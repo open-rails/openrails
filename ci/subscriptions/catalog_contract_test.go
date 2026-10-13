@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -72,7 +73,7 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, product.Prices)
 		_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: int64(i+1) * 1_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
-			PSPLinks: map[string]map[string]string{"nmi": {"plan_id": "plan-" + uuid.NewString()[:8]}}})
+			PSPs: map[string]map[string]string{"nmi": {"plan_id": "plan-" + uuid.NewString()[:8]}}})
 		require.NoError(t, err)
 		products = append(products, product)
 	}
@@ -281,4 +282,30 @@ func TestArchivingAProductKeepsItsBuyers(t *testing.T) {
 	}
 	_, err = w.newCustomer().sell(embedded, order{price: price.ID})
 	require.Error(t, err, "an archived product is not for sale")
+}
+
+// A price is in fiat or SOL. A stablecoin is what a buyer pays with for a
+// price in the fiat currency it tracks, so every write path refuses one.
+func TestPriceCurrencyIsFiatOrSOL(t *testing.T) {
+	t.Parallel()
+	w := prepareWorld(t, 12)
+	w.start()
+	c := w.client[remote]
+	product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "coin-" + uuid.NewString()[:8], DisplayName: "Coin", Entitlements: []string{"content:coin"}})
+	require.NoError(t, err)
+	for _, code := range []string{"USDC", "usdt", "PYUSD", "USD1", "USDG"} {
+		_, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "coin", UnitAmount: 5_000_000, Currency: code})
+		var status *billing.StatusError
+		require.ErrorAs(t, err, &status, code)
+		require.Equal(t, http.StatusBadRequest, status.Status, code)
+		require.Contains(t, status.Message, "stablecoin", code)
+	}
+	var refused map[string]any
+	document := map[string]any{"schema_version": 1, "products": map[string]any{product.Key: map[string]any{"prices": map[string]any{"coin": map[string]any{"amount": "5 USDC", "psps": map[string]any{"stripe": map[string]any{}}}}}}}
+	require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodPost, "/v1/catalog/apply", document, &refused), "%v", refused)
+	require.Contains(t, fmt.Sprint(refused), "stablecoin")
+
+	price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "sol", UnitAmount: 500_000_000, Currency: "sol"})
+	require.NoError(t, err)
+	require.Equal(t, "SOL", price.Currency)
 }

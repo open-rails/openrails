@@ -18,7 +18,7 @@ const (
 // nmi. Credential values are never returned.
 type PSP struct {
 	ID PSPID `json:"id"`
-	// Key is the merchant's name for the PSP: the value price psp_links and
+	// Key is the merchant's name for the PSP: the key a price's psps and
 	// purchase's payment.rail name it by. A key names one PSP for good.
 	Key         string `json:"key"`
 	Rail        Rail   `json:"rail"`

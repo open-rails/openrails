@@ -76,6 +76,11 @@ native self-acting, unbound account and accepted-terms checks and its current
 active links. An app must filter every read and mutation through those current
 links, so revocation immediately hides the merchant's local inbox copies.
 
+A message about an event links to the merchant profile URL for its purpose:
+`MerchantProfile.NotificationURL(event_type)` answers `subscribe_url` for
+`premium_ended` and `billing_url` for everything else, falling back to
+`support_url` ([merchant configuration](merchant-configuration.md)).
+
 ## Facts, preferences and retention
 
 Every real renewal and successful purchase produces its fact; the source does

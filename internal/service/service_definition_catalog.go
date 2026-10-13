@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
 
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -276,7 +277,7 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 	s.catalogAfterCommit(ctx, func(ctx context.Context, s *Service) {
 		// Propagate mutable Product changes to Stripe (display name + description + active).
 		// The Stripe product ID is not stored on the OpenRails product row itself —
-		// it lives on associated prices' psp_links.stripe.product_id. Look up one
+		// it lives on associated prices' psps.stripe.product_id. Look up one
 		// such price to find it; if no prices have a Stripe link yet, there is
 		// nothing to propagate (no Stripe Product exists for this OpenRails product).
 		if !s.localCatalogOnly && !req.SkipRailSync && (req.DisplayName != nil || req.Description != nil || req.Archived != nil) && s.rt.Config != nil {
@@ -348,7 +349,7 @@ func (s *Service) propagateProductActiveToStripeCommitted(ctx context.Context, p
 }
 
 // lookupStripeProductID returns the Stripe Product ID associated with the
-// given OpenRails product by scanning its prices for psp_links.stripe.product_id.
+// given OpenRails product by scanning its prices for psps.stripe.product_id.
 // Returns "" if no associated price has a Stripe Product link.
 func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID) string {
 	if s.rt.PriceService == nil {
@@ -470,7 +471,7 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	if req.ProductID.IsZero() && req.ProductKey == "" {
 		return nil, apperr.Invalidf("product_id required")
 	}
-	// CUR-6: canonicalise at the price WRITE boundary. ValidateCurrency below
+	// CUR-6: canonicalise at the price WRITE boundary. currency.ForPrice below
 	// is case-insensitive, so without this a caller-supplied "usd" validated
 	// fine and then failed the prices_currency_check CHECK at INSERT.
 	req.Currency = money.NormalizeCurrency(req.Currency)
@@ -586,17 +587,17 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 }
 
 // UpdatePriceRequest is the engine's price patch: nil fields are left as
-// they are. PSPLinks merges into the price's links; an empty link unlinks
-// its PSP. SkipRailSync keeps the change local.
+// they are. PSPs merges into the price's PSPs; an empty entry unlinks its
+// PSP. SkipRailSync keeps the change local.
 type UpdatePriceRequest struct {
 	Archived     *bool
-	PSPLinks     map[string]map[string]string
+	PSPs         map[string]map[string]string
 	SkipRailSync bool
 	// ExpectedRevision refuses the edit unless the price key is at it.
 	ExpectedRevision *int64
 }
 
-// pricePatch reads a merge patch: a PSP link set to null is unlinked.
+// pricePatch reads a merge patch: a PSP set to null is unlinked.
 func pricePatch(p billing.UpdatePriceParams) (UpdatePriceRequest, error) {
 	var req UpdatePriceRequest
 	if p.Archived.Null {
@@ -605,14 +606,17 @@ func pricePatch(p billing.UpdatePriceParams) (UpdatePriceRequest, error) {
 	if p.Archived.Set {
 		req.Archived = &p.Archived.Value
 	}
-	if p.PSPLinks != nil {
-		req.PSPLinks = make(map[string]map[string]string, len(p.PSPLinks))
-		for psp, link := range p.PSPLinks {
-			if link.Null || len(link.Value) == 0 {
-				req.PSPLinks[psp] = map[string]string{}
-				continue
+	if p.PSPs != nil {
+		req.PSPs = make(map[string]map[string]string, len(p.PSPs))
+		for psp, link := range p.PSPs {
+			switch {
+			case link.Null:
+				req.PSPs[psp] = map[string]string{}
+			case len(normalizeLinkMap(link.Value)) == 0:
+				return req, apperr.Invalidf("psps.%s: give the PSP's settings for the price, or null to unlink it", psp)
+			default:
+				req.PSPs[psp] = link.Value
 			}
-			req.PSPLinks[psp] = link.Value
 		}
 	}
 	req.ExpectedRevision = p.ExpectedRevision
@@ -667,7 +671,7 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 	}
 	priceID := existing.ID
 	if existing.CustomerAmount != nil {
-		for _, link := range req.PSPLinks {
+		for _, link := range req.PSPs {
 			if len(link) > 0 {
 				return nil, apperr.Invalidf("customer_amount uses purchase amounts, not provider catalog links")
 			}
@@ -676,7 +680,7 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 	var preparedProduct *models.Product
 	var next map[string]map[string]string
 	var pending []billing.PendingAction
-	if req.PSPLinks != nil {
+	if req.PSPs != nil {
 		// The existing price + its product give the substance (product key + money terms)
 		// each adapter's Attach validates the supplied link against. Fetch it
 		// regardless of merge/replace so a rotated link is verified, not blindly
@@ -702,7 +706,7 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 		}
 		adapters := s.providerAdapters()
 		accountRails := s.merchantAccountRails(ctx)
-		for psp, link := range req.PSPLinks {
+		for psp, link := range req.PSPs {
 			psp = strings.ToLower(strings.TrimSpace(psp))
 			if psp == "" {
 				continue
@@ -779,7 +783,7 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 				return nil, ErrCatalogConflict
 			}
 		}
-		if req.PSPLinks != nil {
+		if req.PSPs != nil {
 			if err := prices.UpdatePSPLinks(ctx, priceID, next); err != nil {
 				return nil, priceLookup(err)
 			}
@@ -891,10 +895,9 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 			return apperr.Invalidf("trial pricing requires billing_interval_hours")
 		}
 	}
-	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
+	if _, err := currency.ForPrice(req.Currency); err != nil {
 		return apperr.Invalidf("%v", err)
 	}
-
 	return nil
 }
 

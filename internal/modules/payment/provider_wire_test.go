@@ -48,7 +48,7 @@ func TestCCBillUpgradeWire(t *testing.T) {
 	sub := &models.Subscription{ID: uuid.New(), Rail: models.RailCCBill, RailSubscriptionID: "ccbill-sub-1"}
 	price := func(currency string) *models.Price {
 		return &models.Price{ID: uuid.New(), Currency: currency, PSPLinks: map[string]map[string]string{
-			"ccbill": {models.RailKeyRail: "ccbill", models.RailKeyCCBillFormName: "premium", models.RailKeyCCBillFlexID: "flex-123"}}}
+			"ccbill": {models.RailKeyRail: "ccbill", models.RailKeyCCBillFlexID: "flex-123"}}}
 	}
 
 	resp, err := ccbillService(t, "999999-0000").processCCBillUpgrade(merchantCtx(), user, price("eur"), sub)

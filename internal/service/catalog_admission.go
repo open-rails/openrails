@@ -376,7 +376,7 @@ func priceEditPlan(id billing.PriceID, req UpdatePriceRequest) catalogClassifica
 			return nil, err
 		}
 		changed := req.Archived != nil && *req.Archived != current.Archived
-		for key, link := range req.PSPLinks {
+		for key, link := range req.PSPs {
 			key = strings.ToLower(strings.TrimSpace(key))
 			link = normalizeLinkMap(link)
 			if len(link) == 0 {
@@ -447,16 +447,11 @@ func createPricePlan(req billing.CreatePriceParams) catalogClassification {
 		changed := catalogFieldsChanged(obj, old, fields)
 		if !changed && old != nil {
 			var links map[string]map[string]string
-			if err := json.Unmarshal(old.fields["psp_links"], &links); err != nil {
+			if err := json.Unmarshal(old.fields["psps"], &links); err != nil {
 				return nil, err
 			}
-			for _, key := range req.PSPs {
-				if _, ok := links[key]; !ok {
-					changed = true
-				}
-			}
-			for key, link := range req.PSPLinks {
-				if !catalogLinkContains(links[key], normalizeLinkMap(link)) {
+			for key, link := range req.PSPs {
+				if _, ok := links[key]; !ok || !catalogLinkContains(links[key], normalizeLinkMap(link)) {
 					changed = true
 				}
 			}

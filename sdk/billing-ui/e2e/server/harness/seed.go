@@ -74,13 +74,13 @@ products:
         unit_amount: 2990000
         billing_interval_hours: null
         access_duration_hours: 720
-        psps: [%s]
+        psps: {%s: {}}
       e2e-card-monthly:
         currency: usd
         unit_amount: 4990000
         billing_interval_hours: 720
         access_duration_hours: 720
-        psps: [%s]
+        psps: {%s: {}}
     entitlements: ["e2e-card"]
 `, CardPSPKey, CardPSPKey)))
 	if err != nil {
@@ -117,14 +117,13 @@ products:
         unit_amount: 2990000
         billing_interval_hours: null
         access_duration_hours: 720
-        psps: [solana]
+        psps: {solana: {}}
       e2e-crypto-monthly:
         currency: usd
         unit_amount: 4990000
         billing_interval_hours: 720
         access_duration_hours: 720
-        psps: [solana]
-        psp_links:
+        psps:
           solana:
             plan_pda: %s
             plan_id: "1078"

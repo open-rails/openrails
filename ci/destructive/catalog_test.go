@@ -69,7 +69,7 @@ func TestDestructiveFailedProviderCatalogEditReleasesItsUnit(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, stripe.calls.Load(), "a price without a PSP link calls no provider")
 
-	_, err = client.UpdatePrice(staff, price.ID, billing.UpdatePriceParams{PSPLinks: map[string]catalog.Field[map[string]string]{"stripe": catalog.Value(map[string]string{"lookup_key": "member-monthly"})}})
+	_, err = client.UpdatePrice(staff, price.ID, billing.UpdatePriceParams{PSPs: map[string]catalog.Field[map[string]string]{"stripe": catalog.Value(map[string]string{"lookup_key": "member-monthly"})}})
 	require.Error(t, err)
 	require.Positive(t, stripe.calls.Load(), "the edit reached its provider")
 	var state string

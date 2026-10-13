@@ -60,7 +60,7 @@ func (a *solanaAdapter) PendingActionTemplate(priceID uuid.UUID) billing.Pending
 	return billing.PendingAction{
 		PSP:    "solana",
 		Action: "configure_solana_recurring",
-		Hint:   "Configure the merchant's Solana PSP signer, then re-apply to publish the on-chain plan for price " + priceID.String() + " (USDC in live mode, DUSD in test mode; set psp_links.solana.token to select another supported stablecoin)",
+		Hint:   "Configure the merchant's Solana PSP signer, then re-apply to publish the on-chain plan for price " + priceID.String() + " (USDC in live mode, DUSD in test mode; set psps.solana.token to select another supported stablecoin)",
 	}
 }
 
@@ -100,9 +100,8 @@ func (a *solanaAdapter) defaultRecurringToken() string {
 	return solanaDefaultRecurringToken
 }
 
-// requireUSDBillingForSolanaPublish requires a new recurring plan's price to
-// bill in USD; a non-USDC settlement token is declared separately. Plans
-// attached by plan_pda are exempt (see Attach).
+// requireUSDBillingForSolanaPublish requires a recurring Solana price to bill
+// in USD; its stablecoin settlement token is declared separately.
 func requireUSDBillingForSolanaPublish(currency string) error {
 	if !strings.EqualFold(strings.TrimSpace(currency), "usd") {
 		return fmt.Errorf("solana recurring currently requires USD billing currency, got %q", currency)
@@ -225,29 +224,27 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	_, mintSymbolSupplied := link[solanaKeyMintSymbol]
 	link = normalizeLinkMap(link)
 	if mintSymbolSupplied {
-		return nil, fmt.Errorf("psp_links.solana.mint_symbol is output metadata; use psp_links.solana.token")
+		return nil, fmt.Errorf("psps.solana.mint_symbol is output metadata; use psps.solana.token")
 	}
 	pda := strings.TrimSpace(link[solanaKeyPlanPDA])
 	symbol := strings.ToUpper(strings.TrimSpace(link[solanaKeyToken]))
 	if symbol != "" && !isSolanaRecurringToken(symbol) {
-		return nil, fmt.Errorf("psp_links.solana.token must be USDC, USD1, or DUSD, got %q", symbol)
+		return nil, fmt.Errorf("psps.solana.token must be USDC, USD1, or DUSD, got %q", symbol)
 	}
 	if pda != "" && symbol != "" {
-		return nil, fmt.Errorf("psp_links.solana.token selects a new plan; omit it when plan_pda is supplied because the existing plan's token is resolved on-chain")
+		return nil, fmt.Errorf("psps.solana.token selects a new plan; omit it when plan_pda is supplied because the existing plan's token is resolved on-chain")
+	}
+	if in.BillingCycleDays != nil {
+		if err := requireUSDBillingForSolanaPublish(in.Currency); err != nil {
+			return nil, err
+		}
 	}
 	if pda == "" {
-		// The guard lives here, not on the plan_pda path, so USDC-currency rows
-		// can derive their token from the currency and stay operable.
-		if in.BillingCycleDays != nil {
-			if err := requireUSDBillingForSolanaPublish(in.Currency); err != nil {
-				return nil, err
-			}
-		}
 		if in.BillingCycleDays == nil {
 			// A one-off price takes no link keys (it settles as a direct transfer
 			// quoted at purchase). Refuse rather than drop the operator's values
 			// and re-flag the same drift forever.
-			return nil, fmt.Errorf("solana one-off prices take no psp_links (the settlement token is chosen at purchase); remove psp_links.solana")
+			return nil, fmt.Errorf("solana one-off prices take no settings (the settlement token is chosen at purchase); declare psps.solana: {}")
 		}
 		if symbol == "" {
 			symbol = a.defaultRecurringToken()
@@ -258,13 +255,6 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 		}
 		out[solanaKeyToken] = symbol
 		return out, nil
-	}
-	if in.BillingCycleDays != nil {
-		var err error
-		symbol, err = existingSolanaSettlementToken(in.Currency)
-		if err != nil {
-			return nil, err
-		}
 	}
 	out := map[string]string{solanaKeyPlanPDA: pda}
 	for _, k := range []string{
@@ -284,7 +274,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	}
 	data, err := a.svc.rt.SolanaRPCResolver.ChainReader().GetAccountData(ctx, pubkey)
 	if err != nil || len(data) == 0 {
-		return nil, fmt.Errorf("solana plan account %q not found on-chain; publish it or fix psp_links.solana.plan_pda", pda)
+		return nil, fmt.Errorf("solana plan account %q not found on-chain; publish it or fix psps.solana.plan_pda", pda)
 	}
 	acct, err := subscriptions.DecodePlanAccount(data)
 	if err != nil {
@@ -346,21 +336,6 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	out[solanaKeyMerchant] = acct.Owner.String()
 	out[solanaKeyMintSymbol] = symbol
 	return out, nil
-}
-
-// existingSolanaSettlementToken keeps USDC-currency prices, whose currency
-// names both the billing denomination and the settlement token, operable. USD
-// prices resolve the token from the supplied plan_pda.
-func existingSolanaSettlementToken(currency string) (string, error) {
-	currency = strings.ToLower(strings.TrimSpace(currency))
-	switch currency {
-	case "usd":
-		return "", nil
-	case "usdc":
-		return "USDC", nil
-	default:
-		return "", fmt.Errorf("solana recurring existing-plan links require USD billing currency or a legacy USDC price, got %q", currency)
-	}
 }
 
 func resolveSolanaTokenFromMint(plan *recurring.PlanService, mint string) (string, error) {

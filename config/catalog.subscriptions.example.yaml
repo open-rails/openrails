@@ -14,12 +14,12 @@ products:
         amount: 20 USD
         access_duration_hours: 720
         billing_interval_hours: 8760
-        psps: [stripe]
+        psps: {stripe: {}}
       claude-code-pro-offer-2:
         amount: 200 USD
         access_duration_hours: 8760
         billing_interval_hours: 8760
-        psps: [stripe]
+        psps: {stripe: {}}
 
   claude-code-max-5x:
     display_name: Claude Code Max 5x
@@ -31,7 +31,7 @@ products:
         amount: 100 USD
         access_duration_hours: 720
         billing_interval_hours: 720
-        psps: [stripe]
+        psps: {stripe: {}}
 
   claude-code-max-20x:
     display_name: Claude Code Max 20x
@@ -43,4 +43,4 @@ products:
         amount: 200 USD
         access_duration_hours: 720
         billing_interval_hours: 720
-        psps: [stripe]
+        psps: {stripe: {}}

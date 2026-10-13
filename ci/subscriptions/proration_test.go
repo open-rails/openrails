@@ -33,7 +33,7 @@ func (w *world) tierPrice(group string, rank int, cents int64, cycle int, nmiPla
 	out := tier{ent: "content:" + key}
 	if nmiPlan {
 		out.plan = "gf_plan_" + uuid.NewString()[:8]
-		params.PSPLinks = map[string]map[string]string{"nmi": {"plan_id": out.plan}}
+		params.PSPs = map[string]map[string]string{"nmi": {"plan_id": out.plan}}
 	}
 	out.Price, err = client.CreatePrice(w.t.Context(), params)
 	require.NoError(w.t, err)

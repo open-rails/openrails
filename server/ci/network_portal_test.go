@@ -71,7 +71,7 @@ func (w *world) providerRun(mid billing.MerchantID, customer billing.CustomerID)
 	require.NoError(w.t, err)
 	hours := 720
 	price, err := shop.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", Currency: "USD", UnitAmount: 9_990_000,
-		BillingIntervalHours: &hours, AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})
+		BillingIntervalHours: &hours, AccessDurationHours: &hours, PSPs: map[string]map[string]string{"nmi": {"plan_id": plan}}})
 	require.NoError(w.t, err)
 	end := w.now().UTC().Add(20 * 24 * time.Hour).Truncate(24 * time.Hour)
 	start := end.Add(-time.Duration(hours) * time.Hour)

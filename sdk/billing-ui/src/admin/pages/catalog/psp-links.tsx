@@ -24,7 +24,7 @@ import type { PSPLinkState, Price } from "#orck/client/generated/wire"
 
 // The catalog is declarative: the provider adapter pushes prices and the
 // read-back reconciliation is alert-only, so this surface displays a price's
-// psp_links and never edits them. It answers two different questions:
+// psps and never edits them. It answers two different questions:
 //   - Link state (`price.providers`): does OpenRails hold a link for this PSP,
 //     and does the remote object still match?
 //   - Purchase readiness (the routing preview): would a real purchase land
@@ -106,7 +106,6 @@ const LINK_ID_ORDER = [
   "price_id",
   "product_id",
   "plan_id",
-  "form_name",
   "flex_id",
   "recurring_billing_option_id",
   "lookup_key",

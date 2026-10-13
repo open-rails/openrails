@@ -257,7 +257,6 @@ type CCBillNewSaleSuccessEvent struct {
 	Password    string `json:"password"`
 
 	// Product information
-	FormName                  string `json:"formName"`
 	FlexID                    string `json:"flexId"`
 	ProductDesc               string `json:"productDesc"`
 	PriceDescription          string `json:"priceDescription"`
@@ -329,7 +328,6 @@ type CCBillUpgradeSuccessEvent struct {
 	ReservationID string `json:"reservationId"`
 	Username      string `json:"username"`
 	Password      string `json:"password"`
-	FormName      string `json:"formName"`
 	FlexID        string `json:"flexId"`
 
 	// Product information
@@ -415,7 +413,6 @@ type CCBillUpgradeFailureEvent struct {
 	ReservationID string `json:"reservationId"`
 	Username      string `json:"username"`
 	Password      string `json:"password"`
-	FormName      string `json:"formName"`
 	FlexID        string `json:"flexId"`
 
 	// Product information
@@ -620,7 +617,6 @@ type CCBillNewSaleFailureEvent struct {
 	Password    string `json:"password"`
 
 	// Product information
-	FormName                  string `json:"formName"`
 	FlexID                    string `json:"flexId"`
 	PriceDescription          string `json:"priceDescription"`
 	RecurringPriceDescription string `json:"recurringPriceDescription"`

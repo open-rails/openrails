@@ -102,17 +102,6 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		if err := scoped.revalidateCatalogApplicationProviders(ctx, prepared); err != nil {
 			return nil, err
 		}
-		for _, product := range params.Products {
-			for _, price := range product.Prices {
-				if price.PSPLinks.Set {
-					for _, link := range price.PSPLinks.Value {
-						if len(link) == 0 {
-							return nil, apperr.Invalidf("empty provider links request removal; catalog applications cannot remove bindings")
-						}
-					}
-				}
-			}
-		}
 		owners, err := readCatalogOwners(ctx, q, mid.UUID())
 		if err != nil {
 			return nil, err

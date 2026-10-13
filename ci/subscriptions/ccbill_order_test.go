@@ -60,16 +60,15 @@ func openCCBillShop(t *testing.T, nmi *openrails.PSPConfig) *ccbillShop {
     unit_amount: 23000000
     billing_interval_hours: 720
     access_duration_hours: 720
-    psps: [nmi, ccbill, solana]
-    psp_links:
+    psps:
+      nmi: {}
       ccbill:
-        form_name: %s
         flex_id: %s
         recurring_billing_option_id: "%s"
       solana:
         plan_pda: %s
         plan_id: "4242"
-`, ccbillFormName, ccbillFlexID, ccbillRBO, plan))
+`, ccbillFlexID, ccbillRBO, plan))
 	require.NoError(t, err)
 	return &ccbillShop{w: w, directory: directory, price: priceID(t, w, key, key+"-monthly"), ent: key}
 }
@@ -155,7 +154,7 @@ func (s *ccbillShop) sale(link *url.URL, subscriptionID, transactionID string) m
 	return map[string]string{
 		"subscriptionId": subscriptionID, "transactionId": transactionID, "reservationId": q.Get("reservationId"),
 		"email": q.Get("email"), "username": q.Get("username"),
-		"formName": ccbillFormName, "flexId": ccbillFlexID, "subscriptionTypeId": ccbillRBO,
+		"flexId": ccbillFlexID, "subscriptionTypeId": ccbillRBO,
 		"billedInitialPrice": "23.00", "billedRecurringPrice": "23.00", "billedCurrencyCode": "840",
 		"subscriptionInitialPrice": "23.00", "subscriptionRecurringPrice": "23.00", "subscriptionCurrencyCode": "840",
 		"initialPeriod": "30", "recurringPeriod": "30", "rebills": "99",
@@ -211,7 +210,7 @@ func TestCCBillFallbackOrder(t *testing.T) {
 		require.Equal(t, s.liveAttempt(id), q.Get("reservationId"))
 		require.Equal(t, name, q.Get("username"))
 		require.Equal(t, strings.ToLower(name)+"@example.test", q.Get("email"), "the directory's email, never the browser's")
-		require.Equal(t, ccbillFormName, q.Get("formName"))
+		require.NotContains(t, q, "formName", "a FlexForm is its flex_id alone")
 		require.Equal(t, "840", q.Get("currencyCode"))
 		require.Equal(t, "999999", q.Get("clientAccnum"))
 		require.NotEmpty(t, q.Get("signature"))
@@ -227,7 +226,7 @@ func TestCCBillFallbackOrder(t *testing.T) {
 		// payment, the attempt failed.
 		failed := ccbillNumericID()
 		w.deliverCCBill("NewSaleFailure", map[string]string{"transactionId": failed, "reservationId": q.Get("reservationId"),
-			"email": q.Get("email"), "username": name, "formName": ccbillFormName, "flexId": ccbillFlexID, "subscriptionTypeId": ccbillRBO,
+			"email": q.Get("email"), "username": name, "flexId": ccbillFlexID, "subscriptionTypeId": ccbillRBO,
 			"billedCurrencyCode": "840", "failureCode": "BE-140", "failureReason": "Card declined"})
 		read := s.read(c, id)
 		require.Equal(t, "open", read["status"])

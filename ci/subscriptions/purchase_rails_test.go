@@ -93,8 +93,8 @@ func TestPurchaseOffersSolanaWhenConfigured(t *testing.T) {
     unit_amount: 23000000
     billing_interval_hours: 720
     access_duration_hours: 720
-    psps: [nmi, solana]
-    psp_links:
+    psps:
+      nmi: {}
       solana:
         plan_pda: %s
         plan_id: "4242"
@@ -103,7 +103,7 @@ func TestPurchaseOffersSolanaWhenConfigured(t *testing.T) {
     unit_amount: 5000000
     billing_interval_hours: null
     access_duration_hours: 720
-    psps: [nmi, solana]
+    psps: {nmi: {}, solana: {}}
 `, plan))
 	require.NoError(t, err)
 
@@ -137,13 +137,13 @@ func TestPurchaseOmitsSolanaWhenNotConfigured(t *testing.T) {
     unit_amount: 23000000
     billing_interval_hours: 720
     access_duration_hours: 720
-    psps: [nmi]
+    psps: {nmi: {}}
   "{key}-once":
     currency: usd
     unit_amount: 5000000
     billing_interval_hours: null
     access_duration_hours: 720
-    psps: [nmi]
+    psps: {nmi: {}}
 `)
 	require.NoError(t, err)
 	for _, price := range []string{key + "-monthly", key + "-once"} {
@@ -163,10 +163,8 @@ func TestCCBillSellsSubscriptionsOnItsFlexForm(t *testing.T) {
     unit_amount: 23000000
     billing_interval_hours: 720
     access_duration_hours: 720
-    psps: [ccbill]
-    psp_links:
+    psps:
       ccbill:
-        form_name: %s
         flex_id: %s
         recurring_billing_option_id: "%s"
   "{key}-once":
@@ -174,12 +172,10 @@ func TestCCBillSellsSubscriptionsOnItsFlexForm(t *testing.T) {
     unit_amount: 5000000
     billing_interval_hours: null
     access_duration_hours: 720
-    psps: [ccbill]
-    psp_links:
+    psps:
       ccbill:
-        form_name: %s
         flex_id: %s
-`, ccbillFormName, ccbillFlexID, ccbillRBO, ccbillFormName, ccbillFlexID))
+`, ccbillFlexID, ccbillRBO, ccbillFlexID))
 	require.NoError(t, err, "armed engine rails sell the one-time price on local terms")
 	options := w.options(pid(priceID(t, w, key, key+"-monthly")))
 	require.Equal(t, []string{"redirect"}, options["ccbill"].Accepts, "%+v", options)
@@ -200,12 +196,10 @@ func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
     unit_amount: 23000000
     billing_interval_hours: null
     access_duration_hours: 720
-    psps: [ccbill]
-    psp_links:
+    psps:
       ccbill:
-        form_name: %s
         flex_id: %s
-`, ccbillFormName, ccbillFlexID))
+`, ccbillFlexID))
 	require.Error(t, err, "a FlexForm sells no one-time price")
 	var status *billing.StatusError
 	require.True(t, errors.As(err, &status), "%v", err)
@@ -218,13 +212,11 @@ func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
     billing_interval_hours: 720
     archived: true
     access_duration_hours: 720
-    psps: [ccbill]
-    psp_links:
+    psps:
       ccbill:
-        form_name: %s
         flex_id: %s
         recurring_billing_option_id: "%s"
-`, ccbillFormName, ccbillFlexID, ccbillRBO))
+`, ccbillFlexID, ccbillRBO))
 	require.NoError(t, err)
 }
 

@@ -153,32 +153,19 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 				}
 				links := catalogPriceLinks(current)
 				same := current != nil && samePriceTerms(*current, request)
+				// psps names every PSP the price is sold on; omitted keeps them.
 				wanted := map[string]bool{}
-				if decl.PSPs.Set {
-					for _, key := range decl.PSPs.Value {
-						wanted[key] = true
-					}
-				} else {
-					for key := range links {
-						wanted[key] = true
-					}
-				}
-				if decl.PSPLinks.Set {
-					if len(decl.PSPLinks.Value) == 0 && len(links) > 0 {
-						return nil, apperr.Invalidf("provider binding removal requires a separate provider workflow")
-					}
-					for key, link := range decl.PSPLinks.Value {
-						if len(link) == 0 {
-							return nil, apperr.Invalidf("empty provider links request removal; catalog applications cannot remove bindings")
-						}
-						wanted[key] = true
-					}
+				for key := range links {
+					wanted[key] = true
 				}
 				if decl.PSPs.Set {
 					for key := range links {
-						if !wanted[key] {
-							return nil, apperr.Invalidf("provider binding removal requires a separate provider workflow")
+						if _, kept := decl.PSPs.Value[key]; !kept {
+							return nil, apperr.Invalidf("price %q: removing PSP %q requires a separate provider workflow", priceKey, key)
 						}
+					}
+					for key := range decl.PSPs.Value {
+						wanted[key] = true
 					}
 				}
 				out.links[[2]string{product.Key, priceKey}] = map[string]map[string]string{}
@@ -190,7 +177,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 				declaredRails := make([]string, 0, len(names))
 				for _, key := range names {
 					link := links[key]
-					if supplied, ok := decl.PSPLinks.Value[key]; ok {
+					if supplied := decl.PSPs.Value[key]; len(supplied) > 0 {
 						link = supplied
 					}
 					unchanged := same && catalogLinkContains(links[key], link) && (request.Archived || (!current.Archived && !reactivatingProduct))

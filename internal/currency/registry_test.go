@@ -8,7 +8,7 @@ func TestNativeScalesAndCurrencyKinds(t *testing.T) {
 		{Code: "EUR", Decimals: 6, MinorDecimals: 2, Kind: "fiat"},
 		{Code: "JPY", Decimals: 4, MinorDecimals: 0, Kind: "fiat"},
 		{Code: "SOL", Decimals: 9, MinorDecimals: 9, Kind: "crypto"},
-		{Code: "USDC", Decimals: 6, MinorDecimals: 6, Kind: "crypto"},
+		{Code: "USDC", Decimals: 6, MinorDecimals: 6, Kind: "crypto", Stablecoin: true},
 	} {
 		got, ok := Lookup(want.Code)
 		if !ok || got != want {
@@ -27,5 +27,18 @@ func TestNativeScalesAndCurrencyKinds(t *testing.T) {
 	first[0].Decimals = 0
 	if second := List(); second[0].Decimals != 6 {
 		t.Fatal("mutating a returned list changed the registry")
+	}
+}
+
+func TestPriceCurrenciesAreFiatOrSOL(t *testing.T) {
+	for _, code := range []string{"USD", "eur", "JPY", "SOL"} {
+		if _, err := ForPrice(code); err != nil {
+			t.Errorf("ForPrice(%s): %v", code, err)
+		}
+	}
+	for _, code := range []string{"USDC", "USDT", "PYUSD", "USD1", "usdg", "XYZ"} {
+		if _, err := ForPrice(code); err == nil {
+			t.Errorf("ForPrice(%s) accepted a stablecoin or unknown currency", code)
+		}
 	}
 }

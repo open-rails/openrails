@@ -79,7 +79,7 @@ func (s *OrderAttemptService) payOrderCCBill(ctx context.Context, in OrderPayInp
 		return err
 	}
 	price := linked.ForPSP(option.PSPID)
-	form, flex, ok := price.GetCCBillFlexForm()
+	flex, ok := price.GetCCBillFlexID()
 	if !ok {
 		return orders.ErrOptionMissing
 	}
@@ -102,14 +102,14 @@ func (s *OrderAttemptService) payOrderCCBill(ctx context.Context, in OrderPayInp
 	}
 	username := strings.TrimSpace(in.User.Username)
 	link, err := client.GenerateFlexFormURL(&ccbill.GenerateFlexFormURLParams{
-		Username: username, Email: strings.TrimSpace(*in.User.Email), FlexID: flex, FormName: form,
+		Username: username, Email: strings.TrimSpace(*in.User.Email), FlexID: flex,
 		ReservationID: billing.OrderAttemptID(attemptID).String(), Currency: order.Currency,
 	})
 	if err != nil {
 		return err
 	}
 	state, err := json.Marshal(map[string]any{
-		"flow": ccbillFlow, "return_url": returnURL, "checkout_url": link.RedirectURL, "flex_id": flex, "form_name": form,
+		"flow": ccbillFlow, "return_url": returnURL, "checkout_url": link.RedirectURL, "flex_id": flex,
 		"recurring_billing_option_id": rbo, "username": username, "interval_hours": strconv.Itoa(int(*order.Lines[0].BillingIntervalHours)),
 	})
 	if err != nil {
@@ -331,10 +331,10 @@ func ccbillSaleContradicts(attempt gen.BillingOrderAttempt, sale payments.CCBill
 	if int64(minor) != sale.InitialMinor || sale.RecurringMinor != nil && *sale.RecurringMinor != int64(minor) {
 		return fmt.Sprintf("billed %d (recurring %v) is not the order's %d", sale.InitialMinor, sale.RecurringMinor, minor)
 	}
-	flex, form, rbo := railStateText(attempt.RailState, "flex_id"), railStateText(attempt.RailState, "form_name"), railStateText(attempt.RailState, "recurring_billing_option_id")
+	flex, rbo := railStateText(attempt.RailState, "flex_id"), railStateText(attempt.RailState, "recurring_billing_option_id")
 	switch {
-	case sale.FlexID != "" && sale.FlexID != flex, sale.FormName != "" && sale.FormName != form:
-		return fmt.Sprintf("FlexForm %s/%s is not the attempt's %s/%s", sale.FlexID, sale.FormName, flex, form)
+	case sale.FlexID != "" && sale.FlexID != flex:
+		return fmt.Sprintf("FlexForm %s is not the attempt's %s", sale.FlexID, flex)
 	case sale.RecurringBillingOptionID != "" && rbo != "" && sale.RecurringBillingOptionID != rbo:
 		return fmt.Sprintf("recurring billing option %s is not the attempt's %s", sale.RecurringBillingOptionID, rbo)
 	case sale.FlexID == "" && (sale.RecurringBillingOptionID == "" || rbo == ""):

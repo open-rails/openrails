@@ -198,8 +198,8 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 	if plan == nil || reader == nil {
 		return nil, fmt.Errorf("Solana plan and mint readers must be configured before applying recurring references")
 	}
-	if !strings.EqualFold(req.Currency, "USD") && !strings.EqualFold(req.Currency, "USDC") {
-		return nil, apperr.Invalidf("Solana recurring references require USD billing or legacy USDC")
+	if !strings.EqualFold(req.Currency, "USD") {
+		return nil, apperr.Invalidf("Solana recurring references require USD billing")
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -290,25 +290,19 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 }
 
 // CCBill provides no reference-read API. These remain explicitly operator-owned
-// form identifiers, matching the existing local declaration contract.
+// identifiers: the FlexForm and the recurring billing option.
 func declaredCCBillCatalogReference(link map[string]string) (map[string]string, error) {
-	if err := catalogReferenceKeys(link, models.RailKeyCCBillFormName, models.RailKeyCCBillFlexID, models.RailKeyCCBillRecurringBillingOption); err != nil {
+	if err := catalogReferenceKeys(link, models.RailKeyCCBillFlexID, models.RailKeyCCBillRecurringBillingOption); err != nil {
 		return nil, err
 	}
 	out := map[string]string{}
-	form, flex, option := strings.TrimSpace(link[models.RailKeyCCBillFormName]), strings.TrimSpace(link[models.RailKeyCCBillFlexID]), strings.TrimSpace(link[models.RailKeyCCBillRecurringBillingOption])
-	if (form == "") != (flex == "") {
-		return nil, apperr.Invalidf("CCBill form_name and flex_id must be declared together")
-	}
-	if form != "" {
-		out[models.RailKeyCCBillFormName] = form
-		out[models.RailKeyCCBillFlexID] = flex
-	}
-	if option != "" {
-		out[models.RailKeyCCBillRecurringBillingOption] = option
+	for _, key := range []string{models.RailKeyCCBillFlexID, models.RailKeyCCBillRecurringBillingOption} {
+		if value := strings.TrimSpace(link[key]); value != "" {
+			out[key] = value
+		}
 	}
 	if len(out) == 0 {
-		return nil, apperr.Invalidf("an existing CCBill form or billing-option identifier is required")
+		return nil, apperr.Invalidf("an existing CCBill flex_id or recurring_billing_option_id is required")
 	}
 	return out, nil
 }

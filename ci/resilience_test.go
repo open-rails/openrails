@@ -144,13 +144,13 @@ func solanaSession(t *testing.T, rt *openrails.Engine, client *openrails.Client,
 	t.Helper()
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", Entitlements: []string{"content:sol"}})
 	require.NoError(t, err)
-	params := billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD", PSPs: []string{"solana"}}
+	params := billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD", PSPs: map[string]map[string]string{"solana": {}}}
 	if chain != nil {
 		hours := 720
 		plan, err := chain.Plan(signer, 1, solanafake.DevnetDUSDMint, 1_000_000, uint64(hours))
 		require.NoError(t, err)
 		params.AccessDurationHours, params.BillingIntervalHours = &hours, &hours
-		params.PSPLinks = map[string]map[string]string{"solana": {"plan_pda": plan.String(), "plan_id": "1"}}
+		params.PSPs = map[string]map[string]string{"solana": {"plan_pda": plan.String(), "plan_id": "1"}}
 	}
 	price, err := client.CreatePrice(t.Context(), params)
 	require.NoError(t, err)

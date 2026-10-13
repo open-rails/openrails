@@ -117,9 +117,9 @@ to make a new change, or use the catalog client/API.
 Products and prices match by product key and product-local price key. A fresh
 merchant creates equivalent local prices with its own identities. Provider links
 remain account-specific. To copy prices to a different merchant, remove `psps`
-and `psp_links` declarations or replace them with independently provisioned
-references. Omitting them preserves existing destination bindings; an empty list
-cannot remove an existing binding. Catalog application never creates remote
+declarations or replace their settings with independently provisioned
+references. Omitting `psps` preserves existing destination bindings; leaving a
+bound PSP out of `psps` cannot remove its binding. Catalog application never creates remote
 provider objects.
 
 Price identity in the merchant API is `product-key:price-key:v1`. Snapshots

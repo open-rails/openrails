@@ -188,8 +188,8 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 		if patch.Profile.SupportURL != "" {
 			p.SupportURL = patch.Profile.SupportURL
 		}
-		if patch.Profile.SignupURL != "" {
-			p.SignupURL = patch.Profile.SignupURL
+		if patch.Profile.SubscribeURL != "" {
+			p.SubscribeURL = patch.Profile.SubscribeURL
 		}
 		if patch.Profile.BillingURL != "" {
 			p.BillingURL = patch.Profile.BillingURL

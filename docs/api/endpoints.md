@@ -377,7 +377,7 @@ A price's terms never change: the same key with other terms makes a new version
 and archives the old one. Price keys are product-local and immutable; each has
 financial versions starting at one, identified as `product-key:price-key:v1`.
 The separate `revision` tracks edits to the price key. `PATCH` archives or restores a price and
-merges `psp_links`. `GET …/prices/{id}?verify=true` reads each linked PSP's
+merges `psps` (a PSP set to null is unlinked). `GET …/prices/{id}?verify=true` reads each linked PSP's
 copy and reports drift; `GET /v1/merchant/findings?type=catalog.*` lists the open
 drift findings, each with the `psp_id` that was compared, and
 `POST /v1/merchant/psps/refresh` (merchant configuration) reads every PSP's
@@ -386,8 +386,8 @@ catalog again.
 ## PSPs
 
 A PSP is one merchant account on a rail (`mobius` and `paykings` are two PSPs on
-`nmi`). `key` is the merchant's name for it, unique among its live PSPs; price
-`psp_links` name PSPs by it. Creating one checks its credentials with the
+`nmi`). `key` is the merchant's name for it, unique among its live PSPs; a price's
+`psps` name PSPs by it. Creating one checks its credentials with the
 provider before anything is stored; `PATCH` changes settings, rotates
 credentials or archives against the `expected_revision` it read (`409
 revision_mismatch` when the PSP moved since). These edits are mounted only

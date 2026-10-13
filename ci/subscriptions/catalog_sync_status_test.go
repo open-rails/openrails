@@ -21,7 +21,7 @@ func TestUnreadableProviderLinkIsSyncDisabled(t *testing.T) {
 	require.NoError(t, err)
 	hours := monthHours
 	price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
-		PSPLinks: map[string]map[string]string{"ccbill": {"form_name": ccbillFormName, "flex_id": ccbillFlexID, "recurring_billing_option_id": ccbillRBO}}})
+		PSPs: map[string]map[string]string{"ccbill": {"flex_id": ccbillFlexID, "recurring_billing_option_id": ccbillRBO}}})
 	require.NoError(t, err)
 
 	verified, err := c.GetPrice(t.Context(), price.ID, billing.GetPriceParams{Verify: true})

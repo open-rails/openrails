@@ -210,8 +210,8 @@ Per merchant:
   `billing_policy_bindings` and `delegated_invoker_wasted_spend_limits`
   (windows in seconds). Omitted fields keep their stored values; a declared list
   replaces the stored one.
-- `psps.<key>` — one entry per PSP. `key` is the manifest PSP name catalog
-  `psp_links` and purchase use ("mobius"). Fields: `rail` (`nmi`, `ccbill`,
+- `psps.<key>` — one entry per PSP. `key` is the manifest PSP name a catalog
+  price's `psps` and purchase use ("mobius"). Fields: `rail` (`nmi`, `ccbill`,
   `stripe`, `solana`), `account_id`, `archived`, `custodian`, non-secret
   `settings`, `secrets`, and (Solana) `signer`. There is no `environment`: it is
   derived from the deployment's `test_mode` (sandbox ⇒ `test`, live ⇒ `live`),

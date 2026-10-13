@@ -32,8 +32,9 @@ From CCBill (dashboard or merchant support) you need:
 - the **salt** used to sign FlexForm URLs
 - a **DataLink** username/password (optional — enables merchant-initiated
   cancels and reconciliation; without it those paths cannot execute)
-- per price: a **FlexForm** (`flex_id` + `form_name`) created in CCBill's
-  FlexForms admin with matching pricing
+- per price: a **FlexForm** (`flex_id`) created in CCBill's FlexForms admin
+  with matching pricing, and its **Recurring Billing Option**
+  (`recurring_billing_option_id`)
 
 ### PSP manifest entry
 
@@ -83,17 +84,16 @@ prices:
     amount: 9.99 USD
     access_duration: 30 days
     billing_interval: 30 days
-    psps: [ccbill]
-    psp_links:
+    psps:
       ccbill:
         flex_id: "d7d6d9a5-..." # FlexForm GUID from CCBill admin
-        form_name: "premium"
+        recurring_billing_option_id: "0000007498"
 ```
 
 The FlexForm's own pricing must match the catalog price exactly: a new
 sale must bill the order's total, and renewals are validated against the
-catalog (2% tolerance). A `flexId`/`formName` that doesn't match the price's
-link is rejected. A FlexForm sells subscriptions only: catalog application
+catalog (2% tolerance). A `flexId` or `subscriptionTypeId` that doesn't match the
+price's settings is rejected. A FlexForm sells subscriptions only: catalog application
 refuses a one-time price only CCBill could sell (`price_not_sellable`).
 
 ### New sales
@@ -136,7 +136,7 @@ answers `requires_action` with a `redirect_to_url` next action, a FlexForm URL
 carrying the subscription being upgraded:
 
 ```
-https://api.ccbill.com/wap-frontflex/flexforms/{flex_id}?clientAccnum=…&clientSubacc=…&formName=…&originalSubscriptionId=…&signature=…
+https://api.ccbill.com/wap-frontflex/flexforms/{flex_id}?clientAccnum=…&clientSubacc=…&originalSubscriptionId=…&signature=…
 ```
 
 - The customer must have a **verified account email and a username**: OpenRails

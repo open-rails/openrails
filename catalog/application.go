@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/currency"
 )
 
 const (
@@ -173,20 +175,23 @@ type ApplyProduct struct {
 // ApplyPrice declares the price its map key names. Its money terms are its
 // identity: a declaration with other terms under the same key is a new
 // version of the price, and the previous one is archived. ID pins the
-// declaration to one existing price.
+// declaration to one existing price. Currency is fiat or SOL, never a
+// stablecoin.
 type ApplyPrice struct {
-	ID                   string                              `json:"id,omitempty"`
-	Currency             Field[string]                       `json:"currency,omitzero"`
-	UnitAmount           Field[int64]                        `json:"unit_amount,omitzero"`
-	AccessDurationHours  Field[int]                          `json:"access_duration_hours,omitzero"`
-	BillingIntervalHours Field[int]                          `json:"billing_interval_hours,omitzero"`
-	Archived             Field[bool]                         `json:"archived,omitzero"`
-	TrialUnitAmount      Field[int64]                        `json:"trial_unit_amount,omitzero"`
-	TrialDurationHours   Field[int]                          `json:"trial_duration_hours,omitzero"`
-	CustomerAmount       Field[CustomerAmount]               `json:"customer_amount,omitzero"`
-	Quantity             Field[Quantity]                     `json:"quantity,omitzero"`
-	PSPs                 Field[[]string]                     `json:"psps,omitzero"`
-	PSPLinks             Field[map[string]map[string]string] `json:"psp_links,omitzero"`
+	ID                   string                `json:"id,omitempty"`
+	Currency             Field[string]         `json:"currency,omitzero"`
+	UnitAmount           Field[int64]          `json:"unit_amount,omitzero"`
+	AccessDurationHours  Field[int]            `json:"access_duration_hours,omitzero"`
+	BillingIntervalHours Field[int]            `json:"billing_interval_hours,omitzero"`
+	Archived             Field[bool]           `json:"archived,omitzero"`
+	TrialUnitAmount      Field[int64]          `json:"trial_unit_amount,omitzero"`
+	TrialDurationHours   Field[int]            `json:"trial_duration_hours,omitzero"`
+	CustomerAmount       Field[CustomerAmount] `json:"customer_amount,omitzero"`
+	Quantity             Field[Quantity]       `json:"quantity,omitzero"`
+	// PSPs are the PSPs the price is sold on, keyed by PSP key; each value is
+	// that PSP's settings for the price ({} for none), e.g.
+	// mobius: {plan_id: premium}.
+	PSPs Field[map[string]map[string]string] `json:"psps,omitzero"`
 }
 
 // Validate checks the bounded syntax only; row-dependent validation happens
@@ -237,8 +242,21 @@ func (a Application) Validate() error {
 			if err := validateApplicationFields(price); err != nil {
 				return fmt.Errorf("price %q: %w", priceKey, err)
 			}
-			if price.Currency.Null || price.UnitAmount.Null || price.Archived.Null {
+			if price.Currency.Null || price.UnitAmount.Null || price.Archived.Null || price.PSPs.Null {
 				return fmt.Errorf("price %q: nonnullable field is null", priceKey)
+			}
+			if price.Currency.Set {
+				if _, err := currency.ForPrice(price.Currency.Value); err != nil {
+					return fmt.Errorf("price %q: %w", priceKey, err)
+				}
+			}
+			for _, psp := range slices.Sorted(maps.Keys(price.PSPs.Value)) {
+				if strings.TrimSpace(psp) == "" {
+					return fmt.Errorf("price %q: psps key must name a PSP", priceKey)
+				}
+				if price.PSPs.Value[psp] == nil {
+					return fmt.Errorf("price %q: psps.%s must be the PSP's settings for the price; use {} for none", priceKey, psp)
+				}
 			}
 			if price.UnitAmount.Set && price.UnitAmount.Value < 0 || price.TrialUnitAmount.Set && !price.TrialUnitAmount.Null && price.TrialUnitAmount.Value < 0 {
 				return fmt.Errorf("price %q: money cannot be negative", priceKey)
@@ -310,13 +328,6 @@ func (a Application) CanonicalDigest() ([32]byte, error) {
 		slices.Sort(p.Entitlements.Value)
 		p.RequiredEntitlements.Value = slices.Clone(p.RequiredEntitlements.Value)
 		slices.Sort(p.RequiredEntitlements.Value)
-		prices := make(map[string]ApplyPrice, len(p.Prices))
-		for priceKey, price := range p.Prices {
-			price.PSPs.Value = slices.Clone(price.PSPs.Value)
-			slices.Sort(price.PSPs.Value)
-			prices[priceKey] = price
-		}
-		p.Prices = prices
 		products[key] = p
 	}
 	a.Products = products

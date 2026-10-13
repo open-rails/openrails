@@ -305,7 +305,7 @@ OpenRails.
    plan, which must exist on the account with the target's exact amount and
    cycle; otherwise the change is refused before any charge with
    `409 subscription_change_requires_linked_plan`. Link each tier price of a named-plan
-   book to its NMI plan (price `psp_links` `plan_id`) before offering tier
+   book to its NMI plan (price `psps: {<psp>: {plan_id: ...}}`) before offering tier
    changes. An upgrade charges now the
    new price's share of the time left to E less the old price's unused credit,
    as a customer-initiated sale on the vault card, then updates the schedule,

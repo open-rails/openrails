@@ -254,7 +254,7 @@ func TestCatalogArchivedVersionKeepsProviderBindings(t *testing.T) {
 	hours := monthHours
 	create := func(amount int64, plan string) *billing.Price {
 		t.Helper()
-		price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: amount, Currency: "USD", AccessDurationHours: &hours, BillingIntervalHours: &hours, PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})
+		price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: amount, Currency: "USD", AccessDurationHours: &hours, BillingIntervalHours: &hours, PSPs: map[string]map[string]string{"nmi": {"plan_id": plan}}})
 		require.NoError(t, err)
 		return price
 	}

@@ -29,7 +29,6 @@ import (
 
 const (
 	ccbillSourceIP = "64.38.212.17"
-	ccbillFormName = "basic-monthly"
 	ccbillFlexID   = "681cb38f-afb9-4665-931f-2b896072178a"
 	ccbillRBO      = "0000007498"
 )
@@ -56,7 +55,7 @@ func importCCBillIn(t *testing.T, w *world, currency string) *ccbillMember {
 	require.NoError(t, err)
 	hours := monthHours
 	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-" + strings.ToLower(currency), UnitAmount: 9_990_000, Currency: currency, BillingIntervalHours: &hours, AccessDurationHours: &hours,
-		PSPLinks: map[string]map[string]string{"ccbill": {"form_name": ccbillFormName, "flex_id": ccbillFlexID, "recurring_billing_option_id": ccbillRBO}}})
+		PSPs: map[string]map[string]string{"ccbill": {"flex_id": ccbillFlexID, "recurring_billing_option_id": ccbillRBO}}})
 	require.NoError(t, err)
 
 	start := w.clock.Now().Add(-10 * day)
@@ -334,7 +333,7 @@ func TestCCBillNewSaleIsRefused(t *testing.T) {
 		return map[string]string{
 			"subscriptionId": subscriptionID, "transactionId": txn,
 			"email": "stranger@example.test", "username": stranger.id,
-			"formName": ccbillFormName, "flexId": ccbillFlexID, "subscriptionTypeId": ccbillRBO,
+			"flexId": ccbillFlexID, "subscriptionTypeId": ccbillRBO,
 			"billedInitialPrice": "9.99", "billedRecurringPrice": "9.99", "billedCurrencyCode": "840",
 			"subscriptionInitialPrice": "9.99", "subscriptionRecurringPrice": "9.99", "subscriptionCurrencyCode": "840",
 			"initialPeriod": "30", "recurringPeriod": "30", "rebills": "99",
@@ -385,7 +384,7 @@ func TestCCBillUsernameIsTheDirectorys(t *testing.T) {
 	directory.Put(userinfo.User{ID: buyer.id, Email: "buyer@example.test", Username: name})
 	failure := func(username string) map[string]string {
 		return map[string]string{"transactionId": ccbillNumericID(), "email": "buyer@example.test", "username": username,
-			"formName": ccbillFormName, "flexId": ccbillFlexID, "subscriptionTypeId": ccbillRBO, "billedCurrencyCode": "840",
+			"flexId": ccbillFlexID, "subscriptionTypeId": ccbillRBO, "billedCurrencyCode": "840",
 			"failureCode": "BE-140", "failureReason": "declined"}
 	}
 	w.deliverCCBill("NewSaleFailure", failure(strings.ToLower(name)))
@@ -404,17 +403,17 @@ func TestCCBillUpgradeRetainsVersionedOrders(t *testing.T) {
 	m := importCCBill(t, w)
 	hours := monthHours
 	newRef, transaction := ccbillNumericID(), ccbillNumericID()
-	flex, rbo, form := uuid.NewString(), ccbillNumericID(), "upgraded-monthly"
+	flex, rbo := uuid.NewString(), ccbillNumericID()
 	price, err := w.client[embedded].CreatePrice(t.Context(), billing.CreatePriceParams{
 		ProductID: m.price.ProductID, Key: "upgrade-" + uuid.NewString()[:8], UnitAmount: 19_990_000, Currency: "USD",
 		BillingIntervalHours: &hours, AccessDurationHours: &hours,
-		PSPLinks: map[string]map[string]string{"ccbill": {"form_name": form, "flex_id": flex, "recurring_billing_option_id": rbo}},
+		PSPs: map[string]map[string]string{"ccbill": {"flex_id": flex, "recurring_billing_option_id": rbo}},
 	})
 	require.NoError(t, err)
 	start := w.clock.Now()
 	next := start.Add(monthHours * time.Hour)
 	upgrade := map[string]string{"originalSubscriptionId": m.railSub, "subscriptionId": newRef, "transactionId": transaction,
-		"formName": form, "flexId": flex, "subscriptionTypeId": rbo, "billedInitialPrice": "19.99", "billedRecurringPrice": "19.99",
+		"flexId": flex, "subscriptionTypeId": rbo, "billedInitialPrice": "19.99", "billedRecurringPrice": "19.99",
 		"billedCurrencyCode": "840", "recurringPeriod": "30", "nextRenewalDate": ccbillDate(next)}
 	w.deliverCCBill("UpgradeSuccess", upgrade)
 	sub := w.subscription(embedded, m.sub)

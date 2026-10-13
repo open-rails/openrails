@@ -119,7 +119,7 @@ func (s *PurchaseService) pspEnvironment() string {
 // requests name the provider; a bare rail name resolves through arming to THE
 // active provider on that rail, so the provider is always picked.
 type railTarget struct {
-	PSP   string // PSP key: catalog psp_links key, plan lookup key
+	PSP   string // PSP key: catalog psps key, plan lookup key
 	Rail  string // gateway rail: dispatch, row vocabulary (subscriptions.rail)
 	Scope *merchants.PSPScope
 }

@@ -3,6 +3,7 @@
 package currency
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -13,6 +14,9 @@ type Units struct {
 	Decimals      int
 	MinorDecimals int
 	Kind          string // fiat or crypto
+	// Stablecoin marks a token pegged to a fiat currency: what a buyer pays
+	// with, never what a price is in.
+	Stablecoin bool
 }
 
 // NativeShift is the decimal shift from settlement units to native units.
@@ -31,10 +35,23 @@ var registry = func() map[string]Units {
 		out[code] = Units{Code: code, Decimals: 4, MinorDecimals: 0, Kind: "fiat"}
 	}
 	for code, decimals := range map[string]int{"SOL": 9, "USDC": 6, "USDT": 6, "PYUSD": 6, "USD1": 6, "USDG": 6} {
-		out[code] = Units{Code: code, Decimals: decimals, MinorDecimals: decimals, Kind: "crypto"}
+		out[code] = Units{Code: code, Decimals: decimals, MinorDecimals: decimals, Kind: "crypto", Stablecoin: code != "SOL"}
 	}
 	return out
 }()
+
+// ForPrice returns the scale of a price currency: fiat or SOL. A stablecoin
+// is refused; a buyer pays it for a price in the fiat currency it tracks.
+func ForPrice(code string) (Units, error) {
+	u, ok := Lookup(code)
+	if !ok {
+		return Units{}, fmt.Errorf("unknown currency %q", code)
+	}
+	if u.Stablecoin {
+		return Units{}, fmt.Errorf("currency %s is a stablecoin: price in the fiat currency it tracks (e.g. USD); buyers can still pay in %s", u.Code, u.Code)
+	}
+	return u, nil
+}
 
 // Lookup returns the registered scale for a currency code, case-insensitively.
 func Lookup(code string) (Units, bool) {

@@ -273,15 +273,15 @@ func TestStripeAdapterAutoCreateWireAmount(t *testing.T) {
 func TestCCBillAdapterAttach(t *testing.T) {
 	a := &ccbillAdapter{}
 	for _, link := range []map[string]string{
-		{models.RailKeyCCBillFormName: "premium", models.RailKeyCCBillFlexID: "abc-123"},
+		{models.RailKeyCCBillFlexID: "abc-123"},
 		{models.RailKeyCCBillRecurringBillingOption: "0000000931"}, // RBO-only
-		{models.RailKeyCCBillFormName: "basic-monthly", models.RailKeyCCBillFlexID: "abc-123", models.RailKeyCCBillRecurringBillingOption: "0000007498"},
+		{models.RailKeyCCBillFlexID: "abc-123", models.RailKeyCCBillRecurringBillingOption: "0000007498"},
 	} {
 		ids, err := a.Attach(context.Background(), link, autoCreateContext{})
 		require.NoError(t, err)
 		require.Equal(t, link, ids, "links are preserved exactly; nothing is invented")
 	}
-	for _, link := range []map[string]string{{models.RailKeyCCBillFormName: "premium"}, {}} {
+	for _, link := range []map[string]string{{"form_name": "premium"}, {"form_name": "premium", models.RailKeyCCBillFlexID: "abc-123"}, {}} {
 		_, err := a.Attach(context.Background(), link, autoCreateContext{})
 		require.Error(t, err, "%v", link)
 	}
@@ -290,13 +290,17 @@ func TestCCBillAdapterAttach(t *testing.T) {
 func TestResolveProviders(t *testing.T) {
 	unconfigured := func() *Service { return &Service{rt: &app.Runtime{}} }
 	product := &models.Product{ID: uuid.New(), Key: "premium"}
-	recurring := func(psps ...string) billing.CreatePriceParams {
+	recurring := func(keys ...string) billing.CreatePriceParams {
+		psps := map[string]map[string]string{}
+		for _, key := range keys {
+			psps[key] = map[string]string{}
+		}
 		return billing.CreatePriceParams{ProductID: billing.ProductID(product.ID), UnitAmount: 23_000_000, Currency: "USD", AccessDurationHours: intPtr(720), BillingIntervalHours: intPtr(720), PSPs: psps}
 	}
 
 	t.Run("unknown provider fails loudly", func(t *testing.T) {
 		_, _, _, err := unconfigured().resolveProviders(context.Background(), product, recurring("paypal"), uuid.New())
-		require.ErrorContains(t, err, `unknown provider "paypal"`)
+		require.ErrorContains(t, err, `unknown PSP "paypal"`)
 	})
 
 	t.Run("engine terms request no provider mirrors", func(t *testing.T) {
@@ -310,7 +314,7 @@ func TestResolveProviders(t *testing.T) {
 			require.Empty(t, states)
 			require.Empty(t, pending)
 		}
-		oneTime.PSPLinks = map[string]map[string]string{"stripe": {models.RailKeyStripePriceID: "price_legacy"}}
+		oneTime.PSPs["stripe"] = map[string]string{models.RailKeyStripePriceID: "price_legacy"}
 		links, _, _, err := svc.resolveProviders(context.Background(), product, oneTime, uuid.New())
 		require.NoError(t, err)
 		require.Equal(t, "price_legacy", links["stripe"][models.RailKeyStripePriceID], "an explicit legacy reference is kept")
@@ -319,7 +323,7 @@ func TestResolveProviders(t *testing.T) {
 	t.Run("linked ccbill beside engine nmi", func(t *testing.T) {
 		req := recurring("ccbill", "nmi")
 		req.BillingIntervalHours, req.AccessDurationHours = nil, nil
-		req.PSPLinks = map[string]map[string]string{"ccbill": {"form_name": "premium", "flex_id": "abc-123"}}
+		req.PSPs = map[string]map[string]string{"ccbill": {"flex_id": "abc-123"}, "nmi": {}}
 		links, states, pending, err := unconfigured().resolveProviders(context.Background(), product, req, uuid.New())
 		require.NoError(t, err)
 		require.Equal(t, billing.PSPLinkLinked, states["ccbill"].Status)

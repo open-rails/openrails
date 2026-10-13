@@ -1,5 +1,14 @@
 # Changelog
 
+## A price's PSPs are one map
+
+- Breaking: `CreatePriceParams.psps` and `UpdatePriceParams.psps` map each PSP
+  key to its settings for the price (`{}` for none; null unlinks in an
+  update); `psp_links` is gone. CCBill settings are `flex_id` and
+  `recurring_billing_option_id` (no `form_name`).
+- `MerchantProfile.signup_url` is `subscribe_url`; the console's merchant
+  profile edits it and `billing_url`.
+
 ## The host supplies the configuration
 
 - `BillingProvider` takes `config` (`GET /config`'s document; Go:

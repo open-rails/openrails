@@ -79,7 +79,7 @@ func TestImportPaymentMethodIdempotent(t *testing.T) {
 				require.NoError(t, err)
 				link := "price_legacy_" + key
 				price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key + "-usd", UnitAmount: 9_990_000, Currency: "USD",
-					BillingIntervalHours: &hours, AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"stripe": {"price_id": link}}})
+					BillingIntervalHours: &hours, AccessDurationHours: &hours, PSPs: map[string]map[string]string{"stripe": {"price_id": link}}})
 				require.NoError(t, err)
 				method := ref.RailMethodRef
 				if method == "" {

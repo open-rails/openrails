@@ -103,7 +103,7 @@ func recurringPrice() *models.Price {
 		PSPLinks: map[string]map[string]string{
 			"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_test"},
 			"nmi":    {models.RailKeyRail: "nmi", models.RailKeyPlanID: "plan_test"},
-			"ccbill": {models.RailKeyRail: "ccbill", models.RailKeyCCBillFormName: "form_test", models.RailKeyCCBillFlexID: "flex_test"},
+			"ccbill": {models.RailKeyRail: "ccbill", models.RailKeyCCBillFlexID: "flex_test"},
 		}}
 }
 

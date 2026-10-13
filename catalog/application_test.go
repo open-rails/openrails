@@ -3,6 +3,7 @@ package catalog
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -80,6 +81,12 @@ func TestApplicationRejectsAmbiguousInput(t *testing.T) {
 		"unknown nested field":    "products: {a: {display_nmae: nope}}\n",
 		"padded product key":      "products: {' a': {display_name: A}}\n",
 		"long price key":          "products: {a: {prices: {" + strings.Repeat("p", 256) + ": {amount: 1 USD}}}}\n",
+		"psps list":               "products: {a: {prices: {p: {amount: 1 USD, psps: [stripe]}}}}\n",
+		"removed psp_links":       "products: {a: {prices: {p: {amount: 1 USD, psp_links: {nmi: {plan_id: x}}}}}}\n",
+		"null psp settings":       "products: {a: {prices: {p: {amount: 1 USD, psps: {solana: }}}}}\n",
+		"null psps":               "products: {a: {prices: {p: {amount: 1 USD, psps: null}}}}\n",
+		"stablecoin amount":       "products: {a: {prices: {p: {amount: 1 USDC}}}}\n",
+		"stablecoin currency":     "products: {a: {prices: {p: {currency: USDT, unit_amount: 1}}}}\n",
 	} {
 		if _, err := ParseApplicationYAML([]byte(base + suffix)); err == nil {
 			t.Errorf("%s: YAML accepted", name)
@@ -108,6 +115,45 @@ func TestApplicationRejectsAmbiguousInput(t *testing.T) {
 		if _, err := ParseApplicationJSON([]byte(raw)); err == nil {
 			t.Errorf("%s: JSON accepted", name)
 		}
+	}
+}
+
+// A price names each PSP it is sold on with that PSP's settings, and is priced
+// in fiat or SOL.
+func TestApplicationPricePSPs(t *testing.T) {
+	a, err := ParseApplicationYAML([]byte(`schema_version: 1
+products:
+  premium:
+    prices:
+      premium-monthly:
+        amount: 23 USD
+        billing_interval: 30 days
+        psps:
+          mobius: {plan_id: premium_new}
+          ccbill: {flex_id: 681cb38f-afb9-4665-931f-2b896072178a, recurring_billing_option_id: "0000007498"}
+          solana: {}
+      premium-sol:
+        amount: 0.5 SOL
+        psps: {solana: {}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := a.Products["premium"].Prices["premium-monthly"].PSPs.Value
+	want := map[string]map[string]string{
+		"mobius": {"plan_id": "premium_new"},
+		"ccbill": {"flex_id": "681cb38f-afb9-4665-931f-2b896072178a", "recurring_billing_option_id": "0000007498"},
+		"solana": {},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("psps = %#v, want %#v", got, want)
+	}
+	if c := a.Products["premium"].Prices["premium-sol"].Currency.Value; c != "SOL" {
+		t.Fatalf("SOL price currency = %q", c)
+	}
+	_, err = ParseApplicationYAML([]byte("schema_version: 1\nproducts: {a: {prices: {p: {amount: 23 USDC}}}}\n"))
+	if err == nil || !strings.Contains(err.Error(), "stablecoin") {
+		t.Fatalf("stablecoin price currency: %v", err)
 	}
 }
 
@@ -199,7 +245,7 @@ products:
   b: {}
   a:
     prices:
-      z: {psps: [stripe, mobius]}
+      z: {psps: {stripe: {}, mobius: {plan_id: premium}}}
       x: {}
 meters: {m2: {}, m1: {}}
 `))
@@ -207,10 +253,7 @@ meters: {m2: {}, m1: {}}
 		t.Fatal(err)
 	}
 	ha := digest(t, *a)
-	if a.Products["a"].Prices["z"].PSPs.Value[0] != "stripe" {
-		t.Fatal("digest mutated the request")
-	}
-	b, err := ParseApplicationJSON([]byte(`{"meters":{"m1":{},"m2":{}},"products":{"a":{"prices":{"x":{},"z":{"psps":["mobius","stripe"]}}},"b":{}},"schema_version":1}`))
+	b, err := ParseApplicationJSON([]byte(`{"meters":{"m1":{},"m2":{}},"products":{"a":{"prices":{"x":{},"z":{"psps":{"mobius":{"plan_id":"premium"},"stripe":{}}}}},"b":{}},"schema_version":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}

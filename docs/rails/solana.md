@@ -147,8 +147,8 @@ completes with the subscription on its line. A signature settles one order
 only, across every merchant and PSP.
 
 - Solana recurring prices are denominated in USD, such as `amount: 23 USD`.
-  Declaring `psps: [solana]` creates or
-  reattaches a USDC plan by default. Use `psp_links.solana.token: USD1` to select
+  Declaring `psps: {solana: {}}` creates or
+  reattaches a USDC plan by default. Use `solana: {token: USD1}` to select
   USD1 instead, or supply `plan_pda` to attach an existing plan and resolve its
   configured token from the on-chain mint:
 
@@ -158,16 +158,14 @@ only, across every merchant and PSP.
       amount: 23 USD
       access_duration: 30 days
       billing_interval: 30 days
-      psps: [solana]
-      # Optional:
-      # psp_links:
-      #   solana: {token: USD1}
-      # Or attach an existing plan:
-      #   solana: {plan_pda: 7Xy...PdA}
+      psps:
+        solana: {}
+        # Or select the token:  solana: {token: USD1}
+        # Or attach a plan:     solana: {plan_pda: 7Xy...PdA}
   ```
 
-- `currency` is the price and ledger denomination; stablecoins remain Solana
-  payment assets, not billing currencies. A recurring price has one immutable
+- `currency` is the price and ledger denomination, fiat or SOL; stablecoins
+  are Solana payment assets, and a price in one is refused. A recurring price has one immutable
   Solana Plan and therefore one token. `token` selects creation of a new Plan;
   `plan_pda` instead attaches an existing Plan and must be supplied without
   `token`, because its mint is authoritative on-chain. `mint_symbol` is stored

@@ -116,7 +116,9 @@ export function PriceChangeWizard({
             trial_unit_amount: price.trial_unit_amount ?? undefined,
             trial_duration_hours: price.trial_duration_hours ?? undefined,
             key: price.key,
-            psps: Object.keys(price.psps ?? {}),
+            psps: Object.fromEntries(
+              Object.keys(price.psps ?? {}).map((psp) => [psp, {}])
+            ),
             expected_revision: price.revision,
           },
           migration:

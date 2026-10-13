@@ -35,7 +35,7 @@ func (a *stripeAdapter) PendingActionTemplate(_ uuid.UUID) billing.PendingAction
 	return billing.PendingAction{
 		PSP:    "stripe",
 		Action: "configure_stripe",
-		Hint:   "Stripe is not configured; set stripe.secret_key in config and retry, or PATCH /catalog/prices/{id} with psp_links.stripe.price_id",
+		Hint:   "Stripe is not configured; set stripe.secret_key in config and retry, or PATCH /catalog/prices/{id} with psps.stripe.price_id",
 	}
 }
 
@@ -70,7 +70,7 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 			}
 			return ids, err
 		}
-		return nil, fmt.Errorf("stripe link requires psp_links.stripe.price_id (an existing Stripe Price) or lookup_key (find-or-create at a chosen key)")
+		return nil, fmt.Errorf("stripe link requires psps.stripe.price_id (an existing Stripe Price) or lookup_key (find-or-create at a chosen key)")
 	}
 	out := map[string]string{
 		models.RailKeyStripePriceID: priceID,
@@ -87,7 +87,7 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 	remote, err := stripeSvc.RetrievePrice(ctx, priceID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
-			return nil, fmt.Errorf("stripe price %q not found; create it or fix psp_links.stripe.price_id", priceID)
+			return nil, fmt.Errorf("stripe price %q not found; create it or fix psps.stripe.price_id", priceID)
 		}
 		return nil, fmt.Errorf("verify stripe price %q: %w", priceID, err)
 	}

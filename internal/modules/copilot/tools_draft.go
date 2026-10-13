@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -214,11 +213,11 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 
 	reviewText := buildPriceChangeReviewText(current.Currency, current.Amount, args.NewAmount, affected, mode, effectiveAt, now)
 
-	psps := make([]string, 0, len(current.PSPLinks))
+	// A new price on the same PSPs; each creates its own object for the terms.
+	psps := make(map[string]map[string]string, len(current.PSPLinks))
 	for psp := range current.PSPLinks {
-		psps = append(psps, psp)
+		psps[psp] = map[string]string{}
 	}
-	sort.Strings(psps)
 
 	draft := &billing.PriceChangeDraft{
 		ProductKey:    args.ProductKey,

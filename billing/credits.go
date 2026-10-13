@@ -226,10 +226,27 @@ type MerchantProfile struct {
 	LogoURL    string `json:"logo_url,omitempty"`
 	FromEmail  string `json:"from_email,omitempty"`
 	SupportURL string `json:"support_url,omitempty"`
-	SignupURL  string `json:"signup_url,omitempty"`
+	// SubscribeURL is where new customers, and those whose access ended,
+	// buy a subscription.
+	SubscribeURL string `json:"subscribe_url,omitempty"`
 	// BillingURL is where customers manage and cancel their subscriptions
-	// and payment agreements; receipts and confirmations link to it.
+	// and payment agreements.
 	BillingURL string `json:"billing_url,omitempty"`
+}
+
+// NotificationURL is the link a message about a notification event of kind
+// gives the customer: access ended (premium_ended) links to SubscribeURL;
+// failed or due payments, payment method updates, receipts and confirmations
+// link to BillingURL. Either falls back to SupportURL.
+func (p MerchantProfile) NotificationURL(kind string) string {
+	link := p.BillingURL
+	if kind == "premium_ended" {
+		link = p.SubscribeURL
+	}
+	if link == "" {
+		return p.SupportURL
+	}
+	return link
 }
 
 // MerchantPaymentPageSettings are the merchant's payment page settings.

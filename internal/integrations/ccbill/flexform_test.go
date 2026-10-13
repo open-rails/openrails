@@ -28,12 +28,12 @@ func TestFlexFormURLCarriesAccountPriceCurrencyAndSignature(t *testing.T) {
 	client, err := NewClient(cfg, true)
 	require.NoError(t, err)
 	resp, err := client.GenerateFlexFormURL(&GenerateFlexFormURLParams{
-		Username: "alice", Email: "a@example.com", FormName: "premium", FlexID: "flex-1", Currency: " eur ",
+		Username: "alice", Email: "a@example.com", FlexID: "flex-1", Currency: " eur ",
 		CustomerFName: "Alice", CustomerLName: "Liddell", Address1: " 1 Main ", City: " ", ZipCode: " 12345 ", Country: " US ", ReservationID: " res-9 ",
 	})
 	q := flexQuery(t, resp, err, sandboxFlexFormBase+"/flex-1")
 	require.Equal(t, url.Values{
-		"clientAccnum": {"999999"}, "clientSubacc": {"0001"}, "formName": {"premium"}, "language": {"English"},
+		"clientAccnum": {"999999"}, "clientSubacc": {"0001"}, "language": {"English"},
 		"currencyCode": {"978"}, "email": {"a@example.com"}, "username": {"alice"}, "signature": {signature},
 		"customer_fname": {"Alice"}, "customer_lname": {"Liddell"}, "address1": {"1 Main"},
 		"zipcode": {"12345"}, "country": {"US"}, "reservationId": {"res-9"},
@@ -42,7 +42,7 @@ func TestFlexFormURLCarriesAccountPriceCurrencyAndSignature(t *testing.T) {
 	client, err = NewClient(&config.CCBillConfig{ClientAccNum: "999999", ClientSubAcc: "0000", Salt: "pepper"}, false)
 	require.NoError(t, err)
 	resp, err = client.GenerateUpgradeFlexFormURL(&GenerateUpgradeFlexFormURLParams{
-		Username: "alice", Email: "a@example.com", FormName: "gold", FlexID: "flex-2", Currency: "aud", OriginalSubscriptionID: "0125217202000000017",
+		Username: "alice", Email: "a@example.com", FlexID: "flex-2", Currency: "aud", OriginalSubscriptionID: "0125217202000000017",
 	})
 	q = flexQuery(t, resp, err, prodFlexFormBase+"/flex-2")
 	require.Equal(t, "036", q.Get("currencyCode"), "the target price's currency, leading zero intact")
@@ -55,12 +55,11 @@ func TestFlexFormRefusesIncompleteOrUnbillableRequests(t *testing.T) {
 	client, err := NewClient(&config.CCBillConfig{ClientAccNum: "999999", ClientSubAcc: "0000", Salt: "pepper"}, true)
 	require.NoError(t, err)
 	valid := func() GenerateFlexFormURLParams {
-		return GenerateFlexFormURLParams{Username: "u", Email: "e", FormName: "f", FlexID: "x", Currency: "USD"}
+		return GenerateFlexFormURLParams{Username: "u", Email: "e", FlexID: "x", Currency: "USD"}
 	}
 	for name, mut := range map[string]func(*GenerateFlexFormURLParams){
 		"username": func(p *GenerateFlexFormURLParams) { p.Username = "" },
 		"email":    func(p *GenerateFlexFormURLParams) { p.Email = "" },
-		"form":     func(p *GenerateFlexFormURLParams) { p.FormName = "" },
 		"flex id":  func(p *GenerateFlexFormURLParams) { p.FlexID = "" },
 		"currency": func(p *GenerateFlexFormURLParams) { p.Currency = "" },
 		"bitcoin":  func(p *GenerateFlexFormURLParams) { p.Currency = "BTC" },
@@ -73,9 +72,9 @@ func TestFlexFormRefusesIncompleteOrUnbillableRequests(t *testing.T) {
 		require.Error(t, err, name)
 		require.Nil(t, resp, name)
 	}
-	_, err = client.GenerateUpgradeFlexFormURL(&GenerateUpgradeFlexFormURLParams{Username: "u", Email: "e", FormName: "f", FlexID: "x", Currency: "USD"})
+	_, err = client.GenerateUpgradeFlexFormURL(&GenerateUpgradeFlexFormURLParams{Username: "u", Email: "e", FlexID: "x", Currency: "USD"})
 	require.ErrorContains(t, err, "original_subscription_id")
-	_, err = client.GenerateUpgradeFlexFormURL(&GenerateUpgradeFlexFormURLParams{Username: "u", Email: "e", FormName: "f", FlexID: "x", Currency: "XYZ", OriginalSubscriptionID: "s"})
+	_, err = client.GenerateUpgradeFlexFormURL(&GenerateUpgradeFlexFormURLParams{Username: "u", Email: "e", FlexID: "x", Currency: "XYZ", OriginalSubscriptionID: "s"})
 	var unsupported *UnsupportedCurrencyError
 	require.ErrorAs(t, err, &unsupported)
 

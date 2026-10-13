@@ -72,7 +72,7 @@ func (s *OrderAttemptService) railSkipReason(price *models.Price, target railTar
 		if providerConfig.CCBill == nil || strings.TrimSpace(providerConfig.CCBill.Salt) == "" {
 			return models.PSPRoutingSkipCredentialsMissing
 		}
-		if link == nil || strings.TrimSpace(link[models.RailKeyCCBillFlexID]) == "" || strings.TrimSpace(link[models.RailKeyCCBillFormName]) == "" {
+		if strings.TrimSpace(link[models.RailKeyCCBillFlexID]) == "" {
 			return models.PSPRoutingSkipLinkMissing
 		}
 		return ""

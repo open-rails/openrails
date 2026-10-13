@@ -1142,6 +1142,7 @@ pkg openrails/billing, method (MerchantID) IsZero() bool
 pkg openrails/billing, method (MerchantID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (MerchantID) String() string
 pkg openrails/billing, method (MerchantID) UUID() uuid.UUID
+pkg openrails/billing, method (MerchantProfile) NotificationURL(string) string
 pkg openrails/billing, method (NetworkAccountID) IsZero() bool
 pkg openrails/billing, method (NetworkAccountID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (NetworkAccountID) String() string
@@ -1648,8 +1649,7 @@ pkg openrails/billing, type CreatePriceParams struct, Currency string `json:"cur
 pkg openrails/billing, type CreatePriceParams struct, CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, ExpectedRevision *int64 `json:"expected_revision,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, Key string `json:"key,omitempty"`
-pkg openrails/billing, type CreatePriceParams struct, PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
-pkg openrails/billing, type CreatePriceParams struct, PSPs []string `json:"psps,omitempty"`
+pkg openrails/billing, type CreatePriceParams struct, PSPs map[string]map[string]string `json:"psps,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, ProductData *CreatePriceProduct `json:"product_data,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, ProductID ProductID `json:"product_id,omitzero"`
 pkg openrails/billing, type CreatePriceParams struct, ProductKey string `json:"product_key,omitempty"`
@@ -2231,7 +2231,7 @@ pkg openrails/billing, type MerchantProfile struct
 pkg openrails/billing, type MerchantProfile struct, BillingURL string `json:"billing_url,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, FromEmail string `json:"from_email,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, LogoURL string `json:"logo_url,omitempty"`
-pkg openrails/billing, type MerchantProfile struct, SignupURL string `json:"signup_url,omitempty"`
+pkg openrails/billing, type MerchantProfile struct, SubscribeURL string `json:"subscribe_url,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, SupportURL string `json:"support_url,omitempty"`
 pkg openrails/billing, type MerchantRef struct
 pkg openrails/billing, type MerchantRef struct, DisplayName string `json:"display_name"`
@@ -3339,7 +3339,7 @@ pkg openrails/billing, type UpdatePaymentMethodParams struct, Reusable *bool `js
 pkg openrails/billing, type UpdatePriceParams struct
 pkg openrails/billing, type UpdatePriceParams struct, Archived catalog.Field[bool] `json:"archived,omitzero"`
 pkg openrails/billing, type UpdatePriceParams struct, ExpectedRevision *int64 `json:"expected_revision,omitempty"`
-pkg openrails/billing, type UpdatePriceParams struct, PSPLinks map[string]catalog.Field[map[string]string] `json:"psp_links,omitempty"`
+pkg openrails/billing, type UpdatePriceParams struct, PSPs map[string]catalog.Field[map[string]string] `json:"psps,omitempty"`
 pkg openrails/billing, type UpdateProductParams struct
 pkg openrails/billing, type UpdateProductParams struct, Archived catalog.Field[bool] `json:"archived,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, CreditGrant catalog.Field[catalog.CreditGrantSpec] `json:"credit_grant,omitzero"`
@@ -3534,8 +3534,7 @@ pkg openrails/catalog, type ApplyPrice struct, BillingIntervalHours Field[int] `
 pkg openrails/catalog, type ApplyPrice struct, Currency Field[string] `json:"currency,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, CustomerAmount Field[CustomerAmount] `json:"customer_amount,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, ID string `json:"id,omitempty"`
-pkg openrails/catalog, type ApplyPrice struct, PSPLinks Field[map[string]map[string]string] `json:"psp_links,omitzero"`
-pkg openrails/catalog, type ApplyPrice struct, PSPs Field[[]string] `json:"psps,omitzero"`
+pkg openrails/catalog, type ApplyPrice struct, PSPs Field[map[string]map[string]string] `json:"psps,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, Quantity Field[Quantity] `json:"quantity,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, TrialDurationHours Field[int] `json:"trial_duration_hours,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, TrialUnitAmount Field[int64] `json:"trial_unit_amount,omitzero"`

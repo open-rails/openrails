@@ -73,10 +73,10 @@ type MerchantProfileConfiguration struct {
 	LogoURL     string `json:"logo_url,omitempty"`
 	FromEmail   string `json:"from_email,omitempty"`
 	SupportURL  string `json:"support_url,omitempty"`
-	// SignupURL is the signup page access-ended and expiry emails link to.
-	// "" ⇒ no call to action.
-	SignupURL string `json:"signup_url,omitempty"`
+	// SubscribeURL is where new customers, and those whose access ended,
+	// buy a subscription.
+	SubscribeURL string `json:"subscribe_url,omitempty"`
 	// BillingURL is where customers manage and cancel their subscriptions
-	// and payment agreements; receipts and confirmations link to it.
+	// and payment agreements.
 	BillingURL string `json:"billing_url,omitempty"`
 }

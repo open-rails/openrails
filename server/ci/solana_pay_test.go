@@ -78,7 +78,7 @@ func TestSolanaPayFindsItsMerchantByOrder(t *testing.T) {
 		key := "course-" + uuid.NewString()[:8]
 		product, err := handle(t, srv, s.id).CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: s.name + " 101"})
 		require.NoError(t, err)
-		price, err := handle(t, srv, s.id).CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "once", Currency: "USD", UnitAmount: 5_000_000, PSPs: []string{"solana"}})
+		price, err := handle(t, srv, s.id).CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "once", Currency: "USD", UnitAmount: 5_000_000, PSPs: map[string]map[string]string{"solana": {}}})
 		require.NoError(t, err)
 		login := newIssuerKey(t, "https://"+s.slug+".e2e.test")
 		trust(t, srv, s.id, login.app(t, "viewer", nil))

@@ -70,7 +70,7 @@ func compareCatalogObjects(a, b catalogObject) int {
 // catalogFields are each object's owned fields, in the order results list them.
 var catalogFields = map[billing.CatalogObjectKind][]string{
 	billing.CatalogObjectProduct: {"display_name", "description", "tier_group", "tier_rank", "archived", "ownership", "entitlements", "required_entitlements", "credit_grant", "rate_cards"},
-	billing.CatalogObjectPrice:   {"currency", "unit_amount", "access_duration_hours", "billing_interval_hours", "trial_unit_amount", "trial_duration_hours", "customer_amount", "quantity", "archived", "psp_links"},
+	billing.CatalogObjectPrice:   {"currency", "unit_amount", "access_duration_hours", "billing_interval_hours", "trial_unit_amount", "trial_duration_hours", "customer_amount", "quantity", "archived", "psps"},
 	billing.CatalogObjectMeter:   {"event_type", "value_property", "aggregation", "unit", "group_by"},
 }
 
@@ -219,7 +219,7 @@ func readCatalogState(ctx context.Context, q *gen.Queries, merchantID uuid.UUID)
 			"customer_amount":        customer,
 			"quantity":               quantity,
 			"archived":               catalogJSON(p.Archived),
-			"psp_links":              catalogJSON(links),
+			"psps":                   catalogJSON(links),
 		}}
 	}
 	revisions, err := q.ListCatalogMeterRevisions(ctx, merchantID)
@@ -397,14 +397,14 @@ func documentPriceFields(d catalogwire.ApplyPrice, links map[string]map[string]s
 		"customer_amount":        nullable(d.CustomerAmount.Null, d.CustomerAmount.Value),
 		"quantity":               nullable(d.Quantity.Null, d.Quantity.Value),
 		"archived":               catalogJSON(d.Archived.Value),
-		"psp_links":              catalogJSON(links),
+		"psps":                   catalogJSON(links),
 	}
 	named := map[string]bool{
 		"currency": d.Currency.Set, "unit_amount": d.UnitAmount.Set,
 		"access_duration_hours": d.AccessDurationHours.Set, "billing_interval_hours": d.BillingIntervalHours.Set,
 		"trial_unit_amount": d.TrialUnitAmount.Set, "trial_duration_hours": d.TrialDurationHours.Set,
 		"customer_amount": d.CustomerAmount.Set, "quantity": d.Quantity.Set, "archived": d.Archived.Set,
-		"psp_links": d.PSPs.Set || d.PSPLinks.Set,
+		"psps": d.PSPs.Set,
 	}
 	for field := range values {
 		if !named[field] {

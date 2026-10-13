@@ -59,8 +59,8 @@ func openSolanaShop(t *testing.T, before ...func(*world)) *solanaShop {
     unit_amount: 23000000
     billing_interval_hours: 720
     access_duration_hours: 720
-    psps: [nmi, solana]
-    psp_links:
+    psps:
+      nmi: {}
       solana:
         plan_pda: %s
         plan_id: "4242"

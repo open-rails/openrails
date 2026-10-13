@@ -140,8 +140,7 @@ var emptyObject = object(map[string]jsonRule{})
 // identities move into dedicated columns. Preserve their string values; an
 // unrecognized field must be reviewed instead of silently lost in an archive.
 var priceBindingConfigurationJSON = object(map[string]jsonRule{
-	"product_id": textValue, "provider": textValue, "lookup_key": textValue,
-	"form_name": textValue, "enabled": textValue,
+	"product_id": textValue, "provider": textValue, "lookup_key": textValue, "enabled": textValue,
 	"token": textValue, "mint": textValue, "mint_symbol": textValue,
 	"amount_base_units": textValue, "period_hours": textValue,
 	"created_at": textValue, "merchant_address": textValue,

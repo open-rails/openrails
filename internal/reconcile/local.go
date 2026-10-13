@@ -430,7 +430,7 @@ func SolanaSubscriptionSourceFromDB(d *db.DB) SolanaSubscriptionSource {
 }
 
 // SolanaPlanSourceFromDB lists our plan PDAs for enumeration: locally-known
-// subscription rows plus the catalog's psp_links["solana"].plan_pda links, so
+// subscription rows plus the catalog's psps["solana"].plan_pda settings, so
 // a fresh DB can still enumerate from the catalog alone.
 func SolanaPlanSourceFromDB(d *db.DB) SolanaPlanSource {
 	return func(ctx context.Context) ([]string, error) {

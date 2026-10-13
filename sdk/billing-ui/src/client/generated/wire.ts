@@ -152,8 +152,7 @@ export type ApplyPrice = {
   trial_duration_hours?: number | null
   customer_amount?: CustomerAmount | null
   quantity?: Quantity | null
-  psps?: string[] | null
-  psp_links?: Record<string, Record<string, string>> | null
+  psps?: Record<string, Record<string, string>> | null
   amount?: string
   access_duration?: string | null
   billing_interval?: string | null
@@ -570,8 +569,7 @@ export type CreatePriceParams = {
   billing_interval_hours?: number
   trial_unit_amount?: string
   trial_duration_hours?: number
-  psps?: string[]
-  psp_links?: Record<string, Record<string, string>>
+  psps?: Record<string, Record<string, string>>
   archived?: boolean
   expected_revision?: number
 }
@@ -1182,7 +1180,7 @@ export type MerchantProfile = {
   logo_url?: string
   from_email?: string
   support_url?: string
-  signup_url?: string
+  subscribe_url?: string
   billing_url?: string
 }
 
@@ -2327,7 +2325,7 @@ export type UpdatePaymentMethodParams = {
 
 export type UpdatePriceParams = {
   archived?: boolean | null
-  psp_links?: Record<string, Record<string, string>>
+  psps?: Record<string, Record<string, string>>
   expected_revision?: number
 }
 

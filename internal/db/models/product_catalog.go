@@ -137,15 +137,14 @@ func (p *Price) RecurringCycleDays() *int {
 
 // Link entry key constants (used in the PSPLinks JSONB map)
 const (
-	RailKeyPSPID          = "psp_id"
-	RailKeyPlanID         = "plan_id"
-	RailKeyProvider       = "provider"
-	RailKeyCCBillFormName = "form_name"
-	RailKeyCCBillFlexID   = "flex_id"
+	RailKeyPSPID        = "psp_id"
+	RailKeyPlanID       = "plan_id"
+	RailKeyProvider     = "provider"
+	RailKeyCCBillFlexID = "flex_id"
 	// RailKeyCCBillRecurringBillingOption is CCBill's price/product/plan identity
 	// (#601) — the "Recurring Billing Option" id (a zero-padded numeric, e.g.
-	// "0000042836"). It is DISTINCT from the FlexForm (form_name/flex_id, the
-	// hosted purchase-flow page): legacy/archived tiers carry an RBO with no
+	// "0000042836"). It is DISTINCT from the FlexForm (flex_id, the hosted
+	// purchase-flow page): legacy/archived tiers carry an RBO with no
 	// FlexForm, and reconciliation keys on the RBO.
 	RailKeyCCBillRecurringBillingOption = "recurring_billing_option_id"
 	RailKeyStripePriceID                = "price_id"
@@ -201,19 +200,10 @@ func (p *Price) HasRail(rail Rail) bool {
 	return len(PSPLinksOnRail(p.PSPLinks, rail)) > 0
 }
 
-// GetCCBillFlexForm returns the CCBill flexform configuration (form name + flex ID)
-func (p *Price) GetCCBillFlexForm() (formName, flexID string, ok bool) {
-	config := p.PSPLinkForRail(RailCCBill)
-	if config == nil {
-		return "", "", false
-	}
-	formName = strings.TrimSpace(config[RailKeyCCBillFormName])
-	flexID = strings.TrimSpace(config[RailKeyCCBillFlexID])
-	if formName == "" || flexID == "" {
-		return "", "", false
-	}
-
-	return formName, flexID, true
+// GetCCBillFlexID returns the CCBill FlexForm the price is sold through.
+func (p *Price) GetCCBillFlexID() (flexID string, ok bool) {
+	flexID = strings.TrimSpace(p.PSPLinkForRail(RailCCBill)[RailKeyCCBillFlexID])
+	return flexID, flexID != ""
 }
 
 // GetCCBillRecurringBillingOption returns the CCBill Recurring Billing Option id
@@ -271,11 +261,8 @@ func (p *Price) SetRailConfig(rail Rail, config map[string]string) {
 }
 
 // SetCCBillConfig sets the CCBill rail configuration
-func (p *Price) SetCCBillConfig(formName, flexID string) {
-	p.SetRailConfig(RailCCBill, map[string]string{
-		RailKeyCCBillFormName: formName,
-		RailKeyCCBillFlexID:   flexID,
-	})
+func (p *Price) SetCCBillConfig(flexID string) {
+	p.SetRailConfig(RailCCBill, map[string]string{RailKeyCCBillFlexID: flexID})
 }
 
 // SetSolanaConfig enables the Solana rail

@@ -210,7 +210,7 @@ func (s *PurchaseService) processCCBillUpgrade(
 		return nil, errors.New("existing subscription is missing CCBill reference")
 	}
 
-	formName, flexID, hasCCBill := newPrice.GetCCBillFlexForm()
+	flexID, hasCCBill := newPrice.GetCCBillFlexID()
 	if !hasCCBill {
 		return nil, fmt.Errorf("target price %s is not configured for CCBill", newPrice.ID)
 	}
@@ -228,7 +228,6 @@ func (s *PurchaseService) processCCBillUpgrade(
 	upgradeParams := &ccbill.GenerateUpgradeFlexFormURLParams{
 		Username:               user.Username,
 		Email:                  *user.Email,
-		FormName:               formName,
 		FlexID:                 flexID,
 		Currency:               newPrice.Currency,
 		OriginalSubscriptionID: existingSub.RailSubscriptionID,
@@ -580,7 +579,7 @@ func (s *PurchaseService) validateTierChangePreviewTarget(
 		if action == "downgrade" {
 			return &TierChangeError{Code: billing.CodeSubscriptionChangeUnsupportedOnRail, Message: "CCBill subscription downgrades are not supported"}
 		}
-		if _, _, ok := newPrice.GetCCBillFlexForm(); !ok {
+		if _, ok := newPrice.GetCCBillFlexID(); !ok {
 			return &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan, Message: "target price is not configured for CCBill"}
 		}
 		if user.Email == nil || strings.TrimSpace(*user.Email) == "" || strings.TrimSpace(user.Username) == "" {

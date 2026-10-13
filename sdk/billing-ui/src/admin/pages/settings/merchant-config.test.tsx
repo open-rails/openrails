@@ -269,6 +269,50 @@ it("a configuration edit names the revision it opened at; one changed since clos
   expect(document.body.textContent).toContain("Acme Corp")
 })
 
+it("the merchant profile edits where customers subscribe and manage billing", async () => {
+  browserEnvironment()
+  let current = configuration(3, "Acme Retail")
+  const requests = await server({
+    "/config": capabilities(() => true),
+    "GET /merchant/configuration": () => current,
+    "PATCH /merchant/configuration": (request) => {
+      const body = request.body as UpdateMerchantConfigurationParams
+      current = {
+        ...current,
+        revision: current.revision + 1,
+        settings: {
+          ...current.settings,
+          profile: { ...current.settings.profile, ...body.settings?.profile },
+        },
+      }
+      return current
+    },
+  })
+  selectMerchant("merchant-a")
+  await page(<MerchantSettingsTab />)
+
+  await press("Edit")
+  await type("#s-subscribe", "https://acme.test/subscribe")
+  await type("#s-billing", "https://acme.test/account")
+  await press("Save")
+  expect(writes(requests).map((request) => request.body)).toEqual([
+    {
+      expected_revision: 3,
+      display_name: "Acme Retail",
+      settings: {
+        profile: {
+          from_email: "billing@acme.test",
+          subscribe_url: "https://acme.test/subscribe",
+          billing_url: "https://acme.test/account",
+        },
+      },
+    },
+  ])
+  await settle()
+  expect(document.body.textContent).toContain("https://acme.test/subscribe")
+  expect(document.body.textContent).toContain("https://acme.test/account")
+})
+
 it("a PSP rotation at a stale revision closes, drops the secret and reloads the PSP", async () => {
   browserEnvironment()
   const error = vi.spyOn(toast, "error")

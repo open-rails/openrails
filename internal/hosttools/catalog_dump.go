@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -300,12 +299,7 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 		if links == nil {
 			links = map[string]map[string]string{}
 		}
-		price.PSPLinks = catalog.Value(links)
-		price.PSPs = catalog.Value([]string{})
-		for provider := range price.PSPLinks.Value {
-			price.PSPs.Value = append(price.PSPs.Value, provider)
-		}
-		sort.Strings(price.PSPs.Value)
+		price.PSPs = catalog.Value(links)
 		if p.Prices == nil {
 			p.Prices = map[string]catalog.ApplyPrice{}
 		}

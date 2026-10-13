@@ -38,15 +38,20 @@ display_name: Shop
 settings:
   profile:
     support_url: https://shop.example/support
-    billing_url: https://shop.example/account/billing
+    subscribe_url: https://shop.example/subscribe
+    billing_url: https://shop.example/account
 ```
 
 `card_custody` is where new cards are held: `merchant` (absent) or `platform`
 ([payment-method custody](payment-method-custody.md)).
 
-`billing_url` is where customers manage and cancel their subscriptions and
-[charge agreements](agreements.md); receipts and confirmations link to it,
-else to `support_url`. `balance_notices` sets the customers' default
+`subscribe_url` is where new customers, and those whose access ended, buy a
+subscription. `billing_url` is where customers manage and cancel their
+subscriptions and [charge agreements](agreements.md). Messages about
+notification events pick one by purpose (`MerchantProfile.NotificationURL`):
+access ended links to `subscribe_url`; failed or due payments, payment method
+updates, receipts and confirmations link to `billing_url`; either falls back to
+`support_url`. `balance_notices` sets the customers' default
 low-balance lines ([balance notices](balance-notices.md)).
 
 YAML and JSON use the same typed contract. Documents are limited to 1 MiB.

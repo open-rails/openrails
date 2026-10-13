@@ -67,8 +67,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
         unit_amount: %[3]d
         billing_interval_hours: 720
         access_duration_hours: 720
-        psps: [solana]
-        psp_links:
+        psps:
           solana:
             plan_pda: %[4]s
             plan_id: "%[5]d"

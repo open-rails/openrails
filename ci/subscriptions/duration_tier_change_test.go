@@ -27,7 +27,7 @@ func TestDurationDowngradePreservesLongerPaidBenefit(t *testing.T) {
 			price, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{
 				ProductID: product.ID, Key: "monthly", UnitAmount: 19_990_000, Currency: "USD",
 				BillingIntervalHours: new(720), AccessDurationHours: new(1440),
-				PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}},
+				PSPs: map[string]map[string]string{"nmi": {"plan_id": plan}},
 			})
 			require.NoError(t, err)
 			old := tier{Price: price, ent: "content:long-paid", plan: plan}

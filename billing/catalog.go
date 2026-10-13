@@ -195,7 +195,7 @@ type DriftField struct {
 }
 
 // PendingAction is a manual step an operator takes on a PSP so it can sell a
-// price; PatchRequired is the psp_links patch to send once it is done.
+// price; PatchRequired is the price patch ({psps: ...}) to send once it is done.
 type PendingAction struct {
 	PSP           string                                  `json:"psp"`
 	Action        string                                  `json:"action"`
@@ -217,10 +217,10 @@ var ErrPriceKeyCadenceConflict error = newCodedError("price_key_cadence_conflict
 // Creating a price under the key of a live price with other terms makes it
 // the key's current version and archives the previous one.
 //
-// PSPs lists the PSP keys the price is sold on; PSPLinks supplies a PSP's own
-// identifiers for it, per rail: stripe {price_id, product_id} or
-// {lookup_key}; nmi {plan_id}; ccbill {form_name, flex_id}; solana {token} or
-// {plan_pda}. A PSP named in PSPLinks is sold on too.
+// PSPs are the PSPs the price is sold on, keyed by PSP key; each value is that
+// PSP's settings for the price ({} for none), per rail: stripe {price_id,
+// product_id} or {lookup_key}; nmi {plan_id}; ccbill {flex_id,
+// recurring_billing_option_id}; solana {token} or {plan_pda}.
 type CreatePriceParams struct {
 	CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
 	// Quantity sells a recurring price per seat within its bounds.
@@ -230,7 +230,8 @@ type CreatePriceParams struct {
 	ProductData *CreatePriceProduct `json:"product_data,omitempty"`
 	Key         string              `json:"key,omitempty"`
 	UnitAmount  int64               `json:"unit_amount,string"`
-	Currency    string              `json:"currency"`
+	// Currency is fiat or SOL; a stablecoin is refused.
+	Currency string `json:"currency"`
 	// AccessDurationHours is the access window (nil: no scheduled expiry),
 	// independently of billing cadence. Credit lot expiry belongs to the product.
 	AccessDurationHours *int `json:"access_duration_hours,omitempty"`
@@ -240,8 +241,7 @@ type CreatePriceParams struct {
 	// terms (0 is a free trial); set both or neither, with a recurring billing interval.
 	TrialUnitAmount    *int64                       `json:"trial_unit_amount,omitempty,string"`
 	TrialDurationHours *int                         `json:"trial_duration_hours,omitempty"`
-	PSPs               []string                     `json:"psps,omitempty"`
-	PSPLinks           map[string]map[string]string `json:"psp_links,omitempty"`
+	PSPs               map[string]map[string]string `json:"psps,omitempty"`
 	// Archived creates the price retired: subscribers keep paying it, nobody
 	// new can buy it.
 	Archived bool `json:"archived,omitempty"`
@@ -260,11 +260,11 @@ type CreatePriceProduct struct {
 
 // UpdatePriceParams changes what about a price can change; omitted fields are
 // left as they are. Keys and financial terms are immutable.
-// PSPLinks merges into the price's links: a PSP set to
-// null is unlinked.
+// PSPs merges into the price's PSPs: a PSP set to its settings is linked with
+// them, and a PSP set to null is unlinked.
 type UpdatePriceParams struct {
 	Archived catalog.Field[bool]                         `json:"archived,omitzero"`
-	PSPLinks map[string]catalog.Field[map[string]string] `json:"psp_links,omitempty"`
+	PSPs     map[string]catalog.Field[map[string]string] `json:"psps,omitempty"`
 	// ExpectedRevision refuses the edit with revision_mismatch unless the
 	// price key is still at this revision.
 	ExpectedRevision *int64 `json:"expected_revision,omitempty"`

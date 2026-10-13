@@ -688,7 +688,7 @@ function PriceRow({ price, product }: { price: Price; product?: Product }) {
       <TableCell>{priceIntervalLabel(price)}</TableCell>
       <TableCell>
         <span className="flex flex-wrap gap-1">
-          {/* psp_links is keyed by PSP key ("mobius"), not by rail — the rail
+          {/* psps is keyed by PSP key ("mobius"), not by rail — the rail
               is recorded inside the entry (or#812). */}
           {Object.entries(price.psps ?? {}).map(([psp, state]) => (
             <Badge

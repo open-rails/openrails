@@ -197,6 +197,8 @@ function MerchantProfileForm({
     displayName: configuration.display_name,
     fromEmail: profile?.from_email ?? "",
     supportURL: profile?.support_url ?? "",
+    subscribeURL: profile?.subscribe_url ?? "",
+    billingURL: profile?.billing_url ?? "",
     logoURL: profile?.logo_url ?? "",
   })
   const edit = useConfigurationEdit(configuration)
@@ -210,6 +212,8 @@ function MerchantProfileForm({
             profile: {
               from_email: value.fromEmail || undefined,
               support_url: value.supportURL || undefined,
+              subscribe_url: value.subscribeURL || undefined,
+              billing_url: value.billingURL || undefined,
               logo_url: value.logoURL || undefined,
             },
           },
@@ -318,6 +322,40 @@ function MerchantProfileForm({
               </SettingEditField>
             )}
           </form.Field>
+          <form.Field name="subscribeURL">
+            {(field) => (
+              <SettingEditField
+                label={adminText("Subscribe URL")}
+                id={"s-subscribe"}
+              >
+                <Input
+                  id={adminId("s-subscribe")}
+                  type="url"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                  placeholder={adminText("https://example.com/subscribe")}
+                />
+              </SettingEditField>
+            )}
+          </form.Field>
+          <form.Field name="billingURL">
+            {(field) => (
+              <SettingEditField
+                label={adminText("Billing URL")}
+                id={"s-billing"}
+              >
+                <Input
+                  id={adminId("s-billing")}
+                  type="url"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                  placeholder={adminText("https://example.com/account")}
+                />
+              </SettingEditField>
+            )}
+          </form.Field>
           <form.Field name="logoURL">
             {(field) => (
               <SettingEditField label={adminText("Logo URL")} id={"s-logo"}>
@@ -346,6 +384,14 @@ function MerchantProfileForm({
           <SettingDetail
             label={adminText("Support URL")}
             value={profile?.support_url}
+          />
+          <SettingDetail
+            label={adminText("Subscribe URL")}
+            value={profile?.subscribe_url}
+          />
+          <SettingDetail
+            label={adminText("Billing URL")}
+            value={profile?.billing_url}
           />
           <SettingDetail
             label={adminText("Logo URL")}

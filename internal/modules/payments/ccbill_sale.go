@@ -12,7 +12,6 @@ type CCBillSale struct {
 	TransactionID            string
 	Username                 string
 	FlexID                   string
-	FormName                 string
 	RecurringBillingOptionID string
 	// Currency is the ISO alpha code of the billed amounts.
 	Currency       string

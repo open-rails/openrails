@@ -244,28 +244,25 @@ func ccbillPriceLookupID(rboID, flexID string) string {
 	return strings.TrimSpace(flexID)
 }
 
-func (s *CCBillWebhookService) ensureFlexFormMatches(price *models.Price, flexID, formName string) error {
-	expectedFormName, expectedFlexID, ok := price.GetCCBillFlexForm()
+func (s *CCBillWebhookService) ensureFlexFormMatches(price *models.Price, flexID string) error {
+	expectedFlexID, ok := price.GetCCBillFlexID()
 	if !ok {
 		return fmt.Errorf("price %s is missing CCBill flexform configuration", price.ID)
 	}
 	if strings.TrimSpace(flexID) != expectedFlexID {
 		return fmt.Errorf("payment form id mismatch: got %s, want %s", flexID, expectedFlexID)
 	}
-	if strings.TrimSpace(formName) != expectedFormName {
-		return fmt.Errorf("payment form name mismatch: got %s, want %s", formName, expectedFormName)
-	}
 	return nil
 }
 
-func (s *CCBillWebhookService) ensureCCBillPriceMatches(price *models.Price, flexID, formName, rboID string) error {
+func (s *CCBillWebhookService) ensureCCBillPriceMatches(price *models.Price, flexID, rboID string) error {
 	if expectedRBO, ok := price.GetCCBillRecurringBillingOption(); ok && strings.TrimSpace(rboID) != "" {
 		if strings.TrimSpace(rboID) != expectedRBO {
 			return fmt.Errorf("recurring billing option mismatch: got %s, want %s", rboID, expectedRBO)
 		}
 		return nil
 	}
-	return s.ensureFlexFormMatches(price, flexID, formName)
+	return s.ensureFlexFormMatches(price, flexID)
 }
 
 func (s *CCBillWebhookService) resolveUserID(ctx context.Context, username string) (string, error) {
@@ -606,7 +603,7 @@ func (s *CCBillWebhookService) settleOrderSale(ctx context.Context, attemptID uu
 	}
 	sale := payments.CCBillSale{
 		SubscriptionID: strings.TrimSpace(data.SubscriptionID), TransactionID: strings.TrimSpace(data.TransactionID), Username: strings.TrimSpace(data.Username),
-		FlexID: strings.TrimSpace(data.FlexID), FormName: strings.TrimSpace(data.FormName), RecurringBillingOptionID: strings.TrimSpace(data.SubscriptionTypeID),
+		FlexID: strings.TrimSpace(data.FlexID), RecurringBillingOptionID: strings.TrimSpace(data.SubscriptionTypeID),
 		Currency: currency, InitialMinor: int64(initial), SoldAt: ccbillEventPurchasedAt(data.Timestamp),
 	}
 	if strings.TrimSpace(data.BilledRecurringPrice) != "" {
@@ -650,7 +647,6 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 	}
 
 	formID := data.FlexID
-	formName := data.FormName
 	failureCode := data.FailureCode
 	transactionID := data.TransactionID
 	failureReason := data.FailureReason
@@ -684,7 +680,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 			log.WithContext(ctx).WithError(priceLookupErr).WithFields(log.Fields{
 				"flex_id": formID,
 			}).Warn("Unable to validate CCBill form for new sale failure")
-		} else if err := s.ensureCCBillPriceMatches(price, formID, formName, data.SubscriptionTypeID); err != nil {
+		} else if err := s.ensureCCBillPriceMatches(price, formID, data.SubscriptionTypeID); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"flex_id": formID,
 			}).Warn("Payment form mismatch in new sale failure")
@@ -742,7 +738,6 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 	}
 
 	flexID := strings.TrimSpace(data.FlexID)
-	formName := strings.TrimSpace(data.FormName)
 	ccBillSubID := strings.TrimSpace(data.SubscriptionID)
 	transactionID := strings.TrimSpace(data.TransactionID)
 	originalSubscriptionID := strings.TrimSpace(data.OriginalSubscriptionID)
@@ -807,7 +802,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to find new price for CCBill price ID %s: %w", priceLookupID, err)
 		}
-		if err := s.ensureCCBillPriceMatches(newPrice, flexID, formName, data.SubscriptionTypeID); err != nil {
+		if err := s.ensureCCBillPriceMatches(newPrice, flexID, data.SubscriptionTypeID); err != nil {
 			return err
 		}
 

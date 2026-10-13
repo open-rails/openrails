@@ -172,7 +172,8 @@ products:
 
 The JSON body of `POST /v1/catalog/apply` (was `/v1/merchant/catalog/applications`) and the Go
 `catalog.Application` (`Products`, `Prices` and `Meters` are maps) change the
-same way. Plain lists such as `entitlements`, `psps` and `rate_cards` stay lists.
+same way. Plain lists such as `entitlements` and `rate_cards` stay lists; a price's
+`psps` is a map of each PSP to its settings.
 
 The merchant declaration (`merchant_config.yaml`, `merchants.<slug>` in a
 standalone manifest) changes in two places.
@@ -273,7 +274,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | Before | After |
 |---|---|
 | `client.Products.Create`, `Ensure`, `Retrieve`, `RetrieveByKey`, `Update`, `List` | `client.CreateProduct(` (`Ensure`: a catalog application, `client.ApplyCatalog(`), `client.GetProduct(`, `client.UpdateProduct(`, `client.ListProducts(` (by key: `Keys`) |
-| `client.Prices.Create`, `Retrieve`, `RetrieveByKey`, `Update`, `List`, `SetKey` | `client.CreatePrice(`, `client.GetPrice(`, `client.UpdatePrice(` (a merge patch: `archived`, `psp_links`), `client.ListPrices(` (by key: `ProductKey`, `Key`), `client.ListPriceHistory(` |
+| `client.Prices.Create`, `Retrieve`, `RetrieveByKey`, `Update`, `List`, `SetKey` | `client.CreatePrice(`, `client.GetPrice(`, `client.UpdatePrice(` (a merge patch: `archived`, `psps`), `client.ListPrices(` (by key: `ProductKey`, `Key`), `client.ListPriceHistory(` |
 | `client.Catalog.Apply`, `Revision` | `client.ApplyCatalog(`; its receipt reports the catalog revision (`applied_revision`), and each product, price and meter its own `revision` |
 | `ProductCreateParams`, `PriceCreateParams`, … | `billing.CreateProductParams`, `billing.CreatePriceParams`, `billing.UpdateProductParams`, `billing.UpdatePriceParams` |
 | `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` | `client.SetMeter(` (its `RateCard`; null removes it), `client.GetMeter(`, `client.ListMeters(`; the meter's rate card prices every customer (no per-customer price) |

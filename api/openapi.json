@@ -12605,19 +12605,6 @@
           "psps": {
             "oneOf": [
               {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "psp_links": {
-            "oneOf": [
-              {
                 "type": "object",
                 "additionalProperties": {
                   "type": "object",
@@ -14487,12 +14474,6 @@
             "type": "integer"
           },
           "psps": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "psp_links": {
             "type": "object",
             "additionalProperties": {
               "type": "object",
@@ -17239,7 +17220,7 @@
           "support_url": {
             "type": "string"
           },
-          "signup_url": {
+          "subscribe_url": {
             "type": "string"
           },
           "billing_url": {
@@ -22715,7 +22696,7 @@
               }
             ]
           },
-          "psp_links": {
+          "psps": {
             "type": "object",
             "additionalProperties": {
               "type": "object",

@@ -223,7 +223,7 @@ func TestSeatsRefused(t *testing.T) {
 	cycle := monthHours
 	for _, params := range []billing.CreatePriceParams{
 		{ProductID: perSeat.ProductID, Key: "linked", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: &cycle, Quantity: &catalog.Quantity{Min: 1, Max: 5},
-			PSPLinks: map[string]map[string]string{"nmi": {"plan_id": "seat_plan"}}},
+			PSPs: map[string]map[string]string{"nmi": {"plan_id": "seat_plan"}}},
 		{ProductID: perSeat.ProductID, Key: "one-off", UnitAmount: 10_000_000, Currency: "USD", Quantity: &catalog.Quantity{Min: 1, Max: 5}},
 		{ProductID: perSeat.ProductID, Key: "bounds", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: &cycle, Quantity: &catalog.Quantity{Min: 3, Max: 2}},
 	} {

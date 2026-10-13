@@ -6,7 +6,7 @@ Price bindings belong to the immutable PSP UUID. Catalog labels can change witho
 
 Local collision regressions must exercise purchase and webhook workflows with two same-rail accounts sharing external references. Provider probes, reconciliation evidence, card updater support, dashboards and webhook health remain intact.
 
-Price bindings are stored in `price_psp_bindings`, with a composite merchant/PSP foreign key and account-scoped unique plan, Stripe price, CCBill recurring billing option and Solana plan references. The catalog `psp_links` map is a projection using current labels and explicit `psp_id` values; duplicate labels project under UUID keys. It is not persisted JSON. A shared CCBill FlexForm is a payment page rather than price identity: recurring billing option lookup remains exact, and ambiguous form-only events fail closed.
+Price bindings are stored in `price_psp_bindings`, with a composite merchant/PSP foreign key and account-scoped unique plan, Stripe price, CCBill recurring billing option and Solana plan references. A price's catalog `psps` map is a projection using current labels and explicit `psp_id` values; duplicate labels project under UUID keys. It is not persisted JSON. A shared CCBill FlexForm (`flex_id`) is a payment page rather than price identity: recurring billing option lookup remains exact, and ambiguous form-only events fail closed.
 
 Saved-method and stored-credential references also require PSP identity. Custody import manifests carry `source_psp_id` so the same source vault reference at a sibling gateway cannot be adopted. Webhook deduplication namespaces include the captured PSP or custodian UUID.
 

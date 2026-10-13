@@ -68,7 +68,7 @@ func TestPriceLinksAreAccountKeyed(t *testing.T) {
 	p := &Price{PSPLinks: map[string]map[string]string{
 		"mobius": {RailKeyRail: "nmi", RailKeyPlanID: "premium_new", RailKeyPSPID: psp.String()},
 		"stripe": {RailKeyRail: "stripe", RailKeyStripePriceID: " price_123 "},
-		"ccbill": {RailKeyRail: "ccbill", RailKeyCCBillFormName: "form-name"},
+		"ccbill": {RailKeyRail: "ccbill", RailKeyCCBillRecurringBillingOption: "0000007498"},
 	}}
 	require.Equal(t, "premium_new", p.PSPLinkForRail(RailNMI)[RailKeyPlanID])
 	id, ok := p.GetStripeConfig()
@@ -76,8 +76,8 @@ func TestPriceLinksAreAccountKeyed(t *testing.T) {
 	require.Equal(t, "price_123", id)
 	require.True(t, p.HasRail(RailNMI))
 	require.False(t, p.HasRail(RailSolana))
-	_, _, ok = p.GetCCBillFlexForm()
-	require.False(t, ok, "a FlexForm needs both form_name and flex_id")
+	_, ok = p.GetCCBillFlexID()
+	require.False(t, ok, "a billing option alone is no FlexForm")
 
 	only := p.ForPSP(psp)
 	require.Len(t, only.PSPLinks, 1)
@@ -89,10 +89,10 @@ func TestPriceLinksAreAccountKeyed(t *testing.T) {
 	require.Nil(t, p.PSPLinkForRail(RailNMI))
 
 	var fresh Price
-	fresh.SetCCBillConfig("form", "flex")
-	form, flex, ok := fresh.GetCCBillFlexForm()
+	fresh.SetCCBillConfig("flex")
+	flex, ok := fresh.GetCCBillFlexID()
 	require.True(t, ok)
-	require.Equal(t, []string{"form", "flex"}, []string{form, flex})
+	require.Equal(t, "flex", flex)
 	require.Equal(t, "ccbill", fresh.PSPLinks["ccbill"][RailKeyRail])
 }
 

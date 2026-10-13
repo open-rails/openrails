@@ -99,7 +99,7 @@ type providerAdapter interface {
 	// Attach interprets caller-supplied provider link/config on a freshly created
 	// OpenRails price. It validates an existing remote object or find-or-creates
 	// one from a client-declarative key, then returns the canonical IDs to write
-	// to rails[provider]. Called when the caller provided psp_links[provider] in
+	// to rails[provider]. Called when the caller provided psps[provider] settings in
 	// the create/update request.
 	//
 	// in carries the OpenRails price substance (product key + immutable money terms) so
@@ -111,8 +111,8 @@ type providerAdapter interface {
 	Attach(ctx context.Context, link map[string]string, in autoCreateContext) (map[string]string, error)
 
 	// AutoCreate mints a brand-new remote object for this price and returns the
-	// canonical IDs to store. Called when the caller listed this provider in
-	// `providers` but did not supply pre-existing IDs. Adapters that cannot
+	// canonical IDs to store. Called when the caller named this PSP in `psps`
+	// with no settings. Adapters that cannot
 	// auto-create return errPendingManualLink and the dispatcher converts the
 	// provider's slot to pending_manual_link with the adapter's
 	// billing.PendingAction template (see PendingActionTemplate).
@@ -194,7 +194,7 @@ func internalStripeLookupKey(priceID uuid.UUID) string {
 	return "openrails." + priceID.String()
 }
 
-// resolveProviders walks the declared `providers` + `provider_links` from a
+// resolveProviders walks the declared `psps` from a
 // CreatePrice request through every adapter, dispatches Attach / AutoCreate as
 // appropriate, and returns the raw rails map to persist, the typed
 // per-provider response states, and any aggregated pending-manual-action items.
@@ -220,30 +220,26 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 	pending []billing.PendingAction,
 	err error,
 ) {
-	// Build the unique attach set: union of req.PSPs and the keys of
-	// req.PSPLinks. Lowercase + trimmed for stable dispatch.
-	want := map[string]struct{}{}
-	for _, p := range req.PSPs {
+	// The attach set is the keys of req.PSPs, lowercased and trimmed for
+	// stable dispatch; each keeps its declared settings.
+	settings := map[string]map[string]string{}
+	for p, link := range req.PSPs {
 		p = strings.ToLower(strings.TrimSpace(p))
 		if p == "" {
 			continue
 		}
-		want[p] = struct{}{}
-	}
-	for p := range req.PSPLinks {
-		p = strings.ToLower(strings.TrimSpace(p))
-		if p == "" {
-			continue
+		if _, dup := settings[p]; dup {
+			return nil, nil, nil, apperr.Invalidf("PSP %q is named twice in psps", p)
 		}
-		want[p] = struct{}{}
+		settings[p] = link
 	}
 
 	rails = map[string]map[string]string{}
 	states = map[string]billing.PSPLinkState{}
 
 	// Sort for deterministic ordering in tests / pending action lists.
-	names := make([]string, 0, len(want))
-	for p := range want {
+	names := make([]string, 0, len(settings))
+	for p := range settings {
 		names = append(names, p)
 	}
 	sort.Strings(names)
@@ -256,7 +252,7 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 	// rail are fine — rails[] is keyed by the ACCOUNT key and each entry
 	// records its rail.
 	type attachTarget struct {
-		declared  string // manifest name = ProviderLinks key = rails[]/states[] key
+		declared  string // manifest name = psps key = rails[]/states[] key
 		rail      string // adapters index; recorded in the entry's RailKeyRail
 		accountID string // rail-native account id; pins Attach/AutoCreate to the account
 		adapter   providerAdapter
@@ -275,7 +271,7 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 		}
 		if !ok {
 			return nil, nil, nil, apperr.Invalidf(
-				"unknown provider %q in providers/provider_links: not a rail (%s) or a declared merchant account key",
+				"unknown PSP %q in psps: not a rail (%s) or a declared merchant account key",
 				name, strings.Join(sortedAdapterNames(adapters), ", "))
 		}
 		if t.rail == string(models.RailStripe) || t.rail == string(models.RailNMI) || t.rail == string(models.RailCCBill) {
@@ -287,11 +283,11 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 			if t.rail != string(models.RailStripe) && t.rail != string(models.RailNMI) {
 				return nil, nil, nil, apperr.Invalidf("customer_amount requires Stripe or NMI")
 			}
-			if len(req.PSPLinks[name]) > 0 {
+			if len(settings[name]) > 0 {
 				return nil, nil, nil, apperr.Invalidf("customer_amount uses purchase amounts, not provider catalog links")
 			}
 		}
-		if req.Quantity != nil && (t.rail != string(models.RailStripe) && t.rail != string(models.RailNMI) || len(req.PSPLinks[name]) > 0) {
+		if req.Quantity != nil && (t.rail != string(models.RailStripe) && t.rail != string(models.RailNMI) || len(settings[name]) > 0) {
 			return nil, nil, nil, apperr.Invalidf(errQuantityRail)
 		}
 		targets = append(targets, t)
@@ -301,10 +297,10 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 	// that transaction, even when limited mode might defer the write itself.
 	if s.localCatalogOnly {
 		for _, target := range targets {
-			if target.rail == string(models.RailCCBill) && len(req.PSPLinks[target.declared]) == 0 {
-				return nil, nil, nil, apperr.Invalidf("local catalog application requires an explicit CCBill form or billing-option link")
+			if target.rail == string(models.RailCCBill) && len(settings[target.declared]) == 0 {
+				return nil, nil, nil, apperr.Invalidf("local catalog application requires the CCBill flex_id or recurring_billing_option_id")
 			}
-			if target.rail != string(models.RailCCBill) && (len(req.PSPLinks[target.declared]) > 0 || !s.localEnginePrice(target.rail, priceRequestCycleDays(req))) {
+			if target.rail != string(models.RailCCBill) && (len(settings[target.declared]) > 0 || !s.localEnginePrice(target.rail, priceRequestCycleDays(req))) {
 				return nil, nil, nil, apperr.Invalidf("inline product_data requires local engine catalog terms; create and link legacy provider prices separately")
 			}
 		}
@@ -383,7 +379,7 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 	}
 
 	for _, t := range targets {
-		link := req.PSPLinks[t.declared]
+		link := settings[t.declared]
 		// Pin provider calls to THIS account's credentials; empty means the
 		// rail's armed default.
 		tctx := pctx

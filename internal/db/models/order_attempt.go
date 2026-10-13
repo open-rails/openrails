@@ -97,7 +97,7 @@ const (
 	// PSPRoutingSkipCredentialsMissing: armed, but the credentials the rail
 	// needs to charge are absent or malformed.
 	PSPRoutingSkipCredentialsMissing = "credentials_missing"
-	// PSPRoutingSkipLinkMissing: the price has no usable psp_links entry
+	// PSPRoutingSkipLinkMissing: the price has no usable psps settings
 	// for this PSP (absent, or naming a different remote object).
 	PSPRoutingSkipLinkMissing = "link_missing"
 	// PSPRoutingSkipModeUnsupported: the rail cannot serve this checkout

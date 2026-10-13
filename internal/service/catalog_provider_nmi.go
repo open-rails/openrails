@@ -45,9 +45,9 @@ func (a *nmiAdapter) PendingActionTemplate(priceID uuid.UUID) billing.PendingAct
 	return billing.PendingAction{
 		PSP:    string(models.RailNMI),
 		Action: "create_recurring_plan",
-		Hint:   "Create plan in NMI control center, then PATCH /catalog/prices/" + priceID.String() + " with psp_links.nmi.plan_id",
+		Hint:   "Create plan in NMI control center, then PATCH /catalog/prices/" + priceID.String() + " with psps.nmi.plan_id",
 		PatchRequired: map[string]map[string]map[string]string{
-			"psp_links": {
+			"psps": {
 				string(models.RailNMI): {
 					"plan_id": "<plan id>",
 				},
@@ -66,7 +66,7 @@ func (a *nmiAdapter) Attach(ctx context.Context, link map[string]string, in auto
 	link = normalizeLinkMap(link)
 	planID := strings.TrimSpace(link[models.RailKeyPlanID])
 	if planID == "" {
-		return nil, fmt.Errorf("nmi link requires psp_links.nmi.plan_id")
+		return nil, fmt.Errorf("nmi link requires psps.nmi.plan_id")
 	}
 	// provider is the PSP key the plan lives under (metadata only): the link's
 	// override, else the armed account's key.

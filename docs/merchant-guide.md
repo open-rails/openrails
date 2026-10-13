@@ -68,8 +68,10 @@ Two products with recurring prices that grant one entitlement must share a
 catalog change is refused with `409 catalog_benefit_overlap`. Repeated purchases
 of one timed pass stack: each window starts when the previous one ends.
 
-Catalog prices accept `amount: 9.99 USD`, `amount: 1 SOL`, or `amount: 10 USDC`.
-The currency is required and must be registered. Amounts convert exactly at that
+Catalog prices accept `amount: 9.99 USD` or `amount: 1 SOL`. The currency is
+required and must be fiat or SOL: a stablecoin (USDC, USDT, PYUSD, USD1, USDG)
+is refused, because it is what a buyer pays with for a price in the fiat
+currency it tracks. Amounts convert exactly at that
 currency's precision; values that require rounding are rejected.
 Use `amount` by itself, or `unit_amount` with `currency`; combining these forms is
 invalid. Supplying `amount` sets both the amount and currency. Omitting all money
@@ -90,8 +92,7 @@ Price fields worth knowing:
 | `billing_interval` | time between recurring payments, such as `30 days`, or null for a one-time purchase; independent of access duration; `billing_interval_hours` is the numeric form |
 | `trial_unit_amount`, `trial_duration` | first-phase terms; supply both together with a billing interval; `trial_duration_hours` is the numeric form |
 | `archived` | explicit true retires, explicit false reactivates; omission preserves an existing value |
-| `psps` | explicit PSP list; omitted = OpenRails-native only, no provider sync |
-| `psp_links` | pre-supply provider ids, validated on apply (below) |
+| `psps` | the PSPs the price is sold on, each key a PSP with its settings for the price (`{}` for none), validated on apply (below); omitted keeps the current PSPs |
 
 Trial terms are supported only on rails with native trial settlement; current
 engine-managed purchase refuses trials before charging.
@@ -158,16 +159,17 @@ balance or is owed at once; the daily pass bills each customer's owed usage as a
 usage order. A metered card states no `payment_term`. See
 [usage pricing](usage-pricing.md).
 
-**psp_links** — supply provider-side ids or declarative provider config per PSP key.
-Supplied links are validated against the provider (object exists + money terms match)
-and never duplicated; a mismatch fails the apply loudly:
+**psps** — each key is a PSP the price is sold on; its value is that PSP's
+settings for the price. Supplied settings are validated against the provider
+(object exists + money terms match) and never duplicated; a mismatch fails the
+apply loudly:
 
 ```yaml
-            psp_links:
+            psps:
               stripe: {lookup_key: premium}         # find-or-create at a chosen key
               mobius: {plan_id: premium}            # NMI recurring plan; find-or-create
-              ccbill: {form_name: premium, flex_id: abc-123}  # operator-owned, unvalidated
-              solana: {token: USD1}                 # optional override; recurring defaults to USDC
+              ccbill: {flex_id: abc-123, recurring_billing_option_id: "0000007498"}  # operator-owned, unvalidated
+              solana: {}                            # recurring defaults to USDC; {token: USD1} overrides
               # solana: {plan_pda: "..."}           # alternatively attach and resolve the token on-chain
 ```
 
@@ -193,7 +195,7 @@ Provider support for individual catalog operations (batch applications reject un
 |---|---|
 | stripe | auto-creates Products, Prices, and entitlement Features (`lookup_key` = the entitlement string); financial terms are immutable, so amount changes re-mint a new price and archive the old |
 | nmi PSPs | recurring `plan_id` found-or-created; otherwise link-only |
-| ccbill | link-only: you supply `form_name` + `flex_id` from the CCBill admin |
+| ccbill | link-only: you supply `flex_id` + `recurring_billing_option_id` from the CCBill admin |
 | solana | recurring plans default to USDC and are found-or-created; `token: USD1` selects USD1; `plan_pda` attaches an existing plan and resolves its token on-chain |
 
 A link-only price pushed without its ids is still created in OpenRails and recorded as

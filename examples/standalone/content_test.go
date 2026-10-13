@@ -332,7 +332,7 @@ func startStack(t *testing.T) *stack {
 	require.NoError(t, err, "catalog apply: %s", tail([]byte(out), 20))
 	require.Contains(t, out, "already applied; nothing changed")
 	refused := filepath.Join(dir, "refused.yaml")
-	require.NoError(t, os.WriteFile(refused, []byte("schema_version: 1\nproducts:\n  stray:\n    display_name: Stray\n    prices:\n      once:\n        currency: usd\n        unit_amount: 1000000\n        psps: [nowhere]\n"), 0o600))
+	require.NoError(t, os.WriteFile(refused, []byte("schema_version: 1\nproducts:\n  stray:\n    display_name: Stray\n    prices:\n      once:\n        currency: usd\n        unit_amount: 1000000\n        psps: {nowhere: {}}\n"), 0o600))
 	out, err = applyCatalog(refused)
 	require.Error(t, err, "a refused document exits non-zero: %s", out)
 	require.Contains(t, out, "nowhere")
