@@ -16,8 +16,10 @@ on:
 permissions:
   contents: read
 
+# Pull request runs (a merged one's closed event carries the base ref) group
+# apart from pushes, so merging never cancels master's own run.
 concurrency:
-  group: validate-${{ github.ref }}
+  group: validate-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
