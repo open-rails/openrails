@@ -122,6 +122,11 @@ type RemoteSubscription struct {
 	// Amount is the verbatim major-unit decimal of a rail whose schedule read
 	// names no currency (NMI); it is read in the local price's currency.
 	Amount string `json:"amount,omitempty"`
+	// IntervalDays / IntervalMonths are the recurring cadence the provider's
+	// record states (NMI plan day_frequency / month_frequency); zero when
+	// it states none.
+	IntervalDays   int `json:"interval_days,omitempty"`
+	IntervalMonths int `json:"interval_months,omitempty"`
 	// Raw preserves the provider's record for forensics (original XML element,
 	// CSV row, JSON object, or decoded account state).
 	Raw json.RawMessage `json:"raw,omitempty"`

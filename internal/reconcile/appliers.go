@@ -33,6 +33,7 @@ type LocalWriter interface {
 	AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMethodAction) (bool, error)
 	GrantAccess(ctx context.Context, a GrantAccessAction) (bool, error)
 	MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error)
+	AcceptProviderSchedules(ctx context.Context, psp uuid.UUID, snap *RemoteSnapshot, exhaustive bool, reader TransactionReader) (ProviderScheduleResult, error)
 }
 
 // PGLocalWriter applies enforce writes via the sqlc layer on a merchant-pinned

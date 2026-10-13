@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -171,6 +172,8 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 		}
 		if s.Plan != nil {
 			sub.PlanID = strings.TrimSpace(s.Plan.ID)
+			sub.IntervalDays, _ = strconv.Atoi(strings.TrimSpace(s.Plan.DayFrequency))
+			sub.IntervalMonths, _ = strconv.Atoi(strings.TrimSpace(s.Plan.MonthFrequency))
 		}
 		sub.Amount = s.DeclaredAmount()
 		if next, err := parseNMIV5Date(s.NextBillingDate); err == nil {
@@ -254,6 +257,44 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 		}
 	}
 	return out, nil
+}
+
+// TransactionsByID reads transactions by id, nmi.MaxQueryIDs per Query API
+// request, each as its charge action (chargeAction). An id NMI does not
+// report, or reports unreadably, is absent from the result.
+func (f *NMIFetcher) TransactionsByID(ctx context.Context, ids []string) (map[string]RemoteTransaction, error) {
+	out := make(map[string]RemoteTransaction, len(ids))
+	for len(ids) > 0 {
+		n := min(len(ids), nmi.MaxQueryIDs)
+		raw, err := f.Client.SearchTransactions(ctx, nmi.QueryFilter{TransactionID: strings.Join(ids[:n], ",")})
+		if err != nil {
+			return nil, err
+		}
+		report, err := nmi.ParseTransactionReport(raw)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range report.Transactions {
+			if qualifyNMITransaction(t) != nil {
+				continue
+			}
+			if charge := chargeAction(t); charge != nil {
+				out[charge.TransactionID] = *charge
+			}
+		}
+		ids = ids[n:]
+	}
+	return out, nil
+}
+
+// chargeAction is a transaction's charge: its sale, decline or void.
+func chargeAction(t nmi.QueryTransaction) *RemoteTransaction {
+	for _, c := range normalizeNMITransaction(t) {
+		if c.Type == TransactionTypeSale || c.Type == TransactionTypeDecline || c.Type == TransactionTypeVoid {
+			return &c
+		}
+	}
+	return nil
 }
 
 // An unreadable money fact cannot disappear while its window is marked read.

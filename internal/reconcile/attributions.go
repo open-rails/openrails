@@ -205,13 +205,7 @@ func resolveAttributions(ctx context.Context, database *db.DB, rows []gen.Billin
 			}
 			continue
 		}
-		var charge *RemoteTransaction
-		for _, c := range normalizeNMITransaction(t) {
-			if c.Type == TransactionTypeSale || c.Type == TransactionTypeDecline || c.Type == TransactionTypeVoid {
-				charge = &c
-				break
-			}
-		}
+		charge := chargeAction(t)
 		reason := ""
 		switch {
 		case charge == nil:

@@ -70,7 +70,10 @@ facts. A live NMI/CCBill import provides its accepted recurring amount, currency
 cadence and first due boundary. Stripe financial history provides the complete
 invoice and actual settlement evidence. An amount-only transaction cannot
 reconstruct an unknown historical bill from today's catalog; a charge before
-the accepted schedule is settled history (above). A declared charge without an
+the accepted schedule is settled history (above). A live NMI schedule the book
+does not prove takes its terms from NMI's own recurring record on the next
+provider pull, when they match the subscription's price; otherwise it stays
+unresolved. A declared charge without an
 amount is read from the provider by its transaction id. One-off sales import
 as complete orders with their payments.
 

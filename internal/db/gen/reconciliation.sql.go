@@ -2065,6 +2065,107 @@ func (q *Queries) ListUnknownSubscriptions(ctx context.Context, arg ListUnknownS
 	return items, nil
 }
 
+const listUnresolvedReceiptFindings = `-- name: ListUnresolvedReceiptFindings :many
+SELECT id, substr(subject_key, 9)::text AS transaction_id, (evidence->>'subscription_id')::text AS subscription_id
+FROM billing.reconciliation_findings
+WHERE merchant_id = $1::uuid AND finding_type = 'pull.bill.unresolved' AND psp_id = $2::uuid
+  AND status IN ('reconcile_required', 'requires_review')
+  AND evidence->>'subscription_id' = ANY($3::text[])
+ORDER BY subject_key
+LIMIT $4::int
+`
+
+type ListUnresolvedReceiptFindingsParams struct {
+	MerchantID      uuid.UUID
+	PspID           uuid.UUID
+	SubscriptionIds []string
+	RowLimit        int32
+}
+
+type ListUnresolvedReceiptFindingsRow struct {
+	ID             uuid.UUID
+	TransactionID  string
+	SubscriptionID string
+}
+
+// Open unresolved-receipt findings of the named subscriptions on one PSP.
+func (q *Queries) ListUnresolvedReceiptFindings(ctx context.Context, arg ListUnresolvedReceiptFindingsParams) ([]ListUnresolvedReceiptFindingsRow, error) {
+	rows, err := q.db.Query(ctx, listUnresolvedReceiptFindings,
+		arg.MerchantID,
+		arg.PspID,
+		arg.SubscriptionIds,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnresolvedReceiptFindingsRow
+	for rows.Next() {
+		var i ListUnresolvedReceiptFindingsRow
+		if err := rows.Scan(&i.ID, &i.TransactionID, &i.SubscriptionID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnresolvedScheduleSubscriptions = `-- name: ListUnresolvedScheduleSubscriptions :many
+SELECT f.id AS finding_id, f.subject_key, s.id AS subscription_id
+FROM billing.reconciliation_findings f
+JOIN billing.subscriptions s ON s.merchant_id = f.merchant_id AND s.id = substr(f.subject_key, 14)::uuid
+WHERE f.merchant_id = $1::uuid AND f.finding_type = 'life.import.schedule_unresolved'
+  AND f.psp_id IS NULL AND f.status IN ('reconcile_required', 'requires_review')
+  AND f.subject_key > $2::text AND s.psp_id = $3::uuid AND s.deleted_at IS NULL
+ORDER BY f.subject_key
+LIMIT $4::int
+`
+
+type ListUnresolvedScheduleSubscriptionsParams struct {
+	MerchantID uuid.UUID
+	After      string
+	PspID      uuid.UUID
+	RowLimit   int32
+}
+
+type ListUnresolvedScheduleSubscriptionsRow struct {
+	FindingID      uuid.UUID
+	SubjectKey     string
+	SubscriptionID uuid.UUID
+}
+
+// The PSP's subscriptions whose imported provider schedule is unresolved,
+// each named by its open life.import.schedule_unresolved finding; keyset
+// paged by subject.
+func (q *Queries) ListUnresolvedScheduleSubscriptions(ctx context.Context, arg ListUnresolvedScheduleSubscriptionsParams) ([]ListUnresolvedScheduleSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, listUnresolvedScheduleSubscriptions,
+		arg.MerchantID,
+		arg.After,
+		arg.PspID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnresolvedScheduleSubscriptionsRow
+	for rows.Next() {
+		var i ListUnresolvedScheduleSubscriptionsRow
+		if err := rows.Scan(&i.FindingID, &i.SubjectKey, &i.SubscriptionID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnverifiedNMISubscriptionIDs = `-- name: ListUnverifiedNMISubscriptionIDs :many
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = $1::uuid AND rail = 'nmi' AND status = 'unverified' AND deleted_at IS NULL

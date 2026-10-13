@@ -997,3 +997,26 @@ SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = ANY(sqlc.arg(finding_types)::text[])
   AND status = 'requires_review';
 
+
+-- The PSP's subscriptions whose imported provider schedule is unresolved,
+-- each named by its open life.import.schedule_unresolved finding; keyset
+-- paged by subject.
+-- name: ListUnresolvedScheduleSubscriptions :many
+SELECT f.id AS finding_id, f.subject_key, s.id AS subscription_id
+FROM billing.reconciliation_findings f
+JOIN billing.subscriptions s ON s.merchant_id = f.merchant_id AND s.id = substr(f.subject_key, 14)::uuid
+WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.finding_type = 'life.import.schedule_unresolved'
+  AND f.psp_id IS NULL AND f.status IN ('reconcile_required', 'requires_review')
+  AND f.subject_key > sqlc.arg(after)::text AND s.psp_id = sqlc.arg(psp_id)::uuid AND s.deleted_at IS NULL
+ORDER BY f.subject_key
+LIMIT sqlc.arg(row_limit)::int;
+
+-- Open unresolved-receipt findings of the named subscriptions on one PSP.
+-- name: ListUnresolvedReceiptFindings :many
+SELECT id, substr(subject_key, 9)::text AS transaction_id, (evidence->>'subscription_id')::text AS subscription_id
+FROM billing.reconciliation_findings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = 'pull.bill.unresolved' AND psp_id = sqlc.arg(psp_id)::uuid
+  AND status IN ('reconcile_required', 'requires_review')
+  AND evidence->>'subscription_id' = ANY(sqlc.arg(subscription_ids)::text[])
+ORDER BY subject_key
+LIMIT sqlc.arg(row_limit)::int;

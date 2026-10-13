@@ -160,7 +160,8 @@ from the charge, with the charge as its payment. It grants no access,
 renews nothing and infers no schedule. A decline there moves no money and is
 not recorded. These orders record in one short transaction per subscription
 after the book commits. A live subscription with no accepted schedule keeps
-its receipts unresolved.
+its receipts unresolved until one is accepted (see
+[Accepted bills and provider schedules](#accepted-bills-and-provider-schedules)).
 
 A declared NMI or CCBill charge names the provider's own transaction id,
 which is digits only. Any other id (a host's synthetic id) is evidence: a
@@ -274,7 +275,9 @@ OpenRails.
    Re-post the same book: everything must report `skipped`. Imported members
    are entitled when the call returns.
 2. **Review findings.** Boot, let one provider refresh pull run (advisory until
-   armed), then triage every open finding: `pull.subscription.missing` (NMI
+   armed; it accepts each unproven schedule NMI's record confirms, see
+   [Accepted bills and provider schedules](#accepted-bills-and-provider-schedules)),
+   then triage every open finding: `pull.subscription.missing` (NMI
    schedules absent from the book), `pull.subscription.dead`,
    `pull.subscription.mismatch`, `pull.subscription.drift` (amount, plan,
    vault or pause changed at NMI), `pull.payment_method.mismatch` (vault card removed)
@@ -338,8 +341,23 @@ enrollment freezes them: the declared price's whole-day cadence, a first due one
 cycle before `paid_through`, and the book's approved charge of the price's
 amount inside that cycle. A book that does not prove them still imports the
 subscription, with a `life.import.schedule_unresolved` finding; its receipts stay
-`pull.bill.unresolved` findings until the terms are declared and the book is
-imported again. A receipt no accepted bill can hold never fails the import.
+`pull.bill.unresolved` findings. A receipt no accepted bill can hold never fails
+the import.
+
+The provider's own recurring record then decides. The next provider pull (the
+scheduled refresh, `Client.RefreshPSPs` or `openrails pull-provider`) reads each
+such NMI subscription's schedule: when it is active, its amount equals the
+price's and its `day_frequency` equals the price's cadence, its terms become the
+accepted schedule (source reference `nmi_subscription:<id>`), first due on NMI's
+next charge date. The subscription's unresolved receipts are read again from
+NMI by transaction id and placed by it: settled history before that date, the
+cycle they pay after it. The finding resolves with NMI's terms as its evidence.
+A paused schedule, another amount, a calendar-month or other frequency, or a
+schedule NMI no longer lists keeps the finding open with NMI's record and why;
+no schedule is guessed, and book rows never shape one. Declare
+`accepted_schedule` and import again to settle such a row. A re-import keeps
+an accepted schedule. CCBill's reads state no recurring terms yet, so a CCBill
+subscription stays unresolved until its terms are declared.
 
 For Stripe cash receipts, supply a complete `stripe_invoice` on each declared
 transaction. It contains invoice identity, customer reference, finalized status,

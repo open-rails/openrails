@@ -449,6 +449,27 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		}
 	}
 
+	// A live schedule imported without proven terms takes them from this
+	// read of the provider's recurring record, before the window's receipts
+	// are placed. A failure leaves its finding open for the next pass; the
+	// window's own receipts do not wait on it.
+	if params.Mode == ModeEnforce && params.Mutations.allowsInsert() && snap.Capabilities.Subscriptions {
+		unwrapped := fetcher
+		if k, ok := fetcher.(keyedFetcher); ok {
+			unwrapped = k.RailFetcher
+		}
+		reader, _ := unwrapped.(TransactionReader)
+		exhaustive := snap.Coverage.SubscriptionsExhaustive && traits.absenceMeansCanceled
+		res, err := e.Writer.AcceptProviderSchedules(ctx, binding.ID, snap, exhaustive, reader)
+		if err != nil {
+			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("reconcile: accepting provider schedules failed; their findings stay open")
+		}
+		if res.Accepted+res.Unresolved > 0 {
+			log.WithContext(ctx).WithFields(log.Fields{"provider": provider, "accepted": res.Accepted, "unresolved": res.Unresolved, "receipts_placed": res.Replayed}).
+				Info("reconcile: imported schedules evaluated against the provider's recurring records")
+		}
+	}
+
 	// Local payments are looked up by the snapshot's transaction identity
 	// set (plus refund->charge links) rather than a date window.
 	txnIDs := collectTxnLookupIDs(snap)

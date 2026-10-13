@@ -241,9 +241,10 @@ func ImportDeclaredSubscriptions(
 		// A live provider schedule freezes its accepted terms as enrollment
 		// does: declared, else proven by the book's own paid cycle. Unproven
 		// terms leave the schedule unresolved, never invented.
-		unprovenSchedule := ""
+		unprovenSchedule, derived := "", false
 		if (f.Rail == string(models.RailNMI) || f.Rail == string(models.RailCCBill)) && f.CancelKind == DeclaredCancelNone && f.AcceptedSchedule == nil {
 			f.AcceptedSchedule, unprovenSchedule = derivedSchedule(f, price, txns)
+			derived = true
 		}
 		if schedule := f.AcceptedSchedule; schedule != nil {
 			if schedule.SourceReference == "" || schedule.Amount <= 0 || schedule.FirstDueAt.IsZero() || (schedule.IntervalHours <= 0 || schedule.IntervalHours%24 != 0 || schedule.IntervalMonths != 0) && (schedule.IntervalMonths <= 0 || schedule.IntervalMonths > 1200 || schedule.IntervalHours != 0) || schedule.Quantity != nil && *schedule.Quantity <= 0 || moneyutil.RequireFiatCurrency(schedule.Currency) != nil {
@@ -292,6 +293,17 @@ func ImportDeclaredSubscriptions(
 				continue
 			}
 			subID = existing.ID
+			// A schedule already accepted (declared, enrolled or read from the
+			// provider's record) stands: the book does not derive another.
+			if derived {
+				accepted, err := q.ListProviderSchedules(ctx, gen.ListProviderSchedulesParams{MerchantID: merchantID, SubscriptionID: subID, ProviderReference: f.RailSubscriptionID})
+				if err != nil {
+					return out, fmt.Errorf("declared import: load accepted schedules of %s: %w", f.SourceID, err)
+				}
+				if len(accepted) > 0 {
+					f.AcceptedSchedule, unprovenSchedule = nil, ""
+				}
+			}
 		} else {
 			if f.CancelKind != DeclaredCancelNone {
 				subID, err = insertDeclaredCanceled(ctx, q, merchantID, f, price, periodStart, periodEnd)
@@ -331,32 +343,16 @@ func ImportDeclaredSubscriptions(
 			return out, fmt.Errorf("declared import: load %s: %w", subID, err)
 		}
 		if schedule := f.AcceptedSchedule; schedule != nil {
-			quantity := 1
-			if schedule.Quantity != nil {
-				quantity = *schedule.Quantity
+			bill, err := scheduleBill(ctx, q, sub, price, schedule.Currency, schedule.Amount, schedule.Quantity, schedule.IntervalHours)
+			if err != nil {
+				return out, fmt.Errorf("declared import: %w", err)
 			}
-			var intervalHours *int
-			if schedule.IntervalHours > 0 {
-				intervalHours = &schedule.IntervalHours
-			}
-			// The line names what was bought, as an accepted purchase line does.
-			description := "Subscription"
-			if product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: merchantID, ID: price.ProductID}); err == nil && strings.TrimSpace(product.DisplayName) != "" {
-				description = product.DisplayName
-			} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return out, fmt.Errorf("declared import: load product %s: %w", price.ProductID, err)
-			}
-			bill := observed.Bill{PSPID: f.PspID, CustomerID: f.Customer, SubscriptionID: &sub.ID,
-				Owner: string(f.CollectionPolicy), ProviderReference: f.RailSubscriptionID, Currency: moneyutil.NormalizeCurrency(schedule.Currency), Total: schedule.Amount,
-				Lines: []observed.Line{{PriceID: &f.PriceID, ProductID: &price.ProductID, Description: description,
-					Quantity: schedule.Quantity, UnitAmount: schedule.Amount / int64(quantity), Amount: schedule.Amount,
-					BillingIntervalHours: intervalHours, AccessDurationHours: models.DerefIntPtr(price.AccessDurationHours)}}}
 			if err := observed.DeclareSchedule(ctx, database, schedule.SourceReference, bill, schedule.FirstDueAt, schedule.IntervalHours, schedule.IntervalMonths, asOf); err != nil {
 				return out, fmt.Errorf("declared import accepted schedule %s: %w", f.SourceID, err)
 			}
 		}
 		if unprovenSchedule != "" {
-			if err := recordUnresolvedSchedule(ctx, database.Gen(ctx), sub, unprovenSchedule); err != nil {
+			if err := recordUnresolvedSchedule(ctx, database.Gen(ctx), sub, unprovenSchedule, nil); err != nil {
 				return out, fmt.Errorf("declared import: retain unresolved schedule %s: %w", f.SourceID, err)
 			}
 		}
@@ -619,16 +615,48 @@ func derivedSchedule(f *DeclaredSubscriptionFact, price gen.BillingPrice, txns [
 }
 
 // FindingScheduleUnresolved is an imported live provider schedule whose
-// accepted terms the book neither declares nor proves.
+// accepted terms neither the book nor the provider's own recurring record
+// proves.
 const FindingScheduleUnresolved = "life.import.schedule_unresolved"
 
-func recordUnresolvedSchedule(ctx context.Context, q *gen.Queries, sub *models.Subscription, reason string) error {
-	evidence, _ := json.Marshal(map[string]any{"subscription_id": billing.SubscriptionID(sub.ID).String(), "psp_id": billing.PSPID(sub.PspID).String(), "reason": reason})
-	action := "Declare this provider schedule's accepted terms (accepted_schedule) and import it again; until then its receipts stay unresolved and no renewal is inferred."
+// recordUnresolvedSchedule keeps the finding open with why; provider is the
+// provider's record that disagrees, when one was read.
+func recordUnresolvedSchedule(ctx context.Context, q *gen.Queries, sub *models.Subscription, reason string, provider *providerRecord) error {
+	fields := map[string]any{"subscription_id": billing.SubscriptionID(sub.ID).String(), "psp_id": billing.PSPID(sub.PspID).String(), "reason": reason}
+	if provider != nil {
+		fields["provider"] = provider
+	}
+	evidence, _ := json.Marshal(fields)
+	action := "Declare this provider schedule's accepted terms (accepted_schedule) and import it again; until then its receipts stay unresolved and no renewal is inferred. A provider pull accepts the provider's own recurring record when it matches the subscription's price."
 	_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: sub.MerchantID,
 		FindingType: FindingScheduleUnresolved, SubjectKey: "subscription:" + sub.ID.String(),
 		Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
 	return err
+}
+
+// scheduleBill is the accepted recurring bill of a provider schedule on the
+// subscription's price. Its line names what was bought, as an accepted
+// purchase line does.
+func scheduleBill(ctx context.Context, q *gen.Queries, sub *models.Subscription, price gen.BillingPrice, currency string, amount int64, quantity *int, intervalHours int) (observed.Bill, error) {
+	seats := 1
+	if quantity != nil {
+		seats = *quantity
+	}
+	var interval *int
+	if intervalHours > 0 {
+		interval = &intervalHours
+	}
+	description := "Subscription"
+	if product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: sub.MerchantID, ID: price.ProductID}); err == nil && strings.TrimSpace(product.DisplayName) != "" {
+		description = product.DisplayName
+	} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return observed.Bill{}, fmt.Errorf("load product %s: %w", price.ProductID, err)
+	}
+	return observed.Bill{PSPID: sub.PspID, CustomerID: sub.CustomerID, SubscriptionID: &sub.ID,
+		Owner: string(sub.CollectionPolicy), ProviderReference: sub.RailSubscriptionID, Currency: moneyutil.NormalizeCurrency(currency), Total: amount,
+		Lines: []observed.Line{{PriceID: &price.ID, ProductID: &price.ProductID, Description: description,
+			Quantity: quantity, UnitAmount: amount / int64(seats), Amount: amount,
+			BillingIntervalHours: interval, AccessDurationHours: models.DerefIntPtr(price.AccessDurationHours)}}}, nil
 }
 
 func subscriptionTxns(txns []RemoteTransaction, railSubID string) []RemoteTransaction {
