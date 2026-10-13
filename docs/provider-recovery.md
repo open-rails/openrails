@@ -55,7 +55,8 @@ Observation and application use separate domains in `psp_refresh_watermarks`:
 
 Only a failed read fails the refresh job, which then retries. A refresh held
 only by findings an operator must settle completes; the open findings and this
-gate are the signal. A PSP without pull credentials is not read and does not
+gate are the signal. A pass that raised those findings runs once more first: a
+receipt recorded concurrently makes them stale, and the next read clears them. A PSP without pull credentials is not read and does not
 make the refresh incomplete; it joins the first refresh after it is armed.
 
 A deliberately withheld cancellation does not prevent financial observation.

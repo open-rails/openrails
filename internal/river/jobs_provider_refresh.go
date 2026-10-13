@@ -365,6 +365,12 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		return fmt.Errorf("provider refresh incomplete: provider=%d watermark=%d lane=%d converge=%d ccbill=%d",
 			stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors, stats.ConvergeErrors, stats.CCBillErrors)
 	}
+	if stats.Held > 0 && stats.NewFindings > 0 {
+		// Findings this pass raised may be stale: a concurrent verifier or
+		// webhook can record the receipt after the read. One more pass tells
+		// them from findings that stand (it raises none new).
+		return river.JobSnooze(time.Second)
+	}
 	if stats.Held > 0 {
 		// Every read completed; recovery waits on an operator, not a retry.
 		// The open findings and the recovery gate are the signal.
