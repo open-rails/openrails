@@ -360,7 +360,7 @@ func writeVaultDocs(t testing.TB, v *vaulttest.Vault, bill *openrails.Engine, de
 	}
 	v.Put(t, root+"merchant", merchant)
 	for key, psp := range declared.PSPs {
-		v.Put(t, root+"psps/"+key, map[string]any{"rail": psp.Rail, "environment": "test", "account_id": psp.AccountID,
+		v.Put(t, root+"psps/"+key, map[string]any{"rail": psp.Rail, "environment": psp.Environment, "account_id": psp.AccountID,
 			"custodian": psp.Custodian, "settings": psp.Settings, "secrets": psp.Secrets})
 	}
 	for key, custodian := range declared.Custodians {
