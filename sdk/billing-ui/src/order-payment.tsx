@@ -312,7 +312,11 @@ export function OrderPayment({
           ? cause.message
           : m.error(cause)
       )
-      if (preserveUnconfirmed) throw cause
+      // Validation rejected the request before a charge; let the customer
+      // correct it. Network, server and in-flight errors keep the same attempt.
+      const rejected = isBillingError(cause) && cause.status === 400 &&
+        cause.type === "invalid_request_error"
+      if (preserveUnconfirmed && !rejected) throw cause
       setKey(crypto.randomUUID())
       return false
     } finally {

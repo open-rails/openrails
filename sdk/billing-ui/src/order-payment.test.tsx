@@ -814,8 +814,11 @@ vi.mock("@basis-theory/web-elements", () => ({
   }),
 }))
 
-it.each(["unconfirmed", "declined"])("platform card %s retry preserves the right payment identity", async (outcome) => {
-  platformElements.create.mockClear()
+it.each(["unconfirmed", "server error", "in flight", "declined", "rejected"])("platform card %s retry preserves the right payment identity", async (outcome) => {
+  platformElements.create.mockReset()
+    .mockResolvedValueOnce({ id: "ti_first" })
+    .mockResolvedValue({ id: "ti_next" })
+  const uncertain = ["unconfirmed", "server error", "in flight"].includes(outcome)
   const requests: RequestInit[] = []
   const platformOrder = (payment: Record<string, unknown>, status = "open") => ({
     ...order(payment, status),
@@ -833,6 +836,16 @@ it.each(["unconfirmed", "declined"])("platform card %s retry preserves the right
       requests.push(init)
       if (requests.length === 1) {
         if (outcome === "unconfirmed") throw new TypeError("connection lost")
+        if (outcome === "server error") return Response.json({ error: {
+          type: "api_error", code: "service_unavailable", message: "Try again",
+        } }, { status: 503 })
+        if (outcome === "in flight") return Response.json({ error: {
+          type: "invalid_request_error", code: "idempotency_key_in_use", message: "Still processing",
+        } }, { status: 409 })
+        if (outcome === "rejected") return Response.json({ error: {
+          type: "invalid_request_error", code: "invalid_param", param: "payment.token",
+          message: "Collect the card again",
+        } }, { status: 400 })
         return Response.json({ error: { type: "card_error", code: "card_declined", message: "Card declined",
           order: platformOrder({ last_payment_error: { reason: "generic_decline", message: "Card declined" } }) },
         }, { status: 402 })
@@ -849,12 +862,15 @@ it.each(["unconfirmed", "declined"])("platform card %s retry preserves the right
   const pay = screen.getByRole("button", { name: /Pay / })
   await waitFor(() => expect(pay).toBeEnabled())
   fireEvent.click(pay)
-  if (outcome === "unconfirmed") {
+  if (uncertain) {
     const retry = await screen.findByRole("button", { name: "Retry payment" })
     await waitFor(() => expect(retry).toBeEnabled())
+    expect(screen.getByLabelText("Name on card")).toBeDisabled()
     fireEvent.click(retry)
   } else {
-    await screen.findByText("Card declined")
+    if (outcome === "declined") await screen.findByText("Card declined")
+    await waitFor(() => expect(requests).toHaveLength(1))
+    await waitFor(() => expect(screen.getByLabelText("Name on card")).toBeEnabled())
     await waitFor(() => expect(pay).toBeEnabled())
     fireEvent.click(pay)
   }
@@ -862,13 +878,14 @@ it.each(["unconfirmed", "declined"])("platform card %s retry preserves the right
   expect(requests).toHaveLength(2)
   const keys = requests.map((request) => new Headers(request.headers).get("Idempotency-Key"))
   expect(keys[0]).toBeTruthy()
-  if (outcome === "unconfirmed") {
+  if (uncertain) {
     expect(keys[1]).toEqual(keys[0])
     expect(requests[1].body).toEqual(requests[0].body)
     expect(platformElements.create).toHaveBeenCalledTimes(1)
   } else {
     expect(keys[1]).not.toEqual(keys[0])
     expect(platformElements.create).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(String(requests[1].body)).payment.token).toBe("ti_next")
   }
   expect(container.querySelector('input[autocomplete="cc-number"]')).toBeNull()
   expect(container.querySelector('input[autocomplete="cc-csc"]')).toBeNull()
