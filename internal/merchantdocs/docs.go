@@ -109,7 +109,7 @@ func (c *Custodian) UnmarshalJSON(raw []byte) error {
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return err
 	}
-	d, err := config.DecodeCustodianDocument(fields, true)
+	d, err := config.DecodeCustodianDocument(fields)
 	if err != nil {
 		return err
 	}

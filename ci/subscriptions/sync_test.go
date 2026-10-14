@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchantdocs"
@@ -107,6 +108,34 @@ func TestPSPLabelMoveLeavesAccountRecordsInPlace(t *testing.T) {
 			})
 		}
 	}
+}
+
+// A custodian key moved to another account is refused alone: the account it
+// named keeps serving and the rest of the reload still applies.
+func TestCustodianKeyMoveIsRefusedAlone(t *testing.T) {
+	t.Parallel()
+	w := prepareWorld(t, 12)
+	w.custodians = map[string]openrails.CustodianConfig{"bt": {Kind: "basis_theory", AccountID: "bt-e2e",
+		Settings: map[string]any{"public_api_key": "key_public_e2e"}, Secrets: map[string]string{"api_key": "key_private_e2e"}}}
+	w.start()
+	rt := engine.Graph(w.rt).Runtime
+	ctx := t.Context()
+	mid := w.client[embedded].MerchantID()
+	before, err := rt.MerchantConfig.Get(ctx, mid)
+	require.NoError(t, err)
+	next := before.Clone()
+	bt := next.Custodians["bt"]
+	bt.Value.AccountID = "bt-other"
+	next.Custodians["bt"] = bt
+	nmi := next.PSPs["nmi"]
+	nmi.Value.AccountID = "replacement-account"
+	next.PSPs["nmi"] = nmi
+	rt.MerchantConfig.Source().(*merchantdocs.FileSource).Put(mid, next)
+	served, err := rt.MerchantConfig.Reload(ctx, mid)
+	require.NoError(t, err)
+	require.NotEmpty(t, served.Rejected[merchantdocs.CustodianDoc("bt")], "the key names another account")
+	require.Equal(t, before.Custodians["bt"], served.Custodians["bt"], "the account it named keeps serving")
+	require.Equal(t, "replacement-account", served.PSPs["nmi"].Value.AccountID, "the PSP edit beside it applies")
 }
 
 // Adding a second account beside one with billing, rotating the first's

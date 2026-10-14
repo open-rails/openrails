@@ -165,7 +165,7 @@ func decodeCustodians(c *Custodians, raw []byte) error {
 	}
 	out := make(Custodians, len(docs))
 	for _, key := range slices.Sorted(maps.Keys(docs)) {
-		d, err := DecodeCustodianDocument(docs[key], true)
+		d, err := DecodeCustodianDocument(docs[key])
 		if err != nil {
 			return fmt.Errorf("custodians.%s: %w", key, err)
 		}
@@ -216,12 +216,8 @@ type CustodianDocument struct {
 }
 
 // CustodianDocumentFields are the fields a custodian document of kind takes.
-func CustodianDocumentFields(kind string, environment bool) []string {
-	out := []string{"kind"}
-	if environment {
-		out = append(out, "environment")
-	}
-	out = append(out, "account_id", "archived")
+func CustodianDocumentFields(kind string) []string {
+	out := []string{"kind", "environment", "account_id", "archived"}
 	if d, ok := custodians.Get(kind); ok {
 		out = append(out, d.SettingNames()...)
 	}
@@ -229,8 +225,8 @@ func CustodianDocumentFields(kind string, environment bool) []string {
 }
 
 // DecodeCustodianDocument reads a custodian document, refusing a field its
-// kind does not take. environment says whether it carries its money class.
-func DecodeCustodianDocument(fields map[string]any, environment bool) (CustodianDocument, error) {
+// kind does not take.
+func DecodeCustodianDocument(fields map[string]any) (CustodianDocument, error) {
 	var d CustodianDocument
 	kind, err := documentString(fields, "kind")
 	if err != nil {
@@ -247,7 +243,7 @@ func DecodeCustodianDocument(fields map[string]any, environment bool) (Custodian
 		_, setting := desc.Setting(key)
 		switch {
 		case key == "kind":
-		case key == "environment" && environment:
+		case key == "environment":
 			d.Environment, err = documentString(fields, key)
 		case key == "account_id":
 			d.AccountID, err = documentString(fields, key)
@@ -268,7 +264,7 @@ func DecodeCustodianDocument(fields map[string]any, environment bool) (Custodian
 		}
 	}
 	if len(unknown) > 0 {
-		return d, fmt.Errorf("a %s custodian has no %s (%s takes %s)", d.Kind, strings.Join(unknown, ", "), d.Kind, strings.Join(CustodianDocumentFields(d.Kind, environment), ", "))
+		return d, fmt.Errorf("a %s custodian has no %s (%s takes %s)", d.Kind, strings.Join(unknown, ", "), d.Kind, strings.Join(CustodianDocumentFields(d.Kind), ", "))
 	}
 	return d, nil
 }
@@ -298,7 +294,7 @@ func decodeCustodianConfig(c *CustodianConfig, raw []byte) error {
 	if err := yaml.Unmarshal(raw, &fields); err != nil {
 		return err
 	}
-	d, err := DecodeCustodianDocument(fields, true)
+	d, err := DecodeCustodianDocument(fields)
 	if err != nil {
 		return err
 	}
