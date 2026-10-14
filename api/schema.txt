@@ -101,7 +101,8 @@ migration 0099_psp_rail_environments.up.sql sha256:c2591ae4f3a8157d326ba09efd431
 migration 0100_solana_treasury.up.sql sha256:e9e6beb0bd3e8dee97d57ffa4716c29ece04d21bad3d1fbd562b9f86e04c4f25
 migration 0101_solana_crankers.up.sql sha256:cfc788945c60ae49644969b1cbc339f60db59f419cc4609e24a581419869952f
 migration 0102_book_id.up.sql sha256:c339a6b0581464cfda66c8b6edc68f00d98a67c29bda0162393574a835eb3600
-migration 0104_provider_prices.up.sql sha256:d86dd76e64724bcecb5dbfe8ef73d4a3bb8ad56c567943b87e03897a0dfb0ce0
+migration 0103_solana_engine_collection.up.sql sha256:7af7d6629a3eaa14582631f44343b751d5135a34b171e3a5758c40da4c67c292
+migration 0104_provider_prices.up.sql sha256:c9547910caa053fef3a6915eac4275446cc62ec976be3ffa5a04e2cfe1090408
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1269,6 +1270,7 @@ table billing.order_lines
   constraint order_lines_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id)
   constraint order_lines_product_access_id_fkey FOREIGN KEY (merchant_id, product_access_id) REFERENCES billing.product_access(merchant_id, id)
   constraint order_lines_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
+  constraint order_lines_provider_access_choice_check CHECK (((NOT provider_access_default) OR (access_duration_hours IS NULL)))
   constraint order_lines_quantified_check CHECK (((quantity IS NOT NULL) OR (billing_interval_hours IS NOT NULL) OR (source IS NOT NULL)))
   constraint order_lines_quantity_check CHECK ((quantity >= 1))
   constraint order_lines_seats_check CHECK (((quantity IS NULL) OR (quantity = 1) OR (ownership = 'consumable'::text) OR (billing_interval_hours IS NOT NULL)))
@@ -1851,7 +1853,7 @@ table billing.prices
   constraint prices_product_amount_window_key UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, billing_interval_months, provider_access_default)
   constraint prices_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT
   constraint prices_product_key_revision_key UNIQUE (merchant_id, product_id, key, revision)
-  constraint prices_provider_access_default_check CHECK (((NOT provider_access_default) OR provider_owned))
+  constraint prices_provider_access_default_check CHECK (((NOT provider_access_default) OR (provider_owned AND (access_duration_hours IS NULL))))
   constraint prices_provider_psp_fkey FOREIGN KEY (merchant_id, provider_psp_id) REFERENCES billing.psps(merchant_id, id)
   constraint prices_provider_snapshot_check CHECK ((((provider_psp_id IS NULL) AND (provider_snapshot IS NULL) AND (NOT provider_owned)) OR (provider_owned AND (provider_psp_id IS NOT NULL) AND (provider_snapshot IS NOT NULL) AND (jsonb_typeof(provider_snapshot) = 'object'::text) AND COALESCE(((provider_snapshot ->> 'psp_id'::text) = (provider_psp_id)::text), false))))
   constraint prices_quantity_terms CHECK (((quantity IS NULL) OR ((jsonb_typeof(quantity) = 'object'::text) AND (billing_interval_hours IS NOT NULL) AND (customer_amount IS NULL) AND (quantity ? 'min'::text) AND (quantity ? 'max'::text) AND COALESCE((((quantity ->> 'min'::text))::integer >= 1), false) AND COALESCE(((((quantity ->> 'max'::text))::integer >= ((quantity ->> 'min'::text))::integer) AND (((quantity ->> 'max'::text))::integer <= 10000)), false))))
@@ -2620,6 +2622,7 @@ table billing.subscriptions
   constraint subscriptions_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id)
   constraint subscriptions_price_id_product_id_fkey FOREIGN KEY (merchant_id, price_id, product_id) REFERENCES billing.prices(merchant_id, id, product_id)
   constraint subscriptions_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
+  constraint subscriptions_provider_access_choice_check CHECK (((NOT provider_access_default_snapshot) OR (access_duration_hours_snapshot IS NULL)))
   constraint subscriptions_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint subscriptions_quantity_check CHECK (((quantity IS NULL) OR ((quantity >= 1) AND (collection_policy = 'engine'::text) AND (rail = ANY (ARRAY['nmi'::text, 'stripe'::text])))))
   constraint subscriptions_rail_subscription_id_check CHECK ((rail_subscription_id <> ''::text))

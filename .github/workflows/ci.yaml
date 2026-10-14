@@ -12,11 +12,6 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
-    inputs:
-      catalog_artifacts_only:
-        description: Temporary source generation and compilation only
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -38,53 +33,12 @@ env:
 # Scope, Go tests and Required Security run for every push and for every pull
 # request that is neither a draft nor closed; the other jobs follow Scope.
 jobs:
-  # TEMPORARY #1270 diagnostic: generate reviewed artifacts remotely while the
-  # developer workstation has no heavy-work budget. Remove before PR readiness.
-  catalog-contract-artifacts:
-    name: Catalog contract artifacts (diagnostic)
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      GOWORK: "off"
-      GOMAXPROCS: "2"
-      GOFLAGS: -p=2
-      SQLC_ADMIN_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
-      OPENRAILS_E2E_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Start disposable PostgreSQL
-        run: bash scripts/ci-services.sh start postgres
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: PostgreSQL is ready
-        run: bash scripts/ci-services.sh ready
-      - name: Generate SQL and reviewed contracts
-        run: |
-          sqlc_bin="$(scripts/ci-install-tool.sh sqlc)"
-          export SQLC_DATABASE_URL="$(scripts/sqlc-vet-db.sh)"
-          "$sqlc_bin" generate
-          go run ./scripts/contracts -write
-          go build ./...
-          (cd server && go build ./...)
-          mkdir -p /tmp/catalog-contract-artifacts
-          git rev-parse HEAD > /tmp/catalog-contract-artifacts/source-head.txt
-          git diff --binary > /tmp/catalog-contract-artifacts/generated.patch
-          git diff --stat > /tmp/catalog-contract-artifacts/generated-stat.txt
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: catalog-contract-artifacts-${{ github.sha }}
-          path: /tmp/catalog-contract-artifacts/
-          if-no-files-found: error
-
   # Whether the change reaches beyond the documentation and billing-ui (which
   # sdk.yaml tests). Go tests (the docs guards among them) and Required
   # Security run either way; the jobs that need Scope run only when it does.
   scope:
     name: Scope
-    if: ${{ !inputs.catalog_artifacts_only && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
+    if: ${{ github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -114,7 +68,7 @@ jobs:
 
   go-test:
     name: Go tests
-    if: ${{ !inputs.catalog_artifacts_only && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
+    if: ${{ github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -421,7 +375,7 @@ jobs:
 
   security:
     name: Required Security
-    if: ${{ !inputs.catalog_artifacts_only && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
+    if: ${{ github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
