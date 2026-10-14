@@ -135,7 +135,7 @@ func (p MonthlyPartitions) RetainedRange(now time.Time) (from, through time.Time
 // OutboxIntentTypes are the provider intents that only carried an instruction
 // to a provider: once finished, nothing reads them back, and they are deleted
 // after ProviderWrites. Every other intent type is the record of money moved
-// or refused, a membership enrolled, a card erased or a payment origin
+// or refused, a membership enrolled, a card erased or a checkout origin
 // registered, and is permanent. The
 // baseline's provider_intents_updated_at_idx lists the same types.
 var OutboxIntentTypes = []string{

@@ -254,8 +254,8 @@ func (p MerchantProfile) NotificationURL(kind string) string {
 	return link
 }
 
-// MerchantPaymentPageSettings are the merchant's payment page settings.
-type MerchantPaymentPageSettings struct {
+// MerchantCheckoutSettings are the merchant's embedded checkout settings.
+type MerchantCheckoutSettings struct {
 	// EmbedOrigins are the origins that may frame the merchant's embedded
 	// pay URLs: exact https origins (http on loopback), at most 10, no
 	// wildcards.
@@ -302,8 +302,8 @@ type MerchantSettings struct {
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
-	// PaymentPage is the payment page's settings; a patch replaces it whole.
-	PaymentPage *MerchantPaymentPageSettings `json:"payment_page,omitempty"`
+	// Checkout is the embedded checkout's settings; a patch replaces it whole.
+	Checkout *MerchantCheckoutSettings `json:"checkout,omitempty"`
 	// BalanceNotices are the default low-balance lines of the merchant's
 	// customers; a patch replaces it whole.
 	BalanceNotices *BalanceNoticeSettings `json:"balance_notices,omitempty"`

@@ -3,13 +3,13 @@ package billing
 import "time"
 
 // OrderPayURLParams asks for a merchant order's pay URL: a short-lived URL on
-// the deployment's payment origin where the customer pays, then returns to
+// the deployment's checkout origin where the customer pays, then returns to
 // SuccessURL. {ORDER_ID} in either URL becomes the order's id. Fulfil on
 // order.completed, never the redirect.
 type OrderPayURLParams struct {
 	// Embedded: the merchant's page frames the pay URL (billing-ui's
 	// EmbeddedPayment), only on the origins its settings register
-	// (payment_page.embed_origins). The frame tells its page when the order
+	// (checkout.embed_origins). The frame tells its page when the order
 	// completes; that page goes to SuccessURL unless it handles the
 	// completion itself. Otherwise the customer is sent to the pay URL.
 	Embedded   bool   `json:"embedded,omitempty"`

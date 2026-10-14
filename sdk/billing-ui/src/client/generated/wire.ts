@@ -1222,6 +1222,10 @@ export type MatrixCell = {
   maximum_amount?: string
 }
 
+export type MerchantCheckoutSettings = {
+  embed_origins?: string[]
+}
+
 export type MerchantConfigurationState = {
   revision: number
   display_name: string
@@ -1236,7 +1240,7 @@ export type MerchantConfigurationState = {
   arrears_delinquency_floor?: string
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy
-  payment_page?: MerchantPaymentPageSettings
+  checkout?: MerchantCheckoutSettings
   balance_notices?: BalanceNoticeSettings
   card_vault?: string
   charge_psps?: string[]
@@ -1244,10 +1248,6 @@ export type MerchantConfigurationState = {
   billing_policy_bindings?: BillingPolicyBinding[]
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
   platform_vault: PlatformVaultState
-}
-
-export type MerchantPaymentPageSettings = {
-  embed_origins?: string[]
 }
 
 export type MerchantProfile = {
@@ -2383,7 +2383,7 @@ export type UpdateMerchantConfigurationParams = {
   arrears_delinquency_floor?: string
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy
-  payment_page?: MerchantPaymentPageSettings
+  checkout?: MerchantCheckoutSettings
   balance_notices?: BalanceNoticeSettings
   card_vault?: string
   charge_psps?: string[]

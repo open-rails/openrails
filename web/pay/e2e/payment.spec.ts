@@ -241,7 +241,7 @@ test("pays with Apple Pay through Stripe's Express Checkout Element", async ({ p
   await expect.poll(() => completed(order.order_id)).toBe(true)
 })
 
-test("the payment origin is registered at Stripe and serves Stripe's Apple Pay file", async ({ request }) => {
+test("the checkout origin is registered at Stripe and serves Stripe's Apple Pay file", async ({ request }) => {
   const order = await newOrder()
   const domains = async () => {
     const res = await fetch(`${api()}/__test/stripe/domains`)
@@ -345,7 +345,7 @@ test("a site the shop did not register cannot frame its embedded payment page", 
   await expect(page.frameLocator("iframe").getByRole("heading", { name: "Purchase Shop" })).toHaveCount(0)
 })
 
-// The network's issuer stands in at the payment origin's /__issuer, and the
+// The network's issuer stands in at the checkout origin's /__issuer, and the
 // server's link routes answer as the network would (their server side is
 // server/ci's): what is checked is the page's sign-in.
 async function stubNetwork(context: BrowserContext, order: Created) {

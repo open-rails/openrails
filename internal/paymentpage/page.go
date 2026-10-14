@@ -115,7 +115,7 @@ func ContentSecurityPolicy(captcha string, issuers ...string) Policy {
 // it unless it is an embedded payment page's.
 type Framing func(*http.Request) []string
 
-// HeadersHTTP sets the payment origin's security headers on every answer,
+// HeadersHTTP sets the checkout origin's security headers on every answer,
 // with policy as its Content-Security-Policy, framed as framing says.
 // X-Frame-Options cannot list origins, so a framed page sends none.
 func HeadersHTTP(policy Policy, framing Framing) func(http.Handler) http.Handler {

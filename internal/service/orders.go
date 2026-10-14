@@ -915,7 +915,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 			return nil, true, err
 		}
 		if view.PayURLExpiresAt != nil {
-			recovered, err := paymentpage.ReplayURL(ctx, rt.DB.Gen(ctx), s.rt.PaymentOrigin(), existing.BillingOrder, s.now())
+			recovered, err := paymentpage.ReplayURL(ctx, rt.DB.Gen(ctx), s.rt.CheckoutOrigin(), existing.BillingOrder, s.now())
 			if err != nil {
 				return nil, true, err
 			}
@@ -938,9 +938,9 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 	var attach func(context.Context, *gen.Queries, uuid.UUID) error
 	var payURL string
 	if params.PayURL != nil {
-		origin := s.rt.PaymentOrigin()
+		origin := s.rt.CheckoutOrigin()
 		if origin == "" {
-			return nil, false, apperr.New(http.StatusBadRequest, "pay_url_unavailable", "this deployment serves no payment origin").WithParam("pay_url")
+			return nil, false, apperr.New(http.StatusBadRequest, "pay_url_unavailable", "this deployment serves no checkout origin").WithParam("pay_url")
 		}
 		plan, err := paymentpage.Plan(*params.PayURL, billing.OrderID{}, now, params.ExpiresAt)
 		if err != nil {
@@ -979,7 +979,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		return nil, false, err
 	}
 	if params.PayURL != nil {
-		// A Stripe PSP declared before the payment origin was served is
+		// A Stripe PSP declared before the checkout origin was served is
 		// registered as its payment-method domain now.
 		if mid, err := merchant.Require(ctx); err == nil {
 			s.rt.Go("payment domain registration", func(ctx context.Context) {
@@ -1019,9 +1019,9 @@ func (s *Service) embedOrigins(ctx context.Context) ([]string, error) {
 }
 
 var errEmbedOriginsRequired = apperr.New(http.StatusBadRequest, "embed_origins_required",
-	"an embedded pay URL needs the origins that may frame it: the merchant's settings payment_page.embed_origins")
+	"an embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins")
 
-// payURLOrigin is the payment origin a customer's order's pay URL is on,
+// payURLOrigin is the checkout origin a customer's order's pay URL is on,
 // checked before the order exists: the merchant registered the origins that
 // frame it. The request names no URL.
 func (s *Service) payURLOrigin(ctx context.Context, params billing.CreateMyOrderParams) (string, error) {
@@ -1031,9 +1031,9 @@ func (s *Service) payURLOrigin(ctx context.Context, params billing.CreateMyOrder
 	case !params.PayURL.Embedded:
 		return "", apperr.Invalidf("pay_url.embedded is true: a customer's pay URL is framed by the merchant's registered origins").WithParam("pay_url.embedded")
 	}
-	origin := s.rt.PaymentOrigin()
+	origin := s.rt.CheckoutOrigin()
 	if origin == "" {
-		return "", apperr.New(http.StatusBadRequest, "pay_url_unavailable", "this deployment serves no payment origin").WithParam("pay_url")
+		return "", apperr.New(http.StatusBadRequest, "pay_url_unavailable", "this deployment serves no checkout origin").WithParam("pay_url")
 	}
 	if _, err := s.embedOrigins(ctx); err != nil {
 		return "", err

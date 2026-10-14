@@ -77,7 +77,7 @@ order (`POST /me/orders`) and pays it in a dialog. On a page of a site the
 merchant registered to frame its pay URLs (`merchant.embed_origins` in
 `GET /me/config`), it creates the order with its embedded pay URL in the same
 call (`createOrder({ lines, payUrl: { embedded: true } })`) and frames
-`order.pay_url` from the payment origin (`<EmbeddedPayment>`); anywhere
+`order.pay_url` from the checkout origin (`<EmbeddedPayment>`); anywhere
 else it pays on the page (`<OrderPayment>`). The embedded pay URL returns
 nowhere: the frame says it is paid and tells the page (`onPaid`), and a
 redirect PSP comes back inside it. Nothing is stored: OpenRails answers the

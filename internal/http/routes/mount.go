@@ -88,7 +88,7 @@ type Env struct {
 	// scim is the assembly's SCIM server, built once.
 	scim *scim.Server
 	// payURL scopes customer routes to the order a pay URL's secret
-	// opened (the payment origin).
+	// opened (the checkout origin).
 	payURL bool
 	// applicationPermissions are the mounted application routes' permission pairs.
 	applicationPermissions []Pair

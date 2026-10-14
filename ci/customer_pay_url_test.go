@@ -36,11 +36,11 @@ func decode[T any](t *testing.T, res *httptest.ResponseRecorder) T {
 	return out
 }
 
-// A host's customer buys through billing-ui alone, in the shared-payment-origin
+// A host's customer buys through billing-ui alone, in the shared-checkout-origin
 // topology: one app mounts the customer routes and issues pay URLs on the
-// payment origin another app serves, over one database. The signed-in person
+// checkout origin another app serves, over one database. The signed-in person
 // asks for its order with a pay URL and gets the URL in the same answer; the
-// payment origin resolves it, frames it by the merchant's origins and takes the
+// checkout origin resolves it, frames it by the merchant's origins and takes the
 // payment. The pay URL returns nowhere (the frame tells its page) and lasts
 // as long as its order. Asking again for the same lines, from any tab, reload
 // or click, answers the customer's one open order with a fresh URL, ending the
@@ -60,16 +60,16 @@ func TestCustomerOrderWithEmbeddedPayment(t *testing.T) {
 	cfg.RateLimitsDisabled = true
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{"shared-pay": {
 		DisplayName:      "Shared pay",
-		MerchantSettings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: origins}},
+		MerchantSettings: billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: origins}},
 		PSPs:             map[string]openrails.PSPConfig{"nmi": nmiPSP()},
 	}}
 	deps := openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Clock: clock}
 	publisher, shop := f.boot(t, cfg, deps)
-	_, none, err := publisher.PaymentPage("https://pay.e2e.test", nil)
+	_, none, err := publisher.CheckoutPage("https://pay.e2e.test", nil)
 	require.NoError(t, err)
 	require.Nil(t, none, "the publishing app issues URLs and serves no page")
 	serving, _ := f.boot(t, cfg, deps)
-	_, paymentHost, err := serving.PaymentPage("https://pay.e2e.test", fstest.MapFS{
+	_, paymentHost, err := serving.CheckoutPage("https://pay.e2e.test", fstest.MapFS{
 		"index.html":    {Data: []byte("<!doctype html><title>Payment</title>")},
 		"assets/app.js": {Data: []byte("void 0")},
 	})
@@ -218,7 +218,7 @@ func TestCustomerOrderWithEmbeddedPayment(t *testing.T) {
 	require.Equal(t, clock.Now().Add(orders.CustomerTTL), *first.ExpiresAt)
 	require.Equal(t, *first.ExpiresAt, *first.PayURLExpiresAt)
 
-	// The payment origin resolves it: that order alone, framed by the merchant's
+	// The checkout origin resolves it: that order alone, framed by the merchant's
 	// origins, with the saved cards.
 	shown := opens(firstSecret, first.ID)
 	require.Nil(t, shown.PayURL)
@@ -312,7 +312,7 @@ func TestCustomerOrderWithEmbeddedPayment(t *testing.T) {
 
 // A customer's embedded payment page returns nowhere; a redirect PSP (Stripe's
 // hosted page) started in its frame comes back to the frame's own page on the
-// payment origin, and to no other site.
+// checkout origin, and to no other site.
 func TestCustomerPayURLRedirectReturnsToItsPage(t *testing.T) {
 	f := newFixture(t)
 	provider := &stripeCheckoutFake{t: t}
@@ -321,12 +321,12 @@ func TestCustomerPayURLRedirectReturnsToItsPage(t *testing.T) {
 	cfg.RateLimitsDisabled = true
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{"redirect-" + uuid.NewString()[:8]: {
 		DisplayName:      "Redirect shop",
-		MerchantSettings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
+		MerchantSettings: billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
 		PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test", AccountID: "acct_e2e",
 			Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": "whsec_e2e"}}},
 	}}
 	bill, shop := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, StripeTransport: provider})
-	_, paymentHost, err := bill.PaymentPage("https://pay.e2e.test", fstest.MapFS{
+	_, paymentHost, err := bill.CheckoutPage("https://pay.e2e.test", fstest.MapFS{
 		"index.html":    {Data: []byte("<!doctype html><title>Payment</title>")},
 		"assets/app.js": {Data: []byte("void 0")},
 	})
@@ -383,7 +383,7 @@ func TestCustomerPayURLRedirectReturnsToItsPage(t *testing.T) {
 }
 
 // A customer gets no pay URL, and no order, where the deployment serves no
-// payment origin or the merchant registered no origin to frame it.
+// checkout origin or the merchant registered no origin to frame it.
 func TestCustomerPayURLNeedsItsHostAndOrigins(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
@@ -416,7 +416,7 @@ func TestCustomerPayURLNeedsItsHostAndOrigins(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
 	require.Contains(t, res.Body.String(), `"pay_url_unavailable"`)
 
-	_, _, err = bill.PaymentPage("https://pay.e2e.test", nil)
+	_, _, err = bill.CheckoutPage("https://pay.e2e.test", nil)
 	require.NoError(t, err)
 	res = do(http.MethodPost, body)
 	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())

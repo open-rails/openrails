@@ -13,7 +13,7 @@ import (
 )
 
 // networkProof is the merchant side the customer's request proves: the
-// customer at its merchant, by its own token or, on the payment origin, by
+// customer at its merchant, by its own token or, on the checkout origin, by
 // its order's pay URL.
 func networkProof(r *httprequest.Request) (customernetwork.Network, customernetwork.Proof, bool) {
 	scope, ok := r.CustomerScope()

@@ -10,14 +10,14 @@ payment page.
 
 ## Turning it on
 
-The standalone server serves it at `payment_origin`, or
-`server.Config.PaymentOrigin`:
+The standalone server serves it at `checkout_origin`, or
+`server.Config.CheckoutOrigin`:
 
 ```yaml
-payment_origin: https://pay.example.com
+checkout_origin: https://pay.example.com
 ```
 
-The payment origin has no path; the server answers it by `Host`, so point its
+The checkout origin has no path; the server answers it by `Host`, so point its
 DNS and TLS at the same server. It must differ from
 `public_billing_base_url`, AuthKit's issuer and the frontend's origin: the page
 runs the PSPs' scripts and never shares an origin with the API or the console.
@@ -28,7 +28,7 @@ The page is `web/pay`, built from billing-ui and embedded in the binary
 (`task payment-page-build`; the release image carries it). A host building its
 own binary on `server` builds it with `scripts/build-payment-page.sh <dir>` and
 passes it as `server.Deps.PaymentPageAssets`. A host that mounts `Routes()` on
-its own router sends the payment origin's requests to `PaymentPage()`.
+its own router sends the checkout origin's requests to `CheckoutPage()`.
 
 ## Embedded applications
 
@@ -36,18 +36,18 @@ Before starting an embedded engine or serving HTTP, configure its payment page
 and serve it ahead of the application's routes. With Gin:
 
 ```go
-origin, page, err := engine.PaymentPage("https://pay.example.com", assets)
+origin, page, err := engine.CheckoutPage("https://pay.example.com", assets)
 if err != nil { return err }
-pay, err := openrailsgin.PaymentOrigin(origin, page)
+pay, err := openrailsgin.CheckoutOrigin(origin, page)
 if err != nil { return err }
 router.Use(pay) // before other middleware and routes
 router.Use(gin.LoggerWithFormatter(openrailsgin.RedactLog(format)))
 ```
 
-`openrailsgin.PaymentOrigin` sends a request whose `Host` is the payment origin
+`openrailsgin.CheckoutOrigin` sends a request whose `Host` is the checkout origin
 to the page alone, so no application, sign-in or admin route answers there; a
 malformed `Host` is refused, and forwarded headers never select it.
-`RedactLog` logs payment origin requests and `/pay/` paths without their query
+`RedactLog` logs checkout origin requests and `/pay/` paths without their query
 string or error details; `PaymentRequest(c)` tells a host's own loggers and
 panic recovery the same.
 
@@ -59,7 +59,7 @@ engine's API, dashboard and declared merchant issuers, including equivalent
 port/host spellings.
 
 When two applications share a merchant's billing database and one serves the
-payment origin, the other calls `engine.PaymentPage(origin, nil)` only to
+checkout origin, the other calls `engine.CheckoutPage(origin, nil)` only to
 issue pay URLs; its returned handler is nil. Each application still owns its
 authentication. Its pages sell with billing-ui's `<BuyButton>`, which creates
 the signed-in customer's order with its embedded pay URL (below); it needs no
@@ -140,12 +140,12 @@ and Google Pay through Stripe's Express Checkout Element, where the customer's
 browser and wallet support them. The wallet's card is charged as a new card is.
 
 Stripe shows them only on a payment-method domain registered on the merchant's
-account, so declaring a Stripe PSP registers the payment origin there: a
+account, so declaring a Stripe PSP registers the checkout origin there: a
 `stripe_payment_method_domain` provider intent, once per PSP and host. A PSP
-declared before the server served the payment origin is registered when its
+declared before the server served the checkout origin is registered when its
 merchant next creates an order with a pay URL. A domain the account already holds is
 not registered again (its Apple Pay is validated when inactive), and one the
-merchant disabled in Stripe stays disabled. The payment origin serves Stripe's
+merchant disabled in Stripe stays disabled. The checkout origin serves Stripe's
 Apple Pay domain-association file at
 `/.well-known/apple-developer-merchantid-domain-association`.
 
@@ -159,7 +159,7 @@ merchant first registers the sites that may frame it, in its settings:
 
 ```yaml
 settings:
-  payment_page:
+  checkout:
     embed_origins: [https://shop.example, https://www.shop.example]
 ```
 
@@ -178,11 +178,11 @@ billing-ui frames the order's `pay_url`:
 The iframe allows payment and passkeys. The page follows its height, and once
 the order completes it posts `openrails.payment.complete` (`order_id`,
 `success_url`) to the registered origins only, never `*`; the component hears
-only its own frame on the payment origin's origin. Without `onComplete` it goes
+only its own frame on the checkout origin's origin. Without `onComplete` it goes
 to `success_url`. Fulfil on `order.completed`, as always.
 
 The registered https sites are also registered as payment-method domains on
-the merchant's Stripe accounts (as the payment origin is): Stripe shows Apple
+the merchant's Stripe accounts (as the checkout origin is): Stripe shows Apple
 Pay and Google Pay in a frame only when the framing page's domain is
 registered. Apple Pay there also needs the site itself to serve Stripe's
 domain-association file at the same path.
@@ -206,7 +206,7 @@ POST /v1/me/orders  {"lines": [{"price_id": "…"}], "pay_url": {"embedded": tru
 - It returns nowhere: the request names no URL, and the order has no
   `success_url` or `cancel_url`. Once paid the frame says so and posts
   `openrails.payment.complete` to the page; a redirect PSP or a bank's
-  challenge comes back to the frame's own page on the payment origin.
+  challenge comes back to the frame's own page on the checkout origin.
 - Asked again for the same lines, it answers the customer's open order (200)
   with a fresh URL, and the last one stops working; the order's expiry does not
   move. A reload, a reopened dialog or two clicks pay one order. A paid,
@@ -214,9 +214,9 @@ POST /v1/me/orders  {"lines": [{"price_id": "…"}], "pay_url": {"embedded": tru
   owns is `409 already_owned`, and one whose `required_entitlements` they do
   not hold is `403 entitlement_required`, when asking and when paying.
 - Without registered origins it is `400 embed_origins_required`,
-  without a payment origin `400 pay_url_unavailable`; neither makes an
+  without a checkout origin `400 pay_url_unavailable`; neither makes an
   order.
-- On the payment origin the secret opens that order alone, as a merchant's
+- On the checkout origin the secret opens that order alone, as a merchant's
   pay URL does.
 
 ## Save with the customer network

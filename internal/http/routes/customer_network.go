@@ -14,7 +14,7 @@ var networkLinkErrors = codes(billing.CodeNetworkLinkChallengeInvalid, billing.C
 // customerNetworkRoutes link a merchant's customer to its openrails.dev
 // account, where the deployment runs the customer network: the customer
 // asks for a challenge, answers it with a network sign-in, and redeems it,
-// with its own token or, on the payment origin, its order's pay URL.
+// with its own token or, on the checkout origin, its order's pay URL.
 var customerNetworkRoutes = []Route{
 	{Method: POST, Path: "/v1/me/network-link/challenges", Group: Customer, Auth: AuthCustomer, When: FeatureCustomerNetwork, PayURL: PayURLLink,
 		Responses: []Reply{{201, billing.NetworkLinkChallenge{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.CreateNetworkLinkChallenge)},

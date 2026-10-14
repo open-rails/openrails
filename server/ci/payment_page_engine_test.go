@@ -28,24 +28,24 @@ func TestEmbeddedEnginePaymentPage(t *testing.T) {
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{"shared-pay": {
 		DisplayName: "Shared pay", Issuer: "https://identity.e2e.test",
-		MerchantSettings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
+		MerchantSettings: billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
 		PSPs:             map[string]openrails.PSPConfig{"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig()},
 	}}
 	publisher, shop := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	for _, origin := range []string{"http://pay.e2e.test", "https://api.e2e.test", "https://identity.e2e.test", "https://pay.e2e.test/path"} {
-		_, _, err := publisher.PaymentPage(origin, nil)
+		_, _, err := publisher.CheckoutPage(origin, nil)
 		require.Error(t, err, origin)
 	}
-	origin, handler, err := publisher.PaymentPage("https://pay.e2e.test", nil)
+	origin, handler, err := publisher.CheckoutPage("https://pay.e2e.test", nil)
 	require.NoError(t, err)
 	require.Equal(t, "https://pay.e2e.test", origin)
 	require.Nil(t, handler)
-	_, _, err = publisher.PaymentPage("https://other.e2e.test", nil)
+	_, _, err = publisher.CheckoutPage("https://other.e2e.test", nil)
 	require.Error(t, err)
 	serving, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-	_, _, err = serving.PaymentPage("https://pay.e2e.test", fstest.MapFS{})
+	_, _, err = serving.CheckoutPage("https://pay.e2e.test", fstest.MapFS{})
 	require.Error(t, err, "missing assets must not install an origin")
-	origin, handler, err = serving.PaymentPage("https://pay.e2e.test", paymentPage)
+	origin, handler, err = serving.CheckoutPage("https://pay.e2e.test", paymentPage)
 	require.NoError(t, err)
 	require.Equal(t, "https://pay.e2e.test", origin)
 	require.NotNil(t, handler)
@@ -85,9 +85,9 @@ func TestEmbeddedEnginePaymentPage(t *testing.T) {
 
 	late, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, late.Start(t.Context()))
-	_, _, err = late.PaymentPage("https://late.e2e.test", nil)
+	_, _, err = late.CheckoutPage("https://late.e2e.test", nil)
 	require.ErrorContains(t, err, "before Start")
 	require.NoError(t, late.Close(t.Context()))
-	_, _, err = late.PaymentPage("https://late.e2e.test", nil)
+	_, _, err = late.CheckoutPage("https://late.e2e.test", nil)
 	require.ErrorContains(t, err, "closed")
 }

@@ -56,6 +56,8 @@ access ended links to `subscribe_url`; failed or due payments, payment method
 updates, receipts and confirmations link to `billing_url`; either falls back to
 `support_url`. `balance_notices` sets the customers' default
 low-balance lines ([balance notices](balance-notices.md)).
+`checkout.embed_origins` lists the sites that may frame its embedded pay URLs
+([payment page](payment-page.md)).
 
 YAML and JSON use the same typed contract. Documents are limited to 1 MiB.
 Unknown or duplicate fields, multiple documents, YAML aliases, anchors, merge

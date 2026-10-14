@@ -126,7 +126,7 @@ answers 403 `captcha_required` (null when none is configured) and the customer
 network's sign-in (`network`). It names no merchant.
 
 `GET /v1/me/config` is the merchant's, for a credential bound to that merchant:
-a customer's token, or a pay URL's secret on the payment origin. It holds
+a customer's token, or a pay URL's secret on the checkout origin. It holds
 `merchant` (its `display_name`, https `logo_url` and `support_url`, and
 `embed_origins`) and `payment`, which answers "what can this merchant take
 money with, and what do I need in the browser to do it?" so you never hard-code

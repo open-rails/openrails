@@ -54,7 +54,7 @@ func TestEmbeddedPaymentLogsTheClientBehindItsProxy(t *testing.T) {
 	cfg.TrustedProxies = []string{proxyPeer + "/32"}
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{"proxied-purchase": {DisplayName: "Proxied purchase"}}
 	bill, _ := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-	_, handler, err := bill.PaymentPage("https://pay.e2e.test", paymentPage)
+	_, handler, err := bill.CheckoutPage("https://pay.e2e.test", paymentPage)
 	require.NoError(t, err)
 	front := behindProxy(t, handler)
 

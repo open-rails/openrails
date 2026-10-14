@@ -147,7 +147,7 @@ type MerchantSource string
 // MerchantOrder: the merchant of the order its {id} names.
 const MerchantOrder MerchantSource = "order"
 
-// PayURLAccess is how the payment origin serves a route under a
+// PayURLAccess is how the checkout origin serves a route under a
 // pay URL's secret, which acts as its order's customer.
 type PayURLAccess string
 
@@ -315,7 +315,7 @@ type Route struct {
 	// IdempotencyKey: the route reads the Idempotency-Key header.
 	IdempotencyKey bool
 	// PayURL is what a pay URL's secret opens of the route on the
-	// payment origin; none is not served there.
+	// checkout origin; none is not served there.
 	PayURL PayURLAccess
 
 	// Query lists the query parameters; Request is a zero value of the JSON

@@ -7,7 +7,7 @@ import (
 
 // ordersRoutes are purchases (#1168). The customer previews, buys in one
 // call (create with a payment), or creates it with its embedded pay URL on
-// the payment origin (create with a pay URL), pays, confirms after
+// the checkout origin (create with a pay URL), pays, confirms after
 // next_action, cancels and reads; paying needs the customer in person and an Idempotency-Key, and
 // a failed payment answers 402 card_error with the order. The merchant's
 // backend creates unpaid orders for a customer to pay (/v1/app/orders);

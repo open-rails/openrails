@@ -11,18 +11,18 @@ import (
 
 type paymentKey struct{}
 
-// PaymentOrigin serves the payment origin ahead of every other route: a
-// request whose Host is origin reaches only page (Engine.PaymentPage's
+// CheckoutOrigin serves the checkout origin ahead of every other route: a
+// request whose Host is origin reaches only page (Engine.CheckoutPage's
 // handler), so no app, sign-in or admin route answers there; a malformed Host
 // is refused with 400; any other request passes on. Forwarded headers never
 // select it. Register it before other middleware and routes:
 //
-//	pay, err := openrailsgin.PaymentOrigin(origin, page)
+//	pay, err := openrailsgin.CheckoutOrigin(origin, page)
 //	router.Use(pay)
 //
-// A nil page answers 404 on the payment origin (another host serves it), and
+// A nil page answers 404 on the checkout origin (another host serves it), and
 // "" serves none. Its requests are marked for RedactLog and PaymentRequest.
-func PaymentOrigin(origin string, page http.Handler) (gin.HandlerFunc, error) {
+func CheckoutOrigin(origin string, page http.Handler) (gin.HandlerFunc, error) {
 	if origin == "" {
 		return func(c *gin.Context) { c.Next() }, nil
 	}
@@ -51,21 +51,21 @@ func PaymentOrigin(origin string, page http.Handler) (gin.HandlerFunc, error) {
 	}, nil
 }
 
-// PaymentRequest reports whether c is a payment origin request, or a payment
+// PaymentRequest reports whether c is a checkout origin request, or a payment
 // page path (/pay/...) wherever it arrived: logs and panic recovery leave out
 // its query string and error details.
 func PaymentRequest(c *gin.Context) bool {
 	return c != nil && (paymentMarked(c.Keys) || paymentPath(c.Request.URL.Path))
 }
 
-// RedactLog wraps a gin log formatter (gin.LoggerWithFormatter): a payment
+// RedactLog wraps a gin log formatter (gin.LoggerWithFormatter): a checkout
 // origin request is logged without its query string or error details.
 func RedactLog(format gin.LogFormatter) gin.LogFormatter {
 	return func(p gin.LogFormatterParams) string {
 		if paymentMarked(p.Keys) || paymentPath(p.Path) {
 			p.Path, _, _ = strings.Cut(p.Path, "?")
 			if p.ErrorMessage != "" {
-				p.ErrorMessage = "payment origin error details omitted"
+				p.ErrorMessage = "checkout origin error details omitted"
 			}
 		}
 		return format(p)

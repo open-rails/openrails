@@ -23,17 +23,17 @@ import (
 
 // paymentDomain is the payment page's host name; "" without one.
 func (r *Runtime) paymentDomain() string {
-	if r == nil || r.PaymentOrigin() == "" {
+	if r == nil || r.CheckoutOrigin() == "" {
 		return ""
 	}
-	u, err := url.Parse(r.PaymentOrigin())
+	u, err := url.Parse(r.CheckoutOrigin())
 	if err != nil {
 		return ""
 	}
 	return strings.ToLower(u.Hostname())
 }
 
-// followPaymentDomain registers the payment origin on each Stripe PSP a
+// followPaymentDomain registers the checkout origin on each Stripe PSP a
 // configuration change declared or changed, and the sites a settings change
 // registered for embedded payment pages on every Stripe PSP. It reads the sync's
 // own set (the cache holds it only once the sync returns); PSP ids follow
@@ -86,7 +86,7 @@ func embedDomains(set merchantdocs.Set) []string {
 	return out
 }
 
-// RegisterPaymentDomain queues the registration of the payment origin, and
+// RegisterPaymentDomain queues the registration of the checkout origin, and
 // of the sites the merchant registered for embedded payment pages, as
 // payment-method domains on the merchant's live Stripe PSPs: once per PSP
 // and host.

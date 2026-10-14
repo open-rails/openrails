@@ -152,7 +152,7 @@ func TestPublicConfigHasNoMerchantPart(t *testing.T) {
 	require.Equal(t, billing.CodeAuthenticationRequired, errorCode(t, none))
 }
 
-// On the payment origin a pay URL's secret reads its order's merchant's
+// On the checkout origin a pay URL's secret reads its order's merchant's
 // payment setup and name, never stored by a cache; the deployment's
 // configuration there names no merchant either.
 func TestPurchaseSecretReadsItsMerchantConfig(t *testing.T) {
@@ -207,7 +207,7 @@ func TestPurchaseSecretReadsItsMerchantConfig(t *testing.T) {
 	require.NotContains(t, doc, "merchant")
 
 	refused(t, read(paymentHost, "/v1/me/config", ""), http.StatusNotFound, "pay_url_not_found")
-	// The secret is a credential on the payment origin alone.
+	// The secret is a credential on the checkout origin alone.
 	require.Equal(t, http.StatusUnauthorized, read(serverHost, "/v1/me/config", shop).Code)
 }
 
