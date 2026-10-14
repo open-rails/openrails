@@ -53,7 +53,7 @@ async function pay(page: Page, buy: Locator, confirm: RegExp) {
   await buy.click()
   const purchase = page.getByRole("dialog")
   await purchase.getByLabel("Full name").fill("Card Holder")
-  await purchase.getByLabel("Country").selectOption("US")
+  await purchase.getByLabel("Country or region").selectOption("US")
   await purchase.getByLabel(/ZIP/).fill("10001")
   await purchase.getByRole("button", { name: confirm }).click()
 }

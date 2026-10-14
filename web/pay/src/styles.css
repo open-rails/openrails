@@ -70,7 +70,7 @@ body {
 }
 .payment footer {
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
 }
 .notice {
   padding: 12px;
@@ -97,4 +97,12 @@ body {
 .network .error {
   color: #c62828;
   font-size: 0.875rem;
+}
+html.framed,
+html.framed body {
+  overflow: hidden;
+}
+html.framed .payment {
+  max-width: none;
+  padding: 0;
 }

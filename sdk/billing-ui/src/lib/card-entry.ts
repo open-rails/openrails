@@ -76,9 +76,9 @@ export function formatExpiry(value: string): string {
 
 function parseExpiry(value: string, now: Date) {
   const d = digitsOf(value)
-  if (d.length !== 4 && d.length !== 6) return null
+  if (d.length !== 4) return null
   const month = Number(d.slice(0, 2))
-  const year = d.length === 4 ? 2000 + Number(d.slice(2)) : Number(d.slice(2))
+  const year = 2000 + Number(d.slice(2))
   if (month < 1 || month > 12) return null
   const lapsed =
     year < now.getFullYear() ||

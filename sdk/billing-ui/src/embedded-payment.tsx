@@ -164,6 +164,7 @@ export function EmbeddedPayment({
         src={withPaymentFallbacks(url, fallbacks)}
         title={title}
         className={className}
+        scrolling="no"
         allow="payment *; publickey-credentials-get *; publickey-credentials-create *"
         style={{
           border: 0,

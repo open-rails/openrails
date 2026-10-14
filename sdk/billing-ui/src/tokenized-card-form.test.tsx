@@ -20,7 +20,7 @@ describe("TokenizedCardForm", () => {
     fireEvent.change(screen.getByLabelText(/full name/i), {
       target: { value: "Pat Reader" },
     })
-    fireEvent.change(screen.getByLabelText("Country"), {
+    fireEvent.change(screen.getByLabelText("Country or region"), {
       target: { value: "US" },
     })
     fireEvent.change(screen.getByLabelText(/ZIP/), {
@@ -65,7 +65,7 @@ describe("TokenizedCardForm", () => {
     fireEvent.change(screen.getByLabelText(/full name/i), {
       target: { value: "Pat Reader" },
     })
-    fireEvent.change(screen.getByLabelText("Country"), {
+    fireEvent.change(screen.getByLabelText("Country or region"), {
       target: { value: "US" },
     })
     fireEvent.change(screen.getByLabelText(/ZIP/), {
@@ -89,7 +89,7 @@ describe("TokenizedCardForm", () => {
     fireEvent.change(screen.getByLabelText(/full name/i), {
       target: { value: "Pat Reader" },
     })
-    fireEvent.change(screen.getByLabelText("Country"), {
+    fireEvent.change(screen.getByLabelText("Country or region"), {
       target: { value: "US" },
     })
     fireEvent.change(screen.getByLabelText(/ZIP/), {
@@ -120,7 +120,7 @@ it.each(["key", "url", "consent"])(
     fireEvent.change(screen.getByLabelText(/full name/i), {
       target: { value: "Pat Reader" },
     })
-    fireEvent.change(screen.getByLabelText("Country"), {
+    fireEvent.change(screen.getByLabelText("Country or region"), {
       target: { value: "US" },
     })
     fireEvent.change(screen.getByLabelText(/ZIP/), {
@@ -183,5 +183,10 @@ it("shows Collect.js field errors inline and waits for three valid fields", asyn
     config.validationCallback("cvv", true, "Success")
   })
   expect(screen.queryByText("Enter a valid card number.")).toBeNull()
+  // Valid card fields alone don't enable it: the billing fields are required too.
+  expect(save).toBeDisabled()
+  fireEvent.change(screen.getByLabelText(/full name/i), { target: { value: "Pat Reader" } })
+  fireEvent.change(screen.getByLabelText("Country or region"), { target: { value: "US" } })
+  fireEvent.change(screen.getByLabelText(/ZIP/), { target: { value: "10001" } })
   expect(save).toBeEnabled()
 })
