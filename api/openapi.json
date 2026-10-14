@@ -20342,6 +20342,9 @@
           },
           "product": {
             "type": "string"
+          },
+          "price": {
+            "type": "string"
           }
         },
         "required": [

@@ -623,7 +623,8 @@ func (q *Queries) ListPSPImportsPage(ctx context.Context, arg ListPSPImportsPage
 }
 
 const listPSPProviderPrices = `-- name: ListPSPProviderPrices :many
-SELECT COALESCE(b.plan_id, b.price_ref, b.recurring_billing_option_id)::text AS ref, price.public_id
+SELECT COALESCE(b.plan_id, b.price_ref, b.recurring_billing_option_id)::text AS ref, price.public_id, price.amount, price.currency,
+    price.billing_interval_hours, price.billing_interval_months
 FROM billing.price_psp_bindings b
 JOIN billing.prices price ON price.merchant_id = b.merchant_id AND price.id = b.price_id
 WHERE b.merchant_id = $1::uuid AND b.psp_id = $2::uuid AND price.provider_owned AND price.deleted_at IS NULL
@@ -637,8 +638,12 @@ type ListPSPProviderPricesParams struct {
 }
 
 type ListPSPProviderPricesRow struct {
-	Ref      string
-	PublicID string
+	Ref                   string
+	PublicID              string
+	Amount                int64
+	Currency              string
+	BillingIntervalHours  *int32
+	BillingIntervalMonths *int32
 }
 
 // The live provider prices mirroring these provider objects of one PSP.
@@ -651,7 +656,68 @@ func (q *Queries) ListPSPProviderPrices(ctx context.Context, arg ListPSPProvider
 	var items []ListPSPProviderPricesRow
 	for rows.Next() {
 		var i ListPSPProviderPricesRow
-		if err := rows.Scan(&i.Ref, &i.PublicID); err != nil {
+		if err := rows.Scan(
+			&i.Ref,
+			&i.PublicID,
+			&i.Amount,
+			&i.Currency,
+			&i.BillingIntervalHours,
+			&i.BillingIntervalMonths,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProductProviderPrices = `-- name: ListProductProviderPrices :many
+SELECT price.key, price.public_id, price.amount, price.currency, price.billing_interval_hours, price.billing_interval_months
+FROM billing.price_psp_bindings b
+JOIN billing.prices price ON price.merchant_id = b.merchant_id AND price.id = b.price_id
+JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id
+WHERE b.merchant_id = $1::uuid AND b.psp_id = $2::uuid AND prod.key = $3::text
+  AND price.provider_owned AND price.deleted_at IS NULL
+ORDER BY price.public_id
+`
+
+type ListProductProviderPricesParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	ProductKey string
+}
+
+type ListProductProviderPricesRow struct {
+	Key                   string
+	PublicID              string
+	Amount                int64
+	Currency              string
+	BillingIntervalHours  *int32
+	BillingIntervalMonths *int32
+}
+
+// A product's provider prices on one PSP, for rails whose subscriptions name
+// no provider object.
+func (q *Queries) ListProductProviderPrices(ctx context.Context, arg ListProductProviderPricesParams) ([]ListProductProviderPricesRow, error) {
+	rows, err := q.db.Query(ctx, listProductProviderPrices, arg.MerchantID, arg.PspID, arg.ProductKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProductProviderPricesRow
+	for rows.Next() {
+		var i ListProductProviderPricesRow
+		if err := rows.Scan(
+			&i.Key,
+			&i.PublicID,
+			&i.Amount,
+			&i.Currency,
+			&i.BillingIntervalHours,
+			&i.BillingIntervalMonths,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

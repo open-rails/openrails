@@ -1,6 +1,9 @@
 package app
 
-import "github.com/open-rails/openrails/internal/pspimport"
+import (
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/pspimport"
+)
 
 // PSPImporter runs PSP imports over the runtime's current merchants, NMI
 // clients and directory.
@@ -8,5 +11,5 @@ func (r *Runtime) PSPImporter() *pspimport.Importer {
 	if r == nil || r.DB == nil {
 		return nil
 	}
-	return &pspimport.Importer{DB: r.DB, Merchants: r.Merchants, NMI: r.NMIClients, Stripe: r.StripeClients, Directory: r.Contacts, Clock: r.Clock}
+	return &pspimport.Importer{DB: r.DB, Merchants: r.Merchants, NMI: r.NMIClients, Stripe: r.StripeClients, CCBillDataLinkURL: config.SandboxCCBillDataLinkURL(r.Config), Directory: r.Contacts, Clock: r.Clock}
 }

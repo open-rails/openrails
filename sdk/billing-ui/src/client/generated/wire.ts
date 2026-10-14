@@ -1673,6 +1673,7 @@ export type PSPImportMappingsResult = {
 export type PSPImportProduct = {
   plan?: string
   product: string
+  price?: string
 }
 
 export type PSPImportRecord = {
