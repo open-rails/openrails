@@ -160,7 +160,7 @@ async function payWithCollect(page: Page | FrameLocator) {
   await page.getByLabel("Full name").fill("Card Holder")
   await page.getByLabel("Country").selectOption("US")
   await page.getByLabel(/ZIP/).fill("10001")
-  await page.getByRole("button", { name: /^Pay \$12\.50/ }).click()
+  await page.getByRole("button", { name: "Pay", exact: true }).click()
 }
 
 test("shows the merchant and the order, and keeps the secret out of the address bar", async ({ page }) => {
@@ -195,7 +195,7 @@ test("a card the bank challenges pays after 3-D Secure", async ({ page }) => {
   await page.getByLabel("Pay with").selectOption({ label: "Stripe" })
   await page.getByLabel("Card number").fill("4000002500003155")
   stripeCalls.length = 0
-  await page.getByRole("button", { name: /^Pay \$12\.50/ }).click()
+  await page.getByRole("button", { name: "Pay", exact: true }).click()
   await expect(page).toHaveURL(`${api()}/__test/thanks?order=${order.order_id}`)
   expect(stripeCalls).toEqual(["/v1/payment_methods", "/v1/e2e/authenticate"])
   await expect.poll(() => completed(order.order_id)).toBe(true)
@@ -212,12 +212,12 @@ test("saved cards appear only where the merchant offers them", async ({ page }) 
   const saved = page.getByRole("radiogroup", { name: "Saved cards" })
   await expect(saved.getByText("Visa card ending 4242")).toBeAttached()
   await saved.getByText(/•••• 4242/).click()
-  await page.getByRole("button", { name: /^Pay \$12\.50/ }).click()
+  await page.getByRole("button", { name: "Pay", exact: true }).click()
   await expect(page).toHaveURL(`${api()}/__test/thanks?order=${offered.order_id}`)
 
   const hidden = await newOrder({ customer_id: first.customer_id })
   await page.goto(hidden.url)
-  await expect(page.getByRole("button", { name: /^Pay \$12\.50/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Pay", exact: true })).toBeVisible()
   await expect(page.getByRole("radiogroup", { name: "Saved cards" })).toHaveCount(0)
 })
 
@@ -328,7 +328,7 @@ test("an embedded payment page keeps back the fallback its frame names, as the s
   const fallbacks = encodeURIComponent(JSON.stringify({ stripe: { for: ["nmi"], afterFailures: 1 } }))
   await page.goto(`${api()}/__test/embed?src=${encodeURIComponent(`${order.url}&fallbacks=${fallbacks}`)}`)
   const frame = page.frameLocator("iframe")
-  await expect(frame.getByRole("button", { name: /^Pay \$12\.50/ })).toBeVisible()
+  await expect(frame.getByRole("button", { name: "Pay", exact: true })).toBeVisible()
   await expect(frame.getByLabel("Pay with")).toHaveCount(0)
 
   // Without fallbacks the frame offers both card PSPs.
