@@ -17,6 +17,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 const tierUpdateStuck = "life.tier_change.provider_update_stuck"
@@ -32,9 +33,14 @@ func (w *world) legacyOnTierEndingAt(tp topology, price tier, cents int64, cycle
 	t.Helper()
 	c := w.newCustomer()
 	start := end.Add(-time.Duration(cycle) * time.Hour)
+	months := 0
+	if price.BillingIntervalMonths != nil {
+		months, cycle = *price.BillingIntervalMonths, 0
+		start = calendarutil.AddMonths(end, -months)
+	}
 	amount := fmt.Sprintf("%d.%02d", cents/100, cents%100)
 	vault := w.nmi.AddVault(visa)
-	railSub := w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: price.plan, Amount: amount, Days: cycle / 24, Months: 0, NextBilling: end})
+	railSub := w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: price.plan, Amount: amount, Days: cycle / 24, Months: months, NextBilling: end})
 	sale := w.nmi.AddScheduleSale(railSub, start)
 	customerID, err := billing.ParseCustomerID(c.id)
 	require.NoError(t, err)
@@ -45,7 +51,7 @@ func (w *world) legacyOnTierEndingAt(tp topology, price tier, cents int64, cycle
 		PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: method.RailMethodRef, Card: declaredCard(visa)}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "tier-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
 			StartedAt: start, PaidThrough: &end, PaymentMethod: method,
-			AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: "nmi:" + railSub, Amount: cents * 10_000, Currency: "USD", IntervalHours: cycle, FirstDueAt: start}}},
+			AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: "nmi:" + railSub, Amount: cents * 10_000, Currency: "USD", IntervalHours: cycle, IntervalMonths: months, FirstDueAt: start}}},
 		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: sale.TransactionID, Success: true, Amount: cents * 10_000, Currency: "USD", OccurredAt: start, NextBillingAt: &end}},
 	})
 	require.NoError(t, err)

@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // A nil hour count means either an accepted provider period or explicitly
@@ -121,7 +122,7 @@ func TestProviderTierChangeRetainsAcceptedAccessChoice(t *testing.T) {
 	}
 }
 
-func (w *world) providerAccessTier(rail, group string, rank int, cents int64, access catalog.Field[int]) tier {
+func (w *world) providerAccessTier(rail, group string, rank int, cents int64, access catalog.Field[int], nativeMonths ...int) tier {
 	w.t.Helper()
 	key := "access-tier-" + uuid.NewString()[:8]
 	product, err := w.client[embedded].CreateProduct(w.t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, TierGroup: &group, TierRank: rank, Entitlements: []string{key}})
@@ -129,7 +130,11 @@ func (w *world) providerAccessTier(rail, group string, rank int, cents int64, ac
 	params := billing.CreateProviderPriceParams{ProductID: product.ID, Key: "monthly", PSP: rail, AccessDurationHours: access}
 	out := tier{ent: key, plan: "access-plan-" + uuid.NewString()[:8]}
 	if rail == "nmi" {
-		w.nmi.AddPlan(nmimock.Plan{ID: out.plan, Name: key, Amount: decimalCents(cents), Days: 30})
+		plan := nmimock.Plan{ID: out.plan, Name: key, Amount: decimalCents(cents), Days: 30}
+		if len(nativeMonths) > 0 {
+			plan.Days, plan.Months = 0, nativeMonths[0]
+		}
+		w.nmi.AddPlan(plan)
 		params.PlanID = out.plan
 	} else {
 		out.plan = "price_legacy_access_" + uuid.NewString()[:8]
@@ -139,6 +144,99 @@ func (w *world) providerAccessTier(rail, group string, rank int, cents int64, ac
 	out.Price, err = w.client[embedded].CreateProviderPrice(w.t.Context(), params)
 	require.NoError(w.t, err)
 	return out
+}
+
+func TestCalendarNMITierChangeKeepsItsAcceptedNativeSchedule(t *testing.T) {
+	for _, action := range []string{"upgrade", "downgrade"} {
+		t.Run(action, func(t *testing.T) {
+			w := prepareWorld(t, 12)
+			w.riverWorkers = 1
+			w.start()
+			w.armDestructive()
+			group := "calendar-tier-" + uuid.NewString()[:8]
+			oldRank, newRank, oldCents, newCents := 1, 2, int64(999), int64(1999)
+			if action == "downgrade" {
+				oldRank, newRank, oldCents, newCents = 2, 1, 1999, 999
+			}
+			old := w.providerAccessTier("nmi", group, oldRank, oldCents, catalog.Field[int]{}, 1)
+			target := w.providerAccessTier("nmi", group, newRank, newCents, catalog.Field[int]{}, 1)
+			member := w.legacyOnTier(embedded, old, oldCents, 0, 10*day)
+			boundary := member.periodEnd()
+			params := billing.ChangeSubscriptionParams{PriceID: priceRef(target.ID), IdempotencyKey: "calendar-" + uuid.NewString()}
+			preview, err := member.c.previewChange(member.sub, params)
+			require.NoError(t, err)
+			require.Equal(t, boundary, *preview.NextChargeDate)
+			beforeSales := len(member.tierSales())
+			done, err := member.c.change(member.sub, params)
+			require.NoError(t, err)
+			require.Equal(t, "succeeded", done.Status)
+			w.settle()
+			var hours, months int
+			var raw string
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT cadence_hours,cadence_months,accepted_bill::text FROM billing.provider_schedules WHERE subscription_id=$1 AND initial_order_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`), member.sub.UUID()).Scan(&hours, &months, &raw))
+			require.Zero(t, hours)
+			require.Equal(t, 1, months)
+			var accepted struct {
+				Lines []struct {
+					ProviderAccessDefault bool
+					BillingIntervalHours  *int
+				}
+			}
+			require.NoError(t, json.Unmarshal([]byte(raw), &accepted))
+			require.Len(t, accepted.Lines, 1)
+			require.True(t, accepted.Lines[0].ProviderAccessDefault)
+			require.Nil(t, accepted.Lines[0].BillingIntervalHours)
+			_, err = member.c.change(member.sub, params)
+			require.NoError(t, err)
+			w.settle()
+			wantSales := beforeSales
+			if action == "upgrade" {
+				wantSales++
+			}
+			require.Len(t, member.tierSales(), wantSales, "calendar acceptance and replay never submit another proration")
+			require.Equal(t, boundary, member.periodEnd(), "an in-place native change keeps the provider's paid boundary")
+		})
+	}
+}
+
+func TestCanceledCalendarHistoryPreservesItsReceiptWithoutAForwardSchedule(t *testing.T) {
+	w := prepareWorld(t, 12)
+	w.riverWorkers = 1
+	w.start()
+	price := w.providerAccessTier("nmi", "calendar-history-"+uuid.NewString()[:8], 1, 999, catalog.Field[int]{}, 1)
+	now := w.clock.Now().UTC()
+	start := time.Date(now.Year(), now.Month()-2, 31, 0, 0, 0, 0, time.UTC)
+	end := calendarutil.AddMonths(start, 1)
+	member := w.newCustomer()
+	vault := w.nmi.AddVault(visa)
+	schedule := w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: price.plan, Amount: "9.99", Months: 1, NextBilling: end})
+	sale := w.nmi.AddScheduleSale(schedule, start)
+	w.nmi.DeleteSchedule(schedule)
+	book := billing.DeclaredBilling{AsOf: now, DefaultPSP: billing.PSPRef{Key: "nmi"},
+		Customers:      []billing.DeclaredCustomer{{Customer: member.cid()}},
+		PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: member.cid(), Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID, Card: declaredCard(visa)}},
+		Subscriptions: []billing.DeclaredSubscription{{SourceID: schedule, Customer: member.cid(), Price: price.ID, Rail: "nmi", RailSubscriptionID: schedule,
+			StartedAt: start, PaidThrough: &end, Cancel: billing.CancelEvidence{Kind: "user_canceled", At: end},
+			PaymentMethod: &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}}},
+		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: schedule, TransactionID: sale.TransactionID, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}}}
+	result, err := w.client[embedded].ImportBilling(t.Context(), book)
+	require.NoError(t, err)
+	require.Len(t, result.Imported, 1, "%+v", result)
+	w.settle()
+	bills := w.bills(member.id)
+	require.Len(t, bills, 1)
+	got := bills[sale.TransactionID]
+	require.Equal(t, "provider_pre_schedule", got.source)
+	require.Equal(t, &start, got.periodStart)
+	require.Equal(t, &end, got.periodEnd, "historical month is clamped from its actual receipt, without an hourly estimate")
+	require.Equal(t, int64(9_990_000), got.paid)
+	require.Zero(t, w.countRows(`SELECT count(*) FROM billing.provider_schedules`))
+	require.Zero(t, w.countRows(`SELECT count(*) FROM billing.provider_cycle_receipts`))
+	require.False(t, member.entitled(price.ent), "terminal receipt creates no new access")
+	_, err = w.client[remote].ImportBilling(t.Context(), book)
+	require.NoError(t, err)
+	w.settle()
+	require.Equal(t, bills, w.bills(member.id), "receipt replay preserves original financial identities and calendar period")
 }
 
 func (w *world) stripeOnAccessTier(tp topology, price tier, cents int64) *legacy {

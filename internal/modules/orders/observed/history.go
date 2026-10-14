@@ -74,8 +74,20 @@ func HistoricalBill(ctx context.Context, d *db.DB, sub *models.Subscription, rec
 			return History{}, nil
 		}
 		hours, months = int(first.CadenceHours), int(first.CadenceMonths)
-	case sub.Status == models.StatusCanceled && price.BillingIntervalHours != nil && *price.BillingIntervalHours > 0:
-		hours = int(*price.BillingIntervalHours)
+	case sub.Status == models.StatusCanceled:
+		accepted, err := models.PriceFromGen(price)
+		if err != nil {
+			return History{}, err
+		}
+		if h := accepted.ProviderBillingInterval(); h != nil {
+			hours = *h
+		}
+		if m := accepted.ProviderBillingMonths(); m != nil {
+			months = *m
+		}
+		if !validCadence(hours, months) {
+			return History{}, nil
+		}
 	default:
 		return History{}, nil
 	}
