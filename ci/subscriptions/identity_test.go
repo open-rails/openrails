@@ -232,6 +232,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"GET /v1/me/orders/{id}":                        {"/orders/" + aOrder, nil},
 		"POST /v1/me/orders/{id}/pay":                   {"/orders/" + aOrder + "/pay", map[string]any{"payment": map[string]any{"payment_method_id": bCard}, "expected_total": "3000000"}},
 		"POST /v1/me/orders/{id}/confirm":               {"/orders/" + aOrder + "/confirm", nil},
+		"POST /v1/me/orders/{id}/pay-url-failure":       {"/orders/" + aOrder + "/pay-url-failure", nil},
 		"POST /v1/me/orders/{id}/cancel":                {"/orders/" + aOrder + "/cancel", nil},
 		"POST /v1/me/agreements/{id}/revoke":            {"/agreements/" + aAgreement + "/revoke", nil},
 	}
