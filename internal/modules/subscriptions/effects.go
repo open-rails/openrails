@@ -202,6 +202,7 @@ func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d
 	}
 	sub.PriceID, sub.ProductID = price.ID, product.ID
 	sub.AccessDurationHoursSnapshot = price.AccessDurationHours
+	sub.ProviderAccessDefaultSnapshot = price.ProviderAccessDefault
 	sub.Price = price
 	return nil // The caller grants the newly paid period of the new product.
 }

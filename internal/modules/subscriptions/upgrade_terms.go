@@ -26,6 +26,7 @@ type NMIUpgradePayload struct {
 	// AccessEndsAt preserves an already accepted pre-split partial-period upgrade.
 	AccessEndsAt              *time.Time              `json:"access_ends_at,omitempty"`
 	AccessDurationHours       *int                    `json:"access_duration_hours"`
+	ProviderAccessDefault     bool                    `json:"provider_access_default,omitempty"`
 	Action                    string                  `json:"action"` // upgrade | downgrade
 	Instrument                charge.FrozenInstrument `json:"instrument"`
 	RequestedPrice            string                  `json:"requested_price"`

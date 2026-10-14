@@ -101,17 +101,18 @@ func (s *SubscriptionLifecycleService) SupersedeForUpgradeTx(ctx context.Context
 // subscription whose provider schedule was already moved to the new amount.
 // The subscription row, its rail reference and its period end are kept.
 type InPlaceTierChange struct {
-	AccessEndsAt        *time.Time
-	AccessDurationHours *int
-	SubscriptionID      uuid.UUID
-	FromPriceID         uuid.UUID
-	PriceID             uuid.UUID
-	ProductID           uuid.UUID
-	RailSubscriptionID  string
-	PeriodEnd           time.Time
-	At                  time.Time
-	Payment             *models.Payment
-	Downgrade           bool
+	AccessEndsAt          *time.Time
+	AccessDurationHours   *int
+	ProviderAccessDefault bool
+	SubscriptionID        uuid.UUID
+	FromPriceID           uuid.UUID
+	PriceID               uuid.UUID
+	ProductID             uuid.UUID
+	RailSubscriptionID    string
+	PeriodEnd             time.Time
+	At                    time.Time
+	Payment               *models.Payment
+	Downgrade             bool
 }
 
 // ChangeTierInPlaceTx commits an in-place tier change in the caller's
@@ -138,6 +139,7 @@ func (s *SubscriptionLifecycleService) ChangeTierInPlaceTx(ctx context.Context, 
 	sub.PriceID, sub.ProductID = c.PriceID, c.ProductID
 	if c.AccessEndsAt == nil {
 		sub.AccessDurationHoursSnapshot = c.AccessDurationHours
+		sub.ProviderAccessDefaultSnapshot = c.ProviderAccessDefault
 	}
 	if err := repo.UpdateAt(ctx, sub, c.At); err != nil {
 		return err
