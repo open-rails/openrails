@@ -79,7 +79,7 @@ func PrepareEngineRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscr
 			}
 			return agreement, err
 		}
-		accepted = subscriptions.InitialMembershipTerms{PaymentID: payment.ID, PSPID: agreement.PSPID, SubscriptionID: agreement.SubscriptionID, CustomerID: agreement.CustomerID, PriceID: agreement.PriceID, ProductID: agreement.ProductID, Amount: agreement.Amount, RecurringAmount: agreement.Amount, Currency: agreement.Currency}
+		accepted = subscriptions.InitialMembershipTerms{PaymentID: payment.ID, PSPID: p.Instrument.PSPID, SubscriptionID: agreement.SubscriptionID, CustomerID: agreement.CustomerID, PriceID: agreement.PriceID, ProductID: agreement.ProductID, Amount: agreement.Amount, RecurringAmount: agreement.Amount, Currency: agreement.Currency}
 		if payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptRenewal {
 			return agreement, fmt.Errorf("%w: engine predecessor is not a recurring payment", ErrRebillNotRetryable)
 		}

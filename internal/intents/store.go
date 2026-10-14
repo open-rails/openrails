@@ -262,7 +262,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 			if err != nil {
 				return err
 			}
-			if accepted.Renewal.CustomerID != sub.CustomerID || charged == nil || accepted.PaymentMethodID != *charged || accepted.Instrument.PSPID != sub.PspID {
+			if accepted.Renewal.CustomerID != sub.CustomerID || charged == nil || accepted.PaymentMethodID != *charged || accepted.Renewal.PSPID != sub.PspID {
 				return errors.New("engine admission contradicts locked subscription")
 			}
 		}

@@ -58,6 +58,9 @@ type RenewMembershipParams struct {
 	// PaymentCustodian stamps the credential form actually used by an accepted
 	// engine charge; empty preserves the native provider default.
 	PaymentCustodian string
+	// PaymentPSPID is the accepted platform renewal account, independent of
+	// Prepared.PSPID, which retains the subscription identity.
+	PaymentPSPID uuid.UUID
 	// Prepared is supplied only by an accepted durable recurring-charge operation.
 	// Observed provider renewals use the ordinary catalog-convergence path.
 	Prepared              *RenewalTerms

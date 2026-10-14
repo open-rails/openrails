@@ -16,12 +16,17 @@ import (
 )
 
 func admit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, b Bill, now time.Time) (gen.BillingOrder, bool, error) {
+	differentAccount := false
 	if b.SubscriptionID != nil {
 		sub, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: merchantID, ID: *b.SubscriptionID})
 		if err != nil {
 			return gen.BillingOrder{}, false, err
 		}
-		if sub.CustomerID != b.CustomerID || sub.PspID != b.PSPID || sub.CollectionPolicy != b.Owner {
+		if sub.CustomerID != b.CustomerID || sub.CollectionPolicy != b.Owner {
+			return gen.BillingOrder{}, false, ErrConflict
+		}
+		differentAccount = sub.PspID != b.PSPID
+		if differentAccount && (b.Owner != OwnerEngine || b.Kind != "renewal" || b.SourceKind != "accepted_renewal" || b.ExistingOrderID == nil || b.Payment == nil) {
 			return gen.BillingOrder{}, false, ErrConflict
 		}
 	}
@@ -32,6 +37,11 @@ func admit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, b Bill, no
 		}
 		if order.CustomerID != b.CustomerID || order.Currency != b.Currency || order.Total != b.Total || order.PspID != nil && *order.PspID != b.PSPID || order.SubscriptionID != nil && !sameID(order.SubscriptionID, b.SubscriptionID) {
 			return order, false, ErrConflict
+		}
+		if differentAccount {
+			if err := platformRenewalAttempt(ctx, q, merchantID, order, b); err != nil {
+				return order, false, err
+			}
 		}
 		lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: merchantID, OrderIds: []uuid.UUID{order.ID}})
 		if err != nil {
@@ -87,6 +97,37 @@ func admit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, b Bill, no
 	}
 	return order, true, nil
 }
+
+// A platform renewal can settle on its accepted attempt's account. An observed
+// provider bill or another engine operation cannot relax subscription binding.
+func platformRenewalAttempt(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, order gen.BillingOrder, b Bill) error {
+	if order.AttemptID == nil || !sameID(order.SubscriptionID, b.SubscriptionID) || order.PeriodStartsAt == nil || !order.PeriodStartsAt.Equal(b.PeriodStart) || order.PeriodEndsAt == nil || !order.PeriodEndsAt.Equal(b.PeriodEnd) {
+		return ErrConflict
+	}
+	attempt, err := q.GetOrderAttemptByID(ctx, gen.GetOrderAttemptByIDParams{MerchantID: merchantID, ID: *order.AttemptID})
+	if err != nil {
+		return err
+	}
+	if attempt.OrderID == nil || *attempt.OrderID != order.ID || attempt.CustomerID != b.CustomerID || attempt.PspID != b.PSPID || attempt.Amount == nil || *attempt.Amount != b.Total || attempt.Currency == nil || *attempt.Currency != b.Currency || attempt.Rail != string(b.Payment.Rail) {
+		return ErrConflict
+	}
+	in, err := q.GetProviderIntent(ctx, gen.GetProviderIntentParams{MerchantID: merchantID, ID: attempt.ID})
+	if err != nil {
+		return err
+	}
+	if in.IntentType != "subscription_collection" || !sameID(in.SubscriptionID, b.SubscriptionID) || in.PspID == nil || *in.PspID != b.PSPID || in.Rail != attempt.Rail || in.CustodianID == nil {
+		return ErrConflict
+	}
+	custodian, err := q.GetCustodian(ctx, gen.GetCustodianParams{MerchantID: merchantID, ID: *in.CustodianID})
+	if err != nil {
+		return err
+	}
+	if custodian.Kind != models.CustodianPlatform {
+		return ErrConflict
+	}
+	return nil
+}
+
 func createLine(ctx context.Context, q *gen.Queries, o gen.BillingOrder, sub *uuid.UUID, position int, l Line, now time.Time) error {
 	if l.Source == "" {
 		price, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: o.MerchantID, ID: *l.PriceID})
