@@ -1,7 +1,6 @@
 // The styled account surface against real AuthKit + OpenRails: list, cancel,
-// resume, card removal refusal and history. Card deletion itself calls NMI,
-// which the harness has no credentials for; jsdom tests cover that success
-// path (src/account/account.test.tsx).
+// resume, card removal refusal and history. NMI runs on the local mock;
+// jsdom tests cover successful card removal (src/account/account.test.tsx).
 import { expect, test, type Page } from "@playwright/test"
 
 import { createUser, seedBilling } from "./api"

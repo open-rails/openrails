@@ -37,8 +37,12 @@ type Catalog struct {
 
 func seedCatalog(ctx context.Context, c *openrails.Client) (Catalog, error) {
 	month := 720
-	sub, subPrice, err := product(ctx, c, "e2e-membership", "Membership", billing.CreatePriceParams{
-		Key: "e2e-membership-monthly", UnitAmount: 9_990_000, Currency: "USD", AccessDurationHours: &month, BillingIntervalHours: &month, SellVia: []string{billing.SellViaCard},
+	sub, err := c.CreateProduct(ctx, billing.CreateProductParams{Key: "e2e-membership", DisplayName: "Membership", Entitlements: []string{"e2e-membership"}})
+	if err != nil {
+		return Catalog{}, err
+	}
+	subPrice, err := c.CreateProviderPrice(ctx, billing.CreateProviderPriceParams{
+		ProductID: sub.ID, Key: "e2e-membership-monthly", PSP: PSPKey, PlanID: "e2e-membership-monthly", AccessDurationHours: catalog.Value(month),
 	})
 	if err != nil {
 		return Catalog{}, err
@@ -57,7 +61,7 @@ func seedCatalog(ctx context.Context, c *openrails.Client) (Catalog, error) {
 	if err != nil {
 		return Catalog{}, err
 	}
-	return Catalog{SubscriptionProduct: sub, SubscriptionPrice: subPrice, OneTimeProduct: once, OneTimePrice: oncePrice, CryptoPassPrice: pass, CryptoMonthlyPrice: monthly, CardOncePrice: cardOnce, CardMonthlyPrice: cardMonthly}, nil
+	return Catalog{SubscriptionProduct: sub.ID.String(), SubscriptionPrice: subPrice.ID.String(), OneTimeProduct: once, OneTimePrice: oncePrice, CryptoPassPrice: pass, CryptoMonthlyPrice: monthly, CardOncePrice: cardOnce, CardMonthlyPrice: cardMonthly}, nil
 }
 
 // seedCards applies prices sold by card only.
@@ -238,6 +242,9 @@ func (r *Runtime) SeedBilling(ctx context.Context, userID string) (Seeded, error
 	started, paidThrough := now.Add(-24*time.Hour), now.Add(29*24*time.Hour)
 	// NMI transaction ids are digits.
 	railSub, railCustomer, railMethod, txn := "e2e-sub-"+userID, "e2e-cus-"+userID, "e2e-pm-"+userID, fmt.Sprintf("%020d", binary.BigEndian.Uint64(uid[:8]))
+	r.NMI.PutVault(nmimock.Vault{ID: railCustomer, BillingID: railMethod, Card: nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1230"}})
+	r.NMI.AddSchedule(nmimock.Schedule{ID: railSub, Vault: railCustomer, Plan: "e2e-membership-monthly", Amount: "9.99", Days: 30, Created: started, NextBilling: paidThrough})
+	r.NMI.AddSale(nmimock.Sale{TransactionID: txn, Vault: railCustomer, ScheduleID: railSub, Amount: "9.99", At: started})
 	result, err := r.Client.ImportBilling(ctx, billing.DeclaredBilling{
 		AsOf:       now,
 		DefaultPSP: billing.PSPRef{Key: PSPKey},
