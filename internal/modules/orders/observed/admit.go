@@ -181,7 +181,7 @@ func int32Value(n int) (int32, error) {
 
 // Flat-price purchase omits quantity, while providers report one unit. These
 // represent the same accepted line; money and product identity still match above.
-func sameQuantity(a *int32, b *int) bool {
+func sameQuantity[T ~int | ~int32](a *T, b *int) bool {
 	left, right := int64(1), int64(1)
 	if a != nil {
 		left = int64(*a)
