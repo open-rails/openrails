@@ -1,5 +1,11 @@
 # Changelog
 
+## The checkout origin
+
+- Breaking: the merchant setting `payment_page.embed_origins` is
+  `checkout.embed_origins` (`MerchantSettings.checkout`,
+  `MerchantCheckoutSettings`). `PublicMerchant.embed_origins` is unchanged.
+
 ## Fallbacks are a checkout option
 
 - Breaking: OpenRails no longer marks or withholds fallback PSPs

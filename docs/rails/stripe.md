@@ -183,7 +183,7 @@ expiring the order expires the session. `return_url` must be on an allowed
 origin.
 
 On a server serving the payment page, a declared Stripe PSP gets the
-payment origin registered as a payment-method domain on its account
+checkout origin registered as a payment-method domain on its account
 (through Stripe's payment method domains API, after reading whether the
 account holds it),
 so the page's Express Checkout Element offers Apple Pay and Google Pay; see

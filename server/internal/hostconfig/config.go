@@ -47,9 +47,9 @@ type Config struct {
 	RouteGroups billing.RouteGroups
 	// AdminConsole declares app sign-in. The console is always served at /admin.
 	AdminConsole *ConsoleConfig
-	// PaymentOrigin is where the server serves the payment page
-	// (payment_origin); empty serves none.
-	PaymentOrigin string
+	// CheckoutOrigin is where the server serves the payment page
+	// (checkout_origin); empty serves none.
+	CheckoutOrigin string
 }
 
 type contextKey struct{}
@@ -95,7 +95,7 @@ type fileConfig struct {
 	Captcha            *billing.CaptchaConfig    `koanf:"captcha"`
 	Vault              *billing.VaultConfig      `koanf:"vault"`
 	AdminConsole       *ConsoleConfig            `koanf:"admin_console"`
-	PaymentOrigin      string                    `koanf:"payment_origin"`
+	CheckoutOrigin     string                    `koanf:"checkout_origin"`
 	LLM                *billing.LLMConfig        `koanf:"llm"`
 	RouteGroups        billing.RouteGroups       `koanf:"route_groups"`
 
@@ -257,7 +257,7 @@ func (f *fileConfig) config() (*Config, error) {
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
 		RouteGroups:              f.RouteGroups,
 		AdminConsole:             f.AdminConsole,
-		PaymentOrigin:            strings.TrimSpace(f.PaymentOrigin),
+		CheckoutOrigin:           strings.TrimSpace(f.CheckoutOrigin),
 	}, nil
 }
 

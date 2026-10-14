@@ -11,7 +11,7 @@ const ApplePayDomainAssociationPath = "/.well-known/apple-developer-merchantid-d
 
 // applePayDomainAssociation is Stripe's file, byte for byte, from
 // https://stripe.com/files/apple-pay/apple-developer-merchantid-domain-association:
-// Stripe registers the payment origin for Apple Pay on each merchant's
+// Stripe registers the checkout origin for Apple Pay on each merchant's
 // account, and Apple verifies the host by it.
 //
 //go:embed applepay/apple-developer-merchantid-domain-association

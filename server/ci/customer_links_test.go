@@ -59,7 +59,7 @@ const (
 
 // world is openrails.dev: a standalone server running the customer network,
 // its AuthKit the OpenID provider merchants' clients sign accounts in at,
-// served over HTTPS at its issuer, with a payment origin whose page's
+// served over HTTPS at its issuer, with a checkout origin whose page's
 // client the server declares. The shop has its own login (a trusted issuer)
 // and an NMI PSP; the rival has its own login. The mart has an NMI PSP too,
 // at a gateway of its own.
@@ -118,7 +118,7 @@ func newWorldAt(t *testing.T, clock *clockwork.FakeClock) *world {
 	t.Cleanup(ts.Close)
 	srv := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
 		cfg.Engine.PublicBillingBaseURL = "https://" + serverHost
-		cfg.PaymentOrigin = "https://" + paymentHost
+		cfg.CheckoutOrigin = "https://" + paymentHost
 		deps.PaymentPageAssets = paymentPage
 		cfg.Auth.Token.Issuer = ts.URL
 		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
@@ -414,7 +414,7 @@ func TestCustomerLinkBySigningIn(t *testing.T) {
 }
 
 // The payment page (hosted or embedded) proves the merchant side by the order's
-// pay URL: on the payment origin its secret asks for the challenge and
+// pay URL: on the checkout origin its secret asks for the challenge and
 // redeems it, answered only by the payment page's client; the account must
 // have accepted the network terms.
 func TestCustomerLinkOnThePaymentPage(t *testing.T) {
@@ -468,7 +468,7 @@ func TestCustomerLinkOnThePaymentPage(t *testing.T) {
 
 	order, secret := payURL()
 	r := host(paymentHost, http.MethodGet, "/v1/me/orders/"+order.ID.String(), secret, nil)
-	require.Equal(t, http.StatusOK, r.Code, "the merchant's own login's customer pays on the payment origin: %s", r.Body.String())
+	require.Equal(t, http.StatusOK, r.Code, "the merchant's own login's customer pays on the checkout origin: %s", r.Body.String())
 	ch := challenge(secret)
 	fay := w.account(true)
 	r = redeem(secret, ch.ID, w.paymentPageSignIn(fay, ch.Nonce).IDToken)
@@ -964,7 +964,7 @@ func TestTheServerDeclaresThePaymentPageClient(t *testing.T) {
 		cfg.Auth.Agreements = []authkit.AgreementConfig{{Key: network.TermsAgreement, Version: networkTerms, URL: "https://openrails.e2e.test/terms"}}
 		cfg.Auth.AuthorizationServer.Clients = []authkit.OAuthClientConfig{{ID: network.PaymentPageClientID, RedirectURIs: []string{paymentPageReturn}}}
 		cfg.Engine.PublicBillingBaseURL = "https://" + serverHost
-		cfg.PaymentOrigin = "https://" + paymentHost
+		cfg.CheckoutOrigin = "https://" + paymentHost
 		deps.PaymentPageAssets = paymentPage
 	})
 	require.ErrorContains(t, err, "declares "+network.PaymentPageClientID)

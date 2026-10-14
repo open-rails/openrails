@@ -29,7 +29,7 @@ func WithPayURL(ctx context.Context, c PayURL) context.Context {
 }
 
 // FromContext is the pay URL the request's secret opened: set only on the
-// payment origin.
+// checkout origin.
 func FromContext(ctx context.Context) (PayURL, bool) {
 	if ctx == nil {
 		return PayURL{}, false
@@ -38,7 +38,7 @@ func FromContext(ctx context.Context) (PayURL, bool) {
 	return c, ok
 }
 
-// ResolveHTTP admits the payment origin's API requests by their bearer
+// ResolveHTTP admits the checkout origin's API requests by their bearer
 // secret and pins its order's merchant: 404 pay_url_not_found for an
 // unknown or missing one, 410 pay_url_expired past its expiry. Every answer
 // is no-store. Paths outside /v1/ (the page) pass through untouched.
@@ -77,7 +77,7 @@ func bearer(header string) string {
 	return strings.TrimSpace(token)
 }
 
-// noStore keeps every payment origin answer out of caches: what it says depends on
+// noStore keeps every checkout origin answer out of caches: what it says depends on
 // the secret, which no cache keys on.
 type noStore struct{ http.ResponseWriter }
 
@@ -96,7 +96,7 @@ func (w noStore) Write(b []byte) (int, error) {
 
 func (w noStore) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-// Authenticator says a payment origin request is its order's customer, in
+// Authenticator says a checkout origin request is its order's customer, in
 // person: the secret ResolveHTTP admitted.
 type Authenticator struct{}
 

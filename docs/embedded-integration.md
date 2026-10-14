@@ -452,7 +452,7 @@ if err := openrailsgin.Mount(r, bill, routes); err != nil { return err }
 if err := openrailsfiber.Mount(app, bill, routes); err != nil { return err }
 ```
 
-A host serving the payment origin puts `openrailsgin.PaymentOrigin` ahead of
+A host serving the checkout origin puts `openrailsgin.CheckoutOrigin` ahead of
 every route and logs through `openrailsgin.RedactLog`; see [Payment
 page](payment-page.md#embedded-applications).
 

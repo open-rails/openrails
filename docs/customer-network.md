@@ -77,11 +77,11 @@ signing in this way is refused `409 network_account_linked`.
 
 ## On the payment page
 
-On the payment origin, the order's pay URL is the merchant's side:
+On the checkout origin, the order's pay URL is the merchant's side:
 its backend created the order for its customer. The URL's secret asks for the
 challenge and redeems it (the same two routes), and the shopper signs in with
 the payment page's own client, `openrails-payment-page`. The server declares it
-when the network runs with a payment page: its redirect URI is the payment
+when the network runs with a payment page: its redirect URI is the checkout
 origin's `/pay/sign-in`, its sign-in asks for the network terms, and the page may
 call the server's AuthKit. Only that client answers a pay URL, and a
 merchant's client never does; an operator declaring it is refused at boot.

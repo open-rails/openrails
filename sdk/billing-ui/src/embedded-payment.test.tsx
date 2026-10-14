@@ -30,7 +30,7 @@ describe("EmbeddedPayment", () => {
     expect(frame.getAttribute("allow")).toContain("publickey-credentials-get")
   })
 
-  it("hears completion and height only from its own frame on the payment origin", () => {
+  it("hears completion and height only from its own frame on the checkout origin", () => {
     const onComplete = vi.fn()
     const { container } = render(
       <EmbeddedPayment url={url} onComplete={onComplete} />

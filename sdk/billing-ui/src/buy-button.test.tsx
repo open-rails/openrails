@@ -17,7 +17,7 @@ import {
   type FakeBilling,
 } from "./test/billing-server"
 
-// Paying is OrderPayment's (order-payment.test.tsx) and the payment origin's
+// Paying is OrderPayment's (order-payment.test.tsx) and the checkout origin's
 // (EmbeddedPayment); here the dialogs record what BuyButton hands them.
 const modals = vi.hoisted(() => [] as OrderModalProps[])
 const frames = vi.hoisted(() => [] as EmbeddedModalProps[])
@@ -317,7 +317,7 @@ describe("BuyButton", () => {
     ).toHaveLength(1)
   })
 
-  it("frames the payment origin on a site the merchant registered to frame it", async () => {
+  it("frames the checkout origin on a site the merchant registered to frame it", async () => {
     frames.length = 0
     const server = fakeBilling({ embedOrigins: [window.location.origin] })
     const onPaid = vi.fn()

@@ -54,7 +54,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `default_payment_method_required` | 400 | `invalid_request_error` | The customer has no default card for the currency. |
 | `default_rate_card_not_found` | 404 | `invalid_request_error` | The meter has no default rate card. |
 | `destructive_actions_held` | 409 | `invalid_request_error` | The kill switch holds changes that end access or write to a provider; the proposal stays open. |
-| `embed_origins_required` | 400 | `invalid_request_error` | An embedded pay URL needs the origins that may frame it: the merchant's settings payment_page.embed_origins. |
+| `embed_origins_required` | 400 | `invalid_request_error` | An embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins. |
 | `entitlement_required` | 403 | `invalid_request_error` | A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks. |
 | `finding_action_failed` | 502 | `api_error` | Running the finding's recommendation failed; the finding stays open with the error in its notes. |
 | `finding_not_actionable` | 422 | `invalid_request_error` | The finding carries no recommendation to approve; ignore it or fix it out of band. |
@@ -103,7 +103,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `pay_url_attempts_exhausted` | 409 | `invalid_request_error` | The pay URL took its most card attempts; the merchant creates a new order. |
 | `pay_url_expired` | 410 | `invalid_request_error` | The pay URL expired; the merchant creates a new order. |
 | `pay_url_not_found` | 404 | `invalid_request_error` | The pay URL is unknown or no longer valid. |
-| `pay_url_unavailable` | 400 | `invalid_request_error` | This deployment serves no payment origin, or the order cannot take a pay URL. |
+| `pay_url_unavailable` | 400 | `invalid_request_error` | This deployment serves no checkout origin, or the order cannot take a pay URL. |
 | `payment_duplicate_refused` | 409 | `invalid_request_error` | The provider refused an identical charge it had just made; retry after its duplicate window. |
 | `payment_exceeds_due` | 409 | `invalid_request_error` | The recorded payment exceeds what the usage order has due, or is not the order's total. |
 | `payment_failed` | 402 | `card_error` | The payment was not made. |

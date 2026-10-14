@@ -6,7 +6,7 @@
 // on one origin and the payment page on another. Test-only: /__test/* on the API
 // origin makes merchant orders with a pay URL (as a backend does through
 // POST /v1/app/orders), stands in for Stripe.js's calls to Stripe, runs the
-// payment origin's payment-method domain registration, moves the clock and
+// checkout origin's payment-method domain registration, moves the clock and
 // reads host events.
 package main
 
@@ -65,9 +65,9 @@ type harness struct {
 	// shop is the merchant's handle on the server's engine.
 	shop *openrails.Client
 	api  string
-	// domain is the payment origin's name.
+	// domain is the checkout origin's name.
 	domain string
-	// payment is the payment origin; other is a site the merchant did not
+	// payment is the checkout origin; other is a site the merchant did not
 	// register for its embedded pay URLs.
 	payment, other string
 }
@@ -108,7 +108,7 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 			// which the browser suite stands in for.
 			Captcha: &openrails.CaptchaConfig{Provider: "turnstile", SiteKey: "1x00000000000000000000AA", SecretKey: "1x0000000000000000000000000000000AA"},
 			Merchants: map[string]openrails.MerchantDeclaration{"shop": {DisplayName: "Purchase Shop", // The shop's own site, the API origin, frames its embedded payment pages.
-				MerchantSettings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{api}}}, PSPs: map[string]openrails.PSPConfig{
+				MerchantSettings: billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{api}}}, PSPs: map[string]openrails.PSPConfig{
 					"nmi":    openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "e2e", SecurityKey: "e2e", WebhookSigningSecret: "e2e", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
 					"stripe": openrails.StripePSP{Environment: openrails.EnvironmentTest, AccountID: "acct_e2e", SecretKey: "sk_test_acct_e2e", WebhookSigningSecret: "whsec_e2e", PublishableKey: "pk_test_e2e"}.PSPConfig(),
 				}}},
@@ -119,9 +119,9 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 			Registration: authkit.RegistrationConfig{AllowMissingSenders: true},
 			HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
 		},
-		RouteGroups:   openrails.RouteGroups{Admin: true, Programmatic: true},
-		PaymentOrigin: payment,
-		Addr:          addr,
+		RouteGroups:    openrails.RouteGroups{Admin: true, Programmatic: true},
+		CheckoutOrigin: payment,
+		Addr:           addr,
 	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Clock: h.clock}, PaymentPageAssets: os.DirFS(assets)})
 	if err != nil {
 		return err
@@ -232,7 +232,7 @@ func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 // embed is a merchant's page framing a pay URL (src), as billing-ui's
-// EmbeddedPayment does; it keeps what the payment origin tells it.
+// EmbeddedPayment does; it keeps what the checkout origin tells it.
 func (h *harness) embed(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, `<!doctype html><title>Shop</title><script>window.__messages = []; addEventListener("message", (e) => { if (e.origin === %q) window.__messages.push(e.data) })</script>`+
@@ -270,7 +270,7 @@ func (h *harness) stripeAuthenticate(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, map[string]any{"authenticated": h.stripe.Authenticate(pi), "payment_intent": pi})
 }
 
-// stripeDomains runs the payment origin's queued registrations as the
+// stripeDomains runs the checkout origin's queued registrations as the
 // workers would, then answers the payment-method domains the fake Stripe
 // holds for the merchant's account.
 func (h *harness) stripeDomains(w http.ResponseWriter, r *http.Request) {

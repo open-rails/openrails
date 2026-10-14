@@ -43,9 +43,9 @@ type Dependencies struct {
 	RouteGroups config.RouteGroups
 	// AdminConsole declares app sign-in methods; the console is always on.
 	AdminConsole *hostconfig.ConsoleConfig
-	// PaymentOrigin serves the payment page there (by Host), from
+	// CheckoutOrigin serves the payment page there (by Host), from
 	// PaymentPageAssets; empty serves none.
-	PaymentOrigin     string
+	CheckoutOrigin    string
 	PaymentPageAssets fs.FS
 }
 
@@ -92,9 +92,9 @@ type Server struct {
 	nativeRoutes    *router.Table
 	nativeBrowser   map[string]bool
 	sharedRateLimit middleware.HTTPMiddleware
-	// paymentOrigin, paymentHost and paymentHandler are the payment origin,
+	// checkoutOrigin, paymentHost and paymentHandler are the checkout origin,
 	// its Host and its surface; the public handler sends its requests there.
-	paymentOrigin  string
+	checkoutOrigin string
 	paymentHost    paymentpage.Host
 	paymentHandler http.Handler
 }
@@ -259,7 +259,7 @@ func New(deps Dependencies) (*Server, error) {
 	}
 
 	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
-	if err := s.buildPaymentPage(deps.PaymentOrigin, deps.PaymentPageAssets); err != nil {
+	if err := s.buildPaymentPage(deps.CheckoutOrigin, deps.PaymentPageAssets); err != nil {
 		return nil, err
 	}
 	s.publicHandler = s.dispatchPaymentPage(s.wrapPublicHandler(mux.Handler()))

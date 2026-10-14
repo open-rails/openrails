@@ -105,8 +105,8 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		return Settings{}, err
 	}
 	cfg.ChargePSPs = ChargePSPs(in)
-	if in.PaymentPage != nil {
-		if _, err := NormalizeEmbedOrigins(in.PaymentPage.EmbedOrigins); err != nil {
+	if in.Checkout != nil {
+		if _, err := NormalizeEmbedOrigins(in.Checkout.EmbedOrigins); err != nil {
 			return Settings{}, err
 		}
 	}

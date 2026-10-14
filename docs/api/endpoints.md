@@ -159,7 +159,7 @@ know about the deployment, and names no merchant:
 
 `GET /v1/me/config` is a merchant's part, answered only to a credential bound
 to that merchant: a customer's token, or a pay URL's secret on the
-payment origin. `Cache-Control: private`.
+checkout origin. `Cache-Control: private`.
 
 - `merchant`: how the merchant presents itself: `display_name`, its https
   `logo_url` and `support_url`, and the `embed_origins` that may frame its

@@ -1,5 +1,5 @@
 // The payment dialogs — hosts, not flows: one Dialog around OrderPayment, or
-// around the order's embedded payment page on the payment origin. Closing is always
+// around the order's embedded payment page on the checkout origin. Closing is always
 // possible; an accepted payment settles on the server whether or not the
 // dialog stays open, and the order stays the customer's to pay.
 import type { ReactNode } from "react"

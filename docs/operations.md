@@ -1056,7 +1056,7 @@ What is kept on purpose:
   sales, enrollments, rebills, tier changes, refunds and Solana pulls (succeeded
   or refused) are what grants, payments and orders are checked against, a
   card erasure is the proof the card is gone, and a Stripe payment-method
-  domain registration (one per PSP and payment origin) is the record that the
+  domain registration (one per PSP and checkout origin) is the record that the
   host is registered. Only the instruction-only types
   above age out. The list lives once in the baseline's
   `provider_intents_updated_at_idx` and once in the retention code; a test

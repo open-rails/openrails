@@ -470,7 +470,7 @@ func CancelMerchantOrder(r *httprequest.Request) {
 	writeOrder(r, order)
 }
 
-// payURLPayment refuses on the payment origin what its secret does
+// payURLPayment refuses on the checkout origin what its secret does
 // not open: a saved card the pay URL does not offer (the merchant's opt-in,
 // and cards the customer allowed to be shown again), or another attempt once
 // the order took its most declines.

@@ -149,9 +149,9 @@ type Runtime struct {
 	// CopilotService answers catalog questions and drafts price changes for a
 	// person to review (off without an LLM and its consent).
 	CopilotService *copilot.Service
-	// PaymentOrigin is where a server serving the payment page
+	// CheckoutOrigin is where a server serving the payment page
 	// serves it; merchant orders take a purchase only when it is set.
-	paymentOrigin atomic.Pointer[string]
+	checkoutOrigin atomic.Pointer[string]
 	// paymentDomains are the (PSP, host) registrations known queued.
 	paymentDomains sync.Map
 	// PaymentPageNetwork is the payment page's sign-in to the customer
@@ -632,12 +632,12 @@ func (r *Runtime) SetSolanaPrepareTierChangeService(svc *recurring.PrepareTierCh
 	r.SolanaPrepareTierChangeService = svc
 }
 
-// PaymentOrigin is safe to read from provider posture hooks started
+// CheckoutOrigin is safe to read from provider posture hooks started
 // during New, while the host composes its payment page surface before Start.
-func (r *Runtime) PaymentOrigin() string {
-	if value := r.paymentOrigin.Load(); value != nil {
+func (r *Runtime) CheckoutOrigin() string {
+	if value := r.checkoutOrigin.Load(); value != nil {
 		return *value
 	}
 	return ""
 }
-func (r *Runtime) SetPaymentOrigin(origin string) { r.paymentOrigin.Store(&origin) }
+func (r *Runtime) SetCheckoutOrigin(origin string) { r.checkoutOrigin.Store(&origin) }

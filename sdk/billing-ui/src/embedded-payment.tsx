@@ -1,6 +1,6 @@
 // An order's pay URL framed on the merchant's own page, as Stripe's
 // embedded Checkout: the order's pay URL (embedded) in an
-// iframe the payment origin allows only on the merchant's registered origins.
+// iframe the checkout origin allows only on the merchant's registered origins.
 // The framed page reports its height and the order's completion, and only
 // messages from the pay URL's origin and this iframe are heard. Fulfil
 // on order.completed, never on the completion message. Fallbacks reach the

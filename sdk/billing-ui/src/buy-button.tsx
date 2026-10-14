@@ -1,7 +1,7 @@
 // BuyButton buys one price the host's page carries: it creates the signed-in
 // customer's order and pays it, in OrderPayment on the page, or, on a site
 // the merchant registered to frame its pay URLs, in the order's embedded
-// pay URL on the payment origin. The app never handles the order itself.
+// pay URL on the checkout origin. The app never handles the order itself.
 import * as React from "react"
 import { cn } from "cn"
 
@@ -61,14 +61,14 @@ function heldBy(err: unknown): string | undefined {
     : undefined
 }
 
-// Where the order is paid: on this page, or framed from the payment origin.
+// Where the order is paid: on this page, or framed from the checkout origin.
 type Paying =
   | { kind: "inline"; orderId: string }
   | { kind: "embedded"; orderId: string; url: string }
 
 // A page on an origin the merchant registered to frame its pay URLs pays
 // there; any other pays on the page.
-const framesPayment = (origins: string[]) =>
+const framesCheckout = (origins: string[]) =>
   typeof window !== "undefined" && origins.includes(window.location.origin)
 
 /** One price's button and its order. Requires `BillingProvider`. */
@@ -104,7 +104,7 @@ export function BuyButton({
     setStarting(true)
     try {
       const { merchant } = await client.getCustomerConfig()
-      const embedded = framesPayment(merchant.embed_origins)
+      const embedded = framesCheckout(merchant.embed_origins)
       let order: Order
       try {
         // No key: OpenRails answers the customer's open order of these lines,

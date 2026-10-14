@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The payment origin's Host reaches the page alone, however a browser spells
+// The checkout origin's Host reaches the page alone, however a browser spells
 // it; forwarded headers never select it, and a malformed Host is refused.
-func TestPaymentOriginRoutesByHost(t *testing.T) {
+func TestCheckoutOriginRoutesByHost(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
 		name, origin, host, forwarded string
@@ -30,7 +30,7 @@ func TestPaymentOriginRoutesByHost(t *testing.T) {
 		{name: "empty port", origin: "https://pay.example", host: "pay.example:", status: 400},
 		{name: "bad host", origin: "https://pay.example", host: "pay.example/path", status: 400},
 		{name: "no page here", origin: "https://pay.example", host: "pay.example", disabled: true, status: 404},
-		{name: "no payment origin", origin: "", host: "pay.example", status: 204},
+		{name: "no checkout origin", origin: "", host: "pay.example", status: 204},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			served := false
@@ -38,7 +38,7 @@ func TestPaymentOriginRoutesByHost(t *testing.T) {
 			if tc.disabled {
 				page = nil
 			}
-			pay, err := PaymentOrigin(tc.origin, page)
+			pay, err := CheckoutOrigin(tc.origin, page)
 			require.NoError(t, err)
 			r := gin.New()
 			r.Use(pay)
@@ -56,15 +56,15 @@ func TestPaymentOriginRoutesByHost(t *testing.T) {
 			}
 		})
 	}
-	_, err := PaymentOrigin("https://pay.example/path", nil)
+	_, err := CheckoutOrigin("https://pay.example/path", nil)
 	require.Error(t, err)
 }
 
-// A payment origin request logs without its query string or error details;
+// A checkout origin request logs without its query string or error details;
 // so does a /pay/ path wherever it arrived.
 func TestRedactLogOmitsPaymentDetails(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	pay, err := PaymentOrigin("https://pay.example", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
+	pay, err := CheckoutOrigin("https://pay.example", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
 	require.NoError(t, err)
 	var logged []gin.LogFormatterParams
 	var marked []bool
@@ -89,7 +89,7 @@ func TestRedactLogOmitsPaymentDetails(t *testing.T) {
 	require.Len(t, logged, 3)
 	require.Equal(t, "/v1/me/orders/ord_1", logged[0].Path)
 	require.Equal(t, "/pay/ord_1", logged[1].Path)
-	require.Equal(t, "payment origin error details omitted", logged[1].ErrorMessage)
+	require.Equal(t, "checkout origin error details omitted", logged[1].ErrorMessage)
 	require.Equal(t, "/shop?q=1", logged[2].Path)
 	require.Contains(t, logged[2].ErrorMessage, errSecret.Error())
 	require.Equal(t, []bool{true, true, false}, marked)

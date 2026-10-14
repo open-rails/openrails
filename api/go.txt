@@ -137,6 +137,7 @@ pkg openrails, method (*Client) UpdatePSP(context.Context, billing.PSPID, billin
 pkg openrails, method (*Client) UpdatePrice(context.Context, billing.PriceID, billing.UpdatePriceParams, ...RequestOption) (*billing.Price, error)
 pkg openrails, method (*Client) UpdateProduct(context.Context, billing.ProductID, billing.UpdateProductParams, ...RequestOption) (*billing.Product, error)
 pkg openrails, method (*Client) WaiveOrderBalance(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
+pkg openrails, method (*Engine) CheckoutPage(string, fs.FS) (string, http.Handler, error)
 pkg openrails, method (*Engine) ClearDestructiveHold(context.Context, billing.MerchantID, billing.DestructiveHoldID, billing.DestructiveOperator, string) (*billing.DestructiveHold, error)
 pkg openrails, method (*Engine) Close(context.Context) error
 pkg openrails, method (*Engine) CustomerConfig(Routes, *http.Request) (*billing.CustomerConfig, error)
@@ -145,7 +146,6 @@ pkg openrails, method (*Engine) LocalMerchant(billing.MerchantID) (*LocalClient,
 pkg openrails, method (*Engine) Merchant(billing.MerchantID) (*Client, error)
 pkg openrails, method (*Engine) MerchantBySlug(string) (*Client, error)
 pkg openrails, method (*Engine) NotificationEvents(string) (*NotificationConsumer, error)
-pkg openrails, method (*Engine) PaymentPage(string, fs.FS) (string, http.Handler, error)
 pkg openrails, method (*Engine) Probes() []Probe
 pkg openrails, method (*Engine) PublicConfig(Routes) (*billing.PublicConfig, error)
 pkg openrails, method (*Engine) Ready(context.Context) error
@@ -572,9 +572,9 @@ pkg openrails, type VaultConfig struct, TransitMount string `yaml:"transit_mount
 pkg openrails, var ErrUnauthenticated error
 pkg openrails/adapters/fiber, const RouteNamePrefix untyped string = "openrails."
 pkg openrails/adapters/fiber, func Mount(*fiber.App, *openrails.Engine, openrails.Routes) error
+pkg openrails/adapters/gin, func CheckoutOrigin(string, http.Handler) (gin.HandlerFunc, error)
 pkg openrails/adapters/gin, func Mount(*gin.Engine, *openrails.Engine, openrails.Routes) error
 pkg openrails/adapters/gin, func MountRoutes(*gin.Engine, []openrails.Route) error
-pkg openrails/adapters/gin, func PaymentOrigin(string, http.Handler) (gin.HandlerFunc, error)
 pkg openrails/adapters/gin, func PaymentRequest(*gin.Context) bool
 pkg openrails/adapters/gin, func RedactLog(gin.LogFormatter) gin.LogFormatter
 pkg openrails/adapters/http, func Mount(any, *openrails.Engine, openrails.Routes) error
@@ -2245,6 +2245,8 @@ pkg openrails/billing, type Merchant struct, RailsArmed []Rail `json:"rails_arme
 pkg openrails/billing, type Merchant struct, Slug string `json:"slug"`
 pkg openrails/billing, type Merchant struct, Status MerchantStatus `json:"status"`
 pkg openrails/billing, type Merchant struct, UpdatedAt time.Time `json:"updated_at"`
+pkg openrails/billing, type MerchantCheckoutSettings struct
+pkg openrails/billing, type MerchantCheckoutSettings struct, EmbedOrigins []string `json:"embed_origins,omitempty"`
 pkg openrails/billing, type MerchantConfigurationState struct
 pkg openrails/billing, type MerchantConfigurationState struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type MerchantConfigurationState struct, PlatformVault PlatformVaultState `json:"platform_vault"`
@@ -2258,8 +2260,6 @@ pkg openrails/billing, type MerchantListParams struct, embedded PageRequest
 pkg openrails/billing, type MerchantName struct
 pkg openrails/billing, type MerchantName struct, ID MerchantID `json:"id"`
 pkg openrails/billing, type MerchantName struct, Name string `json:"name"`
-pkg openrails/billing, type MerchantPaymentPageSettings struct
-pkg openrails/billing, type MerchantPaymentPageSettings struct, EmbedOrigins []string `json:"embed_origins,omitempty"`
 pkg openrails/billing, type MerchantProfile struct
 pkg openrails/billing, type MerchantProfile struct, BillingURL string `json:"billing_url,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, FromEmail string `json:"from_email,omitempty"`
@@ -2305,12 +2305,12 @@ pkg openrails/billing, type MerchantSettings struct, BillingPolicies []BillingPo
 pkg openrails/billing, type MerchantSettings struct, BillingPolicyBindings []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, CardVault string `json:"card_vault,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, ChargePSPs []string `json:"charge_psps,omitempty"`
+pkg openrails/billing, type MerchantSettings struct, Checkout *MerchantCheckoutSettings `json:"checkout,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, CollectionThreshold *int64 `json:"collection_threshold,omitempty,string"`
 pkg openrails/billing, type MerchantSettings struct, DelegatedInvokerWastedSpendLimits []BudgetWindow `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, MonthlyFloor *int64 `json:"monthly_floor,omitempty,string"`
 pkg openrails/billing, type MerchantSettings struct, PSPRouting *[]PSPRoutingRule `json:"psp_routing,omitempty"`
-pkg openrails/billing, type MerchantSettings struct, PaymentPage *MerchantPaymentPageSettings `json:"payment_page,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, Profile *MerchantProfile `json:"profile,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, ProviderRefundAccess *string `json:"provider_refund_access,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
@@ -3792,6 +3792,7 @@ pkg openrails/server, func MerchantRole(string) (iam.Role, bool)
 pkg openrails/server, func MerchantRoles() []iam.Role
 pkg openrails/server, func New(context.Context, Config, Deps) (*Server, error)
 pkg openrails/server, method (*Server) AuthKit() *authkit.Client
+pkg openrails/server, method (*Server) CheckoutPage() (string, http.Handler)
 pkg openrails/server, method (*Server) ClearDestructiveHold(context.Context, billing.MerchantID, billing.DestructiveHoldID, billing.DestructiveOperator, string) (*billing.DestructiveHold, error)
 pkg openrails/server, method (*Server) Close(context.Context) error
 pkg openrails/server, method (*Server) CompletePendingMerchantRetirements(context.Context, int) (int, error)
@@ -3815,7 +3816,6 @@ pkg openrails/server, method (*Server) MerchantScope(context.Context, billing.Me
 pkg openrails/server, method (*Server) NetworkAccountHandler(func(http.ResponseWriter, *http.Request, billing.NetworkAccountID)) http.Handler
 pkg openrails/server, method (*Server) NetworkLinks(context.Context, billing.NetworkAccountID) ([]billing.CustomerLink, error)
 pkg openrails/server, method (*Server) NotificationEvents(string) (*openrails.NotificationConsumer, error)
-pkg openrails/server, method (*Server) PaymentPage() (string, http.Handler)
 pkg openrails/server, method (*Server) PrivateHandler() http.Handler
 pkg openrails/server, method (*Server) ProvisionMerchant(context.Context, billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)
 pkg openrails/server, method (*Server) RenameMerchant(context.Context, billing.MerchantID, billing.RenameMerchantParams) (*billing.MerchantName, error)
@@ -3836,12 +3836,12 @@ pkg openrails/server, type Config struct
 pkg openrails/server, type Config struct, Addr string
 pkg openrails/server, type Config struct, AdminConsole *AdminConsole
 pkg openrails/server, type Config struct, Auth authkit.Config
+pkg openrails/server, type Config struct, CheckoutOrigin string
 pkg openrails/server, type Config struct, DrainDelay time.Duration
 pkg openrails/server, type Config struct, Engine openrails.Config
 pkg openrails/server, type Config struct, LocalSignIn bool
 pkg openrails/server, type Config struct, MerchantCreation *MerchantCreationConfig
 pkg openrails/server, type Config struct, Naming NamingConfig
-pkg openrails/server, type Config struct, PaymentOrigin string
 pkg openrails/server, type Config struct, PrivateAddr string
 pkg openrails/server, type Config struct, RouteGroups openrails.RouteGroups
 pkg openrails/server, type Config struct, ShutdownTimeout time.Duration
