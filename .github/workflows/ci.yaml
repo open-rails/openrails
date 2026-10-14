@@ -67,7 +67,7 @@ jobs:
           export SQLC_DATABASE_URL="$(scripts/sqlc-vet-db.sh)"
           "$sqlc_bin" generate
           go run ./scripts/contracts -write
-          go build .
+          go build ./...
           (cd server && go build ./...)
           mkdir -p /tmp/catalog-contract-artifacts
           git rev-parse HEAD > /tmp/catalog-contract-artifacts/source-head.txt
