@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -64,7 +65,7 @@ func (s *Service) writeCatalogPrice(ctx context.Context, w priceWrite) (*models.
 				return fmt.Errorf("resolve current holder of price key %q: %w", key, dErr)
 			}
 			if displaced != nil && displaced.ProductID != product.ID {
-				return ErrCatalogConflict
+				return priceConflict(nil, product.Key, key, w)
 			}
 			if err := defaultKeyCadenceConflict(defaulted, displaced, req, key); err != nil {
 				return err
@@ -93,7 +94,7 @@ func (s *Service) writeCatalogPrice(ctx context.Context, w priceWrite) (*models.
 
 		if reactivating {
 			if existing.ProviderOwned != w.providerOwned {
-				return ErrCatalogConflict
+				return priceConflict(nil, product.Key, key, w)
 			}
 			if existing.Archived != req.Archived {
 				if err := prices.SetArchived(ctx, priceID, req.Archived); err != nil {
@@ -132,7 +133,10 @@ func (s *Service) writeCatalogPrice(ctx context.Context, w priceWrite) (*models.
 				UpdatedAt: now,
 			}
 			if err := prices.Create(ctx, price); err != nil {
-				return catalogWrite(err)
+				if db.IsUniqueViolation(err) {
+					return priceConflict(err, product.Key, key, w)
+				}
+				return err
 			}
 		}
 

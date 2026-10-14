@@ -199,13 +199,21 @@ func (r *Request) ErrorCode(code, message string) {
 // AbortAPIError is APIError that also stops the middleware chain.
 func (r *Request) AbortAPIError(err *api.APIError) {
 	err.WithRequestID(r.RequestID())
-	r.logRefusal(err.HTTPStatus, logrus.Fields{"type": err.Type, "code": err.Code, "param": err.Param}, err.Message)
+	r.logRefusal(err.HTTPStatus, logrus.Fields{"type": err.Type, "code": err.Code, "param": paramValue(err.Param)}, err.Message)
 	r.t.AbortJSON(err.HTTPStatus, err.ToResponse())
+}
+
+// paramValue logs a refusal's param, not its pointer.
+func paramValue(p *string) any {
+	if p == nil {
+		return nil
+	}
+	return *p
 }
 
 func (r *Request) APIError(err *api.APIError) {
 	err.WithRequestID(r.RequestID())
-	fields := logrus.Fields{"type": err.Type, "code": err.Code, "param": err.Param}
+	fields := logrus.Fields{"type": err.Type, "code": err.Code, "param": paramValue(err.Param)}
 	if cause := err.Cause(); cause != nil {
 		fields[logrus.ErrorKey] = cause
 	}

@@ -30,3 +30,14 @@ WHERE owned_price.merchant_id=sqlc.arg(merchant_id)::uuid AND owned_price.id=sql
 SELECT id FROM billing.prices
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(price_id)::uuid
 FOR UPDATE;
+
+-- name: ListProviderObjectHolders :many
+-- The prices, deleted ones included, bound to one provider object of a PSP.
+SELECT price.id, price.key, prod.key AS product_key, price.archived, (price.deleted_at IS NOT NULL)::boolean AS deleted
+FROM billing.price_psp_bindings b
+JOIN billing.prices price ON price.merchant_id = b.merchant_id AND price.id = b.price_id
+JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id
+WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.psp_id = sqlc.arg(psp_id)::uuid AND b.plan_pda IS NULL
+  AND (b.plan_id = sqlc.narg(plan_id)::text OR b.price_ref = sqlc.narg(price_ref)::text
+       OR b.recurring_billing_option_id = sqlc.narg(recurring_billing_option_id)::text)
+ORDER BY price.created_at, price.id;

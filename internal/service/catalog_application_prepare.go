@@ -430,7 +430,7 @@ func (s *Service) revalidateCatalogApplicationProviders(ctx context.Context, pre
 			return err
 		}
 		if !found || !sameCatalogApplicationPSP(current, prepared.accounts[id]) {
-			return ErrCatalogConflict
+			return fmt.Errorf("PSP %q changed while the application was prepared; retry: %w", prepared.accounts[id].Key, ErrCatalogConflict.WithParam("psps."+prepared.accounts[id].Key))
 		}
 	}
 	return nil

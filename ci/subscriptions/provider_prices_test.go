@@ -3,6 +3,7 @@
 package subscriptions_test
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -342,4 +343,103 @@ func TestCalendarProviderPriceRetainsOldIdentityAndAccessChoice(t *testing.T) {
 	require.Equal(t, original.Provider.IDs, earlier.Provider.IDs)
 	require.True(t, earlier.Provider.AccessDurationDefault)
 	require.Equal(t, billing.SyncStatusInSync, earlier.Provider.SyncStatus)
+}
+
+// A provider object has one mirror: the provider price that declares it.
+// An archived price of another key, left by an earlier catalog generation or
+// the provider-price split, gives the object up to the key that declares it
+// now. A live price of another key is refused by name.
+func TestProviderObjectMovesToTheKeyDeclaringIt(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	c := w.client[embedded]
+	product := "moves-" + uuid.NewString()[:8]
+	apply := func(providerPrices string) error {
+		t.Helper()
+		doc := fmt.Sprintf("schema_version: 1\nproducts:\n  %s:\n    display_name: Moves\n    provider_prices:\n%s", product, providerPrices)
+		params, err := catalog.ParseApplicationYAML([]byte(doc))
+		require.NoError(t, err)
+		_, err = c.ApplyCatalog(t.Context(), params, billing.ApplyCatalogParams{})
+		return err
+	}
+	const legacyRBO, trialRBO = "0000001412", "0000000931"
+	require.NoError(t, apply(fmt.Sprintf(`      monthly-ccbill:
+        psp: ccbill
+        flex_id: %s
+        recurring_billing_option_id: "%s"
+        amount: 23 USD
+        billing_interval: 30 days
+        access_duration: 30 days
+      monthly-legacy-ccbill:
+        psp: ccbill
+        recurring_billing_option_id: "%s"
+        amount: 19 USD
+        billing_interval: 30 days
+        access_duration: 30 days
+        archived: true
+      monthly-trial-ccbill:
+        psp: ccbill
+        recurring_billing_option_id: "%s"
+        amount: 14.95 USD
+        billing_interval: 30 days
+        trial_unit_amount: 19950000
+        trial_duration: 30 days
+        access_duration: 30 days
+        archived: true
+`, ccbillFlexID, ccbillRBO, legacyRBO, trialRBO)))
+
+	require.NoError(t, apply(fmt.Sprintf(`      monthly-ccbill:
+        psp: ccbill
+        flex_id: %s
+        recurring_billing_option_id: "%s"
+        amount: 23 USD
+        billing_interval: 30 days
+      monthly-legacy-19-ccbill:
+        psp: ccbill
+        recurring_billing_option_id: "%s"
+        amount: 19 USD
+        billing_interval: 30 days
+        archived: true
+      monthly-legacy-1495-ccbill:
+        psp: ccbill
+        recurring_billing_option_id: "%s"
+        amount: 14.95 USD
+        billing_interval: 30 days
+        trial_unit_amount: 19950000
+        trial_duration: 30 days
+        archived: true
+`, ccbillFlexID, ccbillRBO, legacyRBO, trialRBO)), "an earlier key's archived mirror gives up its object")
+	mirrors := map[string]string{}
+	rows, err := w.pool.Query(t.Context(), w.sql(`SELECT b.recurring_billing_option_id, p.key FROM billing.price_psp_bindings b JOIN billing.prices p ON p.merchant_id=b.merchant_id AND p.id=b.price_id WHERE b.recurring_billing_option_id IS NOT NULL`))
+	require.NoError(t, err)
+	for rows.Next() {
+		var rbo, key string
+		require.NoError(t, rows.Scan(&rbo, &key))
+		require.NotContains(t, mirrors, rbo, "one mirror per provider object")
+		mirrors[rbo] = key
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, map[string]string{ccbillRBO: "monthly-ccbill", legacyRBO: "monthly-legacy-19-ccbill", trialRBO: "monthly-legacy-1495-ccbill"}, mirrors)
+	archived := true
+	earlier, err := c.ListPrices(t.Context(), billing.PriceListParams{ProductKey: product, Key: "monthly-legacy-ccbill", Archived: &archived})
+	require.NoError(t, err)
+	require.Len(t, earlier.Items, 1, "the earlier key's version stays")
+	require.Equal(t, legacyRBO, earlier.Items[0].Provider.IDs["recurring_billing_option_id"], "and keeps its provider identity")
+	monthly, err := priceByKey(t.Context(), c, product, "monthly-ccbill")
+	require.NoError(t, err)
+	require.True(t, monthly.Provider.AccessDurationDefault)
+
+	err = apply(fmt.Sprintf(`      renamed-ccbill:
+        psp: ccbill
+        flex_id: %s
+        recurring_billing_option_id: "%s"
+        amount: 23 USD
+        billing_interval: 30 days
+`, ccbillFlexID, ccbillRBO))
+	requireCode(t, err, http.StatusConflict, billing.CodeResourceConflict)
+	var refusal *billing.StatusError
+	require.True(t, errors.As(err, &refusal))
+	require.Contains(t, refusal.Message, `live provider price "monthly-ccbill"`)
+	require.Contains(t, refusal.Message, ccbillRBO)
+	require.Equal(t, "products."+product+".provider_prices.renamed-ccbill", *refusal.Param)
 }
