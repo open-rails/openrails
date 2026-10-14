@@ -60,6 +60,9 @@ var excludedTables = map[string]string{
 	"customer_entitlement_cache_stamps": "derived from product access and product keys; rebuilt on read",
 	"price_keys":                        "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
 	"balance_watches":                   "derived: when a watched balance is next looked at; restore watches every prepaid balance and running charge again",
+	"psp_imports":                       "import working state: the destination pulls its PSPs again",
+	"psp_import_records":                "import working state: copies of provider objects, pulled again",
+	"psp_import_mappings":               "the merchant's own identifiers; it maps them again for an import",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is

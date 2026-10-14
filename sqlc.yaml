@@ -97,6 +97,7 @@ sql:
       - "internal/migrate/postgres/0102_book_id.up.sql"
       - "internal/migrate/postgres/0103_solana_engine_collection.up.sql"
       - "internal/migrate/postgres/0104_provider_prices.up.sql"
+      - "internal/migrate/postgres/0105_psp_imports.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

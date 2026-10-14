@@ -147,7 +147,7 @@ func TestNMIFetcher(t *testing.T) {
 
 		require.Len(t, snap.Transactions, 3, "settle actions are not charge events")
 		sale, declined, refund := snap.Transactions[0], snap.Transactions[1], snap.Transactions[2]
-		require.Equal(t, RemoteTransaction{TransactionID: "12030573544", Type: TransactionTypeSale, Success: true, AmountCents: 2399, Currency: "USD",
+		require.Equal(t, RemoteTransaction{TransactionID: "12030573544", OrderID: "119f105d-6f72-4257-ab53-353ed2c99e69", Type: TransactionTypeSale, Success: true, AmountCents: 2399, Currency: "USD",
 			OccurredAt: time.Date(2026, 5, 5, 19, 35, 42, 0, time.UTC), Answer: decline.Evidence{Rail: "nmi", Code: "100"}}, withoutRaw(sale))
 		require.Contains(t, string(sale.Raw), "119f105d-6f72-4257-ab53-353ed2c99e69")
 		require.Equal(t, TransactionTypeDecline, declined.Type)

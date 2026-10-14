@@ -41,6 +41,9 @@ type Vault struct {
 	Extra []Billing
 	// NoBrand omits card_type from reads, as some live accounts do.
 	NoBrand bool
+	// Email and the names are the billing entry's; ShippingID names the
+	// shipping entry (NMI generates one when empty).
+	Email, FirstName, LastName, ShippingID string
 }
 
 // Billing is a further billing entry (card) in a vault.
@@ -65,6 +68,8 @@ type Schedule struct {
 	Book    string
 	Created time.Time
 	Order   string
+	// Email is the schedule's billing email; empty reads the vault's.
+	Email string
 	// Days or Months is the cadence (Days 30 when both are zero).
 	Days, Months int
 	// CalendarAnchor is the original provider billing day, retained when a

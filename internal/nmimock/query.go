@@ -59,7 +59,10 @@ type xmlTransaction struct {
 	AVSResponse      string   `xml:"avs_response"`
 	CSCResponse      string   `xml:"csc_response"`
 	CustomerVaultID  string   `xml:"customer_vault_id"`
-	Currency         string   `xml:"currency"`
+	// CustomerID is the vault as live reports name it.
+	CustomerID string `xml:"customerid"`
+	Email      string `xml:"email"`
+	Currency   string `xml:"currency"`
 	// MDF is merchant-defined field 20, present when the transaction carries one.
 	MDF    []xmlMDF  `xml:"merchant_defined_field"`
 	Action xmlAction `xml:"action"`
@@ -93,7 +96,7 @@ func cardTransaction(id, condition, order, vault, currency string, c Card, a xml
 		a.NetworkTokenUsed = "1"
 	}
 	return xmlTransaction{TransactionID: id, TransactionType: "cc", Condition: condition, OrderID: order, CCNumber: maskedNumber(c), CCBin: binFor(c), CCType: c.Brand,
-		AVSResponse: c.AVS, CSCResponse: c.CVV, CustomerVaultID: vault, Currency: currency, Action: a}
+		AVSResponse: c.AVS, CSCResponse: c.CVV, CustomerVaultID: vault, CustomerID: vault, Currency: currency, Action: a}
 }
 
 func binFor(c Card) string {
@@ -164,6 +167,9 @@ func (m *Mock) search(form url.Values) string {
 			Success: success, Source: source, ResponseText: text, ResponseCode: code})
 		txn.OrderDescription = s.OrderDescription
 		txn.MDF = bookField(s.Book)
+		if v := m.vaults[s.Vault]; v != nil {
+			txn.Email = v.Email
+		}
 		add(txn, s.At, s.ScheduleID)
 	}
 	for _, r := range m.refunds {
@@ -199,8 +205,8 @@ func (m *Mock) search(form url.Values) string {
 	return b.String()
 }
 
-// recurringReport lists live schedules by subscription_id (comma list);
-// NMI no longer reports a deleted one.
+// recurringReport lists live schedules by subscription_id (comma list), or
+// every live one; NMI no longer reports a deleted one.
 func (m *Mock) recurringReport(rec *httptest.ResponseRecorder, form url.Values) {
 	type plan struct {
 		ID string `xml:"plan_id"`
@@ -212,12 +218,26 @@ func (m *Mock) recurringReport(rec *httptest.ResponseRecorder, form url.Values) 
 		PONumber       string   `xml:"ponumber"`
 		NextChargeDate string   `xml:"next_charge_date"`
 		Plan           plan     `xml:"plan"`
+		FirstName      string   `xml:"first_name"`
+		LastName       string   `xml:"last_name"`
+		Email          string   `xml:"email"`
+	}
+	ids := strings.Split(form.Get("subscription_id"), ",")
+	if form.Get("subscription_id") == "" {
+		ids = sortedKeys(m.schedules)
 	}
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n<nm_response>")
-	for _, id := range strings.Split(form.Get("subscription_id"), ",") {
+	for _, id := range ids {
 		if s := m.schedules[id]; s != nil && !s.Deleted {
-			raw, _ := xml.Marshal(row{SubscriptionID: s.ID, OrderID: s.Order, PONumber: s.Order, NextChargeDate: s.NextBilling.Format("2006-01-02"), Plan: plan{ID: s.Plan}})
+			r := row{SubscriptionID: s.ID, OrderID: s.Order, PONumber: s.Order, NextChargeDate: s.NextBilling.Format("2006-01-02"), Plan: plan{ID: s.Plan}, Email: s.Email}
+			if v := m.vaults[s.Vault]; v != nil {
+				r.FirstName, r.LastName = v.FirstName, v.LastName
+				if r.Email == "" {
+					r.Email = v.Email
+				}
+			}
+			raw, _ := xml.Marshal(r)
 			b.Write(raw)
 		}
 	}

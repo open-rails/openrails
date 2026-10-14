@@ -250,6 +250,14 @@ type V5CustomerBilling struct {
 	PaymentDetails V5BillingCardData `json:"payment_details"`
 }
 
+// V5CustomerShipping is a vault's shipping entry; merchants often set its id.
+type V5CustomerShipping struct {
+	ID        string `json:"id"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Email     string `json:"email"`
+}
+
 // V5BillingCardData is the response-side stored payment method (masked).
 type V5BillingCardData struct {
 	CardNumber string `json:"card_number"`
@@ -258,10 +266,11 @@ type V5BillingCardData struct {
 }
 
 type V5Customer struct {
-	Object  string              `json:"object"`
-	ID      string              `json:"id"`
-	Created string              `json:"created"`
-	Billing []V5CustomerBilling `json:"billing"`
+	Object   string               `json:"object"`
+	ID       string               `json:"id"`
+	Created  string               `json:"created"`
+	Billing  []V5CustomerBilling  `json:"billing"`
+	Shipping []V5CustomerShipping `json:"shipping"`
 	// MerchantDefinedFields are the vault's merchant-defined fields by id.
 	MerchantDefinedFields map[string]string `json:"merchant_defined_fields"`
 }

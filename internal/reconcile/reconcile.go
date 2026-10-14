@@ -154,9 +154,14 @@ type RemoteTransaction struct {
 	SubscriptionID string `json:"subscription_id,omitempty"`
 	// BookID is the billing book that created the transaction, as it carries
 	// it; empty when it carries none.
-	BookID  string          `json:"book_id,omitempty"`
-	Type    TransactionType `json:"type"`
-	Success bool            `json:"success"`
+	BookID string `json:"book_id,omitempty"`
+	// OrderID, CustomerRef (the vault) and Email are the identity facts the
+	// provider's record carries, when it carries them.
+	OrderID     string          `json:"order_id,omitempty"`
+	CustomerRef string          `json:"customer_ref,omitempty"`
+	Email       string          `json:"email,omitempty"`
+	Type        TransactionType `json:"type"`
+	Success     bool            `json:"success"`
 	// AmountCents is in rail minor units of Currency. Zero for Solana (base
 	// units, preserved in Raw) and when the amount is not exact in Currency.
 	// Currency is the provider's verbatim; empty when it reports none (CCBill

@@ -123,7 +123,7 @@ func (c *NMIClient) salesPage(ctx context.Context, filter QueryFilter, since, un
 		}
 		for _, sale := range saleActions(t, since) {
 			out = append(out, ScheduleSale{SaleAction: sale, SubscriptionID: strings.TrimSpace(t.SubscriptionID),
-				OrderID: strings.TrimSpace(t.OrderID), VaultID: strings.TrimSpace(t.CustomerVaultID)})
+				OrderID: strings.TrimSpace(t.OrderID), VaultID: t.Vault()})
 		}
 	}
 	return out, len(report.Transactions), nil
