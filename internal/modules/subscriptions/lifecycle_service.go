@@ -526,6 +526,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			CurrentPeriodEndsAt:   &periodEndsAt,
 			StartedAt:             periodStartsAt,
 		}
+		// OpenRails' cranker collects every Solana membership.
+		if params.Rail == models.RailSolana {
+			subscription.CollectionPolicy = models.CollectionPolicyEngine
+		}
 
 		if terms := params.Prepared; terms != nil {
 			subscription.ID, subscription.PspID, subscription.Quantity = terms.SubscriptionID, terms.PSPID, CloneQuantity(terms.Quantity)

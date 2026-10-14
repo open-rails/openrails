@@ -437,11 +437,10 @@ func (w *SolanaCrankWorker) finalizePull(ctx context.Context, repo solanaSubStor
 		return err
 	}
 	kind := payments.AttemptRenewal
-	token := payments.DefaultTokenType(string(models.RailSolana), "")
 	payment := &models.Payment{CustomerID: agreement.CustomerID, SubscriptionID: &row.SubscriptionID, PspID: &row.PspID,
 		Rail: models.RailSolana, TransactionID: receipt.Signature, Amount: agreement.Amount, ListAmount: agreement.Amount,
 		Currency: agreement.Currency, Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail,
-		PurchasedAt: receipt.PeriodStart, AttemptKind: &kind, Quantity: agreement.Quantity, TokenType: &token,
+		PurchasedAt: receipt.PeriodStart, AttemptKind: &kind, Quantity: agreement.Quantity,
 		Metadata: map[string]any{"solana_subscriber_wallet": row.SubscriberWallet, "solana_subscription_pda": row.SubscriptionPDA,
 			"solana_token_mint": row.Mint, "solana_token_amount": strconv.FormatUint(receipt.Amount, 10), "solana_treasury": row.Treasury,
 			"solana_pull_intent": execution.IntentID.String(), "solana_pull_episode_at": agreement.EpisodeAt.UTC().Format(time.RFC3339Nano)},

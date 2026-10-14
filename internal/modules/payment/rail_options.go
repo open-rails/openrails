@@ -112,7 +112,12 @@ func (s *OrderAttemptService) railSkipReason(price *models.Price, target railTar
 			}
 			// The subscriber signs into the price's published on-chain plan.
 			targetTerms, targetErr := parseSolanaPlanTerms(link)
-			executionTerms, executionErr := parseSolanaPlanTerms(price.PSPLinkForRail(models.RailSolana))
+			execution := price
+			if target.Scope != nil {
+				// Superseded Solana PSPs keep their plans for the subscriptions they renew.
+				execution = price.ForPSP(target.Scope.ID)
+			}
+			executionTerms, executionErr := parseSolanaPlanTerms(execution.PSPLinkForRail(models.RailSolana))
 			if targetErr != nil || executionErr != nil || targetTerms != executionTerms {
 				return models.PSPRoutingSkipLinkMissing
 			}

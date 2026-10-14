@@ -442,8 +442,17 @@ func (p *Price) View() billing.Price {
 		out.Provider = provider
 	}
 	if !p.ProviderOwned {
-		if pda := strings.TrimSpace(p.PSPLinkForRail(RailSolana)["plan_pda"]); pda != "" {
-			out.SolanaPlan = &pda
+		// New sales take the current Solana PSP's plan; superseded PSPs' plans are keyed by id.
+		var plans []string
+		for key, link := range PSPLinksOnRail(p.PSPLinks, RailSolana) {
+			if _, err := uuid.Parse(key); err != nil {
+				if pda := strings.TrimSpace(link["plan_pda"]); pda != "" {
+					plans = append(plans, pda)
+				}
+			}
+		}
+		if len(plans) == 1 {
+			out.SolanaPlan = &plans[0]
 		}
 	}
 	return out
