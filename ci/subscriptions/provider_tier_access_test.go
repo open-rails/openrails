@@ -17,16 +17,16 @@ import (
 	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
-// A nil hour count means either an accepted provider period or explicitly
-// indefinite access. Provider changes must freeze and retain that choice,
+// Access follows the provider period or an explicit duration.
+// Provider changes must freeze and retain that choice,
 // including the adjustment bill, its future schedule, and a later replay.
 func TestProviderTierChangeRetainsAcceptedAccessChoice(t *testing.T) {
 	rows := []struct {
 		name     string
 		from, to catalog.Field[int]
 	}{
-		{"default to indefinite", catalog.Field[int]{}, catalog.Null[int]()},
-		{"indefinite to default", catalog.Null[int](), catalog.Field[int]{}},
+		{"default to default", catalog.Field[int]{}, catalog.Field[int]{}},
+		{"hours to hours", catalog.Value(1440), catalog.Value(48)},
 		{"default to hours", catalog.Field[int]{}, catalog.Value(48)},
 		{"hours to default", catalog.Value(1440), catalog.Field[int]{}},
 	}
@@ -91,20 +91,14 @@ func TestProviderTierChangeRetainsAcceptedAccessChoice(t *testing.T) {
 					if defaultAccess {
 						require.Nil(t, hours)
 						wantEnd = current.CurrentPeriodEndsAt
-					} else if !row.to.Null {
+					} else {
 						require.Equal(t, &row.to.Value, hours)
 						wantEnd = new(changedAt.Add(time.Duration(row.to.Value) * time.Hour))
-					} else {
-						require.Nil(t, hours)
 					}
 					var gotEnd *time.Time
 					require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT ends_at FROM billing.grants WHERE source_type='subscription' AND source_id=$1 AND product_id=$2 AND event='grant' AND supersedes_id IS NULL ORDER BY starts_at DESC,created_at DESC LIMIT 1`), member.sub.UUID().String(), target.ProductID.UUID()).Scan(&gotEnd))
-					if wantEnd == nil {
-						require.Nil(t, gotEnd, "explicit null remains indefinite")
-					} else {
-						require.NotNil(t, gotEnd)
-						require.True(t, wantEnd.Equal(*gotEnd), "accepted access end: want %s, got %s", wantEnd, gotEnd)
-					}
+					require.NotNil(t, gotEnd)
+					require.True(t, wantEnd.Equal(*gotEnd), "accepted access end: want %s, got %s", wantEnd, gotEnd)
 					if rail == "nmi" {
 						var billDefault bool
 						require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT provider_access_default FROM billing.order_lines WHERE subscription_id=$1 AND price_id=$2 ORDER BY created_at LIMIT 1`), member.sub.UUID(), w.priceStorageID(target.ID)).Scan(&billDefault))

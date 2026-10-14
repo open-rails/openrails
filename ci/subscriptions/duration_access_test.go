@@ -87,27 +87,29 @@ func TestDurationAccessExpiresBeforeNextBill(t *testing.T) {
 
 func TestDurationAccessSurvivesCancellation(t *testing.T) {
 	for _, access := range []struct {
-		name  string
-		hours *int
-	}{{"longer_than_billing", new(1440)}, {"indefinite", nil}} {
+		name        string
+		hours       *int
+		revokeAfter bool
+	}{{"longer_than_billing", new(1440), false}, {"billing_default", nil, false}, {"long_access_revoked", new(2160), true}} {
 		t.Run(access.name, func(t *testing.T) {
 			forEach(t, func(t *testing.T, rail string, tp topology) {
 				w := newWorld(t)
 				e := enrollAccessDuration(t, w, rail, tp, access.hours)
 				_, err := w.client[tp].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "keep purchased access"})
 				require.NoError(t, err)
+				require.True(t, e.c.entitled(e.ent), "cancellation preserves the remaining paid access")
 				w.advance(721 * time.Hour)
 				w.runRenewals()
 				w.converge()
-				require.True(t, e.c.entitled(e.ent), "billing cancellation does not shorten purchased access")
-				requireDurationSelfAccess(t, e, true)
+				require.Equal(t, access.hours != nil, e.c.entitled(e.ent), "default access ends with the paid period; longer access remains")
+				requireDurationSelfAccess(t, e, access.hours != nil)
 				require.Len(t, e.providerLedger(), 1)
 				w.advance(721 * time.Hour)
 				w.runRenewals()
 				w.converge()
-				require.Equal(t, access.hours == nil, e.c.entitled(e.ent), "finite access expires on its own boundary; indefinite access remains")
-				requireDurationSelfAccess(t, e, access.hours == nil)
-				if access.hours == nil {
+				require.Equal(t, access.revokeAfter, e.c.entitled(e.ent), "only the 2160-hour access remains after 1442 hours")
+				requireDurationSelfAccess(t, e, access.revokeAfter)
+				if access.revokeAfter {
 					w.refreshProviders()
 					_, err = w.client[tp].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "revoke purchased access", RevokeAccess: true})
 					require.NoError(t, err)
