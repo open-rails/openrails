@@ -125,8 +125,9 @@ func TestSolanaNetworkIsVerifiedOnEveryEndpoint(t *testing.T) {
 }
 
 // A Solana PSP omitting its environment is on mainnet, its rail's real-money
-// network; a rail refuses another rail's environment; and a live merchant's
-// PSPs move real money. Each refusal is the PSP's alone.
+// network; a rail refuses another rail's environment; and each PSP picks its
+// own environment, so live and test PSPs mix on one merchant. Each refusal is
+// the PSP's alone.
 func TestSolanaEnvironmentsAreTheRails(t *testing.T) {
 	ctx := t.Context()
 	treasury := solanago.NewWallet().PublicKey().String()
@@ -142,10 +143,6 @@ func TestSolanaEnvironmentsAreTheRails(t *testing.T) {
 			`psps.wallet.environment: solana has no "sandbox" environment (mainnet, devnet, testnet)`},
 		"nmi devnet": {openrails.PSPs{"mobius": openrails.NMIPSP{Environment: openrails.EnvironmentDevnet, GatewayID: "100001"}.PSPConfig()},
 			`psps.mobius.environment: nmi has no "devnet" environment (live, test, sandbox)`},
-		"mainnet beside nmi sandbox": {openrails.PSPs{
-			"wallet": openrails.SolanaPSP{Treasury: treasury}.PSPConfig(),
-			"mobius": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "100001"}.PSPConfig(),
-		}, "merchants.shop.psps/mobius: psps.mobius.environment: sandbox moves no money, and the merchant is live"},
 		"a live Stripe PSP holding a test key": {openrails.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_1", SecretKey: "sk_test_abc", WebhookSigningSecret: "whsec_1"}.PSPConfig()},
 			"a test key (sk_test_/rk_test_) moves no money; the PSP declares environment live"},
 	} {
@@ -156,17 +153,31 @@ func TestSolanaEnvironmentsAreTheRails(t *testing.T) {
 	}
 
 	pool := openPool(t, emptyDatabase(t))
-	bill, err := openrails.New(ctx, declare(openrails.PSPs{"wallet": openrails.SolanaPSP{Treasury: treasury}.PSPConfig()}), openrails.Deps{Postgres: pool})
+	bill, err := openrails.New(ctx, declare(openrails.PSPs{
+		"wallet": openrails.SolanaPSP{Treasury: treasury}.PSPConfig(),
+		"mobius": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "100001"}.PSPConfig(),
+	}), openrails.Deps{Postgres: pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bill.Close(ctx) })
+	if err := probe(t, bill, "openrails_configuration"); err != nil {
+		require.NotContains(t, err.Error(), ".environment", "mainnet beside nmi sandbox: each PSP keeps its own environment")
+	}
 	shop, err := bill.MerchantBySlug("shop")
 	require.NoError(t, err)
 	psps, err := shop.ListPSPs(ctx, billing.PSPListParams{})
 	require.NoError(t, err)
-	require.Len(t, psps.Items, 1)
-	require.Equal(t, openrails.EnvironmentMainnet, psps.Items[0].Environment, "omitted is mainnet")
-	require.Equal(t, merchants.PspID("solana", "mainnet", treasury), psps.Items[0].ID.UUID())
-	var live bool
-	require.NoError(t, pool.QueryRow(ctx, "SELECT live FROM billing.psps WHERE rail = 'solana'").Scan(&live))
-	require.True(t, live)
+	require.Len(t, psps.Items, 2)
+	environments := map[string]string{}
+	for _, p := range psps.Items {
+		environments[p.Key] = p.Environment
+		if p.Key == "wallet" {
+			require.Equal(t, merchants.PspID("solana", "mainnet", treasury), p.ID.UUID())
+		}
+	}
+	require.Equal(t, map[string]string{"wallet": openrails.EnvironmentMainnet, "mobius": openrails.EnvironmentSandbox}, environments, "omitted is mainnet; each PSP keeps its own")
+	for rail, want := range map[string]bool{"solana": true, "nmi": false} {
+		var live bool
+		require.NoError(t, pool.QueryRow(ctx, "SELECT live FROM billing.psps WHERE rail = $1", rail).Scan(&live))
+		require.Equal(t, want, live, rail)
+	}
 }

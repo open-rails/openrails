@@ -86,7 +86,7 @@ func TestSolanaCollectionMigrationUpdatesOnlySolana(t *testing.T) {
 		require.NoError(t, pool.QueryRow(t.Context(), `SELECT collection_policy, rail_subscription_id, current_period_ends_at FROM `+table("subscriptions")+` WHERE merchant_id=$1 AND id=$2`, mid, subs[rail]).Scan(&policy, &binding, &end))
 		require.Equal(t, want, policy)
 		require.Equal(t, "accepted-"+rail, binding)
-		require.Equal(t, now.Add(720*time.Hour), end)
+		require.True(t, now.Add(720*time.Hour).Equal(end), "%s keeps its paid period end", rail)
 	}
 	_, err = pool.Exec(t.Context(), `UPDATE `+table("subscriptions")+` SET collection_policy='provider' WHERE merchant_id=$1 AND id=$2`, mid, subs["solana"])
 	require.ErrorContains(t, err, "collection policy is immutable")

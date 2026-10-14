@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -206,7 +207,8 @@ func TestSolanaAlreadyPaidWithoutAcceptedReceiptKeepsUnknown(t *testing.T) {
 	s.land(t, build(t, []solanago.Instruction{solanaint.NewMemoInstruction(solanaint.PurchaseMemo(uuid.New())), outOfBand}, s.cranker), w.clock.Now())
 	require.Equal(t, uint64(2*solanaPlanAmount), s.fake.Balance(s.treasury, s.mint))
 	s.crankPass(t)
-	w.until(func() bool { return string(w.subscription(embedded, sub).Status) == "unverified" }, "unattributed paid state waits for receipt qualification")
+	// The engine owns a Solana renewal: the unattributed paid period is held for review, not guessed.
+	w.until(func() bool { return len(w.openFindings("consistency.ledger.unbooked")) > 0 }, "unattributed paid state waits for receipt qualification")
 	require.Len(t, completed(w.payments(embedded, b.id)), 1, "no guessed second cash payment")
 	require.Equal(t, oldEnd, *w.subscription(embedded, sub).CurrentPeriodEndsAt)
 	var orders int
@@ -238,7 +240,17 @@ func TestSolanaAlreadyPaidWithoutAcceptedReceiptKeepsUnknown(t *testing.T) {
 // Neither legacy missing metadata nor a parked/terminal status releases a
 // cancel while the original signed receipt still awaits qualification.
 func TestSolanaCancelKeepsEverySignedUnresolvedStatus(t *testing.T) {
-	s := openSolanaShop(t)
+	// The member retries the cancel once per stored status, more than the per-minute limit.
+	s := openSolanaShop(t, func(w *world) {
+		previous := w.cfg
+		w.cfg = func(c *config.Config) {
+			if previous != nil {
+				previous(c)
+			}
+			c.RateLimits = config.DefaultRateLimits()
+			(*c.RateLimits)["subscribe"].RequestsPerMinute = 100
+		}
+	})
 	w := s.w
 	b, sub := s.subscribed(t)
 	remove := failpoint.Set(func(_ context.Context, site failpoint.Site) error {

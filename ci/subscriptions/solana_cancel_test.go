@@ -329,10 +329,12 @@ func TestSolanaCancelReleasedOnlyByExactRevertedSignature(t *testing.T) {
 		status, body := b.cancel(sub, map[string]any{"reason": "stop renewing"})
 		require.Equal(t, http.StatusConflict, status, "%v", body)
 		h := &riverjobs.SolanaPullIntentHandler{Store: store, Chain: solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{PublicURL: s.fake.URL(), Network: "devnet"})}
-		s.fake.Forget(sig, 1)
+		// The node lags until told otherwise: background chain readers may read it too.
+		s.fake.Forget(sig, 1_000_000)
 		require.Equal(t, intents.OutcomeAmbiguous, h.Verify(ctx, in).Class)
 		status, body = b.cancel(sub, map[string]any{"reason": "stop renewing"})
 		require.Equal(t, http.StatusConflict, status, "%v", body)
+		s.fake.Forget(sig, 0)
 		require.Equal(t, intents.OutcomeRetryable, h.Verify(ctx, in).Class)
 		status, body = b.cancel(sub, map[string]any{"reason": "stop renewing"})
 		require.Equal(t, http.StatusOK, status, "%v", body)
