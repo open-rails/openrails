@@ -80,6 +80,13 @@ export const en = {
     changeCard: "Change card",
     changeCardLabel: "Change card for {name}",
   },
+  resume: {
+    title: "Resume {name}?",
+    description: "Your subscription renews on {date}, and {price} will be charged to your card then and every billing period until you cancel.",
+    descriptionNoDate: "Your subscription will renew, and your card will be charged each billing period until you cancel.",
+    keepCanceled: "Keep canceled",
+    confirm: "Resume subscription",
+  },
   changeCard: {
     title: "Pay {name} with",
     description: "Future renewals charge the selected card.",

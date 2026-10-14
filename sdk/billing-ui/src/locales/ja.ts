@@ -82,6 +82,13 @@ export const ja: BillingUiMessageBundle = {
     changeCard: "カードを変更",
     changeCardLabel: "{name} のカードを変更",
   },
+  resume: {
+    title: "{name}を再開しますか？",
+    description: "サブスクリプションは{date}に更新され、その時点で{price}がカードに請求されます。解約するまで請求期間ごとに請求されます。",
+    descriptionNoDate: "サブスクリプションは更新され、解約するまで請求期間ごとにカードに請求されます。",
+    keepCanceled: "解約のままにする",
+    confirm: "サブスクリプションを再開",
+  },
   changeCard: {
     title: "{name} の支払い方法",
     description: "今後の更新は選択したカードに請求されます。",

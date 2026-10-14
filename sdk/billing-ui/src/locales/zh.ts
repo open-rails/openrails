@@ -81,6 +81,13 @@ export const zh: BillingUiMessageBundle = {
     changeCard: "更换卡片",
     changeCardLabel: "更换 {name} 的卡片",
   },
+  resume: {
+    title: "恢复{name}？",
+    description: "你的订阅将于{date}续订，届时将从你的卡中扣除{price}，此后每个计费周期扣款，直到你取消。",
+    descriptionNoDate: "你的订阅将续订，直到你取消前每个计费周期都会从你的卡中扣款。",
+    keepCanceled: "保持已取消",
+    confirm: "恢复订阅",
+  },
   changeCard: {
     title: "{name} 的付款卡",
     description: "之后的续费将从所选卡片扣款。",

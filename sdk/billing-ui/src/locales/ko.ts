@@ -81,6 +81,13 @@ export const ko: BillingUiMessageBundle = {
     changeCard: "카드 변경",
     changeCardLabel: "{name} 카드 변경",
   },
+  resume: {
+    title: "{name}을(를) 다시 시작할까요?",
+    description: "구독은 {date}에 갱신되며, 그때 {price}이(가) 카드로 청구되고 해지할 때까지 매 결제 주기마다 청구됩니다.",
+    descriptionNoDate: "구독이 갱신되며 해지할 때까지 매 결제 주기마다 카드로 청구됩니다.",
+    keepCanceled: "해지 상태 유지",
+    confirm: "구독 다시 시작",
+  },
   changeCard: {
     title: "{name} 결제 카드",
     description: "이후 갱신은 선택한 카드로 청구됩니다.",

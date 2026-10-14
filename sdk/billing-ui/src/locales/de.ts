@@ -82,6 +82,13 @@ export const de: BillingUiMessageBundle = {
     changeCard: "Karte ändern",
     changeCardLabel: "Karte für {name} ändern",
   },
+  resume: {
+    title: "{name} fortsetzen?",
+    description: "Dein Abo verlängert sich am {date}. Dann werden {price} von deiner Karte abgebucht, danach in jedem Abrechnungszeitraum bis zur Kündigung.",
+    descriptionNoDate: "Dein Abo verlängert sich, und deine Karte wird in jedem Abrechnungszeitraum belastet, bis du kündigst.",
+    keepCanceled: "Gekündigt lassen",
+    confirm: "Abo fortsetzen",
+  },
   changeCard: {
     title: "{name} bezahlen mit",
     description:

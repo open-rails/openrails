@@ -81,6 +81,13 @@ export const es: BillingUiMessageBundle = {
     changeCard: "Cambiar tarjeta",
     changeCardLabel: "Cambiar la tarjeta de {name}",
   },
+  resume: {
+    title: "¿Reanudar {name}?",
+    description: "Tu suscripción se renueva el {date}: se cobrarán {price} a tu tarjeta entonces y en cada periodo de facturación hasta que la canceles.",
+    descriptionNoDate: "Tu suscripción se renovará y se cobrará a tu tarjeta en cada periodo de facturación hasta que la canceles.",
+    keepCanceled: "Mantener cancelada",
+    confirm: "Reanudar suscripción",
+  },
   changeCard: {
     title: "Pagar {name} con",
     description:
