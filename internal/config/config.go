@@ -117,7 +117,7 @@ type Config struct {
 	// HyperSwitch is the host's trusted HyperSwitch deployment.
 	HyperSwitch *HyperSwitchConfig `yaml:"hyperswitch" json:"hyperswitch"`
 	// PlatformVault is the operator's card vault; nil refuses
-	// settings.card_custody platform.
+	// settings.card_vault platform.
 	PlatformVault *PlatformVaultConfig `yaml:"platform_vault" json:"platform_vault"`
 
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.

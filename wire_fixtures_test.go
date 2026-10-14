@@ -37,7 +37,7 @@ func canonicalWireFixtures() map[string]any {
 	periodHours, expMonth, expYear := 720, 12, 2030
 	card := &billing.CardDetails{Brand: ptr("visa"), Last4: ptr("4242"), ExpMonth: &expMonth, ExpYear: &expYear}
 	priceFixtureValue := billing.Price{ID: priceFixture, Version: 1, Key: "monthly", ProductID: productFixture, UnitAmount: maxMoney, Currency: "USD", AccessDurationHours: &periodHours, BillingIntervalHours: &periodHours,
-		PSPs: map[string]billing.PSPLinkState{"mobius": {Status: billing.PSPLinkLinked, SyncStatus: billing.SyncStatusUnknown}}, PendingManualActions: []billing.PendingAction{}, CreatedAt: when, UpdatedAt: when}
+		SellVia: []string{billing.SellViaCard}, CreatedAt: when, UpdatedAt: when}
 	return map[string]any{
 		"error_envelope.json": errorEnvelope{Error: billing.ErrorDetails{
 			Type: "invalid_request_error", Code: "idempotency_key_reused", Message: "retry changed the committed amount",
@@ -50,7 +50,7 @@ func canonicalWireFixtures() map[string]any {
 			{ID: billing.BalanceTransactionID(uuid.MustParse("33333333-3333-3333-3333-333333333333")), CustomerID: customerFixture, Currency: "JPY", Type: billing.BalanceTransactionSpend, Amount: minMoney, Source: "operator", SourceID: "spend-1", CreatedAt: when},
 		}},
 		"merchant_settings.json": billing.MerchantSettings{
-			CollectionThreshold: &maxMoney, ArrearsDelinquencyFloor: &zero,
+			CollectionThreshold: &maxMoney, ArrearsDelinquencyFloor: &zero, CardVault: "mobius", ChargePSPs: []string{"mobius"},
 			BillingPolicies: []billing.BillingPolicy{
 				{Name: "credit_line", Kind: "outstanding_cap", OutstandingCapAmount: maxMoney, CollectionThresholdAmount: &minMoney},
 				{Name: "monthly", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 2592000, Limit: maxMoney, Currency: "USD"}}},

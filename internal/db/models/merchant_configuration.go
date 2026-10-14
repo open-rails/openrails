@@ -36,6 +36,10 @@ type MerchantConfiguration struct {
 	// RepriceNoticeWindowDays is the minimum advance notice a subscription
 	// price increase must give existing subscribers; decreases are exempt.
 	// Nil ⇒ DefaultPriceIncreaseNoticeDays; zero enforces none.
+	// ChargePSPs are the card PSPs new card charges go to, in order; nil is
+	// every armed card PSP.
+	ChargePSPs []string `json:"charge_psps,omitempty"`
+
 	RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
 
 	// ProviderRefundAccess decides what a refund made at the provider (not

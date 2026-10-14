@@ -84,7 +84,7 @@ func Degrade(cfg *Config) []Degradation {
 	}
 	if err := validatePlatformVault(cfg); err != nil {
 		cfg.PlatformVault = nil
-		off("platform_vault", fmt.Errorf("%w; settings.card_custody platform is refused", err))
+		off("platform_vault", fmt.Errorf("%w; settings.card_vault platform is refused", err))
 	}
 	if s := cfg.ProviderSandbox; s != nil {
 		sandbox := *s

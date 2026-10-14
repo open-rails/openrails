@@ -1,5 +1,13 @@
 /** English message keys. Override individual entries with BillingAdmin.messages. */
 export const billingAdminMessages = {
+  "Sold by OpenRails": "Sold by OpenRails",
+  "OpenRails bills this price: by card through your card vault and charge PSPs, and on Solana. Nothing is written to a provider's catalog.": "OpenRails bills this price: by card through your card vault and charge PSPs, and on Solana. Nothing is written to a provider's catalog.",
+  "Sold via: ": "Sold via: ",
+  "every method you have": "every method you have",
+  "Solana plan ": "Solana plan ",
+  "Owned by its provider": "Owned by its provider",
+  "The provider owns and runs this price; OpenRails read its terms and never writes it. Verify asks the provider what it holds now, and changes nothing.": "The provider owns and runs this price; OpenRails read its terms and never writes it. Verify asks the provider what it holds now, and changes nothing.",
+  "'s price": "'s price",
   " Edit widget": " Edit widget",
   " Price": " Price",
   " Product": " Product",
@@ -420,8 +428,6 @@ export const billingAdminMessages = {
     "Nothing here can be fixed automatically. You can only note why you are leaving it.",
   "Nothing in this range. Pick a wider range.":
     "Nothing in this range. Pick a wider range.",
-  "Nothing is claimed about the providers' copies until you press Verify.":
-    "Nothing is claimed about the providers' copies until you press Verify.",
   "Nothing needs attention right now.": "Nothing needs attention right now.",
   "Notice period": "Notice period",
   "Notice period (days)": "Notice period (days)",
@@ -470,7 +476,6 @@ export const billingAdminMessages = {
   "Payment method": "Payment method",
   "Payment methods": "Payment methods",
   "Payment not found.": "Payment not found.",
-  "Payment providers": "Payment providers",
   "Payment rail": "Payment rail",
   "Payment reference": "Payment reference",
   "Payment terms (days)": "Payment terms (days)",
@@ -608,7 +613,6 @@ export const billingAdminMessages = {
   "Send alerts to Discord, Slack, or your own endpoint.":
     "Send alerts to Discord, Slack, or your own endpoint.",
   "Send email alerts to this address.": "Send email alerts to this address.",
-  Sent: "Sent",
   "Set how much notice customers receive before a price increase.":
     "Set how much notice customers receive before a price increase.",
   "Set the price that charges every customer's usage as it is recorded. Money is entered in major currency units.":
@@ -670,8 +674,6 @@ export const billingAdminMessages = {
   "This is a price": "This is a price",
   "This meter uses an aggregation that the billing engine cannot rate.":
     "This meter uses an aggregation that the billing engine cannot rate.",
-  "This price has not been sent to any provider, so nobody can be charged for it yet.":
-    "This price has not been sent to any provider, so nobody can be charged for it yet.",
   Tier: "Tier",
   "Tier group": "Tier group",
   "Tier mode": "Tier mode",
@@ -718,8 +720,6 @@ export const billingAdminMessages = {
   "What the customer asked for": "What the customer asked for",
   "Which provider would take the money if someone bought this right now, and why the others were passed over. This asks the same question a real purchase asks, without starting one.":
     "Which provider would take the money if someone bought this right now, and why the others were passed over. This asks the same question a real purchase asks, without starting one.",
-  "Which providers this price has been sent to, and whether their copy still matches yours. Publishing the catalog is what sends it; this page only reports. Verify asks each provider what it currently holds, and changes nothing.":
-    "Which providers this price has been sent to, and whether their copy still matches yours. Publishing the catalog is what sends it; this page only reports. Verify asks each provider what it currently holds, and changes nothing.",
   Why: "Why",
   "Why it was granted": "Why it was granted",
   "Widget menu": "Widget menu",

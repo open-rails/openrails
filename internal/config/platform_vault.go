@@ -12,7 +12,7 @@ import (
 )
 
 // PlatformVaultConfig is the operator's card vault for this deployment's
-// posture: merchants with settings.card_custody platform store new cards in it,
+// posture: merchants with settings.card_vault platform store new cards in it,
 // each in its own partition. Its keys are in Vault, at
 // <kv_mount>/<scope_prefix>/platform_vault/<tenant_id>.
 type PlatformVaultConfig struct {

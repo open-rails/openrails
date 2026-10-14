@@ -99,6 +99,7 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 	if err := validateCardVault(in); err != nil {
 		return Settings{}, err
 	}
+	cfg.ChargePSPs = ChargePSPs(in)
 	if in.PaymentPage != nil {
 		if _, err := NormalizeEmbedOrigins(in.PaymentPage.EmbedOrigins); err != nil {
 			return Settings{}, err

@@ -97,9 +97,18 @@ const (
 	// PSPRoutingSkipCredentialsMissing: armed, but the credentials the rail
 	// needs to charge are absent or malformed.
 	PSPRoutingSkipCredentialsMissing = "credentials_missing"
-	// PSPRoutingSkipLinkMissing: the price has no usable psps settings
-	// for this PSP (absent, or naming a different remote object).
+	// PSPRoutingSkipLinkMissing: the price has no object this PSP sells it
+	// through: a CCBill FlexForm, a Solana plan.
 	PSPRoutingSkipLinkMissing = "link_missing"
+	// PSPRoutingSkipNotSoldVia: the price's sell_via leaves out this PSP's
+	// method (card, solana).
+	PSPRoutingSkipNotSoldVia = "not_sold_via"
+	// PSPRoutingSkipNotChargePSP: a card PSP the merchant's charge_psps
+	// leaves out.
+	PSPRoutingSkipNotChargePSP = "not_a_charge_psp"
+	// PSPRoutingSkipProviderPrice: a provider price, which sells only through
+	// its own provider and only when that provider still sells new (CCBill).
+	PSPRoutingSkipProviderPrice = "provider_price"
 	// PSPRoutingSkipModeUnsupported: the rail cannot serve this checkout
 	// mode for this price: the rail registry says it cannot make this kind of
 	// new sale (CCBill new subscriptions, any trial first phase).

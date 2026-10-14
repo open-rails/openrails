@@ -125,8 +125,22 @@ func (c *Client) CreatePrice(ctx context.Context, params billing.CreatePricePara
 	return &out, nil
 }
 
-// GetPrice reads a price; params.Verify also reads each linked PSP's copy and
-// reports its drift.
+// CreateProviderPrice links a price a provider owns and runs to a product
+// (a legacy NMI plan, a Stripe price, a CCBill FlexForm). Its terms are read
+// from the provider, declared for CCBill; nothing is written to the provider.
+func (c *Client) CreateProviderPrice(ctx context.Context, params billing.CreateProviderPriceParams, requestOptions ...RequestOption) (*billing.Price, error) {
+	if params.ProductID.IsZero() == (params.ProductKey == "") {
+		return nil, invalidErr("exactly one of product_id and product_key is required")
+	}
+	var out billing.Price
+	if err := c.do(ctx, http.MethodPost, "/v1/catalog/provider-prices", params, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetPrice reads a price; params.Verify also reads a provider price's terms
+// at its provider and reports their drift.
 func (c *Client) GetPrice(ctx context.Context, id billing.PriceID, params billing.GetPriceParams, requestOptions ...RequestOption) (*billing.Price, error) {
 	path, err := requireTypedID("price_id", id)
 	if err != nil {

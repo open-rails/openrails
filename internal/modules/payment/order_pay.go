@@ -80,6 +80,9 @@ type OrderOption struct {
 	Custodian             string
 	CustodianID           *uuid.UUID
 	SavedPaymentMethodIDs []uuid.UUID
+	// PriceID is the product's CCBill provider price whose FlexForm sells an
+	// order's one line of ours on the same terms; nil for the line's own.
+	PriceID uuid.UUID
 }
 
 // Solana reports a Solana Pay option.
@@ -151,6 +154,13 @@ func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models
 		}
 		out = line
 	}
+	if len(linked) == 1 {
+		stand, err := s.ccbillStandIns(ctx, linked[0], products[0])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, stand...)
+	}
 	oneTime := true
 	for _, price := range prices {
 		oneTime = oneTime && !price.IsRecurring()
@@ -169,6 +179,43 @@ func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models
 		}
 	}
 	return options, nil
+}
+
+// ccbillStandIns are the CCBill options for an order's one recurring line of
+// ours: the product's live CCBill provider prices on the same terms, each sold
+// on its own FlexForm. Ours never sell through CCBill; its prices do.
+func (s *OrderAttemptService) ccbillStandIns(ctx context.Context, price *models.Price, product *models.Product) ([]OrderOption, error) {
+	if price.ProviderOwned || !price.IsRecurring() || s.priceService == nil || product == nil {
+		return nil, nil
+	}
+	candidates, err := s.priceService.GetActiveByProductID(ctx, product.ID)
+	if err != nil {
+		return nil, err
+	}
+	var out []OrderOption
+	for _, candidate := range candidates {
+		_, link, ok := candidate.ProviderLink()
+		if !ok || link[models.RailKeyRail] != string(models.RailCCBill) || !sameSaleTerms(price, candidate) {
+			continue
+		}
+		decision, err := s.Route(ctx, RoutingInput{Price: candidate, Product: product, Mode: models.PurchaseSubscription})
+		if err != nil && !errors.Is(err, ErrNoRoutableProcessor) {
+			return nil, err
+		}
+		for _, c := range decision.Candidates {
+			if c.Skip == "" && c.PSPID != uuid.Nil && models.Rail(c.Rail) == models.RailCCBill && !containsOption(out, c.PSPID) {
+				out = append(out, OrderOption{PSPID: c.PSPID, Rail: c.Rail, PriceID: candidate.ID})
+			}
+		}
+	}
+	return out, nil
+}
+
+// sameSaleTerms reports two prices a customer pays and is granted alike.
+func sameSaleTerms(a, b *models.Price) bool {
+	eq := func(x, y *int) bool { return x == nil && y == nil || x != nil && y != nil && *x == *y }
+	return a.Amount == b.Amount && a.Currency == b.Currency && eq(a.BillingIntervalHours, b.BillingIntervalHours) && eq(a.AccessDurationHours, b.AccessDurationHours) &&
+		a.TrialUnitAmount == nil && b.TrialUnitAmount == nil && a.Quantity == nil && b.Quantity == nil
 }
 
 // CustomerOrderOptions adds saved platform cards with active reuse consent on

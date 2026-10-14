@@ -360,7 +360,10 @@ func (s *PurchaseService) resolveChange(ctx context.Context, req *SubscriptionCh
 			return nil, &TierChangeError{Code: codeProductNotFound, Message: "product not found"}
 		}
 		c.tier = c.product.ID != c.currentProduct.ID
-		if c.tier && (!c.price.IsPurchasable() || !c.product.IsPurchasable()) {
+		// A provider-run subscription moves within its provider's prices; an
+		// OpenRails-run one never onto a provider's.
+		providerRun := sub.CollectionPolicy != models.CollectionPolicyEngine && sub.Rail != models.RailSolana
+		if c.tier && (c.price.Archived || !c.product.IsPurchasable() || c.price.ProviderOwned && !providerRun) {
 			return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeTargetInactive, Message: "price is not available"}
 		}
 		if !c.tier && c.price.ID != c.currentPrice.ID {

@@ -314,19 +314,10 @@ func ComputeStripeDrift(remoteProducts []StripeProduct, remotePrices []StripePri
 		if local == nil {
 			local = snap.ProductByKey[productKey]
 		}
+		// A Stripe product is the provider's: only whether a provider price
+		// names it matters.
 		if local == nil {
 			events = append(events, stripeEvent(models.CatalogDriftOrphanInStripe, models.CatalogDriftResourceProduct, productKey, sp.ID))
-			continue
-		}
-		id := local.ID.String()
-		if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(sp.Name) {
-			fieldDrift(models.CatalogDriftResourceProduct, id, sp.ID, "name", local.DisplayName, sp.Name)
-		}
-		if strings.TrimSpace(local.Description) != strings.TrimSpace(sp.Description) {
-			fieldDrift(models.CatalogDriftResourceProduct, id, sp.ID, "description", local.Description, sp.Description)
-		}
-		if active := local.IsPurchasable(); active != sp.Active {
-			fieldDrift(models.CatalogDriftResourceProduct, id, sp.ID, "active", strconv.FormatBool(active), strconv.FormatBool(sp.Active))
 		}
 	}
 	seenPrices := make(map[string]struct{}, len(remotePrices))
@@ -353,9 +344,6 @@ func ComputeStripeDrift(remoteProducts []StripeProduct, remotePrices []StripePri
 		}
 		if err == nil && !strings.EqualFold(strings.TrimSpace(local.Currency), strings.TrimSpace(sp.Currency)) {
 			fieldDrift(models.CatalogDriftResourcePrice, id, sp.ID, "currency", local.Currency, sp.Currency)
-		}
-		if active := local.IsPurchasable(); active != sp.Active {
-			fieldDrift(models.CatalogDriftResourcePrice, id, sp.ID, "active", strconv.FormatBool(active), strconv.FormatBool(sp.Active))
 		}
 	}
 	for stripeID, localID := range snap.StripeProductIDs {

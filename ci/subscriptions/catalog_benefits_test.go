@@ -40,8 +40,7 @@ func importCatalogBenefitsCCBill(t *testing.T, w *world, benefits []string) *ccb
 	product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "accepted-benefits", DisplayName: "Accepted benefits", Entitlements: benefits})
 	require.NoError(t, err)
 	hours := monthHours
-	price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
-		PSPs: map[string]map[string]string{"ccbill": {"flex_id": ccbillFlexID, "recurring_billing_option_id": ccbillRBO}}})
+	price, err := c.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "monthly", PSP: "ccbill", FlexID: ccbillFlexID, RecurringBillingOptionID: ccbillRBO, UnitAmount: new(int64(9_990_000)), Currency: "USD", BillingIntervalHours: &hours})
 	require.NoError(t, err)
 	start := w.clock.Now().Add(-10 * day)
 	end := start.Add(monthHours * time.Hour)

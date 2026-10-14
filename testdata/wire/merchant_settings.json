@@ -1,6 +1,10 @@
 {
   "collection_threshold": "9223372036854775807",
   "arrears_delinquency_floor": "0",
+  "card_vault": "mobius",
+  "charge_psps": [
+    "mobius"
+  ],
   "billing_policies": [
     {
       "name": "credit_line",

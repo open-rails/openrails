@@ -109,10 +109,9 @@ func TestComputeStripeDrift(t *testing.T) {
 		require.Equal(t, models.CatalogDriftFieldDrift, e.Kind)
 		fields[string(e.OpenRailsResourceType)+"."+e.Field]++
 	}
+	// The provider's product and active flag are its own; its terms drift.
 	require.Equal(t, map[string]int{
-		string(models.CatalogDriftResourceProduct) + ".name": 1, string(models.CatalogDriftResourceProduct) + ".description": 1,
-		string(models.CatalogDriftResourceProduct) + ".active": 1, string(models.CatalogDriftResourcePrice) + ".unit_amount": 1,
-		string(models.CatalogDriftResourcePrice) + ".currency": 1, string(models.CatalogDriftResourcePrice) + ".active": 1,
+		string(models.CatalogDriftResourcePrice) + ".unit_amount": 1, string(models.CatalogDriftResourcePrice) + ".currency": 1,
 	}, fields)
 
 	// Zero-decimal currencies widen with their own native scale.

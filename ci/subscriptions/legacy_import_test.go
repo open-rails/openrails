@@ -39,9 +39,9 @@ func (w *world) bookTier(name string, cents int64, days int) bookTier {
 	client := w.client[embedded]
 	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "lb-" + name + "-" + uuid.NewString()[:8], DisplayName: name, Entitlements: []string{tier.ent}})
 	require.NoError(w.t, err)
-	hours := days * 24
-	tier.price, err = client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: cents * 10_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours, PSPs: map[string]map[string]string{"nmi": {"plan_id": tier.plan}}})
+	tier.price, err = client.CreateProviderPrice(w.t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: product.Key + "-usd", PSP: "nmi", PlanID: tier.plan})
 	require.NoError(w.t, err)
+	require.Equal(w.t, cents*10_000, tier.price.UnitAmount, "terms read from the NMI plan")
 	return tier
 }
 

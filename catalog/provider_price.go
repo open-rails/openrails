@@ -60,25 +60,40 @@ func (p *ApplyProviderPrice) UnmarshalJSON(raw []byte) error {
 	type provider ApplyProviderPrice
 	var decoded struct {
 		provider
-		Amount          *string `json:"amount,omitempty"`
-		AccessDuration  *string `json:"access_duration,omitempty"`
-		BillingInterval *string `json:"billing_interval,omitempty"`
-		TrialDuration   *string `json:"trial_duration,omitempty"`
+		UnitAmount      Field[int64] `json:"unit_amount,omitzero"`
+		TrialUnitAmount Field[int64] `json:"trial_unit_amount,omitzero"`
+		Amount          *string      `json:"amount,omitempty"`
+		AccessDuration  *string      `json:"access_duration,omitempty"`
+		BillingInterval *string      `json:"billing_interval,omitempty"`
+		TrialDuration   *string      `json:"trial_duration,omitempty"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&decoded); err != nil {
 		return err
 	}
+	// Money reads as a number or a decimal string.
+	for _, money := range []struct {
+		field Field[int64]
+		into  **int64
+	}{{decoded.UnitAmount, &decoded.provider.UnitAmount}, {decoded.TrialUnitAmount, &decoded.provider.TrialUnitAmount}} {
+		if money.field.Null {
+			return fmt.Errorf("money cannot be null")
+		}
+		if money.field.Set {
+			value := money.field.Value
+			*money.into = &value
+		}
+	}
 	if decoded.Amount != nil {
-		if decoded.UnitAmount != nil || decoded.Currency != "" {
+		if decoded.provider.UnitAmount != nil || decoded.Currency != "" {
 			return fmt.Errorf("amount cannot be combined with unit_amount or currency")
 		}
 		amount, code, err := parseAmount(*decoded.Amount)
 		if err != nil {
 			return fmt.Errorf("amount: %w", err)
 		}
-		decoded.UnitAmount, decoded.Currency = &amount, code
+		decoded.provider.UnitAmount, decoded.Currency = &amount, code
 	}
 	for _, field := range []struct {
 		name  string

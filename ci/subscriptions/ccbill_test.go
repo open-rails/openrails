@@ -54,8 +54,7 @@ func importCCBillIn(t *testing.T, w *world, currency string) *ccbillMember {
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "ccbill-" + uuid.NewString()[:8], DisplayName: "CCBill membership", Entitlements: []string{l.ent}})
 	require.NoError(t, err)
 	hours := monthHours
-	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-" + strings.ToLower(currency), UnitAmount: 9_990_000, Currency: currency, BillingIntervalHours: &hours, AccessDurationHours: &hours,
-		PSPs: map[string]map[string]string{"ccbill": {"flex_id": ccbillFlexID, "recurring_billing_option_id": ccbillRBO}}})
+	l.price, err = client.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: product.Key + "-" + strings.ToLower(currency), PSP: "ccbill", FlexID: ccbillFlexID, RecurringBillingOptionID: ccbillRBO, UnitAmount: new(int64(9_990_000)), Currency: currency, BillingIntervalHours: &hours})
 	require.NoError(t, err)
 
 	start := w.clock.Now().Add(-10 * day)
@@ -404,11 +403,7 @@ func TestCCBillUpgradeRetainsVersionedOrders(t *testing.T) {
 	hours := monthHours
 	newRef, transaction := ccbillNumericID(), ccbillNumericID()
 	flex, rbo := uuid.NewString(), ccbillNumericID()
-	price, err := w.client[embedded].CreatePrice(t.Context(), billing.CreatePriceParams{
-		ProductID: m.price.ProductID, Key: "upgrade-" + uuid.NewString()[:8], UnitAmount: 19_990_000, Currency: "USD",
-		BillingIntervalHours: &hours, AccessDurationHours: &hours,
-		PSPs: map[string]map[string]string{"ccbill": {"flex_id": flex, "recurring_billing_option_id": rbo}},
-	})
+	price, err := w.client[embedded].CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: m.price.ProductID, Key: "upgrade-" + uuid.NewString()[:8], PSP: "ccbill", FlexID: flex, RecurringBillingOptionID: rbo, UnitAmount: new(int64(19_990_000)), Currency: "USD", BillingIntervalHours: &hours})
 	require.NoError(t, err)
 	start := w.clock.Now()
 	next := start.Add(monthHours * time.Hour)

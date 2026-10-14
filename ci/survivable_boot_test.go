@@ -184,22 +184,28 @@ func TestOptionalSettingsThatCannotBeServedAreTurnedOff(t *testing.T) {
 
 // One merchant's bad declaration refuses that merchant, or that document,
 // alone: the others serve fully. A PSP with a misspelled setting is refused
-// with its reason; a merchant document the deployment cannot serve refuses
-// its PSPs with it; a key that is not a slug is never provisioned.
+// with its reason; a merchant document the deployment cannot serve (a card
+// vault with no platform vault, charge PSPs that cannot charge its card
+// vault's cards) refuses its PSPs with it; a key that is not a slug is never
+// provisioned.
 func TestOneMerchantsBadDeclarationLeavesTheOthersServing(t *testing.T) {
 	f := newFixture(t)
 	suffix := uuid.NewString()[:8]
-	good, typo, custody := "good-"+suffix, "typo-"+suffix, "custody-"+suffix
+	good, typo, custody, vault := "good-"+suffix, "typo-"+suffix, "custody-"+suffix, "vault-"+suffix
 	misspelled := stripeTest()
 	misspelled.AccountID = "acct_e2e_typo"
 	misspelled.Settings = map[string]any{"publishable_kye": "pk_test_e2e"}
 	platform := stripeTest()
 	platform.AccountID = "acct_e2e_custody"
+	held, other := stripeTest(), stripeTest()
+	held.AccountID, other.AccountID = "acct_e2e_vault", "acct_e2e_other"
 	cfg := f.config()
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{
 		good:         {Sandbox: true, DisplayName: "Good", Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": stripeTest()}},
 		typo:         {Sandbox: true, DisplayName: "Typo", PSPs: map[string]openrails.PSPConfig{"stripe": misspelled}},
-		custody:      {Sandbox: true, DisplayName: "Custody", MerchantSettings: billing.MerchantSettings{CardCustody: billing.CardCustodyPlatform}, PSPs: map[string]openrails.PSPConfig{"stripe": platform}},
+		custody:      {Sandbox: true, DisplayName: "Custody", MerchantSettings: billing.MerchantSettings{CardVault: billing.CardVaultPlatform}, PSPs: map[string]openrails.PSPConfig{"stripe": platform}},
+		// A Stripe customer's card charges only through its own account.
+		vault: {Sandbox: true, DisplayName: "Vault", MerchantSettings: billing.MerchantSettings{CardVault: "stripe", ChargePSPs: []string{"other"}}, PSPs: map[string]openrails.PSPConfig{"stripe": held, "other": other}},
 		"Not A Slug": {DisplayName: "Unprovisionable"},
 	}
 	bill := survivingEngine(t, f, cfg)
@@ -210,11 +216,13 @@ func TestOneMerchantsBadDeclarationLeavesTheOthersServing(t *testing.T) {
 	require.ErrorContains(t, err, "publishable_kye")
 	require.ErrorContains(t, err, "merchants."+custody+".merchant: ")
 	require.ErrorContains(t, err, "merchants."+custody+".psps/stripe: the merchant document is not served")
+	require.ErrorContains(t, err, "merchants."+vault+".merchant: ")
+	require.ErrorContains(t, err, "cannot charge cards vaulted at stripe")
 	require.NotContains(t, err.Error(), "merchants."+good+".")
 	_, err = bill.MerchantBySlug("Not A Slug")
 	require.ErrorIs(t, err, billing.ErrMerchantUnresolved)
 
-	for slug, want := range map[string]int{typo: 0, custody: 0, good: 1} {
+	for slug, want := range map[string]int{typo: 0, custody: 0, vault: 0, good: 1} {
 		shop, err := bill.MerchantBySlug(slug)
 		require.NoError(t, err, "a merchant whose document is refused is still provisioned")
 		psps, err := shop.ListPSPs(t.Context(), billing.PSPListParams{})

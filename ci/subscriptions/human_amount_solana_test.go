@@ -29,7 +29,6 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 			chain.runWorkers(w)
 			productKey, err := w.applyCatalog(fmt.Sprintf(`  "{key}-native":
     amount: %s
-    psps: {solana: {}}
 `, tc.amount))
 			require.NoError(t, err)
 			price, err := priceByKey(t.Context(), w.client[embedded], productKey, productKey+"-native")

@@ -65,8 +65,9 @@ products:
 	require.NoError(t, err)
 	_, err = c.ApplyCatalog(t.Context(), rates, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
-	// A retained binding references an already provisioned account; no secret is copied.
-	err = w.catalogExec(t.Context(), w.q(`INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,configuration) VALUES($1,$2,$3,'{"provider":"nmi"}')`), mid.UUID(), w.priceStorageID(first.ID), w.psp["nmi"].UUID())
+	// A provider price's binding references an already provisioned account;
+	// no secret is copied.
+	_, err = c.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: first.ProductID, Key: "legacy", PSP: "nmi", PlanID: "legacy_plan_" + uuid.NewString()[:8], Archived: true})
 	require.NoError(t, err)
 	w.settle()
 	w.stop()
@@ -81,7 +82,7 @@ products:
 	raw, err := configdocument.YAMLToJSON(artifact.Bytes(), merchantarchive.CatalogSnapshotMaxBytes)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &document))
-	require.Len(t, document.Tables["prices"], 3)
+	require.Len(t, document.Tables["prices"], 4)
 	require.Len(t, document.Tables["catalog_rate_cards"], 1)
 	require.Len(t, document.Dependencies.PSPs, 1)
 	require.Nil(t, document.Dependencies.Customers, "a rate card names no customer")

@@ -131,23 +131,20 @@ func sign(t *testing.T, rt *openrails.Engine) ([]byte, error) {
 	return engine.Graph(rt).Runtime.Vault.SolanaTransit.Sign(t.Context(), transitKey, []byte("e2e"))
 }
 
-// solanaSession sells a new one-time price, or a recurring one on a plan
-// owner published on chain paying the treasury, while the Solana rail is
-// armed.
-func solanaSession(t *testing.T, rt *openrails.Engine, client *openrails.Client, chain *solanafake.Node, owner solanago.PublicKey) *purchase {
+// solanaSession sells a new one-time price, or a recurring one on the plan
+// the cranker publishes paying the treasury, while the Solana rail is armed.
+func solanaSession(t *testing.T, rt *openrails.Engine, client *openrails.Client, recurring bool) *purchase {
 	t.Helper()
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", Entitlements: []string{"content:sol"}})
 	require.NoError(t, err)
-	params := billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD", PSPs: map[string]map[string]string{"solana": {}}}
-	if chain != nil {
+	params := billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD", SellVia: []string{billing.SellViaSolana}}
+	if recurring {
 		hours := 720
-		plan, err := chain.Plan(owner, 1, solanafake.DevnetUSDCMint, 1_000_000, uint64(hours), resilienceTreasury)
-		require.NoError(t, err)
 		params.AccessDurationHours, params.BillingIntervalHours = &hours, &hours
-		params.PSPs = map[string]map[string]string{"solana": {"plan_pda": plan.String(), "plan_id": "1"}}
 	}
 	price, err := client.CreatePrice(t.Context(), params)
 	require.NoError(t, err)
+	require.Equal(t, recurring, price.SolanaPlan != nil, "a recurring price sells on its published plan")
 	session, err := sell(t, rt, client, sale{customer: cid(uuid.NewString()), price: price.ID})
 	require.NoError(t, err)
 	return session
@@ -293,8 +290,7 @@ func TestRotatedTransitCrankerIsRefused(t *testing.T) {
 	first, client := boot()
 	require.Eventually(t, func() bool { _, ok := routedPSP(t, first, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
 	stored, _ := routedPSP(t, first, "solana")
-	old := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey))
-	monthly := solanaSession(t, first, client, chain, old)
+	monthly := solanaSession(t, first, client, true)
 	require.Eventually(t, func() bool { return probe(t, first, "openrails_solana_crankers") == nil }, 30*time.Second, 50*time.Millisecond, "the cranker pins its key")
 	require.NoError(t, first.Close(context.Background()))
 
@@ -308,6 +304,6 @@ func TestRotatedTransitCrankerIsRefused(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, solanaPayStatus(t, second, monthly), "the rotated cranker signs nothing")
 	require.ErrorContains(t, probe(t, second, "openrails_solana_crankers"), "the key it was pinned to")
 	require.ErrorContains(t, probe(t, second, "openrails_configuration"), "solana.crankers.vault_transit:"+transitKey+": solana cranker", "the rotated cranker is not served")
-	once := solanaSession(t, second, client, nil, solanago.PublicKey{})
+	once := solanaSession(t, second, client, false)
 	require.Zero(t, solanaPayStatus(t, second, once), "a one-time Solana payment still sells")
 }

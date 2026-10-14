@@ -42,14 +42,14 @@ func (w *world) platformIdentities() []struct{ id, kind, environment, account st
 	return out
 }
 
-func setCustody(custody billing.CardCustody) billing.UpdateMerchantConfigurationParams {
-	return billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{CardCustody: custody}}
+func setVault(vault string, charge ...string) billing.UpdateMerchantConfigurationParams {
+	return billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{CardVault: vault, ChargePSPs: charge}}
 }
 
-// A merchant chooses platform custody only where the deployment's platform
-// vault can serve every card PSP purchase offers; choosing it records the
-// merchant's identity in the vault once, which platform cards are held by.
-func TestPlatformCardCustody(t *testing.T) {
+// A merchant saves new cards in the platform vault only where every PSP new
+// card charges go to can charge them; choosing it records the merchant's
+// identity in the vault once, which platform cards are held by.
+func TestPlatformCardVault(t *testing.T) {
 	t.Parallel()
 	w := newVaultWorld(t, withPlatformVault)
 	ctx := t.Context()
@@ -58,21 +58,19 @@ func TestPlatformCardCustody(t *testing.T) {
 
 	got, err := client.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
-	require.Empty(t, got.MerchantSettings.CardCustody, "absent is merchant custody")
+	require.Empty(t, got.MerchantSettings.CardVault, "absent: each PSP keeps the cards it takes")
 	require.True(t, got.PlatformVault.Available)
 
-	_, err = client.UpdateMerchantConfiguration(ctx, setCustody(billing.CardCustodyHosted))
-	require.Equal(t, "card_custody_reserved", codeOf(err))
-	_, err = client.UpdateMerchantConfiguration(ctx, setCustody(billing.CardCustodyPlatform))
+	_, err = client.UpdateMerchantConfiguration(ctx, setVault(billing.CardVaultPlatform))
 	require.Equal(t, "platform_vault_unreachable", codeOf(err), "Stripe's own fields take the card")
 	require.ErrorContains(t, err, "stripe")
 	require.Empty(t, w.platformIdentities())
 
 	_, err = client.UpdatePSP(ctx, w.psp["stripe"], billing.UpdatePSPParams{Archived: true, AllowLast: true})
 	require.NoError(t, err)
-	got, err = client.UpdateMerchantConfiguration(ctx, setCustody(billing.CardCustodyPlatform))
+	got, err = client.UpdateMerchantConfiguration(ctx, setVault(billing.CardVaultPlatform))
 	require.NoError(t, err)
-	require.Equal(t, billing.CardCustodyPlatform, got.MerchantSettings.CardCustody)
+	require.Equal(t, billing.CardVaultPlatform, got.MerchantSettings.CardVault)
 	identities := w.platformIdentities()
 	require.Len(t, identities, 1)
 	identity := identities[0]
@@ -81,16 +79,24 @@ func TestPlatformCardCustody(t *testing.T) {
 	require.Equal(t, platformTenant+"/"+mid.String(), identity.account)
 
 	grace := 3
-	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{CardCustody: billing.CardCustodyPlatform, ArrearsGraceDays: &grace}})
+	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{CardVault: billing.CardVaultPlatform, ArrearsGraceDays: &grace}})
 	require.NoError(t, err)
 	w.declare = func(psps map[string]openrails.PSPConfig) { delete(psps, "stripe") }
 	w.restart()
 	client = w.client[remote]
 	require.Equal(t, identities, w.platformIdentities(), "choosing again and reloading record no second identity")
 
-	// A PSP that could not charge platform cards is refused before any write.
-	_, err = client.CreatePSP(ctx, billing.CreatePSPParams{Key: "stripe-two", Rail: billing.RailStripe, Environment: "test", PSPAccount: billing.PSPAccount{AccountID: "acct_e2etwo"},
-		PublishableKey: "pk_test_two", Credentials: map[string]string{"secret_key": "sk_test_two", "webhook_signing_secret": "whsec_two"}})
+	// A PSP that would take new card charges it cannot make is refused before
+	// any write; once charge_psps leaves it out, it is a PSP like any other.
+	stripeTwo := billing.CreatePSPParams{Key: "stripe-two", Rail: billing.RailStripe, Environment: "test", PSPAccount: billing.PSPAccount{AccountID: "acct_e2etwo"},
+		PublishableKey: "pk_test_two", Credentials: map[string]string{"secret_key": "sk_test_two", "webhook_signing_secret": "whsec_two"}}
+	_, err = client.CreatePSP(ctx, stripeTwo)
+	require.Equal(t, "platform_vault_unreachable", codeOf(err))
+	_, err = client.UpdateMerchantConfiguration(ctx, setVault(billing.CardVaultPlatform, "nmi"))
+	require.NoError(t, err)
+	_, err = client.CreatePSP(ctx, stripeTwo)
+	require.NoError(t, err, "stripe-two takes no new card charge")
+	_, err = client.UpdateMerchantConfiguration(ctx, setVault(billing.CardVaultPlatform, "nmi", "stripe-two"))
 	require.Equal(t, "platform_vault_unreachable", codeOf(err))
 	// Nor is a PSP document written into Vault directly whose own server
 	// would take the card.
@@ -100,7 +106,7 @@ func TestPlatformCardCustody(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, served.Rejected["psps/nmi"], "platform vault")
 	require.NotContains(t, served.PSPs["nmi"].Value.Settings, "card_entry")
-	require.Equal(t, billing.CardCustodyPlatform, served.Merchant.Value.MerchantSettings.CardCustody)
+	require.Equal(t, billing.CardVaultPlatform, served.Merchant.Value.MerchantSettings.CardVault)
 
 	// A platform card is held by the merchant's identity; without it the
 	// custody checks refuse the row.
@@ -134,10 +140,10 @@ func TestPlatformCardCustody(t *testing.T) {
 	require.NoError(t, w.exportArchive(), "a removed card no longer holds the archive")
 }
 
-// Without a platform vault for the deployment's posture, platform custody is
-// refused: over the API, in a declaration (the merchant document alone), and
-// in Vault directly.
-func TestPlatformCardCustodyNeedsAPlatformVault(t *testing.T) {
+// Without a platform vault for the deployment's posture, card_vault platform
+// is refused: over the API, in a declaration (the merchant document alone),
+// and in Vault directly.
+func TestPlatformCardVaultNeedsAPlatformVault(t *testing.T) {
 	t.Parallel()
 	w := newVaultWorld(t)
 	ctx := t.Context()
@@ -146,18 +152,18 @@ func TestPlatformCardCustodyNeedsAPlatformVault(t *testing.T) {
 	got, err := client.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
 	require.False(t, got.PlatformVault.Available)
-	_, err = client.UpdateMerchantConfiguration(ctx, setCustody(billing.CardCustodyPlatform))
+	_, err = client.UpdateMerchantConfiguration(ctx, setVault(billing.CardVaultPlatform))
 	require.Equal(t, "platform_vault_unavailable", codeOf(err))
-	got, err = client.UpdateMerchantConfiguration(ctx, setCustody(billing.CardCustodyMerchant))
+	got, err = client.UpdateMerchantConfiguration(ctx, setVault("nmi"))
 	require.NoError(t, err)
-	require.Equal(t, billing.CardCustodyMerchant, got.MerchantSettings.CardCustody)
+	require.Equal(t, "nmi", got.MerchantSettings.CardVault)
 
-	w.editDoc("merchant", func(doc map[string]any) { doc["card_custody"] = "platform" })
+	w.editDoc("merchant", func(doc map[string]any) { doc["card_vault"] = "platform" })
 	rt := engine.Graph(w.rt).Runtime
 	served, err := rt.MerchantConfig.Get(ctx, rt.DeclaredMerchants()[0])
 	require.NoError(t, err)
 	require.Contains(t, served.Rejected["merchant"], "platform vault")
-	require.Equal(t, billing.CardCustodyMerchant, served.Merchant.Value.MerchantSettings.CardCustody, "the previous document keeps serving")
+	require.Equal(t, "nmi", served.Merchant.Value.MerchantSettings.CardVault, "the previous document keeps serving")
 	require.Empty(t, w.platformIdentities())
 
 	// Boot serves without what it refuses, and names it.
@@ -165,7 +171,7 @@ func TestPlatformCardCustodyNeedsAPlatformVault(t *testing.T) {
 		cfg.Database = openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}
 		cfg.ProviderWriteMode = openrails.ProviderWritesReadOnly
 		bill, err := openrails.New(ctx, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, Clock: w.clock})
-		require.NoError(t, err, "a custody the deployment cannot serve never fails boot")
+		require.NoError(t, err, "a card vault the deployment cannot serve never fails boot")
 		defer func() { _ = bill.Close(context.Background()) }()
 		for _, p := range bill.Probes() {
 			if p.Name == "openrails_configuration" {
@@ -174,12 +180,52 @@ func TestPlatformCardCustodyNeedsAPlatformVault(t *testing.T) {
 		}
 		return nil
 	}
-	declared := func(custody billing.CardCustody) map[string]openrails.MerchantDeclaration {
-		return map[string]openrails.MerchantDeclaration{"custody-" + uuid.NewString()[:8]: {DisplayName: "Custody", MerchantSettings: billing.MerchantSettings{CardCustody: custody}}}
+	declared := func(vault string) map[string]openrails.MerchantDeclaration {
+		return map[string]openrails.MerchantDeclaration{"vault-" + uuid.NewString()[:8]: {DisplayName: "Vault", MerchantSettings: billing.MerchantSettings{CardVault: vault}}}
 	}
-	require.ErrorContains(t, refused(openrails.Config{Merchants: declared(billing.CardCustodyPlatform)}), "no platform vault")
-	require.ErrorContains(t, refused(openrails.Config{Merchants: declared(billing.CardCustodyHosted)}), "reserved")
+	require.ErrorContains(t, refused(openrails.Config{Merchants: declared(billing.CardVaultPlatform)}), "no platform vault")
+	require.ErrorContains(t, refused(openrails.Config{Merchants: declared("nowhere")}), "card_vault names no live card PSP")
 	require.ErrorContains(t, refused(openrails.Config{PlatformVault: &openrails.PlatformVaultConfig{Kind: "basis_theory", TenantID: platformTenant}}), "vault.kv_mount")
 	vault := vaulttest.New(t)
 	require.ErrorContains(t, refused(openrails.Config{Vault: vault.Config(), PlatformVault: &openrails.PlatformVaultConfig{Kind: "hyperswitch", TenantID: platformTenant}}), "platform_vault.kind")
+}
+
+// A card in a PSP's own vault charges only through that PSP's account: the
+// merchant's charge PSPs must agree with its card vault, or the change is
+// refused for this merchant alone, over the API and in Vault directly. The
+// card vault's PSP alone then takes new card charges.
+func TestCardVaultRefusesChargePSPsThatCannotChargeIt(t *testing.T) {
+	t.Parallel()
+	w := newVaultWorld(t)
+	ctx := t.Context()
+	client := w.client[remote]
+
+	for _, refused := range []struct {
+		settings billing.UpdateMerchantConfigurationParams
+		code     string
+	}{
+		{setVault("nmi", "stripe"), "charge_psp_incompatible"},
+		{setVault("nowhere"), "card_vault_unknown"},
+		{setVault("nmi", "nowhere"), "charge_psp_unknown"},
+		{setVault("ccbill"), "card_vault_unknown"},
+	} {
+		_, err := client.UpdateMerchantConfiguration(ctx, refused.settings)
+		require.Equal(t, refused.code, codeOf(err), "%+v", refused.settings.MerchantSettings)
+	}
+	got, err := client.UpdateMerchantConfiguration(ctx, setVault("nmi", "nmi"))
+	require.NoError(t, err)
+	require.Equal(t, []string{"nmi"}, got.MerchantSettings.ChargePSPs)
+
+	price := w.membership("content:vault", 9_990_000)
+	options := w.options(price.ID)
+	require.Contains(t, options, "nmi")
+	require.NotContains(t, options, "stripe", "only the charge PSPs take a new card")
+
+	w.editDoc("merchant", func(doc map[string]any) { doc["card_vault"], doc["charge_psps"] = "stripe", []any{"nmi"} })
+	rt := engine.Graph(w.rt).Runtime
+	served, err := rt.MerchantConfig.Get(ctx, rt.DeclaredMerchants()[0])
+	require.NoError(t, err)
+	require.Contains(t, served.Rejected["merchant"], "cannot charge cards vaulted at stripe")
+	require.Equal(t, "nmi", served.Merchant.Value.MerchantSettings.CardVault, "the previous document keeps serving")
+	require.Contains(t, w.options(price.ID), "nmi", "the merchant still sells")
 }

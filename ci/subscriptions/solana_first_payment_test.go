@@ -45,6 +45,8 @@ type solanaShop struct {
 	mint     solanago.PublicKey
 	price    string
 	key      string
+	// plan is the on-chain plan the apply published for price.
+	plan *subscriptions.PlanAccount
 }
 
 func openSolanaShop(t *testing.T, before ...func(*world)) *solanaShop {
@@ -55,21 +57,23 @@ func openSolanaShop(t *testing.T, before ...func(*world)) *solanaShop {
 		f(w)
 	}
 	w.start()
-	plan := sol.plan(t, 4242, solanaPlanAmount)
-	key, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
+	// The apply publishes the recurring price's plan from its terms.
+	key, err := w.applyCatalog(`  "{key}-monthly":
     currency: usd
     unit_amount: 23000000
     billing_interval_hours: 720
     access_duration_hours: 720
-    psps:
-      nmi: {}
-      solana:
-        plan_pda: %s
-        plan_id: "4242"
-`, plan))
+`)
 	require.NoError(t, err)
 	mint := solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)
-	return &solanaShop{w: w, sol: sol, fake: sol.fake, cranker: sol.cranker, treasury: sol.treasury, mint: mint, price: priceID(t, w, key, key+"-monthly"), key: key}
+	price, err := priceByKey(t.Context(), w.client[embedded], key, key+"-monthly")
+	require.NoError(t, err)
+	require.NotNil(t, price.SolanaPlan)
+	raw, ok := sol.fake.Account(solanago.MustPublicKeyFromBase58(*price.SolanaPlan))
+	require.True(t, ok)
+	plan, err := subscriptions.DecodePlanAccount(raw)
+	require.NoError(t, err)
+	return &solanaShop{w: w, sol: sol, fake: sol.fake, cranker: sol.cranker, treasury: sol.treasury, mint: mint, price: price.ID.String(), key: key, plan: plan}
 }
 
 type solanaBuyer struct {
@@ -361,14 +365,14 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		// nothing recorded); the attacker asks the order's transaction for that
 		// wallet and confirms with a made-up signature, then the victim's.
 		victim := s.buyer(t, true)
-		plan, bump, _ := subscriptions.DerivePlanPDA(s.cranker.PublicKey(), 4242)
+		plan, bump, _ := subscriptions.DerivePlanPDA(s.cranker.PublicKey(), s.plan.PlanID)
 		sub, _, _ := subscriptions.DeriveSubscriptionPDA(plan, victim.wallet.PublicKey())
 		authority, _, _ := subscriptions.DeriveSubscriptionAuthority(victim.wallet.PublicKey(), s.mint)
 		events, _, _ := subscriptions.DeriveEventAuthority()
 		victimSubscribe := s.land(t, build(t, []solanago.Instruction{subscriptions.BuildSubscribe(subscriptions.SubscribeParams{
 			Subscriber: victim.wallet.PublicKey(), Merchant: s.cranker.PublicKey(), PlanPDA: plan, SubscriptionPDA: sub,
-			SubscriptionAuthorityPDA: authority, EventAuthority: events, PlanID: 4242, PlanBump: bump, ExpectedMint: s.mint,
-			ExpectedAmount: solanaPlanAmount, ExpectedPeriodHours: monthHours, ExpectedCreatedAt: 1_700_000_000, ExpectedSubscriptionAuthInitID: 42,
+			SubscriptionAuthorityPDA: authority, EventAuthority: events, PlanID: s.plan.PlanID, PlanBump: bump, ExpectedMint: s.mint,
+			ExpectedAmount: solanaPlanAmount, ExpectedPeriodHours: monthHours, ExpectedCreatedAt: s.plan.CreatedAt, ExpectedSubscriptionAuthInitID: 42,
 		})}, victim.wallet), s.w.clock.Now())
 
 		attacker := s.buyer(t, true)

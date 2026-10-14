@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchantarchive"
+	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // A key identifies a product-local chain; equal money under another key is a
@@ -244,35 +245,47 @@ func TestCatalogDocumentPartialArchiveAndRestoreVersions(t *testing.T) {
 	requireCode(t, err, http.StatusNotFound, "price_not_found")
 }
 
-// Matching an archived version by its full terms must also recover its PSP
-// bindings. Otherwise an omitted binding silently erases grandfathered routing.
-func TestCatalogArchivedVersionKeepsProviderBindings(t *testing.T) {
+// A provider price's terms are its provider's: when the provider changes them,
+// the next declaration is a new version that takes the provider object, and
+// the earlier one keeps its subscribers' history. A key of ours never becomes
+// a provider price, nor the reverse.
+func TestProviderPriceVersionsFollowTheProvider(t *testing.T) {
 	w := newWorld(t)
 	c := w.client[embedded]
 	product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "bound", DisplayName: "Bound"})
 	require.NoError(t, err)
-	hours := monthHours
-	create := func(amount int64, plan string) *billing.Price {
-		t.Helper()
-		price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: amount, Currency: "USD", AccessDurationHours: &hours, BillingIntervalHours: &hours, PSPs: map[string]map[string]string{"nmi": {"plan_id": plan}}})
-		require.NoError(t, err)
-		return price
+	plan := "bound_plan_" + uuid.NewString()[:8]
+	w.nmi.AddPlan(nmimock.Plan{ID: plan, Name: "Bound", Amount: "10.00", Days: 30})
+	apply := func() (*billing.CatalogApplicationReceipt, error) {
+		return c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{product.Key: {ProviderPrices: map[string]catalog.ApplyProviderPrice{
+			"monthly": {PSP: "nmi", PlanID: plan}}}}}, billing.ApplyCatalogParams{})
 	}
-	first := create(1_000_000, "bound-first")
-	second := create(2_000_000, "bound-second")
-	_, err = c.UpdatePrice(t.Context(), second.ID, billing.UpdatePriceParams{Archived: catalog.Value(true)})
+	_, err = apply()
 	require.NoError(t, err)
-	_, err = c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{product.Key: {Prices: map[string]catalog.ApplyPrice{"monthly": {
-		Currency: catalog.Value("USD"), UnitAmount: catalog.Value(int64(1_000_000)), AccessDurationHours: catalog.Value(hours), BillingIntervalHours: catalog.Value(hours), TrialUnitAmount: catalog.Null[int64](), TrialDurationHours: catalog.Null[int](), Archived: catalog.Value(true),
-	}}}}}, billing.ApplyCatalogParams{})
+	first, err := priceByKey(t.Context(), c, product.Key, "monthly")
 	require.NoError(t, err)
-	preserved, err := c.GetPrice(t.Context(), first.ID, billing.GetPriceParams{})
+	require.Equal(t, int64(10_000_000), first.UnitAmount)
+	require.Equal(t, plan, first.Provider.IDs["plan_id"])
+
+	w.nmi.AddPlan(nmimock.Plan{ID: plan, Name: "Bound", Amount: "12.00", Days: 30})
+	_, err = apply()
 	require.NoError(t, err)
-	require.True(t, preserved.Archived)
-	require.Equal(t, "bound-first", preserved.PSPs["nmi"].IDs["plan_id"])
-	other, err := c.GetPrice(t.Context(), second.ID, billing.GetPriceParams{})
+	second, err := priceByKey(t.Context(), c, product.Key, "monthly")
 	require.NoError(t, err)
-	require.Equal(t, "bound-second", other.PSPs["nmi"].IDs["plan_id"])
+	require.NotEqual(t, first.ID, second.ID, "new terms are a new version")
+	require.Equal(t, int64(12_000_000), second.UnitAmount, "the provider's terms win")
+	require.Equal(t, plan, second.Provider.IDs["plan_id"])
+	earlier, err := c.GetPrice(t.Context(), first.ID, billing.GetPriceParams{})
+	require.NoError(t, err)
+	require.True(t, earlier.Archived)
+	require.NotNil(t, earlier.Provider, "an earlier version stays the provider's")
+
+	_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 5_000_000, Currency: "USD"})
+	require.ErrorIs(t, err, billing.ErrInvalid, "a provider price's key takes none of ours")
+	_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "ours", UnitAmount: 5_000_000, Currency: "USD"})
+	require.NoError(t, err)
+	_, err = c.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "ours", PSP: "nmi", PlanID: plan})
+	require.ErrorIs(t, err, billing.ErrInvalid, "nor ours a provider's")
 }
 
 // These rows have never been purchased. Rejection must come from the database

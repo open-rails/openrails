@@ -267,9 +267,9 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 					reason = "the deployment lists no solana.crankers to own its plan"
 				}
 				if check.solanaOnly {
-					prepared.warn(check.productKey, check.key, true, "price %q of product %q sells only on Solana, and its plan is not published: %s", check.key, check.productKey, reason)
+					prepared.warn(check.productKey, check.key, true, "price %q of product %q sells only on Solana and cannot: %s", check.key, check.productKey, reason)
 				} else {
-					prepared.warn(check.productKey, check.key, false, "price %q of product %q is not sold on Solana: its plan is not published: %s", check.key, check.productKey, reason)
+					prepared.warn(check.productKey, check.key, false, "price %q of product %q is not sold on Solana: %s", check.key, check.productKey, reason)
 				}
 				continue
 			}

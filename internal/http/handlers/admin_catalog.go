@@ -194,6 +194,25 @@ func CreatePrice(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, out)
 }
 
+// CreateProviderPrice links a price a provider owns and runs to a product,
+// with the terms read from its provider.
+func CreateProviderPrice(r *httprequest.Request) {
+	var params billing.CreateProviderPriceParams
+	if !r.BindJSON(&params) {
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.CreateProviderPrice(r.Request.Context(), params)
+	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	r.JSON(http.StatusCreated, out)
+}
+
 func ListPrices(r *httprequest.Request) {
 	page, ok := r.Page()
 	if !ok {

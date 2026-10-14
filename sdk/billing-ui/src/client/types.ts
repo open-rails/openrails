@@ -66,10 +66,13 @@ export type SubscriptionStatus =
   | "canceled"
   | (string & {})
 
-export const pspLinkStateSchema = z.object({
-  /** `linked | pending_manual_link | sync_disabled | error` */
-  status: z.string(),
+/** The provider that owns and runs a provider price. */
+export const priceProviderSchema = z.object({
+  psp: z.string(),
+  rail: z.string(),
+  /** The provider's identifiers; empty in a buyer's view. */
   ids: z.record(z.string(), z.string()).nullish(),
+  /** `unknown | in_sync | drifted | missing | sync_disabled`, after a verifying read. */
   sync_status: z.string().nullish(),
 })
 
@@ -97,8 +100,10 @@ export const priceSchema = z.object({
   billing_interval_hours: z.number().nullable(),
   trial_unit_amount: amount.nullable(),
   trial_duration_hours: z.number().nullable(),
-  /** Keyed by PSP key. */
-  psps: z.record(z.string(), pspLinkStateSchema).nullish(),
+  /** The methods one of ours sells through (`card`, `solana`); null: every method. */
+  sell_via: z.array(z.string()).nullish(),
+  /** Set on a provider price: the PSP that owns and runs it. Null: ours. */
+  provider: priceProviderSchema.nullish(),
   created_at: time,
   updated_at: time,
 })

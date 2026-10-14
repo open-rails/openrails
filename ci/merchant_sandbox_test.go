@@ -58,14 +58,13 @@ products:
   premium:
     display_name: Premium
     entitlements: ["premium"]
-    prices:
+    provider_prices:
       monthly:
-        currency: usd
-        unit_amount: 23000000
-        billing_interval_hours: 720
-        access_duration_hours: 720
-        psps:
-          ccbill: {flex_id: ` + flexID + `, recurring_billing_option_id: "` + rbo + `"}
+        psp: ccbill
+        flex_id: ` + flexID + `
+        recurring_billing_option_id: "` + rbo + `"
+        amount: 23 USD
+        billing_interval: 30 days
 `))
 		require.NoError(t, err)
 		_, err = shop.ApplyCatalog(ctx, params, billing.ApplyCatalogParams{})

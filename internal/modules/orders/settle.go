@@ -68,6 +68,9 @@ type Charge struct {
 type Enrolled struct {
 	RailSubscriptionID     string
 	PeriodStart, PeriodEnd time.Time
+	// PriceID is the provider price the provider bills, when it is not the
+	// line's own (a CCBill FlexForm standing in for a price of ours).
+	PriceID *uuid.UUID
 }
 
 // lineage is the agreement references the charge leaves on the card.
@@ -323,6 +326,9 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 			}
 			terms.CollectionPolicy, terms.PeriodStart, terms.PeriodEnd = models.ProviderCollectionPolicy(charge.Rail), e.PeriodStart, e.PeriodEnd
 			params.RailSubscriptionID = &e.RailSubscriptionID
+			if e.PriceID != nil {
+				terms.PriceID, params.PriceID = *e.PriceID, *e.PriceID
+			}
 		}
 		sub, _, err := s.Memberships.CreateMembershipTx(db.WithPSPID(ctx, charge.PSPID), d, params)
 		if err != nil {

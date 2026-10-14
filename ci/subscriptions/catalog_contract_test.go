@@ -72,8 +72,7 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 			Entitlements: []string{"content:plan"}})
 		require.NoError(t, err)
 		require.Empty(t, product.Prices)
-		_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: int64(i+1) * 1_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
-			PSPs: map[string]map[string]string{"nmi": {"plan_id": "plan-" + uuid.NewString()[:8]}}})
+		_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: int64(i+1) * 1_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
 		require.NoError(t, err)
 		products = append(products, product)
 	}
@@ -84,14 +83,13 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	require.Len(t, got.Prices, 1)
 	price := got.Prices[0]
 	require.Equal(t, products[0].Key+"-monthly", price.Key, "the default key names the cadence")
-	require.Equal(t, billing.PSPLinkLinked, price.PSPs["nmi"].Status)
-	require.NotEmpty(t, price.PSPs["nmi"].IDs["plan_id"])
+	require.Nil(t, price.Provider, "the price is ours")
 	var wire map[string]any
 	require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/catalog/prices/"+price.ID.String(), nil, &wire))
-	for _, field := range []string{"id", "key", "product_id", "archived", "unit_amount", "currency", "access_duration_hours", "billing_interval_hours", "trial_unit_amount", "trial_duration_hours", "psps", "pending_manual_actions", "created_at", "updated_at"} {
+	for _, field := range []string{"id", "key", "product_id", "archived", "unit_amount", "currency", "access_duration_hours", "billing_interval_hours", "trial_unit_amount", "trial_duration_hours", "sell_via", "provider", "solana_plan", "created_at", "updated_at"} {
 		require.Contains(t, wire, field, "nulls are present, never omitted")
 	}
-	require.NotContains(t, wire, "providers")
+	require.NotContains(t, wire, "psps", "a price names no PSPs")
 	require.Equal(t, "1000000", wire["unit_amount"])
 
 	// Cursor paging walks every product exactly once.
@@ -127,10 +125,8 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 			require.Len(t, product.Prices, 1, "a product embeds its prices on sale")
 		}
 		for _, p := range product.Prices {
-			psp := p.PSPs["nmi"]
-			require.Equal(t, billing.PSPLinkLinked, psp.Status)
-			require.Nil(t, psp.IDs, "PSP identifiers stay with the merchant")
-			require.Empty(t, p.PendingManualActions)
+			require.Nil(t, p.Provider)
+			require.Nil(t, p.SolanaPlan, "provider identifiers stay with the merchant")
 		}
 	}
 	require.True(t, keys[products[0].Key])
@@ -301,7 +297,7 @@ func TestPriceCurrencyIsFiatOrSOL(t *testing.T) {
 		require.Contains(t, status.Message, "stablecoin", code)
 	}
 	var refused map[string]any
-	document := map[string]any{"schema_version": 1, "products": map[string]any{product.Key: map[string]any{"prices": map[string]any{"coin": map[string]any{"amount": "5 USDC", "psps": map[string]any{"stripe": map[string]any{}}}}}}}
+	document := map[string]any{"schema_version": 1, "products": map[string]any{product.Key: map[string]any{"prices": map[string]any{"coin": map[string]any{"amount": "5 USDC"}}}}}
 	require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodPost, "/v1/catalog/apply", document, &refused), "%v", refused)
 	require.Contains(t, fmt.Sprint(refused), "stablecoin")
 

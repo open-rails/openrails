@@ -20,16 +20,16 @@ import {
   TableRow,
 } from "#orck/admin/components/ui/table"
 import type { PSPRoutingSkip } from "#orck/admin/lib/api/types"
-import type { PSPLinkState, Price } from "#orck/client/generated/wire"
+import type { Price } from "#orck/client/generated/wire"
 
-// The catalog is declarative: the provider adapter pushes prices and the
-// read-back reconciliation is alert-only, so this surface displays a price's
-// psps and never edits them. It answers two different questions:
-//   - Link state (`price.providers`): does OpenRails hold a link for this PSP,
-//     and does the remote object still match?
+// A price is ours (OpenRails bills it, by card through the merchant's card
+// vault and charge PSPs, and on Solana) or a provider's (the provider owns
+// and runs it; OpenRails reads its terms). This surface reports which, and
+// never edits a provider. It answers two questions:
+//   - Ownership (`price.provider`): who runs the billing, and does a provider
+//     price's provider still state the same terms?
 //   - Purchase readiness (the routing preview): would a real purchase land
-//     here now? A linked price can still be unroutable (PSP unarmed,
-//     credentials missing).
+//     here now?
 
 // SKIP_LABELS renders the routing skip vocabulary for operators. Keep the keys
 // in lockstep with internal/db/models/order_attempt.go.
@@ -40,7 +40,13 @@ const SKIP_LABELS: Record<PSPRoutingSkip, string> = {
   not_armed: "This provider is not set up here, or it was archived.",
   credentials_missing:
     "The provider is set up, but the credentials it needs are missing.",
-  link_missing: "This price has not been sent to the provider yet.",
+  link_missing:
+    "This provider has nothing to sell this price on: a CCBill FlexForm, or a published Solana plan.",
+  not_sold_via: "The price is not sold this way: its sell_via leaves this method out.",
+  not_a_charge_psp:
+    "New card charges go to the merchant's charge PSPs; this provider is not one.",
+  provider_price:
+    "A provider price sells only through its own provider, and only CCBill still sells new ones.",
   mode_unsupported:
     "This provider cannot take this kind of payment (one-off or recurring).",
   posture_disarmed:
@@ -56,7 +62,10 @@ const SKIP_HEADLINES: Record<PSPRoutingSkip, string> = {
   ambiguous_selector: "more than one match",
   not_armed: "not set up",
   credentials_missing: "credentials missing",
-  link_missing: "not sent to provider",
+  link_missing: "nothing to sell on",
+  not_sold_via: "not sold this way",
+  not_a_charge_psp: "not a charge PSP",
+  provider_price: "provider's price",
   mode_unsupported: "cannot take this payment",
   posture_disarmed: "credentials failed check",
   service_unavailable: "connection not running",
@@ -77,12 +86,6 @@ const OK_BADGE = "bg-settled-surface text-settled"
 const WARN_BADGE = "bg-held-surface text-held"
 const BAD_BADGE = "bg-failed-surface text-failed"
 
-function linkStatusClass(status: PSPLinkState["status"]) {
-  if (status === "linked") return OK_BADGE
-  if (status === "error") return BAD_BADGE
-  return WARN_BADGE
-}
-
 // syncStatusClass leaves "unknown" neutral, not a warning: nobody has checked
 // yet.
 function syncStatusClass(sync?: string) {
@@ -92,7 +95,6 @@ function syncStatusClass(sync?: string) {
     case "drifted":
     case "missing":
       return BAD_BADGE
-    case "never_synced":
     case "sync_disabled":
       return WARN_BADGE
     default:
@@ -100,36 +102,31 @@ function syncStatusClass(sync?: string) {
   }
 }
 
-// LINK_ID_ORDER puts the identifying fields first; anything else the adapter
-// stored follows in sorted order. `rail` is pulled out into its own column.
-const LINK_ID_ORDER = [
+const ID_ORDER = [
+  "plan_id",
   "price_id",
   "product_id",
-  "plan_id",
   "flex_id",
   "recurring_billing_option_id",
-  "lookup_key",
-  "provider",
 ]
 
-function linkEntries(ids?: Record<string, string> | null) {
-  const rest = Object.entries(ids ?? {}).filter(
-    ([k, v]) => k !== "rail" && v !== ""
-  )
-  rest.sort(([a], [b]) => {
-    const ia = LINK_ID_ORDER.indexOf(a)
-    const ib = LINK_ID_ORDER.indexOf(b)
-    if (ia !== ib)
+function providerIDs(ids?: Record<string, string> | null) {
+  return Object.entries(ids ?? {})
+    .filter(([, v]) => v !== "")
+    .sort(([a], [b]) => {
+      const ia = ID_ORDER.indexOf(a)
+      const ib = ID_ORDER.indexOf(b)
       return (
-        (ia < 0 ? LINK_ID_ORDER.length : ia) -
-        (ib < 0 ? LINK_ID_ORDER.length : ib)
+        (ia < 0 ? ID_ORDER.length : ia) - (ib < 0 ? ID_ORDER.length : ib) ||
+        a.localeCompare(b)
       )
-    return a.localeCompare(b)
-  })
-  return rest
+    })
 }
 
-export function PSPLinksCard({
+// PriceOwnerCard shows who runs the price's billing: OpenRails, through the
+// methods it sells by, or the provider that owns it, whose terms Verify reads
+// again.
+export function PriceOwnerCard({
   price,
   verifying,
   verified,
@@ -140,140 +137,109 @@ export function PSPLinksCard({
   verified: boolean
   onVerify: () => void
 }) {
-  const links = Object.entries(price.psps ?? {}).sort(([a], [b]) =>
-    a.localeCompare(b)
-  )
+  const provider = price.provider
+  if (!provider)
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">
+            <AdminMessage id={"Sold by OpenRails"} />
+          </CardTitle>
+          <CardDescription>
+            <AdminMessage
+              id={
+                "OpenRails bills this price: by card through your card vault and charge PSPs, and on Solana. Nothing is written to a provider's catalog."
+              }
+            />
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-1 text-sm">
+          <p>
+            <AdminMessage id={"Sold via: "} />
+            {price.sell_via?.length ? (
+              price.sell_via.join(", ")
+            ) : (
+              <AdminMessage id={"every method you have"} />
+            )}
+          </p>
+          {price.solana_plan && (
+            <p className="font-mono text-xs">
+              <AdminMessage id={"Solana plan "} />
+              {price.solana_plan}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+    )
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-2">
         <div className="grid gap-1">
           <CardTitle className="text-sm">
-            <AdminMessage id={"Payment providers"} />
+            <AdminMessage id={"Owned by its provider"} />
           </CardTitle>
           <CardDescription>
             <AdminMessage
               id={
-                "Which providers this price has been sent to, and whether their copy still matches yours. Publishing the catalog is what sends it; this page only reports. Verify asks each provider what it currently holds, and changes nothing."
+                "The provider owns and runs this price; OpenRails read its terms and never writes it. Verify asks the provider what it holds now, and changes nothing."
               }
             />
           </CardDescription>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={verifying || !links.length}
-          onClick={onVerify}
-        >
+        <Button variant="outline" size="sm" disabled={verifying} onClick={onVerify}>
           {verifying ? "Verifying…" : "Verify"}
         </Button>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {!links.length ? (
-          <p className="text-sm text-muted-foreground">
-            <AdminMessage
-              id={
-                "This price has not been sent to any provider, so nobody can be charged for it yet."
-              }
-            />
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="text-muted-foreground">
-                    <AdminMessage id={"Provider"} />
-                  </TableHead>
-                  <TableHead className="text-muted-foreground">
-                    <AdminMessage id={"Rail"} />
-                  </TableHead>
-                  <TableHead className="text-muted-foreground">
-                    <AdminMessage id={"Sent"} />
-                  </TableHead>
-                  <TableHead className="text-muted-foreground">
-                    <AdminMessage id={"Still matches"} />
-                  </TableHead>
-                  <TableHead className="text-muted-foreground">
-                    <AdminMessage id={"Their reference"} />
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {links.map(([psp, state]) => (
-                  <TableRow key={psp}>
-                    <TableCell className="font-mono text-xs">{psp}</TableCell>
-                    <TableCell className="text-xs">
-                      {state.ids?.rail ?? "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="secondary"
-                        className={linkStatusClass(state.status)}
-                      >
-                        {state.status}
-                      </Badge>
-                      {state.message && (
-                        <p className="mt-1 max-w-xs text-xs text-muted-foreground">
-                          {state.message}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="secondary"
-                        className={syncStatusClass(state.sync_status)}
-                      >
-                        {state.sync_status ?? "unknown"}
-                      </Badge>
-                      {state.drift?.map((d) => (
-                        <p
-                          key={d.field}
-                          className="mt-1 text-xs text-muted-foreground"
-                        >
-                          {d.field}
-                          <AdminMessage id={": yours "} />
-                          {d.openrails_value}
-                          <AdminMessage id={" · theirs"} /> {d.remote_value}
-                        </p>
-                      ))}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {linkEntries(state.ids).length ? (
-                        <div className="grid gap-0.5">
-                          {linkEntries(state.ids).map(([k, v]) => (
-                            <span key={k}>
-                              {k}={v}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                  </TableRow>
+      <CardContent className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="text-muted-foreground">
+                <AdminMessage id={"Provider"} />
+              </TableHead>
+              <TableHead className="text-muted-foreground">
+                <AdminMessage id={"Rail"} />
+              </TableHead>
+              <TableHead className="text-muted-foreground">
+                <AdminMessage id={"Still matches"} />
+              </TableHead>
+              <TableHead className="text-muted-foreground">
+                <AdminMessage id={"Their reference"} />
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow>
+              <TableCell className="font-mono text-xs">{provider.psp}</TableCell>
+              <TableCell className="text-xs">{provider.rail}</TableCell>
+              <TableCell>
+                <Badge
+                  variant="secondary"
+                  className={syncStatusClass(provider.sync_status)}
+                >
+                  {verified ? provider.sync_status : "unknown"}
+                </Badge>
+                {provider.drift?.map((d) => (
+                  <p key={d.field} className="mt-1 text-xs text-muted-foreground">
+                    {d.field}
+                    <AdminMessage id={": yours "} />
+                    {d.openrails_value}
+                    <AdminMessage id={" · theirs"} /> {d.remote_value}
+                  </p>
                 ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-        {!!price.pending_manual_actions?.length && (
-          <div className="border-held/40 rounded-md border p-3 text-xs">
-            {price.pending_manual_actions.map((a) => (
-              <p key={`${a.psp}-${a.action}`}>
-                <span className="font-mono">{a.psp}</span>: {a.hint || a.action}
-              </p>
-            ))}
-          </div>
-        )}
-        {!verified && !!links.length && (
-          <p className="text-xs text-muted-foreground">
-            <AdminMessage
-              id={
-                "Nothing is claimed about the providers' copies until you press Verify."
-              }
-            />
-          </p>
-        )}
+              </TableCell>
+              <TableCell className="font-mono text-xs">
+                <div className="grid gap-0.5">
+                  {providerIDs(provider.ids).map(([k, v]) => (
+                    <span key={k}>
+                      {k}={v}
+                    </span>
+                  ))}
+                </div>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
       </CardContent>
     </Card>
   )

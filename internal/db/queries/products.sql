@@ -46,10 +46,14 @@ WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL
   AND (sqlc.narg(entitlements)::text[] IS NULL OR id IN (
     SELECT pe.product_id FROM billing.product_entitlements pe
     WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.entitlement = ANY (sqlc.narg(entitlements)::text[]) AND pe.removed_at IS NULL))
-  -- For sale: some live price sells it. A product without one is granted only.
+  -- For sale: some live price sells it new: one of ours, or a provider's
+  -- that still sells (CCBill). A product without one is granted only.
   AND (sqlc.narg(for_sale)::boolean IS NULL OR sqlc.narg(for_sale)::boolean = EXISTS (
     SELECT 1 FROM billing.prices pr
-    WHERE pr.merchant_id = products.merchant_id AND pr.product_id = products.id AND NOT pr.archived))
+    WHERE pr.merchant_id = products.merchant_id AND pr.product_id = products.id AND NOT pr.archived
+      AND (NOT pr.provider_owned OR EXISTS (
+        SELECT 1 FROM billing.price_psp_bindings b JOIN billing.psps s ON s.merchant_id = b.merchant_id AND s.id = b.psp_id
+        WHERE b.merchant_id = pr.merchant_id AND b.price_id = pr.id AND s.rail = 'ccbill'))))
   AND (sqlc.narg(after_at)::timestamptz IS NULL OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(fetch_limit)::int;

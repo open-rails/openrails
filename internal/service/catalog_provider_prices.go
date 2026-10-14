@@ -313,7 +313,7 @@ func (s *Service) CreateProviderPrice(ctx context.Context, params billing.Create
 	if params.ProductID.IsZero() == (params.ProductKey == "") {
 		return nil, apperr.Invalidf("exactly one of product_id and product_key is required")
 	}
-	return catalogCommand(ctx, s, "provider-price/"+params.Key, params, "", func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
+	return catalogCommand(ctx, s, "provider-price/create", params, "", func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
 		product, err := s.providerPriceProduct(ctx, params)
 		if err != nil {
 			return nil, err

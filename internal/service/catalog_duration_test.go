@@ -69,13 +69,3 @@ func TestCatalogDurationUpdatePreservesOmittedAndClearsNull(t *testing.T) {
 	require.Nil(t, created.AccessDurationHours, "recurring billing must not create an access expiry")
 	require.Equal(t, intPtr(720), created.BillingIntervalHours)
 }
-
-func TestCatalogProvidersRejectFractionalDayBilling(t *testing.T) {
-	terms := autoCreateContext{Currency: "USD", BillingIntervalHours: intPtr(25), BillingCycleDays: intPtr(1)}
-	for _, adapter := range []providerAdapter{&stripeAdapter{}, &nmiAdapter{}} {
-		_, err := adapter.AutoCreate(t.Context(), terms)
-		require.ErrorContains(t, err, "whole-day billing interval")
-		_, err = adapter.Attach(t.Context(), map[string]string{}, terms)
-		require.ErrorContains(t, err, "whole-day billing interval")
-	}
-}

@@ -65,7 +65,6 @@ func TestImportPaymentMethodIdempotent(t *testing.T) {
 			require.NoError(t, err, "a card with both refs is found again")
 			require.Equal(t, both, stored())
 
-			hours := monthHours
 			start := w.clock.Now().Add(-10 * day)
 			end := start.Add(monthHours * time.Hour)
 			subs := book()
@@ -78,8 +77,7 @@ func TestImportPaymentMethodIdempotent(t *testing.T) {
 				product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: "Imported membership", Entitlements: []string{"content:" + key}})
 				require.NoError(t, err)
 				link := "price_legacy_" + key
-				price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key + "-usd", UnitAmount: 9_990_000, Currency: "USD",
-					BillingIntervalHours: &hours, AccessDurationHours: &hours, PSPs: map[string]map[string]string{"stripe": {"price_id": link}}})
+				price, err := client.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: key + "-usd", PSP: "stripe", PriceID: link})
 				require.NoError(t, err)
 				method := ref.RailMethodRef
 				if method == "" {

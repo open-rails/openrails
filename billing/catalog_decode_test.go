@@ -24,11 +24,13 @@ func TestCreateProductEntitlementListDecoding(t *testing.T) {
 	}
 }
 
-func TestUpdatePricePSPsDecoding(t *testing.T) {
+func TestUpdatePriceSellViaDecoding(t *testing.T) {
 	var params UpdatePriceParams
-	require.NoError(t, json.Unmarshal([]byte(`{"psps":{"mobius":{"plan_id":"premium"},"ccbill":null}}`), &params))
-	require.Equal(t, map[string]string{"plan_id": "premium"}, params.PSPs["mobius"].Value)
-	require.True(t, params.PSPs["ccbill"].Null, "null unlinks a PSP")
+	require.NoError(t, json.Unmarshal([]byte(`{"sell_via":["solana"]}`), &params))
+	require.Equal(t, []string{SellViaSolana}, params.SellVia.Value)
+	var every UpdatePriceParams
+	require.NoError(t, json.Unmarshal([]byte(`{"sell_via":null}`), &every))
+	require.True(t, every.SellVia.Null, "null sells through every method")
 }
 
 func TestNotificationURLPicksByPurpose(t *testing.T) {
