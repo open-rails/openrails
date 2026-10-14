@@ -3324,6 +3324,10 @@ pkg openrails/billing, type SubscriptionChange struct, Rail string `json:"rail"`
 pkg openrails/billing, type SubscriptionChange struct, Status string `json:"status"`
 pkg openrails/billing, type SubscriptionChange struct, SubscriptionID *SubscriptionID `json:"subscription_id,omitempty"`
 pkg openrails/billing, type SubscriptionChange struct, TransactionID *string `json:"transaction_id"`
+pkg openrails/billing, type SubscriptionChangeOption struct
+pkg openrails/billing, type SubscriptionChangeOption struct, Preview SubscriptionChangePreview `json:"preview"`
+pkg openrails/billing, type SubscriptionChangeOption struct, Price Price `json:"price"`
+pkg openrails/billing, type SubscriptionChangeOption struct, Product ProductSummary `json:"product"`
 pkg openrails/billing, type SubscriptionChangePreview struct
 pkg openrails/billing, type SubscriptionChangePreview struct, AmountDueNow int64 `json:"amount_due_now,string"`
 pkg openrails/billing, type SubscriptionChangePreview struct, Currency string `json:"currency"`

@@ -15,10 +15,12 @@ export {
   type ConfigStore,
 } from "./config"
 export {
+  useChangeOptions,
   usePaymentMethods,
   usePayments,
   useSubscriptions,
   type ActionResult,
+  type ChangeOptionsState,
   type PaymentMethodAction,
   type PaymentMethodsState,
   type PaymentsOptions,

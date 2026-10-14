@@ -79,6 +79,8 @@ export const en = {
     wallet: "Solana wallet",
     changeCard: "Change card",
     changeCardLabel: "Change card for {name}",
+    changePlan: "Change plan",
+    changePlanLabel: "Change plan for {name}",
   },
   resume: {
     title: "Resume {name}?",
@@ -97,6 +99,29 @@ export const en = {
     current: "Current",
     useDefault: "Your default card ({card})",
     done: "Payment card updated.",
+  },
+  changePlan: {
+    title: "Change {name}",
+    description:
+      "An upgrade starts now; a downgrade starts at your next renewal.",
+    none: "There are no other plans to switch to right now.",
+    chargeNow: "{amount} now, then {next} from {date}",
+    chargeNowEstimate: "About {amount} now, then {next} from {date}",
+    atPeriodEnd: "No charge now. Switches on {date}, then {next}",
+    confirm: "Change plan",
+    signing: "Waiting for wallet...",
+    confirming: "Confirming...",
+    done: "You're now on {name}.",
+    scheduled: "{name} starts {date}.",
+    processing:
+      "Plan change submitted; it will apply once your provider confirms it.",
+    actionRequired: "This change needs another step. Try again.",
+  },
+  renewal: {
+    title: "Renew your subscription",
+    description:
+      "Your subscription has ended. Renew your plan to get your access back.",
+    action: "Renew now",
   },
   cancel: {
     title: "Cancel {name}?",
@@ -210,5 +235,13 @@ export const en = {
     csrf_origin_denied: "The request was blocked. Reload the page.",
     wallet_rejected: "The wallet request was declined.",
     wallet_no_signature: "The wallet did not sign the transaction.",
+    subscription_change_in_flight:
+      "A plan change for this subscription is still being processed. Please wait for it to finish.",
+    subscription_change_idempotency_conflict:
+      "That plan change was already submitted with different details. Please try again.",
+    subscription_change_already_scheduled:
+      "A plan change is already scheduled for your next renewal.",
+    subscription_change_target_inactive: "That plan is no longer available.",
+    subscription_not_active: "Only an active subscription can change plans.",
   },
 }

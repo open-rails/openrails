@@ -25,6 +25,7 @@ import {
   paymentMethodSchema,
   paymentSchema,
   subscriptionSchema,
+  subscriptionChangeOptionSchema,
   subscriptionChangePreviewSchema,
   subscriptionChangeSchema,
   usageSchema,
@@ -47,6 +48,7 @@ import {
   type PaymentMethod,
   type Subscription,
   type SubscriptionChange,
+  type SubscriptionChangeOption,
   type SubscriptionChangePreview,
   type Usage,
 } from "./types"
@@ -342,6 +344,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
   const paymentPage = listPageSchema(paymentSchema)
   const orderPage = listPageSchema(orderSchema)
   const entitlementPage = listPageSchema(customerEntitlementSchema)
+  const changeOptionPage = listPageSchema(subscriptionChangeOptionSchema)
   const cursorQuery = (opts: CursorOptions, limit: number) => ({
     limit: opts.limit ?? limit,
     cursor: opts.cursor ?? undefined,
@@ -436,6 +439,21 @@ export function createBillingClient(options: BillingClientOptions = {}) {
             payment_method_id: paymentMethodId,
           } satisfies wire.SetSubscriptionPaymentMethodParams,
         }
+      )
+    },
+
+    /**
+     * The prices the subscription can change to now, ranked, each with the
+     * change's preview. A subscription that cannot change answers why.
+     */
+    listSubscriptionChangeOptions(
+      subscriptionId: string,
+      signal?: AbortSignal
+    ): Promise<ListPage<SubscriptionChangeOption>> {
+      return json(
+        changeOptionPage,
+        `/me/subscriptions/${id(subscriptionId)}/change/options`,
+        { signal }
       )
     },
 

@@ -102,6 +102,13 @@ func run(addr, baseURL, dsn, static string, lifetime time.Duration) error {
 		}
 		reply(w, http.StatusCreated, s)
 	})
+	mux.HandleFunc("POST /__test/customers/{id}/end-subscriptions", func(w http.ResponseWriter, r *http.Request) {
+		if err := rt.EndSubscriptions(r.Context(), r.PathValue("id")); err != nil {
+			reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /__test/customers/{id}/billing", func(w http.ResponseWriter, r *http.Request) {
 		out, err := rt.CustomerBilling(r.Context(), r.PathValue("id"))
 		if err != nil {

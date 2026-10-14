@@ -33,6 +33,8 @@ type Catalog struct {
 	// Prices sold through the armed card PSP.
 	CardOncePrice    string `json:"card_once_price_id"`
 	CardMonthlyPrice string `json:"card_monthly_price_id"`
+	// The card membership's higher tier.
+	CardPlusPrice string `json:"card_plus_price_id"`
 }
 
 func seedCatalog(ctx context.Context, c *openrails.Client) (Catalog, error) {
@@ -57,19 +59,22 @@ func seedCatalog(ctx context.Context, c *openrails.Client) (Catalog, error) {
 	if err != nil {
 		return Catalog{}, err
 	}
-	cardOnce, cardMonthly, err := seedCards(ctx, c)
+	cardOnce, cardMonthly, cardPlus, err := seedCards(ctx, c)
 	if err != nil {
 		return Catalog{}, err
 	}
-	return Catalog{SubscriptionProduct: sub.ID.String(), SubscriptionPrice: subPrice.ID.String(), OneTimeProduct: once, OneTimePrice: oncePrice, CryptoPassPrice: pass, CryptoMonthlyPrice: monthly, CardOncePrice: cardOnce, CardMonthlyPrice: cardMonthly}, nil
+	return Catalog{SubscriptionProduct: sub.ID.String(), SubscriptionPrice: subPrice.ID.String(), OneTimeProduct: once, OneTimePrice: oncePrice, CryptoPassPrice: pass, CryptoMonthlyPrice: monthly, CardOncePrice: cardOnce, CardMonthlyPrice: cardMonthly, CardPlusPrice: cardPlus}, nil
 }
 
-// seedCards applies prices sold by card only.
-func seedCards(ctx context.Context, c *openrails.Client) (string, string, error) {
+// seedCards applies prices sold by card only: a membership and its higher
+// tier.
+func seedCards(ctx context.Context, c *openrails.Client) (string, string, string, error) {
 	params, err := catalog.ParseApplicationYAML([]byte(`schema_version: 1
 products:
   e2e-card:
     display_name: Card membership
+    tier_group: e2e-card
+    tier_rank: 1
     prices:
       e2e-card-once:
         currency: usd
@@ -84,22 +89,34 @@ products:
         access_duration_hours: 720
         sell_via: [card]
     entitlements: ["e2e-card"]
+  e2e-card-plus:
+    display_name: Card plus
+    tier_group: e2e-card
+    tier_rank: 2
+    prices:
+      e2e-card-plus-monthly:
+        currency: usd
+        unit_amount: 9990000
+        billing_interval_hours: 720
+        access_duration_hours: 720
+        sell_via: [card]
+    entitlements: ["e2e-card", "e2e-card-plus"]
 `))
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if _, err := c.ApplyCatalog(ctx, params, billing.ApplyCatalogParams{}); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	once, err := currentPrice(ctx, c, "e2e-card", "e2e-card-once")
-	if err != nil {
-		return "", "", err
+	var ids [3]string
+	for i, key := range [][2]string{{"e2e-card", "e2e-card-once"}, {"e2e-card", "e2e-card-monthly"}, {"e2e-card-plus", "e2e-card-plus-monthly"}} {
+		price, err := currentPrice(ctx, c, key[0], key[1])
+		if err != nil {
+			return "", "", "", err
+		}
+		ids[i] = price.ID.String()
 	}
-	monthly, err := currentPrice(ctx, c, "e2e-card", "e2e-card-monthly")
-	if err != nil {
-		return "", "", err
-	}
-	return once.ID.String(), monthly.ID.String(), nil
+	return ids[0], ids[1], ids[2], nil
 }
 
 // seedCrypto applies Solana-sold prices the way a host's catalog does: a
@@ -294,6 +311,28 @@ func (r *Runtime) CustomerBilling(ctx context.Context, customerID string) (Custo
 		return CustomerBilling{}, err
 	}
 	return CustomerBilling{Subscriptions: subs.Items, PaymentMethods: methods.Items, Sales: r.NMI.Sales(), Vaults: len(r.NMI.Vaults())}, nil
+}
+
+// EndSubscriptions cancels the customer's subscriptions at once, access
+// included, as staff would.
+func (r *Runtime) EndSubscriptions(ctx context.Context, customerID string) error {
+	customer, err := billing.ParseCustomerID(customerID)
+	if err != nil {
+		return err
+	}
+	subs, err := r.Client.ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: customer})
+	if err != nil {
+		return err
+	}
+	for _, s := range subs.Items {
+		if s.Status == billing.SubscriptionCanceled {
+			continue
+		}
+		if _, err := r.Client.CancelSubscription(ctx, s.ID, billing.CancelSubscriptionParams{Reason: "e2e: ended", RevokeAccess: true}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ptr[T any](v T) *T { return &v }

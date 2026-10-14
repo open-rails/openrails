@@ -39,11 +39,15 @@ export function formatMoney(
 
 /** "every 30 days", "30 days of access" or "one-time". */
 export function intervalLabel(
-  price: Pick<Price, "access_duration_hours" | "billing_interval_hours"> | null | undefined,
+  price:
+    | Pick<Price, "access_duration_hours" | "billing_interval_hours">
+    | null
+    | undefined,
   m: Translator
 ): string | null {
   if (!price) return null
-  if (price.billing_interval_hours) return everyLabel(price.billing_interval_hours, m)
+  if (price.billing_interval_hours)
+    return everyLabel(price.billing_interval_hours, m)
   return accessLabel(price.access_duration_hours, m) ?? m.t("interval.once")
 }
 
@@ -124,6 +128,13 @@ export const isLive = (s: Subscription) =>
 /** Future billing has stopped or cancellation is scheduled. */
 export const isEnding = (s: Subscription) =>
   isLive(s) && (!!s.cancel_scheduled || s.status === "canceled")
+
+/** A subscription OpenRails could move to another plan of its tier group. */
+export const changeable = (s: Subscription) =>
+  (s.status === "active" || s.status === "past_due") &&
+  !s.cancel_scheduled &&
+  !s.cancel_portal_url &&
+  !!s.product?.tier_group
 
 export type StatusTone = "success" | "warning" | "destructive" | "neutral"
 

@@ -31,6 +31,10 @@ export {
   type SubscriptionsPanelProps,
 } from "./account/subscriptions-panel"
 export {
+  RenewalPrompt,
+  type RenewalPromptProps,
+} from "./account/renewal-prompt"
+export {
   CancelSubscriptionDialog,
   type CancelSubscriptionDialogProps,
 } from "./account/cancel-dialog"
