@@ -131,6 +131,13 @@ func (h *PlatformMethodDeleteHandler) resolve(ctx context.Context, in gen.Billin
 	if err != nil {
 		return Ambiguous("platform vault client is unavailable")
 	}
+	tenantID, err := client.TenantID(ctx)
+	if err != nil {
+		return Ambiguous("platform vault could not confirm the API key's tenant")
+	}
+	if tenantID != p.TenantID {
+		return Ambiguous("platform vault API key belongs to another tenant")
+	}
 	token, err := client.GetToken(ctx, p.Instrument.RailMethodRef)
 	if err != nil && !basistheory.IsNotFound(err) {
 		return Ambiguous("platform vault did not confirm whether the card exists")
