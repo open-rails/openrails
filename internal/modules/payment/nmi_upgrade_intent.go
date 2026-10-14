@@ -578,7 +578,7 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.BillingPr
 		if completion.committed {
 			return nil
 		}
-		change := subscriptions.InPlaceTierChange{SubscriptionID: p.OldSubscriptionID, FromPriceID: p.OldPriceID, PriceID: p.PriceID, ProductID: p.ProductID, RailSubscriptionID: p.OldProviderSubscriptionID, PeriodEnd: p.PeriodEnd, At: p.PeriodStart, AccessDurationHours: p.AccessDurationHours, AccessEndsAt: p.AccessEndsAt, Downgrade: p.Downgrade()}
+		change := subscriptions.InPlaceTierChange{SubscriptionID: p.OldSubscriptionID, FromPriceID: p.OldPriceID, PriceID: p.PriceID, ProductID: p.ProductID, RailSubscriptionID: p.OldProviderSubscriptionID, PeriodEnd: p.PeriodEnd, At: p.PeriodStart, AccessDurationHours: p.AccessDurationHours, ProviderAccessDefault: p.ProviderAccessDefault, AccessEndsAt: p.AccessEndsAt, Downgrade: p.Downgrade()}
 		if err := h.Purchases.Lifecycle.ChangeTierInPlaceTx(ctx, txDB, change); err != nil {
 			return err
 		}
@@ -659,7 +659,7 @@ func acceptedNMIChangeBill(in gen.BillingProviderIntent, p subscriptions.NMIUpgr
 		ProviderReference: in.ID.String(), Payment: payment, Settled: true, SettlementSource: "cash",
 		Lines: []observed.Line{{PriceID: &p.PriceID, ProductID: &p.ProductID, Description: p.ProductName,
 			UnitAmount: p.ProrationAmount, Amount: p.ProrationAmount, BillingIntervalHours: &p.RecurringIntervalHours,
-			AccessDurationHours: p.AccessDurationHours}},
+			AccessDurationHours: p.AccessDurationHours, ProviderAccessDefault: p.ProviderAccessDefault}},
 	}
 }
 

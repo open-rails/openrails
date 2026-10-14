@@ -677,7 +677,7 @@ func (s *PurchaseService) processTierChangeStripe(
 		StripeSubscriptionID: existingSub.RailSubscriptionID, StripeItemID: state.ItemID, Action: action,
 		OldPriceID: existingSub.PriceID, OldStripePriceID: currentStripePriceID,
 		PriceID: newPrice.ID, ProductID: newPrice.ProductID, ProductName: newProduct.DisplayName, StripePriceID: stripePriceID,
-		Currency: newPrice.Currency, RecurringAmount: newPrice.Amount, AccessDurationHours: newPrice.AccessDurationHours,
+		Currency: newPrice.Currency, RecurringAmount: newPrice.Amount, AccessDurationHours: newPrice.AccessDurationHours, ProviderAccessDefault: newPrice.ProviderAccessDefault,
 	}
 	if action == "downgrade" {
 		if existingSub.CurrentPeriodEndsAt == nil || existingSub.CurrentPeriodEndsAt.IsZero() {

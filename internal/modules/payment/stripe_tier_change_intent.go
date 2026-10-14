@@ -43,22 +43,23 @@ const stripePaymentBehaviorPaidOrRefused = "error_if_incomplete"
 // StripeTierChangePayload freezes the commercial decision before the first
 // provider request. Replays never recalculate proration, prices or dates.
 type StripeTierChangePayload struct {
-	Staff                *subscriptions.StaffChange `json:"staff,omitempty"`
-	AccessDurationHours  *int                       `json:"access_duration_hours"`
-	RequestedPrice       string                     `json:"requested_price"`
-	UserID               string                     `json:"user_id"`
-	SubscriptionID       uuid.UUID                  `json:"subscription_id"`
-	StripeSubscriptionID string                     `json:"stripe_subscription_id"`
-	StripeItemID         string                     `json:"stripe_item_id"`
-	Action               string                     `json:"action"`
-	OldPriceID           uuid.UUID                  `json:"old_price_id"`
-	OldStripePriceID     string                     `json:"old_stripe_price_id"`
-	PriceID              uuid.UUID                  `json:"price_id"`
-	ProductID            uuid.UUID                  `json:"product_id"`
-	ProductName          string                     `json:"product_name"`
-	StripePriceID        string                     `json:"stripe_price_id"`
-	Currency             string                     `json:"currency"`
-	RecurringAmount      int64                      `json:"recurring_amount"`
+	Staff                 *subscriptions.StaffChange `json:"staff,omitempty"`
+	AccessDurationHours   *int                       `json:"access_duration_hours"`
+	ProviderAccessDefault bool                       `json:"provider_access_default,omitempty"`
+	RequestedPrice        string                     `json:"requested_price"`
+	UserID                string                     `json:"user_id"`
+	SubscriptionID        uuid.UUID                  `json:"subscription_id"`
+	StripeSubscriptionID  string                     `json:"stripe_subscription_id"`
+	StripeItemID          string                     `json:"stripe_item_id"`
+	Action                string                     `json:"action"`
+	OldPriceID            uuid.UUID                  `json:"old_price_id"`
+	OldStripePriceID      string                     `json:"old_stripe_price_id"`
+	PriceID               uuid.UUID                  `json:"price_id"`
+	ProductID             uuid.UUID                  `json:"product_id"`
+	ProductName           string                     `json:"product_name"`
+	StripePriceID         string                     `json:"stripe_price_id"`
+	Currency              string                     `json:"currency"`
+	RecurringAmount       int64                      `json:"recurring_amount"`
 	// AmountDueNow is the local Model B estimate for an upgrade (Stripe
 	// finalizes the exact proration) and 0 for a downgrade.
 	AmountDueNow       int64  `json:"amount_due_now"`
@@ -556,6 +557,7 @@ func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, in 
 			return fmt.Errorf("subscription %s is on price %s, neither the frozen predecessor %s nor the target %s", sub.ID, sub.PriceID, p.OldPriceID, p.PriceID)
 		}
 		sub.AccessDurationHoursSnapshot = p.AccessDurationHours
+		sub.ProviderAccessDefaultSnapshot = p.ProviderAccessDefault
 		sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt = &start, &end
 		sub.MarkLifecycleDecision("tier_change_paid")
 		if err := repo.UpdateAt(ctx, sub, now); err != nil {
