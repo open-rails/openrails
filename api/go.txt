@@ -3836,11 +3836,16 @@ pkg openrails/openrailstest, method (*UserInfo) Search(context.Context, string, 
 pkg openrails/openrailstest, type UserInfo struct
 pkg openrails/openrailstest/nmimock, const InsufficientFunds untyped string = "202"
 pkg openrails/openrailstest/nmimock, func New(Options) *Mock
+pkg openrails/openrailstest/nmimock, method (*Mock) AddPlan(Plan)
+pkg openrails/openrailstest/nmimock, method (*Mock) AddSchedule(Schedule) string
+pkg openrails/openrailstest/nmimock, method (*Mock) AddScheduleSale(string, time.Time) *Sale
 pkg openrails/openrailstest/nmimock, method (*Mock) Charged(string, string) int64
 pkg openrails/openrailstest/nmimock, method (*Mock) Close()
 pkg openrails/openrailstest/nmimock, method (*Mock) LastDecline() *Sale
 pkg openrails/openrailstest/nmimock, method (*Mock) LastSale() *Sale
 pkg openrails/openrailstest/nmimock, method (*Mock) Ledger(string) []LedgerEntry
+pkg openrails/openrailstest/nmimock, method (*Mock) Mutations() int
+pkg openrails/openrailstest/nmimock, method (*Mock) PutVault(Vault)
 pkg openrails/openrailstest/nmimock, method (*Mock) SetDecline(string, string)
 pkg openrails/openrailstest/nmimock, method (*Mock) Tokenize(Card) string
 pkg openrails/openrailstest/nmimock, method (*Mock) URL() string
@@ -3867,6 +3872,13 @@ pkg openrails/openrailstest/nmimock, type LedgerEntry struct, Vault string
 pkg openrails/openrailstest/nmimock, type Mock struct
 pkg openrails/openrailstest/nmimock, type Options struct
 pkg openrails/openrailstest/nmimock, type Options struct, Clock func() time.Time
+pkg openrails/openrailstest/nmimock, type Plan = nmimock.Plan
+pkg openrails/openrailstest/nmimock, type Plan struct
+pkg openrails/openrailstest/nmimock, type Plan struct, Amount string
+pkg openrails/openrailstest/nmimock, type Plan struct, Days int
+pkg openrails/openrailstest/nmimock, type Plan struct, ID string
+pkg openrails/openrailstest/nmimock, type Plan struct, Months int
+pkg openrails/openrailstest/nmimock, type Plan struct, Name string
 pkg openrails/openrailstest/nmimock, type Sale struct
 pkg openrails/openrailstest/nmimock, type Sale struct, Amount string
 pkg openrails/openrailstest/nmimock, type Sale struct, At time.Time
@@ -3876,6 +3888,35 @@ pkg openrails/openrailstest/nmimock, type Sale struct, Last4 string
 pkg openrails/openrailstest/nmimock, type Sale struct, OrderID string
 pkg openrails/openrailstest/nmimock, type Sale struct, TransactionID string
 pkg openrails/openrailstest/nmimock, type Sale struct, Vault string
+pkg openrails/openrailstest/nmimock, type Schedule = nmimock.Schedule
+pkg openrails/openrailstest/nmimock, type Schedule struct
+pkg openrails/openrailstest/nmimock, type Schedule struct, Amount string
+pkg openrails/openrailstest/nmimock, type Schedule struct, Book string
+pkg openrails/openrailstest/nmimock, type Schedule struct, CalendarAnchor time.Time
+pkg openrails/openrailstest/nmimock, type Schedule struct, Created time.Time
+pkg openrails/openrailstest/nmimock, type Schedule struct, Custom bool
+pkg openrails/openrailstest/nmimock, type Schedule struct, Days int
+pkg openrails/openrailstest/nmimock, type Schedule struct, Deleted bool
+pkg openrails/openrailstest/nmimock, type Schedule struct, Email string
+pkg openrails/openrailstest/nmimock, type Schedule struct, ID string
+pkg openrails/openrailstest/nmimock, type Schedule struct, Months int
+pkg openrails/openrailstest/nmimock, type Schedule struct, NextBilling time.Time
+pkg openrails/openrailstest/nmimock, type Schedule struct, Order string
+pkg openrails/openrailstest/nmimock, type Schedule struct, Paused bool
+pkg openrails/openrailstest/nmimock, type Schedule struct, Plan string
+pkg openrails/openrailstest/nmimock, type Schedule struct, Vault string
+pkg openrails/openrailstest/nmimock, type Vault = nmimock.Vault
+pkg openrails/openrailstest/nmimock, type Vault struct
+pkg openrails/openrailstest/nmimock, type Vault struct, BillingID string
+pkg openrails/openrailstest/nmimock, type Vault struct, Book string
+pkg openrails/openrailstest/nmimock, type Vault struct, Card nmimock.Card
+pkg openrails/openrailstest/nmimock, type Vault struct, Email string
+pkg openrails/openrailstest/nmimock, type Vault struct, Extra []nmimock.Billing
+pkg openrails/openrailstest/nmimock, type Vault struct, FirstName string
+pkg openrails/openrailstest/nmimock, type Vault struct, ID string
+pkg openrails/openrailstest/nmimock, type Vault struct, LastName string
+pkg openrails/openrailstest/nmimock, type Vault struct, NoBrand bool
+pkg openrails/openrailstest/nmimock, type Vault struct, ShippingID string
 pkg openrails/openrailstest/stripemock, func New(Options) *Mock
 pkg openrails/openrailstest/stripemock, method (*Mock) Authenticate(string) bool
 pkg openrails/openrailstest/stripemock, method (*Mock) AuthenticateSetup(string) bool

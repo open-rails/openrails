@@ -91,6 +91,35 @@ func (g *Mock) Charged(vault, order string) int64 { return g.m.Charged(vault, or
 // empty.
 func (g *Mock) Unexpected() []string { return g.m.Unexpected() }
 
+// Plan, Vault and Schedule are an existing account's records: a legacy
+// book a host imports.
+type (
+	Plan     = nmimock.Plan
+	Vault    = nmimock.Vault
+	Schedule = nmimock.Schedule
+)
+
+// AddPlan stores a recurring plan the account already has.
+func (g *Mock) AddPlan(p Plan) { g.m.AddPlan(p) }
+
+// PutVault stores a vault as given (its ids, card, email and shipping id).
+func (g *Mock) PutVault(v Vault) { g.m.PutVault(v) }
+
+// AddSchedule stores a recurring subscription the account bills and returns
+// its id.
+func (g *Mock) AddSchedule(s Schedule) string { return g.m.AddSchedule(s) }
+
+// AddScheduleSale records the approved charge NMI's recurring engine made
+// for a schedule at a time.
+func (g *Mock) AddScheduleSale(id string, at time.Time) *Sale {
+	s := g.m.AddScheduleSale(id, at)
+	return sale(&s)
+}
+
+// Mutations counts the writes the gateway received: a read-only caller
+// leaves it zero.
+func (g *Mock) Mutations() int { return len(g.m.Calls()) }
+
 func sale(s *nmimock.Sale) *Sale {
 	if s == nil {
 		return nil
