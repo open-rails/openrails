@@ -205,7 +205,12 @@ jobs:
         run: |
           echo "$RESULTS (code: $CODE)"
           test -n "$RESULTS"
-          for result in $RESULTS; do test "$result" = success || { test "$result" = skipped && test "$CODE" = false; }; done
+          for result in $RESULTS; do
+            case "$result:$CODE" in
+              success:*|skipped:false) ;;
+              *) echo "Required job returned $result" >&2; exit 1 ;;
+            esac
+          done
 
   sql:
     name: SQL bindings and query audit
@@ -361,7 +366,12 @@ jobs:
         run: |
           echo "$RESULTS (code: $CODE)"
           test -n "$RESULTS"
-          for result in $RESULTS; do test "$result" = success || { test "$result" = skipped && test "$CODE" = false; }; done
+          for result in $RESULTS; do
+            case "$result:$CODE" in
+              success:*|skipped:false) ;;
+              *) echo "Required job returned $result" >&2; exit 1 ;;
+            esac
+          done
 
   security:
     name: Required Security
