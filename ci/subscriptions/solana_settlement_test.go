@@ -275,7 +275,7 @@ func TestSolanaCancelKeepsEverySignedUnresolvedStatus(t *testing.T) {
 		eraw, err := json.Marshal(e)
 		require.NoError(t, err)
 		for _, status := range []string{"pending", "in_flight", "unknown_needs_verify", "failed_retryable", "failed_terminal", "superseded", "expired", "succeeded"} {
-			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.provider_intents SET status=$2,payload=$3,result_evidence=$4,executed_at=CASE WHEN $2='succeeded' THEN $5 ELSE NULL END WHERE id=$1`), id, status, praw, eraw, w.clock.Now())
+			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.provider_intents SET status=$2,payload=$3,result_evidence=$4,executed_at=CASE WHEN $2='succeeded' THEN $5::timestamptz ELSE NULL END WHERE id=$1`), id, status, praw, eraw, w.clock.Now())
 			require.NoError(t, err)
 			code, body := b.cancel(sub, map[string]any{"reason": "stop renewing"})
 			require.Equal(t, 409, code, "%s/%s: %v", shape, status, body)

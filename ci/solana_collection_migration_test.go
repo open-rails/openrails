@@ -68,6 +68,13 @@ func TestSolanaCollectionMigrationUpdatesOnlySolana(t *testing.T) {
 		subs[rail] = id
 		exec(`INSERT INTO `+table("customers")+` (merchant_id,id) VALUES ($1,$2)`, mid, customer)
 		exec(`INSERT INTO `+table("psps")+` (merchant_id,id,key,rail,account_id,environment) VALUES ($1,$2,$3,$3,$4,$5)`, mid, psp, rail, "migration-"+rail, environment)
+		// A provider-run subscription names its provider object before the price split.
+		switch rail {
+		case "stripe":
+			exec(`INSERT INTO `+table("price_psp_bindings")+` (merchant_id,price_id,psp_id,price_ref,configuration) VALUES ($1,$2,$3,'price_migration','{}')`, mid, price, psp)
+		case "nmi":
+			exec(`INSERT INTO `+table("price_psp_bindings")+` (merchant_id,price_id,psp_id,plan_id,configuration) VALUES ($1,$2,$3,'plan_migration','{}')`, mid, price, psp)
+		}
 		exec(`INSERT INTO `+table("subscriptions")+` (merchant_id,id,customer_id,product_id,price_id,psp_id,rail,collection_policy,rail_subscription_id,status,started_at,current_period_starts_at,current_period_ends_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10,$10,$11)`, mid, id, customer, product, price, psp, rail, policy, "accepted-"+rail, now, now.Add(720*time.Hour))
 	}
 	engine, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})

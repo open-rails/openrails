@@ -75,6 +75,8 @@ type Node struct {
 	stalled chan string
 	// network is the cluster getGenesisHash names: devnet unless set.
 	network string
+	// now is the cluster clock sent transactions land at: the wall clock unless set.
+	now func() time.Time
 }
 
 type extensions struct {
@@ -139,6 +141,13 @@ func New() *Node {
 }
 
 func (n *Node) URL() string { return n.server.URL }
+
+// SetClock lands sent transactions at now, a scenario's timeline.
+func (n *Node) SetClock(now func() time.Time) {
+	n.mu.Lock()
+	n.now = now
+	n.mu.Unlock()
+}
 
 // SetNetwork makes the node answer getGenesisHash as network's cluster:
 // mainnet, devnet or testnet.
@@ -630,7 +639,13 @@ func (n *Node) send(encoded string) (solanago.Signature, error) {
 	if err != nil {
 		return solanago.Signature{}, fmt.Errorf("solanafake: decode transaction: %w", err)
 	}
-	return n.Land(tx, time.Now())
+	n.mu.Lock()
+	now := n.now
+	n.mu.Unlock()
+	if now == nil {
+		now = time.Now
+	}
+	return n.Land(tx, now())
 }
 
 // Pay lands a synthesized payment and returns its signature.

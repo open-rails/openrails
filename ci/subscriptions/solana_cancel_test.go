@@ -228,7 +228,8 @@ func TestSolanaCancelRacesRenewalSubmission(t *testing.T) {
 				require.Equal(t, uint64(solanaPlanAmount), s.fake.Balance(s.treasury, s.mint), "the winning cancel prevents the signed transaction from being sent")
 				require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, sub).Status)
 			} else {
-				w.until(func() bool { return s.fake.Balance(s.treasury, s.mint) == 2*solanaPlanAmount }, "the winning renewal completes")
+				w.until(func() bool { return len(completed(w.payments(embedded, b.id))) == 2 }, "the winning renewal settles")
+				require.Equal(t, uint64(2*solanaPlanAmount), s.fake.Balance(s.treasury, s.mint))
 				status, body = b.cancel(sub, map[string]any{"reason": "stop renewing"})
 				require.Equal(t, http.StatusOK, status, "%v", body)
 				require.True(t, b.entitled(s.key), "the settled renewal bought the next paid period")
@@ -310,6 +311,8 @@ func TestSolanaCancelReleasedOnlyByExactRevertedSignature(t *testing.T) {
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT id, subscription_pda, next_pull_at FROM billing.solana_subscriptions WHERE subscription_id=$1`), sub.UUID()).Scan(&rowID, &pda, &next))
 	d, err := db.NewWithPGXPool(w.pool, w.schema)
 	require.NoError(t, err)
+	// Enqueuing an intent queues its job in the same transaction.
+	d.SetRiverJobInserter(w.jobs)
 	require.NoError(t, d.RunInMerchantScope(t.Context(), billing.MerchantID(mid), "verify reverted pull", func(ctx context.Context) error {
 		store := intents.NewStore(d)
 		id := sub.UUID()
