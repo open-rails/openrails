@@ -102,7 +102,7 @@ func TestProviderTierChangeRetainsAcceptedAccessChoice(t *testing.T) {
 					}
 					if rail == "nmi" {
 						var billDefault bool
-						require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT provider_access_default FROM billing.order_lines WHERE subscription_id=$1 AND price_id=$2 ORDER BY created_at LIMIT 1`), member.sub.UUID(), target.ID.UUID()).Scan(&billDefault))
+						require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT provider_access_default FROM billing.order_lines WHERE subscription_id=$1 AND price_id=$2 ORDER BY created_at LIMIT 1`), member.sub.UUID(), w.priceStorageID(target.ID)).Scan(&billDefault))
 						require.Equal(t, defaultAccess, billDefault, "accepted adjustment/schedule retains its access choice")
 					}
 					grants := w.countRows(`SELECT count(*) FROM billing.grants WHERE source_id=$1`, member.sub.String())
