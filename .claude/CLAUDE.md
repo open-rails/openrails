@@ -104,6 +104,10 @@ through `host-four`; these are placeholders, not customer or repository names.
   foreign key to `psps`.
 - A provider-owned subscription is never moved or canceled by OpenRails; it stays on its
   (possibly archived) PSP until it drains.
+- Solana subscriptions are engine-owned: its program only authorizes a pull. The
+  specialized cranker freezes its accepted agreement before signing, qualifies
+  the exact chain receipt, and atomically settles the bill/payment/attempt and
+  access period. The generic saved-card collector never admits Solana.
 - ALL outbound Stripe HTTP goes through the choke-point client `internal/integrations/stripeapi`
   (readonly mode blocks writes at the transport). It pins the Stripe API version via
   `stripeapi.APIVersion`: ONE const drives the outbound `Stripe-Version` header AND the

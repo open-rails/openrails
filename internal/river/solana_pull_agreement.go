@@ -2,12 +2,16 @@ package riverjobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -19,6 +23,7 @@ import (
 // transaction is signed. EpisodeAt identifies the due pull; realized service
 // dates come from its verified chain receipt, including after a restart.
 type SolanaPullAgreement struct {
+	Fingerprint         int64                     `json:"plan_fingerprint"`
 	Row                 models.SolanaSubscription `json:"row"`
 	PriceID             uuid.UUID                 `json:"price_id"`
 	ProductID           uuid.UUID                 `json:"product_id"`
@@ -70,14 +75,66 @@ func (w *SolanaCrankWorker) acceptPull(ctx context.Context, row *models.SolanaSu
 	if !ok {
 		return nil, fmt.Errorf("unsupported accepted currency %s", plan.currency)
 	}
-	return &SolanaPullAgreement{Row: *row, PriceID: plan.priceID, ProductID: plan.productID, CustomerID: plan.customerID,
+	acceptedRow := *row
+	if acceptedRow.PspID != uuid.Nil && acceptedRow.PspID != plan.pspID {
+		return nil, errors.New("pull PSP contradicts the accepted subscription")
+	}
+	acceptedRow.PspID = plan.pspID
+	return &SolanaPullAgreement{Fingerprint: plan.fingerprint, Row: acceptedRow, PriceID: plan.priceID, ProductID: plan.productID, CustomerID: plan.customerID,
 		RetryAttempts: plan.retryAttempts, Description: plan.description, Amount: plan.fiatAmount, Currency: units.Code, NativeDecimals: units.Decimals,
 		TokenAmount: plan.amountBaseUnits, TokenDecimals: decimals, PeriodHours: plan.periodHours,
 		AccessDurationHours: plan.accessDurationHours, Quantity: plan.quantity, EpisodeAt: row.NextPullAt, PreviousPeriodEnd: plan.periodEnd}, nil
 }
 
 func (a *SolanaPullAgreement) plan() resolvedPlan {
-	return resolvedPlan{retryAttempts: a.RetryAttempts, amountBaseUnits: a.TokenAmount, periodHours: a.PeriodHours, fingerprint: a.Row.PlanCreatedAtFingerprint,
+	return resolvedPlan{retryAttempts: a.RetryAttempts, amountBaseUnits: a.TokenAmount, periodHours: a.PeriodHours, fingerprint: a.Fingerprint,
 		fiatAmount: a.Amount, currency: a.Currency, customerID: a.CustomerID, pspID: a.Row.PspID, policy: models.CollectionPolicyEngine,
 		priceID: a.PriceID, productID: a.ProductID, description: a.Description, accessDurationHours: a.AccessDurationHours, quantity: a.Quantity, periodEnd: a.PreviousPeriodEnd}
+}
+
+// admitLegacyAgreement upgrades only a never-signed queued episode. A signed
+// legacy operation cannot adopt subsequently edited catalog terms as proof.
+func (h *SolanaPullIntentHandler) admitLegacyAgreement(ctx context.Context, in gen.BillingProviderIntent, p SolanaPullPayload, row *models.SolanaSubscription) (*SolanaPullAgreement, error) {
+	sig, err := recordedSignature(in)
+	if err != nil || sig != "" {
+		return nil, errors.New("signed pull has no retained accepted agreement")
+	}
+	plan, err := h.Core.resolvePlan(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+	agreement, err := h.Core.acceptPull(ctx, row, plan)
+	if err != nil {
+		return nil, err
+	}
+	if err := agreement.validate(in, p); err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(agreement)
+	if err != nil {
+		return nil, err
+	}
+	err = h.Core.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := h.Core.DB.NewWithPgxTx(tx)
+		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, agreement.Row.SubscriptionID)
+		if err != nil {
+			return err
+		}
+		current, err := solanasubs.NewSolanaSubscriptionRepo(d).GetBySubscriptionPDA(ctx, p.SubscriptionPDA)
+		if err != nil {
+			return err
+		}
+		if sub.Status == models.StatusCanceled || sub.CollectionPolicy != models.CollectionPolicyEngine || sub.PriceID != agreement.PriceID || sub.ProductID != agreement.ProductID || sub.CustomerID != agreement.CustomerID || sub.PspID != agreement.Row.PspID || current.Status != models.SolanaSubscriptionActive || !current.NextPullAt.Equal(p.NextPullAt) {
+			return errors.New("queued pull no longer owns its accepted subscription")
+		}
+		changed, err := d.Gen(ctx).AdmitUnsignedSolanaPullAgreement(ctx, gen.AdmitUnsignedSolanaPullAgreementParams{MerchantID: in.MerchantID, ID: in.ID, Attempts: in.Attempts, Agreement: encoded, Now: h.Core.now()})
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return errors.New("queued pull claim changed before agreement admission")
+		}
+		return nil
+	})
+	return agreement, err
 }

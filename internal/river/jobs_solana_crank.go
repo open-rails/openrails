@@ -401,7 +401,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 // membership window (payment row, period advance, notifications; idempotent
 // on the tx signature) and advance the row past the pulled period. Shared by
 // the inline success path and the recorded-signature verify leg.
-func (w *SolanaCrankWorker) finalizePull(ctx context.Context, repo solanaSubStore, agreement *SolanaPullAgreement, receipt *recurring.PullReceipt, intentID uuid.UUID) error {
+func (w *SolanaCrankWorker) finalizePull(ctx context.Context, repo solanaSubStore, agreement *SolanaPullAgreement, receipt *recurring.PullReceipt, execution *observed.Execution) error {
 	row := &agreement.Row
 	ctx = db.WithPSPID(ctx, row.PspID)
 	hours, err := safecast.Convert[int](agreement.PeriodHours)
@@ -416,11 +416,11 @@ func (w *SolanaCrankWorker) finalizePull(ctx context.Context, repo solanaSubStor
 		PurchasedAt: receipt.PeriodStart, AttemptKind: &kind, Quantity: agreement.Quantity, TokenType: &token,
 		Metadata: map[string]any{"solana_subscriber_wallet": row.SubscriberWallet, "solana_subscription_pda": row.SubscriptionPDA,
 			"solana_token_mint": row.Mint, "solana_token_amount": strconv.FormatUint(receipt.Amount, 10), "solana_treasury": row.Treasury,
-			"solana_pull_intent": intentID.String(), "solana_pull_episode_at": agreement.EpisodeAt.UTC().Format(time.RFC3339Nano)},
+			"solana_pull_intent": execution.IntentID.String(), "solana_pull_episode_at": agreement.EpisodeAt.UTC().Format(time.RFC3339Nano)},
 	}
 	unit := agreement.Amount / int64(subscriptions.SeatCount(agreement.Quantity))
-	bill := &observed.Bill{PSPID: row.PspID, CustomerID: agreement.CustomerID, SubscriptionID: &row.SubscriptionID,
-		Owner: observed.OwnerEngine, Kind: "renewal", SourceKind: TypeSolanaPull, SourceKey: intentID.String(), ProviderReference: row.SubscriptionPDA,
+	bill := &observed.Bill{Execution: execution, PSPID: row.PspID, CustomerID: agreement.CustomerID, SubscriptionID: &row.SubscriptionID,
+		Owner: observed.OwnerEngine, Kind: "renewal", SourceKind: TypeSolanaPull, SourceKey: execution.IntentID.String(), ProviderReference: row.SubscriptionPDA,
 		Currency: agreement.Currency, Total: agreement.Amount, PeriodStart: receipt.PeriodStart, PeriodEnd: receipt.PeriodEnd, DueAt: agreement.EpisodeAt,
 		Payment: payment, Settled: true, SettlementSource: "cash",
 		Lines: []observed.Line{{PriceID: &agreement.PriceID, ProductID: &agreement.ProductID, Description: agreement.Description,

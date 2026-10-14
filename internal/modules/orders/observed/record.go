@@ -44,6 +44,9 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 	}
 	now = now.UTC()
 	q := d.Gen(ctx)
+	if err := verifyExecution(ctx, q, mid.UUID(), bill); err != nil {
+		return result, err
+	}
 	if err := q.LockProviderBillIdentity(ctx, gen.LockProviderBillIdentityParams{MerchantID: mid.String(), PspID: bill.PSPID.String(), SourceKind: bill.SourceKind, SourceKey: bill.SourceKey}); err != nil {
 		return result, err
 	}
@@ -114,6 +117,9 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 			payment = *stored
 		}
 		result.Payment = &payment
+	}
+	if err := recordExecution(ctx, q, mid.UUID(), bill, result, now); err != nil {
+		return result, err
 	}
 	captured, err := q.ObservedOrderCaptured(ctx, gen.ObservedOrderCapturedParams{MerchantID: mid.UUID(), OrderID: result.Order.ID})
 	if err != nil {

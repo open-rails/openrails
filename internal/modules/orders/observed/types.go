@@ -27,6 +27,7 @@ var ErrConflict = errors.New("provider bill identity conflicts with accepted ter
 // Record requires a transaction-bound DB. Repeated calls may append distinct
 // actual payments to the same bill, without repeating its completion event.
 type Bill struct {
+	Execution                     *Execution `json:"execution,omitempty"`
 	PSPID, CustomerID             uuid.UUID
 	SubscriptionID                *uuid.UUID
 	ExistingOrderID               *uuid.UUID

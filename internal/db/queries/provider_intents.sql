@@ -893,8 +893,19 @@ SELECT EXISTS (
 
 -- name: FenceSolanaPullSubmission :execrows
 UPDATE billing.provider_intents
-SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('transaction_id', sqlc.arg(signature)::text),
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('transaction_id', sqlc.arg(signature)::text, 'execution', sqlc.arg(execution)::jsonb),
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND intent_type = 'solana_pull' AND status = 'in_flight'
   AND attempts = sqlc.arg(attempts)::int AND lease_expires_at > sqlc.arg(now)::timestamptz;
+
+-- A pre-upgrade queued pull has no signed transaction yet. Adopt its complete
+-- accepted agreement under the subscription lock and current claim only.
+-- name: AdmitUnsignedSolanaPullAgreement :execrows
+UPDATE billing.provider_intents
+SET payload = jsonb_set(payload, '{agreement}', sqlc.arg(agreement)::jsonb), updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND intent_type='solana_pull' AND status='in_flight' AND attempts=sqlc.arg(attempts)::int
+  AND lease_expires_at > sqlc.arg(now)::timestamptz
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'transaction_id')
+  AND NOT (payload ? 'agreement');
