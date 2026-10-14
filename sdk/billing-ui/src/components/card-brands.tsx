@@ -154,3 +154,29 @@ export function CardBrandPlate({
     </span>
   )
 }
+
+const SUPPORTED_BRANDS = [
+  { brand: "visa", Mark: VisaMark },
+  { brand: "mastercard", Mark: MastercardMark },
+  { brand: "amex", Mark: AmexMark },
+] as const
+
+// The accepted networks; once a number's brand is known, the others dim.
+export function SupportedCardBrands({ active }: { active?: string }) {
+  const resolved = resolveCardBrand(active)
+  return (
+    <span aria-hidden className="flex items-center gap-1">
+      {SUPPORTED_BRANDS.map(({ brand, Mark }) => (
+        <span
+          key={brand}
+          className={cn(
+            "grid h-5 w-8 place-items-center rounded-[4px] bg-white ring-1 ring-[color:var(--border)] transition-opacity",
+            resolved && resolved !== brand && "opacity-30"
+          )}
+        >
+          <Mark />
+        </span>
+      ))}
+    </span>
+  )
+}

@@ -92,8 +92,8 @@ export const COUNTRY_OPTIONS = ISO_COUNTRY_CODES.map((code) => ({
 export const nameOnCardSchema = z
   .string()
   .trim()
-  .min(1, "Name on card is required")
-  .max(200, "Name on card is too long")
+  .min(1, "Full name is required")
+  .max(200, "Full name is too long")
 
 export const countryCodeSchema = z
   .string()
@@ -200,4 +200,16 @@ export function initialCountry(hostCountry?: string): string {
   if (COUNTRY_OPTIONS.some((option) => option.code === code)) return code
   const region = browserCountry()
   return COUNTRY_OPTIONS.some((option) => option.code === region) ? region : ""
+}
+
+// The EEA and the UK, where keeping a card for later one-off purchases needs
+// the customer's unticked opt-in; mirrors OpenRails' mandates.optInCountries.
+const REUSE_OPT_IN_COUNTRIES = new Set([
+  "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR",
+  "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI",
+  "SK", "IS", "LI", "NO", "GB",
+])
+
+export function reuseNeedsOptIn(country: string): boolean {
+  return REUSE_OPT_IN_COUNTRIES.has(country.trim().toUpperCase())
 }

@@ -11,6 +11,7 @@ import {
   emptyNMIBilling,
   initialCountry,
   nmiBillingSchema,
+  reuseNeedsOptIn,
 } from "./lib/billing"
 import { collectCardDisplay, useCollectJS } from "./lib/collect"
 import { cn } from "cn"
@@ -26,6 +27,8 @@ export interface TokenizedCardData {
   last_four?: string
   card_type?: string
   expiry_date?: string
+  /** The customer's opt-in to keep the card, when the form asked for it. */
+  reusable?: boolean
 }
 export interface TokenizedCardFormProps {
   tokenizationKey: string
@@ -39,6 +42,15 @@ export interface TokenizedCardFormProps {
   disabled?: boolean
   /** Billing country to preselect; default: the browser locale's region. */
   defaultCountry?: string
+  /**
+   * The merchant the card would be kept with, for a one-off purchase: where
+   * keeping it needs an opt-in (EEA, UK) the form asks, unticked.
+   */
+  saveOptInMerchant?: string
+  /** Shown above the button (the terms the customer accepts). */
+  terms?: React.ReactNode
+  /** The name the charge carries on the card statement. */
+  statementDescriptor?: string
   appearance?: BillingAppearance
   className?: string
 }
@@ -52,9 +64,13 @@ export function TokenizedCardForm({
   submitLabel = "Save card",
   disabled = false,
   defaultCountry,
+  saveOptInMerchant,
+  terms,
+  statementDescriptor,
   appearance,
   className,
 }: TokenizedCardFormProps) {
+  const [keepCard, setKeepCard] = React.useState(false)
   const uid = React.useId().replace(/[^a-zA-Z0-9-]/g, "")
   const ids = React.useMemo(
     () => ({
@@ -96,6 +112,8 @@ export function TokenizedCardForm({
       cvv: `#${ids.cvv}`,
     },
   })
+  const asksToKeep =
+    saveOptInMerchant !== undefined && reuseNeedsOptIn(billing.country)
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (disabled || busy || submitted) return
@@ -122,6 +140,7 @@ export function TokenizedCardForm({
         payment_token: token.token,
         ...parsed.data,
         ...collectCardDisplay(token.card),
+        ...(asksToKeep ? { reusable: keepCard } : {}),
       })
       if (accepted === false && mounted.current) setSubmitted(false)
     } catch (cause) {
@@ -154,13 +173,30 @@ export function TokenizedCardForm({
           value={billing}
           onChange={setBilling}
           disabled={disabled || busy || submitted}
-        />
-        <CardFields
-          ids={ids}
-          preview={collect.preview}
-          error={collect.loadError}
-          fieldErrors={collect.fieldErrors}
-        />
+        >
+          <CardFields
+            ids={ids}
+            preview={collect.preview}
+            brand={collect.brand}
+            error={collect.loadError}
+            fieldErrors={collect.fieldErrors}
+          />
+        </CardBillingFields>
+        {asksToKeep ? (
+          <label className="flex items-start gap-2 text-[13px] text-foreground">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={keepCard}
+              onChange={(event) => setKeepCard(event.target.checked)}
+              disabled={disabled || busy || submitted}
+            />
+            Save payment details to {saveOptInMerchant} for future purchases
+          </label>
+        ) : null}
+        {terms ? (
+          <p className="text-xs text-muted-foreground">{terms}</p>
+        ) : null}
         {error ? (
           <p role="alert" className="text-sm text-destructive">
             {error}
@@ -177,7 +213,14 @@ export function TokenizedCardForm({
             Boolean(collect.loadError)
           }
         />
-        <TrustLine />
+        {statementDescriptor ? (
+          <p className="-mt-1 text-center text-xs text-muted-foreground">
+            The charge will appear as &ldquo;{statementDescriptor}&rdquo; on
+            your card statement.
+          </p>
+        ) : (
+          <TrustLine />
+        )}
       </form>
     </div>
   )

@@ -740,6 +740,10 @@ export const publicMerchantSchema = z.object({
   display_name: z.string(),
   logo_url: z.string().nullish(),
   support_url: z.string().nullish(),
+  terms_url: z.string().nullish(),
+  privacy_url: z.string().nullish(),
+  /** The name card charges carry on statements. */
+  statement_descriptor: z.string().nullish(),
   /** The origins that may frame its embedded payment pages. */
   embed_origins: z
     .array(z.string())
@@ -778,6 +782,11 @@ export type PublicConfig = z.infer<typeof publicConfigSchema>
 export const customerConfigSchema = z.object({
   payment: paymentConfigSchema,
   merchant: publicMerchantSchema,
+  /** The customer's country as the merchant's proxy reports it, or "". */
+  client_country: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? ""),
 })
 export type CustomerConfig = z.infer<typeof customerConfigSchema>
 

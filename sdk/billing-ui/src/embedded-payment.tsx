@@ -33,19 +33,33 @@ export interface EmbeddedPaymentProps {
   onComplete?: (completion: EmbeddedPaymentCompletion) => void
   /** As OrderPayment's: the framed page keeps these PSPs back the same way. */
   fallbacks?: PaymentFallbacks
+  /** Called once when the pay page never loads (no message from the frame). */
+  onLoadFailure?: () => void
   title?: string
   className?: string
 }
+
+// The pay page posts its height on mount; silence this long means it failed.
+const LOAD_TIMEOUT_MS = 12_000
 
 export function EmbeddedPayment({
   url,
   onComplete,
   fallbacks,
+  onLoadFailure,
   title = "Payment",
   className,
 }: EmbeddedPaymentProps) {
   const frame = React.useRef<HTMLIFrameElement>(null)
   const [height, setHeight] = React.useState<number>()
+  const [attempt, setAttempt] = React.useState(0)
+  const [loaded, setLoaded] = React.useState(false)
+  const [failed, setFailed] = React.useState(false)
+  const reported = React.useRef(false)
+  const failure = React.useRef(onLoadFailure)
+  React.useEffect(() => {
+    failure.current = onLoadFailure
+  })
   const completed = React.useRef(onComplete)
   React.useEffect(() => {
     completed.current = onComplete
@@ -73,6 +87,7 @@ export function EmbeddedPayment({
         return
       const data: unknown = event.data
       if (!data || typeof data !== "object") return
+      setLoaded(true)
       const message = data as Record<string, unknown>
       if (
         message.type === PAYMENT_RESIZE_MESSAGE &&
@@ -101,15 +116,62 @@ export function EmbeddedPayment({
     return () => window.removeEventListener("message", heard)
   }, [origin])
 
+  React.useEffect(() => {
+    if (!origin || loaded || failed) return
+    const timer = window.setTimeout(() => {
+      setFailed(true)
+      if (!reported.current) {
+        reported.current = true
+        failure.current?.()
+      }
+    }, LOAD_TIMEOUT_MS)
+    return () => window.clearTimeout(timer)
+  }, [origin, loaded, failed, attempt])
+
   if (!origin) return null
+  if (failed)
+    return (
+      <div role="alert" className="grid gap-3 p-6 text-center">
+        <p className="text-sm font-medium text-foreground">
+          The secure payment page didn&apos;t load.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          You haven&apos;t been charged. We&apos;ve been notified; please try
+          again in a moment.
+        </p>
+        <button
+          type="button"
+          className="mx-auto rounded-md border border-input px-4 py-2 text-sm"
+          onClick={() => {
+            setFailed(false)
+            setAttempt((n) => n + 1)
+          }}
+        >
+          Try again
+        </button>
+      </div>
+    )
   return (
-    <iframe
-      ref={frame}
-      src={withPaymentFallbacks(url, fallbacks)}
-      title={title}
-      className={className}
-      allow="payment *; publickey-credentials-get *; publickey-credentials-create *"
-      style={{ border: 0, width: "100%", height: height ?? 640 }}
-    />
+    <>
+      {loaded ? null : (
+        <p className="p-6 text-center text-sm text-muted-foreground">
+          Loading secure payment page…
+        </p>
+      )}
+      <iframe
+        key={attempt}
+        ref={frame}
+        src={withPaymentFallbacks(url, fallbacks)}
+        title={title}
+        className={className}
+        allow="payment *; publickey-credentials-get *; publickey-credentials-create *"
+        style={{
+          border: 0,
+          width: "100%",
+          height: loaded ? (height ?? 640) : 0,
+          visibility: loaded ? "visible" : "hidden",
+        }}
+      />
+    </>
   )
 }

@@ -197,7 +197,7 @@ describe("PSP flows", () => {
     )
     const save = screen.getByRole("button", { name: "Save card" })
     expect(save).toBeDisabled()
-    fireEvent.change(screen.getByLabelText("Name on card"), {
+    fireEvent.change(screen.getByLabelText(/full name/i), {
       target: { value: "Pat Reader" },
     })
     fireEvent.change(screen.getByLabelText("ZIP code"), {

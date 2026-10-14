@@ -145,6 +145,7 @@ export function useCollectJS(config: {
 }): {
   ready: boolean
   preview: boolean
+  brand?: string
   loadError?: string
   /** Every field reported valid by the gateway. */
   valid: boolean
@@ -155,6 +156,8 @@ export function useCollectJS(config: {
     config.enabled && isPreviewTokenizationKey(config.tokenizationKey)
   const [ready, setReady] = React.useState(false)
   const [loadError, setLoadError] = React.useState<string>()
+  // The card brand Collect.js detects once the number is valid.
+  const [brand, setBrand] = React.useState<string>()
   // Validity per field as Collect.js reports it on edit and blur.
   const [validity, setValidity] = React.useState<
     Partial<
@@ -282,6 +285,8 @@ export function useCollectJS(config: {
             },
           },
           fieldsAvailableCallback: () => settle(() => setReady(true)),
+          lookUpCallback: (response: { type?: string }) =>
+            settle(() => setBrand(response?.type || undefined)),
           validationCallback: (
             field: string,
             status: boolean,
@@ -436,6 +441,7 @@ export function useCollectJS(config: {
   return {
     ready: ready || preview,
     preview,
+    brand,
     loadError,
     valid,
     fieldErrors,

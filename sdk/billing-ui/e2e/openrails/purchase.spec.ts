@@ -87,7 +87,7 @@ test("a signed-in customer orders the host's price and pays it on the page", asy
   await page.getByRole("button", { name: "Rent for 30 days, $2.99" }).click()
 
   const dialog = page.getByRole("dialog")
-  await dialog.getByLabel("Name on card").fill("Card Payer")
+  await dialog.getByLabel("Full name").fill("Card Payer")
   await dialog.getByLabel("Country").selectOption("US")
   await dialog.getByLabel(/ZIP/).fill("10001")
   await dialog.getByRole("button", { name: /^Pay / }).click()

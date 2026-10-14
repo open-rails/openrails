@@ -304,7 +304,8 @@ export function OrderPayment({
   // pay answers whether the payment went through (or awaits its rail).
   const pay = async (
     payment: () => Promise<OrderPaymentInput>,
-    preserveUnconfirmed = false
+    preserveUnconfirmed = false,
+    reusable?: boolean
   ): Promise<boolean> => {
     if (
       busy ||
@@ -320,6 +321,7 @@ export function OrderPayment({
           payment: await payment(),
           expectedTotal: order.total,
           idempotencyKey: key,
+          ...(reusable === undefined ? {} : { reusable }),
         })
       )
     } catch (cause) {
@@ -375,8 +377,26 @@ export function OrderPayment({
   )
 
   // A usage order is paid for what it still owes; a written-off one too.
-  const due = order.usage?.amount_due ?? order.total
-  const payLabel = `Pay ${money(due)}`
+  const payLabel = recurring ? "Subscribe" : "Pay"
+  const profile = merchant?.merchant
+  const terms =
+    profile?.terms_url || profile?.privacy_url ? (
+      <>
+        By {recurring ? "subscribing" : "paying"}, you agree to our{" "}
+        {profile.terms_url ? (
+          <a href={profile.terms_url} target="_blank" rel="noreferrer" className="underline">
+            Terms of Service
+          </a>
+        ) : null}
+        {profile.terms_url && profile.privacy_url ? " and " : null}
+        {profile.privacy_url ? (
+          <a href={profile.privacy_url} target="_blank" rel="noreferrer" className="underline">
+            Privacy Policy
+          </a>
+        ) : null}
+        .
+      </>
+    ) : undefined
   const open =
     order.collection_owner === "engine" &&
     (order.status === "open" ||
@@ -560,13 +580,21 @@ export function OrderPayment({
                   submitLabel={payLabel}
                   disabled={busy || !open}
                   appearance={appearance}
+                  defaultCountry={merchant?.client_country || undefined}
+                  saveOptInMerchant={recurring ? undefined : profile?.display_name}
+                  terms={terms}
+                  statementDescriptor={profile?.statement_descriptor ?? undefined}
                   // A refused payment leaves the form open for another card.
                   onTokenized={(card: TokenizedCardData) =>
-                    pay(async () => ({
-                      token: card.payment_token,
-                      psp_id: psp.psp_id,
-                      billing_details: billingDetailsOf(card),
-                    }))
+                    pay(
+                      async () => ({
+                        token: card.payment_token,
+                        psp_id: psp.psp_id,
+                        billing_details: billingDetailsOf(card),
+                      }),
+                      false,
+                      card.reusable
+                    )
                   }
                 />
               ) : (

@@ -276,6 +276,25 @@ func CancelMyOrder(r *httprequest.Request) {
 	writeOrder(r, order)
 }
 
+// ReportMyPayURLFailure handles POST /v1/me/orders/{id}/pay-url-failure: the
+// customer's page could not frame the order's pay URL.
+func ReportMyPayURLFailure(r *httprequest.Request) {
+	actor := orderActor(r, false)
+	if actor == nil {
+		return
+	}
+	id, ok := orderID(r)
+	svc := orderService(r)
+	if !ok || svc == nil {
+		return
+	}
+	if err := svc.ReportPayURLFailure(r.Request.Context(), *actor, id); err != nil {
+		writeOrderError(r, err)
+		return
+	}
+	r.NoContent()
+}
+
 // GetMyOrder handles GET /v1/me/orders/{id}: the resumable handle.
 func GetMyOrder(r *httprequest.Request) {
 	actor := orderActor(r, false)

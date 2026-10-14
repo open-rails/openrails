@@ -53,7 +53,7 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 	cfg := &out.Config
 	cfg.Profile.DisplayName = strings.TrimSpace(displayName)
 	if p := in.Profile; p != nil {
-		for field, raw := range map[string]string{"logo_url": p.LogoURL, "support_url": p.SupportURL, "subscribe_url": p.SubscribeURL, "billing_url": p.BillingURL} {
+		for field, raw := range map[string]string{"logo_url": p.LogoURL, "support_url": p.SupportURL, "subscribe_url": p.SubscribeURL, "billing_url": p.BillingURL, "terms_url": p.TermsURL, "privacy_url": p.PrivacyURL} {
 			if raw = strings.TrimSpace(raw); raw != "" && !httpURL(raw) {
 				return Settings{}, fmt.Errorf("profile.%s must be an http or https URL", field)
 			}
@@ -61,6 +61,11 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		cfg.Profile.LogoURL, cfg.Profile.FromEmail = strings.TrimSpace(p.LogoURL), strings.TrimSpace(p.FromEmail)
 		cfg.Profile.SupportURL, cfg.Profile.SubscribeURL = strings.TrimSpace(p.SupportURL), strings.TrimSpace(p.SubscribeURL)
 		cfg.Profile.BillingURL = strings.TrimSpace(p.BillingURL)
+		cfg.Profile.TermsURL, cfg.Profile.PrivacyURL = strings.TrimSpace(p.TermsURL), strings.TrimSpace(p.PrivacyURL)
+		cfg.Profile.StatementDescriptor = strings.TrimSpace(p.StatementDescriptor)
+		if len(cfg.Profile.StatementDescriptor) > 64 {
+			return Settings{}, fmt.Errorf("profile.statement_descriptor must be at most 64 characters")
+		}
 	}
 	for name, v := range map[string]*int64{"collection_threshold": in.CollectionThreshold, "monthly_floor": in.MonthlyFloor, "arrears_delinquency_floor": in.ArrearsDelinquencyFloor} {
 		if v != nil && *v < 0 {

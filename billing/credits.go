@@ -232,6 +232,11 @@ type MerchantProfile struct {
 	// BillingURL is where customers manage and cancel their subscriptions
 	// and payment agreements.
 	BillingURL string `json:"billing_url,omitempty"`
+	TermsURL   string `json:"terms_url,omitempty"`
+	PrivacyURL string `json:"privacy_url,omitempty"`
+	// StatementDescriptor is the name card charges carry on statements, shown
+	// under the pay button.
+	StatementDescriptor string `json:"statement_descriptor,omitempty"`
 }
 
 // NotificationURL is the link a message about a notification event of kind

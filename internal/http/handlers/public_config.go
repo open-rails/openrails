@@ -80,7 +80,7 @@ func GetCustomerConfig(r *httprequest.Request) {
 		cache = "no-store"
 	}
 	r.SetHeader("Cache-Control", cache)
-	r.SuccessJSON(billing.CustomerConfig{Payment: payment, Merchant: who})
+	r.SuccessJSON(billing.CustomerConfig{Payment: payment, Merchant: who, ClientCountry: r.ClientCountry()})
 }
 
 // PublicConfigDocument is GET /v1/config on a mount reporting capabilities:
@@ -130,6 +130,10 @@ func loadPublicMerchant(r *httprequest.Request, mid billing.MerchantID) (billing
 	who := billing.PublicMerchant{DisplayName: name, EmbedOrigins: merchantconfig.EmbedOrigins(settings)}
 	if p := settings.Profile; p != nil {
 		who.LogoURL, who.SupportURL = httpsURL(p.LogoURL), httpsURL(p.SupportURL)
+		who.TermsURL, who.PrivacyURL = httpsURL(p.TermsURL), httpsURL(p.PrivacyURL)
+		if d := strings.TrimSpace(p.StatementDescriptor); d != "" {
+			who.StatementDescriptor = &d
+		}
 	}
 	return who, true
 }

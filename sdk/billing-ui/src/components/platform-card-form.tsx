@@ -151,8 +151,9 @@ export function PlatformCardForm({
         value={billing}
         onChange={setBilling}
         disabled={disabled || busy || retry || submitted}
-      />
-      <CardFields ids={ids} preview={false} />
+      >
+        <CardFields ids={ids} preview={false} />
+      </CardBillingFields>
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}

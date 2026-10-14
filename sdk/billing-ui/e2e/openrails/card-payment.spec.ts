@@ -60,7 +60,7 @@ async function openPayment(
     `/payment.html#price=${price}&token=${user.access_token}${theme}`
   )
   const purchase = page.locator(":root")
-  await purchase.getByLabel("Name on card").fill("Card Payer")
+  await purchase.getByLabel("Full name").fill("Card Payer")
   await purchase.getByLabel("Country").selectOption("US")
   await purchase.getByLabel(/ZIP/).fill("10001")
   return purchase

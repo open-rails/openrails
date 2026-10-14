@@ -23,7 +23,7 @@ exactly is refused with a visible notice, never rounded.
 
 The host collects only:
 
-- the cardholder's name: one visible “Name on card” input with `autocomplete="cc-name"`;
+- the cardholder's name: one visible “Full name” input with `autocomplete="cc-name"`;
 - the country: a native ISO-3166 country select with `autocomplete="billing country"`;
 - the postal code: a country-aware input with `autocomplete="billing postal-code"`.
 

@@ -178,6 +178,11 @@ export function BuyButton({
           onComplete={() =>
             void client.getOrder(paying.orderId).then(paid, () => undefined)
           }
+          onLoadFailure={() =>
+            void client
+              .reportPayURLFailure(paying.orderId)
+              .catch(() => undefined)
+          }
         />
       ) : null}
     </span>

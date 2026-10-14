@@ -558,6 +558,44 @@
         ]
       }
     },
+    "/v1/me/orders/{id}/pay-url-failure": {
+      "post": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer"
+        ]
+      }
+    },
     "/v1/me/orders/{id}/cancel": {
       "post": {
         "tags": [
@@ -15282,11 +15320,15 @@
           },
           "merchant": {
             "$ref": "#/components/schemas/PublicMerchant"
+          },
+          "client_country": {
+            "type": "string"
           }
         },
         "required": [
           "payment",
-          "merchant"
+          "merchant",
+          "client_country"
         ]
       },
       "CustomerContact": {
@@ -17549,6 +17591,15 @@
             "type": "string"
           },
           "billing_url": {
+            "type": "string"
+          },
+          "terms_url": {
+            "type": "string"
+          },
+          "privacy_url": {
+            "type": "string"
+          },
+          "statement_descriptor": {
             "type": "string"
           }
         }
@@ -21338,6 +21389,36 @@
               }
             ]
           },
+          "terms_url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "privacy_url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "statement_descriptor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "embed_origins": {
             "type": "array",
             "items": {
@@ -21349,6 +21430,9 @@
           "display_name",
           "logo_url",
           "support_url",
+          "terms_url",
+          "privacy_url",
+          "statement_descriptor",
           "embed_origins"
         ]
       },

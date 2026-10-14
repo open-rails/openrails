@@ -424,6 +424,14 @@ func (r *Request) Staff() (billingauth.Staff, bool) {
 // walking X-Forwarded-For right to left. Rate limits, abuse tracking, webhook
 // IP recording and the CCBill allowlist all resolve through it, so proxy trust
 // is enforced identically everywhere.
+// ClientCountry is the client's country as a trusted proxy reports it, or "".
+func (r *Request) ClientCountry() string {
+	if r.Request == nil || r.State == nil {
+		return ""
+	}
+	return r.State.TrustedProxies.Country(r.Request)
+}
+
 func (r *Request) ClientIP() string {
 	if r.Request == nil {
 		return ""

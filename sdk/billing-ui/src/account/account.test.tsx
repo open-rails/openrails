@@ -450,7 +450,7 @@ describe("PaymentMethodsPanel", () => {
     mount(<AccountBilling defaultCountry="US" />, server)
     fireEvent.click(await screen.findByRole("button", { name: "Add card" }))
     const dialog = await screen.findByRole("dialog")
-    fireEvent.change(within(dialog).getByLabelText("Name on card"), {
+    fireEvent.change(within(dialog).getByLabelText(/full name/i), {
       target: { value: "Pat Reader" },
     })
     fireEvent.change(within(dialog).getByLabelText("ZIP code"), {
