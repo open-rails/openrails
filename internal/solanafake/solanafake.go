@@ -972,9 +972,10 @@ func (n *Node) serve(w http.ResponseWriter, r *http.Request) {
 		opts := options(req.Params, 1)
 		n.mu.Lock()
 		tx, ok := n.txs[sig]
+		forgotten := n.forgets(sig)
 		n.mu.Unlock()
 		switch {
-		case !ok || !tx.visible(opts):
+		case !ok || forgotten || !tx.visible(opts):
 			reply["result"] = nil
 		case tx.v0 && opts["maxSupportedTransactionVersion"] == nil:
 			reply["error"] = map[string]any{"code": -32015, "message": "Transaction version (0) is not supported by the requesting client. Please try the request again with the following configuration parameter: \"maxSupportedTransactionVersion\": 0"}
