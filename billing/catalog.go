@@ -105,7 +105,7 @@ type ProductListParams struct {
 // means a new price under the same key.
 //
 // A price is ours unless Provider is set: OpenRails vaults the card and runs
-// the billing, and nothing is written to a provider's catalog. A provider
+// the billing, without synchronizing provider catalog objects. A provider
 // price is owned and run by its provider (a legacy NMI plan, a Stripe price,
 // a CCBill FlexForm); its terms are read from the provider, or declared for
 // CCBill, and OpenRails never writes it.
@@ -220,7 +220,7 @@ var ErrPriceKeyCadenceConflict error = newCodedError("price_key_cadence_conflict
 // Creating a price under the key of a live price with other terms makes it
 // the key's current version and archives the previous one. The price is ours:
 // OpenRails sells it by card through the merchant's card_vault and
-// charge_psps, and on Solana; nothing is written to a provider's catalog.
+// charge_psps, and on Solana; it does not synchronize provider catalogs.
 type CreatePriceParams struct {
 	CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
 	// Quantity sells a recurring price per seat within its bounds.
@@ -266,7 +266,8 @@ type CreatePriceProduct struct {
 // PriceID (a Stripe price), or FlexID and RecurringBillingOptionID (a CCBill
 // FlexForm). NMI and Stripe terms are read from the provider; CCBill, which
 // has no read API, declares UnitAmount, Currency and BillingIntervalHours.
-// AccessDurationHours defaults to the billing interval; OneOff is a price
+// AccessDurationHours defaults to the verified provider service-period end;
+// explicit hours override it, and explicit null grants indefinite access. OneOff is a price
 // that does not renew. Nothing is created or edited at the provider.
 type CreateProviderPriceParams struct {
 	ProductID                ProductID `json:"product_id,omitzero"`

@@ -1,7 +1,7 @@
 /** English message keys. Override individual entries with BillingAdmin.messages. */
 export const billingAdminMessages = {
   "Sold by OpenRails": "Sold by OpenRails",
-  "OpenRails bills this price: by card through your card vault and charge PSPs, and on Solana. Nothing is written to a provider's catalog.": "OpenRails bills this price: by card through your card vault and charge PSPs, and on Solana. Nothing is written to a provider's catalog.",
+  "OpenRails bills this price through your card vault and charge PSPs, and on Solana. Provider catalogs are not synchronized. Hosted one-time Stripe payments use inline checkout objects.": "OpenRails bills this price through your card vault and charge PSPs, and on Solana. Provider catalogs are not synchronized. Hosted one-time Stripe payments use inline checkout objects.",
   "Sold via: ": "Sold via: ",
   "every method you have": "every method you have",
   "Solana plan ": "Solana plan ",

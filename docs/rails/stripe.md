@@ -159,8 +159,9 @@ provider_prices:
 
 Applying reads the existing Stripe price's amount, currency and recurring
 interval; access defaults to that interval and can be declared separately.
-OpenRails never creates or edits Stripe Products, Prices or Entitlement
-Features. The pull reconciliation job reports drift without mutating Stripe.
+OpenRails does not create or edit a maintained Stripe catalog or Entitlement
+Features. Hosted one-time Checkout uses inline price/product data for its
+inactive, nonreusable payment objects; it creates no Stripe subscription. The pull reconciliation job reports drift without mutating Stripe.
 New subscriptions are sold only on our `prices`, whose terms remain local.
 
 ### Purchase

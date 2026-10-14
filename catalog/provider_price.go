@@ -13,7 +13,8 @@ import (
 // product for entitlements. OpenRails reads its terms and never writes it:
 // NMI plans and Stripe prices are read at apply, so only CCBill, which has no
 // read API, declares its amount and billing interval. AccessDurationHours and
-// OneOff default to the billing interval and recurring. A declaration states
+// OneOff default to the verified service-period end and recurring. Explicit
+// null access is indefinite, while explicit hours override the native boundary. A declaration states
 // the provider price whole; omitted Archived keeps its current value.
 type ApplyProviderPrice struct {
 	// PSP is the merchant's PSP key that owns the price.

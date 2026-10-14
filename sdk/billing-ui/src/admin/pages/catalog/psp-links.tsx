@@ -148,7 +148,7 @@ export function PriceOwnerCard({
           <CardDescription>
             <AdminMessage
               id={
-                "OpenRails bills this price: by card through your card vault and charge PSPs, and on Solana. Nothing is written to a provider's catalog."
+                "OpenRails bills this price through your card vault and charge PSPs, and on Solana. Provider catalogs are not synchronized. Hosted one-time Stripe payments use inline checkout objects."
               }
             />
           </CardDescription>
