@@ -37,7 +37,7 @@ func platformSubscriptionWorld(t *testing.T) (*world, *btFake) {
 	client := w.client[remote]
 	_, err := client.UpdatePSP(t.Context(), w.psp["stripe"], billing.UpdatePSPParams{Archived: true, AllowLast: true})
 	require.NoError(t, err)
-	_, err = client.UpdateMerchantConfiguration(t.Context(), setCustody(billing.CardCustodyPlatform))
+	_, err = client.UpdateMerchantConfiguration(t.Context(), setVault(billing.CardVaultPlatform))
 	require.NoError(t, err)
 	mid := client.MerchantID().UUID().String()
 	w.vault.Put(t, "openrails/platform_vault/"+platformTenant, map[string]any{
@@ -252,7 +252,7 @@ func TestPlatformRenewal(t *testing.T) {
 				require.NoError(t, err)
 			}
 			if scenario == "custody switched" {
-				_, err := w.client[remote].UpdateMerchantConfiguration(t.Context(), setCustody(billing.CardCustodyMerchant))
+				_, err := w.client[remote].UpdateMerchantConfiguration(t.Context(), setVault("nmi"))
 				require.NoError(t, err)
 			}
 			end := *w.subscription(remote, subID).CurrentPeriodEndsAt

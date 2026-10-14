@@ -5,7 +5,6 @@ package subscriptions_test
 import (
 	"bytes"
 	"fmt"
-	"strconv"
 	"testing"
 
 	solanago "github.com/gagliardetto/solana-go"
@@ -22,12 +21,12 @@ import (
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
-// On a fresh database, applying a catalog publishes the plan a recurring
-// `solana: {}` price needs and binds it: owned by the deployment's cranker,
-// paying only into the merchant's treasury. Plans are immutable: re-applying binds
-// the same plan, and new terms are a new price with its own plan. Publishing is
-// a catalog provider write, so limited and readonly modes refuse it by name and
-// change nothing, yet still bind a plan already on chain.
+// On a fresh database, applying a catalog publishes the plan each recurring
+// price of ours sells on and binds it: owned by the deployment's cranker,
+// paying only into the merchant's treasury. Plans are immutable: re-applying
+// binds the same plan, and new terms are a new price with its own plan.
+// Publishing is a provider write: limited and readonly modes apply the price
+// without one, warning by name, yet still bind a plan already on chain.
 func TestCatalogApplyPublishesSolanaPlan(t *testing.T) {
 	w := prepareWorld(t, 12)
 	sol := withSolana(t, w)
@@ -47,13 +46,11 @@ products:
         unit_amount: %[3]d
         billing_interval_hours: 720
         access_duration_hours: 720
-        psps: {nmi: {}, solana: {}}
       once:
         currency: usd
         unit_amount: 5000000
         billing_interval_hours: null
         access_duration_hours: 720
-        psps: {solana: {}}
 `, product, title, amount)
 	}
 	apply := func(raw []byte) (*billing.CatalogApplicationReceipt, error) {
@@ -77,10 +74,10 @@ products:
 	// planOf is the price's bound plan, read from the chain.
 	planOf := func(price *billing.Price, amount uint64) solanago.PublicKey {
 		t.Helper()
-		ids := price.PSPs["solana"].IDs
-		pda := solanago.MustPublicKeyFromBase58(ids["plan_pda"])
+		require.NotNil(t, price.SolanaPlan, "price %s sells on a plan", price.ID)
+		pda := solanago.MustPublicKeyFromBase58(*price.SolanaPlan)
 		raw, ok := fake.Account(pda)
-		require.True(t, ok, "price %s binds a plan on chain: %v", price.ID, ids)
+		require.True(t, ok, "price %s binds a plan on chain", price.ID)
 		plan, err := subscriptions.DecodePlanAccount(raw)
 		require.NoError(t, err)
 		require.Equal(t, sol.cranker.PublicKey(), plan.Owner, "the deployment's cranker owns the plan")
@@ -88,9 +85,6 @@ products:
 		require.Equal(t, solanafake.DevnetUSDCMint, plan.Mint.String(), "a devnet PSP publishes in devnet USDC")
 		require.Equal(t, []uint64{amount, monthHours}, []uint64{plan.Amount, plan.PeriodHours})
 		require.Equal(t, subscriptions.PlanStatusActive, plan.Status)
-		require.Equal(t, strconv.FormatUint(plan.PlanID, 10), ids["plan_id"])
-		require.Equal(t, strconv.FormatInt(plan.CreatedAt, 10), ids["created_at"], "the binding carries the chain's clock")
-		require.Equal(t, "USDC", ids["token"])
 		return pda
 	}
 
@@ -102,7 +96,7 @@ products:
 	require.Equal(t, 1, fake.Transactions(pda), "one create_plan")
 	once, err := priceByKey(ctx, w.client[embedded], product, "once")
 	require.NoError(t, err)
-	require.NotContains(t, once.PSPs["solana"].IDs, "plan_pda", "a one-time price needs no plan")
+	require.Nil(t, once.SolanaPlan, "a one-time price needs no plan")
 	require.Equal(t, []string{"solana_pay"}, w.options(price.ID)["solana"].Accepts, "the bound plan sells")
 
 	// Re-applying publishes nothing: the document replays, and another
@@ -114,25 +108,30 @@ products:
 	require.NoError(t, err)
 	require.False(t, renamed.Replayed)
 	require.Zero(t, renamed.PricesChanged)
-	require.Equal(t, price.PSPs["solana"].IDs, monthly().PSPs["solana"].IDs)
+	require.Equal(t, price.SolanaPlan, monthly().SolanaPlan)
 	require.Equal(t, 1, fake.Transactions(pda))
 	before, _ := fake.Account(pda)
 
-	// Gated modes refuse a plan that is not on chain, naming the price and the
-	// mode, and change nothing.
-	revision := w.catalogRevision()
+	// Gated modes publish nothing: the new terms apply, sold without Solana,
+	// and the warning names the price and the mode. Not recorded, a later
+	// apply retries.
 	for _, mode := range []string{config.ProviderWriteModeLimited, config.ProviderWriteModeReadOnly} {
-		_, err := cli(mode, file("Plans", 29_000_000))
-		require.ErrorContains(t, err, fmt.Sprintf("price %q of product %q", "monthly", product), mode)
-		require.ErrorContains(t, err, "provider_write_mode="+mode)
-		require.Equal(t, price.ID, monthly().ID, mode)
-		require.Equal(t, revision, w.catalogRevision(), mode)
+		receipt, err := cli(mode, file("Plans", 29_000_000))
+		require.NoError(t, err, mode)
+		require.Len(t, receipt.Warnings, 1, mode)
+		require.False(t, receipt.Warnings[0].Refused)
+		require.Contains(t, receipt.Warnings[0].Message, fmt.Sprintf("price %q of product %q", "monthly", product))
+		require.Contains(t, receipt.Warnings[0].Message, "provider_write_mode="+mode)
+		require.NotEqual(t, price.ID, monthly().ID, mode)
+		require.Nil(t, monthly().SolanaPlan, mode)
+		require.NotContains(t, w.options(monthly().ID), "solana", mode)
 	}
 
 	// New terms are a new price with its own plan; the old plan is untouched
 	// and stays bound to the archived price its subscribers hold.
 	repriced, err := cli(config.ProviderWriteModeFull, file("Plans", 29_000_000))
 	require.NoError(t, err, "the operator command publishes too")
+	require.Empty(t, repriced.Warnings)
 	require.Equal(t, 1, repriced.PricesChanged)
 	current := monthly()
 	require.NotEqual(t, price.ID, current.ID)
@@ -144,14 +143,14 @@ products:
 	old, err := w.client[remote].GetPrice(ctx, price.ID, billing.GetPriceParams{})
 	require.NoError(t, err)
 	require.True(t, old.Archived)
-	require.Equal(t, pda.String(), old.PSPs["solana"].IDs["plan_pda"])
+	require.Equal(t, pda.String(), *old.SolanaPlan)
 
 	// Back to the old terms in limited mode: the archived price returns with
 	// the plan it is bound to, verified without a write.
 	_, err = cli(config.ProviderWriteModeLimited, file("Plans restored", 23_000_000))
 	require.NoError(t, err)
 	require.Equal(t, price.ID, monthly().ID)
-	require.Equal(t, pda.String(), monthly().PSPs["solana"].IDs["plan_pda"])
+	require.Equal(t, pda.String(), *monthly().SolanaPlan)
 	require.Equal(t, 1, fake.Transactions(pda))
 
 	// An apply that published, then failed to commit, left a plan on chain

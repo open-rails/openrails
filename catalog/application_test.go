@@ -356,3 +356,25 @@ func digest(t *testing.T, a Application) [32]byte {
 	}
 	return d
 }
+
+func TestProviderPriceDeclaredTrial(t *testing.T) {
+	a, err := ParseApplicationYAML([]byte(`schema_version: 1
+products:
+  premium:
+    provider_prices:
+      legacy:
+        psp: ccbill
+        recurring_billing_option_id: "0000000931"
+        amount: 14.95 USD
+        billing_interval: 30 days
+        trial_unit_amount: 19950000
+        trial_duration: 30 days
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := a.Products["premium"].ProviderPrices["legacy"]
+	if got.TrialUnitAmount == nil || *got.TrialUnitAmount != 19_950_000 || *got.TrialDurationHours != 720 || *got.UnitAmount != 14_950_000 {
+		t.Fatalf("trial = %#v", got)
+	}
+}

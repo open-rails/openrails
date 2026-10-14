@@ -34,7 +34,7 @@ import {
 import { PriceChangeWizard } from "#orck/admin/pages/catalog/price-wizard"
 import {
   PSPReadinessCard,
-  PSPLinksCard,
+  PriceOwnerCard,
 } from "#orck/admin/pages/catalog/psp-links"
 import { useCatalogWrites } from "#orck/admin/lib/capabilities"
 
@@ -61,8 +61,8 @@ export function PriceDetailPage() {
   const id = priceIDFromPath(useLocation().pathname)
   const writesAllowed = useCatalogWrites()
   const navigate = useNavigate()
-  // verify (or#812) is opt-in: it makes GET price perform a live retrieve
-  // against every attached provider, which is a network round trip per PSP.
+  // verify is opt-in: it makes GET price read a provider price's terms at its
+  // provider again, a network round trip.
   const [verify, setVerify] = React.useState(false)
   const {
     data: price,
@@ -120,7 +120,7 @@ export function PriceDetailPage() {
           </p>
         </div>
         <div className="ml-auto">
-          {writesAllowed && (
+          {writesAllowed && !price.provider && (
             <PriceChangeWizard
               price={price}
               productName={product?.display_name ?? "…"}
@@ -143,7 +143,7 @@ export function PriceDetailPage() {
         <Fact label={adminText("Created")}>{formatDate(price.created_at)}</Fact>
       </div>
 
-      <PSPLinksCard
+      <PriceOwnerCard
         price={price}
         verifying={verify && isFetching}
         verified={verify}

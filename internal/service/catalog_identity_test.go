@@ -6,6 +6,7 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/stretchr/testify/require"
@@ -55,34 +56,28 @@ func TestPriceDeterministicID(t *testing.T) {
 	require.Equal(t, with(func(p *priceTerms) { p.trialAmt, p.trialDur = nil, nil }).id(), reseeded.id(), "equal NULL tuples re-seed stably")
 }
 
-// Provider identity follows the retained immutable local ID, not money alone.
-// Existing objects remain bound even when they carry older financial markers.
+// A published Solana plan follows the immutable local price ID and its
+// treasury; a provider price's id follows its terms and its provider object.
 func TestProviderPriceIdentity(t *testing.T) {
 	productID := uuid.New()
 	base := priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), intPtr(720), nil, nil)
 	sibling := priceDeterministicID(productID, "special", 10_000_000, "USD", intPtr(720), intPtr(720), nil, nil)
 	trial := priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), intPtr(720), int64Ptr(0), intPtr(24))
 	for _, other := range []uuid.UUID{sibling, trial} {
-		require.NotEqual(t, internalStripeLookupKey(base), internalStripeLookupKey(other))
-		require.NotEqual(t, nmiDeterministicPlanID(base), nmiDeterministicPlanID(other))
 		treasury := solanago.NewWallet().PublicKey()
 		require.NotEqual(t, solanaPlanID(base, "mint", treasury), solanaPlanID(other, "mint", treasury))
 	}
-	require.Equal(t, internalStripeLookupKey(base), internalStripeLookupKey(base))
 	first, second := solanago.NewWallet().PublicKey(), solanago.NewWallet().PublicKey()
 	require.NotEqual(t, solanaPlanID(base, "mint", first), solanaPlanID(base, "mint", second), "a new treasury takes a new plan")
+	req := billing.CreatePriceParams{Key: "legacy", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: intPtr(720)}
+	psp := uuid.New()
+	require.NotEqual(t, providerPriceID(productID, req, psp, map[string]string{"plan_id": "a"}), providerPriceID(productID, req, psp, map[string]string{"plan_id": "b"}))
+	require.NotEqual(t, newPriceID(productID, "legacy", req), providerPriceID(productID, req, psp, map[string]string{"plan_id": "a"}))
 	product := &models.Product{ID: productID, Key: "pro"}
 	legacy := &models.Price{ID: uuid.New(), ProductID: productID, Key: "monthly", Amount: 10_000_000, Currency: "USD",
 		PSPLinks: map[string]map[string]string{"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_legacy"}}}
 	remote := []catalog.StripePrice{{ID: "price_legacy", UnitAmount: 1000, Currency: "usd", Active: true, LookupKey: "openrails.pro.usd.10000000.onetime"}}
 	require.Empty(t, catalog.ComputeStripeDrift(nil, remote, catalog.BuildDriftSnapshot([]*models.Product{product}, []*models.Price{legacy}, uuid.Nil), time.Now()))
-}
-
-func TestNMIPlanIDShape(t *testing.T) {
-	id := uuid.New()
-	minted := nmiDeterministicPlanID(id)
-	require.Equal(t, nmiDeterministicPlanID(id), minted)
-	require.NotEqual(t, minted, nmiDeterministicPlanID(uuid.New()))
 }
 
 // CUR-8: service entry points accept only registered currencies.

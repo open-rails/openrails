@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 func TestDurationDowngradePreservesLongerPaidBenefit(t *testing.T) {
@@ -24,11 +25,8 @@ func TestDurationDowngradePreservesLongerPaidBenefit(t *testing.T) {
 				Entitlements: []string{"content:long-paid"},
 			})
 			require.NoError(t, err)
-			price, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{
-				ProductID: product.ID, Key: "monthly", UnitAmount: 19_990_000, Currency: "USD",
-				BillingIntervalHours: new(720), AccessDurationHours: new(1440),
-				PSPs: map[string]map[string]string{"nmi": {"plan_id": plan}},
-			})
+			w.nmi.AddPlan(nmimock.Plan{ID: plan, Name: "Long paid access", Amount: "19.99", Days: 30})
+			price, err := w.client[tp].CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "monthly", PSP: "nmi", PlanID: plan, AccessDurationHours: new(1440)})
 			require.NoError(t, err)
 			old := tier{Price: price, ent: "content:long-paid", plan: plan}
 			lower := w.tierPrice(group, 1, 499, monthHours, true)

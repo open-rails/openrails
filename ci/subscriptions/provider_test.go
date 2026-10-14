@@ -42,13 +42,19 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	group := benefitGroup(l.ent)
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy membership", TierGroup: &group, Entitlements: []string{l.ent}})
 	require.NoError(t, err)
-	hours := monthHours
+	// The provider runs the legacy membership: a provider price reads its
+	// terms from the provider's plan or price.
 	links := map[string]map[string]string{"stripe": {"price_id": "price_legacy_" + uuid.NewString()[:8]}}
+	declared := billing.CreateProviderPriceParams{ProductID: product.ID, Key: product.Key + "-usd", PSP: "stripe", PriceID: links["stripe"]["price_id"]}
 	if rail == "nmi" {
 		links = map[string]map[string]string{"nmi": {"plan_id": "legacy_plan_" + uuid.NewString()[:8]}}
+		declared = billing.CreateProviderPriceParams{ProductID: product.ID, Key: product.Key + "-usd", PSP: "nmi", PlanID: links["nmi"]["plan_id"]}
 	}
-	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours, PSPs: links})
+	l.price, err = client.CreateProviderPrice(t.Context(), declared)
 	require.NoError(t, err)
+	require.NotNil(t, l.price.Provider)
+	require.Equal(t, int64(9_990_000), l.price.UnitAmount, "the provider's terms")
+	require.Equal(t, monthHours, *l.price.BillingIntervalHours)
 
 	start := w.clock.Now().Add(-10 * day)
 	end := start.Add(monthHours * time.Hour)

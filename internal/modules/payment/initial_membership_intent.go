@@ -211,34 +211,7 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Bil
 		}
 		return h.Verify(ctx, in)
 	}
-	var credential *nmi.StoredCredential
-	if p.Terms.Amount > 0 {
-		if credential, err = nmidirect.StoredCredentialFor(mode); err != nil {
-			return h.completeInitialNonexecution(ctx, in, proof)
-		}
-	}
-	order := intents.NMIEnrollmentOrder(in)
-	response, callErr := client.AddRecurringSubscription(ctx, nmi.RecurringPaymentData{ScheduleOnly: p.Terms.Amount == 0, PlanID: p.NativeSchedule.PlanID, CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: minor, Currency: p.Terms.Currency, Email: p.Email, OrderID: order, PONumber: order, StartDate: p.NativeSchedule.StartDate, StoredCredential: credential, CardUserData: nmi.CardUserData{FirstName: p.NativeSchedule.Card.FirstName, LastName: p.NativeSchedule.Card.LastName, Address1: p.NativeSchedule.Card.Address1, City: p.NativeSchedule.Card.City, State: p.NativeSchedule.Card.State, Zip: p.NativeSchedule.Card.Zip, Country: p.NativeSchedule.Card.Country}})
-	if callErr != nil {
-		if nmi.RequiresVerification(callErr) {
-			return intents.Ambiguous("native enrollment outcome requires exact provider verification")
-		}
-		var refusal *nmi.CustomerVaultError
-		if !errors.As(callErr, &refusal) {
-			return intents.Ambiguous("native enrollment rejection has no qualified refusal proof")
-		}
-		if err := intents.NewStore(h.database()).RetainInitialMembershipDecline(ctx, in, refusal); err != nil {
-			return intents.Ambiguous("native enrollment refusal could not be qualified: " + err.Error())
-		}
-		return h.Verify(ctx, in)
-	}
-	if response == nil {
-		return intents.Ambiguous("native enrollment returned no receipt candidates")
-	}
-	if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, map[string]any{"provider_subscription_id": response.SubscriptionID, "transaction_id": response.TransactionID}); err != nil {
-		return intents.Ambiguous(err.Error())
-	}
-	return h.Verify(ctx, in)
+	return intents.Ambiguous("an initial membership is OpenRails-run; no provider schedule is started for it")
 }
 
 func (h *InitialMembershipIntentHandler) Verify(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
@@ -254,7 +227,7 @@ func (h *InitialMembershipIntentHandler) Verify(ctx context.Context, in gen.Bill
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	schedule, scheduled, err := intents.LoadNMIEnrollmentReceipt(in)
+	_, scheduled, err := intents.LoadNMIEnrollmentReceipt(in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
@@ -262,7 +235,7 @@ func (h *InitialMembershipIntentHandler) Verify(ctx context.Context, in gen.Bill
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	if (p.NativeSchedule != nil && scheduled || p.NativeSchedule == nil && !scheduled) && (p.Terms.Amount == 0 || paid) {
+	if !scheduled && (p.Terms.Amount == 0 || paid) {
 		return h.complete(ctx, in, intents.Succeeded(nil))
 	}
 	var progress map[string]any
@@ -289,50 +262,14 @@ func (h *InitialMembershipIntentHandler) Verify(ctx context.Context, in gen.Bill
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	store := intents.NewStore(h.database())
 	var paymentErr error
 	if p.Terms.Amount > 0 && !paid {
 		paymentErr = h.retainInitialPayment(ctx, in, client)
 	}
-	if p.NativeSchedule == nil {
-		if paymentErr != nil {
-			return intents.Ambiguous(paymentErr.Error())
-		}
-		return h.complete(ctx, in, intents.Succeeded(nil))
-	}
-	if !scheduled {
-		refs := []string{intents.EvidenceString(in, "provider_subscription_id")}
-		if refs[0] == "" {
-			roster, err := scanRemoteSubscriptions(db.WithPSPID(ctx, *in.PspID), h.Purchases.SubscriptionService, client, "nmi", p.Instrument.RailCustomerRef, p.NativeSchedule.PlanID, intents.NMIEnrollmentOrder(in))
-			if err != nil {
-				return intents.Ambiguous(err.Error())
-			}
-			refs = append(roster.registered, roster.unregistered...)
-		}
-		matches := 0
-		for _, ref := range refs {
-			if ref == "" {
-				continue
-			}
-			candidate, found, err := intents.ReadNMIEnrollmentReceipt(ctx, in, upgradeReceiptResolver{client}, ref)
-			if err != nil || !found {
-				continue
-			}
-			matches++
-			schedule = candidate
-		}
-		if matches != 1 {
-			return intents.AmbiguousWithEvidence("native enrollment has no unique qualified schedule receipt", map[string]any{"candidate_subscription_ids": refs})
-		}
-		schedule, err = store.RetainNMIEnrollmentReceipt(ctx, in, schedule)
-		if err != nil {
-			return intents.Ambiguous(err.Error())
-		}
-	}
 	if paymentErr != nil {
 		return intents.Ambiguous(paymentErr.Error())
 	}
-	return h.complete(ctx, in, intents.Succeeded(map[string]any{"provider_subscription_id": schedule.SubscriptionID()}))
+	return h.complete(ctx, in, intents.Succeeded(nil))
 }
 
 func (h *InitialMembershipIntentHandler) retainInitialPayment(ctx context.Context, in gen.BillingProviderIntent, client *nmi.NMIClient) error {
@@ -398,21 +335,11 @@ func (h *InitialMembershipIntentHandler) Resolve(ctx context.Context, in gen.Bil
 	if err != nil {
 		return intents.Outcome{}, err
 	}
-	if p.NativeSchedule == nil {
-		receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, upgradeReceiptResolver{client}, resolution.ProviderReference)
-		if err != nil || !found {
-			return intents.Outcome{}, intents.RejectResolution("payment does not prove accepted membership")
-		}
-		if _, err := intents.NewStore(h.database()).RetainCollectedReceipt(ctx, in, receipt); err != nil {
-			return intents.Outcome{}, err
-		}
-		return h.Verify(ctx, in), nil
-	}
-	schedule, found, err := intents.ReadNMIEnrollmentReceipt(ctx, in, upgradeReceiptResolver{client}, resolution.ProviderReference)
+	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, upgradeReceiptResolver{client}, resolution.ProviderReference)
 	if err != nil || !found {
-		return intents.Outcome{}, intents.RejectResolution("schedule does not prove accepted enrollment")
+		return intents.Outcome{}, intents.RejectResolution("payment does not prove accepted membership")
 	}
-	if _, err = intents.NewStore(h.database()).RetainNMIEnrollmentReceipt(ctx, in, schedule); err != nil {
+	if _, err := intents.NewStore(h.database()).RetainCollectedReceipt(ctx, in, receipt); err != nil {
 		return intents.Outcome{}, err
 	}
 	return h.Verify(ctx, in), nil
@@ -473,7 +400,7 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 			outcome = refusal.Outcome()
 		}
 
-		if success && ((p.NativeSchedule != nil) != scheduled || (p.Terms.Amount > 0) != paid) {
+		if success && (scheduled || (p.Terms.Amount > 0) != paid) {
 			return errors.New("initial completion lacks exact required schedule/payment receipts")
 		}
 		if !success && (scheduled || paid) {

@@ -12,7 +12,7 @@ var page = []Param{text("cursor"), integer("limit")}
 // Error codes of the catalog's nouns.
 var (
 	productErrors = []string{"catalog_benefit_overlap", "product_not_found", "product_tier_group_conflict", "product_tier_group_in_use", "resource_conflict", "revision_mismatch"}
-	priceErrors   = []string{"catalog_benefit_overlap", "price_key_cadence_conflict", "price_key_not_found", "price_not_found", "product_not_found", "resource_conflict", "revision_mismatch", "trial_unsupported_on_rail"}
+	priceErrors   = []string{"catalog_benefit_overlap", "price_key_cadence_conflict", "price_key_not_found", "price_not_found", "price_not_sellable", "product_not_found", "resource_conflict", "revision_mismatch", "trial_unsupported_on_rail"}
 	meterErrors   = []string{
 		"default_rate_card_not_found", "meter_in_use", "meter_rate_card_conflict", "rate_card_product_not_found",
 		"revision_mismatch", "usage_meter_invalid", "usage_meter_not_found", "usage_rate_card_invalid",
@@ -52,6 +52,8 @@ var catalogRoutes = []Route{
 		Responses: []Reply{{204, nil}}, Errors: codes(billing.CodeProductInUse, "product_not_found"), Handler: h(handlers.DeleteProduct)},
 	{Method: POST, Path: "/v1/catalog/prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreatePrice", Level: LevelUpdate,
 		Request: billing.CreatePriceParams{}, Responses: []Reply{{201, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.CreatePrice)},
+	{Method: POST, Path: "/v1/catalog/provider-prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreateProviderPrice", Level: LevelUpdate,
+		Request: billing.CreateProviderPriceParams{}, Responses: []Reply{{201, billing.Price{}}}, Errors: codes(append([]string{"provider_price_unreadable"}, priceErrors...)...), Handler: h(handlers.CreateProviderPrice)},
 	{Method: GET, Path: "/v1/catalog/prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListPrices", Level: LevelRead,
 		Query: params(page, idsParam, queryOf(handlers.PriceListQuery{})), Responses: []Reply{{200, billing.ListPage[billing.Price]{}}}, Errors: codes(priceErrors...), Handler: h(handlers.ListPrices)},
 	{Method: GET, Path: "/v1/catalog/prices/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetPrice", Level: LevelRead,

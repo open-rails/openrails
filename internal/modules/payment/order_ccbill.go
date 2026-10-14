@@ -75,6 +75,17 @@ func (s *OrderAttemptService) payOrderCCBill(ctx context.Context, in OrderPayInp
 		return fmt.Errorf("%w: a CCBill sale is one seat of one subscription", ErrOrderAttemptValidation)
 	}
 	linked := *in.Prices[0]
+	// A stand-in sells the line of ours on its CCBill provider price's FlexForm.
+	if option.PriceID != uuid.Nil {
+		stand, err := s.priceService.GetByID(ctx, option.PriceID)
+		if err != nil {
+			return err
+		}
+		if !stand.ProviderOwned || stand.ProductID != linked.ProductID || !sameSaleTerms(&linked, stand) {
+			return orders.ErrOptionMissing
+		}
+		linked = *stand
+	}
 	if err := s.db.LoadPricePSPBindings(ctx, []*models.Price{&linked}, nil); err != nil {
 		return err
 	}
@@ -111,6 +122,7 @@ func (s *OrderAttemptService) payOrderCCBill(ctx context.Context, in OrderPayInp
 	state, err := json.Marshal(map[string]any{
 		"flow": ccbillFlow, "return_url": returnURL, "checkout_url": link.RedirectURL, "flex_id": flex,
 		"recurring_billing_option_id": rbo, "username": username, "interval_hours": strconv.Itoa(int(*order.Lines[0].BillingIntervalHours)),
+		"price_id": linked.ID.String(),
 	})
 	if err != nil {
 		return err
@@ -262,6 +274,11 @@ func (s *OrderAttemptService) SettleOrderCCBill(ctx context.Context, attemptID u
 		}
 	}
 	paymentID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("openrails:ccbill-sale:"+attemptID.String()+":"+sale.TransactionID))
+	// CCBill bills the subscription on the provider price its FlexForm sold.
+	var billedPrice *uuid.UUID
+	if id, err := uuid.Parse(railStateText(attempt.RailState, "price_id")); err == nil {
+		billedPrice = &id
+	}
 	ctx = db.WithPSPID(ctx, attempt.PspID)
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.db.NewWithPgxTx(tx)
@@ -296,7 +313,7 @@ func (s *OrderAttemptService) SettleOrderCCBill(ctx context.Context, attemptID u
 		outcome, err := s.orders.Paid(ctx, d, order.ID, orders.Charge{PaymentID: paymentID, AttemptID: attemptID, PSPID: attempt.PspID,
 			Rail: string(models.RailCCBill), TransactionID: sale.TransactionID, Amount: order.Total, Currency: order.Currency, PurchasedAt: start,
 			Metadata: map[string]any{"ccbill_subscription_id": sale.SubscriptionID, "ccbill_flex_id": sale.FlexID, "order_attempt_id": billing.OrderAttemptID(attemptID).String()},
-			Enrolled: &orders.Enrolled{RailSubscriptionID: sale.SubscriptionID, PeriodStart: start, PeriodEnd: end}})
+			Enrolled: &orders.Enrolled{RailSubscriptionID: sale.SubscriptionID, PeriodStart: start, PeriodEnd: end, PriceID: billedPrice}})
 		if subscriptions.IsMembershipSlotTaken(err) {
 			return unhonored("membership_held", "the customer already holds the membership order %s buys", order.ID)
 		}

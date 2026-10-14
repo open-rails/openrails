@@ -167,15 +167,19 @@ type PriceProvider struct {
 }
 
 // BuyerPrices are prices as a buyer sees them, for a host to put in its own
-// pages: a provider price names its PSP, without the provider's identifiers.
+// pages: ours, and the provider prices that still sell new (CCBill), naming
+// their PSP without the provider's identifiers.
 func BuyerPrices(prices []Price) []Price {
-	out := make([]Price, len(prices))
-	for i, p := range prices {
+	out := make([]Price, 0, len(prices))
+	for _, p := range prices {
 		if p.Provider != nil {
+			if p.Provider.Rail != "ccbill" {
+				continue
+			}
 			p.Provider = &PriceProvider{PSP: p.Provider.PSP, PSPID: p.Provider.PSPID, Rail: p.Provider.Rail, IDs: map[string]string{}, SyncStatus: SyncStatusUnknown, Drift: []DriftField{}}
 		}
 		p.SolanaPlan = nil
-		out[i] = p
+		out = append(out, p)
 	}
 	return out
 }

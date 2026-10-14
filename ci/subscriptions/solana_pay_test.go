@@ -72,7 +72,6 @@ func newSolanaPay(t *testing.T, configure ...func(*config.Config)) *solanaPay {
     unit_amount: 5000000
     billing_interval_hours: null
     access_duration_hours: 720
-    psps: {solana: {}}
 `)
 	require.NoError(t, err)
 	p.price = priceID(t, w, key, key+"-once")

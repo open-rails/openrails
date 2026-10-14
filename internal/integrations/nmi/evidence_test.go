@@ -233,7 +233,7 @@ func TestRecurringPlanReadsParseExactMoneyTerms(t *testing.T) {
 		err          bool
 	}{
 		{"usd", "USD", RecurringPlanDetail{Found: true, ID: "usd", Name: "Premium", AmountCents: 999, DayFrequency: 30, Payments: &twelve}, false},
-		{"month", "USD", RecurringPlanDetail{Found: true, ID: "month", Name: "Monthly", AmountCents: 500}, false},
+		{"month", "USD", RecurringPlanDetail{Found: true, ID: "month", Name: "Monthly", AmountCents: 500, MonthFrequency: 1}, false},
 		{"yen", "JPY", RecurringPlanDetail{Found: true, ID: "yen", Name: "JPY", AmountCents: 4, DayFrequency: 30}, false},
 		{"inexact", "USD", RecurringPlanDetail{Found: true, Name: "X"}, true},
 		{"badpay", "USD", RecurringPlanDetail{}, true},

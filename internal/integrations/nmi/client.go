@@ -209,28 +209,6 @@ func (c *NMIClient) checkConfiguration() error {
 	return nil
 }
 
-func newAddSubscriptionError(rawResponse string, output url.Values) error {
-	message := "failed to add subscription"
-
-	responseCode := parseMobiusResponseCode(output)
-
-	rejection := &CustomerVaultError{
-		Message:        message,
-		ResponseCode:   responseCode,
-		LocalizationID: decline.NMILocalizationID(responseCode),
-		Detail:         decline.NMIMessage(responseCode),
-		RawResponse:    rawResponse,
-		AVSResponse:    strings.TrimSpace(output.Get("avsresponse")),
-		CVVResponse:    strings.TrimSpace(output.Get("cvvresponse")),
-		TransactionID:  strings.TrimSpace(output.Get("transactionid")),
-		ResponseText:   strings.TrimSpace(output.Get("responsetext")),
-	}
-	if strings.TrimSpace(output.Get("response")) != "2" {
-		return ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", responseCode))
-	}
-	return rejection
-}
-
 func newSaleError(rawResponse string, output url.Values) error {
 	message := "sale failed"
 
@@ -398,9 +376,9 @@ func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body
 	return string(answer), nil
 }
 
-// createsObject: the request types that make a transaction, vault or schedule.
+// createsObject: the request types that make a transaction or vault.
 var createsObject = map[string]bool{"sale": true, "auth": true, "credit": true, "validate": true, "offline": true,
-	"refund": true, "add_subscription": true, "add_customer": true}
+	"refund": true, "add_customer": true}
 
 // tagged appends the book id to a request that creates an object. The result
 // may share body's array, which a caller holding a card wipes whole; one that

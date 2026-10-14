@@ -95,10 +95,12 @@ func readableCatalogYAML(manifest *catalog.Application) ([]byte, error) {
 	}
 	products, _ := yamlValue(doc, "products").(yaml.MapSlice)
 	for _, product := range products {
-		prices, _ := yamlValue(product.Value, "prices").(yaml.MapSlice)
-		for i, price := range prices {
-			if fields, ok := price.Value.(yaml.MapSlice); ok {
-				prices[i].Value = readablePrice(fields)
+		for _, collection := range []string{"prices", "provider_prices"} {
+			prices, _ := yamlValue(product.Value, collection).(yaml.MapSlice)
+			for i, price := range prices {
+				if fields, ok := price.Value.(yaml.MapSlice); ok {
+					prices[i].Value = readablePrice(fields)
+				}
 			}
 		}
 	}

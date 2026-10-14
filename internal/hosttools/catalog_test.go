@@ -81,32 +81,6 @@ func TestCatalogRuntimeReusesHostRuntime(t *testing.T) {
 	require.ErrorContains(t, err, "not initialized")
 }
 
-// Dumps are manifest input: storage stamps and resolved on-chain snapshots
-// are dropped, and a USDC default or a plan_pda makes token redundant.
-func TestProviderLinksDumpOnlyDeclarativeFields(t *testing.T) {
-	for name, tc := range map[string]struct {
-		raw  string
-		want map[string]map[string]string
-	}{
-		"attached plan":   {`{"solana":{"rail":"solana","token":"USD1","mint_symbol":"USD1","plan_pda":"plan"}}`, map[string]map[string]string{"solana": {"plan_pda": "plan"}}},
-		"default token":   {`{"solana":{"rail":"solana","token":"usdc","mint_symbol":"USDC"}}`, map[string]map[string]string{"solana": {}}},
-		"creation intent": {`{"solana":{"rail":"solana","token":"USD1"}}`, map[string]map[string]string{"solana": {"token": "USD1"}}},
-		"other rail":      {`{"mobius":{"rail":"nmi","plan_id":"premium","token":"kept"}}`, map[string]map[string]string{"mobius": {"plan_id": "premium", "token": "kept"}}},
-		"empty":           {`{}`, nil},
-		"named account":   {`{"chain-main":{"rail":"solana","psp_id":"account","mint_symbol":"USD1","token":"USD1","plan_pda":"plan"}}`, map[string]map[string]string{"chain-main": {"psp_id": "account", "plan_pda": "plan"}}},
-	} {
-		got, err := providerLinks([]byte(tc.raw))
-		require.NoError(t, err, name)
-		require.Equal(t, tc.want, got, name)
-	}
-}
-
-// A malformed stored binding must not become a plausible link-free export.
-func TestProviderLinksDumpRefusesInvalidJSON(t *testing.T) {
-	_, err := providerLinks([]byte(`not json`))
-	require.Error(t, err)
-}
-
 // The dump writes prices the way a person edits them, and apply reads them
 // back to the same exact terms.
 func TestCatalogDumpIsReadable(t *testing.T) {
@@ -118,12 +92,15 @@ products:
       monthly: {currency: USD, unit_amount: 9990000, access_duration_hours: 720, billing_interval_hours: 720, trial_unit_amount: 0, trial_duration_hours: 24}
       lifetime: {currency: JPY, unit_amount: 5000000, access_duration_hours: null, billing_interval_hours: null}
       gas: {currency: SOL, unit_amount: 1500000000, access_duration_hours: 168}
+    provider_prices:
+      legacy: {psp: mobius, plan_id: premium, access_duration_hours: 1440}
+      flexform: {psp: ccbill, flex_id: f, recurring_billing_option_id: "7", currency: USD, unit_amount: 23000000, billing_interval_hours: 720}
 `)
 	manifest, err := catalog.ParseApplicationYAML(source)
 	require.NoError(t, err)
 	raw, err := readableCatalogYAML(manifest)
 	require.NoError(t, err)
-	for _, line := range []string{"amount: 9.99 USD", "billing_interval: 30 days", "trial_duration: 1 day", "amount: 500 JPY", "access_duration: null", "amount: 1.5 SOL", "access_duration: 1 week"} {
+	for _, line := range []string{"amount: 9.99 USD", "billing_interval: 30 days", "trial_duration: 1 day", "amount: 500 JPY", "access_duration: null", "amount: 1.5 SOL", "access_duration: 1 week", "amount: 23.00 USD", "access_duration: 60 days"} {
 		require.Contains(t, string(raw), line)
 	}
 	for _, numeric := range []string{"unit_amount: \"9990000\"", "_hours", "currency:"} {

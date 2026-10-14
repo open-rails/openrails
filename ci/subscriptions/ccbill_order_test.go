@@ -19,8 +19,9 @@ import (
 	"github.com/open-rails/openrails/openrailstest"
 )
 
-// CCBill sells a membership on its FlexForm through an order attempt, offered
-// beside the card and Solana whenever its price links a FlexForm; each option
+// CCBill sells a membership on its FlexForm through an order attempt: an
+// order for a recurring price of ours is offered, beside the card and Solana,
+// the product's CCBill provider price on the same terms; each option
 // reports the order's failed attempts through it (billing-ui's checkout hides
 // a fallback by them). CCBill's NewSaleSuccess for the attempt completes the
 // order with the subscription CCBill bills, once; a sale the order no longer
@@ -30,16 +31,19 @@ type ccbillShop struct {
 	w         *world
 	directory *openrailstest.UserInfo
 	price     string
-	ent       string
+	// ccbillPrice is the CCBill provider price standing in for price.
+	ccbillPrice string
+	ent         string
 }
 
 // openCCBillShop is the merchant selling premium as the doujins catalog
-// does: card (nmi), CCBill and a Solana plan.
+// does: our price by card (its card vault and charge PSP nmi) and on its
+// Solana plan, and the CCBill provider price on its FlexForm.
 func openCCBillShop(t *testing.T) *ccbillShop {
 	t.Helper()
 	directory := &openrailstest.UserInfo{}
 	w := prepareWorld(t, 12)
-	sol := withSolana(t, w)
+	withSolana(t, w)
 	solana := w.declare
 	w.declare = func(psps map[string]openrails.PSPConfig) {
 		solana(psps)
@@ -48,23 +52,21 @@ func openCCBillShop(t *testing.T) *ccbillShop {
 	}
 	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
 	w.start()
-	plan := sol.plan(t, 4242, 23_000_000)
-	key, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
-    currency: usd
-    unit_amount: 23000000
-    billing_interval_hours: 720
-    access_duration_hours: 720
-    psps:
-      nmi: {}
-      ccbill:
-        flex_id: %s
-        recurring_billing_option_id: "%s"
-      solana:
-        plan_pda: %s
-        plan_id: "4242"
-`, ccbillFlexID, ccbillRBO, plan))
+	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{CardVault: "nmi", ChargePSPs: []string{"nmi"}}))
+	key, receipt, err := w.applyCatalogWith(`  "{key}-monthly":
+    amount: 23 USD
+    billing_interval: 30 days
+    access_duration: 30 days
+`, fmt.Sprintf(`  "{key}-monthly-ccbill":
+    psp: ccbill
+    flex_id: %s
+    recurring_billing_option_id: "%s"
+    amount: 23 USD
+    billing_interval: 30 days
+`, ccbillFlexID, ccbillRBO))
 	require.NoError(t, err)
-	return &ccbillShop{w: w, directory: directory, price: priceID(t, w, key, key+"-monthly"), ent: key}
+	require.Empty(t, receipt.Warnings)
+	return &ccbillShop{w: w, directory: directory, price: priceID(t, w, key, key+"-monthly"), ccbillPrice: priceID(t, w, key, key+"-monthly-ccbill"), ent: key}
 }
 
 // buyer is a customer the merchant's directory names.
@@ -253,6 +255,7 @@ func TestCCBillOrder(t *testing.T) {
 		require.Equal(t, "ccbill", subs[0].Rail)
 		require.Equal(t, railSub, str(subs[0].RailSubscriptionID))
 		require.Equal(t, "provider", subs[0].CollectionPolicy, "CCBill bills it")
+		require.Equal(t, pid(s.ccbillPrice), subs[0].PriceID, "on its provider price")
 		require.Equal(t, billing.SubscriptionActive, subs[0].Status)
 		w.converge()
 		require.True(t, c.entitled(s.ent))

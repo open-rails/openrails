@@ -124,8 +124,12 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			none := "{}"
 			r.Values = append(r.Values, &none)
 		}
-		if p.Name == "prices" && len(r.Values) == len(p.Columns)-1 {
+		// Prices before migration 103 were all ours, sold through every method.
+		if p.Name == "prices" && len(r.Values) == len(p.Columns)-3 {
 			r.Values = append(r.Values, nil)
+		}
+		if p.Name == "prices" && len(r.Values) == len(p.Columns)-2 {
+			r.Values = append(r.Values, new("false"), nil)
 		}
 		if err := ValidateValues(p, r.Values); err != nil {
 			return err

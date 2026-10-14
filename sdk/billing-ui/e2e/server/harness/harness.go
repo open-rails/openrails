@@ -130,7 +130,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 			return nil, err
 		}
 	}
-	catalog, err := seedCatalog(ctx, client, chain, cranker.PublicKey(), treasury)
+	catalog, err := seedCatalog(ctx, client)
 	if err != nil {
 		return nil, fmt.Errorf("seed catalog: %w", err)
 	}

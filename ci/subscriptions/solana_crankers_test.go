@@ -56,7 +56,8 @@ func (w *world) probe(name string) error {
 // planOn is the price's bound plan on chain.
 func planOn(t *testing.T, fake *solanafake.Node, price *billing.Price) *subscriptions.PlanAccount {
 	t.Helper()
-	raw, ok := fake.Account(solanago.MustPublicKeyFromBase58(price.PSPs["solana"].IDs["plan_pda"]))
+	require.NotNil(t, price.SolanaPlan, "price %s sells on a published plan", price.ID)
+	raw, ok := fake.Account(solanago.MustPublicKeyFromBase58(*price.SolanaPlan))
 	require.True(t, ok, "price %s binds a plan on chain", price.ID)
 	plan, err := subscriptions.DecodePlanAccount(raw)
 	require.NoError(t, err)
@@ -83,14 +84,12 @@ func TestSolanaCrankersKeepPullingThePlansTheyOwn(t *testing.T) {
     unit_amount: 7000000
     billing_interval_hours: 720
     access_duration_hours: 720
-    psps: {solana: {}}
 `)
 	require.NoError(t, err)
 	price, err := priceByKey(t.Context(), w.client[embedded], key, key+"-monthly")
 	require.NoError(t, err)
 	plan := planOn(t, s.fake, price)
 	require.Equal(t, newer.PublicKey(), plan.Owner, "the first listed cranker publishes new plans")
-	require.Equal(t, newer.PublicKey().String(), price.PSPs["solana"].IDs["merchant_address"])
 	require.Equal(t, [4]solanago.PublicKey{s.treasury}, plan.Destinations)
 	require.Zero(t, s.fake.Balance(newer.PublicKey(), s.mint))
 	require.Zero(t, s.fake.Balance(s.cranker.PublicKey(), s.mint))
@@ -154,7 +153,6 @@ products:
         unit_amount: %[2]d
         billing_interval_hours: 720
         access_duration_hours: 720
-        psps: {solana: {}}
 `, product, solanaPlanAmount))
 		require.NoError(t, err)
 		_, err = w.client[embedded].ApplyCatalog(ctx, params, billing.ApplyCatalogParams{})
