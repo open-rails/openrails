@@ -25,8 +25,8 @@ const (
 	BillingSchema = "billing"
 	Audience      = "billing-ui-e2e"
 	MerchantSlug  = "billing-ui-e2e"
-	// PSPKey is the credential-less, declared-only NMI PSP imported facts are
-	// attributed to; its cancel defers the remote delete, so resume is exercisable.
+	// PSPKey owns the imported NMI subscriptions; cancellation defers their
+	// remote deletion until near the paid period end, so resume is exercisable.
 	PSPKey       = "nmi"
 	PSPRail      = "nmi"
 	PSPAccountID = "billing-ui-e2e"
@@ -66,6 +66,7 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers bool) (_ *Runtime, err error) {
 	chain := solanafake.New()
 	gateway := nmimock.New(nmimock.Options{})
+	gateway.AddPlan(nmimock.Plan{ID: "e2e-membership-monthly", Name: "Membership", Amount: "9.99", Days: 30})
 	defer func() {
 		if err != nil {
 			chain.Close()
@@ -92,6 +93,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 		Solana:               &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: cranker.String()}}},
 		// AuthKit's issuer is baseURL: its users are this merchant's customers.
 		Merchants: map[string]openrails.MerchantDeclaration{MerchantSlug: {Issuer: baseURL, DisplayName: "billing-ui e2e", MerchantSettings: billing.MerchantSettings{PSPRouting: &pspRouting}, PSPs: openrails.PSPs{
+			PSPKey: openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: PSPAccountID, SecurityKey: "e2e-legacy-key"}.PSPConfig(),
 			// An armed Solana PSP on devnet: purchase offers it.
 			SolanaPSPKey: openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: treasury.String()}.PSPConfig(),
 			CardPSPKey: openrails.NMIPSP{Environment: openrails.EnvironmentSandbox,
@@ -116,13 +118,6 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	}()
 	client, err := engine.MerchantBySlug(MerchantSlug)
 	if err != nil {
-		return nil, err
-	}
-	local, err := engine.LocalMerchant(client.MerchantID())
-	if err != nil {
-		return nil, err
-	}
-	if _, err := local.DeclarePSP(ctx, billing.PSPDeclaration{Key: PSPKey, Rail: PSPRail, Environment: openrails.EnvironmentSandbox, PSPAccount: billing.PSPAccount{GatewayID: PSPAccountID}}); err != nil {
 		return nil, err
 	}
 	if workers {
@@ -175,7 +170,7 @@ func authConfig(issuer string) (authkit.Config, map[string]iam.Role) {
 }
 
 // pspRouting sells the card product through the card PSP and everything
-// else through Solana; the declared-only NMI account never sells.
+// else through Solana; the legacy NMI account never sells new subscriptions.
 var pspRouting = []billing.PSPRoutingRule{
 	{Match: billing.PSPRoutingMatch{Product: "e2e-card"}, Prefer: []string{CardPSPKey}},
 	{Prefer: []string{SolanaPSPKey}},
