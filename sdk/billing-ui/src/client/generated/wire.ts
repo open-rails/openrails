@@ -756,6 +756,7 @@ export type CustomerChangeSubscriptionParams = {
 export type CustomerConfig = {
   payment: PaymentConfig
   merchant: PublicMerchant
+  client_country: string
 }
 
 export type CustomerContact = {
@@ -1255,6 +1256,9 @@ export type MerchantProfile = {
   support_url?: string
   subscribe_url?: string
   billing_url?: string
+  terms_url?: string
+  privacy_url?: string
+  statement_descriptor?: string
 }
 
 export type Meter = {
@@ -2008,6 +2012,9 @@ export type PublicMerchant = {
   display_name: string
   logo_url: string | null
   support_url: string | null
+  terms_url: string | null
+  privacy_url: string | null
+  statement_descriptor: string | null
   embed_origins: string[]
 }
 

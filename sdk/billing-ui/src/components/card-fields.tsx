@@ -8,6 +8,7 @@ import type * as React from "react"
 import { Label } from "#orck/components/ui/label"
 import type { CardEntryState } from "#orck/lib/card-entry"
 import type { CollectFieldErrors } from "#orck/lib/collect"
+import { SupportedCardBrands } from "#orck/components/card-brands"
 import { cn } from "cn"
 
 function FieldError({ id, message }: { id: string; message?: string }) {
@@ -35,9 +36,12 @@ export function CardFields({
   error,
   fieldErrors = {},
   hidden,
+  brand,
 }: {
   ids: CardFieldIds
   preview: boolean
+  /** The detected card brand, highlighted among the accepted ones. */
+  brand?: string
   error?: string
   /** Inline per-field errors (gateway validation or a decline). */
   fieldErrors?: CollectFieldErrors
@@ -51,12 +55,15 @@ export function CardFields({
       aria-hidden={hidden || undefined}
     >
       <div className="grid gap-1.5">
-        <Label
-          htmlFor={ids.number}
-          className="text-[13px] font-medium text-foreground"
-        >
-          Card number
-        </Label>
+        <div className="flex items-center justify-between">
+          <Label
+            htmlFor={ids.number}
+            className="text-[13px] font-medium text-foreground"
+          >
+            Card number
+          </Label>
+          <SupportedCardBrands active={brand} />
+        </div>
         {preview ? (
           <div id={ids.number} className={PREVIEW_FIELD}>
             1234 1234 1234 1234
@@ -172,12 +179,15 @@ export function NativeCardFields({
       aria-hidden={hidden || undefined}
     >
       <div className="grid gap-1.5">
-        <Label
-          htmlFor={ids.number}
-          className="text-[13px] font-medium text-foreground"
-        >
-          Card number
-        </Label>
+        <div className="flex items-center justify-between">
+          <Label
+            htmlFor={ids.number}
+            className="text-[13px] font-medium text-foreground"
+          >
+            Card number
+          </Label>
+          <SupportedCardBrands />
+        </div>
         {field(ids.number, "number", errors.number, {
           autoComplete: "cc-number",
           placeholder: "1234 1234 1234 1234",

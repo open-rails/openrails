@@ -157,7 +157,7 @@ async function watchCSP(page: Page): Promise<() => Promise<string[]>> {
 }
 
 async function payWithCollect(page: Page | FrameLocator) {
-  await page.getByLabel("Name on card").fill("Card Holder")
+  await page.getByLabel("Full name").fill("Card Holder")
   await page.getByLabel("Country").selectOption("US")
   await page.getByLabel(/ZIP/).fill("10001")
   await page.getByRole("button", { name: /^Pay \$12\.50/ }).click()

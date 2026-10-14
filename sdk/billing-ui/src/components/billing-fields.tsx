@@ -147,18 +147,21 @@ export function PostalField({
   )
 }
 
+// The card fields (children) sit between the cardholder name and the address.
 export function CardBillingFields({
   idPrefix,
   value,
   onChange,
   disabled,
   postalError,
+  children,
 }: {
   idPrefix: string
   value: NMIBilling
   onChange: (next: NMIBilling) => void
   disabled?: boolean
   postalError?: string
+  children?: React.ReactNode
 }) {
   const set = (key: keyof NMIBilling) => (next: string) =>
     onChange({ ...value, [key]: next })
@@ -168,15 +171,15 @@ export function CardBillingFields({
       <BillingTextField
         id={`${idPrefix}-name-on-card`}
         name="name_on_card"
-        label="Name on card"
+        label="Full name"
         value={value.name_on_card}
         onChange={set("name_on_card")}
         autoComplete="cc-name"
-        placeholder="Name as shown on card"
         disabled={disabled}
         maxLength={200}
         required
       />
+      {children}
       <div className="grid grid-cols-2 gap-3">
         <CountryField
           id={`${idPrefix}-country`}

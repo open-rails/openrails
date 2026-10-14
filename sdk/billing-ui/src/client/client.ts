@@ -654,6 +654,13 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       })
     },
 
+    /** Reports that this page could not frame the order's pay URL. */
+    async reportPayURLFailure(orderId: string): Promise<void> {
+      await send(`/me/orders/${id(orderId)}/pay-url-failure`, {
+        method: "POST",
+      })
+    },
+
     /**
      * Reads the provider after the customer completed `next_action`. A Solana
      * wallet's `signature` names the transaction it sent: a subscription's

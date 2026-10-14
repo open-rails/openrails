@@ -17,7 +17,7 @@ describe("TokenizedCardForm", () => {
         onTokenized={save}
       />
     )
-    fireEvent.change(screen.getByLabelText("Name on card"), {
+    fireEvent.change(screen.getByLabelText(/full name/i), {
       target: { value: "Pat Reader" },
     })
     fireEvent.change(screen.getByLabelText("Country"), {
@@ -62,7 +62,7 @@ describe("TokenizedCardForm", () => {
         onTokenized={save}
       />
     )
-    fireEvent.change(screen.getByLabelText("Name on card"), {
+    fireEvent.change(screen.getByLabelText(/full name/i), {
       target: { value: "Pat Reader" },
     })
     fireEvent.change(screen.getByLabelText("Country"), {
@@ -86,7 +86,7 @@ describe("TokenizedCardForm", () => {
         onTokenized={pay}
       />
     )
-    fireEvent.change(screen.getByLabelText("Name on card"), {
+    fireEvent.change(screen.getByLabelText(/full name/i), {
       target: { value: "Pat Reader" },
     })
     fireEvent.change(screen.getByLabelText("Country"), {
@@ -117,7 +117,7 @@ it.each(["key", "url", "consent"])(
       onTokenized: save,
     }
     const { rerender } = render(<TokenizedCardForm {...props} />)
-    fireEvent.change(screen.getByLabelText("Name on card"), {
+    fireEvent.change(screen.getByLabelText(/full name/i), {
       target: { value: "Pat Reader" },
     })
     fireEvent.change(screen.getByLabelText("Country"), {

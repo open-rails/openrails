@@ -197,8 +197,9 @@ function NativeCardSetup({
         value={billing}
         onChange={setBilling}
         disabled={busy}
-      />
-      <NativeCardFields ids={ids} card={card} disabled={busy} />
+      >
+        <NativeCardFields ids={ids} card={card} disabled={busy} />
+      </CardBillingFields>
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}

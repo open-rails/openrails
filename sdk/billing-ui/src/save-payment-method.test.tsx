@@ -58,7 +58,7 @@ it.each(["saved", "response lost", "declined"])(
         />
       </BillingProvider>
     )
-    fireEvent.change(screen.getByLabelText("Name on card"), {
+    fireEvent.change(screen.getByLabelText(/full name/i), {
       target: { value: "Pat Reader" },
     })
     fireEvent.change(screen.getByLabelText(/ZIP/), {
@@ -72,7 +72,7 @@ it.each(["saved", "response lost", "declined"])(
         name: "Retry saving card",
       })
       expect(onSaved).not.toHaveBeenCalled()
-      expect(screen.getByLabelText("Name on card")).toBeDisabled()
+      expect(screen.getByLabelText(/full name/i)).toBeDisabled()
       await waitFor(() => expect(retry).toBeEnabled())
       fireEvent.click(retry)
     } else if (outcome === "declined") {

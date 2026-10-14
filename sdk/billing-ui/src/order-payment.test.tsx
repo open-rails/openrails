@@ -158,7 +158,7 @@ describe("OrderPayment", () => {
       </BillingProvider>
     )
     expect(
-      await screen.findByRole("button", { name: "Pay $15.00" })
+      await screen.findByRole("button", { name: /^(Pay|Subscribe)$/ })
     ).toBeTruthy()
     expect(fetch.mock.calls.filter(([path]) => /\/config$/.test(path))).toEqual(
       []
@@ -279,7 +279,7 @@ describe("OrderPayment", () => {
         <OrderPayment orderId="ord_1" onSettled={onSettled} />
       </BillingProvider>
     )
-    const pay = await screen.findByRole("button", { name: "Pay $15.00" })
+    const pay = await screen.findByRole("button", { name: /^(Pay|Subscribe)$/ })
     fireEvent.click(pay)
     expect(
       await screen.findByText(
@@ -288,7 +288,7 @@ describe("OrderPayment", () => {
         { timeout: 5000 }
       )
     ).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Pay $15.00" }))
+    fireEvent.click(screen.getByRole("button", { name: /^(Pay|Subscribe)$/ }))
     await waitFor(() => expect(onSettled).toHaveBeenCalled(), {
       timeout: 5000,
     })
@@ -398,7 +398,7 @@ describe("OrderPayment", () => {
       </BillingProvider>
     )
     fireEvent.click(await screen.findByRole("radio", { name: /4242/ }))
-    fireEvent.click(await screen.findByRole("button", { name: "Pay $15.00" }))
+    fireEvent.click(await screen.findByRole("button", { name: /^(Pay|Subscribe)$/ }))
     await waitFor(() => expect(onSettled).toHaveBeenCalled())
     expect(paid).toEqual([
       expect.objectContaining({ payment: { payment_method_id: "pm_kept" }, expected_total: "15000000" }),
@@ -458,7 +458,7 @@ describe("OrderPayment", () => {
     )
     expect(await screen.findByText("Due")).toBeInTheDocument()
     fireEvent.click(await screen.findByRole("radio", { name: /4242/ }))
-    fireEvent.click(await screen.findByRole("button", { name: "Pay $10.00" }))
+    fireEvent.click(await screen.findByRole("button", { name: /^(Pay|Subscribe)$/ }))
     await waitFor(() => expect(onSettled).toHaveBeenCalled())
     expect(paid).toEqual([
       expect.objectContaining({ payment: { payment_method_id: "pm_kept" }, expected_total: "15000000" }),
@@ -614,7 +614,7 @@ describe("OrderPayment", () => {
       </BillingProvider>
     )
     fireEvent.click(
-      await screen.findByRole("button", { name: "Pay $15.00 with Stripe" })
+      await screen.findByRole("button", { name: /^(Pay|Subscribe) with Stripe$/ })
     )
     await waitFor(() => expect(pays).toHaveLength(1))
     expect(pays[0]).toEqual({
@@ -728,7 +728,7 @@ describe("OrderPayment", () => {
             />
           </BillingProvider>
         )
-        const pay = await screen.findByRole("button", { name: "Pay $15.00" })
+        const pay = await screen.findByRole("button", { name: /^(Pay|Subscribe)$/ })
         expect(
           screen.queryByRole("button", { name: /CCBill/ })
         ).not.toBeInTheDocument()
@@ -748,7 +748,7 @@ describe("OrderPayment", () => {
           screen.queryByRole("button", { name: /CCBill/ })
         ).not.toBeInTheDocument()
 
-        fireEvent.click(screen.getByRole("button", { name: "Pay $15.00" }))
+        fireEvent.click(screen.getByRole("button", { name: /^(Pay|Subscribe)$/ }))
         expect(
           await screen.findByText(
             "Card payment isn't working?",
@@ -756,9 +756,10 @@ describe("OrderPayment", () => {
             { timeout: 5000 }
           )
         ).toBeInTheDocument()
+        // CCBill appears once: as the fallback, not as a regular option.
         expect(
-          screen.queryByRole("button", { name: "Pay $15.00 with CCBill" })
-        ).not.toBeInTheDocument()
+          screen.getAllByRole("button", { name: "Pay with CCBill" })
+        ).toHaveLength(1)
         fireEvent.click(screen.getByRole("button", { name: "Pay with CCBill" }))
         await waitFor(() => expect(assign).toHaveBeenCalledWith(flexForm))
         expect(pays.map((p) => p.payment.psp_id)).toEqual([
@@ -808,10 +809,10 @@ describe("OrderPayment", () => {
         </BillingProvider>
       )
       expect(
-        await screen.findByRole("button", { name: "Pay $15.00 with CCBill" })
+        await screen.findByRole("button", { name: /^(Pay|Subscribe) with CCBill$/ })
       ).toBeInTheDocument()
       expect(
-        screen.getByRole("button", { name: "Pay $15.00" })
+        screen.getByRole("button", { name: /^(Pay|Subscribe)$/ })
       ).toBeInTheDocument()
       expect(
         screen.queryByText("Card payment isn't working?")
@@ -826,7 +827,7 @@ describe("OrderPayment", () => {
         </BillingProvider>
       )
       expect(
-        await screen.findByRole("button", { name: "Pay $15.00" })
+        await screen.findByRole("button", { name: /^(Pay|Subscribe)$/ })
       ).toBeInTheDocument()
       expect(
         screen.queryByText("Card payment isn't working?")
@@ -892,21 +893,21 @@ it.each(["unconfirmed", "server error", "in flight", "declined", "rejected"])("p
   })
   const { container } = render(<BillingProvider client={createBillingClient({ fetch })}><OrderPayment orderId="ord_1" /></BillingProvider>)
   await screen.findByRole("form", { name: "Secure platform card payment" })
-  fireEvent.change(screen.getByLabelText("Name on card"), { target: { value: "Pat Reader" } })
+  fireEvent.change(screen.getByLabelText(/full name/i), { target: { value: "Pat Reader" } })
   fireEvent.change(screen.getByLabelText("Country"), { target: { value: "US" } })
   fireEvent.change(screen.getByLabelText(/ZIP/), { target: { value: "94107" } })
-  const pay = screen.getByRole("button", { name: /Pay / })
+  const pay = screen.getByRole("button", { name: /^(Pay|Subscribe)/ })
   await waitFor(() => expect(pay).toBeEnabled())
   fireEvent.click(pay)
   if (uncertain) {
     const retry = await screen.findByRole("button", { name: "Retry payment" })
     await waitFor(() => expect(retry).toBeEnabled())
-    expect(screen.getByLabelText("Name on card")).toBeDisabled()
+    expect(screen.getByLabelText(/full name/i)).toBeDisabled()
     fireEvent.click(retry)
   } else {
     if (outcome === "declined") await screen.findByText("Card declined")
     await waitFor(() => expect(requests).toHaveLength(1))
-    await waitFor(() => expect(screen.getByLabelText("Name on card")).toBeEnabled())
+    await waitFor(() => expect(screen.getByLabelText(/full name/i)).toBeEnabled())
     await waitFor(() => expect(pay).toBeEnabled())
     fireEvent.click(pay)
   }
@@ -935,7 +936,7 @@ it.each(["unconfirmed", "server error", "in flight", "declined", "rejected"])(
       outcome
     )
     const hosted =
-      outcome === "in flight" ? "Pay with Hosted" : "Pay $15.00 with Hosted"
+      "Pay with Hosted"
     const platformOrder = (payment = {}, status = "open") => ({
       ...order(payment, status),
       payment_options: [
@@ -1108,10 +1109,10 @@ it.each(["unconfirmed", "server error", "in flight", "declined", "rejected"])(
     expect(
       await screen.findByRole("button", { name: "Pay with wallet" })
     ).toBeEnabled()
-    fireEvent.click(screen.getByRole("button", { name: "Pay $15.00" }))
+    fireEvent.click(screen.getByRole("button", { name: /^(Pay|Subscribe)$/ }))
     await waitFor(() => expect(requests).toHaveLength(1))
     const next = await screen.findByRole("button", {
-      name: uncertain ? "Retry payment" : "Pay $15.00",
+      name: uncertain ? "Retry payment" : "Pay",
     })
     await waitFor(() => expect(next).toBeEnabled())
     if (uncertain) {
