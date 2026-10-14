@@ -29,7 +29,7 @@ func initialBill(ctx context.Context, d *db.DB, params *CreateMembershipParams, 
 	if t.RecurringIntervalHours != nil {
 		interval = *t.RecurringIntervalHours
 	}
-	b := observed.Bill{PSPID: t.PSPID, CustomerID: t.CustomerID, SubscriptionID: &t.SubscriptionID, Owner: string(t.CollectionPolicy), Kind: "initial", SourceKind: "accepted_initial", SourceKey: t.SubscriptionID.String(), Currency: t.Currency, Total: t.Amount, PeriodStart: t.PeriodStart, PeriodEnd: t.PeriodEnd, DueAt: t.PeriodStart, Payment: p, Settled: true, SettlementSource: "cash", Lines: []observed.Line{{PriceID: &t.PriceID, ProductID: &t.ProductID, Description: t.ProductName, Quantity: t.Quantity, UnitAmount: t.Amount / int64(SeatCount(t.Quantity)), Amount: t.Amount, BillingIntervalHours: &interval, AccessDurationHours: t.AccessDurationHours}}}
+	b := observed.Bill{PSPID: t.PSPID, CustomerID: t.CustomerID, SubscriptionID: &t.SubscriptionID, Owner: string(t.CollectionPolicy), Kind: "initial", SourceKind: "accepted_initial", SourceKey: t.SubscriptionID.String(), Currency: t.Currency, Total: t.Amount, PeriodStart: t.PeriodStart, PeriodEnd: t.PeriodEnd, DueAt: t.PeriodStart, Payment: p, Settled: true, SettlementSource: "cash", Lines: []observed.Line{{PriceID: &t.PriceID, ProductID: &t.ProductID, Description: t.ProductName, Quantity: t.Quantity, UnitAmount: t.Amount / int64(SeatCount(t.Quantity)), Amount: t.Amount, BillingIntervalHours: &interval, AccessDurationHours: t.AccessDurationHours, ProviderAccessDefault: t.ProviderAccessDefault}}}
 	if b.Lines[0].Description == "" {
 		b.Lines[0].Description = "Subscription enrollment"
 	}
@@ -78,7 +78,7 @@ func renewalBill(ctx context.Context, d *db.DB, params *RenewMembershipParams, s
 		return observed.Result{}, err
 	}
 	interval := int(t.PeriodEnd.Sub(t.PeriodStart) / time.Hour)
-	b := observed.Bill{PSPID: t.PSPID, CustomerID: t.CustomerID, SubscriptionID: &t.SubscriptionID, Owner: string(sub.CollectionPolicy), Kind: "renewal", SourceKind: "accepted_renewal", SourceKey: t.SubscriptionID.String() + ":" + boundary.UTC().Format(time.RFC3339Nano), Currency: t.Currency, Total: t.Amount, PeriodStart: t.PeriodStart, PeriodEnd: t.PeriodEnd, DueAt: boundary, Payment: p, Lines: []observed.Line{{PriceID: &t.PriceID, ProductID: &t.ProductID, Description: t.ProductName, Quantity: t.Quantity, UnitAmount: t.UnitAmount(), Amount: t.Amount, BillingIntervalHours: &interval, AccessDurationHours: t.AccessDurationHours}}}
+	b := observed.Bill{PSPID: t.PSPID, CustomerID: t.CustomerID, SubscriptionID: &t.SubscriptionID, Owner: string(sub.CollectionPolicy), Kind: "renewal", SourceKind: "accepted_renewal", SourceKey: t.SubscriptionID.String() + ":" + boundary.UTC().Format(time.RFC3339Nano), Currency: t.Currency, Total: t.Amount, PeriodStart: t.PeriodStart, PeriodEnd: t.PeriodEnd, DueAt: boundary, Payment: p, Lines: []observed.Line{{PriceID: &t.PriceID, ProductID: &t.ProductID, Description: t.ProductName, Quantity: t.Quantity, UnitAmount: t.UnitAmount(), Amount: t.Amount, BillingIntervalHours: &interval, AccessDurationHours: t.AccessDurationHours, ProviderAccessDefault: t.ProviderAccessDefault}}}
 	if b.Lines[0].Description == "" {
 		b.Lines[0].Description = "Subscription renewal"
 	}

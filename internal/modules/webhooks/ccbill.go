@@ -991,7 +991,7 @@ func ccbillUpgradeBill(sub *models.Subscription, price *models.Price, event *CCB
 		PeriodStart: start, PeriodEnd: end, DueAt: start, Settled: true, SettlementSource: "cash",
 		Lines: []observed.Line{{PriceID: &price.ID, ProductID: &price.ProductID, Description: description,
 			UnitAmount: amount, Amount: amount, BillingIntervalHours: price.BillingIntervalHours,
-			AccessDurationHours: price.AccessDurationHours}}}
+			AccessDurationHours: price.AccessDurationHours, ProviderAccessDefault: price.ProviderAccessDefault}}}
 }
 
 // updateAccessForUpgrade moves the subscription's access from the old product

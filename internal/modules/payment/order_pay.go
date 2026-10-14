@@ -214,8 +214,17 @@ func (s *OrderAttemptService) ccbillStandIns(ctx context.Context, price *models.
 // sameSaleTerms reports two prices a customer pays and is granted alike.
 func sameSaleTerms(a, b *models.Price) bool {
 	eq := func(x, y *int) bool { return x == nil && y == nil || x != nil && y != nil && *x == *y }
-	return a.Amount == b.Amount && a.Currency == b.Currency && eq(a.BillingIntervalHours, b.BillingIntervalHours) && eq(a.AccessDurationHours, b.AccessDurationHours) &&
+	return a.Amount == b.Amount && a.Currency == b.Currency && eq(a.BillingIntervalHours, b.BillingIntervalHours) && eq(a.AccessDurationHours, saleAccessHours(b)) &&
 		a.TrialUnitAmount == nil && b.TrialUnitAmount == nil && a.Quantity == nil && b.Quantity == nil
+}
+
+// A CCBill default is its declared fixed service interval. Calendar providers
+// never stand in for our prices; only equal accepted card-sale terms can.
+func saleAccessHours(p *models.Price) *int {
+	if p.ProviderAccessDefault {
+		return p.BillingIntervalHours
+	}
+	return p.AccessDurationHours
 }
 
 // CustomerOrderOptions adds saved platform cards with active reuse consent on

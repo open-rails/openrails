@@ -18,7 +18,7 @@ import (
 var providerLineJSON = object(map[string]jsonRule{
 	"PriceID": nullable(uuidValue), "ProductID": nullable(uuidValue), "Description": textValue,
 	"Quantity": nullable(integerValue), "UnitAmount": integerValue, "Amount": integerValue,
-	"Source": textValue, "BillingIntervalHours": nullable(integerValue), "AccessDurationHours": nullable(integerValue),
+	"ProviderAccessDefault": booleanValue, "Source": textValue, "BillingIntervalHours": nullable(integerValue), "AccessDurationHours": nullable(integerValue),
 	"Ownership": textValue, "ClaimKey": textValue, "ProviderReference": textValue,
 })
 

@@ -20,11 +20,15 @@ import (
 // its bindings (a provider price's provider object, or one of ours' Solana
 // plan).
 type priceWrite struct {
-	req           billing.CreatePriceParams
-	product       *models.Product
-	id            uuid.UUID
-	links         map[string]map[string]string
-	providerOwned bool
+	req                   billing.CreatePriceParams
+	product               *models.Product
+	id                    uuid.UUID
+	links                 map[string]map[string]string
+	providerOwned         bool
+	providerPSPID         *uuid.UUID
+	providerSnapshot      map[string]string
+	providerMonths        *int
+	providerAccessDefault bool
 }
 
 // writeCatalogPrice atomically moves the key, writes the immutable financial
@@ -121,10 +125,11 @@ func (s *Service) writeCatalogPrice(ctx context.Context, w priceWrite) (*models.
 				TrialDurationHours:   req.TrialDurationHours,
 				PSPLinks:             w.links,
 				ProviderOwned:        w.providerOwned,
-				SellVia:              req.SellVia,
-				Key:                  key,
-				CreatedAt:            now,
-				UpdatedAt:            now,
+				ProviderPSPID:        w.providerPSPID, ProviderSnapshot: w.providerSnapshot, BillingIntervalMonths: w.providerMonths, ProviderAccessDefault: w.providerAccessDefault,
+				SellVia:   req.SellVia,
+				Key:       key,
+				CreatedAt: now,
+				UpdatedAt: now,
 			}
 			if err := prices.Create(ctx, price); err != nil {
 				return catalogWrite(err)

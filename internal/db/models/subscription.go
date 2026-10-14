@@ -64,7 +64,8 @@ type Subscription struct {
 
 	// AccessDurationHoursSnapshot is the accepted access duration for this paid phase.
 	// nil has no scheduled expiry; changing price does not change past promises.
-	AccessDurationHoursSnapshot *int `json:"access_duration_hours_snapshot"`
+	AccessDurationHoursSnapshot   *int `json:"access_duration_hours_snapshot"`
+	ProviderAccessDefaultSnapshot bool `json:"provider_access_default_snapshot"`
 
 	Status                SubscriptionStatus `json:"status"`
 	StartedAt             time.Time          `json:"started_at"`

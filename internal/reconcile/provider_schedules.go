@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -150,7 +149,7 @@ func (w *PGLocalWriter) acceptProviderSchedule(ctx context.Context, sub *models.
 		}
 		prices[sub.PriceID] = price
 	}
-	amount, hours, reason := providerTerms(entry, price, sub.Quantity)
+	amount, hours, months, reason := providerTerms(entry, price, sub.Quantity)
 	if reason != "" {
 		return "", recordUnresolvedSchedule(ctx, q, sub, reason, providerRecordEvidence(sub.Rail, entry))
 	}
@@ -172,7 +171,7 @@ func (w *PGLocalWriter) acceptProviderSchedule(ctx context.Context, sub *models.
 		if err != nil {
 			return err
 		}
-		return observed.DeclareSchedule(ctx, d, source, bill, *entry.NextBillingAt, hours, 0, now)
+		return observed.DeclareSchedule(ctx, d, source, bill, *entry.NextBillingAt, hours, months, now)
 	})
 	if err != nil {
 		return "", err
@@ -183,24 +182,29 @@ func (w *PGLocalWriter) acceptProviderSchedule(ctx context.Context, sub *models.
 // providerTerms reads the provider's recurring record against the price the
 // subscription bills: the same amount for its seats and the same whole-day
 // cadence, with a next charge date. A reason names the first disagreement.
-func providerTerms(entry *RemoteSubscription, price gen.BillingPrice, quantity *int) (amount int64, hours int, reason string) {
+func providerTerms(entry *RemoteSubscription, price gen.BillingPrice, quantity *int) (amount int64, hours, months int, reason string) {
 	if entry.Paused {
-		return 0, 0, "the provider's schedule is paused"
+		return 0, 0, 0, "the provider's schedule is paused"
 	}
 	if !remoteLive(entry.Status) || entry.NextBillingAt == nil {
-		return 0, 0, "the provider's schedule states no next charge date"
+		return 0, 0, 0, "the provider's schedule states no next charge date"
 	}
-	if price.BillingIntervalHours == nil || *price.BillingIntervalHours <= 0 || *price.BillingIntervalHours%24 != 0 {
-		return 0, 0, "the subscription's price has no whole-day billing cadence"
-	}
-	hours = int(*price.BillingIntervalHours)
-	switch {
-	case entry.IntervalMonths > 0:
-		return 0, 0, fmt.Sprintf("the provider's schedule bills every %d month(s); the price every %s", entry.IntervalMonths, cadence.FormatHours(hours))
-	case entry.IntervalDays <= 0:
-		return 0, 0, "the provider's schedule states no billing frequency"
-	case entry.IntervalDays*24 != hours:
-		return 0, 0, fmt.Sprintf("the provider's schedule bills every %s; the price every %s", cadence.FormatHours(entry.IntervalDays*24), cadence.FormatHours(hours))
+	if price.BillingIntervalMonths != nil {
+		months = int(*price.BillingIntervalMonths)
+		if entry.IntervalMonths != months || entry.IntervalDays != 0 {
+			return 0, 0, 0, "the provider's calendar cadence differs from the accepted price"
+		}
+	} else {
+		if price.BillingIntervalHours == nil || *price.BillingIntervalHours <= 0 || *price.BillingIntervalHours%24 != 0 {
+			return 0, 0, 0, "the subscription's price has no whole-day billing cadence"
+		}
+		hours = int(*price.BillingIntervalHours)
+		if entry.IntervalMonths > 0 {
+			return 0, 0, 0, "calendar months are not a fixed-hour billing cadence"
+		}
+		if entry.IntervalDays <= 0 || entry.IntervalDays*24 != hours {
+			return 0, 0, 0, "the provider's fixed billing cadence differs from the accepted price"
+		}
 	}
 	seats := int64(1)
 	if quantity != nil && *quantity > 0 {
@@ -213,9 +217,9 @@ func providerTerms(entry *RemoteSubscription, price gen.BillingPrice, quantity *
 		amount, err = moneyutil.RailMinorToNative(currency, minor)
 	}
 	if err != nil || amount != want {
-		return 0, 0, fmt.Sprintf("the provider's schedule bills %q %s; the price bills %s", entry.Amount, currency, moneyutil.FormatAmount(want, currency))
+		return 0, 0, 0, fmt.Sprintf("the provider's schedule bills %q %s; the price bills %s", entry.Amount, currency, moneyutil.FormatAmount(want, currency))
 	}
-	return amount, hours, ""
+	return amount, hours, months, ""
 }
 
 // providerRecord is the provider's recurring record as a finding states it.

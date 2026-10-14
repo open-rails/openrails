@@ -62,7 +62,7 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 		Lines: []Line{{PriceID: line.PriceID, ProductID: line.ProductID, Description: line.Description,
 			Quantity: models.DerefIntPtr(line.Quantity), UnitAmount: unit, Amount: recurringAmount,
 			Ownership: models.DerefStr(line.Ownership), ClaimKey: models.DerefStr(line.ClaimKey),
-			BillingIntervalHours: &cadenceHours, AccessDurationHours: models.DerefIntPtr(line.AccessDurationHours)}}}
+			BillingIntervalHours: &cadenceHours, AccessDurationHours: models.DerefIntPtr(line.AccessDurationHours), ProviderAccessDefault: line.ProviderAccessDefault}}}
 	raw, err := json.Marshal(bill)
 	if err != nil {
 		return err

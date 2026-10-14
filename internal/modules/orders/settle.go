@@ -311,7 +311,7 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 		terms := subscriptions.InitialMembershipTerms{
 			CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), CustomerID: order.CustomerID, PSPID: charge.PSPID,
 			ProductID: models.DerefUUID(line.ProductID), PriceID: models.DerefUUID(line.PriceID), PaymentMethodID: charge.PaymentMethodID, ProductName: line.Description,
-			RecurringAmount: line.Amount, Currency: order.Currency, AccessDurationHours: intPtr(line.AccessDurationHours),
+			RecurringAmount: line.Amount, Currency: order.Currency, AccessDurationHours: intPtr(line.AccessDurationHours), ProviderAccessDefault: line.ProviderAccessDefault,
 			RecurringIntervalHours: intPtr(line.BillingIntervalHours),
 			AcceptedAt:             now, PeriodStart: now, PeriodEnd: now.Add(interval), Quantity: models.DerefIntPtr(line.Quantity),
 		}

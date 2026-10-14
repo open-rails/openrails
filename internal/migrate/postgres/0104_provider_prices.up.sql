@@ -18,6 +18,29 @@ BEGIN
 END $$;
 
 ALTER TABLE billing.prices ADD COLUMN provider_owned boolean NOT NULL DEFAULT false;
+-- Provider terms keep calendar cadence and their immutable object identity.
+ALTER TABLE billing.prices
+    ADD COLUMN provider_psp_id uuid,
+    ADD COLUMN provider_snapshot jsonb,
+    ADD COLUMN billing_interval_months integer,
+    ADD COLUMN provider_access_default boolean NOT NULL DEFAULT false;
+ALTER TABLE billing.prices
+    ADD CONSTRAINT prices_provider_psp_fkey FOREIGN KEY (merchant_id, provider_psp_id) REFERENCES billing.psps(merchant_id, id),
+    ADD CONSTRAINT prices_provider_snapshot_check CHECK ((provider_psp_id IS NULL AND provider_snapshot IS NULL AND NOT provider_owned) OR
+        (provider_owned AND provider_psp_id IS NOT NULL AND provider_snapshot IS NOT NULL AND jsonb_typeof(provider_snapshot) = 'object' AND COALESCE(provider_snapshot->>'psp_id' = provider_psp_id::text, false))),
+    ADD CONSTRAINT prices_calendar_cadence_check CHECK (billing_interval_months IS NULL OR (provider_owned AND billing_interval_hours IS NULL AND billing_interval_months BETWEEN 1 AND 1200)),
+    ADD CONSTRAINT prices_provider_access_default_check CHECK (NOT provider_access_default OR provider_owned);
+ALTER TABLE billing.prices DROP CONSTRAINT prices_product_amount_window_key;
+ALTER TABLE billing.prices ADD CONSTRAINT prices_product_amount_window_key
+    UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, billing_interval_months, provider_access_default);
+COMMENT ON COLUMN billing.prices.provider_snapshot IS 'Immutable provider object and native cadence accepted for this price version; retained even when its normalized lookup binding moves to a newer version.';
+COMMENT ON COLUMN billing.prices.billing_interval_months IS 'Provider calendar cadence, independent of fixed hours; a year is twelve months. NULL on our prices and fixed-duration provider prices.';
+COMMENT ON COLUMN billing.prices.provider_access_default IS 'Access ends at the verified provider service-period end. False retains the explicit hourly access duration, including all pre-split accepted terms.';
+ALTER TABLE billing.subscriptions ADD COLUMN provider_access_default_snapshot boolean NOT NULL DEFAULT false;
+COMMENT ON COLUMN billing.subscriptions.provider_access_default_snapshot IS 'The accepted access choice for this phase: verified provider service-period end, otherwise the explicit access_duration_hours_snapshot. Existing accepted windows are never inferred to be defaults.';
+ALTER TABLE billing.order_lines ADD COLUMN provider_access_default boolean NOT NULL DEFAULT false;
+COMMENT ON COLUMN billing.order_lines.provider_access_default IS 'Frozen access choice accepted on a provider bill: use its verified service-period end, otherwise the explicit hourly duration.';
+
 -- One of ours may sell through only some of the merchant's methods.
 ALTER TABLE billing.prices ADD COLUMN sell_via text[];
 ALTER TABLE billing.prices ADD CONSTRAINT prices_sell_via_check CHECK (sell_via IS NULL OR (NOT provider_owned AND cardinality(sell_via) > 0 AND sell_via <@ ARRAY['card', 'solana']::text[]));
@@ -43,12 +66,15 @@ WITH provider_keys AS (
     JOIN billing.prices p ON p.merchant_id = k.merchant_id AND p.product_id = k.product_id AND p.key = k.split_key
 )
 INSERT INTO billing.prices (id, merchant_id, product_id, archived, amount, currency, access_duration_hours, billing_interval_hours,
-    trial_unit_amount, trial_duration_hours, customer_amount, quantity, key, provider_owned, created_at, updated_at, deleted_at)
+    trial_unit_amount, trial_duration_hours, customer_amount, quantity, key, provider_owned, provider_psp_id, provider_snapshot, created_at, updated_at, deleted_at)
 SELECT md5(p.id::text || ':' || psp.id::text)::uuid, p.merchant_id, p.product_id, p.archived, p.amount, p.currency,
     p.access_duration_hours, p.billing_interval_hours, p.trial_unit_amount, p.trial_duration_hours, p.customer_amount, p.quantity,
     k.split_key || CASE WHEN EXISTS (SELECT 1 FROM collisions c WHERE c.merchant_id = p.merchant_id AND c.product_id = p.product_id AND c.split_key = k.split_key)
         THEN '-provider-' || md5(p.product_id::text || ':' || p.key || ':' || psp.id::text) ELSE '' END,
-    true, p.created_at, p.updated_at, p.deleted_at
+    true, psp.id, b.configuration || jsonb_strip_nulls(jsonb_build_object('psp_key', psp.key, 'psp_id', psp.id::text, 'rail', psp.rail,
+        'plan_id', b.plan_id, 'price_id', b.price_ref, 'flex_id', b.flex_id, 'recurring_billing_option_id', b.recurring_billing_option_id,
+        'provider_billing_interval_hours', COALESCE(p.billing_interval_hours::text, 'none'), 'provider_billing_interval_months', 'none')),
+    p.created_at, p.updated_at, p.deleted_at
 FROM billing.price_psp_bindings b
 JOIN billing.psps psp ON psp.merchant_id = b.merchant_id AND psp.id = b.psp_id
 JOIN billing.prices p ON p.merchant_id = b.merchant_id AND p.id = b.price_id
@@ -98,7 +124,7 @@ DELETE FROM billing.catalog_field_owners WHERE object = 'price' AND field = 'psp
 ALTER TABLE billing.catalog_field_owners DROP CONSTRAINT catalog_field_owners_field_check;
 ALTER TABLE billing.catalog_field_owners ADD CONSTRAINT catalog_field_owners_field_check CHECK ((
     ((object = 'product'::text) AND (field = ANY (ARRAY['display_name'::text, 'description'::text, 'tier_group'::text, 'tier_rank'::text, 'archived'::text, 'ownership'::text, 'entitlements'::text, 'required_entitlements'::text, 'credit_grant'::text, 'rate_cards'::text])))
-    OR ((object = 'price'::text) AND (field = ANY (ARRAY['currency'::text, 'unit_amount'::text, 'access_duration_hours'::text, 'billing_interval_hours'::text, 'trial_unit_amount'::text, 'trial_duration_hours'::text, 'customer_amount'::text, 'quantity'::text, 'archived'::text, 'sell_via'::text, 'provider'::text])))
+    OR ((object = 'price'::text) AND (field = ANY (ARRAY['currency'::text, 'unit_amount'::text, 'access_duration_hours'::text, 'billing_interval_hours'::text, 'billing_interval_months'::text, 'provider_access_default'::text, 'trial_unit_amount'::text, 'trial_duration_hours'::text, 'customer_amount'::text, 'quantity'::text, 'archived'::text, 'sell_via'::text, 'provider'::text])))
     OR ((object = 'meter'::text) AND (field = ANY (ARRAY['event_type'::text, 'value_property'::text, 'aggregation'::text, 'unit'::text, 'group_by'::text])))));
 
 -- Our prices bind only the Solana plans OpenRails publishes; a provider price

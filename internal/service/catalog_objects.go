@@ -70,7 +70,7 @@ func compareCatalogObjects(a, b catalogObject) int {
 // catalogFields are each object's owned fields, in the order results list them.
 var catalogFields = map[billing.CatalogObjectKind][]string{
 	billing.CatalogObjectProduct: {"display_name", "description", "tier_group", "tier_rank", "archived", "ownership", "entitlements", "required_entitlements", "credit_grant", "rate_cards"},
-	billing.CatalogObjectPrice:   {"currency", "unit_amount", "access_duration_hours", "billing_interval_hours", "trial_unit_amount", "trial_duration_hours", "customer_amount", "quantity", "archived", "sell_via", "provider"},
+	billing.CatalogObjectPrice:   {"currency", "unit_amount", "access_duration_hours", "billing_interval_hours", "billing_interval_months", "provider_access_default", "trial_unit_amount", "trial_duration_hours", "customer_amount", "quantity", "archived", "sell_via", "provider"},
 	billing.CatalogObjectMeter:   {"event_type", "value_property", "aggregation", "unit", "group_by"},
 }
 
@@ -207,6 +207,13 @@ func readCatalogState(ctx context.Context, q *gen.Queries, merchantID uuid.UUID)
 			return nil, fmt.Errorf("price %q links: %w", p.Key, err)
 		}
 		provider, plans := json.RawMessage("null"), map[string]map[string]string{}
+		if p.ProviderOwned && len(links) == 0 && len(p.ProviderSnapshot) > 0 {
+			var prior map[string]string
+			if err := json.Unmarshal(p.ProviderSnapshot, &prior); err != nil {
+				return nil, err
+			}
+			links = map[string]map[string]string{prior["psp_key"]: prior}
+		}
 		for key, link := range links {
 			if p.ProviderOwned {
 				provider = catalogJSON(providerFieldValue(key, link))
@@ -219,17 +226,18 @@ func readCatalogState(ctx context.Context, q *gen.Queries, merchantID uuid.UUID)
 			sellVia = catalogJSON(p.SellVia)
 		}
 		state[obj] = &catalogObjectState{revision: p.KeyRevision, productID: p.ProductID, priceID: p.ID, hidden: catalogJSON(plans), fields: map[string]json.RawMessage{
-			"currency":               catalogJSON(p.Currency),
-			"unit_amount":            catalogMoney(p.Amount),
-			"access_duration_hours":  catalogOptionalHours(p.AccessDurationHours),
-			"billing_interval_hours": catalogOptionalHours(p.BillingIntervalHours),
-			"trial_unit_amount":      catalogOptionalMoney(p.TrialUnitAmount),
-			"trial_duration_hours":   catalogOptionalHours(p.TrialDurationHours),
-			"customer_amount":        customer,
-			"quantity":               quantity,
-			"archived":               catalogJSON(p.Archived),
-			"sell_via":               sellVia,
-			"provider":               provider,
+			"currency":                catalogJSON(p.Currency),
+			"unit_amount":             catalogMoney(p.Amount),
+			"access_duration_hours":   catalogOptionalHours(p.AccessDurationHours),
+			"billing_interval_hours":  catalogOptionalHours(p.BillingIntervalHours),
+			"billing_interval_months": catalogOptionalHours(p.BillingIntervalMonths), "provider_access_default": catalogJSON(p.ProviderAccessDefault),
+			"trial_unit_amount":    catalogOptionalMoney(p.TrialUnitAmount),
+			"trial_duration_hours": catalogOptionalHours(p.TrialDurationHours),
+			"customer_amount":      customer,
+			"quantity":             quantity,
+			"archived":             catalogJSON(p.Archived),
+			"sell_via":             sellVia,
+			"provider":             provider,
 		}}
 	}
 	revisions, err := q.ListCatalogMeterRevisions(ctx, merchantID)
@@ -431,6 +439,8 @@ func documentProviderPriceFields(d catalogwire.ApplyProviderPrice, prepared *pro
 		values["unit_amount"] = catalogMoney(req.UnitAmount)
 		values["access_duration_hours"] = catalogJSON(req.AccessDurationHours)
 		values["billing_interval_hours"] = catalogJSON(req.BillingIntervalHours)
+		values["billing_interval_months"] = catalogJSON(prepared.months)
+		values["provider_access_default"] = catalogJSON(prepared.accessDefault)
 		values["trial_unit_amount"] = catalogOptionalMoney(req.TrialUnitAmount)
 		values["trial_duration_hours"] = catalogJSON(req.TrialDurationHours)
 	}

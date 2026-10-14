@@ -127,9 +127,11 @@ func TestCatalogApplyReadsProviderPricesAndWritesNothing(t *testing.T) {
 	}
 	nmiPrice, stripe, ccbill := read("-nmi"), read("-stripe"), read("-ccbill")
 	require.Equal(t, map[string]string{"plan_id": plan}, nmiPrice.Provider.IDs)
-	require.Equal(t, []any{int64(23_000_000), "USD", monthHours, monthHours}, []any{nmiPrice.UnitAmount, nmiPrice.Currency, *nmiPrice.BillingIntervalHours, *nmiPrice.AccessDurationHours}, "NMI's terms")
+	require.Equal(t, []any{int64(23_000_000), "USD", monthHours}, []any{nmiPrice.UnitAmount, nmiPrice.Currency, *nmiPrice.BillingIntervalHours}, "NMI's fixed terms")
+	require.Nil(t, nmiPrice.AccessDurationHours, "default follows the verified provider period")
+	require.True(t, nmiPrice.Provider.AccessDurationDefault)
 	require.Equal(t, stripePrice, stripe.Provider.IDs["price_id"])
-	require.Equal(t, []any{int64(19_000_000), monthHours, 60 * 24}, []any{stripe.UnitAmount, *stripe.BillingIntervalHours, *stripe.AccessDurationHours}, "Stripe's terms, declared access")
+	require.Equal(t, []any{int64(19_000_000), 1, 60 * 24}, []any{stripe.UnitAmount, *stripe.BillingIntervalMonths, *stripe.AccessDurationHours}, "Stripe's terms, declared access")
 	require.Equal(t, []any{int64(23_000_000), monthHours, "ccbill"}, []any{ccbill.UnitAmount, *ccbill.BillingIntervalHours, ccbill.Provider.Rail}, "CCBill's declared terms")
 	require.Nil(t, read("-monthly").Provider)
 
@@ -215,7 +217,7 @@ func TestProviderPriceCachedTermsKeepTheProviderCadence(t *testing.T) {
 	require.NoError(t, err)
 	plan := "override-" + uuid.NewString()[:8]
 	w.nmi.AddPlan(nmimock.Plan{ID: plan, Name: "Override", Amount: "9.99", Days: 30})
-	decl := catalog.ApplyProviderPrice{PSP: "nmi", PlanID: plan, OneOff: true, AccessDurationHours: new(14 * 24)}
+	decl := catalog.ApplyProviderPrice{PSP: "nmi", PlanID: plan, OneOff: true, AccessDurationHours: catalog.Value(14 * 24)}
 	apply := func() (*billing.CatalogApplicationReceipt, error) {
 		return c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{product.Key: {ProviderPrices: map[string]catalog.ApplyProviderPrice{"legacy": decl}}}}, billing.ApplyCatalogParams{})
 	}
@@ -241,6 +243,11 @@ func TestProviderPriceCachedTermsKeepTheProviderCadence(t *testing.T) {
 	require.Equal(t, new(14*24), current.AccessDurationHours)
 	require.Equal(t, int64(9_990_000), current.UnitAmount)
 	require.NotEqual(t, first.ID, current.ID, "changed billing is a new immutable version")
+	earlier, err := c.GetPrice(t.Context(), first.ID, billing.GetPriceParams{})
+	require.NoError(t, err)
+	require.Equal(t, first.Provider.PSPID, earlier.Provider.PSPID)
+	require.Equal(t, first.Provider.IDs, earlier.Provider.IDs, "older version retains its exact provider object")
+
 }
 
 // The upgrade's preserved provider identity is not the normal new-price hash.
@@ -254,17 +261,82 @@ func TestProviderPriceAdoptionPreservesItsExistingIdentity(t *testing.T) {
 	plan := "adopt-" + uuid.NewString()[:8]
 	w.nmi.AddPlan(nmimock.Plan{ID: plan, Name: "Adopt", Amount: "23.00", Days: 30})
 	preserved := uuid.New()
-	_, err = w.pool.Exec(t.Context(), w.sql(`INSERT INTO billing.prices(merchant_id,id,product_id,key,amount,currency,archived,access_duration_hours,billing_interval_hours,provider_owned) VALUES($1,$2,$3,'monthly-nmi',23000000,'USD',false,720,720,true)`), c.MerchantID().UUID(), preserved, product.ID.UUID())
+	_, err = w.pool.Exec(t.Context(), w.sql(`INSERT INTO billing.prices(merchant_id,id,product_id,key,amount,currency,archived,access_duration_hours,billing_interval_hours,provider_owned,provider_psp_id,provider_snapshot) VALUES($1,$2,$3,'monthly-nmi',23000000,'USD',false,720,720,true,$4,$5::jsonb)`), c.MerchantID().UUID(), preserved, product.ID.UUID(), w.psp["nmi"].UUID(), fmt.Sprintf(`{"psp_key":"nmi","psp_id":"%s","rail":"nmi","plan_id":"%s","provider_billing_interval_hours":"720","provider_billing_interval_months":"none"}`, w.psp["nmi"].UUID(), plan))
 	require.NoError(t, err)
 	_, err = w.pool.Exec(t.Context(), w.sql(`INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,plan_id,configuration) VALUES($1,$2,$3,$4,'{"provider_billing_interval_hours":"720"}')`), c.MerchantID().UUID(), preserved, w.psp["nmi"].UUID(), plan)
 	require.NoError(t, err)
 	before, err := priceByKey(t.Context(), c, product.Key, "monthly-nmi")
 	require.NoError(t, err)
-	receipt, err := c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{product.Key: {ProviderPrices: map[string]catalog.ApplyProviderPrice{"monthly-nmi": {PSP: "nmi", PlanID: plan}}}}}, billing.ApplyCatalogParams{})
+	receipt, err := c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{product.Key: {ProviderPrices: map[string]catalog.ApplyProviderPrice{"monthly-nmi": {PSP: "nmi", PlanID: plan, AccessDurationHours: catalog.Value(monthHours)}}}}}, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	require.Zero(t, receipt.PricesChanged)
 	after, err := priceByKey(t.Context(), c, product.Key, "monthly-nmi")
 	require.NoError(t, err)
 	require.Equal(t, before.ID, after.ID, "migrated identity survives adoption")
 	require.Empty(t, w.providerCatalogWrites())
+}
+
+// Native months remain calendar months. A default accepts the verified paid
+// period, while a later explicit override creates another immutable version.
+func TestCalendarProviderPriceRetainsOldIdentityAndAccessChoice(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	client := w.client[embedded]
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "calendar", DisplayName: "Calendar", Entitlements: []string{"calendar-access"}})
+	require.NoError(t, err)
+	plan := "calendar-" + uuid.NewString()[:8]
+	w.nmi.AddPlan(nmimock.Plan{ID: plan, Name: "Calendar", Amount: "23.00", Months: 1})
+	params := billing.CreateProviderPriceParams{ProductID: product.ID, Key: "monthly", PSP: "nmi", PlanID: plan}
+	original, err := client.CreateProviderPrice(t.Context(), params)
+	require.NoError(t, err)
+	require.Nil(t, original.BillingIntervalHours)
+	require.Equal(t, new(1), original.BillingIntervalMonths)
+	require.True(t, original.Provider.AccessDurationDefault)
+	now := w.clock.Now()
+	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+	importAt := func(price *billing.Price) billing.SubscriptionID {
+		t.Helper()
+		c := w.newCustomer()
+		vault := w.nmi.AddVault(visa)
+		schedule := w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: plan, Amount: "23.00", Months: 1, NextBilling: end, Created: start})
+		sale := w.nmi.AddSale(nmimock.Sale{OrderID: "calendar-" + schedule, Vault: vault, Amount: "23.00", At: start})
+		book := billing.DeclaredBilling{AsOf: now, DefaultPSP: billing.PSPRef{Key: "nmi"}, Customers: []billing.DeclaredCustomer{{Customer: c.cid()}},
+			PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: c.cid(), Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID, Card: declaredCard(visa)}},
+			Subscriptions: []billing.DeclaredSubscription{{SourceID: schedule, Customer: c.cid(), Price: price.ID, Rail: "nmi", RailSubscriptionID: schedule, StartedAt: start, PaidThrough: &end,
+				PaymentMethod:    &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID},
+				AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: "calendar:" + schedule, Amount: 23_000_000, Currency: "USD", IntervalMonths: 1, FirstDueAt: start}}},
+			Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: schedule, TransactionID: sale.TransactionID, Success: true, Amount: 23_000_000, Currency: "USD", OccurredAt: start, NextBillingAt: &end}}}
+		result, err := client.ImportBilling(t.Context(), book)
+		require.NoError(t, err)
+		require.Len(t, result.Imported, 1, "%+v", result)
+		subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: c.cid()})
+		require.NoError(t, err)
+		require.Len(t, subs.Items, 1)
+		return subs.Items[0].ID
+	}
+	firstSub := importAt(original)
+	params.AccessDurationHours = catalog.Value(14 * 24)
+	overridden, err := client.CreateProviderPrice(t.Context(), params)
+	require.NoError(t, err)
+	require.NotEqual(t, original.ID, overridden.ID)
+	require.False(t, overridden.Provider.AccessDurationDefault)
+	secondSub := importAt(overridden)
+	for _, expected := range []struct {
+		id            billing.SubscriptionID
+		accessEnd     time.Time
+		defaultAccess bool
+	}{{firstSub, end, true}, {secondSub, start.Add(14 * 24 * time.Hour), false}} {
+		var gotEnd time.Time
+		var choice bool
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT a.ends_at,s.provider_access_default_snapshot FROM billing.product_access a JOIN billing.subscriptions s ON s.merchant_id=a.merchant_id AND a.source_id=s.id::text WHERE s.id=$1 AND a.revoked_at IS NULL ORDER BY a.created_at DESC LIMIT 1`), expected.id.UUID()).Scan(&gotEnd, &choice))
+		require.Equal(t, expected.accessEnd, gotEnd.UTC())
+		require.Equal(t, expected.defaultAccess, choice)
+	}
+	earlier, err := client.GetPrice(t.Context(), original.ID, billing.GetPriceParams{Verify: true})
+	require.NoError(t, err)
+	require.Equal(t, original.Provider.PSPID, earlier.Provider.PSPID)
+	require.Equal(t, original.Provider.IDs, earlier.Provider.IDs)
+	require.True(t, earlier.Provider.AccessDurationDefault)
+	require.Equal(t, billing.SyncStatusInSync, earlier.Provider.SyncStatus)
 }

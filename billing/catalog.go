@@ -121,17 +121,18 @@ type Price struct {
 	Revision int64 `json:"revision"`
 	// Version numbers this price's immutable terms within its key, from one.
 	// It is the v1 suffix in ID; restoring archived terms keeps that version.
-	Version              int64     `json:"version"`
-	ID                   PriceID   `json:"id"`
-	Key                  string    `json:"key"`
-	ProductID            ProductID `json:"product_id"`
-	Archived             bool      `json:"archived"`
-	UnitAmount           int64     `json:"unit_amount,string"`
-	Currency             string    `json:"currency"`
-	AccessDurationHours  *int      `json:"access_duration_hours"`
-	BillingIntervalHours *int      `json:"billing_interval_hours"`
-	TrialUnitAmount      *int64    `json:"trial_unit_amount,string"`
-	TrialDurationHours   *int      `json:"trial_duration_hours"`
+	Version               int64     `json:"version"`
+	ID                    PriceID   `json:"id"`
+	Key                   string    `json:"key"`
+	ProductID             ProductID `json:"product_id"`
+	Archived              bool      `json:"archived"`
+	UnitAmount            int64     `json:"unit_amount,string"`
+	Currency              string    `json:"currency"`
+	AccessDurationHours   *int      `json:"access_duration_hours"`
+	BillingIntervalHours  *int      `json:"billing_interval_hours"`
+	BillingIntervalMonths *int      `json:"billing_interval_months"`
+	TrialUnitAmount       *int64    `json:"trial_unit_amount,string"`
+	TrialDurationHours    *int      `json:"trial_duration_hours"`
 	// SellVia are the methods one of ours sells through: SellViaCard (the
 	// merchant's card vault and charge PSPs) and SellViaSolana. Null: every
 	// method the merchant has. A provider price sells through its provider.
@@ -158,12 +159,13 @@ const (
 // the PSP and rail only. After a verifying read, SyncStatus says whether the
 // provider's terms still match the price's and Drift how they differ.
 type PriceProvider struct {
-	PSP        string            `json:"psp"`
-	PSPID      PSPID             `json:"psp_id"`
-	Rail       string            `json:"rail"`
-	IDs        map[string]string `json:"ids"`
-	SyncStatus SyncStatus        `json:"sync_status"`
-	Drift      []DriftField      `json:"drift"`
+	AccessDurationDefault bool              `json:"access_duration_default"`
+	PSP                   string            `json:"psp"`
+	PSPID                 PSPID             `json:"psp_id"`
+	Rail                  string            `json:"rail"`
+	IDs                   map[string]string `json:"ids"`
+	SyncStatus            SyncStatus        `json:"sync_status"`
+	Drift                 []DriftField      `json:"drift"`
 }
 
 // BuyerPrices are prices as a buyer sees them, for a host to put in its own
@@ -176,7 +178,7 @@ func BuyerPrices(prices []Price) []Price {
 			if p.Provider.Rail != "ccbill" || p.BillingIntervalHours == nil {
 				continue
 			}
-			p.Provider = &PriceProvider{PSP: p.Provider.PSP, PSPID: p.Provider.PSPID, Rail: p.Provider.Rail, IDs: map[string]string{}, SyncStatus: SyncStatusUnknown, Drift: []DriftField{}}
+			p.Provider = &PriceProvider{PSP: p.Provider.PSP, PSPID: p.Provider.PSPID, Rail: p.Provider.Rail, AccessDurationDefault: p.Provider.AccessDurationDefault, IDs: map[string]string{}, SyncStatus: SyncStatusUnknown, Drift: []DriftField{}}
 		}
 		p.SolanaPlan = nil
 		out = append(out, p)
@@ -276,14 +278,14 @@ type CreateProviderPriceParams struct {
 	FlexID                   string    `json:"flex_id,omitempty"`
 	RecurringBillingOptionID string    `json:"recurring_billing_option_id,omitempty"`
 	// Currency prices an NMI plan; USD when omitted.
-	Currency             string `json:"currency,omitempty"`
-	UnitAmount           *int64 `json:"unit_amount,omitempty,string"`
-	BillingIntervalHours *int   `json:"billing_interval_hours,omitempty"`
-	AccessDurationHours  *int   `json:"access_duration_hours,omitempty"`
-	TrialUnitAmount      *int64 `json:"trial_unit_amount,omitempty,string"`
-	TrialDurationHours   *int   `json:"trial_duration_hours,omitempty"`
-	OneOff               bool   `json:"one_off,omitempty"`
-	Archived             bool   `json:"archived,omitempty"`
+	Currency             string             `json:"currency,omitempty"`
+	UnitAmount           *int64             `json:"unit_amount,omitempty,string"`
+	BillingIntervalHours *int               `json:"billing_interval_hours,omitempty"`
+	AccessDurationHours  catalog.Field[int] `json:"access_duration_hours,omitzero"`
+	TrialUnitAmount      *int64             `json:"trial_unit_amount,omitempty,string"`
+	TrialDurationHours   *int               `json:"trial_duration_hours,omitempty"`
+	OneOff               bool               `json:"one_off,omitempty"`
+	Archived             bool               `json:"archived,omitempty"`
 }
 
 // UpdatePriceParams changes what about a price can change; omitted fields are

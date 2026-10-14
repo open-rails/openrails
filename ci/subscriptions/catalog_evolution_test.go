@@ -268,7 +268,12 @@ func TestProviderPriceVersionsFollowTheProvider(t *testing.T) {
 	require.Equal(t, plan, first.Provider.IDs["plan_id"])
 
 	w.nmi.AddPlan(nmimock.Plan{ID: plan, Name: "Bound", Amount: "12.00", Days: 30})
-	_, err = apply()
+	readsBefore := len(w.nmi.CallsTo(http.MethodGet, "/plans/"+plan, nil))
+	replay, err := apply()
+	require.NoError(t, err)
+	require.True(t, replay.Replayed, "a successfully applied file is permanently replayed")
+	require.Equal(t, readsBefore, len(w.nmi.CallsTo(http.MethodGet, "/plans/"+plan, nil)), "replay performs no provider read")
+	_, err = c.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "monthly", PSP: "nmi", PlanID: plan})
 	require.NoError(t, err)
 	second, err := priceByKey(t.Context(), c, product.Key, "monthly")
 	require.NoError(t, err)
@@ -279,6 +284,8 @@ func TestProviderPriceVersionsFollowTheProvider(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, earlier.Archived)
 	require.NotNil(t, earlier.Provider, "an earlier version stays the provider's")
+	require.Equal(t, first.Provider.IDs, earlier.Provider.IDs)
+	require.Equal(t, first.Provider.PSPID, earlier.Provider.PSPID)
 
 	_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 5_000_000, Currency: "USD"})
 	require.ErrorIs(t, err, billing.ErrInvalid, "a provider price's key takes none of ours")

@@ -125,7 +125,7 @@ func TestProviderPricesMigrationPreservesTheExistingBook(t *testing.T) {
 	snapshots := map[string]string{}
 	for _, table := range []string{"order_lines", "payments", "grants", "product_access", "subscription_status_transitions"} {
 		var data string
-		require.NoError(t, query("SELECT jsonb_agg(to_jsonb(r) ORDER BY id)::text FROM billing."+table+" r").Scan(&data))
+		require.NoError(t, query("SELECT jsonb_agg(to_jsonb(r)-'provider_access_default' ORDER BY id)::text FROM billing."+table+" r").Scan(&data))
 		snapshots[table] = data
 	}
 	require.NoError(t, migrator.ApplyMigrations(ctx, migrations))
@@ -165,7 +165,7 @@ func TestProviderPricesMigrationPreservesTheExistingBook(t *testing.T) {
 	}
 	for table, want := range snapshots {
 		var got string
-		require.NoError(t, query("SELECT jsonb_agg(to_jsonb(r) ORDER BY id)::text FROM billing."+table+" r").Scan(&got))
+		require.NoError(t, query("SELECT jsonb_agg(to_jsonb(r)-'provider_access_default' ORDER BY id)::text FROM billing."+table+" r").Scan(&got))
 		require.Equal(t, want, got, table+" keeps accepted history")
 	}
 	var emptyBindings, phantomProviders int

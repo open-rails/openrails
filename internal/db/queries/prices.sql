@@ -3,7 +3,7 @@
 -- name: CreatePrice :one
 INSERT INTO billing.prices (
     id, merchant_id, product_id, archived, amount, currency,
-    access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, quantity, key, provider_owned, sell_via, created_at, updated_at
+    access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, quantity, key, provider_owned, sell_via, provider_psp_id, provider_snapshot, billing_interval_months, provider_access_default, created_at, updated_at
 ) SELECT
     sqlc.arg(id),
     sqlc.arg(merchant_id)::uuid,
@@ -16,6 +16,7 @@ INSERT INTO billing.prices (
     sqlc.arg(key)::text,
     sqlc.arg(provider_owned)::boolean,
     sqlc.narg(sell_via)::text[],
+    sqlc.narg(provider_psp_id)::uuid, sqlc.narg(provider_snapshot)::jsonb, sqlc.narg(billing_interval_months)::int, sqlc.arg(provider_access_default)::boolean,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 FROM billing.products catalog_product

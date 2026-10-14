@@ -24,14 +24,23 @@ func accessEnd(start time.Time, hours *int) *time.Time {
 	return &end
 }
 
+// subscriptionAccessEnd preserves the accepted distinction: provider DEFAULT
+// ends at its verified service boundary; an explicit duration remains hourly.
+func subscriptionAccessEnd(sub *models.Subscription, start time.Time) *time.Time {
+	if sub.ProviderAccessDefaultSnapshot {
+		return sub.CurrentPeriodEndsAt
+	}
+	return accessEnd(start, sub.AccessDurationHoursSnapshot)
+}
+
 // subscriptionAccess grants the subscription's product for exactly the
 // accepted access window. Billing periods schedule charges and never supply an
 // implicit expiry for a new grant.
 func subscriptionAccess(sub *models.Subscription, start time.Time) entitlements.PushAccessParams {
-	end := accessEnd(start, sub.AccessDurationHoursSnapshot)
+	end := subscriptionAccessEnd(sub, start)
 	return entitlements.PushAccessParams{
 		UserID: sub.CustomerID.String(), ProductID: sub.ProductID, NotBefore: &start,
-		EndsAt: end, Indefinite: end == nil,
+		EndsAt: end, Indefinite: end == nil && !sub.ProviderAccessDefaultSnapshot,
 		SourceType: models.AccessSourceSubscription, SourceID: sub.ID.String(), Quantity: sub.Quantity,
 	}
 }
@@ -40,6 +49,9 @@ func subscriptionAccess(sub *models.Subscription, start time.Time) entitlements.
 // access window is not extended through an unpaid gap, and a longer or indefinite
 // purchase does not need a billing-boundary grace grant.
 func accessMatchesBillingPeriod(sub *models.Subscription, start, end time.Time) bool {
+	if sub.ProviderAccessDefaultSnapshot {
+		return sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(end)
+	}
 	if sub.AccessDurationHoursSnapshot == nil {
 		return false
 	}

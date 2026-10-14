@@ -172,3 +172,23 @@ func TestNativeGraceUsesDeclaredCadenceAndKeepsPaidWindow(t *testing.T) {
 	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, start, providerEnd))
 	require.Len(t, r.grants, 1, "canceled recurrence never regains grace")
 }
+
+// DEFAULT follows qualified native service boundaries, including short months
+// and leap years. Explicit hourly access remains exactly what was accepted.
+func TestProviderDefaultAccessUsesItsVerifiedCalendarPeriod(t *testing.T) {
+	for _, pair := range [][2]time.Time{
+		{time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC), time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)},
+		{time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
+	} {
+		start, end := pair[0], pair[1]
+		sub := &models.Subscription{ProviderAccessDefaultSnapshot: true, CurrentPeriodStartsAt: &start, CurrentPeriodEndsAt: &end}
+		got := subscriptionAccess(sub, start)
+		require.Equal(t, &end, got.EndsAt)
+		require.False(t, got.Indefinite)
+		require.True(t, accessMatchesBillingPeriod(sub, start, end))
+		sub.ProviderAccessDefaultSnapshot = false
+		sub.AccessDurationHoursSnapshot = new(720)
+		got = subscriptionAccess(sub, start)
+		require.Equal(t, new(start.Add(720*time.Hour)), got.EndsAt, "explicit hours never become a calendar default")
+	}
+}

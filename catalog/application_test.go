@@ -378,3 +378,23 @@ products:
 		t.Fatalf("trial = %#v", got)
 	}
 }
+
+func TestProviderAccessDistinguishesDefaultHoursAndIndefinite(t *testing.T) {
+	for _, tc := range []struct {
+		raw       string
+		set, null bool
+		hours     int
+	}{
+		{`{"psp":"nmi","plan_id":"p"}`, false, false, 0},
+		{`{"psp":"nmi","plan_id":"p","access_duration_hours":null}`, true, true, 0},
+		{`{"psp":"nmi","plan_id":"p","access_duration":"14 days"}`, true, false, 336},
+		{`{"psp":"nmi","plan_id":"p","access_duration":null}`, true, true, 0},
+	} {
+		var p ApplyProviderPrice
+		require.NoError(t, json.Unmarshal([]byte(tc.raw), &p))
+		require.NoError(t, p.Validate())
+		require.Equal(t, tc.set, p.AccessDurationHours.Set)
+		require.Equal(t, tc.null, p.AccessDurationHours.Null)
+		require.Equal(t, tc.hours, p.AccessDurationHours.Value)
+	}
+}

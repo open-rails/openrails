@@ -118,6 +118,6 @@ func HistoricalBill(ctx context.Context, d *db.DB, sub *models.Subscription, rec
 		SourceKind: SourceHistory, SourceKey: receipt.TransactionID, ProviderReference: sub.RailSubscriptionID, Currency: currency, Total: receipt.Amount,
 		PeriodStart: at, PeriodEnd: scheduleBoundary(at, hours, months, 1), DueAt: at,
 		Lines: []Line{{PriceID: &price.ID, ProductID: &price.ProductID, Description: description, Quantity: sub.Quantity, UnitAmount: receipt.Amount / seats,
-			Amount: receipt.Amount, BillingIntervalHours: interval, AccessDurationHours: sub.AccessDurationHoursSnapshot}}}
+			Amount: receipt.Amount, BillingIntervalHours: interval, AccessDurationHours: sub.AccessDurationHoursSnapshot, ProviderAccessDefault: sub.ProviderAccessDefaultSnapshot}}}
 	return History{Bill: &bill}, nil
 }

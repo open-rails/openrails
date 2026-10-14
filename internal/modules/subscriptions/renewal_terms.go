@@ -23,16 +23,17 @@ import (
 // Preparation reads catalog and scheduled changes before admission; settlement
 // consumes these facts without reinterpreting a subsequently edited catalog.
 type RenewalTerms struct {
-	LegacyEntitlements  map[string]*int `json:"legacy_entitlements,omitzero"`
-	AccessDurationHours *int            `json:"access_duration_hours"`
-	PSPID               uuid.UUID       `json:"psp_id"`
-	SubscriptionID      uuid.UUID       `json:"subscription_id"`
-	CustomerID          uuid.UUID       `json:"customer_id"`
-	FromPriceID         uuid.UUID       `json:"from_price_id"`
-	FromProductID       uuid.UUID       `json:"from_product_id"`
-	PriceID             uuid.UUID       `json:"price_id"`
-	ProductID           uuid.UUID       `json:"product_id"`
-	ProductName         string          `json:"product_name"`
+	LegacyEntitlements    map[string]*int `json:"legacy_entitlements,omitzero"`
+	ProviderAccessDefault bool            `json:"provider_access_default,omitempty"`
+	AccessDurationHours   *int            `json:"access_duration_hours"`
+	PSPID                 uuid.UUID       `json:"psp_id"`
+	SubscriptionID        uuid.UUID       `json:"subscription_id"`
+	CustomerID            uuid.UUID       `json:"customer_id"`
+	FromPriceID           uuid.UUID       `json:"from_price_id"`
+	FromProductID         uuid.UUID       `json:"from_product_id"`
+	PriceID               uuid.UUID       `json:"price_id"`
+	ProductID             uuid.UUID       `json:"product_id"`
+	ProductName           string          `json:"product_name"`
 	// Quantity is the seats of a per-seat price, nil otherwise; Amount is the
 	// unit price times Quantity.
 	Quantity    *int      `json:"quantity,omitempty"`
@@ -86,7 +87,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 	}
 	terms = RenewalTerms{
 		PSPID: sub.PspID, SubscriptionID: sub.ID, CustomerID: sub.CustomerID, FromPriceID: sub.PriceID, FromProductID: sub.ProductID,
-		PriceID: sub.PriceID, ProductID: sub.ProductID, PeriodStart: sub.CurrentPeriodEndsAt.UTC(), AccessDurationHours: sub.AccessDurationHoursSnapshot,
+		PriceID: sub.PriceID, ProductID: sub.ProductID, PeriodStart: sub.CurrentPeriodEndsAt.UTC(), AccessDurationHours: sub.AccessDurationHoursSnapshot, ProviderAccessDefault: sub.ProviderAccessDefaultSnapshot,
 		Quantity: CloneQuantity(sub.Quantity),
 	}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
@@ -107,6 +108,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		}
 		terms.Amount, terms.Currency, terms.ProductName = amount, agreement.Currency, agreement.ProductName
 		terms.AccessDurationHours = agreement.AccessDurationHours
+		terms.ProviderAccessDefault = agreement.ProviderAccessDefault
 		terms.PeriodEnd = terms.PeriodStart.Add(duration)
 	} else if agreement != nil {
 		return terms, errors.New("native renewal cannot substitute an engine agreement")
@@ -151,6 +153,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 	}
 	terms.ProductID, terms.Amount, terms.Currency = price.ProductID, amount, price.Currency
 	terms.AccessDurationHours = price.AccessDurationHours
+	terms.ProviderAccessDefault = price.ProviderAccessDefault
 	terms.PeriodEnd = terms.PeriodStart.Add(time.Duration(*cycle) * time.Hour)
 	product, err := catalog.NewProductService(d).GetByID(ctx, terms.ProductID)
 	if err != nil {
@@ -202,6 +205,7 @@ func applyRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, 
 	}
 	sub.PriceID, sub.ProductID, sub.Quantity = terms.PriceID, terms.ProductID, CloneQuantity(terms.Quantity)
 	sub.AccessDurationHoursSnapshot = terms.AccessDurationHours
+	sub.ProviderAccessDefaultSnapshot = terms.ProviderAccessDefault
 	return applied, alreadyAdvanced, nil
 }
 

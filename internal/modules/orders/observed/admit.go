@@ -121,7 +121,7 @@ func createLine(ctx context.Context, q *gen.Queries, o gen.BillingOrder, sub *uu
 	if err != nil {
 		return err
 	}
-	return q.CreateObservedOrderLine(ctx, gen.CreateObservedOrderLineParams{MerchantID: o.MerchantID, ID: uuidutil.NewV7(), OrderID: o.ID, CustomerID: o.CustomerID, Position: position32, PriceID: l.PriceID, ProductID: l.ProductID, Description: l.Description, Quantity: quantity, UnitAmount: l.UnitAmount, Amount: l.Amount, Ownership: optional(l.Ownership), ClaimKey: optional(l.ClaimKey), BillingIntervalHours: interval, AccessDurationHours: access, SubscriptionID: sub, Source: optional(l.Source), Now: now})
+	return q.CreateObservedOrderLine(ctx, gen.CreateObservedOrderLineParams{MerchantID: o.MerchantID, ID: uuidutil.NewV7(), OrderID: o.ID, CustomerID: o.CustomerID, Position: position32, PriceID: l.PriceID, ProductID: l.ProductID, Description: l.Description, Quantity: quantity, UnitAmount: l.UnitAmount, Amount: l.Amount, Ownership: optional(l.Ownership), ClaimKey: optional(l.ClaimKey), BillingIntervalHours: interval, AccessDurationHours: access, ProviderAccessDefault: l.ProviderAccessDefault, SubscriptionID: sub, Source: optional(l.Source), Now: now})
 }
 
 // freezeLineOwnership resolves ownership once at acceptance. An accepted

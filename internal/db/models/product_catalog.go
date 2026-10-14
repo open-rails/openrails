@@ -92,7 +92,11 @@ type Price struct {
 
 	// ProviderOwned: a provider owns and runs the price; its one PSPLinks
 	// entry is the provider object whose terms the row caches. Ours otherwise.
-	ProviderOwned bool `json:"provider_owned"`
+	ProviderOwned         bool              `json:"provider_owned"`
+	ProviderPSPID         *uuid.UUID        `json:"provider_psp_id,omitempty"`
+	ProviderSnapshot      map[string]string `json:"provider_snapshot,omitempty"`
+	BillingIntervalMonths *int              `json:"billing_interval_months,omitempty"`
+	ProviderAccessDefault bool              `json:"provider_access_default"`
 	// SellVia are the methods one of ours sells through (SellViaCard,
 	// SellViaSolana); nil is every method the merchant has.
 	SellVia []string `json:"sell_via,omitempty"`
@@ -143,11 +147,16 @@ func (p *Price) SellsVia(method string) bool {
 
 // ProviderLink is a provider price's provider object: its PSP key and link.
 func (p *Price) ProviderLink() (string, map[string]string, bool) {
-	if p == nil || !p.ProviderOwned || len(p.PSPLinks) != 1 {
+	if p == nil || !p.ProviderOwned {
 		return "", nil, false
 	}
-	for key, link := range p.PSPLinks {
-		return key, link, true
+	if len(p.PSPLinks) == 1 {
+		for key, link := range p.PSPLinks {
+			return key, link, true
+		}
+	}
+	if len(p.ProviderSnapshot) > 0 {
+		return p.ProviderSnapshot["psp_key"], p.ProviderSnapshot, true
 	}
 	return "", nil, false
 }
@@ -167,9 +176,23 @@ func (p *Price) ProviderBillingInterval() *int {
 	return p.BillingIntervalHours
 }
 
+// ProviderBillingMonths retains calendar recurrence independently of hourly access.
+func (p *Price) ProviderBillingMonths() *int {
+	_, link, ok := p.ProviderLink()
+	if ok {
+		if raw, named := link[RailKeyProviderBillingMonths]; named {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				return &n
+			}
+			return nil
+		}
+	}
+	return p.BillingIntervalMonths
+}
+
 // IsRecurring reports whether the price has a recurring billing cadence.
 func (p *Price) IsRecurring() bool {
-	return p != nil && p.BillingIntervalHours != nil && *p.BillingIntervalHours > 0
+	return p != nil && ((p.BillingIntervalHours != nil && *p.BillingIntervalHours > 0) || (p.BillingIntervalMonths != nil && *p.BillingIntervalMonths > 0))
 }
 
 // RecurringCycleHours returns the billing interval in hours for a recurring
@@ -178,7 +201,7 @@ func (p *Price) IsRecurring() bool {
 // provider cadences (Stripe interval, NMI day-frequency, Solana period) are
 // derived from this (hours/24) ONLY at the provider boundary.
 func (p *Price) RecurringCycleHours() *int {
-	if !p.IsRecurring() {
+	if !p.IsRecurring() || p.BillingIntervalHours == nil {
 		return nil
 	}
 	h := *p.BillingIntervalHours
@@ -200,6 +223,7 @@ func (p *Price) RecurringCycleDays() *int {
 // Link entry key constants (used in the PSPLinks JSONB map)
 const (
 	RailKeyProviderBillingInterval = "provider_billing_interval_hours"
+	RailKeyProviderBillingMonths   = "provider_billing_interval_months"
 	RailKeyPSPID                   = "psp_id"
 	RailKeyPlanID                  = "plan_id"
 	RailKeyProvider                = "provider"
@@ -350,6 +374,9 @@ func (p *Price) ForPSP(pspID uuid.UUID) *Price {
 	}
 	copy := *p
 	copy.PSPLinks = nil
+	if p.ProviderPSPID != nil && *p.ProviderPSPID != pspID {
+		copy.ProviderSnapshot = nil
+	}
 	for key, cfg := range p.PSPLinks {
 		if cfg[RailKeyPSPID] == pspID.String() {
 			if copy.PSPLinks == nil {
@@ -396,14 +423,14 @@ func (p *Product) View() billing.Product {
 func (p *Price) View() billing.Price {
 	out := billing.Price{Revision: p.KeyRevision, Version: p.Revision + 1,
 		ID: p.PublicID, Key: p.Key, ProductID: billing.ProductID(p.ProductID), Archived: p.Archived,
-		UnitAmount: p.Amount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours, BillingIntervalHours: p.BillingIntervalHours,
+		UnitAmount: p.Amount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours, BillingIntervalHours: p.BillingIntervalHours, BillingIntervalMonths: p.BillingIntervalMonths,
 		TrialUnitAmount: p.TrialUnitAmount, TrialDurationHours: p.TrialDurationHours, CustomerAmount: p.CustomerAmount, Quantity: p.Quantity,
 		SellVia: slices.Clone(p.SellVia), CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 	if p.ProviderOwned {
 		// An earlier version whose provider object moved to a newer one keeps
 		// no binding.
-		provider := &billing.PriceProvider{IDs: map[string]string{}, SyncStatus: billing.SyncStatusUnknown, Drift: []billing.DriftField{}}
+		provider := &billing.PriceProvider{AccessDurationDefault: p.ProviderAccessDefault, IDs: map[string]string{}, SyncStatus: billing.SyncStatusUnknown, Drift: []billing.DriftField{}}
 		if key, link, ok := p.ProviderLink(); ok {
 			provider.PSP, provider.Rail = key, link[RailKeyRail]
 			if id, err := uuid.Parse(link[RailKeyPSPID]); err == nil {

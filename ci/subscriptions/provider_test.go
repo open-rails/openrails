@@ -54,7 +54,12 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	require.NoError(t, err)
 	require.NotNil(t, l.price.Provider)
 	require.Equal(t, int64(9_990_000), l.price.UnitAmount, "the provider's terms")
-	require.Equal(t, monthHours, *l.price.BillingIntervalHours)
+	if rail == "stripe" {
+		require.Nil(t, l.price.BillingIntervalHours)
+		require.Equal(t, new(1), l.price.BillingIntervalMonths)
+	} else {
+		require.Equal(t, monthHours, *l.price.BillingIntervalHours)
+	}
 
 	start := w.clock.Now().Add(-10 * day)
 	end := start.Add(monthHours * time.Hour)
