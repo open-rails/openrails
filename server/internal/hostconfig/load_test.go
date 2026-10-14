@@ -43,6 +43,77 @@ func unsetenv(t *testing.T, key string) {
 	require.NoError(t, os.Unsetenv(key))
 }
 
+func TestCardVaultLoading(t *testing.T) {
+	secretsDir := bootEnv(t)
+	cfg, err := Load("")
+	require.NoError(t, err)
+	require.Nil(t, cfg.CardVault)
+	filename := writeFile(t, filepath.Join(t.TempDir(), "config.yaml"), `
+vault:
+  address: http://127.0.0.1:8200
+  token: fixture-token
+card_vault:
+  kind: basis_theory
+  tenant_id: fixture-tenant
+  kv_mount: file-cards
+`)
+	cfg, err = Load(filename)
+	require.NoError(t, err)
+	require.Equal(t, &billing.CardVaultConfig{Kind: "basis_theory", TenantID: "fixture-tenant", KVMount: "file-cards"}, cfg.CardVault)
+	mount, err := billing.CardVaultKVMount(cfg.Config)
+	require.NoError(t, err)
+	require.Equal(t, "file-cards", mount)
+	require.Empty(t, billing.MerchantConfigKVMount(cfg.Config))
+	writeFile(t, filepath.Join(secretsDir, "CARD_VAULT_KV_MOUNT"), "secret-cards")
+	cfg, err = Load(filename)
+	require.NoError(t, err)
+	require.Equal(t, "secret-cards", cfg.CardVault.KVMount)
+	t.Setenv("CARD_VAULT_KIND", "basis_theory")
+	t.Setenv("CARD_VAULT_TENANT_ID", "env-tenant")
+	t.Setenv("CARD_VAULT_KV_MOUNT", "env-cards")
+	cfg, err = Load(filename)
+	require.NoError(t, err)
+	mount, err = billing.CardVaultKVMount(cfg.Config)
+	require.NoError(t, err)
+	require.Equal(t, "env-cards", mount)
+	require.Equal(t, "env-tenant", cfg.CardVault.TenantID)
+	require.Empty(t, billing.MerchantConfigKVMount(cfg.Config))
+	cfg, err = Load("absent.yaml")
+	require.NoError(t, err)
+	require.Equal(t, &billing.CardVaultConfig{Kind: "basis_theory", TenantID: "env-tenant", KVMount: "env-cards"}, cfg.CardVault)
+}
+
+func TestRetiredCardVaultConfigRefused(t *testing.T) {
+	for _, source := range []string{"yaml", "env", "env object", "dotenv", "secret", "secret object"} {
+		t.Run(source, func(t *testing.T) {
+			secretsDir := bootEnv(t)
+			// New values must not hide a stale configuration source.
+			t.Setenv("CARD_VAULT_KIND", "basis_theory")
+			t.Setenv("CARD_VAULT_TENANT_ID", "new-tenant")
+			t.Setenv("CARD_VAULT_KV_MOUNT", "cards")
+			filename := "absent.yaml"
+			switch source {
+			case "yaml":
+				filename = writeFile(t, filepath.Join(t.TempDir(), "config.yaml"), "platform_vault:\n  tenant_id: old-tenant\n")
+			case "env":
+				t.Setenv("PLATFORM_VAULT_TENANT_ID", "old-tenant")
+			case "env object":
+				t.Setenv("PLATFORM_VAULT", `{"tenant_id":"old-tenant"}`)
+			case "dotenv":
+				unsetenv(t, "PLATFORM_VAULT_TENANT_ID")
+				writeFile(t, ".env", "PLATFORM_VAULT_TENANT_ID=old-tenant\n")
+			case "secret":
+				writeFile(t, filepath.Join(secretsDir, "PLATFORM_VAULT_TENANT_ID"), "old-tenant")
+			case "secret object":
+				writeFile(t, filepath.Join(secretsDir, "PLATFORM_VAULT"), `{"tenant_id":"old-tenant"}`)
+			}
+			_, err := Load(filename)
+			require.ErrorContains(t, err, "platform_vault was renamed to card_vault")
+			require.ErrorContains(t, err, "CARD_VAULT_*")
+		})
+	}
+}
+
 func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	bootEnv(t)
 	cfg, err := Load("")

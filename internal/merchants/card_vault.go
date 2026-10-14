@@ -62,7 +62,7 @@ func (s *Service) CardVaultRefusal(settings billing.MerchantSettings, psps map[s
 // CardVaultRefusal is why a deployment with vault (nil: none) cannot serve
 // settings' card vault and charge PSPs beside psps; nil when it can. Every
 // charge PSP must charge cards from the vault.
-func CardVaultRefusal(vault *config.PlatformVaultConfig, settings billing.MerchantSettings, psps map[string]merchantdocs.Doc[merchantdocs.PSP]) error {
+func CardVaultRefusal(vault *config.CardVaultConfig, settings billing.MerchantSettings, psps map[string]merchantdocs.Doc[merchantdocs.PSP]) error {
 	cards := liveCardPSPs(psps)
 	for _, key := range settings.ChargePSPs {
 		if _, ok := cards[key]; !ok {
@@ -165,7 +165,7 @@ func (s *Service) refusePSPForCardVault(settings billing.MerchantSettings, psps 
 // platformUnreachable are the PSPs, in key order, whose cards the platform
 // vault cannot reach: its proxy cannot present a card to their rail, or their
 // own server takes the card.
-func platformUnreachable(vault *config.PlatformVaultConfig, psps map[string]merchantdocs.PSP) []string {
+func platformUnreachable(vault *config.CardVaultConfig, psps map[string]merchantdocs.PSP) []string {
 	var proxy custodians.Descriptor
 	if vault != nil {
 		proxy, _ = custodians.Get(vault.Kind)

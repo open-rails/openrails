@@ -1,7 +1,5 @@
-// Package vaultconn connects the runtime to HashiCorp Vault: the KV v2 mount
-// merchant configuration lives in when one is named, and Transit for Solana
-// signing. Name a KV mount and Vault holds merchant configuration; name only a
-// Transit mount and it only signs.
+// Package vaultconn connects the runtime to HashiCorp Vault for merchant
+// configuration, platform card credentials and Solana Transit signing.
 package vaultconn
 
 import (
@@ -30,6 +28,8 @@ type Connection struct {
 	closeAuth context.CancelFunc
 	// KV is the merchant configuration mount; nil when none is named.
 	KV *vault.KVv2Adapter
+	// PlatformKV holds platform card credentials independently of merchant configuration.
+	PlatformKV *vault.KVv2Adapter
 	// SolanaTransit signs for a vault_transit Solana cranker; nil without
 	// Vault.
 	SolanaTransit solanaint.TransitClient
@@ -48,6 +48,10 @@ func Open(ctx context.Context, cfg *config.Config, borrowed *vaultapi.Client) (*
 	if cfg == nil || (cfg.Vault == nil && borrowed == nil) {
 		return &Connection{}, nil
 	}
+	platformMount, err := config.CardVaultKVMount(cfg)
+	if err != nil {
+		return nil, err
+	}
 	vc := cfg.Vault
 	if vc == nil {
 		vc = &config.VaultConfig{}
@@ -55,7 +59,7 @@ func Open(ctx context.Context, cfg *config.Config, borrowed *vaultapi.Client) (*
 	conn := &Connection{}
 	client := borrowed
 	mount := config.MerchantConfigKVMount(cfg)
-	err := config.ValidateVault(vc)
+	err = config.ValidateVault(vc)
 	if err == nil && client == nil {
 		authCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		if client, conn.Auth, err = vault.Login(authCtx, vaultConfig(vc)); err != nil {
@@ -81,6 +85,9 @@ func Open(ctx context.Context, cfg *config.Config, borrowed *vaultapi.Client) (*
 	conn.SolanaTransit = vault.NewTransitAdapter(client, transitMount).WithSupervisor(conn.Auth)
 	if mount != "" {
 		conn.KV = vault.NewKVv2Adapter(client, mount).WithReauthTrigger(conn.Auth)
+	}
+	if platformMount != "" {
+		conn.PlatformKV = vault.NewKVv2Adapter(client, platformMount).WithReauthTrigger(conn.Auth)
 	}
 	return conn, nil
 }

@@ -306,6 +306,11 @@ pkg openrails, type CaptchaConfig struct
 pkg openrails, type CaptchaConfig struct, Provider string `yaml:"provider" json:"provider"`
 pkg openrails, type CaptchaConfig struct, SecretKey string `yaml:"secret_key" json:"secret_key"`
 pkg openrails, type CaptchaConfig struct, SiteKey string `yaml:"site_key" json:"site_key"`
+pkg openrails, type CardVaultConfig = config.CardVaultConfig
+pkg openrails, type CardVaultConfig struct
+pkg openrails, type CardVaultConfig struct, KVMount string `yaml:"kv_mount" json:"kv_mount"`
+pkg openrails, type CardVaultConfig struct, Kind string `yaml:"kind" json:"kind"`
+pkg openrails, type CardVaultConfig struct, TenantID string `yaml:"tenant_id" json:"tenant_id"`
 pkg openrails, type Client struct
 pkg openrails, type ClientCredentialsConfig struct
 pkg openrails, type ClientCredentialsConfig struct, ClientID string
@@ -318,6 +323,7 @@ pkg openrails, type Config = config.Config
 pkg openrails, type Config struct
 pkg openrails, type Config struct, CCBillWebhookIPAllowlist []string `yaml:"ccbill_webhook_ip_allowlist" json:"ccbill_webhook_ip_allowlist"`
 pkg openrails, type Config struct, Captcha *config.CaptchaConfig `yaml:"captcha" json:"captcha"`
+pkg openrails, type Config struct, CardVault *config.CardVaultConfig `yaml:"card_vault" json:"card_vault"`
 pkg openrails, type Config struct, CatalogReconciliationInterval string `yaml:"catalog_reconciliation_interval" json:"catalog_reconciliation_interval"`
 pkg openrails, type Config struct, CloudflareProxies []string `yaml:"cloudflare_proxies" json:"cloudflare_proxies"`
 pkg openrails, type Config struct, DB *config.DBConfig `yaml:"db" json:"db"`
@@ -328,7 +334,6 @@ pkg openrails, type Config struct, HyperSwitch *config.HyperSwitchConfig `yaml:"
 pkg openrails, type Config struct, LLM *config.LLMConfig `yaml:"llm" json:"llm"`
 pkg openrails, type Config struct, Logger *config.LoggerConfig `yaml:"logger" json:"logger"`
 pkg openrails, type Config struct, Merchants map[string]config.MerchantDeclaration `yaml:"merchants" json:"merchants"`
-pkg openrails, type Config struct, PlatformVault *config.PlatformVaultConfig `yaml:"platform_vault" json:"platform_vault"`
 pkg openrails, type Config struct, ProviderSandbox *config.ProviderSandboxConfig `yaml:"provider_sandbox" json:"provider_sandbox"`
 pkg openrails, type Config struct, ProviderWriteMode string `yaml:"provider_write_mode" json:"provider_write_mode"`
 pkg openrails, type Config struct, PublicBillingBaseURL string `yaml:"public_billing_base_url" json:"public_billing_base_url"`
@@ -452,10 +457,6 @@ pkg openrails, type PSPConfig struct, Secrets map[string]string `yaml:"secrets,o
 pkg openrails, type PSPConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
 pkg openrails, type PSPs = config.PSPs
 pkg openrails, type PSPs map[string]config.PSPConfig
-pkg openrails, type PlatformVaultConfig = config.PlatformVaultConfig
-pkg openrails, type PlatformVaultConfig struct
-pkg openrails, type PlatformVaultConfig struct, Kind string `yaml:"kind" json:"kind"`
-pkg openrails, type PlatformVaultConfig struct, TenantID string `yaml:"tenant_id" json:"tenant_id"`
 pkg openrails, type Probe struct
 pkg openrails, type Probe struct, Check func(context.Context) error
 pkg openrails, type Probe struct, Name string

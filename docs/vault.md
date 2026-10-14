@@ -1,14 +1,16 @@
 # HashiCorp Vault + OpenRails
 
-Name a KV mount and Vault holds merchant configuration; name only a Transit
-mount and it only signs.
+`vault.kv_mount` selects Vault for merchant configuration. Platform card
+credentials and Transit signing can use Vault while merchant configuration
+stays in files.
 
 | Capability | What it is for | Setting |
 |---|---|---|
 | **Merchant configuration** | every merchant's display name, settings, alert webhooks, PSPs and custodians, credentials included | `vault.kv_mount` (a KV v2 mount) |
+| **Platform card credentials** | the operator's Basis Theory private key and merchant collection applications | `card_vault.kv_mount` (defaults to `vault.kv_mount`) |
 | **Transit signing** | Solana `vault_transit` crankers: Vault signs, the key never leaves | `vault.transit_mount` (default `transit`) |
 
-Without a KV mount the merchant's configuration is its file (`Config.Merchants`,
+Without `vault.kv_mount` the merchant's configuration is its file (`Config.Merchants`,
 or a standalone server's merchant manifest): read at startup and read-only.
 Postgres never holds merchant configuration in either mode; it keeps the
 identities history points at (merchants, PSP and custodian accounts) and what
@@ -16,7 +18,7 @@ OpenRails learns about them.
 
 ## Where configuration lives
 
-With a KV mount named, Vault is the only source:
+With `vault.kv_mount` named, Vault is the only merchant configuration source:
 
 - Staff edit configuration over HTTP (`PATCH /v1/merchant/configuration`, the
   `/v1/merchant/psps` and `/v1/merchant/alert-webhooks` routes) or in the console,
@@ -41,15 +43,20 @@ it):
 <kv_mount>/<scope_prefix>/merchants/<merchant-id>/psps/<key>
 <kv_mount>/<scope_prefix>/merchants/<merchant-id>/custodians/<key>
 <kv_mount>/<scope_prefix>/credential_fingerprint_key
-<kv_mount>/<scope_prefix>/platform_vault/<tenant_id>
 ```
 
 `scope_prefix` defaults to `openrails`. A key (the PSP or custodian name
 purchase and the catalog use) matches `^[a-z0-9][a-z0-9_-]{0,62}$`.
 `credential_fingerprint_key` is created by OpenRails on first start; it keys
 the fingerprints that catch one gateway account declared twice. Keep it.
-`platform_vault/<tenant_id>` holds the platform vault's keys when the
-deployment configures one ([payment-method custody](payment-method-custody.md)).
+Platform card credentials live at
+`<card_vault.kv_mount>/<scope_prefix>/platform_vault/<tenant_id>`.
+If the platform mount is omitted, `vault.kv_mount` supplies it, preserving the
+existing shared layout. Both use `vault.scope_prefix` (default `openrails`)
+and the same Vault connection. An explicit platform mount is never replaced
+by the merchant mount when a read fails. A deployment using only platform
+credentials needs read access to that document, not merchant configuration
+or its fingerprint key. See [payment-method custody](payment-method-custody.md).
 
 ```sh
 id=$(openrails merchants get shop | jq -r .id)
