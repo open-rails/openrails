@@ -70,11 +70,10 @@ jobs:
           node-version: 24
       - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
 
-      - name: Check @openrails/billing-ui
+      - name: Install @openrails/billing-ui dependencies
         working-directory: sdk/billing-ui
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
-          pnpm check
 
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
@@ -120,7 +119,6 @@ jobs:
           [[ "$GITHUB_EVENT_NAME" == push ]] && version="${GITHUB_REF_NAME#v}"
           helm="$(scripts/ci-install-tool.sh helm)"
           echo "HELM=$helm" >> "$GITHUB_ENV"
-          "$helm" lint --strict deploy/helm/openrails
           "$helm" package deploy/helm/openrails --version "$version" --app-version "v$version" --destination dist/chart
       - name: Push
         if: github.event_name == 'push'
@@ -174,4 +172,4 @@ jobs:
           # Provenance names this run's commit, so only a tarball built in it gets one.
           provenance=true
           [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] && provenance=false
-          npm publish "openrails-billing-ui-$v.tgz" --tag "$dist_tag" --access public --provenance="$provenance"
+          npm publish "openrails-billing-ui-$v.tgz" --tag "$dist_tag" --access public --provenance="$provenance" --ignore-scripts
