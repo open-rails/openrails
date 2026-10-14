@@ -616,7 +616,11 @@ func nativeEnrollmentCanonicalPrice(ctx context.Context, d *db.DB, p InitialMemb
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("read accepted native price: %w", err)
 	}
-	if original.ProductID != p.Terms.ProductID || original.Amount != p.Terms.RecurringAmount || original.Currency != p.Terms.Currency || original.BillingIntervalHours == nil || int64(*original.BillingIntervalHours) != int64(p.NativeSchedule.DayFrequency)*24 {
+	cadence := original.BillingIntervalHours
+	if original.ProviderOwned {
+		cadence = original.ProviderBillingInterval()
+	}
+	if original.ProductID != p.Terms.ProductID || original.Amount != p.Terms.RecurringAmount || original.Currency != p.Terms.Currency || cadence == nil || p.Terms.RecurringIntervalHours == nil || int64(*cadence) != int64(p.NativeSchedule.DayFrequency)*24 || *cadence != *p.Terms.RecurringIntervalHours {
 		return uuid.Nil, errors.New("accepted native price contradicts its frozen product, money or cadence")
 	}
 	canonical := original
