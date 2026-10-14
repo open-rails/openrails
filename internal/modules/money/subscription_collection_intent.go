@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -264,7 +265,7 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		if err != nil {
 			return err
 		}
-		if sub.CollectionPolicy != models.CollectionPolicyEngine || string(sub.Rail) != in.Rail || sub.RailSubscriptionID != "" || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || charged == nil || *charged != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) || sub.PriceID != p.Renewal.FromPriceID || sub.ProductID != p.Renewal.FromProductID || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod) || sub.CanceledAt != nil || sub.DeletionScheduledAt != nil || failures != p.FailureCount {
+		if sub.CollectionPolicy != models.CollectionPolicyEngine || string(sub.Rail) != in.Rail || sub.RailSubscriptionID != "" || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Renewal.PSPID || charged == nil || *charged != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) || sub.PriceID != p.Renewal.FromPriceID || sub.ProductID != p.Renewal.FromProductID || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod) || sub.CanceledAt != nil || sub.DeletionScheduledAt != nil || failures != p.FailureCount {
 			return errEngineObligationChanged
 		}
 		if p.Instrument.CustodianID != nil {
@@ -286,7 +287,18 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		if err := p.Instrument.Matches(method); err != nil {
 			return err
 		}
-		if err := mandates.Recheck(ctx, q, in.MerchantID, p.Instrument.Mandate); err != nil {
+		if method.Custodian == models.CustodianPlatform {
+			agreement, err := mandates.SubscriptionAgreement(ctx, q, in.MerchantID, p.Renewal.CustomerID, sub.ID, method.ID)
+			if err != nil {
+				return errors.Join(charge.ErrInstrumentChanged, err)
+			}
+			if *mandates.Lineage(agreement) != *p.Instrument.Mandate {
+				return charge.ErrInstrumentChanged
+			}
+			if err := nmiproxy.ValidateRecurringAccount(agreement.PspID, p.Instrument.PSPID); err != nil {
+				return err
+			}
+		} else if err := mandates.Recheck(ctx, q, in.MerchantID, p.Instrument.Mandate); err != nil {
 			return errors.Join(charge.ErrInstrumentChanged, err)
 		}
 		binding, err := engineCollectionBinding(ctx, q, charge.CustodyOf(h.DB), method, p.Instrument.PSPID, p.HyperSwitch.APIBaseURL)

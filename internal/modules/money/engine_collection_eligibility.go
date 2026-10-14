@@ -88,7 +88,23 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 	if configuration == nil {
 		return readFailure(errors.New("merchant configuration is unavailable"))
 	}
-	account, ok, err := configuration.PSPScopeByID(ctx, billing.MerchantID(sub.MerchantID), sub.PspID)
+	agreement, err := mandates.SubscriptionAgreement(ctx, q, sub.MerchantID, sub.CustomerID, sub.ID, method.ID)
+	if err != nil {
+		if errors.Is(err, mandates.ErrMissing) || errors.Is(err, mandates.ErrNotActive) {
+			return unusable(err)
+		}
+		return readFailure(err)
+	}
+	psp := sub.PspID
+	if method.Custodian == models.CustodianPlatform {
+		psp, err = platformRenewalAccount(ctx, configuration, method, agreement)
+		if err != nil {
+			return unsupported(err)
+		}
+	} else if agreement.PspID != psp {
+		return unusable(mandates.ErrMissing)
+	}
+	account, ok, err := configuration.PSPScopeByID(ctx, billing.MerchantID(sub.MerchantID), psp)
 	if err != nil {
 		return readFailure(err)
 	}
@@ -113,21 +129,14 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 			return unusable(errors.New("archived custodian cannot admit a new engine renewal"))
 		}
 	}
-	binding, err = engineCollectionBinding(ctx, q, configuration, method, sub.PspID, s.hyperSwitchDeployment)
+	binding, err = engineCollectionBinding(ctx, q, configuration, method, psp, s.hyperSwitchDeployment)
 	if err != nil {
 		return unsupported(err)
 	}
-	instrument = charge.FreezeInstrument(method, sub.PspID)
+	instrument = charge.FreezeInstrument(method, psp)
 	if err := charge.ValidateEngineInstrument(method.Rail, instrument, engineHyperSwitchPointer(method.Custodian, binding)); err != nil {
 		return unusable(err)
 	}
-	// A renewal runs only under the subscription's active recurring mandate on
-	// this card and account; anything else waits for the member.
-	if instrument.Mandate, err = mandates.ForSubscription(ctx, q, sub.MerchantID, sub.CustomerID, sub.ID, method.ID, sub.PspID); err != nil {
-		if errors.Is(err, mandates.ErrMissing) || errors.Is(err, mandates.ErrNotActive) {
-			return unusable(err)
-		}
-		return readFailure(err)
-	}
+	instrument.Mandate = mandates.Lineage(agreement)
 	return method, instrument, binding, nil
 }

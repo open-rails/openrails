@@ -4,11 +4,22 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
+
+// ValidateRecurringAccount keeps NMI references on their source gateway account
+// until cross-account reference handling is confirmed. Vault access alone does
+// not establish that a destination can continue an existing recurring payment.
+func ValidateRecurringAccount(source, destination uuid.UUID) error {
+	if source == uuid.Nil || source != destination {
+		return errors.New("NMI recurring reference requires its original gateway account")
+	}
+	return nil
+}
 
 // VerifyRecurring establishes a replacement card's recurring reference while
 // the customer is present. It verifies the card without collecting money.
