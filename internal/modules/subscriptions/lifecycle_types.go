@@ -26,6 +26,10 @@ type CreateMembershipParams struct {
 	// PaymentCustodian is the frozen credential custody of the accepted payment.
 	PaymentCustodian string
 	// Prepared is supplied by a qualified durable initial-enrollment operation.
+	// CanonicalPriceID is the provider-price projection of an accepted native
+	// NMI enrollment after its catalog migration. Its qualified intent validates
+	// that projection; Prepared.PriceID still owns the original financial facts.
+	CanonicalPriceID      *uuid.UUID
 	Prepared              *InitialMembershipTerms
 	UserID                string
 	PriceID               uuid.UUID

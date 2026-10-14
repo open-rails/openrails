@@ -3,12 +3,15 @@ package payment
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -16,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -519,7 +523,15 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 			if p.DelayedStart() != nil {
 				metadata["delayed_start"] = p.DelayedStart().UTC().Format(time.RFC3339Nano)
 			}
-			created, _, err := h.Purchases.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, PaymentCustodian: p.Instrument.Custodian, InitialPaymentReversal: receipt.ReversalKind(), UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: models.Rail(in.Rail), RailSubscriptionID: &providerSub, TransactionID: transaction, Amount: p.Terms.Amount, AmountProvided: true, Currency: p.Terms.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata})
+			var canonicalPriceID *uuid.UUID
+			if p.NativeSchedule != nil {
+				id, err := nativeEnrollmentCanonicalPrice(ctx, d, p)
+				if err != nil {
+					return err
+				}
+				canonicalPriceID = &id
+			}
+			created, _, err := h.Purchases.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, CanonicalPriceID: canonicalPriceID, PaymentCustodian: p.Instrument.Custodian, InitialPaymentReversal: receipt.ReversalKind(), UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: models.Rail(in.Rail), RailSubscriptionID: &providerSub, TransactionID: transaction, Amount: p.Terms.Amount, AmountProvided: true, Currency: p.Terms.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata})
 			if err != nil {
 				return err
 			}
@@ -589,6 +601,43 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 	}
 	discardCard(ctx, h.Purchases.RailPaymentMethodService, declined)
 	return outcome
+}
+
+// nativeEnrollmentCanonicalPrice projects only a repaired agreement. The
+// accepted operation, its bill, and its payment keep their original price ID.
+// The migration's exact original-price/account pair is the only projection;
+// a current PSP label or a newer provider price cannot replace that authority.
+func nativeEnrollmentCanonicalPrice(ctx context.Context, d *db.DB, p InitialMembershipPayload) (uuid.UUID, error) {
+	if p.NativeSchedule == nil || p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
+		return uuid.Nil, errors.New("native provider projection requires its accepted schedule")
+	}
+	prices := catalog.NewPriceService(d)
+	original, err := prices.GetByID(ctx, p.Terms.PriceID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("read accepted native price: %w", err)
+	}
+	if original.ProductID != p.Terms.ProductID || original.Amount != p.Terms.RecurringAmount || original.Currency != p.Terms.Currency || original.BillingIntervalHours == nil || int64(*original.BillingIntervalHours) != int64(p.NativeSchedule.DayFrequency)*24 {
+		return uuid.Nil, errors.New("accepted native price contradicts its frozen product, money or cadence")
+	}
+	canonical := original
+	if !original.ProviderOwned {
+		id := uuid.UUID(md5.Sum([]byte(p.Terms.PriceID.String() + ":" + p.Terms.PSPID.String())))
+		canonical, err = prices.GetByID(ctx, id)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("read migrated native provider price: %w", err)
+		}
+	}
+	_, link, found := canonical.ProviderLink()
+	psp, err := uuid.Parse(link[models.RailKeyPSPID])
+	if !found || err != nil || psp != p.Terms.PSPID || link[models.RailKeyRail] != string(models.RailNMI) || link[models.RailKeyPlanID] != p.NativeSchedule.PlanID {
+		return uuid.Nil, errors.New("native provider price contradicts its accepted account or plan")
+	}
+	if canonical.ProductID != original.ProductID || !reflect.DeepEqual(
+		[]any{canonical.Amount, canonical.Currency, canonical.AccessDurationHours, canonical.BillingIntervalHours, canonical.TrialUnitAmount, canonical.TrialDurationHours, canonical.CustomerAmount, canonical.Quantity},
+		[]any{original.Amount, original.Currency, original.AccessDurationHours, original.BillingIntervalHours, original.TrialUnitAmount, original.TrialDurationHours, original.CustomerAmount, original.Quantity}) {
+		return uuid.Nil, errors.New("migrated native provider price contradicts its original financial terms")
+	}
+	return canonical.ID, nil
 }
 
 // railSubscriptionReader is the local-lookup surface the roster scan needs
