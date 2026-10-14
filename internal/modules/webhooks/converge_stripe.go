@@ -321,6 +321,9 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 		}
 		oldProduct = sub.ProductID
 		sub.PriceID, sub.ProductID = price.ID, price.ProductID
+		// The new price's immutable access choice is the one accepted with it.
+		sub.AccessDurationHoursSnapshot = price.AccessDurationHours
+		sub.ProviderAccessDefaultSnapshot = price.ProviderAccessDefault
 		if err := subscriptions.ProviderMovedPrice(ctx, txdb, sub.ID, price.ID, now); err != nil {
 			return fmt.Errorf("stripe converge: settle the scheduled change: %w", err)
 		}
