@@ -118,13 +118,18 @@ func checkProducts(in []billing.PSPImportProduct) error {
 
 // productFor is the product key a plan grants, "" for none.
 func productFor(products []billing.PSPImportProduct, plan string) string {
-	fallback := ""
+	return productEntry(products, plan).Product
+}
+
+// productEntry is the entry naming plan, else the one naming every plan.
+func productEntry(products []billing.PSPImportProduct, plan string) billing.PSPImportProduct {
+	var fallback billing.PSPImportProduct
 	for _, p := range products {
 		if p.Plan == plan {
-			return p.Product
+			return p
 		}
 		if p.Plan == "" {
-			fallback = p.Product
+			fallback = p
 		}
 	}
 	return fallback

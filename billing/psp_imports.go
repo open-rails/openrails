@@ -111,10 +111,13 @@ type PSPImportRule struct {
 }
 
 // PSPImportProduct names the product a provider plan grants. Plan "" is
-// every plan no other entry names.
+// every plan no other entry names. Price, for a rail whose subscriptions name
+// no plan (CCBill), is the key of the product's provider price on the PSP
+// they bill; omitted, the product must hold exactly one.
 type PSPImportProduct struct {
 	Plan    string `json:"plan,omitempty"`
 	Product string `json:"product"`
+	Price   string `json:"price,omitempty"`
 }
 
 // CreatePSPImportParams starts pulling one PSP. HistorySince bounds the

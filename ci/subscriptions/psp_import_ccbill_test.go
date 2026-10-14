@@ -45,6 +45,10 @@ func TestPSPImportFromCCBill(t *testing.T) {
 	_, err = client.CreateProviderPrice(ctx, billing.CreateProviderPriceParams{ProductID: product.ID, Key: product.Key + "-ccbill", PSP: "ccbill", FlexID: ccbillFlexID,
 		RecurringBillingOptionID: ccbillRBO, UnitAmount: new(int64(9_990_000)), Currency: "USD", BillingIntervalHours: &hours, Archived: true})
 	require.NoError(t, err)
+	// A second CCBill price on the product: the import names the one its members bill.
+	_, err = client.CreateProviderPrice(ctx, billing.CreateProviderPriceParams{ProductID: product.ID, Key: product.Key + "-ccbill-annual", PSP: "ccbill", FlexID: ccbillFlexID,
+		RecurringBillingOptionID: "0000009999", UnitAmount: new(int64(99_000_000)), Currency: "USD", BillingIntervalHours: new(365 * 24), Archived: true})
+	require.NoError(t, err)
 
 	member, stranger := w.newCustomer(), w.newCustomer()
 	directory.Put(userinfo.User{ID: member.id, Email: "member@host.test", Username: "legacy_member"})
@@ -65,7 +69,7 @@ func TestPSPImportFromCCBill(t *testing.T) {
 	since := rebillAt.Add(-time.Hour)
 	imp, err := w.client[embedded].CreatePSPImport(ctx, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "ccbill"}, HistorySince: &since,
 		Rules:    []billing.PSPImportRule{{Fact: "username", Via: billing.PSPImportViaDirectory}},
-		Products: []billing.PSPImportProduct{{Product: product.Key}}})
+		Products: []billing.PSPImportProduct{{Product: product.Key, Price: product.Key + "-ccbill"}}})
 	require.NoError(t, err)
 	imp = w.pspImported(imp.ID, billing.PSPImportPulled)
 	recs := w.pspRecords(imp.ID)

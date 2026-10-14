@@ -165,7 +165,7 @@ ORDER BY id;
 -- name: ListProductProviderPrices :many
 -- A product's provider prices on one PSP, for rails whose subscriptions name
 -- no provider object.
-SELECT price.public_id, price.amount, price.currency, price.billing_interval_hours, price.billing_interval_months
+SELECT price.key, price.public_id, price.amount, price.currency, price.billing_interval_hours, price.billing_interval_months
 FROM billing.price_psp_bindings b
 JOIN billing.prices price ON price.merchant_id = b.merchant_id AND price.id = b.price_id
 JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id

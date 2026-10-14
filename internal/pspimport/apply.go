@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -96,16 +97,19 @@ func (im *Importer) providerPrices(ctx context.Context, row gen.BillingPspImport
 		if err := json.Unmarshal(row.Products, &products); err != nil {
 			return nil, "", err
 		}
-		product := productFor(products, "")
-		if product == "" {
+		entry := productEntry(products, "")
+		if entry.Product == "" {
 			return out, "the import names no product for its subscriptions", nil
 		}
-		rows, err := im.DB.Gen(ctx).ListProductProviderPrices(ctx, gen.ListProductProviderPricesParams{MerchantID: row.MerchantID, PspID: row.PspID, ProductKey: product})
+		rows, err := im.DB.Gen(ctx).ListProductProviderPrices(ctx, gen.ListProductProviderPricesParams{MerchantID: row.MerchantID, PspID: row.PspID, ProductKey: entry.Product})
 		if err != nil {
 			return nil, "", err
 		}
+		if entry.Price != "" {
+			rows = slices.DeleteFunc(rows, func(r gen.ListProductProviderPricesRow) bool { return r.Key != entry.Price })
+		}
 		if len(rows) != 1 {
-			return out, fmt.Sprintf("product %q holds %d provider prices on this PSP; declare exactly one (%s has no catalog to read)", product, len(rows), row.Rail), nil
+			return out, fmt.Sprintf("product %q holds %d provider prices on this PSP matching %q; name one by its key (%s has no catalog to read)", entry.Product, len(rows), entry.Price, row.Rail), nil
 		}
 		r := rows[0]
 		out[""] = termsOf(r.PublicID, r.Amount, r.Currency, r.BillingIntervalHours, r.BillingIntervalMonths)
