@@ -35,16 +35,19 @@ type providerPrice struct {
 	request         billing.CreatePriceParams
 	link            map[string]string
 	// cached is why the stored terms were kept: the provider did not answer.
-	cached string
+	cached        string
+	months        *int
+	accessDefault bool
 }
 
 // providerPriceTerms are a provider price's money terms.
 type providerPriceTerms struct {
-	unitAmount           int64
-	currency             string
-	billingIntervalHours *int
-	trialUnitAmount      *int64
-	trialDurationHours   *int
+	unitAmount            int64
+	currency              string
+	billingIntervalHours  *int
+	billingIntervalMonths *int
+	trialUnitAmount       *int64
+	trialDurationHours    *int
 }
 
 // checkProviderPriceRail refuses a declaration its PSP's rail does not take:
@@ -104,13 +107,16 @@ func (s *Service) readProviderPriceTerms(ctx context.Context, account merchants.
 		if terms.unitAmount, err = moneyutil.RailMinorToNative(terms.currency, moneyutil.Cents(detail.AmountCents)); err != nil {
 			return terms, nil, err
 		}
-		// A month-based plan counts 30 days a month.
-		days := cmp.Or(detail.DayFrequency, detail.MonthFrequency*30)
-		if days <= 0 {
+		switch {
+		case detail.DayFrequency > 0 && detail.MonthFrequency > 0:
+			return terms, nil, apperr.Invalidf("NMI plan %q states two billing frequencies", decl.PlanID)
+		case detail.MonthFrequency > 0:
+			terms.billingIntervalMonths = new(detail.MonthFrequency)
+		case detail.DayFrequency > 0:
+			terms.billingIntervalHours = new(detail.DayFrequency * 24)
+		default:
 			return terms, nil, apperr.Invalidf("NMI plan %q states no billing frequency", decl.PlanID)
 		}
-		hours := days * 24
-		terms.billingIntervalHours = &hours
 		return terms, map[string]string{models.RailKeyPlanID: decl.PlanID}, nil
 	case models.RailStripe:
 		reader, ok := s.stripeCatalogReader(ctx, account.AccountID)
@@ -129,12 +135,11 @@ func (s *Service) readProviderPriceTerms(ctx context.Context, account merchants.
 			return terms, nil, err
 		}
 		if remote.Recurring != nil {
-			days := stripeIntervalDays(remote.Recurring.Interval, remote.Recurring.Count)
-			if days <= 0 {
-				return terms, nil, apperr.Invalidf("Stripe price %q bills every %d %s, which OpenRails cannot measure", decl.PriceID, remote.Recurring.Count, remote.Recurring.Interval)
+			var err error
+			terms.billingIntervalHours, terms.billingIntervalMonths, err = providerCadence(remote.Recurring.Interval, remote.Recurring.Count)
+			if err != nil {
+				return terms, nil, apperr.Invalidf("Stripe price %q: %v", decl.PriceID, err)
 			}
-			hours := days * 24
-			terms.billingIntervalHours = &hours
 		}
 		ids := map[string]string{models.RailKeyStripePriceID: decl.PriceID}
 		if remote.Product != "" {
@@ -151,11 +156,23 @@ func (s *Service) readProviderPriceTerms(ctx context.Context, account merchants.
 	return terms, nil, apperr.Invalidf("PSP %q runs no provider prices", account.Key)
 }
 
-// stripeIntervalDays is a Stripe recurring interval in days: a month is 30
-// days, a year 365.
-func stripeIntervalDays(interval string, count int) int {
-	per := map[string]int{"day": 1, "week": 7, "month": 30, "year": 365}[interval]
-	return per * max(count, 1)
+// providerCadence preserves native calendar intervals rather than estimating
+// their hours. A Stripe year is twelve calendar months.
+func providerCadence(unit string, count int) (*int, *int, error) {
+	if count <= 0 {
+		return nil, nil, fmt.Errorf("billing interval count must be positive")
+	}
+	switch unit {
+	case "day":
+		return new(count * 24), nil, nil
+	case "week":
+		return new(count * 7 * 24), nil, nil
+	case "month":
+		return nil, new(count), nil
+	case "year":
+		return nil, new(count * 12), nil
+	}
+	return nil, nil, fmt.Errorf("unsupported provider billing interval %q", unit)
 }
 
 // providerPriceRequest is the price a provider price is stored as: the
@@ -164,7 +181,9 @@ func stripeIntervalDays(interval string, count int) int {
 func providerPriceRequest(product *models.Product, key string, decl catalogwire.ApplyProviderPrice, terms providerPriceTerms, archived bool) billing.CreatePriceParams {
 	req := billing.CreatePriceParams{ProductID: billing.ProductID(product.ID), Key: key, UnitAmount: terms.unitAmount, Currency: terms.currency,
 		BillingIntervalHours: terms.billingIntervalHours, TrialUnitAmount: terms.trialUnitAmount, TrialDurationHours: terms.trialDurationHours, Archived: archived}
-	req.AccessDurationHours = cmp.Or(decl.AccessDurationHours, terms.billingIntervalHours)
+	if decl.AccessDurationHours.Set && !decl.AccessDurationHours.Null {
+		req.AccessDurationHours = new(decl.AccessDurationHours.Value)
+	}
 	if decl.OneOff {
 		req.BillingIntervalHours, req.TrialUnitAmount, req.TrialDurationHours = nil, nil, nil
 	}
@@ -173,8 +192,8 @@ func providerPriceRequest(product *models.Product, key string, decl catalogwire.
 
 // providerPriceID is a provider price's id: its terms', salted with the
 // provider object it mirrors.
-func providerPriceID(productID uuid.UUID, req billing.CreatePriceParams, pspID uuid.UUID, ids map[string]string) uuid.UUID {
-	parts := []string{"provider", pspID.String()}
+func providerPriceID(productID uuid.UUID, req billing.CreatePriceParams, pspID uuid.UUID, ids map[string]string, months *int, defaultAccess bool) uuid.UUID {
+	parts := []string{"provider", pspID.String(), "calendar_months", optionalHours(months), "default_access", strconv.FormatBool(defaultAccess)}
 	for _, k := range slices.Sorted(maps.Keys(ids)) {
 		parts = append(parts, k, ids[k])
 	}
@@ -208,7 +227,7 @@ func (s *Service) prepareProviderPrice(ctx context.Context, accounts []merchants
 	if errors.Is(err, ErrProviderPriceUnreadable) && current != nil {
 		if _, link, ok := current.ProviderLink(); ok && link[models.RailKeyPSPID] == account.ID.String() && sameProviderRefs(link, decl.References()) {
 			out.cached = err.Error()
-			terms = providerPriceTerms{unitAmount: current.Amount, currency: current.Currency, billingIntervalHours: current.ProviderBillingInterval(), trialUnitAmount: current.TrialUnitAmount, trialDurationHours: current.TrialDurationHours}
+			terms = providerPriceTerms{unitAmount: current.Amount, currency: current.Currency, billingIntervalHours: current.ProviderBillingInterval(), billingIntervalMonths: current.ProviderBillingMonths(), trialUnitAmount: current.TrialUnitAmount, trialDurationHours: current.TrialDurationHours}
 			ids = maps.Clone(link)
 			err = nil
 		}
@@ -217,6 +236,11 @@ func (s *Service) prepareProviderPrice(ctx context.Context, accounts []merchants
 		return nil, err
 	}
 	out.request = providerPriceRequest(product, key, decl, terms, archived)
+	out.months = terms.billingIntervalMonths
+	if decl.OneOff {
+		out.months = nil
+	}
+	out.accessDefault = !decl.AccessDurationHours.Set
 	if err := validateCatalogPriceTerms(out.request); err != nil {
 		return nil, err
 	}
@@ -227,17 +251,13 @@ func (s *Service) prepareProviderPrice(ctx context.Context, accounts []merchants
 		}
 	}
 	out.link[models.RailKeyProviderBillingInterval] = optionalHours(terms.billingIntervalHours)
+	out.link[models.RailKeyProviderBillingMonths] = optionalHours(terms.billingIntervalMonths)
 	return out, nil
 }
 
 // sameProviderRefs reports a stored binding naming the declared references.
 func sameProviderRefs(link, refs map[string]string) bool {
-	for k, v := range refs {
-		if link[k] != v {
-			return false
-		}
-	}
-	return len(refs) > 0
+	return len(refs) > 0 && maps.Equal(providerRefs(link), refs)
 }
 
 // providerRefs are a binding's provider identifiers, the declaration's names.
@@ -264,7 +284,7 @@ func (s *Service) writeProviderPrice(ctx context.Context, product *models.Produc
 		return nil, false, err
 	}
 	pspID := p.account.ID
-	id := providerPriceID(product.ID, p.request, pspID, providerRefs(p.link))
+	id := providerPriceID(product.ID, p.request, pspID, providerRefs(p.link), p.months, p.accessDefault)
 	links := map[string]map[string]string{p.account.Key: p.link}
 	chain, err := prices.ListChainByKey(ctx, mid.UUID(), product.ID, p.key)
 	if err != nil {
@@ -277,7 +297,7 @@ func (s *Service) writeProviderPrice(ctx context.Context, product *models.Produc
 		if _, link, bound := version.ProviderLink(); bound && (link[models.RailKeyPSPID] != pspID.String() || !sameProviderRefs(link, providerRefs(p.link))) {
 			return nil, false, apperr.Invalidf("provider price key %q names another provider object: use a new key for a different PSP or reference", p.key)
 		}
-		if samePriceTerms(version.View(), p.request) {
+		if samePriceTerms(version.View(), p.request) && optionalHours(version.BillingIntervalMonths) == optionalHours(p.months) && version.ProviderAccessDefault == p.accessDefault {
 			// Populated upgrades preserve their existing identities, and old
 			// terms reactivate their existing immutable financial row.
 			id = version.ID
@@ -295,7 +315,11 @@ func (s *Service) writeProviderPrice(ctx context.Context, product *models.Produc
 			}
 		}
 	}
-	price, err := s.writeCatalogPrice(ctx, priceWrite{req: p.request, product: product, id: id, links: links, providerOwned: true})
+	price, err := s.writeCatalogPrice(ctx, priceWrite{req: p.request, product: product, id: id, links: links, providerOwned: true, providerPSPID: &pspID, providerSnapshot: func() map[string]string {
+		snapshot := maps.Clone(p.link)
+		snapshot["psp_key"] = p.account.Key
+		return snapshot
+	}(), providerMonths: p.months, providerAccessDefault: p.accessDefault})
 	if err != nil {
 		return nil, false, err
 	}
@@ -448,6 +472,9 @@ func (s *Service) verifyProviderPrice(ctx context.Context, price *models.Price, 
 	stored, remote := price.ProviderBillingInterval(), terms.billingIntervalHours
 	if (stored == nil) != (remote == nil) || stored != nil && *stored != *remote {
 		drift = append(drift, billing.DriftField{Field: "billing_interval_hours", OpenRailsValue: optionalHours(stored), RemoteValue: optionalHours(remote)})
+	}
+	if optionalHours(price.ProviderBillingMonths()) != optionalHours(terms.billingIntervalMonths) {
+		drift = append(drift, billing.DriftField{Field: "billing_interval_months", OpenRailsValue: optionalHours(price.ProviderBillingMonths()), RemoteValue: optionalHours(terms.billingIntervalMonths)})
 	}
 	out.Drift = drift
 	out.SyncStatus = billing.SyncStatusInSync

@@ -222,7 +222,9 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		start = *a.PeriodStartsAt
 	}
 	var accessEnd *time.Time
-	if rows[0].AccessDurationHoursSnapshot != nil {
+	if rows[0].ProviderAccessDefaultSnapshot {
+		accessEnd = rows[0].CurrentPeriodEndsAt
+	} else if rows[0].AccessDurationHoursSnapshot != nil {
 		end := start.Add(time.Duration(*rows[0].AccessDurationHoursSnapshot) * time.Hour)
 		accessEnd = &end
 	}

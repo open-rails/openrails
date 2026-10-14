@@ -161,6 +161,7 @@ func priceForPurchaseTarget(price *models.Price, target railTarget) *models.Pric
 	}
 	copy := *price
 	copy.PSPLinks = nil
+	copy.ProviderSnapshot = nil
 	if link := pspLinkForTarget(price, target); link != nil {
 		copy.PSPLinks = map[string]map[string]string{target.PSP: link}
 	}

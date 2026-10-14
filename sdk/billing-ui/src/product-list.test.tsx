@@ -128,18 +128,27 @@ describe("ProductList", () => {
       const member = catalog()[2]!
       const own = { ...member.prices[0]!, sell_via: sellVia }
       const provider = { ...own, id: "price_ccbill", key: "ccbill", sell_via: null,
-        provider: { psp: "ccbill", psp_id: "psp_ccbill", rail: "ccbill", ids: {}, sync_status: "unknown" as const, drift: [] } }
+        provider: { psp: "ccbill", psp_id: "psp_ccbill", rail: "ccbill", ids: {}, sync_status: "unknown" as const, drift: [], access_duration_default: false } }
       mount(<ProductList products={[{ ...member, prices: [own, provider] }]} onPaid={vi.fn()} onSignInRequired={vi.fn()} />, server)
       expect(await screen.findAllByRole("button", { name: "$10.00 every 30 days" })).toHaveLength(sellVia ? 2 : 1)
     }
   )
+
+  it("keeps an identical trial provider offer because it cannot be an order fallback", async () => {
+    const server = fakeBilling()
+    const member = catalog()[2]!
+    const own = { ...member.prices[0]!, trial_unit_amount: "0", trial_duration_hours: 24 }
+    const provider = { ...own, id: "price_same_trial", key: "same-trial", provider: { psp: "ccbill", psp_id: "psp_ccbill", rail: "ccbill", ids: {}, sync_status: "unknown" as const, drift: [], access_duration_default: false } }
+    mount(<ProductList products={[{ ...member, prices: [own, provider] }]} onPaid={vi.fn()} onSignInRequired={vi.fn()} />, server)
+    expect(await screen.findAllByRole("button")).toHaveLength(2)
+  })
 
   it("keeps a distinct trial and hides legacy provider prices", async () => {
     const server = fakeBilling()
     const member = catalog()[2]!
     const own = member.prices[0]!
     const ccbill = { ...own, id: "price_trial", key: "ccbill-trial", trial_unit_amount: "0", trial_duration_hours: 24,
-      provider: { psp: "ccbill", psp_id: "psp_ccbill", rail: "ccbill", ids: {}, sync_status: "unknown" as const, drift: [] } }
+      provider: { psp: "ccbill", psp_id: "psp_ccbill", rail: "ccbill", ids: {}, sync_status: "unknown" as const, drift: [], access_duration_default: false } }
     const legacy = { ...own, id: "price_legacy", key: "legacy", provider: { ...ccbill.provider, rail: "nmi" } }
     mount(<ProductList products={[{ ...member, prices: [own, ccbill, legacy] }]} onPaid={vi.fn()} onSignInRequired={vi.fn()} />, server)
     expect(await screen.findAllByRole("button")).toHaveLength(2)

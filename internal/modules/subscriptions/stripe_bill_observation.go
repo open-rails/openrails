@@ -49,6 +49,7 @@ func StripeBillObservation(ctx context.Context, d *db.DB, sub *models.Subscripti
 	if bill.Total, err = moneyutil.RailMinorToNative(invoice.Currency, moneyutil.Cents(invoice.Total)); err != nil {
 		return bill, nil, err
 	}
+	acceptedSub := sub
 	var lineTotal int64
 	for _, line := range invoice.Lines {
 		amount, err := moneyutil.RailMinorToNative(invoice.Currency, moneyutil.Cents(line.Amount))
@@ -68,6 +69,20 @@ func StripeBillObservation(ctx context.Context, d *db.DB, sub *models.Subscripti
 			price, err := catalog.NewPriceService(d).GetByStripePriceID(ctx, line.PriceID)
 			if err != nil {
 				return bill, nil, fmt.Errorf("Stripe invoice %s line %s price %s is unresolved: %w", invoice.ID, line.ID, line.PriceID, err)
+			}
+			if acceptedSub != nil {
+				prior, priorErr := catalog.NewPriceService(d).GetByID(ctx, acceptedSub.PriceID)
+				if priorErr != nil {
+					return bill, nil, priorErr
+				}
+				_, link, same := prior.ProviderLink()
+				if same && link[models.RailKeyPSPID] == bill.PSPID.String() && link[models.RailKeyStripePriceID] == line.PriceID {
+					price = prior
+				}
+			}
+			frozen.AccessDurationHours, frozen.ProviderAccessDefault = price.AccessDurationHours, price.ProviderAccessDefault
+			if acceptedSub != nil && price.ID == acceptedSub.PriceID {
+				frozen.AccessDurationHours, frozen.ProviderAccessDefault = acceptedSub.AccessDurationHoursSnapshot, acceptedSub.ProviderAccessDefaultSnapshot
 			}
 			frozen.PriceID, frozen.ProductID, frozen.Source = &price.ID, &price.ProductID, ""
 			// This is a historical fact, not an instruction to grant today's

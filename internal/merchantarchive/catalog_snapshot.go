@@ -112,6 +112,17 @@ func catalogDependencyIDs(document CatalogSnapshot) ([]string, error) {
 		}
 		psps[id] = true
 	}
+	for _, row := range document.Tables["prices"] {
+		raw, ok := row["provider_psp_id"]
+		if !ok {
+			continue
+		}
+		var id string
+		if err := json.Unmarshal(raw, &id); err != nil {
+			return nil, fmt.Errorf("invalid provider price dependency")
+		}
+		psps[id] = true
+	}
 	out := make([]string, 0, len(psps))
 	for id := range psps {
 		out = append(out, id)

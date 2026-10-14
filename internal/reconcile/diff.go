@@ -1368,7 +1368,9 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 				start = *sub.CurrentPeriodStartsAt
 			}
 			var accessEnd *time.Time
-			if sub.AccessDurationHoursSnapshot != nil {
+			if sub.ProviderAccessDefaultSnapshot {
+				accessEnd = sub.CurrentPeriodEndsAt
+			} else if sub.AccessDurationHoursSnapshot != nil {
 				end := start.Add(time.Duration(*sub.AccessDurationHoursSnapshot) * time.Hour)
 				accessEnd = &end
 			}

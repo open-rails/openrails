@@ -52,6 +52,7 @@ type Bill struct {
 // identity. A source line records an explicit adjustment without pretending
 // it was a catalog price. Amount is authoritative, including seat rounding.
 type Line struct {
+	ProviderAccessDefault                     bool `json:"ProviderAccessDefault,omitempty"`
 	PriceID, ProductID                        *uuid.UUID
 	Description                               string
 	Quantity                                  *int

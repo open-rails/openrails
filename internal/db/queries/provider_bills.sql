@@ -37,11 +37,11 @@ WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.arg(order_id):
 
 -- name: CreateObservedOrderLine :exec
 INSERT INTO billing.order_lines (merchant_id, id, order_id, customer_id, "position", price_id, product_id, description,
-    quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, subscription_id, source, provider_amount, created_at)
+    quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, provider_access_default, subscription_id, source, provider_amount, created_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(order_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(position)::int,
     sqlc.narg(price_id)::uuid, sqlc.narg(product_id)::uuid, sqlc.arg(description)::text, sqlc.narg(quantity)::int,
     sqlc.arg(unit_amount)::bigint, sqlc.arg(amount)::bigint, sqlc.narg(ownership)::text, sqlc.narg(claim_key)::text,
-    sqlc.narg(billing_interval_hours)::int, sqlc.narg(access_duration_hours)::int, sqlc.narg(subscription_id)::uuid,
+    sqlc.narg(billing_interval_hours)::int, sqlc.narg(access_duration_hours)::int, sqlc.arg(provider_access_default)::boolean, sqlc.narg(subscription_id)::uuid,
     sqlc.narg(source)::text, true, sqlc.arg(now)::timestamptz);
 
 -- name: ObservedOrderCaptured :one

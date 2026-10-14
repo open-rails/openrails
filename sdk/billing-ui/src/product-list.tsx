@@ -54,9 +54,9 @@ const sameTerms = (a: ListedPrice, b: ListedPrice) =>
   a.unit_amount === b.unit_amount &&
   a.currency === b.currency &&
   a.billing_interval_hours === b.billing_interval_hours &&
-  a.access_duration_hours === b.access_duration_hours &&
-  a.trial_unit_amount === b.trial_unit_amount &&
-  a.trial_duration_hours === b.trial_duration_hours &&
+  a.access_duration_hours === (b.provider?.access_duration_default ? b.billing_interval_hours : b.access_duration_hours) &&
+  !a.trial_unit_amount && !b.trial_unit_amount &&
+  !a.trial_duration_hours && !b.trial_duration_hours &&
   !a.quantity && !b.quantity
 
 export function ProductList({

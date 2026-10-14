@@ -3,7 +3,7 @@
 -- name: CreatePrice :one
 INSERT INTO billing.prices (
     id, merchant_id, product_id, archived, amount, currency,
-    access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, quantity, key, provider_owned, sell_via, created_at, updated_at
+    access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, quantity, key, provider_owned, sell_via, provider_psp_id, provider_snapshot, billing_interval_months, provider_access_default, created_at, updated_at
 ) SELECT
     sqlc.arg(id),
     sqlc.arg(merchant_id)::uuid,
@@ -16,6 +16,7 @@ INSERT INTO billing.prices (
     sqlc.arg(key)::text,
     sqlc.arg(provider_owned)::boolean,
     sqlc.narg(sell_via)::text[],
+    sqlc.narg(provider_psp_id)::uuid, sqlc.narg(provider_snapshot)::jsonb, sqlc.narg(billing_interval_months)::int, sqlc.arg(provider_access_default)::boolean,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 FROM billing.products catalog_product
@@ -84,7 +85,7 @@ WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.deleted_at IS NU
   AND (sqlc.narg(product_id)::uuid IS NULL OR price.product_id = sqlc.narg(product_id)::uuid)
   AND (sqlc.narg(product_key)::text IS NULL OR prod.key = sqlc.narg(product_key)::text)
   AND (sqlc.narg(key)::text IS NULL OR price.key = sqlc.narg(key)::text)
-  AND (sqlc.narg(recurring)::boolean IS NULL OR (price.billing_interval_hours IS NOT NULL) = sqlc.narg(recurring)::boolean)
+  AND (sqlc.narg(recurring)::boolean IS NULL OR (price.billing_interval_hours IS NOT NULL OR price.billing_interval_months IS NOT NULL) = sqlc.narg(recurring)::boolean)
   AND (sqlc.narg(after_at)::timestamptz IS NULL OR (price.created_at, price.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY price.created_at DESC, price.id DESC
 LIMIT sqlc.arg(fetch_limit)::int;

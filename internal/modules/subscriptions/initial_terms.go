@@ -20,17 +20,18 @@ type InitialMembershipTerms struct {
 	// initial trial or prorated service period. Provider schedules require it.
 	RecurringIntervalHours *int `json:"recurring_interval_hours,omitempty"`
 
-	LegacyEntitlements  map[string]*int         `json:"legacy_entitlements,omitzero"`
-	CancelAfterInitial  bool                    `json:"cancel_after_initial,omitempty"`
-	AccessDurationHours *int                    `json:"access_duration_hours"`
-	CollectionPolicy    models.CollectionPolicy `json:"collection_policy"`
-	SubscriptionID      uuid.UUID               `json:"subscription_id"`
-	PaymentID           uuid.UUID               `json:"payment_id"`
-	CustomerID          uuid.UUID               `json:"customer_id"`
-	PSPID               uuid.UUID               `json:"psp_id"`
-	ProductID           uuid.UUID               `json:"product_id"`
-	PriceID             uuid.UUID               `json:"price_id"`
-	PaymentMethodID     uuid.UUID               `json:"payment_method_id"`
+	LegacyEntitlements    map[string]*int         `json:"legacy_entitlements,omitzero"`
+	CancelAfterInitial    bool                    `json:"cancel_after_initial,omitempty"`
+	ProviderAccessDefault bool                    `json:"provider_access_default,omitempty"`
+	AccessDurationHours   *int                    `json:"access_duration_hours"`
+	CollectionPolicy      models.CollectionPolicy `json:"collection_policy"`
+	SubscriptionID        uuid.UUID               `json:"subscription_id"`
+	PaymentID             uuid.UUID               `json:"payment_id"`
+	CustomerID            uuid.UUID               `json:"customer_id"`
+	PSPID                 uuid.UUID               `json:"psp_id"`
+	ProductID             uuid.UUID               `json:"product_id"`
+	PriceID               uuid.UUID               `json:"price_id"`
+	PaymentMethodID       uuid.UUID               `json:"payment_method_id"`
 	// AwaitingMethod preserves a paid order's membership when its card could
 	// not be stored. It cannot renew until a recurring agreement is established.
 	AwaitingMethod bool   `json:"awaiting_method,omitempty"`

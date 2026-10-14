@@ -62,7 +62,11 @@ func pushRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *model
 	if ent == nil || sub == nil || sub.CanceledAt != nil || !lifecycle.Status(sub.Status).Live() || !accessMatchesBillingPeriod(sub, periodStart, periodEnd) {
 		return nil
 	}
-	grace, err := EngineRenewalGrace(time.Duration(*sub.AccessDurationHoursSnapshot) * time.Hour)
+	duration := periodEnd.Sub(periodStart)
+	if !sub.ProviderAccessDefaultSnapshot {
+		duration = time.Duration(*sub.AccessDurationHoursSnapshot) * time.Hour
+	}
+	grace, err := EngineRenewalGrace(duration)
 	if err != nil {
 		return fmt.Errorf("renewal grace for %s: %w", sub.ID, err)
 	}
@@ -70,7 +74,7 @@ func pushRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *model
 	if err != nil {
 		return err
 	}
-	start := *accessEnd(periodStart, sub.AccessDurationHoursSnapshot)
+	start := *subscriptionAccessEnd(sub, periodStart)
 	end := start.Add(grace)
 	p := entitlements.PushAccessParams{UserID: sub.CustomerID.String(), ProductID: sub.ProductID, NotBefore: &start, EndsAt: &end, SourceType: models.AccessSourceGrace, SourceID: sub.ID.String(), Quantity: sub.Quantity}
 	if !policy.SuspendWhenHeld {

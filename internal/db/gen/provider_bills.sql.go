@@ -142,33 +142,34 @@ func (q *Queries) CreateObservedOrder(ctx context.Context, arg CreateObservedOrd
 
 const createObservedOrderLine = `-- name: CreateObservedOrderLine :exec
 INSERT INTO billing.order_lines (merchant_id, id, order_id, customer_id, "position", price_id, product_id, description,
-    quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, subscription_id, source, provider_amount, created_at)
+    quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, provider_access_default, subscription_id, source, provider_amount, created_at)
 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::int,
     $6::uuid, $7::uuid, $8::text, $9::int,
     $10::bigint, $11::bigint, $12::text, $13::text,
-    $14::int, $15::int, $16::uuid,
-    $17::text, true, $18::timestamptz)
+    $14::int, $15::int, $16::boolean, $17::uuid,
+    $18::text, true, $19::timestamptz)
 `
 
 type CreateObservedOrderLineParams struct {
-	MerchantID           uuid.UUID
-	ID                   uuid.UUID
-	OrderID              uuid.UUID
-	CustomerID           uuid.UUID
-	Position             int32
-	PriceID              *uuid.UUID
-	ProductID            *uuid.UUID
-	Description          string
-	Quantity             *int32
-	UnitAmount           int64
-	Amount               int64
-	Ownership            *string
-	ClaimKey             *string
-	BillingIntervalHours *int32
-	AccessDurationHours  *int32
-	SubscriptionID       *uuid.UUID
-	Source               *string
-	Now                  time.Time
+	MerchantID            uuid.UUID
+	ID                    uuid.UUID
+	OrderID               uuid.UUID
+	CustomerID            uuid.UUID
+	Position              int32
+	PriceID               *uuid.UUID
+	ProductID             *uuid.UUID
+	Description           string
+	Quantity              *int32
+	UnitAmount            int64
+	Amount                int64
+	Ownership             *string
+	ClaimKey              *string
+	BillingIntervalHours  *int32
+	AccessDurationHours   *int32
+	ProviderAccessDefault bool
+	SubscriptionID        *uuid.UUID
+	Source                *string
+	Now                   time.Time
 }
 
 func (q *Queries) CreateObservedOrderLine(ctx context.Context, arg CreateObservedOrderLineParams) error {
@@ -188,6 +189,7 @@ func (q *Queries) CreateObservedOrderLine(ctx context.Context, arg CreateObserve
 		arg.ClaimKey,
 		arg.BillingIntervalHours,
 		arg.AccessDurationHours,
+		arg.ProviderAccessDefault,
 		arg.SubscriptionID,
 		arg.Source,
 		arg.Now,

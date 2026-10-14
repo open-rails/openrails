@@ -85,7 +85,7 @@ SELECT p.product_id, p.key, p.amount, p.currency, p.access_duration_hours, p.bil
            JOIN billing.psps psp ON psp.id = binding.psp_id AND psp.merchant_id = binding.merchant_id
            WHERE binding.price_id = p.id AND binding.merchant_id = p.merchant_id
        ), '{}'::jsonb)::jsonb AS psp_links,
-       p.archived, p.provider_owned, p.sell_via
+       p.archived, p.provider_owned, p.sell_via, p.billing_interval_months, p.provider_access_default
 FROM billing.prices p
 JOIN billing.products product ON product.merchant_id = p.merchant_id AND product.id = p.product_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND NOT p.archived

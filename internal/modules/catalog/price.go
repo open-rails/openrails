@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -61,6 +62,13 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 	if err != nil {
 		return err
 	}
+	var providerSnapshot []byte
+	if price.ProviderSnapshot != nil {
+		providerSnapshot, err = json.Marshal(price.ProviderSnapshot)
+		if err != nil {
+			return err
+		}
+	}
 	row, err := s.db.Gen(ctx).CreatePrice(ctx, gen.CreatePriceParams{
 		Quantity:             quantity,
 		ID:                   price.ID,
@@ -76,9 +84,10 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 		TrialDurationHours:   models.IntPtrTo32(price.TrialDurationHours),
 		Key:                  price.Key,
 		ProviderOwned:        price.ProviderOwned,
-		SellVia:              price.SellVia,
-		CreatedAt:            price.CreatedAt,
-		UpdatedAt:            price.UpdatedAt,
+		ProviderPspID:        price.ProviderPSPID, ProviderSnapshot: providerSnapshot, BillingIntervalMonths: models.IntPtrTo32(price.BillingIntervalMonths), ProviderAccessDefault: price.ProviderAccessDefault,
+		SellVia:   price.SellVia,
+		CreatedAt: price.CreatedAt,
+		UpdatedAt: price.UpdatedAt,
 	})
 	if err != nil {
 		return err

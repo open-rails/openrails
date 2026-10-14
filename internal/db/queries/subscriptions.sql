@@ -4,7 +4,7 @@
 -- name: CreateSubscription :execrows
 INSERT INTO billing.subscriptions (
     id, merchant_id, customer_id, product_id, price_id,
-    access_duration_hours_snapshot, status, started_at,
+    access_duration_hours_snapshot, provider_access_default_snapshot, status, started_at,
     ended_at, current_period_starts_at, current_period_ends_at, rail,
     rail_subscription_id, payment_method_id, last_retry_at,
     retry_attempts, next_retry_at, grace_ends_at, cancel_feedback,
@@ -12,7 +12,7 @@ INSERT INTO billing.subscriptions (
     created_at, updated_at, psp_id, collection_policy, quantity
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4,
-    sqlc.narg(access_duration_hours_snapshot)::int,
+    sqlc.narg(access_duration_hours_snapshot)::int, sqlc.arg(provider_access_default_snapshot)::boolean,
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending'),
     sqlc.arg(started_at),
     sqlc.narg(ended_at), sqlc.narg(current_period_starts_at), sqlc.narg(current_period_ends_at),
@@ -35,6 +35,7 @@ UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
     access_duration_hours_snapshot = sqlc.narg(access_duration_hours_snapshot)::int,
+    provider_access_default_snapshot = sqlc.arg(provider_access_default_snapshot)::boolean,
     status = sqlc.arg(status),
     started_at = sqlc.arg(started_at),
     ended_at = sqlc.narg(ended_at),
@@ -68,6 +69,7 @@ UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
     access_duration_hours_snapshot = sqlc.narg(access_duration_hours_snapshot)::int,
+    provider_access_default_snapshot = sqlc.arg(provider_access_default_snapshot)::boolean,
     status = sqlc.arg(status),
     started_at = sqlc.arg(started_at),
     ended_at = sqlc.narg(ended_at),

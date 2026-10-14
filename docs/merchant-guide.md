@@ -165,7 +165,7 @@ usage order. A metered card states no `payment_term`. See
 
 ### Our prices and provider prices
 
-A price under `prices` is ours: nothing is written to a provider's catalog. It sells
+A price under `prices` is ours, without synchronizing a provider catalog. It sells
 by card through the merchant's `card_vault` and `charge_psps` (OpenRails charges the
 card and runs every renewal) and on Solana: a one-time price by direct transfer, a
 recurring one on an on-chain plan the apply publishes from its terms (USDC, owned by
@@ -198,7 +198,7 @@ products:
 | `plan_id` / `price_id` / `flex_id` + `recurring_billing_option_id` | the provider's object: an NMI plan, a Stripe price, a CCBill FlexForm |
 | `amount`, `billing_interval`, `trial_unit_amount` + `trial_duration` | CCBill only: its declared terms |
 | `currency` | NMI only: the plan's currency, USD when omitted |
-| `access_duration` | the access each payment grants; defaults to the billing interval |
+| `access_duration` | omitted: access ends at the verified provider service-period end, preserving calendar months and years; explicit hours override that boundary; null grants indefinite access |
 | `one_off` | a price that does not renew: its billing interval is the access it sells |
 | `archived` | as for prices |
 
@@ -415,3 +415,15 @@ route group's permission (`GET /v1/admin/access`).
   `llm.catalog_drafting_enabled`, it can additionally *draft* a price change or new
   tier — but only into the wizard's review step; nothing mutates until a human clicks
   Confirm.
+
+Provider prices keep their native calendar cadence: a month is not thirty days,
+and a year is twelve calendar months. Existing accepted hourly access snapshots
+keep those exact hours. Reapplying a successfully applied catalog file replays
+its stored receipt without provider I/O; an explicit `CreateProviderPrice`
+operator call can read current external terms and append a new immutable version.
+Earlier versions retain their provider account, object, cadence and access choice.
+
+Stripe hosted one-time Checkout uses inline, nonreusable price/product objects
+for the accepted payment. OpenRails does not synchronize a maintained Stripe
+catalog or create Stripe-managed subscriptions; new recurring card billing stays
+in OpenRails. CCBill remains the provider-run sales exception.

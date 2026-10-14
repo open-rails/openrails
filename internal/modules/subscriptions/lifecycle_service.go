@@ -305,7 +305,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	var price *models.Price
 	var err error
 	if terms := params.Prepared; terms != nil {
-		price = &models.Price{ID: terms.PriceID, ProductID: terms.ProductID, Amount: terms.RecurringAmount, Currency: terms.Currency, BillingIntervalHours: new(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour)), AccessDurationHours: terms.AccessDurationHours}
+		price = &models.Price{ID: terms.PriceID, ProductID: terms.ProductID, Amount: terms.RecurringAmount, Currency: terms.Currency, BillingIntervalHours: new(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour)), AccessDurationHours: terms.AccessDurationHours, ProviderAccessDefault: terms.ProviderAccessDefault}
 	} else {
 		price, err = priceService.GetByID(ctx, params.PriceID)
 	}
@@ -465,6 +465,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		}
 
 		existingPendingSub.AccessDurationHoursSnapshot = price.AccessDurationHours
+		existingPendingSub.ProviderAccessDefaultSnapshot = price.ProviderAccessDefault
 		existingPendingSub.CurrentPeriodStartsAt = &periodStartsAt
 		existingPendingSub.CurrentPeriodEndsAt = &periodEndsAt
 		// The pending membership already accepted its benefits. An empty
@@ -491,13 +492,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		subscription = existingPendingSub
 	} else {
 		subscription = &models.Subscription{
-			ID:                          uuidutil.NewV7(),
-			CustomerID:                  identity.CustomerIDFromString(params.UserID).UUID(),
-			ProductID:                   price.ProductID,
-			PriceID:                     canonicalPriceID,
-			AccessDurationHoursSnapshot: price.AccessDurationHours,
-			Status:                      models.StatusActive,
-			Rail:                        params.Rail,
+			ID:                            uuidutil.NewV7(),
+			CustomerID:                    identity.CustomerIDFromString(params.UserID).UUID(),
+			ProductID:                     price.ProductID,
+			PriceID:                       canonicalPriceID,
+			AccessDurationHoursSnapshot:   price.AccessDurationHours,
+			ProviderAccessDefaultSnapshot: price.ProviderAccessDefault,
+			Status:                        models.StatusActive,
+			Rail:                          params.Rail,
 			RailSubscriptionID: func() string {
 				if params.RailSubscriptionID != nil {
 					return *params.RailSubscriptionID
@@ -590,7 +592,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		// A membership created with an ALREADY-elapsed period (stale import /
 		// backfill shapes) grants no access window — the period is over.
 		elapsed := false
-		if end := accessEnd(periodStartsAt, subscription.AccessDurationHoursSnapshot); params.Prepared == nil && end != nil && !end.After(s.now().UTC()) {
+		if end := subscriptionAccessEnd(subscription, periodStartsAt); params.Prepared == nil && end != nil && !end.After(s.now().UTC()) {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
 				"period_end":      periodEndsAt,
@@ -959,7 +961,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			if plan == nil {
 				return errors.New("provider renewal has no verified subscription line")
 			}
-			price = &models.Price{ID: *plan.PriceID, ProductID: *plan.ProductID, Amount: plan.Amount, Currency: bill.Currency, BillingIntervalHours: plan.BillingIntervalHours, AccessDurationHours: plan.AccessDurationHours}
+			price = &models.Price{ID: *plan.PriceID, ProductID: *plan.ProductID, Amount: plan.Amount, Currency: bill.Currency, BillingIntervalHours: plan.BillingIntervalHours, AccessDurationHours: plan.AccessDurationHours, ProviderAccessDefault: plan.ProviderAccessDefault}
 			newProduct = &models.Product{ID: *plan.ProductID, DisplayName: plan.Description}
 			subscription.PriceID, subscription.ProductID = price.ID, price.ProductID
 			subscription.Quantity = CloneQuantity(plan.Quantity)
@@ -996,6 +998,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		if params.Prepared == nil {
 			subscription.AccessDurationHoursSnapshot = price.AccessDurationHours
+			subscription.ProviderAccessDefaultSnapshot = price.ProviderAccessDefault
 		}
 		subscription.Price = price
 
@@ -2323,7 +2326,7 @@ func (s *SubscriptionLifecycleService) dunningAccess(ctx context.Context, d *db.
 		}
 		return nil
 	}
-	start := *accessEnd(*sub.CurrentPeriodStartsAt, sub.AccessDurationHoursSnapshot)
+	start := *subscriptionAccessEnd(sub, *sub.CurrentPeriodStartsAt)
 	if _, err := ent.PushAccess(ctx, entitlements.PushAccessParams{UserID: sub.CustomerID.String(), ProductID: sub.ProductID, NotBefore: &start, Indefinite: true, SourceType: models.AccessSourceGrace, SourceID: sub.ID.String(), Quantity: sub.Quantity}); err != nil {
 		return fmt.Errorf("keep access through dunning for %s: %w", sub.ID, err)
 	}

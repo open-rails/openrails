@@ -450,7 +450,7 @@ SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subs
        subscriptions.started_at, subscriptions.ended_at, subscriptions.canceled_at, subscriptions.cancel_type,
        subscriptions.deletion_scheduled_at, subscriptions.tier_group, subscriptions.last_retry_at,
        subscriptions.retry_attempts, subscriptions.next_retry_at,
-       subscriptions.access_duration_hours_snapshot,
+       subscriptions.access_duration_hours_snapshot, subscriptions.provider_access_default_snapshot,
        scheduled.price_id AS scheduled_price_id,
        price.currency AS price_currency,
        EXISTS (SELECT 1 FROM billing.provider_intents ri
@@ -533,14 +533,14 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) A
 INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     current_period_starts_at, current_period_ends_at, started_at,
-    access_duration_hours_snapshot, customer_id, psp_id, collection_policy
+    access_duration_hours_snapshot, provider_access_default_snapshot, customer_id, psp_id, collection_policy
 )
 SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::text,
        sqlc.arg(rail), NULLIF(sqlc.arg(rail_subscription_id)::text, ''),
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
-       pr.access_duration_hours, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider')
+       pr.access_duration_hours, pr.provider_access_default, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider')
 FROM billing.prices pr
 JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.id = sqlc.arg(price_id)

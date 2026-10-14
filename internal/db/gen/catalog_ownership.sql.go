@@ -145,7 +145,7 @@ func (q *Queries) ListCatalogMeterRevisions(ctx context.Context, merchantID uuid
 
 const listCatalogStatePrices = `-- name: ListCatalogStatePrices :many
 SELECT p.id, p.product_id, p.key, p.revision AS version, p.amount, p.currency, p.access_duration_hours, p.billing_interval_hours,
-       p.trial_unit_amount, p.trial_duration_hours, p.customer_amount, p.quantity, p.archived, p.provider_owned, p.sell_via,
+       p.trial_unit_amount, p.trial_duration_hours, p.customer_amount, p.quantity, p.archived, p.provider_owned, p.sell_via, p.billing_interval_months, p.provider_access_default, p.provider_snapshot,
        COALESCE((
            SELECT jsonb_object_agg(COALESCE(psp.key, psp.id::text), binding.configuration || jsonb_strip_nulls(jsonb_build_object(
                'psp_id', psp.id::text, 'rail', psp.rail, 'plan_id', binding.plan_id, 'price_id', binding.price_ref,
@@ -163,23 +163,26 @@ ORDER BY p.product_id, p.key, p.revision
 `
 
 type ListCatalogStatePricesRow struct {
-	ID                   uuid.UUID
-	ProductID            uuid.UUID
-	Key                  string
-	Version              int64
-	Amount               int64
-	Currency             string
-	AccessDurationHours  *int32
-	BillingIntervalHours *int32
-	TrialUnitAmount      *int64
-	TrialDurationHours   *int32
-	CustomerAmount       []byte
-	Quantity             []byte
-	Archived             bool
-	ProviderOwned        bool
-	SellVia              []string
-	PspLinks             []byte
-	KeyRevision          int64
+	ID                    uuid.UUID
+	ProductID             uuid.UUID
+	Key                   string
+	Version               int64
+	Amount                int64
+	Currency              string
+	AccessDurationHours   *int32
+	BillingIntervalHours  *int32
+	TrialUnitAmount       *int64
+	TrialDurationHours    *int32
+	CustomerAmount        []byte
+	Quantity              []byte
+	Archived              bool
+	ProviderOwned         bool
+	SellVia               []string
+	BillingIntervalMonths *int32
+	ProviderAccessDefault bool
+	ProviderSnapshot      []byte
+	PspLinks              []byte
+	KeyRevision           int64
 }
 
 // Every version of every price key, with its PSP links and the key's revision.
@@ -208,6 +211,9 @@ func (q *Queries) ListCatalogStatePrices(ctx context.Context, merchantID uuid.UU
 			&i.Archived,
 			&i.ProviderOwned,
 			&i.SellVia,
+			&i.BillingIntervalMonths,
+			&i.ProviderAccessDefault,
+			&i.ProviderSnapshot,
 			&i.PspLinks,
 			&i.KeyRevision,
 		); err != nil {

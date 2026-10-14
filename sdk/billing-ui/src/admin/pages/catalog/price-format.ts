@@ -5,8 +5,12 @@ import { formatNativeAmount } from "#orck/admin/lib/format"
 // priceIntervalLabel renders a price's renewal cadence, shared by the catalog
 // list and the price-change wizard.
 export function priceIntervalLabel(
-  price: Pick<Price, "billing_interval_hours" | "access_duration_hours">
+  price: Pick<Price, "billing_interval_hours" | "access_duration_hours"> & { billing_interval_months?: number | null }
 ): string {
+  if (price.billing_interval_months) {
+    const months = price.billing_interval_months
+    return `every ${months} calendar ${months === 1 ? "month" : "months"}`
+  }
   if (price.billing_interval_hours) {
     return `every ${formatHours(price.billing_interval_hours)}`
   }

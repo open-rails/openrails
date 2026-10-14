@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-var initialMembershipTermsJSON = object(map[string]jsonRule{"collection_policy": textValue, "subscription_id": uuidValue, "payment_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "product_id": uuidValue, "price_id": uuidValue, "payment_method_id": uuidValue, "product_name": textValue, "quantity": integerValue, "amount": moneyStringValue, "recurring_amount": moneyStringValue, "currency": textValue, "accepted_at": textValue, "period_start": textValue, "period_end": textValue, "pending": booleanValue, "cancel_after_initial": booleanValue, "access_duration_hours": nullable(integerValue), "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)),
+var initialMembershipTermsJSON = object(map[string]jsonRule{"collection_policy": textValue, "subscription_id": uuidValue, "payment_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "product_id": uuidValue, "price_id": uuidValue, "payment_method_id": uuidValue, "product_name": textValue, "quantity": integerValue, "amount": moneyStringValue, "recurring_amount": moneyStringValue, "currency": textValue, "accepted_at": textValue, "period_start": textValue, "period_end": textValue, "pending": booleanValue, "cancel_after_initial": booleanValue, "access_duration_hours": nullable(integerValue), "provider_access_default": booleanValue, "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)),
 	"replaces": object(map[string]jsonRule{"subscription_id": uuidValue, "price_id": uuidValue, "period_end": textValue, "credit": moneyStringValue}),
 	"adds":     object(map[string]jsonRule{"from_quantity": integerValue})})
 
@@ -33,7 +33,7 @@ var acceptedRenewalJSON = object(map[string]jsonRule{
 	"psp_id": uuidValue, "subscription_id": uuidValue, "customer_id": uuidValue,
 	"from_price_id": uuidValue, "from_product_id": uuidValue, "price_id": uuidValue, "product_id": uuidValue,
 	"product_name": textValue, "quantity": integerValue, "amount": moneyStringValue, "currency": textValue,
-	"period_start": textValue, "period_end": textValue, "access_duration_hours": nullable(integerValue),
+	"period_start": textValue, "period_end": textValue, "access_duration_hours": nullable(integerValue), "provider_access_default": booleanValue,
 	"entitlements": nullable(acceptedEntitlementsJSON), "legacy_entitlements": dictionary(nullable(integerValue)), "previous_entitlements": nullable(acceptedEntitlementsJSON),
 	"scheduled_change_id": uuidValue,
 })
@@ -141,11 +141,19 @@ var emptyObject = object(map[string]jsonRule{})
 // unrecognized field must be reviewed instead of silently lost in an archive.
 var priceBindingConfigurationJSON = object(map[string]jsonRule{
 	"product_id": textValue, "provider": textValue, "lookup_key": textValue, "enabled": textValue,
-	"provider_billing_interval_hours": textValue,
-	"token":                           textValue, "mint": textValue, "mint_symbol": textValue,
+	"provider_billing_interval_hours":  textValue,
+	"provider_billing_interval_months": textValue,
+	"token":                            textValue, "mint": textValue, "mint_symbol": textValue,
 	"amount_base_units": textValue, "period_hours": textValue,
 	"created_at": textValue, "merchant_address": textValue,
 })
+
+var providerPriceSnapshotJSON = nullable(object(map[string]jsonRule{
+	"psp_key": textValue, "psp_id": uuidValue, "rail": textValue,
+	"plan_id": textValue, "price_id": textValue, "flex_id": textValue, "recurring_billing_option_id": textValue,
+	"product_id": textValue, "provider": textValue, "lookup_key": textValue,
+	"provider_billing_interval_hours": textValue, "provider_billing_interval_months": textValue,
+}))
 
 var budgetWindow = object(map[string]jsonRule{"key": textValue, "window_seconds": integerValue, "limit": integerValue, "currency": textValue})
 var contactsJSON = array(object(map[string]jsonRule{"name": textValue, "email": textValue}))
@@ -196,6 +204,7 @@ var jsonRules = map[string]jsonRule{
 	"provider_bills.snapshot":                           providerBillJSON(false),
 	"provider_schedules.accepted_bill":                  providerBillJSON(true),
 	"products.credit_grant":                             nullable(object(map[string]jsonRule{"currency": textValue, "amount": nullable(moneyStringValue), "from_payment": booleanValue, "expires_after_days": integerValue})),
+	"prices.provider_snapshot":                          providerPriceSnapshotJSON,
 	"prices.customer_amount":                            nullable(object(map[string]jsonRule{"min_amount": moneyStringValue, "max_amount": moneyStringValue})),
 	"prices.quantity":                                   nullable(object(map[string]jsonRule{"min": integerValue, "max": integerValue})),
 	"payments.credit_grant_snapshot":                    creditGrantJSON,
@@ -274,7 +283,7 @@ var jsonRules = map[string]jsonRule{
 		"order_attempt_id":       uuidValue,
 		"request_fingerprint":    sha256Value, "provider": textValue, "psp": textValue, "amount": moneyStringValue, "currency": textValue, "description": textValue, "user_id": uuidValue, "price_id": uuidValue, "e2e_run_id": textValue,
 		"credit_grant":      creditGrantJSON,
-		"payment_method_id": uuidValue, "payment_id": uuidValue, "product_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue, "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)), "access_duration_hours": nullable(integerValue), "entitlement_start": textValue, "ownership_start": textValue, "ownership_end": nullable(textValue), "eligibility": textValue,
+		"payment_method_id": uuidValue, "payment_id": uuidValue, "product_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue, "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)), "access_duration_hours": nullable(integerValue), "provider_access_default": booleanValue, "entitlement_start": textValue, "ownership_start": textValue, "ownership_end": nullable(textValue), "eligibility": textValue,
 		"instrument": frozenInstrumentJSON,
 		// An order's sale: its order, and a new card the charge saves.
 		"order_id": uuidValue, "recurring": booleanValue, "new_card": booleanValue, "token": textValue, "fingerprint": textValue, "reuse": booleanValue, "purchase_scoped": booleanValue,

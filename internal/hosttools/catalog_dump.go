@@ -336,7 +336,7 @@ func dumpProviderPrice(row gen.ListLiveCatalogPricesWithPSPLinksRow) (catalog.Ap
 		}
 		out = catalog.ApplyProviderPrice{PSP: key, PlanID: link[models.RailKeyPlanID], PriceID: link[models.RailKeyStripePriceID],
 			FlexID: link[models.RailKeyCCBillFlexID], RecurringBillingOptionID: link[models.RailKeyCCBillRecurringBillingOption]}
-		out.OneOff = row.BillingIntervalHours == nil && (providerInterval != nil || link[models.RailKeyRail] == string(models.RailNMI))
+		out.OneOff = row.BillingIntervalHours == nil && row.BillingIntervalMonths == nil && (providerInterval != nil || link[models.RailKeyProviderBillingMonths] != "none" && link[models.RailKeyProviderBillingMonths] != "" || link[models.RailKeyRail] == string(models.RailNMI))
 		switch models.Rail(link[models.RailKeyRail]) {
 		case models.RailCCBill:
 			amount, interval := row.Amount, providerInterval
@@ -357,9 +357,11 @@ func dumpProviderPrice(row gen.ListLiveCatalogPricesWithPSPLinksRow) (catalog.Ap
 			}
 		}
 	}
-	if row.AccessDurationHours != nil && (providerInterval == nil || *row.AccessDurationHours != *providerInterval) {
-		hours := int(*row.AccessDurationHours)
-		out.AccessDurationHours = &hours
+	if !row.ProviderAccessDefault {
+		out.AccessDurationHours = catalog.Null[int]()
+		if row.AccessDurationHours != nil {
+			out.AccessDurationHours = catalog.Value(int(*row.AccessDurationHours))
+		}
 	}
 	out.Archived = catalog.Value(row.Archived)
 	return out, nil

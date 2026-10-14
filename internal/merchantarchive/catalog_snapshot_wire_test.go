@@ -53,6 +53,7 @@ func snapshotWireRow(t *testing.T, table string, fields map[string]string) map[s
 	if table == "prices" {
 		if _, named := fields["provider_owned"]; !named {
 			fields["provider_owned"] = "false"
+			fields["provider_access_default"] = "false"
 		}
 	}
 	profile := snapshotWireProfile(t, table)

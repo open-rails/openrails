@@ -214,7 +214,7 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Order, bool, err
 			if err := q.CreateOrderLine(ctx, gen.CreateOrderLineParams{MerchantID: mid.UUID(), ID: uuidutil.NewV7(), OrderID: id, CustomerID: in.CustomerID,
 				Position: int32(i), PriceID: l.Price.ID, ProductID: l.Product.ID, Description: l.Product.DisplayName, Quantity: quantity,
 				UnitAmount: l.UnitAmount, Amount: l.Amount, Ownership: string(l.Ownership), ClaimKey: claim,
-				BillingIntervalHours: interval, AccessDurationHours: access,
+				BillingIntervalHours: interval, AccessDurationHours: access, ProviderAccessDefault: l.Price.ProviderAccessDefault,
 				CreditGrant: credit, Now: now}); err != nil {
 				return err
 			}

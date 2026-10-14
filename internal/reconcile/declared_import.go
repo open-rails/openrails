@@ -487,20 +487,20 @@ func insertDeclaredCanceled(
 		CustomerID:                  f.Customer,
 		ProductID:                   price.ProductID,
 		PriceID:                     &priceID,
-		AccessDurationHoursSnapshot: price.AccessDurationHours,
-		Status:                      string(models.StatusCanceled),
-		StartedAt:                   f.StartedAt.UTC(),
-		EndedAt:                     &endedAt,
-		CurrentPeriodStartsAt:       periodStart,
-		CurrentPeriodEndsAt:         periodEnd,
-		Rail:                        f.Rail,
-		RailSubscriptionID:          f.RailSubscriptionID,
-		CancelFeedback:              &feedback,
-		CancelType:                  &cancelType,
-		CanceledAt:                  &canceledAt,
-		CreatedAt:                   f.StartedAt.UTC(),
-		UpdatedAt:                   canceledAt,
-		PspID:                       f.PspID,
+		AccessDurationHoursSnapshot: price.AccessDurationHours, ProviderAccessDefaultSnapshot: price.ProviderAccessDefault,
+		Status:                string(models.StatusCanceled),
+		StartedAt:             f.StartedAt.UTC(),
+		EndedAt:               &endedAt,
+		CurrentPeriodStartsAt: periodStart,
+		CurrentPeriodEndsAt:   periodEnd,
+		Rail:                  f.Rail,
+		RailSubscriptionID:    f.RailSubscriptionID,
+		CancelFeedback:        &feedback,
+		CancelType:            &cancelType,
+		CanceledAt:            &canceledAt,
+		CreatedAt:             f.StartedAt.UTC(),
+		UpdatedAt:             canceledAt,
+		PspID:                 f.PspID,
 	}); err != nil {
 		// A race with a concurrent writer trips the (merchant, rail, sub-id)
 		// unique index — a loud blocked row, never silent corruption.
@@ -597,6 +597,9 @@ func derivedSchedule(f *DeclaredSubscriptionFact, price gen.BillingPrice, txns [
 	if f.PaidThrough == nil || f.PaidThrough.IsZero() {
 		return nil, "the book states no paid-through boundary"
 	}
+	if price.BillingIntervalMonths != nil {
+		return nil, "calendar billing requires accepted_schedule with interval_months and the provider's original first_due_at; an hourly estimate cannot prove it"
+	}
 	if price.BillingIntervalHours == nil || *price.BillingIntervalHours <= 0 || *price.BillingIntervalHours%24 != 0 {
 		return nil, "the declared price has no whole-day billing cadence"
 	}
@@ -671,7 +674,7 @@ func scheduleBill(ctx context.Context, q *gen.Queries, sub *models.Subscription,
 		Owner: string(sub.CollectionPolicy), ProviderReference: sub.RailSubscriptionID, Currency: moneyutil.NormalizeCurrency(currency), Total: amount,
 		Lines: []observed.Line{{PriceID: &price.ID, ProductID: &price.ProductID, Description: description,
 			Quantity: quantity, UnitAmount: amount / int64(seats), Amount: amount,
-			BillingIntervalHours: interval, AccessDurationHours: models.DerefIntPtr(price.AccessDurationHours)}}}, nil
+			BillingIntervalHours: interval, AccessDurationHours: models.DerefIntPtr(price.AccessDurationHours), ProviderAccessDefault: price.ProviderAccessDefault}}}, nil
 }
 
 func subscriptionTxns(txns []RemoteTransaction, railSubID string) []RemoteTransaction {
