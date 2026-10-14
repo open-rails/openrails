@@ -68,7 +68,7 @@ products:
     prices:
       buy:
         amount: 5 USD
-        access_duration: null
+        access_duration: forever
 `))
 		require.NoError(t, err)
 		return doc

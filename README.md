@@ -53,7 +53,7 @@ products:
     prices:
       purchase:
         amount: 4.99 USD
-        access_duration: null # permanent access
+        access_duration: forever # permanent access
       rent:
         amount: 1.99 USD
         access_duration: 3 days # access expires 3 days after purchase
@@ -64,7 +64,7 @@ products:
     prices:
       purchase:
         amount: 4.99 USD
-        access_duration: null
+        access_duration: forever
       rent:
         amount: 1.99 USD
         access_duration: 3 days
@@ -75,7 +75,7 @@ products:
     prices:
       purchase:
         amount: 8.99 USD # both courses at a discounted price
-        access_duration: null
+        access_duration: forever
 
   channel-membership:
     display_name: Channel membership

@@ -131,6 +131,8 @@ func readablePrice(price yaml.MapSlice) yaml.MapSlice {
 			item.Key = readableDurations[key]
 			if hours, ok := yamlInt(item.Value); ok {
 				item.Value = cadence.FormatHours(hours)
+			} else if key == "access_duration_hours" && item.Value == nil {
+				item.Value = catalog.AccessForever
 			}
 		}
 		out = append(out, item)

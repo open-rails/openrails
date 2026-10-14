@@ -51,8 +51,12 @@ func TestApplicationDurationAliases(t *testing.T) {
 	}
 }
 
-func TestApplicationDurationNullAndOmitted(t *testing.T) {
-	app, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"p":{"prices":{"x":{"access_duration":null,"billing_interval":null},"y":{}}}}}`))
+func TestApplicationDurationForeverNullAndOmitted(t *testing.T) {
+	_, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"p":{"prices":{"x":{"access_duration":null}}}}}`))
+	if err == nil || !strings.Contains(err.Error(), "forever") {
+		t.Fatalf("null access_duration: %v, want a refusal naming forever", err)
+	}
+	app, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"p":{"prices":{"x":{"access_duration":"forever","billing_interval":null},"y":{}}}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

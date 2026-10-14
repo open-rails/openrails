@@ -381,16 +381,27 @@ products:
 	}
 }
 
-func TestProviderAccessDistinguishesDefaultHoursAndIndefinite(t *testing.T) {
+// Provider access is the billed period by default, explicit hours, or forever
+// for a one-off price only.
+func TestProviderAccessDistinguishesDefaultHoursAndForever(t *testing.T) {
+	for _, raw := range []string{
+		`{"psp":"nmi","plan_id":"p","access_duration":"forever"}`,
+		`{"psp":"nmi","plan_id":"p","access_duration_hours":null}`,
+	} {
+		var p ApplyProviderPrice
+		require.NoError(t, json.Unmarshal([]byte(raw), &p))
+		require.ErrorContains(t, p.Validate(), "one-off", "a recurring price's access never runs forever")
+	}
+	var null ApplyProviderPrice
+	require.ErrorContains(t, json.Unmarshal([]byte(`{"psp":"nmi","plan_id":"p","access_duration":null}`), &null), "forever")
 	for _, tc := range []struct {
 		raw       string
 		set, null bool
 		hours     int
 	}{
 		{`{"psp":"nmi","plan_id":"p"}`, false, false, 0},
-		{`{"psp":"nmi","plan_id":"p","access_duration_hours":null}`, true, true, 0},
 		{`{"psp":"nmi","plan_id":"p","access_duration":"14 days"}`, true, false, 336},
-		{`{"psp":"nmi","plan_id":"p","access_duration":null}`, true, true, 0},
+		{`{"psp":"nmi","plan_id":"p","one_off":true,"access_duration":"forever"}`, true, true, 0},
 	} {
 		var p ApplyProviderPrice
 		require.NoError(t, json.Unmarshal([]byte(tc.raw), &p))

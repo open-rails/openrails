@@ -12,6 +12,25 @@ const MaxDurationHours = int((1<<63 - 1) / time.Hour)
 
 // ParseDurationHours parses a positive, whole-number count of hours, days, or
 // weeks. Days are exactly 24 hours; calendar months and years are not durations.
+// AccessForever spells indefinite access: a one-off purchase that never
+// expires. A recurring price's access follows its billing.
+const AccessForever = "forever"
+
+// parseAccessDuration reads access_duration: a duration, or forever (Null).
+func parseAccessDuration(text Field[string]) (Field[int], error) {
+	if text.Null {
+		return Field[int]{}, fmt.Errorf("access_duration cannot be null; write %s for access that never expires", AccessForever)
+	}
+	if strings.TrimSpace(text.Value) == AccessForever {
+		return Null[int](), nil
+	}
+	hours, err := ParseDurationHours(text.Value)
+	if err != nil {
+		return Field[int]{}, fmt.Errorf("access_duration: %w", err)
+	}
+	return Value(hours), nil
+}
+
 func ParseDurationHours(input string) (int, error) {
 	parts := strings.Fields(input)
 	if len(parts) != 2 {

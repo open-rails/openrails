@@ -100,7 +100,7 @@ products:
 	require.NoError(t, err)
 	raw, err := readableCatalogYAML(manifest)
 	require.NoError(t, err)
-	for _, line := range []string{"amount: 9.99 USD", "billing_interval: 30 days", "trial_duration: 1 day", "amount: 500 JPY", "access_duration: null", "amount: 1.5 SOL", "access_duration: 1 week", "amount: 23.00 USD", "access_duration: 60 days"} {
+	for _, line := range []string{"amount: 9.99 USD", "billing_interval: 30 days", "trial_duration: 1 day", "amount: 500 JPY", "access_duration: forever", "amount: 1.5 SOL", "access_duration: 1 week", "amount: 23.00 USD", "access_duration: 60 days"} {
 		require.Contains(t, string(raw), line)
 	}
 	for _, numeric := range []string{"unit_amount: \"9990000\"", "_hours", "currency:"} {

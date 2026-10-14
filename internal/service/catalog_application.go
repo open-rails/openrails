@@ -621,6 +621,17 @@ func catalogApplicationPriceRequest(product *billing.Product, key string, decl c
 			req.BillingIntervalHours = &decl.BillingIntervalHours.Value
 		}
 	}
+	// A recurring price's access follows its billing interval unless declared,
+	// or the key already grants access of another length; never forever.
+	if req.BillingIntervalHours != nil {
+		if decl.AccessDurationHours.Set && decl.AccessDurationHours.Null {
+			return nil, req, apperr.Invalidf("price %q: access_duration %s is for a one-off price; a recurring price's access follows its billing interval", key, catalogwire.AccessForever)
+		}
+		if !decl.AccessDurationHours.Set && (current == nil || current.AccessDurationHours == nil || reflect.DeepEqual(current.AccessDurationHours, current.BillingIntervalHours)) {
+			hours := *req.BillingIntervalHours
+			req.AccessDurationHours = &hours
+		}
+	}
 	if decl.TrialUnitAmount.Set {
 		req.TrialUnitAmount = nil
 		if !decl.TrialUnitAmount.Null {

@@ -120,14 +120,11 @@ func (p *ApplyProviderPrice) UnmarshalJSON(raw []byte) error {
 		if decoded.AccessDurationHours.Set {
 			return fmt.Errorf("access_duration and access_duration_hours cannot both be set")
 		}
-		decoded.AccessDurationHours = Null[int]()
-		if !decoded.AccessDuration.Null {
-			hours, err := ParseDurationHours(decoded.AccessDuration.Value)
-			if err != nil {
-				return fmt.Errorf("access_duration: %w", err)
-			}
-			decoded.AccessDurationHours = Value(hours)
+		hours, err := parseAccessDuration(decoded.AccessDuration)
+		if err != nil {
+			return err
 		}
+		decoded.AccessDurationHours = hours
 	}
 	*p = ApplyProviderPrice(decoded.provider)
 	return nil
@@ -171,7 +168,10 @@ func (p ApplyProviderPrice) Validate() error {
 		}
 	}
 	if p.AccessDurationHours.Set && !p.AccessDurationHours.Null && (p.AccessDurationHours.Value <= 0 || p.AccessDurationHours.Value > MaxDurationHours) {
-		return fmt.Errorf("access duration must be positive supported hours, or null")
+		return fmt.Errorf("access duration must be positive supported hours, or %s", AccessForever)
+	}
+	if p.AccessDurationHours.Set && p.AccessDurationHours.Null && !p.OneOff {
+		return fmt.Errorf("access_duration %s is for a one-off price; a recurring price's access follows its billing", AccessForever)
 	}
 	return nil
 }

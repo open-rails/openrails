@@ -41,7 +41,6 @@ func (p *ApplyPrice) UnmarshalJSON(raw []byte) error {
 		text  Field[string]
 		hours *Field[int]
 	}{
-		{"access_duration", decoded.AccessDuration, &decoded.AccessDurationHours},
 		{"billing_interval", decoded.BillingInterval, &decoded.BillingIntervalHours},
 		{"trial_duration", decoded.TrialDuration, &decoded.TrialDurationHours},
 	} {
@@ -60,6 +59,16 @@ func (p *ApplyPrice) UnmarshalJSON(raw []byte) error {
 			return fmt.Errorf("%s: %w", field.name, err)
 		}
 		*field.hours = Value(hours)
+	}
+	if decoded.AccessDuration.Set {
+		if decoded.AccessDurationHours.Set {
+			return fmt.Errorf("access_duration and access_duration_hours cannot both be set")
+		}
+		hours, err := parseAccessDuration(decoded.AccessDuration)
+		if err != nil {
+			return err
+		}
+		decoded.AccessDurationHours = hours
 	}
 	*p = ApplyPrice(decoded.price)
 	return nil

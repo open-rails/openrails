@@ -401,6 +401,7 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	// is case-insensitive, so without this a caller-supplied "usd" validated
 	// fine and then failed the prices_currency_check CHECK at INSERT.
 	req.Currency = money.NormalizeCurrency(req.Currency)
+	defaultRecurringAccess(&req)
 	if err := validateCatalogPriceTerms(req); err != nil {
 		return nil, err
 	}
@@ -644,6 +645,15 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 func priceToCatalogPrice(p *models.Price) *billing.Price {
 	v := p.View()
 	return &v
+}
+
+// defaultRecurringAccess gives a recurring price without access its billing
+// interval: a subscription's access never runs forever.
+func defaultRecurringAccess(req *billing.CreatePriceParams) {
+	if req.BillingIntervalHours != nil && req.AccessDurationHours == nil {
+		hours := *req.BillingIntervalHours
+		req.AccessDurationHours = &hours
+	}
 }
 
 func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
