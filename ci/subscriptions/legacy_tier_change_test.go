@@ -28,7 +28,7 @@ func (w *world) legacyOnTier(tp topology, price tier, cents int64, cycle int, le
 	return w.legacyOnTierEndingAt(tp, price, cents, cycle, w.clock.Now().Add(left).UTC().Truncate(24*time.Hour))
 }
 
-func (w *world) legacyOnTierEndingAt(tp topology, price tier, cents int64, cycle int, end time.Time) *legacy {
+func (w *world) legacyOnTierEndingAt(tp topology, price tier, cents int64, cycle int, end time.Time, originalAnchor ...time.Time) *legacy {
 	t := w.t
 	t.Helper()
 	c := w.newCustomer()
@@ -38,9 +38,12 @@ func (w *world) legacyOnTierEndingAt(tp topology, price tier, cents int64, cycle
 		months, cycle = *price.BillingIntervalMonths, 0
 		start = calendarutil.AddMonths(end, -months)
 	}
+	if len(originalAnchor) > 0 {
+		start = originalAnchor[0]
+	}
 	amount := fmt.Sprintf("%d.%02d", cents/100, cents%100)
 	vault := w.nmi.AddVault(visa)
-	railSub := w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: price.plan, Amount: amount, Days: cycle / 24, Months: months, NextBilling: end})
+	railSub := w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: price.plan, Amount: amount, Days: cycle / 24, Months: months, CalendarAnchor: start, NextBilling: end})
 	sale := w.nmi.AddScheduleSale(railSub, start)
 	customerID, err := billing.ParseCustomerID(c.id)
 	require.NoError(t, err)

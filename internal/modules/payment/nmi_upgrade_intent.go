@@ -587,7 +587,7 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.BillingPr
 		if err != nil {
 			return err
 		}
-		if err := observed.SeedScheduleCadence(ctx, txDB, result.Order.ID, sub.ID, p.PeriodEnd, p.RecurringIntervalHours, p.RecurringIntervalMonths, p.RecurringAmount, h.Purchases.now()); err != nil {
+		if err := observed.SeedScheduleCadence(ctx, txDB, result.Order.ID, sub.ID, p.PeriodEnd, p.CalendarAnchor, p.RecurringIntervalHours, p.RecurringIntervalMonths, p.RecurringAmount, h.Purchases.now()); err != nil {
 			return err
 		}
 		for finding, subject := range map[string]string{ProviderUpdateStuckFinding: p.OldSubscriptionID.String(), ProrationUnresolvedFinding: in.ID.String()} {

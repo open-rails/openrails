@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -23,7 +24,8 @@ var providerLineJSON = object(map[string]jsonRule{
 })
 
 var providerBillShape = object(map[string]jsonRule{
-	"PSPID": uuidValue, "CustomerID": uuidValue, "SubscriptionID": nullable(uuidValue), "ExistingOrderID": nullable(uuidValue),
+	"CalendarAnchor": nullable(textValue),
+	"PSPID":          uuidValue, "CustomerID": uuidValue, "SubscriptionID": nullable(uuidValue), "ExistingOrderID": nullable(uuidValue),
 	"Owner": textValue, "Kind": textValue, "SourceKind": textValue, "SourceKey": textValue, "Currency": textValue,
 	"Total": integerValue, "PeriodStart": textValue, "PeriodEnd": textValue, "DueAt": textValue,
 	"Lines": array(providerLineJSON), "ProviderReference": textValue, "Payment": func(v any) bool { return v == nil },
@@ -41,6 +43,9 @@ func providerBillJSON(schedule bool) jsonRule {
 		}
 		var bill observed.Bill
 		if json.Unmarshal(raw, &bill) != nil || bill.PSPID == uuid.Nil || bill.CustomerID == uuid.Nil || bill.ExistingOrderID != nil || bill.Payment != nil || bill.Settled || bill.SettlementSource != "" || bill.NonCashAmount != 0 || bill.Total < 0 {
+			return false
+		}
+		if bill.CalendarAnchor != nil && (bill.CalendarAnchor.IsZero() || !schedule && bill.CalendarAnchor.After(bill.PeriodStart)) {
 			return false
 		}
 		if bill.Owner != observed.OwnerEngine && bill.Owner != observed.OwnerProvider && bill.Owner != observed.OwnerNMISchedule || moneyutil.RequireFiatCurrency(bill.Currency) != nil || bill.Currency != moneyutil.NormalizeCurrency(bill.Currency) {
@@ -141,6 +146,19 @@ func validateProviderBillValues(p Profile, values []*string) error {
 		}
 		if err != nil || monthErr != nil || hours < 0 || hours > math.MaxInt64/int64(time.Hour) || hours%24 != 0 || months < 0 || months > 1200 || (hours > 0) == (months > 0) || reference == nil || strings.TrimSpace(*reference) == "" || len(*reference) > 512 || len(bill.Lines) != 1 || hours > 0 && (bill.Lines[0].BillingIntervalHours == nil || int64(*bill.Lines[0].BillingIntervalHours) != hours) || months > 0 && bill.Lines[0].BillingIntervalHours != nil {
 			return fmt.Errorf("provider schedule cadence differs from its accepted terms")
+		}
+		if bill.CalendarAnchor != nil {
+			first := value(p, values, "first_due_at")
+			if first == nil {
+				return fmt.Errorf("provider schedule lacks its effective boundary")
+			}
+			firstDue, err := time.Parse("2006-01-02 15:04:05.999999-07", *first)
+			if err != nil {
+				return fmt.Errorf("provider schedule has invalid effective boundary")
+			}
+			if _, err := observed.CalendarScheduleAnchor(gen.BillingProviderSchedule{FirstDueAt: firstDue, CadenceHours: int32(hours), CadenceMonths: int32(months), AcceptedBill: []byte(*raw)}, firstDue); err != nil {
+				return fmt.Errorf("provider schedule calendar anchor contradicts its effective boundary")
+			}
 		}
 	}
 	return nil

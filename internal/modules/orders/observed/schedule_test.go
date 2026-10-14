@@ -1,6 +1,7 @@
 package observed
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func TestAcceptedProviderCycleIdentity(t *testing.T) {
 
 func TestApprovedReceiptsSettleTheOldestExecutedCycle(t *testing.T) {
 	first := time.Date(2026, 1, 31, 12, 0, 0, 0, time.UTC)
-	schedule := gen.BillingProviderSchedule{FirstDueAt: first, CadenceMonths: 1}
+	schedule := gen.BillingProviderSchedule{FirstDueAt: first, CadenceMonths: 1, AcceptedBill: []byte(`{}`)}
 	day := func(s string) time.Time {
 		v, err := time.Parse("2006-01-02", s)
 		require.NoError(t, err)
@@ -82,4 +83,33 @@ func TestApprovedReceiptsSettleTheOldestExecutedCycle(t *testing.T) {
 			require.Equal(t, tc.want, due.Format("2006-01-02"))
 		})
 	}
+}
+
+func TestCalendarAmendmentRetainsOriginalDayAfterFebruaryClampsItsFirstDue(t *testing.T) {
+	anchor := time.Date(2026, 1, 31, 12, 0, 0, 0, time.UTC)
+	first := time.Date(2026, 2, 28, 12, 0, 0, 0, time.UTC)
+	next := time.Date(2026, 3, 31, 12, 0, 0, 0, time.UTC)
+	raw, err := json.Marshal(Bill{CalendarAnchor: &anchor})
+	require.NoError(t, err)
+	amendment := gen.BillingProviderSchedule{FirstDueAt: first, CadenceMonths: 1, AcceptedBill: raw}
+	frozen, err := CalendarScheduleAnchor(amendment, next)
+	require.NoError(t, err)
+	require.Equal(t, &anchor, frozen)
+	receipt := ScheduleReceipt{TransactionID: "new-plan-payment", OccurredAt: first.Add(time.Hour), NextBillingAt: next, Approved: true}
+	due, err := approvedReceiptCycle(amendment, 0, receipt)
+	require.NoError(t, err)
+	require.Equal(t, first, due)
+	// Reconstruct the immutable acceptance as archive/restart does.
+	var restored Bill
+	require.NoError(t, json.Unmarshal(raw, &restored))
+	amendment.AcceptedBill, err = json.Marshal(restored)
+	require.NoError(t, err)
+	replayed, err := approvedReceiptCycle(amendment, 0, receipt)
+	require.NoError(t, err)
+	require.Equal(t, due, replayed)
+	wrong := next.AddDate(0, 0, -3)
+	_, err = CalendarScheduleAnchor(amendment, wrong)
+	require.Error(t, err, "March28 is not a boundary of the accepted January31 agreement")
+	_, err = declinedReceiptCycle(amendment, 0, ScheduleReceipt{DueAt: anchor, OccurredAt: first})
+	require.ErrorIs(t, err, errNoCycle, "new terms cannot claim a cycle before their first effective boundary")
 }

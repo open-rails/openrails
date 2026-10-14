@@ -43,6 +43,7 @@ type NMIUpgradePayload struct {
 	PaymentMethodID           uuid.UUID               `json:"payment_method_id"`
 	RecurringIntervalHours    int                     `json:"recurring_interval_hours"`
 	RecurringIntervalMonths   int                     `json:"recurring_interval_months,omitempty"`
+	CalendarAnchor            *time.Time              `json:"calendar_anchor,omitempty"`
 	RecurringAmount           int64                   `json:"recurring_amount,string"`
 	ProrationAmount           int64                   `json:"proration_amount,string"`
 	Currency                  string                  `json:"currency"`
@@ -95,6 +96,9 @@ func DecodeNMIUpgradePayload(in gen.BillingProviderIntent) (NMIUpgradePayload, e
 	if !((p.RecurringIntervalHours > 0 && p.RecurringIntervalHours%24 == 0 && p.RecurringIntervalMonths == 0) ||
 		(p.RecurringIntervalHours == 0 && p.RecurringIntervalMonths > 0 && p.RecurringIntervalMonths <= 1200)) {
 		return p, errors.New("provider tier change requires its accepted recurring cadence")
+	}
+	if p.RecurringIntervalMonths > 0 && (p.CalendarAnchor == nil || p.CalendarAnchor.IsZero() || p.CalendarAnchor.After(p.PeriodEnd)) || p.RecurringIntervalMonths == 0 && p.CalendarAnchor != nil {
+		return p, errors.New("provider tier change lacks its original calendar anchor")
 	}
 	if err := p.Instrument.Validate(); err != nil {
 		return p, err

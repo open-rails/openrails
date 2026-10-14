@@ -151,6 +151,10 @@ func TestCalendarNMITierChangeKeepsItsAcceptedNativeSchedule(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			w := prepareWorld(t, 12)
 			w.riverWorkers = 1
+			// Admit while the January31 period is paid through February's
+			// clamped date; the amendment must still end its next cycle March31.
+			at := time.Date(w.clock.Now().Year(), time.February, 15, 12, 0, 0, 0, time.UTC)
+			w.clock.Advance(at.Sub(w.clock.Now()))
 			w.start()
 			w.armDestructive()
 			group := "calendar-tier-" + uuid.NewString()[:8]
@@ -160,7 +164,9 @@ func TestCalendarNMITierChangeKeepsItsAcceptedNativeSchedule(t *testing.T) {
 			}
 			old := w.providerAccessTier("nmi", group, oldRank, oldCents, catalog.Field[int]{}, 1)
 			target := w.providerAccessTier("nmi", group, newRank, newCents, catalog.Field[int]{}, 1)
-			member := w.legacyOnTier(embedded, old, oldCents, 0, 10*day)
+			anchor := time.Date(at.Year(), time.January, 31, 0, 0, 0, 0, time.UTC)
+			firstDue := calendarutil.AddMonths(anchor, 1)
+			member := w.legacyOnTierEndingAt(embedded, old, oldCents, 0, firstDue, anchor)
 			boundary := member.periodEnd()
 			params := billing.ChangeSubscriptionParams{PriceID: priceRef(target.ID), IdempotencyKey: "calendar-" + uuid.NewString()}
 			preview, err := member.c.previewChange(member.sub, params)
@@ -195,6 +201,19 @@ func TestCalendarNMITierChangeKeepsItsAcceptedNativeSchedule(t *testing.T) {
 			}
 			require.Len(t, member.tierSales(), wantSales, "calendar acceptance and replay never submit another proration")
 			require.Equal(t, boundary, member.periodEnd(), "an in-place native change keeps the provider's paid boundary")
+			w.advance(firstDue.Sub(w.clock.Now()) + time.Hour)
+			receipt := w.nmi.RenewSchedule(member.railSub, true)
+			w.refreshProviders()
+			w.settle()
+			bills := w.bills(member.c.id)
+			paid := bills[receipt.TransactionID]
+			require.Equal(t, &firstDue, paid.periodStart)
+			march := calendarutil.AddMonths(anchor, 2)
+			require.Equal(t, &march, paid.periodEnd, "new price's paid cycle retains the original January31 anchor")
+			require.Equal(t, newCents*10_000, paid.paid)
+			w.refreshProviders()
+			w.settle()
+			require.Equal(t, bills, w.bills(member.c.id), "provider receipt replay retains the original accepted month and price")
 		})
 	}
 }

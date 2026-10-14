@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // Card is what a browser tokenizes and a vault stores.
@@ -64,7 +66,10 @@ type Schedule struct {
 	Created time.Time
 	Order   string
 	// Days or Months is the cadence (Days 30 when both are zero).
-	Days, Months    int
+	Days, Months int
+	// CalendarAnchor is the original provider billing day, retained when a
+	// shorter month clamps NextBilling. Zero preserves legacy fixture behavior.
+	CalendarAnchor  time.Time
 	NextBilling     time.Time
 	Deleted, Paused bool
 	// Custom is a custom-amount schedule: its plan shows an empty plan_name.
@@ -177,6 +182,10 @@ func (v *Vault) clone() Vault {
 // advance is the schedule's next regular billing date after at.
 func (s *Schedule) advance(at time.Time) time.Time {
 	if s.Months > 0 {
+		if !s.CalendarAnchor.IsZero() {
+			months := (at.Year()-s.CalendarAnchor.Year())*12 + int(at.Month()-s.CalendarAnchor.Month())
+			return calendarutil.AddMonths(s.CalendarAnchor, (months/s.Months+1)*s.Months)
+		}
 		return at.AddDate(0, s.Months, 0)
 	}
 	days := s.Days

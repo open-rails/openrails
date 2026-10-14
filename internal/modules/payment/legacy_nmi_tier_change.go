@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -109,6 +110,26 @@ func equalOptionalCadence(a, b *int) bool {
 	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
+func (s *PurchaseService) nmiCalendarAnchor(ctx context.Context, sub *models.Subscription, target *models.Price) (*time.Time, error) {
+	if target.BillingIntervalMonths == nil {
+		return nil, nil
+	}
+	schedules, err := s.SubscriptionService.Database().Gen(ctx).ListProviderSchedules(ctx, gen.ListProviderSchedulesParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, ProviderReference: sub.RailSubscriptionID})
+	if err != nil {
+		return nil, err
+	}
+	for i := len(schedules) - 1; i >= 0; i-- {
+		accepted := schedules[i]
+		if accepted.PspID != sub.PspID || accepted.CustomerID != sub.CustomerID || int(accepted.CadenceMonths) != *target.BillingIntervalMonths {
+			continue
+		}
+		if anchor, err := observed.CalendarScheduleAnchor(accepted, *sub.CurrentPeriodEndsAt); err == nil {
+			return anchor, nil
+		}
+	}
+	return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeCadenceUnsupported, Message: "calendar tier change requires the provider schedule's original accepted anchor"}
+}
+
 func (s *PurchaseService) previewProviderNMITierChange(ctx context.Context, resp *TierChangePreviewResponse, sub *models.Subscription, current, target *models.Price, product *models.Product, downgrade bool) (*TierChangePreviewResponse, error) {
 	now := s.now().UTC()
 	if err := providerNMITierAdmissible(sub, current, target, now); err != nil {
@@ -120,6 +141,9 @@ func (s *PurchaseService) previewProviderNMITierChange(ctx context.Context, resp
 		return nil, errTierChangeScheduled
 	}
 	if _, err := s.scheduleTargetPlan(ctx, sub, target); err != nil {
+		return nil, err
+	}
+	if _, err := s.nmiCalendarAnchor(ctx, sub, target); err != nil {
 		return nil, err
 	}
 	end := sub.CurrentPeriodEndsAt.UTC()
@@ -185,6 +209,10 @@ func (s *PurchaseService) processProviderNMITierChange(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
+	calendarAnchor, err := s.nmiCalendarAnchor(ctx, sub, newPrice)
+	if err != nil {
+		return nil, err
+	}
 	if pending, err := subscriptions.PendingChange(ctx, database, sub.ID); err != nil {
 		return nil, err
 	} else if pending != nil {
@@ -236,7 +264,7 @@ func (s *PurchaseService) processProviderNMITierChange(ctx context.Context, req 
 	payload := subscriptions.NMIUpgradePayload{Staff: staffChange(req), Action: action, RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: email,
 		OldSubscriptionID: sub.ID, OldPriceID: sub.PriceID, OldProviderSubscriptionID: sub.RailSubscriptionID, NewPaymentID: uuidutil.NewV7(),
 		PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, Instrument: instrument, PaymentMethodID: methodRow.ID,
-		RecurringIntervalHours: cadenceHours, RecurringIntervalMonths: cadenceMonths, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),
+		RecurringIntervalHours: cadenceHours, RecurringIntervalMonths: cadenceMonths, CalendarAnchor: calendarAnchor, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),
 		AccessDurationHours: newPrice.AccessDurationHours, ProviderAccessDefault: newPrice.ProviderAccessDefault, TargetPlanID: targetPlan}
 	reason := "customer tier upgrade"
 	if downgrade {

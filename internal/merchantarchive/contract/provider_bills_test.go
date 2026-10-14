@@ -134,6 +134,24 @@ func TestProviderArchiveWireRetainsReplayIdentity(t *testing.T) {
 	require.Equal(t, 1, seen)
 }
 
+func TestProviderArchiveRetainsOriginalCalendarAnchorAcrossAmendments(t *testing.T) {
+	bill := archivedProviderBill()
+	anchor := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
+	bill.CalendarAnchor = &anchor
+	bill.SourceKind, bill.SourceKey, bill.ProviderReference = "provider_cycle", "", "provider-subscription-1"
+	bill.PeriodStart, bill.PeriodEnd, bill.DueAt = time.Time{}, time.Time{}, time.Time{}
+	bill.Lines[0].BillingIntervalHours = nil
+	raw, err := json.Marshal(bill)
+	require.NoError(t, err)
+	fields := map[string]string{"merchant_id": testMerchant, "psp_id": bill.PSPID.String(), "customer_id": bill.CustomerID.String(), "subscription_id": bill.SubscriptionID.String(),
+		"first_due_at": "2026-02-28 00:00:00+00", "cadence_hours": "0", "cadence_months": "1", "source_reference": "accepted_amendment", "provider_reference": bill.ProviderReference, "accepted_version": "2", "accepted_bill": string(raw)}
+	p, values := row(t, "provider_schedules", fields)
+	require.NoError(t, ValidateValues(p, values))
+	fields["first_due_at"] = "2026-03-28 00:00:00+00"
+	p, values = row(t, "provider_schedules", fields)
+	require.ErrorContains(t, ValidateValues(p, values), "calendar anchor")
+}
+
 func TestProviderSettlementEventArchiveContract(t *testing.T) {
 	for _, source := range []string{"cash", "credit", "out_of_band", "mixed"} {
 		raw := `{"customer_id":"` + testMerchant + `","status":"complete","payment_status":"succeeded","number":2026,"settlement_source":"` + source + `"}`
