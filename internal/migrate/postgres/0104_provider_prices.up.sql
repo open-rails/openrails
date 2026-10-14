@@ -29,7 +29,7 @@ ALTER TABLE billing.prices
     ADD CONSTRAINT prices_provider_snapshot_check CHECK ((provider_psp_id IS NULL AND provider_snapshot IS NULL AND NOT provider_owned) OR
         (provider_owned AND provider_psp_id IS NOT NULL AND provider_snapshot IS NOT NULL AND jsonb_typeof(provider_snapshot) = 'object' AND COALESCE(provider_snapshot->>'psp_id' = provider_psp_id::text, false))),
     ADD CONSTRAINT prices_calendar_cadence_check CHECK (billing_interval_months IS NULL OR (provider_owned AND billing_interval_hours IS NULL AND billing_interval_months BETWEEN 1 AND 1200)),
-    ADD CONSTRAINT prices_provider_access_default_check CHECK (NOT provider_access_default OR provider_owned);
+    ADD CONSTRAINT prices_provider_access_default_check CHECK (NOT provider_access_default OR (provider_owned AND access_duration_hours IS NULL));
 ALTER TABLE billing.prices DROP CONSTRAINT prices_product_amount_window_key;
 ALTER TABLE billing.prices ADD CONSTRAINT prices_product_amount_window_key
     UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, billing_interval_months, provider_access_default);
@@ -37,8 +37,10 @@ COMMENT ON COLUMN billing.prices.provider_snapshot IS 'Immutable provider object
 COMMENT ON COLUMN billing.prices.billing_interval_months IS 'Provider calendar cadence, independent of fixed hours; a year is twelve months. NULL on our prices and fixed-duration provider prices.';
 COMMENT ON COLUMN billing.prices.provider_access_default IS 'Access ends at the verified provider service-period end. False retains the explicit hourly access duration, including all pre-split accepted terms.';
 ALTER TABLE billing.subscriptions ADD COLUMN provider_access_default_snapshot boolean NOT NULL DEFAULT false;
+ALTER TABLE billing.subscriptions ADD CONSTRAINT subscriptions_provider_access_choice_check CHECK (NOT provider_access_default_snapshot OR access_duration_hours_snapshot IS NULL);
 COMMENT ON COLUMN billing.subscriptions.provider_access_default_snapshot IS 'The accepted access choice for this phase: verified provider service-period end, otherwise the explicit access_duration_hours_snapshot. Existing accepted windows are never inferred to be defaults.';
 ALTER TABLE billing.order_lines ADD COLUMN provider_access_default boolean NOT NULL DEFAULT false;
+ALTER TABLE billing.order_lines ADD CONSTRAINT order_lines_provider_access_choice_check CHECK (NOT provider_access_default OR access_duration_hours IS NULL);
 COMMENT ON COLUMN billing.order_lines.provider_access_default IS 'Frozen access choice accepted on a provider bill: use its verified service-period end, otherwise the explicit hourly duration.';
 
 -- One of ours may sell through only some of the merchant's methods.

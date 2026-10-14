@@ -76,6 +76,9 @@ type StripeTierChangePayload struct {
 }
 
 func (p StripeTierChangePayload) validate() error {
+	if p.ProviderAccessDefault && p.AccessDurationHours != nil {
+		return errors.New("provider-default access contradicts an explicit hourly duration")
+	}
 	if p.Staff != nil && (strings.TrimSpace(p.Staff.Invoker) == "" || strings.TrimSpace(p.Staff.Reason) == "") {
 		return errors.New("invalid staff change identity")
 	}

@@ -238,6 +238,9 @@ func validate(b Bill) error {
 	}
 	var sum int64
 	for _, l := range b.Lines {
+		if l.ProviderAccessDefault && l.AccessDurationHours != nil {
+			return errors.New("provider-default access contradicts an explicit hourly duration")
+		}
 		if strings.TrimSpace(l.Description) == "" || l.Quantity != nil && (*l.Quantity < 1 || *l.Quantity > math.MaxInt32) || l.UnitAmount < 0 || l.Amount < 0 && l.Source != "provider_adjustment" {
 			return errors.New("invalid provider bill line")
 		}

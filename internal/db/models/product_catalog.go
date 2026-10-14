@@ -76,11 +76,11 @@ type Price struct {
 	Key string `json:"key"`
 
 	// AccessDurationHours is the access window granted by each purchase, in hours.
-	// nil grants access without scheduled expiry, independently of billing cadence.
+	// With ProviderAccessDefault false, nil grants access without scheduled expiry.
 	AccessDurationHours *int `json:"access_duration_hours"`
 
-	// BillingIntervalHours is the recurring billing cadence. nil is a one-time
-	// charge; a positive interval bills again until the subscription is canceled.
+	// BillingIntervalHours is a fixed recurring cadence. Calendar provider
+	// prices use BillingIntervalMonths instead; both nil means one-time.
 	BillingIntervalHours *int `json:"billing_interval_hours"`
 
 	// Trial pricing (#622): an optional FIRST phase that differs from the recurring
@@ -195,11 +195,8 @@ func (p *Price) IsRecurring() bool {
 	return p != nil && ((p.BillingIntervalHours != nil && *p.BillingIntervalHours > 0) || (p.BillingIntervalMonths != nil && *p.BillingIntervalMonths > 0))
 }
 
-// RecurringCycleHours returns the billing interval in hours for a recurring
-// price, or nil for a one-off/durable price. This is the internal canonical
-// cadence — duration is measured in hours everywhere inside OpenRails. Day-based
-// provider cadences (Stripe interval, NMI day-frequency, Solana period) are
-// derived from this (hours/24) ONLY at the provider boundary.
+// RecurringCycleHours returns a fixed recurring interval. Calendar provider
+// prices retain BillingIntervalMonths and never acquire estimated hours.
 func (p *Price) RecurringCycleHours() *int {
 	if !p.IsRecurring() || p.BillingIntervalHours == nil {
 		return nil
@@ -428,8 +425,8 @@ func (p *Price) View() billing.Price {
 		SellVia: slices.Clone(p.SellVia), CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 	if p.ProviderOwned {
-		// An earlier version whose provider object moved to a newer one keeps
-		// no binding.
+		// Earlier versions resolve their original provider object from the
+		// immutable snapshot after the current lookup binding moves.
 		provider := &billing.PriceProvider{AccessDurationDefault: p.ProviderAccessDefault, IDs: map[string]string{}, SyncStatus: billing.SyncStatusUnknown, Drift: []billing.DriftField{}}
 		if key, link, ok := p.ProviderLink(); ok {
 			provider.PSP, provider.Rail = key, link[RailKeyRail]

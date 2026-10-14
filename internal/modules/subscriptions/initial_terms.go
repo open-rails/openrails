@@ -95,7 +95,7 @@ func (t InitialMembershipTerms) Validate() error {
 	if t.CancelAfterInitial && t.CollectionPolicy != models.CollectionPolicyEngine {
 		return errors.New("non-renewing order requires engine collection without a provider schedule")
 	}
-	if err := validateAccessDuration(t.AccessDurationHours); err != nil {
+	if err := validateAccessChoice(t.AccessDurationHours, t.ProviderAccessDefault); err != nil {
 		return err
 	}
 	if t.AwaitingMethod && (t.CollectionPolicy != models.CollectionPolicyEngine || t.PaymentMethodID != uuid.Nil || t.Pending || t.Replaces != nil || t.Adds != nil) {

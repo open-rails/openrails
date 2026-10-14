@@ -224,3 +224,10 @@ func TestHistoricalDefaultAccessUsesTheAcceptedBillBoundary(t *testing.T) {
 	got = subscriptionAccessForPeriod(sub, start, &acceptedEnd)
 	require.Equal(t, new(start.Add(24*time.Hour)), got.EndsAt)
 }
+
+func TestAcceptedAccessChoiceCannotNameBothProviderDefaultAndHours(t *testing.T) {
+	require.NoError(t, validateAccessChoice(nil, true))
+	require.NoError(t, validateAccessChoice(nil, false), "explicit indefinite remains distinct")
+	require.NoError(t, validateAccessChoice(new(24), false))
+	require.Error(t, validateAccessChoice(new(24), true))
+}

@@ -16,6 +16,13 @@ func validateAccessDuration(hours *int) error {
 	return nil
 }
 
+func validateAccessChoice(hours *int, providerDefault bool) error {
+	if providerDefault && hours != nil {
+		return errors.New("provider-default access contradicts an explicit hourly duration")
+	}
+	return validateAccessDuration(hours)
+}
+
 func accessEnd(start time.Time, hours *int) *time.Time {
 	if hours == nil {
 		return nil

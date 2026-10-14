@@ -74,7 +74,7 @@ func DecodeNMIUpgradePayload(in gen.BillingProviderIntent) (NMIUpgradePayload, e
 	if p.Staff != nil && !p.Staff.valid() {
 		return p, errors.New("invalid staff change identity")
 	}
-	if err := validateAccessDuration(p.AccessDurationHours); err != nil {
+	if err := validateAccessChoice(p.AccessDurationHours, p.ProviderAccessDefault); err != nil {
 		return p, err
 	}
 	if err := moneyutil.RequireFiatCurrency(p.Currency); err != nil {

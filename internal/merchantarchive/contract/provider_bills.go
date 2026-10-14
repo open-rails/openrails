@@ -77,6 +77,9 @@ func providerBillJSON(schedule bool) jsonRule {
 		}
 		var total int64
 		for _, line := range bill.Lines {
+			if line.ProviderAccessDefault && line.AccessDurationHours != nil {
+				return false
+			}
 			if strings.TrimSpace(line.Description) == "" || line.UnitAmount < 0 || line.Amount < 0 && line.Source != "provider_adjustment" {
 				return false
 			}

@@ -52,7 +52,7 @@ type RenewalTerms struct {
 func (t RenewalTerms) UnitAmount() int64 { return t.Amount / int64(SeatCount(t.Quantity)) }
 
 func (t RenewalTerms) Validate() error {
-	if err := validateAccessDuration(t.AccessDurationHours); err != nil {
+	if err := validateAccessChoice(t.AccessDurationHours, t.ProviderAccessDefault); err != nil {
 		return err
 	}
 	if t.PSPID == uuid.Nil || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.FromPriceID == uuid.Nil || t.FromProductID == uuid.Nil || t.PriceID == uuid.Nil || t.ProductID == uuid.Nil || t.Amount <= 0 || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) {
