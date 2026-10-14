@@ -228,6 +228,13 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 		if err != nil {
 			return nil, nil, err
 		}
+		if terms.Rail == models.RailSolana {
+			// Order fulfillment has already recorded the wallet payment in this
+			// transaction. Its membership effect carries zero additional cash.
+			if err := validateSolanaEnrollmentOrder(ctx, txDB.Gen(ctx), mid.UUID(), *terms, params.ExistingOrderID, *params.RailSubscriptionID); err != nil {
+				return nil, nil, err
+			}
+		}
 		prior, err := txDB.Gen(ctx).GetInitialMembershipForUpdate(ctx, gen.GetInitialMembershipForUpdateParams{MerchantID: mid.UUID(), ID: terms.SubscriptionID})
 		if err != nil && !db.IsNotFound(err) {
 			return nil, nil, err

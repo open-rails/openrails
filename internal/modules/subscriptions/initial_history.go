@@ -1,6 +1,8 @@
 package subscriptions
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -10,6 +12,42 @@ import (
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments"
 )
+
+// validateSolanaEnrollmentOrder proves the first wallet payment from the
+// immutable paid order; membership fulfillment must not record it twice.
+func validateSolanaEnrollmentOrder(ctx context.Context, q *gen.Queries, mid uuid.UUID, t InitialMembershipTerms, orderID *uuid.UUID, providerRef string) error {
+	if orderID == nil || t.Amount != 0 || t.PaymentID != uuid.Nil {
+		return errors.New("Solana enrollment requires its already paid order")
+	}
+	o, err := q.GetOrder(ctx, gen.GetOrderParams{MerchantID: mid, ID: *orderID})
+	if err != nil {
+		return err
+	}
+	if o.CustomerID != t.CustomerID || o.Status != "complete" || o.PaymentStatus != "succeeded" || o.PaymentID == nil || o.Total != t.RecurringAmount || o.Currency != t.Currency {
+		return errors.New("Solana enrollment contradicts its paid order")
+	}
+	p, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid, ID: *o.PaymentID})
+	if err != nil {
+		return err
+	}
+	if p.CustomerID != t.CustomerID || p.OrderID == nil || *p.OrderID != o.ID || p.PspID == nil || *p.PspID != t.PSPID || models.DerefStr(p.Rail) != string(models.RailSolana) || p.TransactionID == "" || p.Amount != o.Total || p.Currency != o.Currency || !payments.PaymentStatusSucceeded(p.Status) || p.MoneyMovement != string(models.MoneyMovementRail) {
+		return errors.New("Solana enrollment has no matching successful wallet payment")
+	}
+	var receipt struct {
+		SubscriptionPDA string `json:"solana_subscription_pda"`
+	}
+	if json.Unmarshal(p.Metadata, &receipt) != nil || providerRef == "" || receipt.SubscriptionPDA != providerRef || !p.PurchasedAt.Equal(t.PeriodStart) {
+		return errors.New("Solana enrollment contradicts its verified subscription receipt")
+	}
+	lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid, OrderIds: []uuid.UUID{o.ID}})
+	if err != nil {
+		return err
+	}
+	if len(lines) != 1 || lines[0].PriceID == nil || *lines[0].PriceID != t.PriceID || lines[0].ProductID == nil || *lines[0].ProductID != t.ProductID || lines[0].Amount != t.RecurringAmount || lines[0].BillingIntervalHours == nil || t.RecurringIntervalHours == nil || int(*lines[0].BillingIntervalHours) != *t.RecurringIntervalHours {
+		return errors.New("Solana enrollment contradicts its accepted order line")
+	}
+	return nil
+}
 
 func (t InitialMembershipTerms) ValidateSubscriptionIdentity(sub *models.Subscription, rail models.Rail, providerRef string) error {
 	if sub == nil || sub.ID != t.SubscriptionID || sub.CustomerID != t.CustomerID || sub.PspID != t.PSPID || sub.CollectionPolicy != t.CollectionPolicy || sub.Rail != rail || sub.RailSubscriptionID != providerRef {

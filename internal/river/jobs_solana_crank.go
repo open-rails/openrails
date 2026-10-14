@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -51,10 +52,10 @@ type solanaCranker interface {
 	Crank(ctx context.Context, merchantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error)
 }
 
-// presubmitCranker is the optional signature write-ahead capability:
+// presubmitCranker provides the required signature write-ahead capability:
 // presubmit(sig) persists the signed tx signature before submission, and
 // memoLocalID (the durable pull-intent id; Nil = unstamped) is stamped on the
-// pull tx as its self-recognition memo. Fakes without it skip the write-ahead.
+// pull tx as its self-recognition memo.
 type presubmitCranker interface {
 	CrankWithPresubmit(ctx context.Context, merchantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string) error) (string, error)
 }
@@ -227,7 +228,7 @@ type crankKind int
 
 const (
 	crankSucceeded       crankKind = iota // pulled + renewed + advanced
-	crankUnqualifiedPaid                  // period already paid on-chain; advanced without local renewal
+	crankUnqualifiedPaid                  // paid on-chain without a qualified accepted receipt
 	crankCanceled                         // delegate revoked → membership canceled (no dunning)
 	crankDunned                           // recoverable decline → FailMembership + rescheduled
 	crankGhostExpired                     // ghost plan → row expired
@@ -242,7 +243,7 @@ type crankOutcome struct {
 	evidence  map[string]any
 }
 
-// crankOne runs the pull state machine for one row. presubmit (optional)
+// crankOne runs the pull state machine for one row. presubmit
 // durably records the signed tx signature before submission. memoLocalID (the
 // pull intent id; Nil = unstamped) is stamped on the pull tx as its SPL Memo,
 // so a chain reader can resolve the tx to the intent with no local send
@@ -276,7 +277,14 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 	if !ok || presubmit == nil {
 		return crankOutcome{}, errors.New("Solana pull requires its durable submission fence")
 	}
-	sig, crankErr = pc.CrankWithPresubmit(ctx, merchantID, row, amountBaseUnits, memoLocalID, presubmit)
+	var submitted string
+	sig, crankErr = pc.CrankWithPresubmit(ctx, merchantID, row, amountBaseUnits, memoLocalID, func(signature string) error {
+		err := presubmit(signature)
+		if err == nil {
+			submitted = signature
+		}
+		return err
+	})
 	if crankErr != nil {
 		// ClassifyCrankError maps the on-chain error onto the billing
 		// decline-code vocabulary and an action. Devnet codes: Custom:400 =
@@ -284,6 +292,18 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 		// delegate revoked (terminal); token InsufficientFunds (Custom:1) =
 		// recoverable; RPC/gas = operational.
 		cf := recurring.ClassifyCrankError(crankErr)
+		if cf.Category != recurring.Operational {
+			failed, verdict := checkSolanaSignature(ctx, w.Chain, submitted)
+			if verdict != sigVerdictNotLanded {
+				return crankOutcome{}, fmt.Errorf("refused pull has no qualified nonexecution receipt: %w", crankErr)
+			}
+			raw, err := json.Marshal(failed.Meta.Err)
+			if err != nil {
+				return crankOutcome{}, fmt.Errorf("decode qualified pull failure: %w", err)
+			}
+			crankErr = fmt.Errorf("on-chain pull reverted: %s", raw)
+			cf = recurring.ClassifyCrankError(crankErr)
+		}
 		llog := log.WithContext(ctx).WithError(crankErr).WithFields(log.Fields{
 			"subscription_pda": row.SubscriptionPDA,
 			"decline_code":     string(cf.Code),

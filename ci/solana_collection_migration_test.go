@@ -60,10 +60,14 @@ func TestSolanaCollectionMigrationUpdatesOnlySolana(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	subs := map[string]uuid.UUID{}
 	for rail, policy := range map[string]string{"solana": "provider", "stripe": "provider", "nmi": "nmi_schedule"} {
+		environment := "sandbox"
+		if rail == "solana" {
+			environment = "devnet"
+		}
 		customer, psp, id := uuid.New(), uuid.New(), uuid.New()
 		subs[rail] = id
 		exec(`INSERT INTO `+table("customers")+` (merchant_id,id) VALUES ($1,$2)`, mid, customer)
-		exec(`INSERT INTO `+table("psps")+` (merchant_id,id,key,rail,account_id,environment) VALUES ($1,$2,$3,$3,$4,'sandbox')`, mid, psp, rail, "migration-"+rail)
+		exec(`INSERT INTO `+table("psps")+` (merchant_id,id,key,rail,account_id,environment) VALUES ($1,$2,$3,$3,$4,$5)`, mid, psp, rail, "migration-"+rail, environment)
 		exec(`INSERT INTO `+table("subscriptions")+` (merchant_id,id,customer_id,product_id,price_id,psp_id,rail,collection_policy,rail_subscription_id,status,started_at,current_period_starts_at,current_period_ends_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10,$10,$11)`, mid, id, customer, product, price, psp, rail, policy, "accepted-"+rail, now, now.Add(720*time.Hour))
 	}
 	engine, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})

@@ -51,15 +51,16 @@ func verifyExecution(ctx context.Context, q *gen.Queries, mid uuid.UUID, b Bill)
 	}
 	var payload struct {
 		Agreement struct {
-			PriceID     uuid.UUID `json:"price_id"`
-			ProductID   uuid.UUID `json:"product_id"`
-			CustomerID  uuid.UUID `json:"customer_id"`
-			Amount      int64     `json:"amount,string"`
-			Currency    string    `json:"currency"`
-			Description string    `json:"description"`
-			PeriodHours uint64    `json:"period_hours,string"`
-			EpisodeAt   time.Time `json:"episode_at"`
-			Quantity    *int      `json:"quantity"`
+			PriceID             uuid.UUID `json:"price_id"`
+			ProductID           uuid.UUID `json:"product_id"`
+			CustomerID          uuid.UUID `json:"customer_id"`
+			Amount              int64     `json:"amount,string"`
+			Currency            string    `json:"currency"`
+			Description         string    `json:"description"`
+			PeriodHours         uint64    `json:"period_hours,string"`
+			EpisodeAt           time.Time `json:"episode_at"`
+			Quantity            *int      `json:"quantity"`
+			AccessDurationHours *int      `json:"access_duration_hours"`
 		} `json:"agreement"`
 	}
 	if json.Unmarshal(in.Payload, &payload) != nil || len(b.Lines) != 1 {
@@ -69,10 +70,14 @@ func verifyExecution(ctx context.Context, q *gen.Queries, mid uuid.UUID, b Bill)
 	if a.PeriodHours == 0 || a.PeriodHours > 24*366 {
 		return ErrConflict
 	}
-	if a.CustomerID != b.CustomerID || a.Amount != b.Total || a.Currency != b.Currency || !a.EpisodeAt.Equal(b.DueAt) || !sameID(line.PriceID, &a.PriceID) || !sameID(line.ProductID, &a.ProductID) || line.Description != a.Description || !sameQuantity(line.Quantity, a.Quantity) || b.PeriodEnd.Sub(b.PeriodStart) != time.Duration(a.PeriodHours)*time.Hour {
+	if a.CustomerID != b.CustomerID || a.Amount != b.Total || a.Currency != b.Currency || !a.EpisodeAt.Equal(b.DueAt) || !sameID(line.PriceID, &a.PriceID) || !sameID(line.ProductID, &a.ProductID) || line.Description != a.Description || !sameQuantity(line.Quantity, a.Quantity) || !sameAccessHours(line.AccessDurationHours, a.AccessDurationHours) || line.BillingIntervalHours == nil || *line.BillingIntervalHours != int(a.PeriodHours) || b.PeriodEnd.Sub(b.PeriodStart) != time.Duration(a.PeriodHours)*time.Hour {
 		return ErrConflict
 	}
 	return nil
+}
+
+func sameAccessHours(a, b *int) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
 func recordExecution(ctx context.Context, q *gen.Queries, mid uuid.UUID, b Bill, result Result, now time.Time) error {

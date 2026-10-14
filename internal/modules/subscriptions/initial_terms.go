@@ -92,7 +92,7 @@ func (t InitialMembershipTerms) Validate() error {
 		return errors.New("accepted provider enrollment requires its recurring cadence")
 	}
 	if t.Rail == models.RailSolana {
-		if t.CollectionPolicy != models.CollectionPolicyEngine || t.PaymentMethodID != uuid.Nil || t.AwaitingMethod || t.Pending || t.Replaces != nil || t.Adds != nil || t.RecurringIntervalHours == nil || t.Amount <= 0 || t.RecurringAmount <= 0 {
+		if t.CollectionPolicy != models.CollectionPolicyEngine || t.PaymentMethodID != uuid.Nil || t.AwaitingMethod || t.Pending || t.Replaces != nil || t.Adds != nil || t.RecurringIntervalHours == nil || t.RecurringAmount <= 0 {
 			return errors.New("Solana enrollment requires its paid wallet authorization")
 		}
 		if err := moneyutil.ValidateCurrency(t.Currency); err != nil {

@@ -270,9 +270,20 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 		intent.ResultEvidence, _ = json.Marshal(map[string]any{"transaction_id": outcome.signature, "execution": execution})
 		return h.repairFromSignature(ctx, repo, p.Agreement, intent, outcome.signature)
 	case crankUnqualifiedPaid:
+		evidence["transaction_id"] = recorded
 		return intents.TerminalWithEvidence(outcome.reason, evidence)
 
 	case crankGhostExpired, crankCanceled, crankDunned:
+		if recorded != "" {
+			_, verdict := h.checkSignature(ctx, recorded)
+			if verdict != sigVerdictNotLanded {
+				return intents.Ambiguous("terminal pull outcome has no positive nonexecution receipt")
+			}
+			if err := h.recordRevertedSignature(ctx, intent.ID, recorded); err != nil {
+				return intents.Parked(err.Error())
+			}
+			evidence["transaction_id"], evidence["reverted_transaction_id"] = recorded, recorded
+		}
 		return intents.TerminalWithEvidence(outcome.reason, evidence)
 	default:
 		return intents.Ambiguous("unrecognized crank outcome")
@@ -352,25 +363,33 @@ const (
 )
 
 // checkSignature reads the chain for the recorded signature. sigVerdictLanded
-// reports a confirmed, on-chain-successful transaction (result non-nil only
-// then, for the memo cross-check).
+// reports a confirmed, on-chain-successful transaction. Reverted receipts
+// also return their validated envelope for authoritative decline classification.
 func (h *SolanaPullIntentHandler) checkSignature(ctx context.Context, signature string) (*rpc.GetTransactionResult, sigVerdict) {
-	if h.Chain == nil {
+	return checkSolanaSignature(ctx, h.Chain, signature)
+}
+
+func checkSolanaSignature(ctx context.Context, chain SolanaTxReader, signature string) (*rpc.GetTransactionResult, sigVerdict) {
+	if chain == nil {
 		return nil, sigVerdictUnknown
 	}
 	sig, err := solanago.SignatureFromBase58(signature)
 	if err != nil {
 		return nil, sigVerdictUnknown
 	}
-	result, err := h.Chain.GetTransaction(ctx, sig)
+	result, err := chain.GetTransaction(ctx, sig)
 	if err != nil || result == nil {
 		return nil, sigVerdictUnknown
 	}
-	if result.Meta == nil {
+	if result.Meta == nil || result.Transaction == nil {
+		return nil, sigVerdictUnknown
+	}
+	tx, err := result.Transaction.GetTransaction()
+	if err != nil || tx == nil || len(tx.Signatures) == 0 || !tx.Signatures[0].Equals(sig) || tx.VerifySignatures() != nil {
 		return nil, sigVerdictUnknown
 	}
 	if result.Meta.Err != nil {
-		return nil, sigVerdictNotLanded // landed but REVERTED: no money moved
+		return result, sigVerdictNotLanded // landed but REVERTED: no money moved
 	}
 	return result, sigVerdictLanded
 }
