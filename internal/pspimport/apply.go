@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
@@ -37,11 +38,11 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID) error {
 	if !found {
 		return Permanent(errors.New("the import's PSP is no longer declared"))
 	}
-	prices, err := im.providerPrices(ctx, row)
+	prices, unpriced, err := im.providerPrices(ctx, row)
 	if err != nil {
 		return err
 	}
-	l := lander{im: im, row: row, scope: scope, prices: prices, asOf: *row.PulledAt}
+	l := lander{im: im, row: row, scope: scope, prices: prices, unpriced: unpriced, asOf: *row.PulledAt}
 	after := uuid.Nil
 	for {
 		customers, err := im.DB.Gen(ctx).ListPSPImportLinkedCustomers(ctx, gen.ListPSPImportLinkedCustomersParams{MerchantID: row.MerchantID, ImportID: row.ID, AfterCustomerID: after, RowLimit: applyCustomers})
@@ -64,12 +65,55 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID) error {
 	return im.DB.Gen(ctx).SetPSPImportApplied(ctx, gen.SetPSPImportAppliedParams{MerchantID: row.MerchantID, ID: row.ID, AppliedAt: im.now()})
 }
 
+// priceTerms are a provider price and the terms it caches.
+type priceTerms struct {
+	id       billing.PriceID
+	amount   int64
+	currency string
+	hours    int
+	months   int
+}
+
+func termsOf(id string, amount int64, currency string, hours, months *int32) priceTerms {
+	t := priceTerms{id: billing.PriceID(id), amount: amount, currency: currency}
+	if hours != nil {
+		t.hours = int(*hours)
+	}
+	if months != nil {
+		t.months = int(*months)
+	}
+	return t
+}
+
 // providerPrices are the provider prices of the plans the linked
-// subscriptions name, by plan.
-func (im *Importer) providerPrices(ctx context.Context, row gen.BillingPspImport) (map[string]billing.PriceID, error) {
+// subscriptions name, by plan. A rail whose subscriptions name no plan
+// (CCBill) takes the one provider price the import's product holds on the
+// PSP, keyed "".
+func (im *Importer) providerPrices(ctx context.Context, row gen.BillingPspImport) (map[string]priceTerms, string, error) {
+	out := map[string]priceTerms{}
+	if !planned[row.Rail] {
+		var products []billing.PSPImportProduct
+		if err := json.Unmarshal(row.Products, &products); err != nil {
+			return nil, "", err
+		}
+		product := productFor(products, "")
+		if product == "" {
+			return out, "the import names no product for its subscriptions", nil
+		}
+		rows, err := im.DB.Gen(ctx).ListProductProviderPrices(ctx, gen.ListProductProviderPricesParams{MerchantID: row.MerchantID, PspID: row.PspID, ProductKey: product})
+		if err != nil {
+			return nil, "", err
+		}
+		if len(rows) != 1 {
+			return out, fmt.Sprintf("product %q holds %d provider prices on this PSP; declare exactly one (%s has no catalog to read)", product, len(rows), row.Rail), nil
+		}
+		r := rows[0]
+		out[""] = termsOf(r.PublicID, r.Amount, r.Currency, r.BillingIntervalHours, r.BillingIntervalMonths)
+		return out, "", nil
+	}
 	plans, err := im.DB.Gen(ctx).ListPSPImportPlans(ctx, gen.ListPSPImportPlansParams{MerchantID: row.MerchantID, ImportID: row.ID})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	refs := make([]string, 0, len(plans))
 	for _, p := range plans {
@@ -77,19 +121,21 @@ func (im *Importer) providerPrices(ctx context.Context, row gen.BillingPspImport
 			refs = append(refs, *p)
 		}
 	}
-	out := map[string]billing.PriceID{}
 	if len(refs) == 0 {
-		return out, nil
+		return out, "", nil
 	}
 	rows, err := im.DB.Gen(ctx).ListPSPProviderPrices(ctx, gen.ListPSPProviderPricesParams{MerchantID: row.MerchantID, PspID: row.PspID, Refs: refs})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	for _, r := range rows {
-		out[r.Ref] = billing.PriceID(r.PublicID)
+		out[r.Ref] = termsOf(r.PublicID, r.Amount, r.Currency, r.BillingIntervalHours, r.BillingIntervalMonths)
 	}
-	return out, nil
+	return out, "", nil
 }
+
+// planned are the rails whose subscriptions name a provider plan or price.
+var planned = map[string]bool{"nmi": true, "stripe": true}
 
 // customerGroup is one customer's linked and landed records.
 type customerGroup struct {
@@ -115,8 +161,10 @@ type lander struct {
 	im     *Importer
 	row    gen.BillingPspImport
 	scope  merchants.PSPScope
-	prices map[string]billing.PriceID
-	asOf   time.Time
+	prices map[string]priceTerms
+	// unpriced says why no subscription of a plan-less rail has a price.
+	unpriced string
+	asOf     time.Time
 }
 
 // outcome is what landing did to one record.
@@ -285,6 +333,14 @@ func (l *lander) declare(groups []customerGroup) (declaration, error) {
 			if err := json.Unmarshal(r.Data, &data); err != nil {
 				return d, err
 			}
+			if data.Currency == "" {
+				amount, reason := l.denominate(sub, data.Decimal)
+				if reason != "" {
+					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, reason}
+					continue
+				}
+				data.Amount, data.Currency = amount, l.prices[planOf(sub)].currency
+			}
 			if inv := data.StripeInvoice; inv != nil {
 				if pm := declared[subRef]; pm == nil || pm.RailCustomerRef != inv.CustomerReference {
 					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "its subscription bills no saved card of the invoice's customer, so the invoice cannot bind"}
@@ -311,14 +367,20 @@ func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImpor
 	}
 	price, ok := l.prices[data.Plan]
 	switch {
-	case data.Plan == "":
+	case !ok && l.unpriced != "":
+		return billing.DeclaredSubscription{}, l.unpriced, nil
+	case !ok && data.Plan == "":
 		return billing.DeclaredSubscription{}, "the provider names no plan for it", nil
 	case !ok:
 		return billing.DeclaredSubscription{}, fmt.Sprintf("plan %q has no provider price: name the product it grants in the import's products", data.Plan), nil
 	case data.StartedAt.IsZero():
 		return billing.DeclaredSubscription{}, "the provider states no start date", nil
 	}
-	sub := billing.DeclaredSubscription{Customer: customer, Price: price, Rail: l.scope.Rail, RailSubscriptionID: r.Ref, StartedAt: data.StartedAt,
+	if data.Amount == 0 {
+		// The provider's record states no terms: the declared price does.
+		data.Amount, data.Currency, data.IntervalHours, data.IntervalMonths = price.amount, price.currency, price.hours, price.months
+	}
+	sub := billing.DeclaredSubscription{Customer: customer, Price: price.id, Rail: l.scope.Rail, RailSubscriptionID: r.Ref, StartedAt: data.StartedAt,
 		PaidThrough: data.NextBillingAt, Evidence: data.Evidence}
 	if vault, ok := vaults[deref(r.CustomerRef)]; ok {
 		method := ""
@@ -403,4 +465,28 @@ func (im *Importer) MissingProviderPrices(ctx context.Context, id billing.PSPImp
 		}
 	}
 	return out, nil
+}
+
+func planOf(r gen.BillingPspImportRecord) string {
+	var data subscriptionData
+	_ = json.Unmarshal(r.Data, &data)
+	return data.Plan
+}
+
+// denominate reads a currency-less amount in its subscription's price
+// currency.
+func (l *lander) denominate(sub gen.BillingPspImportRecord, decimal string) (int64, string) {
+	price, ok := l.prices[planOf(sub)]
+	if !ok {
+		return 0, "its subscription has no price to denominate it"
+	}
+	minor, err := moneyutil.DecimalToRailMinor(price.currency, decimal)
+	if err != nil {
+		return 0, fmt.Sprintf("its amount %q is not exact in %s", decimal, price.currency)
+	}
+	native, err := moneyutil.RailMinorToNative(price.currency, minor)
+	if err != nil {
+		return 0, err.Error()
+	}
+	return native, ""
 }

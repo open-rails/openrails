@@ -74,6 +74,9 @@ type transactionData struct {
 	Amount        int64     `json:"amount,string"`
 	Currency      string    `json:"currency"`
 	OccurredAt    time.Time `json:"occurred_at"`
+	// Decimal is a major-unit amount a provider reports without a currency;
+	// the subscription's price denominates it.
+	Decimal string `json:"decimal,omitempty"`
 	// StripeInvoice is the complete invoice a Stripe charge paid.
 	StripeInvoice *billing.DeclaredStripeInvoice `json:"stripe_invoice,omitempty"`
 }

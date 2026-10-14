@@ -39,9 +39,11 @@ type Importer struct {
 	// NMI builds the import's NMI clients; they are made read-only.
 	NMI *railresolve.NMIFactory
 	// Stripe builds the import's write-blocked Stripe clients.
-	Stripe    *stripeapi.Factory
-	Directory identity.Directory
-	Clock     clockwork.Clock
+	Stripe *stripeapi.Factory
+	// CCBillDataLinkURL points DataLink at a loopback fake (sandbox runs).
+	CCBillDataLinkURL string
+	Directory         identity.Directory
+	Clock             clockwork.Clock
 }
 
 // ErrNotFound is an import or record the merchant does not have.

@@ -11,7 +11,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -39,6 +41,27 @@ var sources = map[string]func(ctx context.Context, im *Importer, mid billing.Mer
 		fetcher := reconcile.NewStripeFetcher(key)
 		fetcher.HTTPClient = im.Stripe.ReadOnlyClient(30 * time.Second)
 		return &stripeSource{fetcher: fetcher}, nil
+	},
+	"ccbill": func(ctx context.Context, im *Importer, mid billing.MerchantID, scope merchants.PSPScope) (source, error) {
+		acc, sub, ok := strings.Cut(strings.TrimSpace(scope.AccountID), "-")
+		if !ok || acc == "" || sub == "" {
+			return nil, fmt.Errorf("CCBill account %q is not clientAccnum-clientSubacc", scope.AccountID)
+		}
+		username, err := im.secret(ctx, mid, scope, "datalink_username")
+		if err != nil {
+			return nil, err
+		}
+		password, err := im.secret(ctx, mid, scope, "datalink_password")
+		if err != nil {
+			return nil, err
+		}
+		dl := ccbill.NewDataLinkClient(&config.CCBillConfig{ClientAccNum: acc, ClientSubAcc: sub, DataLinkUsername: username, DataLinkPassword: password,
+			Sandbox: scope.Environment == config.EnvironmentSandbox})
+		dl.ReadOnly = true
+		if im.CCBillDataLinkURL != "" {
+			dl.BaseURL, dl.LoopbackFixture = im.CCBillDataLinkURL, true
+		}
+		return &ccbillSource{dl: dl}, nil
 	},
 }
 
