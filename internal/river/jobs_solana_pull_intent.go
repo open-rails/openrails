@@ -68,6 +68,10 @@ func NewSolanaPullIntentHandler(core *SolanaCrankWorker, store *intents.Store, c
 }
 
 func (h *SolanaPullIntentHandler) Type() string { return TypeSolanaPull }
+
+// The accepted financial agreement and signed execution contain no secrets.
+// They remain the immutable replay/repair authority after settlement.
+func (h *SolanaPullIntentHandler) PrunePolicy() (bool, bool) { return true, true }
 func (h *SolanaPullIntentHandler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
@@ -337,7 +341,9 @@ func (h *SolanaPullIntentHandler) repairFromSignature(ctx context.Context, repo 
 	if err := h.Core.finalizePull(ctx, repo, agreement, receipt, evidence.Execution); err != nil {
 		return intents.Ambiguous("pull landed on-chain, but settlement failed: " + err.Error())
 	}
-	return intents.Succeeded(map[string]any{"transaction_id": sig, "verified_existing": true})
+	return intents.Succeeded(map[string]any{"transaction_id": sig, "verified_existing": true, "execution": evidence.Execution,
+		"solana_receipt": map[string]any{"signature": sig, "period_start": receipt.PeriodStart, "period_end": receipt.PeriodEnd,
+			"mint": agreement.Row.Mint, "treasury": agreement.Row.Treasury}})
 }
 
 type sigVerdict int
