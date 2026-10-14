@@ -264,7 +264,7 @@ var descriptors = []Descriptor{
 		false,    // RemoteDeleteOnTerminalCancel (local cancel cascade stops the cranker)
 		autoBilledNever,
 		cancelReversible, // OpenRails stops pulling; nothing changes on-chain
-		"", // CancelPortalURL
+		"",               // CancelPortalURL
 		// rpc_url: the operator's RPC endpoint, a secret because its URL carries
 		// the provider's key. The deployment's cranker signs; no PSP holds a key.
 		[]CredentialKey{{"rpc_url", false, false}},
