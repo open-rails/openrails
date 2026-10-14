@@ -587,7 +587,7 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.BillingPr
 		if err != nil {
 			return err
 		}
-		if err := observed.SeedSchedule(ctx, txDB, result.Order.ID, sub.ID, p.PeriodEnd, p.RecurringIntervalHours, p.RecurringAmount, h.Purchases.now()); err != nil {
+		if err := observed.SeedScheduleCadence(ctx, txDB, result.Order.ID, sub.ID, p.PeriodEnd, p.RecurringIntervalHours, p.RecurringIntervalMonths, p.RecurringAmount, h.Purchases.now()); err != nil {
 			return err
 		}
 		for finding, subject := range map[string]string{ProviderUpdateStuckFinding: p.OldSubscriptionID.String(), ProrationUnresolvedFinding: in.ID.String()} {
@@ -653,12 +653,16 @@ func (h *NMIUpgradeIntentHandler) recordPaidProration(ctx context.Context, in ge
 // The accepted operation is the adjustment bill identity; the provider sale
 // is its payment. A zero-price downgrade records terms without invented money.
 func acceptedNMIChangeBill(in gen.BillingProviderIntent, p subscriptions.NMIUpgradePayload, customer uuid.UUID, payment *models.Payment) observed.Bill {
+	var interval *int
+	if p.RecurringIntervalHours > 0 {
+		interval = &p.RecurringIntervalHours
+	}
 	return observed.Bill{PSPID: p.Instrument.PSPID, CustomerID: customer, SubscriptionID: &p.OldSubscriptionID,
 		Owner: observed.OwnerNMISchedule, Kind: "adjustment", SourceKind: "nmi_proration", SourceKey: in.ID.String(),
 		Currency: p.Currency, Total: p.ProrationAmount, PeriodStart: p.PeriodStart, PeriodEnd: p.PeriodEnd,
 		ProviderReference: in.ID.String(), Payment: payment, Settled: true, SettlementSource: "cash",
 		Lines: []observed.Line{{PriceID: &p.PriceID, ProductID: &p.ProductID, Description: p.ProductName,
-			UnitAmount: p.ProrationAmount, Amount: p.ProrationAmount, BillingIntervalHours: &p.RecurringIntervalHours,
+			UnitAmount: p.ProrationAmount, Amount: p.ProrationAmount, BillingIntervalHours: interval,
 			AccessDurationHours: p.AccessDurationHours, ProviderAccessDefault: p.ProviderAccessDefault}},
 	}
 }

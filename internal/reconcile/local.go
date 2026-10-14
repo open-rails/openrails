@@ -114,12 +114,13 @@ type LocalPaymentMethod struct {
 // LocalPrice is the slice of billing.prices the subscription materializer
 // consumes: price bindings map remote plan ids onto local prices.
 type LocalPrice struct {
-	ID               uuid.UUID
-	ProductID        uuid.UUID
-	Amount           int64
-	Currency         string
-	BillingCycleDays *int
-	Archived         bool
+	ID                    uuid.UUID
+	ProductID             uuid.UUID
+	Amount                int64
+	Currency              string
+	BillingCycleDays      *int
+	ProviderAccessDefault bool
+	Archived              bool
 	// PSPLinks is the provider-links blob: PSP key -> link entry
 	// (rail / plan_id / price_id / ...), as written by catalog apply.
 	PSPLinks map[string]map[string]string
@@ -261,11 +262,12 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 	}
 	for _, row := range prices {
 		p := LocalPrice{
-			ID:        row.ID,
-			ProductID: row.ProductID,
-			Amount:    row.Amount,
-			Currency:  row.Currency,
-			Archived:  row.Archived,
+			ID:                    row.ID,
+			ProductID:             row.ProductID,
+			Amount:                row.Amount,
+			Currency:              row.Currency,
+			Archived:              row.Archived,
+			ProviderAccessDefault: row.ProviderAccessDefault,
 		}
 		// Only a recurring price has a cadence to match a remote plan against.
 		// The window is in hours; the provider cadence is whole days.

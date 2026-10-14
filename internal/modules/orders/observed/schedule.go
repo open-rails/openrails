@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // SeedSchedule freezes the future recurring agreement when an accepted initial
@@ -22,11 +23,21 @@ import (
 // recurring amount (which can differ from a trial's initial charge). It must
 // never be called to reconstruct a schedule from today's subscription period.
 func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UUID, firstDue time.Time, cadenceHours int, recurringAmount int64, now time.Time) error {
+	return SeedScheduleCadence(ctx, d, orderID, subscriptionID, firstDue, cadenceHours, 0, recurringAmount, now)
+}
+
+// SeedScheduleCadence freezes an accepted provider amendment without turning
+// its native calendar months into estimated hours.
+func SeedScheduleCadence(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UUID, firstDue time.Time, cadenceHours, cadenceMonths int, recurringAmount int64, now time.Time) error {
 	firstDue = firstDue.UTC().Truncate(time.Microsecond)
-	if firstDue.IsZero() || !validCadence(cadenceHours, 0) || recurringAmount <= 0 {
+	if firstDue.IsZero() || !validCadence(cadenceHours, cadenceMonths) || recurringAmount <= 0 {
 		return errors.New("accepted provider schedule terms are incomplete")
 	}
 	cadenceHours32, err := int32Value(cadenceHours)
+	if err != nil {
+		return errors.New("accepted provider schedule cadence is out of range")
+	}
+	cadenceMonths32, err := int32Value(cadenceMonths)
 	if err != nil {
 		return errors.New("accepted provider schedule cadence is out of range")
 	}
@@ -57,18 +68,22 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 	if line.Quantity != nil {
 		unit /= int64(*line.Quantity)
 	}
+	var interval *int
+	if cadenceHours > 0 {
+		interval = &cadenceHours
+	}
 	bill := Bill{PSPID: *order.PspID, CustomerID: order.CustomerID, SubscriptionID: &subscriptionID, Owner: order.CollectionOwner,
 		Kind: "renewal", SourceKind: "provider_cycle", ProviderReference: models.DerefStr(sub.RailSubscriptionID), Currency: order.Currency, Total: recurringAmount,
 		Lines: []Line{{PriceID: line.PriceID, ProductID: line.ProductID, Description: line.Description,
 			Quantity: models.DerefIntPtr(line.Quantity), UnitAmount: unit, Amount: recurringAmount,
 			Ownership: models.DerefStr(line.Ownership), ClaimKey: models.DerefStr(line.ClaimKey),
-			BillingIntervalHours: &cadenceHours, AccessDurationHours: models.DerefIntPtr(line.AccessDurationHours), ProviderAccessDefault: line.ProviderAccessDefault}}}
+			BillingIntervalHours: interval, AccessDurationHours: models.DerefIntPtr(line.AccessDurationHours), ProviderAccessDefault: line.ProviderAccessDefault}}}
 	raw, err := json.Marshal(bill)
 	if err != nil {
 		return err
 	}
 	_, err = q.InsertProviderSchedule(ctx, gen.InsertProviderScheduleParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID,
-		CustomerID: order.CustomerID, PspID: *order.PspID, InitialOrderID: &orderID, SourceReference: "order:" + orderID.String(), ProviderReference: bill.ProviderReference, FirstDueAt: firstDue.UTC(), CadenceHours: cadenceHours32, AcceptedBill: raw, Now: now})
+		CustomerID: order.CustomerID, PspID: *order.PspID, InitialOrderID: &orderID, SourceReference: "order:" + orderID.String(), ProviderReference: bill.ProviderReference, FirstDueAt: firstDue.UTC(), CadenceHours: cadenceHours32, CadenceMonths: cadenceMonths32, AcceptedBill: raw, Now: now})
 	if err != nil {
 		return err
 	}
@@ -76,7 +91,7 @@ func SeedSchedule(ctx context.Context, d *db.DB, orderID, subscriptionID uuid.UU
 	if err != nil {
 		return err
 	}
-	if stored.InitialOrderID == nil || *stored.InitialOrderID != orderID || stored.CustomerID != order.CustomerID || stored.PspID != *order.PspID || !stored.FirstDueAt.Equal(firstDue) || stored.CadenceHours != cadenceHours32 || !sameJSON(stored.AcceptedBill, raw) {
+	if stored.InitialOrderID == nil || *stored.InitialOrderID != orderID || stored.CustomerID != order.CustomerID || stored.PspID != *order.PspID || !stored.FirstDueAt.Equal(firstDue) || stored.CadenceHours != cadenceHours32 || stored.CadenceMonths != cadenceMonths32 || !sameJSON(stored.AcceptedBill, raw) {
 		return ErrConflict
 	}
 	return nil
@@ -371,10 +386,7 @@ func scheduleBoundary(first time.Time, hours, months, index int) time.Time {
 	if months == 0 {
 		return first.Add(time.Duration(index) * time.Duration(hours) * time.Hour)
 	}
-	monthStart := time.Date(first.Year(), first.Month()+time.Month(index*months), 1, first.Hour(), first.Minute(), first.Second(), first.Nanosecond(), time.UTC)
-	lastDay := monthStart.AddDate(0, 1, -1).Day()
-	day := min(first.Day(), lastDay)
-	return monthStart.AddDate(0, 0, day-1)
+	return calendarutil.AddMonths(first, index*months)
 }
 
 func scheduleBoundaryIndex(first time.Time, hours, months int, boundary time.Time) (int, error) {

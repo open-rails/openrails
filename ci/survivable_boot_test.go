@@ -201,11 +201,11 @@ func TestOneMerchantsBadDeclarationLeavesTheOthersServing(t *testing.T) {
 	held.AccountID, other.AccountID = "acct_e2e_vault", "acct_e2e_other"
 	cfg := f.config()
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{
-		good:         {Sandbox: true, DisplayName: "Good", Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": stripeTest()}},
-		typo:         {Sandbox: true, DisplayName: "Typo", PSPs: map[string]openrails.PSPConfig{"stripe": misspelled}},
-		custody:      {Sandbox: true, DisplayName: "Custody", MerchantSettings: billing.MerchantSettings{CardVault: billing.CardVaultPlatform}, PSPs: map[string]openrails.PSPConfig{"stripe": platform}},
+		good:    {Sandbox: true, DisplayName: "Good", Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": stripeTest()}},
+		typo:    {Sandbox: true, DisplayName: "Typo", PSPs: map[string]openrails.PSPConfig{"stripe": misspelled}},
+		custody: {Sandbox: true, DisplayName: "Custody", MerchantSettings: billing.MerchantSettings{CardVault: billing.CardVaultPlatform}, PSPs: map[string]openrails.PSPConfig{"stripe": platform}},
 		// A Stripe customer's card charges only through its own account.
-		vault: {Sandbox: true, DisplayName: "Vault", MerchantSettings: billing.MerchantSettings{CardVault: "stripe", ChargePSPs: []string{"other"}}, PSPs: map[string]openrails.PSPConfig{"stripe": held, "other": other}},
+		vault:        {Sandbox: true, DisplayName: "Vault", MerchantSettings: billing.MerchantSettings{CardVault: "stripe", ChargePSPs: []string{"other"}}, PSPs: map[string]openrails.PSPConfig{"stripe": held, "other": other}},
 		"Not A Slug": {DisplayName: "Unprovisionable"},
 	}
 	bill := survivingEngine(t, f, cfg)

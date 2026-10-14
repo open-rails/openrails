@@ -46,11 +46,12 @@ func providerNMITierAdmissible(sub *models.Subscription, current, target *models
 	if sub.Status != models.StatusActive || sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodStartsAt == nil || sub.RailSubscriptionID == "" || !sub.CurrentPeriodEndsAt.After(now) {
 		return errTierChangeRenewalDue
 	}
-	oldCycle, newCycle := current.RecurringCycleHours(), target.RecurringCycleHours()
-	if newCycle == nil || *newCycle <= 0 {
+	oldHours, oldMonths := current.RecurringCycleHours(), current.BillingIntervalMonths
+	newHours, newMonths := target.RecurringCycleHours(), target.BillingIntervalMonths
+	if newHours == nil && newMonths == nil || newHours != nil && *newHours <= 0 || newMonths != nil && *newMonths <= 0 {
 		return ErrTierChangeCycleUnknown
 	}
-	if oldCycle == nil || *oldCycle != *newCycle {
+	if !equalOptionalCadence(oldHours, newHours) || !equalOptionalCadence(oldMonths, newMonths) {
 		return errTierChangeCadence
 	}
 	if sub.PaymentMethodID == nil && !subscriptions.FollowsDefault(sub) {
@@ -83,11 +84,11 @@ func (s *PurchaseService) scheduleTargetPlan(ctx context.Context, sub *models.Su
 }
 
 // linkedTargetPlan is the target price's NMI plan on the account, verified at
-// NMI: same amount, whole-day cycle equal to the price's, unlimited payments.
+// NMI: same amount, exact day or calendar-month cycle, unlimited payments.
 func linkedTargetPlan(ctx context.Context, client *nmi.NMIClient, target *models.Price, link map[string]string) (string, error) {
 	planID := strings.TrimSpace(link["plan_id"])
-	cycle := target.RecurringCycleHours()
-	if planID == "" || cycle == nil || *cycle <= 0 {
+	hours, months := target.RecurringCycleHours(), target.BillingIntervalMonths
+	if planID == "" || (hours == nil) == (months == nil) {
 		return "", errTierChangeLinkedPlan
 	}
 	cents, err := moneyutil.NativeToRailMinorExact(target.Currency, target.Amount)
@@ -95,10 +96,17 @@ func linkedTargetPlan(ctx context.Context, client *nmi.NMIClient, target *models
 		return "", err
 	}
 	plan, err := client.GetRecurringPlanDetailByID(ctx, planID, target.Currency)
-	if err != nil || !plan.Found || plan.AmountCents != int64(cents) || plan.DayFrequency*24 != *cycle || (plan.Payments != nil && *plan.Payments != 0) {
+	if err != nil || !plan.Found || plan.AmountCents != int64(cents) ||
+		hours != nil && (plan.DayFrequency*24 != *hours || plan.MonthFrequency != 0) ||
+		months != nil && (plan.MonthFrequency != *months || plan.DayFrequency != 0) ||
+		(plan.Payments != nil && *plan.Payments != 0) {
 		return "", errTierChangeLinkedPlan
 	}
 	return planID, nil
+}
+
+func equalOptionalCadence(a, b *int) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
 func (s *PurchaseService) previewProviderNMITierChange(ctx context.Context, resp *TierChangePreviewResponse, sub *models.Subscription, current, target *models.Price, product *models.Product, downgrade bool) (*TierChangePreviewResponse, error) {
@@ -218,10 +226,17 @@ func (s *PurchaseService) processProviderNMITierChange(ctx context.Context, req 
 	if user.Email != nil {
 		email = strings.TrimSpace(*user.Email)
 	}
+	cadenceHours, cadenceMonths := 0, 0
+	if h := newPrice.RecurringCycleHours(); h != nil {
+		cadenceHours = *h
+	}
+	if m := newPrice.BillingIntervalMonths; m != nil {
+		cadenceMonths = *m
+	}
 	payload := subscriptions.NMIUpgradePayload{Staff: staffChange(req), Action: action, RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: email,
 		OldSubscriptionID: sub.ID, OldPriceID: sub.PriceID, OldProviderSubscriptionID: sub.RailSubscriptionID, NewPaymentID: uuidutil.NewV7(),
 		PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, Instrument: instrument, PaymentMethodID: methodRow.ID,
-		RecurringIntervalHours: *newPrice.RecurringCycleHours(), RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),
+		RecurringIntervalHours: cadenceHours, RecurringIntervalMonths: cadenceMonths, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),
 		AccessDurationHours: newPrice.AccessDurationHours, ProviderAccessDefault: newPrice.ProviderAccessDefault, TargetPlanID: targetPlan}
 	reason := "customer tier upgrade"
 	if downgrade {

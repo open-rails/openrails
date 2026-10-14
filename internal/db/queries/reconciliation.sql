@@ -511,7 +511,7 @@ WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid
 -- Prices bound to this PSP (price_psp_bindings), archived included:
 -- grandfathered subscriptions still bill them.
 -- name: ReconcileListPricesWithPSPLinks :many
-SELECT id, product_id, amount, currency, access_duration_hours, billing_interval_hours, archived
+SELECT id, product_id, amount, currency, access_duration_hours, billing_interval_hours, provider_access_default, archived
 FROM billing.prices
 WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM billing.price_psp_bindings b WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.price_id = billing.prices.id AND b.merchant_id = billing.prices.merchant_id AND b.psp_id = sqlc.arg(psp_id)::uuid);
 

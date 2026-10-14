@@ -158,3 +158,29 @@ func TestModelBUpgradeQuoteRefusals(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestModelBUpgradeUsesCalendarTargetWithoutEstimatingHours(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		at     time.Time
+		months int
+		want   time.Time
+	}{
+		{"short February", time.Date(2026, 1, 31, 12, 0, 0, 0, time.UTC), 1, time.Date(2026, 2, 28, 12, 0, 0, 0, time.UTC)},
+		{"leap February", time.Date(2024, 1, 31, 12, 0, 0, 0, time.UTC), 1, time.Date(2024, 2, 29, 12, 0, 0, 0, time.UTC)},
+		{"leap annual period", time.Date(2023, 3, 1, 12, 0, 0, 0, time.UTC), 12, time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			start, end := tc.at.Add(-15*24*time.Hour), tc.at.Add(15*24*time.Hour)
+			u := ModelBUpgrade{Old: usd(20_000_000), New: usd(50_000_000), PeriodStart: &start, PeriodEnd: &end, NewCycleMonths: &tc.months}
+			q, err := QuoteModelBUpgrade(u, tc.at)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, q.PeriodEnd)
+			require.Equal(t, int64(10_000_000), q.Credit, "credit uses the accepted old period, independently of target cadence")
+			require.Equal(t, int64(40_000_000), q.ChargeNow)
+			u.NewCycleHours = new(720)
+			_, err = QuoteModelBUpgrade(u, tc.at)
+			require.ErrorIs(t, err, ErrTierChangeCycleUnknown, "two cadence authorities are refused")
+		})
+	}
+}

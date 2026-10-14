@@ -251,7 +251,7 @@ func TestRequestsRefusedBeforeTheGateway(t *testing.T) {
 			_, err := c.Refund(ctx, RefundParams{TransactionID: "t", Amount: -1, Currency: "USD"})
 			return err
 		}(),
-		"refund without currency":        func() error { _, err := c.Refund(ctx, RefundParams{TransactionID: "t", Amount: 1}); return err }(),
+		"refund without currency": func() error { _, err := c.Refund(ctx, RefundParams{TransactionID: "t", Amount: 1}); return err }(),
 		"reference-less MIT rebill": func() error {
 			_, err := c.AttemptManualRebill(ctx, ManualRebillParams{VaultID: "v", BillingID: "b", SubscriptionID: "s", StoredCredential: &StoredCredential{InitiatedBy: InitiatedByMerchant, Indicator: IndicatorUsed, Recurring: true}})
 			return err

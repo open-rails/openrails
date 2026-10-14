@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -52,6 +54,7 @@ type ModelBUpgrade struct {
 	Old, New               PriceAmount
 	PeriodStart, PeriodEnd *time.Time
 	NewCycleHours          *int
+	NewCycleMonths         *int
 }
 
 // ModelBUpgradeQuote is what an upgrade charges now and the period it opens.
@@ -75,8 +78,16 @@ func QuoteModelBUpgrade(u ModelBUpgrade, now time.Time) (ModelBUpgradeQuote, err
 	if err := RequireSameCurrency(u.Old, u.New); err != nil {
 		return ModelBUpgradeQuote{}, err
 	}
-	if u.NewCycleHours == nil || *u.NewCycleHours <= 0 {
+	if (u.NewCycleHours == nil) == (u.NewCycleMonths == nil) ||
+		u.NewCycleHours != nil && (*u.NewCycleHours <= 0 || int64(*u.NewCycleHours) > math.MaxInt64/int64(time.Hour)) ||
+		u.NewCycleMonths != nil && (*u.NewCycleMonths <= 0 || *u.NewCycleMonths > 1200) {
 		return ModelBUpgradeQuote{}, ErrTierChangeCycleUnknown
+	}
+	var newEnd time.Time
+	if u.NewCycleMonths != nil {
+		newEnd = calendarutil.AddMonths(now, *u.NewCycleMonths)
+	} else {
+		newEnd = now.Add(time.Duration(*u.NewCycleHours) * time.Hour)
 	}
 	if u.PeriodStart == nil || u.PeriodEnd == nil || u.PeriodStart.IsZero() || !u.PeriodEnd.After(*u.PeriodStart) {
 		return ModelBUpgradeQuote{}, ErrTierChangePeriodUnknown
@@ -103,7 +114,7 @@ func QuoteModelBUpgrade(u ModelBUpgrade, now time.Time) (ModelBUpgradeQuote, err
 		Credit:      credit,
 		ChargeNow:   u.New.Micros - credit,
 		PeriodStart: now,
-		PeriodEnd:   now.Add(time.Duration(*u.NewCycleHours) * time.Hour),
+		PeriodEnd:   newEnd,
 	}, nil
 }
 
@@ -221,7 +232,7 @@ func providerUpgradeOf(sub *models.Subscription, current, target *models.Price) 
 	return ModelBUpgrade{
 		Old: PriceAmountOf(current), New: PriceAmountOf(target),
 		PeriodStart: sub.CurrentPeriodStartsAt, PeriodEnd: sub.CurrentPeriodEndsAt,
-		NewCycleHours: target.RecurringCycleHours(),
+		NewCycleHours: target.RecurringCycleHours(), NewCycleMonths: target.BillingIntervalMonths,
 	}
 }
 

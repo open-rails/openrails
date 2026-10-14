@@ -42,6 +42,7 @@ type NMIUpgradePayload struct {
 	ProductName               string                  `json:"product_name"`
 	PaymentMethodID           uuid.UUID               `json:"payment_method_id"`
 	RecurringIntervalHours    int                     `json:"recurring_interval_hours"`
+	RecurringIntervalMonths   int                     `json:"recurring_interval_months,omitempty"`
 	RecurringAmount           int64                   `json:"recurring_amount,string"`
 	ProrationAmount           int64                   `json:"proration_amount,string"`
 	Currency                  string                  `json:"currency"`
@@ -91,7 +92,8 @@ func DecodeNMIUpgradePayload(in gen.BillingProviderIntent) (NMIUpgradePayload, e
 		p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.ProrationAmount < 0 || p.RecurringAmount <= 0 {
 		return p, errors.New("tier change operation contradicts its accepted terms")
 	}
-	if p.RecurringIntervalHours <= 0 || p.RecurringIntervalHours%24 != 0 {
+	if !((p.RecurringIntervalHours > 0 && p.RecurringIntervalHours%24 == 0 && p.RecurringIntervalMonths == 0) ||
+		(p.RecurringIntervalHours == 0 && p.RecurringIntervalMonths > 0 && p.RecurringIntervalMonths <= 1200)) {
 		return p, errors.New("provider tier change requires its accepted recurring cadence")
 	}
 	if err := p.Instrument.Validate(); err != nil {
