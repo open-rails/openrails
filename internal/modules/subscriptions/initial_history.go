@@ -43,9 +43,13 @@ func ValidateInitialMembershipHistory(merchant uuid.UUID, t InitialMembershipTer
 		}
 		return nil
 	}
+	acceptedEnd := accessEnd(t.PeriodStart, t.AccessDurationHours)
+	if t.ProviderAccessDefault {
+		acceptedEnd = &t.PeriodEnd
+	}
 	access := 0
 	for _, g := range rows {
-		if g.MerchantID != merchant || g.CustomerID != t.CustomerID || g.SourceType != string(grants.Subscription) || models.DerefStr(g.SourceID) != t.SubscriptionID.String() || g.Event != "grant" || g.SupersedesID != nil || g.ProductID != nil && *g.ProductID != t.ProductID || g.PaymentID != nil && *g.PaymentID != t.PaymentID || !g.StartsAt.Equal(t.PeriodStart) || !sameAccessEnd(g.EndsAt, accessEnd(t.PeriodStart, t.AccessDurationHours)) {
+		if g.MerchantID != merchant || g.CustomerID != t.CustomerID || g.SourceType != string(grants.Subscription) || models.DerefStr(g.SourceID) != t.SubscriptionID.String() || g.Event != "grant" || g.SupersedesID != nil || g.ProductID != nil && *g.ProductID != t.ProductID || g.PaymentID != nil && *g.PaymentID != t.PaymentID || !g.StartsAt.Equal(t.PeriodStart) || !sameAccessEnd(g.EndsAt, acceptedEnd) {
 			return errors.New("initial membership grant has another owner or interval")
 		}
 		switch g.Kind {

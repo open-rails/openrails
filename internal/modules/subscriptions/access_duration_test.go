@@ -192,3 +192,18 @@ func TestProviderDefaultAccessUsesItsVerifiedCalendarPeriod(t *testing.T) {
 		require.Equal(t, new(start.Add(720*time.Hour)), got.EndsAt, "explicit hours never become a calendar default")
 	}
 }
+
+func TestInitialHistoryReplaysNativeDefaultAndExplicitIndefinite(t *testing.T) {
+	start := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	merchant, customer, sub, product := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	terms := InitialMembershipTerms{CustomerID: customer, SubscriptionID: sub, ProductID: product, PeriodStart: start, PeriodEnd: end, ProviderAccessDefault: true}
+	row := gen.BillingGrant{MerchantID: merchant, CustomerID: customer, ProductID: &product, SourceType: "subscription", SourceID: new(sub.String()), Event: "grant", Kind: "access", StartsAt: start, EndsAt: &end}
+	require.NoError(t, ValidateInitialMembershipHistory(merchant, terms, []gen.BillingGrant{row}))
+	row.EndsAt = nil
+	require.Error(t, ValidateInitialMembershipHistory(merchant, terms, []gen.BillingGrant{row}), "a default cannot replay as indefinite")
+	terms.ProviderAccessDefault = false
+	require.NoError(t, ValidateInitialMembershipHistory(merchant, terms, []gen.BillingGrant{row}), "explicit nil keeps its original indefinite promise")
+	row.EndsAt = &end
+	require.Error(t, ValidateInitialMembershipHistory(merchant, terms, []gen.BillingGrant{row}), "indefinite acceptance cannot replay as a default")
+}
