@@ -164,6 +164,8 @@ var pendingDynamicMoney = map[string]string{
 	"internal/stripemock/mock.go:func createRefund \"amount_refunded\"":                         notHTTPProviderWire,
 	"internal/stripemock/mock.go:func createRefund \"refunded\"":                                notHTTPProviderWire,
 	"internal/stripemock/seed.go:func changePrice \"price\"":                                    notHTTPProviderWire,
+	"internal/stripemock/seed.go:func RenewSubscription \"price\"":                              notHTTPProviderWire,
+	"internal/stripemock/schedules.go:func changeItemLocked \"price\"":                          notHTTPProviderWire,
 	"internal/stripemock/seed.go:func payInvoiceLocked \"amount_paid\"":                         notHTTPProviderWire,
 	"internal/stripemock/seed.go:func payInvoiceLocked \"amount_remaining\"":                    notHTTPProviderWire,
 	"internal/modules/webhooks/ccbill.go:func handleChargeback \"chargeback_amount_cents\"":     notHTTPStoredMetadata,
