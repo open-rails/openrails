@@ -56,12 +56,16 @@ platform_vault:
 `)
 	cfg, err := Load(filename)
 	require.NoError(t, err)
-	require.Equal(t, "file-cards", billing.PlatformVaultKVMount(cfg.Config))
+	mount, err := billing.PlatformVaultKVMount(cfg.Config)
+	require.NoError(t, err)
+	require.Equal(t, "file-cards", mount)
 	require.Empty(t, billing.MerchantConfigKVMount(cfg.Config))
 	t.Setenv("PLATFORM_VAULT_KV_MOUNT", "env-cards")
 	cfg, err = Load(filename)
 	require.NoError(t, err)
-	require.Equal(t, "env-cards", billing.PlatformVaultKVMount(cfg.Config))
+	mount, err = billing.PlatformVaultKVMount(cfg.Config)
+	require.NoError(t, err)
+	require.Equal(t, "env-cards", mount)
 	require.Empty(t, billing.MerchantConfigKVMount(cfg.Config))
 }
 

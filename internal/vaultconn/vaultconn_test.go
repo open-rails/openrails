@@ -11,6 +11,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMalformedPlatformMountRefusedWithoutEngineBoot(t *testing.T) {
+	for _, mount := range []string{"cards/../other", "/", "card secrets"} {
+		t.Run(mount, func(t *testing.T) {
+			for _, borrowed := range []bool{false, true} {
+				cfg := &config.Config{
+					Vault:         &config.VaultConfig{Address: "http://127.0.0.1:1", Token: "fixture", KVMount: "merchant"},
+					PlatformVault: &config.PlatformVaultConfig{Kind: "basis_theory", TenantID: "tenant", KVMount: mount},
+				}
+				var client *vaultapi.Client
+				if borrowed {
+					var err error
+					client, err = vaultapi.NewClient(&vaultapi.Config{Address: cfg.Vault.Address})
+					require.NoError(t, err)
+				}
+				conn, err := Open(t.Context(), cfg, client)
+				if conn != nil {
+					t.Cleanup(conn.Close)
+				}
+				require.ErrorContains(t, err, "platform_vault.kv_mount")
+				require.Nil(t, conn)
+			}
+		})
+	}
+}
+
 func TestPlatformCredentialReadMount(t *testing.T) {
 	for _, tc := range []struct {
 		name, merchant, platform, read string

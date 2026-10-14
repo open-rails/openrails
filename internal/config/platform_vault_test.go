@@ -31,7 +31,9 @@ func TestPlatformVaultMount(t *testing.T) {
 				require.Nil(t, cfg.PlatformVault)
 			} else {
 				require.NoError(t, validatePlatformVault(cfg))
-				require.Equal(t, tc.want, PlatformVaultKVMount(cfg))
+				mount, err := PlatformVaultKVMount(cfg)
+				require.NoError(t, err)
+				require.Equal(t, tc.want, mount)
 			}
 			require.Equal(t, tc.merchantMount, MerchantConfigKVMount(cfg))
 			err := RefuseDeclarationBesideVault(cfg, "shop", MerchantDeclaration{DisplayName: "Shop"})

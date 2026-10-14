@@ -48,6 +48,10 @@ func Open(ctx context.Context, cfg *config.Config, borrowed *vaultapi.Client) (*
 	if cfg == nil || (cfg.Vault == nil && borrowed == nil) {
 		return &Connection{}, nil
 	}
+	platformMount, err := config.PlatformVaultKVMount(cfg)
+	if err != nil {
+		return nil, err
+	}
 	vc := cfg.Vault
 	if vc == nil {
 		vc = &config.VaultConfig{}
@@ -55,7 +59,7 @@ func Open(ctx context.Context, cfg *config.Config, borrowed *vaultapi.Client) (*
 	conn := &Connection{}
 	client := borrowed
 	mount := config.MerchantConfigKVMount(cfg)
-	err := config.ValidateVault(vc)
+	err = config.ValidateVault(vc)
 	if err == nil && client == nil {
 		authCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		if client, conn.Auth, err = vault.Login(authCtx, vaultConfig(vc)); err != nil {
@@ -82,7 +86,7 @@ func Open(ctx context.Context, cfg *config.Config, borrowed *vaultapi.Client) (*
 	if mount != "" {
 		conn.KV = vault.NewKVv2Adapter(client, mount).WithReauthTrigger(conn.Auth)
 	}
-	if platformMount := config.PlatformVaultKVMount(cfg); platformMount != "" {
+	if platformMount != "" {
 		conn.PlatformKV = vault.NewKVv2Adapter(client, platformMount).WithReauthTrigger(conn.Auth)
 	}
 	return conn, nil
