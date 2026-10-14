@@ -31,15 +31,6 @@ func (s *OrderAttemptService) railSkipReason(price *models.Price, target railTar
 	if _, known := rails.Lookup(rail); !known {
 		return models.PSPRoutingSkipUnknownSelector
 	}
-	// A provider price sells only through its own provider, and only CCBill
-	// still sells new ones; ours never sell through CCBill.
-	if price.ProviderOwned {
-		if _, link, ok := price.ProviderLink(); !ok || rail != models.RailCCBill || link[models.RailKeyRail] != string(rail) {
-			return models.PSPRoutingSkipProviderPrice
-		}
-	} else if rail == models.RailCCBill {
-		return models.PSPRoutingSkipLinkMissing
-	}
 	if (rail == models.RailNMI || rail == models.RailStripe) && !price.SellsVia(models.SellViaCard) && !price.ProviderOwned ||
 		rail == models.RailSolana && !price.SellsVia(models.SellViaSolana) {
 		return models.PSPRoutingSkipNotSoldVia
@@ -61,6 +52,15 @@ func (s *OrderAttemptService) railSkipReason(price *models.Price, target railTar
 	trial := price.TrialUnitAmount != nil || price.TrialDurationHours != nil
 	if !rails.CanSellNew(rail, subscription, trial) {
 		return models.PSPRoutingSkipModeUnsupported
+	}
+	// A provider price sells only through its own provider, and only CCBill
+	// still sells new ones; ours never sell through CCBill.
+	if price.ProviderOwned {
+		if _, link, ok := price.ProviderLink(); !ok || rail != models.RailCCBill || link[models.RailKeyRail] != string(rail) {
+			return models.PSPRoutingSkipProviderPrice
+		}
+	} else if rail == models.RailCCBill {
+		return models.PSPRoutingSkipLinkMissing
 	}
 	if s.pspDisarmed != nil && target.Scope != nil && s.pspDisarmed(target.Scope.ID) {
 		return models.PSPRoutingSkipPostureDisarmed

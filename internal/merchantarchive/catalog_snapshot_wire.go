@@ -84,6 +84,11 @@ func catalogRow(p contract.Profile, values []*string) (map[string]json.RawMessag
 	return row, nil
 }
 func catalogValues(p contract.Profile, row map[string]json.RawMessage, merchantID string) ([]*string, error) {
+	if p.Name == "prices" {
+		if _, named := row["provider_owned"]; !named {
+			return nil, fmt.Errorf("catalog snapshot prices lack explicit ownership: restore using OpenRails v0.255.0, then upgrade")
+		}
+	}
 	// Historical snapshots carry auto_renew in place of billing cadence. Read
 	// those exact persisted terms without changing the document or its digest.
 	if raw, legacy := row["auto_renew"]; p.Name == "prices" && legacy {

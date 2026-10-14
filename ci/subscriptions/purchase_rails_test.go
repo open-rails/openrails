@@ -274,3 +274,26 @@ func priceID(t *testing.T, w *world, productKey, key string) string {
 	require.NoError(t, err)
 	return price.ID.String()
 }
+
+func TestSolanaOnlyPriceCannotOfferACardFallback(t *testing.T) {
+	w := prepareWorld(t, 12)
+	withSolana(t, w)
+	w.start()
+	key, receipt, err := w.applyCatalogWith(`  "{key}-monthly":
+    amount: 23 USD
+    billing_interval: 30 days
+    sell_via: [solana]
+`, fmt.Sprintf(`  "{key}-ccbill":
+    psp: ccbill
+    flex_id: %s
+    recurring_billing_option_id: "%s"
+    amount: 23 USD
+    billing_interval: 30 days
+`, ccbillFlexID, ccbillRBO))
+	require.NoError(t, err)
+	require.Empty(t, receipt.Warnings)
+	price, err := priceByKey(t.Context(), w.client[embedded], key, key+"-monthly")
+	require.NoError(t, err)
+	options := w.options(price.ID)
+	require.Equal(t, []string{"solana"}, slices.Collect(maps.Keys(options)), "sell_via applies to provider stand-ins too")
+}

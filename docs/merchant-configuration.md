@@ -10,7 +10,7 @@ and custodians, credentials included. It lives in one of two places:
   HTTP or in the console, and automation may write the documents directly.
 
 `GetMerchantConfiguration` returns the display name, the settings, a
-`revision` and `platform_vault.available` (whether `settings.card_custody`
+`revision` and `platform_vault.available` (whether `settings.card_vault`
 may be `platform`); credentials are never returned. `UpdateMerchantConfiguration`
 merges the fields it names: omitted fields keep their values and an explicit
 empty list clears one. Name the `expected_revision` you read and an edit made
@@ -42,7 +42,10 @@ settings:
     billing_url: https://shop.example/account
 ```
 
-`card_custody` is where new cards are held: `merchant` (absent) or `platform`
+`card_vault` is where new cards are saved: a merchant PSP key or `platform`.
+`charge_psps` lists the card PSP keys taking new charges in order; omitted, a
+named PSP vault charges through that account alone, and an unspecified vault
+uses each chosen PSP's vault
 ([payment-method custody](payment-method-custody.md)).
 
 `subscribe_url` is where new customers, and those whose access ended, buy a

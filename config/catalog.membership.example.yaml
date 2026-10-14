@@ -15,7 +15,6 @@ products:
         amount: 12 USD
         access_duration_hours: 720
         billing_interval_hours: 720
-        psps: {stripe: {}}
 
   craftsman:
     display_name: Craftsman
@@ -28,7 +27,6 @@ products:
         amount: 29 USD
         access_duration_hours: 720
         billing_interval_hours: 720
-        psps: {stripe: {}}
 
   expert:
     display_name: Expert
@@ -41,7 +39,6 @@ products:
         amount: 59 USD
         access_duration_hours: 720
         billing_interval_hours: 720
-        psps: {stripe: {}}
 
   grandmaster:
     display_name: Grandmaster
@@ -54,4 +51,3 @@ products:
         amount: 119 USD
         access_duration_hours: 720
         billing_interval_hours: 720
-        psps: {stripe: {}}

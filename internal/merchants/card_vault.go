@@ -104,8 +104,9 @@ func CardVaultRefusal(vault *config.PlatformVaultConfig, settings billing.Mercha
 // ChargesVaultedCards reports whether psp can charge the cards vault holds. A
 // custodian's cards go through any PSP naming that custodian. A card in a
 // PSP's own vault charges only through that account: a Stripe customer
-// belongs to its account, and an NMI customer vault id is taken to be scoped
-// to its gateway account (pending confirmation with the gateway).
+// belongs to its account, and NMI gateway-issued Customer Vault tokens are valid
+// only within their merchant account. See NMI's Customer Vault FAQ:
+// https://support.nmi.com/hc/en-gb/articles/33994528786705-Customer-Vault
 func ChargesVaultedCards(vault, psp merchantdocs.PSP) bool {
 	if vault.Custodian != "" {
 		return psp.Custodian == vault.Custodian

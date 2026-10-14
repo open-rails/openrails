@@ -140,9 +140,11 @@ through `host-four`; these are placeholders, not customer or repository names.
   file, and the conflict is reported.
 - The **pull** reconciliation job (`internal/river/jobs_catalog_reconciliation.go`) is
   ALERT-ONLY: it never mutates providers.
-- The **push** path is the provider adapter, e.g. `AutoCreate` in
-  `internal/service/catalog_provider_stripe.go`. Entitlements are plain strings: the
-  keys of a product's `entitlements_spec`.
+- `prices` are OpenRails-owned terms; new card subscriptions always use its billing
+  cycle. `provider_prices` mirror existing NMI/Stripe objects and declare CCBill
+  FlexForms, read-only. NMI and Stripe catalog objects are never created or edited.
+  A recurring price of ours may publish its Solana plan on apply. Entitlements are
+  plain strings: the keys of a product's `entitlements_spec`.
 
 ## Schema / DB
 - SQL is authored in `billing` (`config.DefaultSchema`) and runs there verbatim; any

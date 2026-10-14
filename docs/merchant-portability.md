@@ -96,6 +96,13 @@ the same stopped-source/stopped-target procedure.
 1. Use compatible OpenRails builds and apply the destination migration chain
    before preparing the target. An incompatible archive version or schema is
    refused. This operation does not upgrade or rewrite old snapshots.
+   The billing archive format is version 3, with explicit price ownership.
+   Version 2 archives and catalog snapshots without `provider_owned` are refused
+   before restore writes. Restore them using OpenRails v0.255.0, then upgrade
+   that database through the price-ownership migration and export again. The
+   migration preserves accepted order lines, payments, grants and access; it
+   moves provider-run subscriptions to their provider prices and keeps engine
+   subscriptions on our prices.
 2. Record the immutable source merchant UUID. The CLI requires that exact UUID
    for export and import; `--merchant id:UUID` is also accepted. A slug is not an
    archive identity, and import does not remap merchant or domain IDs.

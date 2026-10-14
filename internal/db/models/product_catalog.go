@@ -2,6 +2,7 @@ package models
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -122,7 +123,7 @@ func (p *Price) IsPurchasable() bool {
 		return true
 	}
 	_, link, ok := p.ProviderLink()
-	return ok && link[RailKeyRail] == string(RailCCBill)
+	return ok && link[RailKeyRail] == string(RailCCBill) && p.IsRecurring()
 }
 
 // Methods one of our prices sells through.
@@ -149,6 +150,21 @@ func (p *Price) ProviderLink() (string, map[string]string, bool) {
 		return key, link, true
 	}
 	return "", nil, false
+}
+
+// ProviderBillingInterval is the cached cadence at the provider, independent
+// of a declaration choosing one-off access. Old bindings use the price's cadence.
+func (p *Price) ProviderBillingInterval() *int {
+	_, link, ok := p.ProviderLink()
+	if ok {
+		if raw, named := link[RailKeyProviderBillingInterval]; named {
+			if h, err := strconv.Atoi(raw); err == nil && h > 0 {
+				return &h
+			}
+			return nil
+		}
+	}
+	return p.BillingIntervalHours
 }
 
 // IsRecurring reports whether the price has a recurring billing cadence.
@@ -183,10 +199,11 @@ func (p *Price) RecurringCycleDays() *int {
 
 // Link entry key constants (used in the PSPLinks JSONB map)
 const (
-	RailKeyPSPID        = "psp_id"
-	RailKeyPlanID       = "plan_id"
-	RailKeyProvider     = "provider"
-	RailKeyCCBillFlexID = "flex_id"
+	RailKeyProviderBillingInterval = "provider_billing_interval_hours"
+	RailKeyPSPID                   = "psp_id"
+	RailKeyPlanID                  = "plan_id"
+	RailKeyProvider                = "provider"
+	RailKeyCCBillFlexID            = "flex_id"
 	// RailKeyCCBillRecurringBillingOption is CCBill's price/product/plan identity
 	// (#601) — the "Recurring Billing Option" id (a zero-padded numeric, e.g.
 	// "0000042836"). It is DISTINCT from the FlexForm (flex_id, the hosted

@@ -148,25 +148,20 @@ PaymentIntents; it creates no Stripe Subscription. One-time payment page uses
 inline accepted product/price presentation without a maintained remote catalog.
 Existing explicit Stripe links remain available for provider-owned agreements.
 
-For provider-managed catalog configuration, the Stripe catalog adapter pushes OpenRails catalog definitions into your Stripe
-account with **find-or-create** semantics — identity is content-based, so re-syncing
-(even after a database rebuild) reattaches to the same Stripe objects instead of
-duplicating them:
+Legacy Stripe prices are declared under a product's `provider_prices`:
 
-- **Products**: found by metadata (`openrails_product_key = <product_key>`), created
-  if absent with an idempotency key derived from the product key.
-- **Prices**: found by a deterministic `lookup_key`
-  (`openrails.<product_key>.<currency>.<unit_amount>.<cycle>`), created if absent.
-  Amounts convert micros → cents exactly; a non-cent-representable amount errors.
-- **Entitlement Features**: each entitlement string on a product is mirrored to a
-  Stripe Feature (`lookup_key` = the entitlement string) attached to the Product.
-  One-way, best-effort — OpenRails stays the source of truth; a feature-sync failure
-  never fails the price link and surfaces as drift on the next reconcile.
+```yaml
+provider_prices:
+  legacy-monthly:
+    psp: stripe
+    price_id: price_existing
+```
 
-Alternatively, link an existing Stripe Price (`psps: {stripe: {price_id: price_...}}`);
-OpenRails round-trips it and rejects the link if amount, currency, recurring terms,
-or product association don't match the catalog. The pull reconciliation job is
-alert-only — it reports drift and never mutates your Stripe objects.
+Applying reads the existing Stripe price's amount, currency and recurring
+interval; access defaults to that interval and can be declared separately.
+OpenRails never creates or edits Stripe Products, Prices or Entitlement
+Features. The pull reconciliation job reports drift without mutating Stripe.
+New subscriptions are sold only on our `prices`, whose terms remain local.
 
 ### Purchase
 

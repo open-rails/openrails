@@ -54,7 +54,10 @@ const sameTerms = (a: ListedPrice, b: ListedPrice) =>
   a.unit_amount === b.unit_amount &&
   a.currency === b.currency &&
   a.billing_interval_hours === b.billing_interval_hours &&
-  a.access_duration_hours === b.access_duration_hours
+  a.access_duration_hours === b.access_duration_hours &&
+  a.trial_unit_amount === b.trial_unit_amount &&
+  a.trial_duration_hours === b.trial_duration_hours &&
+  !a.quantity && !b.quantity
 
 export function ProductList({
   products: given,
@@ -76,12 +79,12 @@ export function ProductList({
     .filter((product) => !product.archived)
     .map((product) => {
       const live = product.prices.filter(
-        (p) => !p.archived && !p.customer_amount
+        (p) => !p.archived && !p.customer_amount && (!p.provider || p.provider.rail === "ccbill")
       )
       return {
         product,
         prices: live.filter(
-          (p) => !p.provider || !live.some((o) => !o.provider && sameTerms(o, p))
+          (p) => !p.provider || !live.some((o) => !o.provider && (!o.sell_via?.length || o.sell_via.includes("card")) && sameTerms(o, p))
         ),
       }
     })
