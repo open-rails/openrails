@@ -198,6 +198,9 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 	if params == nil || (params.InitialPaymentReversal != "" && params.Prepared == nil) {
 		return nil, nil, errors.New("initial reversal requires accepted terms")
 	}
+	if params.CanonicalPriceID != nil && (params.Prepared == nil || *params.CanonicalPriceID == uuid.Nil || params.Rail != models.RailNMI || params.Prepared.CollectionPolicy == models.CollectionPolicyEngine) {
+		return nil, nil, errors.New("canonical provider price requires accepted native NMI terms")
+	}
 	if params.Prepared != nil {
 		terms := params.Prepared
 		if txDB.Pool() != nil {
@@ -312,6 +315,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			"price_id": params.PriceID,
 		}).WithError(err).Error("Failed to load price for membership creation")
 		return nil, nil, fmt.Errorf("failed to get price: %w", err)
+	}
+	canonicalPriceID := price.ID
+	if params.CanonicalPriceID != nil {
+		canonicalPriceID = *params.CanonicalPriceID
 	}
 	log.WithContext(ctx).WithFields(log.Fields{
 		"user_id":    params.UserID,
@@ -449,7 +456,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	var subscription *models.Subscription
 	if existingPendingSub != nil {
-		existingPendingSub.PriceID = price.ID
+		existingPendingSub.PriceID = canonicalPriceID
 		existingPendingSub.ProductID = price.ProductID
 		existingPendingSub.Status = models.StatusActive
 		existingPendingSub.Rail = params.Rail
@@ -485,13 +492,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		subscription = existingPendingSub
 	} else {
 		subscription = &models.Subscription{
-			ID:                          uuidutil.NewV7(),
-			CustomerID:                  identity.CustomerIDFromString(params.UserID).UUID(),
-			ProductID:                   price.ProductID,
-			PriceID:                     price.ID,
-			AccessDurationHoursSnapshot: price.AccessDurationHours, ProviderAccessDefaultSnapshot: price.ProviderAccessDefault,
-			Status: models.StatusActive,
-			Rail:   params.Rail,
+			ID:                            uuidutil.NewV7(),
+			CustomerID:                    identity.CustomerIDFromString(params.UserID).UUID(),
+			ProductID:                     price.ProductID,
+			PriceID:                       canonicalPriceID,
+			AccessDurationHoursSnapshot:   price.AccessDurationHours,
+			ProviderAccessDefaultSnapshot: price.ProviderAccessDefault,
+			Status:                        models.StatusActive,
+			Rail:                          params.Rail,
 			RailSubscriptionID: func() string {
 				if params.RailSubscriptionID != nil {
 					return *params.RailSubscriptionID
