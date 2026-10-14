@@ -3850,6 +3850,10 @@ pkg openrails/openrailstest/nmimock, method (*Mock) SetDecline(string, string)
 pkg openrails/openrailstest/nmimock, method (*Mock) Tokenize(Card) string
 pkg openrails/openrailstest/nmimock, method (*Mock) URL() string
 pkg openrails/openrailstest/nmimock, method (*Mock) Unexpected() []string
+pkg openrails/openrailstest/nmimock, type Billing = nmimock.Billing
+pkg openrails/openrailstest/nmimock, type Billing struct
+pkg openrails/openrailstest/nmimock, type Billing struct, Card nmimock.Card
+pkg openrails/openrailstest/nmimock, type Billing struct, ID string
 pkg openrails/openrailstest/nmimock, type Card = nmimock.Card
 pkg openrails/openrailstest/nmimock, type Card struct
 pkg openrails/openrailstest/nmimock, type Card struct, AVS string

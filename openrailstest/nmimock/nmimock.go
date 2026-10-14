@@ -91,11 +91,12 @@ func (g *Mock) Charged(vault, order string) int64 { return g.m.Charged(vault, or
 // empty.
 func (g *Mock) Unexpected() []string { return g.m.Unexpected() }
 
-// Plan, Vault and Schedule are an existing account's records: a legacy
-// book a host imports.
+// Plan, Vault (with its further Billing entries) and Schedule are an
+// existing account's records: a legacy book a host imports.
 type (
 	Plan     = nmimock.Plan
 	Vault    = nmimock.Vault
+	Billing  = nmimock.Billing
 	Schedule = nmimock.Schedule
 )
 
