@@ -12,6 +12,40 @@ import (
 	"github.com/google/uuid"
 )
 
+const admitUnsignedSolanaPullAgreement = `-- name: AdmitUnsignedSolanaPullAgreement :execrows
+UPDATE billing.provider_intents
+SET payload = jsonb_set(payload, '{agreement}', $1::jsonb), updated_at = $2::timestamptz
+WHERE merchant_id = $3::uuid AND id = $4::uuid
+  AND intent_type='solana_pull' AND status='in_flight' AND attempts=$5::int
+  AND lease_expires_at > $2::timestamptz
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'transaction_id')
+  AND NOT (payload ? 'agreement')
+`
+
+type AdmitUnsignedSolanaPullAgreementParams struct {
+	Agreement  []byte
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	Attempts   int32
+}
+
+// A pre-upgrade queued pull has no signed transaction yet. Adopt its complete
+// accepted agreement under the subscription lock and current claim only.
+func (q *Queries) AdmitUnsignedSolanaPullAgreement(ctx context.Context, arg AdmitUnsignedSolanaPullAgreementParams) (int64, error) {
+	result, err := q.db.Exec(ctx, admitUnsignedSolanaPullAgreement,
+		arg.Agreement,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+		arg.Attempts,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const advanceProviderIntentVerification = `-- name: AdvanceProviderIntentVerification :execrows
 UPDATE billing.provider_intents
 SET next_attempt_at = LEAST(next_attempt_at, $1::timestamptz), updated_at = now()
@@ -930,15 +964,16 @@ func (q *Queries) FenceDestructiveProviderSend(ctx context.Context, arg FenceDes
 
 const fenceSolanaPullSubmission = `-- name: FenceSolanaPullSubmission :execrows
 UPDATE billing.provider_intents
-SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('transaction_id', $1::text),
-    updated_at = $2::timestamptz
-WHERE merchant_id = $3::uuid AND id = $4::uuid
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('transaction_id', $1::text, 'execution', $2::jsonb),
+    updated_at = $3::timestamptz
+WHERE merchant_id = $4::uuid AND id = $5::uuid
   AND intent_type = 'solana_pull' AND status = 'in_flight'
-  AND attempts = $5::int AND lease_expires_at > $2::timestamptz
+  AND attempts = $6::int AND lease_expires_at > $3::timestamptz
 `
 
 type FenceSolanaPullSubmissionParams struct {
 	Signature  string
+	Execution  []byte
 	Now        time.Time
 	MerchantID uuid.UUID
 	ID         uuid.UUID
@@ -948,6 +983,7 @@ type FenceSolanaPullSubmissionParams struct {
 func (q *Queries) FenceSolanaPullSubmission(ctx context.Context, arg FenceSolanaPullSubmissionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, fenceSolanaPullSubmission,
 		arg.Signature,
+		arg.Execution,
 		arg.Now,
 		arg.MerchantID,
 		arg.ID,
@@ -1503,6 +1539,7 @@ SELECT EXISTS (
     AND intent_type = 'solana_pull'
     AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
     AND result_evidence ? 'transaction_id'
+    AND NOT COALESCE(result_evidence->>'transaction_id' = result_evidence->>'reverted_transaction_id', false)
 )
 `
 

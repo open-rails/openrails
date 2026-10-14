@@ -19,6 +19,9 @@ UPDATE billing.solana_subscriptions SET
     next_pull_at = $4,
     updated_at = $5
 WHERE solana_subscriptions.merchant_id = $6::uuid AND id = $1
+  AND subscription_id = $7::uuid
+  AND (next_pull_at = $8::timestamptz OR last_signature = $3)
+  AND (last_pulled_period_starts_at IS NULL OR last_pulled_period_starts_at <= $2)
 `
 
 type AdvanceSolanaSubscriptionAfterPullParams struct {
@@ -28,6 +31,8 @@ type AdvanceSolanaSubscriptionAfterPullParams struct {
 	NextPullAt               time.Time
 	UpdatedAt                time.Time
 	MerchantID               uuid.UUID
+	SubscriptionID           uuid.UUID
+	EpisodeAt                time.Time
 }
 
 func (q *Queries) AdvanceSolanaSubscriptionAfterPull(ctx context.Context, arg AdvanceSolanaSubscriptionAfterPullParams) error {
@@ -38,6 +43,8 @@ func (q *Queries) AdvanceSolanaSubscriptionAfterPull(ctx context.Context, arg Ad
 		arg.NextPullAt,
 		arg.UpdatedAt,
 		arg.MerchantID,
+		arg.SubscriptionID,
+		arg.EpisodeAt,
 	)
 	return err
 }
