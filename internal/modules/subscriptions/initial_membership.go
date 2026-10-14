@@ -6,26 +6,37 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
 const TypeInitialMembership = "initial_membership"
 
-// InitialMembershipPayload is one accepted operation: an OpenRails-run
-// membership's first charge. Terms and Instrument own payment and access
-// authority; OrderAttemptID binds only the terminal session projection.
+type NMIInitialScheduleTerms struct {
+	PlanID       string           `json:"plan_id"`
+	StartDate    string           `json:"start_date"`
+	DayFrequency int              `json:"day_frequency"`
+	PlanPayments int              `json:"plan_payments"`
+	Card         nmi.CardUserData `json:"card"`
+}
+
+// InitialMembershipPayload is one accepted operation with mutually exclusive
+// native-schedule and engine-custody legs. Terms and Instrument own payment and
+// access authority; OrderAttemptID binds only the terminal session projection.
 type InitialMembershipPayload struct {
 	OrderAttemptID         *uuid.UUID                 `json:"order_attempt_id,omitempty"`
 	Terms                  InitialMembershipTerms     `json:"terms"`
 	Instrument             charge.FrozenInstrument    `json:"instrument"`
 	RequestFingerprint     string                     `json:"request_fingerprint"`
 	PurchaseIdempotencyKey string                     `json:"purchase_idempotency_key"`
+	NativeSchedule         *NMIInitialScheduleTerms   `json:"native_schedule,omitempty"`
 	HyperSwitch            *charge.HyperSwitchBinding `json:"hyperswitch,omitempty"`
 	PSP                    string                     `json:"psp"`
 	Email                  string                     `json:"email,omitempty"`
@@ -123,11 +134,29 @@ func DecodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMember
 	if p.Staff != nil && (!p.Staff.valid() || !change || p.Terms.CollectionPolicy != models.CollectionPolicyEngine || p.Instrument.Mandate == nil || in.Origin != "admin") {
 		return p, errors.New("staff change requires its staff member, reason and the card's recurring agreement")
 	}
-	if p.Terms.CollectionPolicy != models.CollectionPolicyEngine {
-		return p, errors.New("an initial membership is OpenRails-run; no provider schedule is started for it")
+	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
+		if p.NativeSchedule != nil || in.CustodianID != nil || p.Terms.Pending || p.Terms.Amount <= 0 || (p.Terms.Amount != p.Terms.RecurringAmount && !change) || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt) {
+			return p, errors.New("engine initial membership requires its positive customer charge and permanent custody, without a native schedule")
+		}
+		return p, charge.ValidateEngineInstrument(in.Rail, p.Instrument, p.HyperSwitch)
 	}
-	if in.CustodianID != nil || p.Terms.Pending || p.Terms.Amount <= 0 || (p.Terms.Amount != p.Terms.RecurringAmount && !change) || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt) {
-		return p, errors.New("engine initial membership requires its positive customer charge and permanent custody")
+	schedule := p.NativeSchedule
+	if in.Rail != "nmi" || schedule == nil || p.HyperSwitch != nil || in.CustodianID != nil || p.Instrument.CustodianHeld() || p.Instrument.RailCustomerRef == "" || strings.TrimSpace(schedule.PlanID) == "" || schedule.DayFrequency <= 0 || schedule.PlanPayments < 0 {
+		return p, errors.New("native initial membership requires its accepted provider schedule and instrument")
 	}
-	return p, charge.ValidateEngineInstrument(in.Rail, p.Instrument, p.HyperSwitch)
+	if int64(schedule.DayFrequency) > math.MaxInt64/int64(24*time.Hour) || p.Terms.PeriodEnd.Sub(p.Terms.PeriodStart) != time.Duration(schedule.DayFrequency)*24*time.Hour || (!p.Terms.Pending && (p.Terms.Amount != p.Terms.RecurringAmount || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt))) {
+		return p, errors.New("initial period or amount contradicts accepted recurring schedule")
+	}
+	start, err := time.Parse("20060102", schedule.StartDate)
+	if err != nil || !start.After(p.Terms.AcceptedAt) {
+		return p, errors.New("native initial membership has no exact future recurring date")
+	}
+	if p.Terms.Pending {
+		if !start.Equal(p.Terms.PeriodStart) {
+			return p, errors.New("native schedule contradicts accepted coverage")
+		}
+	} else if start.Format("20060102") != p.Terms.PeriodEnd.UTC().Format("20060102") {
+		return p, errors.New("native first recurring date contradicts accepted initial period")
+	}
+	return p, nil
 }

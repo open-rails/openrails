@@ -54,8 +54,11 @@ func decodeEnrollmentTerms(in gen.BillingProviderIntent) (enrollmentTerms, error
 		if err != nil {
 			return enrollmentTerms{}, err
 		}
-		_ = p
-		return enrollmentTerms{}, errors.New("an OpenRails-run membership has no provider schedule")
+		if p.NativeSchedule == nil {
+			return enrollmentTerms{}, errors.New("engine membership has no native schedule")
+		}
+
+		return enrollmentTerms{Instrument: p.Instrument, PlanID: p.NativeSchedule.PlanID, Currency: p.Terms.Currency, StartDate: p.NativeSchedule.StartDate, RecurringAmount: p.Terms.RecurringAmount, PeriodStart: p.Terms.PeriodStart, PeriodEnd: p.Terms.PeriodStart.Add(time.Duration(p.NativeSchedule.DayFrequency) * 24 * time.Hour), PlanPayments: &p.NativeSchedule.PlanPayments}, nil
 	}
 	return enrollmentTerms{}, errors.New("operation kind has no enrollment contract")
 }
