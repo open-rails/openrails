@@ -13,18 +13,23 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
 const TypeInitialMembership = "initial_membership"
 
+// NMIInitialCardholder retains the exact historical acceptance shape. It
+// carries no card number and grants no ability to start a provider schedule.
+type NMIInitialCardholder struct {
+	FirstName, LastName, Address1, City, State, Zip, Country string
+}
+
 type NMIInitialScheduleTerms struct {
-	PlanID       string           `json:"plan_id"`
-	StartDate    string           `json:"start_date"`
-	DayFrequency int              `json:"day_frequency"`
-	PlanPayments int              `json:"plan_payments"`
-	Card         nmi.CardUserData `json:"card"`
+	PlanID       string               `json:"plan_id"`
+	StartDate    string               `json:"start_date"`
+	DayFrequency int                  `json:"day_frequency"`
+	PlanPayments int                  `json:"plan_payments"`
+	Card         NMIInitialCardholder `json:"card"`
 }
 
 // InitialMembershipPayload is one accepted operation with mutually exclusive
