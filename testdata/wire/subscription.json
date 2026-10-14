@@ -36,6 +36,7 @@
       "currency": "USD",
       "access_duration_hours": 720,
       "billing_interval_hours": 720,
+      "billing_interval_months": null,
       "trial_unit_amount": null,
       "trial_duration_hours": null,
       "sell_via": [
@@ -80,6 +81,7 @@
     "currency": "USD",
     "access_duration_hours": 720,
     "billing_interval_hours": 720,
+    "billing_interval_months": null,
     "trial_unit_amount": null,
     "trial_duration_hours": null,
     "sell_via": [

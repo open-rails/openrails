@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 
 	"github.com/goccy/go-yaml"
@@ -331,7 +332,7 @@ func dumpProviderPrice(row gen.ListLiveCatalogPricesWithPSPLinksRow) (catalog.Ap
 	var out catalog.ApplyProviderPrice
 	providerInterval := row.BillingIntervalHours
 	for key, link := range links {
-		if h, err := strconv.Atoi(link[models.RailKeyProviderBillingInterval]); err == nil && h > 0 {
+		if h, err := strconv.ParseInt(link[models.RailKeyProviderBillingInterval], 10, 32); err == nil && h > 0 && h <= math.MaxInt32 {
 			providerInterval = new(int32(h))
 		}
 		out = catalog.ApplyProviderPrice{PSP: key, PlanID: link[models.RailKeyPlanID], PriceID: link[models.RailKeyStripePriceID],

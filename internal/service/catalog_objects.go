@@ -434,15 +434,17 @@ func documentProviderPriceFields(d catalogwire.ApplyProviderPrice, prepared *pro
 	values := map[string]json.RawMessage{}
 	if prepared != nil {
 		req := prepared.request
-		values["provider"] = catalogJSON(providerFieldValue(d.PSP, prepared.link))
-		values["currency"] = catalogJSON(req.Currency)
-		values["unit_amount"] = catalogMoney(req.UnitAmount)
-		values["access_duration_hours"] = catalogJSON(req.AccessDurationHours)
-		values["billing_interval_hours"] = catalogJSON(req.BillingIntervalHours)
-		values["billing_interval_months"] = catalogJSON(prepared.months)
-		values["provider_access_default"] = catalogJSON(prepared.accessDefault)
-		values["trial_unit_amount"] = catalogOptionalMoney(req.TrialUnitAmount)
-		values["trial_duration_hours"] = catalogJSON(req.TrialDurationHours)
+		values = map[string]json.RawMessage{
+			"provider":                catalogJSON(providerFieldValue(d.PSP, prepared.link)),
+			"currency":                catalogJSON(req.Currency),
+			"unit_amount":             catalogMoney(req.UnitAmount),
+			"access_duration_hours":   catalogJSON(req.AccessDurationHours),
+			"billing_interval_hours":  catalogJSON(req.BillingIntervalHours),
+			"billing_interval_months": catalogJSON(prepared.months),
+			"provider_access_default": catalogJSON(prepared.accessDefault),
+			"trial_unit_amount":       catalogOptionalMoney(req.TrialUnitAmount),
+			"trial_duration_hours":    catalogJSON(req.TrialDurationHours),
+		}
 	}
 	if d.Archived.Set {
 		values["archived"] = catalogJSON(d.Archived.Value)

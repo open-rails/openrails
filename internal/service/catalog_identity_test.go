@@ -71,8 +71,11 @@ func TestProviderPriceIdentity(t *testing.T) {
 	require.NotEqual(t, solanaPlanID(base, "mint", first), solanaPlanID(base, "mint", second), "a new treasury takes a new plan")
 	req := billing.CreatePriceParams{Key: "legacy", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: intPtr(720)}
 	psp := uuid.New()
-	require.NotEqual(t, providerPriceID(productID, req, psp, map[string]string{"plan_id": "a"}), providerPriceID(productID, req, psp, map[string]string{"plan_id": "b"}))
-	require.NotEqual(t, newPriceID(productID, "legacy", req), providerPriceID(productID, req, psp, map[string]string{"plan_id": "a"}))
+	plan := providerPriceID(productID, req, psp, map[string]string{"plan_id": "a"}, nil, false)
+	require.NotEqual(t, plan, providerPriceID(productID, req, psp, map[string]string{"plan_id": "b"}, nil, false))
+	require.NotEqual(t, plan, providerPriceID(productID, req, psp, map[string]string{"plan_id": "a"}, intPtr(1), false))
+	require.NotEqual(t, plan, providerPriceID(productID, req, psp, map[string]string{"plan_id": "a"}, nil, true))
+	require.NotEqual(t, newPriceID(productID, "legacy", req), plan)
 	product := &models.Product{ID: productID, Key: "pro"}
 	legacy := &models.Price{ID: uuid.New(), ProductID: productID, Key: "monthly", Amount: 10_000_000, Currency: "USD",
 		PSPLinks: map[string]map[string]string{"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_legacy"}}}

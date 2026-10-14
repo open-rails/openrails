@@ -83,6 +83,7 @@ var embeddedMethods = map[string]string{
 var routeArguments = map[string][]any{
 	"ApplyCatalog":          {&catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}, billing.ApplyCatalogParams{}},
 	"CreatePrice":           {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
+	"CreateProviderPrice":   {billing.CreateProviderPriceParams{ProductKey: "pro", Key: "legacy", PSP: "nmi", PlanID: "plan"}},
 	"SetMeter":              {"tokens", billing.SetMeterParams{Aggregation: catalog.AggregationSum, RateCard: catalog.Null[billing.MeterRateCardParams]()}},
 	"RefundPayment":         {billing.PaymentID(uuid.New()), billing.RefundPaymentParams{Full: true, Reason: "requested", IdempotencyKey: "k"}},
 	"CreatePriceMigration":  {billing.CreatePriceMigrationParams{FromPriceID: billing.PriceID("test:" + uuid.NewString() + ":v1"), ToPriceID: billing.PriceID("test:" + uuid.NewString() + ":v1")}},

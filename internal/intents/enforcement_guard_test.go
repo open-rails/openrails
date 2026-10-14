@@ -40,14 +40,11 @@ var providerWriteSurface = map[string]string{
 	"RunSale":                         "write", // charges a card
 	"Refund":                          "write", // returns money
 	"Void":                            "write", // cancels an authorization
-	"AddRecurringSubscription":        "write", // creates a remote billing schedule
 	"UpdateRecurringSubscription":     "write", // mutates a remote billing schedule
 	"UpdateRecurringSubscriptionPlan": "write", // moves a remote billing schedule to another named plan
 	"DeleteRecurringSubscription":     "write", // IRREVERSIBLE
 	"AttemptManualRebill":             "write", // charges a card off a schedule
 	"UpdateSubscriptionPaymentSource": "write", // repoints a live schedule at another card
-	"AddRecurringPlan":                "write", // creates a remote plan
-	"EditRecurringPlan":               "write", // mutates a remote plan
 	"CreateCustomerVault":             "write", // stores a card at the provider
 	"VerifyStoredCredential":          "write", // records a credential-on-file verification (no funds move)
 	"UpdateCustomerVault":             "write", // mutates a stored card

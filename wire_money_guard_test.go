@@ -67,7 +67,6 @@ var pendingNumericMoney = map[string]string{
 	"internal/integrations/nmi/v5.go:v5PaymentRequest.Amount amount":                                                             notHTTPProviderWire,
 	"internal/nmimock/v5.go:func v5.Amount amount":                                                                               notHTTPProviderWire,
 	"internal/nmimock/v5.go:func v5.Amount plan_amount":                                                                          notHTTPProviderWire,
-	"internal/integrations/nmi/v5.go:v5PlanCreateRequest.PlanAmount plan_amount":                                                 notHTTPProviderWire,
 	"internal/modules/admission/spendgate/policy.go:Window.Limit limit":                                                          notHTTPInternalRow,
 	"internal/modules/catalog/stripe_catalog.go:StripePrice.UnitAmount unit_amount":                                              notHTTPProviderWire,
 	"internal/modules/payment/custodian_sale.go:CustodianSalePayload.AmountMicros amount_micros":                                 notHTTPIntentPayload,

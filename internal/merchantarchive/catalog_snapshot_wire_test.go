@@ -237,6 +237,9 @@ func TestCatalogSnapshotWireRejectsMissingIdentityAndUnknownColumns(t *testing.T
 				"merchant_id": json.RawMessage(`"` + snapshotTestMerchant + `"`),
 				"id":          json.RawMessage(`"10000000-0000-0000-0000-000000000002"`),
 			}
+			if table == "prices" {
+				row["provider_owned"] = json.RawMessage("false")
+			}
 			document.Tables[table] = []map[string]json.RawMessage{row}
 			_, _, err := readCatalogSnapshot(bytes.NewReader(snapshotWireUncheckedYAML(t, document)))
 			require.ErrorContains(t, err, "revision")

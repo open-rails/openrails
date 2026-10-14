@@ -1551,7 +1551,7 @@ SELECT EXISTS (
         AND b.settled_at IS NOT NULL AND o.collection_owner='engine'
         AND p.psp_id=i.psp_id AND p.subscription_id=i.subscription_id
         AND p.transaction_id=i.result_evidence->>'transaction_id'
-        AND p.money_movement='rail' AND p.amount > 0
+        AND p.money_movement='rail' AND p.amount > 0 AND p.deleted_at IS NULL
         AND p.status IN ('succeeded', 'refunded')
     )
 )
