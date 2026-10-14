@@ -1223,6 +1223,7 @@
       "func (g *Mock) URL() string",
       "func (g *Mock) Unexpected() []string",
       "func New(opts Options) *Mock",
+      "type Billing = nmimock.Billing",
       "type Card = nmimock.Card",
       "type LedgerEntry = nmimock.LedgerEntry",
       "type Mock struct{}",

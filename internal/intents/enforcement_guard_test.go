@@ -100,6 +100,7 @@ var providerWriteSurface = map[string]string{
 	"ProbeTestMode":                "read",
 	"SearchTransactions":           "read",
 	"TransactionReport":            "read",
+	"RecurringReport":              "read",
 	"DeclineHistory":               "read",
 }
 
