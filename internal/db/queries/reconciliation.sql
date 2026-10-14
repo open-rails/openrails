@@ -553,7 +553,8 @@ WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(
         -- so the dedupe is PSP-scoped.
         AND s.psp_id = sqlc.arg(psp_id)::uuid
   )
-RETURNING id, product_id, access_duration_hours_snapshot;
+RETURNING id, product_id, access_duration_hours_snapshot,
+          provider_access_default_snapshot, current_period_ends_at;
 
 -- Adopts the rail's vault metadata for a stored payment method.
 -- name: ReconcileAdoptPaymentMethod :execrows

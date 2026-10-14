@@ -686,6 +686,9 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		// Local past_due requires a period end (subscriptions_past_due_has_period_end_check).
 		blockers = append(blockers, "remote is past_due without a next billing date; local past_due requires a period end")
 	}
+	if link.price != nil && link.price.ProviderAccessDefault && r.NextBillingAt == nil {
+		blockers = append(blockers, "provider-default access requires a verified service period end")
+	}
 	localStatus, materializable := LocalMaterializeStatus(r.Status)
 	if !materializable {
 		// The local lifecycle has no state meaning "the provider's date

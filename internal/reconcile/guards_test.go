@@ -118,3 +118,22 @@ func TestRemoteStatesWithoutALocalStateNeverMaterialize(t *testing.T) {
 	require.Nil(t, dead.Apply)
 	require.Contains(t, dead.RemoteEvidence["materialize_blocked"], "no canonical local lifecycle state")
 }
+
+func TestMaterializingProviderDefaultRequiresAnObservedServiceEnd(t *testing.T) {
+	price := &LocalPrice{ID: uuid.New(), ProductID: uuid.New(), ProviderAccessDefault: true}
+	idx := &localIndex{byPSID: map[string]*LocalSubscription{}, byEmail: map[string][]*LocalSubscription{},
+		pmByRailCustomerRef: map[string]*LocalPaymentMethod{"vault-1": {CustomerID: uuid.New()}}}
+	planIdx := map[string][]planLink{"plan-1": {{railName: "nmi", price: price}}}
+	remote := &RemoteSubscription{RailSubscriptionID: "sub-1", Status: SubscriptionStatusActive, PlanID: "plan-1", CustomerID: "vault-1"}
+	check := func() Finding {
+		return makePS1(ProviderNMI, remote, idx, planIdx, &RemoteSnapshot{Provider: ProviderNMI, FetchedAt: time.Now().UTC()}, diffOptions{Materialize: true})
+	}
+	missing := check()
+	require.Nil(t, missing.Apply)
+	require.Contains(t, missing.RemoteEvidence["materialize_blocked"], "provider-default access requires a verified service period end")
+	remote.NextBillingAt = new(time.Now().UTC().Add(oneDay))
+	require.NotNil(t, check().Apply, "an observed end qualifies the default")
+	remote.NextBillingAt = nil
+	price.ProviderAccessDefault = false
+	require.NotNil(t, check().Apply, "explicit indefinite acceptance needs no invented service end")
+}

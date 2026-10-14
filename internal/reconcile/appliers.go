@@ -212,7 +212,8 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 	}
 	res := MaterializeResult{SubscriptionID: rows[0].ID, Created: true}
 
-	// The accepted access window is independent of the provider's billing date.
+	// Explicit access is independent of billing; a provider DEFAULT requires
+	// this observed service period's verified end and never means indefinite.
 	now := w.now()
 	start := now
 	if a.StartedAt != nil {
@@ -228,7 +229,7 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		end := start.Add(time.Duration(*rows[0].AccessDurationHoursSnapshot) * time.Hour)
 		accessEnd = &end
 	}
-	if accessEnd == nil || accessEnd.After(now) {
+	if !rows[0].ProviderAccessDefaultSnapshot && accessEnd == nil || accessEnd != nil && accessEnd.After(now) {
 		granted, err := w.GrantAccess(ctx, GrantAccessAction{
 			SubscriptionID: res.SubscriptionID,
 			CustomerID:     a.CustomerID,
