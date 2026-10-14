@@ -86,36 +86,24 @@ func TestDurationAccessExpiresBeforeNextBill(t *testing.T) {
 }
 
 func TestDurationAccessSurvivesCancellation(t *testing.T) {
-	for _, access := range []struct {
-		name  string
-		hours *int
-	}{{"longer_than_billing", new(1440)}, {"indefinite", nil}} {
-		t.Run(access.name, func(t *testing.T) {
-			forEach(t, func(t *testing.T, rail string, tp topology) {
-				w := newWorld(t)
-				e := enrollAccessDuration(t, w, rail, tp, access.hours)
-				_, err := w.client[tp].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "keep purchased access"})
-				require.NoError(t, err)
-				w.advance(721 * time.Hour)
-				w.runRenewals()
-				w.converge()
-				require.True(t, e.c.entitled(e.ent), "billing cancellation does not shorten purchased access")
-				requireDurationSelfAccess(t, e, true)
-				require.Len(t, e.providerLedger(), 1)
-				w.advance(721 * time.Hour)
-				w.runRenewals()
-				w.converge()
-				require.Equal(t, access.hours == nil, e.c.entitled(e.ent), "finite access expires on its own boundary; indefinite access remains")
-				requireDurationSelfAccess(t, e, access.hours == nil)
-				if access.hours == nil {
-					w.refreshProviders()
-					_, err = w.client[tp].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "revoke purchased access", RevokeAccess: true})
-					require.NoError(t, err)
-					require.False(t, e.c.entitled(e.ent))
-					requireDurationSelfAccess(t, e, false)
-				}
-				require.Len(t, e.providerLedger(), 1)
-			})
-		})
-	}
+	// A recurring price's access is finite (#1275): a longer window than the
+	// billing interval outlives cancellation and then expires on its own.
+	forEach(t, func(t *testing.T, rail string, tp topology) {
+		w := newWorld(t)
+		e := enrollAccessDuration(t, w, rail, tp, new(1440))
+		_, err := w.client[tp].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "keep purchased access"})
+		require.NoError(t, err)
+		w.advance(721 * time.Hour)
+		w.runRenewals()
+		w.converge()
+		require.True(t, e.c.entitled(e.ent), "billing cancellation does not shorten purchased access")
+		requireDurationSelfAccess(t, e, true)
+		require.Len(t, e.providerLedger(), 1)
+		w.advance(721 * time.Hour)
+		w.runRenewals()
+		w.converge()
+		require.False(t, e.c.entitled(e.ent), "finite access expires on its own boundary")
+		requireDurationSelfAccess(t, e, false)
+		require.Len(t, e.providerLedger(), 1)
+	})
 }
