@@ -26,12 +26,14 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `captcha_invalid` | 403 | `invalid_request_error` | The captcha token was rejected. |
 | `captcha_required` | 403 | `invalid_request_error` | The caller must solve a captcha and resend with its token. |
 | `card_attempts_blocked` | 429 | `rate_limit_error` | Too many declined card attempts; try again later. |
-| `card_custody_reserved` | 400 | `invalid_request_error` | settings.card_custody hosted is reserved for a private vault the platform will host; choose platform or merchant. |
 | `card_declined` | 402 | `card_error` | The provider declined the card; metadata.decline_reason says why. |
 | `card_not_saved` | 409 | `api_error` | The card was not saved; enter it again. |
 | `card_requires_https` | 400 | `invalid_request_error` | Card data is accepted only over HTTPS. |
+| `card_vault_unknown` | 409 | `invalid_request_error` | settings.card_vault names no live card PSP of the merchant, nor platform. |
 | `catalog_benefit_overlap` | 409 | `invalid_request_error` | Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group. |
 | `catalog_revision_conflict` | 409 | `invalid_request_error` | The catalog changed during the application; retry. |
+| `charge_psp_incompatible` | 409 | `invalid_request_error` | A charge PSP cannot charge cards from the card vault: a PSP-vaulted card charges only through its own account, a custodian's card through the PSPs naming that custodian. |
+| `charge_psp_unknown` | 409 | `invalid_request_error` | settings.charge_psps names a PSP that is not a live card PSP of the merchant. |
 | `credential_expired` | 401 | `authentication_error` | The credential has expired. |
 | `credential_revoked` | 401 | `authentication_error` | The credential or its session was revoked. |
 | `credit_grant_held` | 409 | `invalid_request_error` | Active holds need the grant's remaining credit. |
@@ -123,8 +125,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_option_unavailable` | 422 | `invalid_request_error` | No PSP that can take the order's lines accepts this payment. |
 | `payment_provider_rejected` | 502 | `api_error` | The provider refused to process the charge for a gateway or account reason. |
 | `permission_required` | 403 | `authorization_error` | The credential lacks the permission the route requires. |
-| `platform_vault_unavailable` | 409 | `invalid_request_error` | The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; keep card_custody merchant. |
-| `platform_vault_unreachable` | 409 | `invalid_request_error` | A card PSP routing offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant. |
+| `platform_vault_unavailable` | 409 | `invalid_request_error` | The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; save cards at a PSP's vault. |
+| `platform_vault_unreachable` | 409 | `invalid_request_error` | A charge PSP cannot charge cards from the platform vault (Stripe, or card_entry server); leave it out of charge_psps or save cards at a PSP's vault. |
 | `price_change_currency_mismatch` | 422 | `invalid_request_error` | The target price must be in the subscription's currency. |
 | `price_change_target_archived` | 422 | `invalid_request_error` | The target price is archived. |
 | `price_increase_notice_too_short` | 422 | `invalid_request_error` | effective_at is inside the merchant's notice window for a price increase. |
@@ -132,13 +134,14 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `price_key_not_found` | 404 | `invalid_request_error` | No price holds this key. |
 | `price_migration_not_found` | 404 | `invalid_request_error` | The price migration does not exist. |
 | `price_not_found` | 404 | `invalid_request_error` | The price does not exist. |
-| `price_not_sellable` | 400 | `invalid_request_error` | No PSP can sell this price. |
+| `price_not_sellable` | 400 | `invalid_request_error` | None of the price's methods can sell it. |
 | `product_in_use` | 409 | `invalid_request_error` | Records refer to the product; archive it instead. |
 | `product_not_found` | 404 | `invalid_request_error` | The product does not exist. |
 | `product_tier_group_conflict` | 409 | `invalid_request_error` | A customer holds live subscriptions to more than one product of the tier group. |
 | `product_tier_group_in_use` | 409 | `invalid_request_error` | The tier group cannot change while a subscription has a plan change in flight. |
 | `provider_cancel_held` | 409 | `invalid_request_error` | Cancelling needs a destructive provider action that is not armed for this merchant. |
 | `provider_outcome_unknown` | 409 | `api_error` | The provider did not confirm the outcome; read the resource before retrying. |
+| `provider_price_unreadable` | 502 | `api_error` | The provider did not answer for the provider price's terms; retry. |
 | `provider_writes_disabled` | 503 | `api_error` | Provider writes are off for the merchant, so it takes no payment; the message names why (provider_write_mode or the merchant's write posture). |
 | `provider_writes_held` | 409 | `invalid_request_error` | The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open. |
 | `psp_claim_requires_proof` | 403 | `authorization_error` | Claiming a provider account needs credentials that prove control of it. |

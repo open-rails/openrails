@@ -101,6 +101,7 @@ migration 0099_psp_rail_environments.up.sql sha256:c2591ae4f3a8157d326ba09efd431
 migration 0100_solana_treasury.up.sql sha256:e9e6beb0bd3e8dee97d57ffa4716c29ece04d21bad3d1fbd562b9f86e04c4f25
 migration 0101_solana_crankers.up.sql sha256:cfc788945c60ae49644969b1cbc339f60db59f419cc4609e24a581419869952f
 migration 0102_book_id.up.sql sha256:c339a6b0581464cfda66c8b6edc68f00d98a67c29bda0162393574a835eb3600
+migration 0104_provider_prices.up.sql sha256:d86dd76e64724bcecb5dbfe8ef73d4a3bb8ad56c567943b87e03897a0dfb0ce0
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -277,7 +278,7 @@ table billing.catalog_field_owners
   column actor text NOT NULL
   column set_at timestamp with time zone NOT NULL
   constraint catalog_field_owners_actor_check CHECK (((actor <> ''::text) AND (octet_length(actor) <= 255)))
-  constraint catalog_field_owners_field_check CHECK ((((object = 'product'::text) AND (field = ANY (ARRAY['display_name'::text, 'description'::text, 'tier_group'::text, 'tier_rank'::text, 'archived'::text, 'ownership'::text, 'entitlements'::text, 'required_entitlements'::text, 'credit_grant'::text, 'rate_cards'::text]))) OR ((object = 'price'::text) AND (field = ANY (ARRAY['currency'::text, 'unit_amount'::text, 'access_duration_hours'::text, 'billing_interval_hours'::text, 'trial_unit_amount'::text, 'trial_duration_hours'::text, 'customer_amount'::text, 'quantity'::text, 'archived'::text, 'psps'::text]))) OR ((object = 'meter'::text) AND (field = ANY (ARRAY['event_type'::text, 'value_property'::text, 'aggregation'::text, 'unit'::text, 'group_by'::text])))))
+  constraint catalog_field_owners_field_check CHECK ((((object = 'product'::text) AND (field = ANY (ARRAY['display_name'::text, 'description'::text, 'tier_group'::text, 'tier_rank'::text, 'archived'::text, 'ownership'::text, 'entitlements'::text, 'required_entitlements'::text, 'credit_grant'::text, 'rate_cards'::text]))) OR ((object = 'price'::text) AND (field = ANY (ARRAY['currency'::text, 'unit_amount'::text, 'access_duration_hours'::text, 'billing_interval_hours'::text, 'billing_interval_months'::text, 'provider_access_default'::text, 'trial_unit_amount'::text, 'trial_duration_hours'::text, 'customer_amount'::text, 'quantity'::text, 'archived'::text, 'sell_via'::text, 'provider'::text]))) OR ((object = 'meter'::text) AND (field = ANY (ARRAY['event_type'::text, 'value_property'::text, 'aggregation'::text, 'unit'::text, 'group_by'::text])))))
   constraint catalog_field_owners_key_check CHECK (((key <> ''::text) AND (octet_length(key) <= 255)))
   constraint catalog_field_owners_manager_check CHECK ((manager = ANY (ARRAY['apply'::text, 'edit'::text])))
   constraint catalog_field_owners_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
@@ -1254,6 +1255,7 @@ table billing.order_lines
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column source text
   column provider_amount boolean NOT NULL DEFAULT false
+  column provider_access_default boolean NOT NULL DEFAULT false
   constraint order_lines_access_duration_hours_check CHECK ((access_duration_hours > 0))
   constraint order_lines_amount_check CHECK ((((NOT provider_amount) AND (unit_amount >= 0) AND (amount = (unit_amount * COALESCE(quantity, 1)))) OR (provider_amount AND ((amount >= 0) OR (source = 'provider_adjustment'::text)))))
   constraint order_lines_billing_interval_hours_check CHECK ((billing_interval_hours > 0))
@@ -1805,7 +1807,9 @@ table billing.price_psp_bindings
   index CREATE UNIQUE INDEX price_psp_bindings_psp_id_plan_pda_key ON billing.price_psp_bindings USING btree (merchant_id, psp_id, plan_pda) WHERE (plan_pda IS NOT NULL)
   index CREATE UNIQUE INDEX price_psp_bindings_psp_id_price_ref_key ON billing.price_psp_bindings USING btree (merchant_id, psp_id, price_ref) WHERE (price_ref IS NOT NULL)
   index CREATE UNIQUE INDEX price_psp_bindings_psp_id_recurring_billing_option_id_key ON billing.price_psp_bindings USING btree (merchant_id, psp_id, recurring_billing_option_id) WHERE (recurring_billing_option_id IS NOT NULL)
+  index CREATE UNIQUE INDEX provider_price_one_binding_key ON billing.price_psp_bindings USING btree (merchant_id, price_id) WHERE ((plan_pda IS NULL) AND ((plan_id IS NOT NULL) OR (price_ref IS NOT NULL) OR (flex_id IS NOT NULL) OR (recurring_billing_option_id IS NOT NULL)))
   trigger CREATE TRIGGER catalog_authored_binding BEFORE INSERT OR DELETE OR UPDATE ON billing.price_psp_bindings FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
+  trigger CREATE TRIGGER price_binding_owner BEFORE INSERT OR UPDATE ON billing.price_psp_bindings FOR EACH ROW EXECUTE FUNCTION billing.guard_price_binding_owner()
   trigger CREATE TRIGGER price_key_binding_revision AFTER INSERT OR DELETE OR UPDATE ON billing.price_psp_bindings FOR EACH ROW EXECUTE FUNCTION billing.step_price_key_binding()
 
 table billing.prices
@@ -1827,9 +1831,16 @@ table billing.prices
   column quantity jsonb
   column deleted_at timestamp with time zone
   column public_id text NOT NULL
+  column provider_owned boolean NOT NULL DEFAULT false
+  column provider_psp_id uuid
+  column provider_snapshot jsonb
+  column billing_interval_months integer
+  column provider_access_default boolean NOT NULL DEFAULT false
+  column sell_via text[]
   constraint prices_access_duration_positive_check CHECK (((access_duration_hours IS NULL) OR (access_duration_hours > 0)))
   constraint prices_amount_nonneg_check CHECK ((amount >= 0))
   constraint prices_billing_interval_positive_check CHECK (((billing_interval_hours IS NULL) OR (billing_interval_hours > 0)))
+  constraint prices_calendar_cadence_check CHECK (((billing_interval_months IS NULL) OR (provider_owned AND (billing_interval_hours IS NULL) AND ((billing_interval_months >= 1) AND (billing_interval_months <= 1200)))))
   constraint prices_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint prices_customer_amount_terms CHECK (((customer_amount IS NULL) OR ((jsonb_typeof(customer_amount) = 'object'::text) AND (amount = 0) AND (billing_interval_hours IS NULL) AND (access_duration_hours IS NULL) AND (trial_unit_amount IS NULL) AND (trial_duration_hours IS NULL) AND (customer_amount ? 'min_amount'::text) AND (customer_amount ? 'max_amount'::text) AND COALESCE((((customer_amount ->> 'min_amount'::text))::bigint > 0), false) AND COALESCE((((customer_amount ->> 'max_amount'::text))::bigint >= ((customer_amount ->> 'min_amount'::text))::bigint), false))))
   constraint prices_deleted_archived_check CHECK (((deleted_at IS NULL) OR archived))
@@ -1837,11 +1848,15 @@ table billing.prices
   constraint prices_key_nonempty_check CHECK ((btrim(key) <> ''::text))
   constraint prices_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint prices_pkey PRIMARY KEY (merchant_id, id)
-  constraint prices_product_amount_window_key UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, quantity)
+  constraint prices_product_amount_window_key UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, billing_interval_months, provider_access_default)
   constraint prices_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT
   constraint prices_product_key_revision_key UNIQUE (merchant_id, product_id, key, revision)
+  constraint prices_provider_access_default_check CHECK (((NOT provider_access_default) OR provider_owned))
+  constraint prices_provider_psp_fkey FOREIGN KEY (merchant_id, provider_psp_id) REFERENCES billing.psps(merchant_id, id)
+  constraint prices_provider_snapshot_check CHECK ((((provider_psp_id IS NULL) AND (provider_snapshot IS NULL) AND (NOT provider_owned)) OR (provider_owned AND (provider_psp_id IS NOT NULL) AND (provider_snapshot IS NOT NULL) AND (jsonb_typeof(provider_snapshot) = 'object'::text) AND COALESCE(((provider_snapshot ->> 'psp_id'::text) = (provider_psp_id)::text), false))))
   constraint prices_quantity_terms CHECK (((quantity IS NULL) OR ((jsonb_typeof(quantity) = 'object'::text) AND (billing_interval_hours IS NOT NULL) AND (customer_amount IS NULL) AND (quantity ? 'min'::text) AND (quantity ? 'max'::text) AND COALESCE((((quantity ->> 'min'::text))::integer >= 1), false) AND COALESCE(((((quantity ->> 'max'::text))::integer >= ((quantity ->> 'min'::text))::integer) AND (((quantity ->> 'max'::text))::integer <= 10000)), false))))
   constraint prices_revision_nonnegative CHECK ((revision >= 0))
+  constraint prices_sell_via_check CHECK (((sell_via IS NULL) OR ((NOT provider_owned) AND (cardinality(sell_via) > 0) AND (sell_via <@ ARRAY['card'::text, 'solana'::text]))))
   constraint prices_trial_amount_nonneg_check CHECK (((trial_unit_amount IS NULL) OR (trial_unit_amount >= 0)))
   constraint prices_trial_both_or_neither_check CHECK (((trial_unit_amount IS NULL) = (trial_duration_hours IS NULL)))
   constraint prices_trial_needs_billing_interval_check CHECK (((trial_unit_amount IS NULL) OR (billing_interval_hours IS NOT NULL)))
@@ -1852,12 +1867,12 @@ table billing.prices
   index CREATE INDEX prices_key_idx ON billing.prices USING btree (merchant_id, product_id, key)
   index CREATE UNIQUE INDEX prices_key_key ON billing.prices USING btree (merchant_id, product_id, key) WHERE (NOT archived)
   index CREATE UNIQUE INDEX prices_pkey ON billing.prices USING btree (merchant_id, id)
-  index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, quantity) NULLS NOT DISTINCT
+  index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, billing_interval_months, provider_access_default) NULLS NOT DISTINCT
   index CREATE UNIQUE INDEX prices_product_key_revision_key ON billing.prices USING btree (merchant_id, product_id, key, revision)
   index CREATE INDEX prices_public_id_idx ON billing.prices USING btree (merchant_id, sha256((public_id)::bytea))
   trigger CREATE TRIGGER catalog_authored_price BEFORE INSERT OR DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
   trigger CREATE TRIGGER catalog_price_retired AFTER UPDATE OF archived, key ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_price_retired()
-  trigger CREATE TRIGGER immutable_price_terms BEFORE DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('archived', 'updated_at', 'deleted_at')
+  trigger CREATE TRIGGER immutable_price_terms BEFORE DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('archived', 'updated_at', 'deleted_at', 'sell_via')
   trigger CREATE TRIGGER no_price_truncate BEFORE TRUNCATE ON billing.prices FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER price_key_revision AFTER INSERT OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.step_price_key()
   trigger CREATE TRIGGER price_revision BEFORE INSERT ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.assign_price_revision()
@@ -2585,6 +2600,7 @@ table billing.subscriptions
   column dunning_policy jsonb
   column access_duration_hours_snapshot integer
   column quantity integer
+  column provider_access_default_snapshot boolean NOT NULL DEFAULT false
   constraint subscriptions_access_duration_hours_snapshot_check CHECK (((access_duration_hours_snapshot IS NULL) OR (access_duration_hours_snapshot > 0)))
   constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text])))
   constraint subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
@@ -3627,6 +3643,34 @@ function billing.guard_payment_method_version_update()
       RAISE EXCEPTION 'card version % is append-only', OLD.id USING ERRCODE = '23514';
   END;
   $function$
+
+function billing.guard_price_binding_owner()
+  CREATE OR REPLACE FUNCTION billing.guard_price_binding_owner()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE owned boolean; binding_rail text;
+  BEGIN
+      SELECT p.provider_owned INTO owned FROM billing.prices p WHERE p.merchant_id = NEW.merchant_id AND p.id = NEW.price_id FOR UPDATE;
+      SELECT s.rail INTO binding_rail FROM billing.psps s WHERE s.merchant_id = NEW.merchant_id AND s.id = NEW.psp_id;
+      IF owned IS DISTINCT FROM (binding_rail IN ('nmi', 'stripe', 'ccbill')) THEN
+          RAISE EXCEPTION 'price % cannot bind a % object: our prices bind only Solana plans, provider prices only their provider''s object', NEW.price_id, binding_rail USING ERRCODE = '23514';
+      END IF;
+      IF owned AND EXISTS (SELECT 1 FROM billing.price_psp_bindings b WHERE b.merchant_id = NEW.merchant_id AND b.price_id = NEW.price_id AND b.psp_id <> NEW.psp_id) THEN
+          RAISE EXCEPTION 'provider price % binds one PSP', NEW.price_id USING ERRCODE = '23514';
+      END IF;
+      IF owned AND (NEW.plan_pda IS NOT NULL
+          OR (binding_rail = 'nmi' AND (NEW.plan_id IS NULL OR NEW.price_ref IS NOT NULL OR NEW.flex_id IS NOT NULL OR NEW.recurring_billing_option_id IS NOT NULL))
+          OR (binding_rail = 'stripe' AND (NEW.price_ref IS NULL OR NEW.plan_id IS NOT NULL OR NEW.flex_id IS NOT NULL OR NEW.recurring_billing_option_id IS NOT NULL))
+          OR (binding_rail = 'ccbill' AND (NEW.plan_id IS NOT NULL OR NEW.price_ref IS NOT NULL OR (NEW.flex_id IS NULL AND NEW.recurring_billing_option_id IS NULL)))) THEN
+          RAISE EXCEPTION 'provider price % must name its provider object on %', NEW.price_id, binding_rail USING ERRCODE = '23514';
+      END IF;
+      IF NOT owned AND (NEW.price_ref IS NOT NULL OR NEW.flex_id IS NOT NULL OR NEW.recurring_billing_option_id IS NOT NULL OR (NEW.plan_id IS NOT NULL AND NEW.plan_pda IS NULL)) THEN
+          RAISE EXCEPTION 'our price % binds only a published Solana plan', NEW.price_id USING ERRCODE = '23514';
+      END IF;
+      RETURN NEW;
+  END $function$
 
 function billing.guard_product_entitlement_history()
   CREATE OR REPLACE FUNCTION billing.guard_product_entitlement_history()

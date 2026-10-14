@@ -152,7 +152,7 @@ export type ApplyPrice = {
   trial_duration_hours?: number | null
   customer_amount?: CustomerAmount | null
   quantity?: Quantity | null
-  psps?: Record<string, Record<string, string>> | null
+  sell_via?: string[] | null
   amount?: string
   access_duration?: string | null
   billing_interval?: string | null
@@ -170,7 +170,24 @@ export type ApplyProduct = {
   required_entitlements?: string[]
   credit_grant?: CreditGrantSpec | null
   prices?: Record<string, ApplyPrice>
+  provider_prices?: Record<string, ApplyProviderPrice>
   rate_cards?: RateCard[] | null
+}
+
+export type ApplyProviderPrice = {
+  psp?: string
+  plan_id?: string
+  price_id?: string
+  flex_id?: string
+  recurring_billing_option_id?: string
+  currency?: string
+  unit_amount?: string
+  billing_interval_hours?: number
+  access_duration_hours?: number | null
+  trial_unit_amount?: string
+  trial_duration_hours?: number
+  one_off?: boolean
+  archived?: boolean | null
 }
 
 export type AskCatalogParams = {
@@ -390,6 +407,7 @@ export type CatalogApplicationReceipt = {
   entitlement_changes: EntitlementChange[]
   changes: CatalogChange[]
   conflicts: CatalogConflict[]
+  warnings: CatalogWarning[]
 }
 
 export type CatalogChange = {
@@ -433,6 +451,13 @@ export type CatalogFieldConflict = {
   live_value: unknown | null
   set_by: string
   set_at: string
+}
+
+export type CatalogWarning = {
+  key: string
+  product_key: string
+  refused: boolean
+  message: string
 }
 
 export type ChangeBasis = {
@@ -575,7 +600,7 @@ export type CreatePriceParams = {
   billing_interval_hours?: number
   trial_unit_amount?: string
   trial_duration_hours?: number
-  psps?: Record<string, Record<string, string>>
+  sell_via?: string[]
   archived?: boolean
   expected_revision?: number
 }
@@ -613,6 +638,25 @@ export type CreateProductParams = {
   tier_group?: string
   tier_rank?: number
   ownership?: "consumable" | "extend" | "unique"
+  archived?: boolean
+}
+
+export type CreateProviderPriceParams = {
+  product_id?: string
+  product_key?: string
+  key?: string
+  psp?: string
+  plan_id?: string
+  price_id?: string
+  flex_id?: string
+  recurring_billing_option_id?: string
+  currency?: string
+  unit_amount?: string
+  billing_interval_hours?: number
+  access_duration_hours?: number | null
+  trial_unit_amount?: string
+  trial_duration_hours?: number
+  one_off?: boolean
   archived?: boolean
 }
 
@@ -1193,7 +1237,8 @@ export type MerchantConfigurationState = {
   dunning_policy?: DunningPolicy
   payment_page?: MerchantPaymentPageSettings
   balance_notices?: BalanceNoticeSettings
-  card_custody?: "hosted" | "merchant" | "platform"
+  card_vault?: string
+  charge_psps?: string[]
   billing_policies?: BillingPolicy[]
   billing_policy_bindings?: BillingPolicyBinding[]
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
@@ -1566,15 +1611,6 @@ export type PSPCredential = {
   validated_at: string | null
 }
 
-export type PSPLinkState = {
-  status: "error" | "linked" | "pending_manual_link" | "sync_disabled"
-  ids: Record<string, string> | null
-  lookup_key: string
-  sync_status: "drifted" | "in_sync" | "missing" | "never_synced" | "sync_disabled" | "unknown"
-  drift: DriftField[]
-  message: string
-}
-
 export type PSPPaymentConfig = {
   psp_id: string
   key: string
@@ -1762,13 +1798,6 @@ export type PaymentSettledEvent = {
   currency: string
 }
 
-export type PendingAction = {
-  psp: string
-  action: string
-  hint: string
-  patch_required: Record<string, Record<string, Record<string, string>>> | null
-}
-
 export type PerUnitPrice = {
   unit_amount?: string
   divide_by?: number
@@ -1815,10 +1844,12 @@ export type Price = {
   currency: string
   access_duration_hours: number | null
   billing_interval_hours: number | null
+  billing_interval_months: number | null
   trial_unit_amount: string | null
   trial_duration_hours: number | null
-  psps: Record<string, PSPLinkState> | null
-  pending_manual_actions: PendingAction[]
+  sell_via: string[]
+  provider: PriceProvider | null
+  solana_plan: string | null
   created_at: string
   updated_at: string
 }
@@ -1887,6 +1918,16 @@ export type PriceMigrationRailCounts = {
   auto: number
   requires_action: number
   skipped: number
+}
+
+export type PriceProvider = {
+  access_duration_default: boolean
+  psp: string
+  psp_id: string
+  rail: string
+  ids: Record<string, string> | null
+  sync_status: "drifted" | "in_sync" | "missing" | "sync_disabled" | "unknown"
+  drift: DriftField[]
 }
 
 export type Product = {
@@ -2338,7 +2379,8 @@ export type UpdateMerchantConfigurationParams = {
   dunning_policy?: DunningPolicy
   payment_page?: MerchantPaymentPageSettings
   balance_notices?: BalanceNoticeSettings
-  card_custody?: "hosted" | "merchant" | "platform"
+  card_vault?: string
+  charge_psps?: string[]
   billing_policies?: BillingPolicy[]
   billing_policy_bindings?: BillingPolicyBinding[]
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
@@ -2363,7 +2405,7 @@ export type UpdatePaymentMethodParams = {
 
 export type UpdatePriceParams = {
   archived?: boolean | null
-  psps?: Record<string, Record<string, string>>
+  sell_via?: string[] | null
   expected_revision?: number
 }
 

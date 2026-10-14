@@ -2135,6 +2135,7 @@
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
+          "price_not_sellable",
           "product_not_found",
           "resource_conflict",
           "revision_mismatch",
@@ -2278,7 +2279,77 @@
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
+          "price_not_sellable",
           "product_not_found",
+          "resource_conflict",
+          "revision_mismatch",
+          "trial_unsupported_on_rail"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/catalog/provider-prices": {
+      "post": {
+        "tags": [
+          "catalog"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProviderPriceParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Price"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
+        "x-openrails-catalog-update": true,
+        "x-openrails-errors": [
+          "catalog_benefit_overlap",
+          "price_key_cadence_conflict",
+          "price_key_not_found",
+          "price_not_found",
+          "price_not_sellable",
+          "product_not_found",
+          "provider_price_unreadable",
           "resource_conflict",
           "revision_mismatch",
           "trial_unsupported_on_rail"
@@ -2350,6 +2421,7 @@
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
+          "price_not_sellable",
           "product_not_found",
           "resource_conflict",
           "revision_mismatch",
@@ -2423,6 +2495,7 @@
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
+          "price_not_sellable",
           "product_not_found",
           "resource_conflict",
           "revision_mismatch",
@@ -2520,6 +2593,7 @@
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
+          "price_not_sellable",
           "product_not_found",
           "resource_conflict",
           "revision_mismatch",
@@ -8809,7 +8883,9 @@
         },
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
-          "card_custody_reserved",
+          "card_vault_unknown",
+          "charge_psp_incompatible",
+          "charge_psp_unknown",
           "invalid_param",
           "platform_vault_unavailable",
           "platform_vault_unreachable",
@@ -12600,15 +12676,12 @@
               }
             ]
           },
-          "psps": {
+          "sell_via": {
             "oneOf": [
               {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  }
+                "type": "array",
+                "items": {
+                  "type": "string"
                 }
               },
               {
@@ -12799,6 +12872,12 @@
               "$ref": "#/components/schemas/ApplyPrice"
             }
           },
+          "provider_prices": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ApplyProviderPrice"
+            }
+          },
           "rate_cards": {
             "oneOf": [
               {
@@ -12806,6 +12885,66 @@
                 "items": {
                   "$ref": "#/components/schemas/RateCard"
                 }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ApplyProviderPrice": {
+        "type": "object",
+        "properties": {
+          "psp": {
+            "type": "string"
+          },
+          "plan_id": {
+            "type": "string"
+          },
+          "price_id": {
+            "type": "string"
+          },
+          "flex_id": {
+            "type": "string"
+          },
+          "recurring_billing_option_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "unit_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "billing_interval_hours": {
+            "type": "integer"
+          },
+          "access_duration_hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trial_unit_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "trial_duration_hours": {
+            "type": "integer"
+          },
+          "one_off": {
+            "type": "boolean"
+          },
+          "archived": {
+            "oneOf": [
+              {
+                "type": "boolean"
               },
               {
                 "type": "null"
@@ -13799,6 +13938,12 @@
             "items": {
               "$ref": "#/components/schemas/CatalogConflict"
             }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogWarning"
+            }
           }
         },
         "required": [
@@ -13810,7 +13955,8 @@
           "prices_changed",
           "entitlement_changes",
           "changes",
-          "conflicts"
+          "conflicts",
+          "warnings"
         ]
       },
       "CatalogChange": {
@@ -14027,6 +14173,29 @@
           "live_value",
           "set_by",
           "set_at"
+        ]
+      },
+      "CatalogWarning": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "product_key": {
+            "type": "string"
+          },
+          "refused": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "product_key",
+          "refused",
+          "message"
         ]
       },
       "ChangeBasis": {
@@ -14481,13 +14650,10 @@
           "trial_duration_hours": {
             "type": "integer"
           },
-          "psps": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
-              }
+          "sell_via": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           },
           "archived": {
@@ -14636,6 +14802,68 @@
               "extend",
               "unique"
             ]
+          },
+          "archived": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CreateProviderPriceParams": {
+        "type": "object",
+        "properties": {
+          "product_id": {
+            "type": "string"
+          },
+          "product_key": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "psp": {
+            "type": "string"
+          },
+          "plan_id": {
+            "type": "string"
+          },
+          "price_id": {
+            "type": "string"
+          },
+          "flex_id": {
+            "type": "string"
+          },
+          "recurring_billing_option_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "unit_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "billing_interval_hours": {
+            "type": "integer"
+          },
+          "access_duration_hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trial_unit_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "trial_duration_hours": {
+            "type": "integer"
+          },
+          "one_off": {
+            "type": "boolean"
           },
           "archived": {
             "type": "boolean"
@@ -17254,13 +17482,14 @@
           "balance_notices": {
             "$ref": "#/components/schemas/BalanceNoticeSettings"
           },
-          "card_custody": {
-            "type": "string",
-            "enum": [
-              "hosted",
-              "merchant",
-              "platform"
-            ]
+          "card_vault": {
+            "type": "string"
+          },
+          "charge_psps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "billing_policies": {
             "type": "array",
@@ -19081,64 +19310,6 @@
           "validated_at"
         ]
       },
-      "PSPLinkState": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "string",
-            "enum": [
-              "error",
-              "linked",
-              "pending_manual_link",
-              "sync_disabled"
-            ]
-          },
-          "ids": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "lookup_key": {
-            "type": "string"
-          },
-          "sync_status": {
-            "type": "string",
-            "enum": [
-              "drifted",
-              "in_sync",
-              "missing",
-              "never_synced",
-              "sync_disabled",
-              "unknown"
-            ]
-          },
-          "drift": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DriftField"
-            }
-          },
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "ids",
-          "lookup_key",
-          "sync_status",
-          "drift",
-          "message"
-        ]
-      },
       "PSPPaymentConfig": {
         "type": "object",
         "properties": {
@@ -20102,45 +20273,6 @@
           "currency"
         ]
       },
-      "PendingAction": {
-        "type": "object",
-        "properties": {
-          "psp": {
-            "type": "string"
-          },
-          "action": {
-            "type": "string"
-          },
-          "hint": {
-            "type": "string"
-          },
-          "patch_required": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "type": "string"
-                    }
-                  }
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "psp",
-          "action",
-          "hint",
-          "patch_required"
-        ]
-      },
       "PerUnitPrice": {
         "type": "object",
         "properties": {
@@ -20307,6 +20439,16 @@
               }
             ]
           },
+          "billing_interval_months": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "trial_unit_amount": {
             "oneOf": [
               {
@@ -20328,24 +20470,31 @@
               }
             ]
           },
-          "psps": {
+          "sell_via": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "provider": {
             "oneOf": [
               {
-                "type": "object",
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/PSPLinkState"
-                }
+                "$ref": "#/components/schemas/PriceProvider"
               },
               {
                 "type": "null"
               }
             ]
           },
-          "pending_manual_actions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PendingAction"
-            }
+          "solana_plan": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "type": "string",
@@ -20368,10 +20517,12 @@
           "currency",
           "access_duration_hours",
           "billing_interval_hours",
+          "billing_interval_months",
           "trial_unit_amount",
           "trial_duration_hours",
-          "psps",
-          "pending_manual_actions",
+          "sell_via",
+          "provider",
+          "solana_plan",
           "created_at",
           "updated_at"
         ]
@@ -20692,6 +20843,61 @@
           "auto",
           "requires_action",
           "skipped"
+        ]
+      },
+      "PriceProvider": {
+        "type": "object",
+        "properties": {
+          "access_duration_default": {
+            "type": "boolean"
+          },
+          "psp": {
+            "type": "string"
+          },
+          "psp_id": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "ids": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sync_status": {
+            "type": "string",
+            "enum": [
+              "drifted",
+              "in_sync",
+              "missing",
+              "sync_disabled",
+              "unknown"
+            ]
+          },
+          "drift": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DriftField"
+            }
+          }
+        },
+        "required": [
+          "access_duration_default",
+          "psp",
+          "psp_id",
+          "rail",
+          "ids",
+          "sync_status",
+          "drift"
         ]
       },
       "Product": {
@@ -22717,13 +22923,14 @@
           "balance_notices": {
             "$ref": "#/components/schemas/BalanceNoticeSettings"
           },
-          "card_custody": {
-            "type": "string",
-            "enum": [
-              "hosted",
-              "merchant",
-              "platform"
-            ]
+          "card_vault": {
+            "type": "string"
+          },
+          "charge_psps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "billing_policies": {
             "type": "array",
@@ -22818,14 +23025,18 @@
               }
             ]
           },
-          "psps": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
+          "sell_via": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
               }
-            }
+            ]
           },
           "expected_revision": {
             "type": "integer"
@@ -23558,11 +23769,6 @@
       "type": "rate_limit_error",
       "meaning": "Too many declined card attempts; try again later."
     },
-    "card_custody_reserved": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "settings.card_custody hosted is reserved for a private vault the platform will host; choose platform or merchant."
-    },
     "card_declined": {
       "status": 402,
       "type": "card_error",
@@ -23578,6 +23784,11 @@
       "type": "invalid_request_error",
       "meaning": "Card data is accepted only over HTTPS."
     },
+    "card_vault_unknown": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "settings.card_vault names no live card PSP of the merchant, nor platform."
+    },
     "catalog_benefit_overlap": {
       "status": 409,
       "type": "invalid_request_error",
@@ -23587,6 +23798,16 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The catalog changed during the application; retry."
+    },
+    "charge_psp_incompatible": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "A charge PSP cannot charge cards from the card vault: a PSP-vaulted card charges only through its own account, a custodian's card through the PSPs naming that custodian."
+    },
+    "charge_psp_unknown": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "settings.charge_psps names a PSP that is not a live card PSP of the merchant."
     },
     "credential_expired": {
       "status": 401,
@@ -24046,12 +24267,12 @@
     "platform_vault_unavailable": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; keep card_custody merchant."
+      "meaning": "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; save cards at a PSP's vault."
     },
     "platform_vault_unreachable": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "A card PSP routing offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant."
+      "meaning": "A charge PSP cannot charge cards from the platform vault (Stripe, or card_entry server); leave it out of charge_psps or save cards at a PSP's vault."
     },
     "price_change_currency_mismatch": {
       "status": 422,
@@ -24091,7 +24312,7 @@
     "price_not_sellable": {
       "status": 400,
       "type": "invalid_request_error",
-      "meaning": "No PSP can sell this price."
+      "meaning": "None of the price's methods can sell it."
     },
     "product_in_use": {
       "status": 409,
@@ -24122,6 +24343,11 @@
       "status": 409,
       "type": "api_error",
       "meaning": "The provider did not confirm the outcome; read the resource before retrying."
+    },
+    "provider_price_unreadable": {
+      "status": 502,
+      "type": "api_error",
+      "meaning": "The provider did not answer for the provider price's terms; retry."
     },
     "provider_writes_disabled": {
       "status": 503,

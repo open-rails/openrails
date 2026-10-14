@@ -2800,7 +2800,7 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 }
 
 const reconcileListPricesWithPSPLinks = `-- name: ReconcileListPricesWithPSPLinks :many
-SELECT id, product_id, amount, currency, access_duration_hours, billing_interval_hours, archived
+SELECT id, product_id, amount, currency, access_duration_hours, billing_interval_hours, provider_access_default, archived
 FROM billing.prices
 WHERE prices.merchant_id = $1::uuid AND EXISTS (SELECT 1 FROM billing.price_psp_bindings b WHERE b.merchant_id = $1::uuid AND b.price_id = billing.prices.id AND b.merchant_id = billing.prices.merchant_id AND b.psp_id = $2::uuid)
 `
@@ -2811,13 +2811,14 @@ type ReconcileListPricesWithPSPLinksParams struct {
 }
 
 type ReconcileListPricesWithPSPLinksRow struct {
-	ID                   uuid.UUID
-	ProductID            uuid.UUID
-	Amount               int64
-	Currency             string
-	AccessDurationHours  *int32
-	BillingIntervalHours *int32
-	Archived             bool
+	ID                    uuid.UUID
+	ProductID             uuid.UUID
+	Amount                int64
+	Currency              string
+	AccessDurationHours   *int32
+	BillingIntervalHours  *int32
+	ProviderAccessDefault bool
+	Archived              bool
 }
 
 // Prices bound to this PSP (price_psp_bindings), archived included:
@@ -2838,6 +2839,7 @@ func (q *Queries) ReconcileListPricesWithPSPLinks(ctx context.Context, arg Recon
 			&i.Currency,
 			&i.AccessDurationHours,
 			&i.BillingIntervalHours,
+			&i.ProviderAccessDefault,
 			&i.Archived,
 		); err != nil {
 			return nil, err
@@ -3039,7 +3041,8 @@ WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $11
         -- so the dedupe is PSP-scoped.
         AND s.psp_id = $9::uuid
   )
-RETURNING id, product_id, access_duration_hours_snapshot
+RETURNING id, product_id, access_duration_hours_snapshot,
+          provider_access_default_snapshot, current_period_ends_at
 `
 
 type ReconcileMaterializeSubscriptionParams struct {
@@ -3058,9 +3061,11 @@ type ReconcileMaterializeSubscriptionParams struct {
 }
 
 type ReconcileMaterializeSubscriptionRow struct {
-	ID                          uuid.UUID
-	ProductID                   uuid.UUID
-	AccessDurationHoursSnapshot *int32
+	ID                            uuid.UUID
+	ProductID                     uuid.UUID
+	AccessDurationHoursSnapshot   *int32
+	ProviderAccessDefaultSnapshot bool
+	CurrentPeriodEndsAt           *time.Time
 }
 
 // Materialization (--materialize): creates the local subscription for a rail
@@ -3088,7 +3093,13 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 	var items []ReconcileMaterializeSubscriptionRow
 	for rows.Next() {
 		var i ReconcileMaterializeSubscriptionRow
-		if err := rows.Scan(&i.ID, &i.ProductID, &i.AccessDurationHoursSnapshot); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProductID,
+			&i.AccessDurationHoursSnapshot,
+			&i.ProviderAccessDefaultSnapshot,
+			&i.CurrentPeriodEndsAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

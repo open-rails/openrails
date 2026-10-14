@@ -21,12 +21,14 @@ export type OpenRailsErrorCode =
   | "captcha_invalid"
   | "captcha_required"
   | "card_attempts_blocked"
-  | "card_custody_reserved"
   | "card_declined"
   | "card_not_saved"
   | "card_requires_https"
+  | "card_vault_unknown"
   | "catalog_benefit_overlap"
   | "catalog_revision_conflict"
+  | "charge_psp_incompatible"
+  | "charge_psp_unknown"
   | "credential_expired"
   | "credential_revoked"
   | "credit_grant_held"
@@ -134,6 +136,7 @@ export type OpenRailsErrorCode =
   | "product_tier_group_in_use"
   | "provider_cancel_held"
   | "provider_outcome_unknown"
+  | "provider_price_unreadable"
   | "provider_writes_disabled"
   | "provider_writes_held"
   | "psp_claim_requires_proof"
@@ -221,12 +224,14 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   captcha_invalid: { status: 403, type: "invalid_request_error", meaning: "The captcha token was rejected." },
   captcha_required: { status: 403, type: "invalid_request_error", meaning: "The caller must solve a captcha and resend with its token." },
   card_attempts_blocked: { status: 429, type: "rate_limit_error", meaning: "Too many declined card attempts; try again later." },
-  card_custody_reserved: { status: 400, type: "invalid_request_error", meaning: "settings.card_custody hosted is reserved for a private vault the platform will host; choose platform or merchant." },
   card_declined: { status: 402, type: "card_error", meaning: "The provider declined the card; metadata.decline_reason says why." },
   card_not_saved: { status: 409, type: "api_error", meaning: "The card was not saved; enter it again." },
   card_requires_https: { status: 400, type: "invalid_request_error", meaning: "Card data is accepted only over HTTPS." },
+  card_vault_unknown: { status: 409, type: "invalid_request_error", meaning: "settings.card_vault names no live card PSP of the merchant, nor platform." },
   catalog_benefit_overlap: { status: 409, type: "invalid_request_error", meaning: "Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group." },
   catalog_revision_conflict: { status: 409, type: "invalid_request_error", meaning: "The catalog changed during the application; retry." },
+  charge_psp_incompatible: { status: 409, type: "invalid_request_error", meaning: "A charge PSP cannot charge cards from the card vault: a PSP-vaulted card charges only through its own account, a custodian's card through the PSPs naming that custodian." },
+  charge_psp_unknown: { status: 409, type: "invalid_request_error", meaning: "settings.charge_psps names a PSP that is not a live card PSP of the merchant." },
   credential_expired: { status: 401, type: "authentication_error", meaning: "The credential has expired." },
   credential_revoked: { status: 401, type: "authentication_error", meaning: "The credential or its session was revoked." },
   credit_grant_held: { status: 409, type: "invalid_request_error", meaning: "Active holds need the grant's remaining credit." },
@@ -318,8 +323,8 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   payment_option_unavailable: { status: 422, type: "invalid_request_error", meaning: "No PSP that can take the order's lines accepts this payment." },
   payment_provider_rejected: { status: 502, type: "api_error", meaning: "The provider refused to process the charge for a gateway or account reason." },
   permission_required: { status: 403, type: "authorization_error", meaning: "The credential lacks the permission the route requires." },
-  platform_vault_unavailable: { status: 409, type: "invalid_request_error", meaning: "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; keep card_custody merchant." },
-  platform_vault_unreachable: { status: 409, type: "invalid_request_error", meaning: "A card PSP routing offers cannot charge cards from the platform vault (Stripe, or card_entry server); archive it or keep card_custody merchant." },
+  platform_vault_unavailable: { status: 409, type: "invalid_request_error", meaning: "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; save cards at a PSP's vault." },
+  platform_vault_unreachable: { status: 409, type: "invalid_request_error", meaning: "A charge PSP cannot charge cards from the platform vault (Stripe, or card_entry server); leave it out of charge_psps or save cards at a PSP's vault." },
   price_change_currency_mismatch: { status: 422, type: "invalid_request_error", meaning: "The target price must be in the subscription's currency." },
   price_change_target_archived: { status: 422, type: "invalid_request_error", meaning: "The target price is archived." },
   price_increase_notice_too_short: { status: 422, type: "invalid_request_error", meaning: "effective_at is inside the merchant's notice window for a price increase." },
@@ -327,13 +332,14 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   price_key_not_found: { status: 404, type: "invalid_request_error", meaning: "No price holds this key." },
   price_migration_not_found: { status: 404, type: "invalid_request_error", meaning: "The price migration does not exist." },
   price_not_found: { status: 404, type: "invalid_request_error", meaning: "The price does not exist." },
-  price_not_sellable: { status: 400, type: "invalid_request_error", meaning: "No PSP can sell this price." },
+  price_not_sellable: { status: 400, type: "invalid_request_error", meaning: "None of the price's methods can sell it." },
   product_in_use: { status: 409, type: "invalid_request_error", meaning: "Records refer to the product; archive it instead." },
   product_not_found: { status: 404, type: "invalid_request_error", meaning: "The product does not exist." },
   product_tier_group_conflict: { status: 409, type: "invalid_request_error", meaning: "A customer holds live subscriptions to more than one product of the tier group." },
   product_tier_group_in_use: { status: 409, type: "invalid_request_error", meaning: "The tier group cannot change while a subscription has a plan change in flight." },
   provider_cancel_held: { status: 409, type: "invalid_request_error", meaning: "Cancelling needs a destructive provider action that is not armed for this merchant." },
   provider_outcome_unknown: { status: 409, type: "api_error", meaning: "The provider did not confirm the outcome; read the resource before retrying." },
+  provider_price_unreadable: { status: 502, type: "api_error", meaning: "The provider did not answer for the provider price's terms; retry." },
   provider_writes_disabled: { status: 503, type: "api_error", meaning: "Provider writes are off for the merchant, so it takes no payment; the message names why (provider_write_mode or the merchant's write posture)." },
   provider_writes_held: { status: 409, type: "invalid_request_error", meaning: "The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open." },
   psp_claim_requires_proof: { status: 403, type: "authorization_error", meaning: "Claiming a provider account needs credentials that prove control of it." },
