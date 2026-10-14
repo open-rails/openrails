@@ -105,11 +105,14 @@ func (im *Importer) providerPrices(ctx context.Context, row gen.BillingPspImport
 		if err != nil {
 			return nil, "", err
 		}
+		for _, r := range rows {
+			out["price:"+r.Key] = termsOf(r.PublicID, r.Amount, r.Currency, r.BillingIntervalHours, r.BillingIntervalMonths)
+		}
 		if entry.Price != "" {
 			rows = slices.DeleteFunc(rows, func(r gen.ListProductProviderPricesRow) bool { return r.Key != entry.Price })
 		}
 		if len(rows) != 1 {
-			return out, fmt.Sprintf("product %q holds %d provider prices on this PSP matching %q; name one by its key (%s has no catalog to read)", entry.Product, len(rows), entry.Price, row.Rail), nil
+			return out, fmt.Sprintf("its rebills match none of product %q's provider prices on this PSP, and %d match %q: name one by its key (%s has no catalog to read)", entry.Product, len(rows), entry.Price, row.Rail), nil
 		}
 		r := rows[0]
 		out[""] = termsOf(r.PublicID, r.Amount, r.Currency, r.BillingIntervalHours, r.BillingIntervalMonths)
@@ -291,13 +294,15 @@ func (l *lander) declare(groups []customerGroup) (declaration, error) {
 				subs[r.Ref] = r
 			}
 		}
+		rebills := latestRebills(g.records)
 		declared := map[string]*billing.PaymentMethodRef{}
+		priced := map[string]priceTerms{}
 		declareSub := func(r gen.BillingPspImportRecord) (string, string) {
 			src := "pspimport:" + l.scope.Rail + ":" + r.Ref
 			if _, done := declared[r.Ref]; done {
 				return src, ""
 			}
-			sub, reason, err := l.subscription(customer, r, vaults)
+			sub, terms, reason, err := l.subscription(customer, r, vaults, rebills[r.Ref])
 			if err != nil {
 				return src, err.Error()
 			}
@@ -307,7 +312,7 @@ func (l *lander) declare(groups []customerGroup) (declaration, error) {
 			sub.SourceID = src
 			d.book.Subscriptions = append(d.book.Subscriptions, sub)
 			d.subscriptions[src] = r.ID
-			declared[r.Ref] = sub.PaymentMethod
+			declared[r.Ref], priced[r.Ref] = sub.PaymentMethod, terms
 			return src, ""
 		}
 		for _, r := range g.records {
@@ -338,12 +343,13 @@ func (l *lander) declare(groups []customerGroup) (declaration, error) {
 				return d, err
 			}
 			if data.Currency == "" {
-				amount, reason := l.denominate(sub, data.Decimal)
+				price := priced[subRef]
+				amount, reason := denominate(price, data.Decimal)
 				if reason != "" {
 					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, reason}
 					continue
 				}
-				data.Amount, data.Currency = amount, l.prices[planOf(sub)].currency
+				data.Amount, data.Currency = amount, price.currency
 			}
 			if inv := data.StripeInvoice; inv != nil {
 				if pm := declared[subRef]; pm == nil || pm.RailCustomerRef != inv.CustomerReference {
@@ -364,21 +370,24 @@ func (l *lander) declare(groups []customerGroup) (declaration, error) {
 }
 
 // subscription declares one staged subscription; reason says why it cannot.
-func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImportRecord, vaults map[string]customerData) (billing.DeclaredSubscription, string, error) {
+func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImportRecord, vaults map[string]customerData, rebill string) (billing.DeclaredSubscription, priceTerms, string, error) {
 	var data subscriptionData
 	if err := json.Unmarshal(r.Data, &data); err != nil {
-		return billing.DeclaredSubscription{}, "", err
+		return billing.DeclaredSubscription{}, priceTerms{}, "", err
 	}
 	price, ok := l.prices[data.Plan]
+	if matched, found := l.priceOfRebill(data.Plan, rebill); found {
+		price, ok = matched, true
+	}
 	switch {
 	case !ok && l.unpriced != "":
-		return billing.DeclaredSubscription{}, l.unpriced, nil
+		return billing.DeclaredSubscription{}, price, l.unpriced, nil
 	case !ok && data.Plan == "":
-		return billing.DeclaredSubscription{}, "the provider names no plan for it", nil
+		return billing.DeclaredSubscription{}, price, "the provider names no plan for it", nil
 	case !ok:
-		return billing.DeclaredSubscription{}, fmt.Sprintf("plan %q has no provider price: name the product it grants in the import's products", data.Plan), nil
+		return billing.DeclaredSubscription{}, price, fmt.Sprintf("plan %q has no provider price: name the product it grants in the import's products", data.Plan), nil
 	case data.StartedAt.IsZero():
-		return billing.DeclaredSubscription{}, "the provider states no start date", nil
+		return billing.DeclaredSubscription{}, price, "the provider states no start date", nil
 	}
 	if data.Amount == 0 {
 		// The provider's record states no terms: the declared price does.
@@ -415,7 +424,7 @@ func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImpor
 		sub.AcceptedSchedule = &billing.DeclaredProviderSchedule{SourceReference: l.scope.Rail + "_subscription:" + r.Ref, Amount: data.Amount, Currency: data.Currency,
 			IntervalHours: data.IntervalHours, IntervalMonths: data.IntervalMonths, FirstDueAt: *data.NextBillingAt}
 	}
-	return sub, "", nil
+	return sub, price, "", nil
 }
 
 func (c cardData) details() *billing.CardDetails {
@@ -471,17 +480,10 @@ func (im *Importer) MissingProviderPrices(ctx context.Context, id billing.PSPImp
 	return out, nil
 }
 
-func planOf(r gen.BillingPspImportRecord) string {
-	var data subscriptionData
-	_ = json.Unmarshal(r.Data, &data)
-	return data.Plan
-}
-
 // denominate reads a currency-less amount in its subscription's price
 // currency.
-func (l *lander) denominate(sub gen.BillingPspImportRecord, decimal string) (int64, string) {
-	price, ok := l.prices[planOf(sub)]
-	if !ok {
+func denominate(price priceTerms, decimal string) (int64, string) {
+	if price.id == "" {
 		return 0, "its subscription has no price to denominate it"
 	}
 	minor, err := moneyutil.DecimalToRailMinor(price.currency, decimal)
@@ -493,4 +495,47 @@ func (l *lander) denominate(sub gen.BillingPspImportRecord, decimal string) (int
 		return 0, err.Error()
 	}
 	return native, ""
+}
+
+// latestRebills is each subscription's latest currency-less charge amount.
+func latestRebills(records []gen.BillingPspImportRecord) map[string]string {
+	out, at := map[string]string{}, map[string]time.Time{}
+	for _, r := range records {
+		if r.Kind != string(billing.PSPImportTransaction) || r.SubscriptionRef == nil {
+			continue
+		}
+		var data transactionData
+		if json.Unmarshal(r.Data, &data) != nil || data.Decimal == "" || data.Type != "sale" || !data.Success {
+			continue
+		}
+		if ref := *r.SubscriptionRef; data.OccurredAt.After(at[ref]) {
+			out[ref], at[ref] = data.Decimal, data.OccurredAt
+		}
+	}
+	return out
+}
+
+// priceOfRebill is the one provider price a plan-less subscription's rebill
+// amount equals, read in each price's own currency.
+func (l *lander) priceOfRebill(plan, rebill string) (priceTerms, bool) {
+	if plan != "" || rebill == "" {
+		return priceTerms{}, false
+	}
+	var match []priceTerms
+	for key, t := range l.prices {
+		if !strings.HasPrefix(key, "price:") {
+			continue
+		}
+		minor, err := moneyutil.DecimalToRailMinor(t.currency, rebill)
+		if err != nil {
+			continue
+		}
+		if native, err := moneyutil.RailMinorToNative(t.currency, minor); err == nil && native == t.amount {
+			match = append(match, t)
+		}
+	}
+	if len(match) != 1 {
+		return priceTerms{}, false
+	}
+	return match[0], true
 }
