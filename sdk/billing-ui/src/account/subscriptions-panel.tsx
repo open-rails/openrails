@@ -14,6 +14,7 @@ import { useCurrencyScales } from "#orck/react/config"
 import { useUiSettings } from "#orck/scope-context"
 import { CancelSubscriptionDialog } from "./cancel-dialog"
 import { ChangeCardDialog } from "./change-card-dialog"
+import { ResumeSubscriptionDialog } from "./resume-dialog"
 import {
   brandName,
   formatDate,
@@ -55,6 +56,7 @@ export function SubscriptionsPanel({
   const state = useSubscriptions(options)
   const scales = useCurrencyScales()
   const [cancelling, setCancelling] = React.useState<Subscription | null>(null)
+  const [resuming, setResuming] = React.useState<Subscription | null>(null)
   const [changingCard, setChangingCard] = React.useState<Subscription | null>(
     null
   )
@@ -72,6 +74,7 @@ export function SubscriptionsPanel({
   const resume = async (s: Subscription) => {
     setRowError(null)
     const error = await state.resume(s.id)
+    setResuming(null)
     if (error) setRowError({ id: s.id, message: m.error(error) })
     else announce(t("subscriptions.resumed"))
   }
@@ -215,7 +218,10 @@ export function SubscriptionsPanel({
                     variant="outline"
                     size="sm"
                     disabled={!!pending}
-                    onClick={() => void resume(s)}
+                    onClick={() => {
+                      setRowError(null)
+                      setResuming(s)
+                    }}
                   >
                     {pending === "resume" ? <Spinner /> : null}
                     {pending === "resume"
@@ -324,6 +330,20 @@ export function SubscriptionsPanel({
           }
           return error
         }}
+      />
+      <ResumeSubscriptionDialog
+        open={resuming !== null}
+        onOpenChange={(open) => !open && setResuming(null)}
+        name={resuming ? subscriptionName(resuming, m) : ""}
+        price={
+          resuming?.price
+            ? formatMoney(resuming.price.unit_amount, resuming.price.currency, scales, locale)
+            : null
+        }
+        date={formatDate(resuming?.current_period_ends_at, locale) || null}
+        busy={resuming ? state.pending[resuming.id] === "resume" : false}
+        onConfirm={() => resuming && void resume(resuming)}
+        appearance={appearance}
       />
       <CancelSubscriptionDialog
         key={cancelling?.id ?? "closed"}
