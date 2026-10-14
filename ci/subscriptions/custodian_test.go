@@ -96,8 +96,12 @@ func (f *btFake) salesOf(number string) []btSale {
 
 // The fingerprint is the card number's, whoever collected it.
 func btCard(id, number string) map[string]any {
-	return map[string]any{"id": id, "type": "card", "fingerprint": fmt.Sprintf("%x", sha256.Sum256([]byte(number))),
+	return map[string]any{"id": id, "type": "card", "fingerprint": btFingerprint(number),
 		"card": map[string]any{"bin": number[:6], "last4": number[len(number)-4:], "brand": "visa", "expiration_month": 12, "expiration_year": 2035}}
+}
+
+func btFingerprint(number string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(number)))
 }
 
 var btExpression = regexp.MustCompile(`\{\{ (token_intent|token): (\S+) \|`)

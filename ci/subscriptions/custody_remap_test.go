@@ -91,7 +91,7 @@ func (w *world) remapToCustodian(bt *btFake, method, token, number string) {
 	bt.mu.Unlock()
 	res := w.migrateCustody(hosttools.VaultExport{ExportedAt: w.clock.Now(), SourceRail: "nmi", SourcePSPID: w.psp["nmi"].UUID(), Custodian: "bt",
 		PSP:    hosttools.CustodyPSPRef{Rail: "nmi", Environment: "sandbox", AccountID: "e2e-nmi-bt"},
-		Tokens: []hosttools.ImportedToken{{SourceRailCustomerRef: w.vaultOf(method), Token: token, Fingerprint: "fp_" + number}}})
+		Tokens: []hosttools.ImportedToken{{SourceRailCustomerRef: w.vaultOf(method), Token: token, Fingerprint: btFingerprint(number)}}})
 	require.Equal(w.t, map[hosttools.CustodyOutcome]int{hosttools.CustodyRemapped: 1}, res.Counts, "%+v", res.Rows)
 	require.Equal(w.t, "basis_theory", w.methodRow(method, "custodian"))
 }
@@ -146,7 +146,7 @@ func TestCustodyRemapNeverCitesAnotherAccount(t *testing.T) {
 	stored := bt.salesOf(replacement)
 	require.Equal(t, [][]string{{"e2e-nmi-bt-key", "customer", "stored", ""}}, proxied(replacement))
 	var card string
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT 'pm_' || id FROM billing.payment_methods WHERE fingerprint = $1`), "fp_"+replacement).Scan(&card))
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT 'pm_' || id FROM billing.payment_methods WHERE fingerprint = $1`), btFingerprint(replacement)).Scan(&card))
 
 	// Named the default, it collects the stopped invoice on the new account
 	// under its own agreement; the remapped card's ends.
