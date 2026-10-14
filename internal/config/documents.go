@@ -165,11 +165,11 @@ func decodeCustodians(c *Custodians, raw []byte) error {
 	}
 	out := make(Custodians, len(docs))
 	for _, key := range slices.Sorted(maps.Keys(docs)) {
-		d, err := DecodeCustodianDocument(docs[key], false)
+		d, err := DecodeCustodianDocument(docs[key], true)
 		if err != nil {
 			return fmt.Errorf("custodians.%s: %w", key, err)
 		}
-		out[key] = CustodianConfig{Kind: d.Kind, AccountID: d.AccountID, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}
+		out[key] = CustodianConfig{Kind: d.Kind, Environment: d.Environment, AccountID: d.AccountID, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}
 	}
 	*c = out
 	return nil
@@ -206,8 +206,7 @@ func encodePSPConfig(p PSPConfig) ([]byte, error) {
 // CustodianDocument is a custodian as its document spells it.
 type CustodianDocument struct {
 	Kind string
-	// Environment is the custodian's money class (live or test) in a stored
-	// document; a declaration has none.
+	// Environment is the custodian's declared money class (live or test).
 	Environment string
 	AccountID   string
 	Archived    bool
@@ -299,17 +298,17 @@ func decodeCustodianConfig(c *CustodianConfig, raw []byte) error {
 	if err := yaml.Unmarshal(raw, &fields); err != nil {
 		return err
 	}
-	d, err := DecodeCustodianDocument(fields, false)
+	d, err := DecodeCustodianDocument(fields, true)
 	if err != nil {
 		return err
 	}
-	*c = CustodianConfig{Kind: d.Kind, AccountID: d.AccountID, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}
+	*c = CustodianConfig{Kind: d.Kind, Environment: d.Environment, AccountID: d.AccountID, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}
 	return nil
 }
 
 // encodeCustodianConfig writes a custodian's flat document.
 func encodeCustodianConfig(c CustodianConfig) ([]byte, error) {
-	return yaml.Marshal(orderedFields(CustodianDocument{Kind: c.Kind, AccountID: c.AccountID, Archived: c.Archived, Settings: c.Settings, Secrets: c.Secrets}.Fields(), "kind", "account_id"))
+	return yaml.Marshal(orderedFields(CustodianDocument{Kind: c.Kind, Environment: c.Environment, AccountID: c.AccountID, Archived: c.Archived, Settings: c.Settings, Secrets: c.Secrets}.Fields(), "kind", "environment", "account_id"))
 }
 
 // orderedFields renders fields with first leading, the rest sorted and
