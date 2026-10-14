@@ -145,6 +145,9 @@ func (w *world) stripeOnAccessTier(tp topology, price tier, cents int64) *legacy
 	w.t.Helper()
 	member := &legacy{w: w, rail: "stripe", tp: tp, c: w.newCustomer(), price: price.Price, ent: price.ent, railCust: "cus_access_" + uuid.NewString()[:8]}
 	start := w.clock.Now().Add(-10 * day)
+	if start.Day() > 28 {
+		start = start.AddDate(0, 0, 28-start.Day())
+	}
 	end := start.AddDate(0, 1, 0)
 	method := "pm_access_" + uuid.NewString()[:8]
 	member.railSub = w.stripe.AddSubscription(member.railCust, method, price.plan, cents, start, end)
