@@ -14,14 +14,13 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
-// Declared is the configuration a file declares for merchant id. Each PSP is
-// in its declared environment; custodians take their PSPs' money class.
+// Declared is the configuration a file declares for merchant id. Each PSP and
+// custodian is in its declared environment.
 // loaded is when the file was read.
 func Declared(id billing.MerchantID, m config.MerchantDeclaration, loaded time.Time) Set {
 	set := Set{}.Clone()
 	merchant := Merchant{
 		DisplayName:      strings.TrimSpace(m.DisplayName),
-		Sandbox:          m.Sandbox,
 		MerchantSettings: m.MerchantSettings,
 		Secrets:          MerchantSecrets{SCIMToken: strings.TrimSpace(m.Secrets.SCIMToken)},
 	}
@@ -49,22 +48,21 @@ func Declared(id billing.MerchantID, m config.MerchantDeclaration, loaded time.T
 		}
 		set.PSPs[key] = Doc[PSP]{Value: doc, UpdatedAt: loaded}
 	}
-	environment := DeclaredCustodianEnvironment(m)
 	for key, c := range m.Custodians {
 		key = strings.ToLower(strings.TrimSpace(key))
 		set.Custodians[key] = Doc[Custodian]{Value: Custodian{
-			Kind: strings.ToLower(strings.TrimSpace(c.Kind)), Environment: environment, AccountID: strings.TrimSpace(c.AccountID),
+			Kind: strings.ToLower(strings.TrimSpace(c.Kind)), Environment: DeclaredCustodianEnvironment(c.Environment), AccountID: strings.TrimSpace(c.AccountID),
 			Archived: c.Archived, Settings: maps.Clone(c.Settings), Secrets: normalizedSecrets(c.Secrets),
 		}, UpdatedAt: loaded}
 	}
 	return set
 }
 
-// DeclaredCustodianEnvironment is the money class of m's custodians: test
-// for a sandbox merchant, live otherwise.
-func DeclaredCustodianEnvironment(m config.MerchantDeclaration) string {
-	if m.Sandbox {
-		return config.ClassTest
+// DeclaredCustodianEnvironment is a declared custodian's money class: live
+// when omitted.
+func DeclaredCustodianEnvironment(environment string) string {
+	if environment = strings.ToLower(strings.TrimSpace(environment)); environment != "" {
+		return environment
 	}
 	return config.ClassLive
 }

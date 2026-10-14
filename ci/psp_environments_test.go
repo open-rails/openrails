@@ -18,40 +18,28 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
-// A merchant is live or a sandbox, and its PSPs agree with it. One
-// deployment serves both side by side: a PSP that disagrees with its merchant
-// is refused alone, never failing boot, and the rest of the merchant serves.
-// A test seam never sits beside a live PSP.
-func TestRealMoneyNeverJoinsTestMoney(t *testing.T) {
+// A merchant's PSPs mix live and test freely: a live Stripe account serves
+// beside a sandbox NMI gateway. A test seam never sits beside a live PSP.
+func TestLiveAndTestPSPsMixWithinAMerchant(t *testing.T) {
 	pool := openPool(t, emptyDatabase(t))
 	ctx := t.Context()
-	nmi := func(account string) openrails.PSPConfig {
-		return openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: account}.PSPConfig()
-	}
-	stripe := func(account string) openrails.PSPConfig {
-		return openrails.StripePSP{Environment: openrails.EnvironmentLive, AccountID: account}.PSPConfig()
-	}
 	bill, err := openrails.New(ctx, openrails.Config{ProviderWriteMode: openrails.ProviderWritesReadOnly, Merchants: map[string]openrails.MerchantDeclaration{
-		"shop":         {DisplayName: "Shop", PSPs: map[string]openrails.PSPConfig{"stripe": stripe("acct_e2e_live"), "nmi": nmi("e2e-live-shop-nmi")}},
-		"shop-sandbox": {DisplayName: "Shop Sandbox", Sandbox: true, PSPs: map[string]openrails.PSPConfig{"stripe": stripe("acct_e2e_lab"), "nmi": nmi("e2e-sandbox-nmi")}},
+		"shop": {DisplayName: "Shop", PSPs: map[string]openrails.PSPConfig{
+			"stripe": openrails.StripePSP{Environment: openrails.EnvironmentLive, AccountID: "acct_e2e_live"}.PSPConfig(),
+			"nmi":    openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "e2e-live-shop-nmi"}.PSPConfig()}},
 	}}, openrails.Deps{Postgres: pool})
-	require.NoError(t, err, "disagreeing PSPs never fail boot")
+	require.NoError(t, err)
 	t.Cleanup(func() { _ = bill.Close(ctx) })
-	refused := probe(t, bill, "openrails_configuration")
-	require.ErrorContains(t, refused, "merchants.shop.psps/nmi: psps.nmi.environment: sandbox moves no money, and the merchant is live")
-	require.ErrorContains(t, refused, "merchants.shop-sandbox.psps/stripe: psps.stripe.environment: live moves real money, and the merchant is a sandbox (sandbox: true)")
-	for slug, served := range map[string]string{"shop": "stripe", "shop-sandbox": "nmi"} {
-		m, err := bill.MerchantBySlug(slug)
-		require.NoError(t, err)
-		psps, err := m.ListPSPs(ctx, billing.PSPListParams{})
-		require.NoError(t, err)
-		require.Len(t, psps.Items, 1, slug)
-		require.Equal(t, served, psps.Items[0].Key, "%s serves the PSP that agrees with it", slug)
-	}
+	require.NoError(t, probe(t, bill, "openrails_configuration"))
+	m, err := bill.MerchantBySlug("shop")
+	require.NoError(t, err)
+	psps, err := m.ListPSPs(ctx, billing.PSPListParams{})
+	require.NoError(t, err)
+	require.Len(t, psps.Items, 2, "both PSPs serve")
 	require.NoError(t, bill.Close(ctx))
 
 	_, err = openrails.New(ctx, openrails.Config{ProviderWriteMode: openrails.ProviderWritesReadOnly, Merchants: map[string]openrails.MerchantDeclaration{
-		"two": {DisplayName: "Two", PSPs: map[string]openrails.PSPConfig{"stripe": stripe("acct_e2e_two")}},
+		"two": {DisplayName: "Two", PSPs: map[string]openrails.PSPConfig{"stripe": openrails.StripePSP{Environment: openrails.EnvironmentLive, AccountID: "acct_e2e_two"}.PSPConfig()}},
 	}}, openrails.Deps{Postgres: pool, FXTransport: testFX.Transport()})
 	require.ErrorContains(t, err, "Deps.FXTransport is a test seam and is refused beside a live PSP (two/stripe)")
 }
@@ -87,7 +75,7 @@ func TestNMIEnvironmentDisagreeingWithTheGatewayIsDisarmed(t *testing.T) {
 	}
 	bill, err := openrails.New(ctx, openrails.Config{
 		ProviderWriteMode: openrails.ProviderWritesFull,
-		Merchants: map[string]openrails.MerchantDeclaration{"shop": {DisplayName: "Shop", Sandbox: true, PSPs: map[string]openrails.PSPConfig{
+		Merchants: map[string]openrails.MerchantDeclaration{"shop": {DisplayName: "Shop", PSPs: map[string]openrails.PSPConfig{
 			"mobius":   psp("e2e-test-mode", "e2e-test-mode"),
 			"paykings": psp("e2e-real-money", "e2e-moves-money"),
 		}}},

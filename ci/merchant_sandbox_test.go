@@ -36,7 +36,7 @@ func TestLiveAndSandboxMerchantsSellSideBySide(t *testing.T) {
 	bill, err := openrails.New(ctx, openrails.Config{ProviderWriteMode: openrails.ProviderWritesFull, ReturnOrigins: []string{"https://e2e.test"}, Merchants: map[string]openrails.MerchantDeclaration{
 		"shop": {DisplayName: "Shop", PSPs: openrails.PSPs{
 			"ccbill": openrails.CCBillPSP{ClientAccnum: "900001", ClientSubacc: "0000", Salt: "live-salt"}.PSPConfig()}},
-		"shop-sandbox": {DisplayName: "Shop Sandbox", Sandbox: true, PSPs: openrails.PSPs{
+		"shop-sandbox": {DisplayName: "Shop Sandbox", PSPs: openrails.PSPs{
 			"ccbill": openrails.CCBillPSP{Environment: openrails.EnvironmentSandbox, ClientAccnum: "900002", ClientSubacc: "0000", Salt: "sandbox-salt"}.PSPConfig()}},
 	}}, openrails.Deps{Postgres: openPool(t, emptyDatabase(t)), UserInfo: directory})
 	require.NoError(t, err)

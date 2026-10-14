@@ -10,9 +10,8 @@ version: 1
 #   stripe  live | test
 #   ccbill  live | sandbox
 #   solana  mainnet | devnet | testnet
-# A merchant is live, moving real money (live, mainnet), or `sandbox: true`,
-# moving none; its PSPs agree with it. This example's merchant is a sandbox;
-# a live merchant omits every environment.
+# Each PSP picks its own environment and a merchant mixes them freely; an
+# omitted environment is the rail's real-money one.
 #
 # Solana rebilling also needs the deployment's solana.crankers (config.yaml);
 # docs/rails/solana.md.
@@ -20,7 +19,6 @@ version: 1
 merchants:
   local-stack:
     display_name: Local Stack Billing
-    sandbox: true
 
     remote_application:
       issuer: https://local-stack.example

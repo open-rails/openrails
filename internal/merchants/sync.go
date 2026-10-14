@@ -72,7 +72,7 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 				reject(merchantdocs.PSPDoc(key), err.Error())
 				continue
 			}
-			if why := s.environmentRefusal(key, p.Rail, p.Environment, set.Merchant.Value.Sandbox); why != "" {
+			if why := s.environmentRefusal(p.Rail, p.Environment); why != "" {
 				reject(merchantdocs.PSPDoc(key), why)
 				continue
 			}

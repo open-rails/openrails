@@ -251,9 +251,6 @@ func MergeMerchantConfig(dst *config.MerchantDeclaration, src config.MerchantDec
 	if strings.TrimSpace(src.DisplayName) != "" {
 		dst.DisplayName = src.DisplayName
 	}
-	if src.Sandbox {
-		dst.Sandbox = true
-	}
 	if strings.TrimSpace(src.Secrets.SCIMToken) != "" {
 		dst.Secrets.SCIMToken = src.Secrets.SCIMToken
 	}
@@ -282,6 +279,9 @@ func MergeMerchantConfig(dst *config.MerchantDeclaration, src config.MerchantDec
 func MergeCustodianConfig(dst *config.CustodianConfig, src config.CustodianConfig) {
 	if strings.TrimSpace(src.Kind) != "" {
 		dst.Kind = src.Kind
+	}
+	if strings.TrimSpace(src.Environment) != "" {
+		dst.Environment = src.Environment
 	}
 	if strings.TrimSpace(src.AccountID) != "" {
 		dst.AccountID = src.AccountID
@@ -452,7 +452,7 @@ func ScopeDeclaration(cfg *config.Config, mt config.MerchantDeclaration) (config
 		return mt, refused
 	}
 	for key, account := range mt.PSPs {
-		normalized, err := validatePSPDeclaration(key, account, mt.Sandbox)
+		normalized, err := validatePSPDeclaration(key, account)
 		if err != nil {
 			refused[merchantdocs.PSPDoc(strings.ToLower(strings.TrimSpace(key)))] = err.Error()
 			delete(mt.PSPs, key)
@@ -520,15 +520,11 @@ func validateMerchantDocument(cfg *config.Config, mt config.MerchantDeclaration)
 }
 
 // validatePSPDeclaration checks one declared PSP and returns it in its
-// declared environment: its rail, fields and environment, which its merchant
-// must agree with, a CCBill account's FlexForm salt and a Stripe publishable
-// key's environment.
-func validatePSPDeclaration(key string, account config.PSPConfig, sandbox bool) (config.PSPConfig, error) {
+// declared environment: its rail, fields and environment, a CCBill account's
+// FlexForm salt and a Stripe publishable key's environment.
+func validatePSPDeclaration(key string, account config.PSPConfig) (config.PSPConfig, error) {
 	account, err := config.NormalizePSPDeclaration(key, account)
 	if err != nil {
-		return account, err
-	}
-	if err := config.ValidatePSPMoneyClass(key, string(account.Rail), account.Environment, sandbox); err != nil {
 		return account, err
 	}
 	rail := NormalizeManifestRail(string(account.Rail))

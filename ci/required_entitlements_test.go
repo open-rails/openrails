@@ -39,7 +39,7 @@ func TestRequiredEntitlementsGateOrders(t *testing.T) {
 	cfg.PublicBillingBaseURL = "https://api.e2e.test"
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
 	cfg.RateLimitsDisabled = true
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{"members-only": {Sandbox: true,
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"members-only": {
 		DisplayName:      "Members only",
 		MerchantSettings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
 		PSPs:             map[string]openrails.PSPConfig{"nmi": nmiPSP()},

@@ -92,7 +92,7 @@ func TestTransitCrankerWithoutVaultRefusesOnlyTheCranker(t *testing.T) {
 	cfg := f.config()
 	cfg.Solana = &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "vault_transit", Key: transitKey}}}
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: chain.URL()}
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {Sandbox: true, DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{
 		"stripe": stripeTest(),
 		"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: solanago.NewWallet().PublicKey().String()}.PSPConfig(),
 	}}}
@@ -121,7 +121,7 @@ func TestPSPWithoutItsSecretIsNotArmedAndTheRestSells(t *testing.T) {
 	f := newFixture(t)
 	slug := "secretless-" + uuid.NewString()[:8]
 	cfg := f.config()
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {Sandbox: true, DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{
 		"stripe": stripeTest(),
 		"nmi":    openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "e2e-secretless", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
 	}}}
@@ -146,7 +146,7 @@ func TestOptionalSettingsThatCannotBeServedAreTurnedOff(t *testing.T) {
 	f := newFixture(t)
 	slug := "optional-" + uuid.NewString()[:8]
 	base := f.config()
-	base.Merchants = map[string]openrails.MerchantDeclaration{slug: {Sandbox: true, DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": stripeTest()}}}
+	base.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": stripeTest()}}}
 
 	unreachable := base
 	unreachable.Redis = &openrails.RedisConfig{Addr: "127.0.0.1:1"}
@@ -201,11 +201,11 @@ func TestOneMerchantsBadDeclarationLeavesTheOthersServing(t *testing.T) {
 	held.AccountID, other.AccountID = "acct_e2e_vault", "acct_e2e_other"
 	cfg := f.config()
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{
-		good:    {Sandbox: true, DisplayName: "Good", Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": stripeTest()}},
-		typo:    {Sandbox: true, DisplayName: "Typo", PSPs: map[string]openrails.PSPConfig{"stripe": misspelled}},
-		custody: {Sandbox: true, DisplayName: "Custody", MerchantSettings: billing.MerchantSettings{CardVault: billing.CardVaultPlatform}, PSPs: map[string]openrails.PSPConfig{"stripe": platform}},
+		good:    {DisplayName: "Good", Issuer: authtest.Issuer, PSPs: map[string]openrails.PSPConfig{"stripe": stripeTest()}},
+		typo:    {DisplayName: "Typo", PSPs: map[string]openrails.PSPConfig{"stripe": misspelled}},
+		custody: {DisplayName: "Custody", MerchantSettings: billing.MerchantSettings{CardVault: billing.CardVaultPlatform}, PSPs: map[string]openrails.PSPConfig{"stripe": platform}},
 		// A Stripe customer's card charges only through its own account.
-		vault:        {Sandbox: true, DisplayName: "Vault", MerchantSettings: billing.MerchantSettings{CardVault: "stripe", ChargePSPs: []string{"other"}}, PSPs: map[string]openrails.PSPConfig{"stripe": held, "other": other}},
+		vault:        {DisplayName: "Vault", MerchantSettings: billing.MerchantSettings{CardVault: "stripe", ChargePSPs: []string{"other"}}, PSPs: map[string]openrails.PSPConfig{"stripe": held, "other": other}},
 		"Not A Slug": {DisplayName: "Unprovisionable"},
 	}
 	bill := survivingEngine(t, f, cfg)

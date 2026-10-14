@@ -47,9 +47,6 @@ type ProvisionMerchantParams struct {
 	// DisplayName, when set, becomes the merchant's display name: an
 	// existing one's only for the operator (no OwnerUserID).
 	DisplayName string
-	// Sandbox, when this call creates the merchant, makes it a sandbox: its
-	// PSPs move no money. A merchant's sandbox is its own merchant.
-	Sandbox bool
 	// OwnerUserID becomes the new merchant group's owner, only when this call
 	// creates the merchant; an existing merchant's roles are never touched. A
 	// user claim answers to the declared creation policy.

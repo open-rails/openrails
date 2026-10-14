@@ -32,7 +32,7 @@ func (w *world) migrateCustody(export hosttools.VaultExport) hosttools.CustodyMi
 		name = w.slug
 	}
 	manifest, err := yaml.Marshal(merchantbootstrap.BillingConfig{Version: 1, Merchants: map[string]openrails.MerchantDeclaration{
-		w.slug: {Sandbox: true, DisplayName: name, PSPs: w.psps, Custodians: w.custodians, MerchantSettings: w.settings}}})
+		w.slug: {DisplayName: name, PSPs: w.psps, Custodians: w.custodians, MerchantSettings: w.settings}}})
 	require.NoError(w.t, err)
 	path := filepath.Join(w.t.TempDir(), "merchants.yaml")
 	require.NoError(w.t, os.WriteFile(path, manifest, 0o600))

@@ -53,7 +53,6 @@ func TestStandaloneRecordsVerifiedContactClaims(t *testing.T) {
 merchants:
   %s:
     display_name: Claims
-    sandbox: true
     psps:
       nmi:
         rail: nmi

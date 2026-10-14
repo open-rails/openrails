@@ -361,9 +361,6 @@ func writeVaultDocs(t testing.TB, v *vaulttest.Vault, bill *openrails.Engine, de
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &merchant))
 	merchant["display_name"] = declared.DisplayName
-	if declared.Sandbox {
-		merchant["sandbox"] = true
-	}
 	var hooks []map[string]any
 	for _, hook := range declared.AlertWebhooks {
 		hooks = append(hooks, map[string]any{"id": uuid.NewString(), "name": hook.Name, "url": hook.URL, "format": "generic", "enabled": true})
@@ -507,7 +504,7 @@ func (w *world) start() {
 	}
 	// The harness host's own issuer binds its merchant, as a single-merchant
 	// host declares it.
-	declared := openrails.MerchantDeclaration{Sandbox: true, DisplayName: name, PSPs: psps, Custodians: w.custodians, AlertWebhooks: w.alertWebhooks, MerchantSettings: w.settings,
+	declared := openrails.MerchantDeclaration{DisplayName: name, PSPs: psps, Custodians: w.custodians, AlertWebhooks: w.alertWebhooks, MerchantSettings: w.settings,
 		Issuer: issuer}
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{w.slug: declared}
 	if w.vault != nil {

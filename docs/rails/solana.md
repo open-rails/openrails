@@ -236,8 +236,7 @@ only, across every merchant and PSP.
 
 ### Devnet testing
 
-The network is the PSP's `environment`; a sandbox merchant (`sandbox: true`)
-declares `devnet`:
+The network is the PSP's `environment`; a test PSP declares `devnet`:
 
 ```yaml
       solana:

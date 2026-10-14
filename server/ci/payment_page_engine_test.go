@@ -26,7 +26,7 @@ func TestEmbeddedEnginePaymentPage(t *testing.T) {
 	cfg.PublicBillingBaseURL = "https://api.e2e.test"
 	cfg.ReturnOrigins = []string{"https://shop.e2e.test"}
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{"shared-pay": {Sandbox: true,
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"shared-pay": {
 		DisplayName: "Shared pay", Issuer: "https://identity.e2e.test",
 		MerchantSettings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
 		PSPs:             map[string]openrails.PSPConfig{"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig()},

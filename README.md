@@ -103,7 +103,6 @@ Next, configure your merchant. This contains secrets that allow OpenRails to tal
 # merchant.yaml
 slug: onlydemo # your merchant's name: lowercase letters, digits and hyphens
 display_name: OnlyDemo
-sandbox: true # its PSPs move no money; a live merchant omits it
 psps:
   paykings: # your name for this account; any key you like
     rail: nmi # the gateway kind: nmi, stripe, ccbill or solana
@@ -1465,7 +1464,6 @@ version: 1
 merchants:
   onlydemo: # your merchant's name: lowercase letters, digits and hyphens
     display_name: OnlyDemo
-    sandbox: true # its PSPs move no money; a live merchant omits it
     api_host: localhost # the Host its public routes (the catalog, purchase) answer on
     profile:
       from_email: billing@onlydemo.example # merchant sender identity
@@ -1789,8 +1787,7 @@ build yourself, badly, under deadline:
   before the PSP is used: a Stripe key's prefix must agree, every NMI account is asked
   whether it is in test mode (a sandbox.nmi.com account is probed with a card only a
   simulator approves), and a Solana PSP pays on the network its environment names. A
-  merchant is live or a sandbox (`sandbox: true`), and a PSP that disagrees with its
-  merchant is refused; one deployment serves both kinds side by side.
+  merchant mixes live and test PSPs freely.
 - **Your users never pay for our malfunction.** Access is closed by *evidence* — a
   confirmed cancellation, a terminal decline, exhausted dunning — never by the clock
   alone. A lost webhook, a dead pipe, or stale data parks the subscription for

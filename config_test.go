@@ -25,7 +25,7 @@ func TestReadMerchantFile(t *testing.T) {
 
 // A declaration built in Go, written as a merchant file, reads back unchanged.
 func TestMerchantFileRoundTrip(t *testing.T) {
-	want := MerchantDeclaration{Sandbox: true,
+	want := MerchantDeclaration{
 		Slug: "onlydemo", DisplayName: "OnlyDemo",
 		PSPs: PSPs{
 			"mobius": NMIPSP{Environment: EnvironmentSandbox, GatewayID: "000000", TokenizationKey: "tk", SecurityKey: "sk", WebhookSigningSecret: "whs", CardEntry: "server"}.PSPConfig(),

@@ -41,7 +41,7 @@ func TestSolanaNetworkIsVerifiedOnEveryEndpoint(t *testing.T) {
 		cfg := ownIssuer(openrails.Config{
 			ProviderWriteMode: openrails.ProviderWritesFull,
 			ProviderSandbox:   &openrails.ProviderSandboxConfig{SolanaRPCURL: public.URL()},
-			Merchants: map[string]openrails.MerchantDeclaration{"wallet-shop": {DisplayName: "Wallet Shop", Sandbox: true, PSPs: openrails.PSPs{
+			Merchants: map[string]openrails.MerchantDeclaration{"wallet-shop": {DisplayName: "Wallet Shop", PSPs: openrails.PSPs{
 				"solana": openrails.SolanaPSP{Environment: environment, Treasury: treasury.String(), RPCURL: rpcURL}.PSPConfig(),
 			}}},
 		})

@@ -262,27 +262,6 @@ func TestPSPEnvironments(t *testing.T) {
 		require.Equal(t, ClassLive, EnvironmentClass(rail, environments[0]))
 		require.Equal(t, ClassTest, EnvironmentClass(rail, environments[len(environments)-1]))
 	}
-	// A merchant's PSPs agree with it: real money for a live merchant, none for
-	// a sandbox.
-	for _, row := range []struct {
-		rail, environment string
-		sandbox           bool
-		want              string
-	}{
-		{"nmi", EnvironmentTest, true, ""},
-		{"solana", EnvironmentDevnet, true, ""},
-		{"solana", EnvironmentMainnet, false, ""},
-		{"stripe", EnvironmentLive, false, ""},
-		{"solana", EnvironmentMainnet, true, "psps.p.environment: mainnet moves real money, and the merchant is a sandbox (sandbox: true); its PSPs take devnet or testnet"},
-		{"nmi", EnvironmentSandbox, false, "psps.p.environment: sandbox moves no money, and the merchant is live; a sandbox is its own merchant, declared sandbox: true"},
-	} {
-		err := ValidatePSPMoneyClass("p", row.rail, row.environment, row.sandbox)
-		if row.want == "" {
-			require.NoError(t, err, "%+v", row)
-		} else {
-			require.EqualError(t, err, row.want)
-		}
-	}
 }
 
 // The custody deployment is host-owned: secure transport only (any other is

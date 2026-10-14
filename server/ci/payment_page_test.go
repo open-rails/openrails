@@ -73,7 +73,7 @@ func newPayShop(t *testing.T) *payShop {
 	var err error
 	s.handler, err = standaloneHandler(s.srv)
 	require.NoError(t, err)
-	entry, err := s.srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Sandbox: true, Slug: uniqueName("pay"), DisplayName: "Pay Shop"})
+	entry, err := s.srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: uniqueName("pay"), DisplayName: "Pay Shop"})
 	require.NoError(t, err)
 	s.mid = entry.MerchantID
 	psp, err := handle(s.t, s.srv, s.mid).CreatePSP(t.Context(), billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, Environment: "sandbox", PSPAccount: billing.PSPAccount{GatewayID: "e2e-" + uuid.NewString()[:8]},

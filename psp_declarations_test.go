@@ -122,7 +122,6 @@ func put[V any](m map[string]V, key string, value V) map[string]V {
 func TestTypedPSPsMatchTheirYAML(t *testing.T) {
 	m, err := ParseMerchantDeclaration([]byte(`
 slug: onlydemo
-sandbox: true
 psps:
   mobius:
     rail: nmi

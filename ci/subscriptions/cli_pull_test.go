@@ -44,7 +44,7 @@ func (w *world) cliPullAs(writeMode, provider string, insert, overwrite bool) er
 		DB:                &config.DBConfig{URL: w.dsn}, Database: config.DatabaseConfig{Schema: w.schema},
 	}
 	manifest := &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{
-		w.slug: {Sandbox: true, DisplayName: w.slug, PSPs: w.psps},
+		w.slug: {DisplayName: w.slug, PSPs: w.psps},
 	}}
 	var out strings.Builder
 	err := hosttools.PullProvider(w.t.Context(), hosttools.PullProviderOptions{

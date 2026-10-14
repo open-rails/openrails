@@ -164,8 +164,8 @@ Verification, as implemented (CCBill has no HMAC):
   (`64.38.212.0/24`, `64.38.215.0/24`, `64.38.240.0/24`, `64.38.241.0/24`)
   are built in; nothing to configure. Any OTHER source must be listed
   explicitly in `ccbill_webhook_ip_allowlist` (a CIDR list; `/0` is refused),
-  and even then is accepted only for a webhook naming a sandbox merchant's
-  CCBill account. If that cannot be proven — probe error, no DB — the entry is
+  and even then is accepted only for a webhook naming a sandbox CCBill
+  account. If that cannot be proven — probe error, no DB — the entry is
   refused.
 - **Account match** — the payload's `clientAccnum`/`clientSubacc` must equal
   the PSP's `client_accnum` and `client_subacc`.
@@ -180,8 +180,7 @@ non-retryable. Events are deduplicated by transaction id / payload hash.
 
 ### Sandbox testing
 
-Declare the PSP `environment: sandbox` (CCBill has `live` and `sandbox`) on a
-sandbox merchant (`sandbox: true`). A
+Declare the PSP `environment: sandbox` (CCBill has `live` and `sandbox`). A
 sandbox PSP's FlexForm URLs go to
 `https://sandbox-api.ccbill.com/wap-frontflex/flexforms/...` instead of
 `api.ccbill.com`. To post webhooks from a local harness, declare its source

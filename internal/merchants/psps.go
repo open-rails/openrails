@@ -43,9 +43,9 @@ var (
 	// ErrRevisionMismatch refuses an edit naming a revision the document has
 	// moved past.
 	ErrRevisionMismatch = apperr.New(http.StatusConflict, billing.CodeRevisionMismatch, "the configuration changed since the revision the request names; read it again")
-	// ErrPSPEnvironmentMixed: the PSP's environment disagrees with its
-	// merchant, live or a sandbox.
-	ErrPSPEnvironmentMixed = apperr.New(http.StatusConflict, "psp_environment_mixed", "a sandbox merchant's PSPs move no money, and a live merchant's real money")
+	// ErrPSPEnvironmentRefused: a live PSP where the deployment wires fake
+	// providers.
+	ErrPSPEnvironmentRefused = apperr.New(http.StatusConflict, "psp_environment_refused", "a live PSP never talks to a fake provider")
 	// ErrConfigReadOnly refuses an edit of configuration read from a file.
 	ErrConfigReadOnly = apperr.New(http.StatusConflict, "merchant_config_read_only", "the merchant's configuration is read from a file; change the file")
 )
@@ -245,8 +245,8 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 	}
 	// An identity this merchant declared under the same key (imported
 	// history) is armed by its document; any other owner refuses.
-	if why := s.environmentRefusal(key, rail, environment, set.Merchant.Value.Sandbox); why != "" {
-		return billing.PSP{}, fmt.Errorf("%w: %s", ErrPSPEnvironmentMixed, why)
+	if why := s.environmentRefusal(rail, environment); why != "" {
+		return billing.PSP{}, fmt.Errorf("%w: %s", ErrPSPEnvironmentRefused, why)
 	}
 	if owner, found, err := s.ResolvePSPByIdentity(ctx, rail, environment, accountID); err != nil {
 		return billing.PSP{}, err
@@ -840,12 +840,8 @@ func (s *Service) DeclarePSP(ctx context.Context, id billing.MerchantID, declara
 	if err != nil {
 		return billing.PSP{}, apperr.Invalidf("%v", err).WithParam("environment")
 	}
-	set, err := s.config.Get(ctx, id)
-	if err != nil {
-		return billing.PSP{}, err
-	}
-	if why := s.environmentRefusal(key, rail, environment, set.Merchant.Value.Sandbox); why != "" {
-		return billing.PSP{}, fmt.Errorf("%w: %s", ErrPSPEnvironmentMixed, why)
+	if why := s.environmentRefusal(rail, environment); why != "" {
+		return billing.PSP{}, fmt.Errorf("%w: %s", ErrPSPEnvironmentRefused, why)
 	}
 	if err := AssertPSPUnowned(ctx, gen.New(s.pool), id.UUID(), rail, environment, accountID); err != nil {
 		return billing.PSP{}, err

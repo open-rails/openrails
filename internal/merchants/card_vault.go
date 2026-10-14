@@ -34,6 +34,10 @@ var (
 	// PSP that cannot charge the platform vault's cards.
 	ErrPlatformVaultUnreachable = apperr.New(http.StatusConflict, "platform_vault_unreachable",
 		"a charge PSP cannot charge cards from the platform vault").WithParam("settings.charge_psps")
+	// ErrPlatformVaultMixedClass refuses card_vault platform charged through
+	// both live and test PSPs: one platform identity holds one money class.
+	ErrPlatformVaultMixedClass = apperr.New(http.StatusConflict, "platform_vault_mixed_class",
+		"the platform vault's charge PSPs mix live and test; name charge PSPs of one money class").WithParam("settings.charge_psps")
 	// ErrCardVaultUnknown refuses a card_vault naming no live card PSP.
 	ErrCardVaultUnknown = apperr.New(http.StatusConflict, "card_vault_unknown",
 		"card_vault names no live card PSP of the merchant, nor platform").WithParam("settings.card_vault")
@@ -81,6 +85,9 @@ func CardVaultRefusal(vault *config.PlatformVaultConfig, settings billing.Mercha
 		}
 		if keys := platformUnreachable(vault, charging); len(keys) > 0 {
 			return fmt.Errorf("psps %s: %w", strings.Join(keys, ", "), ErrPlatformVaultUnreachable)
+		}
+		if _, _, mixed := platformClass(charging); mixed {
+			return ErrPlatformVaultMixedClass
 		}
 		return nil
 	default:
@@ -132,8 +139,12 @@ func (s *Service) CheckCardVault(ctx context.Context, id billing.MerchantID, doc
 	if err := s.CardVaultRefusal(doc.MerchantSettings, psps); err != nil || !merchantconfig.PlatformCardVault(doc.MerchantSettings) {
 		return err
 	}
+	class, ok, _ := platformClass(chargingPSPs(doc.MerchantSettings, psps))
+	if !ok {
+		return nil
+	}
 	return s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		return s.platformIdentityRefusal(ctx, s.database.Gen(ctx), id, merchantClass(doc.Sandbox))
+		return s.platformIdentityRefusal(ctx, s.database.Gen(ctx), id, class)
 	})
 }
 
@@ -212,7 +223,10 @@ func (s *Service) syncCardVault(ctx context.Context, q *gen.Queries, id billing.
 	if !merchantconfig.PlatformCardVault(doc.MerchantSettings) {
 		return nil
 	}
-	class := merchantClass(doc.Sandbox)
+	class, ok, _ := platformClass(chargingPSPs(doc.MerchantSettings, set.PSPs))
+	if !ok {
+		return nil
+	}
 	if err := s.platformIdentityRefusal(ctx, q, id, class); errors.Is(err, ErrPlatformVaultUnavailable) {
 		if changed {
 			reject(merchantdocs.MerchantDoc, err.Error())
@@ -226,6 +240,19 @@ func (s *Service) syncCardVault(ctx context.Context, q *gen.Queries, id billing.
 		Environment: class, AccountID: config.PlatformCustodianAccountID(s.platformVault, id.UUID()),
 	})
 	return err
+}
+
+// platformClass is the money class the platform vault holds for psps: the one
+// they share. ok is false when there are none or they mix classes.
+func platformClass(psps map[string]merchantdocs.PSP) (class string, ok, mixed bool) {
+	for _, p := range psps {
+		c := config.EnvironmentClass(p.Rail, p.Environment)
+		if class != "" && c != class {
+			return "", false, true
+		}
+		class = c
+	}
+	return class, class != "", false
 }
 
 // chargingPSPs are the live card PSPs new card charges go to.

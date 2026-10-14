@@ -136,7 +136,6 @@ func newWorldAt(t *testing.T, clock *clockwork.FakeClock) *world {
 merchants:
   %s:
     display_name: Network Shop
-    sandbox: true
     psps:
       nmi:
         rail: nmi
@@ -146,7 +145,6 @@ merchants:
         tokenization_key: test
   %s:
     display_name: Network Mart
-    sandbox: true
     psps:
       nmi:
         rail: nmi

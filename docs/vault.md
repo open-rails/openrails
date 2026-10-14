@@ -94,9 +94,7 @@ returns. An alert webhook's `id` is a UUID you choose; `format` is `generic`,
 ```
 
 The rail decides the fields. `environment` is one of the rail's, its
-real-money one when omitted ([PSP environments](psp-environments.md)); a
-document in the other money class than its merchant (live, or `"sandbox":
-true` on the merchant document) is refused.
+real-money one when omitted ([PSP environments](psp-environments.md)).
 `account_id` is the rail's own id ([merchant provisioning](merchant-provisioning.md)
 lists each rail's). A Solana PSP has `treasury` in its place and an optional
 `rpc_url` secret:

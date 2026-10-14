@@ -12,7 +12,6 @@ func TestParseMerchantDeclarationIsStrict(t *testing.T) {
 	m, err := ParseMerchantDeclaration([]byte(`
 slug: Host-One
 display_name: Host One
-sandbox: true
 psps:
   mobius:
     rail: nmi
@@ -80,34 +79,31 @@ func TestParseMerchantDeclarationRefusesUnknownPSPKeys(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// A PSP's environment is its rail's own, its real-money one when omitted,
-// and it agrees with its merchant: a live merchant's PSPs move real money, a
-// sandbox's none.
+// A PSP's environment is its rail's own, its real-money one when omitted. A
+// merchant's PSPs mix live and test freely.
 func TestParseMerchantDeclarationEnvironments(t *testing.T) {
 	doc := func(psps string) string { return "slug: x\ndisplay_name: X\npsps:\n" + psps }
-	sandbox := func(psps string) string { return "slug: x\ndisplay_name: X\nsandbox: true\npsps:\n" + psps }
 	for psps, want := range map[string]string{
-		"  p: {rail: stripe, environment: sandbox, account_id: acct_1}\n":                                             `psps.p.environment: stripe has no "sandbox" environment (live, test)`,
-		"  p: {rail: ccbill, environment: test, client_accnum: \"999999\", client_subacc: \"0000\"}\n":                `psps.p.environment: ccbill has no "test" environment (live, sandbox)`,
-		"  p: {rail: solana, environment: sandbox, treasury: " + treasury + "}\n":                                     `psps.p.environment: solana has no "sandbox" environment (mainnet, devnet, testnet)`,
-		"  p: {rail: solana, environment: live, treasury: " + treasury + "}\n":                                        `psps.p.environment: solana has no "live" environment (mainnet, devnet, testnet)`,
-		"  p: {rail: nmi, environment: devnet, gateway_id: \"1\"}\n":                                                  `psps.p.environment: nmi has no "devnet" environment (live, test, sandbox)`,
-		"  p: {rail: nmi, gateway_id: \"1\"}\n  q: {rail: solana, environment: devnet, treasury: " + treasury + "}\n": "psps.q.environment: devnet moves no money, and the merchant is live; a sandbox is its own merchant, declared sandbox: true",
+		"  p: {rail: stripe, environment: sandbox, account_id: acct_1}\n":                              `psps.p.environment: stripe has no "sandbox" environment (live, test)`,
+		"  p: {rail: ccbill, environment: test, client_accnum: \"999999\", client_subacc: \"0000\"}\n": `psps.p.environment: ccbill has no "test" environment (live, sandbox)`,
+		"  p: {rail: solana, environment: sandbox, treasury: " + treasury + "}\n":                      `psps.p.environment: solana has no "sandbox" environment (mainnet, devnet, testnet)`,
+		"  p: {rail: solana, environment: live, treasury: " + treasury + "}\n":                         `psps.p.environment: solana has no "live" environment (mainnet, devnet, testnet)`,
+		"  p: {rail: nmi, environment: devnet, gateway_id: \"1\"}\n":                                   `psps.p.environment: nmi has no "devnet" environment (live, test, sandbox)`,
 	} {
 		_, err := ParseMerchantDeclaration([]byte(doc(psps)))
 		require.ErrorContains(t, err, want, psps)
 	}
-	// A sandbox merchant's PSPs move no money.
-	_, err := ParseMerchantDeclaration([]byte(sandbox("  p: {rail: solana, treasury: " + treasury + "}\n")))
-	require.ErrorContains(t, err, "psps.p.environment: mainnet moves real money, and the merchant is a sandbox (sandbox: true); its PSPs take devnet or testnet")
-	m, err := ParseMerchantDeclaration([]byte(sandbox("  mobius: {rail: nmi, environment: sandbox, gateway_id: \"1\"}\n  wallet: {rail: solana, environment: devnet, treasury: " + treasury + "}\n  ccbill: {rail: ccbill, environment: sandbox, client_accnum: \"999999\", client_subacc: \"0000\"}\n")))
-	require.NoError(t, err)
-	require.True(t, m.Sandbox)
-	require.Equal(t, EnvironmentDevnet, m.PSPs["wallet"].Environment)
-	require.Equal(t, treasury, m.PSPs["wallet"].AccountID)
+	_, err := ParseMerchantDeclaration([]byte("slug: x\nsandbox: true\n"))
+	require.ErrorContains(t, err, "sandbox", "a merchant has no sandbox flag: each PSP declares its environment")
 
-	m, err = ParseMerchantDeclaration([]byte(doc("  mobius: {rail: nmi, gateway_id: \"1\"}\n  wallet: {rail: solana, treasury: " + treasury + "}\n")))
+	m, err := ParseMerchantDeclaration([]byte(doc("  mobius: {rail: nmi, environment: test, gateway_id: \"1\"}\n  wallet: {rail: solana, treasury: " + treasury + "}\n  ccbill: {rail: ccbill, environment: sandbox, client_accnum: \"999999\", client_subacc: \"0000\"}\n")))
+	require.NoError(t, err, "live and test PSPs mix within a merchant")
+	require.Equal(t, EnvironmentTest, m.PSPs["mobius"].Environment)
+	require.Equal(t, EnvironmentMainnet, m.PSPs["wallet"].Environment, "omitted is the rail's real-money environment")
+	require.Equal(t, treasury, m.PSPs["wallet"].AccountID)
+	require.Equal(t, EnvironmentSandbox, m.PSPs["ccbill"].Environment)
+
+	m, err = ParseMerchantDeclaration([]byte(doc("  mobius: {rail: nmi, gateway_id: \"1\"}\n")))
 	require.NoError(t, err)
 	require.Equal(t, EnvironmentLive, m.PSPs["mobius"].Environment, "omitted is the rail's real-money environment")
-	require.Equal(t, EnvironmentMainnet, m.PSPs["wallet"].Environment, "omitted is the rail's real-money environment")
 }

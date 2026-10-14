@@ -51,7 +51,6 @@ func TestSolanaPayFindsItsMerchantByOrder(t *testing.T) {
 	for _, s := range shops {
 		manifest += fmt.Sprintf(`  %s:
     display_name: %s
-    sandbox: true
     profile: {logo_url: "%s"}
     psps:
       solana:

@@ -56,7 +56,7 @@ func TestNMIRecoveryWorkerProcess(t *testing.T) {
 		Database:          openrails.DatabaseConfig{Schema: input.Schema, RiverSchema: input.Schema},
 		ProviderWriteMode: input.Mode,
 		DB:                &openrails.DBConfig{URL: input.DSN},
-		Merchants:         map[string]openrails.MerchantDeclaration{input.Slug: {Sandbox: true, DisplayName: input.Slug, PSPs: input.PSPs}},
+		Merchants:         map[string]openrails.MerchantDeclaration{input.Slug: {DisplayName: input.Slug, PSPs: input.PSPs}},
 	}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool, Clock: clock, NMITransport: restartNMITransport{gateway: gateway}})
 	require.NoError(t, err)
 	defer func() { _ = rt.Close(context.Background()) }()

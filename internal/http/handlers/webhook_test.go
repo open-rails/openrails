@@ -331,7 +331,7 @@ func ccbillProbe(presence merchants.LiveRailPresence, err error) webhookauth.Liv
 
 // CCBill has no HMAC, so its source address is its only authentication. A
 // declared dev source is honoured only when a probe proves the account the
-// webhook names moves no money (a sandbox merchant's), and only if declared.
+// webhook names moves no money, and only if declared.
 func TestCCBillSourceAllowlist(t *testing.T) {
 	declared := []string{"203.0.113.0/24"}
 	const ccbillIP, devIP, strangerIP = "64.38.212.5", "203.0.113.5", "198.51.100.7"

@@ -39,15 +39,6 @@ func (c *ControlPlane) SetMerchantDisplayName(ctx context.Context, id billing.Me
 	return directory.SetDisplayName(ctx, id, displayName)
 }
 
-// SetMerchantSandbox makes a merchant a sandbox: its PSPs move no money.
-func (c *ControlPlane) SetMerchantSandbox(ctx context.Context, id billing.MerchantID) error {
-	directory, err := c.directory()
-	if err != nil {
-		return err
-	}
-	return directory.SetSandbox(ctx, id)
-}
-
 // ListUserMerchants returns the live merchants userID holds a role in,
 // ordered by name, with the user's role there and what it grants: a declared
 // role's from AuthKit's catalog, a custom role's from its merchant's group.

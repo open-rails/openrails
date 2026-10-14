@@ -60,7 +60,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 // documents, without credentials.
 func dumpDeclaration(set merchantdocs.Set, slug string) config.MerchantDeclaration {
 	doc := set.Merchant.Value
-	out := config.MerchantDeclaration{DisplayName: doc.DisplayName, Sandbox: doc.Sandbox, MerchantSettings: doc.MerchantSettings}
+	out := config.MerchantDeclaration{DisplayName: doc.DisplayName, MerchantSettings: doc.MerchantSettings}
 	if out.DisplayName == "" {
 		out.DisplayName = slug
 	}
@@ -69,7 +69,7 @@ func dumpDeclaration(set merchantdocs.Set, slug string) config.MerchantDeclarati
 		if out.Custodians == nil {
 			out.Custodians = map[string]config.CustodianConfig{}
 		}
-		out.Custodians[key] = config.CustodianConfig{Kind: c.Kind, AccountID: c.AccountID, Archived: c.Archived, Settings: maps.Clone(c.Settings)}
+		out.Custodians[key] = config.CustodianConfig{Kind: c.Kind, Environment: c.Environment, AccountID: c.AccountID, Archived: c.Archived, Settings: maps.Clone(c.Settings)}
 	}
 	for _, key := range set.PSPKeys() {
 		p := set.PSPs[key].Value

@@ -145,36 +145,6 @@ func (s *Service) SetDisplayName(ctx context.Context, id billing.MerchantID, nam
 	}
 }
 
-// SetSandbox makes a merchant a sandbox in its configuration: its PSPs move
-// no money.
-func (s *Service) SetSandbox(ctx context.Context, id billing.MerchantID) error {
-	if s == nil || s.config == nil {
-		return errors.New("merchants: merchant configuration unavailable")
-	}
-	if !s.config.Writable() {
-		return ErrConfigReadOnly
-	}
-	for attempt := 0; ; attempt++ {
-		set, err := s.config.Reload(ctx, id)
-		if err != nil {
-			return err
-		}
-		doc := set.Merchant.Value
-		if doc.Sandbox {
-			return nil
-		}
-		doc.Sandbox = true
-		_, err = s.config.PutMerchant(ctx, id, doc, set.Merchant.Revision)
-		if errors.Is(err, merchantdocs.ErrRevisionMismatch) {
-			if attempt >= 2 {
-				return ErrRevisionMismatch
-			}
-			continue
-		}
-		return err
-	}
-}
-
 // nameClaimError maps the live-name index and the alias guard to one refusal.
 func nameClaimError(err error) error {
 	var pgErr *pgconn.PgError

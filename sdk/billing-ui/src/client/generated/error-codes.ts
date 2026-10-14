@@ -120,6 +120,7 @@ export type OpenRailsErrorCode =
   | "payment_option_unavailable"
   | "payment_provider_rejected"
   | "permission_required"
+  | "platform_vault_mixed_class"
   | "platform_vault_unavailable"
   | "platform_vault_unreachable"
   | "price_change_currency_mismatch"
@@ -141,7 +142,7 @@ export type OpenRailsErrorCode =
   | "provider_writes_held"
   | "psp_claim_requires_proof"
   | "psp_credentials_rejected"
-  | "psp_environment_mixed"
+  | "psp_environment_refused"
   | "psp_exists"
   | "psp_key_taken"
   | "psp_last_active"
@@ -323,6 +324,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   payment_option_unavailable: { status: 422, type: "invalid_request_error", meaning: "No PSP that can take the order's lines accepts this payment." },
   payment_provider_rejected: { status: 502, type: "api_error", meaning: "The provider refused to process the charge for a gateway or account reason." },
   permission_required: { status: 403, type: "authorization_error", meaning: "The credential lacks the permission the route requires." },
+  platform_vault_mixed_class: { status: 409, type: "invalid_request_error", meaning: "The platform vault's charge PSPs mix live and test; one platform identity holds one money class." },
   platform_vault_unavailable: { status: 409, type: "invalid_request_error", meaning: "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; save cards at a PSP's vault." },
   platform_vault_unreachable: { status: 409, type: "invalid_request_error", meaning: "A charge PSP cannot charge cards from the platform vault (Stripe, or card_entry server); leave it out of charge_psps or save cards at a PSP's vault." },
   price_change_currency_mismatch: { status: 422, type: "invalid_request_error", meaning: "The target price must be in the subscription's currency." },
@@ -344,7 +346,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   provider_writes_held: { status: 409, type: "invalid_request_error", meaning: "The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open." },
   psp_claim_requires_proof: { status: 403, type: "authorization_error", meaning: "Claiming a provider account needs credentials that prove control of it." },
   psp_credentials_rejected: { status: 400, type: "invalid_request_error", meaning: "The provider rejected the credentials, or answered that they are not in the PSP's declared environment." },
-  psp_environment_mixed: { status: 409, type: "invalid_request_error", meaning: "The PSP's environment disagrees with its merchant: a sandbox merchant's PSPs move no money, a live merchant's real money." },
+  psp_environment_refused: { status: 409, type: "invalid_request_error", meaning: "A live PSP is refused where the deployment wires fake providers." },
   psp_exists: { status: 409, type: "invalid_request_error", meaning: "The account is already a PSP, of this merchant or another; update it instead." },
   psp_key_taken: { status: 409, type: "invalid_request_error", meaning: "Another live PSP holds the key." },
   psp_last_active: { status: 409, type: "invalid_request_error", meaning: "The PSP is the last active one on its rail; pass allow_last to archive it." },

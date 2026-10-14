@@ -376,14 +376,6 @@ function MerchantProfileForm({
             value={configuration.display_name}
           />
           <SettingDetail
-            label={adminText("Money")}
-            value={adminText(
-              configuration.sandbox
-                ? "Sandbox: its PSPs move no money"
-                : "Live: its PSPs move real money"
-            )}
-          />
-          <SettingDetail
             label={adminText("From email")}
             value={profile?.from_email}
           />

@@ -1270,9 +1270,8 @@ stored ownership; `provider_write_mode` remains a separate gate.
 A merchant's write posture and the book's identity can lower the mode for one
 merchant or the whole book (see above); the lower mode applies.
 
-What each provider write mode permits (PSP environments apply orthogonally: for
-a sandbox merchant the same matrix holds against test and sandbox rails, so no
-real money can move in any mode):
+What each provider write mode permits (PSP environments apply orthogonally: a
+test or sandbox PSP moves no real money in any mode):
 
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|
@@ -1312,10 +1311,8 @@ check (manifest reconciliation and the provider API alike); unavailable,
 indeterminate or disagreeing answers refuse the arm, and an update that omits
 credentials re-checks the stored key.
 
-A merchant is live or a sandbox (`sandbox: true`): a PSP of the other class is
-refused alone, never failing boot, and one deployment serves live and sandbox
-merchants side by side. Fake providers (`provider_sandbox`, `Deps` test seams)
-are refused beside a live PSP.
+A merchant mixes live and test PSPs freely. Fake providers
+(`provider_sandbox`, `Deps` test seams) are refused beside a live PSP.
 
 ### Cutover: booting against production credentials
 

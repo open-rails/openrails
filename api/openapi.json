@@ -8465,10 +8465,11 @@
         "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
           "invalid_param",
+          "platform_vault_mixed_class",
           "platform_vault_unreachable",
           "psp_claim_requires_proof",
           "psp_credentials_rejected",
-          "psp_environment_mixed",
+          "psp_environment_refused",
           "psp_exists",
           "psp_key_taken",
           "revision_mismatch",
@@ -8888,6 +8889,7 @@
           "charge_psp_incompatible",
           "charge_psp_unknown",
           "invalid_param",
+          "platform_vault_mixed_class",
           "platform_vault_unavailable",
           "platform_vault_unreachable",
           "resource_conflict",
@@ -17438,9 +17440,6 @@
           "display_name": {
             "type": "string"
           },
-          "sandbox": {
-            "type": "boolean"
-          },
           "profile": {
             "$ref": "#/components/schemas/MerchantProfile"
           },
@@ -17520,7 +17519,6 @@
         "required": [
           "revision",
           "display_name",
-          "sandbox",
           "platform_vault"
         ]
       },
@@ -22879,9 +22877,6 @@
           "display_name": {
             "type": "string"
           },
-          "sandbox": {
-            "type": "boolean"
-          },
           "profile": {
             "$ref": "#/components/schemas/MerchantProfile"
           },
@@ -24268,6 +24263,11 @@
       "type": "authorization_error",
       "meaning": "The credential lacks the permission the route requires."
     },
+    "platform_vault_mixed_class": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The platform vault's charge PSPs mix live and test; one platform identity holds one money class."
+    },
     "platform_vault_unavailable": {
       "status": 409,
       "type": "invalid_request_error",
@@ -24373,10 +24373,10 @@
       "type": "invalid_request_error",
       "meaning": "The provider rejected the credentials, or answered that they are not in the PSP's declared environment."
     },
-    "psp_environment_mixed": {
+    "psp_environment_refused": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The PSP's environment disagrees with its merchant: a sandbox merchant's PSPs move no money, a live merchant's real money."
+      "meaning": "A live PSP is refused where the deployment wires fake providers."
     },
     "psp_exists": {
       "status": 409,

@@ -91,7 +91,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 		ProviderSandbox:      &openrails.ProviderSandboxConfig{SolanaRPCURL: chain.URL(), NMIGatewayURL: gateway.URL()},
 		Solana:               &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: cranker.String()}}},
 		// AuthKit's issuer is baseURL: its users are this merchant's customers.
-		Merchants: map[string]openrails.MerchantDeclaration{MerchantSlug: {Sandbox: true, Issuer: baseURL, DisplayName: "billing-ui e2e", MerchantSettings: billing.MerchantSettings{PSPRouting: &pspRouting}, PSPs: openrails.PSPs{
+		Merchants: map[string]openrails.MerchantDeclaration{MerchantSlug: {Issuer: baseURL, DisplayName: "billing-ui e2e", MerchantSettings: billing.MerchantSettings{PSPRouting: &pspRouting}, PSPs: openrails.PSPs{
 			// An armed Solana PSP on devnet: purchase offers it.
 			SolanaPSPKey: openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: treasury.String()}.PSPConfig(),
 			CardPSPKey: openrails.NMIPSP{Environment: openrails.EnvironmentSandbox,

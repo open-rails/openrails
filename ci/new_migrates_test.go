@@ -80,7 +80,7 @@ func TestUnknownPSPKeysRefuseThatPSPAlone(t *testing.T) {
 	pool := openPool(t, emptyDatabase(t))
 	bill, err := openrails.New(t.Context(), openrails.Config{
 		ProviderWriteMode: openrails.ProviderWritesReadOnly,
-		Merchants: map[string]openrails.MerchantDeclaration{"host-one": {Sandbox: true, DisplayName: "Host One", PSPs: map[string]openrails.PSPConfig{
+		Merchants: map[string]openrails.MerchantDeclaration{"host-one": {DisplayName: "Host One", PSPs: map[string]openrails.PSPConfig{
 			"p": {Rail: "nmi", AccountID: "100001", Settings: map[string]any{"tokenisation_key": "tk"}},
 			"q": {Rail: "stripe", AccountID: "acct_1", Secrets: map[string]string{"secret_kye": "sk_test_1"}},
 		}}},

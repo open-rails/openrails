@@ -108,8 +108,7 @@ type PSPListParams struct {
 // CreatePSPParams arms a new PSP. Its rail decides its fields: its account
 // fields (RailDefinition.AccountFields), and the public keys nmi
 // (tokenization_key) and stripe (publishable_key) take. Environment is the
-// rail's own; omitted, its real-money one. A sandbox merchant's PSPs move no
-// money, a live merchant's real money. Credentials are write-only
+// rail's own; omitted, its real-money one. Credentials are write-only
 // and are checked with the provider, against the environment, before
 // anything is stored. Repeating a create that took effect returns the PSP it
 // made.

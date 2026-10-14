@@ -591,17 +591,19 @@ func (s *Service) ProbeLiveAccount(ctx context.Context, rail, account string) (L
 	return LiveRailAbsent, nil
 }
 
-// ProbeLiveMerchant reports whether the merchant is live: absent for a
-// sandbox merchant.
-func (s *Service) ProbeLiveMerchant(ctx context.Context, id billing.MerchantID) (LiveRailPresence, error) {
+// ProbeLiveCardPSP reports whether the merchant has a live PSP whose rail
+// charges cards: absent when every card PSP it serves moves no money.
+func (s *Service) ProbeLiveCardPSP(ctx context.Context, id billing.MerchantID) (LiveRailPresence, error) {
 	set, err := s.Config().Get(ctx, id)
 	if err != nil {
 		return LiveRailUnknown, err
 	}
-	if set.HasMerchant && set.Merchant.Value.Sandbox {
-		return LiveRailAbsent, nil
+	for _, p := range liveCardPSPs(set.PSPs) {
+		if config.LiveEnvironment(p.Rail, p.Environment) {
+			return LiveRailPresent, nil
+		}
 	}
-	return LiveRailPresent, nil
+	return LiveRailAbsent, nil
 }
 
 // CountActivePSPsForRail is how many PSPs the merchant has live for new work

@@ -367,7 +367,7 @@ var ccbillAccountProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe 
 	}
 }
 
-// livePSPProbe asks whether the request's merchant is live; a var so handler
+// livePSPProbe asks whether the request's merchant has a live card PSP; a var so handler
 // tests can stub it. Returning nil fails every gate on it closed.
 var livePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe {
 	if r.State.Merchants == nil {
@@ -378,7 +378,7 @@ var livePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe {
 		if err != nil {
 			return merchants.LiveRailUnknown, err
 		}
-		return r.State.Merchants.ProbeLiveMerchant(ctx, id)
+		return r.State.Merchants.ProbeLiveCardPSP(ctx, id)
 	}
 }
 

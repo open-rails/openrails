@@ -62,7 +62,7 @@ func TestPaymentPageRegistersItsHostForWallets(t *testing.T) {
 	handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "https://"+serverHost+paymentpage.ApplePayDomainAssociationPath, nil))
 	require.Equal(t, http.StatusNotFound, res.Code, "only the payment origin serves it")
 
-	entry, err := srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Sandbox: true, Slug: uniqueName("wallets"), DisplayName: "Wallet Shop"})
+	entry, err := srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: uniqueName("wallets"), DisplayName: "Wallet Shop"})
 	require.NoError(t, err)
 	shop, ctx := handle(t, srv, entry.MerchantID), merchant.WithID(t.Context(), entry.MerchantID)
 	stripe.SeedPaymentMethodDomain("acct_known", paymentHost, false)

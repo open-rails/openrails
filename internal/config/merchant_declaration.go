@@ -38,10 +38,6 @@ type MerchantDeclaration struct {
 	// group (authkit/auth Bound), whose id is the merchant's.
 	Issuer      string `yaml:"-"`
 	DisplayName string `yaml:"display_name"`
-	// Sandbox makes the merchant a sandbox: its PSPs move no money (test,
-	// sandbox, devnet, testnet). Every PSP of a live merchant, the default,
-	// moves real money. A merchant's sandbox is another merchant.
-	Sandbox bool `yaml:"sandbox,omitempty"`
 	// PSPs is the operator-declared PSP catalog: the merchant's payment
 	// service providers, keyed by PSP key (e.g. mobius).
 	PSPs PSPs `yaml:"psps,omitempty"`
@@ -203,6 +199,8 @@ func ValidatePSPKeys(psp string, p PSPConfig) error {
 type CustodianConfig struct {
 	// Kind is the vendor: basis_theory.
 	Kind string `yaml:"kind"`
+	// Environment is the tenant's money class: live (the default) or test.
+	Environment string `yaml:"environment,omitempty"`
 	// AccountID is the custodian-native tenant identity (Basis Theory: the
 	// tenant id). Operator-declared: there is no runtime lookup.
 	AccountID string `yaml:"account_id,omitempty"`
@@ -275,12 +273,6 @@ func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 		}
 		m.PSPs[key] = p
 	}
-	for _, key := range slices.Sorted(maps.Keys(m.PSPs)) {
-		p := m.PSPs[key]
-		if err := ValidatePSPMoneyClass(key, string(p.Rail), p.Environment, m.Sandbox); err != nil {
-			return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
-		}
-	}
 	m.Slug = billing.NormalizeMerchantSlug(f.Slug)
 	return m, nil
 }
@@ -291,9 +283,6 @@ func ConfigurationFields(m MerchantDeclaration) []string {
 	var out []string
 	if strings.TrimSpace(m.DisplayName) != "" {
 		out = append(out, "display_name")
-	}
-	if m.Sandbox {
-		out = append(out, "sandbox")
 	}
 	if len(m.PSPs) > 0 {
 		out = append(out, "psps")

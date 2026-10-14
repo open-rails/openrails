@@ -29,7 +29,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	cfg.ReturnOrigins = []string{"https://example.test"}
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {Sandbox: true, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test",
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{slug: {DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test",
 		AccountID: account,
 		Secrets:   map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": secret},
 	}}}}

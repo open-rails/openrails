@@ -229,7 +229,7 @@ abandoned intent raises `life.provider_intent.abandoned`.
 
 ### Sandbox testing
 
-Declare the PSP `environment: test`, on a sandbox merchant (`sandbox: true`), with a test key (`sk_test_…` / `rk_test_…`).
+Declare the PSP `environment: test`, with a test key (`sk_test_…` / `rk_test_…`).
 A test PSP can never hold a credential that moves real money, and a
 deployment with a test PSP holds no live one. Use Stripe's standard test
 cards.

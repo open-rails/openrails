@@ -105,8 +105,7 @@ type Config struct {
 
 	// CCBillWebhookIPAllowlist are extra source CIDRs accepted as CCBill
 	// webhook origins. CCBill signs nothing, so the source address is the
-	// authentication: the list is honored only for a sandbox merchant's
-	// account.
+	// authentication: the list is honored only for a sandbox account.
 	// Empty accepts CCBill's own ranges alone.
 	CCBillWebhookIPAllowlist []string `yaml:"ccbill_webhook_ip_allowlist" json:"ccbill_webhook_ip_allowlist"`
 

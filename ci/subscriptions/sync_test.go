@@ -17,12 +17,11 @@ import (
 // A PSP is its account, and an account's records stay with it whatever its
 // label names next, from a file or from Vault. A label moved to an unused
 // account registers that account as a new PSP; a label naming an account the
-// merchant cannot hold (another merchant's, one another label of the
-// merchant already declares, or real money on a sandbox merchant) is
-// refused, and the account it named keeps serving and renewing.
+// merchant cannot hold (another merchant's, or one another label of the
+// merchant already declares) is refused, and the account it named keeps serving and renewing.
 func TestPSPLabelMoveLeavesAccountRecordsInPlace(t *testing.T) {
 	for _, source := range []string{"file", "vault"} {
-		for _, change := range []string{"unused account", "another merchant's account", "another label's account", "real money"} {
+		for _, change := range []string{"unused account", "another merchant's account", "another label's account"} {
 			t.Run(source+"/"+change, func(t *testing.T) {
 				t.Parallel()
 				var w *world
@@ -49,7 +48,7 @@ func TestPSPLabelMoveLeavesAccountRecordsInPlace(t *testing.T) {
 						_, _, err := rt.Merchants.RegisterForRestore(ctx, other, "other-"+uuid.NewString()[:8])
 						require.NoError(t, err)
 						foreign, err := rt.Merchants.SyncConfig(ctx, other, merchantdocs.Set{}, merchantdocs.Set{
-							Merchant: merchantdocs.Doc[merchantdocs.Merchant]{Value: merchantdocs.Merchant{Sandbox: true}}, HasMerchant: true,
+							Merchant: merchantdocs.Doc[merchantdocs.Merchant]{Value: merchantdocs.Merchant{}}, HasMerchant: true,
 							PSPs: map[string]merchantdocs.Doc[merchantdocs.PSP]{"other": doc},
 						})
 						require.NoError(t, err)
@@ -57,8 +56,6 @@ func TestPSPLabelMoveLeavesAccountRecordsInPlace(t *testing.T) {
 					}
 				case "another label's account":
 					doc.Value = before.PSPs["stripe"].Value
-				case "real money":
-					doc.Value.Environment = "live"
 				}
 				next.PSPs["nmi"] = doc
 				charges := len(w.nmi.ledger(""))
@@ -79,10 +76,6 @@ func TestPSPLabelMoveLeavesAccountRecordsInPlace(t *testing.T) {
 				var methodPSP uuid.UUID
 				require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT psp_id FROM billing.payment_methods WHERE id = $1`), method.UUID()).Scan(&methodPSP))
 				require.Equal(t, original, methodPSP)
-				var live int
-				require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT count(*) FROM billing.psps WHERE environment = 'live'`)).Scan(&live))
-				require.Zero(t, live, "no real-money PSP joins a sandbox merchant")
-
 				var superseded bool
 				require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT superseded_at IS NOT NULL FROM billing.psps WHERE id = $1`), original).Scan(&superseded))
 				if change == "unused account" {

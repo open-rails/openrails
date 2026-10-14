@@ -9,9 +9,6 @@ changes them against that revision where Vault holds the configuration
 configuration is a file declares the same fields, flat on the merchant, in its
 YAML.
 
-The configuration also says whether the merchant is a sandbox (`sandbox`),
-whose PSPs move no money; a change is refused while a PSP the merchant serves
-would disagree with it ([PSP environments](../psp-environments.md)).
 
 The settings hold the profile, usage billing and arrears policy, PSP routing, the
 dunning policy, named billing policies, default/tier bindings and delegated

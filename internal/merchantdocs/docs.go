@@ -22,8 +22,6 @@ import (
 // itself.
 type Merchant struct {
 	DisplayName string `json:"display_name,omitempty"`
-	// Sandbox makes the merchant a sandbox: its PSPs move no money.
-	Sandbox bool `json:"sandbox,omitempty"`
 	// MerchantSettings are the merchant's settings, beside display_name.
 	billing.MerchantSettings
 	AlertWebhooks []AlertWebhook  `json:"alert_webhooks,omitempty"`

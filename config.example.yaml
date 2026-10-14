@@ -164,7 +164,7 @@ rate_limits:
 
 # EXTRA CCBill webhook source CIDRs, on top of CCBill's own documented ranges.
 # CCBill signs nothing, so this list is authentication: entries are honored only
-# for a webhook naming a sandbox merchant's CCBill account. `/0` is refused. Empty
+# for a webhook naming a sandbox CCBill account. `/0` is refused. Empty
 # (default) accepts CCBill's ranges alone.
 # ccbill_webhook_ip_allowlist:
 #   - 127.0.0.1/32

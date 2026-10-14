@@ -40,7 +40,7 @@ func TestSecondPublicationOfAGatewayAccountStaysDisarmed(t *testing.T) {
 	// tokens, which reads GET /v1/me/config.
 	publish := func(account string) string {
 		slug := "seller-" + uuid.NewString()[:8]
-		m, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Sandbox: true, Slug: slug})
+		m, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug})
 		require.NoError(t, err)
 		_, err = handle(t, srv, m.MerchantID).CreatePSP(ctx, billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, Environment: "sandbox", PSPAccount: billing.PSPAccount{GatewayID: account},
 			TokenizationKey: "e2e-tokenization",

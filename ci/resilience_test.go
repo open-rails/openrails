@@ -92,7 +92,7 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) (*openrails.En
 		t.Cleanup(b.chain.Close)
 	}
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: b.chain.URL()}
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{b.slug: {Sandbox: true, DisplayName: b.slug, PSPs: psps}}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{b.slug: {DisplayName: b.slug, PSPs: psps}}
 	cfg = ownIssuer(cfg)
 	start := time.Now()
 	rt, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Redis: rdb, StripeTransport: historylessStripe{b.stripe}, NMITransport: b.nmi})

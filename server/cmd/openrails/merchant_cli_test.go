@@ -14,7 +14,6 @@ func TestToolsReadTheServerManifest(t *testing.T) {
 merchants:
   onlydemo:
     display_name: OnlyDemo
-    sandbox: true
     remote_application:
       issuer: https://app.example
       jwks_uri: https://app.example/.well-known/jwks.json

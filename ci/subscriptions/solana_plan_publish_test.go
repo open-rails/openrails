@@ -64,7 +64,7 @@ products:
 		cfg := &config.Config{ProviderWriteMode: mode, DB: &config.DBConfig{URL: w.dsn}, Database: config.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}}
 		w.cfg(cfg)
 		return hosttools.ApplyMerchantCatalog(ctx, hosttools.CatalogApplyOptions{Config: cfg, PGXPool: w.pool, Merchant: w.slug, Manifest: raw,
-			MerchantManifest: &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{w.slug: {Sandbox: true, DisplayName: w.slug, PSPs: w.psps}}}})
+			MerchantManifest: &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps}}}})
 	}
 	monthly := func() *billing.Price {
 		price, err := priceByKey(ctx, w.client[remote], product, "monthly")

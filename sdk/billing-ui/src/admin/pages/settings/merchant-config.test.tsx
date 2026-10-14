@@ -55,7 +55,6 @@ const configuration = (
 ): MerchantConfigurationState => ({
   revision,
   display_name: displayName,
-  sandbox: false,
   profile: { from_email: "billing@acme.test" },
   alert_email: "ops@acme.test",
   reprice_notice_window_days: 14,

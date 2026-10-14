@@ -9,11 +9,11 @@ import (
 
 func TestValidateMerchantDeclaration(t *testing.T) {
 	stripe := func(environment, key string) config.MerchantDeclaration {
-		return config.MerchantDeclaration{Sandbox: environment != "live", PSPs: map[string]config.PSPConfig{"main": {Rail: "Stripe", Environment: environment, AccountID: "acct_1", Settings: map[string]any{"publishable_key": key}}}}
+		return config.MerchantDeclaration{PSPs: map[string]config.PSPConfig{"main": {Rail: "Stripe", Environment: environment, AccountID: "acct_1", Settings: map[string]any{"publishable_key": key}}}}
 	}
 	cfg := &config.Config{}
 	ccbill := func(secrets map[string]string) config.MerchantDeclaration {
-		return config.MerchantDeclaration{Sandbox: true, PSPs: map[string]config.PSPConfig{"main": {Rail: "ccbill", Environment: "sandbox", AccountID: "999999-0000", Secrets: secrets}}}
+		return config.MerchantDeclaration{PSPs: map[string]config.PSPConfig{"main": {Rail: "ccbill", Environment: "sandbox", AccountID: "999999-0000", Secrets: secrets}}}
 	}
 	for _, tc := range []struct {
 		name string
@@ -27,13 +27,12 @@ func TestValidateMerchantDeclaration(t *testing.T) {
 		{"live test key", cfg, stripe("live", "pk_test_abc"), false},
 		{"bare prefix", cfg, stripe("test", "pk_test_"), false},
 		{"secret key as publishable", cfg, stripe("test", "sk_test_abc"), false},
-		{"non-string key", cfg, config.MerchantDeclaration{Sandbox: true, PSPs: map[string]config.PSPConfig{"main": {Rail: "stripe", Environment: "test", Settings: map[string]any{"publishable_key": 1}}}}, false},
+		{"non-string key", cfg, config.MerchantDeclaration{PSPs: map[string]config.PSPConfig{"main": {Rail: "stripe", Environment: "test", Settings: map[string]any{"publishable_key": 1}}}}, false},
 		{"ccbill with salt", cfg, ccbill(map[string]string{"salt": "s", "datalink_username": "u", "datalink_password": "p"}), true},
 		{"ccbill credentials without salt", cfg, ccbill(map[string]string{"datalink_username": "u", "datalink_password": "p"}), false},
 		{"ccbill blank salt", cfg, ccbill(map[string]string{"salt": " "}), false},
 		{"ccbill identity only", cfg, ccbill(nil), true},
-		{"real money on a sandbox merchant", cfg, config.MerchantDeclaration{Sandbox: true, PSPs: map[string]config.PSPConfig{"main": {Rail: "stripe", AccountID: "acct_1"}}}, false},
-		{"test money on a live merchant", cfg, config.MerchantDeclaration{PSPs: map[string]config.PSPConfig{"main": {Rail: "stripe", Environment: "test", AccountID: "acct_1"}}}, false},
+		{"live and test PSPs mix", cfg, config.MerchantDeclaration{PSPs: map[string]config.PSPConfig{"main": {Rail: "stripe", AccountID: "acct_1"}, "lab": {Rail: "nmi", Environment: "test", AccountID: "1"}}}, true},
 		{"vault-held configuration seeds from the declaration", &config.Config{Vault: &config.VaultConfig{KVMount: "kv"}}, stripe("test", "pk_test_abc"), true},
 	} {
 		err := ValidateMerchantDeclaration(tc.cfg, tc.mt)

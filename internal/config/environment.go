@@ -32,7 +32,7 @@ const (
 
 // A money class is what a PSP's environment means for money: live, or test
 // for every environment that moves none. A PSP's identity and its custodians
-// use it; a sandbox merchant's PSPs are test, a live merchant's live.
+// use it. A merchant's PSPs mix classes freely.
 const (
 	ClassLive = "live"
 	ClassTest = "test"
@@ -65,21 +65,6 @@ func ResolvePSPEnvironment(psp, rail, environment string) (string, error) {
 		return "", fmt.Errorf("psps.%s.environment: %s has no %q environment (%s)", psp, rail, environment, strings.Join(accepted, ", "))
 	}
 	return environment, nil
-}
-
-// ValidatePSPMoneyClass refuses a PSP whose environment disagrees with its
-// merchant: a sandbox merchant's PSPs move no money, a live merchant's move
-// real money. A merchant's sandbox is its own merchant.
-func ValidatePSPMoneyClass(psp, rail, environment string, sandbox bool) error {
-	rail = strings.ToLower(strings.TrimSpace(rail))
-	live := LiveEnvironment(rail, environment)
-	switch {
-	case sandbox && live:
-		return fmt.Errorf("psps.%s.environment: %s moves real money, and the merchant is a sandbox (sandbox: true); its PSPs take %s", psp, environment, strings.Join(rails.Environments(models.Rail(rail))[1:], " or "))
-	case !sandbox && !live:
-		return fmt.Errorf("psps.%s.environment: %s moves no money, and the merchant is live; a sandbox is its own merchant, declared sandbox: true", psp, environment)
-	}
-	return nil
 }
 
 // FakeProviders names what cfg wires that no live PSP may sit beside:

@@ -1224,7 +1224,6 @@ export type MatrixCell = {
 export type MerchantConfigurationState = {
   revision: number
   display_name: string
-  sandbox: boolean
   profile?: MerchantProfile
   collection_threshold?: string
   monthly_floor?: string
@@ -2366,7 +2365,6 @@ export type UpdateCustomerParams = {
 export type UpdateMerchantConfigurationParams = {
   expected_revision?: number | null
   display_name?: string
-  sandbox?: boolean
   profile?: MerchantProfile
   collection_threshold?: string
   monthly_floor?: string

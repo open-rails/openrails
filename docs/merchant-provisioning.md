@@ -123,9 +123,7 @@ group in AuthKit before treating it as the idempotent repair, and a
 display name applies only to a merchant the call creates. Rate limits on
 registration are the product's. Ownerless `ProvisionMerchant` and Bootstrap
 are operator acts and stay ungated — that is how a platform merchant claims a
-reserved name. `Sandbox: true` creates a sandbox merchant (`acme-sandbox`),
-whose PSPs move no money, beside the live one. OpenRails serves no route that
-creates a merchant.
+reserved name. OpenRails serves no route that creates a merchant.
 
 `FreeAllowance` selects the standard hosted admission policy, composed from
 OpenRails' own state: verified email always; a free allowance of owned
@@ -216,12 +214,12 @@ Per merchant:
   `environment` (one of the rail's, its real-money one when omitted; see
   [PSP environments](psp-environments.md)), the rail's account fields (below),
   `archived`, the rail's own fields (`custodian`, `tokenization_key`, …) and
-  `secrets`. A field the rail does not take is refused. A live merchant's PSPs
-  move real money, a sandbox merchant's (`sandbox: true`) none; the money
-  class is part of the PSP's identity, so re-declaring a test PSP sandbox
-  keeps it.
+  `secrets`. A field the rail does not take is refused. A merchant mixes live
+  and test PSPs freely; the money class is part of the PSP's identity, so
+  re-declaring a test PSP sandbox keeps it.
 - `custodians.<key>` — one entry per card custodian a PSP references. Fields:
-  `kind` (`basis_theory`), `account_id`, `archived`, the kind's own fields
+  `kind` (`basis_theory`), `environment` (`live` or `test`, live when
+  omitted), `account_id`, `archived`, the kind's own fields
   (`public_api_key`, `network_tokens`), `secrets`.
 - `secrets.scim_token` — a provisioning token (at least 32 characters) the
   merchant's directory presents to an embedded engine's SCIM routes

@@ -72,8 +72,7 @@ merchants:
 
 Store real secret values in Vault (or the encrypted DB store) and overlay them;
 never commit them. Every PSP declares its `environment`
-([PSP environments](../psp-environments.md)), which agrees with its merchant:
-live, or a sandbox (`sandbox: true`).
+([PSP environments](../psp-environments.md)).
 
 ### Card entry: browser or server
 

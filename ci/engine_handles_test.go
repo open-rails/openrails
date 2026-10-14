@@ -47,7 +47,7 @@ func TestEngineMerchantHandles(t *testing.T) {
 	theirs, err := provisioner.MerchantBySlug(slug + "-b")
 	require.NoError(t, err)
 	second := theirs.MerchantID()
-	v.Put(t, "openrails/merchants/"+second.UUID().String()+"/merchant", merchantdocs.Merchant{DisplayName: "B", Sandbox: true})
+	v.Put(t, "openrails/merchants/"+second.UUID().String()+"/merchant", merchantdocs.Merchant{DisplayName: "B"})
 	require.NoError(t, provisioner.Close(ctx))
 
 	shop, err := bill.MerchantBySlug(" " + slug + " ")

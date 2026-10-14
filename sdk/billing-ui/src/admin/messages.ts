@@ -503,9 +503,6 @@ export const billingAdminMessages = {
   "Gateway ID": "Gateway ID",
   "Client account number": "Client account number",
   "Client subaccount": "Client subaccount",
-  Money: "Money",
-  "Sandbox: its PSPs move no money": "Sandbox: its PSPs move no money",
-  "Live: its PSPs move real money": "Live: its PSPs move real money",
   "Pick a stored payment method": "Pick a stored payment method",
   "Pinned to an archived (prior) version":
     "Pinned to an archived (prior) version",

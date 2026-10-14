@@ -58,7 +58,7 @@ func TestCustomerOrderWithEmbeddedPayment(t *testing.T) {
 	cfg.PublicBillingBaseURL = "https://api.e2e.test"
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
 	cfg.RateLimitsDisabled = true
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{"shared-pay": {Sandbox: true,
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"shared-pay": {
 		DisplayName:      "Shared pay",
 		MerchantSettings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: origins}},
 		PSPs:             map[string]openrails.PSPConfig{"nmi": nmiPSP()},
@@ -319,7 +319,7 @@ func TestCustomerPayURLRedirectReturnsToItsPage(t *testing.T) {
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	cfg.RateLimitsDisabled = true
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{"redirect-" + uuid.NewString()[:8]: {Sandbox: true,
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"redirect-" + uuid.NewString()[:8]: {
 		DisplayName:      "Redirect shop",
 		MerchantSettings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
 		PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", Environment: "test", AccountID: "acct_e2e",
@@ -388,7 +388,7 @@ func TestCustomerPayURLNeedsItsHostAndOrigins(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
-	cfg.Merchants = map[string]openrails.MerchantDeclaration{"no-origins": {Sandbox: true, DisplayName: "No origins", PSPs: map[string]openrails.PSPConfig{"nmi": nmiPSP()}}}
+	cfg.Merchants = map[string]openrails.MerchantDeclaration{"no-origins": {DisplayName: "No origins", PSPs: map[string]openrails.PSPConfig{"nmi": nmiPSP()}}}
 	bill, shop := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	auth := &authtest.Fake{}
 	app := http.NewServeMux()

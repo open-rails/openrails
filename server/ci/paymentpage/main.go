@@ -107,7 +107,7 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 			// Cloudflare's always-passes test keys: the page loads the widget,
 			// which the browser suite stands in for.
 			Captcha: &openrails.CaptchaConfig{Provider: "turnstile", SiteKey: "1x00000000000000000000AA", SecretKey: "1x0000000000000000000000000000000AA"},
-			Merchants: map[string]openrails.MerchantDeclaration{"shop": {Sandbox: true, DisplayName: "Purchase Shop", // The shop's own site, the API origin, frames its embedded payment pages.
+			Merchants: map[string]openrails.MerchantDeclaration{"shop": {DisplayName: "Purchase Shop", // The shop's own site, the API origin, frames its embedded payment pages.
 				MerchantSettings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{api}}}, PSPs: map[string]openrails.PSPConfig{
 					"nmi":    openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "e2e", SecurityKey: "e2e", WebhookSigningSecret: "e2e", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
 					"stripe": openrails.StripePSP{Environment: openrails.EnvironmentTest, AccountID: "acct_e2e", SecretKey: "sk_test_acct_e2e", WebhookSigningSecret: "whsec_e2e", PublishableKey: "pk_test_e2e"}.PSPConfig(),

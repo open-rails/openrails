@@ -11,9 +11,6 @@ import (
 type UpdateMerchantConfigurationParams struct {
 	ExpectedRevision *int64  `json:"expected_revision"`
 	DisplayName      *string `json:"display_name,omitempty"`
-	// Sandbox makes the merchant a sandbox, or live; refused while a PSP it
-	// serves would disagree.
-	Sandbox *bool `json:"sandbox,omitempty"`
 	// MerchantSettings are the settings to merge, beside display_name; nil
 	// keeps them all.
 	*MerchantSettings
@@ -49,8 +46,6 @@ func (p UpdateMerchantConfigurationParams) MarshalJSON() ([]byte, error) {
 type MerchantConfigurationState struct {
 	Revision    int64  `json:"revision"`
 	DisplayName string `json:"display_name"`
-	// Sandbox is whether the merchant is a sandbox: its PSPs move no money.
-	Sandbox bool `json:"sandbox"`
 	MerchantSettings
 	// PlatformVault is whether card_vault platform can be chosen.
 	PlatformVault PlatformVaultState `json:"platform_vault"`

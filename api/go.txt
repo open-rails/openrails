@@ -348,6 +348,7 @@ pkg openrails, type CustodianConfig = config.CustodianConfig
 pkg openrails, type CustodianConfig struct
 pkg openrails, type CustodianConfig struct, AccountID string `yaml:"account_id,omitempty"`
 pkg openrails, type CustodianConfig struct, Archived bool `yaml:"archived,omitempty"`
+pkg openrails, type CustodianConfig struct, Environment string `yaml:"environment,omitempty"`
 pkg openrails, type CustodianConfig struct, Kind string `yaml:"kind"`
 pkg openrails, type CustodianConfig struct, Secrets map[string]string `yaml:"secrets,omitempty"`
 pkg openrails, type CustodianConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
@@ -421,7 +422,6 @@ pkg openrails, type MerchantDeclaration struct, Custodians config.Custodians `ya
 pkg openrails, type MerchantDeclaration struct, DisplayName string `yaml:"display_name"`
 pkg openrails, type MerchantDeclaration struct, Issuer string `yaml:"-"`
 pkg openrails, type MerchantDeclaration struct, PSPs config.PSPs `yaml:"psps,omitempty"`
-pkg openrails, type MerchantDeclaration struct, Sandbox bool `yaml:"sandbox,omitempty"`
 pkg openrails, type MerchantDeclaration struct, Secrets config.MerchantSecrets `yaml:"secrets,omitempty"`
 pkg openrails, type MerchantDeclaration struct, Slug string `yaml:"-"`
 pkg openrails, type MerchantDeclaration struct, embedded billing.MerchantSettings
@@ -2248,7 +2248,6 @@ pkg openrails/billing, type MerchantConfigurationState struct
 pkg openrails/billing, type MerchantConfigurationState struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type MerchantConfigurationState struct, PlatformVault PlatformVaultState `json:"platform_vault"`
 pkg openrails/billing, type MerchantConfigurationState struct, Revision int64 `json:"revision"`
-pkg openrails/billing, type MerchantConfigurationState struct, Sandbox bool `json:"sandbox"`
 pkg openrails/billing, type MerchantConfigurationState struct, embedded MerchantSettings
 pkg openrails/billing, type MerchantID [16]byte
 pkg openrails/billing, type MerchantListParams struct
@@ -3065,7 +3064,6 @@ pkg openrails/billing, type ProposalSource string
 pkg openrails/billing, type ProvisionMerchantParams struct
 pkg openrails/billing, type ProvisionMerchantParams struct, DisplayName string
 pkg openrails/billing, type ProvisionMerchantParams struct, OwnerUserID string
-pkg openrails/billing, type ProvisionMerchantParams struct, Sandbox bool
 pkg openrails/billing, type ProvisionMerchantParams struct, Slug string
 pkg openrails/billing, type ProvisionMerchantResult struct
 pkg openrails/billing, type ProvisionMerchantResult struct, Created bool
@@ -3372,7 +3370,6 @@ pkg openrails/billing, type UpdateCustomerParams struct, TrustLevels []TrustLeve
 pkg openrails/billing, type UpdateMerchantConfigurationParams struct
 pkg openrails/billing, type UpdateMerchantConfigurationParams struct, DisplayName *string `json:"display_name,omitempty"`
 pkg openrails/billing, type UpdateMerchantConfigurationParams struct, ExpectedRevision *int64 `json:"expected_revision"`
-pkg openrails/billing, type UpdateMerchantConfigurationParams struct, Sandbox *bool `json:"sandbox,omitempty"`
 pkg openrails/billing, type UpdateMerchantConfigurationParams struct, embedded *MerchantSettings
 pkg openrails/billing, type UpdatePSPParams struct
 pkg openrails/billing, type UpdatePSPParams struct, AllowLast bool `json:"allow_last"`

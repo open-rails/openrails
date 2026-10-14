@@ -27,21 +27,16 @@ and subscriptions, its stored environment is corrected, and its posture is
 verified again before it is used. Real money and non-live are different PSPs;
 a key cannot move between them.
 
-A merchant is live, the default, or a sandbox:
-
-```yaml
-merchants:
-  acme-sandbox:
-    sandbox: true      # its PSPs move no money
-```
-
-A live merchant's PSPs move real money; a sandbox merchant's move none. A PSP
-that disagrees with its merchant is refused alone, with why, and the rest of
-the merchant serves; one deployment serves live and sandbox merchants side by
-side. A merchant's sandbox is another merchant: there is no test mode inside a
-merchant. `provider_write_mode` stays deployment-wide. Fake providers
+Each PSP picks its own environment, and a merchant mixes them freely: a
+Solana PSP on mainnet beside an NMI PSP in test mode is one merchant. To stop a
+merchant writing to its providers, lower its write posture (`readonly` or
+`limited`); `provider_write_mode` caps the deployment. Fake providers
 (`provider_sandbox` gateways, an http HyperSwitch fixture, the `Deps` test
 seams) are refused beside a real-money PSP.
+
+A custodian declares its money class the same way, `environment: live | test`
+(live when omitted). The platform card vault takes its charge PSPs' class, so
+they must share one.
 
 ## When it is verified
 

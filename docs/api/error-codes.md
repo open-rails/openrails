@@ -125,6 +125,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_option_unavailable` | 422 | `invalid_request_error` | No PSP that can take the order's lines accepts this payment. |
 | `payment_provider_rejected` | 502 | `api_error` | The provider refused to process the charge for a gateway or account reason. |
 | `permission_required` | 403 | `authorization_error` | The credential lacks the permission the route requires. |
+| `platform_vault_mixed_class` | 409 | `invalid_request_error` | The platform vault's charge PSPs mix live and test; one platform identity holds one money class. |
 | `platform_vault_unavailable` | 409 | `invalid_request_error` | The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; save cards at a PSP's vault. |
 | `platform_vault_unreachable` | 409 | `invalid_request_error` | A charge PSP cannot charge cards from the platform vault (Stripe, or card_entry server); leave it out of charge_psps or save cards at a PSP's vault. |
 | `price_change_currency_mismatch` | 422 | `invalid_request_error` | The target price must be in the subscription's currency. |
@@ -146,7 +147,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `provider_writes_held` | 409 | `invalid_request_error` | The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open. |
 | `psp_claim_requires_proof` | 403 | `authorization_error` | Claiming a provider account needs credentials that prove control of it. |
 | `psp_credentials_rejected` | 400 | `invalid_request_error` | The provider rejected the credentials, or answered that they are not in the PSP's declared environment. |
-| `psp_environment_mixed` | 409 | `invalid_request_error` | The PSP's environment disagrees with its merchant: a sandbox merchant's PSPs move no money, a live merchant's real money. |
+| `psp_environment_refused` | 409 | `invalid_request_error` | A live PSP is refused where the deployment wires fake providers. |
 | `psp_exists` | 409 | `invalid_request_error` | The account is already a PSP, of this merchant or another; update it instead. |
 | `psp_key_taken` | 409 | `invalid_request_error` | Another live PSP holds the key. |
 | `psp_last_active` | 409 | `invalid_request_error` | The PSP is the last active one on its rail; pass allow_last to archive it. |

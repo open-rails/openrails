@@ -44,7 +44,6 @@ func TestStandaloneBootNeverWaitsOnVaultAndKeyChangeKeepsTheTreasury(t *testing.
 merchants:
   `+slug+`:
     display_name: Standalone
-    sandbox: true
     psps:
       solana:
         rail: solana
