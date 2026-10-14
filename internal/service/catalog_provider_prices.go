@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -308,11 +309,18 @@ func (s *Service) writeProviderPrice(ctx context.Context, product *models.Produc
 			return version, false, nil
 		}
 	}
+	released, err := s.providerObjectHolders(ctx, product.Key, p, chain, id)
+	if err != nil {
+		return nil, false, err
+	}
 	for _, version := range chain {
 		if version.ID != id && len(version.PSPLinks) > 0 {
-			if err := prices.UpdatePSPLinks(ctx, version.ID, nil); err != nil {
-				return nil, false, err
-			}
+			released = append(released, version.ID)
+		}
+	}
+	for _, holder := range released {
+		if err := prices.UpdatePSPLinks(ctx, holder, nil); err != nil {
+			return nil, false, err
 		}
 	}
 	price, err := s.writeCatalogPrice(ctx, priceWrite{req: p.request, product: product, id: id, links: links, providerOwned: true, providerPSPID: &pspID, providerSnapshot: func() map[string]string {
@@ -330,6 +338,41 @@ func (s *Service) writeProviderPrice(ctx context.Context, product *models.Produc
 	}
 	price, err = prices.GetByID(ctx, price.ID)
 	return price, true, err
+}
+
+// providerObjectHolders are the prices outside the key's chain still bound to
+// its provider object: archived or deleted ones (an earlier key, a migrated
+// split) give it up. A live one under another key is refused: one provider
+// object has one mirror.
+func (s *Service) providerObjectHolders(ctx context.Context, productKey string, p *providerPrice, chain []*models.Price, id uuid.UUID) ([]uuid.UUID, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	refs := providerRefs(p.link)
+	ref := func(k string) *string {
+		if v := refs[k]; v != "" {
+			return &v
+		}
+		return nil
+	}
+	holders, err := s.catalogDatabase().Gen(ctx).ListProviderObjectHolders(ctx, gen.ListProviderObjectHoldersParams{MerchantID: mid.UUID(), PspID: p.account.ID,
+		PlanID: ref(models.RailKeyPlanID), PriceRef: ref(models.RailKeyStripePriceID), RecurringBillingOptionID: ref(models.RailKeyCCBillRecurringBillingOption)})
+	if err != nil {
+		return nil, err
+	}
+	var released []uuid.UUID
+	for _, h := range holders {
+		if h.ID == id || slices.ContainsFunc(chain, func(v *models.Price) bool { return v.ID == h.ID }) {
+			continue
+		}
+		if !h.Archived && !h.Deleted {
+			return nil, fmt.Errorf("provider price %q of product %q: %s is already mirrored by live provider price %q of product %q; declare it under that key, or archive that key first: %w",
+				p.key, productKey, providerObject(p.account.Key, p.link), h.Key, h.ProductKey, ErrCatalogConflict.WithParam(fmt.Sprintf("products.%s.provider_prices.%s", productKey, p.key)))
+		}
+		released = append(released, h.ID)
+	}
+	return released, nil
 }
 
 // CreateProviderPrice links a price a provider owns and runs to a product:

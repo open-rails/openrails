@@ -125,6 +125,66 @@ func (q *Queries) ListPricePSPBindings(ctx context.Context, arg ListPricePSPBind
 	return items, nil
 }
 
+const listProviderObjectHolders = `-- name: ListProviderObjectHolders :many
+SELECT price.id, price.key, prod.key AS product_key, price.archived, (price.deleted_at IS NOT NULL)::boolean AS deleted
+FROM billing.price_psp_bindings b
+JOIN billing.prices price ON price.merchant_id = b.merchant_id AND price.id = b.price_id
+JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id
+WHERE b.merchant_id = $1::uuid AND b.psp_id = $2::uuid AND b.plan_pda IS NULL
+  AND (b.plan_id = $3::text OR b.price_ref = $4::text
+       OR b.recurring_billing_option_id = $5::text)
+ORDER BY price.created_at, price.id
+`
+
+type ListProviderObjectHoldersParams struct {
+	MerchantID               uuid.UUID
+	PspID                    uuid.UUID
+	PlanID                   *string
+	PriceRef                 *string
+	RecurringBillingOptionID *string
+}
+
+type ListProviderObjectHoldersRow struct {
+	ID         uuid.UUID
+	Key        string
+	ProductKey string
+	Archived   bool
+	Deleted    bool
+}
+
+// The prices, deleted ones included, bound to one provider object of a PSP.
+func (q *Queries) ListProviderObjectHolders(ctx context.Context, arg ListProviderObjectHoldersParams) ([]ListProviderObjectHoldersRow, error) {
+	rows, err := q.db.Query(ctx, listProviderObjectHolders,
+		arg.MerchantID,
+		arg.PspID,
+		arg.PlanID,
+		arg.PriceRef,
+		arg.RecurringBillingOptionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProviderObjectHoldersRow
+	for rows.Next() {
+		var i ListProviderObjectHoldersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Key,
+			&i.ProductKey,
+			&i.Archived,
+			&i.Deleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockPriceForBindingUpdate = `-- name: LockPriceForBindingUpdate :one
 SELECT id FROM billing.prices
 WHERE merchant_id = $1::uuid AND id = $2::uuid
