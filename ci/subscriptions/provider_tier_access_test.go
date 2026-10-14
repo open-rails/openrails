@@ -33,8 +33,9 @@ func TestProviderTierChangeRetainsAcceptedAccessChoice(t *testing.T) {
 		for _, action := range []string{"upgrade", "downgrade"} {
 			for i, row := range rows {
 				t.Run(rail+"/"+action+"/"+row.name, func(t *testing.T) {
-					w := newWorld(t)
+					w := prepareWorld(t, 12)
 					w.riverWorkers = 1
+					w.start()
 					w.armDestructive()
 					tp := []topology{embedded, remote}[i%2]
 					group := "provider-access-" + uuid.NewString()[:8]
