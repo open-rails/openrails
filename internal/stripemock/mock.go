@@ -69,6 +69,7 @@ type Mock struct {
 	refunds         map[string]Object
 	refundOrder     []string
 	subs            map[string]Object
+	schedules       map[string]Object
 	invoices        map[string]Object
 	sessions        map[string]Object
 	sessionOrder    []string
@@ -106,7 +107,7 @@ func NewUnstarted(opts Options) *Mock {
 		opts.Clock = time.Now
 	}
 	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{},
-		intents: map[string]Object{}, charges: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
+		intents: map[string]Object{}, charges: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
 		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{}}
 }
 
@@ -370,11 +371,7 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 		return 404, stripeErr("resource_missing")
 	case r.Method == http.MethodGet && seg[0] == "prices" && len(seg) == 2 && strings.HasPrefix(seg[1], "price_legacy_"):
 		// A legacy monthly price: 9.99 unless SetLegacyPrice set it.
-		amount, ok := m.amounts[seg[1]]
-		if !ok {
-			amount = 999
-		}
-		return 200, Object{"object": "price", "id": seg[1], "product": "prod_legacy", "unit_amount": amount, "currency": "usd", "active": true, "livemode": false,
+		return 200, Object{"object": "price", "id": seg[1], "product": "prod_legacy", "unit_amount": m.legacyAmountLocked(seg[1]), "currency": "usd", "active": true, "livemode": false,
 			"type": "recurring", "recurring": Object{"interval": "month", "interval_count": 1}, "metadata": map[string]string{}}
 	case r.Method == http.MethodGet && seg[0] == "payment_methods" && len(seg) == 2:
 		if pm, ok := m.methods[seg[1]]; ok {
@@ -450,13 +447,32 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 		}
 		switch r.Method {
 		case http.MethodPost:
+			if form.Has("items[0][price]") {
+				if status, out := m.changeItemLocked(s, form); status != 0 {
+					return status, out
+				}
+			}
 			if v := form.Get("cancel_at_period_end"); v != "" {
 				s["cancel_at_period_end"] = v == "true"
+			}
+			if md := metadataOf(form); len(md) > 0 {
+				merged, _ := s["metadata"].(map[string]string)
+				if merged == nil {
+					merged = map[string]string{}
+				}
+				for k, v := range md {
+					merged[k] = v
+				}
+				s["metadata"] = merged
 			}
 		case http.MethodDelete:
 			s["status"], s["canceled_at"] = "canceled", m.now().Unix()
 		}
 		return 200, s
+	case r.Method == http.MethodPost && p == "/v1/subscription_schedules":
+		return m.createScheduleLocked(form)
+	case seg[0] == "subscription_schedules" && len(seg) == 2:
+		return m.scheduleLocked(r.Method, seg[1], form)
 	case r.Method == http.MethodPost && p == "/v1/billing_portal/sessions":
 		if _, ok := m.customers[form.Get("customer")]; !ok {
 			return 400, stripeErr("resource_missing")

@@ -204,6 +204,9 @@ func (m *Mock) RenewSubscription(sub string, paid bool) Object {
 	item := s["items"].(Object)["data"].([]Object)[0]
 	start, end := item["current_period_end"].(int64), item["current_period_end"].(int64)+monthHours*3600
 	item["current_period_start"], item["current_period_end"] = start, end
+	if price, ok := m.schedulePriceLocked(s, start); ok {
+		item["price"] = Object{"id": price, "unit_amount": m.legacyAmountLocked(price), "currency": "usd"}
+	}
 	amount := item["price"].(Object)["unit_amount"].(int64)
 	s["status"] = "active"
 	if !paid {

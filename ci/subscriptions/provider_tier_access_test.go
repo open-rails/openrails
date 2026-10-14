@@ -60,6 +60,11 @@ func TestProviderTierChangeRetainsAcceptedAccessChoice(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, "succeeded", done.Status)
 					w.settle()
+					if rail == "stripe" && action == "upgrade" {
+						// Stripe reports the proration invoice it charged.
+						require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("invoice.paid", w.stripe.Subscription(member.railSub)["latest_invoice"].(obj))))
+						w.settle()
+					}
 					var accepted string
 					require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT payload::text FROM billing.provider_intents WHERE subscription_id=$1 AND intent_type IN ('nmi_upgrade','stripe_tier_change') ORDER BY created_at DESC LIMIT 1`), member.sub.UUID()).Scan(&accepted))
 					var frozen map[string]json.RawMessage
@@ -93,7 +98,7 @@ func TestProviderTierChangeRetainsAcceptedAccessChoice(t *testing.T) {
 						require.Nil(t, hours)
 					}
 					var gotEnd *time.Time
-					require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT ends_at FROM billing.grants WHERE source_type='subscription' AND source_id=$1 AND product_id=$2 AND event='grant' AND supersedes_id IS NULL ORDER BY starts_at DESC,created_at DESC LIMIT 1`), member.sub.String(), target.ProductID.UUID()).Scan(&gotEnd))
+					require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT ends_at FROM billing.grants WHERE source_type='subscription' AND source_id=$1 AND product_id=$2 AND event='grant' AND supersedes_id IS NULL ORDER BY starts_at DESC,created_at DESC LIMIT 1`), member.sub.UUID().String(), target.ProductID.UUID()).Scan(&gotEnd))
 					if wantEnd == nil {
 						require.Nil(t, gotEnd, "explicit null remains indefinite")
 					} else {
@@ -105,13 +110,13 @@ func TestProviderTierChangeRetainsAcceptedAccessChoice(t *testing.T) {
 						require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT provider_access_default FROM billing.order_lines WHERE subscription_id=$1 AND price_id=$2 ORDER BY created_at LIMIT 1`), member.sub.UUID(), w.priceStorageID(target.ID)).Scan(&billDefault))
 						require.Equal(t, defaultAccess, billDefault, "accepted adjustment/schedule retains its access choice")
 					}
-					grants := w.countRows(`SELECT count(*) FROM billing.grants WHERE source_id=$1`, member.sub.String())
+					grants := w.countRows(`SELECT count(*) FROM billing.grants WHERE source_id=$1`, member.sub.UUID().String())
 					paid := len(completed(w.payments(tp, member.c.id)))
 					again, err := member.c.change(member.sub, params)
 					require.NoError(t, err)
 					require.Equal(t, "succeeded", again.Status)
 					w.settle()
-					require.Equal(t, grants, w.countRows(`SELECT count(*) FROM billing.grants WHERE source_id=$1`, member.sub.String()), "replay adds no access grant")
+					require.Equal(t, grants, w.countRows(`SELECT count(*) FROM billing.grants WHERE source_id=$1`, member.sub.UUID().String()), "replay adds no access grant")
 					require.Len(t, completed(w.payments(tp, member.c.id)), paid, "replay adds no payment")
 					var replayed string
 					require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT payload::text FROM billing.provider_intents WHERE subscription_id=$1 AND intent_type IN ('nmi_upgrade','stripe_tier_change') ORDER BY created_at DESC LIMIT 1`), member.sub.UUID()).Scan(&replayed))

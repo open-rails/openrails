@@ -293,7 +293,9 @@ func TestCalendarProviderPriceRetainsOldIdentityAndAccessChoice(t *testing.T) {
 	require.Equal(t, new(1), original.BillingIntervalMonths)
 	require.True(t, original.Provider.AccessDurationDefault)
 	now := w.clock.Now()
-	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	// Both access windows are still open now; day <= 28 keeps one calendar month.
+	base := now.Add(-day)
+	start := time.Date(base.Year(), base.Month(), min(base.Day(), 28), 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)
 	importAt := func(price *billing.Price) billing.SubscriptionID {
 		t.Helper()
@@ -329,7 +331,7 @@ func TestCalendarProviderPriceRetainsOldIdentityAndAccessChoice(t *testing.T) {
 	}{{firstSub, end, true}, {secondSub, start.Add(14 * 24 * time.Hour), false}} {
 		var gotEnd time.Time
 		var choice bool
-		require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT a.ends_at,s.provider_access_default_snapshot FROM billing.product_access a JOIN billing.subscriptions s ON s.merchant_id=a.merchant_id AND a.source_id=s.id::text WHERE s.id=$1 AND a.revoked_at IS NULL ORDER BY a.created_at DESC LIMIT 1`), expected.id.UUID()).Scan(&gotEnd, &choice))
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT a.ends_at,s.provider_access_default_snapshot FROM billing.product_access a JOIN billing.subscriptions s ON s.merchant_id=a.merchant_id AND a.source_id=s.id::text WHERE s.id=$1 AND a.source_type='subscription' AND a.revoked_at IS NULL ORDER BY a.created_at DESC LIMIT 1`), expected.id.UUID()).Scan(&gotEnd, &choice))
 		require.Equal(t, expected.accessEnd, gotEnd.UTC())
 		require.Equal(t, expected.defaultAccess, choice)
 	}

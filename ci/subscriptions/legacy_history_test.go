@@ -82,6 +82,11 @@ func (w *world) bills(customerID string) map[string]billRow {
 		var id string
 		var b billRow
 		require.NoError(w.t, rows.Scan(&id, &b.origin, &b.owner, &b.status, &b.kind, &b.source, &b.total, &b.paid, &b.unit, &b.periodStart, &b.periodEnd, &b.purchasedAt, &b.providerAmount, &b.price))
+		for _, at := range []**time.Time{&b.periodStart, &b.periodEnd, &b.purchasedAt} {
+			if *at != nil {
+				*at = new((*at).UTC())
+			}
+		}
 		require.NotContains(w.t, out, id, "one payment per provider transaction")
 		out[id] = b
 	}
