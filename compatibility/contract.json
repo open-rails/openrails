@@ -1529,7 +1529,7 @@
       "type Result struct {\n\tMerchantID string `json:\"merchant_id\"`\n\tDigest     string `json:\"digest\"`\n\tRows       int64  `json:\"rows\"`\n\tReplayed   bool   `json:\"replayed\"`\n}"
     ],
     "internal/merchantdocs": [
-      "func (c *Custodian) UnmarshalJSON(raw []byte) error {\n\tvar fields map[string]any\n\tif err := json.Unmarshal(raw, \u0026fields); err != nil {\n\t\treturn err\n\t}\n\td, err := config.DecodeCustodianDocument(fields, true)\n\tif err != nil {\n\t\treturn err\n\t}\n\t*c = Custodian(d)\n\treturn nil\n}",
+      "func (c *Custodian) UnmarshalJSON(raw []byte) error {\n\tvar fields map[string]any\n\tif err := json.Unmarshal(raw, \u0026fields); err != nil {\n\t\treturn err\n\t}\n\td, err := config.DecodeCustodianDocument(fields)\n\tif err != nil {\n\t\treturn err\n\t}\n\t*c = Custodian(d)\n\treturn nil\n}",
       "func (c Custodian) MarshalJSON() ([]byte, error) {\n\treturn json.Marshal(config.CustodianDocument(c).Fields())\n}",
       "func (p *PSP) UnmarshalJSON(raw []byte) error {\n\tvar fields map[string]any\n\tif err := json.Unmarshal(raw, \u0026fields); err != nil {\n\t\treturn err\n\t}\n\td, err := config.DecodePSPDocument(fields)\n\tif err != nil {\n\t\treturn err\n\t}\n\t*p = PSP(d)\n\treturn nil\n}",
       "func (p PSP) MarshalJSON() ([]byte, error) {\n\treturn json.Marshal(config.PSPDocument(p).Fields())\n}",

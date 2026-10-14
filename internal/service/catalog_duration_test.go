@@ -37,7 +37,7 @@ func TestCatalogAccessAndBillingAreIndependent(t *testing.T) {
 	require.ErrorContains(t, validateCatalogPriceTerms(billing.CreatePriceParams{Currency: "USD", TrialUnitAmount: int64Ptr(0), TrialDurationHours: intPtr(24)}), "billing_interval_hours")
 }
 
-func TestCatalogDurationUpdatePreservesOmittedAndClearsNull(t *testing.T) {
+func TestCatalogDurationUpdatePreservesOmittedAccess(t *testing.T) {
 	product := &billing.Product{ID: billing.ProductID(uuid.New()), Key: "product"}
 	current := billing.Price{ID: billing.PriceID("test:" + uuid.NewString() + ":v1"), ProductID: product.ID, Key: "price", Currency: "USD", UnitAmount: 10_000_000,
 		AccessDurationHours: intPtr(72), BillingIntervalHours: intPtr(720)}
@@ -49,7 +49,6 @@ func TestCatalogDurationUpdatePreservesOmittedAndClearsNull(t *testing.T) {
 		billing *int
 	}{
 		{"omitted", catalogwire.ApplyPrice{}, current.AccessDurationHours, current.BillingIntervalHours},
-		{"one-off forever", catalogwire.ApplyPrice{AccessDurationHours: catalogwire.Null[int](), BillingIntervalHours: catalogwire.Null[int]()}, nil, nil},
 		{"clear billing", catalogwire.ApplyPrice{BillingIntervalHours: catalogwire.Null[int]()}, current.AccessDurationHours, nil},
 		{"change billing", catalogwire.ApplyPrice{BillingIntervalHours: catalogwire.Value(24)}, current.AccessDurationHours, intPtr(24)},
 	} {
@@ -61,13 +60,13 @@ func TestCatalogDurationUpdatePreservesOmittedAndClearsNull(t *testing.T) {
 		})
 	}
 	_, _, err := catalogApplicationPriceRequest(product, "price", catalogwire.ApplyPrice{AccessDurationHours: catalogwire.Null[int]()}, byKey, nil)
-	require.ErrorContains(t, err, "access_duration forever is for a one-off price")
+	require.ErrorContains(t, err, "one-off", "a recurring price's access is never forever")
 	_, created, err := catalogApplicationPriceRequest(product, "new", catalogwire.ApplyPrice{Currency: catalogwire.Value("USD"), UnitAmount: catalogwire.Value[int64](10_000_000), AccessDurationHours: catalogwire.Value(72)}, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, intPtr(72), created.AccessDurationHours)
 	require.Nil(t, created.BillingIntervalHours, "a finite access window must not create recurring billing")
 	_, created, err = catalogApplicationPriceRequest(product, "new", catalogwire.ApplyPrice{Currency: catalogwire.Value("USD"), UnitAmount: catalogwire.Value[int64](10_000_000), BillingIntervalHours: catalogwire.Value(720)}, nil, nil)
 	require.NoError(t, err)
-	require.Equal(t, intPtr(720), created.AccessDurationHours, "omitted access follows the recurring billing interval")
+	require.Equal(t, intPtr(720), created.AccessDurationHours, "recurring access follows billing")
 	require.Equal(t, intPtr(720), created.BillingIntervalHours)
 }

@@ -183,6 +183,8 @@ merchants:
     custodians:
       bt:
         kind: basis_theory
+        # Its money class, matching the PSPs it serves: live (default) or test.
+        environment: test
         # The custodian-native tenant identity. Operator-declared: there is
         # no runtime whoami (#592).
         account_id: replace-with-bt-tenant-id
