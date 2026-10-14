@@ -289,14 +289,12 @@ ORDER BY g.created_at;
 -- derive.subscription.missing: subscriptions in an access-granting state with no
 -- subscription-sourced grant; derive-1 materializes the grant and its window
 -- (computed Go-side). A chargeback cancel grants no runway. scan_since skips
--- windows that ended long ago. NULL customer_id = merchant-wide.
+-- windows that ended long ago. A provider-default window ends at the paid
+-- period end; dunning access is grace's. NULL customer_id = merchant-wide.
 -- name: ListUngrantedSubscriptions :many
 SELECT s.id, s.customer_id, s.product_id, s.status,
-       s.current_period_starts_at,
-       -- A provider-billed member in the provider's dunning keeps access
-       -- through its grace window, as a mirrored decline does.
-       GREATEST(s.current_period_ends_at, CASE WHEN s.status = 'past_due' THEN s.grace_ends_at END) AS current_period_ends_at,
-       s.started_at, s.ended_at, s.access_duration_hours_snapshot
+       s.current_period_starts_at, s.current_period_ends_at,
+       s.started_at, s.ended_at, s.access_duration_hours_snapshot, s.provider_access_default_snapshot
 FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
@@ -305,8 +303,9 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
   AND (s.status IN ('active', 'canceled', 'unverified', 'awaiting_method') OR (s.status = 'past_due' AND s.collection_policy <> 'engine'))
   AND NOT (s.status = 'canceled' AND s.cancel_type = 'chargeback')
-  AND (s.access_duration_hours_snapshot IS NULL OR
-       COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' >= sqlc.arg(scan_since)::timestamptz)
+  AND (s.provider_access_default_snapshot AND s.current_period_ends_at >= sqlc.arg(scan_since)::timestamptz
+       OR NOT s.provider_access_default_snapshot AND (s.access_duration_hours_snapshot IS NULL OR
+       COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' >= sqlc.arg(scan_since)::timestamptz))
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = s.merchant_id AND g.event = 'grant'

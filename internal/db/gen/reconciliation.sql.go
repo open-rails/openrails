@@ -903,14 +903,15 @@ func (q *Queries) ListActiveMerchantIDs(ctx context.Context) ([]uuid.UUID, error
 
 const listActiveSubsMissingAccessProjection = `-- name: ListActiveSubsMissingAccessProjection :many
 SELECT s.id, s.customer_id, s.product_id, s.status,
-       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.access_duration_hours_snapshot
+       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.access_duration_hours_snapshot, s.provider_access_default_snapshot
 FROM billing.subscriptions s
 WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'active'
-  AND (s.access_duration_hours_snapshot IS NULL OR
-       COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > $3::timestamptz)
+  AND (s.provider_access_default_snapshot AND s.current_period_ends_at > $3::timestamptz
+       OR NOT s.provider_access_default_snapshot AND (s.access_duration_hours_snapshot IS NULL OR
+       COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > $3::timestamptz))
   AND COALESCE(s.current_period_starts_at, s.started_at) <= $3::timestamptz
   AND EXISTS (
       SELECT 1 FROM billing.grants g
@@ -923,8 +924,9 @@ WHERE s.merchant_id = $1::uuid
         AND pa.source_type = 'subscription' AND pa.source_id = s.id::text
         AND pa.product_id = s.product_id
         AND pa.deleted_at IS NULL
-        AND (s.access_duration_hours_snapshot IS NULL OR
-             pa.starts_at < COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour')
+        AND (s.provider_access_default_snapshot AND pa.starts_at < s.current_period_ends_at
+             OR NOT s.provider_access_default_snapshot AND (s.access_duration_hours_snapshot IS NULL OR
+             pa.starts_at < COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour'))
         AND (pa.ends_at IS NULL OR pa.ends_at > COALESCE(s.current_period_starts_at, s.started_at))
   )
 ORDER BY s.current_period_ends_at
@@ -937,15 +939,16 @@ type ListActiveSubsMissingAccessProjectionParams struct {
 }
 
 type ListActiveSubsMissingAccessProjectionRow struct {
-	ID                          uuid.UUID
-	CustomerID                  uuid.UUID
-	ProductID                   uuid.UUID
-	Status                      string
-	CurrentPeriodStartsAt       *time.Time
-	CurrentPeriodEndsAt         *time.Time
-	StartedAt                   time.Time
-	EndedAt                     *time.Time
-	AccessDurationHoursSnapshot *int32
+	ID                            uuid.UUID
+	CustomerID                    uuid.UUID
+	ProductID                     uuid.UUID
+	Status                        string
+	CurrentPeriodStartsAt         *time.Time
+	CurrentPeriodEndsAt           *time.Time
+	StartedAt                     time.Time
+	EndedAt                       *time.Time
+	AccessDurationHoursSnapshot   *int32
+	ProviderAccessDefaultSnapshot bool
 }
 
 // derive.grant_effect.mismatch (grant direction): an active subscription in a
@@ -972,6 +975,7 @@ func (q *Queries) ListActiveSubsMissingAccessProjection(ctx context.Context, arg
 			&i.StartedAt,
 			&i.EndedAt,
 			&i.AccessDurationHoursSnapshot,
+			&i.ProviderAccessDefaultSnapshot,
 		); err != nil {
 			return nil, err
 		}

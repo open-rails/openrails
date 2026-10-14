@@ -1367,8 +1367,9 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 				afterCancel.Change = changes.refundAfterCancel(afterCancel, sub, action)
 			}
 		}
-		// Restore the paid access promise independently of its billing cadence.
-		if sub.IsLive() {
+		// Restore the paid access promise independently of its billing cadence;
+		// a provider default without its verified service end grants nothing.
+		if sub.IsLive() && (!sub.ProviderAccessDefaultSnapshot || sub.CurrentPeriodEndsAt != nil) {
 			start := sub.StartedAt
 			if start.IsZero() {
 				start = t.OccurredAt

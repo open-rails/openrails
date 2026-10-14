@@ -724,14 +724,15 @@ ORDER BY current_period_ends_at;
 -- NULL customer_id = merchant-wide.
 -- name: ListActiveSubsMissingAccessProjection :many
 SELECT s.id, s.customer_id, s.product_id, s.status,
-       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.access_duration_hours_snapshot
+       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.access_duration_hours_snapshot, s.provider_access_default_snapshot
 FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'active'
-  AND (s.access_duration_hours_snapshot IS NULL OR
-       COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > sqlc.arg(now)::timestamptz)
+  AND (s.provider_access_default_snapshot AND s.current_period_ends_at > sqlc.arg(now)::timestamptz
+       OR NOT s.provider_access_default_snapshot AND (s.access_duration_hours_snapshot IS NULL OR
+       COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > sqlc.arg(now)::timestamptz))
   AND COALESCE(s.current_period_starts_at, s.started_at) <= sqlc.arg(now)::timestamptz
   AND EXISTS (
       SELECT 1 FROM billing.grants g
@@ -744,8 +745,9 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
         AND pa.source_type = 'subscription' AND pa.source_id = s.id::text
         AND pa.product_id = s.product_id
         AND pa.deleted_at IS NULL
-        AND (s.access_duration_hours_snapshot IS NULL OR
-             pa.starts_at < COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour')
+        AND (s.provider_access_default_snapshot AND pa.starts_at < s.current_period_ends_at
+             OR NOT s.provider_access_default_snapshot AND (s.access_duration_hours_snapshot IS NULL OR
+             pa.starts_at < COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour'))
         AND (pa.ends_at IS NULL OR pa.ends_at > COALESCE(s.current_period_starts_at, s.started_at))
   )
 ORDER BY s.current_period_ends_at;

@@ -471,11 +471,12 @@ func (l *Ledger) UngrantedWalletPayments(ctx context.Context, customer *uuid.UUI
 
 // DeriveSubscriptionGrant creates the access grant and window for a
 // subscription that has none (derive-1): the subscription's product for
-// [COALESCE(period_start, started_at), + accepted access duration); access
-// state gating already happened in the detection query. Re-runnable: once a
-// grant exists the detection excludes the subscription.
+// [COALESCE(period_start, started_at), + accepted access duration), or to the
+// paid period end for a provider default; access state gating already happened
+// in the detection query. Re-runnable: once a grant exists the detection
+// excludes the subscription.
 func (l *Ledger) DeriveSubscriptionGrant(ctx context.Context, sub gen.ListUngrantedSubscriptionsRow) error {
-	start, end, ok := subscriptionWindow(sub.StartedAt, sub.CurrentPeriodStartsAt, sub.AccessDurationHoursSnapshot)
+	start, end, ok := subscriptionWindow(sub.StartedAt, sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt, sub.AccessDurationHoursSnapshot, sub.ProviderAccessDefaultSnapshot)
 	if !ok {
 		return nil
 	}
@@ -567,8 +568,9 @@ func (l *Ledger) deriveAccessWindow(ctx context.Context, w customerWindow) (bool
 	return true, nil
 }
 
-// subscriptionWindow uses the accepted access duration independently of billing.
-func subscriptionWindow(startedAt time.Time, periodStart *time.Time, hours *int32) (time.Time, *time.Time, bool) {
+// subscriptionWindow uses the accepted access duration independently of
+// billing; a provider default ends at the verified paid period end.
+func subscriptionWindow(startedAt time.Time, periodStart, periodEnd *time.Time, hours *int32, providerDefault bool) (time.Time, *time.Time, bool) {
 	start := startedAt
 	if periodStart != nil && !periodStart.IsZero() {
 		start = *periodStart
@@ -577,6 +579,14 @@ func subscriptionWindow(startedAt time.Time, periodStart *time.Time, hours *int3
 		return time.Time{}, nil, false
 	}
 	start = start.UTC()
+	if providerDefault {
+		// Never indefinite: no verified service end, no window.
+		if periodEnd == nil || !periodEnd.After(start) {
+			return time.Time{}, nil, false
+		}
+		end := periodEnd.UTC()
+		return start, &end, true
+	}
 	if hours == nil {
 		return start, nil, true
 	}
