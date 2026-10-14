@@ -1771,6 +1771,7 @@ pkg openrails/billing, type CustomerAccount struct, DefaultPaymentMethods []Defa
 pkg openrails/billing, type CustomerAccount struct, ID CustomerID `json:"id"`
 pkg openrails/billing, type CustomerAccount struct, LowBalanceLines []EffectiveLowBalanceLine `json:"low_balance_lines"`
 pkg openrails/billing, type CustomerConfig struct
+pkg openrails/billing, type CustomerConfig struct, ClientCountry string `json:"client_country"`
 pkg openrails/billing, type CustomerConfig struct, Merchant PublicMerchant `json:"merchant"`
 pkg openrails/billing, type CustomerConfig struct, Payment PaymentConfig `json:"payment"`
 pkg openrails/billing, type CustomerContact struct
@@ -2263,8 +2264,11 @@ pkg openrails/billing, type MerchantProfile struct
 pkg openrails/billing, type MerchantProfile struct, BillingURL string `json:"billing_url,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, FromEmail string `json:"from_email,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, LogoURL string `json:"logo_url,omitempty"`
+pkg openrails/billing, type MerchantProfile struct, PrivacyURL string `json:"privacy_url,omitempty"`
+pkg openrails/billing, type MerchantProfile struct, StatementDescriptor string `json:"statement_descriptor,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, SubscribeURL string `json:"subscribe_url,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, SupportURL string `json:"support_url,omitempty"`
+pkg openrails/billing, type MerchantProfile struct, TermsURL string `json:"terms_url,omitempty"`
 pkg openrails/billing, type MerchantRef struct
 pkg openrails/billing, type MerchantRef struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type MerchantRef struct, ID MerchantID `json:"id"`
@@ -3088,7 +3092,10 @@ pkg openrails/billing, type PublicMerchant struct
 pkg openrails/billing, type PublicMerchant struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type PublicMerchant struct, EmbedOrigins []string `json:"embed_origins"`
 pkg openrails/billing, type PublicMerchant struct, LogoURL *string `json:"logo_url"`
+pkg openrails/billing, type PublicMerchant struct, PrivacyURL *string `json:"privacy_url"`
+pkg openrails/billing, type PublicMerchant struct, StatementDescriptor *string `json:"statement_descriptor"`
 pkg openrails/billing, type PublicMerchant struct, SupportURL *string `json:"support_url"`
+pkg openrails/billing, type PublicMerchant struct, TermsURL *string `json:"terms_url"`
 pkg openrails/billing, type PublicNetwork struct
 pkg openrails/billing, type PublicNetwork struct, ClientID string `json:"client_id"`
 pkg openrails/billing, type PublicNetwork struct, Issuer string `json:"issuer"`

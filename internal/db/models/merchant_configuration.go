@@ -82,5 +82,8 @@ type MerchantProfileConfiguration struct {
 	SubscribeURL string `json:"subscribe_url,omitempty"`
 	// BillingURL is where customers manage and cancel their subscriptions
 	// and payment agreements.
-	BillingURL string `json:"billing_url,omitempty"`
+	BillingURL          string `json:"billing_url,omitempty"`
+	TermsURL            string `json:"terms_url,omitempty"`
+	PrivacyURL          string `json:"privacy_url,omitempty"`
+	StatementDescriptor string `json:"statement_descriptor,omitempty"`
 }

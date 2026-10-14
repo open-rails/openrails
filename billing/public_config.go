@@ -27,6 +27,9 @@ type CustomerConfig struct {
 	Payment PaymentConfig `json:"payment"`
 	// Merchant is how the merchant presents itself to its customers.
 	Merchant PublicMerchant `json:"merchant"`
+	// ClientCountry is the customer's country as a trusted proxy reports it
+	// (CF-IPCountry), or "": the billing country a card form preselects.
+	ClientCountry string `json:"client_country"`
 }
 
 // PublicNetwork is the payment page's sign-in to the customer network: an
@@ -43,6 +46,10 @@ type PublicMerchant struct {
 	DisplayName string  `json:"display_name"`
 	LogoURL     *string `json:"logo_url"`
 	SupportURL  *string `json:"support_url"`
+	TermsURL    *string `json:"terms_url"`
+	PrivacyURL  *string `json:"privacy_url"`
+	// StatementDescriptor is the name card charges carry on statements.
+	StatementDescriptor *string `json:"statement_descriptor"`
 	// EmbedOrigins are the origins that may frame its embedded payment pages.
 	EmbedOrigins []string `json:"embed_origins"`
 }

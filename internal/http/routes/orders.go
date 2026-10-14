@@ -34,6 +34,10 @@ var ordersRoutes = []Route{
 		Request: billing.PayOrderParams{}, Responses: []Reply{{200, billing.Order{}}}, Errors: orderPayErrors, Handler: h(handlers.PayMyOrder)},
 	{Method: POST, Path: "/v1/me/orders/{id}/confirm", Group: Customer, Auth: AuthCustomer, PayURL: PayURLOrder,
 		Request: billing.ConfirmOrderParams{}, Responses: []Reply{{200, billing.Order{}}}, Errors: codes("card_declined", "customer_action_required", "customer_session_required", "invalid_param", "payment_failed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ConfirmMyOrder)},
+	// The customer's page could not frame the order's pay URL: the operator is
+	// alerted, once per episode.
+	{Method: POST, Path: "/v1/me/orders/{id}/pay-url-failure", Group: Customer, Auth: AuthCustomer,
+		Responses: []Reply{{204, nil}}, Errors: orderReadErrors, Handler: h(handlers.ReportMyPayURLFailure)},
 	{Method: POST, Path: "/v1/me/orders/{id}/cancel", Group: Customer, Auth: AuthCustomer,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: codes("order_not_cancelable", "resource_not_found", "service_unavailable"), Handler: h(handlers.CancelMyOrder)},
 	// A wallet's Solana Pay transaction request for an order awaiting it: the

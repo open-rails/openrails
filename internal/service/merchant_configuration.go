@@ -194,6 +194,15 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 		if patch.Profile.BillingURL != "" {
 			p.BillingURL = patch.Profile.BillingURL
 		}
+		if patch.Profile.TermsURL != "" {
+			p.TermsURL = patch.Profile.TermsURL
+		}
+		if patch.Profile.PrivacyURL != "" {
+			p.PrivacyURL = patch.Profile.PrivacyURL
+		}
+		if patch.Profile.StatementDescriptor != "" {
+			p.StatementDescriptor = patch.Profile.StatementDescriptor
+		}
 		current.Profile = &p
 	}
 	if patch.CollectionThreshold != nil {

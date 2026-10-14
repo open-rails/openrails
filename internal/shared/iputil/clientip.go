@@ -54,6 +54,19 @@ func (t *TrustedProxies) ClientIP(r *http.Request) string {
 	return t.resolve(r.RemoteAddr, strings.Join(r.Header.Values("X-Forwarded-For"), ","))
 }
 
+// Country is the client's ISO country code from a trusted proxy's
+// CF-IPCountry header, or "" when the peer is untrusted or the country unknown.
+func (t *TrustedProxies) Country(r *http.Request) string {
+	if !t.trusts(net.ParseIP(hostOnly(r.RemoteAddr))) {
+		return ""
+	}
+	country := strings.ToUpper(strings.TrimSpace(r.Header.Get("CF-IPCountry")))
+	if len(country) != 2 || country == "XX" || country == "T1" {
+		return ""
+	}
+	return country
+}
+
 // ForwardedHTTPS reports whether a trusted proxy says the client connection
 // was HTTPS: the socket peer is trusted and every X-Forwarded-Proto value it
 // relayed is https. An untrusted peer's header counts for nothing.
