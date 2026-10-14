@@ -187,6 +187,9 @@ func (w *PGLocalWriter) GrantAccess(ctx context.Context, a GrantAccessAction) (b
 // runs. Its product is granted through the subscription-sourced path while the
 // remote period still runs.
 func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error) {
+	if a.Rail == string(models.RailSolana) || a.Provider == ProviderSolana {
+		return MaterializeResult{}, errors.New("Solana materialization requires its accepted purchase and verified chain receipt")
+	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return MaterializeResult{}, err

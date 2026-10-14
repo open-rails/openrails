@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
+	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	solanasubs "github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -142,4 +145,37 @@ func TestSolanaPullRestartRepairsOneAcceptedEpisode(t *testing.T) {
 	require.Equal(t, 1, count)
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.provider_bills WHERE source_kind='solana_pull' AND source_key=$1`), in.ID.String()).Scan(&count))
 	require.Equal(t, 1, count)
+}
+
+// Another signed pull outside this book's accepted episode is evidence for
+// review, not permission to invent a bill or move the local paid boundary.
+func TestSolanaAlreadyPaidWithoutAcceptedReceiptKeepsUnknown(t *testing.T) {
+	s := openSolanaShop(t)
+	w := s.w
+	b, sub := s.subscribed(t)
+	oldEnd := *w.subscription(embedded, sub).CurrentPeriodEndsAt
+	w.advance(monthHours*time.Hour + time.Hour)
+	plan, account := s.onChain(t, sub)
+	authority, _, err := solanasubs.DeriveSubscriptionAuthority(b.wallet.PublicKey(), s.mint)
+	require.NoError(t, err)
+	from, _, err := solanasubs.DeriveATA(b.wallet.PublicKey(), s.mint, solanago.TokenProgramID)
+	require.NoError(t, err)
+	to, _, err := solanasubs.DeriveATA(s.treasury, s.mint, solanago.TokenProgramID)
+	require.NoError(t, err)
+	events, _, err := solanasubs.DeriveEventAuthority()
+	require.NoError(t, err)
+	outOfBand := solanasubs.BuildTransferSubscription(solanasubs.TransferSubscriptionParams{SubscriptionPDA: account, PlanPDA: plan, SubscriptionAuthority: authority,
+		DelegatorATA: from, ReceiverATA: to, Caller: s.cranker.PublicKey(), Mint: s.mint, TokenProgram: solanago.TokenProgramID, EventAuthority: events,
+		Amount: solanaPlanAmount, Delegator: b.wallet.PublicKey()})
+	s.land(t, build(t, []solanago.Instruction{solanaint.NewMemoInstruction(solanaint.PurchaseMemo(uuid.New())), outOfBand}, s.cranker), w.clock.Now())
+	require.Equal(t, uint64(2*solanaPlanAmount), s.fake.Balance(s.treasury, s.mint))
+	s.crankPass(t)
+	w.until(func() bool { return string(w.subscription(embedded, sub).Status) == "unverified" }, "unattributed paid state waits for receipt qualification")
+	require.Len(t, completed(w.payments(embedded, b.id)), 1, "no guessed second cash payment")
+	require.Equal(t, oldEnd, *w.subscription(embedded, sub).CurrentPeriodEndsAt)
+	var orders int
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.orders WHERE subscription_id=$1 AND subscription_bill_kind='renewal'`), sub.UUID()).Scan(&orders))
+	require.Zero(t, orders, "no invented renewal order")
+	require.True(t, b.entitled(s.key), "uncertainty keeps existing access")
+	require.Len(t, w.openFindings("consistency.ledger.unbooked"), 1)
 }

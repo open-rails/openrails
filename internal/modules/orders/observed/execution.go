@@ -66,6 +66,9 @@ func verifyExecution(ctx context.Context, q *gen.Queries, mid uuid.UUID, b Bill)
 		return ErrConflict
 	}
 	a, line := payload.Agreement, b.Lines[0]
+	if a.PeriodHours == 0 || a.PeriodHours > 24*366 {
+		return ErrConflict
+	}
 	if a.CustomerID != b.CustomerID || a.Amount != b.Total || a.Currency != b.Currency || !a.EpisodeAt.Equal(b.DueAt) || !sameID(line.PriceID, &a.PriceID) || !sameID(line.ProductID, &a.ProductID) || line.Description != a.Description || !sameQuantity(line.Quantity, a.Quantity) || b.PeriodEnd.Sub(b.PeriodStart) != time.Duration(a.PeriodHours)*time.Hour {
 		return ErrConflict
 	}
@@ -82,9 +85,9 @@ func recordExecution(ctx context.Context, q *gen.Queries, mid uuid.UUID, b Bill,
 	}
 	row, err := q.GetOrderAttempt(ctx, gen.GetOrderAttemptParams{MerchantID: mid, ID: e.AttemptID})
 	if db.IsNotFound(err) {
-		state, err := json.Marshal(map[string]any{"operation_id": e.IntentID.String(), "solana_execution": e})
-		if err != nil {
-			return err
+		state, encodeErr := json.Marshal(map[string]any{"operation_id": e.IntentID.String(), "solana_execution": e})
+		if encodeErr != nil {
+			return encodeErr
 		}
 		if err := q.CreateOrderAttempt(ctx, gen.CreateOrderAttemptParams{MerchantID: mid, ID: e.AttemptID, CustomerID: b.CustomerID, OrderID: result.Order.ID,
 			Rail: string(models.RailSolana), Status: "processing", Amount: b.Total, Currency: b.Currency, ExpiresAt: b.PeriodEnd,

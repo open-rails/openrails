@@ -269,12 +269,9 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 		}
 		intent.ResultEvidence, _ = json.Marshal(map[string]any{"transaction_id": outcome.signature, "execution": execution})
 		return h.repairFromSignature(ctx, repo, p.Agreement, intent, outcome.signature)
-	case crankAlreadyPaid:
-		// Out-of-band payment (this intent recorded no signature): the row
-		// advanced without a local renewal; the reconcile worker repairs the
-		// ledger.
-		evidence["repair"] = "advanced_without_local_renewal"
-		return intents.Succeeded(evidence)
+	case crankUnqualifiedPaid:
+		return intents.TerminalWithEvidence(outcome.reason, evidence)
+
 	case crankGhostExpired, crankCanceled, crankDunned:
 		return intents.TerminalWithEvidence(outcome.reason, evidence)
 	default:

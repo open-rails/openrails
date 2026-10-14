@@ -52,6 +52,7 @@ func (e *programError) Error() string { return e.msg }
 const (
 	codeTokenOwnerMismatch    = 4
 	codeSubscriptionCancelled = 508
+	codePeriodAlreadyPaid     = 400
 )
 
 type Node struct {
@@ -422,7 +423,7 @@ func (n *Node) apply(tx *solanago.Transaction, inst solanago.CompiledInstruction
 		if acct := n.tokens[accounts[3].PublicKey.String()]; acct != nil && acct.revoked {
 			return "", "", &programError{codeTokenOwnerMismatch, "transfer_subscription refused: delegate revoked"}
 		}
-		if err := n.pullSubscription(accounts[0].PublicKey, blockTime); err != nil {
+		if err := n.pullSubscription(accounts[0].PublicKey, binary.LittleEndian.Uint64(data[1:9]), blockTime); err != nil {
 			return "", "", err
 		}
 		return "", "", n.move(accounts[3].PublicKey, accounts[4].PublicKey, binary.LittleEndian.Uint64(data[1:9]))
@@ -511,15 +512,28 @@ const (
 // pullSubscription refuses a pull of a canceled subscription, as the program
 // does past expires_at_ts, and opens the pulled period. A subscription this
 // node does not hold is not checked. n.mu held.
-func (n *Node) pullSubscription(address solanago.PublicKey, blockTime time.Time) error {
+func (n *Node) pullSubscription(address solanago.PublicKey, amount uint64, blockTime time.Time) error {
 	stored, ok := n.accounts[address.String()]
 	if !ok {
 		return nil
 	}
-	if binary.LittleEndian.Uint64(stored.data[subExpiresAtOffset:]) != 0 {
+	now := uint64(blockTime.Unix()) // #nosec G115 -- the fake's clock is after 1970
+	expires := binary.LittleEndian.Uint64(stored.data[subExpiresAtOffset:])
+	if expires != 0 && now >= expires {
 		return &programError{codeSubscriptionCancelled, "transfer_subscription refused: subscription canceled"}
 	}
-	binary.LittleEndian.PutUint64(stored.data[subPeriodStartOffset:], uint64(blockTime.Unix())) // #nosec G115 -- the fake's clock is after 1970
+	start := binary.LittleEndian.Uint64(stored.data[subPeriodStartOffset:])
+	period := 3600 * binary.LittleEndian.Uint64(stored.data[subPeriodHoursOffset:])
+	pulled := binary.LittleEndian.Uint64(stored.data[subPeriodStartOffset-8:])
+	limit := binary.LittleEndian.Uint64(stored.data[subPeriodHoursOffset-8:])
+	if start == 0 || now >= start+period {
+		start, pulled = now, 0
+	}
+	if amount > limit || pulled > limit-amount {
+		return &programError{codePeriodAlreadyPaid, "transfer_subscription refused: period already paid"}
+	}
+	binary.LittleEndian.PutUint64(stored.data[subPeriodStartOffset:], start)
+	binary.LittleEndian.PutUint64(stored.data[subPeriodStartOffset-8:], pulled+amount)
 	return nil
 }
 

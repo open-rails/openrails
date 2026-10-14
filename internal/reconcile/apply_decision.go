@@ -31,6 +31,12 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 	if d.Kind == TransitionNone || d.stale(sub) {
 		return false, nil
 	}
+	if sub.Rail == models.RailSolana && (d.Kind == TransitionRenew || d.Kind == TransitionAdoptPeriodEnd) {
+		// Only the specialized accepted-intent/positive-receipt settlement may
+		// grant or confirm a paid Solana period. A generic account clock or
+		// provider snapshot supplies no accepted obligation or capture.
+		return false, nil
+	}
 	// A provider renewal needs a settled renewal bill reaching past the paid
 	// period. The paid-through itself stays the provider's reported boundary.
 	if d.Kind == TransitionRenew && sub.CollectionPolicy != models.CollectionPolicyEngine && !d.Declared {

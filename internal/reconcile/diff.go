@@ -676,6 +676,9 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 	subjectID, identityVia, identityNote := resolvePS1Identity(r, idx)
 	link, planNote := resolvePS1Plan(r, planIdx)
 	var blockers []string
+	if provider == ProviderSolana {
+		blockers = append(blockers, "Solana billing and access require the accepted purchase or pull agreement and its matching positive chain receipt; account dates and current catalog terms are not a settlement")
+	}
 	if identityNote != "" {
 		blockers = append(blockers, identityNote)
 	}
