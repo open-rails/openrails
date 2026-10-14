@@ -329,12 +329,17 @@ func dumpProviderPrice(row gen.ListLiveCatalogPricesWithPSPLinksRow) (catalog.Ap
 		return catalog.ApplyProviderPrice{}, fmt.Errorf("a provider price binds one provider object, found %d", len(links))
 	}
 	var out catalog.ApplyProviderPrice
+	providerInterval := row.BillingIntervalHours
 	for key, link := range links {
+		if h, err := strconv.Atoi(link[models.RailKeyProviderBillingInterval]); err == nil && h > 0 {
+			providerInterval = new(int32(h))
+		}
 		out = catalog.ApplyProviderPrice{PSP: key, PlanID: link[models.RailKeyPlanID], PriceID: link[models.RailKeyStripePriceID],
 			FlexID: link[models.RailKeyCCBillFlexID], RecurringBillingOptionID: link[models.RailKeyCCBillRecurringBillingOption]}
+		out.OneOff = row.BillingIntervalHours == nil && (providerInterval != nil || link[models.RailKeyRail] == string(models.RailNMI))
 		switch models.Rail(link[models.RailKeyRail]) {
 		case models.RailCCBill:
-			amount, interval := row.Amount, row.BillingIntervalHours
+			amount, interval := row.Amount, providerInterval
 			if interval == nil {
 				interval, out.OneOff = row.AccessDurationHours, true
 			}
@@ -352,7 +357,7 @@ func dumpProviderPrice(row gen.ListLiveCatalogPricesWithPSPLinksRow) (catalog.Ap
 			}
 		}
 	}
-	if !out.OneOff && row.AccessDurationHours != nil && (row.BillingIntervalHours == nil || *row.AccessDurationHours != *row.BillingIntervalHours) {
+	if row.AccessDurationHours != nil && (providerInterval == nil || *row.AccessDurationHours != *providerInterval) {
 		hours := int(*row.AccessDurationHours)
 		out.AccessDurationHours = &hours
 	}

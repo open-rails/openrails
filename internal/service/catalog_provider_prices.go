@@ -56,14 +56,14 @@ func checkProviderPriceRail(pspKey, rail string, decl catalogwire.ApplyProviderP
 		if decl.PlanID == "" || len(refs) != 1 {
 			return apperr.Invalidf("PSP %q is on NMI: a provider price names its plan_id", pspKey)
 		}
-		if decl.DeclaresTerms() || decl.OneOff {
+		if decl.DeclaresTerms() {
 			return apperr.Invalidf("an NMI plan's terms are read from NMI: declare plan_id, and currency or access_duration when needed")
 		}
 	case models.RailStripe:
 		if decl.PriceID == "" || len(refs) != 1 {
 			return apperr.Invalidf("PSP %q is on Stripe: a provider price names its price_id", pspKey)
 		}
-		if decl.DeclaresTerms() || decl.OneOff || decl.Currency != "" {
+		if decl.DeclaresTerms() || decl.Currency != "" {
 			return apperr.Invalidf("a Stripe price's terms are read from Stripe: declare price_id, and access_duration when needed")
 		}
 	case models.RailCCBill:
@@ -208,7 +208,7 @@ func (s *Service) prepareProviderPrice(ctx context.Context, accounts []merchants
 	if errors.Is(err, ErrProviderPriceUnreadable) && current != nil {
 		if _, link, ok := current.ProviderLink(); ok && link[models.RailKeyPSPID] == account.ID.String() && sameProviderRefs(link, decl.References()) {
 			out.cached = err.Error()
-			terms = providerPriceTerms{unitAmount: current.Amount, currency: current.Currency, billingIntervalHours: current.BillingIntervalHours, trialUnitAmount: current.TrialUnitAmount, trialDurationHours: current.TrialDurationHours}
+			terms = providerPriceTerms{unitAmount: current.Amount, currency: current.Currency, billingIntervalHours: current.ProviderBillingInterval(), trialUnitAmount: current.TrialUnitAmount, trialDurationHours: current.TrialDurationHours}
 			ids = maps.Clone(link)
 			err = nil
 		}
@@ -226,6 +226,7 @@ func (s *Service) prepareProviderPrice(ctx context.Context, accounts []merchants
 			out.link[k] = v
 		}
 	}
+	out.link[models.RailKeyProviderBillingInterval] = optionalHours(terms.billingIntervalHours)
 	return out, nil
 }
 
@@ -273,6 +274,16 @@ func (s *Service) writeProviderPrice(ctx context.Context, product *models.Produc
 		if !version.ProviderOwned {
 			return nil, false, apperr.Invalidf("price key %q is one of ours: a provider price takes a key of its own", p.key)
 		}
+		if _, link, bound := version.ProviderLink(); bound && (link[models.RailKeyPSPID] != pspID.String() || !sameProviderRefs(link, providerRefs(p.link))) {
+			return nil, false, apperr.Invalidf("provider price key %q names another provider object: use a new key for a different PSP or reference", p.key)
+		}
+		if samePriceTerms(version.View(), p.request) {
+			// Populated upgrades preserve their existing identities, and old
+			// terms reactivate their existing immutable financial row.
+			id = version.ID
+		}
+	}
+	for _, version := range chain {
 		if version.ID == id && version.Archived == p.request.Archived && sameCatalogLinks(version.PSPLinks, links) {
 			return version, false, nil
 		}
@@ -424,7 +435,7 @@ func (s *Service) verifyProviderPrice(ctx context.Context, price *models.Price, 
 	terms, _, err := s.readProviderPriceTerms(ctx, account, decl)
 	switch {
 	case errors.Is(err, ErrProviderPriceUnreadable):
-		out.SyncStatus = billing.SyncStatusSyncDisabled
+		out.SyncStatus = billing.SyncStatusUnknown
 		return
 	case err != nil:
 		out.SyncStatus = billing.SyncStatusMissing
@@ -434,7 +445,7 @@ func (s *Service) verifyProviderPrice(ctx context.Context, price *models.Price, 
 	if terms.unitAmount != price.Amount || terms.currency != price.Currency {
 		drift = append(drift, billing.DriftField{Field: "unit_amount", OpenRailsValue: moneyutil.FormatAmount(price.Amount, price.Currency), RemoteValue: moneyutil.FormatAmount(terms.unitAmount, terms.currency)})
 	}
-	stored, remote := price.BillingIntervalHours, terms.billingIntervalHours
+	stored, remote := price.ProviderBillingInterval(), terms.billingIntervalHours
 	if (stored == nil) != (remote == nil) || stored != nil && *stored != *remote {
 		drift = append(drift, billing.DriftField{Field: "billing_interval_hours", OpenRailsValue: optionalHours(stored), RemoteValue: optionalHours(remote)})
 	}

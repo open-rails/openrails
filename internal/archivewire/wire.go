@@ -18,10 +18,13 @@ import (
 
 const (
 	// Version is the merchant export format, the only one import reads.
-	Version              = 2
+	Version              = 3
 	MaxBytes       int64 = 1 << 30
 	MaxRecordBytes       = 8 << 20
 )
+
+// ErrPriceOwnershipFormat refuses archives predating explicit price ownership.
+var ErrPriceOwnershipFormat = errors.New("archive version 2 predates price ownership: restore using OpenRails v0.255.0, then upgrade")
 
 type Info struct {
 	MerchantID string `json:"merchant_id"`
@@ -50,6 +53,35 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 
 func validHeader(h Header) bool {
 	return h.CatalogRevision >= 0 && h.Kind == "header" && h.Version == Version && h.Consistency == "repeatable_read" && h.RequiredCutoverCondition == "source_writers_stopped" && uuidPattern.MatchString(h.MerchantID) && h.MerchantID != "00000000-0000-0000-0000-000000000000"
+}
+
+// ReadHeader verifies the canonical versioned header before a caller opens a
+// database transaction. The returned reader retains the complete input stream.
+func ReadHeader(src io.Reader) (Header, io.Reader, error) {
+	reader := bufio.NewReader(src)
+	line, err := reader.ReadSlice('\n')
+	if err != nil {
+		return Header{}, nil, errors.New("invalid archive header or unsupported version")
+	}
+	h, err := parseHeader(bytes.TrimSuffix(line, []byte("\n")))
+	if err != nil {
+		return Header{}, nil, err
+	}
+	return h, io.MultiReader(bytes.NewReader(bytes.Clone(line)), reader), nil
+}
+
+func parseHeader(line []byte) (Header, error) {
+	var h Header
+	if err := decodeCanonical(line, &h); err != nil || !validHeader(h) {
+		if err == nil && h.Kind == "header" && h.Version > 0 && h.Version < Version {
+			if h.Version == 2 {
+				return Header{}, ErrPriceOwnershipFormat
+			}
+			return Header{}, fmt.Errorf("archive version %d is no longer read: restore it on an earlier release, then export it again", h.Version)
+		}
+		return Header{}, errors.New("invalid archive header or unsupported version")
+	}
+	return h, nil
 }
 
 // Read verifies the complete stream, invoking callbacks while it reads. Callers
@@ -89,12 +121,9 @@ func read(src io.Reader, dst io.Writer, onHeader func(Header) error, onRecord fu
 			return info, errors.New("archive contains data after footer")
 		}
 		if lineNo == 1 {
-			var h Header
-			if err := decodeCanonical(line, &h); err != nil || !validHeader(h) {
-				if err == nil && h.Kind == "header" && h.Version > 0 && h.Version < Version {
-					return info, fmt.Errorf("archive version %d is no longer read: restore it on an earlier release, then export it again", h.Version)
-				}
-				return info, errors.New("invalid archive header or unsupported version")
+			h, err := parseHeader(line)
+			if err != nil {
+				return info, err
 			}
 			info.MerchantID = h.MerchantID
 			if onHeader != nil {

@@ -225,7 +225,12 @@ export function OrderPayment({
     )
   const hosted = redirects.filter((item) => !fallsBack(item))
   const revealed = redirects.filter(fallsBack)
-  const tokens = solana ? (merchant?.payment.solana?.tokens ?? []) : []
+  const recurring = order?.lines.some((line) => line.billing_interval_hours !== null) ?? false
+  const tokens = solana
+    ? (merchant?.payment.solana?.tokens ?? []).filter(
+        (token) => !recurring || token.recurring_eligible === true
+      )
+    : []
   const walletPsp = wallets
     ? cardPsps.find(
         (item) =>

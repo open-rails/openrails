@@ -53,7 +53,7 @@ WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL
     WHERE pr.merchant_id = products.merchant_id AND pr.product_id = products.id AND NOT pr.archived
       AND (NOT pr.provider_owned OR EXISTS (
         SELECT 1 FROM billing.price_psp_bindings b JOIN billing.psps s ON s.merchant_id = b.merchant_id AND s.id = b.psp_id
-        WHERE b.merchant_id = pr.merchant_id AND b.price_id = pr.id AND s.rail = 'ccbill'))))
+        WHERE b.merchant_id = pr.merchant_id AND b.price_id = pr.id AND s.rail = 'ccbill' AND pr.billing_interval_hours IS NOT NULL))))
   AND (sqlc.narg(after_at)::timestamptz IS NULL OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(fetch_limit)::int;

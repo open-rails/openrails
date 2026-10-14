@@ -81,9 +81,9 @@ settings:
 Every charge PSP must charge the vault's cards, which is known by rail and account:
 
 - A card in a PSP's own vault charges only through that account. A Stripe customer
-  belongs to its Stripe account; an NMI customer vault id is taken to be scoped to
-  its gateway account (`gateway_id`), so it charges only through PSPs on that same
-  gateway account. *This NMI scoping awaits confirmation with the gateway.*
+  belongs to its Stripe account; NMI Customer Vault gateway-issued tokens are
+  valid only within their merchant account (`gateway_id`), so they charge only
+  through PSPs on that same gateway account ([NMI Customer Vault FAQ](https://support.nmi.com/hc/en-gb/articles/33994528786705-Customer-Vault)).
 - A custodian's card (Basis Theory, HyperSwitch) charges through any PSP naming that
   custodian.
 - A `platform` card charges through any PSP whose rail accepts a proxied PAN or

@@ -173,7 +173,7 @@ func BuyerPrices(prices []Price) []Price {
 	out := make([]Price, 0, len(prices))
 	for _, p := range prices {
 		if p.Provider != nil {
-			if p.Provider.Rail != "ccbill" {
+			if p.Provider.Rail != "ccbill" || p.BillingIntervalHours == nil {
 				continue
 			}
 			p.Provider = &PriceProvider{PSP: p.Provider.PSP, PSPID: p.Provider.PSPID, Rail: p.Provider.Rail, IDs: map[string]string{}, SyncStatus: SyncStatusUnknown, Drift: []DriftField{}}

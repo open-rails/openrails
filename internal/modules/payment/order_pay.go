@@ -185,7 +185,7 @@ func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models
 // ours: the product's live CCBill provider prices on the same terms, each sold
 // on its own FlexForm. Ours never sell through CCBill; its prices do.
 func (s *OrderAttemptService) ccbillStandIns(ctx context.Context, price *models.Price, product *models.Product) ([]OrderOption, error) {
-	if price.ProviderOwned || !price.IsRecurring() || s.priceService == nil || product == nil {
+	if price.ProviderOwned || !price.SellsVia(models.SellViaCard) || !price.IsRecurring() || s.priceService == nil || product == nil {
 		return nil, nil
 	}
 	candidates, err := s.priceService.GetActiveByProductID(ctx, product.ID)
