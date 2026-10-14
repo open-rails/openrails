@@ -109,10 +109,17 @@ The platform vault is operator configuration, not a merchant custodian:
 platform_vault:
   kind: basis_theory
   tenant_id: <the vault tenant of this deployment's posture>
+  kv_mount: billing-secrets
 ```
 
-It needs `vault.kv_mount`: its keys are at
-`<kv_mount>/<scope_prefix>/platform_vault/<tenant_id>`. When a merchant's `card_vault`
+`platform_vault.kv_mount` names the HashiCorp Vault KV v2 mount holding its keys,
+at `<kv_mount>/<vault.scope_prefix>/platform_vault/<tenant_id>` (prefix default
+`openrails`). It uses the existing `vault` connection and authentication.
+Leave `vault.kv_mount` unset to keep merchant configuration in files. The
+platform mount does not enable merchant configuration edits or move cards.
+If the platform mount is omitted, it uses `vault.kv_mount` as before; at least
+one must be set. An unreadable or missing document never causes a fallback
+to another mount. When a merchant's `card_vault`
 is `platform`, OpenRails records the merchant's identity in it once, as a
 `billing.custodians` row it owns: kind and key `platform`, account
 `<tenant_id>/<merchant_id>`, no credentials. Platform cards name that row as

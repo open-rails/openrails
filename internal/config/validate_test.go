@@ -98,7 +98,7 @@ func TestDegradeTurnsOffWhatCannotBeServed(t *testing.T) {
 			c.HyperSwitch = &HyperSwitchConfig{APIBaseURL: "http://hs.example", SDKURL: "https://sdk.example"}
 		}, "hyperswitch", "requires HTTPS",
 			func(t *testing.T, c *Config) { require.Nil(t, c.HyperSwitch) }},
-		"platform vault without kv": {func(c *Config) { c.PlatformVault = &PlatformVaultConfig{Kind: "basis_theory", TenantID: "t"} }, "platform_vault", "needs vault.kv_mount",
+		"platform vault without kv": {func(c *Config) { c.PlatformVault = &PlatformVaultConfig{Kind: "basis_theory", TenantID: "t"} }, "platform_vault", "needs platform_vault.kv_mount or vault.kv_mount",
 			func(t *testing.T, c *Config) { require.Nil(t, c.PlatformVault) }},
 		"sandbox gateway not loopback": {func(c *Config) {
 			c.ProviderSandbox = &ProviderSandboxConfig{NMIGatewayURL: "http://10.0.0.5:9", StripeAPIURL: "http://127.0.0.1:2"}

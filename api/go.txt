@@ -454,6 +454,7 @@ pkg openrails, type PSPs = config.PSPs
 pkg openrails, type PSPs map[string]config.PSPConfig
 pkg openrails, type PlatformVaultConfig = config.PlatformVaultConfig
 pkg openrails, type PlatformVaultConfig struct
+pkg openrails, type PlatformVaultConfig struct, KVMount string `yaml:"kv_mount" json:"kv_mount"`
 pkg openrails, type PlatformVaultConfig struct, Kind string `yaml:"kind" json:"kind"`
 pkg openrails, type PlatformVaultConfig struct, TenantID string `yaml:"tenant_id" json:"tenant_id"`
 pkg openrails, type Probe struct

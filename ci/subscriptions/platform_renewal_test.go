@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func platformSubscriptionWorld(t *testing.T) (*world, *btFake) {
+func preparePlatformSubscriptionWorld(t *testing.T) (*world, *btFake) {
 	t.Helper()
 	bt, endpoint := newBTFake(t)
 	bt.tenant, bt.application = platformTenant, uuid.NewString()
@@ -36,7 +36,6 @@ func platformSubscriptionWorld(t *testing.T) (*world, *btFake) {
 		withPlatformVault(cfg)
 		cfg.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL}
 	}
-	w.vault = vaulttest.New(t)
 	w.booted = func(e *openrails.Engine) {
 		rt := engine.Graph(e).Runtime
 		rt.RailPaymentMethodService.BTBaseURLOverride = endpoint
@@ -45,6 +44,18 @@ func platformSubscriptionWorld(t *testing.T) (*world, *btFake) {
 		resolver := rt.CollectionResolver.(*money.MerchantCollectionAdapterBuilder)
 		resolver.Endpoints.BTBaseURL, resolver.Endpoints.NMIDirectPostURL = endpoint, endpoint+"/nmi"
 	}
+	keyed := w.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "1111"})
+	bt.gateway = func(form url.Values, _ string) string {
+		return w.nmi.AddSale(nmimock.Sale{Vault: keyed, OrderID: form.Get("orderid"), OrderDescription: form.Get("order_description"), Amount: form.Get("amount"), Currency: form.Get("currency"),
+			InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"), Initial: form.Get("initial_transaction_id")}).TransactionID
+	}
+	return w, bt
+}
+
+func platformSubscriptionWorld(t *testing.T) (*world, *btFake) {
+	t.Helper()
+	w, bt := preparePlatformSubscriptionWorld(t)
+	w.vault = vaulttest.New(t)
 	w.start()
 	client := w.client[remote]
 	_, err := client.UpdatePSP(t.Context(), w.psp["stripe"], billing.UpdatePSPParams{Archived: true, AllowLast: true})
@@ -57,11 +68,6 @@ func platformSubscriptionWorld(t *testing.T) (*world, *btFake) {
 			mid: map[string]any{"id": bt.application, "public_api_key": "platform-public-test"},
 		},
 	})
-	keyed := w.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "1111"})
-	bt.gateway = func(form url.Values, _ string) string {
-		return w.nmi.AddSale(nmimock.Sale{Vault: keyed, OrderID: form.Get("orderid"), OrderDescription: form.Get("order_description"), Amount: form.Get("amount"), Currency: form.Get("currency"),
-			InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"), Initial: form.Get("initial_transaction_id")}).TransactionID
-	}
 	return w, bt
 }
 

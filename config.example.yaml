@@ -96,8 +96,8 @@ naming:
 # local_sign_in: true
 
 # Declaring vault connects to it (VAULT_* env settings declare it too). Name a
-# KV mount and Vault holds merchant configuration; name only a Transit mount
-# and it only signs.
+# vault.kv_mount and Vault holds merchant configuration. Platform credentials
+# can use their own mount while merchant configuration stays in files.
 # vault:
 #   kv_mount: ""      # KV v2 mount holding merchant configuration
 #   scope_prefix: ""  # path under the mount; default openrails
@@ -109,6 +109,14 @@ naming:
 #   secret_id: ""
 #   k8s_role: ""
 #   auth_mount: ""    # approle/kubernetes mount path without auth/; default the method's name
+
+# Platform card credentials use the same Vault connection and scope_prefix.
+# Omit this kv_mount to reuse vault.kv_mount. Set only this one to keep merchant
+# configuration in files. The credential document is platform_vault/<tenant_id>.
+# platform_vault:
+#   kind: basis_theory
+#   tenant_id: ""
+#   kv_mount: billing-secrets
 
 # Solana rebilling's crankers, in order: the first publishes new plans, and
 # each pulls the plans it owns. None turns Solana rebilling off; one-time

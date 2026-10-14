@@ -43,6 +43,28 @@ func unsetenv(t *testing.T, key string) {
 	require.NoError(t, os.Unsetenv(key))
 }
 
+func TestPlatformVaultMountLoading(t *testing.T) {
+	bootEnv(t)
+	filename := writeFile(t, filepath.Join(t.TempDir(), "config.yaml"), `
+vault:
+  address: http://127.0.0.1:8200
+  token: fixture-token
+platform_vault:
+  kind: basis_theory
+  tenant_id: fixture-tenant
+  kv_mount: file-cards
+`)
+	cfg, err := Load(filename)
+	require.NoError(t, err)
+	require.Equal(t, "file-cards", billing.PlatformVaultKVMount(cfg.Config))
+	require.Empty(t, billing.MerchantConfigKVMount(cfg.Config))
+	t.Setenv("PLATFORM_VAULT_KV_MOUNT", "env-cards")
+	cfg, err = Load(filename)
+	require.NoError(t, err)
+	require.Equal(t, "env-cards", billing.PlatformVaultKVMount(cfg.Config))
+	require.Empty(t, billing.MerchantConfigKVMount(cfg.Config))
+}
+
 func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	bootEnv(t)
 	cfg, err := Load("")

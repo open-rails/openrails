@@ -55,7 +55,7 @@ func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB) (*M
 		closeAll()
 		return nil, err
 	}
-	svc.WithPlatformVaultStore(conn.KV)
+	svc.WithPlatformVaultStore(conn.PlatformKV)
 	if vault, ok := source.(*merchantdocs.VaultSource); ok {
 		key, err := vault.FingerprintKey(ctx)
 		if err == nil {

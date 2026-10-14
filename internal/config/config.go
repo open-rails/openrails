@@ -232,7 +232,8 @@ func MerchantConfigKVMount(cfg *Config) string {
 
 // VaultConfig connects to HashiCorp Vault: a non-nil Config.Vault (or
 // Deps.Vault) is the connection. Name a KV mount and Vault holds merchant
-// configuration; name only a Transit mount and it only signs.
+// configuration. PlatformVault.KVMount can read card credentials separately;
+// TransitMount selects the Solana signing mount.
 type VaultConfig struct {
 	Namespace   string `yaml:"namespace" json:"namespace"`
 	ScopePrefix string `yaml:"scope_prefix" json:"scope_prefix"`

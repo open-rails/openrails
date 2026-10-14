@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path"
 	"slices"
 	"strings"
 	"unicode"
@@ -20,6 +21,9 @@ type PlatformVaultConfig struct {
 	Kind string `yaml:"kind" json:"kind"`
 	// TenantID is the vendor's tenant id.
 	TenantID string `yaml:"tenant_id" json:"tenant_id"`
+	// KVMount holds the platform credential document. Empty uses vault.kv_mount.
+	// Setting this does not select Vault as the merchant configuration source.
+	KVMount string `yaml:"kv_mount" json:"kv_mount"`
 }
 
 // PlatformCustodianKey is the custodian key of a merchant's identity in the
@@ -40,10 +44,28 @@ func validatePlatformVault(cfg *Config) error {
 	if v.TenantID == "" || strings.ContainsFunc(v.TenantID, func(r rune) bool { return r == '/' || unicode.IsSpace(r) }) {
 		return fmt.Errorf("platform_vault.tenant_id %q: must be the vendor's tenant id, without spaces or /", v.TenantID)
 	}
-	if MerchantConfigKVMount(cfg) == "" {
-		return fmt.Errorf("platform_vault needs vault.kv_mount: its keys are in Vault")
+	if v.KVMount != "" {
+		mount := strings.Trim(strings.TrimSpace(v.KVMount), "/")
+		if mount == "" || path.Clean(mount) != mount || strings.Contains(mount, "..") || strings.ContainsFunc(mount, unicode.IsSpace) {
+			return fmt.Errorf("platform_vault.kv_mount %q must be a plain Vault path", v.KVMount)
+		}
+	}
+	if PlatformVaultKVMount(cfg) == "" {
+		return fmt.Errorf("platform_vault needs platform_vault.kv_mount or vault.kv_mount: its keys are in Vault")
 	}
 	return nil
+}
+
+// PlatformVaultKVMount selects the platform credential store without changing
+// where merchant configuration lives.
+func PlatformVaultKVMount(cfg *Config) string {
+	if cfg == nil || cfg.PlatformVault == nil {
+		return ""
+	}
+	if cfg.PlatformVault.KVMount != "" {
+		return strings.Trim(strings.TrimSpace(cfg.PlatformVault.KVMount), "/")
+	}
+	return MerchantConfigKVMount(cfg)
 }
 
 // PlatformCustodianAccountID is a merchant's identity in the platform vault:
