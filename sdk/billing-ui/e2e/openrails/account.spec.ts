@@ -65,6 +65,9 @@ test("customer manages a subscription from the account page", async ({
   if (shots) await sub.screenshot({ path: `${shots}/ending-light.png` })
 
   await sub.getByRole("button", { name: "Resume" }).click()
+  const resume = page.getByRole("alertdialog", { name: "Resume Membership?" })
+  await resume.getByRole("button", { name: "Resume subscription", exact: true }).click()
+  await expect(resume).toBeHidden({ timeout: 20_000 })
   await expect(sub).toContainText("Active", { timeout: 20_000 })
   await expect(sub.getByRole("button", { name: "Resume" })).toHaveCount(0)
   await expect(page.getByText("Your subscription will continue.")).toBeVisible()
