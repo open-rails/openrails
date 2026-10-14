@@ -137,7 +137,7 @@ func TestAcceptedNativeEnrollmentRepairsAcrossProviderPriceMigration(t *testing.
 			}
 			wire, err := json.Marshal(payload)
 			require.NoError(t, err)
-			exec(`INSERT INTO billing.provider_intents(id,merchant_id,rail,intent_type,price_id,psp_id,payload,idempotency_key,status,next_attempt_at,origin,attempts,result_evidence) VALUES($1,$2,'nmi','initial_membership',$3,$4,$5,$6,'in_flight',$7,'user',1,'{"initial_submitted":true}')`, operation, mid, acceptedPrice, oldPSP, wire, payment.InitialMembershipIdempotencyKey(operation.String()), acceptedAt)
+			exec(`INSERT INTO billing.provider_intents(id,merchant_id,rail,intent_type,price_id,psp_id,payload,idempotency_key,status,next_attempt_at,lease_expires_at,origin,actor,attempts,result_evidence) VALUES($1,$2,'nmi','initial_membership',$3,$4,$5,$6,'in_flight',$7,$7,'user',$8,1,'{"initial_submitted":true}')`, operation, mid, acceptedPrice, oldPSP, wire, payment.InitialMembershipIdempotencyKey(operation.String()), acceptedAt, customer.String())
 			var acceptedSnapshot string
 			require.NoError(t, query(`SELECT payload::text FROM billing.provider_intents WHERE id=$1`, operation).Scan(&acceptedSnapshot))
 			if !tc.alreadyProviderOwned {
