@@ -100,6 +100,19 @@ func (m *Mock) SetLegacyPrice(id string, amount int64) {
 	m.amounts[id] = amount
 }
 
+// AddCustomer seeds a customer an account already has and returns its id.
+func (m *Mock) AddCustomer(email, name string, metadata map[string]string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	id := m.id("cus")
+	m.customers[id] = Object{"object": "customer", "id": id, "email": email, "name": name, "metadata": metadata, "livemode": false, "created": m.now().Unix(),
+		"invoice_settings": Object{"default_payment_method": nil}}
+	return id
+}
+
 // AddSubscription seeds a provider-owned subscription paid for its current
 // period, in the pinned API version's shape (period on the item, charge under
 // invoice.payments). It returns the subscription id.
@@ -112,6 +125,7 @@ func (m *Mock) AddSubscription(customer, method, price string, amount int64, sta
 	m.methods[method] = Object{"object": "payment_method", "id": method, "type": "card", "customer": customer, "livemode": false, "card": Object{"brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2035}}
 	id := m.id("sub")
 	m.subs[id] = Object{"object": "subscription", "id": id, "customer": customer, "status": "active", "cancel_at_period_end": false, "canceled_at": nil, "livemode": false,
+		"created": start.Unix(), "start_date": start.Unix(),
 		"default_payment_method": method, "metadata": map[string]string{}, "currency": "usd",
 		"items": Object{"object": "list", "data": []Object{{"id": m.id("si"), "price": Object{"id": price, "unit_amount": amount, "currency": "usd"}, "current_period_start": start.Unix(), "current_period_end": end.Unix()}}}}
 	m.invoiceLocked(id, amount, true)["billing_reason"] = "subscription_create"

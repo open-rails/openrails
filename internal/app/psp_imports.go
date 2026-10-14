@@ -8,5 +8,5 @@ func (r *Runtime) PSPImporter() *pspimport.Importer {
 	if r == nil || r.DB == nil {
 		return nil
 	}
-	return &pspimport.Importer{DB: r.DB, Merchants: r.Merchants, NMI: r.NMIClients, Directory: r.Contacts, Clock: r.Clock}
+	return &pspimport.Importer{DB: r.DB, Merchants: r.Merchants, NMI: r.NMIClients, Stripe: r.StripeClients, Directory: r.Contacts, Clock: r.Clock}
 }

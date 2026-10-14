@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
@@ -29,6 +31,34 @@ var sources = map[string]func(ctx context.Context, im *Importer, mid billing.Mer
 		client.ReadOnly = true
 		return &nmiSource{client: client, currency: "USD"}, nil
 	},
+	"stripe": func(ctx context.Context, im *Importer, mid billing.MerchantID, scope merchants.PSPScope) (source, error) {
+		key, err := im.secret(ctx, mid, scope, "secret_key")
+		if err != nil {
+			return nil, err
+		}
+		fetcher := reconcile.NewStripeFetcher(key)
+		fetcher.HTTPClient = im.Stripe.ReadOnlyClient(30 * time.Second)
+		return &stripeSource{fetcher: fetcher}, nil
+	},
+}
+
+// secret reads one of the PSP's credentials.
+func (im *Importer) secret(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, name string) (string, error) {
+	if im.Merchants == nil {
+		return "", errors.New("merchant configuration is not wired")
+	}
+	ref, err := scope.SecretRef(name)
+	if err != nil {
+		return "", err
+	}
+	sec, err := merchants.ReadSecretRef(ctx, im.Merchants.Secrets(), mid, ref)
+	if err != nil {
+		return "", fmt.Errorf("secret %s: %w", name, err)
+	}
+	if strings.TrimSpace(sec.Value) == "" {
+		return "", fmt.Errorf("secret %s is empty", name)
+	}
+	return strings.TrimSpace(sec.Value), nil
 }
 
 // historyWindow bounds one transaction read and its commit.

@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/identity"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/pagination"
@@ -36,7 +37,9 @@ type Importer struct {
 	DB        *db.DB
 	Merchants *merchants.Service
 	// NMI builds the import's NMI clients; they are made read-only.
-	NMI       *railresolve.NMIFactory
+	NMI *railresolve.NMIFactory
+	// Stripe builds the import's write-blocked Stripe clients.
+	Stripe    *stripeapi.Factory
 	Directory identity.Directory
 	Clock     clockwork.Clock
 }

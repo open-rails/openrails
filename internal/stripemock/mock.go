@@ -303,6 +303,10 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 			}
 		}
 		return 200, Object{"object": "search_result", "data": data, "has_more": false}
+	case r.Method == http.MethodGet && p == "/v1/customers":
+		return 200, stripeList(m.customers, q)
+	case r.Method == http.MethodGet && p == "/v1/payment_methods":
+		return 200, stripeList(m.methods, q)
 	case r.Method == http.MethodPost && p == "/v1/customers":
 		c := Object{"object": "customer", "id": m.id("cus"), "email": form.Get("email"), "metadata": metadataOf(form), "livemode": false}
 		m.customers[c["id"].(string)] = c

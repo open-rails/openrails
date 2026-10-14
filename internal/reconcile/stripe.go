@@ -492,3 +492,41 @@ func normalizeStripeDispute(obj json.RawMessage) RemoteTransaction {
 	}
 	return txn
 }
+
+// StripeRoster reads the account's subscriptions in every status, each
+// normalized beside its raw object.
+func (f *StripeFetcher) StripeRoster(ctx context.Context) ([]RemoteSubscription, []json.RawMessage, error) {
+	raws, err := f.listSubscriptions(ctx, FetchParams{})
+	if err != nil {
+		return nil, nil, err
+	}
+	subs := make([]RemoteSubscription, 0, len(raws))
+	for _, raw := range raws {
+		sub, _ := normalizeStripeSubscription(raw)
+		subs = append(subs, sub)
+	}
+	return subs, raws, nil
+}
+
+// StripeList pages one Stripe list endpoint: objects created in [since,
+// until] (zero bounds read everything), for one customer when set.
+func (f *StripeFetcher) StripeList(ctx context.Context, path string, since, until time.Time, customer string, extra url.Values) ([]json.RawMessage, error) {
+	return f.listRaw(ctx, path, FetchParams{Since: since, Until: until, CustomerID: customer}, extra)
+}
+
+// StripeCharges normalizes charges and refunds as the pull reads them.
+func StripeCharges(charges, refunds []json.RawMessage) []RemoteTransaction {
+	out := make([]RemoteTransaction, 0, len(charges)+len(refunds))
+	for _, c := range charges {
+		out = append(out, normalizeStripeCharge(c))
+	}
+	for _, r := range refunds {
+		out = append(out, normalizeStripeRefund(r))
+	}
+	return out
+}
+
+// Bills is the fetcher's invoice reader.
+func (f *StripeFetcher) Bills() *subscriptions.HTTPStripeLivenessProber {
+	return &subscriptions.HTTPStripeLivenessProber{SecretKey: f.SecretKey, BaseURL: f.BaseURL, HTTPClient: f.client()}
+}

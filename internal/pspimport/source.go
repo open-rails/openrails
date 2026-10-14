@@ -45,15 +45,22 @@ type cardData struct {
 // subscriptionData is a live provider subscription's terms. Amount is in the
 // currency's native units.
 type subscriptionData struct {
-	Plan           string          `json:"plan,omitempty"`
-	Amount         int64           `json:"amount,string"`
-	Currency       string          `json:"currency"`
-	IntervalHours  int             `json:"interval_hours,omitempty"`
-	IntervalMonths int             `json:"interval_months,omitempty"`
-	StartedAt      time.Time       `json:"started_at"`
-	NextBillingAt  *time.Time      `json:"next_billing_at,omitempty"`
-	Paused         bool            `json:"paused,omitempty"`
-	Evidence       json.RawMessage `json:"evidence,omitempty"`
+	Plan           string     `json:"plan,omitempty"`
+	Amount         int64      `json:"amount,string"`
+	Currency       string     `json:"currency"`
+	IntervalHours  int        `json:"interval_hours,omitempty"`
+	IntervalMonths int        `json:"interval_months,omitempty"`
+	StartedAt      time.Time  `json:"started_at"`
+	NextBillingAt  *time.Time `json:"next_billing_at,omitempty"`
+	Paused         bool       `json:"paused,omitempty"`
+	// Ended is a subscription the provider no longer bills: EndedAt is when,
+	// UserCanceled whether the subscriber ended it.
+	Ended        bool       `json:"ended,omitempty"`
+	EndedAt      *time.Time `json:"ended_at,omitempty"`
+	UserCanceled bool       `json:"user_canceled,omitempty"`
+	// MethodRef is the saved card the provider bills, when it names one.
+	MethodRef string          `json:"method_ref,omitempty"`
+	Evidence  json.RawMessage `json:"evidence,omitempty"`
 }
 
 // transactionData is one charge, decline or refund. Amount is in the
@@ -67,6 +74,8 @@ type transactionData struct {
 	Amount        int64     `json:"amount,string"`
 	Currency      string    `json:"currency"`
 	OccurredAt    time.Time `json:"occurred_at"`
+	// StripeInvoice is the complete invoice a Stripe charge paid.
+	StripeInvoice *billing.DeclaredStripeInvoice `json:"stripe_invoice,omitempty"`
 }
 
 // attribution places transactions on the subscription they paid when the
