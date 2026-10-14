@@ -237,9 +237,9 @@ var errorCodes = []ErrorCode{
 	// Pay URLs.
 	{"pay_url_not_found", 404, invalid, "The pay URL is unknown or no longer valid."},
 	{"pay_url_expired", 410, invalid, "The pay URL expired; the merchant creates a new order."},
-	{"pay_url_unavailable", 400, invalid, "This deployment serves no payment origin, or the order cannot take a pay URL."},
+	{"pay_url_unavailable", 400, invalid, "This deployment serves no checkout origin, or the order cannot take a pay URL."},
 	{"pay_url_attempts_exhausted", 409, invalid, "The pay URL took its most card attempts; the merchant creates a new order."},
-	{"embed_origins_required", 400, invalid, "An embedded pay URL needs the origins that may frame it: the merchant's settings payment_page.embed_origins."},
+	{"embed_origins_required", 400, invalid, "An embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins."},
 	{"order_attempt_closed", 409, invalid, "The order attempt already completed or was canceled."},
 	{"order_attempt_expired", 410, invalid, "The order attempt expired before it was paid."},
 

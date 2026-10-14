@@ -1,8 +1,8 @@
 // Package paymentpage is the payment page: an order's pay URL on
-// the payment origin (a merchant order's, or a customer's own order's), the
+// the checkout origin (a merchant order's, or a customer's own order's), the
 // secret it carries, the page served there and what the secret opens. The secret
 // acts as the order's customer, for that order alone, and only on the
-// payment origin (Stripe's client secret).
+// checkout origin (Stripe's client secret).
 package paymentpage
 
 import (
@@ -48,13 +48,13 @@ func Hash(secret string) ([]byte, bool) {
 	return sum[:], true
 }
 
-// PagePrefix starts every order page's path on the payment origin.
+// PagePrefix starts every order page's path on the checkout origin.
 const PagePrefix = "/pay/"
 
-// PagePath is the page's path for an order on the payment origin.
+// PagePath is the page's path for an order on the checkout origin.
 func PagePath(order billing.OrderID) string { return PagePrefix + order.String() }
 
-// URL is the pay URL: the page for the order on the payment origin,
+// URL is the pay URL: the page for the order on the checkout origin,
 // with the secret in the fragment, which browsers never send to a server.
 func URL(origin string, order billing.OrderID, secret string) string {
 	return strings.TrimRight(origin, "/") + PagePath(order) + "#" + secret

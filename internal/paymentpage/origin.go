@@ -10,13 +10,13 @@ import (
 	"strings"
 )
 
-// Origin validates an isolated payment origin. Cookie-bearing application,
+// Origin validates an isolated checkout origin. Cookie-bearing application,
 // billing API and identity-provider origins must be passed in forbidden.
 func Origin(raw string, forbidden ...string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.User != nil || u.Host == "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/") ||
 		!(u.Scheme == "https" || u.Scheme == "http" && loopback(u.Hostname())) {
-		return "", fmt.Errorf("the payment origin must be an https origin with no path (http on loopback)")
+		return "", fmt.Errorf("the checkout origin must be an https origin with no path (http on loopback)")
 	}
 	origin, err := canonicalOrigin(u)
 	if err != nil {
@@ -32,7 +32,7 @@ func Origin(raw string, forbidden ...string) (string, error) {
 			return "", fmt.Errorf("invalid application origin: %w", err)
 		}
 		if otherOrigin == origin {
-			return "", fmt.Errorf("the payment origin must be its own origin, separate from billing and sign-in")
+			return "", fmt.Errorf("the checkout origin must be its own origin, separate from billing and sign-in")
 		}
 	}
 	return origin, nil
@@ -48,7 +48,7 @@ func canonicalOrigin(u *url.URL) (string, error) {
 		var err error
 		host, err = idna.Lookup.ToASCII(host)
 		if err != nil {
-			return "", fmt.Errorf("invalid payment origin hostname: %w", err)
+			return "", fmt.Errorf("invalid checkout origin hostname: %w", err)
 		}
 		// Browsers accept shortened, octal and hexadecimal IPv4 addresses.
 		// Reject these ambiguous spellings instead of treating them as DNS names.
@@ -59,13 +59,13 @@ func canonicalOrigin(u *url.URL) (string, error) {
 		numeric := last != "" && strings.Trim(last, "0123456789") == ""
 		hex := strings.HasPrefix(last, "0x") && strings.Trim(strings.TrimPrefix(last, "0x"), "0123456789abcdef") == ""
 		if numeric || hex {
-			return "", fmt.Errorf("the payment origin requires a canonical IP address")
+			return "", fmt.Errorf("the checkout origin requires a canonical IP address")
 		}
 	}
 	if port != "" {
 		n, err := strconv.ParseUint(port, 10, 16)
 		if err != nil {
-			return "", fmt.Errorf("invalid payment origin port")
+			return "", fmt.Errorf("invalid checkout origin port")
 		}
 		port = strconv.FormatUint(n, 10)
 	}
@@ -80,12 +80,12 @@ func canonicalOrigin(u *url.URL) (string, error) {
 	return scheme + "://" + host, nil
 }
 
-// Host recognizes the payment origin in a request's Host header. Browsers'
+// Host recognizes the checkout origin in a request's Host header. Browsers'
 // spellings of one origin match (case, a trailing dot, the scheme's default
 // port); forwarded headers play no part.
 type Host struct{ scheme, host string }
 
-// NewHost is the Host of a payment origin (Origin's rules).
+// NewHost is the Host of a checkout origin (Origin's rules).
 func NewHost(origin string) (Host, error) {
 	canonical, err := Origin(origin)
 	if err != nil {
@@ -95,7 +95,7 @@ func NewHost(origin string) (Host, error) {
 	return Host{scheme: scheme, host: host}, nil
 }
 
-// Match reports whether raw, a request's Host, names the payment origin;
+// Match reports whether raw, a request's Host, names the checkout origin;
 // valid is false for anything but a plain host[:port].
 func (h Host) Match(raw string) (match, valid bool) {
 	u, err := url.Parse("//" + raw)

@@ -81,6 +81,15 @@ export const ko: BillingUiMessageBundle = {
     changeCard: "카드 변경",
     changeCardLabel: "{name} 카드 변경",
   },
+  resume: {
+    title: "{name}을(를) 다시 시작할까요?",
+    description:
+      "구독은 {date}에 갱신되며, 그때 {price}이(가) 카드로 청구되고 해지할 때까지 매 결제 주기마다 청구됩니다.",
+    descriptionNoDate:
+      "구독이 갱신되며 해지할 때까지 매 결제 주기마다 카드로 청구됩니다.",
+    keepCanceled: "해지 상태 유지",
+    confirm: "구독 다시 시작",
+  },
   changeCard: {
     title: "{name} 결제 카드",
     description: "이후 갱신은 선택한 카드로 청구됩니다.",
@@ -93,7 +102,8 @@ export const ko: BillingUiMessageBundle = {
   cancel: {
     title: "{name}을(를) 해지할까요?",
     description: "향후 결제가 중단됩니다. 이미 구매한 이용권은 유지됩니다.",
-    revokeOnChain: "온체인에서도 취소합니다(지갑 서명과 네트워크 수수료가 필요합니다).",
+    revokeOnChain:
+      "온체인에서도 취소합니다(지갑 서명과 네트워크 수수료가 필요합니다).",
     solanaDescription:
       "지갑에서 온체인 해지에 서명합니다. 이미 구매한 이용권은 유지됩니다.",
     reasonLabel: "해지하는 이유를 알려 주세요",
@@ -172,9 +182,10 @@ export const ko: BillingUiMessageBundle = {
   },
   errors: {
     generic: "문제가 발생했습니다. 다시 시도하세요.",
-    network: "서버에 연결할 수 없습니다. 연결을 확인하고 다시 시도하세요.",
     network_error:
       "서버에 연결할 수 없습니다. 연결을 확인하고 다시 시도하세요.",
+    server_unavailable:
+      "서버가 지금 응답하지 않습니다. 잠시 후 다시 시도하세요.",
     invalid_response: "서버가 예상치 못한 응답을 보냈습니다.",
     authentication_required: "세션이 만료되었습니다. 다시 로그인하세요.",
     resource_access_denied: "접근 권한이 없습니다.",

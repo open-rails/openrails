@@ -26,7 +26,7 @@ func NewStore(d *db.DB) *Store { return &Store{db: d} }
 // when the order has one already or is not an open merchant order.
 func Attach(ctx context.Context, q *gen.Queries, origin string, mid billing.MerchantID, c PayURL, now time.Time) (string, error) {
 	if origin == "" {
-		return "", apperr.New(http.StatusBadRequest, "pay_url_unavailable", "this deployment serves no payment origin")
+		return "", apperr.New(http.StatusBadRequest, "pay_url_unavailable", "this deployment serves no checkout origin")
 	}
 	secret, hash, err := NewSecret()
 	if err != nil {

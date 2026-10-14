@@ -81,6 +81,15 @@ export const es: BillingUiMessageBundle = {
     changeCard: "Cambiar tarjeta",
     changeCardLabel: "Cambiar la tarjeta de {name}",
   },
+  resume: {
+    title: "¿Reanudar {name}?",
+    description:
+      "Tu suscripción se renueva el {date}: se cobrarán {price} a tu tarjeta entonces y en cada periodo de facturación hasta que la canceles.",
+    descriptionNoDate:
+      "Tu suscripción se renovará y se cobrará a tu tarjeta en cada periodo de facturación hasta que la canceles.",
+    keepCanceled: "Mantener cancelada",
+    confirm: "Reanudar suscripción",
+  },
   changeCard: {
     title: "Pagar {name} con",
     description:
@@ -95,7 +104,8 @@ export const es: BillingUiMessageBundle = {
     title: "¿Cancelar {name}?",
     description:
       "Se detienen los pagos futuros. Conservas el acceso ya adquirido.",
-    revokeOnChain: "Cancelar también en la cadena (requiere firma de la cartera y una comisión de red).",
+    revokeOnChain:
+      "Cancelar también en la cadena (requiere firma de la cartera y una comisión de red).",
     solanaDescription:
       "Tu cartera firma una cancelación en la cadena. Conservas el acceso ya adquirido.",
     reasonLabel: "¿Por qué cancelas?",
@@ -176,10 +186,10 @@ export const es: BillingUiMessageBundle = {
   },
   errors: {
     generic: "Algo salió mal. Inténtalo de nuevo.",
-    network:
-      "No se puede conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.",
     network_error:
       "No se puede conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.",
+    server_unavailable:
+      "El servidor no responde en este momento. Inténtalo de nuevo en unos instantes.",
     invalid_response: "El servidor envió una respuesta inesperada.",
     authentication_required: "Tu sesión caducó. Vuelve a iniciar sesión.",
     resource_access_denied: "No tienes acceso a esto.",

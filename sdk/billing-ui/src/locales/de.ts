@@ -82,6 +82,15 @@ export const de: BillingUiMessageBundle = {
     changeCard: "Karte ändern",
     changeCardLabel: "Karte für {name} ändern",
   },
+  resume: {
+    title: "{name} fortsetzen?",
+    description:
+      "Dein Abo verlängert sich am {date}. Dann werden {price} von deiner Karte abgebucht, danach in jedem Abrechnungszeitraum bis zur Kündigung.",
+    descriptionNoDate:
+      "Dein Abo verlängert sich, und deine Karte wird in jedem Abrechnungszeitraum belastet, bis du kündigst.",
+    keepCanceled: "Gekündigt lassen",
+    confirm: "Abo fortsetzen",
+  },
   changeCard: {
     title: "{name} bezahlen mit",
     description:
@@ -96,7 +105,8 @@ export const de: BillingUiMessageBundle = {
     title: "{name} kündigen?",
     description:
       "Künftige Zahlungen werden eingestellt. Bereits gekaufter Zugriff bleibt bestehen.",
-    revokeOnChain: "Auch auf der Blockchain kündigen (erfordert Wallet-Signatur und Netzwerkgebühr).",
+    revokeOnChain:
+      "Auch auf der Blockchain kündigen (erfordert Wallet-Signatur und Netzwerkgebühr).",
     solanaDescription:
       "Deine Wallet signiert eine On-Chain-Kündigung. Bereits gekaufter Zugriff bleibt bestehen.",
     reasonLabel: "Warum kündigst du?",
@@ -177,10 +187,10 @@ export const de: BillingUiMessageBundle = {
   },
   errors: {
     generic: "Etwas ist schiefgelaufen. Bitte versuche es erneut.",
-    network:
-      "Der Server ist nicht erreichbar. Prüfe deine Verbindung und versuche es erneut.",
     network_error:
       "Der Server ist nicht erreichbar. Prüfe deine Verbindung und versuche es erneut.",
+    server_unavailable:
+      "Der Server antwortet gerade nicht. Bitte versuche es gleich noch einmal.",
     invalid_response: "Der Server hat eine unerwartete Antwort gesendet.",
     authentication_required:
       "Deine Sitzung ist abgelaufen. Melde dich erneut an.",

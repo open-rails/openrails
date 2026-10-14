@@ -33,11 +33,11 @@ func (s *Server) buildPaymentPage(origin string, assets fs.FS) error {
 	if err != nil {
 		return err
 	}
-	s.paymentOrigin, s.paymentHost, s.paymentHandler = origin, host, handler
+	s.checkoutOrigin, s.paymentHost, s.paymentHandler = origin, host, handler
 	return nil
 }
 
-// dispatchPaymentPage sends the payment origin's requests to its surface
+// dispatchPaymentPage sends the checkout origin's requests to its surface
 // and nothing else there; a malformed Host is refused.
 func (s *Server) dispatchPaymentPage(next http.Handler) http.Handler {
 	if s.paymentHandler == nil {
@@ -55,7 +55,7 @@ func (s *Server) dispatchPaymentPage(next http.Handler) http.Handler {
 	})
 }
 
-// PaymentPage is the payment origin and its surface; "" and nil without one.
-func (s *Server) PaymentPage() (string, http.Handler) {
-	return s.paymentOrigin, s.paymentHandler
+// CheckoutPage is the checkout origin and its surface; "" and nil without one.
+func (s *Server) CheckoutPage() (string, http.Handler) {
+	return s.checkoutOrigin, s.paymentHandler
 }

@@ -5,6 +5,8 @@ import {
   isBillingError,
   localError,
   readBillingError,
+  toBillingError,
+  transportFailure,
 } from "./errors"
 import { OPENRAILS_CURRENCY_SCALES } from "./generated/currencies"
 import type * as wire from "./generated/wire"
@@ -277,7 +279,9 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           !(cause instanceof TypeError) ||
           waited + delay > RETRY_BUDGET_MS
         )
-          throw cause
+          throw opts.signal?.aborted || !transportFailure(cause)
+            ? cause
+            : toBillingError(cause)
         waited += await pause(delay, opts.signal)
         continue
       }
@@ -562,7 +566,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
      * payment attempt. A failed payment resolves as payOrder's does. Without
      * `payment` the customer's open order of the same lines is answered when
      * there is one. With `payUrl` the order answers its embedded pay URL,
-     * `order.pay_url` on the payment origin, for `<EmbeddedPayment>`, fresh
+     * `order.pay_url` on the checkout origin, for `<EmbeddedPayment>`, fresh
      * on every answer: the merchant's own signed-in person only.
      */
     createOrder(input: {

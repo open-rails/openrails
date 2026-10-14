@@ -80,6 +80,15 @@ export const en = {
     changeCard: "Change card",
     changeCardLabel: "Change card for {name}",
   },
+  resume: {
+    title: "Resume {name}?",
+    description:
+      "Your subscription renews on {date}, and {price} will be charged to your card then and every billing period until you cancel.",
+    descriptionNoDate:
+      "Your subscription will renew, and your card will be charged each billing period until you cancel.",
+    keepCanceled: "Keep canceled",
+    confirm: "Resume subscription",
+  },
   changeCard: {
     title: "Pay {name} with",
     description: "Future renewals charge the selected card.",
@@ -92,7 +101,8 @@ export const en = {
   cancel: {
     title: "Cancel {name}?",
     description: "Future payments stop. You keep access already purchased.",
-    revokeOnChain: "Also cancel on chain (requires a wallet signature and network fee).",
+    revokeOnChain:
+      "Also cancel on chain (requires a wallet signature and network fee).",
     solanaDescription:
       "Your wallet signs an on-chain cancellation. You keep access already purchased.",
     reasonLabel: "Why are you cancelling?",
@@ -172,9 +182,10 @@ export const en = {
   },
   errors: {
     generic: "Something went wrong. Please try again.",
-    network: "Can't reach the server. Check your connection and try again.",
     network_error:
-      "Can't reach the server. Check your connection and try again.",
+      "Couldn't reach the server. Check your connection and try again.",
+    server_unavailable:
+      "The server isn't responding right now. Please try again in a moment.",
     invalid_response: "The server sent an unexpected response.",
     authentication_required: "Your session expired. Sign in again.",
     resource_access_denied: "You don't have access to this.",

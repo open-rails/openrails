@@ -111,14 +111,14 @@ type OrderAttemptService struct {
 	// orders settles the orders order attempts pay (#1168).
 	orders *orders.Service
 
-	// paymentOrigin is the payment page's origin, "" without one: its
+	// checkoutOrigin is the payment page's origin, "" without one: its
 	// pages are return URLs too.
-	paymentOrigin func() string
+	checkoutOrigin func() string
 }
 
-// SetPaymentOrigin wires the payment page's origin, set once it is served.
-func (s *OrderAttemptService) SetPaymentOrigin(origin func() string) {
-	s.paymentOrigin = origin
+// SetCheckoutOrigin wires the payment page's origin, set once it is served.
+func (s *OrderAttemptService) SetCheckoutOrigin(origin func() string) {
+	s.checkoutOrigin = origin
 }
 
 // SetPSPPosture wires the verdict purchase consults before offering a PSP.

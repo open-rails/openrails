@@ -34,7 +34,7 @@ type CustomerConfig struct {
 
 // PublicNetwork is the payment page's sign-in to the customer network: an
 // OpenID Connect authorization (code and PKCE) at Issuer for ClientID,
-// returning to the payment origin's /pay/sign-in.
+// returning to the checkout origin's /pay/sign-in.
 type PublicNetwork struct {
 	Issuer   string `json:"issuer"`
 	ClientID string `json:"client_id"`

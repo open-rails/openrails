@@ -241,8 +241,8 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.DunningPolicy != nil {
 		current.DunningPolicy = patch.DunningPolicy
 	}
-	if patch.PaymentPage != nil {
-		current.PaymentPage = patch.PaymentPage
+	if patch.Checkout != nil {
+		current.Checkout = patch.Checkout
 	}
 	if patch.BalanceNotices != nil {
 		current.BalanceNotices = patch.BalanceNotices

@@ -148,6 +148,7 @@ it("retries transient failures at most twice and never a client error", () => {
     false,
   ])
   expect(shouldRetry(0, new TypeError("network error"))).toBe(true)
+  expect(shouldRetry(0, new ApiError(0, null, "unreachable"))).toBe(true)
   expect(shouldRetry(0, new ApiError(400, null, "bad request"))).toBe(false)
 })
 

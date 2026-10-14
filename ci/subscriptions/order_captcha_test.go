@@ -105,7 +105,7 @@ func TestPaymentPageDeclinesRequireCaptcha(t *testing.T) {
 	w := prepareWorld(t, 12, orderCaptchaConfig)
 	var page *httptest.Server
 	w.booted = func(e *openrails.Engine) {
-		_, handler, err := e.PaymentPage("https://pay.e2e.test", fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})
+		_, handler, err := e.CheckoutPage("https://pay.e2e.test", fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})
 		require.NoError(t, err)
 		page = httptest.NewServer(http.StripPrefix(mountPrefix, handler))
 		t.Cleanup(page.Close)

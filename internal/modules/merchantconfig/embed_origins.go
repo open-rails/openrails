@@ -9,26 +9,26 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// MaxEmbedOrigins bounds payment_page.embed_origins.
+// MaxEmbedOrigins bounds checkout.embed_origins.
 const MaxEmbedOrigins = 10
 
-// NormalizeEmbedOrigins validates payment_page.embed_origins: each an exact
+// NormalizeEmbedOrigins validates checkout.embed_origins: each an exact
 // origin (scheme, host and port; no path, wildcard or credentials), https or
 // http on loopback, at most MaxEmbedOrigins, none twice. They become a CSP
 // frame-ancestors source list, so nothing broader is accepted.
 func NormalizeEmbedOrigins(in []string) ([]string, error) {
 	if len(in) > MaxEmbedOrigins {
-		return nil, fmt.Errorf("payment_page.embed_origins: at most %d origins", MaxEmbedOrigins)
+		return nil, fmt.Errorf("checkout.embed_origins: at most %d origins", MaxEmbedOrigins)
 	}
 	out := make([]string, 0, len(in))
 	seen := map[string]bool{}
 	for _, raw := range in {
 		origin, ok := embedOrigin(raw)
 		if !ok {
-			return nil, fmt.Errorf("payment_page.embed_origins: %q is not an exact https origin (http on loopback), like https://shop.example", raw)
+			return nil, fmt.Errorf("checkout.embed_origins: %q is not an exact https origin (http on loopback), like https://shop.example", raw)
 		}
 		if seen[origin] {
-			return nil, fmt.Errorf("payment_page.embed_origins: %q is listed twice", raw)
+			return nil, fmt.Errorf("checkout.embed_origins: %q is listed twice", raw)
 		}
 		seen[origin] = true
 		out = append(out, origin)
@@ -39,10 +39,10 @@ func NormalizeEmbedOrigins(in []string) ([]string, error) {
 // EmbedOrigins are the origins settings let frame the merchant's embedded
 // purchases; none when they name none or name them invalidly.
 func EmbedOrigins(settings billing.MerchantSettings) []string {
-	if settings.PaymentPage == nil {
+	if settings.Checkout == nil {
 		return []string{}
 	}
-	out, err := NormalizeEmbedOrigins(settings.PaymentPage.EmbedOrigins)
+	out, err := NormalizeEmbedOrigins(settings.Checkout.EmbedOrigins)
 	if err != nil {
 		return []string{}
 	}

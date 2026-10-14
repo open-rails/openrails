@@ -109,10 +109,10 @@ type Config struct {
 	// AdminConsole declares app sign-in methods. The console is always on at
 	// /admin; LocalSignIn separately enables local accounts.
 	AdminConsole *AdminConsole
-	// PaymentOrigin is the origin (https://pay.example.com) the server
+	// CheckoutOrigin is the origin (https://pay.example.com) the server
 	// serves its payment page on, by Host; orders then take a pay URL. It
 	// must be an origin of its own. Empty serves none.
-	PaymentOrigin string
+	CheckoutOrigin string
 
 	// Addr is where Run and Serve listen; empty is ":3053".
 	Addr string
@@ -189,7 +189,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 			return nil, fmt.Errorf("server: Engine.Merchants[%q].Issuer binds an embedded host's own issuer to its merchant; a standalone server's credentials are bound to a merchant by its AuthKit group", slug)
 		}
 	}
-	origin, err := paymentOrigin(cfg)
+	origin, err := checkoutOrigin(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +273,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
 		RouteGroups: cfg.RouteGroups, AdminConsole: cfg.AdminConsole, Resource: akCfg.Resource.ID,
-		PaymentOrigin: origin, PaymentPageAssets: paymentPageAssets(deps.PaymentPageAssets), ConsoleAssets: consoleAssets,
+		CheckoutOrigin: origin, PaymentPageAssets: paymentPageAssets(deps.PaymentPageAssets), ConsoleAssets: consoleAssets,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))
 	}

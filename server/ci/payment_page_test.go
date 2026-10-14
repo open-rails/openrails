@@ -66,7 +66,7 @@ func newPayShop(t *testing.T) *payShop {
 		cfg.Engine.PublicBillingBaseURL = "https://" + serverHost
 		cfg.Engine.RateLimitsDisabled = true
 		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
-		cfg.PaymentOrigin = "https://" + paymentHost
+		cfg.CheckoutOrigin = "https://" + paymentHost
 		deps.Engine.Clock = s.clock
 		deps.PaymentPageAssets = paymentPage
 	})
@@ -215,7 +215,7 @@ func TestPaymentPageOnMerchantOrders(t *testing.T) {
 		require.Contains(t, res.Body.String(), `"param":"`+name+`"`)
 	}
 
-	// An enabled merchant on a host serving no payment origin refuses a pay URL.
+	// An enabled merchant on a host serving no checkout origin refuses a pay URL.
 	// Keep the provider-write fence out of this capability check.
 	f := newFixture(t)
 	cfg := f.config()
@@ -342,7 +342,7 @@ CREATE TRIGGER refuse_pay_url_receipt BEFORE INSERT ON %[1]s.idempotency_keys FO
 	require.NotNil(t, order.PayURL)
 }
 
-// The payment origin serves the page and, under one pay URL's secret,
+// The checkout origin serves the page and, under one pay URL's secret,
 // that order's own routes as its customer: never another order, never saved
 // cards the merchant did not offer, never on the API host, and not after the
 // URL expires.
@@ -466,13 +466,13 @@ func TestPaymentPageNeedsItsOwnOrigin(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := f.buildServer(t, func(cfg *server.Config, deps *server.Deps) {
-				cfg.PaymentOrigin = "https://" + paymentHost
+				cfg.CheckoutOrigin = "https://" + paymentHost
 				deps.PaymentPageAssets = paymentPage
 				tc.edit(cfg)
 			})
 			require.ErrorContains(t, err, "own origin")
 		})
 	}
-	_, err := f.buildServer(t, func(cfg *server.Config, _ *server.Deps) { cfg.PaymentOrigin = "https://" + paymentHost + "/pay" })
+	_, err := f.buildServer(t, func(cfg *server.Config, _ *server.Deps) { cfg.CheckoutOrigin = "https://" + paymentHost + "/pay" })
 	require.ErrorContains(t, err, "no path")
 }

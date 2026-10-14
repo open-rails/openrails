@@ -41,11 +41,11 @@ func TestRequiredEntitlementsGateOrders(t *testing.T) {
 	cfg.RateLimitsDisabled = true
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{"members-only": {
 		DisplayName:      "Members only",
-		MerchantSettings: billing.MerchantSettings{PaymentPage: &billing.MerchantPaymentPageSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
+		MerchantSettings: billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{"https://shop.e2e.test"}}},
 		PSPs:             map[string]openrails.PSPConfig{"nmi": nmiPSP()},
 	}}
 	bill, shop := f.boot(t, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
-	_, paymentHost, err := bill.PaymentPage("https://pay.e2e.test", fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>Payment</title>")}})
+	_, paymentHost, err := bill.CheckoutPage("https://pay.e2e.test", fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>Payment</title>")}})
 	require.NoError(t, err)
 	auth := &authtest.Fake{}
 	app := http.NewServeMux()

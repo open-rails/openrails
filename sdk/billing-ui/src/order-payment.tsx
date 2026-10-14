@@ -17,6 +17,7 @@ import type { BillingClient, OrderResult } from "./client/client"
 import { isBillingError } from "./client/errors"
 import type { Order, OrderPaymentInput, PaymentMethod } from "./client/types"
 import { PayButton, TrustLine } from "./components/pay-button"
+import { Button } from "./components/ui/button"
 import { SolanaBody } from "./components/qr"
 import { SavedMethods, NEW_CARD_VALUE } from "./components/saved-methods"
 import { LoadingSkeleton } from "./components/states"
@@ -99,7 +100,11 @@ export function OrderPayment({
   const context = useBillingContext()
   const client = given ?? context.client
   const { config } = useConfig()
-  const { config: merchant } = useCustomerConfig()
+  const {
+    config: merchant,
+    error: merchantError,
+    refetch: refetchMerchant,
+  } = useCustomerConfig()
   const scales = useCurrencyScales()
   const [order, setOrder] = React.useState<Order>()
   const [methods, setMethods] = React.useState<PaymentMethod[]>([])
@@ -627,7 +632,20 @@ export function OrderPayment({
                 </form>
               )}
             </>
-          ) : solana || hosted.length > 0 || revealed.length > 0 ? null : (
+          ) : solana || hosted.length > 0 || revealed.length > 0 ? null : !merchant ? (
+            // The merchant's payment setup is still loading, or failed to:
+            // never read that as card entry being unavailable.
+            merchantError ? (
+              <div role="alert" className="grid gap-2 text-sm">
+                <p className="text-destructive">{m.error(merchantError)}</p>
+                <Button type="button" variant="outline" size="sm" onClick={refetchMerchant}>
+                  {m.t("common.retry")}
+                </Button>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">{m.t("common.loading")}</p>
+            )
+          ) : (
             <p role="alert" className="text-sm text-destructive">
               {m.t("paymentMethods.unavailable")}
             </p>

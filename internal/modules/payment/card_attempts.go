@@ -70,12 +70,12 @@ func cardAttemptFailed(err error) bool {
 // redirect PSP or bank challenge started there comes back inside it, framed
 // or not.
 func (s *OrderAttemptService) paymentPage(raw string) bool {
-	if s.paymentOrigin == nil {
+	if s.checkoutOrigin == nil {
 		return false
 	}
 	origin, ok := config.URLOrigin(raw)
 	u, err := url.Parse(strings.TrimSpace(raw))
-	return ok && err == nil && u.User == nil && origin != "" && origin == s.paymentOrigin() && strings.HasPrefix(u.Path, paymentpage.PagePrefix)
+	return ok && err == nil && u.User == nil && origin != "" && origin == s.checkoutOrigin() && strings.HasPrefix(u.Path, paymentpage.PagePrefix)
 }
 
 // validateReturnURLs refuses redirect targets outside the host's allowed

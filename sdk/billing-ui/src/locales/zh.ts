@@ -81,6 +81,15 @@ export const zh: BillingUiMessageBundle = {
     changeCard: "更换卡片",
     changeCardLabel: "更换 {name} 的卡片",
   },
+  resume: {
+    title: "恢复{name}？",
+    description:
+      "你的订阅将于{date}续订，届时将从你的卡中扣除{price}，此后每个计费周期扣款，直到你取消。",
+    descriptionNoDate:
+      "你的订阅将续订，直到你取消前每个计费周期都会从你的卡中扣款。",
+    keepCanceled: "保持已取消",
+    confirm: "恢复订阅",
+  },
   changeCard: {
     title: "{name} 的付款卡",
     description: "之后的续费将从所选卡片扣款。",
@@ -167,8 +176,8 @@ export const zh: BillingUiMessageBundle = {
   },
   errors: {
     generic: "出了点问题，请重试。",
-    network: "无法连接服务器。请检查网络后重试。",
     network_error: "无法连接服务器。请检查网络后重试。",
+    server_unavailable: "服务器暂时没有响应，请稍后重试。",
     invalid_response: "服务器返回了意外的响应。",
     authentication_required: "会话已过期，请重新登录。",
     resource_access_denied: "你无权访问此内容。",

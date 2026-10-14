@@ -118,7 +118,7 @@ type CreateMyOrderParams struct {
 	Payment       *OrderPaymentParams `json:"payment,omitempty"`
 	Reusable      *bool               `json:"reusable,omitempty"`
 	// PayURL asks, instead of Payment, for the order's embedded pay URL:
-	// Order.PayURL on the payment origin, fresh on every answer (the last
+	// Order.PayURL on the checkout origin, fresh on every answer (the last
 	// one stops working).
 	PayURL *MyOrderPayURLParams `json:"pay_url,omitempty"`
 }
@@ -141,7 +141,7 @@ type CreateOrderParams struct {
 	Lines      []OrderLineParams `json:"lines"`
 	ExpiresAt  *time.Time        `json:"expires_at,omitempty"`
 	// PayURL asks for the order's pay URL (Order.PayURL), where the
-	// customer pays. The deployment must serve a payment origin.
+	// customer pays. The deployment must serve a checkout origin.
 	PayURL         *OrderPayURLParams `json:"pay_url,omitempty"`
 	IdempotencyKey string             `json:"-"`
 }
@@ -192,7 +192,7 @@ type Order struct {
 	Payment  OrderPayment `json:"payment"`
 	// PaymentOptions are the PSPs that can take this order while it is open.
 	PaymentOptions []OrderPaymentOption `json:"payment_options"`
-	// PayURL is where the customer pays the order on the payment origin,
+	// PayURL is where the customer pays the order on the checkout origin,
 	// /pay/<order>#<secret>; the secret stays in the fragment and is stored
 	// hashed. Creation and a re-ask while the order is open answer it;
 	// other reads are null.

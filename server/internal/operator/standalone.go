@@ -19,9 +19,9 @@ type Surface struct {
 	// Resource is AuthKit's resource identifier, the console's audience at a
 	// trusted issuer.
 	Resource string
-	// PaymentOrigin serves the payment page there, from PaymentPageAssets;
+	// CheckoutOrigin serves the payment page there, from PaymentPageAssets;
 	// empty serves none.
-	PaymentOrigin     string
+	CheckoutOrigin    string
 	PaymentPageAssets fs.FS
 }
 
@@ -37,7 +37,7 @@ func StandaloneServer(a *app.App, cp *controlplane.ControlPlane, s Surface) (*se
 		ConsoleAssets:     s.ConsoleAssets,
 		RouteGroups:       s.RouteGroups,
 		AdminConsole:      s.AdminConsole,
-		PaymentOrigin:     s.PaymentOrigin,
+		CheckoutOrigin:    s.CheckoutOrigin,
 		PaymentPageAssets: s.PaymentPageAssets,
 	})
 }

@@ -201,6 +201,8 @@ describe("SubscriptionsPanel", () => {
     expect(row).toHaveTextContent("Access until Sep 16, 2036")
 
     fireEvent.click(within(row).getByRole("button", { name: "Resume" }))
+    // Resuming asks first: the customer will be charged again.
+    fireEvent.click(await screen.findByRole("button", { name: "Resume subscription" }))
     await waitFor(() => expect(row).toHaveTextContent("Active"))
     expect(
       await screen.findByText("Your subscription will continue.")
@@ -336,6 +338,8 @@ describe("SubscriptionsPanel", () => {
     expect(send).not.toHaveBeenCalled()
     expect(JSON.parse(String(server.fetch.mock.calls.find((c) => String(c[0]).endsWith("/cancel"))?.[1]?.body))).toEqual({ reason: "Too expensive", revoke_on_chain: false })
     fireEvent.click(within(row).getByRole("button", { name: "Resume" }))
+    // Resuming asks first: the customer will be charged again.
+    fireEvent.click(await screen.findByRole("button", { name: "Resume subscription" }))
     await waitFor(() => expect(row).toHaveTextContent("Active"))
   })
 

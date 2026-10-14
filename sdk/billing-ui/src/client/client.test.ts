@@ -233,7 +233,10 @@ describe("createBillingClient", () => {
       subscriptions: [subscription({ id: "sub_sol", rail: "solana" })],
     })
     const client = createBillingClient({ fetch: server.fetch })
-    const asked = await client.cancelSubscription("sub_sol", { reason: "done", revokeOnChain: true })
+    const asked = await client.cancelSubscription("sub_sol", {
+      reason: "done",
+      revokeOnChain: true,
+    })
     expect(asked.status).toBe("canceled")
     expect(asked.next_action?.type).toBe("solana_sign_transactions")
     const send = vi.fn(async (tx: string) => `sig-for-${tx}`)
@@ -303,8 +306,28 @@ describe("server errors", () => {
     )
     await expect(
       createBillingClient({ fetch }).listPaymentMethods()
-    ).rejects.toMatchObject({ status: 503 })
+    ).rejects.toMatchObject({ status: 503, code: "server_unavailable" })
     expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("throws a network_error BillingError when no server answers", async () => {
+    const fetch = vi.fn(async () => {
+      throw new TypeError("Load failed")
+    })
+    const err = await createBillingClient({ fetch })
+      .cancelSubscription("sub_1", { reason: "x" })
+      .catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(BillingError)
+    expect(err).toMatchObject({ status: 0, code: "network_error" })
+  })
+
+  it("keeps a coded 503 from OpenRails as sent", async () => {
+    const fetch = calls(() => apiError(503, "service_unavailable"))
+    await expect(
+      createBillingClient({ fetch }).cancelSubscription("sub_1", {
+        reason: "x",
+      })
+    ).rejects.toMatchObject({ status: 503, code: "service_unavailable" })
   })
 
   it("never retries a write", async () => {

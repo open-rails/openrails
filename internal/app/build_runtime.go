@@ -349,7 +349,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// runtimeRef, so every post-boot Merchants bind is visible immediately.
 	runtime.DestructiveAdmissions = runtime.NewDestructiveAdmissions(clock)
 	// Redirect PSPs and bank challenges come back to the payment page itself.
-	serviceInstances.OrderAttemptService.SetPaymentOrigin(runtime.PaymentOrigin)
+	serviceInstances.OrderAttemptService.SetCheckoutOrigin(runtime.CheckoutOrigin)
 	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.PriceMigrationService.WithDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.MoneyService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)

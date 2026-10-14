@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreachable servers are named
+
+- A request that reached no server (a fetch rejection, offline) and a gateway's
+  502, 503, 504 or 520–524 without OpenRails' error envelope (or a
+  `TimeoutError`) are no longer "Something went wrong": `m.error` shows
+  "Couldn't reach the server. Check your connection and try again."
+  (`network_error`) or "The server isn't responding right now. Please try
+  again in a moment." (new local `server_unavailable`), in every locale. The
+  client throws them as `BillingError`s instead of raw `TypeError`s, so
+  payment panels no longer show "Failed to fetch". Coded OpenRails errors are
+  unchanged; a code the bundle doesn't know shows OpenRails' own message.
+  `transportFailure()` is exported; the duplicate `errors.network` key is gone.
+- The staff console names the same failures in its toasts and error panels,
+  and retries queries OpenRails never answered.
+
+## Box sizing
+
+- billing-ui sizes its elements `border-box` itself, so a full-width input no
+  longer overflows by its padding and border on a host page without Tailwind's
+  preflight, such as the pay page.
+
+## The checkout origin
+
+- Breaking: the merchant setting `payment_page.embed_origins` is
+  `checkout.embed_origins` (`MerchantSettings.checkout`,
+  `MerchantCheckoutSettings`). `PublicMerchant.embed_origins` is unchanged.
+
 ## Fallbacks are a checkout option
 
 - Breaking: OpenRails no longer marks or withholds fallback PSPs

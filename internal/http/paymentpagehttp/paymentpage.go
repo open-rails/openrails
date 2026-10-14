@@ -22,7 +22,7 @@ import (
 // before publishing this handler or starting engine workers.
 func New(rt *app.Runtime, origin string, assets fs.FS, issuers []string, limiter func(http.Handler) http.Handler) (string, http.Handler, error) {
 	if u, err := url.Parse(origin); err != nil || u.Host == "" {
-		return "", nil, fmt.Errorf("payment origin %q", origin)
+		return "", nil, fmt.Errorf("checkout origin %q", origin)
 	}
 	page, err := paymentpage.Page(assets)
 	if err != nil {
@@ -49,6 +49,6 @@ func New(rt *app.Runtime, origin string, assets fs.FS, issuers []string, limiter
 		middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes), billingauth.ExplicitCredentials,
 		paymentpage.ResolveHTTP(store, rt.Clock.Now), limiter,
 	)
-	rt.SetPaymentOrigin(origin)
+	rt.SetCheckoutOrigin(origin)
 	return origin, handler, nil
 }
