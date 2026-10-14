@@ -1,6 +1,8 @@
 import type { BillingAdminAuth, BillingAdminResource } from "../../types"
 import type { OpenRailsErrorCode } from "../../../client/generated/error-codes"
 import type { ListPage } from "../../../client/generated/wire"
+import { transportFailure } from "../../../client/errors"
+import { en } from "../../../locales/en"
 
 // Stripe-shaped error envelope (internal/api); codes are billing.ErrorCodes.
 export interface ApiErrorBody {
@@ -51,7 +53,20 @@ async function parseError(res: Response): Promise<ApiError> {
   } catch {
     // non-JSON error body
   }
-  return new ApiError(res.status, body, `request failed (${res.status})`)
+  const failure = body?.error?.code
+    ? undefined
+    : transportFailure({ status: res.status })
+  return new ApiError(
+    res.status,
+    body,
+    failure ? en.errors[failure] : `request failed (${res.status})`
+  )
+}
+
+// A request OpenRails never answered (status 0), named for the operator.
+function unanswered(error: unknown): ApiError | undefined {
+  const failure = transportFailure(error)
+  return failure && new ApiError(0, null, en.errors[failure])
 }
 
 export interface RequestOptions {
@@ -172,10 +187,14 @@ export function createAdminClient(options: AdminClientOptions) {
             },
             "Merchant refused"
           )
-        throw error
+        throw (!opts.signal?.aborted && unanswered(error)) || error
       }
     } else {
-      res = await options.auth.authFetch(url, init)
+      try {
+        res = await options.auth.authFetch(url, init)
+      } catch (error) {
+        throw (!opts.signal?.aborted && unanswered(error)) || error
+      }
     }
     if (!res.ok) throw await parseError(res)
     return {

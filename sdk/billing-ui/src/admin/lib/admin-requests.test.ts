@@ -47,3 +47,33 @@ it("does not replay a write or sign the host out after an authentication refusal
   ).rejects.toMatchObject({ status: 401, code: "credential_expired" })
   expect(requests).toBe(1)
 })
+
+it("names a server that couldn't be reached or didn't answer", async () => {
+  const client = (authFetch: () => Promise<Response>) =>
+    createAdminClient({ baseUrl: "/billing/v1", auth: { authFetch } })
+  await expect(
+    client(async () => {
+      throw new TypeError("Failed to fetch")
+    }).api("/admin/orders")
+  ).rejects.toMatchObject({
+    status: 0,
+    message: "Couldn't reach the server. Check your connection and try again.",
+  })
+  await expect(
+    client(async () => new Response("<html>", { status: 502 })).api(
+      "/admin/orders"
+    )
+  ).rejects.toMatchObject({
+    status: 502,
+    message:
+      "The server isn't responding right now. Please try again in a moment.",
+  })
+  await expect(
+    client(async () =>
+      Response.json(
+        { error: { code: "service_unavailable", message: "Billing paused" } },
+        { status: 503 }
+      )
+    ).api("/admin/orders")
+  ).rejects.toMatchObject({ status: 503, message: "Billing paused" })
+})

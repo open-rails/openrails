@@ -5,6 +5,8 @@ import {
   isBillingError,
   localError,
   readBillingError,
+  toBillingError,
+  transportFailure,
 } from "./errors"
 import { OPENRAILS_CURRENCY_SCALES } from "./generated/currencies"
 import type * as wire from "./generated/wire"
@@ -277,7 +279,9 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           !(cause instanceof TypeError) ||
           waited + delay > RETRY_BUDGET_MS
         )
-          throw cause
+          throw opts.signal?.aborted || !transportFailure(cause)
+            ? cause
+            : toBillingError(cause)
         waited += await pause(delay, opts.signal)
         continue
       }

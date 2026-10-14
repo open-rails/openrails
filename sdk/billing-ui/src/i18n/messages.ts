@@ -1,3 +1,4 @@
+import { isBillingError, transportFailure } from "../client/errors"
 import { en } from "../locales/en.ts"
 
 /**
@@ -171,8 +172,13 @@ function developmentHost(): boolean {
   )
 }
 
-function isNetworkError(error: unknown): boolean {
-  return error instanceof TypeError && /fetch|network/i.test(error.message)
+// The message OpenRails itself sent with a code this bundle doesn't know.
+function serverMessage(error: unknown): string | undefined {
+  if (!isBillingError(error) || error.status === 0 || error.type === "local")
+    return undefined
+  if (error.code === "unknown_error" || error.code === "server_error")
+    return undefined
+  return error.message || undefined
 }
 
 function pluralRules(locale?: string): Intl.PluralRules {
@@ -217,8 +223,8 @@ export function createTranslator(
       )
     },
     error(error, vars) {
-      const code = errorCode(error)
-      if (code && code !== "generic" && code !== "network") {
+      const code = transportFailure(error) ?? errorCode(error)
+      if (code && code !== "generic") {
         const metadata =
           error && typeof error === "object" && "metadata" in error
             ? (error as { metadata?: MessageVars }).metadata
@@ -227,10 +233,11 @@ export function createTranslator(
         const detail = operatorDetail(error)
         if (message) return detail ? `${message} ${detail}` : message
       }
-      const fallback = isNetworkError(error)
-        ? "errors.network"
-        : "errors.generic"
-      return translate(fallback, vars) ?? messages.errors.generic
+      return (
+        serverMessage(error) ??
+        translate("errors.generic", vars) ??
+        messages.errors.generic
+      )
     },
   }
 }

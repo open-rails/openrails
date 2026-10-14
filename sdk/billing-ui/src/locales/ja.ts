@@ -84,8 +84,10 @@ export const ja: BillingUiMessageBundle = {
   },
   resume: {
     title: "{name}を再開しますか？",
-    description: "サブスクリプションは{date}に更新され、その時点で{price}がカードに請求されます。解約するまで請求期間ごとに請求されます。",
-    descriptionNoDate: "サブスクリプションは更新され、解約するまで請求期間ごとにカードに請求されます。",
+    description:
+      "サブスクリプションは{date}に更新され、その時点で{price}がカードに請求されます。解約するまで請求期間ごとに請求されます。",
+    descriptionNoDate:
+      "サブスクリプションは更新され、解約するまで請求期間ごとにカードに請求されます。",
     keepCanceled: "解約のままにする",
     confirm: "サブスクリプションを再開",
   },
@@ -101,7 +103,8 @@ export const ja: BillingUiMessageBundle = {
   cancel: {
     title: "{name}を解約しますか？",
     description: "今後の支払いは停止します。購入済みのアクセスは維持されます。",
-    revokeOnChain: "オンチェーンでも解約する（ウォレットの署名とネットワーク手数料が必要です）。",
+    revokeOnChain:
+      "オンチェーンでも解約する（ウォレットの署名とネットワーク手数料が必要です）。",
     solanaDescription:
       "ウォレットでオンチェーンの解約に署名します。購入済みのアクセスは維持されます。",
     reasonLabel: "解約の理由を教えてください",
@@ -181,9 +184,10 @@ export const ja: BillingUiMessageBundle = {
   },
   errors: {
     generic: "問題が発生しました。もう一度お試しください。",
-    network: "サーバーに接続できません。接続を確認してもう一度お試しください。",
     network_error:
       "サーバーに接続できません。接続を確認してもう一度お試しください。",
+    server_unavailable:
+      "サーバーが現在応答していません。しばらくしてからもう一度お試しください。",
     invalid_response: "サーバーから予期しない応答がありました。",
     authentication_required:
       "セッションの有効期限が切れました。再度サインインしてください。",
