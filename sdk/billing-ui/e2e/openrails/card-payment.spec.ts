@@ -61,7 +61,7 @@ async function openPayment(
   )
   const purchase = page.locator(":root")
   await purchase.getByLabel("Full name").fill("Card Payer")
-  await purchase.getByLabel("Country").selectOption("US")
+  await purchase.getByLabel("Country or region").selectOption("US")
   await purchase.getByLabel(/ZIP/).fill("10001")
   return purchase
 }

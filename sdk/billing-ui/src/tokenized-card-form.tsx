@@ -112,6 +112,8 @@ export function TokenizedCardForm({
       cvv: `#${ids.cvv}`,
     },
   })
+  // The button stays off until every required billing field is filled.
+  const billingComplete = nmiBillingSchema.safeParse(billing).success
   const asksToKeep =
     saveOptInMerchant !== undefined && reuseNeedsOptIn(billing.country)
   const submit = async (event: React.FormEvent) => {
@@ -208,6 +210,7 @@ export function TokenizedCardForm({
           disabled={
             disabled ||
             submitted ||
+            !billingComplete ||
             !collect.ready ||
             !collect.valid ||
             Boolean(collect.loadError)

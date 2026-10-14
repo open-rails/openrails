@@ -162,7 +162,7 @@ export function PlatformCardForm({
       <PayButton
         label={retry ? retryLabel : submitLabel}
         processing={busy}
-        disabled={disabled || submitted || !ready}
+        disabled={disabled || submitted || !ready || !nmiBillingSchema.safeParse(billing).success}
       />
       <TrustLine />
     </form>

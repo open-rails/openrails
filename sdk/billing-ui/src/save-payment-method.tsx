@@ -208,7 +208,7 @@ function NativeCardSetup({
       <PayButton
         label={submitLabel ?? m.t("paymentMethods.save")}
         processing={busy}
-        disabled={!card.valid}
+        disabled={!card.valid || !nmiBillingSchema.safeParse(billing).success}
       />
       <TrustLine />
     </form>

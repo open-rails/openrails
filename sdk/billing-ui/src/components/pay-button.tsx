@@ -47,7 +47,10 @@ export function TrustLine() {
       >
         <path d="M8 1a3.5 3.5 0 0 0-3.5 3.5V6H4a1.5 1.5 0 0 0-1.5 1.5v5A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12 6h-.5V4.5A3.5 3.5 0 0 0 8 1Zm2 5H6V4.5a2 2 0 1 1 4 0V6Z" />
       </svg>
-      Secured by OpenRails
+      Secured by{" "}
+      <a href="https://openrails.dev" target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">
+        OpenRails
+      </a>
     </div>
   )
 }

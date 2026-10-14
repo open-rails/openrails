@@ -68,6 +68,10 @@ export function App({ orderId, secret, fallbacks }: { orderId: string; secret: s
   }, [client, orderId])
 
   const embedded = state.kind === "ready" && framed && state.order.embedded
+  // The frame sizes itself to the page, so the page never scrolls inside it.
+  useEffect(() => {
+    document.documentElement.classList.toggle("framed", embedded)
+  }, [embedded])
   const origins = state.kind === "ready" ? state.merchant.embed_origins : []
   // The order as it settled in the frame.
   const [finished, setFinished] = useState<Order>()
@@ -105,7 +109,6 @@ export function App({ orderId, secret, fallbacks }: { orderId: string; secret: s
       merchant={merchant.display_name}
       logo={merchant.logo_url ?? undefined}
       back={embedded ? undefined : (order.cancel_url ?? undefined)}
-      support={merchant.support_url ?? undefined}
     >
       {order.status === "canceled" || order.status === "expired" ? (
         <Notice reason={order.status === "expired" ? "expired" : "canceled"} />
@@ -210,13 +213,11 @@ function Shell({
   merchant,
   logo,
   back,
-  support,
   children,
 }: {
   merchant?: string
   logo?: string
   back?: string
-  support?: string
   children: ReactNode
 }) {
   return (
@@ -232,12 +233,9 @@ function Shell({
       </header>
       {children}
       <footer>
-        {support && (
-          <a href={support} rel="noreferrer">
-            Support
-          </a>
-        )}
-        <span>Powered by OpenRails</span>
+        <a href="https://openrails.dev" target="_blank" rel="noreferrer">
+          Powered by OpenRails
+        </a>
       </footer>
     </main>
   )
