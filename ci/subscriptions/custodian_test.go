@@ -3,6 +3,7 @@
 package subscriptions_test
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -43,6 +44,14 @@ type btFake struct {
 	loseConversionResponse bool
 	loseSaleResponse       bool
 	beforeTokenRead        func()
+	beforeTokenDelete      func()
+	afterConversion        func()
+	failDelete             bool
+	loseDeleteResponse     bool
+	tokenReadStatus        int
+	foreignAPIKey          string
+	applicationReadStatus  int
+	deletedTokens          []string
 	// gateway charges the detokenized card and answers its transaction id.
 	gateway func(form url.Values, number string) string
 }
@@ -87,8 +96,12 @@ func (f *btFake) salesOf(number string) []btSale {
 
 // The fingerprint is the card number's, whoever collected it.
 func btCard(id, number string) map[string]any {
-	return map[string]any{"id": id, "type": "card", "fingerprint": "fp_" + number,
+	return map[string]any{"id": id, "type": "card", "fingerprint": btFingerprint(number),
 		"card": map[string]any{"bin": number[:6], "last4": number[len(number)-4:], "brand": "visa", "expiration_month": 12, "expiration_year": 2035}}
+}
+
+func btFingerprint(number string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(number)))
 }
 
 var btExpression = regexp.MustCompile(`\{\{ (token_intent|token): (\S+) \|`)
@@ -100,6 +113,23 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(body)
+	}
+	foreignKey := f.foreignAPIKey != "" && r.Header.Get("BT-API-KEY") == f.foreignAPIKey
+	if r.Method == http.MethodGet && r.URL.Path == "/applications/key" {
+		if f.applicationReadStatus != 0 {
+			reply(f.applicationReadStatus, map[string]string{"title": "application read unavailable"})
+			return
+		}
+		tenant := f.tenant
+		if foreignKey {
+			tenant = "another-tenant"
+		}
+		reply(http.StatusOK, map[string]string{"tenant_id": tenant})
+		return
+	}
+	if foreignKey {
+		reply(http.StatusNotFound, map[string]any{"title": "not found"})
+		return
 	}
 	switch {
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/token-intents/"):
@@ -114,6 +144,10 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(http.StatusOK, card)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/tokens/"):
 		id := strings.TrimPrefix(r.URL.Path, "/tokens/")
+		if f.tokenReadStatus != 0 {
+			reply(f.tokenReadStatus, map[string]any{"title": "token read unavailable"})
+			return
+		}
 		number, ok := f.tokens[id]
 		if !ok {
 			reply(http.StatusNotFound, map[string]any{"title": "not found"})
@@ -126,6 +160,28 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		card := btCard(id, number)
 		card["tenant_id"], card["containers"], card["metadata"] = f.tenant, f.containers[id], f.metadata[id]
 		reply(http.StatusOK, card)
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/tokens/"):
+		id := strings.TrimPrefix(r.URL.Path, "/tokens/")
+		if f.failDelete {
+			reply(http.StatusServiceUnavailable, map[string]any{"title": "delete unavailable"})
+			return
+		}
+		if f.beforeTokenDelete != nil {
+			f.beforeTokenDelete()
+			f.beforeTokenDelete = nil
+		}
+		if _, ok := f.tokens[id]; !ok {
+			reply(http.StatusNotFound, map[string]any{"title": "not found"})
+			return
+		}
+		delete(f.tokens, id)
+		f.deletedTokens = append(f.deletedTokens, id)
+		if f.loseDeleteResponse {
+			f.loseDeleteResponse = false
+			reply(http.StatusServiceUnavailable, map[string]any{"title": "delete response lost"})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPost && r.URL.Path == "/tokens":
 		var req struct {
 			ID          string            `json:"id"`
@@ -176,6 +232,13 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.metadata[id] = req.Metadata
 		f.tokens[id], f.byKey[key], f.containers[id] = number, id, req.Containers
+		if f.afterConversion != nil {
+			hold := f.afterConversion
+			f.afterConversion = nil
+			f.mu.Unlock()
+			hold()
+			f.mu.Lock()
+		}
 		if f.loseConversionResponse {
 			f.loseConversionResponse = false
 			reply(http.StatusServiceUnavailable, map[string]any{"title": "conversion response lost"})

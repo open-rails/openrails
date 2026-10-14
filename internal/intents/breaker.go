@@ -28,6 +28,7 @@ var destructiveIntentTypes = map[string]struct{}{
 	// request produces this type; bulk production would itself be the incident.
 	TypeNMIPaymentMethodDelete:  {},
 	TypeHyperSwitchMethodDelete: {},
+	TypePlatformMethodDelete:    {},
 	// TypeNMIPaymentSourceUpdate is not listed: repointing a subscription's
 	// vaulted card destroys nothing (both vaults survive).
 	//

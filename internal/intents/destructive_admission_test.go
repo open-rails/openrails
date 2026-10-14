@@ -10,7 +10,7 @@ import (
 )
 
 func TestStaffDestructiveIntentRequiresOriginalAdmission(t *testing.T) {
-	for _, kind := range []string{TypeNMIRefund, TypeStripeRefund, TypeNMIDeleteSubscription, TypeCCBillCancelSubscription, TypeStripeCancelSubscription, TypeNMIPaymentMethodDelete, TypeHyperSwitchMethodDelete} {
+	for _, kind := range []string{TypeNMIRefund, TypeStripeRefund, TypeNMIDeleteSubscription, TypeCCBillCancelSubscription, TypeStripeCancelSubscription, TypeNMIPaymentMethodDelete, TypeHyperSwitchMethodDelete, TypePlatformMethodDelete} {
 		t.Run(kind, func(t *testing.T) {
 			in := gen.BillingProviderIntent{ID: uuid.New(), MerchantID: uuid.New(), IntentType: kind, Origin: string(OriginAdmin)}
 			_, err := startProtectedEffect(context.Background(), nil, in, nil)

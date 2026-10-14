@@ -109,7 +109,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 	if p.IntentType == TypeNMIPaymentMethodDelete {
 		return s.enqueueNMIMethodDelete(ctx, p)
 	}
-	if p.IntentType == TypeHyperSwitchMethodDelete {
+	if p.IntentType == TypeHyperSwitchMethodDelete || p.IntentType == TypePlatformMethodDelete {
 		return gen.BillingProviderIntent{}, errors.New("custodian deletion requires owned method admission")
 	}
 	if p.IntentType == "nmi_sale" {
@@ -299,7 +299,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 }
 
 func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error) {
-	if p.IntentType == TypeNMIPaymentMethodDelete || p.IntentType == TypeHyperSwitchMethodDelete {
+	if p.IntentType == TypeNMIPaymentMethodDelete || p.IntentType == TypeHyperSwitchMethodDelete || p.IntentType == TypePlatformMethodDelete {
 		if err := validatePaymentMethodDeleteAuthority(ctx, p); err != nil {
 			return gen.BillingProviderIntent{}, err
 		}

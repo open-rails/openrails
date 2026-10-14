@@ -64,6 +64,9 @@ func isSelfServicePaymentMethodDelete(in gen.BillingProviderIntent) bool {
 		return false
 	}
 	switch in.IntentType {
+	case TypePlatformMethodDelete:
+		p, err := DecodePlatformMethodDelete(in)
+		return err == nil && p.CustomerID == actor
 	case TypeHyperSwitchMethodDelete:
 		p, err := DecodeHyperSwitchMethodDelete(in)
 		return err == nil && p.CustomerID == actor

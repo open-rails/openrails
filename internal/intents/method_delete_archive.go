@@ -16,6 +16,19 @@ func DeletedMethod(in gen.BillingProviderIntent) (uuid.UUID, uuid.UUID, error) {
 		return uuid.Nil, uuid.Nil, invalid
 	}
 	switch in.IntentType {
+	case TypePlatformMethodDelete:
+		p, err := DecodePlatformMethodDelete(in)
+		if err != nil {
+			return uuid.Nil, uuid.Nil, err
+		}
+		var receipt struct {
+			Absent bool   `json:"verified_absent"`
+			Method string `json:"vendor_method_id"`
+		}
+		if json.Unmarshal(in.ResultEvidence, &receipt) != nil || !receipt.Absent || receipt.Method != p.Instrument.RailMethodRef || !deletedMethodActorMatches(in, p.CustomerID) {
+			return uuid.Nil, uuid.Nil, invalid
+		}
+		return p.PaymentMethodID, p.CustomerID, nil
 	case TypeHyperSwitchMethodDelete:
 		p, err := DecodeHyperSwitchMethodDelete(in)
 		if err != nil {

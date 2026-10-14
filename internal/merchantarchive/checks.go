@@ -325,6 +325,14 @@ var referenceChecks = []rowCheck{
           (m.id::text=(CASE WHEN provider_intents.intent_type='initial_membership' THEN provider_intents.payload->'terms'->>'payment_method_id' ELSE provider_intents.payload->>'payment_method_id' END) OR
            (m.custodian='psp' AND m.psp_id=provider_intents.psp_id AND m.rail_customer_ref=provider_intents.payload->>'rail_customer_ref' AND
             (provider_intents.payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR m.rail_method_ref=provider_intents.payload->>'rail_method_ref'))))`},
+	{"provider_intents", `intent_type='platform_method_delete' AND NOT EXISTS (
+ SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1
+ AND m.id::text=provider_intents.payload->>'payment_method_id'
+ AND m.customer_id::text=provider_intents.payload->>'customer_id'
+ AND m.custodian='platform' AND m.custodian_id=provider_intents.custodian_id
+ AND m.rail_method_ref=provider_intents.payload->'instrument'->>'rail_method_ref'
+ AND m.park_reason='delete:' || provider_intents.id::text
+ AND m.status IN ('removed','closed','replaced'))`},
 	{"provider_intents", `intent_type='hyperswitch_method_delete' AND
           (NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id::text=provider_intents.payload->>'customer_id') OR
            EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
@@ -371,8 +379,13 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 	if err := validateSaleReferences(ctx, tx, id); err != nil {
 		return err
 	}
-	// Platform-vault cards leave only by a custody export; the archive never carries one.
-	if err := refuseRowsAs(ctx, tx, id, "platform_cards", "payment_methods", "custodian='platform' AND status<>'removed'"); err != nil {
+	// Stored platform cards require a custody export. Erased cards retain their billing history.
+	if err := refuseRowsAs(ctx, tx, id, "platform_cards", "payment_methods", `custodian='platform' AND status<>'removed' AND NOT (
+ status IN ('closed','replaced') AND EXISTS (
+ SELECT 1 FROM billing.provider_intents d WHERE d.merchant_id=payment_methods.merchant_id
+ AND d.idempotency_key='platform_method_delete:' || payment_methods.id::text
+ AND d.intent_type='platform_method_delete' AND d.status='succeeded'
+ AND payment_methods.park_reason='delete:' || d.id::text))`); err != nil {
 		return err
 	}
 	cardCaptureInvalid, err := gen.New(tx).CountInvalidPaymentMethodCaptureReferences(ctx, id.UUID())

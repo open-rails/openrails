@@ -170,6 +170,13 @@ permission verification are operator steps; OpenRails does not create them.
 Missing credentials or a shared collection application fail closed. Only the
 public key appears in customer configuration.
 
+Saved platform card removal also needs `token:delete`. Before reading or deleting
+the card, OpenRails uses `GET /applications/key` with the same private key and
+checks the returned tenant against the accepted removal. A failed lookup or
+different tenant keeps removal pending and the card blocked from further use;
+a token's 404 alone is not proof of deletion. Verify this application lookup
+when provisioning or rotating the key. No management key is stored in the engine.
+
 Token intents have no merchant containers. Before charging, OpenRails checks
 the vendor-reported `tenant_id` and `created_by` against this merchant's
 configured application. After approval, conversion uses an operation-derived

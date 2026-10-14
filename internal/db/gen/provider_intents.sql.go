@@ -2520,7 +2520,7 @@ SET status = 'failed_terminal',
     lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('order_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','subscription_collection')
+  AND intent_type NOT IN ('order_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','platform_method_delete','subscription_collection')
 `
 
 type MarkProviderIntentFailedTerminalParams struct {
@@ -2562,7 +2562,7 @@ SET status = 'succeeded',
     lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('order_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','subscription_collection')
+  AND intent_type NOT IN ('order_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','platform_method_delete','subscription_collection')
 `
 
 type MarkProviderIntentSucceededParams struct {
