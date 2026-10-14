@@ -465,6 +465,30 @@ describe("OrderPayment", () => {
     ])
   })
 
+  it.each([null, 720])("offers only recurring-eligible Solana tokens for cadence %j", async (interval) => {
+    const solanaConfig = { ...config, payment: {
+      psps: [{ psp_id: "psp_sol", key: "solana", rail: "solana", custodian: "self", display_name: "Solana", flow: "wallet", config: {} }],
+      solana: { network: "devnet", chain: "solana:devnet", tokens: [
+        { symbol: "SOL", mint: "mint_sol", decimals: 9, recurring_eligible: false },
+        { symbol: "USDC", mint: "mint_usdc", decimals: 6, recurring_eligible: true },
+      ] },
+    } }
+    const plain = order({})
+    const solanaOrder = { ...plain, lines: plain.lines.map((line) => ({ ...line, billing_interval_hours: interval })),
+      payment_options: [{ psp_id: "psp_sol", rail: "solana", accepts: ["solana_pay"] }], }
+    const fetch = vi.fn(async (input: string) => {
+      if (input.endsWith("/me/config")) return Response.json(solanaConfig)
+      if (input.endsWith("/config")) return Response.json(deployment)
+      if (input.includes("/me/payment-methods")) return Response.json({ data: [], next_cursor: null })
+      if (input.endsWith("/me/orders/ord_1")) return Response.json(solanaOrder)
+      return Response.json({}, { status: 404 })
+    })
+    render(<BillingProvider client={createBillingClient({ fetch })}><OrderPayment orderId="ord_1" /></BillingProvider>)
+    expect(await screen.findByRole("button", { name: "Pay with USDC on Solana" })).toBeInTheDocument()
+    if (interval) expect(screen.queryByRole("button", { name: "Pay with SOL on Solana" })).toBeNull()
+    else expect(screen.getByRole("button", { name: "Pay with SOL on Solana" })).toBeInTheDocument()
+  })
+
   it("pays from a Solana wallet: a Solana Pay QR for the order", async () => {
     const solanaConfig = {
       ...config,

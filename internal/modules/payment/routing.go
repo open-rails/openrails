@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -150,8 +151,15 @@ func (s *OrderAttemptService) Route(ctx context.Context, in RoutingInput) (*Rout
 			return decision, fmt.Errorf("resolve payment provider %q: %w", selector, err)
 		}
 		// Named, not swept: no fallback, but the PSP must still be able to
-		// make this sale (a named CCBill never enrolls a new subscription).
-		if skip := s.railSkipReason(in.Price, target, providerConfig, in.Mode); skip != "" {
+		// make this sale (a named CCBill never enrolls a new subscription), and
+		// a card PSP must be one the merchant charges new cards through.
+		skip := s.railSkipReason(in.Price, target, providerConfig, in.Mode)
+		if skip == "" {
+			if skip, err = s.chargePSPSkip(ctx, target); err != nil {
+				return decision, err
+			}
+		}
+		if skip != "" {
 			decision.Target = railTarget{}
 			decision.Candidates[0].Skip = skip
 			return decision, fmt.Errorf("%w: payment provider %q cannot sell this price (%s)", ErrNoRoutableProcessor, selector, skip)
@@ -240,13 +248,18 @@ func unresolvedRailTarget(selector string) railTarget {
 	return railTarget{PSP: name, Rail: name}
 }
 
-// routingOrder resolves the candidate order for these inputs: the first
-// matching merchant rule, else the built-in default.
+// routingOrder resolves the candidate order for these inputs: a provider
+// price's own PSP, the first matching merchant rule, else the default: the
+// merchant's charge PSPs, then the other rails.
 func (s *OrderAttemptService) routingOrder(ctx context.Context, in RoutingInput) ([]string, string, *int, error) {
-	rules, err := s.routingRules(ctx)
+	if key, _, ok := in.Price.ProviderLink(); ok {
+		return []string{key}, models.PSPRoutingPolicyDefault, nil, nil
+	}
+	conf, err := s.routingConfiguration(ctx)
 	if err != nil {
 		return nil, "", nil, err
 	}
+	rules := conf.PSPRouting
 	for i, rule := range rules {
 		if !routingRuleMatches(rule.Match, in) {
 			continue
@@ -260,23 +273,35 @@ func (s *OrderAttemptService) routingOrder(ctx context.Context, in RoutingInput)
 		}
 		return order, models.PSPRoutingPolicyMerchant, &idx, nil
 	}
+	if len(conf.ChargePSPs) > 0 {
+		return append(append([]string{}, conf.ChargePSPs...), string(models.RailCCBill), string(models.RailSolana)), models.PSPRoutingPolicyDefault, nil, nil
+	}
 	return defaultRoutingOrder, models.PSPRoutingPolicyDefault, nil, nil
 }
 
-// routingRules loads the merchant's declared policy. No stored config (or no
-// DB, as in unit fixtures) means no policy, which means the default order.
-func (s *OrderAttemptService) routingRules(ctx context.Context) ([]models.PSPRoutingRule, error) {
+// routingConfiguration loads the merchant's routing policy and charge PSPs.
+// No stored config (or no DB, as in unit fixtures) means neither.
+func (s *OrderAttemptService) routingConfiguration(ctx context.Context) (models.MerchantConfiguration, error) {
 	if s.db == nil {
-		return nil, nil
+		return models.MerchantConfiguration{}, nil
 	}
-	conf, found, err := merchantconfig.NewStore(s.db).Get(ctx)
+	conf, _, err := merchantconfig.NewStore(s.db).Get(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("load PSP routing policy: %w", err)
+		return conf, fmt.Errorf("load PSP routing policy: %w", err)
 	}
-	if !found {
-		return nil, nil
+	return conf, nil
+}
+
+// chargePSPSkip refuses a card PSP the merchant's charge_psps leave out.
+func (s *OrderAttemptService) chargePSPSkip(ctx context.Context, target railTarget) (string, error) {
+	if target.Rail != string(models.RailNMI) && target.Rail != string(models.RailStripe) {
+		return "", nil
 	}
-	return conf.PSPRouting, nil
+	conf, err := s.routingConfiguration(ctx)
+	if err != nil || len(conf.ChargePSPs) == 0 || slices.Contains(conf.ChargePSPs, target.PSP) {
+		return "", err
+	}
+	return models.PSPRoutingSkipNotChargePSP, nil
 }
 
 // routingRuleMatches reports whether every SET condition holds. An all-empty
@@ -339,7 +364,14 @@ func (s *OrderAttemptService) evaluateCandidate(ctx context.Context, targets ord
 		}
 		return target, models.PSPRoutingSkipResolveFailed
 	}
-	return target, s.railSkipReason(in.Price, target, providerConfig, in.Mode)
+	if skip := s.railSkipReason(in.Price, target, providerConfig, in.Mode); skip != "" {
+		return target, skip
+	}
+	skip, err := s.chargePSPSkip(ctx, target)
+	if err != nil {
+		return target, models.PSPRoutingSkipResolveFailed
+	}
+	return target, skip
 }
 
 // DryRunRouting answers "which PSP would this checkout get, and why" without

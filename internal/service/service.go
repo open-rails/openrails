@@ -28,6 +28,9 @@ type Service struct {
 	catalogWriteLocked   bool
 	catalogCommittedWork *[]func(context.Context, *Service)
 	catalogPreparedLinks map[[2]string]map[string]map[string]string
+	// catalogPreparedProviders are an application's provider prices, read
+	// from their providers.
+	catalogPreparedProviders map[[2]string]*providerPrice
 	// catalogKeyActor attributes key edits made inside a catalog application.
 	catalogKeyActor string
 	// catalogKeyChanges collects the key changes of existing products made

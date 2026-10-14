@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // tierPrice creates a product at rank in group with one auto-renewing USD
@@ -29,13 +30,16 @@ func (w *world) tierPrice(group string, rank int, cents int64, cycle int, nmiPla
 	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, TierGroup: &group, TierRank: rank,
 		Entitlements: []string{"content:" + key}})
 	require.NoError(w.t, err)
-	params := billing.CreatePriceParams{ProductID: product.ID, Key: key + "-usd", UnitAmount: cents * 10_000, Currency: "USD", BillingIntervalHours: &cycle, AccessDurationHours: &cycle}
 	out := tier{ent: "content:" + key}
 	if nmiPlan {
+		// A legacy NMI-run tier: a provider price reads its NMI plan.
 		out.plan = "gf_plan_" + uuid.NewString()[:8]
-		params.PSPs = map[string]map[string]string{"nmi": {"plan_id": out.plan}}
+		w.nmi.AddPlan(nmimock.Plan{ID: out.plan, Name: key, Amount: decimalCents(cents), Days: cycle / 24})
+		out.Price, err = client.CreateProviderPrice(w.t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: key + "-usd", PSP: "nmi", PlanID: out.plan})
+		require.NoError(w.t, err)
+		return out
 	}
-	out.Price, err = client.CreatePrice(w.t.Context(), params)
+	out.Price, err = client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key + "-usd", UnitAmount: cents * 10_000, Currency: "USD", BillingIntervalHours: &cycle, AccessDurationHours: &cycle})
 	require.NoError(w.t, err)
 	return out
 }

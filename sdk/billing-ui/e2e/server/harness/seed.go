@@ -13,13 +13,11 @@ import (
 
 	"github.com/open-rails/authkit/iam"
 
-	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
-	"github.com/open-rails/openrails/internal/solanafake"
 )
 
 type Catalog struct {
@@ -37,21 +35,21 @@ type Catalog struct {
 	CardMonthlyPrice string `json:"card_monthly_price_id"`
 }
 
-func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Node, cranker, treasury solanago.PublicKey) (Catalog, error) {
+func seedCatalog(ctx context.Context, c *openrails.Client) (Catalog, error) {
 	month := 720
 	sub, subPrice, err := product(ctx, c, "e2e-membership", "Membership", billing.CreatePriceParams{
-		Key: "e2e-membership-monthly", UnitAmount: 9_990_000, Currency: "USD", AccessDurationHours: &month, BillingIntervalHours: &month,
+		Key: "e2e-membership-monthly", UnitAmount: 9_990_000, Currency: "USD", AccessDurationHours: &month, BillingIntervalHours: &month, SellVia: []string{billing.SellViaCard},
 	})
 	if err != nil {
 		return Catalog{}, err
 	}
 	once, oncePrice, err := product(ctx, c, "e2e-lifetime", "Lifetime pass", billing.CreatePriceParams{
-		Key: "e2e-lifetime-once", UnitAmount: 19_990_000, Currency: "USD",
+		Key: "e2e-lifetime-once", UnitAmount: 19_990_000, Currency: "USD", SellVia: []string{billing.SellViaCard},
 	})
 	if err != nil {
 		return Catalog{}, err
 	}
-	pass, monthly, err := seedCrypto(ctx, c, chain, cranker, treasury)
+	pass, monthly, err := seedCrypto(ctx, c)
 	if err != nil {
 		return Catalog{}, err
 	}
@@ -62,9 +60,9 @@ func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Nod
 	return Catalog{SubscriptionProduct: sub, SubscriptionPrice: subPrice, OneTimeProduct: once, OneTimePrice: oncePrice, CryptoPassPrice: pass, CryptoMonthlyPrice: monthly, CardOncePrice: cardOnce, CardMonthlyPrice: cardMonthly}, nil
 }
 
-// seedCards applies prices only the armed card PSP sells.
+// seedCards applies prices sold by card only.
 func seedCards(ctx context.Context, c *openrails.Client) (string, string, error) {
-	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+	params, err := catalog.ParseApplicationYAML([]byte(`schema_version: 1
 products:
   e2e-card:
     display_name: Card membership
@@ -74,15 +72,15 @@ products:
         unit_amount: 2990000
         billing_interval_hours: null
         access_duration_hours: 720
-        psps: {%s: {}}
+        sell_via: [card]
       e2e-card-monthly:
         currency: usd
         unit_amount: 4990000
         billing_interval_hours: 720
         access_duration_hours: 720
-        psps: {%s: {}}
+        sell_via: [card]
     entitlements: ["e2e-card"]
-`, CardPSPKey, CardPSPKey)))
+`))
 	if err != nil {
 		return "", "", err
 	}
@@ -101,13 +99,9 @@ products:
 }
 
 // seedCrypto applies Solana-sold prices the way a host's catalog does: a
-// one-time pass and a monthly membership on a published on-chain plan.
-func seedCrypto(ctx context.Context, c *openrails.Client, chain *solanafake.Node, cranker, treasury solanago.PublicKey) (string, string, error) {
-	plan, err := chain.Plan(cranker, 1078, solanafake.DevnetUSDCMint, 4_990_000, 720, treasury)
-	if err != nil {
-		return "", "", err
-	}
-	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+// one-time pass and a monthly membership on the plan the apply publishes.
+func seedCrypto(ctx context.Context, c *openrails.Client) (string, string, error) {
+	params, err := catalog.ParseApplicationYAML([]byte(`schema_version: 1
 products:
   e2e-crypto:
     display_name: Crypto membership
@@ -117,18 +111,15 @@ products:
         unit_amount: 2990000
         billing_interval_hours: null
         access_duration_hours: 720
-        psps: {solana: {}}
+        sell_via: [solana]
       e2e-crypto-monthly:
         currency: usd
         unit_amount: 4990000
         billing_interval_hours: 720
         access_duration_hours: 720
-        psps:
-          solana:
-            plan_pda: %s
-            plan_id: "1078"
+        sell_via: [solana]
     entitlements: ["e2e-crypto"]
-`, plan)))
+`))
 	if err != nil {
 		return "", "", err
 	}

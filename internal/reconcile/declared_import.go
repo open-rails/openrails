@@ -237,6 +237,21 @@ func ImportDeclaredSubscriptions(
 			price = p
 			priceCache[f.PriceID] = p
 		}
+		// A provider-run subscription bills a provider price of its own PSP.
+		if f.Rail == string(models.RailNMI) || f.Rail == string(models.RailStripe) || f.Rail == string(models.RailCCBill) {
+			if !price.ProviderOwned {
+				block("a provider-run subscription names a provider price; this price is OpenRails' own")
+				continue
+			}
+			bound, err := q.ListPricePSPBindings(ctx, gen.ListPricePSPBindingsParams{MerchantID: price.MerchantID, PriceIds: []uuid.UUID{price.ID}, PspID: &f.PspID})
+			if err != nil {
+				return out, fmt.Errorf("declared import: load price %s binding: %w", f.PriceID, err)
+			}
+			if len(bound) != 1 {
+				block("the provider price is not the subscription PSP's")
+				continue
+			}
+		}
 
 		// A live provider schedule freezes its accepted terms as enrollment
 		// does: declared, else proven by the book's own paid cycle. Unproven

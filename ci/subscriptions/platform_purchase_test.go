@@ -39,7 +39,7 @@ func TestPlatformNewCardPurchase(t *testing.T) {
 			client := w.client[remote]
 			_, err := client.UpdatePSP(t.Context(), w.psp["stripe"], billing.UpdatePSPParams{Archived: true, AllowLast: true})
 			require.NoError(t, err)
-			_, err = client.UpdateMerchantConfiguration(t.Context(), setCustody(billing.CardCustodyPlatform))
+			_, err = client.UpdateMerchantConfiguration(t.Context(), setVault(billing.CardVaultPlatform))
 			require.NoError(t, err)
 			mid := w.client[embedded].MerchantID().UUID().String()
 			application := uuid.NewString()
@@ -167,7 +167,7 @@ func TestPlatformVaultUnavailableKeepsExistingPSPCard(t *testing.T) {
 	client := w.client[remote]
 	_, err := client.UpdatePSP(t.Context(), w.psp["stripe"], billing.UpdatePSPParams{Archived: true, AllowLast: true})
 	require.NoError(t, err)
-	_, err = client.UpdateMerchantConfiguration(t.Context(), setCustody(billing.CardCustodyPlatform))
+	_, err = client.UpdateMerchantConfiguration(t.Context(), setVault(billing.CardVaultPlatform))
 	require.NoError(t, err)
 	// No platform credential document: only the customer's existing gateway
 	// card can pay. Choosing custody for new cards must not disable it.
@@ -189,7 +189,7 @@ func TestPlatformCrossMerchantCollection(t *testing.T) {
 		client := w.client[remote]
 		_, err := client.UpdatePSP(t.Context(), w.psp["stripe"], billing.UpdatePSPParams{Archived: true, AllowLast: true})
 		require.NoError(t, err)
-		_, err = client.UpdateMerchantConfiguration(t.Context(), setCustody(billing.CardCustodyPlatform))
+		_, err = client.UpdateMerchantConfiguration(t.Context(), setVault(billing.CardVaultPlatform))
 		require.NoError(t, err)
 		w.vault.Put(t, "openrails/platform_vault/"+platformTenant, map[string]any{"api_key": "shared-private-test", "collection_applications": applications})
 		custody := engine.Graph(w.rt).Runtime.PurchaseService.CustodianSaleService
@@ -238,7 +238,7 @@ func TestPlatformSavedCardOrder(t *testing.T) {
 			client := w.client[remote]
 			_, err := client.UpdatePSP(t.Context(), w.psp["stripe"], billing.UpdatePSPParams{Archived: true, AllowLast: true})
 			require.NoError(t, err)
-			_, err = client.UpdateMerchantConfiguration(t.Context(), setCustody(billing.CardCustodyPlatform))
+			_, err = client.UpdateMerchantConfiguration(t.Context(), setVault(billing.CardVaultPlatform))
 			require.NoError(t, err)
 			mid := w.client[embedded].MerchantID().UUID().String()
 			application := uuid.NewString()
@@ -306,7 +306,7 @@ func TestPlatformSavedCardOrder(t *testing.T) {
 				sale, err = c.sell(remote, next)
 				require.NoError(t, err)
 			case "custody switched":
-				_, err = client.UpdateMerchantConfiguration(t.Context(), setCustody(billing.CardCustodyMerchant))
+				_, err = client.UpdateMerchantConfiguration(t.Context(), setVault("nmi"))
 				require.NoError(t, err)
 			case "consent revoked":
 				c.must(http.MethodPatch, "/payment-methods/"+method, "", map[string]any{"reusable": false})

@@ -49,12 +49,18 @@ func SubscriptionView(sub *models.Subscription, price *models.Price, dunning *bi
 	return out
 }
 
-// buyerPrice is p as its customer sees it; nil for none.
+// buyerPrice is p as its customer sees it, without provider identifiers;
+// nil for none.
 func buyerPrice(p *models.Price) *billing.Price {
 	if p == nil {
 		return nil
 	}
-	return &billing.BuyerPrices([]billing.Price{p.View()})[0]
+	v := p.View()
+	if v.Provider != nil {
+		v.Provider = &billing.PriceProvider{PSP: v.Provider.PSP, PSPID: v.Provider.PSPID, Rail: v.Provider.Rail, IDs: map[string]string{}, SyncStatus: billing.SyncStatusUnknown, Drift: []billing.DriftField{}}
+	}
+	v.SolanaPlan = nil
+	return &v
 }
 
 // subscriptionCardView is the card on the subscription's payment method, from

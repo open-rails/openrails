@@ -80,15 +80,14 @@ objects on CCBill. Each price that sells over CCBill carries the FlexForm it
 maps to:
 
 ```yaml
-prices:
-  premium-monthly:
+provider_prices:
+  premium-monthly-ccbill:
+    psp: ccbill
+    flex_id: "d7d6d9a5-..." # FlexForm GUID from CCBill admin
+    recurring_billing_option_id: "0000007498"
     amount: 9.99 USD
     access_duration: 30 days
     billing_interval: 30 days
-    psps:
-      ccbill:
-        flex_id: "d7d6d9a5-..." # FlexForm GUID from CCBill admin
-        recurring_billing_option_id: "0000007498"
 ```
 
 The FlexForm's own pricing must match the catalog price exactly: a new

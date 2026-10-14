@@ -48,6 +48,17 @@ export interface ProductListProps {
   className?: string
 }
 
+type ListedPrice = ProductListProps["products"][number]["prices"][number]
+
+const sameTerms = (a: ListedPrice, b: ListedPrice) =>
+  a.unit_amount === b.unit_amount &&
+  a.currency === b.currency &&
+  a.billing_interval_hours === b.billing_interval_hours &&
+  a.access_duration_hours === b.access_duration_hours &&
+  a.trial_unit_amount === b.trial_unit_amount &&
+  a.trial_duration_hours === b.trial_duration_hours &&
+  !a.quantity && !b.quantity
+
 export function ProductList({
   products: given,
   onPaid,
@@ -61,13 +72,22 @@ export function ProductList({
   const m = useMessages()
   const scope = useScopeProps(appearance)
 
-  // A deposit's amount is chosen before purchase; ProductList sells fixed prices.
+  // A deposit's amount is chosen before purchase; ProductList sells fixed
+  // prices. A provider's price on the terms of one of ours is that price's
+  // fallback on the order, not a price of its own.
   const products = given
     .filter((product) => !product.archived)
-    .map((product) => ({
-      product,
-      prices: product.prices.filter((p) => !p.archived && !p.customer_amount),
-    }))
+    .map((product) => {
+      const live = product.prices.filter(
+        (p) => !p.archived && !p.customer_amount && (!p.provider || p.provider.rail === "ccbill")
+      )
+      return {
+        product,
+        prices: live.filter(
+          (p) => !p.provider || !live.some((o) => !o.provider && (!o.sell_via?.length || o.sell_via.includes("card")) && sameTerms(o, p))
+        ),
+      }
+    })
     .filter((entry) => entry.prices.length > 0)
 
   let body: React.ReactNode

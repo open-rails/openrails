@@ -31,6 +31,10 @@ func (s *OrderAttemptService) railSkipReason(price *models.Price, target railTar
 	if _, known := rails.Lookup(rail); !known {
 		return models.PSPRoutingSkipUnknownSelector
 	}
+	if (rail == models.RailNMI || rail == models.RailStripe) && !price.SellsVia(models.SellViaCard) && !price.ProviderOwned ||
+		rail == models.RailSolana && !price.SellsVia(models.SellViaSolana) {
+		return models.PSPRoutingSkipNotSoldVia
+	}
 	if rail == models.RailStripe || rail == models.RailNMI || rail == models.RailCCBill {
 		if err := moneyutil.RequireFiatCurrency(price.Currency); err != nil {
 			return models.PSPRoutingSkipCurrencyUnsupported
@@ -48,6 +52,15 @@ func (s *OrderAttemptService) railSkipReason(price *models.Price, target railTar
 	trial := price.TrialUnitAmount != nil || price.TrialDurationHours != nil
 	if !rails.CanSellNew(rail, subscription, trial) {
 		return models.PSPRoutingSkipModeUnsupported
+	}
+	// A provider price sells only through its own provider, and only CCBill
+	// still sells new ones; ours never sell through CCBill.
+	if price.ProviderOwned {
+		if _, link, ok := price.ProviderLink(); !ok || rail != models.RailCCBill || link[models.RailKeyRail] != string(rail) {
+			return models.PSPRoutingSkipProviderPrice
+		}
+	} else if rail == models.RailCCBill {
+		return models.PSPRoutingSkipLinkMissing
 	}
 	if s.pspDisarmed != nil && target.Scope != nil && s.pspDisarmed(target.Scope.ID) {
 		return models.PSPRoutingSkipPostureDisarmed
@@ -80,7 +93,9 @@ func (s *OrderAttemptService) railSkipReason(price *models.Price, target railTar
 		if providerConfig.Solana == nil || len(providerConfig.Solana.Tokens) == 0 {
 			return models.PSPRoutingSkipCredentialsMissing
 		}
-		if link == nil {
+		// A recurring price sells on its published plan; a one-time one by
+		// direct transfer.
+		if subscription && link == nil {
 			return models.PSPRoutingSkipLinkMissing
 		}
 		if units, ok := moneyutil.LookupCurrency(price.Currency); ok && units.Kind == "crypto" {

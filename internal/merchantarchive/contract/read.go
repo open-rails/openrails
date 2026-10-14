@@ -124,8 +124,8 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			none := "{}"
 			r.Values = append(r.Values, &none)
 		}
-		if p.Name == "prices" && len(r.Values) == len(p.Columns)-1 {
-			r.Values = append(r.Values, nil)
+		if p.Name == "prices" && len(r.Values) != len(p.Columns) {
+			return fmt.Errorf("archive prices lack explicit ownership: restore using OpenRails v0.255.0, then upgrade")
 		}
 		if err := ValidateValues(p, r.Values); err != nil {
 			return err

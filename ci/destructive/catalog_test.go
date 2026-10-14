@@ -29,7 +29,7 @@ func (s *failingStripe) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, errors.New("simulated Stripe outage")
 }
 
-// A catalog edit whose provider call fails commits nothing, so it releases its
+// A catalog edit whose provider read fails commits nothing, so it releases its
 // unit: the actor keeps its whole allowance.
 func TestDestructiveFailedProviderCatalogEditReleasesItsUnit(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN"))
@@ -68,15 +68,16 @@ func TestDestructiveFailedProviderCatalogEditReleasesItsUnit(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, stripe.calls.Load(), "a price without a PSP link calls no provider")
 
-	_, err = client.UpdatePrice(staff, price.ID, billing.UpdatePriceParams{PSPs: map[string]catalog.Field[map[string]string]{"stripe": catalog.Value(map[string]string{"lookup_key": "member-monthly"})}})
+	_, err = client.CreateProviderPrice(staff, billing.CreateProviderPriceParams{ProductID: product.ID, Key: "legacy", PSP: "stripe", PriceID: "price_legacy_member"})
 	require.Error(t, err)
-	require.Positive(t, stripe.calls.Load(), "the edit reached its provider")
+	require.Positive(t, stripe.calls.Load(), "the edit read its provider")
 	var state string
-	require.NoError(t, pool.QueryRow(t.Context(), "SELECT state FROM "+pgx.Identifier{schema}.Sanitize()+".destructive_actions WHERE target=$1", "price/"+price.ID.String()).Scan(&state))
+	require.NoError(t, pool.QueryRow(t.Context(), "SELECT state FROM "+pgx.Identifier{schema}.Sanitize()+".destructive_actions WHERE target=$1", "provider-price/create").Scan(&state))
 	require.Equal(t, "no_effect", state, "a failed edit is released, not left uncertain")
-	stored, err := client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
+	prices, err := client.ListPrices(t.Context(), billing.PriceListParams{ProductID: product.ID})
 	require.NoError(t, err)
-	require.Empty(t, stored.PSPs, "the failed edit linked nothing")
+	require.Len(t, prices.Items, 1, "the failed edit stored nothing")
+	require.Equal(t, price.ID, prices.Items[0].ID)
 
 	for i := range 5 {
 		_, err := client.UpdateProduct(staff, product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{fmt.Sprintf("member:%d", i)})})

@@ -140,7 +140,7 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		if err := s.refuseAssignedPolicyRemoval(ctx, mid, settings); err != nil {
 			return nil, err
 		}
-		if err := s.rt.Merchants.CheckCardCustody(ctx, mid, next, set.PSPs); err != nil {
+		if err := s.rt.Merchants.CheckCardVault(ctx, mid, next, set.PSPs); err != nil {
 			return nil, err
 		}
 		set, err = cache.PutMerchant(ctx, mid, next, cas)
@@ -227,8 +227,11 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.BillingPeriodBoundary != "" {
 		current.BillingPeriodBoundary = patch.BillingPeriodBoundary
 	}
-	if patch.CardCustody != "" {
-		current.CardCustody = patch.CardCustody
+	if patch.CardVault != "" {
+		current.CardVault = patch.CardVault
+	}
+	if patch.ChargePSPs != nil {
+		current.ChargePSPs = patch.ChargePSPs
 	}
 	if patch.AlertEmail != nil {
 		current.AlertEmail = patch.AlertEmail

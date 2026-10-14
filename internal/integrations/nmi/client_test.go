@@ -106,24 +106,6 @@ func TestDirectPostWireShapes(t *testing.T) {
 			require.NoError(t, err)
 		}, map[string]string{"amount": "500.00", "currency": "JPY", "order_description": "d", "initiated_by": "merchant", "stored_credential_indicator": "used", "initial_transaction_id": "anchor"},
 			[]string{"billing_method", "billing_id", "orderid"}},
-		{"paid enrollment", func(t *testing.T, c *NMIClient) {
-			got, err := c.AddRecurringSubscription(t.Context(), RecurringPaymentData{PlanID: "p1", CustomerVaultID: "v1", BillingID: "b1", Currency: "JPY", Amount: 4,
-				OrderID: " o1 ", PONumber: "o1", StartDate: "20261021", CustomerID: "cust", StoredCredential: citRecurring()})
-			require.NoError(t, err)
-			require.Equal(t, "sub-1", got.SubscriptionID)
-			require.Equal(t, "txn-1", got.TransactionID)
-		}, map[string]string{"recurring": "add_subscription", "type": "sale", "amount": "4.00", "currency": "JPY", "plan_id": "p1", "customer_vault_id": "v1", "billing_id": "b1",
-			"orderid": "o1", "ponumber": "o1", "start_date": "20261021", "billing_method": "recurring", "initiated_by": "customer", "stored_credential_indicator": "stored"},
-			[]string{"customerid", "payment_token", "initial_transaction_id"}},
-		{"schedule-only enrollment", func(t *testing.T, c *NMIClient) {
-			_, err := c.AddRecurringSubscription(t.Context(), RecurringPaymentData{ScheduleOnly: true, PlanID: "p1", CustomerVaultID: "v1", Currency: "USD", StartDate: "20261021"})
-			require.NoError(t, err)
-		}, map[string]string{"recurring": "add_subscription", "plan_id": "p1", "start_date": "20261021"},
-			[]string{"type", "amount", "billing_method", "initiated_by", "stored_credential_indicator", "initial_transaction_id"}},
-		{"token enrollment", func(t *testing.T, c *NMIClient) {
-			_, err := c.AddRecurringSubscription(t.Context(), RecurringPaymentData{PlanID: "p1", PaymentToken: "tok", CustomerID: "cust", BillingID: "b1", Currency: "USD", Amount: 100, StoredCredential: citRecurring()})
-			require.NoError(t, err)
-		}, map[string]string{"payment_token": "tok", "customerid": "cust", "amount": "1.00"}, []string{"customer_vault_id", "billing_id"}},
 		{"recurring MIT rebill", func(t *testing.T, c *NMIClient) {
 			got, err := c.AttemptManualRebill(t.Context(), ManualRebillParams{VaultID: "v1", BillingID: "b1", SubscriptionID: "s1", OrderID: "ord", PONumber: "ord", StoredCredential: mitRecurring()})
 			require.NoError(t, err)
@@ -131,10 +113,6 @@ func TestDirectPostWireShapes(t *testing.T) {
 		}, map[string]string{"type": "sale", "recurring": "rebill_subscription", "subscription_id": "s1", "customer_vault_id": "v1", "billing_id": "b1", "orderid": "ord", "ponumber": "ord",
 			"billing_method": "recurring", "initiated_by": "merchant", "stored_credential_indicator": "used", "initial_transaction_id": "initial-txn"},
 			[]string{"amount"}},
-		{"edit plan sends only mutable fields", func(t *testing.T, c *NMIClient) {
-			require.NoError(t, c.EditRecurringPlan(t.Context(), "plan-1", "New", 1999, "USD"))
-		}, map[string]string{"recurring": "edit_plan", "current_plan_id": "plan-1", "plan_amount": "19.99", "plan_name": "New"},
-			[]string{"plan_id", "day_frequency", "plan_payments"}},
 		{"recurring agreement verification moves no funds", func(t *testing.T, c *NMIClient) {
 			id, err := c.VerifyStoredCredential(t.Context(), " v1 ", "b1", "ord", true)
 			require.NoError(t, err)
@@ -206,9 +184,6 @@ func TestV5WireShapes(t *testing.T) {
 			return err
 		}},
 		{"void", "POST", "/payments/t1/void", `{}`, func() error { return c.Void(t.Context(), "t1") }},
-		{"create plan", "POST", "/plans", `{"id":"p1","plan_name":"Premium","plan_amount":9.99,"plan_payments":0,"day_frequency":30}`, func() error {
-			return c.AddRecurringPlan(t.Context(), "p1", "Premium", 999, "USD", 30, 0)
-		}},
 		{"create vault", "POST", "/customers", `{"billing":{"currency":"USD","payment_details":{"payment_token":"tok"},"first_name":"Ada"}}`, func() error {
 			got, err := c.CreateCustomerVault(t.Context(), CreateCustomerVaultData{PaymentToken: " tok ", FirstName: "Ada"})
 			if err == nil {
@@ -261,7 +236,6 @@ func TestRequestsRefusedBeforeTheGateway(t *testing.T) {
 		_, err := c.RunSale(ctx, p)
 		return err
 	}
-	enroll := func(d RecurringPaymentData) error { _, err := c.AddRecurringSubscription(ctx, d); return err }
 	unaccounted := *c
 	unaccounted.SecurityKey = "rotated-under-it"
 	for name, err := range map[string]error{
@@ -278,17 +252,10 @@ func TestRequestsRefusedBeforeTheGateway(t *testing.T) {
 			return err
 		}(),
 		"refund without currency":        func() error { _, err := c.Refund(ctx, RefundParams{TransactionID: "t", Amount: 1}); return err }(),
-		"schedule-only with amount":      enroll(RecurringPaymentData{ScheduleOnly: true, PlanID: "p", CustomerVaultID: "v", Amount: 1}),
-		"schedule-only with credential":  enroll(RecurringPaymentData{ScheduleOnly: true, PlanID: "p", CustomerVaultID: "v", StoredCredential: citRecurring()}),
-		"paid enrollment w/o credential": enroll(RecurringPaymentData{PlanID: "p", CustomerVaultID: "v", Currency: "USD", Amount: 1}),
-		"enrollment without source":      enroll(RecurringPaymentData{PlanID: "p", Currency: "USD", StoredCredential: citRecurring()}),
 		"reference-less MIT rebill": func() error {
 			_, err := c.AttemptManualRebill(ctx, ManualRebillParams{VaultID: "v", BillingID: "b", SubscriptionID: "s", StoredCredential: &StoredCredential{InitiatedBy: InitiatedByMerchant, Indicator: IndicatorUsed, Recurring: true}})
 			return err
 		}(),
-		"plan without frequency": c.AddRecurringPlan(ctx, "p", "n", 100, "USD", 0, 0),
-		"plan without name":      c.AddRecurringPlan(ctx, "p", "", 100, "USD", 30, 0),
-		"plan edit without id":   c.EditRecurringPlan(ctx, "", "n", 100, "USD"),
 		"agreement order id over 50": func() error {
 			_, err := c.VerifyStoredCredential(ctx, "v", "", strings.Repeat("o", 51), true)
 			return err
@@ -341,7 +308,7 @@ func TestDirectResponseOutcomeClassification(t *testing.T) {
 		{"duplicate schedule identity", "response=1&response_code=100&subscription_id=one&subscription_id=two", false},
 		{"not a form", "<html>bad gateway</html>", false},
 	}
-	for _, caller := range []string{"sale", "initial", "rebill"} {
+	for _, caller := range []string{"sale", "rebill"} {
 		for _, tc := range cases {
 			t.Run(caller+"/"+tc.name, func(t *testing.T) {
 				f := newNMIFake(t, reply(tc.body))
@@ -352,8 +319,6 @@ func TestDirectResponseOutcomeClassification(t *testing.T) {
 				switch caller {
 				case "sale":
 					_, err = c.RunSale(t.Context(), SaleParams{CustomerVaultID: "v", Amount: 999, Currency: "USD", OrderID: "op", StoredCredential: citOneTime()})
-				case "initial":
-					_, err = c.AddRecurringSubscription(t.Context(), RecurringPaymentData{CustomerVaultID: "v", PlanID: "p", Amount: 999, Currency: "USD", StoredCredential: citRecurring()})
 				case "rebill":
 					var res *ManualRebillResponse
 					res, err = c.AttemptManualRebill(t.Context(), ManualRebillParams{VaultID: "v", BillingID: "b", SubscriptionID: "s", StoredCredential: mitRecurring()})
@@ -489,10 +454,6 @@ func TestStalledGatewayHonorsCallerContext(t *testing.T) {
 		}},
 		{"direct-post sale", true, func(ctx context.Context) error {
 			_, err := client.RunSale(ctx, SaleParams{CustomerVaultID: "v", Amount: 1, Currency: "USD", StoredCredential: citOneTime()})
-			return err
-		}},
-		{"direct-post enrollment", true, func(ctx context.Context) error {
-			_, err := client.AddRecurringSubscription(ctx, RecurringPaymentData{PlanID: "p", CustomerVaultID: "v", Currency: "USD", StoredCredential: citRecurring()})
 			return err
 		}},
 		{"v5 vault create", true, func(ctx context.Context) error {

@@ -54,7 +54,7 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 				reject(merchantdocs.CustodianDoc(key), why)
 			}
 		}
-		if err := s.syncCardCustody(ctx, q, id, previous, set, reject); err != nil {
+		if err := s.syncCardVault(ctx, q, id, previous, set, reject); err != nil {
 			return err
 		}
 		rows, err := q.ListPSPsForMerchant(ctx, id.UUID())

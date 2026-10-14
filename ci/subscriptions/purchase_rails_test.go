@@ -3,8 +3,9 @@
 package subscriptions_test
 
 import (
-	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,21 +29,28 @@ import (
 // boot. {key} in prices names the product.
 func (w *world) applyCatalog(prices string) (string, error) {
 	w.t.Helper()
+	key, _, err := w.applyCatalogWith(prices, "")
+	return key, err
+}
+
+// applyCatalogWith applies one product with its prices and provider prices
+// (maps YAML, keys at two spaces) and returns the receipt.
+func (w *world) applyCatalogWith(prices, providerPrices string) (string, *billing.CatalogApplicationReceipt, error) {
+	w.t.Helper()
 	client := w.client[embedded]
 	key := "rails-" + uuid.NewString()[:8]
-	lines := strings.Split(strings.TrimRight(strings.ReplaceAll(prices, "{key}", key), "\n"), "\n")
-	doc := fmt.Sprintf(`schema_version: 1
-products:
-  %s:
-    display_name: Rails
-    entitlements: ["%s"]
-    prices:
-    %s
-`, key, key, strings.Join(lines, "\n    "))
+	block := func(name, body string) string {
+		if body == "" {
+			return ""
+		}
+		lines := strings.Split(strings.TrimRight(strings.ReplaceAll(body, "{key}", key), "\n"), "\n")
+		return fmt.Sprintf("    %s:\n    %s\n", name, strings.Join(lines, "\n    "))
+	}
+	doc := fmt.Sprintf("schema_version: 1\nproducts:\n  %s:\n    display_name: Rails\n    entitlements: [\"%s\"]\n%s%s", key, key, block("prices", prices), block("provider_prices", providerPrices))
 	params, err := catalog.ParseApplicationYAML([]byte(doc))
 	require.NoError(w.t, err)
-	_, err = client.ApplyCatalog(w.t.Context(), params, billing.ApplyCatalogParams{})
-	return key, err
+	receipt, err := client.ApplyCatalog(w.t.Context(), params, billing.ApplyCatalogParams{})
+	return key, receipt, err
 }
 
 // options are an order's payment options for price, by rail, as the
@@ -104,36 +112,33 @@ func withSolana(t *testing.T, w *world) *solanaDeployment {
 	return s
 }
 
+// A recurring price sells on the Solana plan the apply publishes for it from
+// its terms; a one-time one by direct transfer.
 func TestPurchaseOffersSolanaWhenConfigured(t *testing.T) {
 	w := prepareWorld(t, 12)
-	sol := withSolana(t, w)
+	withSolana(t, w)
 	w.start()
 
-	plan := sol.plan(t, 4242, 23_000_000)
-	key, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
-    currency: usd
-    unit_amount: 23000000
-    billing_interval_hours: 720
-    access_duration_hours: 720
-    psps:
-      nmi: {}
-      solana:
-        plan_pda: %s
-        plan_id: "4242"
+	key, receipt, err := w.applyCatalogWith(`  "{key}-monthly":
+    amount: 23 USD
+    billing_interval: 30 days
+    access_duration: 30 days
   "{key}-once":
-    currency: usd
-    unit_amount: 5000000
-    billing_interval_hours: null
-    access_duration_hours: 720
-    psps: {nmi: {}, solana: {}}
-`, plan))
+    amount: 5 USD
+    billing_interval: null
+    access_duration: 30 days
+`, "")
 	require.NoError(t, err)
+	require.Empty(t, receipt.Warnings)
+	price, err := priceByKey(t.Context(), w.client[embedded], key, key+"-monthly")
+	require.NoError(t, err)
+	require.NotNil(t, price.SolanaPlan, "the apply published the recurring price's plan")
 
-	monthly := w.options(pid(priceID(t, w, key, key+"-monthly")))
+	monthly := w.options(price.ID)
 	require.Equal(t, []string{"solana_pay"}, monthly["solana"].Accepts, "a price with a Solana plan subscribes from a wallet: %+v", monthly)
 	require.Equal(t, []string{"saved_card", "new_card"}, monthly["nmi"].Accepts)
 	require.Equal(t, []string{"saved_card", "new_card"}, monthly["stripe"].Accepts, "a recurring line is no Stripe hosted sale")
-	require.NotContains(t, monthly, "ccbill", "the price links no FlexForm")
+	require.NotContains(t, monthly, "ccbill", "ours never sell through CCBill")
 
 	once := w.options(pid(priceID(t, w, key, key+"-once")))
 	require.Equal(t, []string{"solana_pay"}, once["solana"].Accepts)
@@ -150,6 +155,23 @@ func TestPurchaseOffersSolanaWhenConfigured(t *testing.T) {
 	require.NotNil(t, paid.NextAction, "%+v", paid.Order)
 	require.Equal(t, "solana_pay", paid.NextAction.Type)
 	require.True(t, strings.HasPrefix(*paid.NextAction.URL, "solana:https://e2e.test/billing/v1/orders/"+paid.Order.ID.String()+"/solana-pay"), "%+v", paid.NextAction)
+
+	// sell_via restricts a price to some of the merchant's methods.
+	cardOnly, _, err := w.applyCatalogWith(`  "{key}-card":
+    amount: 5 USD
+    access_duration: 30 days
+    sell_via: [card]
+  "{key}-solana":
+    amount: 5 USD
+    access_duration: 30 days
+    sell_via: [solana]
+`, "")
+	require.NoError(t, err)
+	card := w.options(pid(priceID(t, w, cardOnly, cardOnly+"-card")))
+	require.NotContains(t, card, "solana")
+	require.Contains(t, card, "nmi")
+	sol := w.options(pid(priceID(t, w, cardOnly, cardOnly+"-solana")))
+	require.Equal(t, []string{"solana"}, slices.Collect(maps.Keys(sol)), "%+v", sol)
 }
 
 func TestPurchaseOmitsSolanaWhenNotConfigured(t *testing.T) {
@@ -159,13 +181,11 @@ func TestPurchaseOmitsSolanaWhenNotConfigured(t *testing.T) {
     unit_amount: 23000000
     billing_interval_hours: 720
     access_duration_hours: 720
-    psps: {nmi: {}}
   "{key}-once":
     currency: usd
     unit_amount: 5000000
     billing_interval_hours: null
     access_duration_hours: 720
-    psps: {nmi: {}}
 `)
 	require.NoError(t, err)
 	for _, price := range []string{key + "-monthly", key + "-once"} {
@@ -176,69 +196,75 @@ func TestPurchaseOmitsSolanaWhenNotConfigured(t *testing.T) {
 	}
 }
 
-// A CCBill PSP sells a subscription whose price links a FlexForm, on that
-// form, and nothing one-time.
-func TestCCBillSellsSubscriptionsOnItsFlexForm(t *testing.T) {
+// CCBill sells its own provider prices on their FlexForms. An order for a
+// recurring price of ours also offers the product's CCBill provider price on
+// the same terms (billing-ui's fallback); nothing one-time.
+func TestCCBillSellsItsProviderPricesOnTheirFlexForms(t *testing.T) {
 	w := newWorld(t)
-	key, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
-    currency: usd
-    unit_amount: 23000000
-    billing_interval_hours: 720
-    access_duration_hours: 720
-    psps:
-      ccbill:
-        flex_id: %s
-        recurring_billing_option_id: "%s"
+	key, receipt, err := w.applyCatalogWith(`  "{key}-monthly":
+    amount: 23 USD
+    billing_interval: 30 days
+    access_duration: 30 days
   "{key}-once":
-    currency: usd
-    unit_amount: 5000000
-    billing_interval_hours: null
-    access_duration_hours: 720
-    psps:
-      ccbill:
-        flex_id: %s
-`, ccbillFlexID, ccbillRBO, ccbillFlexID))
-	require.NoError(t, err, "armed engine rails sell the one-time price on local terms")
+    amount: 5 USD
+    billing_interval: null
+    access_duration: 30 days
+`, fmt.Sprintf(`  "{key}-ccbill":
+    psp: ccbill
+    flex_id: %s
+    recurring_billing_option_id: "%s"
+    amount: 23 USD
+    billing_interval: 30 days
+`, ccbillFlexID, ccbillRBO))
+	require.NoError(t, err)
+	require.Empty(t, receipt.Warnings)
+	provider, err := priceByKey(t.Context(), w.client[embedded], key, key+"-ccbill")
+	require.NoError(t, err)
+	require.NotNil(t, provider.Provider)
+	require.Equal(t, map[string]string{"flex_id": ccbillFlexID, "recurring_billing_option_id": ccbillRBO}, provider.Provider.IDs)
+	require.Equal(t, int64(23_000_000), provider.UnitAmount, "CCBill declares its terms")
+
 	options := w.options(pid(priceID(t, w, key, key+"-monthly")))
-	require.Equal(t, []string{"redirect"}, options["ccbill"].Accepts, "%+v", options)
+	require.Equal(t, []string{"redirect"}, options["ccbill"].Accepts, "the CCBill provider price stands in: %+v", options)
 	require.Zero(t, options["ccbill"].FailedAttempts)
 	require.Contains(t, options, "nmi")
 	require.NotContains(t, w.options(pid(priceID(t, w, key, key+"-once"))), "ccbill", "a FlexForm sells subscriptions only")
+	direct := w.options(provider.ID)
+	require.Equal(t, []string{"ccbill"}, slices.Collect(maps.Keys(direct)), "a provider price sells through its provider alone: %+v", direct)
 }
 
-func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
+// A price restricted to methods that cannot sell it is refused by name; the
+// rest of the document applies and is not recorded, so applying it again
+// retries.
+func TestCatalogRefusesAPriceItsMethodsCannotSell(t *testing.T) {
 	w := prepareWorld(t, 12)
 	w.declare = func(psps map[string]openrails.PSPConfig) {
 		delete(psps, "stripe")
 		delete(psps, "nmi")
 	}
 	w.start()
-	_, err := w.applyCatalog(fmt.Sprintf(`  "{key}-once":
-    currency: usd
-    unit_amount: 23000000
-    billing_interval_hours: null
-    access_duration_hours: 720
-    psps:
-      ccbill:
-        flex_id: %s
-`, ccbillFlexID))
-	require.Error(t, err, "a FlexForm sells no one-time price")
-	var status *billing.StatusError
-	require.True(t, errors.As(err, &status), "%v", err)
-	require.Equal(t, "price_not_sellable", status.Code, "%v", err)
-
-	// An archived CCBill price keeps serving its retained cohort.
-	_, err = w.applyCatalog(fmt.Sprintf(`  "{key}-retired":
-    currency: usd
-    unit_amount: 19000000
-    billing_interval_hours: 720
-    archived: true
-    access_duration_hours: 720
-    psps:
-      ccbill:
-        flex_id: %s
-        recurring_billing_option_id: "%s"
-`, ccbillFlexID, ccbillRBO))
+	key, receipt, err := w.applyCatalogWith(`  "{key}-card":
+    amount: 23 USD
+    access_duration: 30 days
+    sell_via: [card]
+  "{key}-monthly-solana":
+    amount: 23 USD
+    billing_interval: 30 days
+    access_duration: 30 days
+    sell_via: [solana]
+  "{key}-open":
+    amount: 23 USD
+    access_duration: 30 days
+`, "")
+	require.NoError(t, err, "a price that cannot sell is never fatal")
+	refused := map[string]bool{}
+	for _, warning := range receipt.Warnings {
+		refused[warning.Key] = warning.Refused
+	}
+	require.Equal(t, map[string]bool{key + "-card": true, key + "-monthly-solana": true}, refused, "%+v", receipt.Warnings)
+	_, err = priceByKey(t.Context(), w.client[embedded], key, key+"-card")
+	require.Error(t, err, "a refused price is left out")
+	_, err = priceByKey(t.Context(), w.client[embedded], key, key+"-open")
 	require.NoError(t, err)
 }
 
@@ -247,4 +273,27 @@ func priceID(t *testing.T, w *world, productKey, key string) string {
 	price, err := priceByKey(t.Context(), w.client[embedded], productKey, key)
 	require.NoError(t, err)
 	return price.ID.String()
+}
+
+func TestSolanaOnlyPriceCannotOfferACardFallback(t *testing.T) {
+	w := prepareWorld(t, 12)
+	withSolana(t, w)
+	w.start()
+	key, receipt, err := w.applyCatalogWith(`  "{key}-monthly":
+    amount: 23 USD
+    billing_interval: 30 days
+    sell_via: [solana]
+`, fmt.Sprintf(`  "{key}-ccbill":
+    psp: ccbill
+    flex_id: %s
+    recurring_billing_option_id: "%s"
+    amount: 23 USD
+    billing_interval: 30 days
+`, ccbillFlexID, ccbillRBO))
+	require.NoError(t, err)
+	require.Empty(t, receipt.Warnings)
+	price, err := priceByKey(t.Context(), w.client[embedded], key, key+"-monthly")
+	require.NoError(t, err)
+	options := w.options(price.ID)
+	require.Equal(t, []string{"solana"}, slices.Collect(maps.Keys(options)), "sell_via applies to provider stand-ins too")
 }

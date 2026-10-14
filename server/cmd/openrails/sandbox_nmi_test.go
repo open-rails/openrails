@@ -48,7 +48,7 @@ func TestSandboxNMIGatewayServesTheQualificationProbe(t *testing.T) {
 		t.Fatalf("qualification probe answered %d %q", resp.StatusCode, body)
 	}
 
-	// The catalog reference check reads the seeded plan through the real client.
+	// A provider price reads the seeded plan through the real client.
 	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{Environment: config.EnvironmentSandbox, SecurityKey: "fake"})
 	if err != nil {
 		t.Fatal(err)
@@ -60,12 +60,6 @@ func TestSandboxNMIGatewayServesTheQualificationProbe(t *testing.T) {
 	}
 	if missing, err := client.GetRecurringPlanDetailByID(ctx, "absent", "usd"); err != nil || missing.Found {
 		t.Fatalf("absent plan %+v, err %v: want not found", missing, err)
-	}
-	if err := client.AddRecurringPlan(ctx, "created", "Created", 999, "usd", 7, 0); err != nil {
-		t.Fatal(err)
-	}
-	if created, err := client.GetRecurringPlanDetailByID(ctx, "created", "usd"); err != nil || created.AmountCents != 999 || created.DayFrequency != 7 {
-		t.Fatalf("plan created through the provider workflow %+v, err %v", created, err)
 	}
 
 	cancel()

@@ -219,11 +219,9 @@ func TestSeatsRefused(t *testing.T) {
 	_, err = l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(perSeat.ID), Quantity: seats(2), IdempotencyKey: "provider-" + uuid.NewString()})
 	requireCode(t, err, http.StatusBadRequest, billing.CodeSubscriptionChangeUnsupportedOnRail)
 
-	// The catalog sells seats only where OpenRails bills them.
+	// The catalog sells seats only on recurring prices.
 	cycle := monthHours
 	for _, params := range []billing.CreatePriceParams{
-		{ProductID: perSeat.ProductID, Key: "linked", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: &cycle, Quantity: &catalog.Quantity{Min: 1, Max: 5},
-			PSPs: map[string]map[string]string{"nmi": {"plan_id": "seat_plan"}}},
 		{ProductID: perSeat.ProductID, Key: "one-off", UnitAmount: 10_000_000, Currency: "USD", Quantity: &catalog.Quantity{Min: 1, Max: 5}},
 		{ProductID: perSeat.ProductID, Key: "bounds", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: &cycle, Quantity: &catalog.Quantity{Min: 3, Max: 2}},
 	} {

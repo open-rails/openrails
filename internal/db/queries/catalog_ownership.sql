@@ -11,7 +11,7 @@ ORDER BY key;
 -- name: ListCatalogStatePrices :many
 -- Every version of every price key, with its PSP links and the key's revision.
 SELECT p.id, p.product_id, p.key, p.revision AS version, p.amount, p.currency, p.access_duration_hours, p.billing_interval_hours,
-       p.trial_unit_amount, p.trial_duration_hours, p.customer_amount, p.quantity, p.archived,
+       p.trial_unit_amount, p.trial_duration_hours, p.customer_amount, p.quantity, p.archived, p.provider_owned, p.sell_via,
        COALESCE((
            SELECT jsonb_object_agg(COALESCE(psp.key, psp.id::text), binding.configuration || jsonb_strip_nulls(jsonb_build_object(
                'psp_id', psp.id::text, 'rail', psp.rail, 'plan_id', binding.plan_id, 'price_id', binding.price_ref,

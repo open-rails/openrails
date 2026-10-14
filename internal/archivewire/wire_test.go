@@ -62,8 +62,8 @@ func TestArchiveRefusesIncompleteOrAlteredStreams(t *testing.T) {
 	}
 	for name, bad := range map[string][]byte{
 		"data after footer":     append(append([]byte{}, good...), "{}\n"...),
-		"unsupported version":   bytes.Replace(good, []byte(`"version":2`), []byte(`"version":3`), 1),
-		"retired draft version": bytes.Replace(good, []byte(`"version":2`), []byte(`"version":0`), 1),
+		"unsupported version":   bytes.Replace(good, []byte(`"version":3`), []byte(`"version":4`), 1),
+		"retired draft version": bytes.Replace(good, []byte(`"version":3`), []byte(`"version":0`), 1),
 		"weaker consistency":    bytes.Replace(good, []byte(`"consistency":"repeatable_read"`), []byte(`"consistency":"read_committed"`), 1),
 		"row count":             bytes.Replace(good, []byte(`"rows":1`), []byte(`"rows":2`), 1),
 		"duplicate field":       bytes.Replace(good, []byte(`"kind":"header"`), []byte(`"kind":"header","kind":"header"`), 1),
@@ -77,7 +77,7 @@ func TestArchiveRefusesIncompleteOrAlteredStreams(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	if _, err := CopyVerified(io.Discard, bytes.NewReader(bytes.Replace(good, []byte(`"version":2`), []byte(`"version":1`), 1))); err == nil || !strings.Contains(err.Error(), "archive version 1 is no longer read") {
+	if _, err := CopyVerified(io.Discard, bytes.NewReader(bytes.Replace(good, []byte(`"version":3`), []byte(`"version":1`), 1))); err == nil || !strings.Contains(err.Error(), "archive version 1 is no longer read") {
 		t.Fatalf("version 1 refusal: %v", err)
 	}
 	stop := io.ErrUnexpectedEOF
@@ -122,5 +122,22 @@ func TestWriterEnforcesShape(t *testing.T) {
 	}
 	if w.Table("late") == nil || w.Row([]*string{&mid}) == nil || w.Close() == nil {
 		t.Error("writer accepted records after footer")
+	}
+}
+
+func TestHeaderPreflightRetainsTheStreamAndRefusesThePriorFormat(t *testing.T) {
+	good := archive(t, "x")
+	h, remaining, err := ReadHeader(bytes.NewReader(good))
+	if err != nil || h.Version != Version {
+		t.Fatalf("header: %+v %v", h, err)
+	}
+	got, err := io.ReadAll(remaining)
+	if err != nil || !bytes.Equal(got, good) {
+		t.Fatalf("stream changed: %v", err)
+	}
+	old := bytes.Replace(good, []byte(`"version":3`), []byte(`"version":2`), 1)
+	_, _, err = ReadHeader(bytes.NewReader(old))
+	if err == nil || !strings.Contains(err.Error(), "restore using OpenRails v0.255.0, then upgrade") {
+		t.Fatalf("old header: %v", err)
 	}
 }

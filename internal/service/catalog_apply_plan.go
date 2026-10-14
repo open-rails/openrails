@@ -37,7 +37,7 @@ type catalogPlan struct {
 	renamed map[catalogObject]bool
 }
 
-func planCatalogApplication(params catalogwire.Application, live catalogState, owners catalogOwners, links map[[2]string]map[string]map[string]string, force bool) (catalogPlan, error) {
+func planCatalogApplication(params catalogwire.Application, live catalogState, owners catalogOwners, providers map[[2]string]*providerPrice, force bool) (catalogPlan, error) {
 	plan := catalogPlan{named: map[catalogObject][]string{}, declared: map[catalogObject]bool{}, conflicts: []billing.CatalogConflict{}, renamed: map[catalogObject]bool{}}
 	plan.document = catalogwire.Application{SchemaVersion: params.SchemaVersion, EntitlementReplacements: params.EntitlementReplacements}
 	renamed, err := renamedProducts(live, params.EntitlementReplacements)
@@ -72,19 +72,30 @@ func planCatalogApplication(params catalogwire.Application, live catalogState, o
 		plan.declared[productObject(key)] = true
 		if !consider(productObject(key), fields) {
 			// Its prices are their own objects and may still apply.
-			decl = catalogwire.ApplyProduct{Prices: decl.Prices}
+			decl = catalogwire.ApplyProduct{Prices: decl.Prices, ProviderPrices: decl.ProviderPrices}
 		}
 		prices := map[string]catalogwire.ApplyPrice{}
 		for _, priceKey := range slices.Sorted(maps.Keys(decl.Prices)) {
 			price := decl.Prices[priceKey]
 			plan.declared[priceObject(key, priceKey)] = true
-			if consider(priceObject(key, priceKey), documentPriceFields(price, links[[2]string{key, priceKey}])) {
+			if consider(priceObject(key, priceKey), documentPriceFields(price)) {
 				prices[priceKey] = price
 			}
 		}
-		decl.Prices = nil
+		providerPrices := map[string]catalogwire.ApplyProviderPrice{}
+		for _, priceKey := range slices.Sorted(maps.Keys(decl.ProviderPrices)) {
+			price := decl.ProviderPrices[priceKey]
+			plan.declared[priceObject(key, priceKey)] = true
+			if consider(priceObject(key, priceKey), documentProviderPriceFields(price, providers[[2]string{key, priceKey}])) {
+				providerPrices[priceKey] = price
+			}
+		}
+		decl.Prices, decl.ProviderPrices = nil, nil
 		if len(prices) > 0 {
 			decl.Prices = prices
+		}
+		if len(providerPrices) > 0 {
+			decl.ProviderPrices = providerPrices
 		}
 		plan.document.Products[key] = decl
 	}
@@ -104,6 +115,8 @@ func planCatalogApplication(params catalogwire.Application, live catalogState, o
 		for _, obj := range slices.SortedFunc(maps.Keys(live), compareCatalogObjects) {
 			product, declared := params.Products[obj.key]
 			_, kept := product.Prices[obj.priceKey]
+			_, keptProvider := product.ProviderPrices[obj.priceKey]
+			kept = kept || keptProvider
 			switch {
 			case obj.kind == billing.CatalogObjectMeter,
 				obj.kind == billing.CatalogObjectProduct && declared,

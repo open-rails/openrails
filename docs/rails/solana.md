@@ -147,10 +147,10 @@ completes with the subscription on its line. A signature settles one order
 only, across every merchant and PSP.
 
 - Solana recurring prices are denominated in USD, such as `amount: 23 USD`.
-  Declaring `psps: {solana: {}}` makes `catalog apply` publish the price's
-  USDC plan, owned by the first cranker and paying the merchant's treasury,
-  and bind it. Supply `plan_pda` to attach an existing plan instead; a listed
-  cranker must own it and it must pay the treasury. A one-time price needs no plan:
+  When the merchant has a Solana PSP, `catalog apply` publishes the price's
+  USDC plan, owned by the first cranker and paying the merchant's treasury.
+  `sell_via` can restrict a price to Solana; omitted, it also sells by card
+  through the merchant's card vault and charge PSPs. A one-time price needs no plan:
 
   ```yaml
   prices:
@@ -158,9 +158,7 @@ only, across every merchant and PSP.
       amount: 23 USD
       access_duration: 30 days
       billing_interval: 30 days
-      psps:
-        solana: {}
-        # Or attach a plan:  solana: {plan_pda: 7Xy...PdA}
+      sell_via: [solana]
   ```
 
 - `currency` is the price and ledger denomination, fiat or SOL; stablecoins

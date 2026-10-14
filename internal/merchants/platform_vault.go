@@ -18,14 +18,15 @@ import (
 // WithPlatformVaultStore uses the engine's authenticated Vault connection.
 func (s *Service) WithPlatformVaultStore(kv *vault.KVv2Adapter) { s.platformKV = kv }
 
-// PlatformCardCustodian selects custody for new cards only. Existing instruments
-// and accepted attempts retain their own custodian when a merchant switches.
+// PlatformCardCustodian is the platform vault holding new cards when the
+// merchant's card_vault is platform; nil otherwise. Existing instruments and
+// accepted attempts retain their own custodian when a merchant switches.
 func (s *Service) PlatformCardCustodian(ctx context.Context, id billing.MerchantID) (*CustodianScope, error) {
 	set, err := s.config.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if merchantconfig.CardCustody(set.Merchant.Value.MerchantSettings) != billing.CardCustodyPlatform {
+	if !merchantconfig.PlatformCardVault(set.Merchant.Value.MerchantSettings) {
 		return nil, nil
 	}
 	c, ok, err := s.CustodianScopeByKey(ctx, id, config.PlatformCustodianKey)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -14,10 +15,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -274,97 +277,7 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 		}
 	}
 
-	s.catalogAfterCommit(ctx, func(ctx context.Context, s *Service) {
-		// Propagate mutable Product changes to Stripe (display name + description + active).
-		// The Stripe product ID is not stored on the OpenRails product row itself —
-		// it lives on associated prices' psps.stripe.product_id. Look up one
-		// such price to find it; if no prices have a Stripe link yet, there is
-		// nothing to propagate (no Stripe Product exists for this OpenRails product).
-		if !s.localCatalogOnly && !req.SkipRailSync && (req.DisplayName != nil || req.Description != nil || req.Archived != nil) && s.rt.Config != nil {
-			stripeProductID := s.lookupStripeProductID(ctx, productID)
-			if stripeProductID != "" {
-				stripeSvc := &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: s.rt.Config, Rails: s.rt.RailConfigs}
-				params := catalog.UpdateProductParams{}
-				if req.DisplayName != nil {
-					name := strings.TrimSpace(*req.DisplayName)
-					params.Name = &name
-				}
-				if req.Description != nil {
-					desc := strings.TrimSpace(*req.Description)
-					params.Description = &desc
-				}
-				if req.Archived != nil {
-					// archived -> Stripe active=false.
-					active := !*req.Archived
-					params.Active = &active
-				}
-				// Best-effort propagation: log on failure, do not roll back the DB change.
-				// Drift will surface on next ?verify=true read.
-				_ = stripeSvc.UpdateProduct(ctx, stripeProductID, params)
-			}
-		}
-
-		// #586: when entitlements change, re-sync the product's Stripe Features so the
-		// mirror matches OpenRails. An emptied spec detaches all OpenRails-managed
-		// features. Best-effort, like the propagation above. Only runs once a Stripe
-		// Product exists for this product (i.e. a price has linked it).
-		if !s.localCatalogOnly && !req.SkipRailSync && req.SetEntitlements && s.rt.Config != nil {
-			if stripeProductID := s.lookupStripeProductID(ctx, productID); stripeProductID != "" {
-				stripeSvc := &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: s.rt.Config, Rails: s.rt.RailConfigs}
-				_ = stripeSvc.SyncProductFeatures(ctx, stripeProductID, p.Entitlements)
-			}
-		}
-
-	})
-
 	return productToCatalogProduct(p), nil
-}
-
-// propagateProductActiveToStripe pushes the product's active flag to its Stripe
-// Product, if one exists. Used by the lifecycle paths (activate / deactivate /
-// SetProductStatus) so a status change reaches Stripe — UpdateProduct already
-// handles the display_name/description/active propagation for definition edits,
-// but the dedicated lifecycle entrypoints bypass it. Best-effort: failures are
-// swallowed (drift surfaces on the next product reconcile).
-func (s *Service) propagateProductActiveToStripe(ctx context.Context, productID uuid.UUID, active bool) {
-	s.catalogAfterCommit(ctx, func(ctx context.Context, committed *Service) {
-		committed.propagateProductActiveToStripeCommitted(ctx, productID, active)
-	})
-}
-
-func (s *Service) propagateProductActiveToStripeCommitted(ctx context.Context, productID uuid.UUID, active bool) {
-	if s.localCatalogOnly {
-		return
-	}
-	if s.rt == nil || s.rt.Config == nil {
-		return
-	}
-	stripeProductID := s.lookupStripeProductID(ctx, productID)
-	if stripeProductID == "" {
-		return
-	}
-	stripeSvc := &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: s.rt.Config, Rails: s.rt.RailConfigs}
-	a := active
-	_ = stripeSvc.UpdateProduct(ctx, stripeProductID, catalog.UpdateProductParams{Active: &a})
-}
-
-// lookupStripeProductID returns the Stripe Product ID associated with the
-// given OpenRails product by scanning its prices for psps.stripe.product_id.
-// Returns "" if no associated price has a Stripe Product link.
-func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID) string {
-	if s.rt.PriceService == nil {
-		return ""
-	}
-	priceList, err := s.rt.PriceService.GetByProductID(ctx, productID)
-	if err != nil {
-		return ""
-	}
-	for _, p := range priceList {
-		if id := strings.TrimSpace(p.PSPLinkForRail(models.RailStripe)[models.RailKeyStripeProductID]); id != "" {
-			return id
-		}
-	}
-	return ""
 }
 
 func productToCatalogProduct(p *models.Product) *billing.Product {
@@ -519,16 +432,16 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 		return nil, err
 	}
 
-	var rails map[string]map[string]string
-	var providerStates map[string]billing.PSPLinkState
-	var pending []billing.PendingAction
+	if chain, err := prices.ListChainByKey(ctx, product.MerchantID, product.ID, key); err != nil {
+		return nil, err
+	} else if len(chain) > 0 && chain[0].ProviderOwned {
+		return nil, apperr.Invalidf("price key %q is a provider price; create ours under a key of its own", key)
+	}
+	rails := map[string]map[string]string{}
 	if prepared, ok := s.catalogPreparedLinks[[2]string{product.Key, req.Key}]; s.localCatalogOnly && ok {
 		rails = cloneRails(prepared)
-	} else {
-		rails, providerStates, pending, err = s.resolveProviders(ctx, product, req, priceID)
-		if err != nil {
-			return nil, err
-		}
+	} else if rails, err = s.createPriceLinks(ctx, req, priceID, existing); err != nil {
+		return nil, err
 	}
 
 	price, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*models.Price, error) {
@@ -546,7 +459,7 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 		if err := scoped.expectCatalogRevision(priceObject(product.Key, key), req.ExpectedRevision); err != nil {
 			return nil, err
 		}
-		price, err := scoped.writeCatalogPrice(ctx, req, current, priceID, rails)
+		price, err := scoped.writeCatalogPrice(ctx, priceWrite{req: req, product: current, id: priceID, links: rails})
 		if err != nil {
 			return nil, err
 		}
@@ -554,8 +467,8 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 		if err != nil {
 			return nil, err
 		}
-		if prepared, ok := scoped.catalogPreparedLinks[[2]string{product.Key, req.Key}]; scoped.localCatalogOnly && ok && !sameCatalogLinks(price.PSPLinks, prepared) {
-			if err := prices.UpdatePSPLinks(ctx, price.ID, prepared); err != nil {
+		if !sameCatalogLinks(price.PSPLinks, rails) {
+			if err := prices.UpdatePSPLinks(ctx, price.ID, rails); err != nil {
 				return nil, err
 			}
 		}
@@ -564,47 +477,63 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	if err != nil {
 		return nil, err
 	}
+	return priceToCatalogPrice(price), nil
+}
 
-	// Created-as-archived: the providers were auto-created active above, so
-	// propagate active=false to match the archived lifecycle (best-effort; drift
-	// surfaces on next verify if a provider rejects it).
-	if !s.localCatalogOnly && req.Archived && len(rails) > 0 && !s.catalogRemoteWritesDisabled() {
-		inactive := false
-		adapters := s.providerAdapters()
-		for provider, ids := range rails {
-			adapter, ok := adapters[strings.ToLower(strings.TrimSpace(provider))]
-			if !ok {
-				continue
-			}
-			_ = adapter.Update(ctx, ids, mutableUpdate{IsActive: &inactive})
+// createPriceLinks are the bindings a price of ours created outside a catalog
+// application takes: its stored version's, else the Solana plan a recurring
+// price sells on, published when missing. A price that sells only on Solana
+// and cannot is refused; otherwise it sells without Solana.
+func (s *Service) createPriceLinks(ctx context.Context, req billing.CreatePriceParams, priceID uuid.UUID, existing *models.Price) (map[string]map[string]string, error) {
+	links := map[string]map[string]string{}
+	if existing != nil {
+		maps.Copy(links, cloneRails(existing.PSPLinks))
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	accounts, err := merchants.Of(s.catalogDatabase()).PSPScopes(ctx, mid)
+	if err != nil {
+		return nil, err
+	}
+	if why := sellViaRefusal(req, accounts); why != "" && !req.Archived {
+		return nil, fmt.Errorf("%w: %s", ErrPriceNotSellable, why)
+	}
+	account := solanaPSP(accounts)
+	solanaOnly := len(req.SellVia) == 1 && req.SellVia[0] == catalogwire.SellViaSolana
+	if req.Archived || req.BillingIntervalHours == nil || account == nil || !sellsVia(req.SellVia, catalogwire.SellViaSolana) || len(models.PSPLinksOnRail(links, models.RailSolana)) > 0 {
+		return links, nil
+	}
+	if why := solanaPlanRefusal(req); why != "" {
+		if solanaOnly {
+			return nil, fmt.Errorf("%w: it sells only on Solana, and %s", ErrPriceNotSellable, why)
 		}
+		return links, nil
 	}
-	out := priceToCatalogPrice(price)
-	// Overlay the dispatcher-computed states (they carry the freshly-minted
-	// IDs and the per-provider status for the create response). priceToCatalogPrice
-	// alone can only see what's in the row; the dispatcher also knows which
-	// providers came back as pending_manual_link and why.
-	if len(providerStates) > 0 {
-		out.PSPs = providerStates
+	link, err := s.solanaPlanLink(ctx, solanaAccount{key: account.Key, id: account.ID}, req, priceID, nil)
+	if err != nil {
+		if solanaOnly {
+			return nil, fmt.Errorf("%w: it sells only on Solana, and its plan is not published: %v", ErrPriceNotSellable, err)
+		}
+		log.WithContext(ctx).WithError(err).WithField("price_key", req.Key).Warn("catalog: price is not sold on Solana; its plan is not published")
+		return links, nil
 	}
-	if len(pending) > 0 {
-		out.PendingManualActions = pending
-	}
-	return out, nil
+	links[account.Key] = link
+	return links, nil
 }
 
 // UpdatePriceRequest is the engine's price patch: nil fields are left as
-// they are. PSPs merges into the price's PSPs; an empty entry unlinks its
-// PSP. SkipRailSync keeps the change local.
+// they are; SetSellVia writes SellVia (nil: every method).
 type UpdatePriceRequest struct {
-	Archived     *bool
-	PSPs         map[string]map[string]string
-	SkipRailSync bool
+	Archived   *bool
+	SellVia    []string
+	SetSellVia bool
 	// ExpectedRevision refuses the edit unless the price key is at it.
 	ExpectedRevision *int64
 }
 
-// pricePatch reads a merge patch: a PSP set to null is unlinked.
+// pricePatch reads a merge patch: a null sell_via sells through every method.
 func pricePatch(p billing.UpdatePriceParams) (UpdatePriceRequest, error) {
 	var req UpdatePriceRequest
 	if p.Archived.Null {
@@ -613,18 +542,11 @@ func pricePatch(p billing.UpdatePriceParams) (UpdatePriceRequest, error) {
 	if p.Archived.Set {
 		req.Archived = &p.Archived.Value
 	}
-	if p.PSPs != nil {
-		req.PSPs = make(map[string]map[string]string, len(p.PSPs))
-		for psp, link := range p.PSPs {
-			switch {
-			case link.Null:
-				req.PSPs[psp] = map[string]string{}
-			case len(normalizeLinkMap(link.Value)) == 0:
-				return req, apperr.Invalidf("psps.%s: give the PSP's settings for the price, or null to unlink it", psp)
-			default:
-				req.PSPs[psp] = link.Value
-			}
+	if p.SellVia.Set {
+		if err := catalogwire.ValidateSellVia(p.SellVia.Value); err != nil {
+			return req, apperr.Invalidf("%v", err)
 		}
+		req.SetSellVia, req.SellVia = true, p.SellVia.Value
 	}
 	req.ExpectedRevision = p.ExpectedRevision
 	return req, nil
@@ -662,7 +584,6 @@ func (s *Service) patchPrice(ctx context.Context, id billing.PriceID, req Update
 }
 
 func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req UpdatePriceRequest) (*billing.Price, error) {
-
 	prices, err := s.requirePriceService()
 	if err != nil {
 		return nil, err
@@ -670,98 +591,14 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 	if id.IsZero() {
 		return nil, apperr.Invalidf("price_id required")
 	}
-	// Declarative PSP link rotation: the supplied entries merge into the
-	// existing links; an empty link clears its PSP.
-	existing, getErr := prices.GetByPublicID(ctx, id)
-	if getErr != nil {
-		return nil, priceLookup(getErr)
+	existing, err := prices.GetByPublicID(ctx, id)
+	if err != nil {
+		return nil, priceLookup(err)
+	}
+	if req.SetSellVia && existing.ProviderOwned {
+		return nil, apperr.Invalidf("a provider price sells through its provider; sell_via is for ours")
 	}
 	priceID := existing.ID
-	if existing.CustomerAmount != nil {
-		for _, link := range req.PSPs {
-			if len(link) > 0 {
-				return nil, apperr.Invalidf("customer_amount uses purchase amounts, not provider catalog links")
-			}
-		}
-	}
-	var preparedProduct *models.Product
-	var next map[string]map[string]string
-	var pending []billing.PendingAction
-	if req.PSPs != nil {
-		// The existing price + its product give the substance (product key + money terms)
-		// each adapter's Attach validates the supplied link against. Fetch it
-		// regardless of merge/replace so a rotated link is verified, not blindly
-		// stored.
-		if s.localCatalogOnly {
-			return nil, apperr.Invalidf("provider link changes must be prepared outside a catalog application")
-		}
-		products, err := s.requireProductService()
-		if err != nil {
-			return nil, err
-		}
-		preparedProduct, err = products.GetByID(ctx, existing.ProductID)
-		if err != nil {
-			return nil, productLookup(err)
-		}
-		pctx, ctxErr := s.priceLinkContext(ctx, existing)
-		if ctxErr != nil {
-			return nil, ctxErr
-		}
-		next = cloneRails(existing.PSPLinks)
-		if next == nil {
-			next = map[string]map[string]string{}
-		}
-		adapters := s.providerAdapters()
-		accountRails := s.merchantAccountRails(ctx)
-		for psp, link := range req.PSPs {
-			psp = strings.ToLower(strings.TrimSpace(psp))
-			if psp == "" {
-				continue
-			}
-			normalized := normalizeLinkMap(link)
-			// Empty link map = clear this PSP (only on merge; replace already
-			// starts empty).
-			if len(normalized) == 0 {
-				delete(next, psp)
-				continue
-			}
-			rail := psp
-			adapter, ok := adapters[psp]
-			if !ok {
-				if acct, found := accountRails[psp]; found {
-					rail = acct.rail
-					adapter, ok = adapters[acct.rail]
-				}
-			}
-			if !ok {
-				return nil, apperr.Invalidf("unknown PSP %q: not a rail or a declared PSP key", psp)
-			}
-			ids, attachErr := adapter.Attach(ctx, normalized, pctx)
-			if errors.Is(attachErr, errPendingManualLink) || errors.Is(attachErr, errRemoteWritesDisabled) {
-				template := adapter.PendingActionTemplate(priceID)
-				if template.PSP == "" {
-					template.PSP = rail
-				}
-				pending = append(pending, template)
-				// The rotation did NOT take effect. Keep the previously stored
-				// (verified) link while the response reports a pending action.
-				if prev, ok := existing.PSPLinks[psp]; ok {
-					if _, kept := next[psp]; !kept {
-						next[psp] = maps.Clone(prev)
-					}
-				}
-				continue
-			}
-			if attachErr != nil {
-				return nil, fmt.Errorf("%s: %w", psp, attachErr)
-			}
-			if ids == nil {
-				ids = map[string]string{}
-			}
-			ids[models.RailKeyRail] = rail
-			next[psp] = ids
-		}
-	}
 	updated, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*models.Price, error) {
 		prices, err := scoped.requirePriceService()
 		if err != nil {
@@ -777,27 +614,12 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 		if !reflect.DeepEqual(current, existing) {
 			return nil, ErrCatalogConflict
 		}
-		if preparedProduct != nil {
-			products, err := scoped.requireProductService()
-			if err != nil {
-				return nil, err
-			}
-			product, err := products.GetByID(ctx, preparedProduct.ID)
-			if err != nil {
-				return nil, productLookup(err)
-			}
-			if !reflect.DeepEqual(productToCatalogProduct(product), productToCatalogProduct(preparedProduct)) {
-				return nil, ErrCatalogConflict
-			}
-		}
-		if req.PSPs != nil {
-			if err := prices.UpdatePSPLinks(ctx, priceID, next); err != nil {
+		if req.SetSellVia && !slices.Equal(current.SellVia, req.SellVia) {
+			if err := prices.SetSellVia(ctx, priceID, req.SellVia); err != nil {
 				return nil, priceLookup(err)
 			}
 		}
 		if req.Archived != nil {
-			// This method propagates once, after its complete local commit and
-			// only when SkipRailSync permits it; nested lifecycle work is local.
 			lifecycle := *scoped
 			lifecycle.localCatalogOnly = true
 			if *req.Archived {
@@ -814,40 +636,20 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 	if err != nil {
 		return nil, err
 	}
-
-	// Propagate mutable changes to every attached provider via its adapter.
-	// Only when the caller did not opt out via SkipRailSync. Failures are
-	// logged-and-swallowed: drift will surface on the next ?verify=true read.
-	if !s.localCatalogOnly && !req.SkipRailSync && req.Archived != nil {
-		active := !*req.Archived
-		mutable := mutableUpdate{IsActive: &active}
-		if !s.catalogRemoteWritesDisabled() {
-			adapters := s.providerAdapters()
-			for _, ids := range updated.PSPLinks {
-				// Entries are account-keyed; the rail lives in the entry.
-				adapter, ok := adapters[strings.ToLower(strings.TrimSpace(ids[models.RailKeyRail]))]
-				if !ok {
-					continue
-				}
-				_ = adapter.Update(ctx, ids, mutable)
-			}
-		}
-	}
-
-	out := priceToCatalogPrice(updated)
-	out.PendingManualActions = pending
-	return out, nil
+	return priceToCatalogPrice(updated), nil
 }
 
-// priceToCatalogPrice maps the DB row into the response shape, including its
-// state on each linked PSP. SyncStatus is unknown until a verifying read or a
-// reconciliation fills it.
+// priceToCatalogPrice maps the DB row into the response shape. A provider
+// price's sync status is unknown until a verifying read fills it.
 func priceToCatalogPrice(p *models.Price) *billing.Price {
 	v := p.View()
 	return &v
 }
 
 func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
+	if err := catalogwire.ValidateSellVia(req.SellVia); err != nil {
+		return apperr.Invalidf("%v", err)
+	}
 	if req.CustomerAmount != nil {
 		if req.UnitAmount != 0 || req.BillingIntervalHours != nil || req.AccessDurationHours != nil || req.TrialUnitAmount != nil || req.TrialDurationHours != nil {
 			return apperr.Invalidf("customer_amount requires a one-off price with unit_amount zero and no access or trial duration")

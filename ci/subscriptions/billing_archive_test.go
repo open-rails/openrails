@@ -31,6 +31,8 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
+	legacy := importLegacy(t, w, "nmi", embedded, declareRecurringAnchor)
+	w.converge()
 	client := w.client[embedded]
 	grant, err := createCreditGrant(t.Context(), client, e.c.cid(), billing.CreateCreditGrantParams{
 		Currency: "USD", Amount: 2_500_000, Source: "archive-test", SourceID: "retained-credit",
@@ -92,7 +94,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	var archive bytes.Buffer
 	err = merchantarchive.Export(t.Context(), source, merchantID, &archive)
 	require.NoError(t, err, "export must preserve application metadata: %v", errors.Unwrap(err))
-	require.Contains(t, archive.String(), `"version":2`)
+	require.Contains(t, archive.String(), `"version":3`)
 
 	destinationSchema := "archive_metadata_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	require.NoError(t, engine.Migrate(t.Context(), w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: destinationSchema, RiverSchema: destinationSchema}}))
@@ -106,7 +108,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	require.NoError(t, err)
 
 	// An unknown format version is refused, without partially restoring rows.
-	old := bytes.Replace(archive.Bytes(), []byte(`"version":2`), []byte(`"version":3`), 1)
+	old := bytes.Replace(archive.Bytes(), []byte(`"version":3`), []byte(`"version":4`), 1)
 	_, err = merchantarchive.Restore(t.Context(), destination, merchantID, bytes.NewReader(old))
 	var archiveErr *merchantarchive.Error
 	require.ErrorAs(t, err, &archiveErr)
@@ -116,11 +118,26 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+destinationName+".customers").Scan(&customers))
 	require.Zero(t, customers)
 
+	prior := bytes.Replace(archive.Bytes(), []byte(`"version":3`), []byte(`"version":2`), 1)
+	_, err = merchantarchive.Restore(t.Context(), destination, merchantID, bytes.NewReader(prior))
+	require.ErrorAs(t, err, &archiveErr)
+	require.Equal(t, "invalid_artifact", archiveErr.Code)
+	require.ErrorContains(t, errors.Unwrap(err), "restore using OpenRails v0.255.0, then upgrade")
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+destinationName+".customers").Scan(&customers))
+	require.Zero(t, customers)
 	result, err := merchantarchive.Restore(t.Context(), destination, merchantID, bytes.NewReader(archive.Bytes()))
 	require.NoError(t, err)
 	require.False(t, result.Replayed)
 	require.Positive(t, result.Rows)
 
+	for _, sub := range []struct {
+		id     billing.SubscriptionID
+		policy string
+	}{{e.sub, "engine"}, {legacy.sub, "nmi_schedule"}} {
+		var policy string
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT collection_policy FROM "+destinationName+".subscriptions WHERE id=$1", sub.id.UUID()).Scan(&policy))
+		require.Equal(t, sub.policy, policy, "both billing owners survive v3 restore")
+	}
 	// Compare stored JSONB, including its exact numeric values and SQL nulls,
 	// independently of archive parsing and without decoding through float64.
 	for _, tc := range []struct{ table, key, fields string }{

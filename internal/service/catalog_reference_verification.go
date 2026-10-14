@@ -11,65 +11,11 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/catalog"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
-
-// verifyCatalogProviderReference prepares existing references before acquiring
-// the catalog transaction. The caller must revalidate its merchant revision and
-// selected PSP identity before committing these results. Nothing here creates,
-// updates, signs, or submits a provider object.
-func (s *Service) verifyCatalogProviderReference(ctx context.Context, providerKey, rail, accountID, productKey string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
-	if s == nil || s.catalogWriteLocked || s.catalogTx != nil {
-		return nil, fmt.Errorf("provider reference verification must run outside the catalog transaction")
-	}
-	var out map[string]string
-	var err error
-	switch rail {
-	case "nmi":
-		out, err = verifyNMICatalogReference(ctx, &nmiAdapter{svc: s}, accountID, req, link)
-	case "stripe":
-		out, err = verifyStripeCatalogReference(ctx, &stripeAdapter{svc: s}, accountID, req, link)
-	case "solana":
-		if s.rt == nil {
-			return nil, fmt.Errorf("Solana catalog reader is unavailable")
-		}
-		// PlanService pays the merchant's active treasury. It must not verify
-		// against one PSP and bind the result to another.
-		if accountID != "" && s.rt.RailConfigs != nil {
-			primary, resolveErr := s.rt.RailConfigs.RailConfig(ctx, "solana", "")
-			if resolveErr != nil {
-				return nil, resolveErr
-			}
-			if primary == nil || primary.EffectiveAccountID() != accountID {
-				return nil, apperr.Invalidf("Solana catalog references require the configured primary account")
-			}
-		}
-		var reader catalogReferenceChainReader
-		if s.rt.SolanaRPCResolver != nil {
-			reader = s.rt.SolanaRPCResolver.ChainReader()
-		}
-		out, err = verifySolanaCatalogReference(ctx, s.rt.SolanaPlanService, reader, req, link)
-	case "ccbill":
-		out, err = declaredCCBillCatalogReference(link)
-	default:
-		return nil, apperr.Invalidf("unsupported catalog reference rail %q", rail)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("catalog PSP %q: %w", providerKey, err)
-	}
-	if given := strings.TrimSpace(link[models.RailKeyRail]); given != "" && given != rail {
-		return nil, apperr.Invalidf("catalog PSP %q rail does not match its selected account", providerKey)
-	}
-	if given := strings.TrimSpace(link[models.RailKeyProvider]); given != "" && given != providerKey && given != rail {
-		return nil, apperr.Invalidf("catalog PSP %q provider does not match its selected account", providerKey)
-	}
-	out[models.RailKeyRail] = rail
-	return out, nil
-}
 
 func catalogReferenceKeys(link map[string]string, allowed ...string) error {
 	for key := range link {
@@ -87,97 +33,13 @@ func catalogReferenceKeys(link map[string]string, allowed ...string) error {
 	return nil
 }
 
-func verifyNMICatalogReference(ctx context.Context, adapter *nmiAdapter, accountID string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
-	if err := catalogReferenceKeys(link, models.RailKeyPlanID); err != nil {
-		return nil, err
-	}
-	planID := strings.TrimSpace(link[models.RailKeyPlanID])
-	if planID == "" {
-		return nil, apperr.Invalidf("an existing NMI plan_id is required; create plans in the separate provider workflow")
-	}
-	if req.BillingIntervalHours == nil || *req.BillingIntervalHours <= 0 || *req.BillingIntervalHours%24 != 0 || req.TrialUnitAmount != nil || req.TrialDurationHours != nil {
-		return nil, apperr.Invalidf("NMI references require recurring whole-day terms without a trial")
-	}
-	client, key, ok := adapter.nmiClientFor(ctx, accountID)
-	if !ok {
-		return nil, fmt.Errorf("NMI account is not configured for reference verification")
-	}
-	detail, err := client.GetRecurringPlanDetailByID(ctx, planID, req.Currency)
-	if err != nil {
-		return nil, err
-	}
-	if !detail.Found {
-		return nil, apperr.Invalidf("NMI plan %q is missing; create it through the separate provider workflow", planID)
-	}
-	amount, err := moneyutil.RailMinorToNative(req.Currency, moneyutil.Cents(detail.AmountCents))
-	if err != nil {
-		return nil, err
-	}
-	if amount != req.UnitAmount || detail.DayFrequency != *req.BillingIntervalHours/24 {
-		return nil, apperr.Invalidf("NMI plan %q does not match the catalog amount and day frequency", planID)
-	}
-	if detail.ID != planID || detail.Payments == nil || *detail.Payments != 0 {
-		return nil, apperr.Invalidf("NMI plan %q must confirm its identity and an open-ended payment schedule", planID)
-	}
-	return map[string]string{models.RailKeyPlanID: planID, models.RailKeyProvider: key}, nil
-}
-
-func verifyStripeCatalogReference(ctx context.Context, adapter *stripeAdapter, accountID string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
-	if err := catalogReferenceKeys(link, models.RailKeyStripePriceID, models.RailKeyStripeProductID, providerLookupKey); err != nil {
-		return nil, err
-	}
-	id := strings.TrimSpace(link[models.RailKeyStripePriceID])
-	if id == "" {
-		return nil, apperr.Invalidf("an existing Stripe price_id is required; lookup-key creation is a separate provider workflow")
-	}
-	if req.TrialUnitAmount != nil || req.TrialDurationHours != nil {
-		return nil, apperr.Invalidf("Stripe trial prices require their separate provider workflow")
-	}
-	client, ok := adapter.stripeServiceFor(ctx, accountID)
-	if !ok {
-		return nil, fmt.Errorf("Stripe account is not configured for reference verification")
-	}
-	remote, found, err := client.FindPrice(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, apperr.Invalidf("Stripe price %q is missing; provision it through the separate provider workflow", id)
-	}
-	amount, err := moneyutil.NativeToRailMinorExact(req.Currency, req.UnitAmount)
-	if err != nil {
-		return nil, err
-	}
-	if remote.ID != id || remote.Product == "" || remote.UnitAmount != int64(amount) || !strings.EqualFold(remote.Currency, req.Currency) || (!req.Archived && !remote.Active) {
-		return nil, apperr.Invalidf("Stripe price does not match catalog identity, amount, currency or active state")
-	}
-	if req.BillingIntervalHours != nil {
-		if *req.BillingIntervalHours <= 0 || *req.BillingIntervalHours%24 != 0 {
-			return nil, apperr.Invalidf("Stripe recurring references require whole-day duration")
-		}
-		interval, count := catalog.StripeIntervalForDays(*req.BillingIntervalHours / 24)
-		if remote.Recurring == nil || remote.Recurring.Interval != interval || remote.Recurring.Count != count {
-			return nil, apperr.Invalidf("Stripe price recurring terms do not match the catalog")
-		}
-	} else if remote.Recurring != nil {
-		return nil, apperr.Invalidf("Stripe price is recurring but the catalog price is one-time")
-	}
-	out := map[string]string{models.RailKeyStripePriceID: id, models.RailKeyStripeProductID: remote.Product}
-	if remote.LookupKey != "" {
-		out[providerLookupKey] = remote.LookupKey
-	}
-	for _, field := range []string{models.RailKeyStripeProductID, providerLookupKey} {
-		if value := strings.TrimSpace(link[field]); value != "" && value != out[field] {
-			return nil, apperr.Invalidf("Stripe price %s differs from the declared reference", field)
-		}
-	}
-	return out, nil
-}
-
 type catalogReferenceChainReader interface {
 	GetAccountData(context.Context, solanago.PublicKey) ([]byte, error)
 }
 
+// verifySolanaCatalogReference reads a published plan back on-chain: it must
+// be the cranker's plan at its program address, pay the merchant's treasury
+// and match the price's period and amount. It returns the stored reference.
 func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanService, reader catalogReferenceChainReader, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
 	if err := catalogReferenceKeys(link, solanaKeyPlanPDA, solanaKeyPlanID, solanaKeyMint, solanaKeyToken, solanaKeyMintSymbol, solanaKeyAmountBaseUnits, solanaKeyPeriodHours, solanaKeyCreatedAt, solanaKeyMerchant, solanaKeyTreasury); err != nil {
 		return nil, err
@@ -246,7 +108,7 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 		return nil, err
 	}
 	if len(raw) == 0 {
-		return nil, apperr.Invalidf("Solana plan %s is missing; declare psps.solana without plan_pda and plan_id to publish one", pdaText)
+		return nil, apperr.Invalidf("Solana plan %s is missing on-chain", pdaText)
 	}
 	account, err := subscriptions.DecodePlanAccount(raw)
 	if err != nil {
@@ -300,24 +162,6 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 		if strings.TrimSpace(value) != out[key] {
 			return nil, apperr.Invalidf("Solana %s does not match the verified plan", key)
 		}
-	}
-	return out, nil
-}
-
-// CCBill provides no reference-read API. These remain explicitly operator-owned
-// identifiers: the FlexForm and the recurring billing option.
-func declaredCCBillCatalogReference(link map[string]string) (map[string]string, error) {
-	if err := catalogReferenceKeys(link, models.RailKeyCCBillFlexID, models.RailKeyCCBillRecurringBillingOption); err != nil {
-		return nil, err
-	}
-	out := map[string]string{}
-	for _, key := range []string{models.RailKeyCCBillFlexID, models.RailKeyCCBillRecurringBillingOption} {
-		if value := strings.TrimSpace(link[key]); value != "" {
-			out[key] = value
-		}
-	}
-	if len(out) == 0 {
-		return nil, apperr.Invalidf("an existing CCBill flex_id or recurring_billing_option_id is required")
 	}
 	return out, nil
 }

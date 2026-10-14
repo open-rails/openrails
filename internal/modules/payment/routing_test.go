@@ -194,10 +194,11 @@ func TestRouteDefaultPolicy(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.PSPRoutingPolicyDefault, decision.Policy)
 	require.Equal(t, "stripe", decision.Selected())
-	require.Equal(t, []string{"stripe", "nmi", "ccbill"}, decision.Eligible(), "CCBill sells a subscription on its FlexForm")
+	require.Equal(t, []string{"stripe", "nmi"}, decision.Eligible(), "our prices sell through card PSPs")
 	reason := decision.Reason()
-	require.Equal(t, []string{"nmi", "ccbill"}, reason.Fallbacks)
+	require.Equal(t, []string{"nmi"}, reason.Fallbacks)
 	require.Equal(t, []models.PSPRoutingSkip{
+		{Selector: "ccbill", Reason: models.PSPRoutingSkipLinkMissing},
 		{Selector: "solana", Reason: models.PSPRoutingSkipNotArmed},
 	}, reason.Skipped)
 
@@ -308,7 +309,12 @@ func TestRailSkipReason(t *testing.T) {
 	noCycle.BillingIntervalHours = nil
 	free := recurringPrice()
 	free.Amount = 0
+	ccbill := recurringPrice()
+	ccbill.ProviderOwned = true
+	ccbill.PSPLinks = map[string]map[string]string{"ccbill": ccbill.PSPLinks["ccbill"]}
 	noFlexForm := recurringPrice()
+	noFlexForm.ProviderOwned = true
+	noFlexForm.PSPLinks = map[string]map[string]string{"ccbill": noFlexForm.PSPLinks["ccbill"]}
 	delete(noFlexForm.PSPLinks["ccbill"], models.RailKeyCCBillFlexID)
 	oneOff := &models.Price{ID: uuid.New(), Amount: 1_000_000, Currency: "USD"}
 	solanaLinked := &models.Price{ID: uuid.New(), Amount: 1_000_000, Currency: "USD", PSPLinks: map[string]map[string]string{"solana": {models.RailKeyRail: "solana"}}}
@@ -329,8 +335,8 @@ func TestRailSkipReason(t *testing.T) {
 		{"nmi engine subscription", "nmi", sub, nmiCfg, S, ""},
 		{"stripe missing key", "stripe", sub, &config.ResolvedPSP{}, S, models.PSPRoutingSkipCredentialsMissing},
 		{"nmi blank key", "nmi", sub, &config.ResolvedPSP{NMI: &config.NMIRailConfig{SecurityKey: "  "}}, S, models.PSPRoutingSkipCredentialsMissing},
-		{"ccbill FlexForm enrollment", "ccbill", sub, &config.ResolvedPSP{CCBill: &config.CCBillRailConfig{Salt: "salt"}}, S, ""},
-		{"ccbill without its salt", "ccbill", sub, &config.ResolvedPSP{CCBill: &config.CCBillRailConfig{}}, S, models.PSPRoutingSkipCredentialsMissing},
+		{"ccbill FlexForm enrollment", "ccbill", ccbill, &config.ResolvedPSP{CCBill: &config.CCBillRailConfig{Salt: "salt"}}, S, ""},
+		{"ccbill without its salt", "ccbill", ccbill, &config.ResolvedPSP{CCBill: &config.CCBillRailConfig{}}, S, models.PSPRoutingSkipCredentialsMissing},
 		{"ccbill without a FlexForm", "ccbill", noFlexForm, &config.ResolvedPSP{CCBill: &config.CCBillRailConfig{Salt: "salt"}}, S, models.PSPRoutingSkipLinkMissing},
 		{"solana subscription without a published plan", "solana", sub, solanaCfg, S, models.PSPRoutingSkipLinkMissing},
 		{"solana plan without recurring services", "solana", solanaPlan, solanaCfg, S, models.PSPRoutingSkipServiceUnavailable},
@@ -342,7 +348,7 @@ func TestRailSkipReason(t *testing.T) {
 		{"nmi one-off missing key", "nmi", oneOff, &config.ResolvedPSP{}, O, models.PSPRoutingSkipCredentialsMissing},
 		{"ccbill one-off", "ccbill", oneOff, &config.ResolvedPSP{CCBill: &config.CCBillRailConfig{}}, O, models.PSPRoutingSkipModeUnsupported},
 		{"solana without tokens", "solana", solanaLinked, &config.ResolvedPSP{Solana: &config.SolanaRailConfig{}}, O, models.PSPRoutingSkipCredentialsMissing},
-		{"solana without link", "solana", oneOff, solanaCfg, O, models.PSPRoutingSkipLinkMissing},
+		{"solana one-off needs no link", "solana", oneOff, solanaCfg, O, models.PSPRoutingSkipServiceUnavailable},
 		{"solana without pay services", "solana", solanaLinked, solanaCfg, O, models.PSPRoutingSkipServiceUnavailable},
 		{"unknown rail", "paypal", oneOff, &config.ResolvedPSP{}, O, models.PSPRoutingSkipUnknownSelector},
 		{"no provider config", "stripe", oneOff, nil, O, models.PSPRoutingSkipNotArmed},

@@ -105,7 +105,7 @@ export function PriceChangeWizard({
       if (newAmount === null || BigInt(newAmount) <= 0n) return
 
       try {
-        const created = await changePrice.mutateAsync({
+        await changePrice.mutateAsync({
           price: {
             product_id: price.product_id,
             unit_amount: newAmount,
@@ -115,9 +115,7 @@ export function PriceChangeWizard({
             trial_unit_amount: price.trial_unit_amount ?? undefined,
             trial_duration_hours: price.trial_duration_hours ?? undefined,
             key: price.key,
-            psps: Object.fromEntries(
-              Object.keys(price.psps ?? {}).map((psp) => [psp, {}])
-            ),
+            sell_via: price.sell_via ?? undefined,
             expected_revision: price.revision,
           },
           migration:
@@ -129,17 +127,11 @@ export function PriceChangeWizard({
                 }
               : undefined,
         })
-        if (created.pending_manual_actions?.length) {
-          toast.warning(
-            `Price updated. One step is left for you: ${created.pending_manual_actions.map((action) => `${action.psp}: ${action.hint}`).join(". ")}`
-          )
-        } else {
-          toast.success(
-            value.mode === "migrate"
-              ? "Price updated and migration scheduled"
-              : "Price updated"
-          )
-        }
+        toast.success(
+          value.mode === "migrate"
+            ? "Price updated and migration scheduled"
+            : "Price updated"
+        )
         handleOpenChange(false)
         onDone?.()
       } catch (err) {

@@ -81,10 +81,14 @@ func TestApplicationRejectsAmbiguousInput(t *testing.T) {
 		"unknown nested field":    "products: {a: {display_nmae: nope}}\n",
 		"padded product key":      "products: {' a': {display_name: A}}\n",
 		"long price key":          "products: {a: {prices: {" + strings.Repeat("p", 256) + ": {amount: 1 USD}}}}\n",
-		"psps list":               "products: {a: {prices: {p: {amount: 1 USD, psps: [stripe]}}}}\n",
+		"removed price psps":      "products: {a: {prices: {p: {amount: 1 USD, psps: {mobius: {plan_id: x}}}}}}\n",
 		"removed psp_links":       "products: {a: {prices: {p: {amount: 1 USD, psp_links: {nmi: {plan_id: x}}}}}}\n",
-		"null psp settings":       "products: {a: {prices: {p: {amount: 1 USD, psps: {solana: }}}}}\n",
-		"null psps":               "products: {a: {prices: {p: {amount: 1 USD, psps: null}}}}\n",
+		"provider price no psp":   "products: {a: {provider_prices: {p: {plan_id: x}}}}\n",
+		"provider price no ref":   "products: {a: {provider_prices: {p: {psp: mobius}}}}\n",
+		"provider price two refs": "products: {a: {provider_prices: {p: {psp: mobius, plan_id: x, price_id: y}}}}\n",
+		"amount without interval": "products: {a: {provider_prices: {p: {psp: ccbill, flex_id: f, amount: 1 USD}}}}\n",
+		"key in both maps":        "products: {a: {prices: {p: {amount: 1 USD}}, provider_prices: {p: {psp: mobius, plan_id: x}}}}\n",
+		"provider price list":     "products: {a: {provider_prices: [{psp: mobius, plan_id: x}]}}\n",
 		"stablecoin amount":       "products: {a: {prices: {p: {amount: 1 USDC}}}}\n",
 		"stablecoin currency":     "products: {a: {prices: {p: {currency: USDT, unit_amount: 1}}}}\n",
 	} {
@@ -118,37 +122,40 @@ func TestApplicationRejectsAmbiguousInput(t *testing.T) {
 	}
 }
 
-// A price names each PSP it is sold on with that PSP's settings, and is priced
-// in fiat or SOL.
-func TestApplicationPricePSPs(t *testing.T) {
+// A provider price names its PSP and the provider's object; CCBill, which has
+// no read API, states its terms.
+func TestApplicationProviderPrices(t *testing.T) {
 	a, err := ParseApplicationYAML([]byte(`schema_version: 1
 products:
   premium:
     prices:
-      premium-monthly:
+      premium-monthly: {amount: 23 USD, access_duration: 30 days, billing_interval: 30 days}
+      premium-sol: {amount: 0.5 SOL}
+    provider_prices:
+      premium-nmi: {psp: mobius, plan_id: premium_new}
+      premium-ccbill:
+        psp: ccbill
+        flex_id: 681cb38f-afb9-4665-931f-2b896072178a
+        recurring_billing_option_id: "0000007498"
         amount: 23 USD
         billing_interval: 30 days
-        psps:
-          mobius: {plan_id: premium_new}
-          ccbill: {flex_id: 681cb38f-afb9-4665-931f-2b896072178a, recurring_billing_option_id: "0000007498"}
-          solana: {}
-      premium-sol:
-        amount: 0.5 SOL
-        psps: {solana: {}}
+        archived: true
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := a.Products["premium"].Prices["premium-monthly"].PSPs.Value
-	want := map[string]map[string]string{
-		"mobius": {"plan_id": "premium_new"},
-		"ccbill": {"flex_id": "681cb38f-afb9-4665-931f-2b896072178a", "recurring_billing_option_id": "0000007498"},
-		"solana": {},
+	product := a.Products["premium"]
+	if got := product.ProviderPrices["premium-nmi"]; got.PSP != "mobius" || got.PlanID != "premium_new" || got.DeclaresTerms() {
+		t.Fatalf("NMI provider price = %#v", got)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("psps = %#v, want %#v", got, want)
+	ccbill := product.ProviderPrices["premium-ccbill"]
+	if ccbill.UnitAmount == nil || *ccbill.UnitAmount != 23_000_000 || ccbill.Currency != "USD" || *ccbill.BillingIntervalHours != 720 || !ccbill.Archived.Value {
+		t.Fatalf("CCBill provider price = %#v", ccbill)
 	}
-	if c := a.Products["premium"].Prices["premium-sol"].Currency.Value; c != "SOL" {
+	if want := map[string]string{"flex_id": "681cb38f-afb9-4665-931f-2b896072178a", "recurring_billing_option_id": "0000007498"}; !reflect.DeepEqual(ccbill.References(), want) {
+		t.Fatalf("references = %#v", ccbill.References())
+	}
+	if c := product.Prices["premium-sol"].Currency.Value; c != "SOL" {
 		t.Fatalf("SOL price currency = %q", c)
 	}
 	_, err = ParseApplicationYAML([]byte("schema_version: 1\nproducts: {a: {prices: {p: {amount: 23 USDC}}}}\n"))
@@ -245,15 +252,18 @@ products:
   b: {}
   a:
     prices:
-      z: {psps: {stripe: {}, mobius: {plan_id: premium}}}
+      z: {amount: 1 USD}
       x: {}
+    provider_prices:
+      legacy: {psp: mobius, plan_id: premium}
+      ccbill: {psp: ccbill, flex_id: f, recurring_billing_option_id: "7", amount: 2 USD, billing_interval: 30 days}
 meters: {m2: {}, m1: {}}
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ha := digest(t, *a)
-	b, err := ParseApplicationJSON([]byte(`{"meters":{"m1":{},"m2":{}},"products":{"a":{"prices":{"x":{},"z":{"psps":{"mobius":{"plan_id":"premium"},"stripe":{}}}}},"b":{}},"schema_version":1}`))
+	b, err := ParseApplicationJSON([]byte(`{"meters":{"m1":{},"m2":{}},"products":{"a":{"provider_prices":{"ccbill":{"billing_interval_hours":720,"currency":"USD","unit_amount":"2000000","recurring_billing_option_id":"7","flex_id":"f","psp":"ccbill"},"legacy":{"plan_id":"premium","psp":"mobius"}},"prices":{"x":{},"z":{"currency":"USD","unit_amount":"1000000"}}},"b":{}},"schema_version":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,4 +355,26 @@ func digest(t *testing.T, a Application) [32]byte {
 		t.Fatal(err)
 	}
 	return d
+}
+
+func TestProviderPriceDeclaredTrial(t *testing.T) {
+	a, err := ParseApplicationYAML([]byte(`schema_version: 1
+products:
+  premium:
+    provider_prices:
+      legacy:
+        psp: ccbill
+        recurring_billing_option_id: "0000000931"
+        amount: 14.95 USD
+        billing_interval: 30 days
+        trial_unit_amount: 19950000
+        trial_duration: 30 days
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := a.Products["premium"].ProviderPrices["legacy"]
+	if got.TrialUnitAmount == nil || *got.TrialUnitAmount != 19_950_000 || *got.TrialDurationHours != 720 || *got.UnitAmount != 14_950_000 {
+		t.Fatalf("trial = %#v", got)
+	}
 }

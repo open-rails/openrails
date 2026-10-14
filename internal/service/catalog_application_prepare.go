@@ -21,24 +21,48 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	railreg "github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-type catalogReferenceCheck struct {
-	key, provider, productKey string
-	account                   merchants.PSPScope
-	request                   billing.CreatePriceParams
-	link                      map[string]string
-	// priceID is the stored id the price commits under; a published Solana
-	// plan derives from it.
-	priceID uuid.UUID
-}
+// catalogApplicationPreparation is what a document needs from outside the
+// catalog transaction: the Solana plans its recurring prices sell on, its
+// provider prices' terms read from their providers, and what it could not do.
 type catalogApplicationPreparation struct {
 	replay   *billing.CatalogApplicationReceipt
 	revision int64
-	links    map[[2]string]map[string]map[string]string
-	accounts map[uuid.UUID]merchants.PSPScope
-	checks   []catalogReferenceCheck
+	// links are our prices' bindings: Solana plans, and those of superseded
+	// PSPs kept by id.
+	links     map[[2]string]map[string]map[string]string
+	providers map[[2]string]*providerPrice
+	accounts  map[uuid.UUID]merchants.PSPScope
+	warnings  []billing.CatalogWarning
+	refused   map[[2]string]bool
+}
+
+// solanaPlanCheck is a recurring price of ours whose Solana plan the
+// preparation finds or publishes.
+type solanaPlanCheck struct {
+	productKey, key string
+	request         billing.CreatePriceParams
+	priceID         uuid.UUID
+	solanaOnly      bool
+}
+
+// providerPriceCheck is a declared provider price whose terms the
+// preparation reads.
+type providerPriceCheck struct {
+	product *models.Product
+	key     string
+	decl    catalogwire.ApplyProviderPrice
+	current *models.Price
+}
+
+func (p *catalogApplicationPreparation) warn(productKey, key string, refused bool, format string, args ...any) {
+	p.warnings = append(p.warnings, billing.CatalogWarning{Key: key, ProductKey: productKey, Refused: refused, Message: fmt.Sprintf(format, args...)})
+	if refused {
+		p.refused[[2]string{productKey, key}] = true
+	}
 }
 
 // catalogApplicationGate runs under the merchant lock. An already committed
@@ -69,18 +93,23 @@ func (s *Service) catalogApplicationGate(ctx context.Context, digest [32]byte) (
 	return revision, &receipt, nil
 }
 
-// Prepare observes remote references and publishes the Solana plans recurring
-// prices declare without one. Snapshot collection and the final local commit
+// prepareCatalogApplication reads what the document needs from outside the
+// catalog: its provider prices' terms, and the Solana plans of its recurring
+// prices, published when missing. Snapshot collection and the final commit
 // each fence the merchant, but no transaction spans provider I/O, so a failed
-// publish leaves the catalog untouched. A committed retry returns before
-// resolving targets or contacting a provider.
+// read or publish leaves the catalog untouched. A committed retry returns
+// before contacting a provider.
 func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte) (*catalogApplicationPreparation, error) {
+	var solanaChecks []solanaPlanCheck
+	var providerChecks []providerPriceCheck
+	var accounts []merchants.PSPScope
 	prepared, err := catalogReadLocked(ctx, s, func(ctx context.Context, scoped *Service) (*catalogApplicationPreparation, error) {
 		revision, replay, err := scoped.catalogApplicationGate(ctx, digest)
 		if err != nil {
 			return nil, err
 		}
-		out := &catalogApplicationPreparation{replay: replay, revision: revision, links: map[[2]string]map[string]map[string]string{}, accounts: map[uuid.UUID]merchants.PSPScope{}}
+		out := &catalogApplicationPreparation{replay: replay, revision: revision, links: map[[2]string]map[string]map[string]string{},
+			providers: map[[2]string]*providerPrice{}, accounts: map[uuid.UUID]merchants.PSPScope{}, warnings: []billing.CatalogWarning{}, refused: map[[2]string]bool{}}
 		if replay != nil {
 			return out, nil
 		}
@@ -88,8 +117,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 		if err != nil {
 			return nil, err
 		}
-		accounts, err := merchants.Of(scoped.catalogDatabase()).PSPScopes(ctx, mid)
-		if err != nil {
+		if accounts, err = merchants.Of(scoped.catalogDatabase()).PSPScopes(ctx, mid); err != nil {
 			return nil, err
 		}
 		for _, productKey := range slices.Sorted(maps.Keys(params.Products)) {
@@ -115,7 +143,6 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 				return nil, err
 			}
 			product.CreditGrant = credit
-			reactivatingProduct := product.Archived && declared.Archived.Set && !declared.Archived.Value
 			if declared.Archived.Set {
 				product.Archived = declared.Archived.Value
 			}
@@ -129,23 +156,11 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 				byKey[p.Key] = append(byKey[p.Key], p)
 				byID[p.ID.String()] = p
 			}
-			references := declared.Prices
-			if reactivatingProduct && !params.Prune {
-				// Parent activation also makes omitted live children available.
-				// Inspect their references without adding them to the declaration
-				// or changing their rows. Pruned children will remain unavailable.
-				references = maps.Clone(declared.Prices)
-				if references == nil {
-					references = map[string]catalogwire.ApplyPrice{}
+			for _, priceKey := range slices.Sorted(maps.Keys(declared.Prices)) {
+				decl := declared.Prices[priceKey]
+				if prior := byKey[priceKey]; len(prior) > 0 && prior[0].Provider != nil {
+					return nil, apperr.Invalidf("price key %q of product %q is a provider price: declare it under provider_prices", priceKey, productKey)
 				}
-				for _, price := range prices {
-					if _, named := declared.Prices[price.Key]; !price.Archived && !named && len(price.PSPs) > 0 {
-						references[price.Key] = catalogwire.ApplyPrice{ID: price.ID.String()}
-					}
-				}
-			}
-			for _, priceKey := range slices.Sorted(maps.Keys(references)) {
-				decl := references[priceKey]
 				current, request, err := catalogApplicationPriceRequest(product, priceKey, decl, byKey, byID)
 				if err != nil {
 					return nil, err
@@ -156,108 +171,63 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 				if err := validateCreditPrice(product.CreditGrant, request); err != nil {
 					return nil, err
 				}
-				links := catalogPriceLinks(current)
-				// Bindings keyed by id belong to superseded PSPs: kept for the subscriptions they still renew.
-				retired := map[string]map[string]string{}
-				for key, link := range links {
-					if _, err := uuid.Parse(key); err == nil {
-						retired[key] = link
-						delete(links, key)
-					}
-				}
 				same := current != nil && samePriceTerms(*current, request)
-				// psps names every PSP the price is sold on; omitted keeps them.
-				wanted := map[string]bool{}
-				for key := range links {
-					wanted[key] = true
-				}
-				if decl.PSPs.Set {
-					for key := range links {
-						if _, kept := decl.PSPs.Value[key]; !kept {
-							return nil, apperr.Invalidf("price %q: removing PSP %q requires a separate provider workflow", priceKey, key)
-						}
-					}
-					for key := range decl.PSPs.Value {
-						wanted[key] = true
-					}
-				}
-				out.links[[2]string{product.Key, priceKey}] = retired
-				names := make([]string, 0, len(wanted))
-				for key := range wanted {
-					names = append(names, key)
-				}
-				sort.Strings(names)
-				declaredRails := make([]string, 0, len(names))
-				for _, key := range names {
-					link := links[key]
-					supplied := decl.PSPs.Value[key]
-					if len(supplied) > 0 {
-						link = supplied
-					}
-					unchanged := same && catalogLinkContains(links[key], link) && (request.Archived || (!current.Archived && !reactivatingProduct))
-					if unchanged {
-						out.links[[2]string{product.Key, priceKey}][key] = cloneStringMap(links[key])
-						rail := links[key]["rail"]
-						if rail == "" {
-							rail = key
-						}
-						if request.CustomerAmount != nil && (rail != "stripe" && rail != "nmi" || len(link) > 0) {
-							return nil, apperr.Invalidf("customer_amount requires Stripe or NMI purchase without provider catalog links")
-						}
-						if request.Quantity != nil && (rail != "stripe" && rail != "nmi" || len(link) > 0) {
-							return nil, apperr.Invalidf(errQuantityRail)
-						}
-						declaredRails = append(declaredRails, rail)
-						continue
-					}
-					account, found, err := selectCatalogApplicationPSP(accounts, key, link)
+				links := map[string]map[string]string{}
+				var stored map[string]string
+				if current != nil {
+					stored, err = scoped.storedPriceLinks(ctx, current.ID, links)
 					if err != nil {
 						return nil, err
 					}
-					rail := key
-					if found {
-						rail = account.Rail
-					}
-					declaredRails = append(declaredRails, rail)
-					if request.Quantity != nil && (rail != "stripe" && rail != "nmi" || len(link) > 0) {
-						return nil, apperr.Invalidf(errQuantityRail)
-					}
-					if (request.TrialUnitAmount != nil || request.TrialDurationHours != nil) && !railreg.SupportsCatalogTrial(models.Rail(rail)) {
-						return nil, fmt.Errorf("%w: PSP %q on rail %s cannot execute trial first-phase terms", ErrTrialUnsupportedOnRail, key, rail)
-					}
-					if found {
-						if account.Archived && !request.Archived {
-							return nil, apperr.Invalidf("provider %q is archived", key)
-						}
-						// A local engine price still selects an account. Its identity and
-						// eligibility must survive the gap before the final commit.
-						out.accounts[account.ID] = account
-					}
-					if len(link) == 0 && scoped.localEnginePrice(rail, priceRequestCycleDays(request)) {
-						continue
-					}
-					if !found {
-						return nil, apperr.Invalidf("provider %q has no matching merchant account", key)
-					}
-					verificationRequest := request
-					verificationRequest.Archived = verificationRequest.Archived || product.Archived
-					check := catalogReferenceCheck{key: priceKey, provider: key, productKey: product.Key, account: account, request: verificationRequest}
-					if rail == string(models.RailSolana) {
-						link = solanaCatalogLink(links[key], supplied, same)
-						if publishesSolanaPlan(request, link) {
-							if check.priceID, err = scoped.catalogPriceStorageID(ctx, product.ID, request, current, same); err != nil {
-								return nil, err
-							}
-						}
-					}
-					check.link = cloneStringMap(link)
-					out.checks = append(out.checks, check)
 				}
-				if len(declaredRails) > 0 && !request.Archived && !product.Archived {
-					if err := requireSellablePrice(priceKey, request, declaredRails, accounts); err != nil {
+				out.links[[2]string{product.Key, priceKey}] = links
+				live := !request.Archived && !product.Archived
+				methods := request.SellVia
+				solanaOnly := len(methods) == 1 && methods[0] == catalogwire.SellViaSolana
+				if !live {
+					if same && stored != nil {
+						links[stored[models.RailKeyPSPID]] = stored
+					}
+					continue
+				}
+				if why := sellViaRefusal(request, accounts); why != "" {
+					out.warn(product.Key, priceKey, true, "price %q of product %q cannot sell: %s", priceKey, productKey, why)
+					continue
+				}
+				if request.BillingIntervalHours == nil || !sellsVia(methods, catalogwire.SellViaSolana) || solanaPSP(accounts) == nil {
+					continue
+				}
+				if why := solanaPlanRefusal(request); why != "" {
+					if solanaOnly {
+						out.warn(product.Key, priceKey, true, "price %q of product %q sells only on Solana, and %s", priceKey, productKey, why)
+					}
+					continue
+				}
+				if same && stored != nil && stored[solanaKeyPlanPDA] != "" {
+					links[stored[models.RailKeyPSPID]] = stored
+					continue
+				}
+				priceID, err := scoped.catalogPriceStorageID(ctx, billing.ProductID(product.ID), request, current, same)
+				if err != nil {
+					return nil, err
+				}
+				solanaChecks = append(solanaChecks, solanaPlanCheck{productKey: product.Key, key: priceKey, request: request, priceID: priceID, solanaOnly: solanaOnly})
+			}
+			for _, priceKey := range slices.Sorted(maps.Keys(declared.ProviderPrices)) {
+				var current *models.Price
+				if versions := byKey[priceKey]; len(versions) > 0 {
+					if versions[0].Provider == nil {
+						return nil, apperr.Invalidf("price key %q of product %q is one of ours: a provider price takes a key of its own", priceKey, productKey)
+					}
+					prices, err := scoped.requirePriceService()
+					if err != nil {
+						return nil, err
+					}
+					if current, err = scoped.currentPriceVersion(ctx, prices, product.ID.UUID(), priceKey); err != nil {
 						return nil, err
 					}
 				}
+				providerChecks = append(providerChecks, providerPriceCheck{product: &models.Product{ID: product.ID.UUID(), Key: product.Key, Archived: product.Archived}, key: priceKey, decl: declared.ProviderPrices[priceKey], current: current})
 			}
 		}
 		return out, nil
@@ -272,26 +242,115 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 		return nil, err
 	}
 	defer release()
-	for _, check := range prepared.checks {
-		link := cloneStringMap(check.link)
-		delete(link, "psp_id")
-		if check.account.Rail == string(models.RailSolana) && publishesSolanaPlan(check.request, link) {
-			if link, err = s.findOrPublishCatalogSolanaPlan(ctx, check, link); err != nil {
-				return nil, err
-			}
+	for _, check := range providerChecks {
+		p, err := s.prepareProviderPrice(ctx, accounts, check.product, check.key, check.decl, check.current)
+		if errors.Is(err, ErrProviderPriceUnreadable) {
+			prepared.warn(check.product.Key, check.key, true, "provider price %q of product %q: %v", check.key, check.product.Key, err)
+			continue
 		}
-		verified, err := s.verifyCatalogProviderReference(ctx, check.provider, check.account.Rail, check.account.AccountID, check.productKey, check.request, link)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("provider price %q of product %q: %w", check.key, check.product.Key, err)
 		}
-		if verified == nil {
-			return nil, apperr.Invalidf("provider %q returned no verified reference", check.provider)
+		if p.cached != "" {
+			prepared.warn(check.product.Key, check.key, false, "provider price %q of product %q keeps its cached terms: %s", check.key, check.product.Key, p.cached)
 		}
-		verified["rail"] = check.account.Rail
-		verified["psp_id"] = check.account.ID.String()
-		prepared.links[[2]string{check.productKey, check.key}][check.provider] = verified
+		prepared.providers[[2]string{check.product.Key, check.key}] = p
+		prepared.accounts[p.account.ID] = p.account
+	}
+	if len(solanaChecks) > 0 {
+		account := solanaPSP(accounts)
+		for _, check := range solanaChecks {
+			link, err := s.solanaPlanLink(ctx, solanaAccount{key: account.Key, id: account.ID}, check.request, check.priceID, nil)
+			if err != nil {
+				reason := err.Error()
+				if isNoCranker(err) {
+					reason = "the deployment lists no solana.crankers to own its plan"
+				}
+				if check.solanaOnly {
+					prepared.warn(check.productKey, check.key, true, "price %q of product %q sells only on Solana and cannot: %s", check.key, check.productKey, reason)
+				} else {
+					prepared.warn(check.productKey, check.key, false, "price %q of product %q is not sold on Solana: %s", check.key, check.productKey, reason)
+				}
+				continue
+			}
+			prepared.links[[2]string{check.productKey, check.key}][account.Key] = link
+			prepared.accounts[account.ID] = *account
+		}
 	}
 	return prepared, nil
+}
+
+// storedPriceLinks are a stored version's bindings: those of superseded PSPs,
+// kept by id for the subscriptions they still renew, go into retained; its
+// current Solana plan is returned.
+func (s *Service) storedPriceLinks(ctx context.Context, id billing.PriceID, retained map[string]map[string]string) (map[string]string, error) {
+	prices, err := s.requirePriceService()
+	if err != nil {
+		return nil, err
+	}
+	stored, err := prices.GetByPublicID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var plan map[string]string
+	for key, link := range stored.PSPLinks {
+		if _, err := uuid.Parse(key); err == nil {
+			retained[key] = cloneStringMap(link)
+			continue
+		}
+		if link[models.RailKeyRail] == string(models.RailSolana) {
+			plan = cloneStringMap(link)
+		}
+	}
+	return plan, nil
+}
+
+// solanaPSP is the merchant's live Solana PSP, nil when it has none.
+func solanaPSP(accounts []merchants.PSPScope) *merchants.PSPScope {
+	for i, a := range accounts {
+		if a.Rail == string(models.RailSolana) && a.Declared && !a.Archived && !a.Superseded {
+			return &accounts[i]
+		}
+	}
+	return nil
+}
+
+// sellsVia reports whether methods (nil: every method) include method.
+func sellsVia(methods []string, method string) bool {
+	return len(methods) == 0 || slices.Contains(methods, method)
+}
+
+// sellViaRefusal is why a price of ours restricted to some methods cannot
+// sell through any of them, "" when one can. Unrestricted prices sell through
+// whatever the merchant arms.
+func sellViaRefusal(req billing.CreatePriceParams, accounts []merchants.PSPScope) string {
+	if len(req.SellVia) == 0 {
+		return ""
+	}
+	recurring := req.BillingIntervalHours != nil
+	trial := req.TrialUnitAmount != nil || req.TrialDurationHours != nil
+	var why []string
+	if slices.Contains(req.SellVia, catalogwire.SellViaCard) {
+		card := false
+		for _, a := range accounts {
+			rail := models.Rail(a.Rail)
+			if !a.Archived && a.Declared && !a.Superseded && railreg.SellsOnLocalTerms(rail) && railreg.CanSellNew(rail, recurring, trial) && moneyutil.RequireFiatCurrency(req.Currency) == nil {
+				card = true
+			}
+		}
+		if card {
+			return ""
+		}
+		why = append(why, "no card PSP of the merchant can sell it")
+	}
+	if slices.Contains(req.SellVia, catalogwire.SellViaSolana) {
+		if solanaPSP(accounts) == nil {
+			why = append(why, "the merchant declares no Solana PSP")
+		} else {
+			return ""
+		}
+	}
+	return strings.Join(why, ", and ")
 }
 
 // catalogPriceStorageID is the stored id a declared price commits under: the
@@ -311,15 +370,6 @@ func (s *Service) catalogPriceStorageID(ctx context.Context, productID billing.P
 	return stored.ID, nil
 }
 
-func catalogPriceLinks(price *billing.Price) map[string]map[string]string {
-	out := map[string]map[string]string{}
-	if price != nil {
-		for key, state := range price.PSPs {
-			out[key] = cloneStringMap(state.IDs)
-		}
-	}
-	return out
-}
 func cloneStringMap(in map[string]string) map[string]string {
 	out := map[string]string{}
 	for k, v := range in {
@@ -327,18 +377,6 @@ func cloneStringMap(in map[string]string) map[string]string {
 	}
 	return out
 }
-func catalogLinkContains(stored, declared map[string]string) bool {
-	if len(stored) == 0 {
-		return false
-	}
-	for k, v := range declared {
-		if stored[k] != v {
-			return false
-		}
-	}
-	return true
-}
-
 func selectCatalogApplicationPSP(accounts []merchants.PSPScope, key string, link map[string]string) (merchants.PSPScope, bool, error) {
 	var selected merchants.PSPScope
 	found := false
@@ -400,28 +438,4 @@ func (s *Service) revalidateCatalogApplicationProviders(ctx context.Context, pre
 
 func sameCatalogLinks(a, b map[string]map[string]string) bool {
 	return len(a) == 0 && len(b) == 0 || reflect.DeepEqual(a, b)
-}
-
-// requireSellablePrice refuses an active price that declares PSPs yet no rail
-// can sell new: none of its declared rails supports its kind, and no armed
-// rail sells it on local terms (#1078). Purchase would otherwise be empty.
-func requireSellablePrice(key string, request billing.CreatePriceParams, declared []string, accounts []merchants.PSPScope) error {
-	recurring := request.BillingIntervalHours != nil
-	trial := request.TrialUnitAmount != nil || request.TrialDurationHours != nil
-	for _, rail := range declared {
-		if railreg.CanSellNew(models.Rail(rail), recurring, trial) {
-			return nil
-		}
-	}
-	for _, account := range accounts {
-		rail := models.Rail(account.Rail)
-		if !account.Archived && railreg.SellsOnLocalTerms(rail) && railreg.CanSellNew(rail, recurring, trial) {
-			return nil
-		}
-	}
-	kind := "one-time purchase"
-	if recurring {
-		kind = "new subscription"
-	}
-	return fmt.Errorf("%w: price %q: no declared or armed PSP can sell a %s (declared rails: %s)", ErrPriceNotSellable, key, kind, strings.Join(declared, ", "))
 }

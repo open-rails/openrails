@@ -129,7 +129,7 @@ whose cards a custodian holds.
 NMI prices are engine terms: no NMI plan is created or required.
 
 - One-time: a direct gateway sale on the Collect.js token or saved vault
-  card. Declaring the PSP on a one-time price (`psps: {mobius: {}}`) needs no
+  card. The merchant's `card_vault` and `charge_psps` select the gateway; a one-time price needs no
   link.
 - Recurring: OpenRails charges each renewal from the vaulted card (manual
   rebill). An explicit `plan_id` link is accepted only for provider-owned

@@ -50,6 +50,11 @@ func snapshotWireProduct(t *testing.T) map[string]json.RawMessage {
 
 func snapshotWireRow(t *testing.T, table string, fields map[string]string) map[string]json.RawMessage {
 	t.Helper()
+	if table == "prices" {
+		if _, named := fields["provider_owned"]; !named {
+			fields["provider_owned"] = "false"
+		}
+	}
 	profile := snapshotWireProfile(t, table)
 	values := make([]*string, len(profile.Columns))
 	for i, column := range profile.Columns {
@@ -308,4 +313,13 @@ func TestCatalogSnapshotHistoricalProductArchives(t *testing.T) {
 	upgraded, err := upgradeCatalogSnapshot(signed)
 	require.NoError(t, err)
 	require.NotContains(t, upgraded.Tables, "product_archive_operations")
+}
+
+func TestCatalogSnapshotRefusesPricesWithoutOwnership(t *testing.T) {
+	document := snapshotWireFixture(t)
+	row := snapshotWireRow(t, "prices", map[string]string{"merchant_id": snapshotTestMerchant, "id": "10000000-0000-0000-0000-000000000003", "product_id": "10000000-0000-0000-0000-000000000002", "revision": "0", "amount": "1000000", "currency": "USD"})
+	delete(row, "provider_owned")
+	document.Tables["prices"] = []map[string]json.RawMessage{row}
+	_, _, err := readCatalogSnapshot(bytes.NewReader(snapshotWireUncheckedYAML(t, document)))
+	require.ErrorContains(t, err, "restore using OpenRails v0.255.0, then upgrade")
 }

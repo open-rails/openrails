@@ -53,9 +53,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	}
 	var doc strings.Builder
 	doc.WriteString("schema_version: 1\nproducts:\n")
-	for i, p := range plans {
-		id := 5001 + i
-		pda := sol.plan(t, uint64(id), uint64(p.amount))
+	for _, p := range plans {
 		fmt.Fprintf(&doc, "  %s-%s:\n    display_name: %s\n", p.key, sfx, p.key)
 		if p.group != "" {
 			fmt.Fprintf(&doc, "    tier_group: %s\n    tier_rank: %d\n", p.group, p.rank)
@@ -66,12 +64,8 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
         unit_amount: %[3]d
         billing_interval_hours: 720
         access_duration_hours: 720
-        psps:
-          solana:
-            plan_pda: %[4]s
-            plan_id: "%[5]d"
     entitlements: ["%[1]s-%[2]s"]
-`, p.key, sfx, p.amount, pda, id)
+`, p.key, sfx, p.amount)
 	}
 	params, err := catalog.ParseApplicationYAML([]byte(doc.String()))
 	require.NoError(t, err)

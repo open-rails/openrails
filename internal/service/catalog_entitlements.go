@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	log "github.com/sirupsen/logrus"
 )
 
 // keyEdit attributes a key change to now on the engine clock and to the
@@ -110,8 +109,6 @@ func (s *Service) replaceEntitlements(ctx context.Context, pairs []catalogwire.E
 	slices.SortFunc(announced, func(a, b *billing.EntitlementChange) int { return strings.Compare(a.ProductKey, b.ProductKey) })
 	for _, change := range announced {
 		receipt.EntitlementChanges = append(receipt.EntitlementChanges, *change)
-		id := change.ProductID.UUID()
-		s.catalogAfterCommit(ctx, func(ctx context.Context, s *Service) { s.syncStripeFeatures(ctx, id) })
 	}
 	receipt.ProductsChanged += len(order)
 	return nil
@@ -149,28 +146,6 @@ type storedCatalogReceipt struct {
 func storedReceipt(r billing.CatalogApplicationReceipt) storedCatalogReceipt {
 	return storedCatalogReceipt{ApplicationID: r.ApplicationID, BaseRevision: r.BaseRevision, AppliedRevision: r.AppliedRevision,
 		Replayed: r.Replayed, ProductsChanged: r.ProductsChanged, PricesChanged: r.PricesChanged}
-}
-
-// syncStripeFeatures mirrors a product's keys onto its Stripe Product, best
-// effort, once one exists. Nothing compares Features later: a failure is
-// logged, and the next change of the product's keys syncs again.
-func (s *Service) syncStripeFeatures(ctx context.Context, productID uuid.UUID) {
-	if s.rt == nil || s.rt.Config == nil {
-		return
-	}
-	stripeProductID := s.lookupStripeProductID(ctx, productID)
-	if stripeProductID == "" {
-		return
-	}
-	product, err := s.GetProduct(ctx, billing.ProductID(productID))
-	if err != nil {
-		return
-	}
-	stripeSvc := &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: s.rt.Config, Rails: s.rt.RailConfigs}
-	if err := stripeSvc.SyncProductFeatures(ctx, stripeProductID, product.Entitlements); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("stripe_product_id", stripeProductID).
-			Warn("stripe entitlement-feature sync failed (best-effort); Features stay stale until the product's keys change again")
-	}
 }
 
 // announceKeyChanges counts each changed product's holders into its change

@@ -40,6 +40,9 @@ func (e *Error) Error() string {
 	if e.Table != "" {
 		return fmt.Sprintf("merchant archive %s: %s (%d rows)", e.Code, e.Table, e.Count)
 	}
+	if errors.Is(e.Err, archivewire.ErrPriceOwnershipFormat) {
+		return "merchant archive " + e.Code + ": " + e.Err.Error()
+	}
 	return "merchant archive " + e.Code
 }
 func (e *Error) Unwrap() error { return e.Err }
@@ -163,6 +166,14 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 	if database == nil || id.IsZero() {
 		return result, &Error{Code: "merchant_mismatch"}
 	}
+	header, verified, err := archivewire.ReadHeader(in)
+	if err != nil {
+		return result, &Error{Code: "invalid_artifact", Err: err}
+	}
+	if header.MerchantID != id.String() {
+		return result, &Error{Code: "merchant_mismatch"}
+	}
+	in = verified
 	ctx = merchant.WithID(ctx, id)
 	// Archived rows may be older than anything written here: their months need
 	// partitions before the restore transaction, which must not hold DDL locks.
@@ -170,7 +181,7 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 	if _, err := retention.EnsureRetainedPartitions(ctx, database.GenDirectory(), restoreNow); err != nil {
 		return result, classify(err)
 	}
-	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if err := scope(ctx, tx, id); err != nil {
 			return err
 		}

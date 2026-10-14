@@ -9,6 +9,7 @@ func TestPriceBindingConfigurationArchive(t *testing.T) {
 		valid bool
 	}{
 		{"empty", `{}`, true},
+		{"provider cadence", `{"provider_billing_interval_hours":"720"}`, true},
 		{"stripe", `{"product_id":"prod_premium","lookup_key":"premium-monthly"}`, true},
 		{"nmi", `{"provider":"mobius"}`, true},
 		{"ccbill form name", `{"form_name":"premium"}`, false},

@@ -688,20 +688,18 @@ function PriceRow({ price, product }: { price: Price; product?: Product }) {
       <TableCell>{priceIntervalLabel(price)}</TableCell>
       <TableCell>
         <span className="flex flex-wrap gap-1">
-          {/* psps is keyed by PSP key ("mobius"), not by rail — the rail
-              is recorded inside the entry (or#812). */}
-          {Object.entries(price.psps ?? {}).map(([psp, state]) => (
-            <Badge
-              key={psp}
-              variant="secondary"
-              className={
-                state.status === "linked" ? "" : "bg-held-surface text-held"
-              }
-              title={state.message || undefined}
-            >
-              {psp}: {state.status}
+          {price.provider ? (
+            <Badge variant="secondary">
+              {price.provider.psp}
+              <AdminMessage id={"'s price"} />
             </Badge>
-          ))}
+          ) : (
+            (price.sell_via ?? []).map((method) => (
+              <Badge key={method} variant="secondary">
+                {method}
+              </Badge>
+            ))
+          )}
         </span>
       </TableCell>
       <TableCell>

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
@@ -16,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -95,10 +95,12 @@ func readableCatalogYAML(manifest *catalog.Application) ([]byte, error) {
 	}
 	products, _ := yamlValue(doc, "products").(yaml.MapSlice)
 	for _, product := range products {
-		prices, _ := yamlValue(product.Value, "prices").(yaml.MapSlice)
-		for i, price := range prices {
-			if fields, ok := price.Value.(yaml.MapSlice); ok {
-				prices[i].Value = readablePrice(fields)
+		for _, collection := range []string{"prices", "provider_prices"} {
+			prices, _ := yamlValue(product.Value, collection).(yaml.MapSlice)
+			for i, price := range prices {
+				if fields, ok := price.Value.(yaml.MapSlice); ok {
+					prices[i].Value = readablePrice(fields)
+				}
 			}
 		}
 	}
@@ -263,6 +265,17 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 		if p == nil {
 			continue
 		}
+		if row.ProviderOwned {
+			provider, err := dumpProviderPrice(row)
+			if err != nil {
+				return fmt.Errorf("decode provider price %q: %w", row.Key, err)
+			}
+			if p.ProviderPrices == nil {
+				p.ProviderPrices = map[string]catalog.ApplyProviderPrice{}
+			}
+			p.ProviderPrices[row.Key] = provider
+			continue
+		}
 		var price catalog.ApplyPrice
 		price.UnitAmount = catalog.Value(row.Amount)
 		price.Currency = catalog.Value(row.Currency)
@@ -292,20 +305,64 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 				return fmt.Errorf("decode price %q quantity: %w", row.Key, err)
 			}
 		}
-		links, err := providerLinks(row.PspLinks)
-		if err != nil {
-			return fmt.Errorf("decode price %q provider links: %w", row.Key, err)
+		price.SellVia = catalog.Null[[]string]()
+		if row.SellVia != nil {
+			price.SellVia = catalog.Value(row.SellVia)
 		}
-		if links == nil {
-			links = map[string]map[string]string{}
-		}
-		price.PSPs = catalog.Value(links)
 		if p.Prices == nil {
 			p.Prices = map[string]catalog.ApplyPrice{}
 		}
 		p.Prices[row.Key] = price
 	}
 	return nil
+}
+
+// dumpProviderPrice writes a provider price as declared: its PSP and the
+// provider's object, CCBill's terms, and access or one-off where they differ
+// from the billing interval.
+func dumpProviderPrice(row gen.ListLiveCatalogPricesWithPSPLinksRow) (catalog.ApplyProviderPrice, error) {
+	var links map[string]map[string]string
+	if err := json.Unmarshal(row.PspLinks, &links); err != nil {
+		return catalog.ApplyProviderPrice{}, err
+	}
+	if len(links) != 1 {
+		return catalog.ApplyProviderPrice{}, fmt.Errorf("a provider price binds one provider object, found %d", len(links))
+	}
+	var out catalog.ApplyProviderPrice
+	providerInterval := row.BillingIntervalHours
+	for key, link := range links {
+		if h, err := strconv.Atoi(link[models.RailKeyProviderBillingInterval]); err == nil && h > 0 {
+			providerInterval = new(int32(h))
+		}
+		out = catalog.ApplyProviderPrice{PSP: key, PlanID: link[models.RailKeyPlanID], PriceID: link[models.RailKeyStripePriceID],
+			FlexID: link[models.RailKeyCCBillFlexID], RecurringBillingOptionID: link[models.RailKeyCCBillRecurringBillingOption]}
+		out.OneOff = row.BillingIntervalHours == nil && (providerInterval != nil || link[models.RailKeyRail] == string(models.RailNMI))
+		switch models.Rail(link[models.RailKeyRail]) {
+		case models.RailCCBill:
+			amount, interval := row.Amount, providerInterval
+			if interval == nil {
+				interval, out.OneOff = row.AccessDurationHours, true
+			}
+			if interval != nil {
+				hours := int(*interval)
+				out.UnitAmount, out.Currency, out.BillingIntervalHours = &amount, row.Currency, &hours
+			}
+			if row.TrialUnitAmount != nil && row.TrialDurationHours != nil {
+				hours := int(*row.TrialDurationHours)
+				out.TrialUnitAmount, out.TrialDurationHours = row.TrialUnitAmount, &hours
+			}
+		case models.RailNMI:
+			if row.Currency != "USD" {
+				out.Currency = row.Currency
+			}
+		}
+	}
+	if row.AccessDurationHours != nil && (providerInterval == nil || *row.AccessDurationHours != *providerInterval) {
+		hours := int(*row.AccessDurationHours)
+		out.AccessDurationHours = &hours
+	}
+	out.Archived = catalog.Value(row.Archived)
+	return out, nil
 }
 
 func dumpCatalogRateCards(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*dumpedProduct) error {
@@ -339,31 +396,4 @@ func dumpCatalogRateCards(ctx context.Context, database *db.DB, merchantID uuid.
 		}
 	}
 	return nil
-}
-
-func providerLinks(raw []byte) (map[string]map[string]string, error) {
-	var links map[string]map[string]string
-	if err := json.Unmarshal(raw, &links); err != nil {
-		return nil, err
-	}
-	if len(links) == 0 {
-		return nil, nil
-	}
-	// The stored blob stamps the rail in each entry; the manifest derives it
-	// from the account key.
-	for _, cfg := range links {
-		rail := cfg[models.RailKeyRail]
-		delete(cfg, models.RailKeyRail)
-		if strings.EqualFold(strings.TrimSpace(rail), string(models.RailSolana)) {
-			// mint_symbol is a resolved on-chain snapshot, not input. token is
-			// redundant beside a stored plan_pda (resolved from chain) or as USDC,
-			// the default.
-			delete(cfg, "mint_symbol")
-			if strings.TrimSpace(cfg["plan_pda"]) != "" ||
-				strings.EqualFold(strings.TrimSpace(cfg["token"]), "USDC") {
-				delete(cfg, "token")
-			}
-		}
-	}
-	return links, nil
 }

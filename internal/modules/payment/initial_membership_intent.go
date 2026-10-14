@@ -123,6 +123,12 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Bil
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
+	if p.NativeSchedule != nil {
+		// Existing submitted operations took the Verify path above. An unsent
+		// historical acceptance is refused under the canonical completion lock;
+		// its accepted payload and history remain intact and no schedule starts.
+		return h.complete(ctx, in, intents.TerminalWithEvidence("new provider schedules are no longer started", map[string]any{"not_executed": true}))
+	}
 	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine && h.Purchases.Config != nil && h.Purchases.Config.EngineAdmissionHold {
 		return intents.Parked("engine payment admission is held")
 	}
@@ -211,34 +217,7 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Bil
 		}
 		return h.Verify(ctx, in)
 	}
-	var credential *nmi.StoredCredential
-	if p.Terms.Amount > 0 {
-		if credential, err = nmidirect.StoredCredentialFor(mode); err != nil {
-			return h.completeInitialNonexecution(ctx, in, proof)
-		}
-	}
-	order := intents.NMIEnrollmentOrder(in)
-	response, callErr := client.AddRecurringSubscription(ctx, nmi.RecurringPaymentData{ScheduleOnly: p.Terms.Amount == 0, PlanID: p.NativeSchedule.PlanID, CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: minor, Currency: p.Terms.Currency, Email: p.Email, OrderID: order, PONumber: order, StartDate: p.NativeSchedule.StartDate, StoredCredential: credential, CardUserData: nmi.CardUserData{FirstName: p.NativeSchedule.Card.FirstName, LastName: p.NativeSchedule.Card.LastName, Address1: p.NativeSchedule.Card.Address1, City: p.NativeSchedule.Card.City, State: p.NativeSchedule.Card.State, Zip: p.NativeSchedule.Card.Zip, Country: p.NativeSchedule.Card.Country}})
-	if callErr != nil {
-		if nmi.RequiresVerification(callErr) {
-			return intents.Ambiguous("native enrollment outcome requires exact provider verification")
-		}
-		var refusal *nmi.CustomerVaultError
-		if !errors.As(callErr, &refusal) {
-			return intents.Ambiguous("native enrollment rejection has no qualified refusal proof")
-		}
-		if err := intents.NewStore(h.database()).RetainInitialMembershipDecline(ctx, in, refusal); err != nil {
-			return intents.Ambiguous("native enrollment refusal could not be qualified: " + err.Error())
-		}
-		return h.Verify(ctx, in)
-	}
-	if response == nil {
-		return intents.Ambiguous("native enrollment returned no receipt candidates")
-	}
-	if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, map[string]any{"provider_subscription_id": response.SubscriptionID, "transaction_id": response.TransactionID}); err != nil {
-		return intents.Ambiguous(err.Error())
-	}
-	return h.Verify(ctx, in)
+	return intents.Ambiguous("new provider schedules are no longer started")
 }
 
 func (h *InitialMembershipIntentHandler) Verify(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {

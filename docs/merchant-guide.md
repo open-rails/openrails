@@ -6,7 +6,10 @@ day-to-day customer operations via the admin API and admin console.
 
 Vocabulary: a **rail** is a gateway kind (`nmi`, `ccbill`, `stripe`, `solana`); a
 **PSP** is *your account* on a rail (e.g. a `mobius` key on the nmi rail; `stripe`,
-`ccbill`, `solana` are their own PSP names). The API and database represent money
+`ccbill`, `solana` are their own PSP names). A **price** is ours: OpenRails vaults
+the card and runs the billing. A **provider price** is one a provider owns and runs
+(a legacy NMI plan, a Stripe price, a CCBill FlexForm): OpenRails reads it and never
+writes it. The API and database represent money
 as **integers in the currency's native units** (micros for USD:
 `20_000_000` = $20.00; scales are listed by `GET /v1/config`). Catalog prices
 can be authored as `amount: 20 USD`; parsing produces those exact native units.
@@ -40,9 +43,10 @@ One application selects one authorized merchant outside the document and include
 `entitlement_replacements`: `[{from, to}]` pairs that move a key across every product
 granting it before `products` apply (an empty `to` removes `from`), so holders lose
 `from` and gain `to` at once.
-Product-local `prices` and `rate_cards` are nested under each product. Products,
-prices and meters are maps keyed by their key; the key is the record's stable
-handle (a price's key names its version chain). See `config/catalog.example.yaml`.
+Product-local `prices`, `provider_prices` and `rate_cards` are nested under each
+product. Products, prices and meters are maps keyed by their key; the key is the
+record's stable handle (a price's key names its version chain, and names one price
+of the product, ours or a provider's). See `config/catalog.example.yaml`.
 
 **A tiered subscription** — `tier_group` + `tier_rank` make products an ordered plan
 family, which is what enables upgrade/downgrade between them:
@@ -92,7 +96,7 @@ Price fields worth knowing:
 | `billing_interval` | time between recurring payments, such as `30 days`, or null for a one-time purchase; independent of access duration; `billing_interval_hours` is the numeric form |
 | `trial_unit_amount`, `trial_duration` | first-phase terms; supply both together with a billing interval; `trial_duration_hours` is the numeric form |
 | `archived` | explicit true retires, explicit false reactivates; omission preserves an existing value |
-| `psps` | the PSPs the price is sold on, each key a PSP with its settings for the price (`{}` for none), validated on apply (below); omitted keeps the current PSPs |
+| `sell_via` | the methods the price sells through: `card` (the merchant's `card_vault` and `charge_psps`) and `solana`; null or omitted on a new price: every method the merchant has. Not a term: changing it keeps the version |
 
 Trial terms are supported only on rails with native trial settlement; current
 engine-managed purchase refuses trials before charging.
@@ -159,19 +163,53 @@ balance or is owed at once; the daily pass bills each customer's owed usage as a
 usage order. A metered card states no `payment_term`. See
 [usage pricing](usage-pricing.md).
 
-**psps** — each key is a PSP the price is sold on; its value is that PSP's
-settings for the price. Supplied settings are validated against the provider
-(object exists + money terms match) and never duplicated; a mismatch fails the
-apply loudly:
+### Our prices and provider prices
+
+A price under `prices` is ours: nothing is written to a provider's catalog. It sells
+by card through the merchant's `card_vault` and `charge_psps` (OpenRails charges the
+card and runs every renewal) and on Solana: a one-time price by direct transfer, a
+recurring one on an on-chain plan the apply publishes from its terms (USDC, owned by
+the deployment's first listed `solana.crankers`, paying the merchant's treasury).
+`sell_via` restricts a price to some of those methods.
+
+A price under `provider_prices` is a provider's: it mirrors what the provider still
+runs (legacy NMI-run subscriptions, imported) or sells (CCBill FlexForms). OpenRails
+reads its terms and caches them on the price; it never creates or edits it.
 
 ```yaml
-            psps:
-              stripe: {lookup_key: premium}         # find-or-create at a chosen key
-              mobius: {plan_id: premium}            # NMI recurring plan; find-or-create
-              ccbill: {flex_id: abc-123, recurring_billing_option_id: "0000007498"}  # operator-owned, unvalidated
-              solana: {}                            # recurring: apply publishes the plan, in USDC
-              # solana: {plan_pda: "..."}           # alternatively attach and resolve the token on-chain
+products:
+  premium:
+    prices:
+      premium-monthly: {amount: 23 USD, billing_interval: 30 days, access_duration: 30 days}
+    provider_prices:
+      premium-monthly-mobius: {psp: mobius, plan_id: premium_new}   # NMI plan; terms read from NMI
+      premium-stripe: {psp: stripe, price_id: price_1Q…}             # Stripe price; terms read from Stripe
+      premium-monthly-ccbill:                                       # CCBill has no read API: terms declared
+        psp: ccbill
+        flex_id: 681cb38f-afb9-4665-931f-2b896072178a
+        recurring_billing_option_id: "0000007498"
+        amount: 23 USD
+        billing_interval: 30 days
 ```
+
+| Field | Meaning |
+|---|---|
+| `psp` | the merchant's PSP key that owns the price |
+| `plan_id` / `price_id` / `flex_id` + `recurring_billing_option_id` | the provider's object: an NMI plan, a Stripe price, a CCBill FlexForm |
+| `amount`, `billing_interval`, `trial_unit_amount` + `trial_duration` | CCBill only: its declared terms |
+| `currency` | NMI only: the plan's currency, USD when omitted |
+| `access_duration` | the access each payment grants; defaults to the billing interval |
+| `one_off` | a price that does not renew: its billing interval is the access it sells |
+| `archived` | as for prices |
+
+An NMI plan or Stripe price that does not exist is refused: a provider price names an
+existing object. A provider that does not answer keeps the cached terms of a provider
+price already applied (with a warning), and leaves a new one out. When the provider's
+terms change, the next apply takes them as a new version. Legacy NMI and Stripe
+provider prices sell nothing new; they bill the subscriptions imported on them
+([batch import](batch-import.md)), whose renewals OpenRails records from provider
+events and reads, and whose declines its dunning retries against the subscription's
+own NMI schedule.
 
 ### Applying and verifying
 
@@ -181,11 +219,14 @@ openrails catalog apply catalog.yaml --merchant your-merchant
 
 Without Vault, `--merchant-manifest PATH` loads the merchant's configuration and
 overlays as the provider tools do; otherwise the conventional merchant manifest
-path is used. With Vault it reads Vault and fails if Vault is unavailable. A recurring
-Solana price declared without `plan_pda` or `plan_id` has its plan published by the
-apply, signed by the deployment's first Solana cranker, before anything local is written; with
-`provider_write_mode` limited or readonly the apply binds a plan already on chain and
-otherwise refuses the price by name.
+path is used. With Vault it reads Vault and fails if Vault is unavailable.
+
+A price that cannot sell through any method it is restricted to (`sell_via: [solana]`
+on a recurring price with no listed cranker, say) is refused by name, and a recurring
+price whose Solana plan cannot be published (no cranker, or `provider_write_mode`
+limited or readonly, which only bind a plan already on chain) applies without one and
+sells by card. Both appear in the receipt's `warnings`; nothing is fatal. A document
+with warnings or conflicts is not recorded as applied, so applying it again retries.
 
 The returned receipt's `application_id` is generated as `sha256:<content digest>`,
 with the merchant's Solana PSPs folded in: a changed treasury makes the same
@@ -194,22 +235,11 @@ It records what committed and whether the call replayed, not whether later edits
 have changed the catalog. Exports are inspection snapshots that can be edited and
 submitted as another batch; submitting already-applied content remains a replay.
 
-Provider support for individual catalog operations (batch applications reject unsupported external workflows before local mutation):
-
-| Rail | On push |
-|---|---|
-| stripe | auto-creates Products, Prices, and entitlement Features (`lookup_key` = the entitlement string); financial terms are immutable, so amount changes re-mint a new price and archive the old |
-| nmi PSPs | recurring `plan_id` found-or-created; otherwise link-only |
-| ccbill | link-only: you supply `flex_id` + `recurring_billing_option_id` from the CCBill admin |
-| solana | a recurring price's plan is published or reattached, in USDC, paying the merchant's treasury; new terms are a new price with a new plan; `plan_pda` attaches an existing plan, which a listed cranker must own |
-
-A link-only price pushed without its ids is still created in OpenRails and recorded as
-`pending_manual_link`, with a `pending_manual_actions` entry telling you what to PATCH
-in later.
-
-Every PSP that can sell a price is offered on its orders. Keeping one back as a
-fallback (CCBill until Mobius declines twice) is a checkout option, billing-ui's
-`fallbacks` prop, not merchant configuration: see [CCBill](rails/ccbill.md#fallback).
+Card checkout offers the merchant's charge PSPs. An order for one recurring price of
+ours also offers the product's live CCBill provider price on the same terms, sold on
+its FlexForm; keeping it back as a fallback (CCBill until Mobius declines twice) is a
+checkout option, billing-ui's `fallbacks` prop, not merchant configuration: see
+[CCBill](rails/ccbill.md#fallback).
 
 ### Entitlements
 

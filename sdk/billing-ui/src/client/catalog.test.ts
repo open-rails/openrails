@@ -45,7 +45,8 @@ const price = {
   billing_interval_hours: 720,
   trial_unit_amount: null,
   trial_duration_hours: null,
-  psps: { cards: { status: "linked", ids: null, sync_status: "unknown" } },
+  sell_via: ["card"],
+  provider: null,
   created_at: "2026-09-16T00:00:00.123456789Z",
   updated_at: "2026-09-16T00:00:00.123456789Z",
 }
@@ -66,7 +67,7 @@ describe("catalog", () => {
           unit_amount: MAX,
           access_duration_hours: 720,
           billing_interval_hours: 720,
-          psps: { cards: { status: "linked" } },
+          sell_via: ["card"],
         },
       ],
     })

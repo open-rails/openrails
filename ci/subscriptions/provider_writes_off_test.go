@@ -37,7 +37,6 @@ func TestProviderWritesOffSaysWhy(t *testing.T) {
     unit_amount: 9990000
     billing_interval_hours: null
     access_duration_hours: 720
-    psps: {nmi: {}}
 `)
 			require.NoError(t, err)
 			if row.hold {

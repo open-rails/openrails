@@ -62,28 +62,46 @@ A Basis-Theory-held card can be charged either way, so the two fields stay
 separate. `payments.token_type` records which form actually went out
 (`pan_via_proxy` / `network_token` / `psp_token`).
 
-## Where new cards go: `settings.card_custody`
+## Where new cards go: `card_vault` and `charge_psps`
 
-A merchant setting chooses who holds the cards it saves from now on:
+Two merchant settings choose where the cards it saves from now on are held, and which
+PSPs charge new cards:
 
-| `card_custody` | New cards are held by |
+| Setting | Meaning |
 |---|---|
-| `merchant` (or absent) | the merchant's own vault: its PSP, or the custodian a PSP names |
-| `platform` | the deployment's platform vault, in the merchant's partition; the merchant's own PSP accounts still charge them |
-| `hosted` | reserved for a private vault the platform hosts: `400 card_custody_reserved` |
+| `card_vault` | where new cards are saved: a card PSP's key, whose own vault holds them (an NMI gateway's customer vault, a Stripe account), or the custodian that PSP names; or `platform`, the deployment's platform vault in the merchant's partition. Absent: each card is saved where the PSP that takes it keeps cards |
+| `charge_psps` | the card PSPs, in order, that new card charges go to. Absent: every armed card PSP that can charge the vault's cards, the `card_vault` PSP alone when it is a PSP |
 
-Changing it moves no existing card. `platform` is refused with:
+```yaml
+settings:
+  card_vault: mobius
+  charge_psps: [mobius]
+```
+
+Every charge PSP must charge the vault's cards, which is known by rail and account:
+
+- A card in a PSP's own vault charges only through that account. A Stripe customer
+  belongs to its Stripe account; NMI Customer Vault gateway-issued tokens are
+  valid only within their merchant account (`gateway_id`), so they charge only
+  through PSPs on that same gateway account ([NMI Customer Vault FAQ](https://support.nmi.com/hc/en-gb/articles/33994528786705-Customer-Vault)).
+- A custodian's card (Basis Theory, HyperSwitch) charges through any PSP naming that
+  custodian.
+- A `platform` card charges through any PSP whose rail accepts a proxied PAN or
+  network token: NMI, and not `card_entry: server` (Stripe's own fields take the card).
+
+A merchant whose settings break this is refused, for that merchant alone and never
+fatally: over the API (`409 card_vault_unknown`, `charge_psp_unknown`,
+`charge_psp_incompatible`), and a merchant document written into Vault directly is
+not served (the previous one keeps serving). `platform` is also refused with:
 
 - `409 platform_vault_unavailable` while the deployment configures no
   `platform_vault` for its posture;
-- `409 platform_vault_unreachable` while a live card PSP cannot charge the
-  vault's cards: Stripe (its own fields take the card) or `card_entry: server`.
-  Archive that PSP, or keep `merchant`. Creating such a PSP for a `platform`
-  merchant is refused the same way.
+- `409 platform_vault_unreachable` while a charge PSP cannot charge the vault's
+  cards. Creating such a PSP while `charge_psps` is absent is refused the same way.
 
-A merchant or PSP document written into Vault directly that breaks these rules
-is not served. `GET /v1/merchant/configuration` reports `platform_vault:
-{available}`.
+Changing either setting moves no existing card. OpenRails-run renewals charge through
+the PSP their subscription was sold through, which holds its recurring agreement.
+`GET /v1/merchant/configuration` reports `platform_vault: {available}`.
 
 The platform vault is operator configuration, not a merchant custodian:
 
@@ -94,8 +112,8 @@ platform_vault:
 ```
 
 It needs `vault.kv_mount`: its keys are at
-`<kv_mount>/<scope_prefix>/platform_vault/<tenant_id>`. When a merchant chooses
-`platform`, OpenRails records the merchant's identity in it once, as a
+`<kv_mount>/<scope_prefix>/platform_vault/<tenant_id>`. When a merchant's `card_vault`
+is `platform`, OpenRails records the merchant's identity in it once, as a
 `billing.custodians` row it owns: kind and key `platform`, account
 `<tenant_id>/<merchant_id>`, no credentials. Platform cards name that row as
 their `custodian_id`, so the custodian checks hold for them as for any
@@ -111,7 +129,7 @@ an offered NMI account where it has active card-on-file consent and a storing
 transaction reference. Order payment options include the eligible
 `saved_payment_method_ids`; the pay request sends only `payment_method_id`.
 Before submitting, the operation verifies the stored token's tenant and merchant
-container and rechecks the card and its consent. Changing custody for new cards
+container and rechecks the card and its consent. Changing the card vault for new cards
 does not move the saved card. Subscription purchases establish a separate
 recurring agreement; card reuse consent alone does not authorize renewals.
 The existing renewal worker charges the saved token without CVV and cites that
@@ -127,7 +145,7 @@ Collection stays on the original NMI account until cross-account transaction
 references are qualified. An unavailable account holds collection for the
 operator; it does not invalidate the customer's card. Account switching,
 migration, network tokens and Stripe platform collection remain unsupported.
-Existing merchant custody remains the default.
+Saving cards where the PSP that takes them keeps them remains the default.
 
 The operator-managed KV document at the path above has this shape:
 
