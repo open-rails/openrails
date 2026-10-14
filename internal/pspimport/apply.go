@@ -239,10 +239,10 @@ func (l *lander) declare(groups []customerGroup) (declaration, error) {
 				subs[r.Ref] = r
 			}
 		}
-		declared := map[string]bool{}
+		declared := map[string]*billing.PaymentMethodRef{}
 		declareSub := func(r gen.BillingPspImportRecord) (string, string) {
 			src := "pspimport:" + l.scope.Rail + ":" + r.Ref
-			if declared[r.Ref] {
+			if _, done := declared[r.Ref]; done {
 				return src, ""
 			}
 			sub, reason, err := l.subscription(customer, r, vaults)
@@ -255,7 +255,7 @@ func (l *lander) declare(groups []customerGroup) (declaration, error) {
 			sub.SourceID = src
 			d.book.Subscriptions = append(d.book.Subscriptions, sub)
 			d.subscriptions[src] = r.ID
-			declared[r.Ref] = true
+			declared[r.Ref] = sub.PaymentMethod
 			return src, ""
 		}
 		for _, r := range g.records {
@@ -285,12 +285,18 @@ func (l *lander) declare(groups []customerGroup) (declaration, error) {
 			if err := json.Unmarshal(r.Data, &data); err != nil {
 				return d, err
 			}
+			if inv := data.StripeInvoice; inv != nil {
+				if pm := declared[subRef]; pm == nil || pm.RailCustomerRef != inv.CustomerReference {
+					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "its subscription bills no saved card of the invoice's customer, so the invoice cannot bind"}
+					continue
+				}
+			}
 			typ := data.Type
 			if typ == "sale" {
 				typ = ""
 			}
 			d.book.Transactions = append(d.book.Transactions, billing.DeclaredTransaction{RailSubscriptionID: subRef, TransactionID: data.TransactionID, Type: typ,
-				Success: data.Success, Amount: data.Amount, Currency: data.Currency, OccurredAt: data.OccurredAt})
+				Success: data.Success, Amount: data.Amount, Currency: data.Currency, OccurredAt: data.OccurredAt, StripeInvoice: data.StripeInvoice})
 			d.txns[src] = append(d.txns[src], r.ID)
 		}
 	}
@@ -315,17 +321,31 @@ func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImpor
 	sub := billing.DeclaredSubscription{Customer: customer, Price: price, Rail: l.scope.Rail, RailSubscriptionID: r.Ref, StartedAt: data.StartedAt,
 		PaidThrough: data.NextBillingAt, Evidence: data.Evidence}
 	if vault, ok := vaults[deref(r.CustomerRef)]; ok {
+		method := ""
 		for _, c := range vault.Cards {
-			if c.Primary {
-				sub.PaymentMethod = &billing.PaymentMethodRef{Rail: l.scope.Rail, RailCustomerRef: deref(r.CustomerRef), RailMethodRef: c.MethodRef}
+			if c.MethodRef == data.MethodRef || data.MethodRef == "" && c.Primary {
+				method = c.MethodRef
 			}
 		}
+		if method != "" {
+			sub.PaymentMethod = &billing.PaymentMethodRef{Rail: l.scope.Rail, RailCustomerRef: deref(r.CustomerRef), RailMethodRef: method}
+		}
 	}
+	scheduled := l.scope.Rail == "nmi" || l.scope.Rail == "ccbill"
 	switch {
+	case data.Ended:
+		at := l.asOf
+		if data.EndedAt != nil {
+			at = *data.EndedAt
+		}
+		sub.Cancel = billing.CancelEvidence{Kind: "provider_terminated", At: at}
+		if data.UserCanceled {
+			sub.Cancel.Kind = "user_canceled"
+		}
 	case data.Paused:
 		// A paused schedule bills nothing: access runs to its paid date.
 		sub.Cancel = billing.CancelEvidence{Kind: "user_canceled", At: l.asOf}
-	case data.NextBillingAt != nil && (data.IntervalHours > 0) != (data.IntervalMonths > 0):
+	case scheduled && data.NextBillingAt != nil && (data.IntervalHours > 0) != (data.IntervalMonths > 0):
 		sub.AcceptedSchedule = &billing.DeclaredProviderSchedule{SourceReference: l.scope.Rail + "_subscription:" + r.Ref, Amount: data.Amount, Currency: data.Currency,
 			IntervalHours: data.IntervalHours, IntervalMonths: data.IntervalMonths, FirstDueAt: *data.NextBillingAt}
 	}

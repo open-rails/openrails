@@ -7,8 +7,15 @@ linked ones as real subscriptions, payment methods and payments. The
 provider is the source of truth, so no legacy database export is needed.
 [Batch import](batch-import.md) remains for books only a legacy system holds.
 
-Rails: NMI (v5 customers and subscriptions, the Query API's recurring and
-transaction reports).
+Rails:
+
+- NMI: v5 customers and subscriptions, the Query API's recurring and
+  transaction reports. A live schedule lands with NMI's own terms as its
+  accepted schedule; a paused one as canceled at the pull.
+- Stripe: customers with their cards, subscriptions in every status, and
+  the charges and refunds in the window with the invoices they paid. A
+  canceled subscription lands canceled at its end; an unpaid, expired or
+  paused one as ended by the provider.
 
 ## Safety
 
@@ -50,7 +57,7 @@ Each staged object carries the identity facts its provider holds: `email`
 customer id), `subscription_ref`, `billing_id`, `shipping_id`, `plan`, and
 NMI's merchant-defined fields as `mdf.<field>`.
 
-A rule reads one fact, optionally through a `pattern` with one `{key}`
+Stripe also stages each object's metadata as `metadata.<key>`. A rule reads one fact, optionally through a `pattern` with one `{key}`
 placeholder, and looks the key up `via`:
 
 | via | looks up |
