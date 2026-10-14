@@ -112,7 +112,7 @@ type fileConfig struct {
 	ProviderSandbox     *billing.ProviderSandboxConfig `koanf:"provider_sandbox"`
 	Solana              *billing.SolanaConfig          `koanf:"solana"`
 	HyperSwitch         *billing.HyperSwitchConfig     `koanf:"hyperswitch"`
-	PlatformVault       *billing.PlatformVaultConfig   `koanf:"platform_vault"`
+	CardVault           *billing.CardVaultConfig       `koanf:"card_vault"`
 	EngineAdmissionHold bool                           `koanf:"engine_admission_hold"`
 
 	// Auth is AuthKit's configuration, decoded by AuthKit's own keys
@@ -242,7 +242,7 @@ func (f *fileConfig) config() (*Config, error) {
 			ProviderSandbox:               f.ProviderSandbox,
 			Solana:                        f.Solana,
 			HyperSwitch:                   f.HyperSwitch,
-			PlatformVault:                 f.PlatformVault,
+			CardVault:                     f.CardVault,
 			EngineAdmissionHold:           f.EngineAdmissionHold,
 		},
 		Auth:                     auth,

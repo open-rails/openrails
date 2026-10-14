@@ -48,7 +48,7 @@ func Open(ctx context.Context, cfg *config.Config, borrowed *vaultapi.Client) (*
 	if cfg == nil || (cfg.Vault == nil && borrowed == nil) {
 		return &Connection{}, nil
 	}
-	platformMount, err := config.PlatformVaultKVMount(cfg)
+	platformMount, err := config.CardVaultKVMount(cfg)
 	if err != nil {
 		return nil, err
 	}

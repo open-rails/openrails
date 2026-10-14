@@ -162,6 +162,7 @@
       "type BoundMerchantError struct {\n\tMerchant billing.MerchantID\n\n\tBound billing.MerchantID\n}",
       "type CCBillPSP struct {\n\tClientAccnum string `psp:\"client_accnum\"`\n\tClientSubacc string `psp:\"client_subacc\"`\n\n\tEnvironment string `psp:\"environment\"`\n\tArchived    bool   `psp:\"archived\"`\n\n\tSalt             string `psp:\"secrets.salt,required\"`\n\tDatalinkUsername string `psp:\"secrets.datalink_username\"`\n\tDatalinkPassword string `psp:\"secrets.datalink_password\"`\n}",
       "type CaptchaConfig = config.CaptchaConfig",
+      "type CardVaultConfig = config.CardVaultConfig",
       "type Client struct {\n}",
       "type ClientCredentialsConfig struct {\n\tTokenURL     string\n\tClientID     string\n\tClientSecret string\n\n\tResource string\n\n\tScopes []string\n\n\tHTTPClient *http.Client\n}",
       "type Config = config.Config",
@@ -188,7 +189,6 @@
       "type NotificationConsumer struct {\n}",
       "type PSPConfig = config.PSPConfig",
       "type PSPs = config.PSPs",
-      "type PlatformVaultConfig = config.PlatformVaultConfig",
       "type Probe struct {\n\tName string\n\n\tCheck func(context.Context) error\n}",
       "type ProviderSandboxConfig = config.ProviderSandboxConfig",
       "type RateLimit = config.RateLimit",
@@ -1103,7 +1103,8 @@
     "internal/config": [
       "type AlertWebhookConfig struct {\n\tName string `yaml:\"name,omitempty\"`\n\tURL  string `yaml:\"url\"`\n\n\tFormat string `yaml:\"format,omitempty\"`\n\n\tEnabled *bool `yaml:\"enabled,omitempty\"`\n}",
       "type CaptchaConfig struct {\n\tProvider  string `yaml:\"provider\" json:\"provider\"`\n\tSiteKey   string `yaml:\"site_key\" json:\"site_key\"`\n\tSecretKey string `yaml:\"secret_key\" json:\"secret_key\"`\n}",
-      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tPlatformVault *PlatformVaultConfig `yaml:\"platform_vault\" json:\"platform_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
+      "type CardVaultConfig struct {\n\tKind string `yaml:\"kind\" json:\"kind\"`\n\n\tTenantID string `yaml:\"tenant_id\" json:\"tenant_id\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n}",
+      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type Custodians map[string]CustodianConfig",
       "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n}",
@@ -1122,7 +1123,6 @@
       "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
       "type PSPConfig struct {\n\tRail billing.Rail `yaml:\"rail\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
       "type PSPs map[string]PSPConfig",
-      "type PlatformVaultConfig struct {\n\tKind string `yaml:\"kind\" json:\"kind\"`\n\n\tTenantID string `yaml:\"tenant_id\" json:\"tenant_id\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n}",
       "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string `yaml:\"nmi_gateway_url\" json:\"nmi_gateway_url\"`\n\n\tStripeAPIURL string `yaml:\"stripe_api_url\" json:\"stripe_api_url\"`\n\n\tSolanaRPCURL string `yaml:\"solana_rpc_url\" json:\"solana_rpc_url\"`\n\n\tCCBillDataLinkURL string `yaml:\"ccbill_datalink_url\" json:\"ccbill_datalink_url\"`\n}",
       "type RateLimit struct {\n\tRequestsPerMinute int `yaml:\"requests_per_minute\" json:\"requests_per_minute\"`\n}",
       "type RateLimitsConfig map[string]*RateLimit",
@@ -1354,14 +1354,14 @@
     ],
     "internal/config": [
       "type CaptchaConfig struct {\n\tProvider  string `yaml:\"provider\" json:\"provider\"`\n\tSiteKey   string `yaml:\"site_key\" json:\"site_key\"`\n\tSecretKey string `yaml:\"secret_key\" json:\"secret_key\"`\n}",
-      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tPlatformVault *PlatformVaultConfig `yaml:\"platform_vault\" json:\"platform_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
+      "type CardVaultConfig struct {\n\tKind string `yaml:\"kind\" json:\"kind\"`\n\n\tTenantID string `yaml:\"tenant_id\" json:\"tenant_id\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n}",
+      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
       "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n}",
       "type DatabaseConfig struct {\n\tSchema string `yaml:\"schema\" json:\"schema\"`\n\n\tRiverSchema string `yaml:\"river_schema\" json:\"river_schema\"`\n}",
       "type EmailAddress struct {\n\tName    string `yaml:\"name\" json:\"name\"`\n\tAddress string `yaml:\"address\" json:\"address\"`\n}",
       "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool   `yaml:\"allow_loopback_http\" json:\"allow_loopback_http\"`\n\tAPIBaseURL        string `yaml:\"api_base_url\" json:\"api_base_url\"`\n\tSDKURL            string `yaml:\"sdk_url\" json:\"sdk_url\"`\n}",
       "type LLMConfig struct {\n\tProvider string `yaml:\"provider\" json:\"provider\"`\n\n\tModel string `yaml:\"model\" json:\"model\"`\n\n\tBaseURL string `yaml:\"base_url\" json:\"base_url\"`\n\n\tAPIKey string `yaml:\"api_key\" json:\"api_key\"`\n\n\tCatalogCopilotEnabled bool `yaml:\"catalog_copilot_enabled\" json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `yaml:\"catalog_drafting_enabled\" json:\"catalog_drafting_enabled\"`\n}",
       "type LoggerConfig struct {\n\tLevel string `yaml:\"level\" json:\"level\"`\n}",
-      "type PlatformVaultConfig struct {\n\tKind string `yaml:\"kind\" json:\"kind\"`\n\n\tTenantID string `yaml:\"tenant_id\" json:\"tenant_id\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n}",
       "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string `yaml:\"nmi_gateway_url\" json:\"nmi_gateway_url\"`\n\n\tStripeAPIURL string `yaml:\"stripe_api_url\" json:\"stripe_api_url\"`\n\n\tSolanaRPCURL string `yaml:\"solana_rpc_url\" json:\"solana_rpc_url\"`\n\n\tCCBillDataLinkURL string `yaml:\"ccbill_datalink_url\" json:\"ccbill_datalink_url\"`\n}",
       "type RateLimit struct {\n\tRequestsPerMinute int `yaml:\"requests_per_minute\" json:\"requests_per_minute\"`\n}",
       "type ReadPolicy struct {\n\tRefreshAfter time.Duration `yaml:\"refresh_after\" json:\"refresh_after\"`\n\tMaxStale     time.Duration `yaml:\"max_stale\" json:\"max_stale\"`\n}",
@@ -2240,6 +2240,15 @@
       "json": "encoding/json",
       "slog": "log/slog"
     },
+    "internal/config/card_vault.go": {
+      "fmt": "fmt",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "path": "path",
+      "slices": "slices",
+      "strings": "strings",
+      "unicode": "unicode",
+      "uuid": "github.com/google/uuid"
+    },
     "internal/config/config.go": {
       "cmp": "cmp",
       "custodians": "github.com/open-rails/openrails/internal/custodians",
@@ -2305,15 +2314,6 @@
     "internal/config/naming.go": {
       "fmt": "fmt",
       "time": "time"
-    },
-    "internal/config/platform_vault.go": {
-      "fmt": "fmt",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "path": "path",
-      "slices": "slices",
-      "strings": "strings",
-      "unicode": "unicode",
-      "uuid": "github.com/google/uuid"
     },
     "internal/config/read_cache.go": {
       "time": "time"

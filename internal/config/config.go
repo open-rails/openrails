@@ -115,9 +115,9 @@ type Config struct {
 	ProviderSandbox *ProviderSandboxConfig `yaml:"provider_sandbox" json:"provider_sandbox"`
 	// HyperSwitch is the host's trusted HyperSwitch deployment.
 	HyperSwitch *HyperSwitchConfig `yaml:"hyperswitch" json:"hyperswitch"`
-	// PlatformVault is the operator's card vault; nil refuses
+	// CardVault is the operator's card vault; nil refuses
 	// settings.card_vault platform.
-	PlatformVault *PlatformVaultConfig `yaml:"platform_vault" json:"platform_vault"`
+	CardVault *CardVaultConfig `yaml:"card_vault" json:"card_vault"`
 
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
 	EngineAdmissionHold bool `yaml:"engine_admission_hold" json:"engine_admission_hold"`
@@ -232,7 +232,7 @@ func MerchantConfigKVMount(cfg *Config) string {
 
 // VaultConfig connects to HashiCorp Vault: a non-nil Config.Vault (or
 // Deps.Vault) is the connection. Name a KV mount and Vault holds merchant
-// configuration. PlatformVault.KVMount can read card credentials separately;
+// configuration. CardVault.KVMount can read card credentials separately;
 // TransitMount selects the Solana signing mount.
 type VaultConfig struct {
 	Namespace   string `yaml:"namespace" json:"namespace"`

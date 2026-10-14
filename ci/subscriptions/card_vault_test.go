@@ -22,7 +22,7 @@ import (
 const platformTenant = "bt-tenant-e2e"
 
 func withPlatformVault(c *config.Config) {
-	c.PlatformVault = &config.PlatformVaultConfig{Kind: "basis_theory", TenantID: platformTenant}
+	c.CardVault = &config.CardVaultConfig{Kind: "basis_theory", TenantID: platformTenant}
 }
 
 // platformIdentities are the merchant's custodian rows keyed platform.
@@ -185,9 +185,9 @@ func TestPlatformCardVaultNeedsAPlatformVault(t *testing.T) {
 	}
 	require.ErrorContains(t, refused(openrails.Config{Merchants: declared(billing.CardVaultPlatform)}), "no platform vault")
 	require.ErrorContains(t, refused(openrails.Config{Merchants: declared("nowhere")}), "card_vault names no live card PSP")
-	require.ErrorContains(t, refused(openrails.Config{PlatformVault: &openrails.PlatformVaultConfig{Kind: "basis_theory", TenantID: platformTenant}}), "vault.kv_mount")
+	require.ErrorContains(t, refused(openrails.Config{CardVault: &openrails.CardVaultConfig{Kind: "basis_theory", TenantID: platformTenant}}), "vault.kv_mount")
 	vault := vaulttest.New(t)
-	require.ErrorContains(t, refused(openrails.Config{Vault: vault.Config(), PlatformVault: &openrails.PlatformVaultConfig{Kind: "hyperswitch", TenantID: platformTenant}}), "platform_vault.kind")
+	require.ErrorContains(t, refused(openrails.Config{Vault: vault.Config(), CardVault: &openrails.CardVaultConfig{Kind: "hyperswitch", TenantID: platformTenant}}), "card_vault.kind")
 }
 
 // A card in a PSP's own vault charges only through that PSP's account: the

@@ -113,7 +113,7 @@ naming:
 # Platform card credentials use the same Vault connection and scope_prefix.
 # Omit this kv_mount to reuse vault.kv_mount. Set only this one to keep merchant
 # configuration in files. The credential document is platform_vault/<tenant_id>.
-# platform_vault:
+# card_vault:
 #   kind: basis_theory
 #   tenant_id: ""
 #   kv_mount: billing-secrets

@@ -95,7 +95,7 @@ fatally: over the API (`409 card_vault_unknown`, `charge_psp_unknown`,
 not served (the previous one keeps serving). `platform` is also refused with:
 
 - `409 platform_vault_unavailable` while the deployment configures no
-  `platform_vault` for its posture;
+  `card_vault` for its posture;
 - `409 platform_vault_unreachable` while a charge PSP cannot charge the vault's
   cards. Creating such a PSP while `charge_psps` is absent is refused the same way.
 
@@ -106,13 +106,25 @@ the PSP their subscription was sold through, which holds its recurring agreement
 The platform vault is operator configuration, not a merchant custodian:
 
 ```yaml
-platform_vault:
+card_vault:
   kind: basis_theory
   tenant_id: <the vault tenant of this deployment's posture>
   kv_mount: billing-secrets
 ```
 
-`platform_vault.kv_mount` names the HashiCorp Vault KV v2 mount holding its keys,
+The deployment config is `card_vault` (`Config.CardVault` / `CardVaultConfig`
+for embedded hosts). Standalone environment variables are `CARD_VAULT_KIND`,
+`CARD_VAULT_TENANT_ID` and `CARD_VAULT_KV_MOUNT`.
+
+When upgrading from `platform_vault`, rename that config section and the
+`PLATFORM_VAULT_*` variables. Embedded hosts must rename the Go field and type.
+The old config names are not aliases. Keep the existing credential document at
+`platform_vault/<tenant_id>`; no credentials or cards need moving. The merchant
+API's `platform_vault.available` response and `settings.card_vault` choice are
+unchanged: the deployment section configures the operator's card storage,
+while the merchant setting chooses whether to use it.
+
+`card_vault.kv_mount` names the HashiCorp Vault KV v2 mount holding its keys,
 at `<kv_mount>/<vault.scope_prefix>/platform_vault/<tenant_id>` (prefix default
 `openrails`). It uses the existing `vault` connection and authentication.
 Leave `vault.kv_mount` unset to keep merchant configuration in files. The

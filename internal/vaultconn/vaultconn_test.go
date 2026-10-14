@@ -16,8 +16,8 @@ func TestMalformedPlatformMountRefusedWithoutEngineBoot(t *testing.T) {
 		t.Run(mount, func(t *testing.T) {
 			for _, borrowed := range []bool{false, true} {
 				cfg := &config.Config{
-					Vault:         &config.VaultConfig{Address: "http://127.0.0.1:1", Token: "fixture", KVMount: "merchant"},
-					PlatformVault: &config.PlatformVaultConfig{Kind: "basis_theory", TenantID: "tenant", KVMount: mount},
+					Vault:     &config.VaultConfig{Address: "http://127.0.0.1:1", Token: "fixture", KVMount: "merchant"},
+					CardVault: &config.CardVaultConfig{Kind: "basis_theory", TenantID: "tenant", KVMount: mount},
 				}
 				var client *vaultapi.Client
 				if borrowed {
@@ -29,7 +29,7 @@ func TestMalformedPlatformMountRefusedWithoutEngineBoot(t *testing.T) {
 				if conn != nil {
 					t.Cleanup(conn.Close)
 				}
-				require.ErrorContains(t, err, "platform_vault.kv_mount")
+				require.ErrorContains(t, err, "card_vault.kv_mount")
 				require.Nil(t, conn)
 			}
 		})
@@ -66,7 +66,7 @@ func TestPlatformCredentialReadMount(t *testing.T) {
 			client, err := vaultapi.NewClient(&vaultapi.Config{Address: server.URL})
 			require.NoError(t, err)
 			cfg := &config.Config{Vault: &config.VaultConfig{KVMount: tc.merchant},
-				PlatformVault: &config.PlatformVaultConfig{Kind: "basis_theory", TenantID: "tenant", KVMount: tc.platform}}
+				CardVault: &config.CardVaultConfig{Kind: "basis_theory", TenantID: "tenant", KVMount: tc.platform}}
 			conn, err := Open(t.Context(), cfg, client)
 			require.NoError(t, err)
 			t.Cleanup(conn.Close)

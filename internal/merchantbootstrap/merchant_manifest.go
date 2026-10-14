@@ -512,9 +512,9 @@ func validateMerchantDocument(cfg *config.Config, mt config.MerchantDeclaration)
 		return fmt.Errorf("settings: %w", err)
 	}
 	declared := merchantdocs.Declared(billing.MerchantID{}, mt, time.Time{})
-	var vault *config.PlatformVaultConfig
+	var vault *config.CardVaultConfig
 	if cfg != nil {
-		vault = cfg.PlatformVault
+		vault = cfg.CardVault
 	}
 	return merchants.CardVaultRefusal(vault, mt.MerchantSettings, declared.PSPs)
 }

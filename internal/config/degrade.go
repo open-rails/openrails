@@ -82,9 +82,9 @@ func Degrade(cfg *Config) []Degradation {
 		}
 		cfg.Solana = &SolanaConfig{Crankers: kept}
 	}
-	if err := validatePlatformVault(cfg); err != nil {
-		cfg.PlatformVault = nil
-		off("platform_vault", fmt.Errorf("%w; settings.card_vault platform is refused", err))
+	if err := validateCardVault(cfg); err != nil {
+		cfg.CardVault = nil
+		off("card_vault", fmt.Errorf("%w; settings.card_vault platform is refused", err))
 	}
 	if s := cfg.ProviderSandbox; s != nil {
 		sandbox := *s

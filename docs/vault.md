@@ -7,7 +7,7 @@ stays in files.
 | Capability | What it is for | Setting |
 |---|---|---|
 | **Merchant configuration** | every merchant's display name, settings, alert webhooks, PSPs and custodians, credentials included | `vault.kv_mount` (a KV v2 mount) |
-| **Platform card credentials** | the operator's Basis Theory private key and merchant collection applications | `platform_vault.kv_mount` (defaults to `vault.kv_mount`) |
+| **Platform card credentials** | the operator's Basis Theory private key and merchant collection applications | `card_vault.kv_mount` (defaults to `vault.kv_mount`) |
 | **Transit signing** | Solana `vault_transit` crankers: Vault signs, the key never leaves | `vault.transit_mount` (default `transit`) |
 
 Without `vault.kv_mount` the merchant's configuration is its file (`Config.Merchants`,
@@ -50,7 +50,7 @@ purchase and the catalog use) matches `^[a-z0-9][a-z0-9_-]{0,62}$`.
 `credential_fingerprint_key` is created by OpenRails on first start; it keys
 the fingerprints that catch one gateway account declared twice. Keep it.
 Platform card credentials live at
-`<platform_vault.kv_mount>/<scope_prefix>/platform_vault/<tenant_id>`.
+`<card_vault.kv_mount>/<scope_prefix>/platform_vault/<tenant_id>`.
 If the platform mount is omitted, `vault.kv_mount` supplies it, preserving the
 existing shared layout. Both use `vault.scope_prefix` (default `openrails`)
 and the same Vault connection. An explicit platform mount is never replaced

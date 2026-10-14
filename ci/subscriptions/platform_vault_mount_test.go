@@ -66,7 +66,7 @@ func TestPlatformVaultWithFileConfiguration(t *testing.T) {
 			w.cfg = func(cfg *config.Config) {
 				configure(cfg)
 				cfg.Vault = &config.VaultConfig{Address: server.URL, Token: secret.Auth.ClientToken, ScopePrefix: prefix}
-				cfg.PlatformVault.KVMount = v.Mount
+				cfg.CardVault.KVMount = v.Mount
 			}
 			if borrowed {
 				client, err := vaultapi.NewClient(&vaultapi.Config{Address: server.URL})

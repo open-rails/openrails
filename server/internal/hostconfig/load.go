@@ -385,6 +385,15 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("clickhouse config was removed (#735): delete the clickhouse yaml key and CLICKHOUSE_* env vars; analytics/forensics read Postgres")
 	}
 
+	_, oldCardVaultEnv := os.LookupEnv("PLATFORM_VAULT")
+	retiredCardVault := k.Exists("platform_vault") || oldCardVaultEnv || hasEnvPrefix("PLATFORM_VAULT_")
+	for name := range secretFiles {
+		retiredCardVault = retiredCardVault || name == "PLATFORM_VAULT" || strings.HasPrefix(name, "PLATFORM_VAULT_")
+	}
+	if retiredCardVault {
+		return nil, fmt.Errorf("platform_vault was renamed to card_vault: use CARD_VAULT_* env vars and secret filenames; keep the existing credential document path")
+	}
+
 	// HARD CUT (#1176): email goes through any SMTP server.
 	retiredSendGrid := k.Exists("sendgrid") || hasEnvPrefix("SENDGRID_")
 	for name := range secretFiles {

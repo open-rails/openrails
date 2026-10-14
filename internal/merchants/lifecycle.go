@@ -116,7 +116,7 @@ type Service struct {
 	fingerprints *CredentialFingerprinter
 	// platformVault is the operator's card vault; nil refuses platform
 	// card custody.
-	platformVault  *config.PlatformVaultConfig
+	platformVault  *config.CardVaultConfig
 	platformKV     *vault.KVv2Adapter
 	platformPrefix string
 }
@@ -148,7 +148,7 @@ func NewService(pool *db.Pool, configuration *merchantdocs.Cache, cfg *config.Co
 	}
 	service.config = configuration
 	service.fakeProviders = config.FakeProviders(cfg)
-	service.platformVault = cfg.PlatformVault
+	service.platformVault = cfg.CardVault
 	if cfg.Vault != nil {
 		service.platformPrefix = cfg.Vault.ScopePrefix
 	}

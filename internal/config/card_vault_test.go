@@ -1,12 +1,23 @@
 package config
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/require"
 )
 
-func TestPlatformVaultMount(t *testing.T) {
+func TestCardVaultConfigLoading(t *testing.T) {
+	want := &CardVaultConfig{Kind: "basis_theory", TenantID: "tenant", KVMount: "cards"}
+	var fromYAML, fromJSON Config
+	require.NoError(t, yaml.Unmarshal([]byte("card_vault:\n  kind: basis_theory\n  tenant_id: tenant\n  kv_mount: cards\n"), &fromYAML))
+	require.NoError(t, json.Unmarshal([]byte(`{"card_vault":{"kind":"basis_theory","tenant_id":"tenant","kv_mount":"cards"}}`), &fromJSON))
+	require.Equal(t, want, fromYAML.CardVault)
+	require.Equal(t, want, fromJSON.CardVault)
+}
+
+func TestCardVaultMount(t *testing.T) {
 	for _, tc := range []struct {
 		name, merchantMount, platformMount, want string
 		invalid                                  bool
@@ -22,16 +33,16 @@ func TestPlatformVaultMount(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			cfg := &Config{Vault: &VaultConfig{KVMount: tc.merchantMount}, PlatformVault: &PlatformVaultConfig{
+			cfg := &Config{Vault: &VaultConfig{KVMount: tc.merchantMount}, CardVault: &CardVaultConfig{
 				Kind: "basis_theory", TenantID: "tenant", KVMount: tc.platformMount,
 			}}
 			if tc.invalid {
-				require.Error(t, validatePlatformVault(cfg))
+				require.Error(t, validateCardVault(cfg))
 				Degrade(cfg)
-				require.Nil(t, cfg.PlatformVault)
+				require.Nil(t, cfg.CardVault)
 			} else {
-				require.NoError(t, validatePlatformVault(cfg))
-				mount, err := PlatformVaultKVMount(cfg)
+				require.NoError(t, validateCardVault(cfg))
+				mount, err := CardVaultKVMount(cfg)
 				require.NoError(t, err)
 				require.Equal(t, tc.want, mount)
 			}
