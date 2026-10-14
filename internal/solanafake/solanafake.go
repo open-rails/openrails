@@ -866,6 +866,24 @@ func (n *Node) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		n.mu.Lock()
 		acct, ok := n.accounts[address]
+		if !ok {
+			if tok := n.tokens[address]; tok != nil {
+				data := make([]byte, 165)
+				copy(data[0:32], tok.mint[:])
+				copy(data[32:64], tok.owner[:])
+				binary.LittleEndian.PutUint64(data[64:72], tok.amount)
+				data[108] = 1 // initialized SPL token account
+				if !tok.revoked {
+					authority, _, err := subscriptions.DeriveSubscriptionAuthority(tok.owner, tok.mint)
+					if err == nil {
+						binary.LittleEndian.PutUint32(data[72:76], 1)
+						copy(data[76:108], authority[:])
+						binary.LittleEndian.PutUint64(data[121:129], ^uint64(0))
+					}
+				}
+				acct, ok = account{owner: solanago.TokenProgramID, data: data}, true
+			}
+		}
 		slot := n.height
 		n.mu.Unlock()
 		var value any

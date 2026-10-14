@@ -94,6 +94,7 @@ export const ja: BillingUiMessageBundle = {
   cancel: {
     title: "{name}を解約しますか？",
     description: "今後の支払いは停止します。購入済みのアクセスは維持されます。",
+    revokeOnChain: "オンチェーンでも解約する（ウォレットの署名とネットワーク手数料が必要です）。",
     solanaDescription:
       "ウォレットでオンチェーンの解約に署名します。購入済みのアクセスは維持されます。",
     reasonLabel: "解約の理由を教えてください",

@@ -877,3 +877,24 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid
        OR idempotency_key=sqlc.arg(idempotency_key)::text || ':action:' || destructive_action_id::text)
   AND intent_type='nmi_delete_subscription'
   AND (status='failed_retryable' OR (status='pending' AND attempts=0)) RETURNING *;
+
+-- The subscription row is locked by cancellation and the pull's pre-submit
+-- fence. A signed transaction remains an unresolved charge until reconciled.
+-- name: HasSubmittedSolanaPull :one
+SELECT EXISTS (
+  SELECT 1 FROM billing.provider_intents
+  WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+    AND subscription_id = sqlc.arg(subscription_id)::uuid
+    AND intent_type = 'solana_pull'
+    AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+    AND result_evidence ? 'transaction_id'
+    AND NOT COALESCE(result_evidence->>'transaction_id' = result_evidence->>'reverted_transaction_id', false)
+);
+
+-- name: FenceSolanaPullSubmission :execrows
+UPDATE billing.provider_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('transaction_id', sqlc.arg(signature)::text),
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND intent_type = 'solana_pull' AND status = 'in_flight'
+  AND attempts = sqlc.arg(attempts)::int AND lease_expires_at > sqlc.arg(now)::timestamptz;

@@ -286,13 +286,12 @@ export function fakeBilling(
         if (!sub) return apiError(404, "subscription_not_found")
         if (String(body?.reason ?? "").trim().length < 4)
           return apiError(400, "invalid_param")
-        // Like OpenRails: the wallet signs a Solana cancel.
-        if (sub.rail === "solana" && !body?.signature)
-          return json(200, { ...sub, next_action: walletStep })
+        // The local cancellation is complete before the optional wallet step.
         Object.assign(sub, {
           status: "canceled",
-          cancel_scheduled: sub.rail !== "solana",
-          resumable: sub.rail !== "solana",
+          cancel_scheduled: true,
+          resumable: true,
+          next_action: sub.rail === "solana" && body?.revoke_on_chain && !body?.signature ? walletStep : null,
         })
         return json(200, sub)
       }

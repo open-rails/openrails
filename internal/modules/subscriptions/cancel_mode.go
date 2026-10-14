@@ -120,7 +120,7 @@ func Resumable(sub *models.Subscription, now time.Time) bool {
 	if (sub.CollectionPolicy == models.CollectionPolicyEngine || sub.Rail == models.RailSolana) && (sub.CancelType == nil || *sub.CancelType != models.CancelTypeUser) {
 		return false
 	}
-	if sub.CollectionPolicy == models.CollectionPolicyEngine && sub.PaymentMethodID == nil && !FollowsDefault(sub) {
+	if CardSubscription(sub) && sub.PaymentMethodID == nil && !FollowsDefault(sub) {
 		return false
 	}
 	if CancelModeFor(sub, now) != CancelModeReversible {

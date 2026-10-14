@@ -187,15 +187,16 @@ func (r *SolanaSubscriptionRepo) listDueScoped(ctx context.Context, now time.Tim
 // AdvanceAfterPull records a confirmed pull: stamps the signature + period start
 // and moves next_pull_at forward. Source of truth for "paid through" is the
 // confirmed pull, not wall-clock.
-func (r *SolanaSubscriptionRepo) AdvanceAfterPull(ctx context.Context, id uuid.UUID, periodStart time.Time, signature string, nextPullAt time.Time) error {
+func (r *SolanaSubscriptionRepo) AdvanceAfterPull(ctx context.Context, id, subscriptionID uuid.UUID, episodeAt, periodStart time.Time, signature string, nextPullAt time.Time) error {
 	ps := periodStart.UTC()
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return scopeErr
 	}
 	return r.db.Gen(ctx).AdvanceSolanaSubscriptionAfterPull(ctx, gen.AdvanceSolanaSubscriptionAfterPullParams{
-		MerchantID:               scopeMerchantID.UUID(),
-		ID:                       id,
+		MerchantID:     scopeMerchantID.UUID(),
+		ID:             id,
+		SubscriptionID: subscriptionID, EpisodeAt: episodeAt.UTC(),
 		LastPulledPeriodStartsAt: &ps,
 		LastSignature:            &signature,
 		NextPullAt:               nextPullAt.UTC(),

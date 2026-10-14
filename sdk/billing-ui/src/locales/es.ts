@@ -95,6 +95,7 @@ export const es: BillingUiMessageBundle = {
     title: "¿Cancelar {name}?",
     description:
       "Se detienen los pagos futuros. Conservas el acceso ya adquirido.",
+    revokeOnChain: "Cancelar también en la cadena (requiere firma de la cartera y una comisión de red).",
     solanaDescription:
       "Tu cartera firma una cancelación en la cadena. Conservas el acceso ya adquirido.",
     reasonLabel: "¿Por qué cancelas?",

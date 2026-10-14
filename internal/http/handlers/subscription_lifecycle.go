@@ -80,7 +80,7 @@ func CancelSubscription(r *httprequest.Request) {
 			r.ErrorCode(billing.CodeServiceUnavailable, "Solana recurring billing is not configured")
 			return
 		}
-		svc := recurring.NewConfirmCancelService(r.State.SolanaRPCResolver.ChainReader(), r.State.SubscriptionLifecycleService)
+		svc := recurring.NewConfirmCancelService(r.State.SolanaRPCResolver.ChainReader(), r.State.SubscriptionLifecycleService, solanasubs.NewSolanaSubscriptionRepo(r.State.DB), r.State.SolanaRPCResolver.ChainReader())
 		if err := svc.Confirm(ctx, sub.ID, signature, reason); err != nil {
 			r.APIError(solanaClientError(err))
 			return
@@ -176,6 +176,7 @@ func resume(r *httprequest.Request, sub *models.Subscription) bool {
 	now := r.Clock.Now().UTC()
 	if !subscriptions.Resumable(sub, now) {
 		switch {
+
 		case sub.Status != models.StatusCanceled:
 			r.ErrorCode(billing.CodeInvalidParam, "subscription is not canceled")
 		case subscriptions.CancelModeFor(sub, now) != subscriptions.CancelModeReversible:
@@ -192,6 +193,12 @@ func resume(r *httprequest.Request, sub *models.Subscription) bool {
 	}
 	var err error
 	switch {
+	case sub.Rail == models.RailSolana:
+		if refusal := solanaResumeRefusal(ctx, r, sub); refusal != nil {
+			r.APIError(refusal)
+			return false
+		}
+		_, err = r.State.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: sub.ID})
 	case sub.CollectionPolicy == models.CollectionPolicyEngine || sub.Rail == models.RailStripe:
 		if sub.CollectionPolicy != models.CollectionPolicyEngine {
 			stripeSvc := &subscriptions.StripeService{StripeClients: r.State.StripeClients, Config: r.State.Config, Rails: r.State.RailConfigs}
@@ -202,12 +209,7 @@ func resume(r *httprequest.Request, sub *models.Subscription) bool {
 		_, err = r.State.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: sub.ID})
 	case rails.IsNMI(sub.Rail):
 		err = resumeNMI(ctx, r, sub)
-	case sub.Rail == models.RailSolana:
-		if refusal := solanaResumeRefusal(ctx, r, sub); refusal != nil {
-			r.APIError(refusal)
-			return false
-		}
-		_, err = r.State.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: sub.ID})
+
 	default:
 		r.ErrorCode(billing.CodeInvalidParam, "resume unsupported for rail")
 		return false
@@ -232,7 +234,10 @@ func solanaResumeRefusal(ctx context.Context, r *httprequest.Request, sub *model
 		}
 		return api.Coded(billing.CodeInternalError, "failed to load the on-chain subscription")
 	}
-	canceled, err := recurring.CanceledOnChain(ctx, r.State.SolanaRPCResolver.ChainReader(), row)
+	if row.Status != models.SolanaSubscriptionCanceled {
+		return api.Coded(billing.CodeInvalidParam, "resume unsupported: the subscription's renewal record is no longer resumable")
+	}
+	renewable, err := recurring.RenewableOnChain(ctx, r.State.SolanaRPCResolver.ChainReader(), row)
 	if err != nil {
 		if refusal := solanaUnavailable(err); refusal != nil {
 			return refusal
@@ -240,7 +245,7 @@ func solanaResumeRefusal(ctx context.Context, r *httprequest.Request, sub *model
 		log.WithContext(ctx).WithField("detail", redact.Secrets(err.Error())).Warn("solana: resume could not read the on-chain subscription")
 		return api.Coded(codeSolanaRPCUnavailable, "Solana RPC is temporarily unavailable; please retry")
 	}
-	if canceled {
+	if !renewable {
 		return api.Coded(billing.CodeInvalidParam, "the subscription was canceled in the customer's wallet, so it ends with its paid period; subscribe again to continue")
 	}
 	return nil

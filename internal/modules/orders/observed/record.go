@@ -215,7 +215,11 @@ func validate(b Bill) error {
 	if b.Owner != OwnerEngine && b.Owner != OwnerProvider && b.Owner != OwnerNMISchedule {
 		return errors.New("provider bill collection owner is invalid")
 	}
-	if err := moneyutil.RequireFiatCurrency(b.Currency); err != nil {
+	if b.Payment != nil && b.Payment.Rail == models.RailSolana {
+		if err := moneyutil.ValidateCurrency(b.Currency); err != nil {
+			return err
+		}
+	} else if err := moneyutil.RequireFiatCurrency(b.Currency); err != nil {
 		return err
 	}
 	if b.Currency != moneyutil.NormalizeCurrency(b.Currency) {

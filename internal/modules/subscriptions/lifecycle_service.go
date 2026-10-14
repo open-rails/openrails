@@ -206,13 +206,22 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 		if err := terms.Validate(); err != nil {
 			return nil, nil, err
 		}
+		if terms.Rail != "" && terms.Rail != params.Rail {
+			return nil, nil, errors.New("membership rail contradicts accepted terms")
+		}
+		if params.Rail == models.RailSolana && terms.CollectionPolicy == models.CollectionPolicyEngine && terms.Rail != models.RailSolana {
+			return nil, nil, errors.New("Solana membership requires its accepted wallet rail")
+		}
+		if terms.Rail == models.RailSolana && (params.RailSubscriptionID == nil || strings.TrimSpace(*params.RailSubscriptionID) == "") {
+			return nil, nil, errors.New("Solana membership has no verified on-chain subscription")
+		}
 		if terms.AwaitingMethod && params.ExistingOrderID == nil {
 			return nil, nil, errors.New("awaiting method requires a paid order")
 		}
 		if params.InitialPaymentReversal != "" && (terms.CollectionPolicy != models.CollectionPolicyEngine || terms.Amount <= 0 || params.Rail != models.RailStripe || (params.InitialPaymentReversal != "refund" && params.InitialPaymentReversal != "dispute")) {
 			return nil, nil, errors.New("invalid accepted initial payment reversal")
 		}
-		if (terms.Amount > 0 && s.PaymentService == nil) || params.UserID != terms.CustomerID.String() || params.PriceID != terms.PriceID || db.PSPIDFromContext(ctx) != terms.PSPID || (terms.Amount > 0) != (strings.TrimSpace(params.TransactionID) != "") || (terms.CollectionPolicy != models.CollectionPolicyEngine && (params.RailSubscriptionID == nil || strings.TrimSpace(*params.RailSubscriptionID) == "")) || (terms.CollectionPolicy == models.CollectionPolicyEngine && params.RailSubscriptionID != nil && strings.TrimSpace(*params.RailSubscriptionID) != "") {
+		if (terms.Amount > 0 && s.PaymentService == nil) || params.UserID != terms.CustomerID.String() || params.PriceID != terms.PriceID || db.PSPIDFromContext(ctx) != terms.PSPID || (terms.Amount > 0) != (strings.TrimSpace(params.TransactionID) != "") || (terms.CollectionPolicy != models.CollectionPolicyEngine && (params.RailSubscriptionID == nil || strings.TrimSpace(*params.RailSubscriptionID) == "")) || (terms.CollectionPolicy == models.CollectionPolicyEngine && params.Rail != models.RailSolana && params.RailSubscriptionID != nil && strings.TrimSpace(*params.RailSubscriptionID) != "") {
 			return nil, nil, errors.New("membership completion contradicts accepted terms")
 		}
 		mid, err := merchant.Require(ctx)
@@ -1162,7 +1171,7 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 			return fmt.Errorf("resume membership: subscription %s is not resumable", subscription.ID)
 		}
 
-		if subscription.CollectionPolicy == models.CollectionPolicyEngine {
+		if CardSubscription(subscription) {
 			q := txdb.Gen(ctx)
 			charged, err := PaymentMethodOf(ctx, q, subscription)
 			if err != nil {
@@ -1406,6 +1415,16 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	if params.RefuseOwnedRenewal && subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status != models.StatusCanceled {
 		if err := refuseSubmittedRenewal(ctx, txDB, subscription); err != nil {
 			return nil, err
+		}
+	}
+
+	if params.RefuseOwnedRenewal && subscription.Rail == models.RailSolana && subscription.Status != models.StatusCanceled {
+		submitted, err := txDB.Gen(ctx).HasSubmittedSolanaPull(ctx, gen.HasSubmittedSolanaPullParams{MerchantID: subscription.MerchantID, SubscriptionID: subscription.ID})
+		if err != nil {
+			return nil, err
+		}
+		if submitted {
+			return nil, ErrRenewalInProgress
 		}
 	}
 
@@ -1775,18 +1794,15 @@ func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscription
 }
 
 // resumeSolanaSubscription re-arms the mirror a cancel stopped, so the
-// cranker pulls the next period. A missing or expired row stays as it is.
+// cranker pulls the next period. A missing or expired mirror cannot resume.
 func resumeSolanaSubscription(ctx context.Context, d *db.DB, subscriptionID uuid.UUID) error {
 	solanaRepo := solanasubs.NewSolanaSubscriptionRepo(d)
 	row, err := solanaRepo.GetBySubscriptionID(ctx, subscriptionID)
 	if err != nil {
-		if db.IsNotFound(err) {
-			return nil
-		}
 		return fmt.Errorf("lookup solana_subscriptions row: %w", err)
 	}
 	if row.Status != models.SolanaSubscriptionCanceled {
-		return nil
+		return fmt.Errorf("Solana subscription mirror is not canceled (status %s)", row.Status)
 	}
 	if err := solanaRepo.SetStatus(ctx, row.ID, models.SolanaSubscriptionActive); err != nil {
 		return fmt.Errorf("set solana_subscriptions status active: %w", err)
@@ -2010,6 +2026,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				}
 				if err := accepted.Validate(); err != nil {
 					return err
+				}
+				if accepted.Rail != "" && accepted.Rail != subscription.Rail {
+					return errors.New("engine failure rail contradicts its accepted agreement")
 				}
 				cycle := accepted.PeriodEnd.Sub(accepted.PeriodStart)
 				if accepted.SubscriptionID != subscription.ID || accepted.CustomerID != subscription.CustomerID || accepted.PSPID != subscription.PspID || accepted.FromPriceID != subscription.PriceID || accepted.FromProductID != subscription.ProductID || cycle%time.Hour != 0 || !accepted.PeriodStart.Add(cycle).Equal(accepted.PeriodEnd) {

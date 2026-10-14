@@ -197,13 +197,23 @@ only, across every merchant and PSP.
   cancels the subscription. No dunning.
 - **RPC/gas failures** are operational: retried next run, never held against the
   subscriber.
-- **Cancels and tier changes are on-chain and signed by the subscriber.**
-  `POST /v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change`
-  answer `next_action: {type: "solana_sign_transactions", transactions}`; the
-  wallet signs and sends them, and the same request repeated with `signature`
-  mirrors the landed transaction. A cancel is immediate: there is no card-style
-  "cancel at period end" deferral on this rail. A merchant cannot do either for
-  the customer (403 `customer_action_required`).
+- **Cancellation is pending until the paid period ends and needs no wallet.**
+  `POST /v1/me/subscriptions/{id}/cancel` records it immediately and stops the
+  cranker from pulling another renewal. Paid access continues until the period
+  ends; `/v1/me/subscriptions/{id}/resume` undoes an ordinary customer cancel
+  before then. The subscription account can remain on chain: no pull is made.
+  A renewal already signed and unresolved must settle before cancellation can
+  be accepted (`payment_in_progress`).
+- **An optional on-chain cancellation is signed by the subscriber.** Send
+  `revoke_on_chain: true` on the cancel request to receive a
+  `solana_sign_transactions` next action. The local cancellation has already
+  taken effect; the wallet signs and sends the additional on-chain cancel and
+  repeats the request with `signature`. Wallet cancellations and delegate
+  revocations are also detected when a due pull is refused, without dunning.
+  They cannot be undone locally.
+- **Tier changes are signed by the subscriber.** The change route answers a
+  `solana_sign_transactions` next action; repeat with the landed signature.
+  A merchant cannot sign this action for the customer.
 
 ### Devnet testing
 

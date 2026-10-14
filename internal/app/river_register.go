@@ -282,6 +282,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if r.SolanaCranker != nil {
 		solanaCrankWorker.Cranker = r.SolanaCranker
 	}
+	if r.SolanaRPCResolver != nil {
+		solanaCrankWorker.Chain = r.SolanaRPCResolver.ChainReader()
+	}
 	if err := addTrackedWorker(r, workers, solanaCrankWorker); err != nil {
 		return fmt.Errorf("add solana cranker worker: %w", err)
 	}
@@ -373,6 +376,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		// The verify leg reads the chain with the intent's merchant-armed client.
 		solanaChain = r.SolanaRPCResolver.ChainReader()
 	}
+	solanaPullCore.Chain = solanaChain
 	registry.Register(riverjobs.NewSolanaPullIntentHandler(solanaPullCore, intents.NewStore(r.DB), solanaChain))
 	return registry
 }

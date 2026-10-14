@@ -92,6 +92,7 @@ export const en = {
   cancel: {
     title: "Cancel {name}?",
     description: "Future payments stop. You keep access already purchased.",
+    revokeOnChain: "Also cancel on chain (requires a wallet signature and network fee).",
     solanaDescription:
       "Your wallet signs an on-chain cancellation. You keep access already purchased.",
     reasonLabel: "Why are you cancelling?",

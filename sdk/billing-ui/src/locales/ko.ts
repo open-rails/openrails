@@ -93,6 +93,7 @@ export const ko: BillingUiMessageBundle = {
   cancel: {
     title: "{name}을(를) 해지할까요?",
     description: "향후 결제가 중단됩니다. 이미 구매한 이용권은 유지됩니다.",
+    revokeOnChain: "온체인에서도 취소합니다(지갑 서명과 네트워크 수수료가 필요합니다).",
     solanaDescription:
       "지갑에서 온체인 해지에 서명합니다. 이미 구매한 이용권은 유지됩니다.",
     reasonLabel: "해지하는 이유를 알려 주세요",

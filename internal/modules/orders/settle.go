@@ -306,7 +306,7 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 		}
 		interval := time.Duration(*line.BillingIntervalHours) * time.Hour
 		terms := subscriptions.InitialMembershipTerms{
-			CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), CustomerID: order.CustomerID, PSPID: charge.PSPID,
+			Rail: models.Rail(charge.Rail), CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), CustomerID: order.CustomerID, PSPID: charge.PSPID,
 			ProductID: models.DerefUUID(line.ProductID), PriceID: models.DerefUUID(line.PriceID), PaymentMethodID: charge.PaymentMethodID, ProductName: line.Description,
 			RecurringAmount: line.Amount, Currency: order.Currency, AccessDurationHours: intPtr(line.AccessDurationHours),
 			RecurringIntervalHours: intPtr(line.BillingIntervalHours),

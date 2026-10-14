@@ -30,8 +30,7 @@ import { BillingStatusBadge } from "./status-badge"
 
 export interface SubscriptionsPanelProps extends SubscriptionsOptions {
   /**
-   * Wallet for Solana-rail subscriptions. Without it their cancel action is
-   * hidden.
+   * Wallet for an optional on-chain cancellation of Solana subscriptions.
    */
   sendSolanaTransaction?: SendSolanaTransaction
   /** Empty-state link to the host's plans page (uses `navigate` if set). */
@@ -150,8 +149,7 @@ export function SubscriptionsPanel({
           const canCancel =
             LIVE_STATUSES.has(s.status) &&
             !scheduled &&
-            !portal &&
-            (s.rail !== "solana" || !!sendSolanaTransaction)
+            !portal
           const canChangeCard =
             (s.status === "active" ||
               s.status === "past_due" ||
@@ -333,15 +331,16 @@ export function SubscriptionsPanel({
         open={cancelling !== null}
         onOpenChange={(open) => !open && setCancelling(null)}
         name={cancelling ? subscriptionName(cancelling, m) : ""}
-        onChain={onChain}
+        onChain={onChain && !!sendSolanaTransaction}
         appearance={appearance}
         pending={cancelling ? state.pending[cancelling.id] : undefined}
-        onConfirm={async (reason) => {
+        onConfirm={async (reason, revokeOnChain) => {
           if (!cancelling) return null
           const error = await state.cancel(
             cancelling.id,
             reason,
-            sendSolanaTransaction
+            sendSolanaTransaction,
+            revokeOnChain
           )
           if (!error) announce(t("cancel.done"))
           return error

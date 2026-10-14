@@ -928,6 +928,37 @@ func (q *Queries) FenceDestructiveProviderSend(ctx context.Context, arg FenceDes
 	return result.RowsAffected(), nil
 }
 
+const fenceSolanaPullSubmission = `-- name: FenceSolanaPullSubmission :execrows
+UPDATE billing.provider_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('transaction_id', $1::text),
+    updated_at = $2::timestamptz
+WHERE merchant_id = $3::uuid AND id = $4::uuid
+  AND intent_type = 'solana_pull' AND status = 'in_flight'
+  AND attempts = $5::int AND lease_expires_at > $2::timestamptz
+`
+
+type FenceSolanaPullSubmissionParams struct {
+	Signature  string
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	Attempts   int32
+}
+
+func (q *Queries) FenceSolanaPullSubmission(ctx context.Context, arg FenceSolanaPullSubmissionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, fenceSolanaPullSubmission,
+		arg.Signature,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+		arg.Attempts,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getLatestManualRebillForPeriod = `-- name: GetLatestManualRebillForPeriod :one
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
@@ -1462,6 +1493,31 @@ func (q *Queries) GetUnresolvedSubscriptionCollection(ctx context.Context, arg G
 		&i.DestructiveActionID,
 	)
 	return i, err
+}
+
+const hasSubmittedSolanaPull = `-- name: HasSubmittedSolanaPull :one
+SELECT EXISTS (
+  SELECT 1 FROM billing.provider_intents
+  WHERE merchant_id = $1::uuid
+    AND subscription_id = $2::uuid
+    AND intent_type = 'solana_pull'
+    AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+    AND result_evidence ? 'transaction_id'
+)
+`
+
+type HasSubmittedSolanaPullParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// The subscription row is locked by cancellation and the pull's pre-submit
+// fence. A signed transaction remains an unresolved charge until reconciled.
+func (q *Queries) HasSubmittedSolanaPull(ctx context.Context, arg HasSubmittedSolanaPullParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasSubmittedSolanaPull, arg.MerchantID, arg.SubscriptionID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const hasUnattributedPaymentAfterRebillBoundary = `-- name: HasUnattributedPaymentAfterRebillBoundary :one

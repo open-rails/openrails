@@ -32,12 +32,12 @@ export interface CancelSubscriptionDialogProps {
   onOpenChange: (open: boolean) => void
   /** Subscription display name. */
   name: string
-  /** On-chain (Solana) cancel: the wallet signs after the reason. */
+  /** Offers an optional on-chain cancellation when a wallet is available. */
   onChain?: boolean
   /** In-flight stage, when cancelling. */
   pending?: SubscriptionAction
   /** Resolves null on success; the dialog then closes. */
-  onConfirm: (reason: string) => Promise<BillingError | null>
+  onConfirm: (reason: string, revokeOnChain: boolean) => Promise<BillingError | null>
   appearance?: BillingAppearance
 }
 
@@ -56,6 +56,7 @@ export function CancelSubscriptionDialog({
   const reasonId = React.useId()
   const hintId = React.useId()
   const [reason, setReason] = React.useState("")
+  const [revokeOnChain, setRevokeOnChain] = React.useState(false)
   const [touched, setTouched] = React.useState(false)
   const [error, setError] = React.useState<BillingError | null>(null)
   const busy = pending !== undefined
@@ -66,13 +67,13 @@ export function CancelSubscriptionDialog({
     setTouched(true)
     if (tooShort || busy) return
     setError(null)
-    const result = await onConfirm(reason)
+    const result = await onConfirm(reason, revokeOnChain)
     if (!result) onOpenChange(false)
     else if (!isWalletRejection(result)) setError(result)
   }
 
   const stageLabel =
-    pending === "cancel" && onChain
+    pending === "cancel" && revokeOnChain
       ? t("cancel.preparing")
       : pending === "signing"
         ? t("cancel.signing")
@@ -80,7 +81,7 @@ export function CancelSubscriptionDialog({
           ? t("cancel.confirming")
           : busy
             ? t("cancel.working")
-            : onChain
+            : revokeOnChain
               ? t("cancel.confirmWallet")
               : t("cancel.confirm")
 
@@ -108,9 +109,7 @@ export function CancelSubscriptionDialog({
           <AlertDialogHeader>
             <AlertDialogTitle>{t("cancel.title", { name })}</AlertDialogTitle>
             <AlertDialogDescription>
-              {onChain
-                ? t("cancel.solanaDescription")
-                : t("cancel.description")}
+              {t("cancel.description")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="grid gap-2">
@@ -146,6 +145,17 @@ export function CancelSubscriptionDialog({
               </span>
             </div>
           </div>
+          {onChain ? (
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={revokeOnChain}
+                disabled={busy}
+                onChange={(event) => setRevokeOnChain(event.target.checked)}
+              />
+              <span>{t("cancel.revokeOnChain")}</span>
+            </label>
+          ) : null}
           {error ? (
             <p role="alert" className="text-sm text-destructive">
               {m.error(error)}
