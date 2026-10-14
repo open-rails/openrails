@@ -49,13 +49,13 @@ async function signIn(page: Page, buy: Locator, user: string) {
 }
 
 // Pays the order in BuyButton's dialog with a new card.
-async function pay(page: Page, buy: Locator, confirm: RegExp) {
+async function pay(page: Page, buy: Locator, confirm: "Pay" | "Subscribe") {
   await buy.click()
   const purchase = page.getByRole("dialog")
   await purchase.getByLabel("Full name").fill("Card Holder")
   await purchase.getByLabel("Country or region").selectOption("US")
   await purchase.getByLabel(/ZIP/).fill("10001")
-  await purchase.getByRole("button", { name: confirm }).click()
+  await purchase.getByRole("button", { name: confirm, exact: true }).click()
 }
 
 const button = (page: Page, name: string) => page.getByRole("button", { name, exact: true })
@@ -76,7 +76,7 @@ test("the store lists courses with their prices and what the user owns", async (
   const rent = css.getByRole("button", { name: "Rent for 3 days, $1.99", exact: true })
 
   await signIn(page, rent, dana)
-  await pay(page, rent, /^Pay \$1\.99/)
+  await pay(page, rent, "Pay")
   await expect(page).toHaveURL("/courses/css-101")
   await expectVideo(page)
 
@@ -102,7 +102,7 @@ test("a course page sends a visitor without access to buy it", async ({ page }) 
   await expect(button(page, "Rent for 3 days, $1.99")).toBeVisible()
 
   await signIn(page, button(page, "$4.99"), alice)
-  await pay(page, button(page, "$4.99"), /^Pay \$4\.99/)
+  await pay(page, button(page, "$4.99"), "Pay")
   await expect(page).toHaveURL("/courses/css-101")
   await expectVideo(page)
 
@@ -115,7 +115,7 @@ test("the bundle unlocks both courses", async ({ page }) => {
   await page.goto("/courses/tailwind-102")
   await expect(page).toHaveURL("/courses/tailwind-102/buy")
   await signIn(page, button(page, "$8.99"), bobby)
-  await pay(page, button(page, "$8.99"), /^Pay \$8\.99/)
+  await pay(page, button(page, "$8.99"), "Pay")
   await expect(page).toHaveURL("/courses/tailwind-102")
   await expectVideo(page)
 
@@ -131,7 +131,7 @@ test("the membership unlocks members-only videos and every course", async ({ pag
   await expect(page.getByTestId("product")).toHaveCount(1)
   await expect(button(page, "$99.00 every 365 days")).toBeVisible()
   await signIn(page, button(page, "$10.00 every 30 days"), carol)
-  await pay(page, button(page, "$10.00 every 30 days"), /^Pay \$10\.00/)
+  await pay(page, button(page, "$10.00 every 30 days"), "Subscribe")
   await expect(page).toHaveURL("/courses/live-qa")
   await expectVideo(page)
 
