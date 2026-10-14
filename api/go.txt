@@ -3508,6 +3508,7 @@ pkg openrails/billing, var ErrUnauthorized error
 pkg openrails/billing, var ErrUnreachable error
 pkg openrails/billing, var ErrUsageNotPriced error
 pkg openrails/billing, var ReservedMerchantSlugs []string
+pkg openrails/catalog, const AccessForever untyped string = "forever"
 pkg openrails/catalog, const AggregationCount Aggregation = "count"
 pkg openrails/catalog, const AggregationLatest Aggregation = "latest"
 pkg openrails/catalog, const AggregationMax Aggregation = "max"

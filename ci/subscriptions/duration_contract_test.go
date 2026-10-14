@@ -73,17 +73,26 @@ func TestCatalogDurationHumanAPIContract(t *testing.T) {
 	repriced := read("mixed", new(72), new(720))
 	require.NotEqual(t, original.ID, repriced.ID)
 	require.EqualValues(t, 12_000_000, repriced.UnitAmount)
-	apply("mixed", map[string]any{"access_duration": nil}, false)
-	read("mixed", nil, new(720))
+	// A recurring price's access is never forever; a one-off's may be.
+	for _, forever := range []any{nil, "forever"} {
+		var refused map[string]any
+		status := w.staffCall(http.MethodPost, "/v1/catalog/apply", map[string]any{
+			"schema_version": 1, "products": map[string]any{key: map[string]any{"prices": map[string]any{"mixed": map[string]any{"access_duration": forever}}}},
+		}, &refused)
+		require.True(t, status >= 400 && status < 500, "%d %v", status, refused)
+	}
+	read("mixed", new(72), new(720))
 	apply("mixed", map[string]any{"billing_interval": nil}, false)
+	read("mixed", new(72), nil)
+	apply("mixed", map[string]any{"access_duration": "forever"}, false)
 	read("mixed", nil, nil)
 
 	apply("finite", map[string]any{"currency": "USD", "unit_amount": "1000000", "access_duration": "3 days"}, false)
 	read("finite", new(72), nil)
 	apply("recurring", map[string]any{"currency": "USD", "unit_amount": "2000000", "billing_interval": "30 days"}, false)
-	read("recurring", nil, new(720))
+	read("recurring", new(720), new(720))
 	apply("trial", map[string]any{"currency": "USD", "unit_amount": "3000000", "billing_interval": "30 days", "trial_unit_amount": "0", "trial_duration": "1 day"}, false)
-	trial := read("trial", nil, new(720))
+	trial := read("trial", new(720), new(720))
 	require.Equal(t, new(24), trial.TrialDurationHours)
 	require.Equal(t, new(int64(0)), trial.TrialUnitAmount)
 }
@@ -96,14 +105,14 @@ func TestCatalogDurationCreatePriceAPIContract(t *testing.T) {
 			product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "price-duration-" + string(tp), DisplayName: "Independent durations"})
 			require.NoError(t, err)
 			for _, tc := range []struct {
-				key      string
-				access   *int
-				interval *int
+				key            string
+				access, wanted *int
+				interval       *int
 			}{
-				{"permanent", nil, nil},
-				{"finite", new(72), nil},
-				{"recurring-permanent", nil, new(720)},
-				{"recurring-finite", new(72), new(720)},
+				{"permanent", nil, nil, nil},
+				{"finite", new(72), new(72), nil},
+				{"recurring-follows-billing", nil, new(720), new(720)},
+				{"recurring-finite", new(72), new(72), new(720)},
 			} {
 				price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{
 					ProductID: product.ID, Key: tc.key, Currency: "USD", UnitAmount: 10_000_000,
@@ -112,7 +121,7 @@ func TestCatalogDurationCreatePriceAPIContract(t *testing.T) {
 				require.NoError(t, err, tc.key)
 				read, err := client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
 				require.NoError(t, err)
-				require.Equal(t, tc.access, read.AccessDurationHours, tc.key)
+				require.Equal(t, tc.wanted, read.AccessDurationHours, tc.key)
 				require.Equal(t, tc.interval, read.BillingIntervalHours, tc.key)
 				var wire map[string]any
 				require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/catalog/prices/"+price.ID.String(), nil, &wire))
