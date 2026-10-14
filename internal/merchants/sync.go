@@ -366,8 +366,11 @@ func validatePSPDocument(key string, p merchantdocs.PSP, set merchantdocs.Set) e
 	}
 	if custodian != "" {
 		held, ok := set.Custodians[custodian]
-		if !ok || held.Value.Environment != config.EnvironmentClass(p.Rail, p.Environment) {
+		if !ok {
 			return fmt.Errorf("custodian %q is not declared (declared: %s)", custodian, strings.Join(set.CustodianKeys(), ", "))
+		}
+		if class := config.EnvironmentClass(p.Rail, p.Environment); held.Value.Environment != class {
+			return fmt.Errorf("custodian %q is %s, the PSP's %s environment is %s: declare the custodian's environment", custodian, held.Value.Environment, p.Environment, class)
 		}
 		d, err := custodians.Require(held.Value.Kind)
 		if err != nil {

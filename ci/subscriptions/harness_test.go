@@ -383,6 +383,22 @@ func writeVaultDocs(t testing.TB, v *vaulttest.Vault, bill *openrails.Engine, de
 	require.Empty(t, loaded.Rejected, "the documents serve")
 }
 
+// testCustodians declares custodians without an environment in the test
+// class, beside the harness's test PSPs.
+func testCustodians(in map[string]openrails.CustodianConfig) map[string]openrails.CustodianConfig {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]openrails.CustodianConfig, len(in))
+	for key, c := range in {
+		if c.Environment == "" {
+			c.Environment = openrails.EnvironmentTest
+		}
+		out[key] = c
+	}
+	return out
+}
+
 // newVaultWorld is newWorld with Vault holding the merchant's configuration,
 // so the configuration API edits it.
 func newVaultWorld(t *testing.T, configure ...func(*config.Config)) *world {
@@ -504,7 +520,7 @@ func (w *world) start() {
 	}
 	// The harness host's own issuer binds its merchant, as a single-merchant
 	// host declares it.
-	declared := openrails.MerchantDeclaration{DisplayName: name, PSPs: psps, Custodians: w.custodians, AlertWebhooks: w.alertWebhooks, MerchantSettings: w.settings,
+	declared := openrails.MerchantDeclaration{DisplayName: name, PSPs: psps, Custodians: testCustodians(w.custodians), AlertWebhooks: w.alertWebhooks, MerchantSettings: w.settings,
 		Issuer: issuer}
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{w.slug: declared}
 	if w.vault != nil {
