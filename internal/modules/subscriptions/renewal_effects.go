@@ -56,7 +56,7 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 			return nil, err
 		}
 	}
-	if _, err := entitlementsService.PushAccess(ctx, subscriptionAccess(sub, effects.PeriodStart)); err != nil {
+	if _, err := entitlementsService.PushAccess(ctx, subscriptionAccessForPeriod(sub, effects.PeriodStart, &effects.PeriodEnd)); err != nil {
 		return nil, fmt.Errorf("grant renewal access %s: %w", sub.ID, err)
 	}
 	if !effects.PreserveLifecycle && effects.PeriodEnd.After(s.now().UTC()) {

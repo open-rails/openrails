@@ -605,7 +605,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				return nil, nil, fmt.Errorf("failed access check: %w", err)
 			}
 			if !granted {
-				window, err := entitlementService.PushAccess(ctx, subscriptionAccess(subscription, periodStartsAt.UTC()))
+				window, err := entitlementService.PushAccess(ctx, subscriptionAccessForPeriod(subscription, periodStartsAt.UTC(), &periodEndsAt))
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to grant subscription access: %w", err)
 				}
@@ -1295,7 +1295,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		}); err != nil {
 			return fmt.Errorf("failed to clear grace access on reactivation: %w", err)
 		}
-		if _, err := entitlementService.PushAccess(ctx, subscriptionAccess(subscription, periodStartsAt.UTC())); err != nil {
+		if _, err := entitlementService.PushAccess(ctx, subscriptionAccessForPeriod(subscription, periodStartsAt.UTC(), &periodEndsAt)); err != nil {
 			return fmt.Errorf("failed to restore access on reactivation: %w", err)
 		}
 

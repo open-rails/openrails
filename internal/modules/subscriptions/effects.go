@@ -55,7 +55,7 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 			if err := ents.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, e.Start, models.AccessRevokeSuperseded, models.AccessSourceGrace); err != nil {
 				return nil, fmt.Errorf("end superseded renewal grace %s: %w", sub.ID, err)
 			}
-			if _, err := ents.PushAccess(ctx, subscriptionAccess(sub, e.Start)); err != nil {
+			if _, err := ents.PushAccess(ctx, subscriptionAccessForPeriod(sub, e.Start, &e.End)); err != nil {
 				return nil, fmt.Errorf("grant period %s: %w", sub.ID, err)
 			}
 			if err := pushRenewalGrace(ctx, d, ents, sub, e.Start, e.End); err != nil {

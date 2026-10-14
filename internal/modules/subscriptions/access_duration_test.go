@@ -207,3 +207,20 @@ func TestInitialHistoryReplaysNativeDefaultAndExplicitIndefinite(t *testing.T) {
 	row.EndsAt = &end
 	require.Error(t, ValidateInitialMembershipHistory(merchant, terms, []gen.BillingGrant{row}), "indefinite acceptance cannot replay as a default")
 }
+
+func TestHistoricalDefaultAccessUsesTheAcceptedBillBoundary(t *testing.T) {
+	start := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	acceptedEnd := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	newerEnd := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
+	sub := &models.Subscription{ProviderAccessDefaultSnapshot: true, CurrentPeriodEndsAt: &newerEnd}
+	got := subscriptionAccessForPeriod(sub, start, &acceptedEnd)
+	require.Equal(t, &acceptedEnd, got.EndsAt, "late paid facts keep their own immutable service period")
+	require.False(t, got.Indefinite)
+	sub.ProviderAccessDefaultSnapshot = false
+	got = subscriptionAccessForPeriod(sub, start, &acceptedEnd)
+	require.Nil(t, got.EndsAt)
+	require.True(t, got.Indefinite, "an explicit nil cannot acquire the provider's default")
+	sub.AccessDurationHoursSnapshot = new(24)
+	got = subscriptionAccessForPeriod(sub, start, &acceptedEnd)
+	require.Equal(t, new(start.Add(24*time.Hour)), got.EndsAt)
+}

@@ -33,11 +33,21 @@ func subscriptionAccessEnd(sub *models.Subscription, start time.Time) *time.Time
 	return accessEnd(start, sub.AccessDurationHoursSnapshot)
 }
 
-// subscriptionAccess grants the subscription's product for exactly the
-// accepted access window. Billing periods schedule charges and never supply an
-// implicit expiry for a new grant.
+// subscriptionAccess grants the current accepted access window. A provider
+// default uses its verified service boundary; explicit access remains hourly
+// or indefinite independently of the billing cadence.
 func subscriptionAccess(sub *models.Subscription, start time.Time) entitlements.PushAccessParams {
-	end := subscriptionAccessEnd(sub, start)
+	return subscriptionAccessForPeriod(sub, start, sub.CurrentPeriodEndsAt)
+}
+
+// subscriptionAccessForPeriod binds a paid fact to that fact's own service
+// boundary. A late historical bill must not acquire the end of a newer period
+// already projected onto the mutable subscription row.
+func subscriptionAccessForPeriod(sub *models.Subscription, start time.Time, periodEnd *time.Time) entitlements.PushAccessParams {
+	end := accessEnd(start, sub.AccessDurationHoursSnapshot)
+	if sub.ProviderAccessDefaultSnapshot {
+		end = periodEnd
+	}
 	return entitlements.PushAccessParams{
 		UserID: sub.CustomerID.String(), ProductID: sub.ProductID, NotBefore: &start,
 		EndsAt: end, Indefinite: end == nil && !sub.ProviderAccessDefaultSnapshot,
