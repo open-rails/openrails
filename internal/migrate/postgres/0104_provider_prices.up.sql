@@ -28,18 +28,31 @@ FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('archived', 'up
 COMMENT ON COLUMN billing.prices.provider_owned IS 'A provider owns and runs the price: its one price_psp_bindings row names the PSP and the provider object, whose terms this row caches. False: ours, bound only to the Solana plans OpenRails published for it.';
 
 -- A split provider price's id derives from the price and PSP it splits.
+WITH provider_keys AS (
+    SELECT DISTINCT p.merchant_id, p.product_id, p.key AS source_key, psp.id AS psp_id,
+        p.key || '-' || psp.key || CASE WHEN psp.superseded_at IS NULL THEN '' ELSE '-' || left(psp.id::text, 8) END AS split_key
+    FROM billing.price_psp_bindings b
+    JOIN billing.psps psp ON psp.merchant_id = b.merchant_id AND psp.id = b.psp_id
+    JOIN billing.prices p ON p.merchant_id = b.merchant_id AND p.id = b.price_id
+    WHERE (psp.rail = 'nmi' AND b.plan_id IS NOT NULL) OR (psp.rail = 'stripe' AND b.price_ref IS NOT NULL)
+        OR (psp.rail = 'ccbill' AND (b.flex_id IS NOT NULL OR b.recurring_billing_option_id IS NOT NULL))
+), collisions AS (
+    SELECT merchant_id, product_id, split_key FROM provider_keys GROUP BY merchant_id, product_id, split_key HAVING count(*) > 1
+    UNION
+    SELECT k.merchant_id, k.product_id, k.split_key FROM provider_keys k
+    JOIN billing.prices p ON p.merchant_id = k.merchant_id AND p.product_id = k.product_id AND p.key = k.split_key
+)
 INSERT INTO billing.prices (id, merchant_id, product_id, archived, amount, currency, access_duration_hours, billing_interval_hours,
     trial_unit_amount, trial_duration_hours, customer_amount, quantity, key, provider_owned, created_at, updated_at, deleted_at)
 SELECT md5(p.id::text || ':' || psp.id::text)::uuid, p.merchant_id, p.product_id, p.archived, p.amount, p.currency,
     p.access_duration_hours, p.billing_interval_hours, p.trial_unit_amount, p.trial_duration_hours, p.customer_amount, p.quantity,
-    p.key || '-' || psp.key || CASE WHEN psp.superseded_at IS NULL THEN '' ELSE '-' || left(psp.id::text, 8) END ||
-    CASE WHEN EXISTS (SELECT 1 FROM billing.prices collision WHERE collision.merchant_id = p.merchant_id AND collision.product_id = p.product_id
-        AND collision.key = p.key || '-' || psp.key || CASE WHEN psp.superseded_at IS NULL THEN '' ELSE '-' || left(psp.id::text, 8) END)
+    k.split_key || CASE WHEN EXISTS (SELECT 1 FROM collisions c WHERE c.merchant_id = p.merchant_id AND c.product_id = p.product_id AND c.split_key = k.split_key)
         THEN '-provider-' || md5(p.product_id::text || ':' || p.key || ':' || psp.id::text) ELSE '' END,
     true, p.created_at, p.updated_at, p.deleted_at
 FROM billing.price_psp_bindings b
 JOIN billing.psps psp ON psp.merchant_id = b.merchant_id AND psp.id = b.psp_id
 JOIN billing.prices p ON p.merchant_id = b.merchant_id AND p.id = b.price_id
+JOIN provider_keys k ON k.merchant_id = p.merchant_id AND k.product_id = p.product_id AND k.source_key = p.key AND k.psp_id = psp.id
 WHERE (psp.rail = 'nmi' AND b.plan_id IS NOT NULL) OR (psp.rail = 'stripe' AND b.price_ref IS NOT NULL)
     OR (psp.rail = 'ccbill' AND (b.flex_id IS NOT NULL OR b.recurring_billing_option_id IS NOT NULL))
 ORDER BY p.created_at, p.id, psp.id;

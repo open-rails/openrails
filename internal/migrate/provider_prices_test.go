@@ -36,7 +36,7 @@ func TestProviderPricesMigrationPreservesTheExistingBook(t *testing.T) {
 	require.NoError(t, err)
 	at := -1
 	for i, m := range migrations {
-		if strings.HasPrefix(m.Name, "0103_") {
+		if strings.HasPrefix(m.Name, "0104_") {
 			at = i
 		}
 	}
