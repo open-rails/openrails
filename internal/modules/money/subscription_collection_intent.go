@@ -467,6 +467,9 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 		return intents.Ambiguous(err.Error())
 	}
 	params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, PreviousPeriodEnd: &p.PreviousPeriodEnd, PaymentCustodian: p.Instrument.Custodian, Rail: models.Rail(in.Rail), TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
+	if p.Instrument.Custodian == models.CustodianPlatform {
+		params.PaymentPSPID = p.Instrument.PSPID
+	}
 	if retained.ReversalKind() != "" {
 		// A confirmed charge is a financial fact even while readonly or stale
 		// coverage holds its cancellation. Commit the idempotent payment first;

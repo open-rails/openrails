@@ -747,7 +747,11 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 		return errors.New("confirmed charge requires a transaction id")
 	}
 	if params.Prepared != nil {
-		ctx = db.WithPSPID(ctx, params.Prepared.PSPID)
+		psp := params.Prepared.PSPID
+		if params.PaymentPSPID != uuid.Nil {
+			psp = params.PaymentPSPID
+		}
+		ctx = db.WithPSPID(ctx, psp)
 	}
 	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		db := db.NewWithPgxTx(tx)
@@ -796,7 +800,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 		now := s.now().UTC()
 		payment := &models.Payment{
 			ID: uuidutil.NewV7(), CustomerID: subscription.CustomerID, SubscriptionID: &subscription.ID,
-			Rail: params.Rail, PspID: pspIDOf(subscription), TransactionID: params.TransactionID,
+			Rail: params.Rail, PspID: new(renewalPaymentPSPID(params, subscription)), TransactionID: params.TransactionID,
 			Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusSucceededValue,
 			Metadata:      metadata,
 			AttemptKind:   func() *string { k := payments.AttemptRenewal; return &k }(),
@@ -845,7 +849,11 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, params *RenewMembershipParams) error {
 	notifications := make([]*models.NotificationEvent, 0, 1)
 	if params.Prepared != nil {
-		ctx = db.WithPSPID(ctx, params.Prepared.PSPID)
+		psp := params.Prepared.PSPID
+		if params.PaymentPSPID != uuid.Nil {
+			psp = params.PaymentPSPID
+		}
+		ctx = db.WithPSPID(ctx, psp)
 	}
 	renewalApplied := false
 
@@ -1055,7 +1063,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				CustomerID:     subscription.CustomerID,
 				SubscriptionID: &subscription.ID,
 				Rail:           params.Rail,
-				PspID:          pspIDOf(subscription),
+				PspID:          new(renewalPaymentPSPID(params, subscription)),
 				TransactionID:  params.TransactionID,
 				Amount:         amount,
 				ListAmount:     amount,

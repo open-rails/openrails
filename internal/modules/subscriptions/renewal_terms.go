@@ -217,6 +217,9 @@ func applyRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, 
 // Prepared renewals name the local obligation. Native calls must still match
 // their immutable remote binding; an engine call must carry its prior boundary.
 func lockedRenewalSubscription(ctx context.Context, d *db.DB, params *RenewMembershipParams) (*models.Subscription, error) {
+	if params.PaymentPSPID != uuid.Nil && (params.Prepared == nil || params.PreviousPeriodEnd == nil || params.PaymentCustodian != models.CustodianPlatform || params.ProviderBill != nil) {
+		return nil, errors.New("payment account requires an accepted platform renewal")
+	}
 	repo := NewSubscriptionRepo(d)
 	if params.Prepared == nil {
 		if params.PreviousPeriodEnd != nil {
@@ -269,4 +272,13 @@ func (t *RenewalTerms) UnmarshalJSON(data []byte) error {
 	}
 	*t = RenewalTerms(decoded)
 	return nil
+}
+
+// renewalPaymentPSPID preserves native account binding while an accepted
+// platform renewal records the account that actually took the payment.
+func renewalPaymentPSPID(params *RenewMembershipParams, sub *models.Subscription) uuid.UUID {
+	if params.PaymentPSPID != uuid.Nil {
+		return params.PaymentPSPID
+	}
+	return sub.PspID
 }

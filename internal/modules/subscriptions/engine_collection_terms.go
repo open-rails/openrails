@@ -101,8 +101,11 @@ func DecodeSubscriptionCollectionPayload(in gen.BillingProviderIntent) (Subscrip
 	}
 	sameCustodian := (in.CustodianID == nil && p.Instrument.CustodianID == nil) ||
 		(in.CustodianID != nil && p.Instrument.CustodianID != nil && *in.CustodianID == *p.Instrument.CustodianID)
-	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeSubscriptionCollection || in.SubscriptionID == nil || *in.SubscriptionID != p.Renewal.SubscriptionID || in.PriceID == nil || *in.PriceID != p.Renewal.PriceID || in.PspID == nil || *in.PspID != p.Renewal.PSPID || p.Instrument.PSPID != p.Renewal.PSPID || !sameCustodian {
+	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeSubscriptionCollection || in.SubscriptionID == nil || *in.SubscriptionID != p.Renewal.SubscriptionID || in.PriceID == nil || *in.PriceID != p.Renewal.PriceID || in.PspID == nil || *in.PspID != p.Instrument.PSPID || !sameCustodian {
 		return p, errors.New("engine renewal operation contradicts accepted scope")
+	}
+	if p.Instrument.Custodian != models.CustodianPlatform && p.Instrument.PSPID != p.Renewal.PSPID {
+		return p, errors.New("provider held renewal cannot change its account")
 	}
 	if p.PaymentMethodID == uuid.Nil || p.Attempt < 0 || p.FailureCount < 0 || p.AcceptedAt.IsZero() || p.PreviousPeriodEnd.IsZero() || p.AcceptedAt.Before(p.PreviousPeriodEnd) {
 		return p, errors.New("engine renewal lacks recurring custody or admission identity")
