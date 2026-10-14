@@ -166,7 +166,14 @@
   * {
     @apply border-border outline-ring/50;
   }
-  /* No preflight (host page stays untouched), so reset the UA button face. */
+  /* No preflight (host page stays untouched), so size boxes as the components
+     are drawn: else a full-width input overflows by its padding and border. */
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+  }
+  /* And reset the UA button face. */
   button {
     background-color: transparent;
     color: inherit;

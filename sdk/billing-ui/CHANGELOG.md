@@ -1,5 +1,11 @@
 # Changelog
 
+## Box sizing
+
+- billing-ui sizes its elements `border-box` itself, so a full-width input no
+  longer overflows by its padding and border on a host page without Tailwind's
+  preflight, such as the pay page.
+
 ## The checkout origin
 
 - Breaking: the merchant setting `payment_page.embed_origins` is
