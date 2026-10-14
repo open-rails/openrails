@@ -82,7 +82,7 @@ var declineCustomer = map[DeclineReason]string{
 
 	DeclineProcessingError: "processing_error", DeclineCommunicationError: "try_again_later",
 	DeclineIssuerUnavailable: "try_again_later", DeclineInvalidRequest: "processing_error",
-	DeclineMerchantConfig: "processing_error", DeclineDuplicateTransaction: "processing_error",
+	DeclineMerchantConfig: "processing_error", DeclineDuplicateTransaction: "duplicate_transaction",
 
 	DeclineUnknown: "generic_decline",
 }
@@ -119,6 +119,7 @@ var failureCopy = map[string]struct{ message, field string }{
 	"card_not_supported":      {"This card doesn't support this type of purchase.", ""},
 	"currency_not_supported":  {"This card doesn't support this currency.", ""},
 	"processing_error":        {"The payment couldn't be processed. Try again.", ""},
+	"duplicate_transaction":   {"This card was just charged the same amount. Check your account before trying again.", ""},
 	"try_again_later":         {"The card issuer is unavailable. Try again later.", ""},
 	"authentication_required": {"The card issuer requires authentication. Try again and complete the verification.", ""},
 	"do_not_honor":            {"Your card was declined. Contact your bank or try a different card.", ""},
