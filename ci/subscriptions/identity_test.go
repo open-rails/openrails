@@ -224,6 +224,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"POST /v1/me/subscriptions/{id}/retry-now":      {"/subscriptions/" + sub.String() + "/retry-now", map[string]any{}},
 		"POST /v1/me/subscriptions/{id}/change":         {"/subscriptions/" + sub.String() + "/change", map[string]any{"price_id": to.ID}},
 		"POST /v1/me/subscriptions/{id}/change/preview": {"/subscriptions/" + sub.String() + "/change/preview", map[string]any{"price_id": to.ID}},
+		"GET /v1/me/subscriptions/{id}/change/options":  {"/subscriptions/" + sub.String() + "/change/options", nil},
 		"POST /v1/me/subscriptions/{id}/confirm":        {"/subscriptions/" + sub.String() + "/confirm", nil},
 		"PATCH /v1/me/payment-methods/{id}":             {"/payment-methods/" + aCard, map[string]any{"exp_month": 12, "exp_year": 2039, "reusable": false}},
 		"DELETE /v1/me/payment-methods/{id}":            {"/payment-methods/" + aCard, nil},
