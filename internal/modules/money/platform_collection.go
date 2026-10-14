@@ -3,13 +3,17 @@ package money
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 )
@@ -58,4 +62,31 @@ func (b *MerchantCollectionAdapterBuilder) ResolvePlatformNMICharge(ctx context.
 		return nil, err
 	}
 	return nmiproxy.New(bt, nmiproxy.GatewayConfig{SecurityKey: posture.SecurityKey, DirectPostURL: posture.DirectPostURL, Posture: posture}).WithSource(nmiproxy.Source{TokenID: token.ID}), nil
+}
+
+// platformRenewalAccount selects an account for a new attempt, not a retry of
+// an accepted operation. Recurring reference eligibility belongs to the rail.
+func platformRenewalAccount(ctx context.Context, configuration *merchants.Service, method gen.BillingPaymentMethod, agreement gen.BillingMandate) (uuid.UUID, error) {
+	mid := billing.MerchantID(method.MerchantID)
+	_, settings, err := configuration.MerchantSettings(ctx, mid)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	accounts, err := configuration.ActivePSPScopesForRail(ctx, mid, method.Rail)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	for _, account := range accounts {
+		if !account.Declared || account.DuplicateAccount || len(settings.ChargePSPs) > 0 && !slices.Contains(settings.ChargePSPs, account.Key) {
+			continue
+		}
+		switch account.Rail {
+		case string(models.RailNMI):
+			if agreement.Rail != account.Rail || nmiproxy.ValidateRecurringAccount(agreement.PspID, account.ID) != nil || account.Secret("security_key") == "" {
+				continue
+			}
+			return account.ID, nil
+		}
+	}
+	return uuid.Nil, fmt.Errorf("%w: no configured account can use the recurring reference from account %s", charge.ErrNoRoute, agreement.PspID)
 }

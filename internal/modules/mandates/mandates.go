@@ -91,17 +91,30 @@ func Citable(ctx context.Context, q *gen.Queries, merchantID, customerID, method
 	return Lineage(m), nil
 }
 
-// ForSubscription is the active recurring mandate a subscription's renewal on
-// this card, through psp, charges under.
-func ForSubscription(ctx context.Context, q *gen.Queries, merchantID, customerID, subscriptionID, methodID, pspID uuid.UUID) (*charge.Mandate, error) {
+// SubscriptionAgreement reads the customer's active recurring agreement on this card.
+// Its source account and references are retained; the charging integration
+// decides which destination accounts can use them.
+func SubscriptionAgreement(ctx context.Context, q *gen.Queries, merchantID, customerID, subscriptionID, methodID uuid.UUID) (gen.BillingMandate, error) {
 	m, err := q.GetLiveRecurringMandateForShare(ctx, gen.GetLiveRecurringMandateForShareParams{MerchantID: merchantID, SubscriptionID: subscriptionID})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrMissing
+		return m, ErrMissing
 	}
+	if err != nil {
+		return m, err
+	}
+	return m, validateAgreement(m, customerID, methodID)
+}
+
+// ForSubscription requires an agreement usable on the subscription's bound account.
+func ForSubscription(ctx context.Context, q *gen.Queries, merchantID, customerID, subscriptionID, methodID, pspID uuid.UUID) (*charge.Mandate, error) {
+	m, err := SubscriptionAgreement(ctx, q, merchantID, customerID, subscriptionID, methodID)
 	if err != nil {
 		return nil, err
 	}
-	return chargeable(m, customerID, methodID, pspID)
+	if m.PspID != pspID {
+		return nil, fmt.Errorf("%w: mandate %s is on another account", ErrMissing, m.ID)
+	}
+	return Lineage(m), nil
 }
 
 // ForCollection is the active unscheduled mandate a collection in currency on
@@ -120,16 +133,26 @@ func ForCollection(ctx context.Context, q *gen.Queries, merchantID, customerID u
 // chargeable: a merchant-initiated charge runs only under an active mandate on
 // the card it charges, with references from the account it charges through.
 func chargeable(m gen.BillingMandate, customerID, methodID, pspID uuid.UUID) (*charge.Mandate, error) {
-	if m.CustomerID != customerID || m.PaymentMethodID == nil || *m.PaymentMethodID != methodID || m.PspID != pspID {
-		return nil, fmt.Errorf("%w: mandate %s is on another card or account", ErrMissing, m.ID)
+	if m.PspID != pspID {
+		return nil, fmt.Errorf("%w: mandate %s is on another account", ErrMissing, m.ID)
 	}
-	if m.Status != StatusActive {
-		return nil, fmt.Errorf("%w: mandate %s is %s", ErrNotActive, m.ID, m.Status)
-	}
-	if m.InitialTransactionID == nil {
-		return nil, fmt.Errorf("%w: mandate %s has no storing transaction", ErrMissing, m.ID)
+	if err := validateAgreement(m, customerID, methodID); err != nil {
+		return nil, err
 	}
 	return Lineage(m), nil
+}
+
+func validateAgreement(m gen.BillingMandate, customerID, methodID uuid.UUID) error {
+	if m.CustomerID != customerID || m.PaymentMethodID == nil || *m.PaymentMethodID != methodID {
+		return fmt.Errorf("%w: mandate %s is on another customer or card", ErrMissing, m.ID)
+	}
+	if m.Status != StatusActive {
+		return fmt.Errorf("%w: mandate %s is %s", ErrNotActive, m.ID, m.Status)
+	}
+	if m.InitialTransactionID == nil {
+		return fmt.Errorf("%w: mandate %s has no storing transaction", ErrMissing, m.ID)
+	}
+	return nil
 }
 
 // Recheck confirms, under a shared lock, that a lineage a charge froze is

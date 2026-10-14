@@ -4,17 +4,22 @@ package subscriptions_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/stretchr/testify/require"
@@ -24,7 +29,13 @@ func platformSubscriptionWorld(t *testing.T) (*world, *btFake) {
 	t.Helper()
 	bt, endpoint := newBTFake(t)
 	bt.tenant, bt.application = platformTenant, uuid.NewString()
-	w := prepareWorld(t, 12, withPlatformVault)
+	w := prepareWorld(t, 12)
+	gateway := httptest.NewServer(w.nmi)
+	t.Cleanup(gateway.Close)
+	w.cfg = func(cfg *config.Config) {
+		withPlatformVault(cfg)
+		cfg.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL}
+	}
 	w.vault = vaulttest.New(t)
 	w.booted = func(e *openrails.Engine) {
 		rt := engine.Graph(e).Runtime
@@ -289,6 +300,137 @@ func TestPlatformRenewal(t *testing.T) {
 					}
 				}
 			}
+		})
+	}
+}
+
+func TestPlatformRenewalChargeAccounts(t *testing.T) {
+	t.Parallel()
+	w, bt := platformSubscriptionWorld(t)
+	c := w.newCustomer()
+	const number = "4111111111111111"
+	paid := c.mustPurchase(remote, order{price: w.membership("platform:routing", 9_990_000).ID, rail: "nmi", token: bt.collect(number)})
+	subID := *paid.SubscriptionID
+	original := w.subscriptionMandate(remote, c.cid(), subID)
+	client := w.client[remote]
+	second, err := client.CreatePSP(t.Context(), billing.CreatePSPParams{
+		Key: "second", Rail: "nmi", Environment: "sandbox", PSPAccount: billing.PSPAccount{GatewayID: "second-account"},
+		Credentials: map[string]string{"security_key": "second-account-key", "webhook_signing_secret": "second-webhook"},
+	})
+	require.NoError(t, err)
+	_, err = client.UpdateMerchantConfiguration(t.Context(), setVault(billing.CardVaultPlatform, "second"))
+	require.NoError(t, err)
+
+	end := *w.subscription(remote, subID).CurrentPeriodEndsAt
+	w.advanceHealthyTo(end)
+	w.runRenewals()
+	require.Len(t, bt.salesOf(number), 1, "neither the excluded account nor a different NMI account may collect")
+	sub := w.subscription(remote, subID)
+	require.Equal(t, billing.SubscriptionActive, sub.Status, "an account restriction is not a bad card")
+	require.True(t, end.Equal(*sub.CurrentPeriodEndsAt))
+	require.Equal(t, original.ID, w.subscriptionMandate(remote, c.cid(), subID).ID)
+
+	_, err = client.UpdateMerchantConfiguration(t.Context(), setVault(billing.CardVaultPlatform, "second", "nmi"))
+	require.NoError(t, err)
+	w.runRenewals()
+	w.until(func() bool { return w.subscription(remote, subID).CurrentPeriodEndsAt.After(end) }, "restoring the eligible account resumes collection")
+	sales := bt.salesOf(number)
+	require.Len(t, sales, 2)
+	require.Equal(t, "e2e-nmi-key", sales[1].SecurityKey)
+	require.Equal(t, *original.InitialTransactionID, sales[1].InitialTxnID)
+	for _, payment := range completed(w.payments(remote, c.id)) {
+		require.NotNil(t, payment.PSPID)
+		require.NotEqual(t, second.ID, *payment.PSPID)
+	}
+}
+
+func TestPlatformRenewalKeepsAcceptedAccount(t *testing.T) {
+	for _, scenario := range []string{"configuration changes before submission", "configuration changes after lost response"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			w, bt := platformSubscriptionWorld(t)
+			c := w.newCustomer()
+			const number = "4111111111111111"
+			paid := c.mustPurchase(remote, order{price: w.membership("platform:accepted-account", 9_990_000).ID, rail: "nmi", token: bt.collect(number)})
+			subID := *paid.SubscriptionID
+			client := w.client[remote]
+			_, err := client.CreatePSP(t.Context(), billing.CreatePSPParams{
+				Key: "second", Rail: "nmi", Environment: "sandbox", PSPAccount: billing.PSPAccount{GatewayID: "second-account"},
+				Credentials: map[string]string{"security_key": "second-account-key", "webhook_signing_secret": "second-webhook"},
+			})
+			require.NoError(t, err)
+			changed := make(chan error, 1)
+			bt.mu.Lock()
+			if scenario == "configuration changes before submission" {
+				bt.beforeTokenRead = func() {
+					_, err := client.UpdateMerchantConfiguration(t.Context(), setVault(billing.CardVaultPlatform, "second"))
+					changed <- err
+				}
+			} else {
+				bt.loseSaleResponse = true
+				w.nmi.HideSales(1)
+			}
+			bt.mu.Unlock()
+			end := *w.subscription(remote, subID).CurrentPeriodEndsAt
+			orderRef := subscriptions.ObligationOrderReference(subID.UUID(), end)
+			var reads, refunds atomic.Int64
+			w.nmi.Intercept(func(r *http.Request) bool {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/refund") {
+					refunds.Add(1)
+					if r.Header.Get("Authorization") != "e2e-nmi-key" {
+						t.Error("refund used a different gateway account")
+					}
+				}
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+				} else if r.Form.Get("order_id") == orderRef {
+					reads.Add(1)
+					if r.Form.Get("security_key") != "e2e-nmi-key" {
+						t.Error("renewal read used a different gateway account")
+					}
+				}
+				return false
+			}, nil)
+			w.advanceHealthyTo(end)
+			w.runRenewals()
+			if scenario == "configuration changes before submission" {
+				select {
+				case err := <-changed:
+					require.NoError(t, err)
+				default:
+					t.Fatal("configuration change did not run before submission")
+				}
+			} else {
+				require.True(t, end.Equal(*w.subscription(remote, subID).CurrentPeriodEndsAt))
+				_, err := client.UpdateMerchantConfiguration(t.Context(), setVault(billing.CardVaultPlatform, "second"))
+				require.NoError(t, err)
+				w.runRenewals()
+				require.Len(t, bt.salesOf(number), 2, "the unresolved attempt prevents another charge")
+				w.nmi.Reveal()
+			}
+			w.until(func() bool { return w.subscription(remote, subID).CurrentPeriodEndsAt.After(end) }, "accepted renewal settles on its original account")
+			require.Positive(t, reads.Load(), "the renewal was checked against its gateway account")
+			sales := bt.salesOf(number)
+			require.Len(t, sales, 2)
+			require.Equal(t, "e2e-nmi-key", sales[1].SecurityKey)
+			payments := completed(w.payments(remote, c.id))
+			require.Len(t, payments, 2)
+			for _, payment := range payments {
+				require.NotNil(t, payment.PSPID)
+				require.Equal(t, w.psp["nmi"], *payment.PSPID)
+			}
+			renewal := payments[0]
+			if payments[1].CreatedAt.After(renewal.CreatedAt) {
+				renewal = payments[1]
+			}
+			_, err = client.RefundPayment(t.Context(), renewal.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "accepted-account-refund"})
+			require.NoError(t, err)
+			w.settle()
+			refunded, err := client.GetPayment(t.Context(), renewal.ID)
+			require.NoError(t, err)
+			require.Equal(t, billing.PaymentRefunded, refunded.Status)
+			require.Equal(t, renewal.PSPID, refunded.PSPID)
+			require.EqualValues(t, 1, refunds.Load())
 		})
 	}
 }
