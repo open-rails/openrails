@@ -1777,8 +1777,11 @@
       "type cardData struct {\n\tMethodRef string `json:\"method_ref\"`\n\tPrimary   bool   `json:\"primary,omitempty\"`\n\tBrand     string `json:\"brand,omitempty\"`\n\tLast4     string `json:\"last4,omitempty\"`\n\tExpMonth  int    `json:\"exp_month,omitempty\"`\n\tExpYear   int    `json:\"exp_year,omitempty\"`\n}",
       "type customerData struct {\n\tCards []cardData `json:\"cards\"`\n}",
       "type recordPosition struct {\n\tID uuid.UUID `json:\"i\"`\n}",
-      "type subscriptionData struct {\n\tPlan           string          `json:\"plan,omitempty\"`\n\tAmount         int64           `json:\"amount,string\"`\n\tCurrency       string          `json:\"currency\"`\n\tIntervalHours  int             `json:\"interval_hours,omitempty\"`\n\tIntervalMonths int             `json:\"interval_months,omitempty\"`\n\tStartedAt      time.Time       `json:\"started_at\"`\n\tNextBillingAt  *time.Time      `json:\"next_billing_at,omitempty\"`\n\tPaused         bool            `json:\"paused,omitempty\"`\n\tEvidence       json.RawMessage `json:\"evidence,omitempty\"`\n}",
-      "type transactionData struct {\n\tTransactionID string    `json:\"transaction_id\"`\n\tType          string    `json:\"type\"`\n\tSuccess       bool      `json:\"success\"`\n\tAmount        int64     `json:\"amount,string\"`\n\tCurrency      string    `json:\"currency\"`\n\tOccurredAt    time.Time `json:\"occurred_at\"`\n}"
+      "type stripeCardJSON struct {\n\tID   string `json:\"id\"`\n\tCard struct {\n\t\tBrand    string `json:\"brand\"`\n\t\tLast4    string `json:\"last4\"`\n\t\tExpMonth int    `json:\"exp_month\"`\n\t\tExpYear  int    `json:\"exp_year\"`\n\t} `json:\"card\"`\n}",
+      "type stripeCustomerJSON struct {\n\tID              string            `json:\"id\"`\n\tEmail           string            `json:\"email\"`\n\tName            string            `json:\"name\"`\n\tCreated         int64             `json:\"created\"`\n\tMetadata        map[string]string `json:\"metadata\"`\n\tInvoiceSettings struct {\n\t\tDefaultPaymentMethod json.RawMessage `json:\"default_payment_method\"`\n\t} `json:\"invoice_settings\"`\n}",
+      "type stripeSubscriptionExtra struct {\n\tStatus               string            `json:\"status\"`\n\tStartDate            int64             `json:\"start_date\"`\n\tCanceledAt           int64             `json:\"canceled_at\"`\n\tEndedAt              int64             `json:\"ended_at\"`\n\tMetadata             map[string]string `json:\"metadata\"`\n\tDefaultPaymentMethod json.RawMessage   `json:\"default_payment_method\"`\n\tItems                struct {\n\t\tData []struct {\n\t\t\tPrice struct {\n\t\t\t\tRecurring *struct {\n\t\t\t\t\tInterval      string `json:\"interval\"`\n\t\t\t\t\tIntervalCount int    `json:\"interval_count\"`\n\t\t\t\t} `json:\"recurring\"`\n\t\t\t} `json:\"price\"`\n\t\t} `json:\"data\"`\n\t} `json:\"items\"`\n}",
+      "type subscriptionData struct {\n\tPlan           string     `json:\"plan,omitempty\"`\n\tAmount         int64      `json:\"amount,string\"`\n\tCurrency       string     `json:\"currency\"`\n\tIntervalHours  int        `json:\"interval_hours,omitempty\"`\n\tIntervalMonths int        `json:\"interval_months,omitempty\"`\n\tStartedAt      time.Time  `json:\"started_at\"`\n\tNextBillingAt  *time.Time `json:\"next_billing_at,omitempty\"`\n\tPaused         bool       `json:\"paused,omitempty\"`\n\n\tEnded        bool       `json:\"ended,omitempty\"`\n\tEndedAt      *time.Time `json:\"ended_at,omitempty\"`\n\tUserCanceled bool       `json:\"user_canceled,omitempty\"`\n\n\tMethodRef string          `json:\"method_ref,omitempty\"`\n\tEvidence  json.RawMessage `json:\"evidence,omitempty\"`\n}",
+      "type transactionData struct {\n\tTransactionID string    `json:\"transaction_id\"`\n\tType          string    `json:\"type\"`\n\tSuccess       bool      `json:\"success\"`\n\tAmount        int64     `json:\"amount,string\"`\n\tCurrency      string    `json:\"currency\"`\n\tOccurredAt    time.Time `json:\"occurred_at\"`\n\n\tStripeInvoice *billing.DeclaredStripeInvoice `json:\"stripe_invoice,omitempty\"`\n}"
     ],
     "internal/query": [
       "type QueryOptions[T any] struct {\n\tPage       int    `form:\"page\" json:\"page\"`\n\tSortBy     string `form:\"sort_by\" json:\"sort_by\"`\n\tPageSize   int    `form:\"page_size\" json:\"page_size\"`\n\tLimit      int    `form:\"limit\" json:\"limit\"`\n\tOffset     int    `form:\"offset\" json:\"offset\"`\n\tTotalItems int64  `form:\"total_items\" json:\"total_items\"`\n\tAll        bool   `form:\"all\" json:\"all\"`\n\tFilters    T      `form:\",inline\"`\n}"
@@ -4197,6 +4200,7 @@
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
       "sort": "sort",
       "strings": "strings",
+      "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
@@ -4208,6 +4212,18 @@
       "context": "context",
       "json": "encoding/json",
       "time": "time"
+    },
+    "internal/pspimport/stripe.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "fmt": "fmt",
+      "json": "encoding/json",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "reconcile": "github.com/open-rails/openrails/internal/reconcile",
+      "strings": "strings",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time",
+      "url": "net/url"
     },
     "internal/reconcile/change.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -4514,7 +4530,6 @@
       "errors": "errors",
       "pspimport": "github.com/open-rails/openrails/internal/pspimport",
       "river": "github.com/riverqueue/river",
-      "rivertype": "github.com/riverqueue/river/rivertype",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
