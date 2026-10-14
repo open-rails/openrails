@@ -52,6 +52,7 @@ func TestAcceptedNativeEnrollmentRepairsAcrossProviderPriceMigration(t *testing.
 		name, plan           string
 		binding              bool
 		amount               int64
+		cadence              int
 		alreadyProviderOwned bool
 		wantSuccess          bool
 	}{
@@ -60,6 +61,7 @@ func TestAcceptedNativeEnrollmentRepairsAcrossProviderPriceMigration(t *testing.
 		{name: "no accepted account mapping", plan: "accepted-plan", amount: 23_000_000},
 		{name: "another plan", binding: true, plan: "different-plan", amount: 23_000_000},
 		{name: "different frozen amount", binding: true, plan: "accepted-plan", amount: 29_000_000},
+		{name: "different frozen cadence", binding: true, plan: "accepted-plan", amount: 23_000_000, cadence: 24},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
@@ -130,9 +132,12 @@ func TestAcceptedNativeEnrollmentRepairsAcrossProviderPriceMigration(t *testing.
 				PSP:        "nmi", RequestFingerprint: strings.Repeat("a", 64), PurchaseIdempotencyKey: operation.String(),
 				NativeSchedule: &subscriptions.NMIInitialScheduleTerms{PlanID: tc.plan, DayFrequency: 30, StartDate: end.Format("20060102")},
 			}
+			if tc.cadence != 0 {
+				payload.Terms.RecurringIntervalHours = &tc.cadence
+			}
 			wire, err := json.Marshal(payload)
 			require.NoError(t, err)
-			exec(`INSERT INTO billing.provider_intents(id,merchant_id,rail,intent_type,price_id,psp_id,payload,idempotency_key,status,next_attempt_at,origin,attempts,result_evidence) VALUES($1,$2,'nmi','initial_membership',$3,$4,$5,$6,'in_flight',$7,'customer',1,'{"initial_submitted":true}')`, operation, mid, acceptedPrice, oldPSP, wire, payment.InitialMembershipIdempotencyKey(operation.String()), acceptedAt)
+			exec(`INSERT INTO billing.provider_intents(id,merchant_id,rail,intent_type,price_id,psp_id,payload,idempotency_key,status,next_attempt_at,origin,attempts,result_evidence) VALUES($1,$2,'nmi','initial_membership',$3,$4,$5,$6,'in_flight',$7,'user',1,'{"initial_submitted":true}')`, operation, mid, acceptedPrice, oldPSP, wire, payment.InitialMembershipIdempotencyKey(operation.String()), acceptedAt)
 			var acceptedSnapshot string
 			require.NoError(t, query(`SELECT payload::text FROM billing.provider_intents WHERE id=$1`, operation).Scan(&acceptedSnapshot))
 			if !tc.alreadyProviderOwned {
