@@ -2766,6 +2766,7 @@ pkg openrails/billing, type PSPImportMappingsResult struct, Deleted int `json:"d
 pkg openrails/billing, type PSPImportMappingsResult struct, Set int `json:"set"`
 pkg openrails/billing, type PSPImportProduct struct
 pkg openrails/billing, type PSPImportProduct struct, Plan string `json:"plan,omitempty"`
+pkg openrails/billing, type PSPImportProduct struct, Price string `json:"price,omitempty"`
 pkg openrails/billing, type PSPImportProduct struct, Product string `json:"product"`
 pkg openrails/billing, type PSPImportRecord struct
 pkg openrails/billing, type PSPImportRecord struct, Customer *CustomerID `json:"customer"`
