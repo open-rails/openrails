@@ -911,6 +911,8 @@ type BillingOrderLine struct {
 	Source *string
 	// The finalized provider amount is authoritative, including exact seat rounding and explicit signed provider adjustments; quantity and unit amount remain the accepted snapshot.
 	ProviderAmount bool
+	// Frozen access choice accepted on a provider bill: use its verified service-period end, otherwise the explicit hourly duration.
+	ProviderAccessDefault bool
 }
 
 // Owed charges awaiting their usage order: an accrual is born pending and gates arrears exposure; finalization moves it onto an order (order_id, status billed), so it bills once. Retention: permanent, never pruned.
@@ -1180,6 +1182,13 @@ type BillingPrice struct {
 	PublicID string
 	// A provider owns and runs the price: its one price_psp_bindings row names the PSP and the provider object, whose terms this row caches. False: ours, bound only to the Solana plans OpenRails published for it.
 	ProviderOwned bool
+	ProviderPspID *uuid.UUID
+	// Immutable provider object and native cadence accepted for this price version; retained even when its normalized lookup binding moves to a newer version.
+	ProviderSnapshot []byte
+	// Provider calendar cadence, independent of fixed hours; a year is twelve months. NULL on our prices and fixed-duration provider prices.
+	BillingIntervalMonths *int32
+	// Access ends at the verified provider service-period end. False retains the explicit hourly access duration, including all pre-split accepted terms.
+	ProviderAccessDefault bool
 	// The methods one of our prices sells through: card (the merchant's card vault and charge PSPs) and solana. NULL: every method the merchant has. Settable like archived; it is not a term.
 	SellVia []string
 }
@@ -1739,6 +1748,8 @@ type BillingSubscription struct {
 	AccessDurationHoursSnapshot *int32
 	// Seats of a per-seat price: renewals bill the unit price times this. NULL unless the price is sold per seat; only an engine-owned NMI or Stripe subscription has seats.
 	Quantity *int32
+	// The accepted access choice for this phase: verified provider service-period end, otherwise the explicit access_duration_hours_snapshot. Existing accepted windows are never inferred to be defaults.
+	ProviderAccessDefaultSnapshot bool
 }
 
 // Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

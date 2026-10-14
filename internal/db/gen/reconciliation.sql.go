@@ -2890,7 +2890,7 @@ SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subs
        subscriptions.started_at, subscriptions.ended_at, subscriptions.canceled_at, subscriptions.cancel_type,
        subscriptions.deletion_scheduled_at, subscriptions.tier_group, subscriptions.last_retry_at,
        subscriptions.retry_attempts, subscriptions.next_retry_at,
-       subscriptions.access_duration_hours_snapshot,
+       subscriptions.access_duration_hours_snapshot, subscriptions.provider_access_default_snapshot,
        scheduled.price_id AS scheduled_price_id,
        price.currency AS price_currency,
        EXISTS (SELECT 1 FROM billing.provider_intents ri
@@ -2915,31 +2915,32 @@ type ReconcileListSubscriptionsByRailsParams struct {
 }
 
 type ReconcileListSubscriptionsByRailsRow struct {
-	ID                          uuid.UUID
-	CustomerID                  uuid.UUID
-	PriceID                     *uuid.UUID
-	ProductID                   uuid.UUID
-	RowVersion                  int64
-	Status                      string
-	Rail                        string
-	CollectionPolicy            string
-	RailSubscriptionID          *string
-	PaymentMethodID             *uuid.UUID
-	CurrentPeriodStartsAt       *time.Time
-	CurrentPeriodEndsAt         *time.Time
-	StartedAt                   time.Time
-	EndedAt                     *time.Time
-	CanceledAt                  *time.Time
-	CancelType                  *string
-	DeletionScheduledAt         *time.Time
-	TierGroup                   *string
-	LastRetryAt                 *time.Time
-	RetryAttempts               *int32
-	NextRetryAt                 *time.Time
-	AccessDurationHoursSnapshot *int32
-	ScheduledPriceID            *uuid.UUID
-	PriceCurrency               *string
-	TierChangePending           bool
+	ID                            uuid.UUID
+	CustomerID                    uuid.UUID
+	PriceID                       *uuid.UUID
+	ProductID                     uuid.UUID
+	RowVersion                    int64
+	Status                        string
+	Rail                          string
+	CollectionPolicy              string
+	RailSubscriptionID            *string
+	PaymentMethodID               *uuid.UUID
+	CurrentPeriodStartsAt         *time.Time
+	CurrentPeriodEndsAt           *time.Time
+	StartedAt                     time.Time
+	EndedAt                       *time.Time
+	CanceledAt                    *time.Time
+	CancelType                    *string
+	DeletionScheduledAt           *time.Time
+	TierGroup                     *string
+	LastRetryAt                   *time.Time
+	RetryAttempts                 *int32
+	NextRetryAt                   *time.Time
+	AccessDurationHoursSnapshot   *int32
+	ProviderAccessDefaultSnapshot bool
+	ScheduledPriceID              *uuid.UUID
+	PriceCurrency                 *string
+	TierChangePending             bool
 }
 
 func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg ReconcileListSubscriptionsByRailsParams) ([]ReconcileListSubscriptionsByRailsRow, error) {
@@ -2974,6 +2975,7 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 			&i.RetryAttempts,
 			&i.NextRetryAt,
 			&i.AccessDurationHoursSnapshot,
+			&i.ProviderAccessDefaultSnapshot,
 			&i.ScheduledPriceID,
 			&i.PriceCurrency,
 			&i.TierChangePending,
@@ -3017,14 +3019,14 @@ const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscript
 INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     current_period_starts_at, current_period_ends_at, started_at,
-    access_duration_hours_snapshot, customer_id, psp_id, collection_policy
+    access_duration_hours_snapshot, provider_access_default_snapshot, customer_id, psp_id, collection_policy
 )
 SELECT $1::uuid, pr.id, pr.product_id, $2::text,
        $3, NULLIF($4::text, ''),
        $5::timestamptz,
        $6::timestamptz,
        COALESCE($7::timestamptz, now()),
-       pr.access_duration_hours, $8, $9::uuid, COALESCE(NULLIF($10::text,''),'provider')
+       pr.access_duration_hours, pr.provider_access_default, $8, $9::uuid, COALESCE(NULLIF($10::text,''),'provider')
 FROM billing.prices pr
 JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $11

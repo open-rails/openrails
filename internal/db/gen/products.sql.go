@@ -291,10 +291,14 @@ WHERE products.merchant_id = $1::uuid AND deleted_at IS NULL
   AND ($5::text[] IS NULL OR id IN (
     SELECT pe.product_id FROM billing.product_entitlements pe
     WHERE pe.merchant_id = $1::uuid AND pe.entitlement = ANY ($5::text[]) AND pe.removed_at IS NULL))
-  -- For sale: some live price sells it. A product without one is granted only.
+  -- For sale: some live price sells it new: one of ours, or a provider's
+  -- that still sells (CCBill). A product without one is granted only.
   AND ($6::boolean IS NULL OR $6::boolean = EXISTS (
     SELECT 1 FROM billing.prices pr
-    WHERE pr.merchant_id = products.merchant_id AND pr.product_id = products.id AND NOT pr.archived))
+    WHERE pr.merchant_id = products.merchant_id AND pr.product_id = products.id AND NOT pr.archived
+      AND (NOT pr.provider_owned OR EXISTS (
+        SELECT 1 FROM billing.price_psp_bindings b JOIN billing.psps s ON s.merchant_id = b.merchant_id AND s.id = b.psp_id
+        WHERE b.merchant_id = pr.merchant_id AND b.price_id = pr.id AND s.rail = 'ccbill' AND pr.billing_interval_hours IS NOT NULL))))
   AND ($7::timestamptz IS NULL OR (created_at, id) < ($7::timestamptz, $8::uuid))
 ORDER BY created_at DESC, id DESC
 LIMIT $9::int

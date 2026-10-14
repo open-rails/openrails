@@ -68,6 +68,9 @@ export type SubscriptionStatus =
 
 /** The provider that owns and runs a provider price. */
 export const priceProviderSchema = z.object({
+  psp_id: z.string(),
+  access_duration_default: z.boolean().optional(),
+  drift: z.array(z.object({ field: z.string(), openrails_value: z.string(), remote_value: z.string() })).nullish(),
   psp: z.string(),
   rail: z.string(),
   /** The provider's identifiers; empty in a buyer's view. */
@@ -98,6 +101,9 @@ export const priceSchema = z.object({
   currency: z.string(),
   access_duration_hours: z.number().nullable(),
   billing_interval_hours: z.number().nullable(),
+  billing_interval_months: z.number().int().positive().nullish(),
+  quantity: z.object({ min: z.number().int().positive(), max: z.number().int().positive() }).nullish(),
+  solana_plan: z.string().nullish(),
   trial_unit_amount: amount.nullable(),
   trial_duration_hours: z.number().nullable(),
   /** The methods one of ours sells through (`card`, `solana`); null: every method. */
