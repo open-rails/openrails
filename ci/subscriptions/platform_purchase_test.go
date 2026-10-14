@@ -116,7 +116,7 @@ func TestPlatformNewCardPurchase(t *testing.T) {
 				require.Equal(t, "failed", paid.Status)
 				if scenario == "duplicate refused" {
 					require.NotNil(t, paid.Failure)
-					require.Equal(t, "processing_error", paid.Failure.Reason)
+					require.Equal(t, "duplicate_transaction", paid.Failure.Reason)
 				}
 				require.Zero(t, countMethods())
 				bt.mu.Lock()
@@ -374,7 +374,7 @@ func TestPlatformSavedCardOrder(t *testing.T) {
 				require.NoError(t, err)
 				if scenario == "duplicate refused" {
 					require.NotNil(t, paid.Failure)
-					require.Equal(t, "processing_error", paid.Failure.Reason)
+					require.Equal(t, "duplicate_transaction", paid.Failure.Reason)
 					require.Len(t, w.nmi.ledger(""), 1, "the refused request creates no second charge")
 					var terminal, duplicate bool
 					require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status = 'failed_terminal', (result_evidence->>'duplicate_refused')::boolean FROM billing.provider_intents WHERE payload->>'order_id' = $1 AND intent_type = 'nmi_sale'`), sale.order.ID.UUID().String()).Scan(&terminal, &duplicate))
