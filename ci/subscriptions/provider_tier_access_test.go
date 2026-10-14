@@ -17,16 +17,14 @@ import (
 	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
-// A nil hour count means either an accepted provider period or explicitly
-// indefinite access. Provider changes must freeze and retain that choice,
-// including the adjustment bill, its future schedule, and a later replay.
+// A nil hour count means the accepted provider period; a recurring price's
+// access is never forever (#1275). Provider changes must freeze and retain that
+// choice, including the adjustment bill, its future schedule, and a later replay.
 func TestProviderTierChangeRetainsAcceptedAccessChoice(t *testing.T) {
 	rows := []struct {
 		name     string
 		from, to catalog.Field[int]
 	}{
-		{"default to indefinite", catalog.Field[int]{}, catalog.Null[int]()},
-		{"indefinite to default", catalog.Null[int](), catalog.Field[int]{}},
 		{"default to hours", catalog.Field[int]{}, catalog.Value(48)},
 		{"hours to default", catalog.Value(1440), catalog.Field[int]{}},
 	}
