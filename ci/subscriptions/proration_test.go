@@ -143,7 +143,7 @@ func TestUpgradeProrationHourlyQuotes(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			group := "g" + uuid.NewString()[:8]
 			old := w.tierPrice(group, 1, row.oldCents, 1, false)
-			next := w.tierPrice(group, 2, row.newCent, 24, true)
+			next := w.tierPrice(group, 2, row.newCent, 24, false)
 			c := w.newCustomer()
 			sub := c.subscribeAgain(embedded, "nmi", old.ID.String(), old.ent, c.saveCard("nmi", visa))
 			current := w.subscription(remote, sub)

@@ -27,6 +27,7 @@ type legacy struct {
 	tp       topology
 	c        *customer
 	price    *billing.Price
+	ours     *billing.Price
 	railSub  string
 	sub      billing.SubscriptionID
 	ent      string

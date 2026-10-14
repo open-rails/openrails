@@ -96,7 +96,7 @@ func TestPendingProviderStopHoldsSlotAgainstOrders(t *testing.T) {
 	before := len(w.nmi.Ledger(""))
 
 	buy := func() orderCall {
-		return l.c.order(http.MethodPost, "/orders", "buy-"+uuid.NewString(), map[string]any{"lines": []any{line(l.price, 0)}, "expected_total": micros(9_990_000), "payment": map[string]any{"payment_method_id": method}})
+		return l.c.order(http.MethodPost, "/orders", "buy-"+uuid.NewString(), map[string]any{"lines": []any{line(l.ourPrice(), 0)}, "expected_total": micros(9_990_000), "payment": map[string]any{"payment_method_id": method}})
 	}
 	refused := buy()
 	require.Len(t, w.nmi.Ledger(""), before, "nothing is charged while the old schedule may still bill")

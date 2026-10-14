@@ -33,11 +33,24 @@ func nmiDeleteFails(w *world, failing *atomic.Bool) {
 	}, http.StatusServiceUnavailable, 1000)
 }
 
-// purchaseAgain buys the legacy membership's own price again: the merchant
-// creates the order and the customer pays it.
+// ourPrice is one of our prices on the legacy membership's product, on the
+// provider price's terms: a provider price is never sold in an order.
+func (l *legacy) ourPrice() *billing.Price {
+	l.w.t.Helper()
+	if l.ours == nil {
+		var err error
+		l.ours, err = l.w.client[l.tp].CreatePrice(l.w.t.Context(), billing.CreatePriceParams{ProductID: l.price.ProductID, Key: "ours", UnitAmount: l.price.UnitAmount,
+			Currency: l.price.Currency, BillingIntervalHours: new(monthHours), AccessDurationHours: new(monthHours)})
+		require.NoError(l.w.t, err)
+	}
+	return l.ours
+}
+
+// purchaseAgain buys the legacy membership's product again at our price: the
+// merchant creates the order and the customer pays it.
 func (l *legacy) purchaseAgain(method string) (*paidOrder, error) {
 	l.w.t.Helper()
-	return l.c.buyOrder(embedded, order{price: l.price.ID, rail: "nmi", method: method})
+	return l.c.buyOrder(embedded, order{price: l.ourPrice().ID, rail: "nmi", method: method})
 }
 
 // reenroll is a purchaseAgain that is answered.

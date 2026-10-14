@@ -89,7 +89,7 @@ func TestPlatformCardVault(t *testing.T) {
 	// A PSP that would take new card charges it cannot make is refused before
 	// any write; once charge_psps leaves it out, it is a PSP like any other.
 	stripeTwo := billing.CreatePSPParams{Key: "stripe-two", Rail: billing.RailStripe, Environment: "test", PSPAccount: billing.PSPAccount{AccountID: "acct_e2etwo"},
-		PublishableKey: "pk_test_two", Credentials: map[string]string{"secret_key": "sk_test_two", "webhook_signing_secret": "whsec_two"}}
+		PublishableKey: "pk_test_two", Credentials: map[string]string{"secret_key": "sk_test_acct_e2etwo", "webhook_signing_secret": "whsec_two"}}
 	_, err = client.CreatePSP(ctx, stripeTwo)
 	require.Equal(t, "platform_vault_unreachable", codeOf(err))
 	_, err = client.UpdateMerchantConfiguration(ctx, setVault(billing.CardVaultPlatform, "nmi"))

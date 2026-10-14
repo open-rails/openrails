@@ -51,8 +51,8 @@ func openCCBillShop(t *testing.T) *ccbillShop {
 		psps["ccbill"] = openrails.CCBillPSP{Environment: openrails.EnvironmentSandbox, ClientAccnum: ccbillAccnum, ClientSubacc: ccbillSubacc, Salt: "e2e-ccbill-salt"}.PSPConfig()
 	}
 	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
+	w.settings = billing.MerchantSettings{CardVault: "nmi", ChargePSPs: []string{"nmi"}}
 	w.start()
-	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{CardVault: "nmi", ChargePSPs: []string{"nmi"}}))
 	key, receipt, err := w.applyCatalogWith(`  "{key}-monthly":
     amount: 23 USD
     billing_interval: 30 days
