@@ -90,7 +90,7 @@ test("a signed-in customer orders the host's price and pays it on the page", asy
   await dialog.getByLabel("Full name").fill("Card Payer")
   await dialog.getByLabel("Country").selectOption("US")
   await dialog.getByLabel(/ZIP/).fill("10001")
-  await dialog.getByRole("button", { name: /^Pay / }).click()
+  await dialog.getByRole("button", { name: "Pay", exact: true }).click()
   await expect.poll(() => windowList(page, "paid")).toEqual(["complete"])
 
   expect(reads).toContain("POST /billing/v1/me/orders")

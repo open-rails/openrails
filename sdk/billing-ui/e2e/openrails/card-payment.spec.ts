@@ -94,7 +94,7 @@ test("a new card subscribes in one click", async ({ page, request }) => {
   ).json()) as Catalog
   const user = await createUser(request)
   const purchase = await openPayment(page, catalog.card_monthly_price_id, user)
-  await purchase.getByRole("button", { name: /^Pay / }).click()
+  await purchase.getByRole("button", { name: "Subscribe", exact: true }).click()
   await expect(purchase.getByText("Payment complete").first()).toBeAttached()
   await expect.poll(() => completed(page)).toEqual(["complete"])
 
@@ -117,7 +117,7 @@ test("a declined new card leaves nothing behind and can be retried", async ({
   const user = await createUser(request)
   const purchase = await openPayment(page, catalog.card_monthly_price_id, user)
   await nextCard(page, "0002")
-  await purchase.getByRole("button", { name: /^Pay / }).click()
+  await purchase.getByRole("button", { name: "Subscribe", exact: true }).click()
   // OpenRails classifies the decline; the page shows its message.
   await expect(purchase.getByRole("alert")).toContainText(/insufficient funds/i)
 
@@ -127,7 +127,7 @@ test("a declined new card leaves nothing behind and can be retried", async ({
   expect(await completed(page)).toEqual([])
 
   await nextCard(page, "4242")
-  await purchase.getByRole("button", { name: /^Pay / }).click()
+  await purchase.getByRole("button", { name: "Subscribe", exact: true }).click()
   await expect(purchase.getByText("Payment complete").first()).toBeAttached()
   const held = await billing(request, user.id)
   expect(held.subscriptions).toHaveLength(1)
@@ -140,7 +140,7 @@ test("a new card pays a one-time price", async ({ page, request }) => {
   ).json()) as Catalog
   const user = await createUser(request)
   const purchase = await openPayment(page, catalog.card_once_price_id, user)
-  await purchase.getByRole("button", { name: /^Pay / }).click()
+  await purchase.getByRole("button", { name: "Pay", exact: true }).click()
   await expect(purchase.getByText("Payment complete").first()).toBeAttached()
   await expect.poll(() => completed(page)).toEqual(["complete"])
   const held = await billing(request, user.id)
@@ -174,11 +174,11 @@ test("a server error is shown at once and paying again succeeds", async ({
     })
   })
   const started = Date.now()
-  await purchase.getByRole("button", { name: /^Pay / }).click()
+  await purchase.getByRole("button", { name: "Pay", exact: true }).click()
   await expect(purchase.getByRole("alert")).toBeVisible({ timeout: 2_000 })
   expect(Date.now() - started).toBeLessThan(2_000)
   expect(failures).toBe(1)
-  await purchase.getByRole("button", { name: /^Pay / }).click()
+  await purchase.getByRole("button", { name: "Pay", exact: true }).click()
   await expect(purchase.getByText("Payment complete").first()).toBeAttached()
 })
 
