@@ -151,3 +151,12 @@ WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.mapping = d.mapping AND 
 -- name: LookupPSPImportMappings :many
 SELECT key, customer_id FROM billing.psp_import_mappings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND mapping = sqlc.arg(mapping)::text AND key = ANY(sqlc.arg(keys)::text[]);
+
+-- name: ListPSPImportsByIDs :many
+SELECT * FROM billing.psp_imports WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY created_at DESC, id DESC;
+
+-- name: ListPSPImportRecordsByIDs :many
+SELECT * FROM billing.psp_import_records
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND import_id = sqlc.arg(import_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY id;

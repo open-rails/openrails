@@ -185,9 +185,18 @@ type PSPImportRecord struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// PSPImportListParams lists the merchant's imports, newest first.
+type PSPImportListParams struct {
+	PageRequest
+	// IDs instead reads 1 to MaxBatchItems named imports in one page.
+	IDs []PSPImportID
+}
+
 // PSPImportRecordListParams filters an import's records, in id order.
 type PSPImportRecordListParams struct {
 	PageRequest
+	// IDs instead reads 1 to MaxBatchItems named records in one page.
+	IDs   []PSPImportRecordID
 	State PSPImportRecordState
 	Kind  PSPImportRecordKind
 }

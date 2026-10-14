@@ -103,6 +103,7 @@ migration 0101_solana_crankers.up.sql sha256:cfc788945c60ae49644969b1cbc339f60db
 migration 0102_book_id.up.sql sha256:c339a6b0581464cfda66c8b6edc68f00d98a67c29bda0162393574a835eb3600
 migration 0103_solana_engine_collection.up.sql sha256:7af7d6629a3eaa14582631f44343b751d5135a34b171e3a5758c40da4c67c292
 migration 0104_provider_prices.up.sql sha256:c9547910caa053fef3a6915eac4275446cc62ec976be3ffa5a04e2cfe1090408
+migration 0105_psp_imports.up.sql sha256:e90d12165af03e63ce985d66169cf507f07555420ace5c2a94ed637dedd24e4f
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2215,6 +2216,77 @@ table billing.psp_customers
   index CREATE UNIQUE INDEX psp_customers_customer_id_psp_id_key ON billing.psp_customers USING btree (merchant_id, customer_id, psp_id)
   index CREATE UNIQUE INDEX psp_customers_pkey ON billing.psp_customers USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX psp_customers_psp_id_remote_customer_ref_key ON billing.psp_customers USING btree (merchant_id, psp_id, remote_customer_ref)
+
+table billing.psp_import_mappings
+  column merchant_id uuid NOT NULL
+  column mapping text NOT NULL
+  column key text NOT NULL
+  column customer_id uuid NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint psp_import_mappings_key_check CHECK (((key <> ''::text) AND (octet_length(key) <= 256)))
+  constraint psp_import_mappings_mapping_check CHECK ((mapping ~ '^[a-z][a-z0-9_.-]{0,63}$'::text))
+  constraint psp_import_mappings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint psp_import_mappings_pkey PRIMARY KEY (merchant_id, mapping, key)
+  index CREATE INDEX psp_import_mappings_customer_idx ON billing.psp_import_mappings USING btree (merchant_id, customer_id)
+  index CREATE UNIQUE INDEX psp_import_mappings_pkey ON billing.psp_import_mappings USING btree (merchant_id, mapping, key)
+
+table billing.psp_import_records
+  column merchant_id uuid NOT NULL
+  column import_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column kind text NOT NULL
+  column ref text NOT NULL
+  column customer_ref text
+  column subscription_ref text
+  column occurred_at timestamp with time zone
+  column facts jsonb NOT NULL
+  column data jsonb NOT NULL
+  column state text NOT NULL
+  column customer_id uuid
+  column linked_via text
+  column manual_customer_id uuid
+  column reason text
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint psp_import_records_data_check CHECK ((jsonb_typeof(data) = 'object'::text))
+  constraint psp_import_records_facts_check CHECK ((jsonb_typeof(facts) = 'object'::text))
+  constraint psp_import_records_import_id_fkey FOREIGN KEY (merchant_id, import_id) REFERENCES billing.psp_imports(merchant_id, id) ON DELETE CASCADE
+  constraint psp_import_records_kind_check CHECK ((kind = ANY (ARRAY['customer'::text, 'subscription'::text, 'transaction'::text])))
+  constraint psp_import_records_pkey PRIMARY KEY (merchant_id, id)
+  constraint psp_import_records_reason_check CHECK ((((reason IS NULL) OR (reason <> ''::text)) AND ((state <> ALL (ARRAY['conflict'::text, 'blocked'::text])) OR (reason IS NOT NULL))))
+  constraint psp_import_records_ref_check CHECK (((ref <> ''::text) AND (octet_length(ref) <= 256)))
+  constraint psp_import_records_ref_key UNIQUE (merchant_id, import_id, kind, ref)
+  constraint psp_import_records_refs_check CHECK ((((customer_ref IS NULL) OR (customer_ref <> ''::text)) AND ((subscription_ref IS NULL) OR (subscription_ref <> ''::text))))
+  constraint psp_import_records_state_check CHECK ((((state = ANY (ARRAY['unmatched'::text, 'conflict'::text])) AND (customer_id IS NULL) AND (linked_via IS NULL)) OR ((state = ANY (ARRAY['linked'::text, 'imported'::text, 'blocked'::text])) AND (customer_id IS NOT NULL) AND (linked_via IS NOT NULL) AND (linked_via <> ''::text))))
+  index CREATE INDEX psp_import_records_kind_idx ON billing.psp_import_records USING btree (merchant_id, import_id, kind, id)
+  index CREATE UNIQUE INDEX psp_import_records_pkey ON billing.psp_import_records USING btree (merchant_id, id)
+  index CREATE UNIQUE INDEX psp_import_records_ref_key ON billing.psp_import_records USING btree (merchant_id, import_id, kind, ref)
+  index CREATE INDEX psp_import_records_state_idx ON billing.psp_import_records USING btree (merchant_id, import_id, state, kind, id)
+
+table billing.psp_imports
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column psp_id uuid NOT NULL
+  column rail text NOT NULL
+  column status text NOT NULL
+  column history_since timestamp with time zone
+  column history_through timestamp with time zone
+  column pulled_at timestamp with time zone
+  column applied_at timestamp with time zone
+  column error text
+  column rules jsonb NOT NULL
+  column products jsonb NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint psp_imports_error_check CHECK ((((status = 'failed'::text) = (error IS NOT NULL)) AND ((error IS NULL) OR (error <> ''::text))))
+  constraint psp_imports_pkey PRIMARY KEY (merchant_id, id)
+  constraint psp_imports_products_check CHECK ((jsonb_typeof(products) = 'array'::text))
+  constraint psp_imports_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
+  constraint psp_imports_rules_check CHECK ((jsonb_typeof(rules) = 'array'::text))
+  constraint psp_imports_status_check CHECK ((status = ANY (ARRAY['pulling'::text, 'pulled'::text, 'applying'::text, 'applied'::text, 'failed'::text])))
+  index CREATE INDEX psp_imports_created_at_id_idx ON billing.psp_imports USING btree (merchant_id, created_at DESC, id DESC)
+  index CREATE UNIQUE INDEX psp_imports_pkey ON billing.psp_imports USING btree (merchant_id, id)
 
 table billing.psp_refresh_watermarks
   column merchant_id uuid NOT NULL

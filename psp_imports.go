@@ -23,9 +23,13 @@ func (c *Client) CreatePSPImport(ctx context.Context, params billing.CreatePSPIm
 }
 
 // ListPSPImports lists the merchant's PSP imports, newest first.
-func (c *Client) ListPSPImports(ctx context.Context, params billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.PSPImport], error) {
+func (c *Client) ListPSPImports(ctx context.Context, params billing.PSPImportListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PSPImport], error) {
+	q := pageValues(nil, params.PageRequest)
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.PSPImport]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/psp-imports?"+pageValues(nil, params).Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/psp-imports?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -76,6 +80,9 @@ func (c *Client) ListPSPImportRecords(ctx context.Context, id billing.PSPImportI
 		return nil, err
 	}
 	q := pageValues(nil, params.PageRequest)
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	if params.State != "" {
 		q.Set("state", string(params.State))
 	}

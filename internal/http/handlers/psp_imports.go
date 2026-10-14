@@ -65,7 +65,11 @@ func ListPSPImports(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := im.List(r.Request.Context(), page)
+	ids, ok := listIDs(r, billing.ParsePSPImportID)
+	if !ok {
+		return
+	}
+	out, err := im.List(r.Request.Context(), billing.PSPImportListParams{PageRequest: page, IDs: ids})
 	if err != nil {
 		writeRefusal(r, err, "PSP import list failed")
 		return
@@ -150,7 +154,11 @@ func ListPSPImportRecords(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := im.ListRecords(r.Request.Context(), id, billing.PSPImportRecordListParams{PageRequest: page, State: query.State, Kind: query.Kind})
+	ids, ok := listIDs(r, billing.ParsePSPImportRecordID)
+	if !ok {
+		return
+	}
+	out, err := im.ListRecords(r.Request.Context(), id, billing.PSPImportRecordListParams{PageRequest: page, IDs: ids, State: query.State, Kind: query.Kind})
 	if err != nil {
 		writeRefusal(r, err, "PSP import record list failed")
 		return

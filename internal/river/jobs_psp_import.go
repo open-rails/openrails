@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/pspimport"
@@ -55,16 +54,14 @@ func (w *PSPImportWorker) Work(ctx context.Context, job *river.Job[PSPImportArgs
 	return river.JobCancel(err)
 }
 
-// EnqueuePSPImport queues one step of an import; a step already queued or
-// running is not queued twice.
+// EnqueuePSPImport queues one step of an import. The import's status, moved
+// under its row lock before the insert, admits one step at a time; a job
+// whose step the status no longer names does nothing.
 func EnqueuePSPImport(ctx context.Context, client *river.Client[pgx.Tx], mid billing.MerchantID, id billing.PSPImportID, step pspimport.Step) (int64, error) {
 	if client == nil {
 		return 0, errors.New("psp import: no River producer")
 	}
-	res, err := client.Insert(ctx, PSPImportArgs{MerchantID: mid.UUID(), ImportID: id.UUID(), Step: step}, &river.InsertOpts{
-		Queue: QueueBilling, MaxAttempts: pspImportAttempts,
-		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled}},
-	})
+	res, err := client.Insert(ctx, PSPImportArgs{MerchantID: mid.UUID(), ImportID: id.UUID(), Step: step}, &river.InsertOpts{Queue: QueueBilling, MaxAttempts: pspImportAttempts})
 	if err != nil {
 		return 0, err
 	}

@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // Importer runs PSP imports for the merchant in ctx.
@@ -148,12 +149,27 @@ func (im *Importer) row(ctx context.Context, id billing.PSPImportID) (gen.Billin
 }
 
 // List reads the merchant's imports, newest first.
-func (im *Importer) List(ctx context.Context, page billing.PageRequest) (billing.ListPage[billing.PSPImport], error) {
+func (im *Importer) List(ctx context.Context, p billing.PSPImportListParams) (billing.ListPage[billing.PSPImport], error) {
 	var out billing.ListPage[billing.PSPImport]
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return out, err
 	}
+	if p.IDs != nil {
+		rows, err := im.DB.Gen(ctx).ListPSPImportsByIDs(ctx, gen.ListPSPImportsByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(p.IDs)})
+		if err != nil {
+			return out, err
+		}
+		for _, row := range rows {
+			v, err := im.view(ctx, row)
+			if err != nil {
+				return out, err
+			}
+			out.Items = append(out.Items, *v)
+		}
+		return out, nil
+	}
+	page := p.PageRequest
 	limit, err := pagination.Limit(page)
 	if err != nil {
 		return out, err
@@ -239,6 +255,16 @@ func (im *Importer) ListRecords(ctx context.Context, id billing.PSPImportID, p b
 	row, err := im.row(ctx, id)
 	if err != nil {
 		return out, err
+	}
+	if p.IDs != nil {
+		rows, err := im.DB.Gen(ctx).ListPSPImportRecordsByIDs(ctx, gen.ListPSPImportRecordsByIDsParams{MerchantID: row.MerchantID, ImportID: row.ID, Ids: uuidutil.Of(p.IDs)})
+		if err != nil {
+			return out, err
+		}
+		for _, r := range rows {
+			out.Items = append(out.Items, recordView(r))
+		}
+		return out, nil
 	}
 	limit, err := pagination.Limit(p.PageRequest)
 	if err != nil {

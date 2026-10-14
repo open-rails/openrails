@@ -555,6 +555,13 @@ export type CreateOrderParams = {
   pay_url?: OrderPayURLParams
 }
 
+export type CreatePSPImportParams = {
+  psp?: PSPRef
+  history_since?: string
+  rules?: PSPImportRule[]
+  products?: PSPImportProduct[]
+}
+
 export type CreatePSPParams = {
   key?: string
   rail?: "ccbill" | "nmi" | "solana" | "stripe"
@@ -1177,6 +1184,10 @@ export type InvoiceProfile = {
   memo: string
 }
 
+export type LinkPSPImportParams = {
+  links?: PSPImportLink[]
+}
+
 export type LowBalanceLine = {
   currency: string
   amount: string | null
@@ -1613,6 +1624,78 @@ export type PSP = {
 export type PSPCredential = {
   configured: boolean
   validated_at: string | null
+}
+
+export type PSPImport = {
+  id: string
+  psp: string
+  rail: string
+  status: "applied" | "applying" | "failed" | "pulled" | "pulling"
+  history_since: string | null
+  history_through: string | null
+  pulled_at: string | null
+  applied_at: string | null
+  error: string | null
+  rules: PSPImportRule[]
+  products: PSPImportProduct[]
+  counts: PSPImportCount[]
+  created_at: string
+  updated_at: string
+}
+
+export type PSPImportCount = {
+  kind: "customer" | "subscription" | "transaction"
+  state: "blocked" | "conflict" | "imported" | "linked" | "unmatched"
+  records: number
+}
+
+export type PSPImportFact = {
+  name: string
+  value: string
+}
+
+export type PSPImportLink = {
+  record?: string
+  customer?: string | null
+}
+
+export type PSPImportMapping = {
+  mapping?: string
+  key?: string
+  customer?: string | null
+}
+
+export type PSPImportMappingsResult = {
+  set: number
+  deleted: number
+}
+
+export type PSPImportProduct = {
+  plan?: string
+  product: string
+}
+
+export type PSPImportRecord = {
+  id: string
+  import: string
+  kind: "customer" | "subscription" | "transaction"
+  ref: string
+  customer_ref: string | null
+  subscription_ref: string | null
+  occurred_at: string | null
+  facts: PSPImportFact[]
+  state: "blocked" | "conflict" | "imported" | "linked" | "unmatched"
+  customer: string | null
+  linked_via: string | null
+  reason: string | null
+  updated_at: string
+}
+
+export type PSPImportRule = {
+  fact: string
+  pattern?: string
+  via: "customer_id" | "directory" | "mapping"
+  mapping?: string
 }
 
 export type PSPPaymentConfig = {
@@ -2198,6 +2281,10 @@ export type SetMeterParams = {
   expected_revision?: number
 }
 
+export type SetPSPImportMappingsParams = {
+  mappings?: PSPImportMapping[]
+}
+
 export type SetSubscriptionPaymentMethodParams = {
   payment_method_id?: string | null
 }
@@ -2396,6 +2483,11 @@ export type UpdateMerchantConfigurationParams = {
   billing_policies?: BillingPolicy[]
   billing_policy_bindings?: BillingPolicyBinding[]
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
+}
+
+export type UpdatePSPImportParams = {
+  rules?: PSPImportRule[]
+  products?: PSPImportProduct[]
 }
 
 export type UpdatePSPParams = {

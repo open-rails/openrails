@@ -290,6 +290,56 @@ func (q *Queries) ListPSPImportPlans(ctx context.Context, arg ListPSPImportPlans
 	return items, nil
 }
 
+const listPSPImportRecordsByIDs = `-- name: ListPSPImportRecordsByIDs :many
+SELECT merchant_id, import_id, id, kind, ref, customer_ref, subscription_ref, occurred_at, facts, data, state, customer_id, linked_via, manual_customer_id, reason, created_at, updated_at FROM billing.psp_import_records
+WHERE merchant_id = $1::uuid AND import_id = $2::uuid AND id = ANY($3::uuid[])
+ORDER BY id
+`
+
+type ListPSPImportRecordsByIDsParams struct {
+	MerchantID uuid.UUID
+	ImportID   uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListPSPImportRecordsByIDs(ctx context.Context, arg ListPSPImportRecordsByIDsParams) ([]BillingPspImportRecord, error) {
+	rows, err := q.db.Query(ctx, listPSPImportRecordsByIDs, arg.MerchantID, arg.ImportID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingPspImportRecord
+	for rows.Next() {
+		var i BillingPspImportRecord
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.ImportID,
+			&i.ID,
+			&i.Kind,
+			&i.Ref,
+			&i.CustomerRef,
+			&i.SubscriptionRef,
+			&i.OccurredAt,
+			&i.Facts,
+			&i.Data,
+			&i.State,
+			&i.CustomerID,
+			&i.LinkedVia,
+			&i.ManualCustomerID,
+			&i.Reason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPSPImportRecordsByKind = `-- name: ListPSPImportRecordsByKind :many
 SELECT merchant_id, import_id, id, kind, ref, customer_ref, subscription_ref, occurred_at, facts, data, state, customer_id, linked_via, manual_customer_id, reason, created_at, updated_at FROM billing.psp_import_records
 WHERE merchant_id = $1::uuid AND import_id = $2::uuid AND kind = $3::text
@@ -458,6 +508,51 @@ func (q *Queries) ListPSPImportRecordsPage(ctx context.Context, arg ListPSPImpor
 			&i.LinkedVia,
 			&i.ManualCustomerID,
 			&i.Reason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPSPImportsByIDs = `-- name: ListPSPImportsByIDs :many
+SELECT merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, products, created_at, updated_at FROM billing.psp_imports WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+ORDER BY created_at DESC, id DESC
+`
+
+type ListPSPImportsByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListPSPImportsByIDs(ctx context.Context, arg ListPSPImportsByIDsParams) ([]BillingPspImport, error) {
+	rows, err := q.db.Query(ctx, listPSPImportsByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingPspImport
+	for rows.Next() {
+		var i BillingPspImport
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.ID,
+			&i.PspID,
+			&i.Rail,
+			&i.Status,
+			&i.HistorySince,
+			&i.HistoryThrough,
+			&i.PulledAt,
+			&i.AppliedAt,
+			&i.Error,
+			&i.Rules,
+			&i.Products,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
