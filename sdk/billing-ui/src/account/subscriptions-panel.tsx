@@ -239,7 +239,7 @@ export function SubscriptionsPanel({
                 ) : null}
                 {canChangeCard ? (
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
                     disabled={!!pending}
                     aria-label={t("subscriptions.changeCardLabel", { name })}
@@ -254,9 +254,8 @@ export function SubscriptionsPanel({
                 ) : null}
                 {canCancel ? (
                   <Button
-                    variant="ghost"
                     size="sm"
-                    className="text-muted-foreground hover:text-destructive"
+                    className="bg-red-600 text-white hover:bg-red-700"
                     disabled={!!pending}
                     aria-label={t("subscriptions.cancelLabel", { name })}
                     onClick={() => {
