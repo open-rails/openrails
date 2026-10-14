@@ -46,14 +46,15 @@ func TestPSPImportFromCCBill(t *testing.T) {
 		RecurringBillingOptionID: ccbillRBO, UnitAmount: new(int64(9_990_000)), Currency: "USD", BillingIntervalHours: &hours, Archived: true})
 	require.NoError(t, err)
 	// A second CCBill price on the product: the import names the one its members bill.
-	_, err = client.CreateProviderPrice(ctx, billing.CreateProviderPriceParams{ProductID: product.ID, Key: product.Key + "-ccbill-annual", PSP: "ccbill", FlexID: ccbillFlexID,
+	annual, err := client.CreateProviderPrice(ctx, billing.CreateProviderPriceParams{ProductID: product.ID, Key: product.Key + "-ccbill-annual", PSP: "ccbill", FlexID: ccbillFlexID,
 		RecurringBillingOptionID: "0000009999", UnitAmount: new(int64(99_000_000)), Currency: "USD", BillingIntervalHours: new(365 * 24), Archived: true})
 	require.NoError(t, err)
 
-	member, stranger := w.newCustomer(), w.newCustomer()
+	member, stranger, yearly := w.newCustomer(), w.newCustomer(), w.newCustomer()
 	directory.Put(userinfo.User{ID: member.id, Email: "member@host.test", Username: "legacy_member"})
 	directory.Put(userinfo.User{ID: stranger.id, Username: "someone_else"})
-	sub, other := ccbillNumericID(), ccbillNumericID()
+	directory.Put(userinfo.User{ID: yearly.id, Username: "yearly_member"})
+	sub, other, year := ccbillNumericID(), ccbillNumericID(), ccbillNumericID()
 	signup := w.clock.Now().Add(-40 * 24 * time.Hour)
 	rebillAt := w.clock.Now().Add(-10 * 24 * time.Hour)
 	next := rebillAt.Add(monthHours * time.Hour)
@@ -61,10 +62,13 @@ func TestPSPImportFromCCBill(t *testing.T) {
 	dl.members = []string{
 		fmt.Sprintf(`"ACTIVEMEMBERS","999999","0000","%s","%s","legacy_member","member@host.test","1","%s",""`, sub, signup.Format("2006-01-02"), next.Format("2006-01-02")),
 		fmt.Sprintf(`"ACTIVEMEMBERS","999999","0000","%s","%s","nobody_here","nobody@elsewhere.test","1","%s",""`, other, signup.Format("2006-01-02"), next.Format("2006-01-02")),
+		fmt.Sprintf(`"ACTIVEMEMBERS","999999","0000","%s","%s","yearly_member","","1","%s",""`, year, signup.Format("2006-01-02"), next.Format("2006-01-02")),
 	}
 	dl.mu.Unlock()
 	rebill := ccbillNumericID()
-	dl.export(fmt.Sprintf(`"REBILL","999999","0000","%s","%s","%s","9.99"`, sub, ccbillTimestamp(rebillAt), rebill))
+	yearRebill := ccbillNumericID()
+	dl.export(fmt.Sprintf(`"REBILL","999999","0000","%s","%s","%s","9.99"`, sub, ccbillTimestamp(rebillAt), rebill),
+		fmt.Sprintf(`"REBILL","999999","0000","%s","%s","%s","99.00"`, year, ccbillTimestamp(rebillAt), yearRebill))
 
 	since := rebillAt.Add(-time.Hour)
 	imp, err := w.client[embedded].CreatePSPImport(ctx, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "ccbill"}, HistorySince: &since,
@@ -94,5 +98,10 @@ func TestPSPImportFromCCBill(t *testing.T) {
 	require.Len(t, payments.Items, 1, "DataLink's rebill is a payment")
 	require.Equal(t, int64(9_990_000), payments.Items[0].Amount)
 	require.Equal(t, "USD", payments.Items[0].Currency, "the declared price denominates DataLink's amount")
+	// A rebill's amount picks the one declared price it equals.
+	subs, err = client.ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: yearly.cid()})
+	require.NoError(t, err)
+	require.Len(t, subs.Items, 1)
+	require.Equal(t, annual.ID, subs.Items[0].PriceID)
 	require.Zero(t, dl.canceled(sub), "the import only read DataLink")
 }

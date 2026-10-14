@@ -18,11 +18,11 @@ Rails:
   paused one as ended by the provider.
 - CCBill: DataLink's active members (username, email, signup and rebill
   dates) and the rebills of each history window, read a day at a time.
-  CCBill has no vault and no catalog to read: a member lands on the
-  provider price (declared with its amount and interval) the import's
-  product entry names by `price`, or the product's only one on the PSP; its
-  terms become the accepted schedule, and a rebill's amount is read in that
-  price's currency.
+  CCBill has no vault and no catalog to read: a member lands on the one
+  provider price of its product on the PSP (declared with its amount and
+  interval) its latest rebill equals, else the one the product entry names by
+  `price` (or the product's only one); its terms become the accepted
+  schedule, and a rebill's amount is read in that price's currency.
 
 ## Safety
 
