@@ -107,6 +107,7 @@ func (s *NMIConvergeService) Converge(ctx context.Context, reference string) (uu
 		return sub.CustomerID, fmt.Errorf("nmi converge: probe %s: %w", sub.RailSubscriptionID, err)
 	}
 
+	periodEnd, fetched := sub.CurrentPeriodEndsAt, len(snap.Transactions)
 	res, err := reconcile.ConvergeSubscriptionFromSnapshot(ctx, s.DB, s.SubscriptionLifecycleService, sub, snap, now, 0)
 	if err != nil {
 		return sub.CustomerID, fmt.Errorf("nmi converge: %w", err)
@@ -118,6 +119,8 @@ func (s *NMIConvergeService) Converge(ctx context.Context, reference string) (uu
 		"reason":               res.Decision.Reason,
 		"applied":              res.Applied,
 		"backfilled":           res.Backfilled,
+		"period_end":           periodEnd,
+		"fetched_transactions": fetched,
 	}).Info("nmi converge: decided from fetched truth")
 
 	return sub.CustomerID, nil

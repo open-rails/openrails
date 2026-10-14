@@ -176,7 +176,8 @@ func TestImportedNMIScheduleBillsItsProviderPrice(t *testing.T) {
 	require.Equal(t, l.price.ID, w.subscription(embedded, l.sub).PriceID)
 
 	w.nmi.SetDecline(visa.Last4, "202")
-	w.advanceHealthyTo(l.periodEnd().Add(time.Hour))
+	// NMI bills on its own clock; the local boundary is its next charge date's day.
+	w.advanceHealthyTo(w.nmi.Schedule(l.railSub).NextBilling.Add(time.Hour))
 	require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(false)))
 	w.settle()
 	sub := w.subscription(embedded, l.sub)
