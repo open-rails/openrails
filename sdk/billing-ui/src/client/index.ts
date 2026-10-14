@@ -31,6 +31,7 @@ export {
   isServerError,
   readBillingError,
   toBillingError,
+  transportFailure,
   type BillingErrorBody,
 } from "./errors"
 export type {

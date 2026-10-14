@@ -4,7 +4,9 @@ import { ApiError } from "#orck/admin/lib/api/client"
 import { createAdminToast, createToastHandlers } from "#orck/admin/lib/toast"
 
 export function shouldRetry(failureCount: number, error: unknown): boolean {
-  if (error instanceof ApiError && error.status < 500) return false
+  // Status 0: OpenRails never answered.
+  if (error instanceof ApiError && error.status > 0 && error.status < 500)
+    return false
   return failureCount < 2
 }
 
