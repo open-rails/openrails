@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -47,8 +48,8 @@ func (c *canceller) CancelMembership(_ context.Context, p *submod.CancelMembersh
 	return nil
 }
 
-// The chain is the source of truth: only a confirmed-and-succeeded cancel
-// mirrors, and it mirrors as a SCHEDULED period-end cancel, not a revoke.
+// The optional wallet step must succeed and leave the target subscription
+// canceled. A successful unrelated transaction is not a cancellation receipt.
 func TestConfirmCancel(t *testing.T) {
 	subID := uuid.New()
 	for _, tc := range []struct {
@@ -66,7 +67,7 @@ func TestConfirmCancel(t *testing.T) {
 		{"nil subscription", landed(), uuid.Nil, zeroSig, false},
 	} {
 		c := &canceller{}
-		err := NewConfirmCancelService(tc.w, c).Confirm(context.Background(), tc.subID, tc.sig, "")
+		err := NewConfirmCancelService(tc.w, c, cancelRows{&models.SolanaSubscription{SubscriptionPDA: randAddr(t)}}, chain{}).Confirm(context.Background(), tc.subID, tc.sig, "")
 		if !tc.mirror {
 			require.Error(t, err, tc.name)
 			require.Empty(t, c.params, tc.name)
@@ -79,4 +80,14 @@ func TestConfirmCancel(t *testing.T) {
 		require.False(t, c.params[0].RevokeAccess, "cancel at period end")
 		require.Equal(t, models.CancelTypeUser, c.params[0].CancelType)
 	}
+}
+
+func TestConfirmCancelRefusesUnrelatedSuccessfulTransaction(t *testing.T) {
+	pda := solanago.NewWallet().PublicKey()
+	raw := make([]byte, subscriptions.SubscriptionAccountSize)
+	raw[0] = subscriptions.SubscriptionAccountDiscriminator
+	c := &canceller{}
+	svc := NewConfirmCancelService(landed(), c, cancelRows{&models.SolanaSubscription{SubscriptionPDA: pda.String()}}, chain{planPDA: pda, plan: raw})
+	require.ErrorContains(t, svc.Confirm(t.Context(), uuid.New(), zeroSig, "done"), "did not cancel this subscription")
+	require.Empty(t, c.params)
 }

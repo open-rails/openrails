@@ -877,3 +877,49 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid
        OR idempotency_key=sqlc.arg(idempotency_key)::text || ':action:' || destructive_action_id::text)
   AND intent_type='nmi_delete_subscription'
   AND (status='failed_retryable' OR (status='pending' AND attempts=0)) RETURNING *;
+
+-- The subscription row is locked by cancellation and the pull's pre-submit
+-- fence. A signed transaction remains an unresolved charge until reconciled.
+-- name: HasSubmittedSolanaPull :one
+SELECT EXISTS (
+  SELECT 1 FROM billing.provider_intents i
+  WHERE i.merchant_id = sqlc.arg(merchant_id)::uuid
+    AND i.subscription_id = sqlc.arg(subscription_id)::uuid
+    AND i.intent_type = 'solana_pull'
+    -- Status is not monetary evidence: parked, expired, superseded and even
+    -- terminal/succeeded legacy rows can still retain an unresolved send.
+    AND i.result_evidence ? 'transaction_id'
+    AND (COALESCE(i.result_evidence->>'needs_qualification', 'false') = 'true'
+      OR NOT COALESCE(i.result_evidence->>'transaction_id' = i.result_evidence->>'reverted_transaction_id', false))
+    AND NOT EXISTS (
+      SELECT 1 FROM billing.provider_bills b
+      JOIN billing.orders o ON o.merchant_id=b.merchant_id AND o.id=b.order_id
+      JOIN billing.payments p ON p.merchant_id=o.merchant_id AND p.order_id=o.id
+      WHERE b.merchant_id=i.merchant_id AND b.psp_id=i.psp_id
+        AND b.source_kind='solana_pull' AND b.source_key=i.id::text
+        AND b.settled_at IS NOT NULL AND o.collection_owner='engine'
+        AND p.psp_id=i.psp_id AND p.subscription_id=i.subscription_id
+        AND p.transaction_id=i.result_evidence->>'transaction_id'
+        AND p.money_movement='rail' AND p.amount > 0
+        AND p.status IN ('succeeded', 'refunded')
+    )
+);
+
+-- name: FenceSolanaPullSubmission :execrows
+UPDATE billing.provider_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('transaction_id', sqlc.arg(signature)::text, 'execution', sqlc.arg(execution)::jsonb),
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND intent_type = 'solana_pull' AND status = 'in_flight'
+  AND attempts = sqlc.arg(attempts)::int AND lease_expires_at > sqlc.arg(now)::timestamptz;
+
+-- A pre-upgrade queued pull has no signed transaction yet. Adopt its complete
+-- accepted agreement under the subscription lock and current claim only.
+-- name: AdmitUnsignedSolanaPullAgreement :execrows
+UPDATE billing.provider_intents
+SET payload = jsonb_set(payload, '{agreement}', sqlc.arg(agreement)::jsonb), updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND intent_type='solana_pull' AND status='in_flight' AND attempts=sqlc.arg(attempts)::int
+  AND lease_expires_at > sqlc.arg(now)::timestamptz
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'transaction_id')
+  AND NOT (payload ? 'agreement');

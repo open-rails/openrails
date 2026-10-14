@@ -9,7 +9,7 @@ import {
 import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
 
-import { createBillingClient } from "../client/client"
+import { createBillingClient, WalletRejectedError } from "../client/client"
 import { de } from "../locales/de"
 import { en } from "../locales/en"
 import { es } from "../locales/es"
@@ -323,7 +323,40 @@ describe("SubscriptionsPanel", () => {
     expect(within(row).queryByRole("button", { name: /Cancel/ })).toBeNull()
   })
 
-  it("cancels a Solana subscription through the wallet", async () => {
+  it.each([false, true])("cancels and resumes Solana without signing with wallet available=%s", async (walletAvailable) => {
+    const server = fakeBilling({ subscriptions: [subscription({ id: "sub_sol", rail: "solana", card: null })] })
+    const send = vi.fn(async () => "sig")
+    mount(<SubscriptionsPanel sendSolanaTransaction={walletAvailable ? send : undefined} />, server)
+    const row = await screen.findByTestId("subscription-row")
+    fireEvent.click(within(row).getByRole("button", { name: "Cancel Pro" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.change(within(dialog).getByLabelText("Why are you cancelling?"), { target: { value: "Too expensive" } })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel subscription" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(send).not.toHaveBeenCalled()
+    expect(JSON.parse(String(server.fetch.mock.calls.find((c) => String(c[0]).endsWith("/cancel"))?.[1]?.body))).toEqual({ reason: "Too expensive", revoke_on_chain: false })
+    fireEvent.click(within(row).getByRole("button", { name: "Resume" }))
+    await waitFor(() => expect(row).toHaveTextContent("Active"))
+  })
+
+  it("keeps the local cancellation when the optional wallet prompt is declined", async () => {
+    const server = fakeBilling({ subscriptions: [subscription({ id: "sub_sol", rail: "solana" })] })
+    const send = vi.fn(async () => { throw new WalletRejectedError() })
+    mount(<SubscriptionsPanel sendSolanaTransaction={send} />, server)
+    const row = await screen.findByTestId("subscription-row")
+    fireEvent.click(within(row).getByRole("button", { name: "Cancel Pro" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.change(within(dialog).getByLabelText("Why are you cancelling?"), { target: { value: "Too expensive" } })
+    fireEvent.click(within(dialog).getByRole("checkbox"))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Sign with wallet" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(send).toHaveBeenCalledOnce()
+    expect(row).toHaveTextContent("Ending")
+    expect(server.calls.filter((c) => c.endsWith("/cancel"))).toHaveLength(1)
+    expect(within(row).getByRole("button", { name: "Resume" })).toBeEnabled()
+  })
+
+  it("optionally cancels a Solana subscription on chain", async () => {
     const server = fakeBilling({
       subscriptions: [
         subscription({ id: "sub_sol", rail: "solana", card: null }),
@@ -338,11 +371,12 @@ describe("SubscriptionsPanel", () => {
     fireEvent.change(within(dialog).getByLabelText("Why are you cancelling?"), {
       target: { value: "Too expensive" },
     })
+    fireEvent.click(within(dialog).getByRole("checkbox"))
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Sign with wallet" })
     )
-    await waitFor(() => expect(row).toHaveTextContent("Canceled"))
-    expect(send).toHaveBeenCalledWith("dHg=")
+    await waitFor(() => expect(send).toHaveBeenCalledWith("dHg="))
+    expect(row).toHaveTextContent("Ending")
   })
 })
 

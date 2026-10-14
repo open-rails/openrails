@@ -30,6 +30,27 @@ func (c *pullChain) GetTransaction(context.Context, solanago.Signature) (*rpc.Ge
 }
 
 func TestPullRetryNeedsNonexecutionEvidence(t *testing.T) {
+	wallet := solanago.NewWallet()
+	tx, err := solanago.NewTransaction([]solanago.Instruction{solanaint.NewMemoInstruction(solanaint.PurchaseMemo(uuid.New()))}, solanago.Hash{1}, solanago.TransactionPayer(wallet.PublicKey()))
+	require.NoError(t, err)
+	_, err = tx.Sign(func(key solanago.PublicKey) *solanago.PrivateKey { return &wallet.PrivateKey })
+	require.NoError(t, err)
+	envelope := func(tx *solanago.Transaction, failure any) *rpc.GetTransactionResult {
+		t.Helper()
+		encoded, err := tx.ToBase64()
+		require.NoError(t, err)
+		body, err := json.Marshal(map[string]any{"transaction": []string{encoded, "base64"}, "meta": map[string]any{"err": failure}})
+		require.NoError(t, err)
+		var result rpc.GetTransactionResult
+		require.NoError(t, json.Unmarshal(body, &result))
+		return &result
+	}
+	bad := *tx
+	bad.Message.RecentBlockhash[0]++
+	other := bad
+	other.Signatures = nil
+	_, err = other.Sign(func(key solanago.PublicKey) *solanago.PrivateKey { return &wallet.PrivateKey })
+	require.NoError(t, err)
 	for _, tc := range []struct {
 		name  string
 		chain pullChain
@@ -38,13 +59,16 @@ func TestPullRetryNeedsNonexecutionEvidence(t *testing.T) {
 		{"not found is not nonexecution", pullChain{err: rpc.ErrNotFound}, sigVerdictUnknown},
 		{"null is not nonexecution", pullChain{}, sigVerdictUnknown},
 		{"read failure stays unresolved", pullChain{err: errors.New("RPC unavailable")}, sigVerdictUnknown},
-		{"landed payment needs repair", pullChain{result: &rpc.GetTransactionResult{Meta: &rpc.TransactionMeta{}}}, sigVerdictLanded},
-		{"reverted payment permits retry", pullChain{result: &rpc.GetTransactionResult{Meta: &rpc.TransactionMeta{Err: "reverted"}}}, sigVerdictNotLanded},
+		{"landed payment needs repair", pullChain{result: envelope(tx, nil)}, sigVerdictLanded},
+		{"reverted payment permits retry", pullChain{result: envelope(tx, "reverted")}, sigVerdictNotLanded},
+		{"metadata alone is not nonexecution", pullChain{result: &rpc.GetTransactionResult{Meta: &rpc.TransactionMeta{Err: "reverted"}}}, sigVerdictUnknown},
+		{"another signed transaction proves nothing", pullChain{result: envelope(&other, "reverted")}, sigVerdictUnknown},
+		{"invalid required signature proves nothing", pullChain{result: envelope(&bad, "reverted")}, sigVerdictUnknown},
 		{"missing execution metadata stays unresolved", pullChain{result: &rpc.GetTransactionResult{}}, sigVerdictUnknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &SolanaPullIntentHandler{Chain: &tc.chain}
-			_, verdict := h.checkSignature(t.Context(), solanago.Signature{1}.String())
+			_, verdict := h.checkSignature(t.Context(), tx.Signatures[0].String())
 			require.Equal(t, tc.want, verdict)
 		})
 	}

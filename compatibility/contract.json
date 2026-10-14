@@ -1424,7 +1424,7 @@
       "type pullProviderConvergeLog struct {\n\tRunID             *uuid.UUID\n\tFindings          int\n\tAutoFixed         int\n\tReconcileRequired int\n\tRequiresReview    int `json:\"requires_review\"`\n\tAdminRequired     int `json:\"-\"`\n}"
     ],
     "internal/http/handlers": [
-      "type CustomerCancelSubscriptionParams struct {\n\tReason    string `json:\"reason\"`\n\tSignature string `json:\"signature\"`\n}",
+      "type CustomerCancelSubscriptionParams struct {\n\tReason        string `json:\"reason\"`\n\tRevokeOnChain bool   `json:\"revoke_on_chain\"`\n\tSignature     string `json:\"signature\"`\n}",
       "type CustomerChangeSubscriptionParams struct {\n\tPriceID   *billing.PriceID `json:\"price_id\"`\n\tQuantity  *int             `json:\"quantity\"`\n\tSignature string           `json:\"signature\"`\n}",
       "type PaginatedResponse[T any] struct {\n\tItems  []T   `json:\"items\"`\n\tTotal  int64 `json:\"total\"`\n\tLimit  int   `json:\"limit\"`\n\tOffset int   `json:\"offset\"`\n}",
       "type PreviewSubscriptionChangeParams struct {\n\tPriceID  *billing.PriceID `json:\"price_id\"`\n\tQuantity *int             `json:\"quantity\"`\n}",
@@ -2615,6 +2615,8 @@
       "models": "github.com/open-rails/openrails/internal/db/models",
       "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
       "recurring": "github.com/open-rails/openrails/internal/modules/solana/recurring",
+      "redact": "github.com/open-rails/openrails/internal/shared/redact",
+      "solanasubs": "github.com/open-rails/openrails/internal/modules/solana/solanasubs",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "utf8": "unicode/utf8",
@@ -4379,6 +4381,7 @@
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
+      "failpoint": "github.com/open-rails/openrails/internal/failpoint",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "intents": "github.com/open-rails/openrails/internal/intents",
@@ -4388,8 +4391,10 @@
       "solanago": "github.com/gagliardetto/solana-go",
       "solanaint": "github.com/open-rails/openrails/internal/integrations/solana",
       "solanasubs": "github.com/open-rails/openrails/internal/modules/solana/solanasubs",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/river/jobs_subscription_converge.go": {
       "attempts": "github.com/open-rails/openrails/internal/modules/attempts",

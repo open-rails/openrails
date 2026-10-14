@@ -243,12 +243,18 @@ type providerTraits struct {
 	// paymentMethodsExhaustive: the vault listing is the complete roster, so a local
 	// payment method missing from it no longer exists at the rail.
 	paymentMethodsExhaustive bool
+	// billsOnlyWhenPulled: the rail never bills on its own; OpenRails pulls
+	// each renewal (Solana), so a rail subscription left live after a local
+	// cancel charges nothing.
+	billsOnlyWhenPulled bool
 }
 
 func traitsFor(p Provider) providerTraits {
 	switch p {
 	case ProviderNMI:
 		return providerTraits{absenceMeansCanceled: true, paymentMethodsExhaustive: true}
+	case ProviderSolana:
+		return providerTraits{billsOnlyWhenPulled: true}
 	default:
 		// CCBill: absence from ACTIVEMEMBERS is inactive-or-out-of-window, NOT
 		// proof of termination — only CANCELLATION/EXPIRE rows assert death.

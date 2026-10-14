@@ -387,14 +387,13 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /**
-     * Cancels at period end and answers the subscription. When the rail needs
-     * the customer's step (`next_action`, a Solana wallet signature), the
-     * subscription is unchanged: complete it with `signWalletAction` and
-     * repeat with `signature`.
+     * Cancels at period end without a wallet. `revokeOnChain` also requests
+     * an optional Solana wallet step in `next_action`; the local cancellation
+     * is already effective. Complete the step and repeat with `signature`.
      */
     cancelSubscription(
       subscriptionId: string,
-      input: { reason: string; signature?: string }
+      input: { reason: string; revokeOnChain?: boolean; signature?: string }
     ): Promise<Subscription> {
       return json(
         subscriptionSchema,
@@ -403,6 +402,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           method: "POST",
           body: {
             reason: input.reason.trim(),
+            revoke_on_chain: input.revokeOnChain,
             signature: input.signature,
           } satisfies wire.CustomerCancelSubscriptionParams,
         }

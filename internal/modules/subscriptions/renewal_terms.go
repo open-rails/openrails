@@ -23,6 +23,7 @@ import (
 // Preparation reads catalog and scheduled changes before admission; settlement
 // consumes these facts without reinterpreting a subsequently edited catalog.
 type RenewalTerms struct {
+	Rail                  models.Rail     `json:"rail,omitempty"`
 	LegacyEntitlements    map[string]*int `json:"legacy_entitlements,omitzero"`
 	ProviderAccessDefault bool            `json:"provider_access_default,omitempty"`
 	AccessDurationHours   *int            `json:"access_duration_hours"`
@@ -64,7 +65,11 @@ func (t RenewalTerms) Validate() error {
 	if t.Quantity != nil && *t.Quantity < 1 || t.Amount%int64(SeatCount(t.Quantity)) != 0 {
 		return errors.New("renewal seats contradict its amount")
 	}
-	if _, err := moneyutil.NativeToRailMinorExact(t.Currency, t.Amount); err != nil {
+	if t.Rail == models.RailSolana {
+		if err := moneyutil.ValidateCurrency(t.Currency); err != nil {
+			return err
+		}
+	} else if _, err := moneyutil.NativeToRailMinorExact(t.Currency, t.Amount); err != nil {
 		return fmt.Errorf("renewal amount: %w", err)
 	}
 	if t.ScheduledChangeID != nil && *t.ScheduledChangeID == uuid.Nil {

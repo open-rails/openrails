@@ -179,6 +179,27 @@ only, across every merchant and PSP.
 - **USDC only**: on-chain plan amounts are immutable, so only a stablecoin
   keeps a fixed base-unit amount ≈ a fixed fiat amount. One-time purchases
   also accept SOL. Testnet has no USDC, so it offers no recurring.
+- **OpenRails owns collection.** Solana subscriptions use `collection_policy:
+  engine`; only the specialized cranker collects them. The generic saved-card
+  collector never admits their renewals. Upgrades correct the former provider
+  classification while retaining existing rail identifiers, paid access and
+  historical settled bill snapshots.
+- **An accepted episode and its realized service period are separate facts.**
+  Before signing, the durable pull intent freezes the customer and subscription,
+  price/product terms, amount and currency precision, mint and precision,
+  treasury, plan/accounts, duration and due episode. The exact signed execution
+  identity, signature and submission time are recorded before sending. A
+  confirmed transaction must prove the expected program pull and intent memo,
+  exact token credit and destination. Its chain block time anchors the realized
+  paid period. Completion and restart repair use the same accepted episode to
+  record one engine-owned order, actual payment and canonical order attempt,
+  and grant that one period. Later catalog edits and verifier clocks cannot
+  reprice or extend it. Missing or mismatched evidence stays unresolved.
+- **Queued work survives an upgrade conservatively.** A never-signed legacy
+  pull can accept its complete agreement under the current subscription and
+  claim fence. An already-signed legacy pull without retained terms keeps its
+  signature for evidence-based recovery; current catalog data cannot supply
+  its missing historical agreement.
 - **One pull per period, enforced twice.** The on-chain program independently
   caps pulls at one plan-amount per period (a second pull fails with
   `Custom:400` "period already paid"), so even a buggy biller cannot
@@ -195,13 +216,23 @@ only, across every merchant and PSP.
   cancels the subscription. No dunning.
 - **RPC/gas failures** are operational: retried next run, never held against the
   subscriber.
-- **Cancels and tier changes are on-chain and signed by the subscriber.**
-  `POST /v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change`
-  answer `next_action: {type: "solana_sign_transactions", transactions}`; the
-  wallet signs and sends them, and the same request repeated with `signature`
-  mirrors the landed transaction. A cancel is immediate: there is no card-style
-  "cancel at period end" deferral on this rail. A merchant cannot do either for
-  the customer (403 `customer_action_required`).
+- **Cancellation is pending until the paid period ends and needs no wallet.**
+  `POST /v1/me/subscriptions/{id}/cancel` records it immediately and stops the
+  cranker from pulling another renewal. Paid access continues until the period
+  ends; `/v1/me/subscriptions/{id}/resume` undoes an ordinary customer cancel
+  before then. The subscription account can remain on chain: no pull is made.
+  A renewal already signed and unresolved must settle before cancellation can
+  be accepted (`payment_in_progress`).
+- **An optional on-chain cancellation is signed by the subscriber.** Send
+  `revoke_on_chain: true` on the cancel request to receive a
+  `solana_sign_transactions` next action. The local cancellation has already
+  taken effect; the wallet signs and sends the additional on-chain cancel and
+  repeats the request with `signature`. Wallet cancellations and delegate
+  revocations are also detected when a due pull is refused, without dunning.
+  They cannot be undone locally.
+- **Tier changes are signed by the subscriber.** The change route answers a
+  `solana_sign_transactions` next action; repeat with the landed signature.
+  A merchant cannot sign this action for the customer.
 
 ### Devnet testing
 

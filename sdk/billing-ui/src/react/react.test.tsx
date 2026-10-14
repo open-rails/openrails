@@ -259,7 +259,7 @@ describe("useSubscriptions", () => {
     expect(error).toMatchObject({ status: 400, code: "invalid_param" })
   })
 
-  it("signs a Solana cancel's next action and tracks its stages", async () => {
+  it("signs an explicitly requested on-chain cancel and tracks its stages", async () => {
     const server = fakeBilling({
       subscriptions: [subscription({ id: "sub_sol", rail: "solana" })],
     })
@@ -267,7 +267,7 @@ describe("useSubscriptions", () => {
     await waitFor(() => expect(result.current.subscriptions).not.toBeNull())
     let error: unknown
     await act(async () => {
-      error = await result.current.cancel("sub_sol", "too expensive")
+      error = await result.current.cancel("sub_sol", "too expensive", undefined, true)
     })
     expect(error).toMatchObject({ code: "wallet_required" })
     expect(server.subscriptions[0].status).toBe("active")
@@ -278,7 +278,8 @@ describe("useSubscriptions", () => {
       done = result.current.cancel(
         "sub_sol",
         "too expensive",
-        () => new Promise((resolve) => (sign = resolve))
+        () => new Promise((resolve) => (sign = resolve)),
+        true
       )
     })
     await waitFor(() => expect(result.current.pending.sub_sol).toBe("signing"))

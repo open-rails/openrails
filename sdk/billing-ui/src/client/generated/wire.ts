@@ -743,6 +743,7 @@ export type CustomerAmount = {
 
 export type CustomerCancelSubscriptionParams = {
   reason?: string
+  revoke_on_chain?: boolean
   signature?: string
 }
 

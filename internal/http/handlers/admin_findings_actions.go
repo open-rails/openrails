@@ -282,9 +282,6 @@ func executeCancelAndRefund(r *httprequest.Request, finding reconcile.FindingRec
 			return err
 		}
 		if sub.Status != models.StatusCanceled {
-			if sub.CollectionPolicy != models.CollectionPolicyEngine && sub.Rail == models.RailSolana {
-				return subscriptions.ErrCustomerActionRequired
-			}
 			command, err := subscriptions.CancellationCommand(r.Request.Context(), sub, reason, true, false)
 			if err != nil {
 				return err

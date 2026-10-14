@@ -182,14 +182,15 @@ lines.
 Cancel, resume and the payment-method switch answer the `Subscription`, in the
 request. Cancel ends access at the period end; `revoke_access` on the merchant
 route must be explicit to end it now. Resume undoes a scheduled cancel where
-the rail can (not on CCBill or Solana).
+the rail can (including Solana; not on CCBill).
 
-A Solana subscription is changed and canceled in the customer's wallet: cancel
-and change answer `next_action: {type: "solana_sign_transactions",
-transactions}`; the wallet signs and sends them, and the same request repeated
-with `signature` mirrors the landed transaction. Nothing changes before the
-chain confirms it, and a merchant cannot do it for the customer
-(`403 customer_action_required`).
+A Solana cancellation needs no wallet signature: OpenRails stops pulling its
+renewals, preserves the paid period, and permits undo until that period ends.
+An unresolved signed renewal answers `409 payment_in_progress`; cancel again
+once its outcome resolves. `revoke_on_chain: true` additionally requests a
+wallet-signed on-chain cancellation through `next_action`; local cancellation
+has already taken effect. Repeat with the landed `signature` to confirm the
+on-chain action. A Solana tier change still requires the customer's signature.
 
 On an NMI- or CCBill-scheduled subscription, a cancel while the merchant's
 destructive switch is off answers `409 provider_cancel_held`: OpenRails will

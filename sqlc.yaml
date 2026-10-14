@@ -95,6 +95,7 @@ sql:
       - "internal/migrate/postgres/0100_solana_treasury.up.sql"
       - "internal/migrate/postgres/0101_solana_crankers.up.sql"
       - "internal/migrate/postgres/0102_book_id.up.sql"
+      - "internal/migrate/postgres/0103_solana_engine_collection.up.sql"
       - "internal/migrate/postgres/0104_provider_prices.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"

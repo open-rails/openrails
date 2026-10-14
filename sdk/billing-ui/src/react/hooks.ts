@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react"
 
 import {
   isWalletAction,
+  isWalletRejection,
   signWalletAction,
   type SendSolanaTransaction,
   type SubscriptionChangeInput,
@@ -41,14 +42,14 @@ export interface SubscriptionsState {
   /** In-flight action per subscription id. */
   pending: Readonly<Record<string, SubscriptionAction>>
   /**
-   * Cancels at period end. A Solana subscription is canceled by the wallet:
-   * pass `sendTransaction`; without it the cancel resolves to a
-   * `wallet_required` error.
+   * Cancels at period end without a wallet. Set `revokeOnChain` and pass
+   * `sendTransaction` to also cancel the Solana subscription on chain.
    */
   cancel: (
     subscriptionId: string,
     reason: string,
-    sendTransaction?: SendSolanaTransaction
+    sendTransaction?: SendSolanaTransaction,
+    revokeOnChain?: boolean
   ) => ActionResult
   resume: (subscriptionId: string) => ActionResult
   /** `null` makes the subscription follow the default card. */
@@ -127,28 +128,35 @@ export function useSubscriptions(
     [mark, patchRow]
   )
 
-  // A declined wallet prompt resolves to a `wallet_rejected` error.
+  // Declining the optional wallet prompt keeps the completed local cancel.
   const cancel = useCallback(
-    (id: string, reason: string, sendTransaction?: SendSolanaTransaction) =>
+    (id: string, reason: string, sendTransaction?: SendSolanaTransaction, revokeOnChain = false) =>
       act(
         id,
         "cancel",
         async () => {
-          const sub = await client.cancelSubscription(id, { reason })
+          if (revokeOnChain && !sendTransaction) throw walletRequired()
+          const sub = await client.cancelSubscription(id, { reason, revokeOnChain })
+          // The local cancellation has already succeeded, even if the optional
+          // wallet step is declined or fails. Keep that state visible.
+          patchRow(sub)
           if (!sub.next_action) return sub
           if (!isWalletAction(sub.next_action) || !sendTransaction)
             throw walletRequired()
           mark(id, "signing")
-          const signature = await signWalletAction(
-            sub.next_action,
-            sendTransaction
-          )
+          let signature: string
+          try {
+            signature = await signWalletAction(sub.next_action, sendTransaction)
+          } catch (err) {
+            if (isWalletRejection(toBillingError(err))) return sub
+            throw err
+          }
           mark(id, "confirming")
           return client.cancelSubscription(id, { reason, signature })
         },
         () => notify({ type: "subscription.canceled", subscriptionId: id })
       ),
-    [act, client, mark, notify]
+    [act, client, mark, notify, patchRow]
   )
 
   const resume = useCallback(

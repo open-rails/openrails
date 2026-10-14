@@ -10,13 +10,19 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/failpoint"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // TypeSolanaPull is the recurring on-chain pull: one durable intent per
@@ -35,9 +41,10 @@ func SolanaPullIdempotencyKey(rowID uuid.UUID, nextPullAt time.Time) string {
 
 // SolanaPullPayload is the stored payload for TypeSolanaPull.
 type SolanaPullPayload struct {
-	SubscriptionPDA string    `json:"subscription_pda"`
-	RowID           uuid.UUID `json:"row_id"`
-	NextPullAt      time.Time `json:"next_pull_at"`
+	Agreement       *SolanaPullAgreement `json:"agreement,omitempty"`
+	SubscriptionPDA string               `json:"subscription_pda"`
+	RowID           uuid.UUID            `json:"row_id"`
+	NextPullAt      time.Time            `json:"next_pull_at"`
 }
 
 // SolanaTxReader is the chain-read surface the verify leg needs (satisfied by
@@ -61,6 +68,10 @@ func NewSolanaPullIntentHandler(core *SolanaCrankWorker, store *intents.Store, c
 }
 
 func (h *SolanaPullIntentHandler) Type() string { return TypeSolanaPull }
+
+// The accepted financial agreement and signed execution contain no secrets.
+// They remain the immutable replay/repair authority after settlement.
+func (h *SolanaPullIntentHandler) PrunePolicy() (bool, bool) { return true, true }
 func (h *SolanaPullIntentHandler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
@@ -104,6 +115,9 @@ func (h *SolanaPullIntentHandler) CheckRelevance(ctx context.Context, intent gen
 	if err != nil {
 		return intents.SupersededBy("unusable solana pull intent: " + err.Error()), nil
 	}
+	if signature, err := recordedSignature(intent); err != nil || signature != "" {
+		return intents.StillRelevant(), nil
+	}
 	row, err := h.loadRow(ctx, p)
 	if err != nil {
 		if db.IsNotFound(err) {
@@ -132,6 +146,19 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 	if err != nil {
 		return intents.Retryable("load solana subscription: " + err.Error())
 	}
+	if p.Agreement == nil {
+		p.Agreement, err = h.admitLegacyAgreement(ctx, intent, p, row)
+		if err != nil {
+			return intents.Parked("legacy pull agreement could not be admitted: " + err.Error())
+		}
+		intent.Payload, err = json.Marshal(p)
+		if err != nil {
+			return intents.Parked(err.Error())
+		}
+	}
+	if err := p.Agreement.validate(intent, p); err != nil {
+		return intents.Parked("pull has no qualified accepted agreement: " + err.Error())
+	}
 	repo := solanasubs.NewSolanaSubscriptionRepo(h.Core.DB)
 
 	// A previously-recorded signature means a tx WAS signed (and possibly
@@ -150,26 +177,75 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 			if err := verifyPullMemoMatchesIntent(result, intent.ID); err != nil {
 				return intents.Parked("recorded pull signature landed but " + err.Error())
 			}
-			return h.repairFromSignature(ctx, repo, row, sig)
+			return h.repairFromSignature(ctx, repo, p.Agreement, intent, sig)
 		case sigVerdictNotLanded:
-			// The transaction reverted, so no payment was made.
+			// Release only this exact signature after a positive chain revert.
+			// A later signer outage must not block a cancel of an unpaid period.
+			if err := h.recordRevertedSignature(ctx, intent.ID, sig); err != nil {
+				return intents.Parked("could not retain pull nonexecution evidence: " + err.Error())
+			}
 		}
 	}
 
 	var recorded string
+	var execution *observed.Execution
+	stopped := errors.New("Solana pull superseded before submission")
 	presubmit := func(sig string) error {
-		recorded = sig
 		if h.Store == nil {
 			return errors.New("intent store unavailable for signature write-ahead")
 		}
-		return h.Store.RecordProgress(ctx, intent.ID, map[string]any{"transaction_id": sig})
+		site := failpoint.Site{Point: failpoint.BeforeInline, Kind: TypeSolanaPull, Operation: intent.ID, Subscription: row.SubscriptionID}
+		if err := failpoint.Hit(ctx, site); err != nil {
+			return err
+		}
+		// Cancellation and admission take the same subscription row lock. The
+		// winning cancellation prevents the send; a winning signed pull makes
+		// cancellation wait for its outcome rather than discard paid access.
+		err := h.Core.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			d := h.Core.DB.NewWithPgxTx(tx)
+			sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, row.SubscriptionID)
+			if err != nil {
+				return err
+			}
+			current, err := solanasubs.NewSolanaSubscriptionRepo(d).GetBySubscriptionPDA(ctx, p.SubscriptionPDA)
+			if err != nil {
+				return err
+			}
+			if sub.Status == models.StatusCanceled || sub.CollectionPolicy != models.CollectionPolicyEngine || sub.PriceID != p.Agreement.PriceID || sub.ProductID != p.Agreement.ProductID || sub.CustomerID != p.Agreement.CustomerID || sub.PspID != p.Agreement.Row.PspID || current.Status != models.SolanaSubscriptionActive || current.NextPullAt.UTC().Unix() != p.NextPullAt.UTC().Unix() {
+				return stopped
+			}
+			execution = &observed.Execution{IntentID: intent.ID, AttemptID: uuidutil.NewV7(), ClaimAttempt: intent.Attempts, Signature: sig, SubmittedAt: h.Core.now().Truncate(time.Microsecond)}
+			encoded, err := json.Marshal(execution)
+			if err != nil {
+				return err
+			}
+			fenced, err := d.Gen(ctx).FenceSolanaPullSubmission(ctx, gen.FenceSolanaPullSubmissionParams{
+				MerchantID: intent.MerchantID, ID: intent.ID, Attempts: intent.Attempts, Signature: sig, Execution: encoded, Now: execution.SubmittedAt,
+			})
+			if err != nil {
+				return err
+			}
+			if fenced != 1 {
+				return stopped
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		recorded = sig
+		site.Point = failpoint.AfterFence
+		return failpoint.Hit(ctx, site)
 	}
 
 	// The intent id is the memo local-id: it exists durably before the send,
 	// so the stamped pull is chain-recognizable even if every local send
 	// record is lost.
-	outcome, crankErr := h.Core.crankOne(ctx, repo, row, intent.ID, presubmit)
+	outcome, crankErr := h.Core.crankOne(ctx, repo, &p.Agreement.Row, p.Agreement.plan(), intent.ID, presubmit)
 	if crankErr != nil {
+		if errors.Is(crankErr, stopped) {
+			return intents.TerminalWithEvidence(stopped.Error(), map[string]any{"not_executed": true})
+		}
 		if recorded != "" || outcome.signature != "" {
 			// The tx was signed (and its signature durably recorded) before the
 			// failure: submit or local finalize may have half-happened. The
@@ -188,14 +264,26 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 	}
 	switch outcome.kind {
 	case crankSucceeded:
-		return intents.Succeeded(evidence)
-	case crankAlreadyPaid:
-		// Out-of-band payment (this intent recorded no signature): the row
-		// advanced without a local renewal; the reconcile worker repairs the
-		// ledger.
-		evidence["repair"] = "advanced_without_local_renewal"
-		return intents.Succeeded(evidence)
+		if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.AfterProvider, Kind: TypeSolanaPull, Operation: intent.ID, Subscription: row.SubscriptionID}); err != nil {
+			return intents.Ambiguous("pull landed before settlement: " + err.Error())
+		}
+		intent.ResultEvidence, _ = json.Marshal(map[string]any{"transaction_id": outcome.signature, "execution": execution})
+		return h.repairFromSignature(ctx, repo, p.Agreement, intent, outcome.signature)
+	case crankUnqualifiedPaid:
+		evidence["transaction_id"] = recorded
+		return intents.TerminalWithEvidence(outcome.reason, evidence)
+
 	case crankGhostExpired, crankCanceled, crankDunned:
+		if recorded != "" {
+			_, verdict := h.checkSignature(ctx, recorded)
+			if verdict != sigVerdictNotLanded {
+				return intents.Ambiguous("terminal pull outcome has no positive nonexecution receipt")
+			}
+			if err := h.recordRevertedSignature(ctx, intent.ID, recorded); err != nil {
+				return intents.Parked(err.Error())
+			}
+			evidence["transaction_id"], evidence["reverted_transaction_id"] = recorded, recorded
+		}
 		return intents.TerminalWithEvidence(outcome.reason, evidence)
 	default:
 		return intents.Ambiguous("unrecognized crank outcome")
@@ -222,33 +310,48 @@ func (h *SolanaPullIntentHandler) Verify(ctx context.Context, intent gen.Billing
 	case sigVerdictUnknown:
 		return intents.Ambiguous("recorded pull signature still unresolved")
 	case sigVerdictNotLanded:
+		if err := h.recordRevertedSignature(ctx, intent.ID, sig); err != nil {
+			return intents.Parked("could not retain pull nonexecution evidence: " + err.Error())
+		}
 		return intents.Retryable("recorded transaction reverted; safe to re-pull")
 	}
 	if err := verifyPullMemoMatchesIntent(result, intent.ID); err != nil {
 		return intents.Parked("recorded pull signature landed but " + err.Error())
 	}
-	row, err := h.loadRow(ctx, p)
-	if err != nil {
-		return intents.Ambiguous("pull landed on-chain, but local row load failed: " + err.Error())
+	if err := p.Agreement.validate(intent, p); err != nil {
+		return intents.Parked("landed pull has no qualified accepted agreement: " + err.Error())
 	}
-	return h.repairFromSignature(ctx, solanasubs.NewSolanaSubscriptionRepo(h.Core.DB), row, sig)
+	return h.repairFromSignature(ctx, solanasubs.NewSolanaSubscriptionRepo(h.Core.DB), p.Agreement, intent, sig)
+}
+
+// The proof names its exact signature. A subsequent signed pull has a new
+// transaction_id and is unresolved again, regardless of the old proof.
+func (h *SolanaPullIntentHandler) recordRevertedSignature(ctx context.Context, id uuid.UUID, sig string) error {
+	if h.Store == nil {
+		return errors.New("intent store unavailable")
+	}
+	return h.Store.RecordProgress(ctx, id, map[string]any{"reverted_transaction_id": sig})
 }
 
 // repairFromSignature runs the renewal repair for a pull CONFIRMED on-chain:
 // RenewMembership (idempotent on the signature) + AdvanceAfterPull.
-func (h *SolanaPullIntentHandler) repairFromSignature(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription, sig string) intents.Outcome {
-	resolve := h.Core.resolvePlanFn
-	if resolve == nil {
-		resolve = h.Core.resolvePlan
-	}
-	plan, err := resolve(ctx, row)
+func (h *SolanaPullIntentHandler) repairFromSignature(ctx context.Context, repo solanaSubStore, agreement *SolanaPullAgreement, intent gen.BillingProviderIntent, sig string) intents.Outcome {
+	receipt, err := recurring.VerifyPullReceipt(ctx, h.Chain, &agreement.Row, sig, agreement.TokenAmount, agreement.PeriodHours, agreement.TokenDecimals, intent.ID)
 	if err != nil {
-		return intents.Ambiguous("pull landed on-chain, but plan resolution failed: " + err.Error())
+		return intents.Ambiguous("pull receipt does not qualify its accepted agreement: " + err.Error())
 	}
-	if err := h.Core.finalizePull(ctx, repo, row, plan, sig); err != nil {
-		return intents.Ambiguous("pull landed on-chain, but renewal repair failed: " + err.Error())
+	var evidence struct {
+		Execution *observed.Execution `json:"execution"`
 	}
-	return intents.Succeeded(map[string]any{"transaction_id": sig, "verified_existing": true})
+	if json.Unmarshal(intent.ResultEvidence, &evidence) != nil || evidence.Execution == nil || evidence.Execution.IntentID != intent.ID || evidence.Execution.Signature != sig {
+		return intents.Parked("recorded pull has no matching submitted execution identity")
+	}
+	if err := h.Core.finalizePull(ctx, repo, agreement, receipt, evidence.Execution); err != nil {
+		return intents.Ambiguous("pull landed on-chain, but settlement failed: " + err.Error())
+	}
+	return intents.Succeeded(map[string]any{"transaction_id": sig, "verified_existing": true, "execution": evidence.Execution,
+		"solana_receipt": map[string]any{"signature": sig, "period_start": receipt.PeriodStart, "period_end": receipt.PeriodEnd,
+			"mint": agreement.Row.Mint, "treasury": agreement.Row.Treasury}})
 }
 
 type sigVerdict int
@@ -260,25 +363,33 @@ const (
 )
 
 // checkSignature reads the chain for the recorded signature. sigVerdictLanded
-// reports a confirmed, on-chain-successful transaction (result non-nil only
-// then, for the memo cross-check).
+// reports a confirmed, on-chain-successful transaction. Reverted receipts
+// also return their validated envelope for authoritative decline classification.
 func (h *SolanaPullIntentHandler) checkSignature(ctx context.Context, signature string) (*rpc.GetTransactionResult, sigVerdict) {
-	if h.Chain == nil {
+	return checkSolanaSignature(ctx, h.Chain, signature)
+}
+
+func checkSolanaSignature(ctx context.Context, chain SolanaTxReader, signature string) (*rpc.GetTransactionResult, sigVerdict) {
+	if chain == nil {
 		return nil, sigVerdictUnknown
 	}
 	sig, err := solanago.SignatureFromBase58(signature)
 	if err != nil {
 		return nil, sigVerdictUnknown
 	}
-	result, err := h.Chain.GetTransaction(ctx, sig)
+	result, err := chain.GetTransaction(ctx, sig)
 	if err != nil || result == nil {
 		return nil, sigVerdictUnknown
 	}
-	if result.Meta == nil {
+	if result.Meta == nil || result.Transaction == nil {
+		return nil, sigVerdictUnknown
+	}
+	tx, err := result.Transaction.GetTransaction()
+	if err != nil || tx == nil || len(tx.Signatures) == 0 || !tx.Signatures[0].Equals(sig) || tx.VerifySignatures() != nil {
 		return nil, sigVerdictUnknown
 	}
 	if result.Meta.Err != nil {
-		return nil, sigVerdictNotLanded // landed but REVERTED: no money moved
+		return result, sigVerdictNotLanded // landed but REVERTED: no money moved
 	}
 	return result, sigVerdictLanded
 }

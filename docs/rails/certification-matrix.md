@@ -53,8 +53,8 @@ read them, and a request a rail cannot serve is refused, never dropped.
 | Card entry | Collect.js token, or server card entry when the PSP declares it | Stripe Elements; a hosted redirect for one-off without a publishable key | CCBill's own page | none: a wallet |
 | Saved cards managed through OpenRails | yes | saved through setup; changed in Stripe's billing portal | no | n/a |
 | Charge a saved card for a usage order | yes | yes | no | no |
-| Customer cancel | reversible until the scheduled delete runs | reversible until period end | final; access runs to the paid date | signed by the customer's wallet |
-| Merchant cancel | yes | yes | yes | no: `customer_action_required` |
+| Customer cancel | reversible until the scheduled delete runs | reversible until period end | final; access runs to the paid date | reversible until period end; optional wallet cancellation |
+| Merchant cancel | yes | yes | yes | yes; stops OpenRails pulls |
 | Tier change | upgrade now with proration, downgrade at period end | upgrade now with proration, downgrade at period end | upgrade by redirect; no downgrade | signed by the customer's wallet |
 | Refund through the rail | yes | yes | no (`refund_unsupported`) | no (`refund_unsupported`) |
 | Catalog push | recurring plans, find-or-create | products, prices and features, find-or-create | link only: the operator supplies `flex_id` and `recurring_billing_option_id` | plans, find-or-create |

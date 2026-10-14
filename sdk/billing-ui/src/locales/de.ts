@@ -96,6 +96,7 @@ export const de: BillingUiMessageBundle = {
     title: "{name} kündigen?",
     description:
       "Künftige Zahlungen werden eingestellt. Bereits gekaufter Zugriff bleibt bestehen.",
+    revokeOnChain: "Auch auf der Blockchain kündigen (erfordert Wallet-Signatur und Netzwerkgebühr).",
     solanaDescription:
       "Deine Wallet signiert eine On-Chain-Kündigung. Bereits gekaufter Zugriff bleibt bestehen.",
     reasonLabel: "Warum kündigst du?",

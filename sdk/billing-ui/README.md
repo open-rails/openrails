@@ -183,7 +183,7 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
   <AccountBilling
     plansHref="/plans"
     defaultCurrency="USD" // offers "Make default"
-    sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // signs a Solana cancel
+    sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // optional on-chain cancellation
   />
 </BillingProvider>
 ```
@@ -276,10 +276,11 @@ const change = await billing.changeSubscription(sub.id, {
   `next_action`. Solana's is `solana_sign_transactions`:
   `signWalletAction(change.next_action, send)` signs and sends its
   transactions and returns the signature; repeat `changeSubscription` with the same
-  key and `signature`. `cancelSubscription(id, { reason, signature? })` works
-  the same way: its answer is the subscription, unchanged and carrying
-  `next_action` until the signed cancel lands. The hooks run this when given
-  `sendTransaction`.
+  key and `signature`. `cancelSubscription(id, { reason })` cancels at
+  period end without a wallet. Set `revokeOnChain: true` to also request an
+  optional wallet step; local cancellation has already taken effect. The
+  cancel hook signs this additional step when passed `sendTransaction` and
+  `revokeOnChain: true`.
 
 ## Provider-neutral flows
 

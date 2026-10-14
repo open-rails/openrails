@@ -172,7 +172,6 @@ var pendingDynamicMoney = map[string]string{
 	"internal/modules/webhooks/ccbill.go:func handleRenewalSuccessInternal \"amount_cents\"":    notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func handleUpgradeSuccess \"billed_amount_cents\"":     notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func handleUpgradeSuccess \"expected_amount_cents\"":   notHTTPStoredMetadata,
-	"internal/river/jobs_solana_crank.go:func finalizePull \"solana_token_amount\"":             notHTTPStoredMetadata,
 }
 
 // pinnedMarshalers lists every custom JSON marshaler in the wire tree with

@@ -93,6 +93,7 @@ export const zh: BillingUiMessageBundle = {
   cancel: {
     title: "取消 {name}？",
     description: "停止后续付款。已购买的访问权限予以保留。",
+    revokeOnChain: "同时在链上取消（需要钱包签名和网络费用）。",
     solanaDescription: "你的钱包将签署链上取消交易。已购买的访问权限予以保留。",
     reasonLabel: "为什么要取消？",
     reasonPlaceholder: "你的反馈能帮助我们改进。",

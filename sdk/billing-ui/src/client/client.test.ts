@@ -233,8 +233,8 @@ describe("createBillingClient", () => {
       subscriptions: [subscription({ id: "sub_sol", rail: "solana" })],
     })
     const client = createBillingClient({ fetch: server.fetch })
-    const asked = await client.cancelSubscription("sub_sol", { reason: "done" })
-    expect(asked.status).toBe("active")
+    const asked = await client.cancelSubscription("sub_sol", { reason: "done", revokeOnChain: true })
+    expect(asked.status).toBe("canceled")
     expect(asked.next_action?.type).toBe("solana_sign_transactions")
     const send = vi.fn(async (tx: string) => `sig-for-${tx}`)
     const signature = await signWalletAction(asked.next_action!, send)

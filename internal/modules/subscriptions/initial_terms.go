@@ -16,6 +16,9 @@ import (
 // before provider submission. A schedule-only pending phase confers no new
 // access; a free phase confers its declared access without recording money.
 type InitialMembershipTerms struct {
+	// Rail identifies the specialized wallet authorization on a Solana order.
+	// Older card agreements omit it and retain their saved-card requirements.
+	Rail models.Rail `json:"rail,omitempty"`
 	// RecurringIntervalHours freezes the ongoing cadence separately from an
 	// initial trial or prorated service period. Provider schedules require it.
 	RecurringIntervalHours *int `json:"recurring_interval_hours,omitempty"`
@@ -89,7 +92,14 @@ func (t InitialMembershipTerms) Validate() error {
 	if t.RecurringIntervalHours != nil && *t.RecurringIntervalHours <= 0 || t.CollectionPolicy != models.CollectionPolicyEngine && t.RecurringIntervalHours == nil {
 		return errors.New("accepted provider enrollment requires its recurring cadence")
 	}
-	if err := moneyutil.RequireFiatCurrency(t.Currency); err != nil {
+	if t.Rail == models.RailSolana {
+		if t.CollectionPolicy != models.CollectionPolicyEngine || t.PaymentMethodID != uuid.Nil || t.AwaitingMethod || t.Pending || t.Replaces != nil || t.Adds != nil || t.RecurringIntervalHours == nil || t.RecurringAmount <= 0 {
+			return errors.New("Solana enrollment requires its paid wallet authorization")
+		}
+		if err := moneyutil.ValidateCurrency(t.Currency); err != nil {
+			return err
+		}
+	} else if err := moneyutil.RequireFiatCurrency(t.Currency); err != nil {
 		return err
 	}
 	if t.CancelAfterInitial && t.CollectionPolicy != models.CollectionPolicyEngine {
@@ -101,7 +111,7 @@ func (t InitialMembershipTerms) Validate() error {
 	if t.AwaitingMethod && (t.CollectionPolicy != models.CollectionPolicyEngine || t.PaymentMethodID != uuid.Nil || t.Pending || t.Replaces != nil || t.Adds != nil) {
 		return errors.New("awaiting method requires a paid engine order without a saved card")
 	}
-	if !t.CollectionPolicy.Valid() || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.PSPID == uuid.Nil || t.ProductID == uuid.Nil || t.PriceID == uuid.Nil || t.PaymentMethodID == uuid.Nil && t.CollectionPolicy == models.CollectionPolicyEngine && !t.AwaitingMethod || t.AcceptedAt.IsZero() || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) || t.Amount < 0 || t.RecurringAmount < 0 {
+	if !t.CollectionPolicy.Valid() || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.PSPID == uuid.Nil || t.ProductID == uuid.Nil || t.PriceID == uuid.Nil || t.PaymentMethodID == uuid.Nil && t.CollectionPolicy == models.CollectionPolicyEngine && !t.AwaitingMethod && t.Rail != models.RailSolana || t.AcceptedAt.IsZero() || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) || t.Amount < 0 || t.RecurringAmount < 0 {
 		return errors.New("initial membership terms are incomplete")
 	}
 	for _, instant := range []time.Time{t.AcceptedAt, t.PeriodStart, t.PeriodEnd} {
@@ -115,8 +125,10 @@ func (t InitialMembershipTerms) Validate() error {
 	if t.Currency != strings.ToUpper(strings.TrimSpace(t.Currency)) || (t.Amount > 0) != (t.PaymentID != uuid.Nil) || (t.Pending && (t.Amount != 0 || !t.PeriodStart.After(t.AcceptedAt))) {
 		return errors.New("initial membership phase contradicts its accepted payment")
 	}
-	if _, err := moneyutil.NativeToRailMinorExact(t.Currency, t.Amount); err != nil {
-		return err
+	if t.Rail != models.RailSolana {
+		if _, err := moneyutil.NativeToRailMinorExact(t.Currency, t.Amount); err != nil {
+			return err
+		}
 	}
 	if a := t.Adds; a != nil {
 		if t.Quantity == nil {
@@ -131,6 +143,9 @@ func (t InitialMembershipTerms) Validate() error {
 		if t.CollectionPolicy != models.CollectionPolicyEngine || t.Pending || r.SubscriptionID == uuid.Nil || r.SubscriptionID == t.SubscriptionID || r.PriceID == uuid.Nil || r.PriceID == t.PriceID || !r.PeriodEnd.After(t.AcceptedAt) || !r.PeriodEnd.Equal(r.PeriodEnd.Truncate(time.Microsecond)) || t.Amount <= 0 || r.Credit < 0 || t.Amount+r.Credit != t.RecurringAmount {
 			return errors.New("engine upgrade terms contradict the membership they replace")
 		}
+	}
+	if t.Rail == models.RailSolana {
+		return nil
 	}
 	_, err := moneyutil.NativeToRailMinorExact(t.Currency, t.RecurringAmount)
 	return err

@@ -30,6 +30,7 @@ type Bill struct {
 	// CalendarAnchor retains the original day across calendar amendments whose
 	// first effective due date may be clamped in a shorter month.
 	CalendarAnchor                *time.Time `json:"CalendarAnchor,omitempty"`
+	Execution                     *Execution `json:"execution,omitempty"`
 	PSPID, CustomerID             uuid.UUID
 	SubscriptionID                *uuid.UUID
 	ExistingOrderID               *uuid.UUID

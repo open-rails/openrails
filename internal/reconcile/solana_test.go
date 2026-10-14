@@ -575,12 +575,22 @@ func TestDiffSolanaDiscoveries(t *testing.T) {
 			require.Equal(t, FindingRemoteSubMissingLocal, findings[0].Type)
 			return findings[0]
 		}
-		require.NotNil(t, diff(map[string]any{"source": "solana_subscription_account"}).Apply.Materialize, "control: identity and plan resolve")
+		resolved := diff(map[string]any{"source": "solana_subscription_account"})
+		require.Nil(t, resolved.Apply, "identity and plan alone cannot authorize cash or access")
+		require.Contains(t, resolved.RemoteEvidence["materialize_blocked"], "matching positive chain receipt")
 		f := diff(map[string]any{"discovered_not_local": true})
 		require.Equal(t, FindingStatusAdminRequired, f.Status)
 		require.True(t, f.RequiresAdmin)
 		require.Nil(t, f.Apply)
 		require.Contains(t, f.RemoteEvidence["materialize_blocked"], "#714")
+	})
+
+	t.Run("a subscription canceled here bills nothing while live on chain", func(t *testing.T) {
+		pda := newKey().String()
+		local := &LocalState{Subscriptions: []LocalSubscription{{ID: uuid.New(), CustomerID: uuid.New(), Status: "canceled", Rail: "solana", RailSubscriptionID: pda}}}
+		snap := &RemoteSnapshot{Provider: ProviderSolana, Capabilities: Capabilities{Subscriptions: true},
+			Subscriptions: []RemoteSubscription{{RailSubscriptionID: pda, Status: SubscriptionStatusActive}}}
+		require.Empty(t, diffProvider(ProviderSolana, snap, local, nil, now, diffOptions{}))
 	})
 
 	t.Run("a ref skipped this tick is never read as disappeared", func(t *testing.T) {

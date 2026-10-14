@@ -2903,7 +2903,6 @@
         },
         "x-openrails-errors": [
           "cancel_unsupported_on_rail",
-          "customer_action_required",
           "invalid_param",
           "payment_in_progress",
           "provider_cancel_held",
@@ -2968,6 +2967,8 @@
         },
         "x-openrails-errors": [
           "invalid_param",
+          "service_unavailable",
+          "solana_rpc_unavailable",
           "subscription_not_found"
         ],
         "x-openrails-error-sets": [
@@ -3720,6 +3721,7 @@
           "authentication_required",
           "invalid_param",
           "service_unavailable",
+          "solana_rpc_unavailable",
           "subscription_not_found"
         ],
         "x-openrails-error-sets": [
@@ -8287,7 +8289,6 @@
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
           "cancel_unsupported_on_rail",
-          "customer_action_required",
           "invalid_param",
           "payment_in_progress",
           "provider_cancel_held",
@@ -11220,6 +11221,7 @@
           "authentication_required",
           "invalid_param",
           "service_unavailable",
+          "solana_rpc_unavailable",
           "subscription_not_found"
         ],
         "x-openrails-error-sets": [
@@ -11848,7 +11850,6 @@
         "x-openrails-mounted-when": "customer_network",
         "x-openrails-errors": [
           "cancel_unsupported_on_rail",
-          "customer_action_required",
           "invalid_param",
           "payment_in_progress",
           "provider_cancel_held",
@@ -15234,6 +15235,9 @@
         "properties": {
           "reason": {
             "type": "string"
+          },
+          "revoke_on_chain": {
+            "type": "boolean"
           },
           "signature": {
             "type": "string"

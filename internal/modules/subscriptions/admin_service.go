@@ -200,7 +200,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 	if subscription.Status == models.StatusCanceled && !revokeAccess {
 		return ErrSubscriptionNotActive
 	}
-	if subscription.CollectionPolicy == models.CollectionPolicyEngine || subscription.Status == models.StatusCanceled && revokeAccess {
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine || subscription.Rail == models.RailSolana || subscription.Status == models.StatusCanceled && revokeAccess {
 		command, err := CancellationCommand(ctx, subscription, reason, revokeAccess, accountDeletion)
 		if err != nil {
 			return err
@@ -241,8 +241,6 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		if subscription.RailSubscriptionID != "" && s.providerCancel == nil {
 			return fmt.Errorf("provider cancel scheduler unavailable")
 		}
-	case subscription.Rail == models.RailSolana:
-		return ErrCustomerActionRequired
 	default:
 		return fmt.Errorf("%w: %s", ErrCancelUnsupportedOnRail, subscription.Rail)
 	}

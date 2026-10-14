@@ -48,7 +48,10 @@ UPDATE billing.solana_subscriptions SET
     last_signature = $3,
     next_pull_at = $4,
     updated_at = $5
-WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
+WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
+  AND subscription_id = sqlc.arg(subscription_id)::uuid
+  AND (next_pull_at = sqlc.arg(episode_at)::timestamptz OR last_signature = $3)
+  AND (last_pulled_period_starts_at IS NULL OR last_pulled_period_starts_at <= $2);
 
 -- name: SetSolanaSubscriptionNextPullAt :exec
 UPDATE billing.solana_subscriptions SET

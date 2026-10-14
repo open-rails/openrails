@@ -20,8 +20,12 @@ func (p CollectionPolicy) Valid() bool {
 }
 
 // ProviderCollectionPolicy is the policy of a provider-scheduled subscription
-// on rail: every NMI schedule is dunned by OpenRails.
+// on rail: every NMI schedule is dunned by OpenRails. Solana enrolls an
+// on-chain authorization, but only OpenRails collects its renewals.
 func ProviderCollectionPolicy(rail string) CollectionPolicy {
+	if rail == string(RailSolana) {
+		return CollectionPolicyEngine
+	}
 	if rail == string(RailNMI) {
 		return CollectionPolicyNMISchedule
 	}

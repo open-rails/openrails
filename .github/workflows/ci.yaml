@@ -12,6 +12,11 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      catalog_artifacts_only:
+        description: Temporary source generation and compilation only
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -62,6 +67,8 @@ jobs:
           export SQLC_DATABASE_URL="$(scripts/sqlc-vet-db.sh)"
           "$sqlc_bin" generate
           go run ./scripts/contracts -write
+          go build .
+          (cd server && go build ./...)
           mkdir -p /tmp/catalog-contract-artifacts
           git rev-parse HEAD > /tmp/catalog-contract-artifacts/source-head.txt
           git diff --binary > /tmp/catalog-contract-artifacts/generated.patch
@@ -77,7 +84,7 @@ jobs:
   # Security run either way; the jobs that need Scope run only when it does.
   scope:
     name: Scope
-    if: ${{ github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft) }}
+    if: ${{ !inputs.catalog_artifacts_only && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -107,7 +114,7 @@ jobs:
 
   go-test:
     name: Go tests
-    if: ${{ github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft) }}
+    if: ${{ !inputs.catalog_artifacts_only && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -414,7 +421,7 @@ jobs:
 
   security:
     name: Required Security
-    if: ${{ github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft) }}
+    if: ${{ !inputs.catalog_artifacts_only && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

@@ -44,6 +44,9 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 	}
 	now = now.UTC()
 	q := d.Gen(ctx)
+	if err := verifyExecution(ctx, q, mid.UUID(), bill); err != nil {
+		return result, err
+	}
 	if err := q.LockProviderBillIdentity(ctx, gen.LockProviderBillIdentityParams{MerchantID: mid.String(), PspID: bill.PSPID.String(), SourceKind: bill.SourceKind, SourceKey: bill.SourceKey}); err != nil {
 		return result, err
 	}
@@ -114,6 +117,9 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 			payment = *stored
 		}
 		result.Payment = &payment
+	}
+	if err := recordExecution(ctx, q, mid.UUID(), bill, result, now); err != nil {
+		return result, err
 	}
 	captured, err := q.ObservedOrderCaptured(ctx, gen.ObservedOrderCapturedParams{MerchantID: mid.UUID(), OrderID: result.Order.ID})
 	if err != nil {
@@ -215,7 +221,11 @@ func validate(b Bill) error {
 	if b.Owner != OwnerEngine && b.Owner != OwnerProvider && b.Owner != OwnerNMISchedule {
 		return errors.New("provider bill collection owner is invalid")
 	}
-	if err := moneyutil.RequireFiatCurrency(b.Currency); err != nil {
+	if b.Payment != nil && b.Payment.Rail == models.RailSolana {
+		if err := moneyutil.ValidateCurrency(b.Currency); err != nil {
+			return err
+		}
+	} else if err := moneyutil.RequireFiatCurrency(b.Currency); err != nil {
 		return err
 	}
 	if b.Currency != moneyutil.NormalizeCurrency(b.Currency) {
