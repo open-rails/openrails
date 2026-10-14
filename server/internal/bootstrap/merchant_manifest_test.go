@@ -44,6 +44,7 @@ func TestExampleManifestsParse(t *testing.T) {
 
 	bt := m.Custodians["bt"]
 	require.Equal(t, models.CustodianBasisTheory, bt.Kind)
+	require.Equal(t, config.ClassTest, bt.Environment, "the custodian's money class matches its test PSPs")
 	require.NoError(t, config.ValidateCustodianEntry(config.CustodianEntry{
 		Key: "bt", Kind: models.CustodianBasisTheory, AccountID: bt.AccountID, Settings: bt.Settings, SecretKeys: []string{custodians.SecretAPIKey},
 	}))

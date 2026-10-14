@@ -48,7 +48,7 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 				reject(merchantdocs.CustodianDoc(key), err.Error())
 				continue
 			}
-			if why, err := registerCustodian(ctx, q, id, key, c); err != nil {
+			if why, err := registerCustodian(ctx, tx, id, key, c); err != nil {
 				return err
 			} else if why != "" {
 				reject(merchantdocs.CustodianDoc(key), why)
@@ -93,7 +93,7 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 		}
 		for _, key := range accepted {
 			p := set.PSPs[key].Value
-			row, why, err := s.registerPSP(ctx, q, id, key, p)
+			row, why, err := s.registerPSP(ctx, tx, id, key, p)
 			if err != nil {
 				return err
 			}
@@ -277,9 +277,12 @@ func keepServed(previous, set merchantdocs.Set) merchantdocs.Set {
 
 // registerCustodian records a custodian document's identity; why says why it
 // cannot be served.
-func registerCustodian(ctx context.Context, q *gen.Queries, id billing.MerchantID, key string, c merchantdocs.Custodian) (string, error) {
-	_, err := q.RegisterCustodian(ctx, gen.RegisterCustodianParams{
-		MerchantID: id.UUID(), Key: key, Kind: custodians.Normalize(c.Kind), Environment: c.Environment, AccountID: strings.TrimSpace(c.AccountID),
+func registerCustodian(ctx context.Context, tx pgx.Tx, id billing.MerchantID, key string, c merchantdocs.Custodian) (string, error) {
+	err := inSavepoint(ctx, tx, func(q *gen.Queries) error {
+		_, err := q.RegisterCustodian(ctx, gen.RegisterCustodianParams{
+			MerchantID: id.UUID(), Key: key, Kind: custodians.Normalize(c.Kind), Environment: c.Environment, AccountID: strings.TrimSpace(c.AccountID),
+		})
+		return err
 	})
 	var pgErr *pgconn.PgError
 	switch {
@@ -291,10 +294,29 @@ func registerCustodian(ctx context.Context, q *gen.Queries, id billing.MerchantI
 	return "", err
 }
 
+// inSavepoint runs fn in a savepoint: a refused statement is rolled back alone
+// and leaves tx usable.
+func inSavepoint(ctx context.Context, tx pgx.Tx, fn func(*gen.Queries) error) error {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	if err := fn(gen.New(sp)); err != nil {
+		_ = sp.Rollback(ctx)
+		return err
+	}
+	return sp.Commit(ctx)
+}
+
 // registerPSP records a PSP document's identity, current under its key.
-func (s *Service) registerPSP(ctx context.Context, q *gen.Queries, id billing.MerchantID, key string, p merchantdocs.PSP) (gen.BillingPsp, string, error) {
+func (s *Service) registerPSP(ctx context.Context, tx pgx.Tx, id billing.MerchantID, key string, p merchantdocs.PSP) (gen.BillingPsp, string, error) {
 	pspID, rail, environment, account := PSPNaturalKey(p.Rail, p.Environment, p.AccountID)
-	row, err := q.RegisterPSP(ctx, gen.RegisterPSPParams{ID: pspID, MerchantID: id.UUID(), Key: key, Rail: rail, Environment: environment, AccountID: account})
+	var row gen.BillingPsp
+	err := inSavepoint(ctx, tx, func(q *gen.Queries) error {
+		var err error
+		row, err = q.RegisterPSP(ctx, gen.RegisterPSPParams{ID: pspID, MerchantID: id.UUID(), Key: key, Rail: rail, Environment: environment, AccountID: account})
+		return err
+	})
 	var pgErr *pgconn.PgError
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
