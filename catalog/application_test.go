@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplicationYAMLAndJSONShareOneIdentity(t *testing.T) {
