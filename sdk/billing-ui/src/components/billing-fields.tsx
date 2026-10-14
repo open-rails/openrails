@@ -81,7 +81,7 @@ export function CountryField({
   return (
     <div className="grid gap-1.5">
       <Label htmlFor={id} className={LABEL}>
-        Country
+        Country or region
       </Label>
       <select
         id={id}

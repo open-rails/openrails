@@ -894,7 +894,7 @@ it.each(["unconfirmed", "server error", "in flight", "declined", "rejected"])("p
   const { container } = render(<BillingProvider client={createBillingClient({ fetch })}><OrderPayment orderId="ord_1" /></BillingProvider>)
   await screen.findByRole("form", { name: "Secure platform card payment" })
   fireEvent.change(screen.getByLabelText(/full name/i), { target: { value: "Pat Reader" } })
-  fireEvent.change(screen.getByLabelText("Country"), { target: { value: "US" } })
+  fireEvent.change(screen.getByLabelText("Country or region"), { target: { value: "US" } })
   fireEvent.change(screen.getByLabelText(/ZIP/), { target: { value: "94107" } })
   const pay = screen.getByRole("button", { name: /^(Pay|Subscribe)/ })
   await waitFor(() => expect(pay).toBeEnabled())

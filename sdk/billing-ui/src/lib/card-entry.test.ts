@@ -75,6 +75,7 @@ describe("native card entry", () => {
         now
       )
     ).toEqual({})
-    expect(cardEntryErrors({ ...valid, expiry: "10/2026" }, now)).toEqual({})
+    // One expiry format: MM / YY.
+    expect(cardEntryErrors({ ...valid, expiry: "10/2026" }, now)).toHaveProperty("expiry")
   })
 })
