@@ -1962,6 +1962,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Products and prices through the Client](docs/catalog-client.md).
 - [Payment page](docs/payment-page.md) — a pay URL on OpenRails' own domain, or embedded on your site.
 - [Customer network](docs/customer-network.md) — openrails.dev accounts linked to each merchant's customers, and the portal's API.
+- [PSP import](docs/psp-import.md) — onboarding a merchant's subscribers straight from its PSPs: a read-only pull, rules and mappings that link them to customers, and landing.
 - [Batch import / legacy migration](docs/batch-import.md) — moving an existing subscriber base onto OpenRails: the import surface, the phased playbook, and the limited-mode cutover.
 
 **API** — the contract:

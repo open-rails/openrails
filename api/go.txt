@@ -34,6 +34,7 @@ pkg openrails, method (*BoundMerchantError) Error() string
 pkg openrails, method (*Client) AcknowledgeHostEvents(context.Context, []billing.HostEventID, ...RequestOption) (map[billing.HostEventID]*billing.HostEvent, error)
 pkg openrails, method (*Client) Admit(context.Context, []billing.AdmitParams, ...RequestOption) ([]billing.AdmissionVerdict, error)
 pkg openrails, method (*Client) ApplyCatalog(context.Context, *catalog.Application, billing.ApplyCatalogParams, ...RequestOption) (*billing.CatalogApplicationReceipt, error)
+pkg openrails, method (*Client) ApplyPSPImport(context.Context, billing.PSPImportID, ...RequestOption) (*billing.PSPImport, error)
 pkg openrails, method (*Client) CancelOrder(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
 pkg openrails, method (*Client) CancelPriceMigration(context.Context, billing.PriceMigrationID, ...RequestOption) (*billing.PriceMigrationCancel, error)
 pkg openrails, method (*Client) CancelSubscription(context.Context, billing.SubscriptionID, billing.CancelSubscriptionParams, ...RequestOption) (*billing.Subscription, error)
@@ -45,6 +46,7 @@ pkg openrails, method (*Client) CreateAlertWebhook(context.Context, billing.Crea
 pkg openrails, method (*Client) CreateCreditGrants(context.Context, []billing.CreateCreditGrantParams, ...RequestOption) ([]billing.CreditGrant, error)
 pkg openrails, method (*Client) CreateOrder(context.Context, billing.CreateOrderParams, ...RequestOption) (*billing.Order, error)
 pkg openrails, method (*Client) CreatePSP(context.Context, billing.CreatePSPParams, ...RequestOption) (*billing.PSP, error)
+pkg openrails, method (*Client) CreatePSPImport(context.Context, billing.CreatePSPImportParams, ...RequestOption) (*billing.PSPImport, error)
 pkg openrails, method (*Client) CreatePrice(context.Context, billing.CreatePriceParams, ...RequestOption) (*billing.Price, error)
 pkg openrails, method (*Client) CreatePriceMigration(context.Context, billing.CreatePriceMigrationParams, ...RequestOption) (*billing.PriceMigration, error)
 pkg openrails, method (*Client) CreateProduct(context.Context, billing.CreateProductParams, ...RequestOption) (*billing.Product, error)
@@ -54,6 +56,7 @@ pkg openrails, method (*Client) CreateProvisioningToken(context.Context, billing
 pkg openrails, method (*Client) CustomerAssertion(context.Context, billing.CustomerTokenParams) (string, error)
 pkg openrails, method (*Client) CustomerToken(context.Context, billing.CustomerTokenParams) (*billing.CustomerToken, error)
 pkg openrails, method (*Client) DeleteAlertWebhook(context.Context, billing.AlertWebhookID, ...RequestOption) error
+pkg openrails, method (*Client) DeletePSPImport(context.Context, billing.PSPImportID, ...RequestOption) error
 pkg openrails, method (*Client) DeleteProduct(context.Context, billing.ProductID, ...RequestOption) error
 pkg openrails, method (*Client) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID, ...RequestOption) error
 pkg openrails, method (*Client) ExportBillingArchive(context.Context, io.Writer, ...RequestOption) error
@@ -70,6 +73,7 @@ pkg openrails, method (*Client) GetMeter(context.Context, string, ...RequestOpti
 pkg openrails, method (*Client) GetMetricsSchema(context.Context, ...RequestOption) (*billing.MetricsSchema, error)
 pkg openrails, method (*Client) GetOrder(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
 pkg openrails, method (*Client) GetPSP(context.Context, billing.PSPID, ...RequestOption) (*billing.PSP, error)
+pkg openrails, method (*Client) GetPSPImport(context.Context, billing.PSPImportID, ...RequestOption) (*billing.PSPImport, error)
 pkg openrails, method (*Client) GetPayment(context.Context, billing.PaymentID, ...RequestOption) (*billing.Payment, error)
 pkg openrails, method (*Client) GetPaymentAttempt(context.Context, billing.PaymentAttemptID, ...RequestOption) (*billing.PaymentAttempt, error)
 pkg openrails, method (*Client) GetPrice(context.Context, billing.PriceID, billing.GetPriceParams, ...RequestOption) (*billing.Price, error)
@@ -82,6 +86,7 @@ pkg openrails, method (*Client) GetSubscription(context.Context, billing.Subscri
 pkg openrails, method (*Client) GetUsageEvent(context.Context, billing.UsageEventID, ...RequestOption) (*billing.UsageEvent, error)
 pkg openrails, method (*Client) ImportBilling(context.Context, billing.DeclaredBilling, ...RequestOption) (*billing.BillingImportResult, error)
 pkg openrails, method (*Client) ImportBillingArchive(context.Context, io.Reader, ...RequestOption) (*billing.BillingArchiveImport, error)
+pkg openrails, method (*Client) LinkPSPImport(context.Context, billing.PSPImportID, billing.LinkPSPImportParams, ...RequestOption) (*billing.PSPImport, error)
 pkg openrails, method (*Client) ListAdmissions(context.Context, billing.AdmissionListParams, ...RequestOption) (*billing.ListPage[billing.Admission], error)
 pkg openrails, method (*Client) ListAlertWebhooks(context.Context, billing.AlertWebhookListParams, ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error)
 pkg openrails, method (*Client) ListBalanceTransactions(context.Context, billing.CustomerID, billing.BalanceTransactionListParams, ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error)
@@ -94,6 +99,8 @@ pkg openrails, method (*Client) ListHostEvents(context.Context, billing.HostEven
 pkg openrails, method (*Client) ListMeters(context.Context, billing.PageRequest, ...RequestOption) (*billing.ListPage[billing.Meter], error)
 pkg openrails, method (*Client) ListNetworkCustomers(context.Context, billing.NetworkCustomerListParams, ...RequestOption) (*billing.ListPage[billing.Customer], error)
 pkg openrails, method (*Client) ListOrders(context.Context, billing.OrderListParams, ...RequestOption) (*billing.ListPage[billing.Order], error)
+pkg openrails, method (*Client) ListPSPImportRecords(context.Context, billing.PSPImportID, billing.PSPImportRecordListParams, ...RequestOption) (*billing.ListPage[billing.PSPImportRecord], error)
+pkg openrails, method (*Client) ListPSPImports(context.Context, billing.PSPImportListParams, ...RequestOption) (*billing.ListPage[billing.PSPImport], error)
 pkg openrails, method (*Client) ListPSPs(context.Context, billing.PSPListParams, ...RequestOption) (*billing.ListPage[billing.PSP], error)
 pkg openrails, method (*Client) ListPaymentAttempts(context.Context, billing.PaymentAttemptListParams, ...RequestOption) (*billing.ListPage[billing.PaymentAttempt], error)
 pkg openrails, method (*Client) ListPaymentMethods(context.Context, billing.CustomerID, billing.PaymentMethodListParams, ...RequestOption) (*billing.ListPage[billing.PaymentMethod], error)
@@ -127,6 +134,7 @@ pkg openrails, method (*Client) RevokeCreditGrant(context.Context, billing.Credi
 pkg openrails, method (*Client) RevokeProductAccess(context.Context, billing.ProductAccessID, billing.RevokeProductAccessParams, ...RequestOption) error
 pkg openrails, method (*Client) SetDashboard(context.Context, billing.SetDashboardParams, ...RequestOption) (*billing.Dashboard, error)
 pkg openrails, method (*Client) SetMeter(context.Context, string, billing.SetMeterParams, ...RequestOption) (*billing.Meter, error)
+pkg openrails, method (*Client) SetPSPImportMappings(context.Context, billing.SetPSPImportMappingsParams, ...RequestOption) (*billing.PSPImportMappingsResult, error)
 pkg openrails, method (*Client) SetSubscriptionPaymentMethod(context.Context, billing.SubscriptionID, billing.SetSubscriptionPaymentMethodParams, ...RequestOption) (*billing.Subscription, error)
 pkg openrails, method (*Client) StartRunningCharge(context.Context, billing.StartRunningChargeParams, ...RequestOption) (*billing.RunningCharge, error)
 pkg openrails, method (*Client) StopRunningCharge(context.Context, string, billing.StopRunningChargeParams, ...RequestOption) (*billing.RunningCharge, error)
@@ -134,6 +142,7 @@ pkg openrails, method (*Client) UpdateAlertWebhook(context.Context, billing.Aler
 pkg openrails, method (*Client) UpdateCustomer(context.Context, billing.CustomerID, billing.UpdateCustomerParams, ...RequestOption) (*billing.CustomerSettingsResult, error)
 pkg openrails, method (*Client) UpdateMerchantConfiguration(context.Context, billing.UpdateMerchantConfigurationParams, ...RequestOption) (*billing.MerchantConfigurationState, error)
 pkg openrails, method (*Client) UpdatePSP(context.Context, billing.PSPID, billing.UpdatePSPParams, ...RequestOption) (*billing.PSP, error)
+pkg openrails, method (*Client) UpdatePSPImport(context.Context, billing.PSPImportID, billing.UpdatePSPImportParams, ...RequestOption) (*billing.PSPImport, error)
 pkg openrails, method (*Client) UpdatePrice(context.Context, billing.PriceID, billing.UpdatePriceParams, ...RequestOption) (*billing.Price, error)
 pkg openrails, method (*Client) UpdateProduct(context.Context, billing.ProductID, billing.UpdateProductParams, ...RequestOption) (*billing.Product, error)
 pkg openrails, method (*Client) WaiveOrderBalance(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
@@ -170,6 +179,7 @@ pkg openrails, method (CCBillPSP) PSPConfig() PSPConfig
 pkg openrails, method (LocalClient) AcknowledgeHostEvents(context.Context, []billing.HostEventID, ...RequestOption) (map[billing.HostEventID]*billing.HostEvent, error)
 pkg openrails, method (LocalClient) Admit(context.Context, []billing.AdmitParams, ...RequestOption) ([]billing.AdmissionVerdict, error)
 pkg openrails, method (LocalClient) ApplyCatalog(context.Context, *catalog.Application, billing.ApplyCatalogParams, ...RequestOption) (*billing.CatalogApplicationReceipt, error)
+pkg openrails, method (LocalClient) ApplyPSPImport(context.Context, billing.PSPImportID, ...RequestOption) (*billing.PSPImport, error)
 pkg openrails, method (LocalClient) CancelOrder(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
 pkg openrails, method (LocalClient) CancelPriceMigration(context.Context, billing.PriceMigrationID, ...RequestOption) (*billing.PriceMigrationCancel, error)
 pkg openrails, method (LocalClient) CancelSubscription(context.Context, billing.SubscriptionID, billing.CancelSubscriptionParams, ...RequestOption) (*billing.Subscription, error)
@@ -181,6 +191,7 @@ pkg openrails, method (LocalClient) CreateAlertWebhook(context.Context, billing.
 pkg openrails, method (LocalClient) CreateCreditGrants(context.Context, []billing.CreateCreditGrantParams, ...RequestOption) ([]billing.CreditGrant, error)
 pkg openrails, method (LocalClient) CreateOrder(context.Context, billing.CreateOrderParams, ...RequestOption) (*billing.Order, error)
 pkg openrails, method (LocalClient) CreatePSP(context.Context, billing.CreatePSPParams, ...RequestOption) (*billing.PSP, error)
+pkg openrails, method (LocalClient) CreatePSPImport(context.Context, billing.CreatePSPImportParams, ...RequestOption) (*billing.PSPImport, error)
 pkg openrails, method (LocalClient) CreatePrice(context.Context, billing.CreatePriceParams, ...RequestOption) (*billing.Price, error)
 pkg openrails, method (LocalClient) CreatePriceMigration(context.Context, billing.CreatePriceMigrationParams, ...RequestOption) (*billing.PriceMigration, error)
 pkg openrails, method (LocalClient) CreateProduct(context.Context, billing.CreateProductParams, ...RequestOption) (*billing.Product, error)
@@ -190,6 +201,7 @@ pkg openrails, method (LocalClient) CreateProvisioningToken(context.Context, bil
 pkg openrails, method (LocalClient) CustomerAssertion(context.Context, billing.CustomerTokenParams) (string, error)
 pkg openrails, method (LocalClient) CustomerToken(context.Context, billing.CustomerTokenParams) (*billing.CustomerToken, error)
 pkg openrails, method (LocalClient) DeleteAlertWebhook(context.Context, billing.AlertWebhookID, ...RequestOption) error
+pkg openrails, method (LocalClient) DeletePSPImport(context.Context, billing.PSPImportID, ...RequestOption) error
 pkg openrails, method (LocalClient) DeleteProduct(context.Context, billing.ProductID, ...RequestOption) error
 pkg openrails, method (LocalClient) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID, ...RequestOption) error
 pkg openrails, method (LocalClient) ExportBillingArchive(context.Context, io.Writer, ...RequestOption) error
@@ -206,6 +218,7 @@ pkg openrails, method (LocalClient) GetMeter(context.Context, string, ...Request
 pkg openrails, method (LocalClient) GetMetricsSchema(context.Context, ...RequestOption) (*billing.MetricsSchema, error)
 pkg openrails, method (LocalClient) GetOrder(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
 pkg openrails, method (LocalClient) GetPSP(context.Context, billing.PSPID, ...RequestOption) (*billing.PSP, error)
+pkg openrails, method (LocalClient) GetPSPImport(context.Context, billing.PSPImportID, ...RequestOption) (*billing.PSPImport, error)
 pkg openrails, method (LocalClient) GetPayment(context.Context, billing.PaymentID, ...RequestOption) (*billing.Payment, error)
 pkg openrails, method (LocalClient) GetPaymentAttempt(context.Context, billing.PaymentAttemptID, ...RequestOption) (*billing.PaymentAttempt, error)
 pkg openrails, method (LocalClient) GetPrice(context.Context, billing.PriceID, billing.GetPriceParams, ...RequestOption) (*billing.Price, error)
@@ -218,6 +231,7 @@ pkg openrails, method (LocalClient) GetSubscription(context.Context, billing.Sub
 pkg openrails, method (LocalClient) GetUsageEvent(context.Context, billing.UsageEventID, ...RequestOption) (*billing.UsageEvent, error)
 pkg openrails, method (LocalClient) ImportBilling(context.Context, billing.DeclaredBilling, ...RequestOption) (*billing.BillingImportResult, error)
 pkg openrails, method (LocalClient) ImportBillingArchive(context.Context, io.Reader, ...RequestOption) (*billing.BillingArchiveImport, error)
+pkg openrails, method (LocalClient) LinkPSPImport(context.Context, billing.PSPImportID, billing.LinkPSPImportParams, ...RequestOption) (*billing.PSPImport, error)
 pkg openrails, method (LocalClient) ListAdmissions(context.Context, billing.AdmissionListParams, ...RequestOption) (*billing.ListPage[billing.Admission], error)
 pkg openrails, method (LocalClient) ListAlertWebhooks(context.Context, billing.AlertWebhookListParams, ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error)
 pkg openrails, method (LocalClient) ListBalanceTransactions(context.Context, billing.CustomerID, billing.BalanceTransactionListParams, ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error)
@@ -230,6 +244,8 @@ pkg openrails, method (LocalClient) ListHostEvents(context.Context, billing.Host
 pkg openrails, method (LocalClient) ListMeters(context.Context, billing.PageRequest, ...RequestOption) (*billing.ListPage[billing.Meter], error)
 pkg openrails, method (LocalClient) ListNetworkCustomers(context.Context, billing.NetworkCustomerListParams, ...RequestOption) (*billing.ListPage[billing.Customer], error)
 pkg openrails, method (LocalClient) ListOrders(context.Context, billing.OrderListParams, ...RequestOption) (*billing.ListPage[billing.Order], error)
+pkg openrails, method (LocalClient) ListPSPImportRecords(context.Context, billing.PSPImportID, billing.PSPImportRecordListParams, ...RequestOption) (*billing.ListPage[billing.PSPImportRecord], error)
+pkg openrails, method (LocalClient) ListPSPImports(context.Context, billing.PSPImportListParams, ...RequestOption) (*billing.ListPage[billing.PSPImport], error)
 pkg openrails, method (LocalClient) ListPSPs(context.Context, billing.PSPListParams, ...RequestOption) (*billing.ListPage[billing.PSP], error)
 pkg openrails, method (LocalClient) ListPaymentAttempts(context.Context, billing.PaymentAttemptListParams, ...RequestOption) (*billing.ListPage[billing.PaymentAttempt], error)
 pkg openrails, method (LocalClient) ListPaymentMethods(context.Context, billing.CustomerID, billing.PaymentMethodListParams, ...RequestOption) (*billing.ListPage[billing.PaymentMethod], error)
@@ -263,6 +279,7 @@ pkg openrails, method (LocalClient) RevokeCreditGrant(context.Context, billing.C
 pkg openrails, method (LocalClient) RevokeProductAccess(context.Context, billing.ProductAccessID, billing.RevokeProductAccessParams, ...RequestOption) error
 pkg openrails, method (LocalClient) SetDashboard(context.Context, billing.SetDashboardParams, ...RequestOption) (*billing.Dashboard, error)
 pkg openrails, method (LocalClient) SetMeter(context.Context, string, billing.SetMeterParams, ...RequestOption) (*billing.Meter, error)
+pkg openrails, method (LocalClient) SetPSPImportMappings(context.Context, billing.SetPSPImportMappingsParams, ...RequestOption) (*billing.PSPImportMappingsResult, error)
 pkg openrails, method (LocalClient) SetSubscriptionPaymentMethod(context.Context, billing.SubscriptionID, billing.SetSubscriptionPaymentMethodParams, ...RequestOption) (*billing.Subscription, error)
 pkg openrails, method (LocalClient) StartRunningCharge(context.Context, billing.StartRunningChargeParams, ...RequestOption) (*billing.RunningCharge, error)
 pkg openrails, method (LocalClient) StopRunningCharge(context.Context, string, billing.StopRunningChargeParams, ...RequestOption) (*billing.RunningCharge, error)
@@ -270,6 +287,7 @@ pkg openrails, method (LocalClient) UpdateAlertWebhook(context.Context, billing.
 pkg openrails, method (LocalClient) UpdateCustomer(context.Context, billing.CustomerID, billing.UpdateCustomerParams, ...RequestOption) (*billing.CustomerSettingsResult, error)
 pkg openrails, method (LocalClient) UpdateMerchantConfiguration(context.Context, billing.UpdateMerchantConfigurationParams, ...RequestOption) (*billing.MerchantConfigurationState, error)
 pkg openrails, method (LocalClient) UpdatePSP(context.Context, billing.PSPID, billing.UpdatePSPParams, ...RequestOption) (*billing.PSP, error)
+pkg openrails, method (LocalClient) UpdatePSPImport(context.Context, billing.PSPImportID, billing.UpdatePSPImportParams, ...RequestOption) (*billing.PSPImport, error)
 pkg openrails, method (LocalClient) UpdatePrice(context.Context, billing.PriceID, billing.UpdatePriceParams, ...RequestOption) (*billing.Price, error)
 pkg openrails, method (LocalClient) UpdateProduct(context.Context, billing.ProductID, billing.UpdateProductParams, ...RequestOption) (*billing.Product, error)
 pkg openrails, method (LocalClient) WaiveOrderBalance(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
@@ -904,6 +922,24 @@ pkg openrails/billing, const OrderProcessing OrderStatus = "processing"
 pkg openrails/billing, const OrderUncollectible OrderStatus = "uncollectible"
 pkg openrails/billing, const OrderVoid OrderStatus = "void"
 pkg openrails/billing, const PSPIDPrefix untyped string = "psp_"
+pkg openrails/billing, const PSPImportApplied PSPImportStatus = "applied"
+pkg openrails/billing, const PSPImportApplying PSPImportStatus = "applying"
+pkg openrails/billing, const PSPImportBlocked PSPImportRecordState = "blocked"
+pkg openrails/billing, const PSPImportConflict PSPImportRecordState = "conflict"
+pkg openrails/billing, const PSPImportCustomer PSPImportRecordKind = "customer"
+pkg openrails/billing, const PSPImportFailed PSPImportStatus = "failed"
+pkg openrails/billing, const PSPImportIDPrefix untyped string = "pim_"
+pkg openrails/billing, const PSPImportImported PSPImportRecordState = "imported"
+pkg openrails/billing, const PSPImportLinked PSPImportRecordState = "linked"
+pkg openrails/billing, const PSPImportPulled PSPImportStatus = "pulled"
+pkg openrails/billing, const PSPImportPulling PSPImportStatus = "pulling"
+pkg openrails/billing, const PSPImportRecordIDPrefix untyped string = "pir_"
+pkg openrails/billing, const PSPImportSubscription PSPImportRecordKind = "subscription"
+pkg openrails/billing, const PSPImportTransaction PSPImportRecordKind = "transaction"
+pkg openrails/billing, const PSPImportUnmatched PSPImportRecordState = "unmatched"
+pkg openrails/billing, const PSPImportViaCustomerID PSPImportRuleVia = "customer_id"
+pkg openrails/billing, const PSPImportViaDirectory PSPImportRuleVia = "directory"
+pkg openrails/billing, const PSPImportViaMapping PSPImportRuleVia = "mapping"
 pkg openrails/billing, const PSPTemporarilyUnavailable untyped string = "temporarily_unavailable"
 pkg openrails/billing, const PaymentAttemptIDPrefix untyped string = "att_"
 pkg openrails/billing, const PaymentCharge PaymentKind = "charge"
@@ -1027,6 +1063,8 @@ pkg openrails/billing, func ParseOrderAttemptID(string) (OrderAttemptID, error)
 pkg openrails/billing, func ParseOrderID(string) (OrderID, error)
 pkg openrails/billing, func ParseOrderLineID(string) (OrderLineID, error)
 pkg openrails/billing, func ParsePSPID(string) (PSPID, error)
+pkg openrails/billing, func ParsePSPImportID(string) (PSPImportID, error)
+pkg openrails/billing, func ParsePSPImportRecordID(string) (PSPImportRecordID, error)
 pkg openrails/billing, func ParsePaymentAttemptID(string) (PaymentAttemptID, error)
 pkg openrails/billing, func ParsePaymentID(string) (PaymentID, error)
 pkg openrails/billing, func ParsePaymentMethodID(string) (PaymentMethodID, error)
@@ -1071,6 +1109,8 @@ pkg openrails/billing, method (*OrderAttemptID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*OrderID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*OrderLineID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PSPID) UnmarshalText([]byte) error
+pkg openrails/billing, method (*PSPImportID) UnmarshalText([]byte) error
+pkg openrails/billing, method (*PSPImportRecordID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PaymentAttemptID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PaymentID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PaymentMethodID) UnmarshalText([]byte) error
@@ -1173,6 +1213,14 @@ pkg openrails/billing, method (PSPID) IsZero() bool
 pkg openrails/billing, method (PSPID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (PSPID) String() string
 pkg openrails/billing, method (PSPID) UUID() uuid.UUID
+pkg openrails/billing, method (PSPImportID) IsZero() bool
+pkg openrails/billing, method (PSPImportID) MarshalText() ([]byte, error)
+pkg openrails/billing, method (PSPImportID) String() string
+pkg openrails/billing, method (PSPImportID) UUID() uuid.UUID
+pkg openrails/billing, method (PSPImportRecordID) IsZero() bool
+pkg openrails/billing, method (PSPImportRecordID) MarshalText() ([]byte, error)
+pkg openrails/billing, method (PSPImportRecordID) String() string
+pkg openrails/billing, method (PSPImportRecordID) UUID() uuid.UUID
 pkg openrails/billing, method (PSPRef) IsZero() bool
 pkg openrails/billing, method (PSPRef) String() string
 pkg openrails/billing, method (PSPRoutingMatch) IsCatchAll() bool
@@ -1632,6 +1680,11 @@ pkg openrails/billing, type CreateOrderParams struct, ExpiresAt *time.Time `json
 pkg openrails/billing, type CreateOrderParams struct, IdempotencyKey string `json:"-"`
 pkg openrails/billing, type CreateOrderParams struct, Lines []OrderLineParams `json:"lines"`
 pkg openrails/billing, type CreateOrderParams struct, PayURL *OrderPayURLParams `json:"pay_url,omitempty"`
+pkg openrails/billing, type CreatePSPImportParams struct
+pkg openrails/billing, type CreatePSPImportParams struct, HistorySince *time.Time `json:"history_since,omitempty"`
+pkg openrails/billing, type CreatePSPImportParams struct, PSP PSPRef `json:"psp"`
+pkg openrails/billing, type CreatePSPImportParams struct, Products []PSPImportProduct `json:"products,omitempty"`
+pkg openrails/billing, type CreatePSPImportParams struct, Rules []PSPImportRule `json:"rules,omitempty"`
 pkg openrails/billing, type CreatePSPParams struct
 pkg openrails/billing, type CreatePSPParams struct, Credentials map[string]string `json:"credentials"`
 pkg openrails/billing, type CreatePSPParams struct, Environment string `json:"environment,omitempty"`
@@ -2199,6 +2252,8 @@ pkg openrails/billing, type InvoiceProfile struct, NetTermsDays int `json:"net_t
 pkg openrails/billing, type InvoiceProfile struct, PONumber string `json:"po_number"`
 pkg openrails/billing, type InvoiceProfile struct, Tax map[string]any `json:"tax"`
 pkg openrails/billing, type InvokerType string
+pkg openrails/billing, type LinkPSPImportParams struct
+pkg openrails/billing, type LinkPSPImportParams struct, Links []PSPImportLink `json:"links,omitempty"`
 pkg openrails/billing, type ListPage struct, Items []T
 pkg openrails/billing, type ListPage struct, Next string
 pkg openrails/billing, type ListPage[T any] struct
@@ -2673,6 +2728,74 @@ pkg openrails/billing, type PSPFields struct, TokenizationURL string `json:"toke
 pkg openrails/billing, type PSPFields struct, WebhookOverlapExpiresAt *time.Time `json:"webhook_overlap_expires_at,omitempty"`
 pkg openrails/billing, type PSPFields struct, embedded PSPAccount
 pkg openrails/billing, type PSPID [16]byte
+pkg openrails/billing, type PSPImport struct
+pkg openrails/billing, type PSPImport struct, AppliedAt *time.Time `json:"applied_at"`
+pkg openrails/billing, type PSPImport struct, Counts []PSPImportCount `json:"counts"`
+pkg openrails/billing, type PSPImport struct, CreatedAt time.Time `json:"created_at"`
+pkg openrails/billing, type PSPImport struct, Error *string `json:"error"`
+pkg openrails/billing, type PSPImport struct, HistorySince *time.Time `json:"history_since"`
+pkg openrails/billing, type PSPImport struct, HistoryThrough *time.Time `json:"history_through"`
+pkg openrails/billing, type PSPImport struct, ID PSPImportID `json:"id"`
+pkg openrails/billing, type PSPImport struct, PSP PSPID `json:"psp"`
+pkg openrails/billing, type PSPImport struct, Products []PSPImportProduct `json:"products"`
+pkg openrails/billing, type PSPImport struct, PulledAt *time.Time `json:"pulled_at"`
+pkg openrails/billing, type PSPImport struct, Rail string `json:"rail"`
+pkg openrails/billing, type PSPImport struct, Rules []PSPImportRule `json:"rules"`
+pkg openrails/billing, type PSPImport struct, Status PSPImportStatus `json:"status"`
+pkg openrails/billing, type PSPImport struct, UpdatedAt time.Time `json:"updated_at"`
+pkg openrails/billing, type PSPImportCount struct
+pkg openrails/billing, type PSPImportCount struct, Kind PSPImportRecordKind `json:"kind"`
+pkg openrails/billing, type PSPImportCount struct, Records int `json:"records"`
+pkg openrails/billing, type PSPImportCount struct, State PSPImportRecordState `json:"state"`
+pkg openrails/billing, type PSPImportFact struct
+pkg openrails/billing, type PSPImportFact struct, Name string `json:"name"`
+pkg openrails/billing, type PSPImportFact struct, Value string `json:"value"`
+pkg openrails/billing, type PSPImportID [16]byte
+pkg openrails/billing, type PSPImportLink struct
+pkg openrails/billing, type PSPImportLink struct, Customer *CustomerID `json:"customer"`
+pkg openrails/billing, type PSPImportLink struct, Record PSPImportRecordID `json:"record"`
+pkg openrails/billing, type PSPImportListParams struct
+pkg openrails/billing, type PSPImportListParams struct, IDs []PSPImportID
+pkg openrails/billing, type PSPImportListParams struct, embedded PageRequest
+pkg openrails/billing, type PSPImportMapping struct
+pkg openrails/billing, type PSPImportMapping struct, Customer *CustomerID `json:"customer"`
+pkg openrails/billing, type PSPImportMapping struct, Key string `json:"key"`
+pkg openrails/billing, type PSPImportMapping struct, Mapping string `json:"mapping"`
+pkg openrails/billing, type PSPImportMappingsResult struct
+pkg openrails/billing, type PSPImportMappingsResult struct, Deleted int `json:"deleted"`
+pkg openrails/billing, type PSPImportMappingsResult struct, Set int `json:"set"`
+pkg openrails/billing, type PSPImportProduct struct
+pkg openrails/billing, type PSPImportProduct struct, Plan string `json:"plan,omitempty"`
+pkg openrails/billing, type PSPImportProduct struct, Product string `json:"product"`
+pkg openrails/billing, type PSPImportRecord struct
+pkg openrails/billing, type PSPImportRecord struct, Customer *CustomerID `json:"customer"`
+pkg openrails/billing, type PSPImportRecord struct, CustomerRef *string `json:"customer_ref"`
+pkg openrails/billing, type PSPImportRecord struct, Facts []PSPImportFact `json:"facts"`
+pkg openrails/billing, type PSPImportRecord struct, ID PSPImportRecordID `json:"id"`
+pkg openrails/billing, type PSPImportRecord struct, Import PSPImportID `json:"import"`
+pkg openrails/billing, type PSPImportRecord struct, Kind PSPImportRecordKind `json:"kind"`
+pkg openrails/billing, type PSPImportRecord struct, LinkedVia *string `json:"linked_via"`
+pkg openrails/billing, type PSPImportRecord struct, OccurredAt *time.Time `json:"occurred_at"`
+pkg openrails/billing, type PSPImportRecord struct, Reason *string `json:"reason"`
+pkg openrails/billing, type PSPImportRecord struct, Ref string `json:"ref"`
+pkg openrails/billing, type PSPImportRecord struct, State PSPImportRecordState `json:"state"`
+pkg openrails/billing, type PSPImportRecord struct, SubscriptionRef *string `json:"subscription_ref"`
+pkg openrails/billing, type PSPImportRecord struct, UpdatedAt time.Time `json:"updated_at"`
+pkg openrails/billing, type PSPImportRecordID [16]byte
+pkg openrails/billing, type PSPImportRecordKind string
+pkg openrails/billing, type PSPImportRecordListParams struct
+pkg openrails/billing, type PSPImportRecordListParams struct, IDs []PSPImportRecordID
+pkg openrails/billing, type PSPImportRecordListParams struct, Kind PSPImportRecordKind
+pkg openrails/billing, type PSPImportRecordListParams struct, State PSPImportRecordState
+pkg openrails/billing, type PSPImportRecordListParams struct, embedded PageRequest
+pkg openrails/billing, type PSPImportRecordState string
+pkg openrails/billing, type PSPImportRule struct
+pkg openrails/billing, type PSPImportRule struct, Fact string `json:"fact"`
+pkg openrails/billing, type PSPImportRule struct, Mapping string `json:"mapping,omitempty"`
+pkg openrails/billing, type PSPImportRule struct, Pattern string `json:"pattern,omitempty"`
+pkg openrails/billing, type PSPImportRule struct, Via PSPImportRuleVia `json:"via"`
+pkg openrails/billing, type PSPImportRuleVia string
+pkg openrails/billing, type PSPImportStatus string
 pkg openrails/billing, type PSPListParams struct
 pkg openrails/billing, type PSPListParams struct, Archived *bool
 pkg openrails/billing, type PSPListParams struct, IDs []PSPID
@@ -3236,6 +3359,8 @@ pkg openrails/billing, type SetMeterParams struct, GroupBy map[string]string `js
 pkg openrails/billing, type SetMeterParams struct, RateCard catalog.Field[MeterRateCardParams] `json:"rate_card,omitzero"`
 pkg openrails/billing, type SetMeterParams struct, Unit string `json:"unit,omitempty"`
 pkg openrails/billing, type SetMeterParams struct, ValueProperty string `json:"value_property,omitempty"`
+pkg openrails/billing, type SetPSPImportMappingsParams struct
+pkg openrails/billing, type SetPSPImportMappingsParams struct, Mappings []PSPImportMapping `json:"mappings"`
 pkg openrails/billing, type SetSubscriptionPaymentMethodParams struct
 pkg openrails/billing, type SetSubscriptionPaymentMethodParams struct, PaymentMethodID *PaymentMethodID `json:"payment_method_id"`
 pkg openrails/billing, type SolanaPaymentConfig struct
@@ -3383,6 +3508,9 @@ pkg openrails/billing, type UpdateMerchantConfigurationParams struct
 pkg openrails/billing, type UpdateMerchantConfigurationParams struct, DisplayName *string `json:"display_name,omitempty"`
 pkg openrails/billing, type UpdateMerchantConfigurationParams struct, ExpectedRevision *int64 `json:"expected_revision"`
 pkg openrails/billing, type UpdateMerchantConfigurationParams struct, embedded *MerchantSettings
+pkg openrails/billing, type UpdatePSPImportParams struct
+pkg openrails/billing, type UpdatePSPImportParams struct, Products *[]PSPImportProduct `json:"products,omitempty"`
+pkg openrails/billing, type UpdatePSPImportParams struct, Rules *[]PSPImportRule `json:"rules,omitempty"`
 pkg openrails/billing, type UpdatePSPParams struct
 pkg openrails/billing, type UpdatePSPParams struct, AllowLast bool `json:"allow_last"`
 pkg openrails/billing, type UpdatePSPParams struct, Archived bool `json:"archived"`

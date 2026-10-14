@@ -1498,6 +1498,56 @@ type BillingPspCustomer struct {
 	UpdatedAt         time.Time
 }
 
+// One read-only pull of a PSP's customers, subscriptions and transaction history, the merchant's rules for linking them to customers, and the products its plans grant. history_through is how far the transaction history has been read. Deleting the import deletes its records.
+type BillingPspImport struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	PspID          uuid.UUID
+	Rail           string
+	Status         string
+	HistorySince   *time.Time
+	HistoryThrough *time.Time
+	PulledAt       *time.Time
+	AppliedAt      *time.Time
+	Error          *string
+	Rules          []byte
+	Products       []byte
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// A merchant's own identifiers mapped to its customers (a legacy user id, a legacy order id), named by mapping. PSP import rules read a provider fact through one.
+type BillingPspImportMapping struct {
+	MerchantID uuid.UUID
+	Mapping    string
+	Key        string
+	CustomerID uuid.UUID
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// A provider object a PSP import staged: a customer (vault) with its cards, a subscription or a transaction, with the identity facts the provider holds (email, username, order id, vault ids). linked names the customer a rule, a mapping, the object it belongs to or the merchant linked it to; imported once the billing import landed it; blocked says why it did not land. Deleted with its import.
+type BillingPspImportRecord struct {
+	MerchantID      uuid.UUID
+	ImportID        uuid.UUID
+	ID              uuid.UUID
+	Kind            string
+	Ref             string
+	CustomerRef     *string
+	SubscriptionRef *string
+	OccurredAt      *time.Time
+	Facts           []byte
+	Data            []byte
+	State           string
+	CustomerID      *uuid.UUID
+	LinkedVia       *string
+	// The customer the merchant linked this object to by hand; it wins over every rule.
+	ManualCustomerID *uuid.UUID
+	Reason           *string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 // PSP refresh cursors: the exclusive lower bound of the next bounded event window, per (merchant, PSP, domain). A failed or partial provider read never advances watermark_at.
 type BillingPspRefreshWatermark struct {
 	MerchantID uuid.UUID

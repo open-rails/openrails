@@ -220,6 +220,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add nmi history worker: %w", err)
 	}
+	// PSP imports: a read-only pull of a PSP, then its landing.
+	if err := addTrackedWorker(r, workers, &riverjobs.PSPImportWorker{Importer: r.PSPImporter}); err != nil {
+		return fmt.Errorf("add psp import worker: %w", err)
+	}
 	// Declared charges without an amount, read from their provider once.
 	if err := addTrackedWorker(r, workers, &riverjobs.ChargeAttributionWorker{
 		DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver,

@@ -61,6 +61,15 @@ func (t QueryTransaction) BookID() string {
 	return ""
 }
 
+// Vault is the customer vault the transaction charged: the report names it
+// customerid (customer_vault_id on older reports).
+func (t QueryTransaction) Vault() string {
+	if v := strings.TrimSpace(t.CustomerVaultID); v != "" {
+		return v
+	}
+	return strings.TrimSpace(t.CustomerID)
+}
+
 // QueryAction is one action on a transaction: a sale, validate, refund, void.
 type QueryAction struct {
 	Amount     string `xml:"amount"`

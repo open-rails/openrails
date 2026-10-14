@@ -257,11 +257,16 @@ func (m *Mock) customer(v *Vault) obj {
 		}
 		return d
 	}
-	billing := []obj{{"id": v.BillingID, "priority": 1, "payment_details": details(v.Card)}}
+	billing := []obj{{"id": v.BillingID, "priority": 1, "payment_details": details(v.Card), "email": v.Email, "first_name": v.FirstName, "last_name": v.LastName}}
 	for i, b := range v.Extra {
 		billing = append(billing, obj{"id": b.ID, "priority": i + 2, "payment_details": details(b.Card)})
 	}
-	out := obj{"object": "customer", "id": v.ID, "created": "2026-01-01T00:00:00Z", "billing": billing}
+	shipping := v.ShippingID
+	if shipping == "" {
+		shipping = "ship-" + v.ID
+	}
+	out := obj{"object": "customer", "id": v.ID, "created": "2026-01-01T00:00:00Z", "billing": billing,
+		"shipping": []obj{{"object": "shipping", "id": shipping, "priority": 1}}}
 	if v.Book != "" {
 		out["merchant_defined_fields"] = obj{"20": v.Book}
 	}

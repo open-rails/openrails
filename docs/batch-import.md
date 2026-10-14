@@ -2,7 +2,8 @@
 
 How to move an existing site's subscribers, payment history, and provider-side
 subscription/vault records from a legacy billing system onto OpenRails
-(embedded or standalone). The import surface is `Client.ImportBilling` with a
+(embedded or standalone). When the PSP holds the book, prefer the
+[PSP import](psp-import.md), which reads it from the provider. The import surface is `Client.ImportBilling` with a
 `billing.DeclaredBilling` document; the cutover doctrine it feeds into lives in
 [operations.md](operations.md).
 

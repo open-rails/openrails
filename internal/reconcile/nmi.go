@@ -266,6 +266,12 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 	return out, nil
 }
 
+// NMITransactions reads the transaction report for [since, until), each
+// charge, decline and refund normalized as the pull reads it.
+func NMITransactions(ctx context.Context, client *nmi.NMIClient, since, until time.Time) ([]RemoteTransaction, error) {
+	return NewNMIFetcher(client).fetchTransactions(ctx, FetchParams{Since: since, Until: until})
+}
+
 // TransactionsByID reads transactions by id, nmi.MaxQueryIDs per Query API
 // request, each as its charge action (chargeAction). An id NMI does not
 // report, or reports unreadably, is absent from the result.
@@ -368,6 +374,9 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 			// instead of weakening exact attribution into a vault match.
 			SubscriptionID: strings.TrimSpace(t.SubscriptionID),
 			BookID:         t.BookID(),
+			OrderID:        strings.TrimSpace(t.OrderID),
+			CustomerRef:    t.Vault(),
+			Email:          strings.TrimSpace(t.Email),
 			Type:           txnType,
 			Success:        success,
 			Currency:       strings.TrimSpace(t.Currency),
