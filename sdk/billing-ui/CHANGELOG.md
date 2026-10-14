@@ -1,5 +1,16 @@
 # Changelog
 
+## Plan changes and renewal
+
+- `SubscriptionsPanel` rows offer Change plan when OpenRails lists another
+  tier of the subscription's group (`GET /me/subscriptions/{id}/change/options`,
+  `client.listSubscriptionChangeOptions`, `useChangeOptions`). The dialog
+  shows what each tier charges now and from when, and runs the change with
+  one idempotency key until it resolves, signing Solana changes and running
+  the card issuer's authentication in the page.
+- `RenewalPrompt` invites a customer whose subscriptions all ended back to
+  the plans page.
+
 ## Unreachable servers are named
 
 - A request that reached no server (a fetch rejection, offline) and a gateway's
@@ -167,7 +178,7 @@
 ## Public reads name their merchant; token source
 
 - Breaking: `listProducts({ merchant, keys })`, `useProducts({ merchant, keys
-  })` and `<BuyButton merchant>` take the merchant's id, and `<ProductList>` takes
+})` and `<BuyButton merchant>` take the merchant's id, and `<ProductList>` takes
   it with `keys`: `GET /catalog/products?merchant=<id>&keys=…`. The read sends
   no bearer, signed in or out.
 - Breaking: `getConfig()` and `useConfig()` are the deployment's part alone
@@ -228,7 +239,7 @@
 
 - Breaking: `listInvoices`, `getInvoice` and `Invoice` are removed. Usage
   billed in arrears is an order (`origin: usage`): `listOrders({ origin:
-  "usage" })` lists them, and `<OrderCheckout>` pays one with a saved card.
+"usage" })` lists them, and `<OrderCheckout>` pays one with a saved card.
 - `Order` gains `usage` (its period, `due_at`, `amount_paid`, `amount_due`,
   collection and `delinquent`) and `uncollectible_at`; `status` may be
   `uncollectible`. A usage line names its `source`; its `price_id` and
@@ -363,7 +374,7 @@
 ## A default card per currency
 
 - `setDefaultPaymentMethod({currency, paymentMethodId})` (`PUT
-  /me/default-payment-methods/{currency}`) replaces
+/me/default-payment-methods/{currency}`) replaces
   `setCollectionPaymentMethod`: the default card pays the currency's invoices
   and every subscription in it without its own card. `usePaymentMethods()`
   has `setDefault` for `setCollection`, `PaymentMethod.default_currencies`
@@ -393,7 +404,7 @@
 ## Subscription changes and seats
 
 - `changeTier` and `previewTierChange` are `changeSubscription(id,
-  { priceId?, quantity?, idempotencyKey, signature? })` and
+{ priceId?, quantity?, idempotencyKey, signature? })` and
   `previewSubscriptionChange(id, { priceId?, quantity? })`, on
   `POST /me/subscriptions/{id}/change[/preview]`. `TierChange` and
   `TierChangePreview` are `SubscriptionChange` and `SubscriptionChangePreview`:

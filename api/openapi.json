@@ -4204,6 +4204,74 @@
         ]
       }
     },
+    "/v1/me/subscriptions/{id}/change/options": {
+      "get": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SubscriptionChangeOption"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "authentication_required",
+          "invalid_param",
+          "resource_conflict",
+          "service_unavailable",
+          "subscription_change_in_flight",
+          "subscription_not_active",
+          "subscription_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer"
+        ]
+      }
+    },
     "/v1/me/subscriptions/{id}/change/preview": {
       "post": {
         "tags": [
@@ -22643,6 +22711,25 @@
           "transaction_id",
           "amount_due_now",
           "next_charge_amount"
+        ]
+      },
+      "SubscriptionChangeOption": {
+        "type": "object",
+        "properties": {
+          "product": {
+            "$ref": "#/components/schemas/ProductSummary"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Price"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/SubscriptionChangePreview"
+          }
+        },
+        "required": [
+          "product",
+          "price",
+          "preview"
         ]
       },
       "SubscriptionChangePreview": {

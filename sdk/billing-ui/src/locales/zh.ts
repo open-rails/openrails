@@ -80,6 +80,8 @@ export const zh: BillingUiMessageBundle = {
     wallet: "Solana 钱包",
     changeCard: "更换卡片",
     changeCardLabel: "更换 {name} 的卡片",
+    changePlan: "更改方案",
+    changePlanLabel: "更改 {name} 的方案",
   },
   resume: {
     title: "恢复{name}？",
@@ -98,6 +100,26 @@ export const zh: BillingUiMessageBundle = {
     current: "当前",
     useDefault: "默认银行卡（{card}）",
     done: "付款卡已更新。",
+  },
+  changePlan: {
+    title: "更改 {name}",
+    description: "升级立即生效；降级在下次续订时生效。",
+    none: "目前没有可切换的其他方案。",
+    chargeNow: "现在 {amount}，{date} 起 {next}",
+    chargeNowEstimate: "现在约 {amount}，{date} 起 {next}",
+    atPeriodEnd: "现在不扣费。{date} 切换，之后 {next}",
+    confirm: "更改方案",
+    signing: "正在等待钱包...",
+    confirming: "正在确认...",
+    done: "你已切换到 {name}。",
+    scheduled: "{name} 将于 {date} 开始。",
+    processing: "已提交方案变更；支付服务商确认后生效。",
+    actionRequired: "此变更还需要一个步骤。请重试。",
+  },
+  renewal: {
+    title: "续订你的订阅",
+    description: "你的订阅已结束。续订方案即可恢复访问。",
+    action: "立即续订",
   },
   cancel: {
     title: "取消 {name}？",
@@ -198,5 +220,11 @@ export const zh: BillingUiMessageBundle = {
     csrf_origin_denied: "请求被拦截。请刷新页面。",
     wallet_rejected: "钱包请求被拒绝。",
     wallet_no_signature: "钱包未签署该交易。",
+    subscription_change_in_flight: "此订阅的方案变更仍在处理中。请等待完成。",
+    subscription_change_idempotency_conflict:
+      "该方案变更已用不同的信息提交过。请重试。",
+    subscription_change_already_scheduled: "下次续订时已安排了方案变更。",
+    subscription_change_target_inactive: "该方案已不再提供。",
+    subscription_not_active: "只有有效的订阅才能更改方案。",
   },
 }

@@ -80,6 +80,8 @@ export const ko: BillingUiMessageBundle = {
     wallet: "Solana 지갑",
     changeCard: "카드 변경",
     changeCardLabel: "{name} 카드 변경",
+    changePlan: "플랜 변경",
+    changePlanLabel: "{name} 플랜 변경",
   },
   resume: {
     title: "{name}을(를) 다시 시작할까요?",
@@ -98,6 +100,29 @@ export const ko: BillingUiMessageBundle = {
     current: "현재",
     useDefault: "기본 카드({card})",
     done: "결제 카드가 변경되었습니다.",
+  },
+  changePlan: {
+    title: "{name} 변경",
+    description:
+      "업그레이드는 즉시, 다운그레이드는 다음 갱신일부터 적용됩니다.",
+    none: "지금 전환할 수 있는 다른 플랜이 없습니다.",
+    chargeNow: "지금 {amount}, {date}부터 {next}",
+    chargeNowEstimate: "지금 약 {amount}, {date}부터 {next}",
+    atPeriodEnd: "지금은 결제되지 않습니다. {date}에 전환되며 이후 {next}",
+    confirm: "플랜 변경",
+    signing: "지갑을 기다리는 중...",
+    confirming: "확인 중...",
+    done: "이제 {name} 플랜을 이용합니다.",
+    scheduled: "{name} 플랜이 {date}에 시작됩니다.",
+    processing:
+      "플랜 변경이 제출되었습니다. 결제 제공업체가 확인하면 적용됩니다.",
+    actionRequired: "이 변경에는 추가 단계가 필요합니다. 다시 시도하세요.",
+  },
+  renewal: {
+    title: "구독을 갱신하세요",
+    description:
+      "구독이 종료되었습니다. 플랜을 갱신하면 다시 이용할 수 있습니다.",
+    action: "지금 갱신",
   },
   cancel: {
     title: "{name}을(를) 해지할까요?",
@@ -210,5 +235,13 @@ export const ko: BillingUiMessageBundle = {
     csrf_origin_denied: "요청이 차단되었습니다. 페이지를 새로고침하세요.",
     wallet_rejected: "지갑 요청이 거절되었습니다.",
     wallet_no_signature: "지갑이 트랜잭션에 서명하지 않았습니다.",
+    subscription_change_in_flight:
+      "이 구독의 플랜 변경이 아직 처리 중입니다. 완료될 때까지 기다려 주세요.",
+    subscription_change_idempotency_conflict:
+      "이 플랜 변경은 다른 내용으로 이미 제출되었습니다. 다시 시도하세요.",
+    subscription_change_already_scheduled:
+      "다음 갱신일에 적용될 플랜 변경이 이미 예약되어 있습니다.",
+    subscription_change_target_inactive: "이 플랜은 더 이상 제공되지 않습니다.",
+    subscription_not_active: "활성 구독만 플랜을 변경할 수 있습니다.",
   },
 }

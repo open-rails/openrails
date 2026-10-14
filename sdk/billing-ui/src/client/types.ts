@@ -70,7 +70,15 @@ export type SubscriptionStatus =
 export const priceProviderSchema = z.object({
   psp_id: z.string(),
   access_duration_default: z.boolean().optional(),
-  drift: z.array(z.object({ field: z.string(), openrails_value: z.string(), remote_value: z.string() })).nullish(),
+  drift: z
+    .array(
+      z.object({
+        field: z.string(),
+        openrails_value: z.string(),
+        remote_value: z.string(),
+      })
+    )
+    .nullish(),
   psp: z.string(),
   rail: z.string(),
   /** The provider's identifiers; empty in a buyer's view. */
@@ -102,7 +110,12 @@ export const priceSchema = z.object({
   access_duration_hours: z.number().nullable(),
   billing_interval_hours: z.number().nullable(),
   billing_interval_months: z.number().int().positive().nullish(),
-  quantity: z.object({ min: z.number().int().positive(), max: z.number().int().positive() }).nullish(),
+  quantity: z
+    .object({
+      min: z.number().int().positive(),
+      max: z.number().int().positive(),
+    })
+    .nullish(),
   solana_plan: z.string().nullish(),
   trial_unit_amount: amount.nullable(),
   trial_duration_hours: z.number().nullable(),
@@ -332,14 +345,19 @@ export const orderSchema = z.object({
   /** Only `engine` orders accept generic payment commands. */
   collection_owner: z.string().nullish(),
   collection_psp_id: z.string().nullish(),
-  provider_bills: z.array(z.object({
-    psp_id: z.string(),
-    kind: z.string(),
-    reference: z.string(),
-    settlement_source: z.string().nullish(),
-    non_cash_amount: amount,
-    settled_at: time.nullish(),
-  })).nullish().transform((bills) => bills ?? []),
+  provider_bills: z
+    .array(
+      z.object({
+        psp_id: z.string(),
+        kind: z.string(),
+        reference: z.string(),
+        settlement_source: z.string().nullish(),
+        non_cash_amount: amount,
+        settled_at: time.nullish(),
+      })
+    )
+    .nullish()
+    .transform((bills) => bills ?? []),
   status: z.string(),
   number: z.number().int().nullish(),
   currency: z.string(),
@@ -373,7 +391,10 @@ export const orderSchema = z.object({
   /** When the pay URL stops working; null without one. */
   pay_url_expires_at: time.nullish(),
   /** The merchant's page frames the pay URL. */
-  embedded: z.boolean().nullish().transform((v) => v ?? false),
+  embedded: z
+    .boolean()
+    .nullish()
+    .transform((v) => v ?? false),
   /** A merchant order's return; none on a customer's embedded one. */
   success_url: z.string().nullish(),
   cancel_url: z.string().nullish(),
@@ -663,6 +684,16 @@ export const subscriptionChangePreviewSchema = z.object({
 })
 export type SubscriptionChangePreview = z.infer<
   typeof subscriptionChangePreviewSchema
+>
+
+/** A price the subscription can change to now, with the change's preview. */
+export const subscriptionChangeOptionSchema = z.object({
+  product: subscriptionProductSchema,
+  price: priceSchema,
+  preview: subscriptionChangePreviewSchema,
+})
+export type SubscriptionChangeOption = z.infer<
+  typeof subscriptionChangeOptionSchema
 >
 
 export const subscriptionChangeSchema = z.object({

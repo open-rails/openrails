@@ -71,6 +71,7 @@ export type {
   SubscriptionProduct,
   SubscriptionStatus,
   SubscriptionChange,
+  SubscriptionChangeOption,
   SubscriptionChangePreview,
   Usage,
   UsageRow,

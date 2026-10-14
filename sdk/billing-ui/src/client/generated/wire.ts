@@ -2316,6 +2316,12 @@ export type SubscriptionChange = {
   next_charge_date?: string
 }
 
+export type SubscriptionChangeOption = {
+  product: ProductSummary
+  price: Price
+  preview: SubscriptionChangePreview
+}
+
 export type SubscriptionChangePreview = {
   effective: string
   price_id: string

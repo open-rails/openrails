@@ -81,6 +81,8 @@ export const ja: BillingUiMessageBundle = {
     wallet: "Solana ウォレット",
     changeCard: "カードを変更",
     changeCardLabel: "{name} のカードを変更",
+    changePlan: "プランを変更",
+    changePlanLabel: "{name} のプランを変更",
   },
   resume: {
     title: "{name}を再開しますか？",
@@ -99,6 +101,30 @@ export const ja: BillingUiMessageBundle = {
     current: "現在",
     useDefault: "デフォルトのカード（{card}）",
     done: "支払いカードを更新しました。",
+  },
+  changePlan: {
+    title: "{name} を変更",
+    description:
+      "アップグレードはすぐに、ダウングレードは次回の更新時に適用されます。",
+    none: "現在、切り替えられる他のプランはありません。",
+    chargeNow: "今 {amount}、{date} から {next}",
+    chargeNowEstimate: "今 約 {amount}、{date} から {next}",
+    atPeriodEnd: "今は請求なし。{date} に切り替わり、その後 {next}",
+    confirm: "プランを変更",
+    signing: "ウォレットを待っています...",
+    confirming: "確認しています...",
+    done: "{name} に変更しました。",
+    scheduled: "{name} は {date} に開始します。",
+    processing:
+      "プラン変更を送信しました。決済サービスが確認すると適用されます。",
+    actionRequired:
+      "この変更には追加の手順が必要です。もう一度お試しください。",
+  },
+  renewal: {
+    title: "サブスクリプションを更新",
+    description:
+      "サブスクリプションが終了しました。プランを更新すると再びご利用いただけます。",
+    action: "今すぐ更新",
   },
   cancel: {
     title: "{name}を解約しますか？",
@@ -216,5 +242,15 @@ export const ja: BillingUiMessageBundle = {
       "リクエストがブロックされました。ページを再読み込みしてください。",
     wallet_rejected: "ウォレットのリクエストが拒否されました。",
     wallet_no_signature: "ウォレットがトランザクションに署名しませんでした。",
+    subscription_change_in_flight:
+      "このサブスクリプションのプラン変更はまだ処理中です。完了するまでお待ちください。",
+    subscription_change_idempotency_conflict:
+      "このプラン変更は別の内容ですでに送信されています。もう一度お試しください。",
+    subscription_change_already_scheduled:
+      "次回の更新時のプラン変更がすでに予定されています。",
+    subscription_change_target_inactive:
+      "このプランは現在ご利用いただけません。",
+    subscription_not_active:
+      "プランを変更できるのは有効なサブスクリプションのみです。",
   },
 }

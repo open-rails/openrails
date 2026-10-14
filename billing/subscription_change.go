@@ -64,6 +64,14 @@ type SubscriptionChangePreview struct {
 	Message          string     `json:"message,omitempty"`
 }
 
+// SubscriptionChangeOption is a price a subscription can change to now, with
+// what the change would charge.
+type SubscriptionChangeOption struct {
+	Product ProductSummary            `json:"product"`
+	Price   Price                     `json:"price"`
+	Preview SubscriptionChangePreview `json:"preview"`
+}
+
 // Subscription-change refusals carry these StatusError.Code values.
 const (
 	// CodeSubscriptionChangeInFlight: another unresolved change owns the

@@ -14,7 +14,7 @@ import (
 func (r *UserSubscriptionResponse) View() billing.Subscription {
 	out := SubscriptionView(r.Subscription, r.Price, r.Dunning, r.EvaluationTime())
 	if out.ScheduledChange != nil {
-		out.ScheduledChange.Price = buyerPrice(r.ScheduledPrice)
+		out.ScheduledChange.Price = BuyerPrice(r.ScheduledPrice)
 		out.ScheduledChange.Product = r.ScheduledProduct.Summary()
 	}
 	out.Access = r.Access
@@ -39,7 +39,7 @@ func SubscriptionView(sub *models.Subscription, price *models.Price, dunning *bi
 		PaymentMethodID: (*billing.PaymentMethodID)(sub.PaymentMethodID),
 		Resumable:       Resumable(sub, now), CancelScheduled: CancelScheduled(sub, now), CancelMode: string(CancelModeFor(sub, now)),
 		CancelPortalURL: CancelPortalURL(sub, now),
-		Price:           buyerPrice(price), Product: sub.Product.Summary(), Card: subscriptionCardView(sub.PaymentMethod),
+		Price:           BuyerPrice(price), Product: sub.Product.Summary(), Card: subscriptionCardView(sub.PaymentMethod),
 	}
 	out.ScheduledChange = sub.ScheduledChange.View()
 	if sub.CancelType != nil {
@@ -49,9 +49,9 @@ func SubscriptionView(sub *models.Subscription, price *models.Price, dunning *bi
 	return out
 }
 
-// buyerPrice is p as its customer sees it, without provider identifiers;
+// BuyerPrice is p as its customer sees it, without provider identifiers;
 // nil for none.
-func buyerPrice(p *models.Price) *billing.Price {
+func BuyerPrice(p *models.Price) *billing.Price {
 	if p == nil {
 		return nil
 	}

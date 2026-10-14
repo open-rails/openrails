@@ -172,6 +172,31 @@ func PreviewSubscriptionChange(r *httprequest.Request) {
 	r.SuccessJSON(resp)
 }
 
+// SubscriptionChangeOptions lists the prices the customer's subscription can
+// change to now, each with the change's preview.
+func SubscriptionChangeOptions(r *httprequest.Request) {
+	user := r.GetUser()
+	if user == nil || strings.TrimSpace(user.ID) == "" {
+		r.ErrorCode(billing.CodeAuthenticationRequired, "authentication required")
+		return
+	}
+	id, err := billing.ParseSubscriptionID(r.Param("id"))
+	if err != nil || id.IsZero() {
+		r.ErrorCode(billing.CodeInvalidParam, "invalid subscription ID")
+		return
+	}
+	if r.State.PurchaseService == nil {
+		r.ErrorCode(billing.CodeInternalError, "purchase service unavailable")
+		return
+	}
+	options, err := r.State.PurchaseService.SubscriptionChangeOptions(r.Request.Context(), id.UUID(), user)
+	if err != nil {
+		writeChangeTierError(r, err)
+		return
+	}
+	r.SuccessJSON(billing.ListPage[billing.SubscriptionChangeOption]{Items: options})
+}
+
 func writeChangeTierError(r *httprequest.Request, err error) {
 	var refusal *api.APIError
 	if errors.As(err, &refusal) {

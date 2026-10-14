@@ -80,6 +80,8 @@ export const es: BillingUiMessageBundle = {
     wallet: "Billetera de Solana",
     changeCard: "Cambiar tarjeta",
     changeCardLabel: "Cambiar la tarjeta de {name}",
+    changePlan: "Cambiar plan",
+    changePlanLabel: "Cambiar el plan de {name}",
   },
   resume: {
     title: "¿Reanudar {name}?",
@@ -99,6 +101,29 @@ export const es: BillingUiMessageBundle = {
     current: "Actual",
     useDefault: "Tu tarjeta predeterminada ({card})",
     done: "Tarjeta de pago actualizada.",
+  },
+  changePlan: {
+    title: "Cambiar {name}",
+    description:
+      "Una mejora empieza ahora; una reducción empieza en tu próxima renovación.",
+    none: "Ahora mismo no hay otros planes a los que cambiar.",
+    chargeNow: "{amount} ahora, luego {next} desde el {date}",
+    chargeNowEstimate: "Unos {amount} ahora, luego {next} desde el {date}",
+    atPeriodEnd: "Sin cargo ahora. Cambia el {date}, luego {next}",
+    confirm: "Cambiar plan",
+    signing: "Esperando a la billetera...",
+    confirming: "Confirmando...",
+    done: "Ya tienes {name}.",
+    scheduled: "{name} empieza el {date}.",
+    processing:
+      "Cambio de plan enviado; se aplicará cuando tu proveedor lo confirme.",
+    actionRequired: "Este cambio necesita otro paso. Inténtalo de nuevo.",
+  },
+  renewal: {
+    title: "Renueva tu suscripción",
+    description:
+      "Tu suscripción ha terminado. Renueva tu plan para recuperar el acceso.",
+    action: "Renovar ahora",
   },
   cancel: {
     title: "¿Cancelar {name}?",
@@ -217,5 +242,14 @@ export const es: BillingUiMessageBundle = {
     csrf_origin_denied: "La solicitud fue bloqueada. Recarga la página.",
     wallet_rejected: "Se rechazó la solicitud de la billetera.",
     wallet_no_signature: "La billetera no firmó la transacción.",
+    subscription_change_in_flight:
+      "Todavía se está procesando un cambio de plan de esta suscripción. Espera a que termine.",
+    subscription_change_idempotency_conflict:
+      "Ese cambio de plan ya se envió con otros datos. Inténtalo de nuevo.",
+    subscription_change_already_scheduled:
+      "Ya hay un cambio de plan programado para tu próxima renovación.",
+    subscription_change_target_inactive: "Ese plan ya no está disponible.",
+    subscription_not_active:
+      "Solo una suscripción activa puede cambiar de plan.",
   },
 }

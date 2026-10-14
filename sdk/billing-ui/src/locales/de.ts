@@ -81,6 +81,8 @@ export const de: BillingUiMessageBundle = {
     wallet: "Solana-Wallet",
     changeCard: "Karte ändern",
     changeCardLabel: "Karte für {name} ändern",
+    changePlan: "Plan ändern",
+    changePlanLabel: "Plan für {name} ändern",
   },
   resume: {
     title: "{name} fortsetzen?",
@@ -100,6 +102,30 @@ export const de: BillingUiMessageBundle = {
     current: "Aktuell",
     useDefault: "Ihre Standardkarte ({card})",
     done: "Zahlungskarte aktualisiert.",
+  },
+  changePlan: {
+    title: "{name} ändern",
+    description:
+      "Ein Upgrade gilt sofort, ein Downgrade ab deiner nächsten Verlängerung.",
+    none: "Derzeit gibt es keine anderen Pläne zum Wechseln.",
+    chargeNow: "{amount} jetzt, danach {next} ab {date}",
+    chargeNowEstimate: "Etwa {amount} jetzt, danach {next} ab {date}",
+    atPeriodEnd: "Jetzt keine Kosten. Wechsel am {date}, danach {next}",
+    confirm: "Plan ändern",
+    signing: "Warte auf die Wallet...",
+    confirming: "Wird bestätigt...",
+    done: "Du nutzt jetzt {name}.",
+    scheduled: "{name} beginnt am {date}.",
+    processing:
+      "Tarifwechsel übermittelt; er wird wirksam, sobald dein Anbieter ihn bestätigt.",
+    actionRequired:
+      "Für diesen Wechsel ist ein weiterer Schritt nötig. Versuche es erneut.",
+  },
+  renewal: {
+    title: "Abonnement erneuern",
+    description:
+      "Dein Abonnement ist abgelaufen. Erneuere deinen Plan, um wieder Zugang zu erhalten.",
+    action: "Jetzt erneuern",
   },
   cancel: {
     title: "{name} kündigen?",
@@ -221,5 +247,15 @@ export const de: BillingUiMessageBundle = {
     csrf_origin_denied: "Die Anfrage wurde blockiert. Lade die Seite neu.",
     wallet_rejected: "Die Wallet-Anfrage wurde abgelehnt.",
     wallet_no_signature: "Die Wallet hat die Transaktion nicht signiert.",
+    subscription_change_in_flight:
+      "Ein Planwechsel für dieses Abonnement wird noch verarbeitet. Bitte warte, bis er abgeschlossen ist.",
+    subscription_change_idempotency_conflict:
+      "Dieser Planwechsel wurde bereits mit anderen Angaben übermittelt. Bitte versuche es erneut.",
+    subscription_change_already_scheduled:
+      "Für deine nächste Verlängerung ist bereits ein Planwechsel geplant.",
+    subscription_change_target_inactive:
+      "Dieser Plan ist nicht mehr verfügbar.",
+    subscription_not_active:
+      "Nur ein aktives Abonnement kann den Plan wechseln.",
   },
 }

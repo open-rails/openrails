@@ -15,6 +15,7 @@ import type {
   PaymentMethod,
   Subscription,
   SubscriptionChange,
+  SubscriptionChangeOption,
 } from "../client/types"
 import { useBillingContext } from "./context"
 import { useRemote } from "./remote"
@@ -130,13 +131,21 @@ export function useSubscriptions(
 
   // Declining the optional wallet prompt keeps the completed local cancel.
   const cancel = useCallback(
-    (id: string, reason: string, sendTransaction?: SendSolanaTransaction, revokeOnChain = false) =>
+    (
+      id: string,
+      reason: string,
+      sendTransaction?: SendSolanaTransaction,
+      revokeOnChain = false
+    ) =>
       act(
         id,
         "cancel",
         async () => {
           if (revokeOnChain && !sendTransaction) throw walletRequired()
-          const sub = await client.cancelSubscription(id, { reason, revokeOnChain })
+          const sub = await client.cancelSubscription(id, {
+            reason,
+            revokeOnChain,
+          })
           // The local cancellation has already succeeded, even if the optional
           // wallet step is declined or fails. Keep that state visible.
           patchRow(sub)
@@ -235,6 +244,32 @@ export function useSubscriptions(
     resume,
     setPaymentMethod,
     changeSubscription,
+  }
+}
+
+export interface ChangeOptionsState {
+  /** Ranked, each with the change's preview; null while loading. */
+  options: SubscriptionChangeOption[] | null
+  loading: boolean
+  error: BillingError | null
+  refetch: () => void
+}
+
+/** The prices a subscription can change to now; a null id loads nothing. */
+export function useChangeOptions(
+  subscriptionId: string | null
+): ChangeOptionsState {
+  const { client, version } = useBillingContext()
+  const remote = useRemote(`${subscriptionId}|${version}`, (signal) =>
+    subscriptionId
+      ? client.listSubscriptionChangeOptions(subscriptionId, signal)
+      : Promise.resolve(null)
+  )
+  return {
+    options: remote.data?.data ?? null,
+    loading: remote.loading,
+    error: remote.error,
+    refetch: remote.refetch,
   }
 }
 

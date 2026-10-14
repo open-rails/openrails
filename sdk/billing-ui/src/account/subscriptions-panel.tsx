@@ -14,9 +14,11 @@ import { useCurrencyScales } from "#orck/react/config"
 import { useUiSettings } from "#orck/scope-context"
 import { CancelSubscriptionDialog } from "./cancel-dialog"
 import { ChangeCardDialog } from "./change-card-dialog"
+import { ChangePlan } from "./change-plan"
 import { ResumeSubscriptionDialog } from "./resume-dialog"
 import {
   brandName,
+  changeable,
   formatDate,
   formatMoney,
   intervalLabel,
@@ -31,7 +33,8 @@ import { BillingStatusBadge } from "./status-badge"
 
 export interface SubscriptionsPanelProps extends SubscriptionsOptions {
   /**
-   * Wallet for an optional on-chain cancellation of Solana subscriptions.
+   * Wallet for Solana subscriptions: plan changes and the optional on-chain
+   * cancellation.
    */
   sendSolanaTransaction?: SendSolanaTransaction
   /** Empty-state link to the host's plans page (uses `navigate` if set). */
@@ -149,10 +152,7 @@ export function SubscriptionsPanel({
                   })
                 : null
           const portal = live && !scheduled ? s.cancel_portal_url : null
-          const canCancel =
-            LIVE_STATUSES.has(s.status) &&
-            !scheduled &&
-            !portal
+          const canCancel = LIVE_STATUSES.has(s.status) && !scheduled && !portal
           const canChangeCard =
             (s.status === "active" ||
               s.status === "past_due" ||
@@ -243,6 +243,18 @@ export function SubscriptionsPanel({
                     <HugeiconsIcon icon={ArrowUpRight01Icon} aria-hidden />
                   </a>
                 ) : null}
+                {changeable(s) &&
+                (s.rail !== "solana" || sendSolanaTransaction) ? (
+                  <ChangePlan
+                    subscription={s}
+                    name={name}
+                    pending={pending}
+                    changeSubscription={state.changeSubscription}
+                    sendSolanaTransaction={sendSolanaTransaction}
+                    onChanged={announce}
+                    appearance={appearance}
+                  />
+                ) : null}
                 {canChangeCard ? (
                   <Button
                     variant="ghost"
@@ -269,10 +281,8 @@ export function SubscriptionsPanel({
                       setCancelling(s)
                     }}
                   >
-                    {pending &&
-                    pending !== "resume" &&
-                    pending !== "payment_method" &&
-                    pending !== "change" ? (
+                    {pending === "cancel" ||
+                    (cancelling?.id === s.id && !!pending) ? (
                       <Spinner />
                     ) : null}
                     {t("subscriptions.cancel")}
@@ -337,7 +347,12 @@ export function SubscriptionsPanel({
         name={resuming ? subscriptionName(resuming, m) : ""}
         price={
           resuming?.price
-            ? formatMoney(resuming.price.unit_amount, resuming.price.currency, scales, locale)
+            ? formatMoney(
+                resuming.price.unit_amount,
+                resuming.price.currency,
+                scales,
+                locale
+              )
             : null
         }
         date={formatDate(resuming?.current_period_ends_at, locale) || null}

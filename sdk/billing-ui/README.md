@@ -9,8 +9,8 @@ administration inside the host's application.
 | `@openrails/billing-ui/react`     | `BillingProvider` and headless hooks, without styles                               |
 | `@openrails/billing-ui`           | `BillingProvider`, styled purchase and account components, i18n                    |
 | `@openrails/billing-ui/locales/*` | `en de es ja ko zh` message bundles                                                |
-| `@openrails/billing-ui/admin` | `BillingAdmin`, `BillingCustomerSummary`, access and confirmation helpers |
-| `@openrails/billing-ui/admin.css` | Scoped staff administration styles |
+| `@openrails/billing-ui/admin`     | `BillingAdmin`, `BillingCustomerSummary`, access and confirmation helpers          |
+| `@openrails/billing-ui/admin.css` | Scoped staff administration styles                                                 |
 
 The purchase owns the browser payment flow, behind `<BuyButton>`, `<ProductList>`
 and `<OrderPayment>`: the signed-in customer's order, read and paid with
@@ -50,15 +50,24 @@ however many calls wait, and once more when a call answers 401
 `credential_expired`.
 
 ```ts
-import { createBillingClient, redeemAssertion, tokenSource } from "@openrails/billing-ui"
+import {
+  createBillingClient,
+  redeemAssertion,
+  tokenSource,
+} from "@openrails/billing-ui"
 
 const billing = createBillingClient({
   baseUrl: "https://billing.example/v1",
   getToken: tokenSource({
     // { access_token, expires_in } from your backend, or its signed assertion redeemed here.
     fetchToken: async () => {
-      const { assertion } = await (await fetch("/api/billing/assertion", { method: "POST" })).json()
-      return redeemAssertion({ tokenEndpoint: "https://billing.example/oauth2/token", assertion })
+      const { assertion } = await (
+        await fetch("/api/billing/assertion", { method: "POST" })
+      ).json()
+      return redeemAssertion({
+        tokenEndpoint: "https://billing.example/oauth2/token",
+        assertion,
+      })
     },
   }),
 })
@@ -114,7 +123,11 @@ option reports its `failed_attempts`); it then shows under "Card payment isn't
 working?". CCBill after Mobius declines twice:
 
 ```tsx
-<ProductList products={products} fallbacks={{ ccbill: { for: ["mobius"], afterFailures: 2 } }} {...handlers} />
+<ProductList
+  products={products}
+  fallbacks={{ ccbill: { for: ["mobius"], afterFailures: 2 } }}
+  {...handlers}
+/>
 ```
 
 `BuyButton`, `Cart`, `OrderPayment` and `EmbeddedPayment` take it too.
@@ -153,7 +166,11 @@ A server that decides what its customer buys creates the order with the Go
 customer's browser, which pays it signed in:
 
 ```tsx
-<OrderPayment orderId={orderId} returnUrl={returnUrl} onSettled={(order) => refetchAccess(order)} />
+<OrderPayment
+  orderId={orderId}
+  returnUrl={returnUrl}
+  onSettled={(order) => refetchAccess(order)}
+/>
 ```
 
 `onSettled` follows a complete order, or one processing on an asynchronous
@@ -220,7 +237,7 @@ The host owns sign-in and passes its authenticated transport and router:
 import { BillingAdmin } from "@openrails/billing-ui/admin"
 import "@openrails/billing-ui/admin.css"
 
-<BillingAdmin
+;<BillingAdmin
   baseUrl="/billing/v1"
   auth={auth}
   basePath="/admin/billing"
@@ -247,12 +264,13 @@ for merchant selection, permissions, localization, and standalone console setup.
 The client also reads the configuration and changes a subscription's plan.
 `GET /config` is a public route: the client sends it no bearer.
 
-| Call                                                                                                | Route                                                           |
-| --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `getConfig()` (capabilities, `currencies`, `captcha`; `client.currencies` is the pinned registry) | `GET /config` |
-| `getCustomerConfig()` (the customer's merchant: `payment` with PSPs, `solana.network` and tokens, and `merchant`, its name) | `GET /me/config` |
-| `previewSubscriptionChange(id, { priceId?, quantity? })`                                            | `POST /me/subscriptions/{id}/change/preview`                    |
-| `changeSubscription(id, { priceId?, quantity?, idempotencyKey, signature? })`                       | `POST /me/subscriptions/{id}/change`                            |
+| Call                                                                                                                        | Route                                        |
+| --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `getConfig()` (capabilities, `currencies`, `captcha`; `client.currencies` is the pinned registry)                           | `GET /config`                                |
+| `getCustomerConfig()` (the customer's merchant: `payment` with PSPs, `solana.network` and tokens, and `merchant`, its name) | `GET /me/config`                             |
+| `listSubscriptionChangeOptions(id)` (the other tiers it can move to now, ranked, each with its preview)                     | `GET /me/subscriptions/{id}/change/options`  |
+| `previewSubscriptionChange(id, { priceId?, quantity? })`                                                                    | `POST /me/subscriptions/{id}/change/preview` |
+| `changeSubscription(id, { priceId?, quantity?, idempotencyKey, signature? })`                                               | `POST /me/subscriptions/{id}/change`         |
 
 ```ts
 const preview = await billing.previewSubscriptionChange(sub.id, { quantity: 5 }) // amount_due_now, effective
@@ -307,13 +325,19 @@ provider:
 - `defaultCountry` (SavePaymentMethod, AccountBilling)
   preselects the billing country, else the browser locale's region.
 
-- Panels: `SubscriptionsPanel` (cancel, resume, change card),
+- Panels: `SubscriptionsPanel` (cancel, resume, change card, change plan),
   `PaymentMethodsPanel`, `PaymentHistory`, `BillingStatusBadge`,
-  `CancelSubscriptionDialog`; `AccountBilling` stacks them.
+  `CancelSubscriptionDialog`; `AccountBilling` stacks them. A row offers
+  Change plan when OpenRails lists another tier for it; the dialog shows each
+  tier's charge and date and runs the change (wallet and issuer steps
+  included, one idempotency key until it resolves).
+- `<RenewalPrompt plansHref="/plans" />` invites a customer whose
+  subscriptions all ended back to the plans page. A host that grants access
+  some other way leaves it out for customers who have that access.
 - `renderSubscriptionFooter={(s) => ...}` adds host content under a
   subscription row; `useBillingRefresh()` refetches after host-side changes.
 - Hooks: `useSubscriptions` (`cancel`, `resume`, `setPaymentMethod`,
-  `changeSubscription`, per-row `pending`, `nextCursor`), `usePaymentMethods` (`add`,
+  `changeSubscription`, per-row `pending`, `nextCursor`), `useChangeOptions`, `usePaymentMethods` (`add`,
   `remove`, `setDefault`), `usePayments` (cursor pages).
   Actions resolve to `null` or a `BillingError`; they never throw.
   `changeSubscription` resolves to the `SubscriptionChange` instead of `null`. Cancel, resume

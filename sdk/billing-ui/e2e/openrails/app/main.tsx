@@ -1,7 +1,7 @@
 // Host page for account.spec.ts, built against the packaged dist/ entries.
 import { createRoot } from "react-dom/client"
 
-import { AccountBilling } from "../../../dist/index.js"
+import { AccountBilling, RenewalPrompt } from "../../../dist/index.js"
 import { createBillingClient } from "../../../dist/client.js"
 import { BillingProvider } from "../../../dist/react.js"
 
@@ -26,8 +26,22 @@ document.body.style.margin = "0"
 const client = createBillingClient({ getToken: () => token })
 
 createRoot(document.getElementById("root")!).render(
-  <BillingProvider appearance={{ theme }} locale="en-US" client={client} onChange={(c) => changes.push(c.type)}>
-    <main style={{ maxWidth: 720, margin: "0 auto", padding: "32px 16px" }}>
+  <BillingProvider
+    appearance={{ theme }}
+    locale="en-US"
+    client={client}
+    onChange={(c) => changes.push(c.type)}
+  >
+    <main
+      style={{
+        maxWidth: 720,
+        margin: "0 auto",
+        padding: "32px 16px",
+        display: "grid",
+        gap: 24,
+      }}
+    >
+      <RenewalPrompt plansHref="/plans" />
       <AccountBilling plansHref="/plans" collectionCurrency="USD" />
     </main>
   </BillingProvider>
