@@ -173,6 +173,13 @@ func TestListsReadNamedRecords(t *testing.T) {
 		_, err = client.CreateProvisioningToken(ctx, billing.CreateProvisioningTokenParams{Name: "directory"})
 		require.NoError(t, err)
 	}
+	// Two PSP imports; the NMI one stages the enrolled member's records.
+	var imports []billing.PSPImportID
+	for _, psp := range []string{"nmi", "stripe"} {
+		imp, err := client.CreatePSPImport(ctx, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: psp}})
+		require.NoError(t, err)
+		imports = append(imports, w.pspImported(imp.ID, billing.PSPImportPulled).ID)
+	}
 	for range 2 {
 		w.seedFinding(duplicateCharge, "provider_charge:"+c.id+":"+uuid.NewString()+":"+w.clock.Now().Format("2006-01"))
 	}
@@ -219,6 +226,8 @@ func TestListsReadNamedRecords(t *testing.T) {
 		"GET /v1/merchant/psps":                                      {"/v1/merchant/psps", "", "psps", ", account_id = 'elsewhere'", ""},
 		"GET /v1/merchant/alert-webhooks":                            {"/v1/merchant/alert-webhooks", "", "", "", ""},
 		"GET /v1/merchant/provisioning-tokens":                       {"/v1/merchant/provisioning-tokens", "", "provisioning_tokens", ", token_sha256 = sha256(token_sha256)", ""},
+		"GET /v1/merchant/psp-imports":                               {"/v1/merchant/psp-imports", "", "psp_imports", "", ""},
+		"GET /v1/merchant/psp-imports/{id}/records":                  {"/v1/merchant/psp-imports/" + imports[0].String() + "/records", "", "psp_import_records", "", ""},
 		"GET /v1/app/host-events":                                    {"/v1/app/host-events", "include_acknowledged=true", "host_outbox", "", ""},
 		"GET /v1/merchant/findings":                                  {"/v1/merchant/findings", "", "reconciliation_findings", "", ""},
 		"GET /v1/merchant/destructive-holds":                         {"/v1/merchant/destructive-holds", "", "destructive_holds", ", scope_key = scope_key || ':elsewhere'", ""},

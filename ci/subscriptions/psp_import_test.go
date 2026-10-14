@@ -83,10 +83,10 @@ func TestPSPImportFromNMI(t *testing.T) {
 	}
 	a, b, c, d := w.newCustomer(), w.newCustomer(), w.newCustomer(), w.newCustomer()
 	directory.Put(userinfo.User{ID: a.id, Email: "a@host.test"})
-	byEmail := add("A@Host.Test", "", "ord-a")         // the directory's email
-	byShipping := add("", "shipment-1002", "ord-b")    // legacy user 1002
-	byOrder := add("", "", "77")                       // legacy order 77
-	unmatched := add("d@elsewhere.test", "", "ord-d")  // nobody's
+	byEmail := add("A@Host.Test", "", "ord-a")        // the directory's email
+	byShipping := add("", "shipment-1002", "ord-b")   // legacy user 1002
+	byOrder := add("", "", "77")                      // legacy order 77
+	unmatched := add("d@elsewhere.test", "", "ord-d") // nobody's
 	conflicted := add("a@host.test", "shipment-1002", "ord-e")
 	oneOff := w.nmi.AddSale(nmimock.Sale{Vault: byEmail.vault, Amount: "4.99", OrderID: "one-off", At: start.Add(-5 * 24 * time.Hour)})
 
