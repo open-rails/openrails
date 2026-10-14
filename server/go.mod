@@ -25,8 +25,8 @@ require (
 	github.com/open-rails/authkit v1.24.0
 	github.com/open-rails/helpers v1.12.0
 	github.com/redis/go-redis/v9 v9.22.0
-	github.com/riverqueue/river v0.47.0
-	github.com/riverqueue/river/rivertype v0.47.0
+	github.com/riverqueue/river v0.48.0
+	github.com/riverqueue/river/rivertype v0.48.0
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
@@ -89,9 +89,9 @@ require (
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
 	github.com/open-rails/migratekit v1.11.1 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
-	github.com/riverqueue/river/riverdriver v0.47.0 // indirect
-	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect
-	github.com/riverqueue/river/rivershared v0.47.0 // indirect
+	github.com/riverqueue/river/riverdriver v0.48.0 // indirect
+	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.48.0 // indirect
+	github.com/riverqueue/river/rivershared v0.48.0 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/streamingfast/logging v0.0.0-20250729153644-6ddeb9abb112 // indirect
