@@ -92,6 +92,25 @@ func (q *Queries) InsertPaymentMethodVersion(ctx context.Context, arg InsertPaym
 	return result.RowsAffected(), nil
 }
 
+const latestPaymentMethodVersionID = `-- name: LatestPaymentMethodVersionID :one
+SELECT id FROM billing.payment_method_versions
+WHERE merchant_id = $1::uuid AND payment_method_id = $2::uuid
+ORDER BY id DESC LIMIT 1
+`
+
+type LatestPaymentMethodVersionIDParams struct {
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+}
+
+// Admission freezes the latest observed card version, including late observations.
+func (q *Queries) LatestPaymentMethodVersionID(ctx context.Context, arg LatestPaymentMethodVersionIDParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, latestPaymentMethodVersionID, arg.MerchantID, arg.PaymentMethodID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const listPaymentMethodVersions = `-- name: ListPaymentMethodVersions :many
 SELECT id, merchant_id, customer_id, payment_method_id, source, kind, event_ref, psp_id, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, fingerprint, network_token_id, network_token_status, network_token_par, effective_at, created_at FROM billing.payment_method_versions
 WHERE merchant_id = $1::uuid AND payment_method_id = $2::uuid

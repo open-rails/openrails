@@ -64,6 +64,7 @@ var providerWriteSurface = map[string]string{
 	"ConfirmApprovedSale":          "read",
 	"ConfirmApprovedUnvaultedSale": "read",
 	"ConfirmLiveSubscription":      "read",
+	"ReadVerificationEvidence":     "read",
 	"ReadEnrollmentEvidence":       "read",
 	"ReadSingleCardVaultBilling":   "read",
 	"ConfirmRefund":                "read",
@@ -125,6 +126,7 @@ var nameAmbiguousWrites = map[string]string{
 // permitted to reach a provider write directly. Anything else fails.
 var allowedWriteCallers = map[string]string{
 	// --- the sanctioned executors: intent handlers -----------------------
+	"internal/intents/nmi_recurring_confirmation.go:Execute":            "durable same-card confirmation with write-ahead fence",
 	"internal/modules/payment/nmi_sale_intent.go:Execute":               "nmi_sale intent handler",
 	"internal/modules/payment/initial_membership_intent.go:Execute":     "initial_membership intent handler",
 	"internal/modules/payment/nmi_upgrade_intent.go:advance":            "durable per-step tier change handler",

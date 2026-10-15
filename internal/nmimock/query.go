@@ -179,7 +179,7 @@ func (m *Mock) search(form url.Values) string {
 		refunded.MDF = bookField(s.Book)
 		add(refunded, r.At, s.ScheduleID)
 	}
-	if !schedules {
+	if !schedules && !m.hideValidations {
 		for _, v := range m.validations {
 			success, code, text, condition := "1", "100", "VALIDATED", "complete"
 			if !v.Approved {

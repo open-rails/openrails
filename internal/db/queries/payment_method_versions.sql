@@ -84,3 +84,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe'
   AND psp_id = sqlc.arg(psp_id)::uuid AND rail_method_ref = sqlc.arg(rail_method_ref)::text
   AND status = 'active'
 RETURNING id;
+
+-- name: LatestPaymentMethodVersionID :one
+-- Admission freezes the latest observed card version, including late observations.
+SELECT id FROM billing.payment_method_versions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_method_id = sqlc.arg(payment_method_id)::uuid
+ORDER BY id DESC LIMIT 1;

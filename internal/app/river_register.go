@@ -326,6 +326,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	rebill := intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock)
 	rebill.DeferDelete = newProviderCancelScheduler(r.DB, r.RateCeiling(), intents.OriginSystem, "terminal recurring recovery")
 	registry := intents.NewRegistry(
+		intents.NewNMIRecurringConfirmationHandler(r.DB, r.Config, r.CollectionResolver, clock),
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.CollectionResolver, clock),
 		intents.NewNMIPaymentSourceUpdateHandler(r.DB, r.CollectionResolver, clock), // payment-method swap
 		ccbillCancel,

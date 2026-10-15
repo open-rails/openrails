@@ -138,6 +138,30 @@ is `platform`, OpenRails records the merchant's identity in it once, as a
 their `custodian_id`, so the custodian checks hold for them as for any
 custodian. The key `platform` is reserved: no merchant custodian takes it.
 
+### Same-card recovery for imported NMI subscriptions
+
+For an imported NMI schedule in `awaiting_method` whose current PSP-held card
+has no recurring agreement (or an active agreement without its storing
+transaction), the customer can confirm that exact card through
+`PUT /v1/me/subscriptions/{id}/payment-method` with its `payment_method_id`.
+This does not charge. One durable `nmi_recurring_confirmation` operation owns
+the zero-value verification, even when clicks carry different request keys.
+An unresolved confirmation returns `409 resource_conflict`; the subscription
+stays held and its recovery view reports `payment_in_progress`.
+
+A lost response is looked up by the persisted order reference on the same NMI
+account. Empty, ambiguous or mismatched results never permit a resend. After
+confirmation, the agreement, attributed history decision
+`recurring_agreement_restored`, retry date and successful operation commit
+together. The existing retry worker collects later, subject to normal write
+modes. A definitive decline remains held and repeated clicks return that
+refusal. Cancellation, a changed card/version or a changed unpaid period prevents
+an old confirmation from restoring the agreement.
+
+This repair does not reauthorize revoked or inactive consent. Staff selection,
+following the default with `null`, engine subscriptions, platform-held cards
+and ordinary card replacement keep their existing behavior.
+
 ### Platform NMI purchases and subscriptions
 
 Platform collection supports new and saved cards on NMI orders, including subscriptions.
