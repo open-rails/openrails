@@ -865,10 +865,22 @@ export type DeclaredBilling = {
   transactions?: DeclaredTransaction[]
   admin_grants?: DeclaredAdminGrant[]
   purchases?: DeclaredPurchase[]
+  historical_payments?: DeclaredHistoricalPayment[]
 }
 
 export type DeclaredCustomer = {
   customer?: string
+}
+
+export type DeclaredHistoricalPayment = {
+  source_id?: string
+  customer?: string
+  psp?: PSPRef
+  rail?: string
+  transaction_id?: string
+  amount?: string
+  currency?: string
+  paid_at?: string
 }
 
 export type DeclaredOrderLine = {

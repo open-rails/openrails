@@ -16,7 +16,7 @@ import (
 // own job, so such a test anywhere else never runs.
 var (
 	suiteTags = []string{"e2e", "integration"}
-	suiteDirs = []string{"ci/", "server/ci/", "examples/"}
+	suiteDirs = []string{"ci/", "server/ci/", "server/cmd/openrails/", "examples/"}
 )
 
 func TestEndToEndTestsLiveInTheSuites(t *testing.T) {

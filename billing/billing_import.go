@@ -32,6 +32,25 @@ type DeclaredBilling struct {
 	AdminGrants []DeclaredAdminGrant `json:"admin_grants,omitempty"`
 	// Purchases are settled one-off sales, each an order with its payment.
 	Purchases []DeclaredPurchase `json:"purchases,omitempty"`
+	// HistoricalPayments records confirmed receipts without inventing
+	// subscriptions or access.
+	HistoricalPayments []DeclaredHistoricalPayment `json:"historical_payments,omitempty"`
+}
+
+// DeclaredHistoricalPayment is a confirmed successful NMI payment with no
+// known refund, whose subscription or catalog purchase is unavailable.
+// The caller supplies those facts. It records history only:
+// no access, recurring agreement or future collection is created.
+// Amount is in native units (micros for USD); PSP falls back to DefaultPSP.
+type DeclaredHistoricalPayment struct {
+	SourceID      string     `json:"source_id"`
+	Customer      CustomerID `json:"customer"`
+	PSP           PSPRef     `json:"psp,omitzero"`
+	Rail          string     `json:"rail"`
+	TransactionID string     `json:"transaction_id"`
+	Amount        int64      `json:"amount,string"`
+	Currency      string     `json:"currency"`
+	PaidAt        time.Time  `json:"paid_at"`
 }
 
 // DeclaredPurchase is one settled one-off sale: an engine-owned order with
@@ -210,7 +229,8 @@ type DeclaredAdminGrant struct {
 }
 
 // BillingImportResult reports per-SourceID outcomes for subscriptions, admin
-// grants and purchases; customers and payment methods are idempotent upserts.
+// grants, purchases and historical payments. Customers and payment methods
+// are idempotent upserts.
 type BillingImportResult struct {
 	Imported []string          `json:"imported"`
 	Skipped  []string          `json:"skipped"`

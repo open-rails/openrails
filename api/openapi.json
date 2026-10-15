@@ -16776,6 +16776,12 @@
             "items": {
               "$ref": "#/components/schemas/DeclaredPurchase"
             }
+          },
+          "historical_payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeclaredHistoricalPayment"
+            }
           }
         }
       },
@@ -16784,6 +16790,37 @@
         "properties": {
           "customer": {
             "type": "string"
+          }
+        }
+      },
+      "DeclaredHistoricalPayment": {
+        "type": "object",
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "customer": {
+            "type": "string"
+          },
+          "psp": {
+            "$ref": "#/components/schemas/PSPRef"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "transaction_id": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "paid_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
