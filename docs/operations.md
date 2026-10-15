@@ -209,6 +209,13 @@ The flags compose; full reconciliation to the source of truth is
 Global flags on every command: `--config/-c` (default `config.yaml`),
 `--provider-write-mode`, `--test-mode` (flag beats env beats yaml).
 
+One-off commands open only their required resources and print their result,
+useful progress and actionable errors. They do not start the HTTP server or a
+worker fleet. JSON/YAML exports keep standard output suitable for parsing.
+Database connection setup is bounded; a long-running operation keeps its own
+context after connecting. `run-server` and `run-worker` retain normal startup
+and operational logging.
+
 | Command | Purpose |
 |---|---|
 | `run-server [--no-workers]` / `run-worker` | serve the public API (+ workers unless disabled; `--no-workers` remains live but not ready) / workers only |

@@ -136,6 +136,8 @@ type LoadOption func(*loadOptions)
 
 type loadOptions struct {
 	overrides map[string]any
+	quiet     bool
+	directory bool
 }
 
 // WithOverride overlays one koanf config key (e.g. "provider_write_mode")
@@ -153,12 +155,28 @@ func Load(configPath string, opts ...LoadOption) (*Config, error) {
 	return load(configPath, false, opts...)
 }
 
+// LoadForCommand uses the same configuration pipeline without routine startup
+// provenance messages. Validation and configuration failures are unchanged.
+func LoadForCommand(configPath string, opts ...LoadOption) (*Config, error) {
+	return load(configPath, false, append(opts, func(o *loadOptions) { o.quiet = true })...)
+}
+
 // LoadDatabase loads and validates only database configuration for offline
 // operator commands. It preserves the normal file, mounted-secret, environment
 // and flag precedence, without requiring provider or authentication credentials.
 // The returned config is unsuitable for constructing a server runtime.
 func LoadDatabase(configPath string, opts ...LoadOption) (*Config, error) {
 	return load(configPath, true, opts...)
+}
+
+func LoadDatabaseForCommand(configPath string, opts ...LoadOption) (*Config, error) {
+	return load(configPath, true, append(opts, func(o *loadOptions) { o.quiet = true })...)
+}
+
+// LoadDirectoryForCommand keeps the optional merchant configuration store as
+// well as the database, without requiring sign-in or payment-provider settings.
+func LoadDirectoryForCommand(configPath string, opts ...LoadOption) (*Config, error) {
+	return load(configPath, true, append(opts, func(o *loadOptions) { o.quiet, o.directory = true, true })...)
 }
 
 func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, error) {
@@ -184,7 +202,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		if !errors.As(err, &pathErr) {
 			return nil, err
 		}
-	} else if abs, absErr := filepath.Abs(".env"); absErr == nil {
+	} else if abs, absErr := filepath.Abs(".env"); absErr == nil && !options.quiet {
 		log.Infof("config: loaded environment overrides from %s", abs)
 	}
 
@@ -332,6 +350,18 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		databaseConfig.Database.Schema = billing.SchemaName(databaseConfig.Config)
 		if err := billing.ValidateDatabase(databaseConfig.Config); err != nil {
 			return nil, err
+		}
+		if options.directory && k.Exists("vault") {
+			var vault billing.VaultConfig
+			if err := k.UnmarshalWithConf("vault", &vault, koanf.UnmarshalConf{
+				DecoderConfig: &mapstructure.DecoderConfig{
+					DecodeHook: mapstructure.ComposeDecodeHookFunc(mapstructure.StringToTimeDurationHookFunc(), mapstructure.TextUnmarshallerHookFunc()),
+					Result:     &vault, WeaklyTypedInput: true, ErrorUnused: true, TagName: "koanf", MatchName: matchField,
+				},
+			}); err != nil {
+				return nil, fmt.Errorf("unmarshaling directory vault config: %w", err)
+			}
+			databaseConfig.Vault = &vault
 		}
 		return databaseConfig, nil
 	}

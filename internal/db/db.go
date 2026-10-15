@@ -57,6 +57,16 @@ const (
 // ctx bounds the wait: it is the boot context (canceled by SIGTERM in the
 // standalone binary), never a package clock.
 func NewDB(ctx context.Context, cfg *config.Config) (_ *DB, err error) {
+	return newDB(ctx, cfg, true)
+}
+
+// NewDBOnce opens the same owned, schema-aware pool with one connectivity
+// attempt. One-shot callers bound ctx; serving processes use NewDB's retry.
+func NewDBOnce(ctx context.Context, cfg *config.Config) (*DB, error) {
+	return newDB(ctx, cfg, false)
+}
+
+func newDB(ctx context.Context, cfg *config.Config, retry bool) (_ *DB, err error) {
 	if cfg == nil || cfg.DB == nil {
 		return nil, fmt.Errorf("database config is nil")
 	}
@@ -68,7 +78,7 @@ func NewDB(ctx context.Context, cfg *config.Config) (_ *DB, err error) {
 		ctx = context.Background()
 	}
 
-	pool, err := newTunedPGXPool(ctx, url, cfg.DB.SQLTrace)
+	pool, err := newTunedPGXPool(ctx, url, cfg.DB.SQLTrace, retry)
 	if err != nil {
 		return nil, err
 	}
@@ -76,8 +86,9 @@ func NewDB(ctx context.Context, cfg *config.Config) (_ *DB, err error) {
 }
 
 // newTunedPGXPool parses the connection string, applies the pool tuning,
-// installs the optional query tracer, and verifies connectivity with retry.
-func newTunedPGXPool(ctx context.Context, url string, sqlTrace bool) (*pgxpool.Pool, error) {
+// installs the optional query tracer, and verifies connectivity with the
+// caller's retry policy.
+func newTunedPGXPool(ctx context.Context, url string, sqlTrace, retry bool) (*pgxpool.Pool, error) {
 	pcfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, fmt.Errorf("parse postgres config: %w", err)
@@ -93,7 +104,11 @@ func newTunedPGXPool(ctx context.Context, url string, sqlTrace bool) (*pgxpool.P
 	if err != nil {
 		return nil, fmt.Errorf("create pgx pool: %w", err)
 	}
-	if err := pingWithRetry(ctx, pool.Ping, "database"); err != nil {
+	ping := pool.Ping
+	if retry {
+		ping = func(ctx context.Context) error { return pingWithRetry(ctx, pool.Ping, "database") }
+	}
+	if err := ping(ctx); err != nil {
 		pool.Close()
 		return nil, err
 	}

@@ -3,13 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/hosttools"
+	"github.com/open-rails/openrails/internal/modules/payment"
 )
 
 // newSolanaPayCmd groups the Solana Pay operator commands.
@@ -35,7 +37,7 @@ func newSolanaPayResolveCmd() *cobra.Command {
 			if strings.TrimSpace(signature) == "" || strings.TrimSpace(resolution) == "" {
 				return fmt.Errorf("--signature and --resolution are required")
 			}
-			return runSolanaPayResolve(c.Context(), cfg, merchantSlug, strings.TrimSpace(signature), strings.TrimSpace(resolution))
+			return runSolanaPayResolve(c.Context(), cfg, merchantSlug, strings.TrimSpace(signature), strings.TrimSpace(resolution), c.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
@@ -44,19 +46,23 @@ func newSolanaPayResolveCmd() *cobra.Command {
 	return cmd
 }
 
-func runSolanaPayResolve(ctx context.Context, cfg *config.Config, merchantSlug, signature, resolution string) error {
-	client, graph, err := openEngine(ctx, cfg, openrails.Deps{})
+func runSolanaPayResolve(ctx context.Context, cfg *config.Config, merchantSlug, signature, resolution string, out io.Writer) error {
+	database, err := openCLIDB(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = client.Close(context.Background()) }()
-	mid, err := resolveCLIMerchant(ctx, graph.Runtime.DB, merchantSlug)
+	defer database.Close()
+	mid, err := resolveCLIMerchant(ctx, database, merchantSlug)
 	if err != nil {
 		return err
 	}
+	// Resolving a recorded review only needs the attempt service's ledger; it
+	// never quotes, charges or talks to a chain/provider.
+	attempts := payment.NewOrderAttemptService(database, nil, nil, nil, nil, nil, nil, nil, nil, cfg, nil)
+	graph := &app.App{Config: cfg, Runtime: &app.Runtime{DB: database, Config: cfg, OrderAttemptService: attempts}}
 	if err := hosttools.ResolveSolanaPayReview(ctx, graph, mid, signature, resolution); err != nil {
 		return err
 	}
-	fmt.Printf("resolved Solana Pay review %s for merchant %s\n", signature, mid)
-	return nil
+	_, err = fmt.Fprintf(out, "Resolved Solana Pay review %s for merchant %s.\n", signature, mid)
+	return err
 }

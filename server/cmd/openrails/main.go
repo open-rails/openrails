@@ -13,7 +13,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/buildinfo"
 	"github.com/open-rails/openrails/internal/config"
@@ -53,9 +52,18 @@ func newRootCmd() *cobra.Command {
 				loadOpts = append(loadOpts, hostconfig.WithOverride("provider_write_mode", strings.TrimSpace(mode)))
 			}
 
-			load := hostconfig.Load
+			load := hostconfig.LoadForCommand
+			if cmd.Name() == "run-server" || cmd.Name() == "run-worker" {
+				load = hostconfig.Load
+			}
 			if isDatabaseOnlyBillingCommand(cmd) {
-				load = hostconfig.LoadDatabase
+				load = hostconfig.LoadDatabaseForCommand
+			}
+			if cmd.Name() == "workers" || cmd.Name() == "list" && cmd.Parent() != nil && cmd.Parent().Name() == "destructive-holds" {
+				load = hostconfig.LoadDatabaseForCommand
+			}
+			if cmd.Parent() != nil && cmd.Parent().Name() == "merchants" && (cmd.Name() == "list" || cmd.Name() == "get") {
+				load = hostconfig.LoadDirectoryForCommand
 			}
 			cfg, err := load(configPath, loadOpts...)
 			if err != nil {
@@ -236,10 +244,10 @@ func runWorker(cmd *cobra.Command, args []string) error {
 // applyStandaloneMigrations does what server.New does first: billing and
 // River. AuthKit migrates itself when the server builds it.
 func applyStandaloneMigrations(ctx context.Context, cfg *config.Config) error {
-	pool, err := pgxpool.New(ctx, config.DBConnectionString(cfg.DB))
+	database, err := openCLIDB(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("standalone migration pool: %w", err)
 	}
-	defer pool.Close()
-	return engine.Migrate(ctx, pool, *cfg)
+	defer database.Close()
+	return engine.Migrate(ctx, database.Pool(), *cfg)
 }

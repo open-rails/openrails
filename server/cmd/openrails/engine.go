@@ -9,8 +9,6 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/server"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
@@ -52,14 +50,4 @@ func openServer(ctx context.Context, deps openrails.Deps) (*server.Server, *app.
 	}
 	graph, cp := operator.Of(srv)
 	return srv, graph, cp, nil
-}
-
-// openEngine builds the engine alone through openrails.New, like any host,
-// for commands that need no control plane.
-func openEngine(ctx context.Context, cfg *config.Config, deps openrails.Deps) (*openrails.Engine, *app.App, error) {
-	eng, err := openrails.New(ctx, *cfg, deps)
-	if err != nil {
-		return nil, nil, fmt.Errorf("bootstrap application: %w", err)
-	}
-	return eng, engine.Graph(eng), nil
 }

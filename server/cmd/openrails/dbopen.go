@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -17,9 +20,22 @@ func openCLIDB(ctx context.Context, cfg *config.Config) (*db.DB, error) {
 	if cfg == nil || cfg.DB == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
-	database, err := db.NewDB(ctx, cfg)
+	connect, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	database, err := db.NewDBOnce(connect, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}
 	return database, nil
+}
+
+func withCLIDB(cmd *cobra.Command, run func(context.Context, *db.DB) error) error {
+	ctx := cmd.Context()
+	cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+	database, err := openCLIDB(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+	return run(ctx, database)
 }

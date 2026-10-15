@@ -374,17 +374,12 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 			} else {
 				// Hosted identity preparation verifies live group ownership
 				// through the control plane.
-				database, err := openCLIDB(ctx, cfg)
+				resources, err := openCLIControlPlane(ctx)
 				if err != nil {
 					return err
 				}
-				defer database.Close()
-				srv, _, cp, err := openServer(ctx, openrails.Deps{Postgres: database.Pool()})
-				if err != nil {
-					return err
-				}
-				defer func() { _ = srv.Close(context.WithoutCancel(ctx)) }()
-				if _, err := operator.ProvisionMerchantForRestore(ctx, cp, operator.ProvisionMerchantForRestoreRequest{
+				defer resources.close()
+				if _, err := operator.ProvisionMerchantForRestore(ctx, resources.cp, operator.ProvisionMerchantForRestoreRequest{
 					MerchantID: mid, Slug: strings.TrimSpace(slug), OwnerUserID: strings.TrimSpace(ownerID),
 				}); err != nil {
 					return err

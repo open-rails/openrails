@@ -10,33 +10,35 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/abusestate"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/server"
+	"github.com/open-rails/openrails/internal/http/middleware"
+	"github.com/open-rails/openrails/internal/merchants"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
 // The operator's commands over the server's Go API: the merchant directory,
 // worker health and administrator lockouts. None has an HTTP route.
 
-// operatorServer is the standalone server the configuration builds, and its
-// database for name lookups.
-type operatorServer struct {
-	*server.Server
-	db *db.DB
-}
+type operatorSession = commandControlPlane
 
-// withServer runs fn against the standalone server the configuration builds.
-func withServer(cmd *cobra.Command, fn func(context.Context, operatorServer) error) error {
+// withOperator runs an operator action using only the account and merchant stores.
+func withOperator(cmd *cobra.Command, fn func(context.Context, operatorSession) error) error {
 	ctx := cmd.Context()
-	srv, graph, _, err := openServer(ctx, openrails.Deps{})
+	srv, err := openCLIControlPlane(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = srv.Close(context.WithoutCancel(ctx)) }()
-	return fn(ctx, operatorServer{Server: srv, db: graph.Runtime.DB})
+	defer srv.close()
+	if err := srv.loadMerchants(ctx); err != nil {
+		return err
+	}
+	return fn(ctx, *srv)
 }
 
 func printJSON(w io.Writer, v any) error {
@@ -47,18 +49,18 @@ func printJSON(w io.Writer, v any) error {
 
 // merchantArg resolves a merchant id, or a live merchant's current or former
 // name.
-func merchantArg(ctx context.Context, srv operatorServer, ref string) (billing.MerchantID, error) {
+func merchantArg(ctx context.Context, database *db.DB, ref string) (billing.MerchantID, error) {
 	if id, err := uuid.Parse(strings.TrimSpace(ref)); err == nil {
 		return billing.MerchantID(id), nil
 	}
-	return resolveCLIMerchant(ctx, srv.db, ref)
+	return resolveCLIMerchant(ctx, database, ref)
 }
 
 func newMerchantsCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "merchants", Short: "The merchant directory: list, read, create, rename, soft-delete and restore merchants"}
 	cmd.AddCommand(newMerchantsListCmd(), newMerchantsGetCmd(), newMerchantsCreateCmd(), newMerchantsRenameCmd(),
-		newMerchantsLifecycleCmd("delete", "Soft-delete a merchant: off the default lists, its credentials resolve nothing, its records kept", (*server.Server).DeleteMerchant),
-		newMerchantsLifecycleCmd("restore", "Restore a soft-deleted merchant", (*server.Server).RestoreMerchant))
+		newMerchantsLifecycleCmd("delete", "Soft-delete a merchant: off the default lists, its credentials resolve nothing, its records kept", (*commandControlPlane).DeleteMerchant),
+		newMerchantsLifecycleCmd("restore", "Restore a soft-deleted merchant", (*commandControlPlane).RestoreMerchant))
 	return cmd
 }
 
@@ -81,8 +83,8 @@ func newMerchantsListCmd() *cobra.Command {
 			default:
 				return fmt.Errorf("--status is active, deleted or all")
 			}
-			return withServer(cmd, func(ctx context.Context, srv operatorServer) error {
-				page, err := srv.ListMerchants(ctx, params)
+			return withCLIDirectory(cmd, func(ctx context.Context, database *db.DB, directory *merchants.Service) error {
+				page, err := directory.ListDirectory(ctx, params)
 				if err != nil {
 					return err
 				}
@@ -119,12 +121,12 @@ func newMerchantsGetCmd() *cobra.Command {
 		Short: "Read one merchant, in any status (an id, or a live merchant's name)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withServer(cmd, func(ctx context.Context, srv operatorServer) error {
-				id, err := merchantArg(ctx, srv, args[0])
+			return withCLIDirectory(cmd, func(ctx context.Context, database *db.DB, directory *merchants.Service) error {
+				id, err := merchantArg(ctx, database, args[0])
 				if err != nil {
 					return err
 				}
-				m, err := srv.GetMerchant(ctx, id)
+				m, err := directory.DirectoryEntry(ctx, id)
 				if err != nil {
 					return err
 				}
@@ -141,7 +143,7 @@ func newMerchantsCreateCmd() *cobra.Command {
 		Short: "Create a merchant claiming a name, or report the one that holds it",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withServer(cmd, func(ctx context.Context, srv operatorServer) error {
+			return withOperator(cmd, func(ctx context.Context, srv operatorSession) error {
 				res, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: args[0], DisplayName: displayName, OwnerUserID: owner})
 				if err != nil {
 					return err
@@ -168,8 +170,8 @@ func newMerchantsRenameCmd() *cobra.Command {
 		Short: "Rename a merchant; its former name forwards under auth.naming",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withServer(cmd, func(ctx context.Context, srv operatorServer) error {
-				id, err := merchantArg(ctx, srv, args[0])
+			return withOperator(cmd, func(ctx context.Context, srv operatorSession) error {
+				id, err := merchantArg(ctx, srv.db, args[0])
 				if err != nil {
 					return err
 				}
@@ -183,7 +185,7 @@ func newMerchantsRenameCmd() *cobra.Command {
 	}
 }
 
-func newMerchantsLifecycleCmd(use, short string, op func(*server.Server, context.Context, billing.MerchantID) (*billing.Merchant, error)) *cobra.Command {
+func newMerchantsLifecycleCmd(use, short string, op func(*commandControlPlane, context.Context, billing.MerchantID) (*billing.Merchant, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   use + " <merchant-id>",
 		Short: short,
@@ -193,8 +195,8 @@ func newMerchantsLifecycleCmd(use, short string, op func(*server.Server, context
 			if err != nil {
 				return fmt.Errorf("a merchant id: %w", err)
 			}
-			return withServer(cmd, func(ctx context.Context, srv operatorServer) error {
-				m, err := op(srv.Server, ctx, billing.MerchantID(id))
+			return withOperator(cmd, func(ctx context.Context, srv operatorSession) error {
+				m, err := op(&srv, ctx, billing.MerchantID(id))
 				if err != nil {
 					return err
 				}
@@ -211,8 +213,8 @@ func newWorkersCmd() *cobra.Command {
 		Short: "Each background job kind's recent runs, with its last error",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withServer(cmd, func(ctx context.Context, srv operatorServer) error {
-				health, err := srv.ListWorkerHealth(ctx)
+			return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
+				health, err := riverjobs.ListWorkerHealth(ctx, database)
 				if err != nil {
 					return err
 				}
@@ -249,13 +251,25 @@ func newAdminLockoutsCmd() *cobra.Command {
 			if _, err := uuid.Parse(strings.TrimSpace(args[0])); err != nil {
 				return fmt.Errorf("a user id: %w", err)
 			}
-			return withServer(cmd, func(ctx context.Context, srv operatorServer) error {
-				if err := srv.UnlockAdminLockout(ctx, args[0]); err != nil {
-					return err
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "unlocked %s\n", args[0])
-				return nil
-			})
+			cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+			if cfg == nil {
+				return fmt.Errorf("config not loaded")
+			}
+			if cfg.Redis == nil {
+				return fmt.Errorf("Redis is required to unlock another process's administrator lockout")
+			}
+			opts, err := config.RedisOptions(cfg.Redis)
+			if err != nil {
+				return err
+			}
+			client := redis.NewClient(opts)
+			defer client.Close()
+			limiter := middleware.NewAdminOperationLimiter(abusestate.New(client))
+			if err := limiter.Unlock(cmd.Context(), args[0], "operator"); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "unlocked %s\n", args[0])
+			return err
 		},
 	})
 	return cmd

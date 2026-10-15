@@ -5,7 +5,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/spf13/cobra"
 )
 
@@ -22,10 +27,24 @@ func newDestructiveHoldsCmd() *cobra.Command {
 				return err
 			}
 		}
-		return withServer(cmd, func(ctx context.Context, srv operatorServer) error {
-			items, err := srv.ListOpenDestructiveHolds(ctx, limit, id)
+		return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
+			gate := destructive.NewAdmissions(database, nil, nil)
+			var cursor *uuid.UUID
+			if !id.IsZero() {
+				value := id.UUID()
+				cursor = &value
+			}
+			addresses, err := gate.ListOpenHoldsDirectory(ctx, limit, cursor)
 			if err != nil {
 				return err
+			}
+			items := make([]billing.DestructiveHoldReview, 0, len(addresses))
+			for _, address := range addresses {
+				hold, err := gate.GetHold(ctx, address.MerchantID, address.ID)
+				if err != nil {
+					return err
+				}
+				items = append(items, hold.Review())
 			}
 			return printJSON(cmd.OutOrStdout(), items)
 		})
@@ -41,16 +60,22 @@ func newDestructiveHoldsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return withServer(cmd, func(ctx context.Context, srv operatorServer) error {
-			mid, err := merchantArg(ctx, srv, args[0])
+		return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
+			mid, err := merchantArg(ctx, database, args[0])
 			if err != nil {
 				return err
 			}
-			out, err := srv.ClearDestructiveHold(ctx, mid, id, billing.DestructiveOperator{Issuer: issuer, ID: actor}, reason)
+			cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+			runtime := &app.Runtime{DB: database, Config: cfg}
+			if err := runtime.WireOneOffDestructiveAdmissions(ctx); err != nil {
+				return err
+			}
+			defer runtime.Close(context.WithoutCancel(ctx))
+			hold, err := runtime.DestructiveAdmissions.Clear(ctx, mid.UUID(), id.UUID(), destructive.Actor{Issuer: issuer, ID: actor, Credential: "trusted-operator"}, reason)
 			if err != nil {
 				return err
 			}
-			return printJSON(cmd.OutOrStdout(), out)
+			return printJSON(cmd.OutOrStdout(), hold.View())
 		})
 	}}
 	clear.Flags().StringVar(&issuer, "operator-issuer", "", "verified operator's identity issuer")

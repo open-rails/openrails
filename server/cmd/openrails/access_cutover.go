@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails"
@@ -33,12 +32,12 @@ func newAccessCutoverCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-			pool, err := pgxpool.New(cmd.Context(), config.DBConnectionString(cfg.DB))
+			database, err := openCLIDB(cmd.Context(), cfg)
 			if err != nil {
 				return fmt.Errorf("open postgres: %w", err)
 			}
-			defer pool.Close()
-			report, err := openrails.AccessCutoverPreflight(cmd.Context(), pool, cfg.Database, approve)
+			defer database.Close()
+			report, err := openrails.AccessCutoverPreflight(cmd.Context(), database.Pool(), cfg.Database, approve)
 			if err != nil {
 				return err
 			}

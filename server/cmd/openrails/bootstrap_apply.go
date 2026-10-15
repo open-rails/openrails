@@ -10,7 +10,7 @@ import (
 
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/app"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -122,17 +122,13 @@ func runPushAuthBootstrap(cmd *cobra.Command, opts pushAuthBootstrapOptions) err
 		return fmt.Errorf("config not loaded; push-auth-bootstrap requires --config")
 	}
 
-	srv, _, cp, err := openServer(ctx, openrails.Deps{})
+	resources, err := openCLIControlPlane(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if closeErr := srv.Close(context.Background()); closeErr != nil {
-			log.WithError(closeErr).Error("push-auth-bootstrap cleanup failed")
-		}
-	}()
+	defer resources.close()
 
-	return applyAuthKitAuthorityManifest(ctx, cp, manifest, out, iam.BootstrapOptions{
+	return applyAuthKitAuthorityManifest(ctx, resources.cp, manifest, out, iam.BootstrapOptions{
 		DryRun:      opts.dryRun,
 		StartupOnly: opts.startupOnly,
 		Name:        opts.name,
@@ -162,20 +158,21 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 		return err
 	}
 
-	srv, graph, cp, err := openServer(ctx, openrails.Deps{})
+	resources, err := openCLIControlPlane(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if closeErr := srv.Close(context.Background()); closeErr != nil {
-			log.WithError(closeErr).Error("push-merchant-config cleanup failed")
-		}
-	}()
-	if err := graph.Runtime.EnsureMerchantsService(ctx); err != nil {
+	defer resources.close()
+	if err := resources.loadMerchants(ctx); err != nil {
 		return err
 	}
-	reconcileOpts.Merchants = graph.Runtime.Merchants
-	return applyPushMerchantConfigManifest(ctx, cfg, cp, manifest, out, reconcileOpts)
+	runtime := &app.Runtime{DB: resources.db, Config: cfg, Merchants: resources.directory, MerchantConfig: resources.directory.Config()}
+	if err := runtime.WireOneOffDestructiveAdmissions(ctx); err != nil {
+		return err
+	}
+	defer runtime.Close(context.WithoutCancel(ctx))
+	reconcileOpts.Merchants = resources.directory
+	return applyPushMerchantConfigManifest(ctx, cfg, resources.cp, manifest, out, reconcileOpts)
 }
 
 type dumpMerchantConfigOptions struct {
@@ -205,17 +202,13 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 		return fmt.Errorf("config not loaded; dump-merchant-config requires --config")
 	}
 
-	srv, _, cp, err := openServer(ctx, openrails.Deps{})
+	resources, err := openCLIControlPlane(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if closeErr := srv.Close(context.Background()); closeErr != nil {
-			log.WithError(closeErr).Error("dump-merchant-config cleanup failed")
-		}
-	}()
+	defer resources.close()
 
-	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, cp, opts.slug)
+	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, resources.cp, opts.slug)
 	if err != nil {
 		return err
 	}
@@ -227,8 +220,8 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 		if err := os.WriteFile(path, encoded, 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
-		log.WithField("file", path).Info("dump-merchant-config: wrote merchant config YAML")
-		return nil
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Merchant configuration written to %s.\n", path)
+		return err
 	}
 	_, err = cmd.OutOrStdout().Write(encoded)
 	return err
