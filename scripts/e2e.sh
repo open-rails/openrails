@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Runs ./ci/... of the root module and of server/: each package's test binary
-# is built once, then every top-level test runs in its own process with its own
-# database on the disposable server (migrations hold a database-wide lock, so a
+# Runs ./ci/... of the root module and of server/, plus the server CLI package.
+# Each package's binary is built once. Every top-level test gets its own process
+# and database on the disposable server (migrations hold a database-wide lock, so a
 # shared database would queue every test's migrations behind one another).
 # Every test creates its own schema, so tests never share state. A package is
 # named by its directory (ci/subscriptions, server/ci).
@@ -41,7 +41,10 @@ mkdir "$E2E_OUT/logs"
 # under its name with / as _.
 : >"$E2E_OUT/all.tsv"
 for module in . server; do
-  package_list="$(cd "$module" && go list -tags="$tags" -f '{{.ImportPath}} {{.Dir}}' ./ci/...)"
+  suites=(./ci/...)
+  # CLI integration tests need access to the command package's private helpers.
+  if [[ "$module" == server ]]; then suites+=(./cmd/openrails); fi
+  package_list="$(cd "$module" && go list -tags="$tags" -f '{{.ImportPath}} {{.Dir}}' "${suites[@]}")"
   mapfile -t packages <<<"$package_list"
   paths=()
   for line in "${packages[@]}"; do
