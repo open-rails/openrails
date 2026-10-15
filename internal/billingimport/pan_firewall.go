@@ -92,6 +92,11 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 		if err := scan(fmt.Sprintf("historical_payments[%d]", i), payment.SourceID, payment.Rail, payment.PSP.Key, payment.TransactionID, payment.Currency); err != nil {
 			return err
 		}
+		for j, refund := range payment.Refunds {
+			if err := scan(fmt.Sprintf("historical_payments[%d].refunds[%d]", i, j), refund.TransactionID); err != nil {
+				return err
+			}
+		}
 	}
 	for i, grant := range book.AdminGrants {
 		if err := scan(fmt.Sprintf("admin_grants[%d]", i), grant.SourceID); err != nil {

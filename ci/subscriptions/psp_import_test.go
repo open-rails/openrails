@@ -302,3 +302,75 @@ func TestPSPImportFromNMI(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, subs.Items, 1, "what an import landed stays")
 }
+
+func TestPSPImportNMIStandaloneRefundHistory(t *testing.T) {
+	t.Parallel()
+	directory := &openrailstest.UserInfo{}
+	w := prepareWorld(t, 12)
+	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
+	w.start()
+	ctx, client := t.Context(), w.client[remote]
+	buyer := w.newCustomer()
+	directory.Put(userinfo.User{ID: buyer.id, Email: "history@host.test"})
+	vault := w.nmi.AddVault(visa)
+	w.nmi.EditVault(vault, func(v *nmimock.Vault) { v.Email = "history@host.test" })
+	paid := w.clock.Now().Add(-5 * day)
+	partial := w.nmi.AddSale(nmimock.Sale{Vault: vault, Amount: "4.23", At: paid})
+	full := w.nmi.AddSale(nmimock.Sale{Vault: vault, Amount: "4.23", At: paid})
+	refundedAt := paid.Add(time.Hour)
+	w.nmi.Intercept(func(r *http.Request) bool { return true }, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
+		res := serve()
+		raw, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		body := string(raw)
+		for _, r := range []struct{ id, original, amount string }{
+			{"12682586568", partial.TransactionID, "-1.01"},
+			{"12682589153", partial.TransactionID, "-1.01"},
+			{"12682590253", full.TransactionID, "-4.23"},
+		} {
+			if !strings.Contains(body, "<transaction_id>"+r.original+"</transaction_id>") {
+				continue
+			}
+			txn := fmt.Sprintf("<transaction><transaction_id>%s</transaction_id><original_transaction_id>%s</original_transaction_id><customerid>%s</customerid><currency>USD</currency><action><amount>%s</amount><action_type>refund</action_type><date>%s</date><success>1</success></action></transaction>", r.id, r.original, vault, r.amount, refundedAt.UTC().Format("20060102150405"))
+			body = strings.Replace(body, "</nm_response>", txn+"</nm_response>", 1)
+		}
+		res.Body = io.NopCloser(strings.NewReader(body))
+		res.ContentLength = int64(len(body))
+		res.Header.Set("Content-Length", fmt.Sprint(len(body)))
+		return res, nil
+	})
+	mutations := len(w.nmi.Calls())
+	since := paid.Add(-day)
+	for range 2 {
+		// A fresh import must deduplicate against the earlier import's rows.
+		imp, err := client.CreatePSPImport(ctx, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since, Rules: []billing.PSPImportRule{{Fact: "email", Via: billing.PSPImportViaDirectory}}})
+		require.NoError(t, err)
+		w.pspImported(imp.ID, billing.PSPImportPulled)
+		_, err = client.ApplyPSPImport(ctx, imp.ID)
+		require.NoError(t, err)
+		w.pspImported(imp.ID, billing.PSPImportApplied)
+		recs := w.pspRecords(imp.ID)
+		for _, id := range []string{partial.TransactionID, full.TransactionID, "12682586568:refund:" + refundedAt.Format(time.RFC3339), "12682589153:refund:" + refundedAt.Format(time.RFC3339), "12682590253:refund:" + refundedAt.Format(time.RFC3339)} {
+			require.Equal(t, billing.PSPImportImported, recs[id].State, "%s: %v", id, recs[id].Reason)
+		}
+		for _, tc := range []struct {
+			id    string
+			total int64
+		}{{partial.TransactionID, 2_020_000}, {full.TransactionID, 4_230_000}} {
+			page, err := client.ListPayments(ctx, billing.PaymentListParams{CustomerID: buyer.cid(), TransactionID: tc.id})
+			require.NoError(t, err)
+			require.Len(t, page.Items, 1)
+			require.Nil(t, page.Items[0].SubscriptionID)
+			require.Equal(t, tc.total, page.Items[0].AmountRefunded)
+		}
+		require.Equal(t, 5, w.countRows(`SELECT count(*) FROM billing.payments`))
+		require.Equal(t, 2, w.countRows(`SELECT count(*) FROM billing.orders`))
+	}
+	for _, table := range []string{"subscriptions", "grants", "provider_intents"} {
+		require.Equal(t, 0, w.countRows("SELECT count(*) FROM billing."+table), table)
+	}
+	require.Len(t, w.nmi.Calls(), mutations, "pull and apply do not request charges or refunds")
+}

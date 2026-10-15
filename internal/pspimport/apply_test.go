@@ -45,7 +45,10 @@ func TestOrphanedHistoryRequiresSuccessfulStandalonePayment(t *testing.T) {
 			if rail == "" {
 				rail = "nmi"
 			}
-			l := lander{scope: merchants.PSPScope{ID: uuid.New(), Rail: rail}, asOf: time.Now().UTC(), refunded: map[string]bool{data.TransactionID: tc.refunded}}
+			l := lander{scope: merchants.PSPScope{ID: uuid.New(), Rail: rail}, asOf: time.Now().UTC()}
+			if tc.refunded {
+				l.refunds = map[string][]importRefund{data.TransactionID: {{}}}
+			}
 			d, err := l.declare([]customerGroup{{customer: customer, records: []gen.BillingPspImportRecord{{ID: id, Kind: string(billing.PSPImportTransaction), State: string(billing.PSPImportLinked), SubscriptionRef: &tc.ref, Data: raw}}}}, map[string]bool{tc.ref: tc.known})
 			require.NoError(t, err)
 			require.Empty(t, d.book.Subscriptions)

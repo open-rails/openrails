@@ -47,7 +47,7 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID) error {
 	if scope.Rail == "nmi" {
 		// Refunds can be unmatched or linked to another customer. Inspect the
 		// whole staged import before landing any standalone charge.
-		l.refunded = map[string]bool{}
+		l.refunds = map[string][]importRefund{}
 		if err := im.eachRecord(ctx, row, billing.PSPImportTransaction, func(r gen.BillingPspImportRecord) error {
 			var data transactionData
 			if err := json.Unmarshal(r.Data, &data); err != nil {
@@ -57,7 +57,7 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID) error {
 				if data.OriginalTransactionID == "" {
 					l.unqualifiedRefund = true
 				} else {
-					l.refunded[data.OriginalTransactionID] = true
+					l.refunds[data.OriginalTransactionID] = append(l.refunds[data.OriginalTransactionID], importRefund{record: r, data: data})
 				}
 			}
 			return nil
@@ -193,7 +193,7 @@ type lander struct {
 	// unpriced says why no subscription of a plan-less rail has a price.
 	unpriced          string
 	asOf              time.Time
-	refunded          map[string]bool
+	refunds           map[string][]importRefund
 	unqualifiedRefund bool
 }
 
@@ -211,7 +211,7 @@ type declaration struct {
 	// subscriptions maps a source id to its record, txns to its transactions.
 	subscriptions map[string]uuid.UUID
 	txns          map[string][]uuid.UUID
-	historical    map[string]uuid.UUID
+	historical    map[string][]uuid.UUID
 	outcomes      map[uuid.UUID]outcome
 }
 
@@ -285,11 +285,13 @@ func (d *declaration) record(res billing.BillingImportResult) {
 	for _, src := range append(append([]string{}, res.Imported...), res.Skipped...) {
 		landed[src] = true
 	}
-	for src, id := range d.historical {
-		if landed[src] {
-			d.outcomes[id] = outcome{state: billing.PSPImportImported}
-		} else {
-			d.outcomes[id] = outcome{billing.PSPImportBlocked, res.Reasons[src]}
+	for src, ids := range d.historical {
+		for _, id := range ids {
+			if landed[src] {
+				d.outcomes[id] = outcome{state: billing.PSPImportImported}
+			} else {
+				d.outcomes[id] = outcome{billing.PSPImportBlocked, res.Reasons[src] + "; relink the staged records before applying again"}
+			}
 		}
 	}
 	for src, id := range d.subscriptions {
@@ -317,7 +319,7 @@ func (d *declaration) record(res billing.BillingImportResult) {
 
 func (l *lander) declare(groups []customerGroup, known map[string]bool) (declaration, error) {
 	pspID := billing.PSPID(l.scope.ID)
-	d := declaration{historical: map[string]uuid.UUID{}, subscriptions: map[string]uuid.UUID{}, txns: map[string][]uuid.UUID{}, outcomes: map[uuid.UUID]outcome{},
+	d := declaration{historical: map[string][]uuid.UUID{}, subscriptions: map[string]uuid.UUID{}, txns: map[string][]uuid.UUID{}, outcomes: map[uuid.UUID]outcome{},
 		book: billing.DeclaredBilling{AsOf: l.asOf, DefaultPSP: billing.PSPRef{ID: &pspID}}}
 	for _, g := range groups {
 		customer := billing.CustomerID(g.customer)
@@ -403,8 +405,9 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "a successful refund has no original payment ID; create a fresh import to read its history before importing standalone payments"}
 					continue
 				}
-				if l.refunded[data.TransactionID] {
-					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "this payment has a recorded refund; importing payment and refund history together is not yet supported"}
+				refunds, refundIDs, reason := l.historicalRefunds(g.customer, data)
+				if reason != "" {
+					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, reason}
 					continue
 				}
 				if data.StripeInvoice != nil {
@@ -412,10 +415,10 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 					continue
 				}
 				src := "history:" + r.ID.String()
-				d.historical[src] = r.ID
+				d.historical[src] = append([]uuid.UUID{r.ID}, refundIDs...)
 				d.book.HistoricalPayments = append(d.book.HistoricalPayments, billing.DeclaredHistoricalPayment{
 					SourceID: src, Customer: customer, Rail: l.scope.Rail, TransactionID: data.TransactionID,
-					Amount: data.Amount, Currency: data.Currency, PaidAt: data.OccurredAt,
+					Amount: data.Amount, Currency: data.Currency, PaidAt: data.OccurredAt, Refunds: refunds,
 				})
 				continue
 			}

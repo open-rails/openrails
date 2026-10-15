@@ -16821,6 +16821,28 @@
           "paid_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "refunds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeclaredHistoricalRefund"
+            }
+          }
+        }
+      },
+      "DeclaredHistoricalRefund": {
+        "type": "object",
+        "properties": {
+          "transaction_id": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "refunded_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

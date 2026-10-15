@@ -61,3 +61,37 @@ func TestHistoricalPaymentUnsupportedProvidersStayBlocked(t *testing.T) {
 		})
 	}
 }
+
+func TestHistoricalRefundValidation(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC().Truncate(time.Second)
+	payment := billing.DeclaredHistoricalPayment{Rail: "nmi", TransactionID: "120001", Amount: 4_230_000, Currency: "USD", PaidAt: now.Add(-time.Hour)}
+	good := billing.DeclaredHistoricalRefund{TransactionID: "120002", Amount: 1_010_000, RefundedAt: now}
+	for _, tc := range []struct {
+		name    string
+		refunds []billing.DeclaredHistoricalRefund
+		valid   bool
+	}{
+		{"partial", []billing.DeclaredHistoricalRefund{good}, true},
+		{"equal partial refunds", []billing.DeclaredHistoricalRefund{good, {TransactionID: "120003", Amount: good.Amount, RefundedAt: now}}, true},
+		{"full", []billing.DeclaredHistoricalRefund{{TransactionID: "120002", Amount: payment.Amount, RefundedAt: now}}, true},
+		{"duplicate", []billing.DeclaredHistoricalRefund{good, good}, false},
+		{"same as sale", []billing.DeclaredHistoricalRefund{{TransactionID: payment.TransactionID, Amount: good.Amount, RefundedAt: now}}, false},
+		{"negative", []billing.DeclaredHistoricalRefund{{TransactionID: good.TransactionID, Amount: -good.Amount, RefundedAt: now}}, false},
+		{"too much", []billing.DeclaredHistoricalRefund{{TransactionID: good.TransactionID, Amount: payment.Amount + 1_000_000, RefundedAt: now}}, false},
+		{"before payment", []billing.DeclaredHistoricalRefund{{TransactionID: good.TransactionID, Amount: good.Amount, RefundedAt: payment.PaidAt.Add(-time.Second)}}, false},
+		{"future", []billing.DeclaredHistoricalRefund{{TransactionID: good.TransactionID, Amount: good.Amount, RefundedAt: now.Add(time.Second)}}, false},
+		{"subcent", []billing.DeclaredHistoricalRefund{{TransactionID: good.TransactionID, Amount: 1, RefundedAt: now}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := payment
+			p.Refunds = tc.refunds
+			reason := validateHistoricalRefunds(&p, now)
+			if tc.valid {
+				require.Empty(t, reason)
+			} else {
+				require.NotEmpty(t, reason)
+			}
+		})
+	}
+}
