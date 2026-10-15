@@ -265,6 +265,7 @@ func (h *NMIRecurringConfirmationHandler) complete(ctx context.Context, in gen.B
 			return err
 		}
 		sub.NextRetryAt = &now
+		sub.PaymentMethodID = &p.PaymentMethodID
 		sub.RecordHistoryDecision(lifecycle.Name(lifecycle.RecurringAgreementRestored{}))
 		if err := repo.UpdateAt(ctx, sub, now); err != nil {
 			return err

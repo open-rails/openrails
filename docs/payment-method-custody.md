@@ -144,6 +144,9 @@ For an imported NMI schedule in `awaiting_method` whose current PSP-held card
 has no recurring agreement (or an active agreement without its storing
 transaction), the customer can confirm that exact card through
 `PUT /v1/me/subscriptions/{id}/payment-method` with its `payment_method_id`.
+On approval, that explicit selection becomes the subscription's own card,
+including when it previously followed the customer's default. A later change
+between following the default and owning a card invalidates an older confirmation.
 This does not charge. One durable `nmi_recurring_confirmation` operation owns
 the zero-value verification, even when clicks carry different request keys.
 An unresolved confirmation returns `409 resource_conflict`; the subscription

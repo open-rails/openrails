@@ -26,6 +26,7 @@ type confirmationTerms struct {
 	SubscriptionID  uuid.UUID               `json:"subscription_id"`
 	CustomerID      uuid.UUID               `json:"customer_id"`
 	PaymentMethodID uuid.UUID               `json:"payment_method_id"`
+	FollowsDefault  bool                    `json:"follows_default"`
 	VersionID       uuid.UUID               `json:"version_id"`
 	MandateID       uuid.UUID               `json:"mandate_id"`
 	Instrument      charge.FrozenInstrument `json:"instrument"`
@@ -135,6 +136,7 @@ func confirmationSnapshot(ctx context.Context, d *db.DB, sub *models.Subscriptio
 		return p, false, err
 	}
 	p.SubscriptionID, p.CustomerID, p.PaymentMethodID, p.VersionID = sub.ID, sub.CustomerID, method.ID, version
+	p.FollowsDefault = subscriptions.FollowsDefault(sub)
 	p.Instrument, p.Rail, p.Schedule, p.PeriodEnd = instrument, string(sub.Rail), sub.RailSubscriptionID, sub.CurrentPeriodEndsAt.UTC()
 	return p, true, nil
 }

@@ -22,6 +22,12 @@ import (
 func missingRecurringAgreement(t *testing.T, w *world) *legacy {
 	t.Helper()
 	l := importLegacy(t, w, "nmi", embedded)
+	awaitMissingRecurringAgreement(t, w, l)
+	return l
+}
+
+func awaitMissingRecurringAgreement(t *testing.T, w *world, l *legacy) {
+	t.Helper()
 	// An older imported subscription lacks a retained recurring agreement.
 	_, err := w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.mandates WHERE subscription_id=$1`), l.sub.UUID())
 	require.NoError(t, err)
@@ -33,6 +39,16 @@ func missingRecurringAgreement(t *testing.T, w *world) *legacy {
 	w.runRenewals()
 	require.Equal(t, billing.SubscriptionAwaitingMethod, w.subscription(embedded, l.sub).Status)
 	require.Empty(t, w.nmi.Attempts())
+}
+
+func missingRecurringAgreementOnDefaultCard(t *testing.T, w *world) *legacy {
+	t.Helper()
+	l := importLegacy(t, w, "nmi", embedded)
+	method := l.c.saveCard("nmi", visa)
+	l.c.setDefault(method)
+	l.c.setOwnCard(l.sub, method)
+	l.railCust = w.vaultOf(method)
+	awaitMissingRecurringAgreement(t, w, l)
 	return l
 }
 
@@ -137,11 +153,48 @@ func TestNMISameCardRecoveryDeclineStaysHeld(t *testing.T) {
 	assertConfirmationCount(t, w, l, 1)
 }
 
+func TestNMISameCardRecoverySelectsDefaultCardExplicitly(t *testing.T) {
+	w := newWorld(t)
+	l := missingRecurringAgreementOnDefaultCard(t, w)
+	method := w.subscription(embedded, l.sub).PaymentMethodID.String()
+	l.c.setOwnCard(l.sub, "")
+	own, _ := w.ownCard(embedded, l.sub)
+	require.Empty(t, own)
+	before := len(w.nmi.Validations(l.railCust))
+	w.nmi.DropValidationResponses(1)
+	w.nmi.HideValidations(true)
+	for _, key := range []string{"accepted", "repeated"} {
+		status, body := l.c.call(http.MethodPut, "/subscriptions/"+l.sub.String()+"/payment-method", key, map[string]any{"payment_method_id": method})
+		require.Equal(t, http.StatusConflict, status, "%v", body)
+	}
+	own, _ = w.ownCard(embedded, l.sub)
+	require.Empty(t, own, "uncertain confirmation does not change selection")
+	w.nmi.HideValidations(false)
+	status, body := l.c.call(http.MethodPut, "/subscriptions/"+l.sub.String()+"/payment-method", "resolved", map[string]any{"payment_method_id": method})
+	require.Equal(t, http.StatusOK, status, "%v", body)
+	own, _ = w.ownCard(embedded, l.sub)
+	require.Equal(t, method, own, "explicit selection makes this the subscription's own card")
+	require.Len(t, w.nmi.Validations(l.railCust), before+1)
+	assertConfirmationCount(t, w, l, 1)
+	l.c.setDefault(l.c.saveCard("nmi", mastercard))
+	w.settle()
+	own, _ = w.ownCard(embedded, l.sub)
+	require.Equal(t, method, own)
+	require.Equal(t, l.railCust, w.nmi.Schedule(l.railSub).Vault, "later default changes do not move the confirmed subscription")
+	w.runRenewals()
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status)
+	require.Len(t, w.nmi.Attempts(), 1)
+}
+
 func TestNMISameCardRecoveryChangedWhileVerifying(t *testing.T) {
-	for _, change := range []string{"cancel", "card", "version"} {
+	for _, change := range []string{"cancel", "card", "version", "follow-default"} {
 		t.Run(change, func(t *testing.T) {
 			w := newWorld(t)
-			l := missingRecurringAgreement(t, w)
+			setup := missingRecurringAgreement
+			if change == "follow-default" {
+				setup = missingRecurringAgreementOnDefaultCard
+			}
+			l := setup(t, w)
 			original := w.subscription(embedded, l.sub).PaymentMethodID.String()
 			w.nmi.DropValidationResponses(1)
 			w.nmi.HideValidations(true)
@@ -153,6 +206,8 @@ func TestNMISameCardRecoveryChangedWhileVerifying(t *testing.T) {
 				require.NoError(t, err)
 			} else if change == "version" {
 				l.c.must(http.MethodPatch, "/payment-methods/"+original, "", map[string]any{"exp_month": 9, "exp_year": 2031})
+			} else if change == "follow-default" {
+				l.c.setOwnCard(l.sub, "")
 			} else {
 				replacement := l.c.saveCard("nmi", mastercard)
 				l.c.setOwnCard(l.sub, replacement)

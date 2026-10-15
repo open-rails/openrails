@@ -260,7 +260,8 @@ var jsonRules = map[string]jsonRule{
 	})),
 	"provider_intents.nmi_recurring_confirmation.payload": object(map[string]jsonRule{
 		"subscription_id": uuidValue, "customer_id": uuidValue, "payment_method_id": uuidValue,
-		"version_id": uuidValue, "mandate_id": uuidValue, "instrument": frozenInstrumentJSON,
+		"follows_default": booleanValue,
+		"version_id":      uuidValue, "mandate_id": uuidValue, "instrument": frozenInstrumentJSON,
 		"rail": textValue, "schedule": textValue, "period_end": textValue,
 		"order_reference": textValue, "accepted_at": textValue,
 	}),
