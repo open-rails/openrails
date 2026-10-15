@@ -69,24 +69,21 @@ func (r *refundAccountReader) ResolveNMIClient(_ context.Context, mid uuid.UUID,
 }
 
 func TestNMIRefundReadsOnlyRoutedAccount(t *testing.T) {
-	mid, psp, other := uuid.New(), uuid.New(), uuid.New()
+	mid, psp := uuid.New(), uuid.New()
 	ctx := db.WithPSPID(merchant.WithID(t.Context(), billing.MerchantID(mid)), psp)
 	for _, tc := range []struct {
 		name     string
 		ctx      context.Context
-		original *uuid.UUID
 		resolves bool
 	}{
-		{"no merchant", db.WithPSPID(t.Context(), psp), &psp, false},
-		{"no routed account", merchant.WithID(t.Context(), billing.MerchantID(mid)), &psp, false},
-		{"no original account", ctx, nil, false},
-		{"different account", ctx, &other, false},
-		{"matching account", ctx, &psp, true},
+		{"no merchant", db.WithPSPID(t.Context(), psp), false},
+		{"no routed account", merchant.WithID(t.Context(), billing.MerchantID(mid)), false},
+		{"matching account", ctx, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reader := &refundAccountReader{}
 			s := &NMIWebhookService{NMIResolver: reader}
-			_, err := s.recordNMIRefund(tc.ctx, &models.Payment{PspID: tc.original}, "100002", 1_010_000)
+			_, err := s.readNMIRefundReport(tc.ctx, "100002")
 			require.Error(t, err)
 			require.Equal(t, tc.resolves, reader.called)
 			if tc.resolves {
@@ -94,6 +91,31 @@ func TestNMIRefundReadsOnlyRoutedAccount(t *testing.T) {
 				require.NotNil(t, reader.pspID, "never fall back to the default account")
 				require.Equal(t, psp, *reader.pspID)
 			}
+		})
+	}
+}
+
+func TestNMIRefundOriginalID(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rows []nmi.QueryTransaction
+		want string
+	}{
+		{"explicit link", []nmi.QueryTransaction{{TransactionID: "200", OriginalTransactionID: "100"}}, "100"},
+		{"missing refund", nil, ""},
+		{"another receipt", []nmi.QueryTransaction{{TransactionID: "201", OriginalTransactionID: "100"}}, ""},
+		{"no original", []nmi.QueryTransaction{{TransactionID: "200"}}, ""},
+		{"same ID", []nmi.QueryTransaction{{TransactionID: "200", OriginalTransactionID: "200"}}, ""},
+		{"ambiguous receipts", []nmi.QueryTransaction{{TransactionID: "200", OriginalTransactionID: "100"}, {TransactionID: "200", OriginalTransactionID: "101"}}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := nmiRefundOriginalID(nmi.TransactionReport{Transactions: tc.rows}, "200")
+			if tc.want == "" {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tc.want, got)
 		})
 	}
 }

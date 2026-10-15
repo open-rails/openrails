@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// NMI sandbox deliveries name the refund, without a nested original payment.
 // Signed webhook delivery and history imports must retain the same provider facts.
 func TestNMIRefundWebhookSharesImportedDates(t *testing.T) {
 	for _, order := range []string{"import_first", "webhook_first", "before_original", "concurrent", "query_recovery"} {
@@ -29,7 +30,6 @@ func TestNMIRefundWebhookSharesImportedDates(t *testing.T) {
 			notice := nmiEvent("transaction.refund.success", obj{
 				"transaction_id": refundID, "currency": "USD",
 				"action":                  obj{"action_type": "refund", "amount": "-1.01", "date": "ignored-unqualified-webhook-date", "success": "1"},
-				"transaction":             obj{"transaction_id": sale.TransactionID},
 				"merchant_defined_fields": obj{"20": w.bookID()},
 			})
 			if order == "before_original" {
@@ -112,7 +112,7 @@ func TestNMIRefundWebhookChecksPartialReceipts(t *testing.T) {
 	require.Empty(t, result.Blocked)
 	notice := func(id, amount string) obj {
 		return nmiEvent("transaction.refund.success", obj{"transaction_id": id, "currency": "USD",
-			"action": obj{"amount": amount}, "transaction": obj{"transaction_id": sale.TransactionID}})
+			"action": obj{"amount": amount}})
 	}
 	// A cumulative total cannot be mistaken for the amount of one partial refund.
 	require.NotEqual(t, http.StatusOK, w.deliverNow("nmi", notice(refunds[0].TransactionID, "-2.02")))
@@ -142,4 +142,70 @@ func TestNMIRefundWebhookChecksPartialReceipts(t *testing.T) {
 	for _, refund := range page.Items {
 		require.True(t, refunded.Equal(refund.CreatedAt))
 	}
+}
+
+func TestNMIRefundWebhookResolvesImportedSubscription(t *testing.T) {
+	w := newWorld(t)
+	l := importLegacy(t, w, "nmi", embedded)
+	paid := completed(w.payments(embedded, l.c.id))
+	require.Len(t, paid, 1)
+	at := w.clock.Now().UTC().Truncate(time.Second)
+	refundID := w.nmi.Refund(paid[0].TransactionID, 101)
+	w.clock.Advance(time.Hour)
+	notice := nmiEvent("transaction.refund.success", obj{
+		"transaction_id": refundID, "currency": "USD",
+		"subscription": obj{"subscription_id": l.railSub},
+		"action":       obj{"amount": "-1.01", "action_type": "refund", "success": "1"},
+	})
+	require.Equal(t, http.StatusOK, w.deliverNow("nmi", notice))
+	w.nmi.QueryUnavailable(true)
+	notice["event_id"] = uuid.NewString()
+	require.Equal(t, http.StatusOK, w.deliverNow("nmi", notice), "subscription refund replay uses its recorded original")
+	w.nmi.QueryUnavailable(false)
+	page, err := w.client[embedded].ListPayments(t.Context(), billing.PaymentListParams{CustomerID: l.c.cid(), Kind: billing.PaymentRefund})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, paid[0].SubscriptionID, page.Items[0].SubscriptionID)
+	require.EqualValues(t, -1_010_000, page.Items[0].Amount)
+	require.True(t, at.Equal(page.Items[0].CreatedAt))
+	require.True(t, l.c.entitled(l.ent), "a partial refund preserves access under the existing default policy")
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status)
+}
+
+func TestNMIRefundLookupStaysWithinAccount(t *testing.T) {
+	w := prepareWorld(t, 12)
+	w.declare = declareB("nmi")
+	w.start()
+	client, buyer := w.client[embedded], w.newCustomer()
+	sale := w.nmi.AddSale(nmimock.Sale{Vault: w.nmi.AddVault(visa), Amount: "4.23", At: w.clock.Now().Add(-day)})
+	book := billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"}, HistoricalPayments: []billing.DeclaredHistoricalPayment{{
+		SourceID: "account-sale", Customer: buyer.cid(), Rail: "nmi", TransactionID: sale.TransactionID, Amount: 4_230_000, Currency: "USD", PaidAt: sale.At,
+	}}}
+	for _, key := range []string{"nmi", "mobius"} {
+		book.DefaultPSP = billing.PSPRef{Key: key}
+		result, err := client.ImportBilling(t.Context(), book)
+		require.NoError(t, err)
+		require.Empty(t, result.Blocked)
+	}
+	rival := w.rival()
+	book.DefaultPSP = billing.PSPRef{Key: "nmi"}
+	result, err := rival.client.ImportBilling(t.Context(), book)
+	require.NoError(t, err)
+	require.Empty(t, result.Blocked)
+	refundID := w.nmi.Refund(sale.TransactionID, 101)
+	notice := nmiEvent("transaction.refund.success", obj{"transaction_id": refundID, "currency": "USD", "action": obj{"amount": "-1.01"}})
+	require.Equal(t, http.StatusOK, w.deliverNow("nmi", notice))
+	page, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: buyer.cid(), Kind: billing.PaymentCharge})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 2)
+	for _, payment := range page.Items {
+		if payment.PSPID != nil && *payment.PSPID == w.psp["nmi"] {
+			require.EqualValues(t, 1_010_000, payment.AmountRefunded)
+		} else {
+			require.Zero(t, payment.AmountRefunded, "the same transaction ID in another account is untouched")
+		}
+	}
+	other, err := rival.client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: buyer.cid(), Kind: billing.PaymentRefund})
+	require.NoError(t, err)
+	require.Empty(t, other.Items, "the other merchant's copy is untouched")
 }

@@ -2,6 +2,7 @@ package webhooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,12 +15,33 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Query dates are UTC and share the history reader's contract. Receipt time is
-// not the refund date, and the webhook date's timezone is not confirmed.
-func (s *NMIWebhookService) recordNMIRefund(ctx context.Context, original *models.Payment, transactionID string, amount int64) (*models.Payment, error) {
-	mid, err := merchant.Require(ctx)
+var errNMIRefundOriginalNotFound = errors.New("original NMI payment not found")
+
+// recordNMIRefund returns the original payment so the caller can apply its
+// existing access policy. A real NMI refund notice may name only the refund ID.
+func (s *NMIWebhookService) recordNMIRefund(ctx context.Context, body *NMITransactionEventBody, transactionID string) (*models.Payment, error) {
+	originalID := getOriginalTransactionID(body)
+	var report nmi.TransactionReport
+	var err error
+	if originalID == "" {
+		report, err = s.readNMIRefundReport(ctx, transactionID)
+		if err != nil {
+			return nil, err
+		}
+		originalID, err = nmiRefundOriginalID(report, transactionID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if originalID == transactionID {
+		return nil, fmt.Errorf("NMI refund does not identify a distinct original payment")
+	}
+	original, err := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(s.Rail), originalID)
 	if err != nil {
-		return nil, err
+		if db.IsNotFound(err) {
+			return nil, fmt.Errorf("%w: %q", errNMIRefundOriginalNotFound, originalID)
+		}
+		return nil, fmt.Errorf("resolve original NMI payment %q: %w", originalID, err)
 	}
 	psp, err := db.RequirePSPID(ctx)
 	if err != nil {
@@ -28,25 +50,70 @@ func (s *NMIWebhookService) recordNMIRefund(ctx context.Context, original *model
 	if original.PspID == nil || *original.PspID != psp {
 		return nil, fmt.Errorf("NMI refund account does not own the original payment")
 	}
-	if s.NMIResolver == nil {
-		return nil, fmt.Errorf("NMI refund reader is unavailable")
-	}
-	client, found, err := s.NMIResolver.ResolveNMIClient(ctx, mid.UUID(), &psp)
+	amount, err := s.refundAmount(ctx, body, original)
 	if err != nil {
-		return nil, fmt.Errorf("resolve NMI refund account: %w", err)
+		return nil, err
 	}
-	if !found || client == nil {
-		return nil, fmt.Errorf("NMI refund account is unavailable")
-	}
-	report, err := client.TransactionReport(ctx, nmi.QueryFilter{TransactionID: transactionID})
-	if err != nil {
-		return nil, fmt.Errorf("read NMI refund: %w", err)
+	if getOriginalTransactionID(body) != "" {
+		report, err = s.readNMIRefundReport(ctx, transactionID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	at, err := nmiRefundTime(report, original, transactionID, amount, s.now())
 	if err != nil {
 		return nil, err
 	}
-	return s.PaymentService.RecordObservedRefund(ctx, original.ID, transactionID, amount, payments.ReversalRefund, at, nil)
+	if _, err := s.PaymentService.RecordObservedRefund(ctx, original.ID, transactionID, amount, payments.ReversalRefund, at, nil); err != nil {
+		return nil, err
+	}
+	return original, nil
+}
+
+func (s *NMIWebhookService) readNMIRefundReport(ctx context.Context, transactionID string) (nmi.TransactionReport, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nmi.TransactionReport{}, err
+	}
+	psp, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nmi.TransactionReport{}, err
+	}
+	if s.NMIResolver == nil {
+		return nmi.TransactionReport{}, fmt.Errorf("NMI refund reader is unavailable")
+	}
+	client, found, err := s.NMIResolver.ResolveNMIClient(ctx, mid.UUID(), &psp)
+	if err != nil {
+		return nmi.TransactionReport{}, fmt.Errorf("resolve NMI refund account: %w", err)
+	}
+	if !found || client == nil {
+		return nmi.TransactionReport{}, fmt.Errorf("NMI refund account is unavailable")
+	}
+	report, err := client.TransactionReport(ctx, nmi.QueryFilter{TransactionID: transactionID})
+	if err != nil {
+		return nmi.TransactionReport{}, fmt.Errorf("read NMI refund: %w", err)
+	}
+	return report, nil
+}
+
+func nmiRefundOriginalID(report nmi.TransactionReport, transactionID string) (string, error) {
+	var originalID string
+	for _, transaction := range report.Transactions {
+		if strings.TrimSpace(transaction.TransactionID) != transactionID {
+			continue
+		}
+		if originalID != "" {
+			return "", fmt.Errorf("NMI refund report has multiple matching transactions")
+		}
+		originalID = strings.TrimSpace(transaction.OriginalTransactionID)
+		if originalID == "" || originalID == transactionID {
+			return "", fmt.Errorf("NMI refund report does not identify a distinct original payment")
+		}
+	}
+	if originalID == "" {
+		return "", fmt.Errorf("NMI refund is not yet confirmed in the transaction report")
+	}
+	return originalID, nil
 }
 
 func nmiRefundTime(report nmi.TransactionReport, original *models.Payment, transactionID string, amount int64, now time.Time) (time.Time, error) {

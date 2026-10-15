@@ -916,7 +916,6 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 
 	txnID := body.TransactionID.Trimmed()
 	nmiSubID := transactionSubscriptionID(body)
-	originalTxnID := getOriginalTransactionID(body)
 
 	if _, err := s.normalizedRail(); err != nil {
 		return err
@@ -937,18 +936,9 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	// No local subscription (a one-time purchase, or the refund raced the
 	// sale): resolve by transaction id and reverse, as Stripe's one-off path does.
 	if subscription == nil {
-		return s.handleNMIOneOffRefund(ctx, body, txnID, originalTxnID)
+		return s.handleNMIOneOffRefund(ctx, body, txnID)
 	}
 
-	// Missing original references are not safe to complete silently because we
-	// cannot link the refund to the ledger entry that funded entitlement.
-	if originalTxnID == "" {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"refund_transaction_id": txnID,
-			"subscription_ref":      nmiSubID,
-		}).Warn("NMI refund missing original transaction ID; skipping lifecycle termination")
-		return fmt.Errorf("unable to resolve original payment for NMI refund transaction %q", txnID)
-	}
 	var refunded *models.Payment
 
 	// Record the refund as a negative payment linked to the original payment.
@@ -973,46 +963,10 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 				Warn("Failed to check existing refund payment by transaction ID")
 			return fmt.Errorf("check existing refund payment: %w", lookupErr)
 		default:
-			var originalPayment *models.Payment
-			var originalLookupErr error
-
-			if originalTxnID != "" && originalTxnID != txnID {
-				originalPayment, originalLookupErr = s.PaymentService.GetByPSPTransactionID(ctx, rail, originalTxnID)
-				if originalLookupErr != nil && !db.IsNotFound(originalLookupErr) {
-					log.WithContext(ctx).WithError(originalLookupErr).WithField("original_transaction_id", originalTxnID).
-						Warn("Failed to resolve original payment by transaction ID for refund")
-					return fmt.Errorf("resolve original payment by transaction ID: %w", originalLookupErr)
-				}
-			}
-
-			if originalPayment == nil {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"refund_transaction_id":   txnID,
-					"subscription_id":         subscription.ID,
-					"original_transaction_id": originalTxnID,
-				}).Warn("Unable to resolve original payment for refund ledger linkage; skipping payment insert")
-				return fmt.Errorf("unable to resolve original payment %q for NMI refund transaction %q", originalTxnID, txnID)
-			}
-			refundAmount, err := s.refundAmount(ctx, body, originalPayment)
+			refunded, err = s.recordNMIRefund(ctx, body, txnID)
 			if err != nil {
-				return err
+				return fmt.Errorf("record NMI refund: %w", err)
 			}
-			if _, refundErr := s.recordNMIRefund(ctx, originalPayment, txnID, refundAmount); refundErr != nil {
-				log.WithContext(ctx).WithError(refundErr).WithFields(log.Fields{
-					"refund_transaction_id":   txnID,
-					"original_payment_id":     originalPayment.ID,
-					"original_transaction_id": originalTxnID,
-					"refund_amount":           moneyutil.FormatAmount(refundAmount, originalPayment.Currency),
-				}).Warn("Failed to persist refund payment record")
-				return fmt.Errorf("persist refund payment record: %w", refundErr)
-			}
-			refunded = originalPayment
-			log.WithContext(ctx).WithFields(log.Fields{
-				"refund_transaction_id": txnID,
-				"original_payment_id":   originalPayment.ID,
-				"subscription_id":       subscription.ID,
-				"refund_amount":         moneyutil.FormatAmount(refundAmount, originalPayment.Currency),
-			}).Info("Persisted refund payment record")
 		}
 	}
 
@@ -1039,7 +993,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 // refunds of one-time purchases), as the Stripe one-off path does: resolve the
 // original payment by transaction id, record the negative payment, and revoke
 // what the payment funded once fully refunded.
-func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, body *NMITransactionEventBody, txnID, originalTxnID string) error {
+func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, body *NMITransactionEventBody, txnID string) error {
 	if s.PaymentService == nil {
 		return fmt.Errorf("payment service is required for NMI refund")
 	}
@@ -1060,30 +1014,12 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, body *NMI
 		return fmt.Errorf("lookup NMI refund payment: %w", err)
 	}
 	if original == nil {
-		if originalTxnID == "" || originalTxnID == txnID {
-			// Retryable: redelivery wins once the sale materializes; an object
-			// this book did not create never will.
-			if quietUnknownObject(ctx, s.DB, nmiBookID(body.MerchantDefinedFields), txnID) {
+		var err error
+		original, err = s.recordNMIRefund(ctx, body, txnID)
+		if err != nil {
+			if errors.Is(err, errNMIRefundOriginalNotFound) && quietUnknownObject(ctx, s.DB, nmiBookID(body.MerchantDefinedFields), txnID) {
 				return nil
 			}
-			return fmt.Errorf("unable to resolve original payment for NMI refund transaction %q", txnID)
-		}
-		var err error
-		original, err = s.PaymentService.GetByPSPTransactionID(ctx, rail, originalTxnID)
-		if err != nil {
-			if db.IsNotFound(err) {
-				if quietUnknownObject(ctx, s.DB, nmiBookID(body.MerchantDefinedFields), txnID) {
-					return nil
-				}
-				return fmt.Errorf("original payment %q not found for NMI refund %q", originalTxnID, txnID)
-			}
-			return fmt.Errorf("resolve original payment for NMI refund: %w", err)
-		}
-		refundAmount, err := s.refundAmount(ctx, body, original)
-		if err != nil {
-			return err
-		}
-		if _, err := s.recordNMIRefund(ctx, original, txnID, refundAmount); err != nil {
 			return fmt.Errorf("record NMI refund: %w", err)
 		}
 	}
