@@ -258,6 +258,17 @@ var jsonRules = map[string]jsonRule{
 		"rebill_decline":                    object(map[string]jsonRule{"binding": receiptBindingJSON, "response_code": integerValue, "provider_reference": textValue}),
 		"qualified_collection_nonexecution": object(map[string]jsonRule{"binding": receiptBindingJSON, "submitted_at": textValue, "code": textValue, "reason": textValue}),
 	})),
+	"provider_intents.nmi_recurring_confirmation.payload": object(map[string]jsonRule{
+		"subscription_id": uuidValue, "customer_id": uuidValue, "payment_method_id": uuidValue,
+		"version_id": uuidValue, "mandate_id": uuidValue, "instrument": frozenInstrumentJSON,
+		"rail": textValue, "schedule": textValue, "period_end": textValue,
+		"order_reference": textValue, "accepted_at": textValue,
+	}),
+	"provider_intents.nmi_recurring_confirmation.result_evidence": object(map[string]jsonRule{
+		"confirmation_submitted_at": textValue,
+		"confirmation_answer":       object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue}),
+		"transaction_id":            textValue, "response_code": integerValue, "not_executed": booleanValue,
+	}),
 	"provider_intents.manual_rebill.payload": object(map[string]jsonRule{
 		"initiator": textValue, "requested_payment_method_id": uuidValue,
 		"renewal":           acceptedRenewalJSON,
