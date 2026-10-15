@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -46,6 +47,10 @@ func TestInvoicePaymentsProceedWithoutBulkProviderHistory(t *testing.T) {
 	require.Equal(t, 1, operations, "the ordinary payment has one canonical operation")
 	w.nmi.ClearIntercepts()
 	w.refreshProviders()
+	// Healthy refresh queues scans independently; finish them before the
+	// fault's invoice exists or its business clock advances to a retry.
+	w.settleRefreshes()
+	w.settleCollectionScans()
 	retry := payNMIInvoice(t.Context(), w, c, invoice, method, "customer-recovery")
 	require.NoError(t, retry.err)
 	require.Equal(t, http.StatusOK, retry.status, string(retry.body))
@@ -59,23 +64,30 @@ func TestInvoicePaymentsProceedWithoutBulkProviderHistory(t *testing.T) {
 	declined := payNMIInvoice(t.Context(), w, c, second, method, "declined")
 	require.NoError(t, declined.err)
 	require.Equal(t, http.StatusPaymentRequired, declined.status, string(declined.body))
+	var declinedIntent uuid.UUID
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT id FROM billing.provider_intents
+        WHERE intent_type='order_collection' AND origin='user' AND payload->>'order_id'=$1`), second.UUID().String()).Scan(&declinedIntent))
 	w.nmi.SetDecline(visa.Last4, "")
 	c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": method})
+	w.settleCollectionScans() // before this order's own retry deadline
+	require.Len(t, w.nmi.Attempts(), 2, "no collection is admitted before the declared retry")
 	blockHistory()
-	w.advance(5 * 24 * time.Hour)
-	w.settleCollectionScans()
 	var nextRetry *time.Time
 	var failures int
 	var previousState, previousReason string
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT next_collection_attempt_at, collection_failure_count
         FROM billing.orders WHERE id=$1`), second.UUID()).Scan(&nextRetry, &failures))
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status,coalesce(last_failure_reason,'') FROM billing.provider_intents
-        WHERE intent_type='order_collection' AND payload->>'order_id'=$1 ORDER BY created_at DESC LIMIT 1`), second.UUID().String()).Scan(&previousState, &previousReason))
+        WHERE id=$1`), declinedIntent).Scan(&previousState, &previousReason))
 	t.Logf("before scheduled retry: previous_intent=%s reason=%s failures=%d retry_at=%v now=%v", previousState, previousReason, failures, nextRetry, w.clock.Now())
 	require.Equal(t, "failed_terminal", previousState, "the prior declined attempt is finished")
 	require.Equal(t, 1, failures)
 	require.NotNil(t, nextRetry)
+	require.True(t, nextRetry.After(w.clock.Now()), "the declined order declares a future retry")
+	w.advance(5 * 24 * time.Hour)
 	require.False(t, nextRetry.After(w.clock.Now()), "the declared retry is due")
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.provider_intents WHERE id=$1`), declinedIntent).Scan(&previousState))
+	require.Equal(t, "failed_terminal", previousState, "the exact declined attempt stays finished when a new retry becomes due")
 	// Advancing the fake business clock does not run an hourly job. Trigger
 	// the same collecting pass that production schedules, not another user pay.
 	mid := w.client[embedded].MerchantID()

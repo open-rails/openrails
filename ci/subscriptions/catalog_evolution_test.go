@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -417,6 +418,30 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	}
 	merchantID := c.MerchantID()
 	w.stop()
+	// The archive carries the same explicitly provisioned identity into its
+	// destination. Reopening it must verify that binding, never adopt a bound
+	// directory row through the legacy unbound declaration path.
+	binding := billing.MerchantBinding{ID: merchantID, TenantID: uuid.NewString()}
+	groups := &archiveCatalogMerchantGroups{binding: binding}
+	changed, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.merchants
+        SET permission_group_id=$2, tenant_id=$3 WHERE id=$1
+        AND permission_group_id IS NULL AND tenant_id IS NULL`), merchantID.UUID(), merchantID.String(), binding.TenantID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, changed.RowsAffected())
+	openBound := func(targetSchema string) *openrails.Engine {
+		t.Helper()
+		bill, err := openrails.New(t.Context(), openrails.Config{Database: openrails.DatabaseConfig{Schema: targetSchema, RiverSchema: targetSchema}, ProviderWriteMode: openrails.ProviderWritesFull,
+			Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps, Binding: &binding}},
+		}, openrails.Deps{MerchantGroups: groups, FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
+		require.NoError(t, err)
+		shop, err := bill.MerchantBySlug(w.slug)
+		require.NoError(t, err)
+		require.Equal(t, merchantID, shop.MerchantID())
+		t.Cleanup(func() { _ = bill.Close(context.Background()) })
+		return bill
+	}
+	boundSource := openBound(w.schema)
+	require.NoError(t, boundSource.Close(t.Context()))
 	source, err := db.NewWithPGXPool(w.pool, w.schema)
 	require.NoError(t, err)
 	var archive bytes.Buffer
@@ -426,7 +451,7 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	require.NoError(t, engine.Migrate(t.Context(), w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}}))
 	name := pgx.Identifier{schema}.Sanitize()
 	t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+name+" CASCADE") })
-	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+name+`.merchants (id, slug, status, permission_group_id) VALUES ($1, $2, 'active', $3)`, merchantID.UUID(), w.slug, uuid.New())
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+name+`.merchants (id, slug, status, permission_group_id, tenant_id) VALUES ($1, $2, 'active', $3, $4)`, merchantID.UUID(), w.slug, merchantID.String(), binding.TenantID)
 	require.NoError(t, err)
 	destination, err := db.NewWithPGXPool(w.pool, schema)
 	require.NoError(t, err)
@@ -448,11 +473,7 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	}
 	boot := func(app *catalog.Application) (*openrails.Engine, *openrails.Client) {
 		t.Helper()
-		bill, err := openrails.New(t.Context(), openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, ProviderWriteMode: openrails.ProviderWritesFull,
-			Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps}},
-		}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = bill.Close(context.Background()) })
+		bill := openBound(schema)
 		shop, err := bill.MerchantBySlug(w.slug)
 		require.NoError(t, err)
 		_, err = shop.ApplyCatalog(t.Context(), app, billing.ApplyCatalogParams{})
@@ -481,4 +502,27 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 4, price.Version, "new terms allocate after all restored versions")
 	require.NoError(t, nextEngine.Close(t.Context()))
+	var restoredGroup, restoredTenant string
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT permission_group_id, tenant_id::text FROM "+name+".merchants WHERE id=$1", merchantID.UUID()).Scan(&restoredGroup, &restoredTenant))
+	require.Equal(t, merchantID.String(), restoredGroup)
+	require.Equal(t, binding.TenantID, restoredTenant)
+	require.GreaterOrEqual(t, groups.calls.Load(), int32(3), "source and both destination restarts verify the exact live binding")
+}
+
+// The fixture's separate permission directory supplies exact live metadata;
+// no billing name or row is treated as proof of permission-group ownership.
+type archiveCatalogMerchantGroups struct {
+	binding billing.MerchantBinding
+	calls   atomic.Int32
+}
+
+func (g *archiveCatalogMerchantGroups) LookupMerchantGroup(ctx context.Context, binding billing.MerchantBinding) (billing.MerchantGroup, error) {
+	if err := ctx.Err(); err != nil {
+		return billing.MerchantGroup{}, err
+	}
+	if binding != g.binding {
+		return billing.MerchantGroup{}, fmt.Errorf("unexpected archive merchant binding")
+	}
+	g.calls.Add(1)
+	return billing.MerchantGroup{ID: g.binding.ID.String(), TenantID: g.binding.TenantID, Persona: billing.MerchantGroupPersona}, nil
 }
