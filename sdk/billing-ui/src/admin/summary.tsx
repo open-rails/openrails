@@ -223,6 +223,52 @@ export function billingConfirmWarnings(customer: {
     : []
 }
 
+export interface BillingConfirmWarningsOptions extends Connection {
+  customer: string
+  signal?: AbortSignal
+}
+
+const uncheckedBillingWarning =
+  "Subscription status could not be fully checked. Banning or deleting the account does not cancel subscriptions; review billing separately."
+
+/** Advisory-only billing check before a host bans or deletes an account. */
+export async function loadBillingConfirmWarnings(
+  options: BillingConfirmWarningsOptions
+): Promise<string[]> {
+  const merchant =
+    typeof options.merchant === "string"
+      ? { id: options.merchant, slug: options.merchant }
+      : options.merchant
+  const api = createAdminAPI(createAdminClient({ ...options, merchant }))
+  let cursor: string | undefined
+  const visited = new Set<string>()
+  try {
+    // This is a confirmation hint, not an unbounded account export. A partial
+    // scan stays advisory rather than preventing the host's account action.
+    for (let page = 0; page < 10; page++) {
+      options.signal?.throwIfAborted()
+      const subscriptions = await api.listSubscriptions(
+        { customer_id: options.customer },
+        100,
+        cursor,
+        options.signal
+      )
+      const warnings = billingConfirmWarnings({
+        subscriptions: subscriptions.data,
+      })
+      if (warnings.length) return warnings
+      if (!subscriptions.next_cursor) return []
+      if (visited.has(subscriptions.next_cursor)) break
+      visited.add(subscriptions.next_cursor)
+      cursor = subscriptions.next_cursor
+    }
+  } catch (error) {
+    options.signal?.throwIfAborted()
+    if (error instanceof Error && error.name === "AbortError") throw error
+  }
+  return [uncheckedBillingWarning]
+}
+
 const permissionAreas: Record<string, string> = {
   "customer:read": "Read customers, subscriptions, payments, and orders.",
   "customer:manage":

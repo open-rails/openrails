@@ -47,6 +47,8 @@ draft remains a separate action requiring catalog manage authority.
 
 `billingConfirmWarnings({ subscriptions })` supplies warning text for a host's ban or account-deletion confirmation. A ban or account deletion does not cancel subscriptions. `billingPermissionHelp` describes the billing and application permissions for the host's role editor.
 
+`loadBillingConfirmWarnings({ baseUrl, auth, customer, merchant?, exchange?, signal? })` reads a customer's subscriptions through the same authenticated admin transport and returns those warnings. It scans at most ten pages of 100 rows, stopping when it finds an ongoing subscription. A permission refusal, unavailable service or incomplete scan returns advisory text; it does not prevent the host's account action. An aborted request still rejects. Neither helper cancels subscriptions.
+
 The customer entry (`@openrails/billing-ui`) imports no admin modules or admin stylesheet. TanStack Query 5 is an optional peer used by the admin entry.
 
 ## Standalone server console

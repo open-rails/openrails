@@ -13,9 +13,13 @@ export type {
 export {
   BillingCustomerSummary,
   billingConfirmWarnings,
+  loadBillingConfirmWarnings,
   billingPermissionHelp,
   useBillingAdminAccess,
 } from "./summary"
-export type { BillingCustomerSummaryProps } from "./summary"
+export type {
+  BillingCustomerSummaryProps,
+  BillingConfirmWarningsOptions,
+} from "./summary"
 
 export { billingAdminMessages } from "./messages"
