@@ -30,7 +30,8 @@ func dunningPolicyJSON(v any) bool {
 			return false
 		}
 		for _, hours := range tier.RetryAfterHours {
-			if hours <= 0 || hours > catalog.MaxDurationHours {
+			// Leave room for collection validation's maximum 24-hour window allowance.
+			if hours <= 0 || hours > catalog.MaxDurationHours-24 {
 				return false
 			}
 		}

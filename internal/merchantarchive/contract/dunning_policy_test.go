@@ -28,6 +28,8 @@ func TestDunningPolicyArchive(t *testing.T) {
 		{"nonincreasing retries", `{"tiers":[{"max_cycle_hours":96},{"retry_after_hours":[48,24]}]}`, false},
 		{"retries outlast cycle", `{"tiers":[{"retry_after_hours":[24]}]}`, false},
 		{"invalid transient", `{"transient_retry_minutes":[0]}`, false},
+		{"overflow retry window", `{"tiers":[{"max_cycle_hours":96},{"retry_after_hours":[2562047]}]}`, false},
+		{"largest valid retry window", `{"tiers":[{"max_cycle_hours":2562047},{"retry_after_hours":[2562022]}]}`, true},
 		{"overflow hours", `{"tiers":[{"max_cycle_hours":5124096},{}]}`, false},
 		{"overflow minutes", `{"transient_retry_minutes":[307445735]}`, false},
 	} {
