@@ -23,7 +23,8 @@ type TransactionReport struct {
 // QueryTransaction is one transaction of the report: the card it used and
 // every action taken on it.
 type QueryTransaction struct {
-	TransactionID string `xml:"transaction_id"`
+	TransactionID         string `xml:"transaction_id"`
+	OriginalTransactionID string `xml:"original_transaction_id"`
 	// SubscriptionID is set only when NMI names the schedule; live accounts
 	// usually do not.
 	SubscriptionID   string `xml:"subscription_id"`

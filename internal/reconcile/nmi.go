@@ -348,6 +348,15 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 	for _, action := range t.Actions {
 		voided = voided || action.Is("void") && action.Succeeded()
 	}
+	original := strings.TrimSpace(t.OriginalTransactionID)
+	if original == "" {
+		for _, action := range t.Actions {
+			if action.Is("sale") && action.Succeeded() {
+				original = strings.TrimSpace(t.TransactionID)
+				break
+			}
+		}
+	}
 	voidRecorded := false
 	var out []RemoteTransaction
 	for _, a := range t.Actions {
@@ -392,6 +401,9 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 				"action":            a,
 				"actions":           t.Actions,
 			}),
+		}
+		if txnType == TransactionTypeRefund {
+			txn.OriginalTransactionID = original
 		}
 		txn.setAmount(a.Amount)
 		if ts, ok := a.At(); ok {

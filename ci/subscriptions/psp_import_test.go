@@ -100,8 +100,8 @@ func TestPSPImportFromNMI(t *testing.T) {
 	partial := w.nmi.AddSale(nmimock.Sale{Vault: byEmail.vault, Amount: "4.99", OrderID: "partial-refund", At: oneOff.At})
 	full := w.nmi.AddSale(nmimock.Sale{Vault: byEmail.vault, Amount: "4.99", OrderID: "full-refund", At: oneOff.At})
 	failedRefund := w.nmi.AddSale(nmimock.Sale{Vault: byEmail.vault, Amount: "4.99", OrderID: "failed-refund", At: oneOff.At})
-	// Query API refunds are actions on the original transaction. Supply that
-	// report shape without changing the shared mock's refund behavior.
+	// The sandbox v5 refund report uses separate transaction IDs with an
+	// explicit original link and negative amounts. Preserve that shape here.
 	w.nmi.Intercept(func(r *http.Request) bool { return true }, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
 		res := serve()
 		raw, err := io.ReadAll(res.Body)
@@ -110,12 +110,17 @@ func TestPSPImportFromNMI(t *testing.T) {
 			return nil, err
 		}
 		body := string(raw)
-		for _, refund := range []struct{ id, amount, success string }{
-			{partial.TransactionID, "1.00", "1"}, {full.TransactionID, "4.99", "1"}, {failedRefund.TransactionID, "1.00", "0"},
+		for _, refund := range []struct{ id, original, amount, success string }{
+			{"refund-partial-1", partial.TransactionID, "-1.00", "1"},
+			{"refund-partial-2", partial.TransactionID, "-1.00", "1"},
+			{"refund-full", full.TransactionID, "-4.99", "1"},
+			{"refund-failed", failedRefund.TransactionID, "-1.00", "0"},
 		} {
-			identity := "<transaction_id>" + refund.id + "</transaction_id>"
-			action := fmt.Sprintf("<action><amount>%s</amount><action_type>refund</action_type><date>%s</date><success>%s</success></action>", refund.amount, start.UTC().Format("20060102150405"), refund.success)
-			body = strings.ReplaceAll(body, identity, identity+action)
+			if !strings.Contains(body, "<transaction_id>"+refund.original+"</transaction_id>") {
+				continue
+			}
+			txn := fmt.Sprintf("<transaction><transaction_id>%s</transaction_id><original_transaction_id>%s</original_transaction_id><customerid>%s</customerid><currency>USD</currency><action><amount>%s</amount><action_type>refund</action_type><date>%s</date><success>%s</success></action></transaction>", refund.id, refund.original, byEmail.vault, refund.amount, start.UTC().Format("20060102150405"), refund.success)
+			body = strings.Replace(body, "</nm_response>", txn+"</nm_response>", 1)
 		}
 		res.Body = io.NopCloser(strings.NewReader(body))
 		res.ContentLength = int64(len(body))
@@ -174,9 +179,35 @@ func TestPSPImportFromNMI(t *testing.T) {
 	require.Equal(t, d.cid(), *recs[unmatched.schedule].Customer)
 
 	// Even an unlinked refund must stop its linked charge from landing.
-	refundRef := partial.TransactionID + ":refund:" + start.UTC().Format(time.RFC3339)
+	refundRef := "refund-partial-1:refund:" + start.UTC().Format(time.RFC3339)
+	secondRefundRef := "refund-partial-2:refund:" + start.UTC().Format(time.RFC3339)
+	require.Equal(t, billing.PSPImportLinked, recs[secondRefundRef].State)
+	require.NotEqual(t, recs[refundRef].ID, recs[secondRefundRef].ID)
 	require.Equal(t, billing.PSPImportLinked, recs[refundRef].State)
-	_, err = w.pool.Exec(ctx, w.q(`UPDATE billing.psp_import_records SET state = 'unmatched', customer_id = NULL, linked_via = NULL WHERE id = $1`), recs[refundRef].ID.UUID())
+	_, err = w.pool.Exec(ctx, w.q(`UPDATE billing.psp_import_records SET state = 'unmatched', customer_id = NULL, linked_via = NULL WHERE id IN ($1, $2)`), recs[refundRef].ID.UUID(), recs[secondRefundRef].ID.UUID())
+	require.NoError(t, err)
+
+	// Staging from older versions discarded the original ID. Hold standalone
+	// history even when that refund is unmatched, until its link is qualified.
+	_, err = w.pool.Exec(ctx, w.q(`UPDATE billing.psp_import_records SET data = data - 'original_transaction_id' WHERE id IN ($1, $2)`), recs[refundRef].ID.UUID(), recs[secondRefundRef].ID.UUID())
+	require.NoError(t, err)
+	_, err = remoteClient.ApplyPSPImport(ctx, imp.ID)
+	require.NoError(t, err)
+	w.pspImported(imp.ID, billing.PSPImportApplied)
+	held := w.pspRecords(imp.ID)
+	require.Equal(t, billing.PSPImportBlocked, held[oneOff.TransactionID].State)
+	require.Contains(t, *held[oneOff.TransactionID].Reason, "create a fresh import")
+	for _, id := range []string{oneOff.TransactionID, partial.TransactionID, full.TransactionID} {
+		payments, err := remoteClient.ListPayments(ctx, billing.PaymentListParams{CustomerID: a.cid(), TransactionID: id})
+		require.NoError(t, err)
+		require.Empty(t, payments.Items)
+	}
+	// Restore the fixture's provider-proven link and retry the held records.
+	_, err = w.pool.Exec(ctx, w.q(`UPDATE billing.psp_import_records SET data = jsonb_set(data, '{original_transaction_id}', to_jsonb($2::text)) WHERE id IN ($1, $3)`), recs[refundRef].ID.UUID(), partial.TransactionID, recs[secondRefundRef].ID.UUID())
+	require.NoError(t, err)
+	_, err = remoteClient.LinkPSPImport(ctx, imp.ID, billing.LinkPSPImportParams{})
+	require.NoError(t, err)
+	_, err = w.pool.Exec(ctx, w.q(`UPDATE billing.psp_import_records SET state = 'unmatched', customer_id = NULL, linked_via = NULL WHERE id IN ($1, $2)`), recs[refundRef].ID.UUID(), recs[secondRefundRef].ID.UUID())
 	require.NoError(t, err)
 
 	imp, err = remoteClient.ApplyPSPImport(ctx, imp.ID)
@@ -215,6 +246,7 @@ func TestPSPImportFromNMI(t *testing.T) {
 	}
 	require.Equal(t, billing.PSPImportImported, recs[oneOff.TransactionID].State)
 	require.Equal(t, billing.PSPImportBlocked, recs[partial.TransactionID].State)
+	require.Equal(t, billing.PSPImportBlocked, recs[full.TransactionID].State)
 	require.Contains(t, *recs[partial.TransactionID].Reason, "recorded refund")
 	require.Equal(t, billing.PSPImportUnmatched, recs[refundRef].State)
 	require.Equal(t, billing.PSPImportImported, recs[failedRefund.TransactionID].State)
