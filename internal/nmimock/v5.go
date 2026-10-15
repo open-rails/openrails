@@ -268,7 +268,7 @@ func (m *Mock) customer(v *Vault) obj {
 	out := obj{"object": "customer", "id": v.ID, "created": "2026-01-01T00:00:00Z", "billing": billing,
 		"shipping": []obj{{"object": "shipping", "id": shipping, "priority": 1}}}
 	if v.Book != "" {
-		out["merchant_defined_fields"] = obj{"20": v.Book}
+		out["merchant_defined_fields"] = obj{"field_20": v.Book}
 	}
 	return out
 }
@@ -302,7 +302,7 @@ func (m *Mock) schedule(s *Schedule) obj {
 		"amount": s.Amount, "next_billing_date": s.NextBilling.Format("2006-01-02"), "start_date": s.Created.UTC().Format("2006-01-02"),
 		"plan": obj{"id": s.Plan, "plan_name": name, "plan_amount": s.Amount, "day_frequency": itoa(days), "month_frequency": itoa(months), "plan_payments": "0"}}
 	if s.Book != "" {
-		out["merchant_defined_fields"] = obj{"20": s.Book}
+		out["merchant_defined_fields"] = obj{"field_20": s.Book}
 	}
 	return out
 }

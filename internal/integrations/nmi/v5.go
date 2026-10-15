@@ -277,7 +277,7 @@ type V5Customer struct {
 
 // BookID is the billing book the vault carries, "" for none.
 func (c *V5Customer) BookID() string {
-	return strings.TrimSpace(c.MerchantDefinedFields[booktag.NMIFieldID])
+	return strings.TrimSpace(c.MerchantDefinedFields[booktag.NMIV5Key])
 }
 
 // PrimaryBilling returns the priority-1 (or first) billing record.
@@ -407,7 +407,7 @@ type V5Subscription struct {
 
 // BookID is the billing book the schedule carries, "" for none.
 func (s *V5Subscription) BookID() string {
-	return strings.TrimSpace(s.MerchantDefinedFields[booktag.NMIFieldID])
+	return strings.TrimSpace(s.MerchantDefinedFields[booktag.NMIV5Key])
 }
 
 // canceledAtNMI reports whether the record is a deletion tombstone.
