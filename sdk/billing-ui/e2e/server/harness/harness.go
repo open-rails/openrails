@@ -106,6 +106,9 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 		// Every browser of the suite is one address, 127.0.0.1, which one
 		// purchase limit would soon refuse.
 		RateLimitsDisabled: true,
+		// The suite cancels and removes cards for many fresh customers of one
+		// merchant, past the default merchant-wide budget.
+		UserActionRateLimit: openrails.UserActionRateLimitConfig{MinimumCustomersPerHour: 1000, MinimumCustomersPerDay: 1000},
 	}
 	engine, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool})
 	if err != nil {
