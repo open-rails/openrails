@@ -241,10 +241,9 @@ func RecordVersion(ctx context.Context, q *gen.Queries, m gen.BillingPaymentMeth
 	if models.DerefStr(brand) == "" {
 		brand = nil
 	}
-	id := uuid.New()
 	_, err := q.InsertPaymentMethodVersion(ctx, gen.InsertPaymentMethodVersionParams{
-		ID: id, HistoryAttribution: history.Bind(ctx, m.MerchantID, id, "card_version", 0, string(change)),
-		MerchantID: m.MerchantID, CustomerID: m.CustomerID, PaymentMethodID: m.ID,
+		HistoryAttribution: history.Bind(ctx, m.MerchantID, uuid.Nil, "card_version", 0, string(change)),
+		MerchantID:         m.MerchantID, CustomerID: m.CustomerID, PaymentMethodID: m.ID,
 		Source: string(source), Kind: string(change), EventRef: strings.TrimSpace(eventRef),
 		PspID: m.PspID, CustodianID: m.CustodianID, RailCustomerRef: m.RailCustomerRef, RailMethodRef: m.RailMethodRef,
 		CardBrand: brand, CardLast4: m.CardLast4, CardExpMonth: m.CardExpMonth, CardExpYear: m.CardExpYear, Fingerprint: m.Fingerprint,

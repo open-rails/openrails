@@ -122,6 +122,9 @@ func TestSubscriptionHistoryCardChanges(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, closed, "card closure must retain the association before the default is cleared")
+	versions, err := d.Gen(ctx).ListPaymentMethodVersions(ctx, gen.ListPaymentMethodVersionsParams{MerchantID: mid.UUID(), PaymentMethodID: method.UUID()})
+	require.NoError(t, err)
+	require.Equal(t, "closed", versions[len(versions)-1].Kind, "same-time observations retain database UUID ordering used by reconciliation")
 }
 
 func TestSubscriptionHistoryRetryAtomicityAndAttribution(t *testing.T) {
