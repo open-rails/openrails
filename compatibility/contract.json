@@ -1588,6 +1588,7 @@
       "type V5CustomerShipping struct {\n\tID        string `json:\"id\"`\n\tFirstName string `json:\"first_name\"`\n\tLastName  string `json:\"last_name\"`\n\tEmail     string `json:\"email\"`\n}",
       "type V5Plan struct {\n\tObject         string `json:\"object\"`\n\tID             string `json:\"id\"`\n\tPlanName       string `json:\"plan_name\"`\n\tPlanAmount     string `json:\"plan_amount\"`\n\tPlanPayments   string `json:\"plan_payments\"`\n\tDayFrequency   string `json:\"day_frequency\"`\n\tMonthFrequency string `json:\"month_frequency\"`\n\tDayOfMonth     string `json:\"day_of_month\"`\n}",
       "type V5Subscription struct {\n\tObject          string `json:\"object\"`\n\tID              string `json:\"id\"`\n\tStartDate       string `json:\"start_date\"`\n\tNextBillingDate string `json:\"next_billing_date\"`\n\tAmount          string `json:\"amount\"`\n\tCustomerVaultID string `json:\"customer_vault_id\"`\n\n\tDelayedCondition string `json:\"delayed_condition\"`\n\n\tMerchantDefinedFields map[string]string `json:\"merchant_defined_fields\"`\n\tPausedSubscription    any               `json:\"paused_subscription\"`\n\tPlan                  *V5Plan           `json:\"plan\"`\n}",
+      "type VerificationEvidence struct {\n\tTransactionID string `json:\"transaction_id\"`\n\tResponseCode  int    `json:\"response_code\"`\n}",
       "type v5CustomerBillingRequest struct {\n\tID             string            `json:\"id,omitempty\"`\n\tCurrency       string            `json:\"currency,omitempty\"`\n\tPaymentDetails *v5PaymentDetails `json:\"payment_details,omitempty\"`\n\tFirstName      string            `json:\"first_name,omitempty\"`\n\tLastName       string            `json:\"last_name,omitempty\"`\n\tCompany        string            `json:\"company,omitempty\"`\n\tAddress1       string            `json:\"address1,omitempty\"`\n\tAddress2       string            `json:\"address2,omitempty\"`\n\tCity           string            `json:\"city,omitempty\"`\n\tState          string            `json:\"state,omitempty\"`\n\tZip            string            `json:\"zip,omitempty\"`\n\tCountry        string            `json:\"country,omitempty\"`\n\tPhone          string            `json:\"phone,omitempty\"`\n\tEmail          string            `json:\"email,omitempty\"`\n}",
       "type v5CustomerVaultRef struct {\n\tID string `json:\"id\"`\n}",
       "type v5OrderDetails struct {\n\tID               string `json:\"id,omitempty\"`\n\tOrderDescription string `json:\"order_description,omitempty\"`\n}",
@@ -1618,12 +1619,14 @@
       "type StripePaymentMethodDomainPayload struct {\n\tDomainName string `json:\"domain_name\"`\n}",
       "type collectedReceipt struct {\n\tVersion      int                                    `json:\"version\"`\n\tFamily       string                                 `json:\"family\"`\n\tBinding      receiptBinding                         `json:\"binding\"`\n\tNMI          *nmi.SaleEvidence                      `json:\"nmi,omitempty\"`\n\tStripe       *subscriptions.StripeCollectionReceipt `json:\"stripe,omitempty\"`\n\tStripeEngine *subscriptions.StripeEngineReceipt     `json:\"stripe_engine,omitempty\"`\n}",
       "type collectionNonexecution struct {\n\tBinding     receiptBinding `json:\"binding\"`\n\tSubmittedAt string         `json:\"submitted_at\"`\n\tCode        string         `json:\"code\"`\n\tReason      string         `json:\"reason\"`\n}",
+      "type confirmationTerms struct {\n\tSubscriptionID  uuid.UUID               `json:\"subscription_id\"`\n\tCustomerID      uuid.UUID               `json:\"customer_id\"`\n\tPaymentMethodID uuid.UUID               `json:\"payment_method_id\"`\n\tFollowsDefault  bool                    `json:\"follows_default\"`\n\tVersionID       uuid.UUID               `json:\"version_id\"`\n\tMandateID       uuid.UUID               `json:\"mandate_id\"`\n\tInstrument      charge.FrozenInstrument `json:\"instrument\"`\n\tRail            string                  `json:\"rail\"`\n\tSchedule        string                  `json:\"schedule\"`\n\tPeriodEnd       time.Time               `json:\"period_end\"`\n}",
       "type enrollmentReceipt struct {\n\tBinding receiptBinding         `json:\"binding\"`\n\tFacts   nmi.EnrollmentEvidence `json:\"facts\"`\n}",
       "type initialMembershipRefusal struct {\n\tBinding               receiptBinding `json:\"binding\"`\n\tKind                  string         `json:\"kind\"`\n\tResponseCode          int            `json:\"response_code\"`\n\tLocalizationID        string         `json:\"localization_id\"`\n\tStripePaymentIntentID string         `json:\"stripe_payment_intent_id,omitempty\"`\n\tStripeFailureCode     string         `json:\"stripe_failure_code,omitempty\"`\n\tStripeDeclineCode     string         `json:\"stripe_decline_code,omitempty\"`\n\n\tTransactionID string `json:\"transaction_id,omitempty\"`\n\tAVS           string `json:\"avs,omitempty\"`\n\tCVV           string `json:\"cvv,omitempty\"`\n\tText          string `json:\"text,omitempty\"`\n}",
       "type nmiCard struct {\n\tLastFour   string `json:\"last_four\"`\n\tCardType   string `json:\"card_type\"`\n\tExpiryDate string `json:\"expiry_date\"`\n}",
       "type rebillDecline struct {\n\tBinding           receiptBinding `json:\"binding\"`\n\tResponseCode      int            `json:\"response_code\"`\n\tProviderReference string         `json:\"provider_reference\"`\n}",
       "type rebillPreparation struct {\n\tBinding         receiptBinding `json:\"binding\"`\n\tSubscriptionID  string         `json:\"subscription_id\"`\n\tCustomerVaultID string         `json:\"customer_vault_id\"`\n\tAmount          string         `json:\"amount\"`\n\tNextBillingDate string         `json:\"next_billing_date\"`\n\tPlan            nmi.V5Plan     `json:\"plan\"`\n}",
       "type receiptBinding struct {\n\tOperationID   uuid.UUID `json:\"operation_id\"`\n\tMerchantID    uuid.UUID `json:\"merchant_id\"`\n\tPSPID         uuid.UUID `json:\"psp_id\"`\n\tKind          string    `json:\"kind\"`\n\tPayloadSHA256 string    `json:\"payload_sha256\"`\n}",
+      "type recurringConfirmation struct {\n\tconfirmationTerms\n\tOrderReference string    `json:\"order_reference\"`\n\tAcceptedAt     time.Time `json:\"accepted_at\"`\n}",
       "type stripeDomain struct {\n\tID       string `json:\"id\"`\n\tDomain   string `json:\"domain_name\"`\n\tEnabled  bool   `json:\"enabled\"`\n\tApplePay struct {\n\t\tStatus        string `json:\"status\"`\n\t\tStatusDetails struct {\n\t\t\tErrorMessage string `json:\"error_message\"`\n\t\t} `json:\"status_details\"`\n\t} `json:\"apple_pay\"`\n\tGooglePay struct {\n\t\tStatus string `json:\"status\"`\n\t} `json:\"google_pay\"`\n}",
       "type stripeRecurringDecline struct {\n\tDeclineCode     string         `json:\"decline_code,omitempty\"`\n\tBinding         receiptBinding `json:\"binding\"`\n\tFailureCode     string         `json:\"failure_code\"`\n\tPaymentIntentID string         `json:\"payment_intent_id\"`\n}"
     ],
@@ -2956,6 +2959,12 @@
       "strings": "strings",
       "url": "net/url"
     },
+    "internal/integrations/nmi/verification_evidence.go": {
+      "context": "context",
+      "errors": "errors",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "strings": "strings"
+    },
     "internal/integrations/pyth/client.go": {
       "context": "context",
       "fmt": "fmt",
@@ -3204,6 +3213,22 @@
       "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
       "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
       "strings": "strings",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/intents/nmi_recurring_confirmation_admission.go": {
+      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "mandates": "github.com/open-rails/openrails/internal/modules/mandates",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
+      "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
       "uuid": "github.com/google/uuid",

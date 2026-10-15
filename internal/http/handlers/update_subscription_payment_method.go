@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -108,6 +110,43 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	if subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue && subscription.Status != models.StatusAwaitingMethod {
 		r.ErrorCode(billing.CodeInvalidParam, "Cannot update payment method for canceled subscriptions")
 		return
+	}
+
+	if enforceOwnership {
+		handler := intents.NewNMIRecurringConfirmationHandler(r.State.DB, r.State.Config, r.State.CollectionResolver, r.State.Clock)
+		accepted, err := handler.EnqueueCustomer(ctx, subscription.ID, subscription.CustomerID, methodID)
+		if err != nil {
+			writeMoveRefusal(r, err, "Failed to confirm payment method")
+			return
+		}
+		if accepted != nil {
+			var result = *accepted
+			if accepted.Status == intents.StatusUnknownNeedsVerify {
+				result, err = r.State.IntentRunner().VerifyByID(ctx, accepted.ID)
+			} else {
+				result, err = r.State.IntentRunner().ExecuteByID(ctx, accepted.ID)
+			}
+			if err != nil {
+				writeMoveRefusal(r, err, "Failed to confirm payment method")
+				return
+			}
+			switch result.Status {
+			case intents.StatusSucceeded:
+				writeUpdatedSubscription(r, authenticatedUserID, true, subscription.ID)
+			case intents.StatusFailedTerminal:
+				var answer struct {
+					ResponseCode int `json:"response_code"`
+				}
+				if json.Unmarshal(result.ResultEvidence, &answer) == nil && answer.ResponseCode >= 200 && answer.ResponseCode < 300 {
+					r.APIError(paymentRefusalError(strconv.Itoa(answer.ResponseCode)))
+				} else {
+					r.ErrorCode(billing.CodeResourceConflict, "The subscription or card changed; this confirmation no longer applies")
+				}
+			default:
+				r.ErrorCode(billing.CodeResourceConflict, "Card confirmation is still processing; no payment will be retried until it is confirmed")
+			}
+			return
+		}
 	}
 
 	// The card the schedule moves to: the named one, or the default it then

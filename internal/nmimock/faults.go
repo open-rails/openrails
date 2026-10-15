@@ -202,3 +202,17 @@ func (m *Mock) Hold(match func(*http.Request) bool, mode HoldMode) *Held {
 	})
 	return h
 }
+
+// DropValidationResponses processes the next n validations but loses their responses.
+func (m *Mock) DropValidationResponses(n int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dropValidations = n
+}
+
+// HideValidations simulates an empty report while validations await indexing.
+func (m *Mock) HideValidations(hidden bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hideValidations = hidden
+}

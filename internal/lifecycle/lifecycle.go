@@ -118,6 +118,9 @@ type Reinstate struct{ PeriodStart, PeriodEnd time.Time }
 // MethodReplaced is the customer replacing the card of an awaiting subscription.
 type MethodReplaced struct{}
 
+// RecurringAgreementRestored confirms the existing card without replacing it.
+type RecurringAgreementRestored struct{}
+
 // DunningExhausted is the dunning schedule spent after real declines.
 type DunningExhausted struct{ At time.Time }
 
@@ -171,6 +174,8 @@ func (RenewalOverdue) event() string   { return "renewal_overdue" }
 func (ProviderCanceled) event() string { return "provider_canceled" }
 func (Cancel) event() string           { return "cancel" }
 func (Resume) event() string           { return "resume" }
+
+func (RecurringAgreementRestored) event() string { return "recurring_agreement_restored" }
 
 // Name is the event's stable name for the transition log.
 func Name(e Event) string { return e.event() }
@@ -354,7 +359,7 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 		}
 		return s, []Effect{GrantPeriod{ev.PeriodStart, ev.PeriodEnd}, ReopenAccess{}}, nil
 
-	case MethodReplaced:
+	case MethodReplaced, RecurringAgreementRestored:
 		if s.Status != AwaitingMethod {
 			return s, nil, nil
 		}

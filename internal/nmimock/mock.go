@@ -62,6 +62,8 @@ type Mock struct {
 	duplicate                 int
 	lose, lost                int
 	drop                      int
+	dropValidations           int
+	hideValidations           bool
 	failUpdates               int
 	hide                      int
 	queryDown                 bool
@@ -159,6 +161,10 @@ func (m *Mock) RoundTrip(r *http.Request) (*http.Response, error) {
 		m.lost++
 	case dropped:
 		m.drop--
+	}
+	if kind == routeDirectPost && strings.Contains(string(body), "type=validate") && m.dropValidations > 0 {
+		m.dropValidations--
+		dropped = true
 	}
 	intercepts := append([]*intercept(nil), m.intercepts...)
 	failures := append([]*failure(nil), m.failures...)

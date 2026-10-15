@@ -158,7 +158,18 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 		if !errors.Is(err, mandates.ErrMissing) && !errors.Is(err, mandates.ErrNotActive) {
 			return nil, err
 		}
+		kind := intents.TypeNMIRecurringConfirmation
+		confirmations, err := s.rt.DB.Gen(ctx).ListProviderIntents(ctx, gen.ListProviderIntentsParams{MerchantID: mid.UUID(), SubscriptionID: &id, IntentType: &kind, PageLimit: 1})
+		if err != nil {
+			return nil, err
+		}
 		out.BlockedReason = "customer_payment_unsupported"
+		if len(confirmations) > 0 {
+			switch confirmations[0].Status {
+			case intents.StatusPending, intents.StatusInFlight, intents.StatusUnknownNeedsVerify, intents.StatusFailedRetryable:
+				out.BlockedReason = "payment_in_progress"
+			}
+		}
 		return out, nil
 	}
 	price, err := catalog.NewPriceService(s.rt.DB).GetByID(ctx, sub.PriceID)
