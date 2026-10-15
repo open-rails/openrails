@@ -11,7 +11,7 @@ type Catalog = { card_monthly_price_id: string }
 
 type Billing = {
   subscriptions: { status: string; price_id: string }[]
-  sales: { amount: string }[]
+  payments: { amount: string }[]
 }
 
 async function heldBy(request: APIRequestContext, customer: string) {
@@ -48,7 +48,7 @@ test("a card member upgrades from the account page, then renews once it ends", a
   await expect(option).toContainText(
     /\$\d+\.\d{2} now, then \$9\.99 from \w{3} \d{1,2}, \d{4}/
   )
-  const sales = (await heldBy(request, user.id)).sales.length
+  const paid = (await heldBy(request, user.id)).payments.length
 
   await option.click()
   await dialog.getByRole("button", { name: "Change plan", exact: true }).click()
@@ -58,8 +58,10 @@ test("a card member upgrades from the account page, then renews once it ends", a
     page.getByTestId("subscription-row").filter({ hasText: "Card plus" })
   ).toContainText("Active")
 
+  await expect
+    .poll(async () => (await heldBy(request, user.id)).payments.length)
+    .toBe(paid + 1)
   const held = await heldBy(request, user.id)
-  expect(held.sales).toHaveLength(sales + 1)
   expect(held.subscriptions.map((s) => s.status).sort()).toEqual([
     "active",
     "canceled",

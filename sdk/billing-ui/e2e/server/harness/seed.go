@@ -293,7 +293,7 @@ func (r *Runtime) SeedBilling(ctx context.Context, userID string) (Seeded, error
 type CustomerBilling struct {
 	Subscriptions  []billing.Subscription  `json:"subscriptions"`
 	PaymentMethods []billing.PaymentMethod `json:"payment_methods"`
-	Sales          []nmimock.Sale          `json:"sales"`
+	Payments       []billing.Payment       `json:"payments"`
 	Vaults         int                     `json:"vaults"`
 }
 
@@ -310,7 +310,11 @@ func (r *Runtime) CustomerBilling(ctx context.Context, customerID string) (Custo
 	if err != nil {
 		return CustomerBilling{}, err
 	}
-	return CustomerBilling{Subscriptions: subs.Items, PaymentMethods: methods.Items, Sales: r.NMI.Sales(), Vaults: len(r.NMI.Vaults())}, nil
+	payments, err := r.Client.ListPayments(ctx, billing.PaymentListParams{CustomerID: customer, PageRequest: billing.PageRequest{Limit: 100}})
+	if err != nil {
+		return CustomerBilling{}, err
+	}
+	return CustomerBilling{Subscriptions: subs.Items, PaymentMethods: methods.Items, Payments: payments.Items, Vaults: len(r.NMI.Vaults())}, nil
 }
 
 // EndSubscriptions cancels the customer's subscriptions at once, access
