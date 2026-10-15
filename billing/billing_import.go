@@ -37,20 +37,30 @@ type DeclaredBilling struct {
 	HistoricalPayments []DeclaredHistoricalPayment `json:"historical_payments,omitempty"`
 }
 
-// DeclaredHistoricalPayment is a confirmed successful NMI payment with no
-// known refund, whose subscription or catalog purchase is unavailable.
+// DeclaredHistoricalPayment is a confirmed successful NMI payment and its
+// known refunds, whose subscription or catalog purchase is unavailable.
 // The caller supplies those facts. It records history only:
 // no access, recurring agreement or future collection is created.
 // Amount is in native units (micros for USD); PSP falls back to DefaultPSP.
 type DeclaredHistoricalPayment struct {
-	SourceID      string     `json:"source_id"`
-	Customer      CustomerID `json:"customer"`
-	PSP           PSPRef     `json:"psp,omitzero"`
-	Rail          string     `json:"rail"`
-	TransactionID string     `json:"transaction_id"`
-	Amount        int64      `json:"amount,string"`
-	Currency      string     `json:"currency"`
-	PaidAt        time.Time  `json:"paid_at"`
+	SourceID      string                     `json:"source_id"`
+	Customer      CustomerID                 `json:"customer"`
+	PSP           PSPRef                     `json:"psp,omitzero"`
+	Rail          string                     `json:"rail"`
+	TransactionID string                     `json:"transaction_id"`
+	Amount        int64                      `json:"amount,string"`
+	Currency      string                     `json:"currency"`
+	PaidAt        time.Time                  `json:"paid_at"`
+	Refunds       []DeclaredHistoricalRefund `json:"refunds,omitempty"`
+}
+
+// DeclaredHistoricalRefund is a confirmed refund with its own provider ID.
+// Amount is positive in the original payment's currency and native units.
+// Customer and PSP are inherited from the enclosing historical payment.
+type DeclaredHistoricalRefund struct {
+	TransactionID string    `json:"transaction_id"`
+	Amount        int64     `json:"amount,string"`
+	RefundedAt    time.Time `json:"refunded_at"`
 }
 
 // DeclaredPurchase is one settled one-off sale: an engine-owned order with

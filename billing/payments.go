@@ -67,7 +67,8 @@ type Payment struct {
 	Reason *string `json:"reason"`
 	// Refunds are the reversals of a charge: read with a single payment, null
 	// in lists.
-	Refunds   []Payment `json:"refunds"`
+	Refunds []Payment `json:"refunds"`
+	// CreatedAt is when the payment or reversal occurred, including imported history.
 	CreatedAt time.Time `json:"created_at"`
 }
 

@@ -881,6 +881,13 @@ export type DeclaredHistoricalPayment = {
   amount?: string
   currency?: string
   paid_at?: string
+  refunds?: DeclaredHistoricalRefund[]
+}
+
+export type DeclaredHistoricalRefund = {
+  transaction_id?: string
+  amount?: string
+  refunded_at?: string
 }
 
 export type DeclaredOrderLine = {

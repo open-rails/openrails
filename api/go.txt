@@ -1961,8 +1961,13 @@ pkg openrails/billing, type DeclaredHistoricalPayment struct, Customer CustomerI
 pkg openrails/billing, type DeclaredHistoricalPayment struct, PSP PSPRef `json:"psp,omitzero"`
 pkg openrails/billing, type DeclaredHistoricalPayment struct, PaidAt time.Time `json:"paid_at"`
 pkg openrails/billing, type DeclaredHistoricalPayment struct, Rail string `json:"rail"`
+pkg openrails/billing, type DeclaredHistoricalPayment struct, Refunds []DeclaredHistoricalRefund `json:"refunds,omitempty"`
 pkg openrails/billing, type DeclaredHistoricalPayment struct, SourceID string `json:"source_id"`
 pkg openrails/billing, type DeclaredHistoricalPayment struct, TransactionID string `json:"transaction_id"`
+pkg openrails/billing, type DeclaredHistoricalRefund struct
+pkg openrails/billing, type DeclaredHistoricalRefund struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type DeclaredHistoricalRefund struct, RefundedAt time.Time `json:"refunded_at"`
+pkg openrails/billing, type DeclaredHistoricalRefund struct, TransactionID string `json:"transaction_id"`
 pkg openrails/billing, type DeclaredOrderLine struct
 pkg openrails/billing, type DeclaredOrderLine struct, AccessEndsAt *time.Time `json:"access_ends_at,omitempty"`
 pkg openrails/billing, type DeclaredOrderLine struct, Description string `json:"description,omitempty"`

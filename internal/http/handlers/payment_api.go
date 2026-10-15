@@ -45,7 +45,7 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 		Quantity:       p.Quantity,
 		Channel:        billing.ChannelRail,
 		TransactionID:  p.TransactionID,
-		CreatedAt:      p.CreatedAt,
+		CreatedAt:      p.PurchasedAt,
 	}
 	if p.SubscriptionID != nil {
 		id := billing.SubscriptionID(*p.SubscriptionID)
