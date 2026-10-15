@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Additional sentinel errors for admin operations
@@ -47,6 +48,7 @@ type AdminSubscriptionService struct {
 	PaymentService        *payments.PaymentService
 	StripeService         *StripeService
 	clock                 clockwork.Clock
+	postures              writeposture.View
 
 	// providerCancel queues the durable, admin-origin provider cancel of a
 	// merchant-initiated cancel.
@@ -101,7 +103,7 @@ func (s *AdminSubscriptionService) ListSubscriptions(ctx context.Context, f GetS
 	if err := LoadScheduledChanges(ctx, s.SubscriptionService.Database(), subs.Items); err != nil {
 		return billing.ListPage[*AdminSubscriptionResponse]{}, err
 	}
-	dunning, err := DunningViews(ctx, s.SubscriptionService.Database(), subs.Items, prices)
+	dunning, err := DunningViews(ctx, s.SubscriptionService.Database(), s.postures, subs.Items, prices)
 	if err != nil {
 		return billing.ListPage[*AdminSubscriptionResponse]{}, fmt.Errorf("failed to load subscription dunning: %w", err)
 	}
@@ -147,7 +149,7 @@ func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subs
 		}
 	}
 
-	dunning, err := DunningViews(ctx, s.SubscriptionService.Database(), []*models.Subscription{subscription}, map[uuid.UUID]*models.Price{subscription.PriceID: response.Price})
+	dunning, err := DunningViews(ctx, s.SubscriptionService.Database(), s.postures, []*models.Subscription{subscription}, map[uuid.UUID]*models.Price{subscription.PriceID: response.Price})
 	if err != nil {
 		return nil, fmt.Errorf("load subscription dunning: %w", err)
 	}
@@ -374,6 +376,7 @@ func NewAdminSubscriptionService(
 	entitlementService *entitlements.EntitlementService,
 	notificationService *NotificationService,
 	paymentService *payments.PaymentService,
+	postures writeposture.View,
 	clocks ...clockwork.Clock,
 ) *AdminSubscriptionService {
 	return &AdminSubscriptionService{
@@ -383,6 +386,7 @@ func NewAdminSubscriptionService(
 		EntitlementService:  entitlementService,
 		NotificationService: notificationService,
 		PaymentService:      paymentService,
+		postures:            postures,
 		clock:               timeutil.FirstClock(clocks...),
 	}
 }

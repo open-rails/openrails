@@ -24140,6 +24140,12 @@
       "SubscriptionDunning": {
         "type": "object",
         "properties": {
+          "paused": {
+            "type": "boolean"
+          },
+          "pause_reason": {
+            "type": "string"
+          },
           "attempts": {
             "type": "integer"
           },
@@ -24229,6 +24235,7 @@
           }
         },
         "required": [
+          "paused",
           "attempts",
           "retries_left",
           "next_retry_at",

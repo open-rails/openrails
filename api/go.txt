@@ -3531,6 +3531,8 @@ pkg openrails/billing, type SubscriptionDunning struct, Attempts int `json:"atte
 pkg openrails/billing, type SubscriptionDunning struct, FinalRetryAt *time.Time `json:"final_retry_at"`
 pkg openrails/billing, type SubscriptionDunning struct, LastFailureReason *DeclineReason `json:"last_failure_reason"`
 pkg openrails/billing, type SubscriptionDunning struct, NextRetryAt *time.Time `json:"next_retry_at"`
+pkg openrails/billing, type SubscriptionDunning struct, PauseReason string `json:"pause_reason,omitempty"`
+pkg openrails/billing, type SubscriptionDunning struct, Paused bool `json:"paused"`
 pkg openrails/billing, type SubscriptionDunning struct, RetriesLeft *int `json:"retries_left"`
 pkg openrails/billing, type SubscriptionDunning struct, WaitingForNewCard bool `json:"waiting_for_new_card"`
 pkg openrails/billing, type SubscriptionHistory struct

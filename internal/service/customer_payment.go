@@ -183,7 +183,20 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 		return out, nil
 	}
 	out.Retryable = true
+	s.holdRecoveryForWritePosture(ctx, sub.MerchantID, out)
 	return out, nil
+}
+
+// A recovery view must not offer a new customer payment while the executor
+// holds user-origin writes. Preserve more specific existing recovery states.
+func (s *Service) holdRecoveryForWritePosture(ctx context.Context, merchantID uuid.UUID, out *billing.PaymentRecovery) {
+	if !out.Retryable {
+		return
+	}
+	if blocked, _ := intents.GateExecution(ctx, s.rt.Posture(), merchantID, intents.OriginUser); blocked {
+		out.Retryable = false
+		out.BlockedReason = billing.CodeProviderWritesDisabled
+	}
 }
 
 // CustomerPaymentRefusal is a definitive accepted operation result, rendered

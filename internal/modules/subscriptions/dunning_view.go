@@ -14,12 +14,13 @@ import (
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // DunningViews reads the dunning of each subscription past_due or
 // awaiting_method, by subscription id. prices holds the subscriptions'
 // current prices by price id.
-func DunningViews(ctx context.Context, d *db.DB, subs []*models.Subscription, prices map[uuid.UUID]*models.Price) (map[uuid.UUID]*billing.SubscriptionDunning, error) {
+func DunningViews(ctx context.Context, d *db.DB, postures writeposture.View, subs []*models.Subscription, prices map[uuid.UUID]*models.Price) (map[uuid.UUID]*billing.SubscriptionDunning, error) {
 	out := map[uuid.UUID]*billing.SubscriptionDunning{}
 	var ids []uuid.UUID
 	var dues []time.Time
@@ -36,12 +37,32 @@ func DunningViews(ctx context.Context, d *db.DB, subs []*models.Subscription, pr
 			ids, dues = append(ids, sub.ID), append(dues, sub.CurrentPeriodEndsAt.UTC())
 		}
 	}
-	if len(ids) == 0 {
+	if len(out) == 0 {
 		return out, nil
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
+	}
+	posture := postures.Posture(ctx, mid.UUID())
+	if posture.Limited() {
+		for _, sub := range subs {
+			if sub == nil {
+				continue
+			}
+			view := out[sub.ID]
+			if view == nil || OwnerOf(sub) == lifecycle.Provider {
+				continue
+			}
+			view.Paused = true
+			view.PauseReason = "automatic_collection_paused"
+			if posture.ReadOnly() {
+				view.PauseReason = billing.CodeProviderWritesDisabled
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return out, nil
 	}
 	rows, err := d.Gen(ctx).ListRenewalDeclines(ctx, gen.ListRenewalDeclinesParams{MerchantID: mid.UUID(), SubscriptionIds: ids, DueAts: dues, RowLimit: int32(len(ids))}) // #nosec G115 -- ids is at most one page (MaxPageLimit)
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // renewalOrders are the subscription's renewal orders, as the merchant reads
@@ -205,6 +206,11 @@ func TestRenewalOrderAuthentication(t *testing.T) {
 	busy := e.payRenewal(e.method)
 	require.Equal(t, http.StatusConflict, busy.status, "%v", busy.body)
 	require.Equal(t, "order_payment_in_progress", orderError(busy))
+
+	setRecoveryPosture(t, w, writeposture.ReadOnly)
+	held := unwrap(e.c.must(http.MethodGet, "/subscriptions/"+e.sub.String(), "", nil))["recovery"].(map[string]any)
+	require.Equal(t, recovery, held, "a write hold must not erase the authentication requirement")
+	setRecoveryPosture(t, w, writeposture.Full)
 
 	require.True(t, w.stripe.Authenticate(next["payload"].(map[string]any)["payment_intent_id"].(string)))
 	confirmed := e.c.order(http.MethodPost, "/orders/"+open.body["id"].(string)+"/confirm", "", nil)

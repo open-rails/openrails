@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Sentinel errors for subscription operations. The typed ones carry the
@@ -46,6 +47,7 @@ type UserSubscriptionService struct {
 	// NMIResolver arms store-scoped NMI clients per merchant.
 	NMIResolver NMIClientSource
 	clock       clockwork.Clock
+	postures    writeposture.View
 
 	// providerCancel queues the durable provider cancel of a membership the
 	// member ends (injected post-construction, after the intent ledger).
@@ -232,7 +234,7 @@ func (s *UserSubscriptionService) enrichSubscriptionResponses(ctx context.Contex
 		}
 		subs = append(subs, resp.Subscription)
 	}
-	dunning, err := DunningViews(ctx, s.SubscriptionService.Database(), subs, prices)
+	dunning, err := DunningViews(ctx, s.SubscriptionService.Database(), s.postures, subs, prices)
 	if err != nil {
 		return fmt.Errorf("load subscription dunning: %w", err)
 	}
@@ -446,6 +448,7 @@ func NewUserSubscriptionService(
 	notificationService *NotificationService,
 	entitlementService *entitlements.EntitlementService,
 	nmiResolver NMIClientSource,
+	postures writeposture.View,
 	clocks ...clockwork.Clock,
 ) *UserSubscriptionService {
 	return &UserSubscriptionService{
@@ -454,6 +457,7 @@ func NewUserSubscriptionService(
 		ProductService:      productService,
 		PriceService:        priceService,
 		PaymentService:      paymentService,
+		postures:            postures,
 		NotificationService: notificationService,
 		EntitlementService:  entitlementService,
 		clock:               timeutil.FirstClock(clocks...),
