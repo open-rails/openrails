@@ -469,7 +469,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscriptions.
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, currency, status,
-       subscription_id, refunded_payment_id, purchased_at, order_id, ledger_transfer_id
+       subscription_id, refunded_payment_id, purchased_at, order_id, ledger_transfer_id, reversal_kind
 FROM billing.payments
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (sqlc.arg(rails)::text[])
   AND deleted_at IS NULL

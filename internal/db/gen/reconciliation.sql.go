@@ -2735,7 +2735,7 @@ func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg Re
 
 const reconcileListPaymentsByTransactionIDs = `-- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, currency, status,
-       subscription_id, refunded_payment_id, purchased_at, order_id, ledger_transfer_id
+       subscription_id, refunded_payment_id, purchased_at, order_id, ledger_transfer_id, reversal_kind
 FROM billing.payments
 WHERE payments.merchant_id = $1::uuid AND rail::text = ANY ($2::text[])
   AND deleted_at IS NULL
@@ -2763,6 +2763,7 @@ type ReconcileListPaymentsByTransactionIDsRow struct {
 	PurchasedAt       time.Time
 	OrderID           *uuid.UUID
 	LedgerTransferID  *uuid.UUID
+	ReversalKind      *string
 }
 
 func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg ReconcileListPaymentsByTransactionIDsParams) ([]ReconcileListPaymentsByTransactionIDsRow, error) {
@@ -2792,6 +2793,7 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 			&i.PurchasedAt,
 			&i.OrderID,
 			&i.LedgerTransferID,
+			&i.ReversalKind,
 		); err != nil {
 			return nil, err
 		}

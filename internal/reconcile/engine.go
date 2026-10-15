@@ -951,6 +951,7 @@ func collectTxnLookupIDs(snap *RemoteSnapshot) []string {
 	for i := range snap.Transactions {
 		t := &snap.Transactions[i]
 		add(t.TransactionID)
+		add(t.OriginalTransactionID)
 		bc := decodeBreadcrumbs(t.Raw)
 		add(bc.Charge)
 		add(bc.PaymentIntent)

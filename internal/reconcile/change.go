@@ -232,12 +232,16 @@ func (b *changeBuilder) fromApply(f *Finding) *Change {
 		return c
 	case a.RecordRefund != nil:
 		r := *a.RecordRefund
+		amount, err := moneyutil.RailMinorToNative(r.Currency, moneyutil.Cents(r.AmountCents))
+		if err != nil {
+			return nil
+		}
 		c := b.change(f, billing.ChangeRecordRefund, transactionSubject(r.TransactionID), r.CustomerID)
 		if !r.MarkRefundedOnly {
 			absent := r.TransactionID
 			c.Basis.AbsentRailID = &absent
 		}
-		refund := map[string]any{"transaction_id": r.TransactionID, "amount": microsString(r.AmountCents, nil), "currency": r.Currency}
+		refund := map[string]any{"transaction_id": r.TransactionID, "amount": strconv.FormatInt(amount, 10), "currency": r.Currency}
 		if r.RefundedPaymentID != nil {
 			refund["refunded_payment_id"] = billing.PaymentID(*r.RefundedPaymentID).String()
 		}

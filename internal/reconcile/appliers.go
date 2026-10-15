@@ -127,7 +127,23 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	if lookupErr != nil && !db.IsNotFound(lookupErr) {
 		return false, lookupErr
 	}
-	_, err = svc.RecordObservedRefund(ctx, original.ID, key, amount, payments.ReversalRefund, a.PurchasedAt, a.Metadata)
+	if original.Rail == models.RailNMI && a.TransactionID != original.TransactionID {
+		err = w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			scoped := payments.NewPaymentService(w.DB.NewWithPgxTx(tx), clockwork.NewFakeClockAt(w.now()))
+			receipt, err := scoped.RecordObservedRefund(ctx, original.ID, key, amount, payments.ReversalRefund, a.PurchasedAt, a.Metadata)
+			if err != nil {
+				return err
+			}
+			// Include observations inserted after our snapshot. A date conflict
+			// rolls back any accounting work and preserves the accepted receipt.
+			if !receipt.PurchasedAt.Equal(a.PurchasedAt.UTC().Truncate(time.Microsecond)) {
+				return observed.ErrConflict
+			}
+			return nil
+		})
+	} else {
+		_, err = svc.RecordObservedRefund(ctx, original.ID, key, amount, payments.ReversalRefund, a.PurchasedAt, a.Metadata)
+	}
 	return db.IsNotFound(lookupErr) && err == nil, err
 }
 
