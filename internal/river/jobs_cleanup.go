@@ -132,25 +132,26 @@ func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
 
 // CleanupResult holds the count of deleted records per table
 type CleanupResult struct {
-	UserActionReservations  int64
-	NotificationEvents      int64
-	OrderAttemptsExpired    int64
-	Carts                   int64
-	NotificationsSeen       int64
-	NotificationsAll        int64
-	WebhookEvents           int64
-	PaymentSettlements      int64
-	HostLifecycleEvents     int64
-	PaymentAttempts         int64
-	RebillCycles            int64
-	NMIHistoryMonths        int64
-	SubscriptionTransitions int64
-	OrderAttempts           int64
-	ReconciliationFindings  int64
-	ReconciliationRuns      int64
-	ProviderIntents         int64
-	ProviderMutationLogs    int64
-	CustomerLinks           int64
+	UserActionReservations     int64
+	NotificationEvents         int64
+	OrderAttemptsExpired       int64
+	Carts                      int64
+	NotificationsSeen          int64
+	NotificationsAll           int64
+	WebhookEvents              int64
+	PaymentSettlements         int64
+	HostLifecycleEvents        int64
+	PaymentAttempts            int64
+	RebillCycles               int64
+	NMIHistoryMonths           int64
+	SubscriptionTransitions    int64
+	SubscriptionBillingChanges int64
+	OrderAttempts              int64
+	ReconciliationFindings     int64
+	ReconciliationRuns         int64
+	ProviderIntents            int64
+	ProviderMutationLogs       int64
+	CustomerLinks              int64
 	// PartitionsCreated and PartitionsDropped count whole monthly partitions.
 	PartitionsCreated int
 	PartitionsDropped int
@@ -336,32 +337,33 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	saveSweepCursor(ctx, directory, KindCleanupExpiredData, cursorRow, nextCursor, logger)
 
 	opsmetric.Emit(ctx, opsmetric.MetricRetentionSweep, log.Fields{
-		"worker":                   KindCleanupExpiredData,
-		"merchants_with_work":      len(merchantIDs),
-		"merchants_budget_capped":  result.MerchantsBudgetCapped,
-		"resumed_from_cursor":      cursor != nil,
-		"more_work_queued":         nextCursor != nil,
-		"duration_ms":              clock.Now().Sub(started).Milliseconds(),
-		"order_attempts_expired":   result.OrderAttemptsExpired,
-		"carts":                    result.Carts,
-		"notification_events":      result.NotificationEvents,
-		"notifications_seen":       result.NotificationsSeen,
-		"notifications_unseen":     result.NotificationsAll,
-		"webhook_events":           result.WebhookEvents,
-		"payment_settlements":      result.PaymentSettlements,
-		"lifecycle_events":         result.HostLifecycleEvents,
-		"payment_attempts":         result.PaymentAttempts,
-		"rebill_cycles":            result.RebillCycles,
-		"nmi_history_months":       result.NMIHistoryMonths,
-		"subscription_transitions": result.SubscriptionTransitions,
-		"order_attempts":           result.OrderAttempts,
-		"reconciliation_findings":  result.ReconciliationFindings,
-		"reconciliation_runs":      result.ReconciliationRuns,
-		"provider_intents":         result.ProviderIntents,
-		"provider_mutation_logs":   result.ProviderMutationLogs,
-		"customer_links":           result.CustomerLinks,
-		"partitions_created":       result.PartitionsCreated,
-		"partitions_dropped":       result.PartitionsDropped,
+		"worker":                       KindCleanupExpiredData,
+		"merchants_with_work":          len(merchantIDs),
+		"merchants_budget_capped":      result.MerchantsBudgetCapped,
+		"resumed_from_cursor":          cursor != nil,
+		"more_work_queued":             nextCursor != nil,
+		"duration_ms":                  clock.Now().Sub(started).Milliseconds(),
+		"order_attempts_expired":       result.OrderAttemptsExpired,
+		"carts":                        result.Carts,
+		"notification_events":          result.NotificationEvents,
+		"notifications_seen":           result.NotificationsSeen,
+		"notifications_unseen":         result.NotificationsAll,
+		"webhook_events":               result.WebhookEvents,
+		"payment_settlements":          result.PaymentSettlements,
+		"lifecycle_events":             result.HostLifecycleEvents,
+		"payment_attempts":             result.PaymentAttempts,
+		"rebill_cycles":                result.RebillCycles,
+		"nmi_history_months":           result.NMIHistoryMonths,
+		"subscription_transitions":     result.SubscriptionTransitions,
+		"subscription_billing_changes": result.SubscriptionBillingChanges,
+		"order_attempts":               result.OrderAttempts,
+		"reconciliation_findings":      result.ReconciliationFindings,
+		"reconciliation_runs":          result.ReconciliationRuns,
+		"provider_intents":             result.ProviderIntents,
+		"provider_mutation_logs":       result.ProviderMutationLogs,
+		"customer_links":               result.CustomerLinks,
+		"partitions_created":           result.PartitionsCreated,
+		"partitions_dropped":           result.PartitionsDropped,
 	})
 
 	if cleanupErr != nil {
@@ -489,6 +491,13 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	sweep("delete subscription transitions", &result.SubscriptionTransitions, guarded("subscription_status_transitions",
 		func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 			return q.DeleteSubscriptionTransitionsPastRetention(ctx, gen.DeleteSubscriptionTransitionsPastRetentionParams{
+				MerchantID: mid, RetentionDays: retention.Days(retention.SubscriptionTransitions), RowLimit: limit,
+			})
+		}))
+
+	sweep("delete subscription billing changes", &result.SubscriptionBillingChanges, guarded("subscription_billing_changes",
+		func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+			return q.DeleteSubscriptionBillingChangesPastRetention(ctx, gen.DeleteSubscriptionBillingChangesPastRetentionParams{
 				MerchantID: mid, RetentionDays: retention.Days(retention.SubscriptionTransitions), RowLimit: limit,
 			})
 		}))

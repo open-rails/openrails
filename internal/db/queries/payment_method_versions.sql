@@ -2,11 +2,13 @@
 
 -- name: InsertPaymentMethodVersion :execrows
 -- One row per method, source and event; a replay inserts nothing.
+WITH history AS MATERIALIZED (SELECT set_config('openrails.subscription_history', sqlc.arg(history_attribution)::text, true))
 INSERT INTO billing.payment_method_versions (
+    id,
     merchant_id, customer_id, payment_method_id, source, kind, event_ref, psp_id, custodian_id,
     rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, fingerprint,
     network_token_id, network_token_status, network_token_par, effective_at
-) VALUES (
+) SELECT COALESCE(NULLIF(sqlc.arg(id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),uuidv7()),
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(payment_method_id)::uuid,
     sqlc.arg(source)::text, sqlc.arg(kind)::text, sqlc.arg(event_ref)::text,
     sqlc.narg(psp_id)::uuid, sqlc.narg(custodian_id)::uuid,
@@ -15,7 +17,7 @@ INSERT INTO billing.payment_method_versions (
     sqlc.narg(card_exp_month)::smallint, sqlc.narg(card_exp_year)::smallint, sqlc.narg(fingerprint)::text,
     sqlc.narg(network_token_id)::text, sqlc.narg(network_token_status)::text, sqlc.narg(network_token_par)::text,
     sqlc.arg(effective_at)::timestamptz
-)
+FROM history
 ON CONFLICT (merchant_id, payment_method_id, source, event_ref) DO NOTHING;
 
 -- name: PaymentMethodVersionRecorded :one

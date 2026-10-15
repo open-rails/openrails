@@ -24294,6 +24294,74 @@
           "psp_id"
         ]
       },
+      "SubscriptionHistoryAttribution": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "executor": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        }
+      },
+      "SubscriptionHistoryBillingState": {
+        "type": "object",
+        "properties": {
+          "payment_method_id": {
+            "type": "string"
+          },
+          "next_retry_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_retry_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "retry_attempts": {
+            "type": "integer"
+          },
+          "transient_retries": {
+            "type": "integer"
+          },
+          "grace_ends_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SubscriptionHistoryChange": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/SubscriptionHistoryBillingState"
+          },
+          "to": {
+            "$ref": "#/components/schemas/SubscriptionHistoryBillingState"
+          },
+          "card_version_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "from",
+          "to"
+        ]
+      },
       "SubscriptionHistoryCoverage": {
         "type": "object",
         "properties": {
@@ -24342,6 +24410,12 @@
           "attempt": {
             "$ref": "#/components/schemas/SubscriptionHistoryAttempt"
           },
+          "change": {
+            "$ref": "#/components/schemas/SubscriptionHistoryChange"
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/SubscriptionHistoryAttribution"
+          },
           "operation": {
             "$ref": "#/components/schemas/SubscriptionHistoryOperation"
           }
@@ -24367,6 +24441,9 @@
           },
           "attempt": {
             "type": "integer"
+          },
+          "reason": {
+            "type": "string"
           }
         },
         "required": [

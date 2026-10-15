@@ -22,6 +22,7 @@ func ReplaceMethod(sub *models.Subscription, now time.Time) error {
 	}
 	if sub.Status == models.StatusPastDue {
 		sub.NextRetryAt = &now
+		sub.RecordHistoryDecision(lifecycle.Name(lifecycle.MethodReplaced{}))
 	}
 	return nil
 }

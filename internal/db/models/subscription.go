@@ -113,8 +113,9 @@ type Subscription struct {
 	// dunning case opened; nil outside a case.
 	DunningPolicy []byte `json:"-"`
 	// loaded is the lifecycle state as read; decision names what changed it.
-	loaded   lifecycleFields
-	decision string
+	loaded          lifecycleFields
+	decision        string
+	historyDecision string
 
 	// Relationships
 	Price         *Price         `json:"price,omitempty"`
@@ -221,7 +222,7 @@ func (s *Subscription) lifecycle() lifecycleFields {
 // RememberLifecycle records the lifecycle state as persisted: after a read,
 // an insert or a saved decision.
 func (s *Subscription) RememberLifecycle() {
-	s.loaded, s.decision = s.lifecycle(), ""
+	s.loaded, s.decision, s.historyDecision = s.lifecycle(), "", ""
 }
 
 // LifecycleChanged reports whether status, paid period or cancellation
@@ -235,3 +236,12 @@ func (s *Subscription) MarkLifecycleDecision(name string) { s.decision = name }
 
 // LifecycleDecision is the decision pending on this row, or "".
 func (s *Subscription) LifecycleDecision() string { return s.decision }
+
+// RecordHistoryDecision names an observed billing change without deciding lifecycle state.
+func (s *Subscription) RecordHistoryDecision(name string) { s.historyDecision = name }
+func (s *Subscription) HistoryDecision() string {
+	if s.decision != "" {
+		return s.decision
+	}
+	return s.historyDecision
+}

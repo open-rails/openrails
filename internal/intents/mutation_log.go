@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/history"
 )
 
 type MutationLogPhase string
@@ -67,10 +68,12 @@ func (s *Store) LogExternalMutation(ctx context.Context, p MutationLogParams) er
 		}
 		evidence = b
 	}
+	a := history.FromContext(ctx)
 	intentType := emptyStringNil(p.IntentType)
 	idempotencyKey := emptyStringNil(p.IdempotencyKey)
 	return s.db.Gen(ctx).InsertProviderMutationLog(ctx, gen.InsertProviderMutationLogParams{
-		MerchantID:       p.MerchantID,
+		MerchantID: p.MerchantID,
+		Origin:     a.Origin, Actor: a.Actor, Executor: a.Executor,
 		Rail:             p.Provider,
 		PspID:            uuidPtrOrNil(p.PspID),
 		CustodianID:      uuidPtrOrNil(p.CustodianID),

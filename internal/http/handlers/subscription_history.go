@@ -57,7 +57,7 @@ func GetSubscriptionHistory(r *httprequest.Request) {
 	var cursor subscriptionHistoryCursor
 	present, err := pagination.Decode(request.Cursor, &cursor)
 	if err != nil || (present && (cursor.Version != 1 || cursor.Merchant != mid || cursor.Subscription != id.UUID() ||
-		cursor.At.IsZero() || cursor.ID == uuid.Nil || cursor.Source < 1 || cursor.Source > 3)) {
+		cursor.At.IsZero() || cursor.ID == uuid.Nil || cursor.Source < 1 || cursor.Source > 4)) {
 		writeRefusal(r, pagination.ErrInvalidCursor, "invalid history cursor")
 		return
 	}
@@ -75,15 +75,21 @@ func GetSubscriptionHistory(r *httprequest.Request) {
 	r.SuccessJSON(billing.SubscriptionHistory{
 		Events: pagination.Map(page, subscriptionHistoryEntry),
 		Coverage: billing.SubscriptionHistoryCoverage{
-			Sources:       []string{"subscription_transition", "payment_attempt", "provider_operation"},
+			Sources:       []string{"subscription_transition", "payment_attempt", "provider_operation", "subscription_billing_change"},
 			RetentionDays: 761,
-			Gaps:          []string{"actor_attribution", "card_assignment_changes", "retry_schedule_changes", "pre_dispatch_holds"},
+			Gaps:          []string{"unrecorded_older_changes", "unavailable_attribution", "operation_logs_not_portable"},
 		},
 	})
 }
 
 func subscriptionHistoryEntry(row gen.ListSubscriptionHistoryRow) billing.SubscriptionHistoryEntry {
 	out := billing.SubscriptionHistoryEntry{At: row.At, RecordedAt: row.RecordedAt}
+	if row.AttributionOrigin != "" || row.Actor != "" || row.Executor != "" || (row.Source != 2 && row.OperationID != nil) {
+		out.Attribution = &billing.SubscriptionHistoryAttribution{Origin: row.AttributionOrigin, Actor: row.Actor, Executor: row.Executor}
+		if row.OperationID != nil {
+			out.Attribution.OperationID = row.OperationID.String()
+		}
+	}
 	switch row.Source {
 	case 1:
 		out.Kind = "subscription_transition"
@@ -126,7 +132,42 @@ func subscriptionHistoryEntry(row gen.ListSubscriptionHistoryRow) billing.Subscr
 	case 3:
 		out.Kind = "provider_operation"
 		out.Operation = &billing.SubscriptionHistoryOperation{
-			ID: row.OperationID.String(), Kind: row.Kind, Phase: row.Category, Attempt: int(row.Attempt),
+			Kind: row.Kind, Phase: row.Category, Attempt: int(row.Attempt), Reason: row.Reason,
+		}
+		if row.OperationID != nil {
+			out.Operation.ID = row.OperationID.String()
+		}
+	case 4:
+		out.Kind = "subscription_billing_change"
+		out.Change = &billing.SubscriptionHistoryChange{Kind: row.Kind, Decision: row.Reason,
+			From: billing.SubscriptionHistoryBillingState{NextRetryAt: row.FromNextRetryAt, LastRetryAt: row.FromLastRetryAt, GraceEndsAt: row.FromGraceEndsAt},
+			To:   billing.SubscriptionHistoryBillingState{NextRetryAt: row.ToNextRetryAt, LastRetryAt: row.ToLastRetryAt, GraceEndsAt: row.ToGraceEndsAt}}
+		if row.FromPaymentMethodID != nil {
+			id := billing.PaymentMethodID(*row.FromPaymentMethodID)
+			out.Change.From.PaymentMethodID = &id
+		}
+		if row.ToPaymentMethodID != nil {
+			id := billing.PaymentMethodID(*row.ToPaymentMethodID)
+			out.Change.To.PaymentMethodID = &id
+		}
+		if row.FromRetryAttempts != nil {
+			n := int(*row.FromRetryAttempts)
+			out.Change.From.RetryAttempts = &n
+		}
+		if row.ToRetryAttempts != nil {
+			n := int(*row.ToRetryAttempts)
+			out.Change.To.RetryAttempts = &n
+		}
+		if row.FromTransientRetries != nil {
+			n := int(*row.FromTransientRetries)
+			out.Change.From.TransientRetries = &n
+		}
+		if row.ToTransientRetries != nil {
+			n := int(*row.ToTransientRetries)
+			out.Change.To.TransientRetries = &n
+		}
+		if row.MethodVersionID != nil {
+			out.Change.CardVersionID = row.MethodVersionID.String()
 		}
 	}
 	out.ID = out.Kind + ":" + row.ID.String()

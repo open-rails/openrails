@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/history"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -95,6 +96,7 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 		return terr
 	}
 	params.MerchantID = tid.UUID()
+	params.HistoryAttribution = history.Bind(ctx, tid.UUID(), s.ID, "insert", 0, "created")
 	if params.PspID == uuid.Nil {
 		if params.PspID, err = db.RequirePSPID(ctx); err != nil {
 			return fmt.Errorf("create subscription %s/%s: %w", s.Rail, s.RailSubscriptionID, err)
@@ -180,6 +182,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		Quantity:              models.IntPtrTo32(s.Quantity),
 		UpdatedAt:             s.UpdatedAt,
 		ExpectedVersion:       s.RowVersion,
+		HistoryAttribution:    history.Bind(ctx, scopeMerchantID.UUID(), s.ID, "update", s.RowVersion, s.HistoryDecision()),
 		DunningPolicy:         s.DunningPolicy,
 	}
 	if s.LifecycleChanged() {
@@ -210,6 +213,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		return fmt.Errorf("%w: subscription %s changed since it was read (caller %s)", ErrSubscriptionMoved, s.ID, callerName(2))
 	}
 	s.RowVersion++
+	s.RecordHistoryDecision("")
 	return nil
 }
 
@@ -843,6 +847,6 @@ func decidedParams(p gen.UpdateSubscriptionAtParams, rev int64) gen.UpdateSubscr
 		LastRetryAt: p.LastRetryAt, RetryAttempts: p.RetryAttempts, TransientRetries: p.TransientRetries, NextRetryAt: p.NextRetryAt,
 		GraceEndsAt: p.GraceEndsAt, CancelFeedback: p.CancelFeedback, CancelType: p.CancelType, CanceledAt: p.CanceledAt,
 		DeletionScheduledAt: p.DeletionScheduledAt, GatewayResponse: p.GatewayResponse, Quantity: p.Quantity,
-		UpdatedAt: p.UpdatedAt, MerchantID: p.MerchantID, ExpectedRev: rev, ExpectedVersion: p.ExpectedVersion, DunningPolicy: p.DunningPolicy,
+		UpdatedAt: p.UpdatedAt, MerchantID: p.MerchantID, ExpectedRev: rev, ExpectedVersion: p.ExpectedVersion, HistoryAttribution: p.HistoryAttribution, DunningPolicy: p.DunningPolicy,
 	}
 }

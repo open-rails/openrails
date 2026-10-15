@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/history"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 )
 
@@ -210,6 +211,11 @@ func ApplyCardLifecycle(ctx context.Context, q *gen.Queries, ev CardEvent) (Card
 			}
 		}
 	}
+	// Snapshot affected subscriptions before closing the card releases its default.
+	// Both the version and the actual card write remain in the caller's transaction.
+	if err := RecordVersion(ctx, q, next, ev.Source, out.Change, ev.EventRef, at); err != nil {
+		return out, err
+	}
 	n, err := q.SetPaymentMethodCard(ctx, gen.SetPaymentMethodCardParams{
 		MerchantID: ev.MerchantID, ID: m.ID,
 		RailCustomerRef: next.RailCustomerRef, RailMethodRef: next.RailMethodRef,
@@ -225,7 +231,7 @@ func ApplyCardLifecycle(ctx context.Context, q *gen.Queries, ev CardEvent) (Card
 	}
 	next.UpdatedAt = at
 	out.Method = next
-	return out, RecordVersion(ctx, q, next, ev.Source, out.Change, ev.EventRef, at)
+	return out, nil
 }
 
 // RecordVersion writes m's card as a version; a replay of source's event
@@ -235,7 +241,9 @@ func RecordVersion(ctx context.Context, q *gen.Queries, m gen.BillingPaymentMeth
 	if models.DerefStr(brand) == "" {
 		brand = nil
 	}
+	id := uuid.New()
 	_, err := q.InsertPaymentMethodVersion(ctx, gen.InsertPaymentMethodVersionParams{
+		ID: id, HistoryAttribution: history.Bind(ctx, m.MerchantID, id, "card_version", 0, string(change)),
 		MerchantID: m.MerchantID, CustomerID: m.CustomerID, PaymentMethodID: m.ID,
 		Source: string(source), Kind: string(change), EventRef: strings.TrimSpace(eventRef),
 		PspID: m.PspID, CustodianID: m.CustodianID, RailCustomerRef: m.RailCustomerRef, RailMethodRef: m.RailMethodRef,

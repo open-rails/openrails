@@ -25,13 +25,15 @@ type SubscriptionHistoryCoverage struct {
 // time for payment attempts. RecordedAt is when OpenRails stored the fact.
 // Neither implies the original signup time of an imported subscription.
 type SubscriptionHistoryEntry struct {
-	ID         string                         `json:"id"`
-	At         time.Time                      `json:"at"`
-	RecordedAt time.Time                      `json:"recorded_at"`
-	Kind       string                         `json:"kind"`
-	Transition *SubscriptionHistoryTransition `json:"transition,omitempty"`
-	Attempt    *SubscriptionHistoryAttempt    `json:"attempt,omitempty"`
-	Operation  *SubscriptionHistoryOperation  `json:"operation,omitempty"`
+	ID          string                          `json:"id"`
+	At          time.Time                       `json:"at"`
+	RecordedAt  time.Time                       `json:"recorded_at"`
+	Kind        string                          `json:"kind"`
+	Transition  *SubscriptionHistoryTransition  `json:"transition,omitempty"`
+	Attempt     *SubscriptionHistoryAttempt     `json:"attempt,omitempty"`
+	Change      *SubscriptionHistoryChange      `json:"change,omitempty"`
+	Attribution *SubscriptionHistoryAttribution `json:"attribution,omitempty"`
+	Operation   *SubscriptionHistoryOperation   `json:"operation,omitempty"`
 }
 
 // SubscriptionHistoryTransition is the state actually committed. Created
@@ -75,4 +77,37 @@ type SubscriptionHistoryOperation struct {
 	Kind    string `json:"kind"`
 	Phase   string `json:"phase"`
 	Attempt int    `json:"attempt"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// SubscriptionHistoryAttribution identifies the recorded initiator and executing
+// path. Missing fields are unknown, not necessarily system initiated.
+type SubscriptionHistoryAttribution struct {
+	Origin      string `json:"origin,omitempty"`
+	Actor       string `json:"actor,omitempty"`
+	Executor    string `json:"executor,omitempty"`
+	OperationID string `json:"operation_id,omitempty"`
+}
+
+// SubscriptionHistoryChange records actual card or retry changes. A null card
+// selection means following the default; default_card describes that default's
+// change, not confirmation that an external schedule has applied it. CardVersionID
+// names the instrument observation without exposing card or credential data.
+type SubscriptionHistoryChange struct {
+	Kind          string                          `json:"kind"`
+	Decision      string                          `json:"decision,omitempty"`
+	From          SubscriptionHistoryBillingState `json:"from"`
+	To            SubscriptionHistoryBillingState `json:"to"`
+	CardVersionID string                          `json:"card_version_id,omitempty"`
+}
+
+// SubscriptionHistoryBillingState is an observed selection or retry schedule.
+// Retry dates are historical stored values, never promises to attempt a charge.
+type SubscriptionHistoryBillingState struct {
+	PaymentMethodID  *PaymentMethodID `json:"payment_method_id,omitempty"`
+	NextRetryAt      *time.Time       `json:"next_retry_at,omitempty"`
+	LastRetryAt      *time.Time       `json:"last_retry_at,omitempty"`
+	RetryAttempts    *int             `json:"retry_attempts,omitempty"`
+	TransientRetries *int             `json:"transient_retries,omitempty"`
+	GraceEndsAt      *time.Time       `json:"grace_ends_at,omitempty"`
 }

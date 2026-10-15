@@ -2460,6 +2460,30 @@ export type SubscriptionHistoryAttempt = {
   operation_id?: string
 }
 
+export type SubscriptionHistoryAttribution = {
+  origin?: string
+  actor?: string
+  executor?: string
+  operation_id?: string
+}
+
+export type SubscriptionHistoryBillingState = {
+  payment_method_id?: string
+  next_retry_at?: string
+  last_retry_at?: string
+  retry_attempts?: number
+  transient_retries?: number
+  grace_ends_at?: string
+}
+
+export type SubscriptionHistoryChange = {
+  kind: string
+  decision?: string
+  from: SubscriptionHistoryBillingState
+  to: SubscriptionHistoryBillingState
+  card_version_id?: string
+}
+
 export type SubscriptionHistoryCoverage = {
   sources: string[]
   retention_days: number
@@ -2473,6 +2497,8 @@ export type SubscriptionHistoryEntry = {
   kind: string
   transition?: SubscriptionHistoryTransition
   attempt?: SubscriptionHistoryAttempt
+  change?: SubscriptionHistoryChange
+  attribution?: SubscriptionHistoryAttribution
   operation?: SubscriptionHistoryOperation
 }
 
@@ -2481,6 +2507,7 @@ export type SubscriptionHistoryOperation = {
   kind: string
   phase: string
   attempt: number
+  reason?: string
 }
 
 export type SubscriptionHistoryTransition = {

@@ -53,20 +53,24 @@ func TestSubscriptionHistoryFactsAndPaging(t *testing.T) {
  SELECT merchant_id,rail,psp_id,$2,'manual_rebill',1,'parked',$3
  FROM billing.subscriptions WHERE id=$1`, subUUID(e.sub), operation, at.Add(time.Second))
 
+	run(`INSERT INTO billing.subscription_billing_changes
+ (merchant_id,id,subscription_id,occurred_at,kind,from_retry_attempts,to_retry_attempts)
+ SELECT merchant_id,$2,id,$3,'retry_schedule',0,1 FROM billing.subscriptions WHERE id=$1`, subUUID(e.sub), id, at)
 	before := len(w.railLedger("stripe"))
 	full, err := w.client[embedded].GetSubscriptionHistory(t.Context(), e.sub, billing.PageRequest{Limit: 500})
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(full.Events.Items), 4)
+	require.GreaterOrEqual(t, len(full.Events.Items), 5)
 	require.Empty(t, full.Events.Next)
 	require.Equal(t, "parked", full.Events.Items[0].Operation.Phase)
-	require.Equal(t, "unknown", full.Events.Items[1].Operation.Phase)
-	require.Equal(t, operation.String(), full.Events.Items[1].Operation.ID)
-	require.Nil(t, full.Events.Items[1].Attempt, "uncertainty is not a provider decline")
-	require.Equal(t, "insufficient_funds", full.Events.Items[2].Attempt.Reason)
-	require.True(t, at.Equal(full.Events.Items[2].At))
-	require.True(t, at.Add(time.Minute).Equal(full.Events.Items[2].RecordedAt))
-	require.Equal(t, "renewal_declined", full.Events.Items[3].Transition.Decision)
-	require.Contains(t, full.Coverage.Gaps, "actor_attribution")
+	require.Equal(t, "retry_schedule", full.Events.Items[1].Change.Kind)
+	require.Equal(t, "unknown", full.Events.Items[2].Operation.Phase)
+	require.Equal(t, operation.String(), full.Events.Items[2].Operation.ID)
+	require.Nil(t, full.Events.Items[2].Attempt, "uncertainty is not a provider decline")
+	require.Equal(t, "insufficient_funds", full.Events.Items[3].Attempt.Reason)
+	require.True(t, at.Equal(full.Events.Items[3].At))
+	require.True(t, at.Add(time.Minute).Equal(full.Events.Items[3].RecordedAt))
+	require.Equal(t, "renewal_declined", full.Events.Items[4].Transition.Decision)
+	require.Contains(t, full.Coverage.Gaps, "unavailable_attribution")
 
 	var paged []billing.SubscriptionHistoryEntry
 	cursor := ""
