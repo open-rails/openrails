@@ -83,9 +83,8 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 
 	t.Run("refuses", func(t *testing.T) {
 		for mode, want := range map[iam.RegistrationMode]string{
-			"sometimes":                    "not one of open, invite_only, closed",
-			iam.RegistrationModeOpen:       "open self-registration",
-			iam.RegistrationModeInviteOnly: "no email or SMS sender is configured",
+			"sometimes":              "not one of open, invite_only, closed",
+			iam.RegistrationModeOpen: "open self-registration",
 		} {
 			_, err := f.buildServer(t, func(cfg *server.Config, _ *server.Deps) {
 				cfg.Auth.Token.Issuer = "http://127.0.0.1/reg-" + uuid.NewString()[:8]
@@ -97,15 +96,31 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 		}
 	})
 
-	t.Run("hosted open requires verification sender", func(t *testing.T) {
-		_, err := f.buildServer(t, func(cfg *server.Config, _ *server.Deps) {
-			cfg.MerchantCreation = &server.MerchantCreationConfig{}
-			cfg.Auth.Registration.NativeUserMode = iam.RegistrationModeOpen
-			cfg.Auth.Registration.AllowMissingSenders = false
-			cfg.Auth.Registration.Verification = iam.RegistrationVerificationRequired
+	for _, mode := range []iam.RegistrationMode{iam.RegistrationModeInviteOnly, iam.RegistrationModeOpen} {
+		t.Run(string(mode)+" without verification sender stays closed to unverified signup", func(t *testing.T) {
+			cp := f.newServer(t, func(cfg *server.Config, _ *server.Deps) {
+				cfg.Auth.Token.Issuer = "http://127.0.0.1/" + f.schema
+				if mode == iam.RegistrationModeOpen {
+					cfg.MerchantCreation = &server.MerchantCreationConfig{}
+				}
+				cfg.Auth.Registration.NativeUserMode = mode
+				cfg.Auth.Registration.AllowMissingSenders = false
+				cfg.Auth.Registration.Verification = iam.RegistrationVerificationRequired
+			})
+			require.ErrorContains(t, authProbe(t, cp, "authkit_config"), "no email or SMS sender is configured")
+			require.False(t, cp.AuthKit().EmailAvailable())
+			handler, err := standaloneHandler(cp)
+			require.NoError(t, err)
+			id := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+			body := `{"identifier":"missing-` + id + `@e2e.test","username":"missing_` + id + `","password":"Correct-horse-battery-9"}`
+			r := httptest.NewRequest(http.MethodPost, "/"+f.schema+"/v1/register", strings.NewReader(body))
+			r.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+			require.Contains(t, w.Body.String(), `"code":"email_unavailable"`)
 		})
-		require.ErrorContains(t, err, "no email or SMS sender is configured")
-	})
+	}
 }
 
 // outbox is an engine email sender that keeps what it sends.

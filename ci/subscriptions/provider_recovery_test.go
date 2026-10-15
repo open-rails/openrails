@@ -337,6 +337,12 @@ func TestReadonlyStripeRecoveryRetainsObservedCandidate(t *testing.T) {
 		return err == nil && candidate == payment
 	}, 30*time.Second, 30*time.Millisecond, "an observed processing payment is retained before later reads")
 	b.w.stop()
+	var beforeSubmitted int
+	require.NoError(t, b.w.pool.QueryRow(t.Context(), b.w.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='subscription_collection' AND result_evidence ? 'submitted_at'`)).Scan(&beforeSubmitted))
+	// Normal-mode observation can already retain a submission fence. Read-only
+	// recovery preserves that evidence and must send no new provider writes.
+	beforePosts := len(provider.Submitted("/v1/payment_intents"))
+	beforeMutations := len(provider.Mutations(""))
 	b.w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
 	b.w.start()
 	provider.ChargeListUnavailable(false)
@@ -346,7 +352,9 @@ func TestReadonlyStripeRecoveryRetainsObservedCandidate(t *testing.T) {
 	require.Equal(t, 2, b.providerAttempts())
 	var submitted int
 	require.NoError(t, b.w.pool.QueryRow(t.Context(), b.w.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='subscription_collection' AND result_evidence ? 'submitted_at'`)).Scan(&submitted))
-	require.Zero(t, submitted)
+	require.Equal(t, beforeSubmitted, submitted, "read-only recovery adds no submission fence")
+	require.Len(t, provider.Submitted("/v1/payment_intents"), beforePosts, "read-only recovery sends no payment request")
+	require.Len(t, provider.Mutations(""), beforeMutations, "read-only recovery performs no provider mutation")
 }
 
 func TestReadonlyStripeReversalRecordsMoneyBeforeCancellation(t *testing.T) {

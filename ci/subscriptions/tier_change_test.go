@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // Engine-owned tier changes. A customer's upgrade is one engine charge of new
@@ -78,7 +79,11 @@ func TestEngineTierUpgrade(t *testing.T) {
 		{"7d to 720h", 168, 720, 500, 2000, 84 * h, 1750},
 	}
 	forEachRail(t, func(t *testing.T, rail string) {
-		w := newWorld(t)
+		w := newWorld(t, func(cfg *config.Config) {
+			// The cadence matrix cancels one customer per row. The shared abuse
+			// budget uses the database clock, not the advanced billing clock.
+			cfg.UserActionRateLimit.MinimumCustomersPerHour = int64(len(rows))
+		})
 		for i, row := range rows {
 			tp := []topology{embedded, remote}[i%2]
 			group := "g" + uuid.NewString()[:8]
@@ -150,7 +155,11 @@ func TestEngineTierDowngrade(t *testing.T) {
 		{"7d to 720h", 168, 720},
 	}
 	forEachRail(t, func(t *testing.T, rail string) {
-		w := newWorld(t)
+		w := newWorld(t, func(cfg *config.Config) {
+			// The cadence matrix cancels one customer per row. The shared abuse
+			// budget uses the database clock, not the advanced billing clock.
+			cfg.UserActionRateLimit.MinimumCustomersPerHour = int64(len(rows))
+		})
 		for i, row := range rows {
 			tp := []topology{embedded, remote}[i%2]
 			group := "g" + uuid.NewString()[:8]

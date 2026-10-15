@@ -37,11 +37,17 @@ func providerCopyDatabase(t *testing.T, adminDSN string) string {
 	_, err = admin.Exec(t.Context(), "CREATE DATABASE "+pgx.Identifier{name}.Sanitize())
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Physical database removal can wait for a checkpoint under parallel
+		// integration load. Do not interrupt it and leave an invalid database.
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
+		defer func() {
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer closeCancel()
+			require.NoError(t, admin.Close(closeCtx))
+		}()
 		_, err := admin.Exec(ctx, "DROP DATABASE "+pgx.Identifier{name}.Sanitize()+" WITH (FORCE)")
 		require.NoError(t, err)
-		require.NoError(t, admin.Close(ctx))
 	})
 	u, err := url.Parse(adminDSN)
 	require.NoError(t, err)

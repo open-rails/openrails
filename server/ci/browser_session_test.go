@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/open-rails/authkit/iam"
@@ -55,7 +56,8 @@ func TestControlPlaneBrowserSessionUsesRefreshCookie(t *testing.T) {
 		require.NotEmpty(t, result.Tokens.Access)
 		require.Nil(t, result.Tokens.Refresh, "the HTTP response cannot expose a refresh credential to JavaScript")
 		for _, cookie := range w.Result().Cookies() {
-			if cookie.Name == iam.InsecureRefreshCookieName && cookie.Value != "" {
+			if strings.HasPrefix(cookie.Name, iam.InsecureRefreshCookieName+"_") && cookie.Value != "" {
+				require.Regexp(t, `^authkit_rt_[0-9a-f]{32}$`, cookie.Name, "the default cookie is isolated by issuer")
 				require.True(t, cookie.HttpOnly)
 				require.Equal(t, "/", cookie.Path)
 				require.Equal(t, http.SameSiteLaxMode, cookie.SameSite)

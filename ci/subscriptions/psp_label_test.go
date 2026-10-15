@@ -120,11 +120,20 @@ func TestPSPLabelMovedToAnotherAccount(t *testing.T) {
 	newSub := c.subscribe(embedded, "nmi", price.ID.String(), "content:new", method)
 	require.Equal(t, accountBID, w.subscription(embedded, newSub).PSPID.UUID().String())
 
-	// A's renewal fails on its own, naming why; nothing reaches the gateway.
-	charges := len(w.nmi.ledger(""))
+	// A's renewal fails on its own, naming why; B's usable account keeps
+	// renewing. An undeclared account never blocks the other account.
+	aVault, bVault := w.vaultOf(e.method), w.vaultOf(method)
+	aCharges, bCharges := len(w.nmi.ledger(aVault)), len(w.nmi.ledger(bVault))
+	aAttempts := w.attemptsOn(aVault)
+	bEnd := *w.subscription(embedded, newSub).CurrentPeriodEndsAt
 	e.toFreshPeriodEnd()
 	w.runRenewals()
-	require.Len(t, w.nmi.ledger(""), charges, "A's card is not charged without A's credentials")
+	require.Len(t, w.nmi.ledger(aVault), aCharges, "A's card is not charged without A's credentials")
+	require.Equal(t, aAttempts, w.attemptsOn(aVault), "A's unusable credentials never reach the provider")
+	require.Len(t, w.nmi.ledger(bVault), bCharges+1, "B's valid renewal is independent of A's missing credentials")
+	bRenewed := w.subscription(embedded, newSub)
+	require.Equal(t, accountBID, bRenewed.PSPID.UUID().String())
+	require.True(t, bRenewed.CurrentPeriodEndsAt.After(bEnd))
 	require.Equal(t, billing.SubscriptionAwaitingMethod, w.subscription(embedded, e.sub).Status, "the member pays the renewal with a usable card")
 	refused := false
 	for _, entry := range logs.AllEntries() {

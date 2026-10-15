@@ -16,9 +16,9 @@ import (
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
-// Provider drift remains visible with the destructive switch off. Arming does
-// not bypass unresolved account evidence: neither provider writes nor local
-// cancellations resume until ordinary observation confirms the drift is gone.
+// Provider drift remains visible with the destructive switch off. Arming lets
+// an independently confirmed provider deletion update its local mirror while
+// unrelated drift stays advisory and no provider writes are made.
 func TestLegacyNMIDrift(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -31,14 +31,14 @@ func TestLegacyNMIDrift(t *testing.T) {
 	w.refreshProviders()
 	w.settleCollectionScans()
 	writes := len(w.nmiWrites())
-	pullHeld := func() {
+	pullObserved := func() {
 		t.Helper()
 		job, err := w.jobs.Insert(t.Context(), refreshMerchant{MerchantID: w.client[embedded].MerchantID().UUID()}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		require.Eventually(t, func() bool {
 			row, err := w.jobs.JobGet(t.Context(), job.Job.ID)
 			return err == nil && row.State == rivertype.JobStateCompleted && len(row.Errors) == 0
-		}, 20*time.Second, 20*time.Millisecond, "observed drift holds financial recovery, not the completed pass")
+		}, 20*time.Second, 20*time.Millisecond, "the observation pass completes while drift remains visible")
 	}
 
 	w.nmi.EditSchedule(amount.railSub, func(s *nmimock.Schedule) { s.Amount = "14.99" })
@@ -48,16 +48,17 @@ func TestLegacyNMIDrift(t *testing.T) {
 	w.nmi.DeleteSchedule(deleted.railSub)
 	w.advance(time.Hour)
 
-	pullHeld()
+	pullObserved()
 	drifted := []string{amount.sub.UUID().String(), plan.sub.UUID().String(), paused.sub.UUID().String()}
 	require.ElementsMatch(t, drifted, w.openFindings("pull.subscription.drift"), "the switch blocks effects, not provider observation")
 	require.Equal(t, billing.SubscriptionActive, w.subscription(remote, deleted.sub).Status, "nothing changes without the switch")
 
 	w.armDestructive()
-	pullHeld()
+	pullObserved()
 	require.ElementsMatch(t, drifted, w.openFindings("pull.subscription.drift"))
 	require.Contains(t, w.openFindings("pull.payment_method.mismatch"), vaultGone.railCust, "the removed vault card is reported")
-	require.Equal(t, billing.SubscriptionActive, w.subscription(remote, deleted.sub).Status, "arming cannot bypass unresolved provider drift")
+	require.Equal(t, billing.SubscriptionCanceled, w.subscription(remote, deleted.sub).Status, "an independently confirmed deletion is mirrored despite unrelated drift")
+	require.True(t, deleted.c.entitled(deleted.ent), "the confirmed deletion preserves already-paid access")
 	require.Equal(t, "14.99", w.nmi.Schedule(amount.railSub).Amount, "the schedule is left as NMI holds it")
 	require.Equal(t, other, w.nmi.Schedule(plan.railSub).Plan)
 	require.True(t, w.nmi.Schedule(paused.railSub).Paused)
@@ -70,7 +71,7 @@ func TestLegacyNMIDrift(t *testing.T) {
 	w.pull()
 	w.pull()
 	require.Empty(t, w.openFindings("pull.subscription.drift"))
-	require.Equal(t, billing.SubscriptionCanceled, w.subscription(remote, deleted.sub).Status, "a schedule NMI deleted is mirrored once recovery completes")
+	require.Equal(t, billing.SubscriptionCanceled, w.subscription(remote, deleted.sub).Status, "the confirmed provider deletion remains mirrored")
 	require.True(t, deleted.c.entitled(deleted.ent), "canceling an NMI schedule preserves its already-paid access")
 	for _, l := range []*legacy{amount, plan, paused, vaultGone, clean} {
 		require.Equal(t, billing.SubscriptionActive, w.subscription(remote, l.sub).Status, "drift is reported, never acted on")

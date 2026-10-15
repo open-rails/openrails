@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@openrails/auth-ui':
-        specifier: 1.29.0
-        version: 1.29.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: 1.29.1
+        version: 1.29.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/billing-ui':
         specifier: file:../../../sdk/billing-ui
         version: file:../../../sdk/billing-ui(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
@@ -105,8 +105,8 @@ packages:
     peerDependencies:
       react: '>=16.0.0'
 
-  '@openrails/auth-ui@1.29.0':
-    resolution: {integrity: sha512-N8zttyRTEUHkVSHv27niMqFHbhiffoYpqDJgEM0UbeJ+pSl0UtRsvXblhGmyHlovvrfP3leiGpPfDNFqYfyf3w==}
+  '@openrails/auth-ui@1.29.1':
+    resolution: {integrity: sha512-xkKRVuv/fkB71viAVDHrU1EwF31qE5BhzefOb5io27OpJfOpAVDCM+cM9WX8Dlb8+xSeffRGJUdctpo8ehGbcA==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@solana/wallet-adapter-react': '>=0.15 <1'
@@ -828,7 +828,7 @@ snapshots:
     dependencies:
       react: 19.3.0
 
-  '@openrails/auth-ui@1.29.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@openrails/auth-ui@1.29.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@hugeicons/core-free-icons': 4.3.5
