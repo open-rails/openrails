@@ -117,8 +117,10 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	if a.SubscriptionID != nil && (original.SubscriptionID == nil || *a.SubscriptionID != *original.SubscriptionID) {
 		return false, observed.ErrConflict
 	}
-	// Query reports can reuse the sale's reference for its refund action.
-	// Namespace that verified action; retain the original provider reference.
+	// Reject actions prepared before ambiguous NMI refunds required review.
+	if original.Rail == models.RailNMI && a.TransactionID == original.TransactionID {
+		return false, observed.ErrConflict
+	}
 	key := a.TransactionID
 	if key == original.TransactionID {
 		key = "refund:" + key
@@ -127,7 +129,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	if lookupErr != nil && !db.IsNotFound(lookupErr) {
 		return false, lookupErr
 	}
-	if original.Rail == models.RailNMI && a.TransactionID != original.TransactionID {
+	if original.Rail == models.RailNMI {
 		err = w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			scoped := payments.NewPaymentService(w.DB.NewWithPgxTx(tx), clockwork.NewFakeClockAt(w.now()))
 			receipt, err := scoped.RecordObservedRefund(ctx, original.ID, key, amount, payments.ReversalRefund, a.PurchasedAt, a.Metadata)

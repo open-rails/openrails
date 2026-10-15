@@ -147,3 +147,77 @@ func TestNMIRefundReconciliationSharesImportedReceipts(t *testing.T) {
 		})
 	}
 }
+
+func TestNMIAmbiguousRefundReconciliationDoesNotWrite(t *testing.T) {
+	w := newWorld(t)
+	client, buyer := w.client[embedded], w.newCustomer()
+	d, err := db.NewWithPGXPool(w.pool, w.schema)
+	require.NoError(t, err)
+	ctx := merchant.WithID(t.Context(), client.MerchantID())
+	psp := w.psp["nmi"].UUID()
+	paid := w.clock.Now().Add(-day)
+	sale := w.nmi.AddSale(nmimock.Sale{Vault: w.nmi.AddVault(visa), Amount: "4.23", At: paid})
+	book := billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"}, HistoricalPayments: []billing.DeclaredHistoricalPayment{{SourceID: "sale", Customer: buyer.cid(), Rail: "nmi", TransactionID: sale.TransactionID, Amount: 4_230_000, Currency: "USD", PaidAt: paid}}}
+	_, err = client.ImportBilling(t.Context(), book)
+	require.NoError(t, err)
+	svc := payments.NewPaymentService(d, w.clock)
+	scoped := db.WithPSPID(ctx, psp)
+	original, err := svc.GetByPSPTransactionID(scoped, models.RailNMI, sale.TransactionID)
+	require.NoError(t, err)
+	writer := &reconcile.PGLocalWriter{DB: d, Now: w.clock.Now}
+	reader := reconcile.NewEngine(d, nil, nil, nil, nil)
+	reader.Now, reader.Writer = w.clock.Now, writer
+	run := func(report nmiRefundReport) *reconcile.RunResult {
+		t.Helper()
+		reader.Fetchers = map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderNMI: report}
+		var result *reconcile.RunResult
+		err := d.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			var runErr error
+			result, runErr = reader.Run(ctx, reconcile.RunParams{Mode: reconcile.ModeEnforce, Mutations: &reconcile.LocalMutationPolicy{Insert: true}, Since: paid, Until: w.clock.Now(), PSPs: map[reconcile.Provider]reconcile.PSPBinding{reconcile.ProviderNMI: {ID: psp, Rail: "nmi", AccountID: nmiAcct}}})
+			return runErr
+		})
+		require.NoError(t, err)
+		for _, provider := range result.Summary.Providers {
+			require.Empty(t, provider.Error)
+			require.Empty(t, provider.ApplyErrors)
+		}
+		return result
+	}
+	refund := reconcile.RemoteTransaction{TransactionID: sale.TransactionID, OriginalTransactionID: sale.TransactionID, Type: reconcile.TransactionTypeRefund, Success: true, AmountCents: 101, Currency: "USD", OccurredAt: w.clock.Now()}
+	for _, originalID := range []string{sale.TransactionID, ""} {
+		refund.OriginalTransactionID = originalID
+		for range 2 {
+			result := run(nmiRefundReport{transactions: []reconcile.RemoteTransaction{refund}})
+			require.Len(t, result.Findings, 1)
+			require.Equal(t, reconcile.FindingStatusRequiresReview, result.Findings[0].Status)
+			require.Empty(t, result.PlannedChanges)
+			require.Empty(t, result.AppliedChanges)
+		}
+	}
+	// An action prepared by older code must not bypass the review decision.
+	changed, err := writer.RecordRefund(ctx, reconcile.RecordRefundAction{PspID: &psp, Rail: "nmi", TransactionID: sale.TransactionID, AmountCents: 101, Currency: "USD", PurchasedAt: refund.OccurredAt, RefundedPaymentID: &original.ID, CustomerID: original.CustomerID})
+	require.Error(t, err)
+	require.False(t, changed)
+	require.Equal(t, 1, w.countRows(`SELECT count(*) FROM billing.payments`))
+	total, err := svc.GetRefundTotalByPaymentID(scoped, original.ID)
+	require.NoError(t, err)
+	require.Zero(t, total)
+	unchanged, err := svc.GetByID(ctx, original.ID)
+	require.NoError(t, err)
+	require.Equal(t, original.Status, unchanged.Status)
+	require.Equal(t, original.Amount, unchanged.Amount)
+
+	// Once the provider supplies a distinct receipt and explicit link, normal
+	// reconciliation can record it, and a replay cannot record it twice.
+	refund.TransactionID, refund.OriginalTransactionID, refund.AmountCents = "12684044441", sale.TransactionID, -101
+	for range 2 {
+		run(nmiRefundReport{transactions: []reconcile.RemoteTransaction{refund}})
+	}
+	require.Equal(t, 2, w.countRows(`SELECT count(*) FROM billing.payments`))
+	total, err = svc.GetRefundTotalByPaymentID(scoped, original.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1_010_000, total)
+	for _, table := range []string{"subscriptions", "grants", "provider_intents"} {
+		require.Zero(t, w.countRows("SELECT count(*) FROM billing."+table), table)
+	}
+}

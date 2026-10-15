@@ -93,3 +93,39 @@ func TestNMISeparateRefunds(t *testing.T) {
 	require.Len(t, findings, 1, "one recorded partial must not hide another equal partial")
 	require.Equal(t, second.TransactionID, findings[0].Apply.RecordRefund.TransactionID)
 }
+
+func TestNMIAmbiguousRefundsRequireReview(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, tc := range []struct {
+		name, refundID, originalID string
+	}{
+		{"same ID", "123456", "123456"},
+		{"same ID without original link", "123456", ""},
+		{"separate ID without original link", "654321", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, status := range []string{"succeeded", "refunded"} {
+				t.Run(status, func(t *testing.T) {
+					original := LocalPayment{ID: uuid.New(), CustomerID: uuid.New(), Rail: "nmi", TransactionID: "123456", AmountNative: 4_230_000, AmountCents: 423, Currency: "USD", Status: status, PurchasedAt: now.Add(-time.Hour)}
+					refund := RemoteTransaction{TransactionID: tc.refundID, OriginalTransactionID: tc.originalID, Type: TransactionTypeRefund, Success: true, AmountCents: 101, Currency: "USD", OccurredAt: now,
+						Raw: rawJSON(map[string]string{"charge": original.TransactionID})}
+					second := refund
+					second.OccurredAt = now.Add(-time.Minute)
+					snapshot := &RemoteSnapshot{Provider: ProviderNMI, Capabilities: Capabilities{Transactions: true, Refunds: true}, Transactions: []RemoteTransaction{refund, second}}
+					findings := diffProvider(ProviderNMI, snapshot, &LocalState{}, []LocalPayment{original}, now, diffOptions{})
+					require.Len(t, findings, 2, "neither an existing payment nor a refund status qualifies ambiguous receipts")
+					for _, finding := range findings {
+						require.Equal(t, FindingStatusRequiresReview, finding.Status)
+						require.True(t, finding.RequiresAdmin)
+						require.Nil(t, finding.Apply)
+						require.Equal(t, tc.refundID, finding.RemoteEvidence["transaction_id"])
+					}
+					snapshot.Transactions = []RemoteTransaction{refund}
+					snapshot.Transactions[0].Success = false
+					require.Empty(t, diffProvider(ProviderNMI, snapshot, &LocalState{}, []LocalPayment{original}, now, diffOptions{}))
+				})
+			}
+		})
+	}
+}

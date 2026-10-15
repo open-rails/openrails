@@ -1515,14 +1515,12 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 }
 
 func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, paymentsByTxnID map[string]*LocalPayment, now time.Time) (Finding, bool) {
-	if provider == ProviderNMI && t.OriginalTransactionID != "" && t.OriginalTransactionID != t.TransactionID {
+	if provider == ProviderNMI {
 		return makeNMIRefund(t, paymentsByTxnID, now)
 	}
 	bc := decodeBreadcrumbs(t.Raw)
 
-	// Identify the local original payment: an explicit charge link (Stripe
-	// re_ -> ch_), or the refund sharing the original's transaction id (NMI
-	// refund actions ride the original transaction record).
+	// Identify the local original payment from the provider's charge link.
 	var original *LocalPayment
 	if bc.Charge != "" {
 		original = paymentsByTxnID[bc.Charge]
