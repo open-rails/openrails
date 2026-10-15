@@ -212,7 +212,8 @@ WITH targets AS MATERIALIZED (
 )
 UPDATE billing.subscriptions s SET payment_method_id = NULL, updated_at = now()
 FROM targets, history
-WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = targets.id AND s.row_version = targets.row_version;
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = targets.id AND s.row_version = targets.row_version
+  AND s.deleted_at IS NULL;
 
 -- name: ListActiveSubscriptionsForPSP :many
 SELECT * FROM billing.subscriptions sub
