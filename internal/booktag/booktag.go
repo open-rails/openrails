@@ -19,6 +19,8 @@ const (
 	NMIField = "merchant_defined_field_20"
 	// NMIFieldID is NMIField's id in query reports and webhooks.
 	NMIFieldID = "20"
+	// NMIV5Key is NMIField's key in v5 API objects.
+	NMIV5Key = "field_20"
 	// StripeKey is the metadata key Stripe objects carry the book id in.
 	StripeKey = "openrails_book"
 )
