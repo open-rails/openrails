@@ -182,6 +182,9 @@ export type NextAction = z.infer<typeof nextActionSchema>
  * is replaced, and the subscription ends at `final_retry_at`.
  */
 export const subscriptionDunningSchema = z.object({
+  /** Operating-mode hold; dates remain the planned schedule while paused. */
+  paused: z.boolean(),
+  pause_reason: z.string().nullish(),
   attempts: z.number(),
   retries_left: z.number().nullish(),
   next_retry_at: time.nullish(),

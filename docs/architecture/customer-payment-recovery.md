@@ -70,6 +70,25 @@ account.
 A caller should retain its key through network uncertainty and read the existing
 resource before starting a different action.
 
+The dunning dates describe the planned schedule. For retries OpenRails runs,
+`dunning.paused` reports an operating-mode hold without changing those dates:
+`pause_reason: automatic_collection_paused` means limited mode, while
+`provider_writes_disabled` means readonly. Effective mode includes the
+deployment, merchant and billing-book restrictions. Restoring effective full
+mode clears this automatic hold on the next read; it does not guarantee that
+the card, provider or pending payment permits a charge. An existing
+`waiting_for_new_card` or failure reason remains meaningful while paused.
+OpenRails' mode does not pause retries managed by an external provider.
+
+Customer-requested payment is separate: limited mode permits otherwise
+eligible customer payments, even while automatic retries wait. Readonly makes
+an otherwise retryable recovery answer `retryable: false` with
+`blocked_reason: provider_writes_disabled`. Existing `payment_in_progress`,
+`authentication_required` and unsupported/nonretryable reasons keep their
+meaning and priority. No raw operating-mode diagnostics are exposed in these
+fields. Reads do not charge, reschedule or arm anything; commands still check
+current eligibility under the appropriate lock.
+
 A declined order carries `payment.last_payment_error`; a subscription's
 `recovery.last_failure_reason` names why its latest collection failed. This is
 the same normalized machine category as a payment error's `decline_reason`

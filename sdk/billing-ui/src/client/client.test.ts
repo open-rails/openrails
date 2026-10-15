@@ -45,6 +45,7 @@ describe("wire fixtures", () => {
       product: { display_name: "Pro" },
       card: { brand: "visa", last4: "4242" },
       dunning: {
+        paused: false,
         attempts: 2,
         retries_left: 3,
         next_retry_at: "2026-09-16T00:00:00.123456789Z",
@@ -52,6 +53,17 @@ describe("wire fixtures", () => {
         last_failure_reason: "insufficient_funds",
       },
     })
+  })
+
+  it("preserves a paused retry's planned date and reason", () => {
+    const dunning = {
+      ...subscriptionFixture.dunning,
+      paused: true,
+      pause_reason: "automatic_collection_paused",
+    }
+    expect(
+      subscriptionSchema.parse({ ...subscriptionFixture, dunning }).dunning
+    ).toMatchObject(dunning)
   })
 
   it("decodes the canonical OpenRails usage report", () => {

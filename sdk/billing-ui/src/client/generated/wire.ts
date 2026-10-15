@@ -2441,6 +2441,8 @@ export type SubscriptionChangePreview = {
 }
 
 export type SubscriptionDunning = {
+  paused: boolean
+  pause_reason?: string
   attempts: number
   retries_left: number | null
   next_retry_at: string | null
