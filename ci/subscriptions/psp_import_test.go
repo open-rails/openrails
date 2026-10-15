@@ -3,6 +3,10 @@
 package subscriptions_test
 
 import (
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,7 +62,7 @@ func TestPSPImportFromNMI(t *testing.T) {
 	w := prepareWorld(t, 12)
 	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
 	w.start()
-	w.waive("recorded", "the conflicted member's charge and the one-off charge stay staged, never landed")
+	w.waive("recorded", "the conflicted member's charge stays staged, never landed")
 	ctx := t.Context()
 	embeddedClient, remoteClient := w.client[embedded], w.client[remote]
 	mutations := len(w.nmi.Calls())
@@ -93,6 +97,31 @@ func TestPSPImportFromNMI(t *testing.T) {
 	again := w.nmi.AddSchedule(nmimock.Schedule{Vault: twice.vault, Plan: plan, Amount: "9.99", Days: 30, Order: "ord-g", NextBilling: paid, Created: start})
 	againSale := w.nmi.AddScheduleSale(again, start)
 	oneOff := w.nmi.AddSale(nmimock.Sale{Vault: byEmail.vault, Amount: "4.99", OrderID: "one-off", At: start.Add(-5 * 24 * time.Hour)})
+	partial := w.nmi.AddSale(nmimock.Sale{Vault: byEmail.vault, Amount: "4.99", OrderID: "partial-refund", At: oneOff.At})
+	full := w.nmi.AddSale(nmimock.Sale{Vault: byEmail.vault, Amount: "4.99", OrderID: "full-refund", At: oneOff.At})
+	failedRefund := w.nmi.AddSale(nmimock.Sale{Vault: byEmail.vault, Amount: "4.99", OrderID: "failed-refund", At: oneOff.At})
+	// Query API refunds are actions on the original transaction. Supply that
+	// report shape without changing the shared mock's refund behavior.
+	w.nmi.Intercept(func(r *http.Request) bool { return true }, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
+		res := serve()
+		raw, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		body := string(raw)
+		for _, refund := range []struct{ id, amount, success string }{
+			{partial.TransactionID, "1.00", "1"}, {full.TransactionID, "4.99", "1"}, {failedRefund.TransactionID, "1.00", "0"},
+		} {
+			identity := "<transaction_id>" + refund.id + "</transaction_id>"
+			action := fmt.Sprintf("<action><amount>%s</amount><action_type>refund</action_type><date>%s</date><success>%s</success></action>", refund.amount, start.UTC().Format("20060102150405"), refund.success)
+			body = strings.ReplaceAll(body, identity, identity+action)
+		}
+		res.Body = io.NopCloser(strings.NewReader(body))
+		res.ContentLength = int64(len(body))
+		res.Header.Set("Content-Length", fmt.Sprint(len(body)))
+		return res, nil
+	})
 
 	res, err := embeddedClient.SetPSPImportMappings(ctx, billing.SetPSPImportMappingsParams{Mappings: []billing.PSPImportMapping{
 		{Mapping: "legacy_user", Key: "1002", Customer: new(b.cid())},
@@ -144,6 +173,12 @@ func TestPSPImportFromNMI(t *testing.T) {
 	require.Equal(t, "manual", *recs[unmatched.vault].LinkedVia)
 	require.Equal(t, d.cid(), *recs[unmatched.schedule].Customer)
 
+	// Even an unlinked refund must stop its linked charge from landing.
+	refundRef := partial.TransactionID + ":refund:" + start.UTC().Format(time.RFC3339)
+	require.Equal(t, billing.PSPImportLinked, recs[refundRef].State)
+	_, err = w.pool.Exec(ctx, w.q(`UPDATE billing.psp_import_records SET state = 'unmatched', customer_id = NULL, linked_via = NULL WHERE id = $1`), recs[refundRef].ID.UUID())
+	require.NoError(t, err)
+
 	imp, err = remoteClient.ApplyPSPImport(ctx, imp.ID)
 	require.NoError(t, err)
 	imp = w.pspImported(imp.ID, billing.PSPImportApplied)
@@ -178,8 +213,21 @@ func TestPSPImportFromNMI(t *testing.T) {
 	for _, ref := range []string{byEmail.vault, byEmail.schedule, byEmail.sale.TransactionID, byOrder.vault, unmatched.schedule} {
 		require.Equal(t, billing.PSPImportImported, state(ref), ref)
 	}
-	require.Equal(t, billing.PSPImportBlocked, recs[oneOff.TransactionID].State)
-	require.Contains(t, *recs[oneOff.TransactionID].Reason, "no subscription")
+	require.Equal(t, billing.PSPImportImported, recs[oneOff.TransactionID].State)
+	require.Equal(t, billing.PSPImportBlocked, recs[partial.TransactionID].State)
+	require.Contains(t, *recs[partial.TransactionID].Reason, "recorded refund")
+	require.Equal(t, billing.PSPImportUnmatched, recs[refundRef].State)
+	require.Equal(t, billing.PSPImportImported, recs[failedRefund.TransactionID].State)
+	for _, id := range []string{partial.TransactionID, full.TransactionID} {
+		payments, err := remoteClient.ListPayments(ctx, billing.PaymentListParams{CustomerID: a.cid(), TransactionID: id})
+		require.NoError(t, err)
+		require.Empty(t, payments.Items, "refunded history stays staged")
+	}
+	history, err := remoteClient.ListPayments(ctx, billing.PaymentListParams{CustomerID: a.cid(), TransactionID: oneOff.TransactionID})
+	require.NoError(t, err)
+	require.Len(t, history.Items, 1)
+	require.Equal(t, int64(4_990_000), history.Items[0].Amount)
+	require.Nil(t, history.Items[0].SubscriptionID)
 	require.Equal(t, billing.PSPImportConflict, recs[conflicted.schedule].State)
 
 	// A customer's second live schedule of the product cannot land beside the

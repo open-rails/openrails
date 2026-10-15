@@ -2,6 +2,7 @@
 -- trg_subscriptions_set_tier_group trigger — never written by the app.
 
 -- name: CreateSubscription :execrows
+WITH history AS MATERIALIZED (SELECT set_config('openrails.subscription_history', sqlc.arg(history_attribution)::text, true))
 INSERT INTO billing.subscriptions (
     id, merchant_id, customer_id, product_id, price_id,
     access_duration_hours_snapshot, provider_access_default_snapshot, status, started_at,
@@ -10,7 +11,7 @@ INSERT INTO billing.subscriptions (
     retry_attempts, next_retry_at, grace_ends_at, cancel_feedback,
     cancel_type, canceled_at, deletion_scheduled_at, gateway_response,
     created_at, updated_at, psp_id, collection_policy, quantity
-) VALUES (
+) SELECT
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4,
     sqlc.narg(access_duration_hours_snapshot)::int, sqlc.arg(provider_access_default_snapshot)::boolean,
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending'),
@@ -26,7 +27,7 @@ INSERT INTO billing.subscriptions (
     sqlc.arg(psp_id)::uuid,
     COALESCE(NULLIF(sqlc.arg(collection_policy)::text, ''), 'provider'),
     sqlc.narg(quantity)::int
-);
+FROM history;
 
 -- name: UpdateSubscriptionAt :execrows
 -- Full-column update (nil pointers CLEAR fields like canceled_at) against the
@@ -59,7 +60,8 @@ UPDATE billing.subscriptions SET
     updated_at = sqlc.arg(updated_at)
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND row_version = sqlc.arg(expected_version)
-  AND deleted_at IS NULL;
+  AND deleted_at IS NULL
+  AND set_config('openrails.subscription_history', sqlc.arg(history_attribution)::text, true) IS NOT NULL;
 
 -- name: UpdateSubscriptionDecided :execrows
 -- A lifecycle decision: the full-row write that may change status, paid period
@@ -97,7 +99,8 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND row_version = sqlc.arg(expected_version)
   AND deleted_at IS NULL
   -- The status-transition audit records this decision's name.
-  AND set_config('openrails.subscription_decision', sqlc.arg(decision)::text, true) IS NOT NULL;
+  AND set_config('openrails.subscription_decision', sqlc.arg(decision)::text, true) IS NOT NULL
+  AND set_config('openrails.subscription_history', sqlc.arg(history_attribution)::text, true) IS NOT NULL;
 
 -- name: GetSubscriptionByID :one
 SELECT * FROM billing.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
@@ -184,18 +187,33 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail_subscription_id = sqlc.arg(rail_subscription_id)::text
   AND deleted_at IS NULL
-  AND payment_method_id IS DISTINCT FROM sqlc.narg(payment_method_id)::uuid;
+  AND payment_method_id IS DISTINCT FROM sqlc.narg(payment_method_id)::uuid
+  AND set_config('openrails.subscription_history', jsonb_build_object(
+      'merchant_id', subscriptions.merchant_id, 'entity_id', id, 'action', 'update',
+      'version', row_version, 'origin', 'provider', 'executor', 'stripe_observation',
+      'decision', 'provider_card_observed')::text, true) IS NOT NULL;
 
 -- name: ClearStripePaymentMethodSubscriptions :execrows
--- A detached Stripe method can no longer be charged or reattached. Clear only
--- links owned by the exact PSP that delivered the detach event.
-UPDATE billing.subscriptions SET
-    payment_method_id = NULL,
-    updated_at = now()
-WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe'
-  AND psp_id = sqlc.arg(psp_id)::uuid
-  AND payment_method_id = sqlc.arg(payment_method_id)::uuid
-  AND deleted_at IS NULL;
+-- A detach can affect several subscriptions. Capture all locked row versions
+-- in one envelope: AFTER ROW triggers run after the whole UPDATE, so a mutable
+-- per-row GUC would retain only the final subscription's attribution.
+WITH targets AS MATERIALIZED (
+    SELECT id, row_version FROM billing.subscriptions
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe'
+      AND psp_id = sqlc.arg(psp_id)::uuid AND payment_method_id = sqlc.arg(payment_method_id)::uuid
+      AND deleted_at IS NULL
+    ORDER BY id FOR UPDATE
+), history AS MATERIALIZED (
+    SELECT set_config('openrails.subscription_history', jsonb_build_object(
+        'merchant_id', sqlc.arg(merchant_id)::uuid, 'action', 'update',
+        'versions', COALESCE(jsonb_object_agg(id::text,row_version),'{}'::jsonb),
+        'origin','provider','executor','stripe_observation','decision','provider_card_detached')::text,true)
+    FROM targets
+)
+UPDATE billing.subscriptions s SET payment_method_id = NULL, updated_at = now()
+FROM targets, history
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = targets.id AND s.row_version = targets.row_version
+  AND s.deleted_at IS NULL;
 
 -- name: ListActiveSubscriptionsForPSP :many
 SELECT * FROM billing.subscriptions sub

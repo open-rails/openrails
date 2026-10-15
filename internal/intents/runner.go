@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/history"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/shared/progress"
@@ -198,10 +199,11 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	// And its PSP: every mirror row the handler creates (charge, subscription,
 	// vaulted method) inherits the account the intent is addressed to.
 	ctx = pinIntentAddress(ctx, intent)
+	ctx = history.WithAttribution(ctx, intentHistoryAttribution(intent, "execution"))
 	var actionErr error
 	ctx, actionErr = r.bindIntentAction(ctx, intent)
 	if actionErr != nil {
-		r.park(ctx, logEntry, stats, intent.ID, now, actionErr.Error())
+		r.park(withHistoryHold(ctx, "admission_unavailable"), logEntry, stats, intent.ID, now, actionErr.Error())
 		return
 	}
 
@@ -209,7 +211,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	if handler == nil {
 		// Likely deploy skew (an intent type from a newer/older build). Keep
 		// it pending — a build that knows the type will drain it.
-		r.park(ctx, logEntry, stats, intent.ID, now, "no handler registered for intent type "+intent.IntentType)
+		r.park(withHistoryHold(ctx, "handler_unavailable"), logEntry, stats, intent.ID, now, "no handler registered for intent type "+intent.IntentType)
 		return
 	}
 
@@ -217,7 +219,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	if err != nil {
 		// Local read failed; not an attempt — re-check soon without burning
 		// backoff.
-		r.park(ctx, logEntry, stats, intent.ID, now, "relevance check failed: "+err.Error())
+		r.park(withHistoryHold(ctx, "relevance_unavailable"), logEntry, stats, intent.ID, now, "relevance check failed: "+err.Error())
 		return
 	}
 	if !rel.Applicable {
@@ -235,7 +237,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	// it still passes provider mode and the destructive rate/volume ceilings.
 	if r.Destructive != nil && IsDestructiveIntentType(intent.IntentType) && !isSelfServicePaymentMethodDelete(intent) {
 		if allowed, reason := r.Destructive.AllowDestructive(ctx, intent.MerchantID); !allowed {
-			r.park(ctx, logEntry, stats, intent.ID, now, reason)
+			r.park(withHistoryHold(ctx, "destructive_guard"), logEntry, stats, intent.ID, now, reason)
 			return
 		}
 	}
@@ -250,11 +252,11 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 			return NewStore(d).LogExternalMutation(ctx, r.mutationLogParams(intent, MutationLogPhaseAttempting, "", nil))
 		})
 		if err != nil {
-			r.park(ctx, logEntry, stats, intent.ID, now, "destructive-volume breaker check failed: "+err.Error())
+			r.park(withHistoryHold(ctx, "breaker_unavailable"), logEntry, stats, intent.ID, now, "destructive-volume breaker check failed: "+err.Error())
 			return
 		}
 		if held {
-			r.park(ctx, logEntry, stats, intent.ID, now, reason)
+			r.park(withHistoryHold(ctx, "destructive_guard"), logEntry, stats, intent.ID, now, reason)
 			return
 		}
 	}
@@ -378,6 +380,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 		// same mirror rows the executor would have.
 		ctx := merchant.WithID(ctx, billing.MerchantID(intent.MerchantID))
 		ctx = pinIntentAddress(ctx, intent)
+		ctx = history.WithAttribution(ctx, intentHistoryAttribution(intent, "verification"))
 		logEntry := log.WithContext(ctx).WithFields(log.Fields{
 			"intent_id":   intent.ID,
 			"intent_type": intent.IntentType,
@@ -506,7 +509,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 			submitted, malformed := hasSubmissionEvidence(intent)
 			if !submitted && malformed == nil {
 				if blocked, reason := GateExecution(ctx, r.Config, intent.MerchantID, Origin(intent.Origin)); blocked {
-					err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), reason, nil)
+					err = r.Store.MarkUnknown(withHistoryHold(ctx, "write_posture"), intent.ID, now.Add(ParkRetryInterval), reason, nil)
 					applied = OutcomeAmbiguous
 					break
 				}
@@ -528,7 +531,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		}
 	case OutcomeParked:
 		if verifying {
-			err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason, outcome.Evidence)
+			err = r.Store.MarkUnknown(withHistoryHold(ctx, "execution_held"), intent.ID, now.Add(ParkRetryInterval), outcome.Reason, outcome.Evidence)
 			applied = OutcomeAmbiguous
 		} else {
 			if unsent, _ := outcome.Evidence["destructive_before_effect"].(bool); unsent {
@@ -745,6 +748,7 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProvi
 	}
 	ctx = merchant.WithID(ctx, billing.MerchantID(in.MerchantID))
 	ctx = pinIntentAddress(ctx, in)
+	ctx = history.WithAttribution(ctx, intentHistoryAttribution(in, "verification"))
 	ctx, err = r.bindIntentAction(ctx, in)
 	if err != nil {
 		return in, err
@@ -767,6 +771,7 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProvi
 // state. Redispatch it through Verify, which can record positive receipts while
 // the write gate remains closed, without issuing another provider mutation.
 func (r *Runner) holdForWritePosture(ctx context.Context, logger *log.Entry, stats *Stats, in gen.BillingProviderIntent, now time.Time, reason string) {
+	ctx = withHistoryHold(ctx, "write_posture")
 	submitted, malformed := hasSubmissionEvidence(in)
 	if in.IntentType == "subscription_collection" || in.IntentType == TypeOrderCollection || submitted || malformed != nil {
 		writeCtx, cancel := LedgerWriteContext(ctx)

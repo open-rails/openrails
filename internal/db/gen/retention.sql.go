@@ -183,6 +183,32 @@ func (q *Queries) DeleteResolvedFindingsBefore(ctx context.Context, arg DeleteRe
 	return result.RowsAffected(), nil
 }
 
+const deleteSubscriptionBillingChangesPastRetention = `-- name: DeleteSubscriptionBillingChangesPastRetention :execrows
+DELETE FROM billing.subscription_billing_changes
+WHERE merchant_id = $1::uuid
+  AND id IN (
+    SELECT st.id FROM billing.subscription_billing_changes st
+    WHERE st.merchant_id = $1::uuid
+      AND st.occurred_at < now() - make_interval(days => $2::int)
+    ORDER BY st.occurred_at
+    LIMIT $3::int
+)
+`
+
+type DeleteSubscriptionBillingChangesPastRetentionParams struct {
+	MerchantID    uuid.UUID
+	RetentionDays int32
+	RowLimit      int32
+}
+
+func (q *Queries) DeleteSubscriptionBillingChangesPastRetention(ctx context.Context, arg DeleteSubscriptionBillingChangesPastRetentionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSubscriptionBillingChangesPastRetention, arg.MerchantID, arg.RetentionDays, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteSubscriptionTransitionsPastRetention = `-- name: DeleteSubscriptionTransitionsPastRetention :execrows
 DELETE FROM billing.subscription_status_transitions
 WHERE merchant_id = $1::uuid
@@ -352,6 +378,11 @@ FROM (
     UNION
     (SELECT DISTINCT st.merchant_id AS mid
        FROM billing.subscription_status_transitions st
+      WHERE ($1::uuid IS NULL OR st.merchant_id > $1::uuid)
+        AND st.occurred_at < $10::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT st.merchant_id AS mid FROM billing.subscription_billing_changes st
       WHERE ($1::uuid IS NULL OR st.merchant_id > $1::uuid)
         AND st.occurred_at < $10::timestamptz
       ORDER BY 1 LIMIT $3::int)

@@ -14,11 +14,18 @@ import (
 
 const insertPaymentMethodVersion = `-- name: InsertPaymentMethodVersion :execrows
 
+WITH version AS MATERIALIZED (SELECT uuidv7() AS id),
+history AS MATERIALIZED (
+    SELECT id, set_config('openrails.subscription_history',
+        (COALESCE(NULLIF($20::text,''),'{}')::jsonb || jsonb_build_object('entity_id',id))::text,true)
+    FROM version
+)
 INSERT INTO billing.payment_method_versions (
+    id,
     merchant_id, customer_id, payment_method_id, source, kind, event_ref, psp_id, custodian_id,
     rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, fingerprint,
     network_token_id, network_token_status, network_token_par, effective_at
-) VALUES (
+) SELECT history.id,
     $1::uuid, $2::uuid, $3::uuid,
     $4::text, $5::text, $6::text,
     $7::uuid, $8::uuid,
@@ -27,7 +34,7 @@ INSERT INTO billing.payment_method_versions (
     $13::smallint, $14::smallint, $15::text,
     $16::text, $17::text, $18::text,
     $19::timestamptz
-)
+FROM history
 ON CONFLICT (merchant_id, payment_method_id, source, event_ref) DO NOTHING
 `
 
@@ -51,6 +58,7 @@ type InsertPaymentMethodVersionParams struct {
 	NetworkTokenStatus *string
 	NetworkTokenPar    *string
 	EffectiveAt        time.Time
+	HistoryAttribution string
 }
 
 // billing.payment_method_versions: the history of the card behind a method.
@@ -76,6 +84,7 @@ func (q *Queries) InsertPaymentMethodVersion(ctx context.Context, arg InsertPaym
 		arg.NetworkTokenStatus,
 		arg.NetworkTokenPar,
 		arg.EffectiveAt,
+		arg.HistoryAttribution,
 	)
 	if err != nil {
 		return 0, err

@@ -36,6 +36,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			if renamed, ok := usageRenames[r.Table]; ok {
 				r.Table, preUsage = renamed, true
 			}
+			if table+1 < len(Profiles) && Profiles[table+1].Name == "subscription_billing_changes" && r.Table == "subscription_status_transitions" {
+				table++
+			}
 			table++
 			if table >= len(Profiles) || r.Table != Profiles[table].Name {
 				return fmt.Errorf("invalid archive table order")
@@ -49,6 +52,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			return nil
 		}
 		p := Profiles[table]
+		if p.Name == "subscription_status_transitions" && len(r.Values) == len(p.Columns)-4 {
+			r.Values = append(r.Values, nil, nil, nil, nil)
+		}
 		if preUsage {
 			if err := normalizePreUsage(p, &r.Values); err != nil {
 				return err

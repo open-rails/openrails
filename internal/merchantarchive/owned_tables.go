@@ -91,6 +91,7 @@ var ownedTables = []string{
 	"solana_pay_receipts",
 	"solana_pay_references",
 	"solana_subscriptions",
+	"subscription_billing_changes",
 	"subscription_status_transitions",
 	"subscription_verifications",
 	"subscriptions",

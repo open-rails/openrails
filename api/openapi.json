@@ -2881,6 +2881,81 @@
         ]
       }
     },
+    "/v1/admin/subscriptions/{id}/history": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionHistory"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:customer:read",
+          "root": "root:customer:read"
+        },
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_param",
+          "invalid_query",
+          "subscription_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
     "/v1/admin/subscriptions/{id}/cancel": {
       "post": {
         "tags": [
@@ -16701,6 +16776,12 @@
             "items": {
               "$ref": "#/components/schemas/DeclaredPurchase"
             }
+          },
+          "historical_payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeclaredHistoricalPayment"
+            }
           }
         }
       },
@@ -16709,6 +16790,37 @@
         "properties": {
           "customer": {
             "type": "string"
+          }
+        }
+      },
+      "DeclaredHistoricalPayment": {
+        "type": "object",
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "customer": {
+            "type": "string"
+          },
+          "psp": {
+            "$ref": "#/components/schemas/PSPRef"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "transaction_id": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "paid_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -24123,6 +24235,327 @@
           "final_retry_at",
           "waiting_for_new_card",
           "last_failure_reason"
+        ]
+      },
+      "SubscriptionHistory": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SubscriptionHistoryEntry"
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "next_cursor"
+            ]
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/SubscriptionHistoryCoverage"
+          }
+        },
+        "required": [
+          "events",
+          "coverage"
+        ]
+      },
+      "SubscriptionHistoryAttempt": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "observed_via": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "psp_id": {
+            "type": "string"
+          },
+          "order_id": {
+            "type": "string"
+          },
+          "payment_id": {
+            "type": "string"
+          },
+          "renewal_id": {
+            "type": "string"
+          },
+          "payment_method_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "category",
+          "source",
+          "observed_via",
+          "amount",
+          "currency",
+          "psp_id"
+        ]
+      },
+      "SubscriptionHistoryAttribution": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "executor": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        }
+      },
+      "SubscriptionHistoryBillingState": {
+        "type": "object",
+        "properties": {
+          "payment_method_id": {
+            "type": "string"
+          },
+          "next_retry_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_retry_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "retry_attempts": {
+            "type": "integer"
+          },
+          "transient_retries": {
+            "type": "integer"
+          },
+          "grace_ends_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SubscriptionHistoryChange": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/SubscriptionHistoryBillingState"
+          },
+          "to": {
+            "$ref": "#/components/schemas/SubscriptionHistoryBillingState"
+          },
+          "card_version_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "from",
+          "to"
+        ]
+      },
+      "SubscriptionHistoryCoverage": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "retention_days": {
+            "type": "integer"
+          },
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "sources",
+          "retention_days",
+          "gaps"
+        ]
+      },
+      "SubscriptionHistoryEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "transition": {
+            "$ref": "#/components/schemas/SubscriptionHistoryTransition"
+          },
+          "attempt": {
+            "$ref": "#/components/schemas/SubscriptionHistoryAttempt"
+          },
+          "change": {
+            "$ref": "#/components/schemas/SubscriptionHistoryChange"
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/SubscriptionHistoryAttribution"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/SubscriptionHistoryOperation"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "recorded_at",
+          "kind"
+        ]
+      },
+      "SubscriptionHistoryOperation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "attempt": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "phase",
+          "attempt"
+        ]
+      },
+      "SubscriptionHistoryTransition": {
+        "type": "object",
+        "properties": {
+          "from_status": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "awaiting_method",
+                  "canceled",
+                  "past_due",
+                  "pending",
+                  "unverified"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to_status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "awaiting_method",
+              "canceled",
+              "past_due",
+              "pending",
+              "unverified"
+            ]
+          },
+          "decision": {
+            "type": "string"
+          },
+          "cancel_type": {
+            "type": "string"
+          },
+          "from_period_end": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to_period_end": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "from_status",
+          "to_status",
+          "from_period_end",
+          "to_period_end"
         ]
       },
       "SubscriptionRetryNowResult": {

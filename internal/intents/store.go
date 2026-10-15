@@ -784,6 +784,9 @@ func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt tim
 		rows, err := txs.db.Gen(ctx).MarkProviderIntentUnknown(ctx, gen.MarkProviderIntentUnknownParams{
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason, ResultEvidence: raw,
 		})
+		if err == nil && rows > 0 && historyHold(ctx) != "" {
+			err = txs.recordHistoryHold(ctx, id)
+		}
 		wake := nextAttemptAt
 		if held, _ := evidence["recovery_held"].(bool); held {
 			wake = time.Time{} // durable immediate readiness check; the held retry date remains
@@ -826,6 +829,9 @@ func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 }
 
 func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, recovery []byte) error {
+	if historyHold(ctx) == "" {
+		ctx = withHistoryHold(ctx, "execution_held")
+	}
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return scopeErr
@@ -839,6 +845,9 @@ func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 			RecoveryEvidence: recovery,
 		})
+		if err == nil && rows > 0 {
+			err = txs.recordHistoryHold(ctx, id)
+		}
 		if err != nil || rows != 0 {
 			return rows, wake, err
 		}
@@ -861,6 +870,9 @@ func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 				MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 				ResultEvidence: recovery,
 			})
+			if err == nil && rows > 0 {
+				err = txs.recordHistoryHold(ctx, id)
+			}
 			return rows, wake, err
 		}
 		return 0, time.Time{}, nil

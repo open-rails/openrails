@@ -100,7 +100,8 @@ sql:
       - "internal/migrate/postgres/0105_psp_imports.up.sql"
       - "internal/migrate/postgres/0106_user_destructive_reservations.up.sql"
       - "internal/migrate/postgres/0107_user_action_retention.up.sql"
-      - "internal/migrate/postgres/0108_tenant_merchant_binding.up.sql"
+      - "internal/migrate/postgres/0108_subscription_history.up.sql"
+      - "internal/migrate/postgres/0109_tenant_merchant_binding.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

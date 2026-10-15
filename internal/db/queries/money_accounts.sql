@@ -101,7 +101,8 @@ SET default_payment_method_id = sqlc.arg(payment_method_id),
     updated_at = sqlc.arg(now)
 WHERE merchant_id = $1
   AND customer_id = $2
-  AND currency = sqlc.arg(currency);
+  AND currency = sqlc.arg(currency)
+  AND set_config('openrails.subscription_history', sqlc.arg(history_attribution)::text, true) IS NOT NULL;
 
 -- name: RevokeMoneyCollection :exec
 -- The customer revoked its collection agreement in the currency.
