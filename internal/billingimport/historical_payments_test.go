@@ -44,3 +44,20 @@ func TestHistoricalPaymentIncompleteFactsStayBlocked(t *testing.T) {
 		})
 	}
 }
+
+func TestHistoricalPaymentUnsupportedProvidersStayBlocked(t *testing.T) {
+	t.Parallel()
+	for _, rail := range []string{"stripe", "ccbill"} {
+		t.Run(rail, func(t *testing.T) {
+			resolver := &pspResolver{byKey: map[string]gen.BillingPsp{rail + "\x1f" + rail: {ID: uuid.New(), Rail: rail}}, fallback: PSPRef{Key: rail}}
+			now := time.Now().UTC()
+			p := billing.DeclaredHistoricalPayment{SourceID: "old-payment", Customer: billing.CustomerID(uuid.New()), Rail: rail, TransactionID: "12345678", Amount: 4_990_000, Currency: "USD", PaidAt: now.Add(-time.Hour)}
+			res := Result{Reasons: map[string]string{}}
+			planned, err := planHistoricalPayments(resolver, []billing.DeclaredHistoricalPayment{p}, now, &res)
+			require.NoError(t, err)
+			require.Empty(t, planned)
+			require.Equal(t, []string{p.SourceID}, res.Blocked)
+			require.Contains(t, res.Reasons[p.SourceID], "only NMI")
+		})
+	}
+}

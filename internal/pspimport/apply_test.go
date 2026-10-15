@@ -17,9 +17,13 @@ func TestOrphanedHistoryRequiresSuccessfulStandalonePayment(t *testing.T) {
 	for _, tc := range []struct {
 		name, kind                 string
 		success, invoice, accepted bool
-		known                      bool
+		known, refunded            bool
+		rail                       string
 		ref                        string
 	}{
+		{name: "Stripe", rail: "stripe", kind: "sale", success: true},
+		{name: "CCBill", rail: "ccbill", kind: "sale", success: true},
+		{name: "refunded sale", kind: "sale", success: true, refunded: true},
 		{name: "sale", kind: "sale", success: true, accepted: true},
 		{name: "deleted subscription", kind: "sale", success: true, accepted: true, ref: "deleted"},
 		{name: "subscription linked elsewhere or blocked", kind: "sale", success: true, known: true, ref: "existing"},
@@ -37,7 +41,11 @@ func TestOrphanedHistoryRequiresSuccessfulStandalonePayment(t *testing.T) {
 			}
 			raw, err := json.Marshal(data)
 			require.NoError(t, err)
-			l := lander{scope: merchants.PSPScope{ID: uuid.New(), Rail: "nmi"}, asOf: time.Now().UTC()}
+			rail := tc.rail
+			if rail == "" {
+				rail = "nmi"
+			}
+			l := lander{scope: merchants.PSPScope{ID: uuid.New(), Rail: rail}, asOf: time.Now().UTC(), refunded: map[string]bool{data.TransactionID: tc.refunded}}
 			d, err := l.declare([]customerGroup{{customer: customer, records: []gen.BillingPspImportRecord{{ID: id, Kind: string(billing.PSPImportTransaction), State: string(billing.PSPImportLinked), SubscriptionRef: &tc.ref, Data: raw}}}}, map[string]bool{tc.ref: tc.known})
 			require.NoError(t, err)
 			require.Empty(t, d.book.Subscriptions)

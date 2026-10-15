@@ -44,6 +44,23 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID) error {
 		return err
 	}
 	l := lander{im: im, row: row, scope: scope, prices: prices, unpriced: unpriced, asOf: *row.PulledAt}
+	if scope.Rail == "nmi" {
+		// Refunds can be unmatched or linked to another customer. Inspect the
+		// whole staged import before landing any standalone charge.
+		l.refunded = map[string]bool{}
+		if err := im.eachRecord(ctx, row, billing.PSPImportTransaction, func(r gen.BillingPspImportRecord) error {
+			var data transactionData
+			if err := json.Unmarshal(r.Data, &data); err != nil {
+				return err
+			}
+			if data.Success && data.Type == "refund" {
+				l.refunded[data.TransactionID] = true
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
 	after := uuid.Nil
 	for {
 		customers, err := im.DB.Gen(ctx).ListPSPImportLinkedCustomers(ctx, gen.ListPSPImportLinkedCustomersParams{MerchantID: row.MerchantID, ImportID: row.ID, AfterCustomerID: after, RowLimit: applyCustomers})
@@ -172,6 +189,7 @@ type lander struct {
 	// unpriced says why no subscription of a plan-less rail has a price.
 	unpriced string
 	asOf     time.Time
+	refunded map[string]bool
 }
 
 // outcome is what landing did to one record.
@@ -360,6 +378,10 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 			subRef := deref(r.SubscriptionRef)
 			sub, ok := subs[subRef]
 			if subRef == "" || !ok {
+				if l.scope.Rail != "nmi" {
+					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "history without a subscription is currently supported only for NMI"}
+					continue
+				}
 				if known[subRef] {
 					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "its subscription exists but is not linked to this customer"}
 					continue
@@ -370,6 +392,10 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 				}
 				if !data.Success || data.Type != "" && data.Type != "sale" {
 					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "history without a subscription requires a confirmed successful sale"}
+					continue
+				}
+				if l.refunded[data.TransactionID] {
+					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "this payment has a recorded refund; importing payment and refund history together is not yet supported"}
 					continue
 				}
 				if data.StripeInvoice != nil {

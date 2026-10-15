@@ -44,8 +44,8 @@ func planHistoricalPayments(psps *pspResolver, declared []billing.DeclaredHistor
 		switch {
 		case p.Customer.IsZero():
 			reason = "customer is required"
-		case p.Rail != "nmi" && p.Rail != "ccbill" && p.Rail != "stripe":
-			reason = "historical payments require a supported fiat provider"
+		case p.Rail != "nmi":
+			reason = "historical payments currently support only NMI"
 		case !providerTransactionID(p.Rail, p.TransactionID) || len(p.TransactionID) > 512:
 			reason = "a valid provider transaction_id is required"
 		case p.Amount <= 0 || moneyutil.RequireFiatCurrency(p.Currency) != nil:

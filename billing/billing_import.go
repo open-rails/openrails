@@ -37,8 +37,9 @@ type DeclaredBilling struct {
 	HistoricalPayments []DeclaredHistoricalPayment `json:"historical_payments,omitempty"`
 }
 
-// DeclaredHistoricalPayment is a confirmed successful provider payment whose
-// subscription or catalog purchase is unavailable. It records history only:
+// DeclaredHistoricalPayment is a confirmed successful NMI payment with no
+// known refund, whose subscription or catalog purchase is unavailable.
+// The caller supplies those facts. It records history only:
 // no access, recurring agreement or future collection is created.
 // Amount is in native units (micros for USD); PSP falls back to DefaultPSP.
 type DeclaredHistoricalPayment struct {
