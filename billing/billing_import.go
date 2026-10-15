@@ -173,19 +173,23 @@ type DunningEvidence struct {
 	ScheduleLive bool       `json:"schedule_live"`
 }
 
-// DeclaredTransaction is one charge-level fact, successes and declines alike.
+// DeclaredTransaction is one provider receipt, including charges and refunds.
 // Amount is in the currency's native units (micros for USD), and must be a
 // whole number of the provider's minor unit. An approved NMI or CCBill charge
 // names the provider's own transaction id (digits only); one with no amount
 // is looked up at the provider by that id after the import.
 type DeclaredTransaction struct {
-	RailSubscriptionID string    `json:"rail_subscription_id"`
-	TransactionID      string    `json:"transaction_id"`
-	Type               string    `json:"type,omitempty"` // sale | refund | chargeback | decline; "" = sale
-	Success            bool      `json:"success"`
-	Amount             int64     `json:"amount,string"`
-	Currency           string    `json:"currency"`
-	OccurredAt         time.Time `json:"occurred_at"`
+	// SourceID requests a receipt outcome independently of the subscription (NMI).
+	SourceID string `json:"source_id,omitempty"`
+	// OriginalTransactionID links a separate NMI refund to its successful charge.
+	OriginalTransactionID string    `json:"original_transaction_id,omitempty"`
+	RailSubscriptionID    string    `json:"rail_subscription_id"`
+	TransactionID         string    `json:"transaction_id"`
+	Type                  string    `json:"type,omitempty"` // sale | refund | chargeback | decline; "" = sale
+	Success               bool      `json:"success"`
+	Amount                int64     `json:"amount,string"`
+	Currency              string    `json:"currency"`
+	OccurredAt            time.Time `json:"occurred_at"`
 	// NextBillingAt is the verified provider boundary accompanying this receipt.
 	NextBillingAt *time.Time `json:"next_billing_at,omitempty"`
 	// StripeInvoice is the complete verified bill, repeated identically for each receipt.
@@ -239,8 +243,8 @@ type DeclaredAdminGrant struct {
 }
 
 // BillingImportResult reports per-SourceID outcomes for subscriptions, admin
-// grants, purchases and historical payments. Customers and payment methods
-// are idempotent upserts.
+// grants, purchases, historical payments and named NMI receipts. Customers and
+// payment methods are idempotent upserts.
 type BillingImportResult struct {
 	Imported []string          `json:"imported"`
 	Skipped  []string          `json:"skipped"`

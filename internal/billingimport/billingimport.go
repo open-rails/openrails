@@ -95,6 +95,9 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	ctx = merchant.WithID(ctx, merchantID)
 
 	history := reconcile.NewDeclaredHistory()
+	if err := validateReceiptSources(opts.Book, history); err != nil {
+		return res, err
+	}
 	var plans []plannedPurchase
 	var historical []historicalPayment
 	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -118,8 +121,37 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 
 		// Customers first (subscriptions FK them).
 		seen := map[uuid.UUID]struct{}{}
+		if history.HasReceipts() {
+			var customers []string
+			for _, c := range opts.Book.Customers {
+				if !c.Customer.IsZero() {
+					seen[c.Customer.UUID()] = struct{}{}
+				}
+			}
+			for _, s := range opts.Book.Subscriptions {
+				if !s.Customer.IsZero() {
+					seen[s.Customer.UUID()] = struct{}{}
+				}
+			}
+			for id := range seen {
+				customers = append(customers, id.String())
+			}
+			sort.Strings(customers)
+			for _, id := range customers {
+				customer := uuid.MustParse(id)
+				if err := db.EnsureCustomerRow(ctx, qx, merchantID.UUID(), customer); err != nil {
+					return err
+				}
+				if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID.UUID(), ID: customer}); err != nil {
+					return err
+				}
+			}
+		}
 		for _, c := range opts.Book.Customers {
 			if c.Customer.IsZero() {
+				continue
+			}
+			if _, ok := seen[c.Customer.UUID()]; ok {
 				continue
 			}
 			if err := db.EnsureCustomerRow(ctx, qx, merchantID.UUID(), c.Customer.UUID()); err != nil {
@@ -265,15 +297,16 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				return apperr.Invalidf("transaction %s invoice: %v", t.TransactionID, err).WithParam("transactions")
 			}
 			txns = append(txns, reconcile.RemoteTransaction{
-				StripeBill:     invoice,
-				TransactionID:  t.TransactionID,
-				SubscriptionID: t.RailSubscriptionID,
-				Type:           typ,
-				Success:        t.Success,
-				AmountCents:    int64(minor),
-				Currency:       t.Currency,
-				OccurredAt:     t.OccurredAt.UTC(),
-				NextBillingAt:  t.NextBillingAt,
+				StripeBill:            invoice,
+				TransactionID:         t.TransactionID,
+				OriginalTransactionID: t.OriginalTransactionID,
+				SubscriptionID:        t.RailSubscriptionID,
+				Type:                  typ,
+				Success:               t.Success,
+				AmountCents:           int64(minor),
+				Currency:              t.Currency,
+				OccurredAt:            t.OccurredAt.UTC(),
+				NextBillingAt:         t.NextBillingAt,
 			})
 		}
 
@@ -423,6 +456,21 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		return res, err
 	}
 
+	for _, t := range opts.Book.Transactions {
+		if t.SourceID == "" {
+			continue
+		}
+		o := history.Outcome(t.RailSubscriptionID, t.TransactionID)
+		switch o.Code {
+		case reconcile.DeclaredImported:
+			res.Imported = append(res.Imported, t.SourceID)
+		case reconcile.DeclaredAlreadyPresent:
+			res.Skipped = append(res.Skipped, t.SourceID)
+		default:
+			res.Blocked = append(res.Blocked, t.SourceID)
+			res.Reasons[t.SourceID] = o.Reason
+		}
+	}
 	sort.Strings(res.Imported)
 	sort.Strings(res.Skipped)
 	sort.Strings(res.Blocked)

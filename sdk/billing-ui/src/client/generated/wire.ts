@@ -993,6 +993,8 @@ export type DeclaredSubscription = {
 }
 
 export type DeclaredTransaction = {
+  source_id?: string
+  original_transaction_id?: string
   rail_subscription_id?: string
   transaction_id?: string
   type?: string
