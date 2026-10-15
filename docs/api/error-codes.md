@@ -48,6 +48,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `customer_not_found` | 404 | `invalid_request_error` | The customer does not exist. |
 | `customer_payment_unsupported` | 400 | `invalid_request_error` | Customer-present payment is unsupported for this rail or method. |
 | `customer_session_required` | 403 | `authorization_error` | The operation needs the customer's interactive session. |
+| `customer_tenant_mismatch` | 403 | `authorization_error` | The signed-in account does not belong to this merchant's tenant. |
 | `dashboard_invalid` | 400 | `invalid_request_error` | The dashboard is invalid; metadata.errors lists why. |
 | `database_busy` | 503 | `api_error` | No database connection is available; retry shortly. |
 | `default_payment_method_invalid` | 400 | `invalid_request_error` | The card cannot be the customer's default for the currency. |

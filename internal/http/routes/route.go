@@ -477,7 +477,7 @@ func TierErrors(tier Tier) []string {
 	case AuthCustomer:
 		// network_account_linked: an account linked to another customer of
 		// the merchant, where the customer network runs.
-		own = append([]string{billing.CodeInvokerScopedPrincipal, billing.CodeCustomerIssuerMismatch, billing.CodeNetworkAccountLinked}, authenticated...)
+		own = append([]string{billing.CodeInvokerScopedPrincipal, billing.CodeCustomerIssuerMismatch, billing.CodeCustomerTenantMismatch, billing.CodeNetworkAccountLinked}, authenticated...)
 	case AuthMerchant:
 		own = append(staff, authenticated...)
 	case AuthSignedIn:

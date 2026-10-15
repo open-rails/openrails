@@ -32,10 +32,11 @@ snapshot names, and fails when they are not.
 ## Go API
 
 Every exported identifier of `openrails`, `billing`, `catalog`, `server`,
-`adapters/http`, `adapters/gin`, `adapters/fiber`, `openrailstest`,
-`openrailstest/nmimock`, `openrailstest/stripemock` and `server/web/console`. `server` is its own module,
-`github.com/open-rails/openrails/server`, released with the root under the same
-version (tags `vX.Y.Z` and `server/vX.Y.Z`); one list covers both modules.
+`adapters/http`, `adapters/gin`, `adapters/fiber`, `adapters/authkit`, `openrailstest`,
+`openrailstest/nmimock`, `openrailstest/stripemock` and `server/web/console`.
+The server and AuthKit adapter are separate modules released with the root
+under the same version (tags `vX.Y.Z`, `server/vX.Y.Z` and
+`adapters/authkit/vX.Y.Z`); one list covers all three modules.
 `api/go.txt` holds one line per constant, variable, function, type, struct
 field (with its tag) and method. `internal/…` and `cmd/…` of either module, `examples/…` and `ci/…`
 are not covered. Some types are declared under `internal/` and named by an

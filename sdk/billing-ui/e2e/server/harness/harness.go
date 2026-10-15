@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
@@ -162,13 +163,14 @@ func authConfig(issuer string) (authkit.Config, map[string]iam.Role) {
 	}
 	staff := map[string]iam.Role{"admin": roles.Root.Role("billing-admin", grants...), "reader": roles.Root.Role("billing-reader", read)}
 	return authkit.Config{
-		Roles:        roles,
-		Database:     authkit.DatabaseConfig{Schema: AuthSchema, RiverSchema: AuthSchema},
-		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, APIPath: "/auth"},
-		Token:        authkit.TokenConfig{Issuer: issuer, IssuedAudiences: []string{Audience}},
-		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
-		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true},
-		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
+		DefaultTenantID: iam.TenantID(uuid.MustParse("a4dbdfe9-87bc-4f5b-894d-c3ebd881f7a6")),
+		Roles:           roles,
+		Database:        authkit.DatabaseConfig{Schema: AuthSchema, RiverSchema: AuthSchema},
+		HTTP:            &authkit.HTTPConfig{DirectPeerIP: true, APIPath: "/auth"},
+		Token:           authkit.TokenConfig{Issuer: issuer, IssuedAudiences: []string{Audience}},
+		Registration:    authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
+		Keys:            authkit.KeysConfig{AllowEphemeralDevKeys: true},
+		TwoFactor:       authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
 	}, staff
 }
 

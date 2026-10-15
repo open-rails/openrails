@@ -132,6 +132,7 @@ const (
 	CodePermissionRequired                   = "permission_required"
 	CodeMerchantUnresolved                   = "merchant_unresolved"
 	CodeCustomerIssuerMismatch               = "customer_issuer_mismatch"
+	CodeCustomerTenantMismatch               = "customer_tenant_mismatch"
 	CodeInvokerScopedPrincipal               = "invoker_scoped_principal"
 	CodeApplicationRequired                  = "application_required"
 	CodeStepUpRequired                       = "step_up_required"
@@ -197,6 +198,7 @@ var errorCodes = []ErrorCode{
 	{CodePermissionRequired, 403, authz, "The credential lacks the permission the route requires."},
 	{CodeMerchantUnresolved, 403, authz, "The credential is bound to no merchant here."},
 	{CodeCustomerIssuerMismatch, 403, authz, "The customer belongs to another issuer's user with the same subject."},
+	{CodeCustomerTenantMismatch, 403, authz, "The signed-in account does not belong to this merchant's tenant."},
 	{CodeServiceCredentialCustomerScopeDenied, 403, authz, "The service credential may not act for this customer."},
 	{CodeInvokerScopedPrincipal, 403, authz, "An invoker-scoped credential spends a customer's balance but may not manage the account."},
 	{CodeApplicationRequired, 403, authz, "The route is your backend's: it takes an application's credential, never a person's."},

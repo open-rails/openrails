@@ -40,9 +40,10 @@ type Engine struct {
 	// provisioning failed at New joins them once a background retry succeeds.
 	declMu sync.RWMutex
 	// declared are Config.Merchants' provisioned ids, by slug.
-	declared map[string]billing.MerchantID
-	issuers  map[string]billing.MerchantID
-	bySlug   map[billing.MerchantID]config.MerchantDeclaration
+	declared       map[string]billing.MerchantID
+	issuers        map[string]billing.MerchantID
+	bySlug         map[billing.MerchantID]config.MerchantDeclaration
+	merchantGroups billing.MerchantGroupReader
 
 	mu          sync.Mutex
 	closed      bool
@@ -121,7 +122,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
-	e := &Engine{App: application, declared: map[string]billing.MerchantID{}, issuers: map[string]billing.MerchantID{}, bySlug: map[billing.MerchantID]config.MerchantDeclaration{}}
+	e := &Engine{App: application, merchantGroups: deps.MerchantGroups, declared: map[string]billing.MerchantID{}, issuers: map[string]billing.MerchantID{}, bySlug: map[billing.MerchantID]config.MerchantDeclaration{}}
 	fail := func(err error) (*Engine, error) {
 		_ = e.Close(ctx)
 		return nil, err
@@ -138,7 +139,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	// see it; the issuer that binds its credentials is recorded with it. One
 	// that cannot be is refused alone and retried in the background.
 	for _, m := range declarations {
-		id, err := upsertMerchantConfig(ctx, application, m)
+		id, err := upsertMerchantConfig(ctx, application, m, e.merchantGroups)
 		if err != nil {
 			e.provisionLater(m, err)
 			continue
@@ -186,7 +187,7 @@ func (e *Engine) provisionLater(m config.MerchantDeclaration, err error) {
 	rt.Refuse(merchantSubject(m.Slug), fmt.Errorf("%w; the merchant is not provisioned, retrying in the background", err))
 	rt.Go("provision merchant "+m.Slug, func(ctx context.Context) {
 		_ = retry.Forever(ctx, func(ctx context.Context) error {
-			id, err := upsertMerchantConfig(ctx, e.App, m)
+			id, err := upsertMerchantConfig(ctx, e.App, m, e.merchantGroups)
 			if err != nil {
 				rt.Refuse(merchantSubject(m.Slug), fmt.Errorf("%w; the merchant is not provisioned, retrying in the background", err))
 				return err

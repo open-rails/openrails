@@ -40,7 +40,7 @@ func (q *Queries) CountMatchingPurgeInventories(ctx context.Context, arg CountMa
 }
 
 const getMerchantByGroupID = `-- name: GetMerchantByGroupID :one
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants WHERE permission_group_id = $1::text
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation, tenant_id FROM billing.merchants WHERE permission_group_id = $1::text
 `
 
 // Includes retired rows so a group cannot silently acquire a new identity.
@@ -60,6 +60,7 @@ func (q *Queries) GetMerchantByGroupID(ctx context.Context, groupID string) (Bil
 		&i.CatalogRevision,
 		&i.SlugChangedAt,
 		&i.EntitlementGeneration,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -97,7 +98,7 @@ func (q *Queries) GetMerchantBySlugOrAlias(ctx context.Context, slug string) (Ge
 }
 
 const getUnretiredLiveMerchant = `-- name: GetUnretiredLiveMerchant :one
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation, tenant_id FROM billing.merchants
 WHERE id = $1::uuid AND deleted_at IS NULL AND retired_at IS NULL
 `
 
@@ -117,6 +118,7 @@ func (q *Queries) GetUnretiredLiveMerchant(ctx context.Context, id uuid.UUID) (B
 		&i.CatalogRevision,
 		&i.SlugChangedAt,
 		&i.EntitlementGeneration,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -211,7 +213,7 @@ func (q *Queries) ListAllMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
 }
 
 const listLiveMerchantsByGroupID = `-- name: ListLiveMerchantsByGroupID :many
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation, tenant_id FROM billing.merchants
 WHERE permission_group_id = $1::text AND deleted_at IS NULL
 LIMIT 2
 `
@@ -239,6 +241,7 @@ func (q *Queries) ListLiveMerchantsByGroupID(ctx context.Context, groupID string
 			&i.CatalogRevision,
 			&i.SlugChangedAt,
 			&i.EntitlementGeneration,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}

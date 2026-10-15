@@ -22,6 +22,8 @@ redis: # optional for one server; replicas share rate limits and spent proofs th
 # resource server it is. Its sign-in stays off: people sign in at the app,
 # which merchant.yaml declares the merchant's trusted issuer.
 auth:
+  # Stable example platform/operator directory, independent of the app's own.
+  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11
   token:
     issuer: http://localhost:3053
     allow_private_network_jwks: true # local only: the app's keys at http://localhost:8080

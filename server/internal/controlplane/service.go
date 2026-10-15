@@ -112,6 +112,9 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 	if cfg == nil || strings.TrimSpace(auth.Token.Issuer) == "" {
 		return authkit.Config{}, errors.New("controlplane: auth.token.issuer is required")
 	}
+	if err := RequireDefaultTenant(auth); err != nil {
+		return authkit.Config{}, err
+	}
 	if err := validate(auth, opts); err != nil {
 		return authkit.Config{}, err
 	}
@@ -169,6 +172,15 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 	http.RefreshCookie = true
 	auth.HTTP = &http
 	return auth, nil
+}
+
+// RequireDefaultTenant refuses an unassigned platform account directory.
+// Merchant ownership is independent; it never supplies this identity.
+func RequireDefaultTenant(auth authkit.Config) error {
+	if auth.DefaultTenantID.IsZero() {
+		return errors.New("standalone: auth.default_tenant_id (AUTH_DEFAULT_TENANT_ID) must name the stable platform account tenant; generate it once and persist it in deployment configuration")
+	}
+	return nil
 }
 
 // defaultResource is the server's resource identifier (RFC 8707) when

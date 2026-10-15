@@ -103,7 +103,15 @@ func Export(ctx context.Context, database *db.DB, id billing.MerchantID, out io.
 		if err != nil {
 			return err
 		}
-		w, err := archivewire.NewWriter(out, id.String(), catalogRevision)
+		binding, err := q.GetMerchantTenantBinding(ctx, id.UUID())
+		if err != nil {
+			return err
+		}
+		tenantID := ""
+		if binding.TenantID != nil {
+			tenantID = binding.TenantID.String()
+		}
+		w, err := archivewire.NewWriterWithTenant(out, id.String(), tenantID, catalogRevision)
 		if err != nil {
 			return err
 		}
@@ -189,6 +197,17 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			return err
 		}
 		q := gen.New(tx)
+		binding, err := q.GetMerchantTenantBinding(ctx, id.UUID())
+		if err != nil {
+			return err
+		}
+		tenantID := ""
+		if binding.TenantID != nil {
+			tenantID = binding.TenantID.String()
+		}
+		if header.TenantID != tenantID {
+			return &Error{Code: "merchant_mismatch"}
+		}
 		var previousDigest *string
 		var previousRows *int64
 		var restoredCatalogRevision int64

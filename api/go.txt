@@ -401,6 +401,7 @@ pkg openrails, type Deps struct
 pkg openrails, type Deps struct, Clock clockwork.Clock
 pkg openrails, type Deps struct, Email config.EmailSender
 pkg openrails, type Deps struct, FXTransport http.RoundTripper
+pkg openrails, type Deps struct, MerchantGroups billing.MerchantGroupReader
 pkg openrails, type Deps struct, NMITransport http.RoundTripper
 pkg openrails, type Deps struct, Postgres *pgxpool.Pool
 pkg openrails, type Deps struct, Redis redis.UniversalClient
@@ -446,6 +447,7 @@ pkg openrails, type LoggerConfig struct, Level string `yaml:"level" json:"level"
 pkg openrails, type MerchantDeclaration = config.MerchantDeclaration
 pkg openrails, type MerchantDeclaration struct
 pkg openrails, type MerchantDeclaration struct, AlertWebhooks []config.AlertWebhookConfig `yaml:"alert_webhooks,omitempty"`
+pkg openrails, type MerchantDeclaration struct, Binding *billing.MerchantBinding `yaml:"-" json:"-"`
 pkg openrails, type MerchantDeclaration struct, Custodians config.Custodians `yaml:"custodians,omitempty"`
 pkg openrails, type MerchantDeclaration struct, DisplayName string `yaml:"display_name"`
 pkg openrails, type MerchantDeclaration struct, Issuer string `yaml:"-"`
@@ -601,6 +603,8 @@ pkg openrails, type VaultConfig struct, Token string `yaml:"token" json:"token"`
 pkg openrails, type VaultConfig struct, TransitMount string `yaml:"transit_mount" json:"transit_mount"`
 pkg openrails, var ErrMigrationsRequired error
 pkg openrails, var ErrUnauthenticated error
+pkg openrails/adapters/authkit, func BindMerchant(context.Context, *pgxpool.Pool, openrails.DatabaseConfig, *authkit.Client, billing.MerchantBinding) error
+pkg openrails/adapters/authkit, func MerchantGroups(*authkit.Client) billing.MerchantGroupReader
 pkg openrails/adapters/fiber, const RouteNamePrefix untyped string = "openrails."
 pkg openrails/adapters/fiber, func Mount(*fiber.App, *openrails.Engine, openrails.Routes) error
 pkg openrails/adapters/gin, func CheckoutOrigin(string, http.Handler) (gin.HandlerFunc, error)
@@ -676,6 +680,7 @@ pkg openrails/billing, const CodeCredentialExpired untyped string = "credential_
 pkg openrails/billing, const CodeCredentialRevoked untyped string = "credential_revoked"
 pkg openrails/billing, const CodeCustomerActionRequired untyped string = "customer_action_required"
 pkg openrails/billing, const CodeCustomerIssuerMismatch untyped string = "customer_issuer_mismatch"
+pkg openrails/billing, const CodeCustomerTenantMismatch untyped string = "customer_tenant_mismatch"
 pkg openrails/billing, const CodeDefaultPaymentMethodInvalid untyped string = "default_payment_method_invalid"
 pkg openrails/billing, const CodeDefaultPaymentMethodRequired untyped string = "default_payment_method_required"
 pkg openrails/billing, const CodeDestructiveActionsHeld untyped string = "destructive_actions_held"
@@ -2328,6 +2333,9 @@ pkg openrails/billing, type Merchant struct, RailsArmed []Rail `json:"rails_arme
 pkg openrails/billing, type Merchant struct, Slug string `json:"slug"`
 pkg openrails/billing, type Merchant struct, Status MerchantStatus `json:"status"`
 pkg openrails/billing, type Merchant struct, UpdatedAt time.Time `json:"updated_at"`
+pkg openrails/billing, type MerchantBinding struct
+pkg openrails/billing, type MerchantBinding struct, ID MerchantID
+pkg openrails/billing, type MerchantBinding struct, TenantID string
 pkg openrails/billing, type MerchantCheckoutSettings struct
 pkg openrails/billing, type MerchantCheckoutSettings struct, EmbedOrigins []string `json:"embed_origins,omitempty"`
 pkg openrails/billing, type MerchantConfigurationState struct
@@ -2335,6 +2343,13 @@ pkg openrails/billing, type MerchantConfigurationState struct, DisplayName strin
 pkg openrails/billing, type MerchantConfigurationState struct, PlatformVault PlatformVaultState `json:"platform_vault"`
 pkg openrails/billing, type MerchantConfigurationState struct, Revision int64 `json:"revision"`
 pkg openrails/billing, type MerchantConfigurationState struct, embedded MerchantSettings
+pkg openrails/billing, type MerchantGroup struct
+pkg openrails/billing, type MerchantGroup struct, Deleted bool
+pkg openrails/billing, type MerchantGroup struct, ID string
+pkg openrails/billing, type MerchantGroup struct, Persona string
+pkg openrails/billing, type MerchantGroup struct, TenantID string
+pkg openrails/billing, type MerchantGroupReader interface
+pkg openrails/billing, type MerchantGroupReader interface, LookupMerchantGroup(context.Context, MerchantBinding) (MerchantGroup, error)
 pkg openrails/billing, type MerchantID [16]byte
 pkg openrails/billing, type MerchantListParams struct
 pkg openrails/billing, type MerchantListParams struct, Query string

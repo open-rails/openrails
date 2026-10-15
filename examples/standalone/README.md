@@ -29,10 +29,15 @@ The store is http://localhost:8080, the server http://localhost:3053 and the
 inbox (verification codes, receipts) http://localhost:8025.
 `docker compose down -v` removes it all.
 
-The server image is `docker.io/openrails/openrails:v0.235.0`, the first
-release with route groups and the catalog filters this app reads. Until it
-is published, build that tag from this checkout:
-`docker build -t docker.io/openrails/openrails:v0.235.0 ../..`.
+The server image is `docker.io/openrails/openrails:v0.259.0`, including explicit
+account-directory tenancy. Until it is published, build that tag from this checkout:
+`docker build -t docker.io/openrails/openrails:v0.259.0 ../..`.
+
+The example keeps fixed, separate directory IDs for the app and the billing
+platform. For your deployment generate each ID once, set the app's
+`AUTH_DEFAULT_TENANT_ID` and the server's `auth.default_tenant_id`, and preserve
+them across restarts. `openrails migrate up` uses the server's configured ID
+when adopting an existing single-directory AuthKit database.
 
 Without Docker, the release binary runs the same files: with PostgreSQL,
 Redis and an SMTP server of your own, set `DB_URL`, `REDIS_ADDR`,

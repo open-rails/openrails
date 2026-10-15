@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Releases the root module and the server module in lockstep. Master only
+# Releases the root, server and optional AuthKit adapter in lockstep. Master only
 # accepts commits whose checks passed, so a release is two steps:
 #
 #   scripts/release prepare vX.Y.Z           # opens the release PR
 #   scripts/release publish vX.Y.Z ["note"]  # once that PR is green
 #
-# prepare pins the server and console browser fixture's root require to vX.Y.Z
+# prepare pins the server, AuthKit adapter and browser fixture to vX.Y.Z
 # (replaces keep in-repository builds on local source) on origin/master, commits
 # that to release/vX.Y.Z and opens its PR. publish fast-forwards master to the
 # green PR head and pushes it with the signed, annotated vX.Y.Z and
-# server/vX.Y.Z tags at once. The vX.Y.Z tag runs release.yaml and
+# server/vX.Y.Z and adapters/authkit/vX.Y.Z tags at once. The vX.Y.Z tag runs release.yaml and
 # docker-publish.yaml.
 set -euo pipefail
 die() {
@@ -25,7 +25,7 @@ branch="release/$version"
 cd "$(git rev-parse --show-toplevel)"
 export GOWORK=off
 git fetch --quiet origin master --tags
-for tag in "$version" "server/$version"; do
+for tag in "$version" "server/$version" "adapters/authkit/$version"; do
   if git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null; then
     die "$tag already exists"
   fi
@@ -38,13 +38,13 @@ prepare)
   git worktree add --quiet --detach "$work" origin/master
   # The browser fixture imports both modules, so its direct root requirement
   # must advance with the server's.
-  for manifest in server/go.mod server/web/console/e2e/server/go.mod; do
+  for manifest in server/go.mod adapters/authkit/go.mod server/web/console/e2e/server/go.mod; do
     (cd "$work/${manifest%/go.mod}" && go mod edit -require="github.com/open-rails/openrails@$version" && go build -o /dev/null ./...)
   done
-  git -C "$work" commit --quiet -S -am "Release $version: pin server and browser fixture to the paired root"
+  git -C "$work" commit --quiet -S -am "Release $version: pin server, adapter and browser fixture to the paired root"
   git -C "$work" push --quiet origin "HEAD:refs/heads/$branch"
   gh pr create --base master --head "$branch" --title "Release $version" \
-    --body "Pins server and the console browser fixture to the paired root. When its checks pass: \`scripts/release publish $version\`."
+    --body "Pins server, AuthKit adapter and the console browser fixture to the paired root. When its checks pass: \`scripts/release publish $version\`."
   ;;
 publish)
   git fetch --quiet origin "$branch"
@@ -55,12 +55,13 @@ publish)
   message="$version${note:+: $note}"
   git tag -s -a "$version" -m "$message" "$head"
   git tag -s -a "server/$version" -m "server/$message" "$head"
-  if ! git push --atomic origin "$head:refs/heads/master" "refs/tags/$version" "refs/tags/server/$version"; then
-    git tag -d "$version" "server/$version" >/dev/null
+  git tag -s -a "adapters/authkit/$version" -m "adapters/authkit/$message" "$head"
+  if ! git push --atomic origin "$head:refs/heads/master" "refs/tags/$version" "refs/tags/server/$version" "refs/tags/adapters/authkit/$version"; then
+    git tag -d "$version" "server/$version" "adapters/authkit/$version" >/dev/null
     die "push refused; tags removed locally"
   fi
   git push --quiet origin --delete "$branch" || true
-  echo "release: $version and server/$version at ${head:0:9}"
+  echo "release: $version, server/$version and adapters/authkit/$version at ${head:0:9}"
   ;;
 *)
   die "$usage"

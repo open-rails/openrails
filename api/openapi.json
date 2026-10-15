@@ -25014,6 +25014,7 @@
       "credential_expired",
       "credential_revoked",
       "customer_issuer_mismatch",
+      "customer_tenant_mismatch",
       "database_busy",
       "internal_error",
       "invalid_param",
@@ -25303,6 +25304,11 @@
       "status": 403,
       "type": "authorization_error",
       "meaning": "The operation needs the customer's interactive session."
+    },
+    "customer_tenant_mismatch": {
+      "status": 403,
+      "type": "authorization_error",
+      "meaning": "The signed-in account does not belong to this merchant's tenant."
     },
     "dashboard_invalid": {
       "status": 400,

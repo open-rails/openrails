@@ -59,11 +59,12 @@ merchants:
 			cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: chain.URL()}
 			// Keep enrollment closed in this Vault/key-rotation fixture.
 			cfg.Auth = authkit.Config{
-				Token:        authkit.TokenConfig{Issuer: "http://127.0.0.1/" + slug},
-				Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true, VerifyOnly: true},
-				Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeClosed},
-				HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
-				Database:     authkit.DatabaseConfig{Schema: f.authSchema()},
+				DefaultTenantID: f.tenantID(),
+				Token:           authkit.TokenConfig{Issuer: "http://127.0.0.1/" + slug},
+				Keys:            authkit.KeysConfig{AllowEphemeralDevKeys: true, VerifyOnly: true},
+				Registration:    authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeClosed},
+				HTTP:            &authkit.HTTPConfig{DirectPeerIP: true},
+				Database:        authkit.DatabaseConfig{Schema: f.authSchema()},
 			}
 		})
 		graph, cp := operator.Of(srv)

@@ -65,13 +65,19 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 	if err != nil {
 		return nil, err
 	}
+	// A deployment keeps this directory ID across every restart.
+	tenant, err := iam.ParseTenantID(cmp.Or(os.Getenv("AUTH_DEFAULT_TENANT_ID"), "8c67667c-8837-439a-a485-2c9a385c64c3"))
+	if err != nil {
+		return nil, err
+	}
 	return authkit.New(ctx, authkit.Config{
-		Database:     authkit.DatabaseConfig{Schema: "profiles"},
-		Token:        authkit.TokenConfig{Issuer: s.PublicURL, IssuedAudiences: []string{"onlydemo"}},
-		Keys:         authkit.KeysConfig{Path: s.KeysPath, AllowEphemeralDevKeys: true}, // generated once, then reused
-		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true},
-		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired},
-		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
+		DefaultTenantID: tenant,
+		Database:        authkit.DatabaseConfig{Schema: "profiles"},
+		Token:           authkit.TokenConfig{Issuer: s.PublicURL, IssuedAudiences: []string{"onlydemo"}},
+		Keys:            authkit.KeysConfig{Path: s.KeysPath, AllowEphemeralDevKeys: true}, // generated once, then reused
+		HTTP:            &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true},
+		Registration:    authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired},
+		TwoFactor:       authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
 
 		// The platform is a resource server this AuthKit mints customer tokens for.
 		AuthorizationServer: authkit.AuthorizationServerConfig{

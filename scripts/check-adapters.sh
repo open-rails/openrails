@@ -5,3 +5,4 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 bash scripts/check-embedded-auth-boundary.sh
 go test -vet=all -race -count=1 "$@" ./adapters/gin/... ./adapters/fiber/...
+(cd adapters/authkit && GOWORK=off go test -vet=all -race -count=1 "$@" ./...)

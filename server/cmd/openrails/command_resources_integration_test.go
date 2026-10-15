@@ -1,5 +1,3 @@
-//go:build integration
-
 package main
 
 import (
@@ -18,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
@@ -46,7 +45,9 @@ type commandFixture struct {
 func newCommandFixture(t *testing.T) commandFixture {
 	t.Helper()
 	dsn := os.Getenv("OPENRAILS_E2E_DSN")
-	require.NotEmpty(t, dsn, "OPENRAILS_E2E_DSN must name a disposable database")
+	if dsn == "" {
+		t.Skip("OPENRAILS_E2E_DSN must name a disposable database")
+	}
 	pool, err := pgxpool.New(t.Context(), dsn)
 	require.NoError(t, err)
 	schema := "cli_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
@@ -70,11 +71,12 @@ func newCommandFixture(t *testing.T) commandFixture {
 	_, err = directory.Provision(t.Context(), merchants.ProvisionRequest{ID: mid, Slug: "fixture", PermissionGroupID: mid.String()}, nil)
 	require.NoError(t, err)
 	h := &hostconfig.Config{Config: cfg, Auth: authkit.Config{
-		Token:        authkit.TokenConfig{Issuer: "https://issuer.example/" + schema},
-		Keys:         authkit.KeysConfig{Path: t.TempDir(), AllowEphemeralDevKeys: true},
-		Database:     authkit.DatabaseConfig{Schema: authSchema, RiverSchema: schema},
-		Registration: authkit.RegistrationConfig{AllowMissingSenders: true},
-		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
+		DefaultTenantID: iam.TenantID(uuid.New()),
+		Token:           authkit.TokenConfig{Issuer: "https://issuer.example/" + schema},
+		Keys:            authkit.KeysConfig{Path: t.TempDir(), AllowEphemeralDevKeys: true},
+		Database:        authkit.DatabaseConfig{Schema: authSchema, RiverSchema: schema},
+		Registration:    authkit.RegistrationConfig{AllowMissingSenders: true},
+		HTTP:            &authkit.HTTPConfig{DirectPeerIP: true},
 	}}
 	ctx := hostconfig.NewContext(context.WithValue(t.Context(), config.ConfigContextKey, cfg), h)
 	return commandFixture{ctx: ctx, cfg: cfg, db: database, mid: mid}
@@ -195,6 +197,22 @@ func TestOneOffSolanaReviewNeedsOnlyTheLedger(t *testing.T) {
 	err := runSolanaPayResolve(f.ctx, f.cfg, "fixture", "unknown-signature", "reviewed", &out)
 	require.ErrorIs(t, err, payment.ErrOrderAttemptNotFound)
 	require.Empty(t, out.String())
+}
+
+func TestOneOffMigratePreparesTheConfiguredAccountTenant(t *testing.T) {
+	f := newCommandFixture(t)
+	host := hostconfig.FromContext(f.ctx)
+	require.NoError(t, applyStandaloneMigrations(f.ctx, host))
+	require.NoError(t, applyStandaloneMigrations(f.ctx, host), "the explicit adoption is idempotent")
+	host.Auth.Database.SkipMigrations = true
+	resources, err := openCLIControlPlane(f.ctx)
+	require.NoError(t, err)
+	t.Cleanup(resources.close)
+	view, err := resources.cp.Core().ForTenant(f.ctx, host.Auth.DefaultTenantID)
+	require.NoError(t, err)
+	user, err := view.CreateUser(f.ctx, iam.NewUser{Username: "migration_fixture"})
+	require.NoError(t, err)
+	require.Equal(t, host.Auth.DefaultTenantID, user.TenantID)
 }
 
 func TestOneOffHoldClearKeepsAdmissionChecksAndEvents(t *testing.T) {

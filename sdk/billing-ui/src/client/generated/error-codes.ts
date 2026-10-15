@@ -43,6 +43,7 @@ export type OpenRailsErrorCode =
   | "customer_not_found"
   | "customer_payment_unsupported"
   | "customer_session_required"
+  | "customer_tenant_mismatch"
   | "dashboard_invalid"
   | "database_busy"
   | "default_payment_method_invalid"
@@ -247,6 +248,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   customer_not_found: { status: 404, type: "invalid_request_error", meaning: "The customer does not exist." },
   customer_payment_unsupported: { status: 400, type: "invalid_request_error", meaning: "Customer-present payment is unsupported for this rail or method." },
   customer_session_required: { status: 403, type: "authorization_error", meaning: "The operation needs the customer's interactive session." },
+  customer_tenant_mismatch: { status: 403, type: "authorization_error", meaning: "The signed-in account does not belong to this merchant's tenant." },
   dashboard_invalid: { status: 400, type: "invalid_request_error", meaning: "The dashboard is invalid; metadata.errors lists why." },
   database_busy: { status: 503, type: "api_error", meaning: "No database connection is available; retry shortly." },
   default_payment_method_invalid: { status: 400, type: "invalid_request_error", meaning: "The card cannot be the customer's default for the currency." },

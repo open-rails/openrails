@@ -54,6 +54,11 @@ func (f *fixture) newVaultServer(t *testing.T, edit func(*server.Config, *server
 // authSchema is the schema of the fixture's standalone AuthKit.
 func (f *fixture) authSchema() string { return f.schema + "_auth" }
 
+// One stable operator directory per fixture, including every restart.
+func (f *fixture) tenantID() iam.TenantID {
+	return iam.TenantID(uuid.NewSHA1(uuid.NameSpaceOID, []byte(f.authSchema())))
+}
+
 // buildServer is newServer reporting New's error.
 func (f *fixture) buildServer(t *testing.T, edit func(*server.Config, *server.Deps)) (*server.Server, error) {
 	t.Helper()
@@ -62,11 +67,12 @@ func (f *fixture) buildServer(t *testing.T, edit func(*server.Config, *server.De
 	// Most journeys seed verified accounts without delivery. Enrollment journeys
 	// restore the required-verification default and wire an actual test outbox.
 	cfg := server.Config{Engine: f.config(), LocalSignIn: true, Auth: authkit.Config{
-		Token:        authkit.TokenConfig{Issuer: "http://127.0.0.1/" + f.schema},
-		Keys:         authkit.KeysConfig{Path: t.TempDir(), AllowEphemeralDevKeys: true},
-		Registration: authkit.RegistrationConfig{AllowMissingSenders: true, Verification: iam.RegistrationVerificationNone},
-		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
-		Database:     authkit.DatabaseConfig{Schema: f.authSchema()},
+		DefaultTenantID: f.tenantID(),
+		Token:           authkit.TokenConfig{Issuer: "http://127.0.0.1/" + f.schema},
+		Keys:            authkit.KeysConfig{Path: t.TempDir(), AllowEphemeralDevKeys: true},
+		Registration:    authkit.RegistrationConfig{AllowMissingSenders: true, Verification: iam.RegistrationVerificationNone},
+		HTTP:            &authkit.HTTPConfig{DirectPeerIP: true},
+		Database:        authkit.DatabaseConfig{Schema: f.authSchema()},
 	}, RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}}
 	deps := server.Deps{Engine: openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool}}
 	if edit != nil {

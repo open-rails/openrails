@@ -77,7 +77,9 @@ type Config struct {
 	// resource server (Auth.Resource; its ID defaults to
 	// Engine.PublicBillingBaseURL) and its trusted issuers. It decides who
 	// every request is; the server only maps merchants to AuthKit groups.
-	// Auth.Token.Issuer is required. The server sets what is the product's:
+	// Auth.Token.Issuer and Auth.DefaultTenantID are required. DefaultTenantID
+	// identifies the persisted platform/operator account directory, not a
+	// merchant's customer tenant. The server sets what is the product's:
 	// the merchant roles, the API key prefix, the issued audience, the
 	// resource's scopes, the enabled console's OAuth client (openrails-console),
 	// a 15-minute access-token lifetime unless
@@ -184,6 +186,9 @@ func init() {
 func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := controlplane.RequireDefaultTenant(cfg.Auth); err != nil {
+		return nil, err
 	}
 	for slug, m := range cfg.Engine.Merchants {
 		if m.Issuer != "" {

@@ -28,12 +28,15 @@ const (
 
 // Packages are the covered packages, relative to Module.
 var Packages = []string{
-	"", "adapters/fiber", "adapters/gin", "adapters/http", "billing", "catalog", "openrailstest", "openrailstest/nmimock", "openrailstest/stripemock", "server", "server/web/console", "web/pay",
+	"", "adapters/authkit", "adapters/fiber", "adapters/gin", "adapters/http", "billing", "catalog", "openrailstest", "openrailstest/nmimock", "openrailstest/stripemock", "server", "server/web/console", "web/pay",
 }
 
 // ServerModule is the directory of the module released in lockstep with the
 // root; its packages are listed from there.
 const ServerModule = "server"
+
+// AuthKitAdapterModule is the opt-in module that may link AuthKit runtime.
+const AuthKitAdapterModule = "adapters/authkit"
 
 // Surface is the covered API.
 type Surface struct {
@@ -58,13 +61,15 @@ func Load(ctx context.Context, repo string) (*Surface, error) {
 		dir := "."
 		if rel == ServerModule || strings.HasPrefix(rel, ServerModule+"/") {
 			dir = ServerModule
+		} else if rel == AuthKitAdapterModule {
+			dir = AuthKitAdapterModule
 		}
 		byModule[dir] = append(byModule[dir], paths[i])
 	}
-	// One importer over both lists: a root package keeps the root module's
+	// One importer over the module lists: a root package keeps the root module's
 	// export data, so both modules' packages share its types.
 	exports := map[string]string{}
-	for _, dir := range []string{".", ServerModule} {
+	for _, dir := range []string{".", ServerModule, AuthKitAdapterModule} {
 		if err := listExports(ctx, filepath.Join(repo, dir), byModule[dir], exports); err != nil {
 			return nil, err
 		}

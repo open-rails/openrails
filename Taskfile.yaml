@@ -199,7 +199,7 @@ tasks:
       - bash scripts/go-test-gate.sh ./internal/db/ TestNoInlineSQL
 
   lint:
-    desc: golangci-lint over the root and server modules (same gate CI runs — see .golangci.yaml)
+    desc: golangci-lint over the root, server and AuthKit adapter modules
     cmds:
       # Pinned: a floating version silently changes what the gate means.
       - |
@@ -219,6 +219,7 @@ tasks:
         esac
       - golangci-lint run --timeout=15m ./...
       - cd server && golangci-lint run --timeout=15m --config ../.golangci.yaml ./...
+      - cd adapters/authkit && golangci-lint run --timeout=15m --config ../../.golangci.yaml ./...
 
   sql-lint:
     desc: Fail on inline SQL outside internal/db/queries (allowlist in internal/db/inlinesql_test.go)

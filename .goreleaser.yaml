@@ -5,10 +5,11 @@ version: 2
 
 project_name: openrails
 
-# server/vX.Y.Z tags the same commit as vX.Y.Z; the release is the root's tag.
+# Module tags share the root release commit; the release is the root's tag.
 git:
   ignore_tags:
     - "server/*"
+    - "adapters/authkit/*"
 
 before:
   hooks:

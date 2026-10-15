@@ -106,6 +106,7 @@ migration 0104_provider_prices.up.sql sha256:c9547910caa053fef3a6915eac4275446cc
 migration 0105_psp_imports.up.sql sha256:e90d12165af03e63ce985d66169cf507f07555420ace5c2a94ed637dedd24e4f
 migration 0106_user_destructive_reservations.up.sql sha256:338ebf15379b9abb3165f4c9d47249707feeff460d78d8ea9f987ded16645b42
 migration 0107_user_action_retention.up.sql sha256:f8963bbe29d458e72f2a7e64b819ff92204de84ea0e8d06849380a93d71f9dda
+migration 0109_tenant_merchant_binding.up.sql sha256:5597e671dfe1443fdeffa5378e62aa0c61d7be36534715d6a91b42cddf8ce097
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1027,16 +1028,20 @@ table billing.merchants
   column catalog_revision bigint NOT NULL DEFAULT 0
   column slug_changed_at timestamp with time zone
   column entitlement_generation bigint NOT NULL DEFAULT 0
+  column tenant_id uuid
   constraint merchants_catalog_revision_check CHECK ((catalog_revision >= 0))
   constraint merchants_pkey PRIMARY KEY (id)
   constraint merchants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'deleted'::text])))
+  constraint merchants_tenant_group_check CHECK (((tenant_id IS NULL) OR ((permission_group_id IS NOT NULL) AND (permission_group_id = (id)::text))))
   index CREATE UNIQUE INDEX merchants_permission_group_id_key ON billing.merchants USING btree (permission_group_id) WHERE (permission_group_id IS NOT NULL)
   index CREATE UNIQUE INDEX merchants_pkey ON billing.merchants USING btree (id)
   index CREATE INDEX merchants_retired_at_id_idx ON billing.merchants USING btree (retired_at, id) WHERE ((retired_at IS NOT NULL) AND (group_release_completed_at IS NULL))
   index CREATE UNIQUE INDEX merchants_slug_key ON billing.merchants USING btree (slug) WHERE (deleted_at IS NULL)
+  index CREATE UNIQUE INDEX merchants_tenant_id_key ON billing.merchants USING btree (tenant_id) WHERE (tenant_id IS NOT NULL)
   trigger CREATE TRIGGER guard_merchant_name BEFORE INSERT OR UPDATE OF slug, deleted_at ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_name()
   trigger CREATE TRIGGER guard_merchant_restore BEFORE UPDATE ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_restore()
   trigger CREATE TRIGGER immutable_merchant_group_binding BEFORE UPDATE OF permission_group_id ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_group_binding()
+  trigger CREATE TRIGGER merchants_tenant_binding_immutable BEFORE UPDATE OF tenant_id, permission_group_id ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_tenant_binding()
 
 table billing.meter_period_quantities
   column merchant_id uuid NOT NULL
@@ -3684,6 +3689,22 @@ function billing.guard_merchant_restore()
       ) THEN
           RAISE EXCEPTION 'retired or purged merchant cannot be restored' USING ERRCODE='23514';
           END IF;
+      END IF;
+      RETURN NEW;
+  END;
+  $function$
+
+function billing.guard_merchant_tenant_binding()
+  CREATE OR REPLACE FUNCTION billing.guard_merchant_tenant_binding()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  BEGIN
+      IF OLD.tenant_id IS NOT NULL AND (
+          NEW.tenant_id IS DISTINCT FROM OLD.tenant_id OR
+          NEW.permission_group_id IS DISTINCT FROM OLD.permission_group_id
+      ) THEN
+          RAISE EXCEPTION 'merchant tenant binding is immutable';
       END IF;
       RETURN NEW;
   END;

@@ -27,12 +27,14 @@ const (
 var ErrPriceOwnershipFormat = errors.New("archive version 2 predates price ownership: restore using OpenRails v0.255.0, then upgrade")
 
 type Info struct {
+	TenantID   string `json:"tenant_id,omitempty"`
 	MerchantID string `json:"merchant_id"`
 	Digest     string `json:"digest"`
 	Rows       int64  `json:"rows"`
 }
 
 type Header struct {
+	TenantID                 string `json:"tenant_id,omitempty"`
 	CatalogRevision          int64  `json:"catalog_revision"`
 	Kind                     string `json:"kind"`
 	Version                  int    `json:"version"`
@@ -52,7 +54,7 @@ type Record struct {
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 func validHeader(h Header) bool {
-	return h.CatalogRevision >= 0 && h.Kind == "header" && h.Version == Version && h.Consistency == "repeatable_read" && h.RequiredCutoverCondition == "source_writers_stopped" && uuidPattern.MatchString(h.MerchantID) && h.MerchantID != "00000000-0000-0000-0000-000000000000"
+	return (h.TenantID == "" || uuidPattern.MatchString(h.TenantID) && h.TenantID != "00000000-0000-0000-0000-000000000000") && h.CatalogRevision >= 0 && h.Kind == "header" && h.Version == Version && h.Consistency == "repeatable_read" && h.RequiredCutoverCondition == "source_writers_stopped" && uuidPattern.MatchString(h.MerchantID) && h.MerchantID != "00000000-0000-0000-0000-000000000000"
 }
 
 // ReadHeader verifies the canonical versioned header before a caller opens a
@@ -126,6 +128,7 @@ func read(src io.Reader, dst io.Writer, onHeader func(Header) error, onRecord fu
 				return info, err
 			}
 			info.MerchantID = h.MerchantID
+			info.TenantID = h.TenantID
 			if onHeader != nil {
 				if err := onHeader(h); err != nil {
 					return info, err
@@ -234,10 +237,17 @@ type Writer struct {
 }
 
 func NewWriter(w io.Writer, merchantID string, catalogRevision ...int64) (*Writer, error) {
-	h := Header{Kind: "header", Version: Version, MerchantID: merchantID, Consistency: "repeatable_read", RequiredCutoverCondition: "source_writers_stopped"}
+	var revision int64
 	if len(catalogRevision) > 0 {
-		h.CatalogRevision = catalogRevision[0]
+		revision = catalogRevision[0]
 	}
+	return NewWriterWithTenant(w, merchantID, "", revision)
+}
+
+// NewWriterWithTenant preserves the explicit tenant ownership in the archive
+// header. An empty tenant retains the legacy unbound format.
+func NewWriterWithTenant(w io.Writer, merchantID, tenantID string, catalogRevision int64) (*Writer, error) {
+	h := Header{TenantID: tenantID, Kind: "header", Version: Version, MerchantID: merchantID, CatalogRevision: catalogRevision, Consistency: "repeatable_read", RequiredCutoverCondition: "source_writers_stopped"}
 	if !validHeader(h) {
 		return nil, errors.New("invalid archive version or merchant UUID")
 	}

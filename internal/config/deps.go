@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit/userinfo"
+	"github.com/open-rails/openrails/billing"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -19,6 +20,10 @@ type Deps struct {
 	// Postgres is the host's pool; its role owns OpenRails' tables, which New
 	// creates or upgrades. Nil opens one from Config.DB.
 	Postgres *pgxpool.Pool
+	// MerchantGroups reads live ownership metadata for explicit bound merchant
+	// declarations. It authenticates no request and is never closed by the engine.
+	// Required only when a declaration supplies Binding.
+	MerchantGroups billing.MerchantGroupReader
 	// Redis is optional shared storage for rate limits and abuse statistics:
 	// a single-node, failover (Sentinel) or cluster client. The host owns it;
 	// OpenRails never closes it.

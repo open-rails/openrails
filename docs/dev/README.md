@@ -138,11 +138,11 @@ scripts/release prepare vX.Y.Z            # opens the release PR from origin/mas
 scripts/release publish vX.Y.Z ["note"]   # once that PR's checks pass
 ```
 
-The root and server modules release together. Master accepts only commits
-whose checks passed, so `prepare` pins `server/go.mod`'s require of the root
+The root, server and optional AuthKit adapter modules release together. Master accepts only commits
+whose checks passed, so `prepare` pins their requirements of the root
 to `vX.Y.Z` on a `release/vX.Y.Z` branch and opens its PR; `publish`
 fast-forwards master to the green PR head and pushes it with the signed,
-annotated `vX.Y.Z` and `server/vX.Y.Z` tags in one atomic push. `vX.Y.Z` runs `release.yaml` (GoReleaser builds the binary from the
+annotated `vX.Y.Z`, `server/vX.Y.Z` and `adapters/authkit/vX.Y.Z` tags in one atomic push. `vX.Y.Z` runs `release.yaml` (GoReleaser builds the binary from the
 server module: binaries, checksums, SBOMs, generated notes, build
 provenance; then `@openrails/billing-ui@X.Y.Z` on npm) and
 `docker-publish.yaml` (`vX.Y.Z`, `X.Y`, `latest` on Docker Hub and GHCR, one

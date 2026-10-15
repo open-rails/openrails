@@ -218,7 +218,13 @@ rbac.Root.Role("operator", billingRead, billingManage, catalogManage, configMana
 Then build AuthKit with those roles:
 
 ```go
+// Persist this deployment's account directory UUID; never generate it at boot.
+tenant, err := iam.ParseTenantID(os.Getenv("AUTH_DEFAULT_TENANT_ID"))
+if err != nil {
+	return err
+}
 ak, err := authkit.New(ctx, authkit.Config{
+	DefaultTenantID: tenant,
 	Database: authkit.DatabaseConfig{Schema: "profiles"}, // AuthKit's tables, beside OpenRails' "billing"
 	Token:    authkit.TokenConfig{Issuer: issuer, IssuedAudiences: []string{"myapp"}},
 	Keys:     authkit.KeysConfig{Path: "/vault/auth"}, // its signing keys
@@ -1407,7 +1413,7 @@ DB_URL=postgres://… EMAIL_SMTP_HOST=… AUTH_KEYS_PATH=… ./openrails run-ser
 
 #### Configure it
 
-`config.yaml` holds the process: its database, its own AuthKit, the issuer it trusts, its route groups and SMTP. This is the example's, whole:
+`config.yaml` holds the process: its database, its own AuthKit, the issuer it trusts, its route groups and SMTP. Generate a stable `auth.default_tenant_id` once for the server's platform/operator account directory; it is independent of its merchants' tenants. Keep it across replicas and restarts. `openrails migrate up` prepares both billing and this explicit AuthKit directory. See [account directory adoption](docs/auth.md#standalone-account-directory). This is the example's, whole:
 
 ```yaml
 provider_write_mode: full # full | limited | readonly: how much it may do at the PSPs
@@ -1424,6 +1430,7 @@ redis: # rate limits and abuse state shared by replicas; without it, in memory (
 # The server's own AuthKit: its tables (schema profiles) and signing key. Its
 # sign-in stays off: people sign in at the app, the trusted issuer below.
 auth:
+  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11
   issuer: http://localhost:3053
   request_origin: http://localhost:3053 # the origin DPoP proofs name
   keys_path: /vault/auth

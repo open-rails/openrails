@@ -4,8 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # Each module is proven on its own, never through a developer's go.work.
 export GOWORK=off
-# The root library, the server released with it, and the examples.
-modules=(. server examples)
+# Each separately published module and the examples.
+modules=(. server adapters/authkit examples)
 
 # in_modules runs a command in every module.
 in_modules() {
@@ -94,7 +94,23 @@ checks() {
 e2e() {
   : "${OPENRAILS_E2E_DSN:?Set OPENRAILS_E2E_DSN to a disposable PostgreSQL server}"
   bash scripts/e2e.sh
+  authkit_adapter_e2e
+  cli_e2e
   examples_e2e
+}
+
+# The opt-in AuthKit module proves real merchant/tenant binding against the
+# same disposable database. A skipped or renamed test must fail this gate.
+authkit_adapter_e2e() {
+  : "${OPENRAILS_E2E_DSN:?Set OPENRAILS_E2E_DSN to a disposable PostgreSQL server}"
+  bash scripts/go-test-gate.sh -C adapters/authkit . '^TestExplicitMerchantTenantBinding$'
+}
+
+cli_e2e() {
+  : "${OPENRAILS_E2E_DSN:?Set OPENRAILS_E2E_DSN to a disposable PostgreSQL server}"
+  : "${OPENRAILS_E2E_VAULT_ADDR:?Set OPENRAILS_E2E_VAULT_ADDR to a disposable Vault server}"
+  : "${OPENRAILS_E2E_VAULT_TOKEN:?Set OPENRAILS_E2E_VAULT_TOKEN for the disposable Vault server}"
+  bash scripts/go-test-gate.sh -C server ./cmd/openrails '^TestOneOff'
 }
 
 # The examples' end-to-end tests: own-auth's, and standalone's against the
@@ -116,7 +132,9 @@ case "${1:-all}" in
   console) console ;;
   chart) chart ;;
   e2e) e2e ;;
+  authkit-adapter-e2e) authkit_adapter_e2e ;;
+  cli-e2e) cli_e2e ;;
   examples-e2e) examples_e2e ;;
   all) checks; e2e ;;
-  *) echo "usage: bash scripts/check.sh [checks|build|go|console|chart|e2e|examples-e2e|all]" >&2; exit 2 ;;
+  *) echo "usage: bash scripts/check.sh [checks|build|go|console|chart|e2e|authkit-adapter-e2e|cli-e2e|examples-e2e|all]" >&2; exit 2 ;;
 esac

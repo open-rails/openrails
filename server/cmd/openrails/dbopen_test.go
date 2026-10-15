@@ -9,9 +9,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMigrateRequiresPlatformTenantBeforeDatabase(t *testing.T) {
+	err := applyStandaloneMigrations(t.Context(), &hostconfig.Config{
+		Config: &config.Config{DB: &config.DBConfig{URL: "postgres://unreachable.invalid/db"}},
+	})
+	require.ErrorContains(t, err, "auth.default_tenant_id")
+}
 
 func TestCommandDatabaseFailureDoesNotRetryOrPrintStartup(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

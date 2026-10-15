@@ -78,13 +78,19 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 		return nil, err
 	}
 	secret := sha256.Sum256([]byte(s.ClientSecret))
+	// A deployment keeps this directory ID across every restart.
+	tenant, err := iam.ParseTenantID(cmp.Or(os.Getenv("AUTH_DEFAULT_TENANT_ID"), "8c67667c-8837-439a-a485-2c9a385c64c3"))
+	if err != nil {
+		return nil, err
+	}
 	return authkit.New(ctx, authkit.Config{
-		Database:     authkit.DatabaseConfig{Schema: "profiles"},
-		Token:        authkit.TokenConfig{Issuer: s.PublicURL, IssuedAudiences: []string{"onlydemo"}},
-		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true}, // the README's Path: "/vault/auth" in production
-		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true},
-		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired},
-		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
+		DefaultTenantID: tenant,
+		Database:        authkit.DatabaseConfig{Schema: "profiles"},
+		Token:           authkit.TokenConfig{Issuer: s.PublicURL, IssuedAudiences: []string{"onlydemo"}},
+		Keys:            authkit.KeysConfig{AllowEphemeralDevKeys: true}, // the README's Path: "/vault/auth" in production
+		HTTP:            &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true},
+		Registration:    authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired},
+		TwoFactor:       authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
 
 		// OpenRails is a resource server this AuthKit mints tokens for.
 		AuthorizationServer: authkit.AuthorizationServerConfig{

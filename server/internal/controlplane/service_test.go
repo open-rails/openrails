@@ -14,6 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
+var controlPlaneTestTenant = iam.NewTenantID()
+
 // The server passes the host's AuthKit configuration through, setting only
 // the product's own: roles, the API key prefix, its River schema, the
 // resource's scopes, invitation-only local registration, and its HTTP mount.
@@ -25,17 +27,18 @@ func TestAuthKitConfiguration(t *testing.T) {
 		auth authkit.Config
 		opts Options
 	}{
-		"auth.token.issuer is required":     {authkit.Config{}, Options{}},
-		"is not one of open":                {authkit.Config{Token: issuer, Registration: authkit.RegistrationConfig{NativeUserMode: "sometimes"}}, Options{}},
-		"need local sign-in":                {authkit.Config{Token: issuer, Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen}}, Options{}},
-		"open self-registration":            {authkit.Config{Token: issuer, Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen}}, Options{LocalSignIn: true}},
-		"passwordless login need local sig": {authkit.Config{Token: issuer, Registration: authkit.RegistrationConfig{PasswordlessLogin: true}}, Options{}},
+		"auth.token.issuer is required":     {authkit.Config{DefaultTenantID: controlPlaneTestTenant}, Options{}},
+		"auth.default_tenant_id":            {authkit.Config{Token: issuer}, Options{}},
+		"is not one of open":                {authkit.Config{DefaultTenantID: controlPlaneTestTenant, Token: issuer, Registration: authkit.RegistrationConfig{NativeUserMode: "sometimes"}}, Options{}},
+		"need local sign-in":                {authkit.Config{DefaultTenantID: controlPlaneTestTenant, Token: issuer, Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen}}, Options{}},
+		"open self-registration":            {authkit.Config{DefaultTenantID: controlPlaneTestTenant, Token: issuer, Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen}}, Options{LocalSignIn: true}},
+		"passwordless login need local sig": {authkit.Config{DefaultTenantID: controlPlaneTestTenant, Token: issuer, Registration: authkit.RegistrationConfig{PasswordlessLogin: true}}, Options{}},
 	} {
 		_, err := AuthKit(engine, tc.auth, tc.opts)
 		require.ErrorContains(t, err, want)
 	}
 
-	got, err := AuthKit(engine, authkit.Config{Token: issuer}, Options{})
+	got, err := AuthKit(engine, authkit.Config{DefaultTenantID: controlPlaneTestTenant, Token: issuer}, Options{})
 	require.NoError(t, err)
 	require.Same(t, Roles, got.Roles)
 	require.Equal(t, APIKeyPrefix, got.APIKeys.Prefix)
@@ -48,7 +51,7 @@ func TestAuthKitConfiguration(t *testing.T) {
 	require.Equal(t, "/auth", got.HTTP.APIPath)
 	require.True(t, got.HTTP.RefreshCookie)
 
-	got, err = AuthKit(engine, authkit.Config{
+	got, err = AuthKit(engine, authkit.Config{DefaultTenantID: controlPlaneTestTenant,
 		Token:        issuer,
 		Resource:     authkit.ResourceConfig{ID: "https://api.openrails.example.com", Scopes: map[string][]string{"x": {"y"}}},
 		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeInviteOnly},
@@ -75,7 +78,7 @@ func TestAuthKitPreservesNoAutomaticMigrations(t *testing.T) {
 	for _, engineSkip := range []bool{false, true} {
 		for _, authSkip := range []bool{false, true} {
 			cfg := &config.Config{Database: config.DatabaseConfig{SkipMigrations: engineSkip}}
-			authCfg := authkit.Config{Token: authkit.TokenConfig{Issuer: "https://openrails.example"}, Database: authkit.DatabaseConfig{SkipMigrations: authSkip}}
+			authCfg := authkit.Config{DefaultTenantID: controlPlaneTestTenant, Token: authkit.TokenConfig{Issuer: "https://openrails.example"}, Database: authkit.DatabaseConfig{SkipMigrations: authSkip}}
 			got, err := AuthKit(cfg, authCfg, Options{})
 			require.NoError(t, err)
 			require.Equal(t, engineSkip || authSkip, got.Database.SkipMigrations)
@@ -85,7 +88,7 @@ func TestAuthKitPreservesNoAutomaticMigrations(t *testing.T) {
 
 func TestLocalConsoleEnrollmentAndLinkDefaults(t *testing.T) {
 	engine := &config.Config{PublicBillingBaseURL: "https://billing.example.com/v1"}
-	got, err := AuthKit(engine, authkit.Config{Token: authkit.TokenConfig{Issuer: "https://billing.example.com/auth"}}, Options{LocalSignIn: true, Console: true})
+	got, err := AuthKit(engine, authkit.Config{DefaultTenantID: controlPlaneTestTenant, Token: authkit.TokenConfig{Issuer: "https://billing.example.com/auth"}}, Options{LocalSignIn: true, Console: true})
 	require.NoError(t, err)
 	require.Equal(t, iam.RegistrationModeInviteOnly, got.Registration.NativeUserMode)
 	require.Equal(t, "https://billing.example.com", got.Frontend.BaseURL)
@@ -102,7 +105,7 @@ func TestLocalSignInWithoutConsole(t *testing.T) {
 		BaseURL: "https://accounts.example.com", InvitePath: "/join", PasswordResetPath: "/reset",
 		VerifyPath: "/verify", PasswordlessPath: "/sign-in",
 	}} {
-		got, err := AuthKit(engine, authkit.Config{
+		got, err := AuthKit(engine, authkit.Config{DefaultTenantID: controlPlaneTestTenant,
 			Token: authkit.TokenConfig{Issuer: "https://billing.example.com/auth"}, Frontend: frontend,
 		}, Options{LocalSignIn: true})
 		require.NoError(t, err)
@@ -116,7 +119,7 @@ func TestLocalSignInWithoutConsole(t *testing.T) {
 
 func TestHostedOpenRegistrationRequiresPolicyAndLocalSignIn(t *testing.T) {
 	engine := &config.Config{}
-	auth := authkit.Config{Token: authkit.TokenConfig{Issuer: "https://billing.example.com/auth"},
+	auth := authkit.Config{DefaultTenantID: controlPlaneTestTenant, Token: authkit.TokenConfig{Issuer: "https://billing.example.com/auth"},
 		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen}}
 	for _, tc := range []struct {
 		name string

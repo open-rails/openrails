@@ -248,6 +248,25 @@ AuthKit groups and nothing more:
   declares. No foreign trusted issuer reaches it, so let a foreign issuer's
   customer make itself with its first request.
 
+## Standalone account directory
+
+The standalone server requires `auth.default_tenant_id`
+(`AUTH_DEFAULT_TENANT_ID`), a UUID generated once for its platform/operator
+account directory and retained in deployment configuration. It is not inferred
+from a merchant, a token issuer or a request. Merchant ownership and external
+customer directories remain separate, even when one deployment hosts both.
+
+`openrails migrate up` (or `migrate pg`) explicitly migrates both OpenRails and
+AuthKit. It passes this configured ID as AuthKit's legacy-directory adoption
+target, preserving existing account and credential IDs. Review that mapping
+before migrating a populated database; every subsequent boot and replica uses
+the same value. Database-only inspection commands require no account tenant.
+
+For an explicitly tenant-bound merchant, the customer gate also checks the
+verified credential's tenant. A foreign issuer's subject keeps that issuer in
+the billing customer row: a matching UUID or tenant never turns it into a
+native account or lets it claim an existing native customer's row.
+
 ## Trusted issuers
 
 With `auth.resource.id` set, the server's AuthKit is an OAuth 2.0 resource

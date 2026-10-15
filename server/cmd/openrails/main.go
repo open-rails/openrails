@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/open-rails/authkit"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
 	"github.com/open-rails/openrails/server/internal/bootstrap/serverboot"
+	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
@@ -107,21 +109,17 @@ func newRootCmd() *cobra.Command {
 
 	migrateUpCmd := &cobra.Command{
 		Use:   "up",
-		Short: "Apply OpenRails and River migrations",
+		Short: "Apply OpenRails, AuthKit and River migrations",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-			ctx := cmd.Context()
-			return applyStandaloneMigrations(ctx, cfg)
+			return applyStandaloneMigrations(cmd.Context(), hostconfig.FromContext(cmd.Context()))
 		},
 	}
 
 	migratePgCmd := &cobra.Command{
 		Use:   "pg",
-		Short: "Apply OpenRails and River migrations",
+		Short: "Apply OpenRails, AuthKit and River migrations",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-			ctx := cmd.Context()
-			return applyStandaloneMigrations(ctx, cfg)
+			return applyStandaloneMigrations(cmd.Context(), hostconfig.FromContext(cmd.Context()))
 		},
 	}
 
@@ -241,13 +239,27 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// applyStandaloneMigrations does what server.New does first: billing and
-// River. AuthKit migrates itself when the server builds it.
-func applyStandaloneMigrations(ctx context.Context, cfg *config.Config) error {
-	database, err := openCLIDB(ctx, cfg)
+// applyStandaloneMigrations prepares both schemas without constructing a
+// server. Existing single-directory accounts adopt only the explicit platform
+// tenant in configuration, never a generated or inferred merchant identity.
+func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) error {
+	if host == nil || host.Config == nil {
+		return errors.New("standalone config is required")
+	}
+	if err := controlplane.RequireDefaultTenant(host.Auth); err != nil {
+		return err
+	}
+	database, err := openCLIDB(ctx, host.Config)
 	if err != nil {
 		return fmt.Errorf("standalone migration pool: %w", err)
 	}
 	defer database.Close()
-	return engine.Migrate(ctx, database.Pool(), *cfg)
+	if err := engine.Migrate(ctx, database.Pool(), *host.Config); err != nil {
+		return err
+	}
+	// The control plane owns the AuthKit/River schema selection. Preserve its
+	// configuration without building its roles, HTTP handler or job workers.
+	authDatabase := host.Auth.Database
+	authDatabase.RiverSchema = config.RiverSchemaName(host.Config)
+	return authkit.Migrate(ctx, database.Pool(), authDatabase, authkit.MigrationOptions{LegacyTenantID: host.Auth.DefaultTenantID})
 }

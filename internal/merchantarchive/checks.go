@@ -79,7 +79,7 @@ var excludedColumns = map[string]string{
 	"worker_state":                  "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",
 	"periodic_leases":               "kind merchant_set holder expires_at claimed_at",
 	"solana_crankers":               "name public_key pinned_at",
-	"merchants":                     "id slug status permission_group_id created_at updated_at deleted_at retired_at group_release_completed_at catalog_revision slug_changed_at entitlement_generation",
+	"merchants":                     "id slug status permission_group_id tenant_id created_at updated_at deleted_at retired_at group_release_completed_at catalog_revision slug_changed_at entitlement_generation",
 	"merchant_slug_aliases":         "slug merchant_id expires_at created_at",
 	"webhook_health":                "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
 	"webhook_health_daily":          "merchant_id psp_id custodian_id day_at rejected drift",

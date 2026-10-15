@@ -45,6 +45,9 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 	if h.Config == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
+	if err := controlplane.RequireDefaultTenant(h.Auth); err != nil {
+		return nil, err
+	}
 	c := &commandControlPlane{}
 	defer func() {
 		if err != nil {

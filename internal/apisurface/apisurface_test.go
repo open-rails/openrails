@@ -27,6 +27,14 @@ func TestGoAPISurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, prefix := range []string{
+		"pkg openrails/adapters/authkit, func BindMerchant(",
+		"pkg openrails/adapters/authkit, func MerchantGroups(",
+	} {
+		if !slices.ContainsFunc(s.Features, func(feature string) bool { return strings.HasPrefix(feature, prefix) }) {
+			t.Errorf("opt-in adapter API is missing from the covered modules: %s", prefix)
+		}
+	}
 	if len(s.Leaks) > 0 {
 		t.Errorf("the public API exposes internal types no public package names:\n%s", strings.Join(s.Leaks, "\n"))
 	}

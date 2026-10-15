@@ -25,9 +25,10 @@ import (
 const (
 	Module       = "github.com/open-rails/openrails"
 	SnapshotPath = "compatibility/contract.json"
-	// ServerModule is the nested module released in lockstep with the root
-	// (scripts/release); the contract covers it. Other nested modules are not.
-	ServerModule = "server"
+	// Nested modules released with the root by scripts/release are covered by
+	// the same contract. Example and browser-fixture modules are not.
+	ServerModule         = "server"
+	AuthKitAdapterModule = "adapters/authkit"
 )
 
 // Snapshot is the reviewed contract. Every section is derived from source, so
@@ -145,7 +146,7 @@ func walkDir(fsys fs.FS, name, base string) error {
 	if strings.HasPrefix(base, ".") || strings.HasPrefix(base, "_") || base == "node_modules" || base == "vendor" || base == "testdata" {
 		return fs.SkipDir
 	}
-	if _, err := fs.Stat(fsys, path.Join(name, "go.mod")); err == nil && name != ServerModule {
+	if _, err := fs.Stat(fsys, path.Join(name, "go.mod")); err == nil && name != ServerModule && name != AuthKitAdapterModule {
 		return fs.SkipDir
 	}
 	return nil

@@ -3,7 +3,7 @@ name: Release
 # A v* tag publishes the GitHub Release (.goreleaser.yaml): binaries, checksums,
 # SBOMs, generated notes and build provenance; then @openrails/billing-ui to npm
 # and the Helm chart to oci://ghcr.io/open-rails/charts/openrails.
-# scripts/release cuts one (prepare, then publish): vX.Y.Z and server/vX.Y.Z on one master commit. The
+# scripts/release tags root, server and adapters/authkit at one master commit. The
 # binary is built from the server module.
 # Pull requests that change the release build run it as a snapshot.
 # workflow_dispatch publishes an older release's attached billing-ui tarball.
@@ -21,6 +21,8 @@ on:
       - .goreleaser.yaml
       - .github/workflows/release.yaml
       - server/go.mod
+      - adapters/authkit/go.mod
+      - scripts/release
       - scripts/build-admin-console.sh
       - scripts/pack-billing-ui.sh
       - internal/buildinfo/**

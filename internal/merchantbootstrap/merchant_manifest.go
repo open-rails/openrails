@@ -398,6 +398,9 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (_ *mer
 	case err != nil:
 		return nil, nil, fmt.Errorf("merchant bootstrap: lookup %q: %w", slug, err)
 	}
+	if req.Insert && req.MerchantID.IsZero() && tn.PermissionGroupID != "" {
+		return nil, nil, fmt.Errorf("merchant bootstrap: %q is group-bound; an explicit verified binding is required", slug)
+	}
 	if refused, err = PutDeclaration(ctx, req, tn.ID, mt); err != nil {
 		return nil, nil, fmt.Errorf("merchant bootstrap: configure %q: %w", slug, err)
 	}

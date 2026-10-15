@@ -54,6 +54,9 @@ redis:
 # mint for auth.resource.id. Env AUTH_<KEY> sets auth.<key> (AUTH_TOKEN_ISSUER,
 # AUTH_SIGN_IN_DPOP).
 auth:
+  # Generate once for this deployment; keep it across restarts and migration.
+  # This platform/operator directory is independent of merchant ownership.
+  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11
   token:
     issuer: http://localhost:3053 # issuer URL; JWKS is served under this authority
   keys:

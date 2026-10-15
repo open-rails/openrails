@@ -647,6 +647,8 @@ type BillingMerchant struct {
 	SlugChangedAt *time.Time
 	// Steps with every statement that changes a product's keys: a cached key set from an older generation is stale.
 	EntitlementGeneration int64
+	// Explicit immutable business tenant associated one-to-one with this billing identity. NULL is the legacy unbound mode; never inferred from an issuer, name, default account tenant or request. The matching permission group has this merchant ID.
+	TenantID *uuid.UUID
 }
 
 // Per-merchant destructive-action policy: destructive_actions_enabled is the per-merchant emergency stop (the instance switch in destructive_action_switch gates it globally); enforce_armed_at is the first-enforce gate — NULL means the merchant's provider pull runs advisory (findings only, zero mutations) until an operator reviews the first pull and arms it.

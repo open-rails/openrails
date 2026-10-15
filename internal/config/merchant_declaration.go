@@ -25,6 +25,10 @@ type MerchantDeclaration struct {
 	// entry's key in Config.Merchants and in a manifest, which refuses the
 	// field.
 	Slug string `yaml:"-"`
+	// Binding selects an already adopted merchant by immutable ID and tenant.
+	// Only trusted host code sets this; merchant documents cannot claim it.
+	// Nil retains the unbound configuration mode.
+	Binding *billing.MerchantBinding `yaml:"-" json:"-"`
 	// Issuer binds the credentials of one issuer to this merchant: every
 	// request whose Identity names it as issuer, and whose credential is
 	// bound to no scope, acts on this merchant, as its customer or its
@@ -332,6 +336,10 @@ func DeclaredMerchants(cfg *Config) (out []MerchantDeclaration, refused []Degrad
 	byIssuer := map[string][]string{}
 	for _, key := range slices.Sorted(maps.Keys(cfg.Merchants)) {
 		m := cfg.Merchants[key]
+		if m.Binding != nil {
+			binding := *m.Binding
+			m.Binding = &binding
+		}
 		slug := billing.NormalizeMerchantSlug(key)
 		if err := billing.ValidateMerchantSlug(key); err != nil {
 			refused = append(refused, Degradation{Field: "merchants." + key, Err: fmt.Errorf("%w; the merchant is not provisioned", err)})

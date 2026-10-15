@@ -522,6 +522,9 @@ func admitCustomer(rt *app.Runtime) func(context.Context, billing.MerchantID, bi
 		if rt == nil || rt.DB == nil {
 			return errors.Join(auth.ErrUnavailable, errors.New("no database admits customers"))
 		}
+		if err := requireCustomerTenant(ctx, rt, mid, id); err != nil {
+			return err
+		}
 		admit := func(ctx context.Context) error {
 			return db.AdmitCustomer(ctx, rt.DB.Gen(ctx), mid.UUID(), id.UUID(), issuer)
 		}
