@@ -445,6 +445,9 @@ func remoteTxnEvidence(t *RemoteTransaction) map[string]any {
 		// occurred_at drives the windowed auto-resolve of PS-4/5/6.
 		"occurred_at": t.OccurredAt.UTC().Format(time.RFC3339),
 	}
+	if t.OriginalTransactionID != "" {
+		ev["original_transaction_id"] = t.OriginalTransactionID
+	}
 	if t.SubscriptionID != "" {
 		ev["subscription_id"] = t.SubscriptionID
 	}
@@ -1512,6 +1515,9 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 }
 
 func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, paymentsByTxnID map[string]*LocalPayment, now time.Time) (Finding, bool) {
+	if provider == ProviderNMI && t.OriginalTransactionID != "" && t.OriginalTransactionID != t.TransactionID {
+		return makeNMIRefund(t, paymentsByTxnID, now)
+	}
 	bc := decodeBreadcrumbs(t.Raw)
 
 	// Identify the local original payment: an explicit charge link (Stripe

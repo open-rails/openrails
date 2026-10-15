@@ -87,6 +87,8 @@ type LocalPayment struct {
 	Rail          string
 	TransactionID string
 	AmountCents   int64
+	AmountNative  int64
+	ReversalKind  string
 	Currency      string
 	Status        string
 	// UsageOrderID is the usage order a ledger-settled payment paid.
@@ -391,11 +393,15 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 			CustomerID:        row.CustomerID,
 			TransactionID:     row.TransactionID,
 			AmountCents:       row.Amount / moneyutil.MicrosPerCent,
+			AmountNative:      row.Amount,
 			Currency:          row.Currency,
 			Status:            string(row.Status),
 			SubscriptionID:    row.SubscriptionID,
 			RefundedPaymentID: row.RefundedPaymentID,
 			PurchasedAt:       row.PurchasedAt,
+		}
+		if row.ReversalKind != nil {
+			p.ReversalKind = *row.ReversalKind
 		}
 		if row.Rail != nil {
 			p.Rail = *row.Rail
