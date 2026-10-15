@@ -152,9 +152,9 @@ rate_limits:
 # Combined customer card-removal and subscription-cancellation protection.
 # Distinct affected customers across all actors/apps; no per-minute window.
 user_action_rate_limit:
-  minimum_customers_per_hour: 2
+  minimum_customers_per_hour: 5
   paid_customers_per_hourly_customer: 400
-  minimum_customers_per_day: 5
+  minimum_customers_per_day: 10
   paid_customers_per_daily_customer: 100
 
 # Exact origins purchase success/cancel and billing-portal return URLs may

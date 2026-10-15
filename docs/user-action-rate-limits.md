@@ -6,11 +6,11 @@ share it, independent of ordinary per-IP/user HTTP rate limits.
 
 The rolling 24-hour limit is the larger of:
 
-- five distinct affected customers;
+- ten distinct affected customers;
 - one percent of customers with a successful positive payment in the previous
   30 days, rounded up.
 
-The rolling-hour limit is the larger of two distinct customers or one per
+The rolling-hour limit is the larger of five distinct customers or one per
 400 recent paying customers (rounded up). For 4,000 recent paying customers,
 the limits are ten per rolling hour and 40 per rolling day. There is no
 per-minute limit. A burst is checked on every request; it cannot wait for the
@@ -31,9 +31,9 @@ Configuration (`UserActionRateLimit` in Go):
 
 ```yaml
 user_action_rate_limit:
-  minimum_customers_per_hour: 2
+  minimum_customers_per_hour: 5
   paid_customers_per_hourly_customer: 400
-  minimum_customers_per_day: 5
+  minimum_customers_per_day: 10
   paid_customers_per_daily_customer: 100
 ```
 
