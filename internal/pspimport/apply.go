@@ -54,7 +54,11 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID) error {
 				return err
 			}
 			if data.Success && data.Type == "refund" {
-				l.refunded[data.TransactionID] = true
+				if data.OriginalTransactionID == "" {
+					l.unqualifiedRefund = true
+				} else {
+					l.refunded[data.OriginalTransactionID] = true
+				}
 			}
 			return nil
 		}); err != nil {
@@ -187,9 +191,10 @@ type lander struct {
 	scope  merchants.PSPScope
 	prices map[string]priceTerms
 	// unpriced says why no subscription of a plan-less rail has a price.
-	unpriced string
-	asOf     time.Time
-	refunded map[string]bool
+	unpriced          string
+	asOf              time.Time
+	refunded          map[string]bool
+	unqualifiedRefund bool
 }
 
 // outcome is what landing did to one record.
@@ -392,6 +397,10 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 				}
 				if !data.Success || data.Type != "" && data.Type != "sale" {
 					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "history without a subscription requires a confirmed successful sale"}
+					continue
+				}
+				if l.unqualifiedRefund {
+					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "a successful refund has no original payment ID; create a fresh import to read its history before importing standalone payments"}
 					continue
 				}
 				if l.refunded[data.TransactionID] {

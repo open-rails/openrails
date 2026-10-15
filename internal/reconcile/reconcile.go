@@ -149,6 +149,8 @@ type RemoteTransaction struct {
 	// transaction_id, CCBill transaction id, Stripe ch_/re_/dp_..., Solana tx
 	// signature).
 	TransactionID string `json:"transaction_id"`
+	// OriginalTransactionID links a refund to its charge when the report proves it.
+	OriginalTransactionID string `json:"original_transaction_id,omitempty"`
 	// SubscriptionID links to the rail subscription when the provider
 	// exposes the linkage; empty otherwise (see fetcher notes).
 	SubscriptionID string `json:"subscription_id,omitempty"`

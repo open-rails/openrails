@@ -68,12 +68,13 @@ type subscriptionData struct {
 type transactionData struct {
 	// TransactionID is the provider's id; a refund's record ref also names
 	// the refund.
-	TransactionID string    `json:"transaction_id"`
-	Type          string    `json:"type"`
-	Success       bool      `json:"success"`
-	Amount        int64     `json:"amount,string"`
-	Currency      string    `json:"currency"`
-	OccurredAt    time.Time `json:"occurred_at"`
+	TransactionID         string    `json:"transaction_id"`
+	OriginalTransactionID string    `json:"original_transaction_id,omitempty"`
+	Type                  string    `json:"type"`
+	Success               bool      `json:"success"`
+	Amount                int64     `json:"amount,string"`
+	Currency              string    `json:"currency"`
+	OccurredAt            time.Time `json:"occurred_at"`
 	// Decimal is a major-unit amount a provider reports without a currency;
 	// the subscription's price denominates it.
 	Decimal string `json:"decimal,omitempty"`

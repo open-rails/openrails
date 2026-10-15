@@ -168,13 +168,13 @@ func (s *nmiSource) history(ctx context.Context, since, until time.Time) ([]stag
 		f.add(FactCustomerRef, t.CustomerRef)
 		f.add(FactEmail, t.Email)
 		f.add(FactSubscriptionRef, t.SubscriptionID)
-		// A refund is its own action on the sale's transaction id.
+		// Keep staged refs stable for both separate and combined refund reports.
 		ref := t.TransactionID
 		if typ == "refund" {
 			ref = t.TransactionID + ":refund:" + t.OccurredAt.UTC().Format(time.RFC3339)
 		}
 		out = append(out, staged{kind: billing.PSPImportTransaction, ref: ref, customerRef: t.CustomerRef, subscriptionRef: t.SubscriptionID,
-			occurredAt: t.OccurredAt, facts: f, data: transactionData{TransactionID: t.TransactionID, Type: typ, Success: t.Success, Amount: native, Currency: strings.ToUpper(t.Currency), OccurredAt: t.OccurredAt.UTC()}})
+			occurredAt: t.OccurredAt, facts: f, data: transactionData{TransactionID: t.TransactionID, OriginalTransactionID: t.OriginalTransactionID, Type: typ, Success: t.Success, Amount: native, Currency: strings.ToUpper(t.Currency), OccurredAt: t.OccurredAt.UTC()}})
 	}
 	return out, nil
 }
