@@ -85,6 +85,7 @@ pkg openrails, method (*Client) GetPublicConfig(context.Context, ...RequestOptio
 pkg openrails, method (*Client) GetRenewal(context.Context, billing.RenewalID, ...RequestOption) (*billing.Renewal, error)
 pkg openrails, method (*Client) GetRunningCharge(context.Context, string, ...RequestOption) (*billing.RunningCharge, error)
 pkg openrails, method (*Client) GetSubscription(context.Context, billing.SubscriptionID, ...RequestOption) (*billing.Subscription, error)
+pkg openrails, method (*Client) GetSubscriptionHistory(context.Context, billing.SubscriptionID, billing.PageRequest, ...RequestOption) (*billing.SubscriptionHistory, error)
 pkg openrails, method (*Client) GetUsageEvent(context.Context, billing.UsageEventID, ...RequestOption) (*billing.UsageEvent, error)
 pkg openrails, method (*Client) ImportBilling(context.Context, billing.DeclaredBilling, ...RequestOption) (*billing.BillingImportResult, error)
 pkg openrails, method (*Client) ImportBillingArchive(context.Context, io.Reader, ...RequestOption) (*billing.BillingArchiveImport, error)
@@ -231,6 +232,7 @@ pkg openrails, method (LocalClient) GetPublicConfig(context.Context, ...RequestO
 pkg openrails, method (LocalClient) GetRenewal(context.Context, billing.RenewalID, ...RequestOption) (*billing.Renewal, error)
 pkg openrails, method (LocalClient) GetRunningCharge(context.Context, string, ...RequestOption) (*billing.RunningCharge, error)
 pkg openrails, method (LocalClient) GetSubscription(context.Context, billing.SubscriptionID, ...RequestOption) (*billing.Subscription, error)
+pkg openrails, method (LocalClient) GetSubscriptionHistory(context.Context, billing.SubscriptionID, billing.PageRequest, ...RequestOption) (*billing.SubscriptionHistory, error)
 pkg openrails, method (LocalClient) GetUsageEvent(context.Context, billing.UsageEventID, ...RequestOption) (*billing.UsageEvent, error)
 pkg openrails, method (LocalClient) ImportBilling(context.Context, billing.DeclaredBilling, ...RequestOption) (*billing.BillingImportResult, error)
 pkg openrails, method (LocalClient) ImportBillingArchive(context.Context, io.Reader, ...RequestOption) (*billing.BillingArchiveImport, error)
@@ -3506,6 +3508,49 @@ pkg openrails/billing, type SubscriptionDunning struct, LastFailureReason *Decli
 pkg openrails/billing, type SubscriptionDunning struct, NextRetryAt *time.Time `json:"next_retry_at"`
 pkg openrails/billing, type SubscriptionDunning struct, RetriesLeft *int `json:"retries_left"`
 pkg openrails/billing, type SubscriptionDunning struct, WaitingForNewCard bool `json:"waiting_for_new_card"`
+pkg openrails/billing, type SubscriptionHistory struct
+pkg openrails/billing, type SubscriptionHistory struct, Coverage SubscriptionHistoryCoverage `json:"coverage"`
+pkg openrails/billing, type SubscriptionHistory struct, Events ListPage[SubscriptionHistoryEntry] `json:"events"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, Action string `json:"action,omitempty"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, Category string `json:"category"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, Currency string `json:"currency"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, ID PaymentAttemptID `json:"id"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, Kind string `json:"kind"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, ObservedVia string `json:"observed_via"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, OperationID string `json:"operation_id,omitempty"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, OrderID *OrderID `json:"order_id,omitempty"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, PSPID PSPID `json:"psp_id"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, PaymentID *PaymentID `json:"payment_id,omitempty"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, PaymentMethodID *PaymentMethodID `json:"payment_method_id,omitempty"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, Reason string `json:"reason,omitempty"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, RenewalID *RenewalID `json:"renewal_id,omitempty"`
+pkg openrails/billing, type SubscriptionHistoryAttempt struct, Source string `json:"source"`
+pkg openrails/billing, type SubscriptionHistoryCoverage struct
+pkg openrails/billing, type SubscriptionHistoryCoverage struct, Gaps []string `json:"gaps"`
+pkg openrails/billing, type SubscriptionHistoryCoverage struct, RetentionDays int `json:"retention_days"`
+pkg openrails/billing, type SubscriptionHistoryCoverage struct, Sources []string `json:"sources"`
+pkg openrails/billing, type SubscriptionHistoryEntry struct
+pkg openrails/billing, type SubscriptionHistoryEntry struct, At time.Time `json:"at"`
+pkg openrails/billing, type SubscriptionHistoryEntry struct, Attempt *SubscriptionHistoryAttempt `json:"attempt,omitempty"`
+pkg openrails/billing, type SubscriptionHistoryEntry struct, ID string `json:"id"`
+pkg openrails/billing, type SubscriptionHistoryEntry struct, Kind string `json:"kind"`
+pkg openrails/billing, type SubscriptionHistoryEntry struct, Operation *SubscriptionHistoryOperation `json:"operation,omitempty"`
+pkg openrails/billing, type SubscriptionHistoryEntry struct, RecordedAt time.Time `json:"recorded_at"`
+pkg openrails/billing, type SubscriptionHistoryEntry struct, Transition *SubscriptionHistoryTransition `json:"transition,omitempty"`
+pkg openrails/billing, type SubscriptionHistoryOperation struct
+pkg openrails/billing, type SubscriptionHistoryOperation struct, Attempt int `json:"attempt"`
+pkg openrails/billing, type SubscriptionHistoryOperation struct, ID string `json:"id"`
+pkg openrails/billing, type SubscriptionHistoryOperation struct, Kind string `json:"kind"`
+pkg openrails/billing, type SubscriptionHistoryOperation struct, Phase string `json:"phase"`
+pkg openrails/billing, type SubscriptionHistoryTransition struct
+pkg openrails/billing, type SubscriptionHistoryTransition struct, CancelType string `json:"cancel_type,omitempty"`
+pkg openrails/billing, type SubscriptionHistoryTransition struct, Decision string `json:"decision,omitempty"`
+pkg openrails/billing, type SubscriptionHistoryTransition struct, FromPeriodEnd *time.Time `json:"from_period_end"`
+pkg openrails/billing, type SubscriptionHistoryTransition struct, FromStatus *SubscriptionStatus `json:"from_status"`
+pkg openrails/billing, type SubscriptionHistoryTransition struct, ToPeriodEnd *time.Time `json:"to_period_end"`
+pkg openrails/billing, type SubscriptionHistoryTransition struct, ToStatus SubscriptionStatus `json:"to_status"`
 pkg openrails/billing, type SubscriptionID [16]byte
 pkg openrails/billing, type SubscriptionListParams struct
 pkg openrails/billing, type SubscriptionListParams struct, CustomerID CustomerID

@@ -68,6 +68,20 @@ func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID,
 	return &out, nil
 }
 
+// GetSubscriptionHistory reads retained subscription evidence, newest first.
+// It uses the merchant's subscription read permission, including when embedded.
+func (c *Client) GetSubscriptionHistory(ctx context.Context, id billing.SubscriptionID, page billing.PageRequest, requestOptions ...RequestOption) (*billing.SubscriptionHistory, error) {
+	path, err := subscriptionPath(id)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.SubscriptionHistory
+	if err := c.do(ctx, http.MethodGet, path+"/history?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // CancelSubscription cancels at the end of the paid period or, with
 // RevokeAccess, immediately, and returns the subscription. Both stop provider
 // billing.

@@ -18,6 +18,8 @@ var subscriptionsRoutes = []Route{
 		Query: params(queryOf(subscriptions.GetSubscriptionsFilters{}), idsParam, text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Subscription]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query"), Handler: h(handlers.GetAdminSubscriptions)},
 	{Method: GET, Path: "/v1/admin/subscriptions/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetSubscription", Level: LevelRead,
 		Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("invalid_param", "subscription_not_found"), Handler: h(handlers.GetAdminSubscription)},
+	{Method: GET, Path: "/v1/admin/subscriptions/{id}/history", Group: Admin, Auth: AuthMerchant, Name: "GetSubscriptionHistory", Level: LevelRead,
+		Query: params(text("cursor"), integer("limit")), Responses: []Reply{{200, billing.SubscriptionHistory{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "subscription_not_found"), Handler: h(handlers.GetSubscriptionHistory)},
 	{Method: POST, Path: "/v1/admin/subscriptions/{id}/cancel", Group: Admin, Auth: AuthMerchant, Name: "CancelSubscription", Level: LevelUpdate,
 		Request: handlers.AdminCancelSubscriptionRequest{}, Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("cancel_unsupported_on_rail", "invalid_param", "payment_in_progress", "provider_cancel_held", "resource_conflict", "subscription_not_active", "subscription_not_found"), Handler: h(handlers.AdminCancelSubscription)},
 	{Method: POST, Path: "/v1/admin/subscriptions/{id}/resume", Group: Admin, Auth: AuthMerchant, Name: "ResumeSubscription", Level: LevelUpdate,

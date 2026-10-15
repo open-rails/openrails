@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (190), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (191), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -88,6 +88,7 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | POST | `/v1/admin/orders/{id}/mark-uncollectible` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` |  |
 | GET | `/v1/admin/subscriptions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Subscription>` |  |
 | GET | `/v1/admin/subscriptions/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Subscription` |  |
+| GET | `/v1/admin/subscriptions/{id}/history` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `SubscriptionHistory` |  |
 | POST | `/v1/admin/subscriptions/{id}/cancel` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CancelSubscriptionParams` | 200 `Subscription` |  |
 | POST | `/v1/admin/subscriptions/{id}/resume` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Subscription` |  |
 | POST | `/v1/admin/subscriptions/{id}/change` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `ChangeSubscriptionParams` | 200 `SubscriptionChange`<br>202 `SubscriptionChange` | limit `off_channel`; `Idempotency-Key` |
