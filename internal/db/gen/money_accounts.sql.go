@@ -609,14 +609,16 @@ SET default_payment_method_id = $3,
 WHERE merchant_id = $1
   AND customer_id = $2
   AND currency = $5
+  AND set_config('openrails.subscription_history', $6::text, true) IS NOT NULL
 `
 
 type SetMoneyAccountDefaultPaymentMethodParams struct {
-	MerchantID      uuid.UUID
-	CustomerID      uuid.UUID
-	PaymentMethodID *uuid.UUID
-	Now             time.Time
-	Currency        string
+	MerchantID         uuid.UUID
+	CustomerID         uuid.UUID
+	PaymentMethodID    *uuid.UUID
+	Now                time.Time
+	Currency           string
+	HistoryAttribution string
 }
 
 func (q *Queries) SetMoneyAccountDefaultPaymentMethod(ctx context.Context, arg SetMoneyAccountDefaultPaymentMethodParams) (int64, error) {
@@ -626,6 +628,7 @@ func (q *Queries) SetMoneyAccountDefaultPaymentMethod(ctx context.Context, arg S
 		arg.PaymentMethodID,
 		arg.Now,
 		arg.Currency,
+		arg.HistoryAttribution,
 	)
 	if err != nil {
 		return 0, err

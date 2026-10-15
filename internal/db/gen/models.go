@@ -1427,7 +1427,13 @@ type BillingProviderMutationLog struct {
 	Evidence  []byte
 	CreatedAt time.Time
 	// The custodian the logged mutation was addressed to, for custodian-addressed intents. NULL for the ordinary PSP-addressed mutation.
-	CustodianID *uuid.UUID
+	CustodianID    *uuid.UUID
+	Origin         *string
+	Actor          *string
+	Executor       *string
+	OperationID    *uuid.UUID
+	SubscriptionID *uuid.UUID
+	ReasonCode     *string
 }
 
 // Immutable accepted provider schedule versions: first due instant, cadence and the accepted bill a provider-run renewal must match. Retention: permanent, never pruned.
@@ -1802,6 +1808,33 @@ type BillingSubscription struct {
 	ProviderAccessDefaultSnapshot bool
 }
 
+// Append-only observed subscription card and retry changes. References and before/after values are snapshots, not charging instructions. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.
+type BillingSubscriptionBillingChange struct {
+	MerchantID           uuid.UUID
+	ID                   uuid.UUID
+	SubscriptionID       uuid.UUID
+	OccurredAt           time.Time
+	Kind                 string
+	Decision             *string
+	FromPaymentMethodID  *uuid.UUID
+	ToPaymentMethodID    *uuid.UUID
+	FromNextRetryAt      *time.Time
+	ToNextRetryAt        *time.Time
+	FromLastRetryAt      *time.Time
+	ToLastRetryAt        *time.Time
+	FromRetryAttempts    *int32
+	ToRetryAttempts      *int32
+	FromTransientRetries *int32
+	ToTransientRetries   *int32
+	FromGraceEndsAt      *time.Time
+	ToGraceEndsAt        *time.Time
+	MethodVersionID      *uuid.UUID
+	Origin               *string
+	Actor                *string
+	Executor             *string
+	OperationID          *uuid.UUID
+}
+
 // Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.
 type BillingSubscriptionStatusTransition struct {
 	ID             uuid.UUID
@@ -1815,6 +1848,10 @@ type BillingSubscriptionStatusTransition struct {
 	Decision                *string
 	FromCurrentPeriodEndsAt *time.Time
 	ToCurrentPeriodEndsAt   *time.Time
+	Origin                  *string
+	Actor                   *string
+	Executor                *string
+	OperationID             *uuid.UUID
 }
 
 // One row per unverified subscription, kept by trg_subscriptions_track_unverified at commit. unverified_at dates entry (the row's updated_at); reads/last_read_at record provider reads. Feeds life.unverified.backlog and the unresolved escalation.

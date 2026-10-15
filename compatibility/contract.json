@@ -58,6 +58,7 @@
       "func (c *Client) GetRenewal(ctx context.Context, id billing.RenewalID, requestOptions ...RequestOption) (*billing.Renewal, error)",
       "func (c *Client) GetRunningCharge(ctx context.Context, reference string, requestOptions ...RequestOption) (*billing.RunningCharge, error)",
       "func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.Subscription, error)",
+      "func (c *Client) GetSubscriptionHistory(ctx context.Context, id billing.SubscriptionID, page billing.PageRequest, requestOptions ...RequestOption) (*billing.SubscriptionHistory, error)",
       "func (c *Client) GetUsageEvent(ctx context.Context, id billing.UsageEventID, options ...RequestOption) (*billing.UsageEvent, error)",
       "func (c *Client) ImportBilling(ctx context.Context, book billing.DeclaredBilling, requestOptions ...RequestOption) (*billing.BillingImportResult, error)",
       "func (c *Client) ImportBillingArchive(ctx context.Context, src io.Reader, requestOptions ...RequestOption) (*billing.BillingArchiveImport, error)",
@@ -1004,6 +1005,15 @@
       "type SubscriptionChangeOption struct {\n\tProduct ProductSummary            `json:\"product\"`\n\tPrice   Price                     `json:\"price\"`\n\tPreview SubscriptionChangePreview `json:\"preview\"`\n}",
       "type SubscriptionChangePreview struct {\n\tEffective        string     `json:\"effective\"`\n\tPriceID          PriceID    `json:\"price_id\"`\n\tQuantity         *int       `json:\"quantity\"`\n\tRail             string     `json:\"rail\"`\n\tCurrency         string     `json:\"currency\"`\n\tAmountDueNow     int64      `json:\"amount_due_now,string\"`\n\tNextChargeAmount int64      `json:\"next_charge_amount,string\"`\n\tNextChargeDate   *time.Time `json:\"next_charge_date,omitempty\"`\n\tIsEstimate       bool       `json:\"is_estimate\"`\n\tMessage          string     `json:\"message,omitempty\"`\n}",
       "type SubscriptionDunning struct {\n\tAttempts          int            `json:\"attempts\"`\n\tRetriesLeft       *int           `json:\"retries_left\"`\n\tNextRetryAt       *time.Time     `json:\"next_retry_at\"`\n\tFinalRetryAt      *time.Time     `json:\"final_retry_at\"`\n\tWaitingForNewCard bool           `json:\"waiting_for_new_card\"`\n\tLastFailureReason *DeclineReason `json:\"last_failure_reason\"`\n}",
+      "type SubscriptionHistory struct {\n\tEvents   ListPage[SubscriptionHistoryEntry] `json:\"events\"`\n\tCoverage SubscriptionHistoryCoverage        `json:\"coverage\"`\n}",
+      "type SubscriptionHistoryAttempt struct {\n\tID              PaymentAttemptID `json:\"id\"`\n\tKind            string           `json:\"kind\"`\n\tCategory        string           `json:\"category\"`\n\tReason          string           `json:\"reason,omitempty\"`\n\tAction          string           `json:\"action,omitempty\"`\n\tSource          string           `json:\"source\"`\n\tObservedVia     string           `json:\"observed_via\"`\n\tAmount          int64            `json:\"amount,string\"`\n\tCurrency        string           `json:\"currency\"`\n\tPSPID           PSPID            `json:\"psp_id\"`\n\tOrderID         *OrderID         `json:\"order_id,omitempty\"`\n\tPaymentID       *PaymentID       `json:\"payment_id,omitempty\"`\n\tRenewalID       *RenewalID       `json:\"renewal_id,omitempty\"`\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id,omitempty\"`\n\tOperationID     string           `json:\"operation_id,omitempty\"`\n}",
+      "type SubscriptionHistoryAttribution struct {\n\tOrigin      string `json:\"origin,omitempty\"`\n\tActor       string `json:\"actor,omitempty\"`\n\tExecutor    string `json:\"executor,omitempty\"`\n\tOperationID string `json:\"operation_id,omitempty\"`\n}",
+      "type SubscriptionHistoryBillingState struct {\n\tPaymentMethodID  *PaymentMethodID `json:\"payment_method_id,omitempty\"`\n\tNextRetryAt      *time.Time       `json:\"next_retry_at,omitempty\"`\n\tLastRetryAt      *time.Time       `json:\"last_retry_at,omitempty\"`\n\tRetryAttempts    *int             `json:\"retry_attempts,omitempty\"`\n\tTransientRetries *int             `json:\"transient_retries,omitempty\"`\n\tGraceEndsAt      *time.Time       `json:\"grace_ends_at,omitempty\"`\n}",
+      "type SubscriptionHistoryChange struct {\n\tKind          string                          `json:\"kind\"`\n\tDecision      string                          `json:\"decision,omitempty\"`\n\tFrom          SubscriptionHistoryBillingState `json:\"from\"`\n\tTo            SubscriptionHistoryBillingState `json:\"to\"`\n\tCardVersionID string                          `json:\"card_version_id,omitempty\"`\n}",
+      "type SubscriptionHistoryCoverage struct {\n\tSources       []string `json:\"sources\"`\n\tRetentionDays int      `json:\"retention_days\"`\n\tGaps          []string `json:\"gaps\"`\n}",
+      "type SubscriptionHistoryEntry struct {\n\tID          string                          `json:\"id\"`\n\tAt          time.Time                       `json:\"at\"`\n\tRecordedAt  time.Time                       `json:\"recorded_at\"`\n\tKind        string                          `json:\"kind\"`\n\tTransition  *SubscriptionHistoryTransition  `json:\"transition,omitempty\"`\n\tAttempt     *SubscriptionHistoryAttempt     `json:\"attempt,omitempty\"`\n\tChange      *SubscriptionHistoryChange      `json:\"change,omitempty\"`\n\tAttribution *SubscriptionHistoryAttribution `json:\"attribution,omitempty\"`\n\tOperation   *SubscriptionHistoryOperation   `json:\"operation,omitempty\"`\n}",
+      "type SubscriptionHistoryOperation struct {\n\tID      string `json:\"id\"`\n\tKind    string `json:\"kind\"`\n\tPhase   string `json:\"phase\"`\n\tAttempt int    `json:\"attempt\"`\n\tReason  string `json:\"reason,omitempty\"`\n}",
+      "type SubscriptionHistoryTransition struct {\n\tFromStatus    *SubscriptionStatus `json:\"from_status\"`\n\tToStatus      SubscriptionStatus  `json:\"to_status\"`\n\tDecision      string              `json:\"decision,omitempty\"`\n\tCancelType    string              `json:\"cancel_type,omitempty\"`\n\tFromPeriodEnd *time.Time          `json:\"from_period_end\"`\n\tToPeriodEnd   *time.Time          `json:\"to_period_end\"`\n}",
       "type SubscriptionID uuid.UUID",
       "type SubscriptionListParams struct {\n\tPageRequest\n\n\tIDs        []SubscriptionID\n\tCustomerID CustomerID\n\tStatus     SubscriptionStatus\n\n\tDunning bool\n\tRail    string\n\tPriceID PriceID\n\tSort    SubscriptionSort\n}",
       "type SubscriptionRetryNowResult struct {\n\tSubscription Subscription `json:\"subscription\"`\n\tStatus       string       `json:\"status\"`\n\tReplayed     bool         `json:\"replayed\"`\n}",
@@ -1499,6 +1509,9 @@
     "internal/destructive": [
       "type userActionRateEvidence struct {\n\tWindow                 string `json:\"window\"`\n\tHourlyCustomers        int64  `json:\"hourly_customers\"`\n\tMaximumHourlyCustomers int64  `json:\"maximum_hourly_customers\"`\n\tDailyCustomers         int64  `json:\"daily_customers\"`\n\tMaximumDailyCustomers  int64  `json:\"maximum_daily_customers\"`\n\tRetryAfterSeconds      int64  `json:\"retry_after_seconds\"`\n}"
     ],
+    "internal/history": [
+      "type Attribution struct {\n\tOrigin      string     `json:\"origin,omitempty\"`\n\tActor       string     `json:\"actor,omitempty\"`\n\tExecutor    string     `json:\"executor,omitempty\"`\n\tOperationID *uuid.UUID `json:\"operation_id,omitempty\"`\n}"
+    ],
     "internal/hosttools": [
       "type declineMonth struct {\n\tMonth    string `json:\"month\"`\n\tKind     string `json:\"kind\"`\n\tAttempts int    `json:\"attempts\"`\n\tApproved int    `json:\"approved\"`\n\tRefused  int    `json:\"refused\"`\n\n\tRefusalRate float64 `json:\"refusal_rate\"`\n}",
       "type declineRefusal struct {\n\tKind     string `json:\"kind\"`\n\tCategory string `json:\"category\"`\n\tReason   string `json:\"reason\"`\n\tCount    int    `json:\"count\"`\n}",
@@ -1517,7 +1530,8 @@
       "type WebhookReceipt struct {\n\tStatus string  `json:\"status\"`\n\tCode   *string `json:\"code\"`\n}",
       "type entitlementCursor struct {\n\tCustomer uuid.UUID `json:\"c\"`\n\tKey      string    `json:\"k\"`\n}",
       "type networkPosition struct {\n\tAt time.Time `json:\"a\"`\n\tM  uuid.UUID `json:\"m\"`\n\tI  uuid.UUID `json:\"i\"`\n}",
-      "type stripeThinEnvelope struct {\n\tID            string          `json:\"id\"`\n\tObject        string          `json:\"object\"`\n\tType          string          `json:\"type\"`\n\tAccount       string          `json:\"account\"`\n\tContext       string          `json:\"context\"`\n\tCreated       json.RawMessage `json:\"created\"`\n\tSnapshotEvent string          `json:\"snapshot_event\"`\n\tRelatedObject *struct {\n\t\tID   string `json:\"id\"`\n\t\tType string `json:\"type\"`\n\t\tURL  string `json:\"url\"`\n\t} `json:\"related_object\"`\n\tData struct {\n\t\tObject             json.RawMessage `json:\"object\"`\n\t\tPreviousAttributes json.RawMessage `json:\"previous_attributes\"`\n\t} `json:\"data\"`\n}"
+      "type stripeThinEnvelope struct {\n\tID            string          `json:\"id\"`\n\tObject        string          `json:\"object\"`\n\tType          string          `json:\"type\"`\n\tAccount       string          `json:\"account\"`\n\tContext       string          `json:\"context\"`\n\tCreated       json.RawMessage `json:\"created\"`\n\tSnapshotEvent string          `json:\"snapshot_event\"`\n\tRelatedObject *struct {\n\t\tID   string `json:\"id\"`\n\t\tType string `json:\"type\"`\n\t\tURL  string `json:\"url\"`\n\t} `json:\"related_object\"`\n\tData struct {\n\t\tObject             json.RawMessage `json:\"object\"`\n\t\tPreviousAttributes json.RawMessage `json:\"previous_attributes\"`\n\t} `json:\"data\"`\n}",
+      "type subscriptionHistoryCursor struct {\n\tVersion      int       `json:\"v\"`\n\tMerchant     uuid.UUID `json:\"m\"`\n\tSubscription uuid.UUID `json:\"s\"`\n\tAt           time.Time `json:\"t\"`\n\tSource       int32     `json:\"k\"`\n\tID           uuid.UUID `json:\"i\"`\n}"
     ],
     "internal/http/routes": [
       "type Health struct {\n\tStatus HealthStatus `json:\"status\"`\n}"
@@ -2156,6 +2170,9 @@
     "billing/subscription_change.go": {
       "time": "time"
     },
+    "billing/subscription_history.go": {
+      "time": "time"
+    },
     "billing/subscriptions.go": {
       "time": "time"
     },
@@ -2610,6 +2627,12 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
+    "internal/history/attribution.go": {
+      "billingauth": "github.com/open-rails/openrails/internal/billingauth",
+      "context": "context",
+      "json": "encoding/json",
+      "uuid": "github.com/google/uuid"
+    },
     "internal/hosttools/nmi_decline_report.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "cmp": "cmp",
@@ -2728,6 +2751,16 @@
       "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions"
+    },
+    "internal/http/handlers/subscription_history.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "errors": "errors",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "httprequest": "github.com/open-rails/openrails/internal/http/request",
+      "pagination": "github.com/open-rails/openrails/internal/pagination",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/http/handlers/subscription_lifecycle.go": {
       "api": "github.com/open-rails/openrails/internal/api",
@@ -3764,6 +3797,7 @@
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "history": "github.com/open-rails/openrails/internal/history",
       "mandates": "github.com/open-rails/openrails/internal/modules/mandates",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "river": "github.com/riverqueue/river",

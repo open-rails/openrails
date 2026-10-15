@@ -62,6 +62,7 @@ var Tables = map[string]Table{
 	"usage_events":         {PartitionedMonthly, "monthly partitions on occurred_at, dropped 24 months after the month's usage was billed."},
 	"admission_operations": {PartitionedMonthly, "monthly partitions on admitted_at, dropped once older than the longest spend window plus 30 days."},
 
+	"subscription_billing_changes":    {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},
 	"subscription_status_transitions": {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},
 	"provider_intents":                {Rows, "finished intents that only instructed a provider (cancel, update, archive, vault, token, account updater) are deleted 25 months (761 days) after they last changed; an intent that moved or refused money, enrolled a membership or erased a card is permanent."},
 	"provider_mutation_logs":          {Rows, "rows are deleted 25 months (761 days) after created_at."},

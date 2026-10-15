@@ -13,13 +13,23 @@ import (
 )
 
 const clearStripePaymentMethodSubscriptions = `-- name: ClearStripePaymentMethodSubscriptions :execrows
-UPDATE billing.subscriptions SET
-    payment_method_id = NULL,
-    updated_at = now()
-WHERE subscriptions.merchant_id = $1::uuid AND rail = 'stripe'
-  AND psp_id = $2::uuid
-  AND payment_method_id = $3::uuid
-  AND deleted_at IS NULL
+WITH targets AS MATERIALIZED (
+    SELECT id, row_version FROM billing.subscriptions
+    WHERE merchant_id = $1::uuid AND rail = 'stripe'
+      AND psp_id = $2::uuid AND payment_method_id = $3::uuid
+      AND deleted_at IS NULL
+    ORDER BY id FOR UPDATE
+), history AS MATERIALIZED (
+    SELECT set_config('openrails.subscription_history', jsonb_build_object(
+        'merchant_id', $1::uuid, 'action', 'update',
+        'versions', COALESCE(jsonb_object_agg(id::text,row_version),'{}'::jsonb),
+        'origin','provider','executor','stripe_observation','decision','provider_card_detached')::text,true)
+    FROM targets
+)
+UPDATE billing.subscriptions s SET payment_method_id = NULL, updated_at = now()
+FROM targets, history
+WHERE s.merchant_id = $1::uuid AND s.id = targets.id AND s.row_version = targets.row_version
+  AND s.deleted_at IS NULL
 `
 
 type ClearStripePaymentMethodSubscriptionsParams struct {
@@ -28,8 +38,9 @@ type ClearStripePaymentMethodSubscriptionsParams struct {
 	PaymentMethodID uuid.UUID
 }
 
-// A detached Stripe method can no longer be charged or reattached. Clear only
-// links owned by the exact PSP that delivered the detach event.
+// A detach can affect several subscriptions. Capture all locked row versions
+// in one envelope: AFTER ROW triggers run after the whole UPDATE, so a mutable
+// per-row GUC would retain only the final subscription's attribution.
 func (q *Queries) ClearStripePaymentMethodSubscriptions(ctx context.Context, arg ClearStripePaymentMethodSubscriptionsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, clearStripePaymentMethodSubscriptions, arg.MerchantID, arg.PspID, arg.PaymentMethodID)
 	if err != nil {
@@ -140,6 +151,7 @@ func (q *Queries) CountSubscriptionsFiltered(ctx context.Context, arg CountSubsc
 
 const createSubscription = `-- name: CreateSubscription :execrows
 
+WITH history AS MATERIALIZED (SELECT set_config('openrails.subscription_history', $30::text, true))
 INSERT INTO billing.subscriptions (
     id, merchant_id, customer_id, product_id, price_id,
     access_duration_hours_snapshot, provider_access_default_snapshot, status, started_at,
@@ -148,7 +160,7 @@ INSERT INTO billing.subscriptions (
     retry_attempts, next_retry_at, grace_ends_at, cancel_feedback,
     cancel_type, canceled_at, deletion_scheduled_at, gateway_response,
     created_at, updated_at, psp_id, collection_policy, quantity
-) VALUES (
+) SELECT
     $1, $5::uuid, $2, $3, $4,
     $6::int, $7::boolean,
     COALESCE(NULLIF($8::text, ''), 'pending'),
@@ -164,7 +176,7 @@ INSERT INTO billing.subscriptions (
     $27::uuid,
     COALESCE(NULLIF($28::text, ''), 'provider'),
     $29::int
-)
+FROM history
 `
 
 type CreateSubscriptionParams struct {
@@ -197,6 +209,7 @@ type CreateSubscriptionParams struct {
 	PspID                         uuid.UUID
 	CollectionPolicy              string
 	Quantity                      *int32
+	HistoryAttribution            string
 }
 
 // billing.subscriptions. tier_group is set by the
@@ -232,6 +245,7 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 		arg.PspID,
 		arg.CollectionPolicy,
 		arg.Quantity,
+		arg.HistoryAttribution,
 	)
 	if err != nil {
 		return 0, err
@@ -2182,6 +2196,10 @@ WHERE subscriptions.merchant_id = $2::uuid AND rail = 'stripe'
   AND rail_subscription_id = $4::text
   AND deleted_at IS NULL
   AND payment_method_id IS DISTINCT FROM $1::uuid
+  AND set_config('openrails.subscription_history', jsonb_build_object(
+      'merchant_id', subscriptions.merchant_id, 'entity_id', id, 'action', 'update',
+      'version', row_version, 'origin', 'provider', 'executor', 'stripe_observation',
+      'decision', 'provider_card_observed')::text, true) IS NOT NULL
 `
 
 type SetStripeSubscriptionPaymentMethodParams struct {
@@ -2265,6 +2283,7 @@ UPDATE billing.subscriptions SET
 WHERE subscriptions.merchant_id = $27::uuid AND id = $1
   AND row_version = $28
   AND deleted_at IS NULL
+  AND set_config('openrails.subscription_history', $29::text, true) IS NOT NULL
 `
 
 type UpdateSubscriptionAtParams struct {
@@ -2296,6 +2315,7 @@ type UpdateSubscriptionAtParams struct {
 	UpdatedAt                     time.Time
 	MerchantID                    uuid.UUID
 	ExpectedVersion               int64
+	HistoryAttribution            string
 }
 
 // Full-column update (nil pointers CLEAR fields like canceled_at) against the
@@ -2330,6 +2350,7 @@ func (q *Queries) UpdateSubscriptionAt(ctx context.Context, arg UpdateSubscripti
 		arg.UpdatedAt,
 		arg.MerchantID,
 		arg.ExpectedVersion,
+		arg.HistoryAttribution,
 	)
 	if err != nil {
 		return 0, err
@@ -2371,6 +2392,7 @@ WHERE subscriptions.merchant_id = $27::uuid AND id = $1
   AND deleted_at IS NULL
   -- The status-transition audit records this decision's name.
   AND set_config('openrails.subscription_decision', $30::text, true) IS NOT NULL
+  AND set_config('openrails.subscription_history', $31::text, true) IS NOT NULL
 `
 
 type UpdateSubscriptionDecidedParams struct {
@@ -2404,6 +2426,7 @@ type UpdateSubscriptionDecidedParams struct {
 	ExpectedRev                   int64
 	ExpectedVersion               int64
 	Decision                      string
+	HistoryAttribution            string
 }
 
 // A lifecycle decision: the full-row write that may change status, paid period
@@ -2441,6 +2464,7 @@ func (q *Queries) UpdateSubscriptionDecided(ctx context.Context, arg UpdateSubsc
 		arg.ExpectedRev,
 		arg.ExpectedVersion,
 		arg.Decision,
+		arg.HistoryAttribution,
 	)
 	if err != nil {
 		return 0, err

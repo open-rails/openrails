@@ -2449,6 +2449,88 @@ export type SubscriptionDunning = {
   last_failure_reason: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data" | null
 }
 
+export type SubscriptionHistory = {
+  events: ListPage<SubscriptionHistoryEntry>
+  coverage: SubscriptionHistoryCoverage
+}
+
+export type SubscriptionHistoryAttempt = {
+  id: string
+  kind: string
+  category: string
+  reason?: string
+  action?: string
+  source: string
+  observed_via: string
+  amount: string
+  currency: string
+  psp_id: string
+  order_id?: string
+  payment_id?: string
+  renewal_id?: string
+  payment_method_id?: string
+  operation_id?: string
+}
+
+export type SubscriptionHistoryAttribution = {
+  origin?: string
+  actor?: string
+  executor?: string
+  operation_id?: string
+}
+
+export type SubscriptionHistoryBillingState = {
+  payment_method_id?: string
+  next_retry_at?: string
+  last_retry_at?: string
+  retry_attempts?: number
+  transient_retries?: number
+  grace_ends_at?: string
+}
+
+export type SubscriptionHistoryChange = {
+  kind: string
+  decision?: string
+  from: SubscriptionHistoryBillingState
+  to: SubscriptionHistoryBillingState
+  card_version_id?: string
+}
+
+export type SubscriptionHistoryCoverage = {
+  sources: string[]
+  retention_days: number
+  gaps: string[]
+}
+
+export type SubscriptionHistoryEntry = {
+  id: string
+  at: string
+  recorded_at: string
+  kind: string
+  transition?: SubscriptionHistoryTransition
+  attempt?: SubscriptionHistoryAttempt
+  change?: SubscriptionHistoryChange
+  attribution?: SubscriptionHistoryAttribution
+  operation?: SubscriptionHistoryOperation
+}
+
+export type SubscriptionHistoryOperation = {
+  id: string
+  kind: string
+  phase: string
+  attempt: number
+  reason?: string
+}
+
+export type SubscriptionHistoryTransition = {
+  from_status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified" | null
+  to_status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified"
+  decision?: string
+  cancel_type?: string
+  from_period_end: string | null
+  to_period_end: string | null
+}
+
 export type SubscriptionRetryNowResult = {
   subscription: Subscription
   status: string

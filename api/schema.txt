@@ -106,6 +106,7 @@ migration 0104_provider_prices.up.sql sha256:c9547910caa053fef3a6915eac4275446cc
 migration 0105_psp_imports.up.sql sha256:e90d12165af03e63ce985d66169cf507f07555420ace5c2a94ed637dedd24e4f
 migration 0106_user_destructive_reservations.up.sql sha256:338ebf15379b9abb3165f4c9d47249707feeff460d78d8ea9f987ded16645b42
 migration 0107_user_action_retention.up.sql sha256:f8963bbe29d458e72f2a7e64b819ff92204de84ea0e8d06849380a93d71f9dda
+migration 0108_subscription_history.up.sql sha256:fbd81b4e32710a7e12db21fc0f5a0f5d64e6ad906b83b01c33d6c341373a1dd4
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1076,6 +1077,7 @@ table billing.money_settings
   constraint money_settings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint money_settings_pkey PRIMARY KEY (merchant_id, customer_id, currency)
   index CREATE UNIQUE INDEX money_settings_pkey ON billing.money_settings USING btree (merchant_id, customer_id, currency)
+  trigger CREATE TRIGGER trg_subscription_history_default AFTER UPDATE OF default_payment_method_id ON billing.money_settings FOR EACH ROW EXECUTE FUNCTION billing.subscription_history_default_card()
 
 table billing.nmi_bulk_checkpoints
   column merchant_id uuid NOT NULL
@@ -1565,6 +1567,7 @@ table billing.payment_method_versions
   index CREATE UNIQUE INDEX payment_method_versions_pkey ON billing.payment_method_versions USING btree (merchant_id, id)
   index CREATE INDEX payment_method_versions_psp_id_idx ON billing.payment_method_versions USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL)
   trigger CREATE TRIGGER guard_payment_method_version_update BEFORE UPDATE ON billing.payment_method_versions FOR EACH ROW EXECUTE FUNCTION billing.guard_payment_method_version_update()
+  trigger CREATE TRIGGER trg_subscription_history_card_version AFTER INSERT ON billing.payment_method_versions FOR EACH ROW EXECUTE FUNCTION billing.subscription_history_card_version()
 
 table billing.payment_methods
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2142,6 +2145,12 @@ table billing.provider_mutation_logs
   column evidence jsonb
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column custodian_id uuid
+  column origin text
+  column actor text
+  column executor text
+  column operation_id uuid
+  column subscription_id uuid
+  column reason_code text
   constraint provider_mutation_logs_addressed_check CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
   constraint provider_mutation_logs_custodian_id_fkey FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT
   constraint provider_mutation_logs_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
@@ -2151,10 +2160,12 @@ table billing.provider_mutation_logs
   constraint provider_mutation_logs_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   index CREATE INDEX provider_mutation_logs_created_at_idx ON billing.provider_mutation_logs USING btree (merchant_id, created_at DESC)
   index CREATE INDEX provider_mutation_logs_custodian_id_idx ON billing.provider_mutation_logs USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL)
+  index CREATE INDEX provider_mutation_logs_operation_history_idx ON billing.provider_mutation_logs USING btree (merchant_id, operation_id, created_at DESC, id DESC) WHERE (phase = ANY (ARRAY['parked'::text, 'attempting'::text, 'succeeded'::text, 'failed'::text]))
   index CREATE UNIQUE INDEX provider_mutation_logs_pkey ON billing.provider_mutation_logs USING btree (merchant_id, id)
   index CREATE INDEX provider_mutation_logs_provider_intent_id_idx ON billing.provider_mutation_logs USING btree (merchant_id, provider_intent_id) WHERE (provider_intent_id IS NOT NULL)
   index CREATE INDEX provider_mutation_logs_psp_id_idx ON billing.provider_mutation_logs USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL)
   index CREATE INDEX provider_mutation_logs_rail_phase_created_at_idx ON billing.provider_mutation_logs USING btree (rail, phase, created_at DESC)
+  index CREATE INDEX provider_mutation_logs_subscription_history_idx ON billing.provider_mutation_logs USING btree (merchant_id, subscription_id, created_at DESC, id DESC) WHERE (subscription_id IS NOT NULL)
   trigger CREATE TRIGGER immutable_provider_mutation_log_content BEFORE UPDATE ON billing.provider_mutation_logs FOR EACH ROW WHEN ((NOT ((new.provider_intent_id IS NULL) AND ((to_jsonb(new.*) - 'provider_intent_id'::text) = (to_jsonb(old.*) - 'provider_intent_id'::text))))) EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.provider_schedules
@@ -2603,6 +2614,40 @@ table billing.solana_subscriptions
   index CREATE INDEX solana_subscriptions_subscription_id_idx ON billing.solana_subscriptions USING btree (merchant_id, subscription_id)
   index CREATE UNIQUE INDEX solana_subscriptions_subscription_pda_key ON billing.solana_subscriptions USING btree (subscription_pda)
 
+table billing.subscription_billing_changes
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column subscription_id uuid NOT NULL
+  column occurred_at timestamp with time zone NOT NULL DEFAULT now()
+  column kind text NOT NULL
+  column decision text
+  column from_payment_method_id uuid
+  column to_payment_method_id uuid
+  column from_next_retry_at timestamp with time zone
+  column to_next_retry_at timestamp with time zone
+  column from_last_retry_at timestamp with time zone
+  column to_last_retry_at timestamp with time zone
+  column from_retry_attempts integer
+  column to_retry_attempts integer
+  column from_transient_retries integer
+  column to_transient_retries integer
+  column from_grace_ends_at timestamp with time zone
+  column to_grace_ends_at timestamp with time zone
+  column method_version_id uuid
+  column origin text
+  column actor text
+  column executor text
+  column operation_id uuid
+  constraint subscription_billing_changes_kind_check CHECK ((kind = ANY (ARRAY['card_selection'::text, 'default_card'::text, 'card_version'::text, 'retry_schedule'::text])))
+  constraint subscription_billing_changes_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint subscription_billing_changes_merchant_id_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE RESTRICT
+  constraint subscription_billing_changes_pkey PRIMARY KEY (merchant_id, id)
+  index CREATE INDEX subscription_billing_changes_history_idx ON billing.subscription_billing_changes USING btree (merchant_id, subscription_id, occurred_at DESC, id DESC)
+  index CREATE UNIQUE INDEX subscription_billing_changes_pkey ON billing.subscription_billing_changes USING btree (merchant_id, id)
+  index CREATE INDEX subscription_billing_changes_retention_idx ON billing.subscription_billing_changes USING btree (merchant_id, occurred_at)
+  trigger CREATE TRIGGER immutable_subscription_billing_changes BEFORE UPDATE ON billing.subscription_billing_changes FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER retained_subscription_billing_changes BEFORE DELETE ON billing.subscription_billing_changes FOR EACH ROW EXECUTE FUNCTION billing.guard_retention_delete('occurred_at', '761 days')
+
 table billing.subscription_status_transitions
   column id uuid NOT NULL DEFAULT uuidv7()
   column merchant_id uuid NOT NULL
@@ -2614,6 +2659,10 @@ table billing.subscription_status_transitions
   column decision text
   column from_current_period_ends_at timestamp with time zone
   column to_current_period_ends_at timestamp with time zone
+  column origin text
+  column actor text
+  column executor text
+  column operation_id uuid
   constraint subscription_status_transitions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text])))
   constraint subscription_status_transitions_from_status_check CHECK ((from_status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'awaiting_method'::text, 'canceled'::text, 'unverified'::text])))
   constraint subscription_status_transitions_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
@@ -2738,6 +2787,7 @@ table billing.subscriptions
   trigger CREATE TRIGGER subscriptions_release_ownership_claims AFTER UPDATE OF status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.release_ended_ownership_claims()
   trigger CREATE TRIGGER subscriptions_row_version BEFORE UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_row_version()
   trigger CREATE TRIGGER subscriptions_void_renewal_orders AFTER UPDATE OF status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.void_ended_renewal_orders()
+  trigger CREATE TRIGGER trg_subscriptions_billing_changes AFTER UPDATE OF payment_method_id, next_retry_at, last_retry_at, retry_attempts, transient_retries, grace_ends_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_record_billing_change()
   trigger CREATE TRIGGER trg_subscriptions_set_tier_group BEFORE INSERT OR UPDATE OF product_id, tier_group, status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_set_tier_group()
   trigger CREATE TRIGGER trg_subscriptions_status_transition AFTER INSERT OR UPDATE OF status, current_period_ends_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_record_status_transition()
   trigger CREATE CONSTRAINT TRIGGER trg_subscriptions_track_unverified AFTER INSERT OR UPDATE OF status ON billing.subscriptions DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_track_unverified()
@@ -3500,6 +3550,7 @@ function billing.guard_billing_restore_receipt()
                     'solana_pay_references',
                     'solana_subscriptions',
                     'subscription_status_transitions',
+                    'subscription_billing_changes',
                     'subscription_verifications',
                     'subscriptions',
                     'usage_collection_cadence',
@@ -4151,6 +4202,64 @@ function billing.step_price_key_binding()
       RETURN NULL;
   END $function$
 
+function billing.subscription_history_attribution(uuid,uuid,text,bigint)
+  CREATE OR REPLACE FUNCTION billing.subscription_history_attribution(mid uuid, entity uuid, action text, version bigint)
+   RETURNS jsonb
+   LANGUAGE plpgsql
+  AS $function$
+  DECLARE a jsonb := COALESCE(NULLIF(current_setting('openrails.subscription_history',true),''),'{}')::jsonb;
+  BEGIN
+      IF a->>'merchant_id'=mid::text AND a->>'action'=action AND (
+          (a->>'entity_id'=entity::text AND (a->>'version')::bigint=version)
+          OR (action='update' AND (a->'versions'->>entity::text)::bigint=version)
+      ) THEN RETURN a; END IF;
+      RETURN '{}'::jsonb;
+  END;
+  $function$
+
+function billing.subscription_history_card_version()
+  CREATE OR REPLACE FUNCTION billing.subscription_history_card_version()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  DECLARE a jsonb;
+  BEGIN
+      IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
+      a := billing.subscription_history_attribution(NEW.merchant_id,NEW.id,'card_version',0);
+      INSERT INTO billing.subscription_billing_changes
+          (merchant_id,subscription_id,kind,decision,from_payment_method_id,to_payment_method_id,method_version_id,origin,actor,executor,operation_id)
+      SELECT s.merchant_id,s.id,'card_version',NEW.kind,NEW.payment_method_id,NEW.payment_method_id,NEW.id,
+          COALESCE(a->>'origin',NEW.source),a->>'actor',COALESCE(a->>'executor',NEW.source),(a->>'operation_id')::uuid
+      FROM billing.subscriptions s
+      WHERE s.merchant_id=NEW.merchant_id AND s.customer_id=NEW.customer_id
+        AND billing.subscription_payment_method_id(s.merchant_id,s.customer_id,s.payment_method_id,s.price_id,s.rail,s.collection_policy)=NEW.payment_method_id
+        AND s.deleted_at IS NULL AND s.status IN ('active','past_due','awaiting_method','unverified');
+      RETURN NEW;
+  END;
+  $function$
+
+function billing.subscription_history_default_card()
+  CREATE OR REPLACE FUNCTION billing.subscription_history_default_card()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  DECLARE a jsonb;
+  BEGIN
+      a := billing.subscription_history_attribution(NEW.merchant_id,NEW.customer_id,'default:'||NEW.currency,0);
+      PERFORM set_config('openrails.subscription_history','',true);
+      IF billing.billing_restore_active(NEW.merchant_id) OR OLD.default_payment_method_id IS NOT DISTINCT FROM NEW.default_payment_method_id THEN RETURN NEW; END IF;
+      INSERT INTO billing.subscription_billing_changes
+          (merchant_id,subscription_id,kind,from_payment_method_id,to_payment_method_id,origin,actor,executor,operation_id)
+      SELECT s.merchant_id,s.id,'default_card',OLD.default_payment_method_id,NEW.default_payment_method_id,
+          a->>'origin',a->>'actor',a->>'executor',(a->>'operation_id')::uuid
+      FROM billing.subscriptions s JOIN billing.prices p ON p.merchant_id=s.merchant_id AND p.id=s.price_id
+      WHERE s.merchant_id=NEW.merchant_id AND s.customer_id=NEW.customer_id AND p.currency=NEW.currency
+        AND s.payment_method_id IS NULL AND s.rail IN ('stripe','nmi') AND s.collection_policy IN ('engine','nmi_schedule')
+        AND s.deleted_at IS NULL AND s.status IN ('active','past_due','awaiting_method','unverified');
+      RETURN NEW;
+  END;
+  $function$
+
 function billing.subscription_payment_method_id(uuid,uuid,uuid,uuid,text,text)
   CREATE OR REPLACE FUNCTION billing.subscription_payment_method_id(p_merchant uuid, p_customer uuid, p_own uuid, p_price uuid, p_rail text, p_policy text)
    RETURNS uuid
@@ -4191,23 +4300,51 @@ function billing.subscriptions_lifecycle_single_writer()
   END;
   $function$
 
+function billing.subscriptions_record_billing_change()
+  CREATE OR REPLACE FUNCTION billing.subscriptions_record_billing_change()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  DECLARE a jsonb;
+  BEGIN
+      IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
+      a := billing.subscription_history_attribution(NEW.merchant_id,NEW.id,'update',OLD.row_version);
+      IF OLD.payment_method_id IS DISTINCT FROM NEW.payment_method_id THEN
+          INSERT INTO billing.subscription_billing_changes
+              (merchant_id,subscription_id,kind,decision,from_payment_method_id,to_payment_method_id,origin,actor,executor,operation_id)
+          VALUES (NEW.merchant_id,NEW.id,'card_selection',a->>'decision',OLD.payment_method_id,NEW.payment_method_id,
+              a->>'origin',a->>'actor',a->>'executor',(a->>'operation_id')::uuid);
+      END IF;
+      IF ROW(OLD.next_retry_at,OLD.last_retry_at,OLD.retry_attempts,OLD.transient_retries,OLD.grace_ends_at) IS DISTINCT FROM ROW(NEW.next_retry_at,NEW.last_retry_at,NEW.retry_attempts,NEW.transient_retries,NEW.grace_ends_at) THEN
+          INSERT INTO billing.subscription_billing_changes
+              (merchant_id,subscription_id,kind,decision,from_next_retry_at,to_next_retry_at,from_last_retry_at,to_last_retry_at,from_retry_attempts,to_retry_attempts,from_transient_retries,to_transient_retries,from_grace_ends_at,to_grace_ends_at,origin,actor,executor,operation_id)
+          VALUES (NEW.merchant_id,NEW.id,'retry_schedule',a->>'decision',OLD.next_retry_at,NEW.next_retry_at,OLD.last_retry_at,NEW.last_retry_at,OLD.retry_attempts,NEW.retry_attempts,OLD.transient_retries,NEW.transient_retries,OLD.grace_ends_at,NEW.grace_ends_at,
+              a->>'origin',a->>'actor',a->>'executor',(a->>'operation_id')::uuid);
+      END IF;
+      RETURN NEW;
+  END;
+  $function$
+
 function billing.subscriptions_record_status_transition()
   CREATE OR REPLACE FUNCTION billing.subscriptions_record_status_transition()
    RETURNS trigger
    LANGUAGE plpgsql
   AS $function$
-  DECLARE
-      decision text := nullif(current_setting('openrails.subscription_decision', true), '');
+  DECLARE a jsonb;
   BEGIN
       IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
-      IF TG_OP = 'INSERT' THEN
+      IF TG_OP='INSERT' THEN
+          a := billing.subscription_history_attribution(NEW.merchant_id,NEW.id,'insert',0);
           INSERT INTO billing.subscription_status_transitions
-              (merchant_id, subscription_id, from_status, to_status, cancel_type, occurred_at, decision, to_current_period_ends_at)
-          VALUES (NEW.merchant_id, NEW.id, NULL, NEW.status, NEW.cancel_type, now(), 'created', NEW.current_period_ends_at);
+              (merchant_id,subscription_id,to_status,cancel_type,decision,to_current_period_ends_at,origin,actor,executor,operation_id)
+          VALUES (NEW.merchant_id,NEW.id,NEW.status,NEW.cancel_type,'created',NEW.current_period_ends_at,
+              a->>'origin',a->>'actor',a->>'executor',(a->>'operation_id')::uuid);
       ELSIF OLD.status IS DISTINCT FROM NEW.status OR OLD.current_period_ends_at IS DISTINCT FROM NEW.current_period_ends_at THEN
+          a := billing.subscription_history_attribution(NEW.merchant_id,NEW.id,'update',OLD.row_version);
           INSERT INTO billing.subscription_status_transitions
-              (merchant_id, subscription_id, from_status, to_status, cancel_type, occurred_at, decision, from_current_period_ends_at, to_current_period_ends_at)
-          VALUES (NEW.merchant_id, NEW.id, OLD.status, NEW.status, NEW.cancel_type, now(), decision, OLD.current_period_ends_at, NEW.current_period_ends_at);
+              (merchant_id,subscription_id,from_status,to_status,cancel_type,decision,from_current_period_ends_at,to_current_period_ends_at,origin,actor,executor,operation_id)
+          VALUES (NEW.merchant_id,NEW.id,OLD.status,NEW.status,NEW.cancel_type,a->>'decision',OLD.current_period_ends_at,NEW.current_period_ends_at,
+              a->>'origin',a->>'actor',a->>'executor',(a->>'operation_id')::uuid);
       END IF;
       RETURN NEW;
   END;

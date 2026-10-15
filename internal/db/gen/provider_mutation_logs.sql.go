@@ -43,20 +43,18 @@ func (q *Queries) CountProviderMutationLogs(ctx context.Context, arg CountProvid
 
 const insertProviderMutationLog = `-- name: InsertProviderMutationLog :exec
 INSERT INTO billing.provider_mutation_logs (
-    merchant_id,
-    rail,
-    psp_id,
-    custodian_id,
-    provider_intent_id,
-    intent_type,
-    idempotency_key,
-    attempt,
-    phase,
-    reason,
-    evidence
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+ merchant_id,rail,psp_id,custodian_id,provider_intent_id,intent_type,idempotency_key,attempt,phase,reason,evidence,
+ subscription_id,operation_id,origin,actor,executor,created_at
 )
+SELECT $1::uuid,$2::text,$3::uuid,$4::uuid,
+ $5::uuid,$6::text,$7::text,
+ $8::int,$9::text,$10::text,$11::jsonb,
+ i.subscription_id,$5::uuid,
+ COALESCE(i.origin,NULLIF($12::text,'')),
+ CASE WHEN i.id IS NOT NULL THEN i.actor ELSE NULLIF($13::text,'') END,
+ NULLIF($14::text,''),clock_timestamp()
+FROM (SELECT 1) seed LEFT JOIN billing.provider_intents i
+ ON i.merchant_id=$1::uuid AND i.id=$5::uuid
 `
 
 type InsertProviderMutationLogParams struct {
@@ -71,6 +69,9 @@ type InsertProviderMutationLogParams struct {
 	Phase            string
 	Reason           *string
 	Evidence         []byte
+	Origin           string
+	Actor            string
+	Executor         string
 }
 
 func (q *Queries) InsertProviderMutationLog(ctx context.Context, arg InsertProviderMutationLogParams) error {
@@ -86,13 +87,16 @@ func (q *Queries) InsertProviderMutationLog(ctx context.Context, arg InsertProvi
 		arg.Phase,
 		arg.Reason,
 		arg.Evidence,
+		arg.Origin,
+		arg.Actor,
+		arg.Executor,
 	)
 	return err
 }
 
 const listProviderMutationLogs = `-- name: ListProviderMutationLogs :many
 
-SELECT id, merchant_id, rail, psp_id, provider_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, created_at, custodian_id FROM billing.provider_mutation_logs
+SELECT id, merchant_id, rail, psp_id, provider_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, created_at, custodian_id, origin, actor, executor, operation_id, subscription_id, reason_code FROM billing.provider_mutation_logs
 WHERE merchant_id = $1::uuid
   AND ($2::text IS NULL OR rail = $2::text)
   AND ($3::uuid IS NULL OR provider_intent_id = $3::uuid)
@@ -142,6 +146,12 @@ func (q *Queries) ListProviderMutationLogs(ctx context.Context, arg ListProvider
 			&i.Evidence,
 			&i.CreatedAt,
 			&i.CustodianID,
+			&i.Origin,
+			&i.Actor,
+			&i.Executor,
+			&i.OperationID,
+			&i.SubscriptionID,
+			&i.ReasonCode,
 		); err != nil {
 			return nil, err
 		}
@@ -151,4 +161,44 @@ func (q *Queries) ListProviderMutationLogs(ctx context.Context, arg ListProvider
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordSubscriptionOperationHold = `-- name: RecordSubscriptionOperationHold :exec
+INSERT INTO billing.provider_mutation_logs
+ (merchant_id,rail,psp_id,custodian_id,provider_intent_id,operation_id,subscription_id,
+ intent_type,attempt,phase,reason_code,origin,actor,executor,created_at)
+SELECT i.merchant_id,i.rail,i.psp_id,i.custodian_id,i.id,i.id,i.subscription_id,
+ i.intent_type,i.attempts,'parked',$1::text,i.origin,i.actor,NULLIF($2::text,''),clock_timestamp()
+FROM billing.provider_intents i
+WHERE i.merchant_id=$3::uuid AND i.id=$4::uuid AND i.subscription_id IS NOT NULL
+ AND NOT EXISTS (
+  SELECT 1 FROM (
+   SELECT l.phase,l.reason_code FROM billing.provider_mutation_logs l
+   WHERE l.merchant_id=i.merchant_id AND l.operation_id=i.id
+     AND l.phase IN ('parked','attempting','succeeded','failed')
+   ORDER BY l.created_at DESC,l.id DESC LIMIT 1
+  ) last WHERE last.phase='parked' AND last.reason_code=$1::text
+ )
+`
+
+type RecordSubscriptionOperationHoldParams struct {
+	ReasonCode string
+	Executor   string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// Timestamp after acquiring the row lock: transaction start time could order
+// a waiting transaction before the hold it followed.
+// The caller already updated (and therefore locked) the intent in this transaction.
+// Unknown readbacks do not end a hold. Only attempted execution or a terminal
+// result separates two observations of the same hold.
+func (q *Queries) RecordSubscriptionOperationHold(ctx context.Context, arg RecordSubscriptionOperationHoldParams) error {
+	_, err := q.db.Exec(ctx, recordSubscriptionOperationHold,
+		arg.ReasonCode,
+		arg.Executor,
+		arg.MerchantID,
+		arg.ID,
+	)
+	return err
 }

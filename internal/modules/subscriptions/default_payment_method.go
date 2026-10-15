@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/history"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -308,7 +309,7 @@ func (s *SubscriptionLifecycleService) setDefault(ctx context.Context, tx pgx.Tx
 	if _, err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, BillingMode: "prepaid", Now: now}); err != nil {
 		return nil, nil, err
 	}
-	if n, err := q.SetMoneyAccountDefaultPaymentMethod(ctx, gen.SetMoneyAccountDefaultPaymentMethodParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, PaymentMethodID: &method.ID, Now: now}); err != nil {
+	if n, err := q.SetMoneyAccountDefaultPaymentMethod(ctx, gen.SetMoneyAccountDefaultPaymentMethodParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, PaymentMethodID: &method.ID, Now: now, HistoryAttribution: history.Bind(ctx, merchantID, c.Customer, "default:"+c.Currency, 0, "")}); err != nil {
 		return nil, nil, err
 	} else if n != 1 {
 		return nil, nil, errors.New("default payment method: settings row not found")

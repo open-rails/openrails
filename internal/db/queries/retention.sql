@@ -68,6 +68,11 @@ FROM (
         AND st.occurred_at < sqlc.arg(transition_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
+    (SELECT DISTINCT st.merchant_id AS mid FROM billing.subscription_billing_changes st
+      WHERE (sqlc.narg(after)::uuid IS NULL OR st.merchant_id > sqlc.narg(after)::uuid)
+        AND st.occurred_at < sqlc.arg(transition_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
     (SELECT DISTINCT ca.merchant_id AS mid
        FROM billing.order_attempts ca
       WHERE (sqlc.narg(after)::uuid IS NULL OR ca.merchant_id > sqlc.narg(after)::uuid)
@@ -250,4 +255,16 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
     LIMIT sqlc.arg(row_limit)::int
 );
 
+
+
+-- name: DeleteSubscriptionBillingChangesPastRetention :execrows
+DELETE FROM billing.subscription_billing_changes
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id IN (
+    SELECT st.id FROM billing.subscription_billing_changes st
+    WHERE st.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND st.occurred_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
+    ORDER BY st.occurred_at
+    LIMIT sqlc.arg(row_limit)::int
+);
 
