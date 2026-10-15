@@ -42,6 +42,12 @@ Archives with payments lacking an order are incompatible with the current
 prelaunch contract and are refused; no historical payment-price fallback or
 automatic database reset is performed.
 
+Open recovery cases retain their saved dunning policy, retry schedule and
+last order payment error. Restore preserves the case's original policy even
+when the destination's merchant settings differ. Unknown policy/error fields
+and invalid retry schedules refuse the archive; export/restore itself makes no
+provider requests. Existing unfinished-operation refusals still apply.
+
 ## Exclusions and refusals
 
 - Operation authorizations, provider billing qualifications/observations,
