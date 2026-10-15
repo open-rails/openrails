@@ -320,10 +320,21 @@ func ImportDeclaredSubscriptions(
 				}
 			}
 		} else {
-			if f.CancelKind != DeclaredCancelNone {
-				subID, err = insertDeclaredCanceled(ctx, q, merchantID, f, price, periodStart, periodEnd)
-			} else {
-				subID, err = materializeDeclaredUnknown(ctx, q, merchantID, f, periodStart, periodEnd)
+			// A savepoint keeps a refused insert (a twin live row holding the
+			// customer's slot) from poisoning the book transaction.
+			err = database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				var err error
+				txq := db.NewWithPgxTx(tx).Gen(ctx)
+				if f.CancelKind != DeclaredCancelNone {
+					subID, err = insertDeclaredCanceled(ctx, txq, merchantID, f, price, periodStart, periodEnd)
+				} else {
+					subID, err = materializeDeclaredUnknown(ctx, txq, merchantID, f, periodStart, periodEnd)
+				}
+				return err
+			})
+			if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				block("lifecycle conflict: " + pgErr.ConstraintName)
+				continue
 			}
 			if err != nil {
 				block(err.Error())

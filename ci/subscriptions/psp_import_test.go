@@ -88,14 +88,19 @@ func TestPSPImportFromNMI(t *testing.T) {
 	byOrder := add("", "", "77")                      // legacy order 77
 	unmatched := add("d@elsewhere.test", "", "ord-d") // nobody's
 	conflicted := add("a@host.test", "shipment-1002", "ord-e")
+	e := w.newCustomer()
+	twice := add("", "shipment-1005", "ord-f")
+	again := w.nmi.AddSchedule(nmimock.Schedule{Vault: twice.vault, Plan: plan, Amount: "9.99", Days: 30, Order: "ord-g", NextBilling: paid, Created: start})
+	againSale := w.nmi.AddScheduleSale(again, start)
 	oneOff := w.nmi.AddSale(nmimock.Sale{Vault: byEmail.vault, Amount: "4.99", OrderID: "one-off", At: start.Add(-5 * 24 * time.Hour)})
 
 	res, err := embeddedClient.SetPSPImportMappings(ctx, billing.SetPSPImportMappingsParams{Mappings: []billing.PSPImportMapping{
 		{Mapping: "legacy_user", Key: "1002", Customer: new(b.cid())},
 		{Mapping: "legacy_order", Key: "77", Customer: new(c.cid())},
+		{Mapping: "legacy_user", Key: "1005", Customer: new(e.cid())},
 	}})
 	require.NoError(t, err)
-	require.Equal(t, 2, res.Set)
+	require.Equal(t, 3, res.Set)
 
 	since := start.AddDate(0, 0, -30)
 	imp, err := embeddedClient.CreatePSPImport(ctx, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since,
@@ -176,6 +181,20 @@ func TestPSPImportFromNMI(t *testing.T) {
 	require.Equal(t, billing.PSPImportBlocked, recs[oneOff.TransactionID].State)
 	require.Contains(t, *recs[oneOff.TransactionID].Reason, "no subscription")
 	require.Equal(t, billing.PSPImportConflict, recs[conflicted.schedule].State)
+
+	// A customer's second live schedule of the product cannot land beside the
+	// first: it alone is blocked, and the rest of the book lands.
+	twins, err := remoteClient.ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: e.cid()})
+	require.NoError(t, err)
+	require.Len(t, twins.Items, 1)
+	landed, blocked, blockedSale := twice.schedule, again, againSale
+	if str(twins.Items[0].RailSubscriptionID) == again {
+		landed, blocked, blockedSale = again, twice.schedule, twice.sale
+	}
+	require.Equal(t, billing.PSPImportImported, state(landed))
+	require.Equal(t, billing.PSPImportBlocked, state(blocked))
+	require.Contains(t, *recs[blocked].Reason, "subscriptions_customer_id_product_id_key")
+	require.Equal(t, billing.PSPImportBlocked, state(blockedSale.TransactionID))
 	nobody, err := remoteClient.ListSubscriptions(ctx, billing.SubscriptionListParams{Rail: "nmi"})
 	require.NoError(t, err)
 	for _, s := range nobody.Items {
