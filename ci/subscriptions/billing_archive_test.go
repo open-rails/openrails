@@ -252,10 +252,10 @@ func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 		_, err := w.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
 		require.NoError(t, err)
 	}
-	refusedTable := func() string {
+	archiveResult := func() (int, string) {
 		status, body := w.staff(http.MethodGet, "/v1/merchant/billing-archive")
 		if status == http.StatusOK {
-			return ""
+			return status, ""
 		}
 		var refusal struct {
 			Error struct {
@@ -265,9 +265,10 @@ func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 			} `json:"error"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(body), &refusal), body)
-		return refusal.Error.Metadata.Table
+		return status, refusal.Error.Metadata.Table
 	}
-	require.NotEqual(t, "provider_intents", refusedTable())
+	status, _ := archiveResult()
+	require.Equal(t, http.StatusOK, status, "a declined sale can be exported")
 
 	// An older decline record: a failed payments row.
 	record, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.payments (merchant_id, id, customer_id, order_id, psp_id, channel, rail, transaction_id, amount, list_amount, currency, status, money_movement, purchased_at)
@@ -277,11 +278,13 @@ func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 		FROM billing.provider_intents WHERE intent_type = 'nmi_sale' AND status = 'failed_terminal'`))
 	require.NoError(t, err)
 	require.EqualValues(t, 1, record.RowsAffected())
-	require.NotEqual(t, "provider_intents", refusedTable(), "a pre-#1111 decline record is not a payment")
+	status, _ = archiveResult()
+	require.Equal(t, http.StatusOK, status, "a pre-#1111 decline record can be exported")
 
 	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.payments SET status = 'succeeded' WHERE transaction_id LIKE '%_sub_declined:%'`))
 	require.NoError(t, err)
-	require.Equal(t, "provider_intents", refusedTable(), "a completed payment under a refused sale")
+	_, table := archiveResult()
+	require.Equal(t, "provider_intents", table, "a completed payment under a refused sale")
 	_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.payments WHERE transaction_id LIKE '%_sub_declined:%'`))
 	require.NoError(t, err)
 }

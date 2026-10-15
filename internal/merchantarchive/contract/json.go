@@ -313,6 +313,7 @@ var jsonRules = map[string]jsonRule{
 		"qualified_receipt": collectedReceiptJSON, "sale_submitted": booleanValue, "transaction_id": textValue, "payment_id": uuidValue, "delayed_start": textValue,
 		"declined": booleanValue, "not_executed": booleanValue, "request_refused": booleanValue, "response_code": integerValue, "localization_id": textValue, "operator_resolution": operatorResolutionJSON,
 		"duplicate_refused": booleanValue, "failure_code": textValue, "resolved_absent": booleanValue,
+		"avs_response": textValue, "cvv_response": textValue, "decline_transaction_id": textValue,
 	})),
 	"provider_intents.initial_membership.payload": object(map[string]jsonRule{
 		"order_attempt_id":    uuidValue,
