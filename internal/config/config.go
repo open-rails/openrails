@@ -859,13 +859,13 @@ type UserActionRateLimitConfig struct {
 
 func NormalizeUserActionRateLimit(c UserActionRateLimitConfig) (UserActionRateLimitConfig, error) {
 	if c.MinimumCustomersPerHour == 0 {
-		c.MinimumCustomersPerHour = 2
+		c.MinimumCustomersPerHour = 5
 	}
 	if c.PaidCustomersPerHourlyCustomer == 0 {
 		c.PaidCustomersPerHourlyCustomer = 400
 	}
 	if c.MinimumCustomersPerDay == 0 {
-		c.MinimumCustomersPerDay = 5
+		c.MinimumCustomersPerDay = 10
 	}
 	if c.PaidCustomersPerDailyCustomer == 0 {
 		c.PaidCustomersPerDailyCustomer = 100

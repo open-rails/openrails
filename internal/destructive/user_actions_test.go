@@ -12,9 +12,9 @@ import (
 func TestUserActionRatePolicy(t *testing.T) {
 	p, err := config.NormalizeUserActionRateLimit(config.UserActionRateLimitConfig{})
 	require.NoError(t, err)
-	require.EqualValues(t, 2, p.MinimumCustomersPerHour)
+	require.EqualValues(t, 5, p.MinimumCustomersPerHour)
 	require.EqualValues(t, 400, p.PaidCustomersPerHourlyCustomer)
-	require.EqualValues(t, 5, p.MinimumCustomersPerDay)
+	require.EqualValues(t, 10, p.MinimumCustomersPerDay)
 	require.EqualValues(t, 100, p.PaidCustomersPerDailyCustomer)
 	l := NewUserActionLimiter(nil, p)
 	require.EqualValues(t, 40, l.limit(4000))

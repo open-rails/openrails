@@ -65,8 +65,8 @@ func TestUserActionGlobalRateReservations(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	require.EqualValues(t, 2, allowed.Load())
-	require.EqualValues(t, 98, denied.Load())
+	require.EqualValues(t, 5, allowed.Load())
+	require.EqualValues(t, 95, denied.Load())
 	limiter := destructive.NewUserActionLimiter(w.db, config.UserActionRateLimitConfig{})
 	require.NoError(t, limiter.Reserve(ctx, firstKind, firstKey, firstID), "same operation replay is free")
 	require.Error(t, limiter.Reserve(ctx, firstKind, firstKey, uuid.New()), "a key cannot be shared across customers")
@@ -121,7 +121,7 @@ func TestUserActionDailyWindowAndPruning(t *testing.T) {
 	w := newAdmissionsWorld(t)
 	mid := w.merchant()
 	ctx := merchant.WithID(t.Context(), billing.MerchantID(mid))
-	limiter := destructive.NewUserActionLimiter(w.db, config.UserActionRateLimitConfig{MinimumCustomersPerHour: 100})
+	limiter := destructive.NewUserActionLimiter(w.db, config.UserActionRateLimitConfig{MinimumCustomersPerHour: 100, MinimumCustomersPerDay: 5})
 	ids := make([]uuid.UUID, 5)
 	for i := range ids {
 		ids[i] = uuid.New()
@@ -160,7 +160,7 @@ func TestUserActionRetryAfterShrinkingBudget(t *testing.T) {
 		config  config.UserActionRateLimitConfig
 		seconds int64
 	}{
-		{"hour", []string{"50 minutes", "40 minutes", "30 minutes", "20 minutes"}, config.UserActionRateLimitConfig{MinimumCustomersPerDay: 100}, 1800},
+		{"hour", []string{"50 minutes", "40 minutes", "30 minutes", "20 minutes"}, config.UserActionRateLimitConfig{MinimumCustomersPerHour: 2, MinimumCustomersPerDay: 100}, 1800},
 		{"day", []string{"23 hours", "22 hours", "21 hours", "20 hours"}, config.UserActionRateLimitConfig{MinimumCustomersPerHour: 100, MinimumCustomersPerDay: 1}, 4 * 3600},
 	} {
 		t.Run(test.name, func(t *testing.T) {
