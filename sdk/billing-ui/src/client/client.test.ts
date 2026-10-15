@@ -216,11 +216,13 @@ describe("createBillingClient", () => {
     })
   })
 
-  it("reports a converging card removal as pending", async () => {
+  it("rejects an unconfirmed card removal instead of reporting success", async () => {
     const client = createBillingClient({
       fetch: async () => new Response(null, { status: 202 }),
     })
-    await expect(client.removePaymentMethod("pm_1")).resolves.toBe("pending")
+    await expect(client.removePaymentMethod("pm_1")).rejects.toMatchObject({
+      code: "invalid_response",
+    })
   })
 
   it("carries the pinned currency registry, extendable by the host", () => {

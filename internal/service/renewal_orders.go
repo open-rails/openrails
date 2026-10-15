@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -114,8 +113,6 @@ func renewalRefusal(err error) error {
 		return errOrderKeyReused
 	case errors.Is(err, money.ErrEngineMethodUnusable):
 		return fmt.Errorf("%w: %w", payment.ErrPaymentMethodStale, err)
-	case errors.Is(err, providerrecovery.ErrPending):
-		return errOrdersFenced
 	case errors.Is(err, money.ErrEngineCollectionNotDue), errors.Is(err, intents.ErrRebillNotRetryable), errors.Is(err, intents.ErrRebillUnsupported):
 		return apperr.New(http.StatusConflict, billing.CodeOrderNotPayable, "The renewal takes no payment now: "+err.Error())
 	}

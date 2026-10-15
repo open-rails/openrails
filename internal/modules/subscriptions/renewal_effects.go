@@ -18,8 +18,10 @@ type renewalEffects struct {
 	// Reinstate reactivates a decided cancellation on an explicit override.
 	Reinstate bool
 	// SeatsChanged ends access of the old seats where the new period starts.
-	SeatsChanged bool
-	ProductName  string
+	SeatsChanged    bool
+	ProductName     string
+	FromProductID   uuid.UUID
+	FromProductName string
 }
 
 // applyRenewalEffects owns the local projection for both observed provider
@@ -67,6 +69,9 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 	data := billing.NotificationData{SubscriptionID: billing.SubscriptionID(sub.ID), PeriodStartsAt: &effects.PeriodStart, PeriodEndsAt: &effects.PeriodEnd}
 	if effects.Downgrade {
 		data.DowngradeApplied, data.NewProduct = true, effects.ProductName
+		data.FromProductID, data.FromProductName = billing.ProductID(effects.FromProductID), effects.FromProductName
+		data.ToProductID, data.ToProductName = billing.ProductID(sub.ProductID), effects.ProductName
+		data.EffectiveAt = &effects.PeriodStart
 	}
 	key := "renewed:" + effects.PeriodStart.UTC().Format(time.RFC3339Nano) + ":" + effects.PeriodEnd.UTC().Format(time.RFC3339Nano)
 	notification := &models.NotificationEvent{ID: uuid.NewSHA1(sub.ID, []byte(key)), CustomerID: sub.CustomerID, EventType: models.NotificationPremiumRenewed, Data: data}

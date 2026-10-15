@@ -20,7 +20,6 @@ import (
 
 // ledger is the Store surface the Runner drives (interface for unit tests).
 type ledger interface {
-	CheckRecovery(context.Context, gen.BillingProviderIntent, time.Time) error
 	Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error)
 	Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error)
 	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
@@ -37,7 +36,6 @@ type ledger interface {
 	MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, evidence map[string]any) error
 	MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error
 	Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
-	ParkForRecovery(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	WakeRecoveryHeld(ctx context.Context, id uuid.UUID, now time.Time) error
 	MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error
 }
@@ -175,6 +173,9 @@ func (r *Runner) RunExecuteOnce(ctx context.Context) (Stats, error) {
 	stats.Claimed = len(claimed)
 
 	for _, intent := range claimed {
+		if ManualPaymentMethodDelete(intent) {
+			continue
+		}
 		progress.Mark(ctx, "intent execute "+intent.ID.String())
 		r.executeOne(ctx, intent, &stats)
 	}
@@ -225,11 +226,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	}
 
 	if blocked, reason := GateExecution(ctx, r.Config, intent.MerchantID, Origin(intent.Origin)); blocked {
-		r.holdForRecovery(ctx, logEntry, stats, intent, now, reason, false)
-		return
-	}
-	if err := r.Store.CheckRecovery(ctx, intent, now); err != nil {
-		r.holdForRecovery(ctx, logEntry, stats, intent, now, err.Error(), true)
+		r.holdForWritePosture(ctx, logEntry, stats, intent, now, reason)
 		return
 	}
 
@@ -334,6 +331,9 @@ func (r *Runner) ExecuteByID(ctx context.Context, id uuid.UUID) (gen.BillingProv
 	if err != nil {
 		return gen.BillingProviderIntent{}, err
 	}
+	if ManualPaymentMethodDelete(row) && !manualDeleteAllowed(ctx, row.ID) {
+		return row, ErrManualPaymentMethodDeleteRequired
+	}
 	switch row.Status {
 	case StatusPending, StatusFailedRetryable:
 		// claimable below
@@ -370,6 +370,9 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 	stats.Claimed = len(claimed)
 
 	for _, intent := range claimed {
+		if ManualPaymentMethodDelete(intent) {
+			continue
+		}
 		progress.Mark(ctx, "intent verify "+intent.ID.String())
 		// Pin the intent's merchant and PSP: a verifier's repair writes the
 		// same mirror rows the executor would have.
@@ -507,12 +510,6 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 					applied = OutcomeAmbiguous
 					break
 				}
-				if held := r.Store.CheckRecovery(ctx, intent, now); held != nil {
-					recoveryHeld = true
-					err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), held.Error(), RecoveryHeld(held.Error()).Evidence)
-					applied = OutcomeAmbiguous
-					break
-				}
 				// Verified-unsubmitted recovery is ready work, not a failed
 				// provider attempt. Execute still rechecks every write guard.
 				next = now
@@ -556,7 +553,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		return
 	}
 	if recoveryHeld {
-		r.wakeRecoveryIfReady(ctx, logEntry, intent, now)
+		r.wakeLegacyHeldIfAllowed(ctx, logEntry, intent, now)
 	}
 	// Reporting follows a confirmed write/read. A failed transition is never a
 	// successful payment or terminal refusal in worker statistics.
@@ -731,6 +728,13 @@ func derefUUID(id *uuid.UUID) uuid.UUID {
 // It claims the same lease as the scheduled verifier and performs no provider
 // writes. A retryable result may subsequently enter ExecuteByID's write gates.
 func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error) {
+	row, err := r.Store.Get(ctx, id)
+	if err != nil {
+		return row, err
+	}
+	if ManualPaymentMethodDelete(row) && !manualDeleteAllowed(ctx, id) {
+		return row, ErrManualPaymentMethodDeleteRequired
+	}
 	now := r.now()
 	in, ok, err := r.Store.ClaimUnknownByID(ctx, id, now, now.Add(r.lease()))
 	if err != nil {
@@ -762,47 +766,25 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProvi
 // A held write must not strand a possibly submitted operation in an execute
 // state. Redispatch it through Verify, which can record positive receipts while
 // the write gate remains closed, without issuing another provider mutation.
-func (r *Runner) holdForRecovery(ctx context.Context, logger *log.Entry, stats *Stats, in gen.BillingProviderIntent, now time.Time, reason string, recovery bool) {
+func (r *Runner) holdForWritePosture(ctx context.Context, logger *log.Entry, stats *Stats, in gen.BillingProviderIntent, now time.Time, reason string) {
 	submitted, malformed := hasSubmissionEvidence(in)
 	if in.IntentType == "subscription_collection" || in.IntentType == TypeOrderCollection || submitted || malformed != nil {
 		writeCtx, cancel := LedgerWriteContext(ctx)
 		defer cancel()
-		var evidence map[string]any
-		if recovery {
-			evidence = RecoveryHeld(reason).Evidence
-		}
-		if err := r.Store.MarkUnknown(r.transitionContext(writeCtx), in.ID, now, reason, evidence); err != nil {
+		if err := r.Store.MarkUnknown(r.transitionContext(writeCtx), in.ID, now, reason, nil); err != nil {
 			logger.WithError(err).Error("cannot schedule held operation readback")
 			return
 		}
 		stats.Parked++
-		if recovery {
-			r.wakeRecoveryIfReady(writeCtx, logger, in, now)
-		}
-		return
-	}
-	if recovery {
-		writeCtx, cancel := LedgerWriteContext(ctx)
-		defer cancel()
-		if err := r.Store.ParkForRecovery(r.transitionContext(writeCtx), in.ID, now.Add(ParkRetryInterval), reason); err != nil {
-			logger.WithError(err).Error("cannot retain provider recovery hold")
-			return
-		}
-		stats.Parked++
-		r.wakeRecoveryIfReady(writeCtx, logger, in, now)
 		return
 	}
 	r.park(ctx, logger, stats, in.ID, now, reason)
 }
 
-// The normal dispatcher commits a hold before this recheck. Completion might
-// have skipped the verifier's live lease just before that commit; a newly ready
-// account must not leave the now-unleased operation sleeping on its old hold.
-func (r *Runner) wakeRecoveryIfReady(ctx context.Context, logger *log.Entry, in gen.BillingProviderIntent, now time.Time) {
+// Legacy recovery markers may still exist after upgrade. Normal write posture
+// is the only global policy checked before their ordinary retry is scheduled.
+func (r *Runner) wakeLegacyHeldIfAllowed(ctx context.Context, logger *log.Entry, in gen.BillingProviderIntent, now time.Time) {
 	if blocked, _ := GateExecution(ctx, r.Config, in.MerchantID, Origin(in.Origin)); blocked {
-		return
-	}
-	if r.Store.CheckRecovery(ctx, in, now) != nil {
 		return
 	}
 	if err := r.Store.WakeRecoveryHeld(ctx, in.ID, now); err != nil {

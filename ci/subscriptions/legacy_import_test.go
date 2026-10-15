@@ -15,10 +15,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 )
 
 // bookTier is one catalog price of a legacy NMI book, linked to the NMI plan
@@ -164,8 +161,8 @@ func (w *world) nmiCharges(vault string) []string {
 
 // A realistic legacy book lands in one ImportBilling call: refunds never
 // become charges, re-import changes nothing, the first enforcing pull raises
-// no false drift, unresolved imported money holds recovery and local
-// cancellation, and OpenRails never writes to NMI.
+// no false drift, unresolved imported money remains reviewable, and confirmed
+// missing schedules cancel locally without writing to NMI.
 func TestLegacyNMIBookImport(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {
@@ -297,12 +294,10 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			}, 30*time.Second, 20*time.Millisecond, "the pass completes: the unresolved book awaits an operator, not a retry")
 			w.settle()
 			require.NoError(t, w.pool.QueryRow(t.Context(), watermark, mid.UUID(), psp.UUID()).Scan(&completedAfter))
-			require.Equal(t, completedBefore, completedAfter, "incomplete financial history cannot advance completed coverage")
-			ctx := merchant.WithID(t.Context(), mid)
-			require.ErrorIs(t, providerrecovery.CheckPSP(ctx, engine.Graph(w.rt).Runtime.DB, mid.UUID(), psp.UUID(), w.clock.Now()), providerrecovery.ErrPending)
+			require.Equal(t, completedBefore, completedAfter, "unresolved financial history is not reported as complete")
 			require.Contains(t, w.openFindings("pull.reversal.unlinked"), "nmi:"+refund, "the imported refund remains unresolved")
 			require.Contains(t, w.openFindings("pull.subscription.missing"), stray, "the NMI-only schedule is surfaced")
-			require.Equal(t, billing.SubscriptionActive, gone.sub(w, tp).Status, "local cancellation waits for financial recovery despite the missing provider schedule")
+			require.Equal(t, billing.SubscriptionCanceled, gone.sub(w, tp).Status, "a confirmed missing provider schedule is canceled without waiting for unrelated findings")
 			require.True(t, gone.paid.Equal(*gone.sub(w, tp).CurrentPeriodEndsAt), "the unresolved book retains its paid coverage")
 			require.Empty(t, w.openFindings("pull.subscription.drift"), "matching schedules raise no drift")
 			require.Empty(t, w.openFindings("pull.payment_method.mismatch"), "each card of a multi-card vault matches its own billing entry")

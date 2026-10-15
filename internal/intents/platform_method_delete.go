@@ -62,7 +62,7 @@ func DecodePlatformMethodDelete(in gen.BillingProviderIntent) (PlatformMethodDel
 		strings.TrimSpace(p.TenantID) == "" ||
 		strings.Contains(p.TenantID, "/") ||
 		p.Environment != "test" && p.Environment != "live" ||
-		in.IdempotencyKey != TypePlatformMethodDelete+":"+p.PaymentMethodID.String() {
+		!methodDeleteKeyMatches(TypePlatformMethodDelete, in.IdempotencyKey, p.PaymentMethodID) {
 		return p, paymentmethods.ErrPaymentMethodDeleteUnsafe
 	}
 	return p, p.Instrument.ValidateCustody()
@@ -199,7 +199,7 @@ func (h *PlatformMethodDeleteHandler) complete(ctx context.Context, in gen.Billi
 		if _, err := mandates.EndForPaymentMethod(ctx, q, in.MerchantID, p.PaymentMethodID, mandates.EndPaymentMethodRemoved, h.Clock.Now()); err != nil {
 			return err
 		}
-		n, err := q.RemoveFencedPlatformPaymentMethod(ctx, gen.RemoveFencedPlatformPaymentMethodParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, OperationID: in.ID, Now: h.Clock.Now().UTC()})
+		n, err := q.RemoveFencedCustodianPaymentMethod(ctx, gen.RemoveFencedCustodianPaymentMethodParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, OperationID: in.ID, Now: h.Clock.Now().UTC()})
 		if err != nil {
 			return err
 		}

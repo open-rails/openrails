@@ -607,12 +607,11 @@ func firstNonEmpty(values ...string) string {
 // saved and the same request succeeds after its window.
 var ErrPaymentDuplicateRefused = errors.New("the payment provider refused the card verification as a duplicate of an identical recent request; try again in a few minutes")
 
-// ErrPaymentMethodDeleteProcessing: the durable vault-delete intent could not confirm
-// the remote delete inline (transport-ambiguous outcome, parked provider). The
-// intent ledger completes it out-of-band; a retried request maps onto the SAME
-// intent. Never a lost delete.
+// ErrPaymentMethodDeleteProcessing means this request could not confirm removal.
+// The ledger preserves the target and uncertainty for an explicit manual retry;
+// no background worker completes it.
 var (
-	ErrPaymentMethodDeleteProcessing     = errors.New("payment method deletion is processing; it will complete automatically")
+	ErrPaymentMethodDeleteProcessing     = errors.New("payment method removal was not confirmed; retry explicitly")
 	ErrPaymentMethodInUse                = errors.New("payment method is used by a live subscription")
 	ErrPaymentMethodDeleteUnsafe         = errors.New("payment method cannot be deleted safely")
 	ErrPaymentMethodProviderUnavailable  = errors.New("payment method provider is unavailable")
@@ -635,9 +634,9 @@ func (e *PaymentMethodDeleteFailedError) Error() string {
 
 // PaymentMethodDeleteOutcome mirrors the durable intent's post-execution state without
 // importing the intents package (import cycle: intents → subscriptions →
-// paymentmethods). Neither Done nor Terminal = still resolving out-of-band.
+// paymentmethods). Neither Done nor Terminal means an explicit retry is needed.
 type PaymentMethodDeleteOutcome struct {
-	// Done: the remote delete is confirmed and the local row is gone.
+	// Done: the remote delete is confirmed and the card is no longer usable or listed.
 	Done bool
 	// InUse: the delete was superseded because a live subscription uses it.
 	InUse bool
@@ -646,29 +645,39 @@ type PaymentMethodDeleteOutcome struct {
 	Reason   string
 }
 
-// PaymentMethodDeleteExecutor posts the durable nmi_vault_delete intent and executes
-// it inline (#674 write-through). Implemented by intents.PaymentMethodDeleteThrough.
+// PaymentMethodDeleteExecutor records and executes a manual removal for the
+// card's custodian. Implemented by intents.PaymentMethodDeleteThrough.
 type PaymentMethodDeleteExecutor interface {
 	ExecutePaymentMethodDelete(ctx context.Context, pm *models.PaymentMethod) (PaymentMethodDeleteOutcome, error)
 }
 
-// DeletePaymentMethod deletes a stored payment method the DURABLE way (#674 tail):
-// guards run inline, then the remote NMI delete goes through the write-ahead
-// nmi_vault_delete intent — a crash or lost response after the user's request
-// is accepted can never lose the delete (the verifier resolves "vault gone at
-// provider ⇒ done" and finalizes the local removal).
+// DeletePaymentMethod is an explicit synchronous request. The operation ledger
+// retains locks and uncertain evidence for a manual retry; no worker retries it.
 func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *models.PaymentMethod) error {
-	if pm == nil || (pm.Custodian != models.CustodianHyperSwitch && pm.Custodian != models.CustodianPlatform) {
-		if _, _, err := s.deletePaymentMethodGuards(ctx, pm); err != nil {
-			return err
-		}
+	if pm == nil {
+		return errors.New("payment method is required")
 	}
+	if pm.Custodian != models.CustodianPSP && pm.Custodian != models.CustodianHyperSwitch && pm.Custodian != models.CustodianPlatform {
+		return ErrPaymentMethodCustodianUnsupported
+	}
+	if pm.Custodian == models.CustodianPSP && !rails.SupportsPaymentMethodCRUD(models.Rail(strings.ToLower(string(pm.Rail)))) {
+		return RailPaymentMethodsUnsupported(string(pm.Rail))
+	}
+	live, err := s.countLiveSubscriptionsUsingPaymentMethod(ctx, pm)
+	if err != nil {
+		return err
+	}
+	if live > 0 {
+		return ErrPaymentMethodInUse
+	}
+	// Exact account/vault checks follow the completed-request fast path, so a
+	// retry of an already-finished deletion needs no available provider client.
 	if s.DeleteIntents == nil {
-		return errors.New("vault delete intent executor not wired")
+		return errors.New("manual card deletion executor not wired")
 	}
 	out, err := s.DeleteIntents.ExecutePaymentMethodDelete(ctx, pm)
 	if err != nil {
-		return fmt.Errorf("post vault delete intent: %w", err)
+		return fmt.Errorf("remove payment method: %w", err)
 	}
 	switch {
 	case out.Done:

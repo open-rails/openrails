@@ -6,6 +6,11 @@ export type ListPage<T> = {
   next_cursor: string | null
 }
 
+export type AccessTenure = {
+  as_of: string
+  seconds: Record<string, number> | null
+}
+
 export type AcknowledgeHostEventsParams = {
   host_event_ids?: string[]
 }

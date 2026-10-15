@@ -37,6 +37,28 @@ type AcknowledgeNotificationEventsParams struct {
 	NotificationIDs []NotificationID `json:"notification_ids"`
 }
 
+// NotificationRetryStatus records the collection decision when a failure was
+// observed. Unknown never promises an automatic retry.
+type NotificationRetryStatus string
+
+const (
+	NotificationRetryScheduled             NotificationRetryStatus = "scheduled"
+	NotificationRetryPaymentMethodRequired NotificationRetryStatus = "payment_method_required"
+	NotificationRetryStopped               NotificationRetryStatus = "stopped"
+	NotificationRetryUnknown               NotificationRetryStatus = "unknown"
+)
+
+// NotificationRecoveryAction identifies the customer action supported by the
+// billing outcome. The consuming application supplies its destination.
+type NotificationRecoveryAction string
+
+const (
+	NotificationRecoveryUpdatePaymentMethod NotificationRecoveryAction = "update_payment_method"
+	NotificationRecoveryResubscribe         NotificationRecoveryAction = "resubscribe"
+	NotificationRecoveryAuthenticatePayment NotificationRecoveryAction = "authenticate_payment"
+	NotificationRecoveryContactSupport      NotificationRecoveryAction = "contact_support"
+)
+
 // CustomerNotificationActionRequested classifies what the fact originally asked.
 func CustomerNotificationActionRequested(kind string) bool {
 	switch kind {
@@ -77,13 +99,18 @@ type NotificationData struct {
 	Source    string     `json:"source,omitempty"`
 	ProductID ProductID  `json:"product_id,omitzero"`
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
-	Currency  string     `json:"currency,omitempty"`
+	// AccessEnded distinguishes observed access loss from stopping recurrence.
+	// A subscription_canceled fact may retain paid access until EndedAt.
+	AccessEnded bool   `json:"access_ended,omitempty"`
+	Currency    string `json:"currency,omitempty"`
 
 	// Scheduled reprice / plan change (subscription_reprice_scheduled,
 	// subscription_plan_change_scheduled).
 	SubscriptionID   SubscriptionID   `json:"subscription_id,omitzero"`
 	PriceMigrationID PriceMigrationID `json:"price_migration_id,omitzero"`
 	FromPriceID      PriceID          `json:"from_price_id,omitzero"`
+	FromProductID    ProductID        `json:"from_product_id,omitzero"`
+	FromProductName  string           `json:"from_product_name,omitempty"`
 	ToPriceID        PriceID          `json:"to_price_id,omitzero"`
 	ToProductID      ProductID        `json:"to_product_id,omitzero"`
 	ToProductName    string           `json:"to_product_name,omitempty"`
@@ -109,13 +136,15 @@ type NotificationData struct {
 	// payment_method_failed, payment_method_update_required,
 	// order_collection_stopped); OrderID names it. CollectionMethod, on
 	// order_due, records whether collection is automatic or invoiced.
-	AmountDue        *int64                  `json:"amount_due,omitempty,string"`
-	DueAt            *time.Time              `json:"due_at,omitempty"`
-	CollectionMethod InvoiceCollectionMethod `json:"collection_method,omitempty"`
-	FailureCode      string                  `json:"failure_code,omitempty"`
-	FailureReason    string                  `json:"failure_reason,omitempty"`
-	DeclineOutcome   string                  `json:"decline_outcome,omitempty"`
-	NextAttemptAt    *time.Time              `json:"next_attempt_at,omitempty"`
+	AmountDue        *int64                     `json:"amount_due,omitempty,string"`
+	DueAt            *time.Time                 `json:"due_at,omitempty"`
+	CollectionMethod InvoiceCollectionMethod    `json:"collection_method,omitempty"`
+	FailureCode      string                     `json:"failure_code,omitempty"`
+	FailureReason    string                     `json:"failure_reason,omitempty"`
+	DeclineOutcome   string                     `json:"decline_outcome,omitempty"`
+	NextAttemptAt    *time.Time                 `json:"next_attempt_at,omitempty"`
+	RetryStatus      NotificationRetryStatus    `json:"retry_status,omitempty"`
+	RecoveryAction   NotificationRecoveryAction `json:"recovery_action,omitempty"`
 
 	// A watched balance went low or ran out (balance_low, balance_depleted):
 	// what was available and owed in Currency as the crossing was seen, the

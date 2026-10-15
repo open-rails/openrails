@@ -104,6 +104,7 @@ WITH due AS (
             (status IN ('pending', 'failed_retryable') AND next_attempt_at <= $3::timestamptz)
             OR (status = 'in_flight' AND lease_expires_at IS NOT NULL AND lease_expires_at <= $3::timestamptz)
           )
+      AND intent_type NOT IN ('nmi_vault_delete','platform_method_delete','hyperswitch_method_delete')
       AND (intent_type = 'subscription_collection' OR status = 'in_flight' OR (status = 'pending' AND attempts > 0) OR expires_at IS NULL OR expires_at > $3::timestamptz)
     ORDER BY next_attempt_at
     LIMIT $4
@@ -189,6 +190,7 @@ const claimDueVerifyProviderIntents = `-- name: ClaimDueVerifyProviderIntents :m
 WITH due AS (
     SELECT id FROM billing.provider_intents
     WHERE provider_intents.merchant_id = $2::uuid AND status = 'unknown_needs_verify'
+      AND intent_type NOT IN ('nmi_vault_delete','platform_method_delete','hyperswitch_method_delete')
       AND next_attempt_at <= $3::timestamptz
       AND (lease_expires_at IS NULL OR lease_expires_at <= $3::timestamptz)
     ORDER BY next_attempt_at

@@ -171,7 +171,7 @@ describe("SubscriptionsPanel", () => {
   })
 
   it("cancels with a reason, then resumes", async () => {
-    const server = fakeBilling()
+    const server = fakeBilling({ subscriptions: [subscription({ collection_policy: "engine" })] })
     mount(<SubscriptionsPanel />, server)
     const row = await screen.findByTestId("subscription-row")
     fireEvent.click(within(row).getByRole("button", { name: "Cancel Pro" }))
@@ -201,8 +201,11 @@ describe("SubscriptionsPanel", () => {
     expect(row).toHaveTextContent("Access until Sep 16, 2036")
 
     fireEvent.click(within(row).getByRole("button", { name: "Resume" }))
-    // Resuming asks first: the customer will be charged again.
-    fireEvent.click(await screen.findByRole("button", { name: "Resume subscription" }))
+    // The card must load before the customer can confirm future billing.
+    await screen.findByRole("combobox")
+    const resume = screen.getByRole("button", { name: "Resume subscription" })
+    await waitFor(() => expect(resume).toBeEnabled())
+    fireEvent.click(resume)
     await waitFor(() => expect(row).toHaveTextContent("Active"))
     expect(
       await screen.findByText("Your subscription will continue.")

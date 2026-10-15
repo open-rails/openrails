@@ -14,9 +14,11 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -353,10 +355,47 @@ func (s *Service) endAgreement(ctx context.Context, m gen.BillingMandate, curren
 // period's end. A provider-billed schedule that cannot be deleted
 // (destructive actions disarmed) is refused with its operator finding.
 func (s *Service) CancelSubscriptionForCustomer(ctx context.Context, customer billing.CustomerID, sub *models.Subscription, reason string) error {
+	if sub == nil || customer.IsZero() || sub.CustomerID != customer.UUID() {
+		return subscriptions.ErrSubscriptionNotFound
+	}
+	rt, err := s.runtime()
+	if err != nil {
+		return err
+	}
+	if rt.SubscriptionService == nil {
+		return fmt.Errorf("subscription service unavailable")
+	}
+	current, err := rt.SubscriptionService.GetByID(ctx, sub.ID)
+	if err != nil {
+		return err
+	}
+	if current.CustomerID != customer.UUID() || current.MerchantID != sub.MerchantID {
+		return subscriptions.ErrSubscriptionNotFound
+	}
+	sub = current
+	if sub.Status == models.StatusCanceled {
+		return nil
+	}
+	if !sub.Status.Live() {
+		return subscriptions.ErrSubscriptionNotActive
+	}
+
 	ctx = db.WithPSPID(ctx, sub.PspID)
 	if _, err := subscriptions.RequireProviderCancelArmed(ctx, s.rt.SubscriptionService.Database(), sub, false); err != nil {
 		return err
 	}
+	// A completed cancellation is a domain no-op, including after reservation pruning.
+	if sub.Status != models.StatusCanceled {
+		policy := config.UserActionRateLimitConfig{}
+		if rt.Config != nil {
+			policy = rt.Config.UserActionRateLimit
+		}
+		limiter := destructive.NewUserActionLimiter(rt.DB, policy)
+		if err := limiter.Reserve(ctx, destructive.CancelSubscription, fmt.Sprintf("cancel:%s:%d", sub.ID, sub.LifecycleRev), sub.CustomerID); err != nil {
+			return err
+		}
+	}
+
 	if err := s.cancelForCustomer(ctx, customer, sub, reason); err != nil {
 		return err
 	}
@@ -368,8 +407,8 @@ func (s *Service) CancelSubscriptionForCustomer(ctx context.Context, customer bi
 }
 
 // cancelForCustomer records the cancel at once. A provider-billed schedule is
-// stopped by a durable provider intent committed with it, which waits out
-// provider recovery instead of refusing the customer.
+// stopped by a durable provider intent committed with it, scheduled before
+// expiry when the rail supports a cancellation undo window.
 func (s *Service) cancelForCustomer(ctx context.Context, customer billing.CustomerID, sub *models.Subscription, reason string) error {
 	if sub.CollectionPolicy != models.CollectionPolicyEngine {
 		if s.rt.UserSubscriptionService == nil {

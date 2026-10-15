@@ -20,6 +20,7 @@ pkg openrails, const ReadPublicConfig config.Read = "public_config"
 pkg openrails, const SubjectApplication auth.SubjectKind = "application"
 pkg openrails, const SubjectUser auth.SubjectKind = "user"
 pkg openrails, func AccessCutoverPreflight(context.Context, *pgxpool.Pool, DatabaseConfig, string) (*billing.AccessCutoverReport, error)
+pkg openrails, func Migrate(context.Context, *pgxpool.Pool, Config) error
 pkg openrails, func New(context.Context, Config, Deps) (*Engine, error)
 pkg openrails, func NewClientCredentialsTokenProvider(ClientCredentialsConfig) (func(context.Context) (string, error), error)
 pkg openrails, func NewRemote(string, RemoteOptions) (*Remote, error)
@@ -61,6 +62,7 @@ pkg openrails, method (*Client) DeleteProduct(context.Context, billing.ProductID
 pkg openrails, method (*Client) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID, ...RequestOption) error
 pkg openrails, method (*Client) ExportBillingArchive(context.Context, io.Writer, ...RequestOption) error
 pkg openrails, method (*Client) ExtendAdmissions(context.Context, []billing.ExtendAdmissionParams, ...RequestOption) ([]billing.AdmissionResult, error)
+pkg openrails, method (*Client) GetAccessTenure(context.Context, billing.AccessTenureParams, ...RequestOption) (*billing.AccessTenure, error)
 pkg openrails, method (*Client) GetAdminAccess(context.Context, ...RequestOption) (*billing.AdminAccess, error)
 pkg openrails, method (*Client) GetAdmission(context.Context, string, ...RequestOption) (*billing.Admission, error)
 pkg openrails, method (*Client) GetBalance(context.Context, billing.CustomerID, string, ...RequestOption) (*billing.Balance, error)
@@ -206,6 +208,7 @@ pkg openrails, method (LocalClient) DeleteProduct(context.Context, billing.Produ
 pkg openrails, method (LocalClient) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID, ...RequestOption) error
 pkg openrails, method (LocalClient) ExportBillingArchive(context.Context, io.Writer, ...RequestOption) error
 pkg openrails, method (LocalClient) ExtendAdmissions(context.Context, []billing.ExtendAdmissionParams, ...RequestOption) ([]billing.AdmissionResult, error)
+pkg openrails, method (LocalClient) GetAccessTenure(context.Context, billing.AccessTenureParams, ...RequestOption) (*billing.AccessTenure, error)
 pkg openrails, method (LocalClient) GetAdminAccess(context.Context, ...RequestOption) (*billing.AdminAccess, error)
 pkg openrails, method (LocalClient) GetAdmission(context.Context, string, ...RequestOption) (*billing.Admission, error)
 pkg openrails, method (LocalClient) GetBalance(context.Context, billing.CustomerID, string, ...RequestOption) (*billing.Balance, error)
@@ -363,6 +366,7 @@ pkg openrails, type Config struct, ReturnOrigins []string `yaml:"return_origins"
 pkg openrails, type Config struct, SMTP *config.SMTPConfig `yaml:"smtp" json:"smtp"`
 pkg openrails, type Config struct, Solana *config.SolanaConfig `yaml:"solana" json:"solana"`
 pkg openrails, type Config struct, TrustedProxies []string `yaml:"trusted_proxies" json:"trusted_proxies"`
+pkg openrails, type Config struct, UserActionRateLimit config.UserActionRateLimitConfig `yaml:"user_action_rate_limit" json:"user_action_rate_limit"`
 pkg openrails, type Config struct, Vault *config.VaultConfig `yaml:"vault" json:"vault"`
 pkg openrails, type Config struct, WebhookSecretOverlap string `yaml:"webhook_secret_overlap" json:"webhook_secret_overlap"`
 pkg openrails, type Credential = billingauth.Credential
@@ -391,6 +395,7 @@ pkg openrails, type DatabaseConfig = config.DatabaseConfig
 pkg openrails, type DatabaseConfig struct
 pkg openrails, type DatabaseConfig struct, RiverSchema string `yaml:"river_schema" json:"river_schema"`
 pkg openrails, type DatabaseConfig struct, Schema string `yaml:"schema" json:"schema"`
+pkg openrails, type DatabaseConfig struct, SkipMigrations bool `yaml:"skip_migrations" json:"skip_migrations"`
 pkg openrails, type Deps = config.Deps
 pkg openrails, type Deps struct
 pkg openrails, type Deps struct, Clock clockwork.Clock
@@ -574,6 +579,12 @@ pkg openrails, type UsageSweepArgs struct, Collect bool `json:"collect,omitempty
 pkg openrails, type UsageSweepArgs struct, FinalizePreviousMonth bool `json:"finalize_previous_month,omitempty"`
 pkg openrails, type UsageSweepArgs struct, MerchantID *billing.MerchantID `json:"merchant_id,omitempty"`
 pkg openrails, type UsageSweepArgs struct, UseMonthlyFloor bool `json:"use_monthly_floor,omitempty"`
+pkg openrails, type UserActionRateLimitConfig = config.UserActionRateLimitConfig
+pkg openrails, type UserActionRateLimitConfig struct
+pkg openrails, type UserActionRateLimitConfig struct, MinimumCustomersPerDay int64 `yaml:"minimum_customers_per_day" json:"minimum_customers_per_day"`
+pkg openrails, type UserActionRateLimitConfig struct, MinimumCustomersPerHour int64 `yaml:"minimum_customers_per_hour" json:"minimum_customers_per_hour"`
+pkg openrails, type UserActionRateLimitConfig struct, PaidCustomersPerDailyCustomer int64 `yaml:"paid_customers_per_daily_customer" json:"paid_customers_per_daily_customer"`
+pkg openrails, type UserActionRateLimitConfig struct, PaidCustomersPerHourlyCustomer int64 `yaml:"paid_customers_per_hourly_customer" json:"paid_customers_per_hourly_customer"`
 pkg openrails, type UserInfo = config.UserInfo
 pkg openrails, type VaultConfig = config.VaultConfig
 pkg openrails, type VaultConfig struct
@@ -588,6 +599,7 @@ pkg openrails, type VaultConfig struct, ScopePrefix string `yaml:"scope_prefix" 
 pkg openrails, type VaultConfig struct, SecretID string `yaml:"secret_id" json:"secret_id"`
 pkg openrails, type VaultConfig struct, Token string `yaml:"token" json:"token"`
 pkg openrails, type VaultConfig struct, TransitMount string `yaml:"transit_mount" json:"transit_mount"`
+pkg openrails, var ErrMigrationsRequired error
 pkg openrails, var ErrUnauthenticated error
 pkg openrails/adapters/fiber, const RouteNamePrefix untyped string = "openrails."
 pkg openrails/adapters/fiber, func Mount(*fiber.App, *openrails.Engine, openrails.Routes) error
@@ -900,6 +912,14 @@ pkg openrails/billing, const MigrationKeepGrandfathered MigrationFallback = "kee
 pkg openrails/billing, const MigrationScheduled PriceMigrationDisposition = "scheduled"
 pkg openrails/billing, const MigrationSkipped PriceMigrationDisposition = "skipped"
 pkg openrails/billing, const NotificationIDPrefix untyped string = "ntf_"
+pkg openrails/billing, const NotificationRecoveryAuthenticatePayment NotificationRecoveryAction = "authenticate_payment"
+pkg openrails/billing, const NotificationRecoveryContactSupport NotificationRecoveryAction = "contact_support"
+pkg openrails/billing, const NotificationRecoveryResubscribe NotificationRecoveryAction = "resubscribe"
+pkg openrails/billing, const NotificationRecoveryUpdatePaymentMethod NotificationRecoveryAction = "update_payment_method"
+pkg openrails/billing, const NotificationRetryPaymentMethodRequired NotificationRetryStatus = "payment_method_required"
+pkg openrails/billing, const NotificationRetryScheduled NotificationRetryStatus = "scheduled"
+pkg openrails/billing, const NotificationRetryStopped NotificationRetryStatus = "stopped"
+pkg openrails/billing, const NotificationRetryUnknown NotificationRetryStatus = "unknown"
 pkg openrails/billing, const OrderAttemptIDPrefix untyped string = "oat_"
 pkg openrails/billing, const OrderCanceled OrderStatus = "canceled"
 pkg openrails/billing, const OrderCollectionEngine OrderCollectionOwner = "engine"
@@ -1299,6 +1319,13 @@ pkg openrails/billing, type AccessNote struct, Note AccessNoteKind `json:"note"`
 pkg openrails/billing, type AccessNote struct, SourceID string `json:"source_id"`
 pkg openrails/billing, type AccessNote struct, SourceType string `json:"source_type"`
 pkg openrails/billing, type AccessNoteKind string
+pkg openrails/billing, type AccessTenure struct
+pkg openrails/billing, type AccessTenure struct, AsOf time.Time `json:"as_of"`
+pkg openrails/billing, type AccessTenure struct, Seconds map[string]int64 `json:"seconds"`
+pkg openrails/billing, type AccessTenureParams struct
+pkg openrails/billing, type AccessTenureParams struct, At time.Time
+pkg openrails/billing, type AccessTenureParams struct, CustomerID CustomerID
+pkg openrails/billing, type AccessTenureParams struct, Entitlements []string
 pkg openrails/billing, type AcknowledgeHostEventsParams struct
 pkg openrails/billing, type AcknowledgeHostEventsParams struct, HostEventIDs []HostEventID `json:"host_event_ids"`
 pkg openrails/billing, type AcknowledgeNotificationEventsParams struct
@@ -2489,6 +2516,7 @@ pkg openrails/billing, type NextAction struct, Transactions []string `json:"tran
 pkg openrails/billing, type NextAction struct, Type string `json:"type"`
 pkg openrails/billing, type NextAction struct, URL *string `json:"url"`
 pkg openrails/billing, type NotificationData struct
+pkg openrails/billing, type NotificationData struct, AccessEnded bool `json:"access_ended,omitempty"`
 pkg openrails/billing, type NotificationData struct, Amount *int64 `json:"amount,omitempty,string"`
 pkg openrails/billing, type NotificationData struct, AmountDue *int64 `json:"amount_due,omitempty,string"`
 pkg openrails/billing, type NotificationData struct, AvailableAmount *int64 `json:"available_amount,omitempty,string"`
@@ -2502,6 +2530,8 @@ pkg openrails/billing, type NotificationData struct, EndedAt *time.Time `json:"e
 pkg openrails/billing, type NotificationData struct, FailureCode string `json:"failure_code,omitempty"`
 pkg openrails/billing, type NotificationData struct, FailureReason string `json:"failure_reason,omitempty"`
 pkg openrails/billing, type NotificationData struct, FromPriceID PriceID `json:"from_price_id,omitzero"`
+pkg openrails/billing, type NotificationData struct, FromProductID ProductID `json:"from_product_id,omitzero"`
+pkg openrails/billing, type NotificationData struct, FromProductName string `json:"from_product_name,omitempty"`
 pkg openrails/billing, type NotificationData struct, FromState string `json:"from_state,omitempty"`
 pkg openrails/billing, type NotificationData struct, LowBalanceAmount *int64 `json:"low_balance_amount,omitempty,string"`
 pkg openrails/billing, type NotificationData struct, Message string `json:"message,omitempty"`
@@ -2526,6 +2556,8 @@ pkg openrails/billing, type NotificationData struct, Quantity *int `json:"quanti
 pkg openrails/billing, type NotificationData struct, Rail string `json:"rail,omitempty"`
 pkg openrails/billing, type NotificationData struct, RailSubscriptionID string `json:"rail_subscription_id,omitempty"`
 pkg openrails/billing, type NotificationData struct, Reason string `json:"reason,omitempty"`
+pkg openrails/billing, type NotificationData struct, RecoveryAction NotificationRecoveryAction `json:"recovery_action,omitempty"`
+pkg openrails/billing, type NotificationData struct, RetryStatus NotificationRetryStatus `json:"retry_status,omitempty"`
 pkg openrails/billing, type NotificationData struct, RunwayEndsAt *time.Time `json:"runway_ends_at,omitempty"`
 pkg openrails/billing, type NotificationData struct, Source string `json:"source,omitempty"`
 pkg openrails/billing, type NotificationData struct, SubscriptionID SubscriptionID `json:"subscription_id,omitzero"`
@@ -2549,6 +2581,8 @@ pkg openrails/billing, type NotificationEventRef struct, MerchantID MerchantID `
 pkg openrails/billing, type NotificationEvents struct
 pkg openrails/billing, type NotificationEvents struct, Data []NotificationEvent `json:"data"`
 pkg openrails/billing, type NotificationID [16]byte
+pkg openrails/billing, type NotificationRecoveryAction string
+pkg openrails/billing, type NotificationRetryStatus string
 pkg openrails/billing, type Order struct
 pkg openrails/billing, type Order struct, CancelURL *string `json:"cancel_url"`
 pkg openrails/billing, type Order struct, CanceledAt *time.Time `json:"canceled_at"`

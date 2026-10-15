@@ -180,6 +180,7 @@ func init() {
 // engine, then its own AuthKit (which creates or upgrades its tables), then
 // the control plane over both and the HTTP surface. ctx bounds the wait for
 // the database.
+// Engine.Database.SkipMigrations applies to the internal AuthKit as well.
 func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if ctx == nil {
 		ctx = context.Background()

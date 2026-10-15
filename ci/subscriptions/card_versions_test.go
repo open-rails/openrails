@@ -127,6 +127,9 @@ func TestDeclinedCardIsReadFromItsVault(t *testing.T) {
 	require.Equal(t, []string{"customer_save/saved", "provider_read/updated"}, w.methodVersions(e.method))
 	require.Equal(t, "3", w.methodRow(e.method, "card_exp_month::text"))
 	require.Zero(t, e.c.notificationCount("payment_method_update_required"), "the member is not asked")
+	notice := e.c.notificationData("payment_method_failed")
+	require.Equal(t, "unknown", notice["retry_status"], "the updater's lookup does not promise a retry or require a new card")
+	require.Equal(t, "update_payment_method", notice["recovery_action"])
 	w.runRenewals()
 	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status, "the renewal is collected on the reissued card")
 }

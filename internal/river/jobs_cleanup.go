@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/notificationevents"
@@ -131,6 +132,7 @@ func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
 
 // CleanupResult holds the count of deleted records per table
 type CleanupResult struct {
+	UserActionReservations  int64
 	NotificationEvents      int64
 	OrderAttemptsExpired    int64
 	Carts                   int64
@@ -216,6 +218,18 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		}
 		if batch == cleanupIndexedMaxBatches-1 {
 			logger.Warn("Cleanup: notification event retention reached its pass budget")
+		}
+	}
+
+	for range cleanupIndexedMaxBatches {
+		n, err := destructive.PruneUserActionReservations(ctx, w.DB, cleanupDeleteBatch)
+		if err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("prune user action reservations: %w", err))
+			break
+		}
+		result.UserActionReservations += n
+		if n < cleanupDeleteBatch {
+			break
 		}
 	}
 

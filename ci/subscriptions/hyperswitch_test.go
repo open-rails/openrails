@@ -38,9 +38,14 @@ type hsFake struct {
 	gateway func(form url.Values) string
 	// decline is the issuer's answer to the next sale; reissue is the card
 	// HyperSwitch's updater holds after it.
-	decline string
-	reissue map[string]string
-	card    map[string]string
+	decline            string
+	reissue            map[string]string
+	card               map[string]string
+	deleteCapability   bool
+	deleteStatus       int
+	deleteMismatch     bool
+	deleteLoseResponse bool
+	deletedMethods     []string
 }
 
 func newHSFake(t *testing.T, account string) (*hsFake, string) {
@@ -99,7 +104,30 @@ func (f *hsFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, destination := range []string{nmi.DefaultDirectPostURL, nmi.GatewayDirectPostURL, nmi.SandboxDirectPostURL} {
 			routes = append(routes, map[string]string{"destination_url": destination, "method": http.MethodPost, "response_profile": "nmi_classic"})
 		}
-		reply(http.StatusOK, map[string]any{"contract": "openrails-nmi-form-v2", "strict": true, "max_response_bytes": 65536, "routes": routes})
+		contract := map[string]any{"contract": "openrails-nmi-form-v2", "strict": true, "max_response_bytes": 65536, "routes": routes}
+		if f.deleteCapability {
+			contract["native_vault_delete_contract"] = "openrails-native-vault-delete-v1"
+		}
+		reply(http.StatusOK, contract)
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v2/payment-methods/"):
+		id := strings.TrimPrefix(r.URL.Path, "/v2/payment-methods/")
+		f.deletedMethods = append(f.deletedMethods, id)
+		if f.deleteStatus != 0 {
+			reply(f.deleteStatus, map[string]any{"error": "delete unavailable"})
+			return
+		}
+		delete(f.methods, id)
+		if f.deleteLoseResponse {
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = connection.Close()
+			}
+			return
+		}
+		if f.deleteMismatch {
+			id = "another-method"
+		}
+		reply(http.StatusOK, map[string]any{"id": id})
 	case r.Method == http.MethodPost && r.URL.Path == "/v2/proxy":
 		var req struct {
 			Body  map[string]string `json:"request_body"`

@@ -98,6 +98,8 @@ sql:
       - "internal/migrate/postgres/0103_solana_engine_collection.up.sql"
       - "internal/migrate/postgres/0104_provider_prices.up.sql"
       - "internal/migrate/postgres/0105_psp_imports.up.sql"
+      - "internal/migrate/postgres/0106_user_destructive_reservations.up.sql"
+      - "internal/migrate/postgres/0107_user_action_retention.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

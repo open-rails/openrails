@@ -1,0 +1,2 @@
+-- Repair: none-needed Document the existing bounded retention policy.
+COMMENT ON TABLE billing.user_destructive_reservations IS 'Merchant-global customer card-delete and soft-cancel rolling-hour/day rate reservations. No actor can obtain a separate budget. customer_id is an opaque identity and deliberately has no cascading customer FK. The canonical operation/card/subscription remains authoritative after pruning. Retention: rows are deleted 24 hours after reserved_at.';

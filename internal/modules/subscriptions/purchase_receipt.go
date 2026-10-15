@@ -73,7 +73,7 @@ func QueuePaymentAuthenticationRequired(ctx context.Context, d *db.DB, r Authent
 	n := &models.NotificationEvent{
 		ID:         uuid.NewSHA1(r.AttemptID, []byte(models.NotificationPaymentAuthenticationRequired)),
 		CustomerID: r.CustomerID, EventType: models.NotificationPaymentAuthenticationRequired, CreatedAt: r.At.UTC(),
-		Data: billing.NotificationData{Amount: &amount, Currency: r.Currency, ProductName: r.Items, OrderID: billing.OrderID(r.OrderID)},
+		Data: billing.NotificationData{Amount: &amount, Currency: r.Currency, ProductName: r.Items, OrderID: billing.OrderID(r.OrderID), RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryAuthenticatePayment},
 	}
 	if err := NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {
 		return fmt.Errorf("queue authentication notice of order %s: %w", r.OrderID, err)

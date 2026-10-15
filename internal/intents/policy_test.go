@@ -90,7 +90,7 @@ func TestDestructiveClassificationAndBudget(t *testing.T) {
 }
 
 func TestRateCeilingIsPinnedAndFailsClosed(t *testing.T) {
-	// Hardcoded safeguards, not config: drift must fail the build.
+	// Legacy operator/system safeguards remain pinned.
 	assert.Equal(t, time.Hour, RateCeilingWindow)
 	assert.Equal(t, []int{5, 15, 50, 3, 8, 25}, []int{
 		PerActorHourlyCeiling, PerMerchantHourlyCeiling, PerMerchantSystemHourlyCeiling,
@@ -111,12 +111,13 @@ func TestRateCeilingIsPinnedAndFailsClosed(t *testing.T) {
 		params  CheckParams
 		refused bool
 	}{
-		{"nil gate, user", absent, CheckParams{Actor: "a", MerchantID: uuid.New(), IntentType: destructive, Origin: OriginUser}, true},
+		{"user uses the separate merchant limiter", absent, CheckParams{Actor: "a", MerchantID: uuid.New(), IntentType: destructive, Origin: OriginUser}, false},
+		{"nil gate, admin", absent, CheckParams{Actor: "a", MerchantID: uuid.New(), IntentType: destructive, Origin: OriginAdmin}, true},
 		{"nil gate, system", absent, CheckParams{MerchantID: uuid.New(), IntentType: destructive, Origin: OriginSystem}, true},
-		{"broken db, user", broken, CheckParams{Actor: "a", MerchantID: uuid.New(), IntentType: destructive, Origin: OriginUser}, true},
+		{"user does not spend a second legacy budget", broken, CheckParams{Actor: "a", MerchantID: uuid.New(), IntentType: destructive, Origin: OriginUser}, false},
 		{"broken db, admin", broken, CheckParams{Actor: "a", MerchantID: uuid.New(), IntentType: destructive, Origin: OriginAdmin}, true},
 		{"broken db, system", broken, CheckParams{MerchantID: uuid.New(), IntentType: destructive, Origin: OriginSystem}, true},
-		{"no merchant, user", broken, CheckParams{Actor: "a", IntentType: destructive, Origin: OriginUser}, true},
+		{"user ownership is validated by its separate admission", broken, CheckParams{Actor: "a", IntentType: destructive, Origin: OriginUser}, false},
 		{"no merchant, system", broken, CheckParams{IntentType: destructive, Origin: OriginSystem}, true},
 		{"non-destructive passes a broken gate", broken, CheckParams{Actor: "a", MerchantID: uuid.New(), IntentType: TypeNMIPaymentSourceUpdate, Origin: OriginUser}, false},
 		{"non-destructive passes a nil gate", absent, CheckParams{MerchantID: uuid.New(), IntentType: TypeNMIRefund, Origin: OriginSystem}, false},

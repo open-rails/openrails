@@ -149,6 +149,14 @@ rate_limits:
   payment:
     requests_per_minute: 40
 
+# Combined customer card-removal and subscription-cancellation protection.
+# Distinct affected customers across all actors/apps; no per-minute window.
+user_action_rate_limit:
+  minimum_customers_per_hour: 2
+  paid_customers_per_hourly_customer: 400
+  minimum_customers_per_day: 5
+  paid_customers_per_daily_customer: 100
+
 # Exact origins purchase success/cancel and billing-portal return URLs may
 # name. Empty allows only the origin of public_billing_base_url.
 # return_origins:

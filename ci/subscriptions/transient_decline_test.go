@@ -27,6 +27,21 @@ func TestEngineTransientDeclineLadder(t *testing.T) {
 		require.Equal(t, billing.SubscriptionPastDue, sub.Status, "transient retry %d", i+1)
 		require.NotNil(t, nextRetry(sub))
 		require.Equal(t, gap, nextRetry(sub).Sub(at).Round(time.Minute), "transient retry %d", i+1)
+		var failures []map[string]any
+		for _, raw := range e.c.notificationEvents() {
+			event := raw.(map[string]any)
+			if event["event_type"] == "payment_method_failed" {
+				failures = append(failures, event["data"].(map[string]any))
+			}
+		}
+		require.Len(t, failures, i+1, "each real declined attempt produces its retry guidance")
+		latest := failures[len(failures)-1]
+		require.Equal(t, "scheduled", latest["retry_status"])
+		require.Equal(t, "update_payment_method", latest["recovery_action"])
+		require.Equal(t, nextRetry(sub).UTC().Format(time.RFC3339Nano), latest["next_attempt_at"])
+		require.Equal(t, e.sub.String(), latest["subscription_id"])
+		w.runRenewals()
+		require.Equal(t, i+1, e.c.notificationCount("payment_method_failed"), "replaying the completed attempt adds no failure notice")
 		w.advanceHealthyTo(nextRetry(sub).Add(time.Second))
 	}
 	first := w.clock.Now()

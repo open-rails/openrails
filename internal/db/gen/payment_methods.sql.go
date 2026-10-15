@@ -132,6 +132,7 @@ SELECT count(*) FROM billing.payment_methods
 WHERE merchant_id = $2::uuid AND psp_id = $3::uuid
   AND rail = $1
   AND rail_customer_ref = $4::text
+  AND NOT COALESCE(park_reason LIKE 'removed:%', false)
   AND id <> $5
 `
 
@@ -940,10 +941,11 @@ const listPaymentMethodsByCustomer = `-- name: ListPaymentMethodsByCustomer :man
 SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at, setup_ref, capture, wallet_card_id FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1::uuid
   AND pm.customer_id = $2::uuid
+  AND NOT COALESCE(pm.park_reason LIKE 'removed:%', false)
   AND NOT (pm.custodian = 'platform' AND EXISTS (
     SELECT 1 FROM billing.provider_intents d
     WHERE d.merchant_id = pm.merchant_id
-      AND d.idempotency_key = 'platform_method_delete:' || pm.id::text
+      AND d.idempotency_key IN ('platform_method_delete:' || pm.id::text, 'manual:platform_method_delete:' || pm.id::text)
       AND d.intent_type = 'platform_method_delete' AND d.status = 'succeeded'
   ))
 ORDER BY pm.created_at DESC, pm.id DESC
@@ -1011,10 +1013,11 @@ WHERE pm.merchant_id = $1::uuid
   AND pm.customer_id = $2::uuid
   AND ($3::timestamptz IS NULL
        OR (pm.created_at, pm.id) < ($3::timestamptz, $4::uuid))
+  AND NOT COALESCE(pm.park_reason LIKE 'removed:%', false)
   AND NOT (pm.custodian = 'platform' AND EXISTS (
     SELECT 1 FROM billing.provider_intents d
     WHERE d.merchant_id = pm.merchant_id
-      AND d.idempotency_key = 'platform_method_delete:' || pm.id::text
+      AND d.idempotency_key IN ('platform_method_delete:' || pm.id::text, 'manual:platform_method_delete:' || pm.id::text)
       AND d.intent_type = 'platform_method_delete' AND d.status = 'succeeded'
   ))
 ORDER BY pm.created_at DESC, pm.id DESC
@@ -1092,10 +1095,11 @@ const listPaymentMethodsByCustomerRails = `-- name: ListPaymentMethodsByCustomer
 SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at, setup_ref, capture, wallet_card_id FROM billing.payment_methods pm
 WHERE pm.merchant_id = $2::uuid AND pm.customer_id = $1
   AND pm.rail = ANY($3::text[])
+  AND NOT COALESCE(pm.park_reason LIKE 'removed:%', false)
   AND NOT (pm.custodian = 'platform' AND EXISTS (
     SELECT 1 FROM billing.provider_intents d
     WHERE d.merchant_id = pm.merchant_id
-      AND d.idempotency_key = 'platform_method_delete:' || pm.id::text
+      AND d.idempotency_key IN ('platform_method_delete:' || pm.id::text, 'manual:platform_method_delete:' || pm.id::text)
       AND d.intent_type = 'platform_method_delete' AND d.status = 'succeeded'
   ))
 ORDER BY pm.created_at DESC

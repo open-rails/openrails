@@ -35,6 +35,7 @@
       "func (c *Client) DeleteProvisioningToken(ctx context.Context, id billing.ProvisioningTokenID, options ...RequestOption) error",
       "func (c *Client) ExportBillingArchive(ctx context.Context, dst io.Writer, requestOptions ...RequestOption) error",
       "func (c *Client) ExtendAdmissions(ctx context.Context, items []billing.ExtendAdmissionParams, requestOptions ...RequestOption) ([]billing.AdmissionResult, error)",
+      "func (c *Client) GetAccessTenure(ctx context.Context, params billing.AccessTenureParams, options ...RequestOption) (*billing.AccessTenure, error)",
       "func (c *Client) GetAdminAccess(ctx context.Context, options ...RequestOption) (*billing.AdminAccess, error)",
       "func (c *Client) GetAdmission(ctx context.Context, requestID string, options ...RequestOption) (*billing.Admission, error)",
       "func (c *Client) GetBalance(ctx context.Context, customer billing.CustomerID, currency string, requestOptions ...RequestOption) (*billing.Balance, error)",
@@ -155,6 +156,7 @@
       "func (r *Remote) Merchant(id billing.MerchantID) (*Client, error)",
       "func (r *Remote) Ready(ctx context.Context) error",
       "func AccessCutoverPreflight(ctx context.Context, db *pgxpool.Pool, database DatabaseConfig, approvedBy string) (*billing.AccessCutoverReport, error)",
+      "func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg Config) error",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error)",
       "func NewClientCredentialsTokenProvider(cfg ClientCredentialsConfig) (func(context.Context) (string, error), error)",
       "func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error)",
@@ -222,10 +224,12 @@
       "type StripePSP struct {\n\tAccountID string `psp:\"account_id\"`\n\n\tEnvironment string `psp:\"environment\"`\n\tArchived    bool   `psp:\"archived\"`\n\n\tSecretKey            string `psp:\"secrets.secret_key,required\"`\n\tWebhookSigningSecret string `psp:\"secrets.webhook_signing_secret,required\"`\n\n\tWebhookSigningSecretThin string `psp:\"secrets.webhook_signing_secret_thin\"`\n\n\tWebhookSigningSecretPrevious string    `psp:\"secrets.webhook_signing_secret_previous\"`\n\tWebhookOverlapExpiresAt      time.Time `psp:\"webhook_overlap_expires_at\"`\n\n\tPublishableKey string `psp:\"publishable_key\"`\n}",
       "type SubjectKind = billingauth.SubjectKind",
       "type UsageSweepArgs struct {\n\tMerchantID *billing.MerchantID `json:\"merchant_id,omitempty\"`\n\n\tCollect bool `json:\"collect,omitempty\"`\n\n\tUseMonthlyFloor bool `json:\"use_monthly_floor,omitempty\"`\n\n\tFinalizePreviousMonth bool `json:\"finalize_previous_month,omitempty\"`\n}",
+      "type UserActionRateLimitConfig = config.UserActionRateLimitConfig",
       "type UserInfo = config.UserInfo",
       "type VaultConfig = config.VaultConfig",
       "type requestOptions struct {\n}",
       "type startOptions struct {\n}",
+      "var ErrMigrationsRequired = migrate.ErrMigrationsRequired",
       "var ErrUnauthenticated = billingauth.ErrUnauthenticated"
     ],
     "adapters/fiber": [
@@ -298,6 +302,8 @@
       "const (\n\tMerchantRetirementRefusedNotLive       MerchantRetirementRefusal = \"not_live\"\n\tMerchantRetirementRefusedGroupMismatch MerchantRetirementRefusal = \"group_mismatch\"\n\tMerchantRetirementRefusedReserved      MerchantRetirementRefusal = \"reserved\"\n\tMerchantRetirementRefusedActive        MerchantRetirementRefusal = \"active\"\n)",
       "const (\n\tMigrationKeepGrandfathered MigrationFallback = \"keep_grandfathered\"\n\n\tMigrationCancelAtPeriodEnd MigrationFallback = \"cancel_at_period_end\"\n)",
       "const (\n\tMigrationScheduled PriceMigrationDisposition = \"scheduled\"\n\n\tMigrationApplied PriceMigrationDisposition = \"applied\"\n\n\tMigrationSkipped PriceMigrationDisposition = \"skipped\"\n\n\tMigrationBlocked PriceMigrationDisposition = \"blocked\"\n)",
+      "const (\n\tNotificationRecoveryUpdatePaymentMethod NotificationRecoveryAction = \"update_payment_method\"\n\tNotificationRecoveryResubscribe         NotificationRecoveryAction = \"resubscribe\"\n\tNotificationRecoveryAuthenticatePayment NotificationRecoveryAction = \"authenticate_payment\"\n\tNotificationRecoveryContactSupport      NotificationRecoveryAction = \"contact_support\"\n)",
+      "const (\n\tNotificationRetryScheduled             NotificationRetryStatus = \"scheduled\"\n\tNotificationRetryPaymentMethodRequired NotificationRetryStatus = \"payment_method_required\"\n\tNotificationRetryStopped               NotificationRetryStatus = \"stopped\"\n\tNotificationRetryUnknown               NotificationRetryStatus = \"unknown\"\n)",
       "const (\n\tOrderCollectionEngine      OrderCollectionOwner = \"engine\"\n\tOrderCollectionNMISchedule OrderCollectionOwner = \"nmi_schedule\"\n\tOrderCollectionProvider    OrderCollectionOwner = \"provider\"\n)",
       "const (\n\tOrderOpen       OrderStatus = \"open\"\n\tOrderProcessing OrderStatus = \"processing\"\n\tOrderComplete   OrderStatus = \"complete\"\n\tOrderCanceled   OrderStatus = \"canceled\"\n\tOrderExpired    OrderStatus = \"expired\"\n\tOrderVoid       OrderStatus = \"void\"\n\n\tOrderUncollectible OrderStatus = \"uncollectible\"\n)",
       "const (\n\tOrderOriginCustomer OrderOrigin = \"customer\"\n\tOrderOriginMerchant OrderOrigin = \"merchant\"\n\n\tOrderOriginSubscription OrderOrigin = \"subscription\"\n\n\tOrderOriginUsage OrderOrigin = \"usage\"\n)",
@@ -588,6 +594,8 @@
       "type AccessLevel string",
       "type AccessNote struct {\n\tMerchantID   MerchantID     `json:\"merchant_id\"`\n\tCustomerID   CustomerID     `json:\"customer_id\"`\n\tNote         AccessNoteKind `json:\"note\"`\n\tSourceType   string         `json:\"source_type\"`\n\tSourceID     string         `json:\"source_id\"`\n\tEntitlements []string       `json:\"entitlements\"`\n}",
       "type AccessNoteKind string",
+      "type AccessTenure struct {\n\tAsOf    time.Time        `json:\"as_of\"`\n\tSeconds map[string]int64 `json:\"seconds\"`\n}",
+      "type AccessTenureParams struct {\n\tCustomerID   CustomerID\n\tEntitlements []string\n\tAt           time.Time\n}",
       "type AcknowledgeHostEventsParams struct {\n\tHostEventIDs []HostEventID `json:\"host_event_ids\"`\n}",
       "type AcknowledgeNotificationEventsParams struct {\n\tNotificationIDs []NotificationID `json:\"notification_ids\"`\n}",
       "type AdminAccess struct {\n\tAdmin          AccessLevel     `json:\"admin\"`\n\tCatalog        AccessLevel     `json:\"catalog\"`\n\tMerchantConfig AccessLevel     `json:\"merchant_config\"`\n\tMetrics        bool            `json:\"metrics\"`\n\tScopeID        string          `json:\"scope_id\"`\n\tAssistants     AdminAssistants `json:\"assistants\"`\n\n\tApplicationPermissions []Permission `json:\"application_permissions\"`\n}",
@@ -830,11 +838,13 @@
       "type NetworkSubscription struct {\n\tLinkID       CustomerLinkID `json:\"link_id\"`\n\tMerchantID   MerchantID     `json:\"merchant_id\"`\n\tSubscription Subscription   `json:\"subscription\"`\n}",
       "type NewPriceDraft struct {\n\tProductKey  string            `json:\"product_key\"`\n\tReviewText  string            `json:\"review_text\"`\n\tCreatePrice CreatePriceParams `json:\"create_price\"`\n}",
       "type NextAction struct {\n\tType         string            `json:\"type\"`\n\tURL          *string           `json:\"url\"`\n\tTransactions []string          `json:\"transactions\"`\n\tPSPID        *PSPID            `json:\"psp_id\"`\n\tPayload      map[string]string `json:\"payload\"`\n}",
-      "type NotificationData struct {\n\tReason  string `json:\"reason,omitempty\"`\n\tMessage string `json:\"message,omitempty\"`\n\n\tSource    string     `json:\"source,omitempty\"`\n\tProductID ProductID  `json:\"product_id,omitzero\"`\n\tEndedAt   *time.Time `json:\"ended_at,omitempty\"`\n\tCurrency  string     `json:\"currency,omitempty\"`\n\n\tSubscriptionID   SubscriptionID   `json:\"subscription_id,omitzero\"`\n\tPriceMigrationID PriceMigrationID `json:\"price_migration_id,omitzero\"`\n\tFromPriceID      PriceID          `json:\"from_price_id,omitzero\"`\n\tToPriceID        PriceID          `json:\"to_price_id,omitzero\"`\n\tToProductID      ProductID        `json:\"to_product_id,omitzero\"`\n\tToProductName    string           `json:\"to_product_name,omitempty\"`\n\tOldAmount        *int64           `json:\"old_amount,omitempty,string\"`\n\tNewAmount        *int64           `json:\"new_amount,omitempty,string\"`\n\tEffectiveAt      *time.Time       `json:\"effective_at,omitempty\"`\n\n\tPeriodStartsAt   *time.Time `json:\"period_starts_at,omitempty\"`\n\tPeriodEndsAt     *time.Time `json:\"period_ends_at,omitempty\"`\n\tDowngradeApplied bool       `json:\"downgrade_applied,omitempty\"`\n\tNewProduct       string     `json:\"new_product,omitempty\"`\n\n\tOverdueAmount    *int64     `json:\"overdue_amount,omitempty,string\"`\n\tOverdueOrders    int        `json:\"overdue_orders,omitempty\"`\n\tOverdueStartedAt *time.Time `json:\"overdue_started_at,omitempty\"`\n\tFromState        string     `json:\"from_state,omitempty\"`\n\tToState          string     `json:\"to_state,omitempty\"`\n\n\tAmountDue        *int64                  `json:\"amount_due,omitempty,string\"`\n\tDueAt            *time.Time              `json:\"due_at,omitempty\"`\n\tCollectionMethod InvoiceCollectionMethod `json:\"collection_method,omitempty\"`\n\tFailureCode      string                  `json:\"failure_code,omitempty\"`\n\tFailureReason    string                  `json:\"failure_reason,omitempty\"`\n\tDeclineOutcome   string                  `json:\"decline_outcome,omitempty\"`\n\tNextAttemptAt    *time.Time              `json:\"next_attempt_at,omitempty\"`\n\n\tAvailableAmount  *int64     `json:\"available_amount,omitempty,string\"`\n\tOwedAmount       *int64     `json:\"owed_amount,omitempty,string\"`\n\tLowBalanceAmount *int64     `json:\"low_balance_amount,omitempty,string\"`\n\tRunwayEndsAt     *time.Time `json:\"runway_ends_at,omitempty\"`\n\n\tRail               string `json:\"rail,omitempty\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id,omitempty\"`\n\tTransactionID      string `json:\"transaction_id,omitempty\"`\n\n\tQuantity *int `json:\"quantity,omitempty\"`\n\n\tAmount        *int64    `json:\"amount,omitempty,string\"`\n\tProductName   string    `json:\"product_name,omitempty\"`\n\tPaymentMethod string    `json:\"payment_method,omitempty\"`\n\tPaymentID     PaymentID `json:\"payment_id,omitzero\"`\n\tOrderID       OrderID   `json:\"order_id,omitzero\"`\n\tOrderNumber   int64     `json:\"order_number,omitempty\"`\n}",
+      "type NotificationData struct {\n\tReason  string `json:\"reason,omitempty\"`\n\tMessage string `json:\"message,omitempty\"`\n\n\tSource    string     `json:\"source,omitempty\"`\n\tProductID ProductID  `json:\"product_id,omitzero\"`\n\tEndedAt   *time.Time `json:\"ended_at,omitempty\"`\n\n\tAccessEnded bool   `json:\"access_ended,omitempty\"`\n\tCurrency    string `json:\"currency,omitempty\"`\n\n\tSubscriptionID   SubscriptionID   `json:\"subscription_id,omitzero\"`\n\tPriceMigrationID PriceMigrationID `json:\"price_migration_id,omitzero\"`\n\tFromPriceID      PriceID          `json:\"from_price_id,omitzero\"`\n\tFromProductID    ProductID        `json:\"from_product_id,omitzero\"`\n\tFromProductName  string           `json:\"from_product_name,omitempty\"`\n\tToPriceID        PriceID          `json:\"to_price_id,omitzero\"`\n\tToProductID      ProductID        `json:\"to_product_id,omitzero\"`\n\tToProductName    string           `json:\"to_product_name,omitempty\"`\n\tOldAmount        *int64           `json:\"old_amount,omitempty,string\"`\n\tNewAmount        *int64           `json:\"new_amount,omitempty,string\"`\n\tEffectiveAt      *time.Time       `json:\"effective_at,omitempty\"`\n\n\tPeriodStartsAt   *time.Time `json:\"period_starts_at,omitempty\"`\n\tPeriodEndsAt     *time.Time `json:\"period_ends_at,omitempty\"`\n\tDowngradeApplied bool       `json:\"downgrade_applied,omitempty\"`\n\tNewProduct       string     `json:\"new_product,omitempty\"`\n\n\tOverdueAmount    *int64     `json:\"overdue_amount,omitempty,string\"`\n\tOverdueOrders    int        `json:\"overdue_orders,omitempty\"`\n\tOverdueStartedAt *time.Time `json:\"overdue_started_at,omitempty\"`\n\tFromState        string     `json:\"from_state,omitempty\"`\n\tToState          string     `json:\"to_state,omitempty\"`\n\n\tAmountDue        *int64                     `json:\"amount_due,omitempty,string\"`\n\tDueAt            *time.Time                 `json:\"due_at,omitempty\"`\n\tCollectionMethod InvoiceCollectionMethod    `json:\"collection_method,omitempty\"`\n\tFailureCode      string                     `json:\"failure_code,omitempty\"`\n\tFailureReason    string                     `json:\"failure_reason,omitempty\"`\n\tDeclineOutcome   string                     `json:\"decline_outcome,omitempty\"`\n\tNextAttemptAt    *time.Time                 `json:\"next_attempt_at,omitempty\"`\n\tRetryStatus      NotificationRetryStatus    `json:\"retry_status,omitempty\"`\n\tRecoveryAction   NotificationRecoveryAction `json:\"recovery_action,omitempty\"`\n\n\tAvailableAmount  *int64     `json:\"available_amount,omitempty,string\"`\n\tOwedAmount       *int64     `json:\"owed_amount,omitempty,string\"`\n\tLowBalanceAmount *int64     `json:\"low_balance_amount,omitempty,string\"`\n\tRunwayEndsAt     *time.Time `json:\"runway_ends_at,omitempty\"`\n\n\tRail               string `json:\"rail,omitempty\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id,omitempty\"`\n\tTransactionID      string `json:\"transaction_id,omitempty\"`\n\n\tQuantity *int `json:\"quantity,omitempty\"`\n\n\tAmount        *int64    `json:\"amount,omitempty,string\"`\n\tProductName   string    `json:\"product_name,omitempty\"`\n\tPaymentMethod string    `json:\"payment_method,omitempty\"`\n\tPaymentID     PaymentID `json:\"payment_id,omitzero\"`\n\tOrderID       OrderID   `json:\"order_id,omitzero\"`\n\tOrderNumber   int64     `json:\"order_number,omitempty\"`\n}",
       "type NotificationEvent struct {\n\tID         NotificationID  `json:\"id\"`\n\tMerchantID MerchantID      `json:\"merchant_id\"`\n\tCustomerID CustomerID      `json:\"customer_id\"`\n\tEventType  string          `json:\"event_type\"`\n\tData       json.RawMessage `json:\"data\"`\n\tCreatedAt  time.Time       `json:\"created_at\"`\n\n\tActionRequested bool `json:\"action_requested,omitempty\"`\n\n\tOptional bool `json:\"optional,omitempty\"`\n}",
       "type NotificationEventRef struct {\n\tMerchantID MerchantID     `json:\"merchant_id\"`\n\tID         NotificationID `json:\"id\"`\n}",
       "type NotificationEvents struct {\n\tData []NotificationEvent `json:\"data\"`\n}",
       "type NotificationID uuid.UUID",
+      "type NotificationRecoveryAction string",
+      "type NotificationRetryStatus string",
       "type Order struct {\n\tID         OrderID     `json:\"id\"`\n\tCustomerID CustomerID  `json:\"customer_id\"`\n\tOrigin     OrderOrigin `json:\"origin\"`\n\tStatus     OrderStatus `json:\"status\"`\n\n\tCollectionOwner OrderCollectionOwner `json:\"collection_owner\"`\n\n\tCollectionPSPID *PSPID `json:\"collection_psp_id\"`\n\n\tProviderBills []OrderProviderBill `json:\"provider_bills\"`\n\n\tNumber   *int64       `json:\"number\"`\n\tCurrency string       `json:\"currency\"`\n\tTotal    int64        `json:\"total,string\"`\n\tLines    []OrderLine  `json:\"lines\"`\n\tPayment  OrderPayment `json:\"payment\"`\n\n\tPaymentOptions []OrderPaymentOption `json:\"payment_options\"`\n\n\tPayURL *string `json:\"pay_url\"`\n\n\tPayURLExpiresAt *time.Time `json:\"pay_url_expires_at\"`\n\n\tEmbedded bool `json:\"embedded\"`\n\n\tSuccessURL          *string `json:\"success_url\"`\n\tCancelURL           *string `json:\"cancel_url\"`\n\tSavedPaymentMethods bool    `json:\"saved_payment_methods\"`\n\n\tRenewal *OrderRenewal `json:\"renewal\"`\n\n\tUsage *OrderUsage `json:\"usage\"`\n\n\tExpiresAt   *time.Time `json:\"expires_at\"`\n\tCompletedAt *time.Time `json:\"completed_at\"`\n\tCanceledAt  *time.Time `json:\"canceled_at\"`\n\tExpiredAt   *time.Time `json:\"expired_at\"`\n\tVoidedAt    *time.Time `json:\"voided_at\"`\n\n\tUncollectibleAt *time.Time `json:\"uncollectible_at\"`\n\tCreatedAt       time.Time  `json:\"created_at\"`\n}",
       "type OrderAttemptID uuid.UUID",
       "type OrderCollectionOwner string",
@@ -1152,11 +1162,11 @@
       "type AlertWebhookConfig struct {\n\tName string `yaml:\"name,omitempty\"`\n\tURL  string `yaml:\"url\"`\n\n\tFormat string `yaml:\"format,omitempty\"`\n\n\tEnabled *bool `yaml:\"enabled,omitempty\"`\n}",
       "type CaptchaConfig struct {\n\tProvider  string `yaml:\"provider\" json:\"provider\"`\n\tSiteKey   string `yaml:\"site_key\" json:\"site_key\"`\n\tSecretKey string `yaml:\"secret_key\" json:\"secret_key\"`\n}",
       "type CardVaultConfig struct {\n\tKind string `yaml:\"kind\" json:\"kind\"`\n\n\tTenantID string `yaml:\"tenant_id\" json:\"tenant_id\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n}",
-      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
+      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\" json:\"user_action_rate_limit\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type Custodians map[string]CustodianConfig",
       "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n}",
-      "type DatabaseConfig struct {\n\tSchema string `yaml:\"schema\" json:\"schema\"`\n\n\tRiverSchema string `yaml:\"river_schema\" json:\"river_schema\"`\n}",
+      "type DatabaseConfig struct {\n\tSkipMigrations bool `yaml:\"skip_migrations\" json:\"skip_migrations\"`\n\n\tSchema string `yaml:\"schema\" json:\"schema\"`\n\n\tRiverSchema string `yaml:\"river_schema\" json:\"river_schema\"`\n}",
       "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis redis.UniversalClient\n\n\tVault *vaultapi.Client\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tFXTransport     http.RoundTripper\n\tClock           clockwork.Clock\n}",
       "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n}",
       "type EmailAddress struct {\n\tName    string `yaml:\"name\" json:\"name\"`\n\tAddress string `yaml:\"address\" json:\"address\"`\n}",
@@ -1183,6 +1193,7 @@
       "type SMTPConfig struct {\n\tHost     string       `yaml:\"host\" json:\"host\"`\n\tPort     int          `yaml:\"port\" json:\"port\"`\n\tUsername string       `yaml:\"username\" json:\"username\"`\n\tPassword string       `yaml:\"password\" json:\"password\"`\n\tFrom     EmailAddress `yaml:\"from\" json:\"from\"`\n}",
       "type SolanaConfig struct {\n\tCrankers []SolanaCrankerConfig `yaml:\"crankers\" json:\"crankers\"`\n}",
       "type SolanaCrankerConfig struct {\n\tMode string `yaml:\"mode\" json:\"mode\"`\n\n\tKey string `yaml:\"key\" json:\"key\"`\n\n\tPrivateKey string `yaml:\"private_key\" json:\"private_key\"`\n}",
+      "type UserActionRateLimitConfig struct {\n\tMinimumCustomersPerHour        int64 `yaml:\"minimum_customers_per_hour\" json:\"minimum_customers_per_hour\"`\n\tPaidCustomersPerHourlyCustomer int64 `yaml:\"paid_customers_per_hourly_customer\" json:\"paid_customers_per_hourly_customer\"`\n\tMinimumCustomersPerDay         int64 `yaml:\"minimum_customers_per_day\" json:\"minimum_customers_per_day\"`\n\tPaidCustomersPerDailyCustomer  int64 `yaml:\"paid_customers_per_daily_customer\" json:\"paid_customers_per_daily_customer\"`\n}",
       "type UserInfo = userinfo.Lookup",
       "type VaultConfig struct {\n\tNamespace   string `yaml:\"namespace\" json:\"namespace\"`\n\tScopePrefix string `yaml:\"scope_prefix\" json:\"scope_prefix\"`\n\n\tAddress string `yaml:\"address\" json:\"address\"`\n\n\tAuthMethod string `yaml:\"auth_method\" json:\"auth_method\"`\n\n\tToken    string `yaml:\"token\" json:\"token\"`\n\tRoleID   string `yaml:\"role_id\" json:\"role_id\"`\n\tSecretID string `yaml:\"secret_id\" json:\"secret_id\"`\n\tK8sRole  string `yaml:\"k8s_role\" json:\"k8s_role\"`\n\n\tAuthMount string `yaml:\"auth_mount\" json:\"auth_mount\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n\n\tTransitMount string `yaml:\"transit_mount\" json:\"transit_mount\"`\n}"
     ],
@@ -1420,9 +1431,9 @@
     "internal/config": [
       "type CaptchaConfig struct {\n\tProvider  string `yaml:\"provider\" json:\"provider\"`\n\tSiteKey   string `yaml:\"site_key\" json:\"site_key\"`\n\tSecretKey string `yaml:\"secret_key\" json:\"secret_key\"`\n}",
       "type CardVaultConfig struct {\n\tKind string `yaml:\"kind\" json:\"kind\"`\n\n\tTenantID string `yaml:\"tenant_id\" json:\"tenant_id\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n}",
-      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
+      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\" json:\"user_action_rate_limit\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
       "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n}",
-      "type DatabaseConfig struct {\n\tSchema string `yaml:\"schema\" json:\"schema\"`\n\n\tRiverSchema string `yaml:\"river_schema\" json:\"river_schema\"`\n}",
+      "type DatabaseConfig struct {\n\tSkipMigrations bool `yaml:\"skip_migrations\" json:\"skip_migrations\"`\n\n\tSchema string `yaml:\"schema\" json:\"schema\"`\n\n\tRiverSchema string `yaml:\"river_schema\" json:\"river_schema\"`\n}",
       "type EmailAddress struct {\n\tName    string `yaml:\"name\" json:\"name\"`\n\tAddress string `yaml:\"address\" json:\"address\"`\n}",
       "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool   `yaml:\"allow_loopback_http\" json:\"allow_loopback_http\"`\n\tAPIBaseURL        string `yaml:\"api_base_url\" json:\"api_base_url\"`\n\tSDKURL            string `yaml:\"sdk_url\" json:\"sdk_url\"`\n}",
       "type LLMConfig struct {\n\tProvider string `yaml:\"provider\" json:\"provider\"`\n\n\tModel string `yaml:\"model\" json:\"model\"`\n\n\tBaseURL string `yaml:\"base_url\" json:\"base_url\"`\n\n\tAPIKey string `yaml:\"api_key\" json:\"api_key\"`\n\n\tCatalogCopilotEnabled bool `yaml:\"catalog_copilot_enabled\" json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `yaml:\"catalog_drafting_enabled\" json:\"catalog_drafting_enabled\"`\n}",
@@ -1435,6 +1446,7 @@
       "type SolanaConfig struct {\n\tCrankers []SolanaCrankerConfig `yaml:\"crankers\" json:\"crankers\"`\n}",
       "type SolanaCrankerConfig struct {\n\tMode string `yaml:\"mode\" json:\"mode\"`\n\n\tKey string `yaml:\"key\" json:\"key\"`\n\n\tPrivateKey string `yaml:\"private_key\" json:\"private_key\"`\n}",
       "type TokenConfig struct {\n\tMint string `json:\"mint\"`\n\tName string `json:\"name\"`\n}",
+      "type UserActionRateLimitConfig struct {\n\tMinimumCustomersPerHour        int64 `yaml:\"minimum_customers_per_hour\" json:\"minimum_customers_per_hour\"`\n\tPaidCustomersPerHourlyCustomer int64 `yaml:\"paid_customers_per_hourly_customer\" json:\"paid_customers_per_hourly_customer\"`\n\tMinimumCustomersPerDay         int64 `yaml:\"minimum_customers_per_day\" json:\"minimum_customers_per_day\"`\n\tPaidCustomersPerDailyCustomer  int64 `yaml:\"paid_customers_per_daily_customer\" json:\"paid_customers_per_daily_customer\"`\n}",
       "type VaultConfig struct {\n\tNamespace   string `yaml:\"namespace\" json:\"namespace\"`\n\tScopePrefix string `yaml:\"scope_prefix\" json:\"scope_prefix\"`\n\n\tAddress string `yaml:\"address\" json:\"address\"`\n\n\tAuthMethod string `yaml:\"auth_method\" json:\"auth_method\"`\n\n\tToken    string `yaml:\"token\" json:\"token\"`\n\tRoleID   string `yaml:\"role_id\" json:\"role_id\"`\n\tSecretID string `yaml:\"secret_id\" json:\"secret_id\"`\n\tK8sRole  string `yaml:\"k8s_role\" json:\"k8s_role\"`\n\n\tAuthMount string `yaml:\"auth_mount\" json:\"auth_mount\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n\n\tTransitMount string `yaml:\"transit_mount\" json:\"transit_mount\"`\n}"
     ],
     "internal/contract": [
@@ -1482,6 +1494,9 @@
     "internal/db/sqlaudit": [
       "type explainRoot struct {\n\tPlan planNode `json:\"Plan\"`\n}",
       "type planNode struct {\n\tNodeType     string     `json:\"Node Type\"`\n\tRelationName string     `json:\"Relation Name\"`\n\tSchema       string     `json:\"Schema\"`\n\tAlias        string     `json:\"Alias\"`\n\tIndexName    string     `json:\"Index Name\"`\n\tIndexCond    string     `json:\"Index Cond\"`\n\tRecheckCond  string     `json:\"Recheck Cond\"`\n\tFilter       string     `json:\"Filter\"`\n\tPlans        []planNode `json:\"Plans\"`\n}"
+    ],
+    "internal/destructive": [
+      "type userActionRateEvidence struct {\n\tWindow                 string `json:\"window\"`\n\tHourlyCustomers        int64  `json:\"hourly_customers\"`\n\tMaximumHourlyCustomers int64  `json:\"maximum_hourly_customers\"`\n\tDailyCustomers         int64  `json:\"daily_customers\"`\n\tMaximumDailyCustomers  int64  `json:\"maximum_daily_customers\"`\n\tRetryAfterSeconds      int64  `json:\"retry_after_seconds\"`\n}"
     ],
     "internal/hosttools": [
       "type declineMonth struct {\n\tMonth    string `json:\"month\"`\n\tKind     string `json:\"kind\"`\n\tAttempts int    `json:\"attempts\"`\n\tApproved int    `json:\"approved\"`\n\tRefused  int    `json:\"refused\"`\n\n\tRefusalRate float64 `json:\"refusal_rate\"`\n}",
@@ -1900,6 +1915,15 @@
       "engine": "github.com/open-rails/openrails/internal/engine",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool"
     },
+    "access_tenure.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "catalog": "github.com/open-rails/openrails/catalog",
+      "context": "context",
+      "fmt": "fmt",
+      "http": "net/http",
+      "time": "time",
+      "url": "net/url"
+    },
     "adapters/fiber/fiber.go": {
       "adaptor": "github.com/gofiber/fiber/v3/middleware/adaptor",
       "fmt": "fmt",
@@ -1943,6 +1967,9 @@
       "http": "net/http",
       "strconv": "strconv",
       "url": "net/url"
+    },
+    "billing/access_tenure.go": {
+      "time": "time"
     },
     "billing/admissions.go": {
       "time": "time",
@@ -2567,6 +2594,21 @@
       "json": "encoding/json",
       "v5": "github.com/jackc/pgx/v5"
     },
+    "internal/destructive/user_actions.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "internal/hosttools/nmi_decline_report.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "cmp": "cmp",
@@ -3170,7 +3212,6 @@
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "math": "math",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "providerrecovery": "github.com/open-rails/openrails/internal/providerrecovery",
       "river": "github.com/riverqueue/river",
       "time": "time",
       "uuid": "github.com/google/uuid",
@@ -3639,7 +3680,6 @@
       "observed": "github.com/open-rails/openrails/internal/modules/orders/observed",
       "paymentattempts": "github.com/open-rails/openrails/internal/modules/attempts",
       "payments": "github.com/open-rails/openrails/internal/modules/payments",
-      "providerrecovery": "github.com/open-rails/openrails/internal/providerrecovery",
       "strconv": "strconv",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
@@ -3809,6 +3849,7 @@
     "internal/modules/subscriptions/admin_service.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "billing": "github.com/open-rails/openrails/billing",
+      "billingauth": "github.com/open-rails/openrails/internal/billingauth",
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
@@ -3824,6 +3865,7 @@
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "payments": "github.com/open-rails/openrails/internal/modules/payments",
       "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
+      "requestauth": "github.com/open-rails/openrails/internal/requestauth",
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
@@ -4522,7 +4564,6 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
       "progress": "github.com/open-rails/openrails/internal/shared/progress",
-      "providerrecovery": "github.com/open-rails/openrails/internal/providerrecovery",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
       "reconcile": "github.com/open-rails/openrails/internal/reconcile",
       "river": "github.com/riverqueue/river",
@@ -4804,6 +4845,12 @@
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "http": "net/http"
+    },
+    "migrate.go": {
+      "context": "context",
+      "engine": "github.com/open-rails/openrails/internal/engine",
+      "migrate": "github.com/open-rails/openrails/internal/migrate",
+      "pgxpool": "github.com/jackc/pgx/v5/pgxpool"
     },
     "notification_events.go": {
       "billing": "github.com/open-rails/openrails/billing",

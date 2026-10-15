@@ -95,6 +95,7 @@ WITH due AS (
             (status IN ('pending', 'failed_retryable') AND next_attempt_at <= sqlc.arg(now)::timestamptz)
             OR (status = 'in_flight' AND lease_expires_at IS NOT NULL AND lease_expires_at <= sqlc.arg(now)::timestamptz)
           )
+      AND intent_type NOT IN ('nmi_vault_delete','platform_method_delete','hyperswitch_method_delete')
       AND (intent_type = 'subscription_collection' OR status = 'in_flight' OR (status = 'pending' AND attempts > 0) OR expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz)
     ORDER BY next_attempt_at
     LIMIT sqlc.arg(batch_size)
@@ -133,6 +134,7 @@ RETURNING pi.*;
 WITH due AS (
     SELECT id FROM billing.provider_intents
     WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'unknown_needs_verify'
+      AND intent_type NOT IN ('nmi_vault_delete','platform_method_delete','hyperswitch_method_delete')
       AND next_attempt_at <= sqlc.arg(now)::timestamptz
       AND (lease_expires_at IS NULL OR lease_expires_at <= sqlc.arg(now)::timestamptz)
     ORDER BY next_attempt_at

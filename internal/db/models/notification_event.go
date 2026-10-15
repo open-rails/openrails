@@ -16,6 +16,8 @@ const (
 	NotificationPremiumStarted NotificationEventType = "premium_started"
 	NotificationPremiumRenewed NotificationEventType = "premium_renewed"
 	NotificationPremiumEnded   NotificationEventType = "premium_ended"
+	// Recurrence stopped; paid access may remain. This is distinct from access loss.
+	NotificationSubscriptionCanceled NotificationEventType = "subscription_canceled"
 
 	// Payment method notifications
 	NotificationPaymentMethodFailed         NotificationEventType = "payment_method_failed"

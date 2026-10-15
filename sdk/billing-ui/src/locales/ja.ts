@@ -85,6 +85,9 @@ export const ja: BillingUiMessageBundle = {
     changePlanLabel: "{name} のプランを変更",
   },
   resume: {
+    chooseCard: "支払い方法を選択",
+    savedCardUnavailable:
+      "この保存済みカードは利用できません。別のカードを選択するか、追加してください。",
     title: "{name}を再開しますか？",
     description:
       "サブスクリプションは{date}に更新され、その時点で{price}がカードに請求されます。解約するまで請求期間ごとに請求されます。",
@@ -178,7 +181,8 @@ export const ja: BillingUiMessageBundle = {
       "有効なサブスクリプションで使用中のカードは、別のカードに切り替えてから削除してください。",
     removeConfirm: "カードを削除",
     removed: "カードを削除しました。",
-    removePending: "削除を処理しています。",
+    removeFailed:
+      "カードの削除を確認できませんでした。もう一度お試しください。",
     inUse:
       "このカードは有効なサブスクリプションの支払いに使われています。先に別のカードへ切り替えてください。",
   },

@@ -75,7 +75,9 @@ func Graph(client any) *app.App {
 
 // New builds the engine. It first creates or upgrades OpenRails' tables, this
 // month's partitions and River's tables (Migrate's work); the control plane's
-// AuthKit migrates itself as it is built. ctx bounds the wait for the
+// AuthKit migrates itself as it is built.
+// Database.SkipMigrations validates existing schemas instead of
+// applying startup schema, partition or River changes. ctx bounds the
 // database; nothing else does. Only the database, an unknown provider write
 // mode, an invalid River schema and money-safety refusals (live beside
 // non-live PSPs, a test seam beside a live PSP) fail construction. Anything

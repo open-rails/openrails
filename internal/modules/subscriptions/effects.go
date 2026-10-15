@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/providerrecovery"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
@@ -37,7 +38,7 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 	for _, effect := range effects {
 		switch effect.(type) {
 		case lifecycle.EndAccess, lifecycle.QueueProviderCancel:
-			if err := s.CheckCancellationRecovery(ctx, d, sub, now); err != nil {
+			if err := s.CheckCancellationWritePosture(ctx, d, sub); err != nil {
 				return nil, err
 			}
 		}
@@ -94,7 +95,7 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 			// Paid grants retain their own expiry when billing resumes.
 
 		case lifecycle.Notify:
-			n, err := s.queueNotice(ctx, d, sub, e.Kind, granted, opts)
+			n, err := s.queueNotice(ctx, d, sub, e.Kind, granted, opts, now)
 			if err != nil {
 				return nil, err
 			}
@@ -146,14 +147,22 @@ func revokeReason(sub *models.Subscription, opts EffectOptions) models.AccessRev
 
 // queueNotice queues one customer notice, idempotent per subscription, kind
 // and period so a replayed transition never notifies twice.
-func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB, sub *models.Subscription, kind lifecycle.NoticeKind, granted *lifecycle.GrantPeriod, opts EffectOptions) (*models.NotificationEvent, error) {
+func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB, sub *models.Subscription, kind lifecycle.NoticeKind, granted *lifecycle.GrantPeriod, opts EffectOptions, now time.Time) (*models.NotificationEvent, error) {
 	data := opts.Notice
 	data.SubscriptionID = billing.SubscriptionID(sub.ID)
+	data.ProductID = billing.ProductID(sub.ProductID)
 	if data.Rail == "" {
 		data.Rail, data.RailSubscriptionID = string(sub.Rail), sub.RailSubscriptionID
 	}
 	if kind == lifecycle.NoticeEnded && opts.EndedReason != "" {
 		data.Reason = string(opts.EndedReason)
+	}
+	if kind == lifecycle.NoticePaymentFailed && data.RetryStatus == "" {
+		recovery := subscriptionFailureNotice(sub, &FailMembershipParams{}, false)
+		data.RetryStatus, data.RecoveryAction, data.NextAttemptAt = recovery.RetryStatus, recovery.RecoveryAction, recovery.NextAttemptAt
+	}
+	if kind == lifecycle.NoticeUpdateMethod {
+		data.RetryStatus, data.RecoveryAction = billing.NotificationRetryPaymentMethodRequired, billing.NotificationRecoveryUpdatePaymentMethod
 	}
 	key := string(kind)
 	if sub.CurrentPeriodEndsAt != nil {
@@ -169,7 +178,7 @@ func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB
 			key = "renewed:" + start.UTC().Format(time.RFC3339Nano) + ":" + end.UTC().Format(time.RFC3339Nano)
 		}
 	}
-	n := &models.NotificationEvent{ID: uuid.NewSHA1(sub.ID, []byte(key)), CustomerID: sub.CustomerID, EventType: models.NotificationEventType(kind), Data: data}
+	n := &models.NotificationEvent{ID: uuid.NewSHA1(sub.ID, []byte(key)), CustomerID: sub.CustomerID, EventType: models.NotificationEventType(kind), Data: data, CreatedAt: now}
 	if err := NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {
 		return nil, fmt.Errorf("queue %s notice for %s: %w", kind, sub.ID, err)
 	}
@@ -207,19 +216,16 @@ func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d
 	return nil // The caller grants the newly paid period of the new product.
 }
 
-// CheckCancellationRecovery keeps automated local revocation and its eventual
-// provider delete behind the same recovered-account boundary. A positive paid
-// renewal has no cancellation effect and can still settle while writes hold.
-// A cancel the customer or merchant requested never consults it.
-func (s *SubscriptionLifecycleService) CheckCancellationRecovery(ctx context.Context, d *db.DB, sub *models.Subscription, now time.Time) error {
+var ErrCancellationWriteDisabled = apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "provider writes are disabled for this merchant")
+
+// CheckCancellationWritePosture respects explicit readonly operation policy.
+// Unrelated findings and provider observation age never hold a cancellation.
+func (s *SubscriptionLifecycleService) CheckCancellationWritePosture(ctx context.Context, d *db.DB, sub *models.Subscription) error {
 	if sub.Rail != models.RailNMI && sub.Rail != models.RailStripe {
 		return nil
 	}
 	if p := (writeposture.View{Config: s.Config, DB: d}).Posture(ctx, sub.MerchantID); s.Config != nil && p.ReadOnly() {
-		return fmt.Errorf("%w: %s holds local cancellation", providerrecovery.ErrPending, p.Reason)
+		return fmt.Errorf("%w: %s holds local cancellation", ErrCancellationWriteDisabled, p.Reason)
 	}
-	if sub.PspID == uuid.Nil {
-		return nil
-	}
-	return providerrecovery.CheckPSP(ctx, d, sub.MerchantID, sub.PspID, now)
+	return nil
 }

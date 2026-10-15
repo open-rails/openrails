@@ -2,18 +2,12 @@ package riverjobs
 
 import (
 	"testing"
-	"time"
-
-	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/providerrecovery"
+	"github.com/stretchr/testify/require"
 )
 
-// An account refreshed on schedule never trips the recovery gate: its next
-// refresh may start a whole stagger late and still has an hour to complete
-// before its coverage is stale.
-func TestScheduledRefreshCompletesBeforeCoverageIsStale(t *testing.T) {
-	latest := providerrecovery.RefreshInterval + defaultRefreshStagger + defaultRefreshSafetyLag
+// A provider observation retains its indexing safety lag. Its age is not a write gate.
+func TestRefreshUsesObservationSafetyLag(t *testing.T) {
 	require.Equal(t, providerrecovery.SafetyLag, defaultRefreshSafetyLag)
-	require.GreaterOrEqual(t, providerrecovery.StaleAfter-latest, time.Hour)
 }

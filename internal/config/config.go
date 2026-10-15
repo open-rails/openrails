@@ -68,6 +68,10 @@ type Config struct {
 	// RateLimitsDisabled turns off the built-in rate limits and captcha
 	// escalation, for a host that fronts billing with its own limiter.
 	RateLimitsDisabled bool `yaml:"rate_limits_disabled" json:"rate_limits_disabled"`
+	// UserActionRateLimit bounds customer card deletes and soft cancellations
+	// across this merchant's users, actors and processes. Always enabled,
+	// including when the host owns ordinary HTTP rate limits.
+	UserActionRateLimit UserActionRateLimitConfig `yaml:"user_action_rate_limit" json:"user_action_rate_limit"`
 	// Captcha challenges a client that keeps hitting a rate limit.
 	Captcha *CaptchaConfig `yaml:"captcha" json:"captcha"`
 	// Vault connects to HashiCorp Vault when Deps.Vault is nil, and names its
@@ -353,6 +357,10 @@ func LLMModel(c *LLMConfig) string {
 // DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
 // The role of the pool New runs with owns every object in them.
 type DatabaseConfig struct {
+	// SkipMigrations makes New validate existing schemas without applying
+	// migrations or preparing startup partitions. Call openrails.Migrate first.
+	// Normal request-time and scheduled partition maintenance is unchanged.
+	SkipMigrations bool `yaml:"skip_migrations" json:"skip_migrations"`
 	// Schema holds OpenRails' tables. Empty is "billing".
 	Schema string `yaml:"schema" json:"schema"`
 	// RiverSchema holds the River tables OpenRails' jobs run in; empty is
@@ -840,6 +848,34 @@ func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 	return nil
 }
 
+// UserActionRateLimitConfig bounds distinct customers affected by manual card
+// removals and cancellations in rolling hour/day windows. Zero fields select defaults.
+type UserActionRateLimitConfig struct {
+	MinimumCustomersPerHour        int64 `yaml:"minimum_customers_per_hour" json:"minimum_customers_per_hour"`
+	PaidCustomersPerHourlyCustomer int64 `yaml:"paid_customers_per_hourly_customer" json:"paid_customers_per_hourly_customer"`
+	MinimumCustomersPerDay         int64 `yaml:"minimum_customers_per_day" json:"minimum_customers_per_day"`
+	PaidCustomersPerDailyCustomer  int64 `yaml:"paid_customers_per_daily_customer" json:"paid_customers_per_daily_customer"`
+}
+
+func NormalizeUserActionRateLimit(c UserActionRateLimitConfig) (UserActionRateLimitConfig, error) {
+	if c.MinimumCustomersPerHour == 0 {
+		c.MinimumCustomersPerHour = 2
+	}
+	if c.PaidCustomersPerHourlyCustomer == 0 {
+		c.PaidCustomersPerHourlyCustomer = 400
+	}
+	if c.MinimumCustomersPerDay == 0 {
+		c.MinimumCustomersPerDay = 5
+	}
+	if c.PaidCustomersPerDailyCustomer == 0 {
+		c.PaidCustomersPerDailyCustomer = 100
+	}
+	if c.MinimumCustomersPerHour < 1 || c.PaidCustomersPerHourlyCustomer < 1 || c.MinimumCustomersPerDay < 1 || c.PaidCustomersPerDailyCustomer < 1 {
+		return c, fmt.Errorf("user_action_rate_limit fields must be positive")
+	}
+	return c, nil
+}
+
 // RateLimitsConfig maps a feature bucket to its request limit.
 // A bucket left out is not limited; other routes never are (a
 // per-address ceiling belongs to the proxy in front of OpenRails).
@@ -961,6 +997,10 @@ func CaptchaChallengeBuckets() []string {
 // write mode (#346), missing rate limits and the database. Every optional
 // setting is Degrade's: it is turned off with a reason, never refused.
 func Validate(cfg *Config) error {
+	if _, err := NormalizeUserActionRateLimit(cfg.UserActionRateLimit); err != nil {
+		return err
+	}
+
 	// A typo (e.g. "redaonly") must never silently boot with full behavior.
 	providerWriteMode := cfg.normalizedProviderWriteMode()
 	if !ValidProviderWriteModes[providerWriteMode] {

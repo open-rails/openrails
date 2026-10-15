@@ -80,11 +80,18 @@ func (n ccbillNotice) build(sub *models.Subscription, kind lifecycle.NoticeKind)
 	var event models.NotificationEventType
 	data := n.data
 	data.SubscriptionID = billing.SubscriptionID(sub.ID)
+	data.ProductID = billing.ProductID(sub.ProductID)
 	switch kind {
 	case lifecycle.NoticeEnded:
 		event, data.Reason = models.NotificationPremiumEnded, string(n.ended)
 	case lifecycle.NoticePaymentFailed:
 		event = models.NotificationPaymentMethodFailed
+		data.RetryStatus, data.RecoveryAction = billing.NotificationRetryUnknown, billing.NotificationRecoveryContactSupport
+		if sub.NextRetryAt != nil {
+			next := sub.NextRetryAt.UTC()
+			data.NextAttemptAt = &next
+			data.RetryStatus, data.RecoveryAction = billing.NotificationRetryScheduled, billing.NotificationRecoveryUpdatePaymentMethod
+		}
 	default:
 		return nil
 	}

@@ -83,6 +83,9 @@ export const en = {
     changePlanLabel: "Change plan for {name}",
   },
   resume: {
+    chooseCard: "Choose a payment method",
+    savedCardUnavailable:
+      "This saved card is not available. Choose another card or add one.",
     title: "Resume {name}?",
     description:
       "Your subscription renews on {date}, and {price} will be charged to your card then and every billing period until you cancel.",
@@ -175,7 +178,7 @@ export const en = {
       "A card used by an active subscription must be replaced before it can be removed.",
     removeConfirm: "Remove card",
     removed: "Card removed.",
-    removePending: "Removal is processing.",
+    removeFailed: "Card removal could not be confirmed. Please try again.",
     inUse:
       "This card pays for an active subscription. Switch that subscription to another card first.",
   },

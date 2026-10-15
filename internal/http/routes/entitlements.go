@@ -9,6 +9,10 @@ import (
 // entitlementsRoutes is access: the products a customer holds, the keys those
 // products grant them, and the products staff grant free.
 var entitlementsRoutes = []Route{
+	{Method: GET, Path: "/v1/admin/customers/{customer_id}/access-tenure", Group: Admin, Auth: AuthMerchant, Name: "GetAccessTenure", Level: LevelRead,
+		Query: params(text("at"), repeated("entitlement")), Responses: []Reply{{200, billing.AccessTenure{}}}, Errors: codes("invalid_param", "service_credential_customer_scope_denied"), Handler: h(handlers.GetAccessTenure)},
+	{Method: GET, Path: "/v1/me/access-tenure", Group: Customer, Auth: AuthCustomer,
+		Query: params(text("at"), repeated("entitlement")), Responses: []Reply{{200, billing.AccessTenure{}}}, Errors: codes("authentication_required", "invalid_param"), Handler: h(handlers.SelfAccessTenure)},
 	{Method: GET, Path: "/v1/admin/entitlements", Group: Admin, Auth: AuthMerchant, Name: "ListEntitlements", Level: LevelRead,
 		Query: params(text("at"), text("customer_id"), repeated("entitlement"), text("prefix"), pageParams), Responses: []Reply{{200, billing.ListPage[billing.CustomerEntitlement]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_credential_customer_scope_denied"), Handler: h(handlers.ListEntitlements)},
 	{Method: POST, Path: "/v1/app/entitlements/check", Group: App, Auth: AuthApplication, Permission: needEntitlements, Name: "CheckEntitlements", Level: LevelRead,

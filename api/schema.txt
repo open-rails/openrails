@@ -104,6 +104,8 @@ migration 0102_book_id.up.sql sha256:c339a6b0581464cfda66c8b6edc68f00d98a67c29bd
 migration 0103_solana_engine_collection.up.sql sha256:7af7d6629a3eaa14582631f44343b751d5135a34b171e3a5758c40da4c67c292
 migration 0104_provider_prices.up.sql sha256:c9547910caa053fef3a6915eac4275446cc62ec976be3ffa5a04e2cfe1090408
 migration 0105_psp_imports.up.sql sha256:e90d12165af03e63ce985d66169cf507f07555420ace5c2a94ed637dedd24e4f
+migration 0106_user_destructive_reservations.up.sql sha256:338ebf15379b9abb3165f4c9d47249707feeff460d78d8ea9f987ded16645b42
+migration 0107_user_action_retention.up.sql sha256:f8963bbe29d458e72f2a7e64b819ff92204de84ea0e8d06849380a93d71f9dda
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2787,6 +2789,20 @@ table billing.usage_events PARTITION BY RANGE (occurred_at)
   index CREATE INDEX usage_events_occurred_at_idx ON ONLY billing.usage_events USING btree (merchant_id, occurred_at)
   index CREATE UNIQUE INDEX usage_events_pkey ON ONLY billing.usage_events USING btree (merchant_id, id, occurred_at)
   index CREATE INDEX usage_events_source_occurred_at_id_idx ON ONLY billing.usage_events USING btree (merchant_id, source, source_id, occurred_at DESC, id DESC)
+
+table billing.user_destructive_reservations
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column action_key text NOT NULL
+  column kind text NOT NULL
+  column reserved_at timestamp with time zone NOT NULL
+  constraint user_destructive_reservations_action_key_check CHECK (((action_key <> ''::text) AND (octet_length(action_key) <= 512)))
+  constraint user_destructive_reservations_kind_check CHECK ((kind = ANY (ARRAY['delete_payment_method'::text, 'cancel_subscription'::text])))
+  constraint user_destructive_reservations_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
+  constraint user_destructive_reservations_pkey PRIMARY KEY (merchant_id, action_key)
+  index CREATE INDEX user_destructive_reservations_expiry_idx ON billing.user_destructive_reservations USING btree (reserved_at, merchant_id, action_key)
+  index CREATE UNIQUE INDEX user_destructive_reservations_pkey ON billing.user_destructive_reservations USING btree (merchant_id, action_key)
+  index CREATE INDEX user_destructive_reservations_window_idx ON billing.user_destructive_reservations USING btree (merchant_id, reserved_at) INCLUDE (customer_id)
 
 table billing.webhook_events
   column merchant_id uuid NOT NULL

@@ -19,21 +19,22 @@ import (
 // Every OpenRails-owned table has an explicit decision. These are deployment/operations
 // data or unsupported opaque evidence, not additional archive row profiles.
 var excludedTables = map[string]string{
-	"destructive_actions":       "deployment command admissions; never imported, re-exported or reset by merchant restore",
-	"destructive_holds":         "deployment incident authority and clears; never imported or reset by merchant restore",
-	"notification_consumers":    "deployment delivery subscriptions; hosts register at destination",
-	"notification_event_acks":   "deployment consumer processing receipts",
-	"notification_events":       "immutable source facts, drained before archive",
-	"catalog_restore_receipts":  "local restore replay receipts, excluded from re-export like billing_restore maintenance receipts",
-	"merchants":                 "destination identity is explicitly provisioned",
-	"merchant_slug_aliases":     "former names are directory identity, not billing history",
-	"worker_state":              "deployment-wide worker health and fair sweep cursors",
-	"periodic_leases":           "deployment-wide fleet leases on periodic work",
-	"solana_crankers":           "the deployment's Solana cranker pins",
-	"destructive_action_switch": "deployment-wide safety switch",
-	"book_identity":             "the deployment's database identity",
-	"merchant_write_posture":    "deployment write posture: export sets the source readonly, restore the destination",
-	"webhook_health":            "telemetry", "webhook_health_daily": "telemetry", "admission_denials_hourly": "telemetry",
+	"user_destructive_reservations": "rolling-day abuse reservations; never imported or reset by merchant restore",
+	"destructive_actions":           "deployment command admissions; never imported, re-exported or reset by merchant restore",
+	"destructive_holds":             "deployment incident authority and clears; never imported or reset by merchant restore",
+	"notification_consumers":        "deployment delivery subscriptions; hosts register at destination",
+	"notification_event_acks":       "deployment consumer processing receipts",
+	"notification_events":           "immutable source facts, drained before archive",
+	"catalog_restore_receipts":      "local restore replay receipts, excluded from re-export like billing_restore maintenance receipts",
+	"merchants":                     "destination identity is explicitly provisioned",
+	"merchant_slug_aliases":         "former names are directory identity, not billing history",
+	"worker_state":                  "deployment-wide worker health and fair sweep cursors",
+	"periodic_leases":               "deployment-wide fleet leases on periodic work",
+	"solana_crankers":               "the deployment's Solana cranker pins",
+	"destructive_action_switch":     "deployment-wide safety switch",
+	"book_identity":                 "the deployment's database identity",
+	"merchant_write_posture":        "deployment write posture: export sets the source readonly, restore the destination",
+	"webhook_health":                "telemetry", "webhook_health_daily": "telemetry", "admission_denials_hourly": "telemetry",
 	"failed_usage_windows":        "live grace and cutoff windows; the destination counts afresh",
 	"payment_attempts":            "decline analytics, kept 25 months; money is payments and provider_intents",
 	"rebill_cycles":               "rebill analytics: expected rebills, derived from subscriptions",
@@ -68,6 +69,7 @@ var excludedTables = map[string]string{
 // Explicit exclusions cover only these reviewed columns. A later column is
 // unclassified even on a diagnostic table and must receive a new decision.
 var excludedColumns = map[string]string{
+	"user_destructive_reservations": "merchant_id action_key customer_id kind reserved_at",
 	"destructive_actions":           "merchant_id id admission_sequence kind target action_key request_digest origin actor_issuer actor_id actor_key credential units admitted_at state started_at finished_at completion_sequence result",
 	"destructive_holds":             "merchant_id id scope scope_key actor_issuer actor_id credential action_kind target window_name observed requested ceiling opened_at cleared_at clear_through_sequence cleared_by_issuer cleared_by_id clear_reason",
 	"catalog_restore_receipts":      "merchant_id digest rows restored_at",
@@ -327,20 +329,35 @@ var referenceChecks = []rowCheck{
 	{"provider_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
           (m.id::text=(CASE WHEN provider_intents.intent_type='initial_membership' THEN provider_intents.payload->'terms'->>'payment_method_id' ELSE provider_intents.payload->>'payment_method_id' END) OR
            (m.custodian='psp' AND m.psp_id=provider_intents.psp_id AND m.rail_customer_ref=provider_intents.payload->>'rail_customer_ref' AND
-            (provider_intents.payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR m.rail_method_ref=provider_intents.payload->>'rail_method_ref'))))`},
+            NOT COALESCE(m.park_reason LIKE 'removed:%',false) AND
+            (provider_intents.payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR m.rail_method_ref=provider_intents.payload->>'rail_method_ref')))
+          AND NOT (m.id::text=provider_intents.payload->>'payment_method_id'
+            AND m.customer_id::text=provider_intents.payload->>'user_id'
+            AND m.custodian='psp' AND m.rail='nmi' AND m.psp_id=provider_intents.psp_id
+            AND COALESCE(m.rail_customer_ref,'')=COALESCE(provider_intents.payload->>'rail_customer_ref','')
+            AND COALESCE(m.rail_method_ref,'')=COALESCE(provider_intents.payload->>'rail_method_ref','')
+            AND m.status IN ('removed','closed','replaced')
+            AND m.park_reason IS NOT DISTINCT FROM ('removed:' || provider_intents.id::text)))`},
 	{"provider_intents", `intent_type='platform_method_delete' AND NOT EXISTS (
  SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1
  AND m.id::text=provider_intents.payload->>'payment_method_id'
  AND m.customer_id::text=provider_intents.payload->>'customer_id'
  AND m.custodian='platform' AND m.custodian_id=provider_intents.custodian_id
  AND m.rail_method_ref=provider_intents.payload->'instrument'->>'rail_method_ref'
- AND m.park_reason='delete:' || provider_intents.id::text
+ AND m.park_reason IN ('delete:' || provider_intents.id::text, 'removed:' || provider_intents.id::text)
  AND m.status IN ('removed','closed','replaced'))`},
 	{"provider_intents", `intent_type='hyperswitch_method_delete' AND
           (NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id::text=provider_intents.payload->>'customer_id') OR
            EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
              (m.id::text=(CASE WHEN provider_intents.intent_type='initial_membership' THEN provider_intents.payload->'terms'->>'payment_method_id' ELSE provider_intents.payload->>'payment_method_id' END) OR
-              (provider_intents.payload->>'detach_only'='false' AND m.custodian_id=provider_intents.custodian_id AND m.rail_method_ref=provider_intents.payload->'instrument'->>'rail_method_ref'))))`},
+              (provider_intents.payload->>'detach_only'='false' AND m.custodian_id=provider_intents.custodian_id AND m.rail_method_ref=provider_intents.payload->'instrument'->>'rail_method_ref'))
+             AND NOT (m.id::text=provider_intents.payload->>'payment_method_id'
+               AND m.customer_id::text=provider_intents.payload->>'customer_id'
+               AND m.custodian='hyperswitch' AND m.custodian_id=provider_intents.custodian_id
+               AND m.rail_method_ref=provider_intents.payload->'instrument'->>'rail_method_ref'
+               AND m.rail_customer_ref=provider_intents.payload->'instrument'->>'rail_customer_ref'
+               AND m.status IN ('removed','closed','replaced')
+               AND m.park_reason IS NOT DISTINCT FROM ('removed:' || provider_intents.id::text))))`},
 	{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
 	 OR (grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.grants g
    WHERE g.merchant_id=$1 AND g.id=ledger_transfers.grant_id AND (
@@ -386,9 +403,9 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 	if err := refuseRowsAs(ctx, tx, id, "platform_cards", "payment_methods", `custodian='platform' AND status<>'removed' AND NOT (
  status IN ('closed','replaced') AND EXISTS (
  SELECT 1 FROM billing.provider_intents d WHERE d.merchant_id=payment_methods.merchant_id
- AND d.idempotency_key='platform_method_delete:' || payment_methods.id::text
+ AND d.idempotency_key IN ('platform_method_delete:' || payment_methods.id::text, 'manual:platform_method_delete:' || payment_methods.id::text)
  AND d.intent_type='platform_method_delete' AND d.status='succeeded'
- AND payment_methods.park_reason='delete:' || d.id::text))`); err != nil {
+ AND payment_methods.park_reason IN ('delete:' || d.id::text, 'removed:' || d.id::text)))`); err != nil {
 		return err
 	}
 	cardCaptureInvalid, err := gen.New(tx).CountInvalidPaymentMethodCaptureReferences(ctx, id.UUID())

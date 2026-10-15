@@ -10,16 +10,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
-func TestNMIVoidCannotCompleteRecoveryWithUnresolvedInvoiceMoney(t *testing.T) {
+func TestNMIVoidRetainsUnresolvedInvoiceEvidenceWithoutBlockingPayments(t *testing.T) {
 	t.Parallel()
 	for _, recorded := range []bool{true, false} {
 		name := "retained_paid_invoice"
@@ -37,15 +34,15 @@ func TestNMIVoidCannotCompleteRecoveryWithUnresolvedInvoiceMoney(t *testing.T) {
 			mid, psp := w.client[embedded].MerchantID(), w.psp["nmi"]
 			var completedBefore time.Time
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT watermark_at FROM billing.psp_refresh_watermarks WHERE merchant_id=$1 AND psp_id=$2 AND event_domain='completed_events'`), mid.UUID(), psp.UUID()).Scan(&completedBefore))
-			refreshHeld := func() {
+			refreshWithFindings := func() {
 				t.Helper()
-				// Ordinary worker: unresolved money holds recovery; the pass completes.
+				// Ordinary worker: unresolved money retains its evidence; the pass completes.
 				job, err := w.jobs.Insert(t.Context(), refreshMerchant{MerchantID: mid.UUID()}, &river.InsertOpts{Queue: openrails.QueueBilling})
 				require.NoError(t, err)
 				require.Eventually(t, func() bool {
 					row, err := w.jobs.JobGet(t.Context(), job.Job.ID)
 					return err == nil && row.State == rivertype.JobStateCompleted && len(row.Errors) == 0
-				}, 20*time.Second, 20*time.Millisecond, "unresolved money holds recovery without failing the refresh")
+				}, 20*time.Second, 20*time.Millisecond, "unresolved money does not fail the refresh")
 			}
 			var transaction string
 			if recorded {
@@ -57,7 +54,7 @@ func TestNMIVoidCannotCompleteRecoveryWithUnresolvedInvoiceMoney(t *testing.T) {
 				sale := w.nmi.AddSale(nmimock.Sale{OrderID: uuid.NewString(), OrderDescription: "invoice " + uuid.NewString(), Vault: w.vaultOf(method), Amount: "50.00"})
 				transaction = sale.TransactionID
 				w.advance(10 * time.Minute)
-				refreshHeld()
+				refreshWithFindings()
 				var status string
 				require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND psp_id=$2 AND finding_type='pull.charge.missing' AND subject_key=$3`), mid.UUID(), psp.UUID(), transaction).Scan(&status))
 				require.Equal(t, "requires_review", status)
@@ -67,7 +64,7 @@ func TestNMIVoidCannotCompleteRecoveryWithUnresolvedInvoiceMoney(t *testing.T) {
 			}
 			w.nmi.Void(transaction) // dashboard action at the local provider fixture
 			w.advance(10 * time.Minute)
-			refreshHeld()
+			refreshWithFindings()
 			var status string
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND psp_id=$2 AND finding_type='pull.reversal.unlinked' AND subject_key=$3`), mid.UUID(), psp.UUID(), transaction).Scan(&status))
 			require.Equal(t, "requires_review", status)
@@ -77,9 +74,7 @@ func TestNMIVoidCannotCompleteRecoveryWithUnresolvedInvoiceMoney(t *testing.T) {
 			}
 			var completedAfter time.Time
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT watermark_at FROM billing.psp_refresh_watermarks WHERE merchant_id=$1 AND psp_id=$2 AND event_domain='completed_events'`), mid.UUID(), psp.UUID()).Scan(&completedAfter))
-			require.True(t, completedBefore.Equal(completedAfter), "void did not advance financial completion")
-			ctx := merchant.WithID(t.Context(), mid)
-			require.ErrorIs(t, providerrecovery.CheckPSP(ctx, engine.Graph(w.rt).Runtime.DB, mid.UUID(), psp.UUID(), w.clock.Now()), providerrecovery.ErrPending)
+			require.True(t, completedBefore.Equal(completedAfter), "unresolved invoice evidence is not reported as financially complete")
 			current, err := w.client[remote].GetOrder(t.Context(), invoice)
 			require.NoError(t, err)
 			if recorded {
@@ -95,6 +90,11 @@ func TestNMIVoidCannotCompleteRecoveryWithUnresolvedInvoiceMoney(t *testing.T) {
 				want = 1
 			}
 			require.Len(t, w.nmi.Attempts(), want, "observation made no provider charge")
+			next := observedInvoice(t, w, c, 60_000_000)
+			answer := payNMIInvoice(t.Context(), w, c, next, method, "after-unresolved-reversal")
+			require.NoError(t, answer.err)
+			require.Equal(t, http.StatusOK, answer.status, string(answer.body))
+			require.Len(t, w.nmi.Attempts(), want+1, "the reversal finding does not block a separate invoice payment")
 		})
 	}
 }

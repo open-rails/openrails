@@ -779,6 +779,12 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 			continue
 		}
 		cust, product := c.CustomerID, billing.ProductID(c.ProductID)
+		var subscriptionID billing.SubscriptionID
+		if c.SourceType == "subscription" || c.SourceType == "grace" {
+			if id, err := uuid.Parse(c.SourceID); err == nil {
+				subscriptionID = billing.SubscriptionID(id)
+			}
+		}
 		out = append(out, ConvergeFinding{
 			Type:       "notify.access_ended.missing",
 			Shape:      ShapeMissing,
@@ -796,11 +802,14 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 					ID:         uuid.NewSHA1(cust, []byte("access-ended:"+closedAt.Format(time.RFC3339Nano))),
 					CustomerID: cust,
 					EventType:  models.NotificationPremiumEnded,
+					CreatedAt:  now,
 					Data: billing.NotificationData{
-						Reason:    string(subscriptions.PremiumEndReasonAccessEnded),
-						EndedAt:   &closedAt,
-						ProductID: product,
-						Source:    "converge_notify",
+						Reason:         string(subscriptions.PremiumEndReasonAccessEnded),
+						EndedAt:        &closedAt,
+						AccessEnded:    true,
+						ProductID:      product,
+						Source:         "converge_notify",
+						SubscriptionID: subscriptionID,
 					},
 				})
 			},

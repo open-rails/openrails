@@ -3,6 +3,7 @@ package merchantarchive
 // ownedTables is the reviewed inventory of OpenRails tables. A schema may be
 // shared with the host, so the archive judges only these; each needs a decision.
 var ownedTables = []string{
+	"user_destructive_reservations",
 	"access_cutover_approvals",
 	"account_updater_batches",
 	"admission_denials_hourly",

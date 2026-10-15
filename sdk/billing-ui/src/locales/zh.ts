@@ -84,6 +84,9 @@ export const zh: BillingUiMessageBundle = {
     changePlanLabel: "更改 {name} 的方案",
   },
   resume: {
+    chooseCard: "选择付款方式",
+    savedCardUnavailable:
+      "此已保存的银行卡不可用。请选择其他银行卡或添加一张。",
     title: "恢复{name}？",
     description:
       "你的订阅将于{date}续订，届时将从你的卡中扣除{price}，此后每个计费周期扣款，直到你取消。",
@@ -167,7 +170,7 @@ export const zh: BillingUiMessageBundle = {
     removeDescription: "正在为有效订阅付款的银行卡需要先替换才能移除。",
     removeConfirm: "移除银行卡",
     removed: "银行卡已移除。",
-    removePending: "正在处理移除。",
+    removeFailed: "无法确认银行卡已移除，请重试。",
     inUse: "这张卡正在为有效订阅付款。请先将该订阅切换到其他银行卡。",
   },
   purchase: {

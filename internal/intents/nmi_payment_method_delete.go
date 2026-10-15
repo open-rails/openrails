@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/destructive"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/destructive"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -25,10 +26,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
-// TypeNMIPaymentMethodDelete is the durable NMI customer-vault delete: a
-// payment-method delete request posts this intent and executes it inline. A
-// crash or ambiguous response routes through the verifier, whose read treats
-// an absent vault (or billing entry) as done.
+// TypeNMIPaymentMethodDelete records an explicit NMI customer-vault delete and
+// executes it inline. An ambiguous response can be verified during that request
+// or a later manual retry; workers never execute this operation. An absent
+// vault (or billing entry) confirms completion.
 //
 // OpenRails never deletes a stored payment method on its own: not on expiry,
 // a stolen card or cancellation. The only producer is
@@ -324,7 +325,7 @@ func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.Bil
 		if err != nil {
 			return err
 		}
-		if accepted != p || current.PspID == nil || in.PspID == nil || *current.PspID != *in.PspID || current.Rail != in.Rail || current.IdempotencyKey != NMIPaymentMethodDeleteIdempotencyKey(p.PaymentMethodID) {
+		if accepted != p || current.PspID == nil || in.PspID == nil || *current.PspID != *in.PspID || current.Rail != in.Rail || !nativeMethodDeleteKeyMatches(current.IdempotencyKey, p.PaymentMethodID) {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		if current.Status == StatusSucceeded {
@@ -342,7 +343,7 @@ func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.Bil
 		if _, err := mandates.EndForPaymentMethod(ctx, q, in.MerchantID, p.PaymentMethodID, mandates.EndPaymentMethodRemoved, h.Clock.Now()); err != nil {
 			return err
 		}
-		n, err := q.DeleteFencedPaymentMethod(ctx, gen.DeleteFencedPaymentMethodParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, OperationID: in.ID})
+		n, err := q.RemoveFencedNativePaymentMethod(ctx, gen.RemoveFencedNativePaymentMethodParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, OperationID: in.ID, Now: h.Clock.Now().UTC()})
 		if err != nil {
 			return err
 		}
@@ -372,7 +373,8 @@ func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.Bil
 // paymentmethods.PaymentMethodDeleteExecutor (paymentmethods cannot import intents —
 // import cycle via subscriptions — so the adapter lives here).
 type PaymentMethodDeleteThrough struct {
-	Runner *Runner
+	Runner           *Runner
+	BeforeUserDelete func(context.Context, *models.PaymentMethod) error
 }
 
 func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Context, pm *models.PaymentMethod) (paymentmethods.PaymentMethodDeleteOutcome, error) {
@@ -382,10 +384,35 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 	if pm == nil {
 		return paymentmethods.PaymentMethodDeleteOutcome{}, paymentmethods.ErrPaymentMethodDeleteUnsafe
 	}
-	var err error
+	prior, found, err := t.existingDelete(ctx, pm)
+	if err != nil {
+		return paymentmethods.PaymentMethodDeleteOutcome{}, err
+	}
+	if found && prior.Status == StatusSucceeded {
+		return methodDeleteOutcome(prior), nil
+	}
+	if origin, _ := paymentMethodDeleteAuthority(ctx, pm.CustomerID); origin == OriginUser || origin == OriginAdmin {
+		if t.BeforeUserDelete == nil {
+			return paymentmethods.PaymentMethodDeleteOutcome{}, errors.New("user card deletion limiter is not configured")
+		}
+		if err := t.BeforeUserDelete(ctx, pm); err != nil {
+			return paymentmethods.PaymentMethodDeleteOutcome{}, err
+		}
+	}
 	ctx, err = t.admitStaffDeletion(ctx, pm)
 	if err != nil {
 		return paymentmethods.PaymentMethodDeleteOutcome{}, err
+	}
+	if found && prior.Origin == string(OriginUser) && !strings.HasPrefix(prior.IdempotencyKey, "manual:") && prior.Status == StatusPending && prior.Attempts == 0 {
+		if err := t.Runner.Store.(*Store).RetireUnattemptedUserMethodDelete(ctx, prior.ID, pm, t.Runner.now()); err != nil {
+			return paymentmethods.PaymentMethodDeleteOutcome{}, err
+		}
+		pm.ParkReason, pm.ParkedAt = "", nil
+		found = false
+	}
+	if found {
+		row, err := t.executeManual(ctx, prior)
+		return methodDeleteOutcome(row), err
 	}
 	if pm.Custodian == models.CustodianPlatform {
 		h, ok := t.Runner.Registry.Lookup(TypePlatformMethodDelete).(*PlatformMethodDeleteHandler)
@@ -397,7 +424,7 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 		if err != nil {
 			return paymentmethods.PaymentMethodDeleteOutcome{}, err
 		}
-		row, err = t.Runner.ExecuteByID(ctx, row.ID)
+		row, err = t.executeManual(ctx, row)
 		if err != nil {
 			return paymentmethods.PaymentMethodDeleteOutcome{}, err
 		}
@@ -413,7 +440,7 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 		if err != nil {
 			return paymentmethods.PaymentMethodDeleteOutcome{}, err
 		}
-		row, err = t.Runner.ExecuteByID(ctx, row.ID)
+		row, err = t.executeManual(ctx, row)
 		if err != nil {
 			return paymentmethods.PaymentMethodDeleteOutcome{}, err
 		}
@@ -424,7 +451,7 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 		return paymentmethods.PaymentMethodDeleteOutcome{}, err
 	}
 	origin, actor := paymentMethodDeleteAuthority(ctx, pm.CustomerID)
-	row, err := t.Runner.EnqueueAndExecute(ctx, EnqueueParams{
+	row, err := t.Runner.Store.Enqueue(ctx, EnqueueParams{
 		MerchantID: tid.UUID(),
 		Provider:   strings.ToLower(string(pm.Rail)),
 		IntentType: TypeNMIPaymentMethodDelete,
@@ -435,7 +462,7 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 			RailCustomerRef: pm.RailCustomerRef,
 			RailMethodRef:   pm.RailMethodRef,
 		},
-		IdempotencyKey: NMIPaymentMethodDeleteIdempotencyKey(pm.ID),
+		IdempotencyKey: manualMethodDeleteKey(TypeNMIPaymentMethodDelete, pm.ID),
 		NextAttemptAt:  t.Runner.now(),
 		Origin:         origin,
 		Actor:          actor,
@@ -444,6 +471,14 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 	if err != nil {
 		return paymentmethods.PaymentMethodDeleteOutcome{}, err
 	}
+	row, err = t.executeManual(ctx, row)
+	if err != nil {
+		return paymentmethods.PaymentMethodDeleteOutcome{}, err
+	}
+	return methodDeleteOutcome(row), nil
+}
+
+func methodDeleteOutcome(row gen.BillingProviderIntent) paymentmethods.PaymentMethodDeleteOutcome {
 	out := paymentmethods.PaymentMethodDeleteOutcome{}
 	if row.LastFailureReason != nil {
 		out.Reason = *row.LastFailureReason
@@ -456,7 +491,7 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 	case StatusFailedTerminal, StatusExpired:
 		out.Terminal = true
 	}
-	return out, nil
+	return out
 }
 
 func (t *PaymentMethodDeleteThrough) admitStaffDeletion(ctx context.Context, pm *models.PaymentMethod) (context.Context, error) {
@@ -473,11 +508,11 @@ func (t *PaymentMethodDeleteThrough) admitStaffDeletion(ctx context.Context, pm 
 	if !ok {
 		return ctx, errors.New("payment method admission store is unavailable")
 	}
-	key := NMIPaymentMethodDeleteIdempotencyKey(pm.ID)
+	key := manualMethodDeleteKey(TypeNMIPaymentMethodDelete, pm.ID)
 	if pm.Custodian == models.CustodianHyperSwitch {
-		key = TypeHyperSwitchMethodDelete + ":" + pm.ID.String()
+		key = manualMethodDeleteKey(TypeHyperSwitchMethodDelete, pm.ID)
 	} else if pm.Custodian == models.CustodianPlatform {
-		key = TypePlatformMethodDelete + ":" + pm.ID.String()
+		key = manualMethodDeleteKey(TypePlatformMethodDelete, pm.ID)
 	}
 	// The canonical admission below validates the old row's frozen ownership.
 	// Retrying an existing deletion resumes that command without spending again.

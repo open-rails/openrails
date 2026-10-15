@@ -76,12 +76,10 @@ modes"](operations.md#operating-modes-the-safety-levers).
 | Catalog provider-object writes | yes | deferred | deferred |
 | Provider reads + webhook ingestion | yes | yes | yes |
 
-For established NMI and Stripe accounts, stale completed provider coverage or
-unresolved financial conflicts also hold new collection and destructive work.
-Configured `full` resumes eligible work automatically after verified catch-up;
-explicit `readonly` stays readonly. This automatic gate does not cover CCBill
-or Solana and does not establish ownership across separate database copies.
-See [provider recovery](provider-recovery.md).
+Reconciliation findings and bulk-observation age do not block normal operations.
+Each operation retains its own ownership, provider, chargeability and receipt
+checks. Explicit `readonly` and `limited` modes still apply. See
+[provider observation](provider-recovery.md).
 
 ### Routine operation
 
@@ -181,9 +179,8 @@ auto-resolve when the divergence vanishes. Taxonomy:
 
 ### Cutover / migration boots
 
-Set the mode **before first start**. With `full`, an established NMI/Stripe
-book catches up through the automatic provider recovery gate before eligible
-collection resumes. Stop the source writers before activating a restored
+Set the mode **before first start**. With `full`, eligible collection runs
+under its ordinary operation-specific checks; bulk reconciliation is separate. Stop the source writers before activating a restored
 database; see [backup and recovery](backup-and-recovery.md#restore-procedure).
 For a cutover requiring manual review before system-origin collection:
 

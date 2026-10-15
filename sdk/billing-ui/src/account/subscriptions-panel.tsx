@@ -45,6 +45,11 @@ export interface SubscriptionsPanelProps extends SubscriptionsOptions {
   className?: string
 }
 
+// Canceled engine subscriptions support choosing a new card before resume.
+// Provider-managed and wallet subscriptions retain their own resume flow.
+const resumesWithCard = (s: Subscription) =>
+  (s.rail === "nmi" || s.rail === "stripe") && s.collection_policy === "engine"
+
 export function SubscriptionsPanel({
   sendSolanaTransaction,
   plansHref,
@@ -74,12 +79,18 @@ export function SubscriptionsPanel({
     return [...list.filter(isLive), ...list.filter((s) => !isLive(s))]
   }, [state.subscriptions])
 
-  const resume = async (s: Subscription) => {
+  const resume = async (s: Subscription, paymentMethodId: string | null) => {
     setRowError(null)
+    if (resumesWithCard(s) && paymentMethodId !== s.payment_method_id) {
+      const error = await state.setPaymentMethod(s.id, paymentMethodId)
+      if (error) return error
+    }
     const error = await state.resume(s.id)
-    setResuming(null)
-    if (error) setRowError({ id: s.id, message: m.error(error) })
-    else announce(t("subscriptions.resumed"))
+    if (!error) {
+      setResuming(null)
+      announce(t("subscriptions.resumed"))
+    }
+    return error
   }
 
   const onChain = cancelling?.rail === "solana"
@@ -139,8 +150,9 @@ export function SubscriptionsPanel({
               : accessEnd
                 ? t("subscriptions.endsOn", { date: accessEnd })
                 : t("subscriptions.noMorePayments")
-          const paidWith =
-            s.rail === "solana"
+          const paidWith = !renews
+            ? null
+            : s.rail === "solana"
               ? t("subscriptions.wallet")
               : s.card?.last4
                 ? t("subscriptions.paidWith", {
@@ -154,11 +166,12 @@ export function SubscriptionsPanel({
           const portal = live && !scheduled ? s.cancel_portal_url : null
           const canCancel = LIVE_STATUSES.has(s.status) && !scheduled && !portal
           const canChangeCard =
-            (s.status === "active" ||
-              s.status === "past_due" ||
-              s.status === "awaiting_method" ||
-              s.status === "unverified") &&
-            !scheduled &&
+            ((s.resumable && s.collection_policy === "engine") ||
+              ((s.status === "active" ||
+                s.status === "past_due" ||
+                s.status === "awaiting_method" ||
+                s.status === "unverified") &&
+                !scheduled)) &&
             !portal &&
             s.rail !== "solana" &&
             (s.collection_policy === "engine" ||
@@ -341,8 +354,34 @@ export function SubscriptionsPanel({
           return error
         }}
       />
+      <ChangeCardDialog
+        key={`resume-${resuming?.id ?? "closed"}`}
+        subscription={resuming && resumesWithCard(resuming) ? resuming : null}
+        mode="resume"
+        onOpenChange={(open) => !open && setResuming(null)}
+        name={resuming ? subscriptionName(resuming, m) : ""}
+        description={
+          resuming?.price && resuming.current_period_ends_at
+            ? t("resume.description", {
+                price:
+                  formatMoney(
+                    resuming.price.unit_amount,
+                    resuming.price.currency,
+                    scales,
+                    locale
+                  ) ?? "",
+                date: formatDate(resuming.current_period_ends_at, locale) ?? "",
+              })
+            : t("resume.descriptionNoDate")
+        }
+        pending={resuming ? !!state.pending[resuming.id] : false}
+        onConfirm={(paymentMethodId) =>
+          resuming ? resume(resuming, paymentMethodId) : Promise.resolve(null)
+        }
+        appearance={appearance}
+      />
       <ResumeSubscriptionDialog
-        open={resuming !== null}
+        open={!!resuming && !resumesWithCard(resuming)}
         onOpenChange={(open) => !open && setResuming(null)}
         name={resuming ? subscriptionName(resuming, m) : ""}
         price={
@@ -355,9 +394,16 @@ export function SubscriptionsPanel({
               )
             : null
         }
-        date={formatDate(resuming?.current_period_ends_at, locale) || null}
-        busy={resuming ? state.pending[resuming.id] === "resume" : false}
-        onConfirm={() => resuming && void resume(resuming)}
+        date={formatDate(resuming?.current_period_ends_at, locale)}
+        busy={resuming ? !!state.pending[resuming.id] : false}
+        onConfirm={async () => {
+          if (!resuming) return
+          const error = await resume(resuming, null)
+          if (error) {
+            setRowError({ id: resuming.id, message: m.error(error) })
+            setResuming(null)
+          }
+        }}
         appearance={appearance}
       />
       <CancelSubscriptionDialog

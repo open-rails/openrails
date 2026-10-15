@@ -390,6 +390,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 				SubscriptionID:  &subID,
 				FailureReason:   &reason,
 				FailureCode:     &code,
+				FailureID:       memoLocalID,
 				AttemptRecorded: true,
 			}); err != nil {
 				return crankOutcome{}, fmt.Errorf("solana crank: fail membership: %w", err)

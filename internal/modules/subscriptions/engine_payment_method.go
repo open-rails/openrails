@@ -90,7 +90,8 @@ func (s *SubscriptionLifecycleService) moveEngineMethod(ctx context.Context, d *
 	if sub.CustomerID != customer {
 		return nil, pgx.ErrNoRows
 	}
-	if sub.CollectionPolicy != models.CollectionPolicyEngine || (sub.Rail != models.RailNMI && sub.Rail != models.RailStripe) || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod) {
+	resumable := Resumable(sub, s.now())
+	if sub.CollectionPolicy != models.CollectionPolicyEngine || (sub.Rail != models.RailNMI && sub.Rail != models.RailStripe) || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod && !resumable) {
 		return nil, apperr.Conflictf("subscription cannot select an engine payment method")
 	}
 	if err := RefuseOwnedRebillTerms(ctx, d, sub); err != nil {

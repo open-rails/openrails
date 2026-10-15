@@ -70,10 +70,11 @@ DELETE FROM billing.payment_methods WHERE payment_methods.merchant_id = sqlc.arg
 SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pm.customer_id = sqlc.arg(customer_id)::uuid
+  AND NOT COALESCE(pm.park_reason LIKE 'removed:%', false)
   AND NOT (pm.custodian = 'platform' AND EXISTS (
     SELECT 1 FROM billing.provider_intents d
     WHERE d.merchant_id = pm.merchant_id
-      AND d.idempotency_key = 'platform_method_delete:' || pm.id::text
+      AND d.idempotency_key IN ('platform_method_delete:' || pm.id::text, 'manual:platform_method_delete:' || pm.id::text)
       AND d.intent_type = 'platform_method_delete' AND d.status = 'succeeded'
   ))
 ORDER BY pm.created_at DESC, pm.id DESC;
@@ -86,10 +87,11 @@ WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pm.customer_id = sqlc.arg(customer_id)::uuid
   AND (sqlc.narg(after_at)::timestamptz IS NULL
        OR (pm.created_at, pm.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+  AND NOT COALESCE(pm.park_reason LIKE 'removed:%', false)
   AND NOT (pm.custodian = 'platform' AND EXISTS (
     SELECT 1 FROM billing.provider_intents d
     WHERE d.merchant_id = pm.merchant_id
-      AND d.idempotency_key = 'platform_method_delete:' || pm.id::text
+      AND d.idempotency_key IN ('platform_method_delete:' || pm.id::text, 'manual:platform_method_delete:' || pm.id::text)
       AND d.intent_type = 'platform_method_delete' AND d.status = 'succeeded'
   ))
 ORDER BY pm.created_at DESC, pm.id DESC
@@ -151,10 +153,11 @@ ORDER BY created_at DESC, id DESC;
 SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.customer_id = $1
   AND pm.rail = ANY(sqlc.arg(rails)::text[])
+  AND NOT COALESCE(pm.park_reason LIKE 'removed:%', false)
   AND NOT (pm.custodian = 'platform' AND EXISTS (
     SELECT 1 FROM billing.provider_intents d
     WHERE d.merchant_id = pm.merchant_id
-      AND d.idempotency_key = 'platform_method_delete:' || pm.id::text
+      AND d.idempotency_key IN ('platform_method_delete:' || pm.id::text, 'manual:platform_method_delete:' || pm.id::text)
       AND d.intent_type = 'platform_method_delete' AND d.status = 'succeeded'
   ))
 ORDER BY pm.created_at DESC;
@@ -185,6 +188,7 @@ SELECT count(*) FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail = $1
   AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text
+  AND NOT COALESCE(park_reason LIKE 'removed:%', false)
   AND id <> sqlc.arg(exclude_id);
 
 -- name: GetPaymentMethodByRailInstrument :one

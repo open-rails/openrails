@@ -46,8 +46,8 @@ type (
 	// merchant's account with a card custodian.
 	CustodianConfig = config.CustodianConfig
 
-	// DatabaseConfig is Config.Database: the Postgres schemas New creates or
-	// upgrades.
+	// DatabaseConfig is Config.Database: the Postgres schemas New creates,
+	// upgrades or validates when SkipMigrations is enabled.
 	DatabaseConfig = config.DatabaseConfig
 	// DBConfig is Config.DB: the Postgres connection OpenRails opens when
 	// Deps.Postgres is nil.
@@ -63,6 +63,8 @@ type (
 	RateLimitsConfig = config.RateLimitsConfig
 	// RateLimit is one bucket's requests per minute.
 	RateLimit = config.RateLimit
+	// UserActionRateLimitConfig sets the merchant-global rolling hour/day budget.
+	UserActionRateLimitConfig = config.UserActionRateLimitConfig
 	// CaptchaConfig is Config.Captcha: the captcha account.
 	CaptchaConfig = config.CaptchaConfig
 	// VaultConfig is Config.Vault: the HashiCorp Vault connection OpenRails

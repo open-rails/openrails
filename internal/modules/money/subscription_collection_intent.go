@@ -26,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
@@ -454,8 +453,8 @@ func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.B
 		return intents.NewStore(d).CompleteSubscriptionCollection(ctx, in, outcome, h.now())
 	})
 	if err != nil {
-		if errors.Is(err, providerrecovery.ErrPending) {
-			return intents.RecoveryHeld(err.Error())
+		if errors.Is(err, subscriptions.ErrCancellationWriteDisabled) {
+			return intents.Parked(err.Error())
 		}
 		return intents.Ambiguous("engine local completion resumes from retained custody: " + err.Error())
 	}
@@ -558,7 +557,7 @@ func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in 
 			if gate := destructive.New(d).Check(ctx, in.MerchantID); !gate.Allowed {
 				blocked = gate.Reason
 			}
-			return h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Prepared: &p.Renewal, Rail: models.Rail(in.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
+			return h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Prepared: &p.Renewal, Rail: models.Rail(in.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureID: in.ID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
 		}
 		return nil
 	})
@@ -598,9 +597,6 @@ func recordEngineAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIn
 func (h *SubscriptionCollectionHandler) awaitRecoveredSubmission(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
 	if reason := h.submissionHeld(ctx, in); reason != "" {
 		return intents.Parked(reason)
-	}
-	if err := intents.NewStore(h.DB).CheckRecovery(ctx, in, h.now()); err != nil {
-		return intents.RecoveryHeld(err.Error())
 	}
 	return intents.Retryable("unsubmitted payment awaits gated execution")
 }

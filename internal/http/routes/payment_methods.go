@@ -21,7 +21,7 @@ var paymentMethodsRoutes = []Route{
 	{Method: PATCH, Path: "/v1/me/payment-methods/{id}", Group: Customer, Auth: AuthCustomer,
 		Request: billing.UpdatePaymentMethodParams{}, Responses: []Reply{{200, billing.PaymentMethod{}}}, Errors: codes("card_requires_https", "invalid_param", "payment_method_not_usable", "payment_method_update_unsupported", "payment_provider_rejected", "provider_outcome_unknown", "resource_not_found", "service_unavailable"), Handler: h(handlers.UpdatePaymentMethod)},
 	{Method: DELETE, Path: "/v1/me/payment-methods/{id}", Group: Customer, Auth: AuthCustomer,
-		Responses: []Reply{{202, nil}, {204, nil}}, Errors: codes("invalid_param", "payment_method_delete_failed", "payment_method_delete_unsupported", "rate_limit_exceeded", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.DeletePaymentMethod)},
+		Responses: []Reply{{204, nil}}, Errors: codes("invalid_param", "payment_method_delete_failed", "payment_method_delete_unsupported", "rate_limit_exceeded", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.DeletePaymentMethod)},
 	{Method: POST, Path: "/v1/me/payment-methods/{id}/confirm", Group: Customer, Auth: AuthCustomer,
 		Request: billing.ConfirmPaymentMethodParams{}, Responses: []Reply{{200, billing.PaymentMethod{}}}, Errors: codes("card_declined", "invalid_param", "payment_method_stale", "payment_provider_rejected", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ConfirmPaymentMethod)},
 	{Method: POST, Path: "/v1/me/stripe/billing-portal-sessions", Group: Customer, Auth: AuthCustomer, When: FeatureStripePortal,

@@ -204,6 +204,11 @@ func TestEngineTierDowngrade(t *testing.T) {
 			require.True(t, end.Add(time.Duration(row.newCycle)*h).Equal(*renewed.CurrentPeriodEndsAt), "%s: a period of the new cadence", row.name)
 			require.True(t, c.entitled(low.ent))
 			require.False(t, c.entitled(high.ent))
+			notice := c.notificationData("premium_renewed")
+			require.Equal(t, true, notice["downgrade_applied"])
+			require.Equal(t, high.ProductID.String(), notice["from_product_id"])
+			require.Equal(t, low.ProductID.String(), notice["to_product_id"])
+			require.Equal(t, end.UTC().Format(time.RFC3339Nano), notice["effective_at"])
 
 			c.must(http.MethodPost, "/subscriptions/"+sub.String()+"/cancel", "", map[string]any{"reason": "done"})
 			w.settle()

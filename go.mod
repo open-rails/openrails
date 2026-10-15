@@ -80,7 +80,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
-	github.com/gagliardetto/binary v0.8.0 // indirect
+	github.com/gagliardetto/binary v0.8.0
 	github.com/gagliardetto/treeout v0.1.4 // indirect
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-playground/locales v0.14.1 // indirect
@@ -103,8 +103,8 @@ require (
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/mostynb/zstdpool-freelist v0.0.0-20201229113212-927304c0c3b1 // indirect
-	github.com/open-rails/authkit v1.24.0
-	github.com/open-rails/helpers v1.12.0
+	github.com/open-rails/authkit v1.29.0
+	github.com/open-rails/helpers v1.13.0
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/riverqueue/river/riverdriver v0.48.0 // indirect
 	github.com/riverqueue/river/rivershared v0.48.0 // indirect

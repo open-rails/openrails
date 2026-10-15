@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/reconcile"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/writeposture"
@@ -72,7 +71,7 @@ func (w *world) findingView(findingType, subject string) findingView {
 // enrollBeforeTagging enrolls an NMI member and returns when the book began
 // tagging: a day after enrolment, with the world ten days on, so a charge at
 // preAt predates it and one at postAt follows it. Both fall in the first
-// window a refresh reads, which a held PSP never moves past.
+// window a refresh reads.
 func (w *world) enrollBeforeTagging(t *testing.T) (e *engineCase, preAt, postAt time.Time) {
 	t.Helper()
 	enrolled := w.clock.Now()
@@ -93,10 +92,10 @@ func (w *world) foreignObjects(carried string, at time.Time) (schedule, charge s
 }
 
 // An unknown provider object is lost when this book created it, and the book
-// id says so on every PSP: critical, alerted, and it holds provider recovery.
+// id says so on every PSP: critical and alerted for operator review.
 // One made by another book, or by hand after tagging began, is foreign on
 // every PSP, and one that predates tagging is foreign only where no money
-// moves: low severity, no alert, and recovery stays open.
+// moves: low severity and no alert. None of these findings gates billing.
 func TestUnknownProviderObjectsAreLostOrForeignByTheirBook(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -138,15 +137,14 @@ func TestUnknownProviderObjectsAreLostOrForeignByTheirBook(t *testing.T) {
 				if quiet {
 					require.Equal(t, "low", sub.severity)
 					require.Equal(t, "low", txn.severity)
-					require.NoError(t, w.recoveryCheck("nmi"), "recovery stays open")
-					before := len(e.providerLedger())
-					e.toFreshPeriodEnd()
-					w.runRenewals()
-					require.Len(t, e.providerLedger(), before+1, "the renewal is charged")
+
 				} else {
 					require.Equal(t, "critical", sub.severity)
-					require.ErrorIs(t, w.recoveryCheck("nmi"), providerrecovery.ErrPending, "recovery is held")
 				}
+				before := len(e.providerLedger())
+				e.toFreshPeriodEnd()
+				w.runRenewals()
+				require.Len(t, e.providerLedger(), before+1, "findings stay diagnostic while a legitimate renewal proceeds")
 			})
 		}
 	}
@@ -154,7 +152,7 @@ func TestUnknownProviderObjectsAreLostOrForeignByTheirBook(t *testing.T) {
 
 // A record that names the object keeps its full handling on a sandbox PSP,
 // whoever the book on the object says made it.
-func TestRecordedProviderObjectHoldsRecoveryOnSandbox(t *testing.T) {
+func TestRecordedProviderObjectRemainsActionableOnSandbox(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	e, _, _ := w.enrollBeforeTagging(t)
@@ -162,7 +160,6 @@ func TestRecordedProviderObjectHoldsRecoveryOnSandbox(t *testing.T) {
 	w.refreshProviders()
 	v := w.findingView("pull.subscription.missing", mine)
 	require.Equal(t, []any{"critical", false, true}, []any{v.severity, v.quiet, v.notified})
-	require.ErrorIs(t, w.recoveryCheck("nmi"), providerrecovery.ErrPending)
 }
 
 // Every object OpenRails creates at NMI and Stripe carries the book id.
@@ -223,7 +220,6 @@ func TestRestoredBookRecognisesItsOwnLostObjects(t *testing.T) {
 		v := w.findingView(typ, id)
 		require.Equal(t, []any{"foreign", true, false}, []any{v.provenance, v.quiet, v.notified})
 	}
-	require.ErrorIs(t, w.recoveryCheck("nmi"), providerrecovery.ErrPending, "what the book lost holds recovery")
 	_ = e
 }
 
@@ -259,7 +255,6 @@ func TestForeignStripeSubscriptionIsInformational(t *testing.T) {
 	w.refreshProviders()
 	v := w.findingView("pull.subscription.missing", foreignSub)
 	require.Equal(t, []any{"low", "foreign", true, false}, []any{v.severity, v.provenance, v.quiet, v.notified})
-	require.NoError(t, w.recoveryCheck("stripe"))
 }
 
 // catalogPull runs the catalog reconciliation pass and waits for it.
@@ -283,7 +278,7 @@ func (w *world) catalogPull() {
 }
 
 // A plan on the gateway that no price names is informational on a sandbox
-// gateway: low severity, no alert, and it never holds recovery. A live
+// gateway: low severity and no alert. A live
 // gateway's is unchanged.
 func TestOrphanPlanOnSandboxIsInformational(t *testing.T) {
 	t.Parallel()
@@ -301,7 +296,6 @@ func TestOrphanPlanOnSandboxIsInformational(t *testing.T) {
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT severity, notified_at IS NOT NULL, coalesce(evidence @> '{"quiet_foreign":true}', false)
 				FROM billing.reconciliation_findings WHERE finding_type = 'catalog.orphan_in_nmi' AND external_resource_id = 'another_environment_plan'`)).Scan(&severity, &notified, &quiet))
 			require.Equal(t, []any{"low", false, !live}, []any{severity, notified, quiet})
-			require.NoError(t, w.recoveryCheck("nmi"))
 		})
 	}
 }
@@ -318,10 +312,10 @@ func (f fetcher) Fetch(_ context.Context, p reconcile.FetchParams) (*reconcile.R
 }
 
 // On a PSP that moves real money an unknown object is handled by its book
-// alone: lost holds recovery and alerts as always, foreign never does, and a
+// alone: lost objects alert as always, foreign ones stay quiet, and a
 // pre-tag one is today's behaviour. A live PSP cannot arm against the fake
 // gateway, so the engine reads a fixed provider snapshot against the real
-// database, findings and recovery gate.
+// database and findings.
 func TestLiveProviderObjectsByProvenance(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -367,10 +361,8 @@ func TestLiveProviderObjectsByProvenance(t *testing.T) {
 			}
 			if tc.quiet {
 				require.Equal(t, []string{"low", "low"}, []string{sub.severity, txn.severity})
-				require.NoError(t, w.recoveryCheck("nmi"), "a foreign object never holds recovery")
 			} else {
 				require.Equal(t, "critical", sub.severity)
-				require.ErrorIs(t, w.recoveryCheck("nmi"), providerrecovery.ErrPending, "recovery is held")
 			}
 		})
 	}

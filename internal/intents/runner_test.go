@@ -25,7 +25,6 @@ type fakeLedger struct {
 	due, dueVerify         []gen.BillingProviderIntent
 	refuseClaim            bool
 	markErr, logErr        error
-	recoveryErr            error
 	recs                   map[uuid.UUID]*ledgerRec
 	logs                   []MutationLogParams
 	pruned, prunedTerminal []uuid.UUID
@@ -328,30 +327,22 @@ func TestEnqueueAndExecute(t *testing.T) {
 	assert.Equal(t, StatusPending, row.Status)
 }
 
-func (f *fakeLedger) CheckRecovery(context.Context, gen.BillingProviderIntent, time.Time) error {
-	return f.recoveryErr
-}
-
-func TestHeldCollectionsRedispatchOnlyForReadback(t *testing.T) {
+func TestWritePostureHeldCollectionsRedispatchOnlyForReadback(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		kind     string
 		mode     ModeView
 		evidence []byte
 	}{
-		{"restored renewal without local fence", "subscription_collection", modeFull, nil},
-		{"old retryable submitted operation", "subscription_collection", modeFull, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
 		{"readonly submitted operation", "subscription_collection", modeReadonly, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
-		{"restored usage collection without local fence", "order_collection", modeFull, nil},
 		{"readonly usage collection without local fence", "order_collection", modeReadonly, nil},
-		{"stale paid tier change", "nmi_upgrade", modeFull, []byte(`{"proration":{"submitted_at":"2026-10-01T00:00:00Z"}}`)},
 		{"readonly paid tier change", "nmi_upgrade", modeReadonly, []byte(`{"proration":{"submitted_at":"2026-10-01T00:00:00Z"}}`)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			intent := testIntent(test.kind, OriginSystem, 1)
 			intent.Status = StatusFailedRetryable
 			intent.ResultEvidence = test.evidence
-			store := &fakeLedger{row: intent, due: []gen.BillingProviderIntent{intent}, recoveryErr: errors.New("provider recovery required")}
+			store := &fakeLedger{row: intent, due: []gen.BillingProviderIntent{intent}}
 			handler := &fakeHandler{typ: intent.IntentType, relevance: StillRelevant(), verify: Succeeded(nil)}
 			runner := &Runner{Store: store, Registry: NewRegistry(handler), Config: test.mode}
 			_, err := runner.RunExecuteOnce(context.Background())
@@ -375,13 +366,11 @@ func TestVerifiedUnsubmittedRecoveryReconsidersOnlyWhenAllowed(t *testing.T) {
 		name      string
 		mode      ModeView
 		submitted bool
-		held      bool
 		ready     bool
 	}{
-		{"ready", modeFull, false, false, true},
-		{"readonly", modeReadonly, false, false, false},
-		{"still stale", modeFull, false, true, false},
-		{"submitted replay keeps backoff", modeFull, true, false, false},
+		{"ready", modeFull, false, true},
+		{"readonly", modeReadonly, false, false},
+		{"submitted replay keeps backoff", modeFull, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := testIntent("subscription_collection", OriginSystem, 1)
@@ -391,9 +380,6 @@ func TestVerifiedUnsubmittedRecoveryReconsidersOnlyWhenAllowed(t *testing.T) {
 				in.ResultEvidence = []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)
 			}
 			store := &fakeLedger{row: in, dueVerify: []gen.BillingProviderIntent{in}}
-			if tc.held {
-				store.recoveryErr = errors.New("provider recovery required")
-			}
 			handler := &fakeHandler{typ: in.IntentType, relevance: StillRelevant(), verify: Retryable("verified unsubmitted")}
 			before := time.Now()
 			_, err := (&Runner{Store: store, Registry: NewRegistry(handler), Config: tc.mode}).RunVerifyOnce(context.Background())

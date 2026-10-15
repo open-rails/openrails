@@ -71,6 +71,18 @@ func TestAuthKitConfiguration(t *testing.T) {
 	require.ErrorContains(t, err, "AuthKit client is required")
 }
 
+func TestAuthKitPreservesNoAutomaticMigrations(t *testing.T) {
+	for _, engineSkip := range []bool{false, true} {
+		for _, authSkip := range []bool{false, true} {
+			cfg := &config.Config{Database: config.DatabaseConfig{SkipMigrations: engineSkip}}
+			authCfg := authkit.Config{Token: authkit.TokenConfig{Issuer: "https://openrails.example"}, Database: authkit.DatabaseConfig{SkipMigrations: authSkip}}
+			got, err := AuthKit(cfg, authCfg, Options{})
+			require.NoError(t, err)
+			require.Equal(t, engineSkip || authSkip, got.Database.SkipMigrations)
+		}
+	}
+}
+
 func TestLocalConsoleEnrollmentAndLinkDefaults(t *testing.T) {
 	engine := &config.Config{PublicBillingBaseURL: "https://billing.example.com/v1"}
 	got, err := AuthKit(engine, authkit.Config{Token: authkit.TokenConfig{Issuer: "https://billing.example.com/auth"}}, Options{LocalSignIn: true})

@@ -85,6 +85,9 @@ export const de: BillingUiMessageBundle = {
     changePlanLabel: "Plan für {name} ändern",
   },
   resume: {
+    chooseCard: "Zahlungsmethode auswählen",
+    savedCardUnavailable:
+      "Diese gespeicherte Karte ist nicht verfügbar. Wähle eine andere Karte oder füge eine hinzu.",
     title: "{name} fortsetzen?",
     description:
       "Dein Abo verlängert sich am {date}. Dann werden {price} von deiner Karte abgebucht, danach in jedem Abrechnungszeitraum bis zur Kündigung.",
@@ -181,7 +184,8 @@ export const de: BillingUiMessageBundle = {
       "Eine Karte, die ein aktives Abonnement bezahlt, muss vor dem Entfernen ersetzt werden.",
     removeConfirm: "Karte entfernen",
     removed: "Karte entfernt.",
-    removePending: "Entfernung wird verarbeitet.",
+    removeFailed:
+      "Die Karte konnte nicht bestätigt entfernt werden. Bitte versuche es erneut.",
     inUse:
       "Diese Karte bezahlt ein aktives Abonnement. Stelle das Abonnement zuerst auf eine andere Karte um.",
   },

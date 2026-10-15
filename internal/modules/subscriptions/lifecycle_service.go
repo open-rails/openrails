@@ -932,6 +932,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		var price *models.Price
 		var newProduct *models.Product
+		fromProductID := subscription.ProductID
 		fromQuantity := CloneQuantity(subscription.Quantity)
 		applyingDowngrade := false
 		preserveLifecycle := false
@@ -1139,12 +1140,21 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		// Both observed and accepted inputs share one local effect writer.
 		// A payment row alone does not finish an accepted renewal.
 		productName := ""
+		fromProductName := ""
 		if newProduct != nil {
 			productName = newProduct.DisplayName
+		}
+		if applyingDowngrade {
+			previous, err := productService.GetByID(ctx, fromProductID)
+			if err != nil {
+				return fmt.Errorf("load previous product for applied change: %w", err)
+			}
+			fromProductName = previous.DisplayName
 		}
 		notification, err := s.applyRenewalEffects(ctx, db, subscription, renewalEffects{
 			PeriodStart: periodStartsAt, PeriodEnd: periodEndsAt,
 			Downgrade: applyingDowngrade, ProductName: productName,
+			FromProductID: fromProductID, FromProductName: fromProductName,
 			PreserveLifecycle: preserveLifecycle, Reinstate: params.AllowTerminalReactivation,
 			SeatsChanged: !SameQuantity(subscription.Quantity, fromQuantity),
 		})
@@ -1211,6 +1221,9 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 			}
 			method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: subscription.MerchantID, ID: *charged})
 			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return fmt.Errorf("resume engine: %w", ErrCardUnusable)
+				}
 				return err
 			}
 			observedInstrument := charge.FreezeInstrument(method, subscription.PspID)
@@ -1220,15 +1233,21 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 					return err
 				}
 				if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, subscription.MerchantID, handle); err != nil {
+					if errors.Is(err, paymentmethods.ErrPaymentMethodDeleteProcessing) || errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe) {
+						return fmt.Errorf("resume engine: %w", ErrCardUnusable)
+					}
 					return err
 				}
 			}
 			method, err = q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: subscription.MerchantID, ID: *charged})
 			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return fmt.Errorf("resume engine: %w", ErrCardUnusable)
+				}
 				return err
 			}
 			if method.CustomerID != subscription.CustomerID || !charge.ChargeableOn(method, subscription.PspID) || !paymentmethods.Chargeable(method) || method.Rail != string(subscription.Rail) || (method.RailCustomerRef == nil && method.Custodian != models.CustodianPlatform) || method.RailMethodRef == nil || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP && method.Custodian != models.CustodianPlatform) || observedInstrument.Matches(method) != nil {
-				return fmt.Errorf("resume engine: payment method is unavailable")
+				return fmt.Errorf("resume engine: %w", ErrCardUnusable)
 			}
 			if _, err := mandates.ForSubscription(ctx, q, subscription.MerchantID, subscription.CustomerID, subscription.ID, method.ID, subscription.PspID); err != nil {
 				return fmt.Errorf("resume engine: %w", err)
@@ -1523,7 +1542,8 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		ID:         uuid.NewSHA1(subscription.ID, []byte(fmt.Sprintf("canceled:%d", subscription.LifecycleRev))),
 		CustomerID: subscription.CustomerID,
 		EventType:  models.NotificationPremiumEnded,
-		Data:       billing.NotificationData{Reason: string(reason), SubscriptionID: billing.SubscriptionID(subscription.ID)},
+		Data:       billing.NotificationData{Reason: string(reason), SubscriptionID: billing.SubscriptionID(subscription.ID), ProductID: billing.ProductID(subscription.ProductID)},
+		CreatedAt:  now,
 	}
 	if err := notificationRepo.CreateIfAbsent(ctx, notification); err != nil {
 		return nil, fmt.Errorf("record membership ended notification: %w", err)
@@ -1565,7 +1585,7 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 	}
 	now := s.now()
 	if !c.Requested {
-		if err := s.CheckCancellationRecovery(ctx, dbb, sub, now); err != nil {
+		if err := s.CheckCancellationWritePosture(ctx, dbb, sub); err != nil {
 			return err
 		}
 	}
@@ -1909,7 +1929,8 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 			ID:         uuid.NewSHA1(subscription.ID, []byte(fmt.Sprintf("expired:%d", subscription.LifecycleRev))),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumEnded,
-			Data:       billing.NotificationData{Reason: string(PremiumEndReasonExpired)},
+			Data:       billing.NotificationData{Reason: string(PremiumEndReasonExpired), SubscriptionID: billing.SubscriptionID(subscription.ID), ProductID: billing.ProductID(subscription.ProductID)},
+			CreatedAt:  now,
 		}
 		if err := notificationRepo.CreateIfAbsent(ctx, notification); err != nil {
 			return fmt.Errorf("record membership expired notification: %w", err)
@@ -2021,7 +2042,6 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			periodStart = subscription.CurrentPeriodEndsAt.UTC()
 		}
 		heldTerminal := ""
-		quietRetry := false // a transient retry tells the customer nothing yet
 		var event lifecycle.Event
 		// A decline opens the dunning case under the merchant's policy of the
 		// moment; the rest of the case runs under it.
@@ -2093,7 +2113,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 						return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 					}
 					subscription.NextRetryAt = &next
-					event, quietRetry = nil, true
+					event = nil
 					break
 				}
 			}
@@ -2247,55 +2267,51 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 
-		// Notify every outcome, so no customer is canceled without warning:
-		//   bucket 1, still trying  -> payment_method_failed
-		//   bucket 1, schedule out  -> premium_ended / expired
-		//   bucket 2                -> payment_method_update_required
-		//   bucket 3                -> premium_ended / non_recoverable
+		// A collection failure is a payment fact even when retries stop. The
+		// access ledger independently publishes the actual membership expiry.
 		eventType := models.NotificationPaymentMethodFailed
-		var data billing.NotificationData
+		data := subscriptionFailureNotice(subscription, params, heldTerminal != "")
 		switch {
 		case needsPaymentMethodUpdate:
 			eventType = models.NotificationPaymentMethodUpdateRequired
-			data.FailureCode = normalize.FromPtr(params.FailureCode)
-		case subscription.Status == models.StatusCanceled:
-			eventType = models.NotificationPremiumEnded
-			endReason := PremiumEndReasonExpired
-			if params.Decline == decline.NonRecoverable {
-				endReason = PremiumEndReasonNonRecoverable
-			}
-			data.Reason = string(endReason)
 		}
 
-		// A decline that says the card was reissued reads the holder once
-		// first: an updater may already hold the new card, and the member is
-		// asked only if it does not.
+		// A decline that says the card was reissued also reads the holder:
+		// an updater may already hold the new card.
 		charged, err := PaymentMethodOf(ctx, db.Gen(ctx), subscription)
 		if err != nil {
 			return err
 		}
 		readCard := needsPaymentMethodUpdate && charged != nil &&
-			decline.HolderMayHoldNewCard(billing.DeclineReason(normalize.FromPtr(params.FailureReason)))
+			(decline.HolderMayHoldNewCard(billing.DeclineReason(data.FailureReason)) ||
+				decline.HolderMayHoldNewCard(billing.DeclineReason(decline.ReasonFor(string(subscription.Rail), data.FailureCode))))
 		if readCard {
 			args := paymentmethods.CardRefreshArgs{MerchantID: subscription.MerchantID, PaymentMethodID: *charged}
 			opts := args.InsertOpts()
 			if err := s.DB.InsertRiverJobTx(ctx, tx, args, &opts); err != nil {
 				return fmt.Errorf("queue declined card read: %w", err)
 			}
+			// The decline is real, but the updater may already have a repaired
+			// card. Record the failure without declaring a customer fix required.
+			eventType = models.NotificationPaymentMethodFailed
+			data.RetryStatus, data.RecoveryAction = billing.NotificationRetryUnknown, billing.NotificationRecoveryUpdatePaymentMethod
+			data.NextAttemptAt = nil
 		}
-		if !quietRetry && !readCard {
-			notification := &models.NotificationEvent{
-				ID:         uuidutil.NewV7(),
-				CustomerID: subscription.CustomerID,
-				EventType:  eventType,
-				Data:       data,
-			}
-			if err := notificationRepo.Create(ctx, notification); err != nil {
-				return fmt.Errorf("create payment failed notification: %w", err)
-			} else {
-				notifications = append(notifications, notification)
-			}
+		noticeID := uuidutil.NewV7()
+		if params.FailureID != uuid.Nil {
+			noticeID = uuid.NewSHA1(params.FailureID, []byte("payment_failure"))
 		}
+		notification := &models.NotificationEvent{
+			ID:         noticeID,
+			CustomerID: subscription.CustomerID,
+			EventType:  eventType,
+			Data:       data,
+			CreatedAt:  now,
+		}
+		if err := notificationRepo.CreateIfAbsent(ctx, notification); err != nil {
+			return fmt.Errorf("create payment failed notification: %w", err)
+		}
+		notifications = append(notifications, notification)
 
 		return nil
 	})

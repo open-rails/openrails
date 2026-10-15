@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/payment"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -30,7 +29,7 @@ var (
 	errUsageSavedCard      = apperr.Invalidf("a usage order is paid with a saved card: payment.payment_method_id").WithParam("payment")
 	errUsageActionRefused  = apperr.New(http.StatusConflict, billing.CodeOrderActionNotAllowed, "The order's origin or status does not allow this action.")
 	errUsageNotCollectible = apperr.New(http.StatusConflict, billing.CodeOrderNotPayable, "The usage order takes no collection now.")
-	errBillingPaused       = apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "billing is paused while provider recovery completes")
+	errBillingPaused       = apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "this order needs its provider payment history to be verified")
 )
 
 // payUsage pays what the open usage order still owes. replayed: key's
@@ -87,7 +86,7 @@ func usageRefusal(err error) error {
 		return errUsageActionRefused
 	case errors.Is(err, money.ErrCustomerPaymentUnsupported), errors.Is(err, money.ErrDefaultPaymentMethodInvalid):
 		return orders.ErrOptionMissing
-	case errors.Is(err, providerrecovery.ErrPending), errors.Is(err, money.ErrUsageRecoveryHeld):
+	case errors.Is(err, money.ErrUsageRecoveryHeld):
 		return errBillingPaused
 	}
 	return err

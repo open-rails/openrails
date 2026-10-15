@@ -55,6 +55,8 @@ function methodLabel(method: PaymentMethod, m: Translator): string {
 function removeMessage(error: BillingError, m: Translator): string {
   if (error.status === 409 && error.code === "resource_conflict")
     return m.t("paymentMethods.inUse")
+  if (error.status === 503 || error.code === "invalid_response")
+    return m.t("paymentMethods.removeFailed")
   return m.error(error)
 }
 
@@ -97,9 +99,9 @@ export function PaymentMethodsPanel({
   const confirmRemove = async () => {
     if (!removing) return
     setRemoveError(null)
-    const error = await state.remove(removing.id)
-    if (error) {
-      setRemoveError(removeMessage(error, m))
+    const result = await state.remove(removing.id)
+    if (result) {
+      setRemoveError(removeMessage(result, m))
       return
     }
     setRemoving(null)
@@ -197,9 +199,9 @@ export function PaymentMethodsPanel({
                   </Button>
                 ) : null}
                 <Button
-                  variant="ghost"
+                  variant="destructive"
                   size="icon-sm"
-                  className="text-muted-foreground hover:text-destructive"
+                  className="bg-red-600 text-white hover:bg-red-700"
                   aria-label={t("paymentMethods.removeLabel", { label })}
                   title={t("paymentMethods.remove")}
                   disabled={!!pending}

@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (188), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (190), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -57,6 +57,7 @@ A customer acting on its own account.
 | POST | `/v1/me/subscriptions/{id}/confirm` | customer | — | — | 200 `SubscriptionChange`<br>202 `SubscriptionChange` |  |
 | GET | `/v1/me/subscriptions/{id}/change/options` | customer | — | — | 200 `ListPage<SubscriptionChangeOption>` |  |
 | POST | `/v1/me/subscriptions/{id}/change/preview` | customer | — | `PreviewSubscriptionChangeParams` | 200 `SubscriptionChangePreview` |  |
+| GET | `/v1/me/access-tenure` | customer | — | — | 200 `AccessTenure` |  |
 | GET | `/v1/me/entitlements` | customer | — | — | 200 `ListPage<CustomerEntitlement>` |  |
 | GET | `/v1/me` | customer | — | — | 200 `CustomerAccount` |  |
 | PUT | `/v1/me/low-balance-lines/{currency}` | customer | — | `SetLowBalanceLineParams` | 200 `EffectiveLowBalanceLine` |  |
@@ -67,7 +68,7 @@ A customer acting on its own account.
 | GET | `/v1/me/payment-methods` | customer | — | — | 200 `ListPage<PaymentMethod>` |  |
 | POST | `/v1/me/payment-methods` | customer | — | `CreatePaymentMethodParams` | 201 `PaymentMethod` | `Idempotency-Key` |
 | PATCH | `/v1/me/payment-methods/{id}` | customer | — | `UpdatePaymentMethodParams` | 200 `PaymentMethod` |  |
-| DELETE | `/v1/me/payment-methods/{id}` | customer | — | — | 202 —<br>204 — |  |
+| DELETE | `/v1/me/payment-methods/{id}` | customer | — | — | 204 — |  |
 | POST | `/v1/me/payment-methods/{id}/confirm` | customer | — | `ConfirmPaymentMethodParams` | 200 `PaymentMethod` |  |
 | POST | `/v1/me/stripe/billing-portal-sessions` | customer | — | — | 200 `StripePortalSession` | when `stripe_portal` |
 | GET | `/v1/me/agreements` | customer | — | — | 200 `ListPage<Agreement>` |  |
@@ -92,6 +93,7 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | POST | `/v1/admin/subscriptions/{id}/change` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `ChangeSubscriptionParams` | 200 `SubscriptionChange`<br>202 `SubscriptionChange` | limit `off_channel`; `Idempotency-Key` |
 | POST | `/v1/admin/subscriptions/{id}/change/preview` | merchant | `merchant:customer:read`<br>`root:customer:read` | `ChangeSubscriptionParams` | 200 `SubscriptionChangePreview` |  |
 | PUT | `/v1/admin/subscriptions/{id}/payment-method` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` |  |
+| GET | `/v1/admin/customers/{customer_id}/access-tenure` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `AccessTenure` |  |
 | GET | `/v1/admin/entitlements` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<CustomerEntitlement>` |  |
 | GET | `/v1/admin/product-access` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<ProductAccessGrant>` |  |
 | POST | `/v1/admin/product-access` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | limit `grant`; `Idempotency-Key` |
@@ -268,7 +270,7 @@ The openrails.dev account across the merchants it is linked at, where the standa
 | PUT | `/v1/network/links/{link_id}/subscriptions/{id}/payment-method` | network | — | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` | when `customer_network`; sensitive |
 | GET | `/v1/network/links/{link_id}/payment-methods` | network | — | — | 200 `ListPage<PaymentMethod>` | when `customer_network` |
 | POST | `/v1/network/links/{link_id}/payment-methods` | network | — | `CreatePaymentMethodParams` | 201 `PaymentMethod` | when `customer_network`; sensitive; `Idempotency-Key` |
-| DELETE | `/v1/network/links/{link_id}/payment-methods/{id}` | network | — | — | 202 —<br>204 — | when `customer_network`; sensitive |
+| DELETE | `/v1/network/links/{link_id}/payment-methods/{id}` | network | — | — | 204 — | when `customer_network`; sensitive |
 | GET | `/v1/network/links/{link_id}/orders/{id}` | network | — | — | 200 `Order` | when `customer_network` |
 | POST | `/v1/network/links/{link_id}/orders/{id}/pay` | network | — | `PayOrderParams` | 200 `Order` | when `customer_network`; sensitive; `Idempotency-Key` |
 | POST | `/v1/network/links/{link_id}/orders/{id}/confirm` | network | — | `ConfirmOrderParams` | 200 `Order` | when `customer_network`; sensitive |

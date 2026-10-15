@@ -160,7 +160,7 @@ func TestRevokingAgreements(t *testing.T) {
 	require.Equal(t, e.sub, *events[0].SubscriptionID)
 	require.Equal(t, "USD", events[0].Currency)
 	end := e.periodEnd()
-	require.Equal(t, e.sub.String(), c.notificationData("premium_ended")["subscription_id"])
+	require.Equal(t, e.sub.String(), c.notificationData("subscription_canceled")["subscription_id"])
 	left := agreements()
 	require.Len(t, left, 1, "only the new usage agreement")
 	require.Contains(t, left, billing.MandateUnscheduled)

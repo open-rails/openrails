@@ -1865,6 +1865,15 @@ type BillingUsageEvent struct {
 	StatedAmount *int64
 }
 
+// Merchant-global customer card-delete and soft-cancel rolling-hour/day rate reservations. No actor can obtain a separate budget. customer_id is an opaque identity and deliberately has no cascading customer FK. The canonical operation/card/subscription remains authoritative after pruning. Retention: rows are deleted 24 hours after reserved_at.
+type BillingUserDestructiveReservation struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ActionKey  string
+	Kind       string
+	ReservedAt time.Time
+}
+
 // webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied. Retention: completed events are deleted 90 days after completed_at.
 type BillingWebhookEvent struct {
 	MerchantID  uuid.UUID

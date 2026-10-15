@@ -60,7 +60,10 @@ type Engine struct {
 // month's partitions; the pool's role owns them. That is idempotent, replicas
 // booting together take turns on an advisory lock, and a schema a newer build
 // already migrated is left as it is. It starts no workers: Start does, and
-// jobs queued before it wait in Config.Database.RiverSchema. ctx bounds the
+// jobs queued before it wait in Config.Database.RiverSchema.
+// With Database.SkipMigrations, New validates existing
+// migration ledgers instead; run Migrate explicitly before starting the app.
+// Normal runtime partition maintenance remains active. ctx bounds the
 // wait for the database; nothing else does. It provisions each merchant
 // Config.Merchants declares and never changes a catalog: a catalog document
 // is an operator's ApplyCatalog. Vault login, PSP posture checks and Redis

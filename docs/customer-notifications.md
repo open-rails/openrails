@@ -43,6 +43,28 @@ come from the current source version. `action_requested` describes what the
 event originally asked, not whether an invoice is still unpaid today.
 Actions must re-read authoritative billing state.
 
+Stopping renewal and losing membership are separate facts. A
+`subscription_canceled` event records stopped renewal while purchased access
+remains. Its `data.ended_at`, when present, is the retained access end. A
+`premium_ended` event with `data.access_ended: true` records actual closed access
+from the grant ledger, including expiration after an earlier cancellation.
+Consumers should not present a cancellation click as membership ending.
+
+`payment_method_failed`, `payment_method_update_required`,
+`payment_authentication_required`, and `order_collection_stopped` include
+`data.subscription_id` or `data.order_id` for
+correlation and a `data.retry_status`: `scheduled` promises another attempt at
+`data.next_attempt_at`; `payment_method_required` waits for a replacement payment
+method; `stopped` schedules no further attempt; `unknown` makes no retry promise.
+`data.recovery_action` is `update_payment_method`, `resubscribe`,
+`authenticate_payment`, or `contact_support`. Consumers provide the corresponding
+destination and use `failure_code` and `failure_reason` for appropriate copy.
+These are facts as observed, not a substitute for current billing state. Phrase
+retry guidance as the decision when the notice was created and link to current
+billing state, since a later payment may already have resolved the problem.
+A renewal with `downgrade_applied` records an applied asynchronous plan change,
+with previous/new product IDs and names and its effective time.
+
 Persist the destination inbox item idempotently by source installation,
 merchant and event ID, then acknowledge the source. Deliberately skipped events
 should also be acknowledged. If persistence succeeds but acknowledgment fails,

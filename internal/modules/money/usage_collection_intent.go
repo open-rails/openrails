@@ -715,13 +715,16 @@ func queueCollectionOutcome(ctx context.Context, database *db.DB, order gen.Bill
 	data := billing.NotificationData{
 		OrderID: billing.OrderID(order.ID), Currency: order.Currency, AmountDue: &amountDue,
 		FailureCode: failureCode, DeclineOutcome: action.Decline.Action.String(),
+		RetryStatus: billing.NotificationRetryUnknown, RecoveryAction: billing.NotificationRecoveryContactSupport,
 	}
 	eventType := models.NotificationPaymentMethodFailed
 	switch {
 	case action.AwaitingPaymentMethod():
 		eventType = models.NotificationPaymentMethodUpdateRequired
+		data.RetryStatus, data.RecoveryAction = billing.NotificationRetryPaymentMethodRequired, billing.NotificationRecoveryUpdatePaymentMethod
 	case action.Terminal:
 		eventType = models.NotificationOrderCollectionStopped
+		data.RetryStatus, data.RecoveryAction = billing.NotificationRetryStopped, billing.NotificationRecoveryUpdatePaymentMethod
 		reason := "non_recoverable"
 		if action.ScheduleExhausted() {
 			reason = "schedule_exhausted"
@@ -730,6 +733,7 @@ func queueCollectionOutcome(ctx context.Context, database *db.DB, order gen.Bill
 	case action.NextAttemptAt != nil:
 		next := action.NextAttemptAt.UTC()
 		data.NextAttemptAt = &next
+		data.RetryStatus, data.RecoveryAction = billing.NotificationRetryScheduled, billing.NotificationRecoveryUpdatePaymentMethod
 	}
 	notification := &models.NotificationEvent{ID: uuidutil.NewV7(), CustomerID: order.CustomerID, EventType: eventType, Data: data, CreatedAt: now}
 	return subscriptions.NewNotificationService(database).Create(ctx, notification)

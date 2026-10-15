@@ -74,51 +74,6 @@ func (q *Queries) PSPHasUnresolvedFinancialFindings(ctx context.Context, arg PSP
 	return column_1, err
 }
 
-const pSPRecoveryBookAge = `-- name: PSPRecoveryBookAge :one
-SELECT EXISTS (
-  SELECT 1 FROM billing.subscriptions
-    WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
-      AND started_at < $3::timestamptz
-  UNION ALL
-  SELECT 1 FROM billing.payments
-    WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
-      AND purchased_at < $3::timestamptz
-  UNION ALL
-  SELECT 1 FROM billing.payments ip
-    JOIN billing.orders i ON i.merchant_id=ip.merchant_id AND i.id=ip.order_id AND i.origin='usage'
-    WHERE ip.merchant_id=$1::uuid AND ip.psp_id=$2::uuid
-      AND i.period_starts_at < $3::timestamptz
-  UNION ALL
-  SELECT 1 FROM billing.provider_intents pi
-    LEFT JOIN billing.orders i ON i.merchant_id=pi.merchant_id AND i.id::text=COALESCE(pi.payload->>'order_id', pi.payload->>'invoice_id')
-    WHERE pi.merchant_id=$1::uuid AND pi.psp_id=$2::uuid
-      AND pi.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
-      AND COALESCE(i.period_starts_at, NULLIF(pi.payload->>'accepted_at','')::timestamptz,
-        NULLIF(pi.result_evidence->>'submitted_at','')::timestamptz, pi.created_at) < $3::timestamptz
-  UNION ALL
-  SELECT 1 FROM billing.orders i
-    WHERE i.merchant_id=$1::uuid AND i.origin='usage'
-      AND i.status IN ('open','uncollectible')
-      AND i.period_starts_at < $3::timestamptz
-      AND EXISTS (SELECT 1 FROM billing.psps p WHERE p.merchant_id=i.merchant_id AND p.id=$2::uuid AND p.rail IN ('nmi','stripe'))
-)::boolean
-`
-
-type PSPRecoveryBookAgeParams struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-	Before     time.Time
-}
-
-// This cold-path exemption uses EXISTS: one older bound fact is sufficient.
-// Fresh completed coverage is checked first; ordinary writes do not scan history.
-func (q *Queries) PSPRecoveryBookAge(ctx context.Context, arg PSPRecoveryBookAgeParams) (bool, error) {
-	row := q.db.QueryRow(ctx, pSPRecoveryBookAge, arg.MerchantID, arg.PspID, arg.Before)
-	var column_1 bool
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const pSPRecoveryHistoryFloor = `-- name: PSPRecoveryHistoryFloor :one
 SELECT COALESCE(min(at), $1::timestamptz)::timestamptz AS oldest_at FROM (
   SELECT COALESCE(current_period_starts_at, started_at) AS at FROM billing.subscriptions
@@ -163,33 +118,30 @@ WHERE merchant_id=$2::uuid AND id IN (
  SELECT id FROM billing.provider_intents
  WHERE merchant_id=$2::uuid
    AND ($3::uuid IS NULL OR id=$3::uuid)
-   AND (psp_id=ANY($4::uuid[]) OR (psp_id IS NULL AND $5::boolean))
+   AND intent_type NOT IN ('nmi_vault_delete','platform_method_delete','hyperswitch_method_delete')
    AND status IN ('pending','failed_retryable','unknown_needs_verify')
    AND result_evidence @> '{"recovery_held":true}'::jsonb
    AND (lease_expires_at IS NULL OR lease_expires_at<=$1::timestamptz)
- ORDER BY id LIMIT $6::int
+ ORDER BY id LIMIT $4::int
  FOR UPDATE SKIP LOCKED
 )
 RETURNING id
 `
 
 type ResumeProviderRecoveryHeldOperationsParams struct {
-	Now              time.Time
-	MerchantID       uuid.UUID
-	IntentID         *uuid.UUID
-	ReadyPspIds      []uuid.UUID
-	AllAccountsReady bool
-	BatchSize        int32
+	Now        time.Time
+	MerchantID uuid.UUID
+	IntentID   *uuid.UUID
+	BatchSize  int32
 }
 
-// Only recovery delays are expedited; issuer retry dates and live leases stand.
+// Upgrade compatibility: release obsolete blanket-hold delays through normal dispatch.
+// Manual card deletions are excluded; issuer retry dates and live leases stand.
 func (q *Queries) ResumeProviderRecoveryHeldOperations(ctx context.Context, arg ResumeProviderRecoveryHeldOperationsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, resumeProviderRecoveryHeldOperations,
 		arg.Now,
 		arg.MerchantID,
 		arg.IntentID,
-		arg.ReadyPspIds,
-		arg.AllAccountsReady,
 		arg.BatchSize,
 	)
 	if err != nil {

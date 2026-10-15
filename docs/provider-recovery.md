@@ -1,114 +1,55 @@
-# Provider recovery
+# Provider observation and recovery
 
-Provider observation is independent of permission to charge or cancel. In
-`provider_write_mode: readonly`, startup and periodic refresh read the provider
-and record qualified payments, refunds and missing provider-owned records.
-They do not execute provider writes or policy-held local cancellations.
-Explicit readonly mode is never automatically changed to full mode.
+Provider observation reports differences between the local billing book and
+provider records. An unresolved finding or an old bulk-refresh timestamp does
+not block purchases, renewals, refunds, cancellations, or card removal.
+Operators review findings separately; ordinary operations retain their own
+ownership, payment-method, duplicate-charge, and provider checks.
 
-Provider refresh runs every two hours. An established NMI or Stripe account
-that has missed a whole refresh cycle (completed financial coverage older than
-four hours plus the five-minute provider window delay) holds renewal and usage
-collection dispatch and destructive work. A refresh that is due or still running holds
-nothing: coverage ends at a refresh's start, and each cycle staggers its
-merchants. A new account without older
-billing facts can serve its initial purchase. A fresh row never hides an older
-book. Known unresolved financial findings hold writes even when the last
-completion marker is recent; ignoring an alert does not settle its receipt.
-Verified receipt recovery continues while the gate is closed. Configured full
-mode resumes automatically after catch-up completes without those conflicts.
-Starting another replica does not reset healthy shared-database coverage.
-CCBill and Solana retain their existing webhook and destructive-policy behavior;
-this delivery does not give them an automatic stale-backup recovery guarantee.
-Completion durably wakes recovery-held operations and requests the merchant's
-normal renewal and usage order scans, including orders refused before admission.
-Issuer retry dates and monthly collection cadence remain unchanged. A verifier
-that commits its hold just after completion rechecks readiness after commit, so
-its live lease cannot strand the operation on the former recovery delay.
+Provider refresh runs every two hours. It reads bounded time windows with a
+five-minute indexing overlap and records qualified payments, refunds and
+provider-owned records. A failed read retries normally. Unknown identities,
+duplicate subscriptions and conflicting receipts remain visible findings;
+acknowledging an alert does not resolve its underlying evidence.
 
-A financial finding about a provider schedule that is not this merchant's
-obligation (another environment's on a shared gateway) settles only when an
-operator closes it as `foreign` (see Proposals in
-[operations](operations.md)); a dismissed one still holds until it is closed
-as `foreign` too.
+Observation and application use separate `psp_refresh_watermarks` domains:
 
-Every provider object OpenRails creates carries the billing book's identity: NMI
-merchant-defined field 20, Stripe metadata `openrails_book`. The id belongs to the
-book, so it survives a restore and `openrails book arm`. An unknown provider
-object that no record names, and that carries this book's id, is lost: critical,
-alerted, and it holds recovery on every PSP. One that carries another book's id,
-or none and was created after the book began tagging, is foreign: low severity,
-never alerted, never held against recovery, and its webhooks answer 200 and are
-only logged. An object with no id from before tagging began is foreign on a PSP
-that moves no money and keeps the behaviour above on one that does. A catalog
-plan no price names is foreign on a non-live PSP. A record that names the object
-always keeps full handling. CCBill and Solana carry no book id.
+- `events` records observed provider windows, including advisory runs.
+- `applied_events` records successfully applied account-bound windows.
+- `completed_events` records the target of a complete financial observation.
+  Failed reads, incomplete pagination and unresolved financial identities can
+  leave it unchanged. It is reporting progress, never write authorization.
 
-A cancel the customer or the merchant asks for is never held, by recovery or
-by readonly mode. It is recorded at once: an engine-owned subscription renews
-no more and keeps access as the cancel mode says. A provider-billed schedule
-(an NMI schedule, a Stripe-run subscription) is stopped by a durable provider
-intent committed with the cancel, which waits for recovery and for provider
-writes, and is then sent once. Until the provider confirms the stop, the
-canceled subscription keeps `deletion_scheduled_at`. A provider charge after
-the recorded cancel renews nothing: it raises `life.charge_after_cancel`, and
-its refund, which moves money, waits for recovery too. A renewal recovery held
-before it was sent does not refuse the cancel, and never charges the canceled
-subscription.
+A newly configured or restored instance follows its explicit provider write
+mode. `readonly` permits observation but no provider mutation; `limited`
+permits customer-requested operations but no autonomous collection. Neither
+setting changes automatically. A copied billing book still requires its
+separate ownership/arming procedure before provider writes.
 
-Observation and application use separate domains in `psp_refresh_watermarks`:
+Every operation must prove its own authority. An uncertain submitted charge is
+verified against its exact order, account, payer, currency and amount before
+any retry. A positive receipt can be recovered without inventing a local
+submission. Missing or contradictory evidence for that operation remains an
+error. Removing the bulk reconciliation gate does not authorize duplicate
+charges, unknown provider targets, or the deletion of a card in active use.
 
-- `events` records provider-window observation, including old advisory runs.
-- `applied_events` records successfully applied account-bound windows, so a
-  partial catch-up can resume without repeating its entire history.
-- `completed_events` records the captured target only after the whole financial
-  catch-up completes. Old observation cursors are never promoted into this
-  domain. Fetch failures, incomplete pagination, failed financial writes and
-  unresolved receipt identity prevent completion.
+A subscription cancellation records nonrenewal immediately and preserves paid
+access. A provider-owned recurring schedule stops through its existing deferred
+operation; NMI's stop remains scheduled near the end of the paid period. Card
+removal is different: the caller waits for provider confirmation and local
+removal. It creates no background execution or automatic retry. An incomplete
+response is an error, and the person can explicitly retry; an ambiguous earlier
+attempt is verified before another provider mutation.
 
-Only a failed read fails the refresh job, which then retries. A refresh held
-only by findings an operator must settle completes; the open findings and this
-gate are the signal. A pass that raised those findings runs once more first: a
-receipt recorded concurrently makes them stale, and the next read clears them. A PSP without pull credentials is not read and does not
-make the refresh incomplete; it joins the first refresh after it is armed.
+Provider object provenance remains part of reporting. NMI merchant-defined
+field 20 and Stripe `openrails_book` distinguish this book's objects from foreign
+ones where available. Unmatched foreign/test objects can be informational;
+matching identities and conflicting receipts still require review. These labels
+affect reporting severity, not permission for unrelated operations.
 
-A deliberately withheld cancellation does not prevent financial observation.
-It also does not become permission to cancel: full reconciliation proofs and
-destructive policy remain separate. A confirmed Stripe reversal records its
-original charge first; the accepted operation retains its pending cancellation
-until policy permits that separate lifecycle step.
-
-Catch-up reads bounded time windows, repeats an overlap for delayed indexing,
-and schedules the next batch immediately when more windows remain. Provider
-transaction IDs are neither ordered cursors nor proof that nothing is missing.
-NMI query windows describe provider modification time, not an exhaustive set of
-transactions originally charged during the window. A financial finding closes
-only when its actual transaction is observed and now matches local facts.
-
-When applied progress exists, recovery continues from that cursor. On first
-upgrade without it, the lower bound comes from relevant current subscriptions,
-unpaid usage order periods and unresolved accepted operations, not every historical
-completed payment. Long billing periods are read in bounded batches from their
-relevant obligation floor. Unavailable provider history remains an error; the
-read is not truncated and an operator flag cannot manufacture its proof.
-
-Native renewals recover through their accepted operation and normal settlement
-path. A restored copy may admit local recovery work and verify a positive
-stable-obligation receipt without pretending it previously submitted a charge.
-A known usage order whose accepted operation was lost can recover a verified
-NMI receipt carrying its exact order description (`invoice <order id>`),
-account, payer, currency and full remaining amount. Partial, reversed, ambiguous or contradictory receipts
-remain held. Existing accepted operations retain their canonical authority;
-recovery never creates a fake dispatched operation or a manual payment.
-
-The gate detects known stale timestamps; it is not a universal detector of an
-arbitrary database clone. Provider visibility can lag, and an account created
-after a backup is absent from that backup. Window overlap and freshness alone
-are not an exactly-once fence across independent databases. Immediate native
-obligation lookups complement bulk catch-up; an uncertain submitted NMI charge
-still requires positive evidence rather than an automatic resend. Entire missed
-subscription billing periods remain outside automatic catch-up.
-
-Migration 0012 extends existing watermark domains without changing the merchant
-archive format. Local PostgreSQL and provider-simulator tests exercise restore
-and recovery; they do not qualify live provider visibility or a deployed restore.
+Bulk catch-up resumes from its applied cursor. Without one it uses relevant
+subscriptions, unpaid usage periods and unresolved accepted operations rather
+than every historical payment. Provider timestamps are not ordered cursors, and
+bulk observation does not guarantee exactly-once behavior across independent
+billing databases. Local PostgreSQL and provider-simulator tests do not qualify
+live provider visibility or a production restore.

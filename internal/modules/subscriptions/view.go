@@ -64,9 +64,10 @@ func BuyerPrice(p *models.Price) *billing.Price {
 }
 
 // subscriptionCardView is the card on the subscription's payment method, from
-// the linked payment_methods row alone: never a provider fetch.
+// the usable linked payment_methods row alone: never a provider fetch.
+// Removed and parked instruments remain in payment history, not renewal UI.
 func subscriptionCardView(pm *models.PaymentMethod) *billing.CardDetails {
-	if pm == nil {
+	if pm == nil || !pm.Chargeable() {
 		return nil
 	}
 	return pm.Card.Details()

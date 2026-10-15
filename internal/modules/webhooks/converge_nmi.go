@@ -237,11 +237,16 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 		code := strconv.Itoa(probe.DeclineResponseCode)
 		failureCode = &code
 	}
+	var failureID uuid.UUID
+	if probe.DeclineTransactionID != "" {
+		failureID = uuid.NewSHA1(sub.PspID, []byte("decline:"+probe.DeclineTransactionID))
+	}
 	if err := s.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
 		Rail:           models.Rail(rail),
 		SubscriptionID: &sub.ID,
 		FailureReason:  failureReason,
 		FailureCode:    failureCode,
+		FailureID:      failureID,
 		// The dunning worker's classifier, so a decline arriving over the
 		// webhook plane gets the same three-way answer.
 		Decline: decline.Classify(rail, normalize.FromPtr(failureCode)).Action,

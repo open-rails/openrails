@@ -157,6 +157,9 @@ type FailMembershipParams struct {
 	SubscriptionID *uuid.UUID
 	FailureReason  *string
 	FailureCode    *string
+	// FailureID is the durable identity of the provider attempt or intent. A
+	// replay keeps the same notification; distinct retries use distinct IDs.
+	FailureID uuid.UUID
 	// DeclinedAt is when the decline happened; zero means now. The retry
 	// schedule runs from it, so a decline seen late keeps the same retry days.
 	DeclinedAt time.Time

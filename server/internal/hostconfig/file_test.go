@@ -40,6 +40,8 @@ func TestFileReachesConfig(t *testing.T) {
 				switch sub := field.Field(j); sub.Kind() {
 				case reflect.Bool:
 					sub.SetBool(true)
+				case reflect.Int, reflect.Int64:
+					sub.SetInt(1)
 				case reflect.String:
 					sub.SetString("sandbox")
 				case reflect.Pointer:

@@ -66,15 +66,11 @@ func TestPlatformCardRemoval(t *testing.T) {
 			}
 			bt.mu.Unlock()
 			status, out := c.call(http.MethodDelete, "/payment-methods/"+id, "", nil)
-			pending := scenario == "local completion failed" || scenario == "response lost" || scenario == "delete unavailable" || scenario == "read forbidden"
+			pending := scenario == "local completion failed" || scenario == "delete unavailable" || scenario == "read forbidden"
 			if pending {
-				// The worker might already have verified a lost response.
-				require.Contains(t, []int{http.StatusAccepted, http.StatusNoContent}, status, "%v", out)
-				if scenario != "response lost" {
-					require.Equal(t, http.StatusAccepted, status, "%v", out)
-					status, _ := c.call(http.MethodPost, "/payment-methods", "", req)
-					require.GreaterOrEqual(t, status, 400, "accepted deletion blocks save replay")
-				}
+				require.Equal(t, http.StatusServiceUnavailable, status, "%v", out)
+				replayStatus, _ := c.call(http.MethodPost, "/payment-methods", "", req)
+				require.GreaterOrEqual(t, replayStatus, 400, "uncertain removal still fences save replay")
 				bt.mu.Lock()
 				bt.failDelete, bt.tokenReadStatus = false, 0
 				bt.mu.Unlock()
@@ -85,11 +81,13 @@ func TestPlatformCardRemoval(t *testing.T) {
 					_, err := w.pool.Exec(t.Context(), w.q(`DROP TRIGGER reject_card_removal ON billing.payment_methods; DROP FUNCTION billing.reject_card_removal();`))
 					require.NoError(t, err)
 				}
-				w.until(func() bool {
-					var done bool
-					require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status='succeeded' FROM billing.provider_intents WHERE idempotency_key=$1`), intents.TypePlatformMethodDelete+":"+methodID.UUID().String()).Scan(&done))
-					return done
-				}, "the existing worker completes card removal")
+				w.advance(time.Hour)
+				w.wake()
+				var state string
+				require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.payment_methods WHERE id=$1`), methodID.UUID()).Scan(&state))
+				require.Equal(t, "active", state, "worker activity cannot complete a failed user deletion")
+				status, out = c.call(http.MethodDelete, "/payment-methods/"+id, "", nil)
+				require.Equal(t, http.StatusNoContent, status, "explicit retry: %v", out)
 			} else {
 				require.Equal(t, http.StatusNoContent, status, "%v", out)
 			}
@@ -113,8 +111,13 @@ func TestPlatformCardRemoval(t *testing.T) {
 			require.Empty(t, list["data"], "%v", list)
 			status, out = c.call(http.MethodDelete, "/payment-methods/"+id, "", nil)
 			require.Equal(t, http.StatusNoContent, status, "%v", out)
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.provider_intents WHERE idempotency_key=$1`), intents.TypePlatformMethodDelete+":"+methodID.UUID().String()).Scan(&operations))
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.provider_intents WHERE idempotency_key=$1`), "manual:"+intents.TypePlatformMethodDelete+":"+methodID.UUID().String()).Scan(&operations))
 			require.Equal(t, 1, operations)
+			var queued int
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job j
+                JOIN billing.provider_intents i ON i.id::text=j.args->>'intent_id'
+                WHERE j.kind='openrails.provider_operation' AND i.intent_type=$1 AND i.payload->>'payment_method_id'=$2`), intents.TypePlatformMethodDelete, methodID.UUID().String()).Scan(&queued))
+			require.Zero(t, queued, "user deletion never schedules a background retry")
 			if scenario != "changed vault" {
 				status, _ = c.call(http.MethodPost, "/payment-methods", "", req)
 				require.GreaterOrEqual(t, status, 400, "removed cards cannot be restored by replay")
@@ -179,7 +182,7 @@ func TestPlatformCardRemovalRetainsReceipt(t *testing.T) {
 	c.must(http.MethodDelete, "/payment-methods/"+id, "", nil)
 	ctx := merchant.WithID(t.Context(), w.client[remote].MerchantID())
 	store := intents.NewStore(engine.Graph(w.rt).Runtime.DB)
-	row, err := store.GetByIdempotencyKey(ctx, intents.TypePlatformMethodDelete+":"+methodID.UUID().String())
+	row, err := store.GetByIdempotencyKey(ctx, "manual:"+intents.TypePlatformMethodDelete+":"+methodID.UUID().String())
 	require.NoError(t, err)
 	method, payer, err := intents.DeletedMethod(row)
 	require.NoError(t, err)
@@ -273,15 +276,19 @@ func TestPlatformCardRemovalBlocksLaterPayment(t *testing.T) {
 	bt.failDelete = true
 	bt.mu.Unlock()
 	status, out := c.call(http.MethodDelete, "/payment-methods/"+id, "", nil)
-	require.Equal(t, http.StatusAccepted, status, "%v", out)
+	require.Equal(t, http.StatusServiceUnavailable, status, "%v", out)
 	_, err = sale.buy(c, purchase)
-	require.Equal(t, "payment_method_stale", codeOf(err), "an accepted removal prevents a later payment using the card")
+	require.Equal(t, "payment_method_stale", codeOf(err), "an unconfirmed removal still fences a later payment using the card")
 	require.Empty(t, bt.salesOf("4111111111111111"), "the payment never reaches NMI")
 	require.Empty(t, completed(w.payments(remote, c.id)))
 	bt.mu.Lock()
 	bt.failDelete = false
 	bt.mu.Unlock()
-	w.until(func() bool { return len(c.must(http.MethodGet, "/payment-methods", "", nil)["data"].([]any)) == 0 }, "the worker completes removal")
+	w.advance(time.Hour)
+	w.wake()
+	require.Len(t, c.must(http.MethodGet, "/payment-methods", "", nil)["data"], 1, "no background completion")
+	c.must(http.MethodDelete, "/payment-methods/"+id, "", nil)
+	require.Empty(t, c.must(http.MethodGet, "/payment-methods", "", nil)["data"])
 }
 
 func TestPlatformCardRemovalMerchantIsolation(t *testing.T) {
@@ -316,8 +323,8 @@ func TestPlatformCardRemovalVaultCredentials(t *testing.T) {
 			saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"].String(), "token": bt.collect("4111111111111111")}))
 			id, err := billing.ParsePaymentMethodID(saved["id"].(string))
 			require.NoError(t, err)
-			// Pause scheduled retries so the credential change and explicit recovery
-			// run in a known order. Requests still use the ordinary durable runner.
+			// Pause unrelated background work while credential changes and explicit
+			// HTTP retries run in a known order.
 			stop, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			require.NoError(t, w.jobs.StopAndCancel(stop))
 			cancel()
@@ -325,13 +332,13 @@ func TestPlatformCardRemovalVaultCredentials(t *testing.T) {
 			bt.failDelete = true
 			bt.mu.Unlock()
 			status, out := c.call(http.MethodDelete, "/payment-methods/"+id.String(), "", nil)
-			require.Equal(t, http.StatusAccepted, status, "%v", out)
+			require.Equal(t, http.StatusServiceUnavailable, status, "%v", out)
 			rt := engine.Graph(w.rt).Runtime
 			ctx := merchant.WithID(t.Context(), w.client[remote].MerchantID())
 			store := intents.NewStore(rt.DB)
-			operation, err := store.GetByIdempotencyKey(ctx, intents.TypePlatformMethodDelete+":"+id.UUID().String())
+			operation, err := store.GetByIdempotencyKey(ctx, "manual:"+intents.TypePlatformMethodDelete+":"+id.UUID().String())
 			require.NoError(t, err)
-			require.Equal(t, intents.StatusUnknownNeedsVerify, operation.Status)
+			require.Contains(t, []string{intents.StatusUnknownNeedsVerify, intents.StatusFailedRetryable}, operation.Status)
 			path := "openrails/platform_vault/" + platformTenant
 			var credentials map[string]any
 			w.vault.Get(t, path, &credentials)
@@ -356,32 +363,27 @@ func TestPlatformCardRemovalVaultCredentials(t *testing.T) {
 				bt.applicationReadStatus = http.StatusServiceUnavailable
 			}
 			bt.mu.Unlock()
-			recovered, err := rt.IntentRunner().VerifyByID(ctx, operation.ID)
-			require.NoError(t, err)
+			status, out = c.call(http.MethodDelete, "/payment-methods/"+id.String(), "", nil)
 			if scenario == "rotated key" {
-				require.Equal(t, intents.StatusFailedRetryable, recovered.Status, "the original token still exists")
+				require.Equal(t, http.StatusNoContent, status, "%v", out)
 			} else {
-				require.Equal(t, intents.StatusUnknownNeedsVerify, recovered.Status, "missing credentials or another tenant's 404 cannot prove erasure")
-			}
-			bt.mu.Lock()
-			require.Contains(t, bt.tokens, id.UUID().String())
-			require.Empty(t, bt.deletedTokens)
-			bt.mu.Unlock()
-			var state, fence string
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status, park_reason FROM billing.payment_methods WHERE id=$1`), id.UUID()).Scan(&state, &fence))
-			require.Equal(t, "active", state, "unconfirmed erasure retains the fenced card")
-			require.Equal(t, "delete:"+operation.ID.String(), fence)
-			if scenario != "rotated key" {
+				require.Equal(t, http.StatusServiceUnavailable, status, "%v", out)
+				bt.mu.Lock()
+				require.Contains(t, bt.tokens, id.UUID().String())
+				require.Empty(t, bt.deletedTokens)
+				bt.mu.Unlock()
+				var state, fence string
+				require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status, park_reason FROM billing.payment_methods WHERE id=$1`), id.UUID()).Scan(&state, &fence))
+				require.Equal(t, "active", state, "unconfirmed erasure retains the fenced card")
+				require.Equal(t, "delete:"+operation.ID.String(), fence)
 				credentials["api_key"] = "platform-private-test"
 				w.vault.Put(t, path, credentials)
+				bt.mu.Lock()
+				bt.applicationReadStatus = 0
+				bt.mu.Unlock()
+				c.must(http.MethodDelete, "/payment-methods/"+id.String(), "", nil)
 			}
-			bt.mu.Lock()
-			bt.applicationReadStatus = 0
-			bt.mu.Unlock()
-			_, err = rt.IntentRunner().VerifyByID(ctx, operation.ID)
-			require.NoError(t, err)
-			c.must(http.MethodDelete, "/payment-methods/"+id.String(), "", nil)
-			recovered, err = store.Get(ctx, operation.ID)
+			recovered, err := store.Get(ctx, operation.ID)
 			require.NoError(t, err)
 			require.Equal(t, intents.StatusSucceeded, recovered.Status)
 			bt.mu.Lock()

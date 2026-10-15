@@ -56,7 +56,7 @@ func (h *HyperSwitchMethodDeleteHandler) admit(ctx context.Context, store *Store
 		return operation, paymentmethods.ErrPaymentMethodDeleteUnsafe
 	}
 	origin, actor := paymentMethodDeleteAuthority(ctx, pm.CustomerID)
-	key := TypeHyperSwitchMethodDelete + ":" + pm.ID.String()
+	key := manualMethodDeleteKey(TypeHyperSwitchMethodDelete, pm.ID)
 	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := h.DB.NewWithPgxTx(tx)
 		q := d.Gen(ctx)
@@ -108,7 +108,7 @@ func (h *HyperSwitchMethodDeleteHandler) admit(ctx context.Context, store *Store
 		}
 		configuration := merchants.Of(h.DB)
 		if configuration == nil {
-			return errors.New("merchant configuration is unavailable")
+			return merchants.ErrConfigUnavailable
 		}
 		account, ok, err := configuration.CustodianScopeByID(ctx, mid, *pm.CustodianID)
 		if err != nil {
@@ -119,7 +119,7 @@ func (h *HyperSwitchMethodDeleteHandler) admit(ctx context.Context, store *Store
 		}
 		binding, err := deletionBinding(account, h.Rails.Config)
 		if err != nil {
-			return err
+			return errors.Join(paymentmethods.ErrPaymentMethodProviderUnavailable, err)
 		}
 		operation, err = scoped.enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: models.CustodianHyperSwitch, CustodianID: *pm.CustodianID, IntentType: TypeHyperSwitchMethodDelete, IdempotencyKey: key, Origin: origin, Actor: actor, OriginReason: "user payment-method delete", NextAttemptAt: h.Clock.Now().UTC(), Inline: true, Payload: HyperSwitchMethodDeletePayload{CustomerID: pm.CustomerID, PaymentMethodID: pm.ID, DetachOnly: aliases.Total > 1, Instrument: charge.FreezeCustody(current), Binding: binding, Environment: account.Environment}})
 		if err != nil {

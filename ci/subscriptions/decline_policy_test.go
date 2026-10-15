@@ -55,6 +55,23 @@ func TestNMIScheduleDeclinePolicy(t *testing.T) {
 			w.settle()
 			sub := w.subscription(embedded, l.sub)
 			require.Equal(t, tc.status, string(sub.Status))
+			kind := "payment_method_failed"
+			wantRetry, wantAction := "scheduled", "update_payment_method"
+			if tc.status == "awaiting_method" {
+				wantRetry = "unknown" // the account updater is checking for a repaired card
+			} else if tc.status == "canceled" {
+				wantRetry, wantAction = "stopped", "resubscribe"
+			}
+			notice := l.c.notificationData(kind)
+			require.Equal(t, wantRetry, notice["retry_status"])
+			require.Equal(t, wantAction, notice["recovery_action"])
+			require.Equal(t, l.sub.String(), notice["subscription_id"])
+			require.Equal(t, tc.code, notice["failure_code"])
+			if tc.retry {
+				require.NotEmpty(t, notice["next_attempt_at"])
+			} else {
+				require.NotContains(t, notice, "next_attempt_at")
+			}
 			if !tc.retry {
 				require.Nil(t, nextRetry(sub))
 				w.advanceHealthyTo(w.clock.Now().Add(3 * day))

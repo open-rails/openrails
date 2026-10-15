@@ -20,6 +20,9 @@ import { RadioGroup, RadioGroupItem } from "#orck/components/ui/radio-group"
 import { Spinner } from "#orck/components/ui/spinner"
 import { useMessages } from "#orck/i18n/context"
 import { usePaymentMethods } from "#orck/react/hooks"
+import { useCustomerConfig } from "#orck/react/config"
+import { canSavePaymentMethod, routedPsps } from "#orck/psp"
+import { SavePaymentMethod } from "#orck/save-payment-method"
 import { useScopeProps } from "#orck/scope-context"
 import { cardText, RESET } from "./format"
 import { ErrorState, ListSkeleton } from "./section"
@@ -34,6 +37,7 @@ function eligibleCards(
 ): PaymentMethod[] {
   return methods.filter(
     (m) =>
+      m.health?.active !== false &&
       m.health?.expiry_status !== "expired" &&
       (!s.psp_id || !m.psp_id || m.psp_id === s.psp_id) &&
       (!s.rail || !m.rail || m.rail === s.rail)
@@ -50,6 +54,8 @@ export interface ChangeCardDialogProps {
    * null on success; the dialog then closes.
    */
   onConfirm: (paymentMethodId: string | null) => Promise<BillingError | null>
+  mode?: "change" | "resume"
+  description?: string
   appearance?: BillingAppearance
 }
 
@@ -59,6 +65,8 @@ export function ChangeCardDialog({
   onOpenChange,
   pending,
   onConfirm,
+  mode = "change",
+  description,
   appearance,
 }: ChangeCardDialogProps) {
   const scope = useScopeProps(appearance)
@@ -72,7 +80,7 @@ export function ChangeCardDialog({
     >
       <DialogContent
         showCloseButton={false}
-        className={`${scope.className} ${RESET} bg-popover text-popover-foreground`}
+        className={`${scope.className} ${RESET} max-h-[calc(100dvh-2rem)] overflow-y-auto bg-popover text-popover-foreground`}
         data-orck-theme={scope["data-orck-theme"]}
         style={scope.style}
       >
@@ -83,6 +91,9 @@ export function ChangeCardDialog({
             pending={pending}
             onCancel={() => onOpenChange(false)}
             onConfirm={onConfirm}
+            mode={mode}
+            description={description}
+            appearance={appearance}
           />
         ) : null}
       </DialogContent>
@@ -97,12 +108,18 @@ function ChangeCardForm({
   pending,
   onCancel,
   onConfirm,
+  mode,
+  description,
+  appearance,
 }: {
   subscription: Subscription
   name: string
   pending: boolean
   onCancel: () => void
   onConfirm: (paymentMethodId: string | null) => Promise<BillingError | null>
+  mode: "change" | "resume"
+  description?: string
+  appearance?: BillingAppearance
 }) {
   const m = useMessages()
   const { t } = m
@@ -111,26 +128,49 @@ function ChangeCardForm({
   const current = subscription.payment_method_id ?? FOLLOW_DEFAULT
   const [selected, setSelected] = React.useState(current)
   const [error, setError] = React.useState<BillingError | null>(null)
-  const cards = methods.methods
-    ? eligibleCards(subscription, methods.methods)
-    : null
+  const [adding, setAdding] = React.useState(false)
+  const [submitting, setSubmitting] = React.useState(false)
+  const initialized = React.useRef(false)
+  const busy = pending || submitting
+  const cards = React.useMemo(
+    () =>
+      methods.methods ? eligibleCards(subscription, methods.methods) : null,
+    [methods.methods, subscription]
+  )
+  React.useEffect(() => {
+    if (mode !== "resume" || cards === null || initialized.current) return
+    initialized.current = true
+    setSelected(
+      cards.some((card) => card.id === current) ? current : (cards[0]?.id ?? "")
+    )
+    setAdding(cards.length === 0)
+  }, [cards, current, mode])
   const currency = subscription.price?.currency?.toUpperCase()
   const defaultCard = currency
     ? cards?.find((c) => (c.default_currencies ?? []).includes(currency))
     : undefined
   const choices = [
-    ...(defaultCard ? [{ id: FOLLOW_DEFAULT, card: defaultCard }] : []),
+    ...(mode === "change" && defaultCard
+      ? [{ id: FOLLOW_DEFAULT, card: defaultCard }]
+      : []),
     ...(cards ?? []).map((card) => ({ id: card.id, card })),
   ]
   const canSwitch = choices.some((c) => c.id !== current)
+  const selectable = choices.some((c) => c.id === selected)
 
   const confirm = async () => {
-    if (!selected || selected === current || pending) return
+    if (!selectable || (mode === "change" && selected === current) || busy)
+      return
     setError(null)
-    const result = await onConfirm(
-      selected === FOLLOW_DEFAULT ? null : selected
-    )
-    if (result) setError(result)
+    setSubmitting(true)
+    try {
+      const result = await onConfirm(
+        selected === FOLLOW_DEFAULT ? null : selected
+      )
+      if (result) setError(result)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   let list: React.ReactNode
@@ -138,6 +178,40 @@ function ChangeCardForm({
     list = <ErrorState error={methods.error} onRetry={methods.refetch} />
   } else if (cards === null) {
     list = <ListSkeleton rows={2} />
+  } else if (mode === "resume") {
+    list = adding ? (
+      <ResumeCardEntry
+        subscription={subscription}
+        appearance={appearance}
+        onSaved={(id) => {
+          setSelected(id)
+          setAdding(false)
+          methods.refetch()
+        }}
+      />
+    ) : (
+      <label className="grid gap-2 text-sm">
+        {t("changeCard.title", { name })}
+        <select
+          aria-label={t("changeCard.title", { name })}
+          disabled={busy}
+          value={selectable ? selected : ""}
+          onChange={(event) => setSelected(event.target.value)}
+          className="h-10 rounded-md border border-input bg-background px-3"
+        >
+          {!selectable ? (
+            <option value="" disabled>
+              {t("resume.chooseCard")}
+            </option>
+          ) : null}
+          {choices.map(({ id, card }) => (
+            <option key={id} value={id}>
+              {cardText(card.card, m)}
+            </option>
+          ))}
+        </select>
+      </label>
+    )
   } else {
     list = (
       <RadioGroup
@@ -145,7 +219,7 @@ function ChangeCardForm({
         onValueChange={(next) => {
           if (typeof next === "string" && next) setSelected(next)
         }}
-        disabled={pending}
+        disabled={busy}
         aria-label={t("changeCard.title", { name })}
         className="grid gap-0"
       >
@@ -159,7 +233,7 @@ function ChangeCardForm({
               data-testid="change-card-option"
               className={cn(
                 "flex cursor-pointer items-center gap-3 py-1.5 select-none",
-                pending && "cursor-default"
+                busy && "cursor-default"
               )}
             >
               <RadioGroupItem id={id} value={value} />
@@ -185,23 +259,42 @@ function ChangeCardForm({
   }
 
   return (
-    <form
-      className="grid gap-5"
-      noValidate
-      onSubmit={(event) => {
-        event.preventDefault()
-        void confirm()
-      }}
-    >
+    <div className="grid gap-5">
       <DialogHeader>
-        <DialogTitle>{t("changeCard.title", { name })}</DialogTitle>
+        <DialogTitle>
+          {t(mode === "resume" ? "resume.title" : "changeCard.title", { name })}
+        </DialogTitle>
         <DialogDescription>
-          {cards !== null && !canSwitch
-            ? t("changeCard.none")
-            : t("changeCard.description")}
+          {description ??
+            (cards !== null && !canSwitch
+              ? t("changeCard.none")
+              : t("changeCard.description"))}
         </DialogDescription>
       </DialogHeader>
       {list}
+      {cards !== null && methods.error ? (
+        <ErrorState error={methods.error} onRetry={methods.refetch} />
+      ) : null}
+      {mode === "resume" &&
+      !adding &&
+      cards !== null &&
+      !selectable &&
+      !methods.loading &&
+      !methods.error ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          {t("resume.savedCardUnavailable")}
+        </p>
+      ) : null}
+      {mode === "resume" && cards !== null ? (
+        <Button
+          type="button"
+          variant="link"
+          disabled={busy || (adding && cards.length === 0)}
+          onClick={() => setAdding(!adding)}
+        >
+          {adding ? t("changeCard.title", { name }) : t("paymentMethods.add")}
+        </Button>
+      ) : null}
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {m.error(error)}
@@ -211,19 +304,79 @@ function ChangeCardForm({
         <Button
           type="button"
           variant="outline"
-          disabled={pending}
+          disabled={busy}
           onClick={onCancel}
         >
           {t("common.cancel")}
         </Button>
-        <Button
-          type="submit"
-          disabled={pending || !selected || selected === current}
-        >
-          {pending ? <Spinner /> : null}
-          {t("changeCard.confirm")}
-        </Button>
+        {!adding ? (
+          <Button
+            type="button"
+            onClick={() => void confirm()}
+            disabled={
+              busy || !selectable || (mode === "change" && selected === current)
+            }
+          >
+            {busy ? <Spinner /> : null}
+            {t(mode === "resume" ? "resume.confirm" : "changeCard.confirm")}
+          </Button>
+        ) : null}
       </DialogFooter>
-    </form>
+    </div>
+  )
+}
+
+function ResumeCardEntry({
+  subscription,
+  appearance,
+  onSaved,
+}: {
+  subscription: Subscription
+  appearance?: BillingAppearance
+  onSaved: (id: string) => void
+}) {
+  const { t } = useMessages()
+  const config = useCustomerConfig()
+  const available = routedPsps(config.config?.payment.psps ?? []).filter(
+    (psp) =>
+      canSavePaymentMethod(psp) &&
+      (!subscription.psp_id || psp.psp_id === subscription.psp_id) &&
+      (!subscription.rail || psp.rail === subscription.rail)
+  )
+  const [selected, select] = React.useState<string>()
+  const psp = available.find((item) => item.psp_id === selected) ?? available[0]
+  if (config.error)
+    return <ErrorState error={config.error} onRetry={config.refetch} />
+  if (config.loading) return <ListSkeleton rows={2} />
+  if (!psp)
+    return (
+      <p role="status" className="text-sm text-muted-foreground">
+        {t("paymentMethods.addUnavailable")}
+      </p>
+    )
+  return (
+    <div className="grid gap-4">
+      {available.length > 1 ? (
+        <label className="grid gap-2 text-sm">
+          {t("paymentMethods.provider")}
+          <select
+            value={psp.psp_id}
+            onChange={(event) => select(event.target.value)}
+          >
+            {available.map((item) => (
+              <option key={item.psp_id} value={item.psp_id}>
+                {item.display_name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <SavePaymentMethod
+        key={psp.psp_id}
+        psp={psp}
+        appearance={appearance}
+        onSaved={onSaved}
+      />
+    </div>
   )
 }

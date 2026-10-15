@@ -72,7 +72,7 @@ func isSelfServicePaymentMethodDelete(in gen.BillingProviderIntent) bool {
 		return err == nil && p.CustomerID == actor
 	case TypeNMIPaymentMethodDelete:
 		p, err := decodeNMIVaultDeletePayload(in)
-		if err != nil || in.Rail != "nmi" || in.PspID == nil || *in.PspID == uuid.Nil || in.CustodianID != nil || in.IdempotencyKey != NMIPaymentMethodDeleteIdempotencyKey(p.PaymentMethodID) {
+		if err != nil || in.Rail != "nmi" || in.PspID == nil || *in.PspID == uuid.Nil || in.CustodianID != nil || !nativeMethodDeleteKeyMatches(in.IdempotencyKey, p.PaymentMethodID) {
 			return false
 		}
 		payer, err := uuid.Parse(p.UserID)

@@ -198,6 +198,11 @@ func TestCCBillNotificationFailureRollsBackTransition(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.sendCCBill(ctx, failure.kind, failure.fields))
 	require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, m.sub).Status)
 	require.Equal(t, 1, m.c.notificationCount("payment_method_failed"))
+	notice := m.c.notificationData("payment_method_failed")
+	require.Equal(t, "scheduled", notice["retry_status"])
+	require.Equal(t, "update_payment_method", notice["recovery_action"])
+	require.NotEmpty(t, notice["next_attempt_at"])
+	require.Equal(t, m.sub.String(), notice["subscription_id"])
 	require.Equal(t, http.StatusOK, w.sendCCBill(ctx, failure.kind, failure.fields))
 	require.Equal(t, 1, m.c.notificationCount("payment_method_failed"), "provider replay is the same durable source event")
 }

@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 )
 
 // Store persists intents on the ledger. Producers call Enqueue/Supersede from
@@ -414,7 +413,7 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 		if !reflect.DeepEqual(row.DestructiveActionID, p.DestructiveActionID) {
 			return errors.New("provider operation belongs to another destructive command")
 		}
-		if OperationTerminal(row.Status) {
+		if OperationTerminal(row.Status) || ManualPaymentMethodDelete(row) {
 			return nil
 		}
 		wake := row.NextAttemptAt
@@ -826,11 +825,6 @@ func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 	return s.park(ctx, id, nextAttemptAt, reason, nil)
 }
 
-// ParkForRecovery marks a known-unsent operation for the catch-up wakeup.
-func (s *Store) ParkForRecovery(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
-	return s.park(ctx, id, nextAttemptAt, reason, []byte(`{"recovery_held":true}`))
-}
-
 func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, recovery []byte) error {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
@@ -953,20 +947,6 @@ func (s *Store) LiveTierChange(ctx context.Context, subscriptionID uuid.UUID) (g
 		return gen.BillingProviderIntent{}, err
 	}
 	return s.db.Gen(ctx).GetLiveTierChangeProviderIntent(ctx, gen.GetLiveTierChangeProviderIntentParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID})
-}
-
-// CheckRecovery holds writes on an inherited account until provider observation
-// and financial receipt recovery complete. First purchases and card enrollment
-// keep their own request idempotency; they are not old-obligation recovery.
-func (s *Store) CheckRecovery(ctx context.Context, in gen.BillingProviderIntent, now time.Time) error {
-	switch in.IntentType {
-	case subscriptions.TypeInitialMembership, "nmi_sale", TypeNMICardVault:
-		return nil
-	}
-	if in.PspID == nil {
-		return providerrecovery.CheckMerchant(ctx, s.db, in.MerchantID, now)
-	}
-	return providerrecovery.CheckPSP(ctx, s.db, in.MerchantID, *in.PspID, now)
 }
 
 // textOrNil is v, or nil when it is blank.

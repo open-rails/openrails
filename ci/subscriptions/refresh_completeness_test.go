@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/providerrecovery"
@@ -24,7 +23,7 @@ import (
 // merchant's refresh incomplete: an NMI PSP beside a CCBill PSP declared with
 // no credentials at all completes, and the CCBill PSP joins the first pass
 // after it is armed. A card PSP that loses its credentials is skipped the same
-// way while its recovery stays pending.
+// way; no missing observation grants or revokes write authority.
 func TestProviderRefreshSkipsUnarmedPSPs(t *testing.T) {
 	t.Parallel()
 	dl := newDataLinkFake(t)
@@ -47,9 +46,6 @@ func TestProviderRefreshSkipsUnarmedPSPs(t *testing.T) {
 	w.start()
 	enroll(t, w, "nmi", embedded)
 	member := importCCBill(t, w)
-	mid := w.client[embedded].MerchantID()
-	ctx := merchant.WithID(t.Context(), mid)
-	db := engine.Graph(w.rt).Runtime.DB
 
 	job := w.refreshProviders()
 	require.Empty(t, job.Errors, "an unarmed CCBill PSP is not an incomplete provider")
@@ -57,14 +53,12 @@ func TestProviderRefreshSkipsUnarmedPSPs(t *testing.T) {
 		require.NotNil(t, w.refreshWatermark(w.psp["nmi"], domain), "the armed NMI PSP refreshes: %s", domain)
 	}
 	require.Nil(t, w.refreshWatermark(w.psp["ccbill"], "events"), "nothing reads the unarmed CCBill PSP")
-	require.NoError(t, providerrecovery.CheckPSP(ctx, db, mid.UUID(), w.psp["nmi"].UUID(), w.clock.Now()))
 	require.Zero(t, w.workerFailures(riverjobs.KindProviderRefreshMerchant))
 
 	nmiSecrets := w.psps["nmi"].Secrets
 	armed := map[string]string{"salt": "e2e-ccbill-salt", "datalink_username": "e2e-datalink", "datalink_password": "e2e-datalink-password"}
 	w.declare = declare(armed, nil)
 	w.restart()
-	db = engine.Graph(w.rt).Runtime.DB
 	dl.list(member.railSub, ccbillDate(member.paidThrough), "")
 	w.refreshProviders()
 	require.NotNil(t, w.refreshWatermark(w.psp["ccbill"], "events"), "the armed CCBill PSP joins the next pass")
@@ -77,27 +71,23 @@ func TestProviderRefreshSkipsUnarmedPSPs(t *testing.T) {
 	}
 	w.declare = declare(armed, unarmedNMI)
 	w.restart()
-	db = engine.Graph(w.rt).Runtime.DB
-	w.advance(providerrecovery.StaleAfter + time.Hour)
+	w.advance(2*providerrecovery.RefreshInterval + time.Hour)
 	nmiReads := w.nmi.Reads()["query:transaction"]
 	job = w.refreshProviders()
 	require.Empty(t, job.Errors, "an NMI PSP without its security key is not refreshable, not incomplete")
 	require.Equal(t, nmiReads, w.nmi.Reads()["query:transaction"], "nothing reads the unarmed NMI PSP")
-	require.ErrorIs(t, providerrecovery.CheckPSP(ctx, db, mid.UUID(), w.psp["nmi"].UUID(), w.clock.Now()), providerrecovery.ErrPending,
-		"its book stays held until it is read")
 
 	w.declare = declare(armed, nmiSecrets)
 	w.restart()
-	db = engine.Graph(w.rt).Runtime.DB
 	w.refreshProviders()
-	require.NoError(t, providerrecovery.CheckPSP(ctx, db, mid.UUID(), w.psp["nmi"].UUID(), w.clock.Now()), "re-armed, it recovers on the next pass")
+	require.Greater(t, w.nmi.Reads()["query:transaction"], nmiReads, "re-armed credentials restore provider observation")
 	require.Zero(t, w.workerFailures(riverjobs.KindProviderRefreshMerchant))
 }
 
 // A refresh that read every window but found receipts only an operator can
 // settle has done its work: the job completes, no stall is raised (a standing
-// one resolves), the findings stay open and recovery stays pending, so a
-// payment on the PSP is still refused. A failed read still fails the job.
+// one resolves), and the findings retain their evidence while ordinary
+// payments remain allowed. A failed read still fails the job.
 func TestProviderRefreshCompletesWhileFindingsAwaitOperator(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
@@ -105,9 +95,7 @@ func TestProviderRefreshCompletesWhileFindingsAwaitOperator(t *testing.T) {
 	w.start()
 	w.refreshProviders()
 	mid, psp := w.client[embedded].MerchantID(), w.psp["nmi"]
-	ctx := merchant.WithID(t.Context(), mid)
 	rt := engine.Graph(w.rt).Runtime
-	require.NoError(t, providerrecovery.CheckPSP(ctx, rt.DB, mid.UUID(), psp.UUID(), w.clock.Now()))
 	c := w.newCustomer()
 	method := c.saveCard("nmi", visa)
 	invoice := observedInvoice(t, w, c, 50_000_000)
@@ -126,6 +114,7 @@ func TestProviderRefreshCompletesWhileFindingsAwaitOperator(t *testing.T) {
 	stray := w.nmi.AddSchedule(nmimock.Schedule{Vault: w.nmi.AddVault(visa), Plan: tier.plan, Amount: tier.amount, Days: 30, NextBilling: w.clock.Now().Add(5 * day)})
 	w.armDestructive()
 	completed := w.refreshWatermark(psp, "completed_events")
+	require.NotNil(t, completed)
 	w.advance(time.Hour)
 	job := w.refreshProviders()
 	require.Empty(t, job.Errors, "operator-actionable findings are not a failed read")
@@ -138,15 +127,13 @@ func TestProviderRefreshCompletesWhileFindingsAwaitOperator(t *testing.T) {
 	require.NotContains(t, w.openFindings(strayFinding), stray)
 	w.advance(time.Hour)
 	job = w.refreshProviders()
-	require.Empty(t, job.Errors, "a dismissed stray schedule still holds recovery without failing the job")
+	require.Empty(t, job.Errors, "a dismissed stray schedule does not fail the observation job")
 
-	require.Equal(t, completed, w.refreshWatermark(psp, "completed_events"), "held recovery never advances completed coverage")
-	require.ErrorIs(t, providerrecovery.CheckPSP(ctx, rt.DB, mid.UUID(), psp.UUID(), w.clock.Now()), providerrecovery.ErrPending)
+	require.Equal(t, completed, w.refreshWatermark(psp, "completed_events"), "unresolved financial evidence remains incomplete in the report, without gating payments")
 	answer := payNMIInvoice(t.Context(), w, c, invoice, method, "held-recovery")
 	require.NoError(t, answer.err)
-	require.Equal(t, http.StatusServiceUnavailable, answer.status, string(answer.body))
-	require.Contains(t, string(answer.body), "billing is paused while provider recovery completes")
-	require.Empty(t, w.nmi.Attempts(), "no charge while recovery is held")
+	require.Equal(t, http.StatusOK, answer.status, string(answer.body))
+	require.Len(t, w.nmi.Attempts(), 1, "unresolved findings do not gate payment")
 
 	require.Zero(t, w.workerFailures(kind), "a completed refresh ends the failure streak")
 	report, err := rt.RiverProgress(t.Context())
@@ -162,6 +149,7 @@ func TestProviderRefreshCompletesWhileFindingsAwaitOperator(t *testing.T) {
 	require.NoError(t, monitor.RaiseAlerts(t.Context(), riverjobs.ProgressReport{CheckedAt: w.clock.Now(), Progressing: true, Kinds: []riverjobs.KindProgress{*health}}))
 	require.NotContains(t, w.openFindings(string(alerting.FindingWorkerStalled)), kind, "the stall resolves once the refresh completes")
 
+	beforeFailedRead := w.refreshWatermark(psp, "completed_events")
 	w.readUnavailable("nmi", true)
 	w.advance(time.Hour)
 	id, _, err := riverjobs.EnqueueMerchantRefresh(t.Context(), w.jobs, mid.UUID(), openrails.QueueBilling)
@@ -174,6 +162,7 @@ func TestProviderRefreshCompletesWhileFindingsAwaitOperator(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, failed.Errors[0].Error, "provider refresh incomplete: provider=1")
 	require.Positive(t, w.workerFailures(kind), "a failed read is a failure")
+	require.Equal(t, beforeFailedRead, w.refreshWatermark(psp, "completed_events"), "a failed provider read does not advance completed coverage")
 	w.readUnavailable("nmi", false)
 }
 

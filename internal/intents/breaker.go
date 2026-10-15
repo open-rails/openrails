@@ -106,6 +106,14 @@ func (b *VolumeBreaker) Check(ctx context.Context, intent gen.BillingProviderInt
 	if err := b.db.AssertMerchantScope(ctx, "destructive-volume breaker"); err != nil {
 		return false, "", err
 	}
+	// Customer card removals and accepted customer cancellation consequences
+	// already passed request admission. Keep their attempt audit without a
+	// second operator bulk hold when delayed work becomes due.
+	if isSelfServicePaymentMethodDelete(intent) || isAcceptedCustomerCancel(intent) {
+		return false, "", b.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			return admit(ctx, b.db.NewWithPgxTx(tx))
+		})
+	}
 	err = b.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := b.db.NewWithPgxTx(tx)
 		if err := d.Gen(ctx).LockDestructiveBreaker(ctx, intent.MerchantID); err != nil {
@@ -211,4 +219,21 @@ func (b *VolumeBreaker) finding(ctx context.Context, d *db.DB, merchantID uuid.U
 		return gen.BillingReconciliationFinding{}, false, err
 	}
 	return row, true, nil
+}
+
+// These rows are emitted by customer cancellation admission. Their handler
+// still rechecks the captured subscription, account ownership and relevance.
+func isAcceptedCustomerCancel(in gen.BillingProviderIntent) bool {
+	if in.Origin != string(OriginUser) || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.SubscriptionID == nil || *in.SubscriptionID == uuid.Nil || in.PspID == nil || *in.PspID == uuid.Nil || in.Actor == nil {
+		return false
+	}
+	if actor, err := uuid.Parse(*in.Actor); err != nil || actor == uuid.Nil {
+		return false
+	}
+	switch in.IntentType {
+	case TypeNMIDeleteSubscription, TypeCCBillCancelSubscription, TypeStripeCancelSubscription:
+		return true
+	default:
+		return false
+	}
 }

@@ -78,6 +78,7 @@ var Tables = map[string]Table{
 	"rebill_cycles":                   {Rows, "rows are deleted 25 months (761 days) after due_at, once their attempts are gone."},
 	"nmi_history_months":              {Rows, "rows are deleted 25 months (761 days) after their month."},
 	"idempotency_keys":                {Rows, "rows are deleted at expires_at."},
+	"user_destructive_reservations":   {Rows, "rows are deleted 24 hours after reserved_at."},
 	"failed_usage_windows":            {Rows, "rows are deleted once their window has ended."},
 	"meter_period_quantities":         {Rows, "rows are deleted 100 days after period_starts_at."},
 	"solana_pay_references":           {Rows, "settled references are deleted after their 7-day watch window."},

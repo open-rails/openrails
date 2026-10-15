@@ -368,7 +368,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		}
 		if err := NewNotificationService(txdb).CreateIfAbsent(ctx, &models.NotificationEvent{
 			ID: uuid.NewSHA1(subscription.ID, []byte("cancel:user:"+now.UTC().Format(time.RFC3339Nano))), CustomerID: subscription.CustomerID, EventType: models.NotificationPremiumEnded, CreatedAt: now,
-			Data: billing.NotificationData{Reason: string(PremiumEndReasonUserCancel), SubscriptionID: billing.SubscriptionID(subscription.ID)},
+			Data: billing.NotificationData{Reason: string(PremiumEndReasonUserCancel), SubscriptionID: billing.SubscriptionID(subscription.ID), ProductID: billing.ProductID(subscription.ProductID)},
 		}); err != nil {
 			return fmt.Errorf("record cancellation notification: %w", err)
 		}

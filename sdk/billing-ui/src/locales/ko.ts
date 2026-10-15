@@ -84,6 +84,9 @@ export const ko: BillingUiMessageBundle = {
     changePlanLabel: "{name} 플랜 변경",
   },
   resume: {
+    chooseCard: "결제 수단 선택",
+    savedCardUnavailable:
+      "저장된 카드를 사용할 수 없습니다. 다른 카드를 선택하거나 추가하세요.",
     title: "{name}을(를) 다시 시작할까요?",
     description:
       "구독은 {date}에 갱신되며, 그때 {price}이(가) 카드로 청구되고 해지할 때까지 매 결제 주기마다 청구됩니다.",
@@ -175,7 +178,7 @@ export const ko: BillingUiMessageBundle = {
       "활성 구독에 사용 중인 카드는 다른 카드로 바꾼 후 삭제할 수 있습니다.",
     removeConfirm: "카드 삭제",
     removed: "카드를 삭제했습니다.",
-    removePending: "삭제를 처리하고 있습니다.",
+    removeFailed: "카드 삭제를 확인할 수 없습니다. 다시 시도해 주세요.",
     inUse:
       "이 카드는 활성 구독의 결제에 사용 중입니다. 먼저 해당 구독을 다른 카드로 변경하세요.",
   },

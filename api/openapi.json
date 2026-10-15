@@ -3004,7 +3004,9 @@
           "root": "root:customer:manage"
         },
         "x-openrails-errors": [
+          "default_payment_method_required",
           "invalid_param",
+          "payment_method_stale",
           "service_unavailable",
           "solana_rpc_unavailable",
           "subscription_not_found"
@@ -3757,7 +3759,9 @@
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
           "authentication_required",
+          "default_payment_method_required",
           "invalid_param",
+          "payment_method_stale",
           "service_unavailable",
           "solana_rpc_unavailable",
           "subscription_not_found"
@@ -4343,6 +4347,143 @@
           "subscription_change_unsupported_on_rail",
           "subscription_not_active",
           "subscription_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer",
+          "request"
+        ]
+      }
+    },
+    "/v1/admin/customers/{customer_id}/access-tenure": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entitlement",
+            "in": "query",
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTenure"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:customer:read",
+          "root": "root:customer:read"
+        },
+        "x-openrails-errors": [
+          "invalid_param",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/me/access-tenure": {
+      "get": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "at",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entitlement",
+            "in": "query",
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTenure"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "authentication_required",
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -8161,9 +8302,6 @@
           }
         ],
         "responses": {
-          "202": {
-            "description": "Accepted"
-          },
           "204": {
             "description": "No Content"
           },
@@ -11975,7 +12113,9 @@
         "x-openrails-mounted-when": "customer_network",
         "x-openrails-errors": [
           "authentication_required",
+          "default_payment_method_required",
           "invalid_param",
+          "payment_method_stale",
           "service_unavailable",
           "solana_rpc_unavailable",
           "subscription_not_found"
@@ -12234,9 +12374,6 @@
           }
         ],
         "responses": {
-          "202": {
-            "description": "Accepted"
-          },
           "204": {
             "description": "No Content"
           },
@@ -12621,6 +12758,32 @@
   },
   "components": {
     "schemas": {
+      "AccessTenure": {
+        "type": "object",
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "seconds": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "as_of",
+          "seconds"
+        ]
+      },
       "AcknowledgeHostEventsParams": {
         "type": "object",
         "properties": {

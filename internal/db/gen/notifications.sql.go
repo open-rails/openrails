@@ -125,3 +125,50 @@ func (q *Queries) PremiumEndedNotificationExistsSince(ctx context.Context, arg P
 	err := row.Scan(&found)
 	return found, err
 }
+
+const subscriptionNotificationAccess = `-- name: SubscriptionNotificationAccess :one
+SELECT COALESCE(bool_or(starts_at <= $1::timestamptz AND closes_at > $1::timestamptz), false)::boolean AS retained,
+       CASE WHEN bool_or(starts_at <= $1::timestamptz AND closes_at = 'infinity'::timestamptz) THEN '0001-01-01 00:00:00+00'::timestamptz
+            ELSE COALESCE(max(closes_at) FILTER (WHERE starts_at <= $1::timestamptz AND closes_at > $1::timestamptz), '0001-01-01 00:00:00+00'::timestamptz) END::timestamptz AS retained_until,
+       COALESCE(max(closes_at) FILTER (WHERE closes_at <= $1::timestamptz), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS closed_at
+FROM (
+    SELECT starts_at, LEAST(COALESCE(ends_at, 'infinity'::timestamptz), COALESCE(revoked_at, 'infinity'::timestamptz)) AS closes_at
+    FROM billing.product_access access
+    WHERE access.merchant_id = $2::uuid AND access.customer_id = $3::uuid
+      AND access.deleted_at IS NULL
+      AND access.product_id IN (
+          SELECT owned.product_id FROM billing.product_access owned
+          WHERE owned.merchant_id = access.merchant_id AND owned.customer_id = access.customer_id
+            AND owned.source_type IN ('subscription', 'grace') AND owned.source_id = $4::text
+            AND owned.deleted_at IS NULL
+      )
+) AS windows
+`
+
+type SubscriptionNotificationAccessParams struct {
+	AtTime         time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	SubscriptionID string
+}
+
+type SubscriptionNotificationAccessRow struct {
+	Retained      bool
+	RetainedUntil time.Time
+	ClosedAt      time.Time
+}
+
+// The access ledger, rather than billing status, determines whether stopping a
+// subscription actually ended membership. A future grant after a gap does not
+// mean that access remains active now.
+func (q *Queries) SubscriptionNotificationAccess(ctx context.Context, arg SubscriptionNotificationAccessParams) (SubscriptionNotificationAccessRow, error) {
+	row := q.db.QueryRow(ctx, subscriptionNotificationAccess,
+		arg.AtTime,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.SubscriptionID,
+	)
+	var i SubscriptionNotificationAccessRow
+	err := row.Scan(&i.Retained, &i.RetainedUntil, &i.ClosedAt)
+	return i, err
+}

@@ -43,7 +43,7 @@ func DecodeHyperSwitchMethodDelete(in gen.BillingProviderIntent) (HyperSwitchMet
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return p, err
 	}
-	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeHyperSwitchMethodDelete || in.Rail != models.CustodianHyperSwitch || in.PspID != nil || in.SubscriptionID != nil || in.PaymentID != nil || in.PriceID != nil || (in.Origin != string(OriginUser) && in.Origin != string(OriginAdmin)) || in.CustodianID == nil || p.CustomerID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Instrument.Custodian != models.CustodianHyperSwitch || p.Instrument.CustodianID == nil || *p.Instrument.CustodianID != *in.CustodianID || p.Instrument.RailCustomerRef == "" || p.Instrument.RailMethodRef == "" || p.Environment != "test" && p.Environment != "live" || in.IdempotencyKey != TypeHyperSwitchMethodDelete+":"+p.PaymentMethodID.String() {
+	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeHyperSwitchMethodDelete || in.Rail != models.CustodianHyperSwitch || in.PspID != nil || in.SubscriptionID != nil || in.PaymentID != nil || in.PriceID != nil || (in.Origin != string(OriginUser) && in.Origin != string(OriginAdmin)) || in.CustodianID == nil || p.CustomerID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Instrument.Custodian != models.CustodianHyperSwitch || p.Instrument.CustodianID == nil || *p.Instrument.CustodianID != *in.CustodianID || p.Instrument.RailCustomerRef == "" || p.Instrument.RailMethodRef == "" || p.Environment != "test" && p.Environment != "live" || !methodDeleteKeyMatches(TypeHyperSwitchMethodDelete, in.IdempotencyKey, p.PaymentMethodID) {
 		return p, paymentmethods.ErrPaymentMethodDeleteUnsafe
 	}
 	if err := p.Instrument.ValidateCustody(); err != nil {
@@ -53,7 +53,7 @@ func DecodeHyperSwitchMethodDelete(in gen.BillingProviderIntent) (HyperSwitchMet
 }
 
 // The native DELETE contract alone permits exact retries after uncertainty.
-// Verification only requeues through the runner's ordinary mutation gates.
+// Only a later explicit request can repeat it through the mutation gates.
 type HyperSwitchMethodDeleteHandler struct {
 	DB    *db.DB
 	Rails *paymentmethods.RailPaymentMethodService
@@ -192,7 +192,7 @@ func (h *HyperSwitchMethodDeleteHandler) complete(ctx context.Context, in gen.Bi
 		if _, err := mandates.EndForPaymentMethod(ctx, q, in.MerchantID, p.PaymentMethodID, mandates.EndPaymentMethodRemoved, h.Clock.Now()); err != nil {
 			return err
 		}
-		n, err := q.DeleteFencedPaymentMethod(ctx, gen.DeleteFencedPaymentMethodParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, OperationID: in.ID})
+		n, err := q.RemoveFencedCustodianPaymentMethod(ctx, gen.RemoveFencedCustodianPaymentMethodParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, OperationID: in.ID, Now: h.Clock.Now().UTC()})
 		if err != nil {
 			return err
 		}

@@ -26,7 +26,7 @@ func (h *PlatformMethodDeleteHandler) admit(ctx context.Context, store *Store, p
 		return operation, paymentmethods.ErrPaymentMethodDeleteUnsafe
 	}
 	origin, actor := paymentMethodDeleteAuthority(ctx, pm.CustomerID)
-	key := TypePlatformMethodDelete + ":" + pm.ID.String()
+	key := manualMethodDeleteKey(TypePlatformMethodDelete, pm.ID)
 	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := h.DB.NewWithPgxTx(tx)
 		q := d.Gen(ctx)
@@ -78,7 +78,7 @@ func (h *PlatformMethodDeleteHandler) admit(ctx context.Context, store *Store, p
 		}
 		configuration := merchants.Of(h.DB)
 		if configuration == nil {
-			return errors.New("merchant configuration is unavailable")
+			return merchants.ErrConfigUnavailable
 		}
 		account, ok, err := configuration.CustodianScopeByID(ctx, mid, *pm.CustodianID)
 		if err != nil {

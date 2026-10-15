@@ -76,6 +76,18 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 	terminal := false
 	err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(args.MerchantID), "provider operation", func(ctx context.Context) error {
 		now := workerNow(w.Clock)
+		prior, err := store.Get(ctx, args.IntentID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			terminal = true
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if intents.ManualPaymentMethodDelete(prior) {
+			terminal = true // Retire only this obsolete job; never execute the request.
+			return nil
+		}
 		row, err := store.PrepareDispatch(ctx, args.IntentID, now)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// The scoped ledger is authoritative. An old JSON-addressed wake
@@ -97,7 +109,7 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 		// its ordinary retry date. This check survives either actor crashing
 		// between completion and the optional inline wakeup.
 		if intents.IsRecoveryHeld(row) && (row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.After(now)) {
-			if blocked, _ := intents.GateExecution(ctx, writeposture.View{Config: w.Config, DB: w.DB}, row.MerchantID, intents.Origin(row.Origin)); !blocked && store.CheckRecovery(ctx, row, now) == nil {
+			if blocked, _ := intents.GateExecution(ctx, writeposture.View{Config: w.Config, DB: w.DB}, row.MerchantID, intents.Origin(row.Origin)); !blocked {
 				if err := store.WakeRecoveryHeld(ctx, row.ID, now); err != nil {
 					return err
 				}

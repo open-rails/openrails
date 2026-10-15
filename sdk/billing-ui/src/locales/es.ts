@@ -84,6 +84,9 @@ export const es: BillingUiMessageBundle = {
     changePlanLabel: "Cambiar el plan de {name}",
   },
   resume: {
+    chooseCard: "Elige un método de pago",
+    savedCardUnavailable:
+      "Esta tarjeta guardada no está disponible. Elige otra tarjeta o añade una.",
     title: "¿Reanudar {name}?",
     description:
       "Tu suscripción se renueva el {date}: se cobrarán {price} a tu tarjeta entonces y en cada periodo de facturación hasta que la canceles.",
@@ -179,7 +182,8 @@ export const es: BillingUiMessageBundle = {
       "Una tarjeta que paga una suscripción activa debe sustituirse antes de eliminarla.",
     removeConfirm: "Eliminar tarjeta",
     removed: "Tarjeta eliminada.",
-    removePending: "La eliminación se está procesando.",
+    removeFailed:
+      "No se pudo confirmar la eliminación de la tarjeta. Inténtalo de nuevo.",
     inUse:
       "Esta tarjeta paga una suscripción activa. Cambia primero esa suscripción a otra tarjeta.",
   },

@@ -31,7 +31,6 @@ var allow = map[string]string{
 	"GetOrderPayment":                       "a collection's own payment, tombstoned or not, means the charge settled",
 	"ListOrderCollectionsForArchive":        "archive validates each collection's payment including tombstones",
 	"CountOrderAttempts":                    "a scheduled collection's ordinal counts every attempt ever made, so its key is never reused",
-	"PSPRecoveryBookAge":                    "tombstones do not turn an established restored provider book into a fresh account or authorize new writes",
 	"GetInitialMembershipForUpdate":         "completion inspects tombstones to preserve later cancellation and never recreate the accepted ID",
 	"GetInitialMembershipForArchive":        "archive validates retained membership identity including later tombstones",
 	"ListObservedInitialMembershipPayments": "archive validates observed first-payment history including tombstones",

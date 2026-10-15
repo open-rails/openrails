@@ -26,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -354,17 +353,6 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 			local := NewMoneyService(s.db.NewWithPgxTx(tx), s.Clock())
 			_, err := local.RecoverObservedUsagePayment(ctx, receipt)
 			return err // committed readback; no new operation or invented initiator
-		}
-		// A recent read on the newly selected account cannot exclude a payment
-		// through another known card account after the restored snapshot.
-		accounts, err := q.UsageRecoveryAccounts(ctx, gen.UsageRecoveryAccountsParams{MerchantID: tid.UUID(), RoutedPsp: psp})
-		if err != nil {
-			return err
-		}
-		for _, account := range accounts {
-			if err := providerrecovery.CheckPSP(ctx, s.db.NewWithPgxTx(tx), tid.UUID(), account.ID, now); err != nil {
-				return err
-			}
 		}
 		var custody *charge.HyperSwitchBinding
 		if method.Custodian == models.CustodianHyperSwitch {

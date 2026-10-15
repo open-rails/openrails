@@ -713,14 +713,16 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       )
     },
 
-    /** `pending` when the provider is still converging (202). */
-    async removePaymentMethod(
-      paymentMethodId: string
-    ): Promise<"removed" | "pending"> {
+    /** Completes only after provider removal is confirmed. Retry is explicit. */
+    async removePaymentMethod(paymentMethodId: string): Promise<void> {
       const res = await send(`/me/payment-methods/${id(paymentMethodId)}`, {
         method: "DELETE",
       })
-      return res.status === 202 ? "pending" : "removed"
+      if (res.status !== 204)
+        throw localError(
+          "invalid_response",
+          "Card removal was not confirmed. Please try again."
+        )
     },
 
     /**

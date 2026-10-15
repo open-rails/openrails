@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/nmimock"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -79,7 +78,7 @@ func TestReadonlyProviderRecoveryAppliesReceiptsWithoutDestruction(t *testing.T)
 // The backup is a real stopped merchant archive restored into another PostgreSQL
 // database. Normal full-mode workers must not collect from its stale book while
 // the bulk provider refresh is unavailable, even though exact-order lookup works.
-func TestRestoredBookWaitsForProviderCatchupBeforeRenewal(t *testing.T) {
+func TestRestoredBookCollectsFromExactEvidenceWithoutBulkCatchup(t *testing.T) {
 	for _, alreadyPaid := range []bool{false, true} {
 		name := "unpaid_obligation"
 		if alreadyPaid {
@@ -174,9 +173,7 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 		err := target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.dunning' AND state='completed'`)).Scan(&count)
 		return err == nil && count > 0
 	}, 30*time.Second, 30*time.Millisecond, "normal due worker evaluated the restored obligation")
-	expectedCharges := 1
 	if alreadyPaid {
-		expectedCharges = 2
 		require.Eventually(t, func() bool {
 			var count int
 			err := target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='succeeded'`), subUUID(member.sub)).Scan(&count)
@@ -187,14 +184,16 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 		require.Zero(t, fenced, "restored receipt recovery never fabricates submission")
 		// Ignoring an alert is not financial resolution. Once a later pull
 		// actually sees this now-recorded receipt, it must close the finding
-		// from that proof instead of leaving the account held forever.
+		// from that proof instead of treating dismissal as financial resolution.
 		_, err = target.pool.Exec(t.Context(), target.q(`INSERT INTO billing.reconciliation_findings(merchant_id,psp_id,rail,finding_type,subject_key,severity,status,resolved_at,resolution,operator_notes,recommended_action,evidence,source) VALUES($1,$2,'nmi','pull.charge.missing',$3,'high','ignored',now(),'ignored','notification muted during outage','qualify receipt','{}','pull') ON CONFLICT(merchant_id,psp_id,finding_type,subject_key) DO UPDATE SET status='ignored',resolved_at=now(),resolution='ignored',operator_notes=EXCLUDED.operator_notes`), mid.UUID(), target.psp["nmi"].UUID(), target.nmi.LastSale().TransactionID)
 		require.NoError(t, err)
-	} else {
-		require.True(t, end.Equal(*target.subscription(embedded, member.sub).CurrentPeriodEndsAt))
 	}
-	require.Len(t, target.nmi.Attempts(), expectedCharges, "working exact-order lookup cannot authorize a new charge before bulk catch-up")
-	require.ErrorIs(t, providerrecovery.CheckPSP(t.Context(), targetDB, mid.UUID(), target.psp["nmi"].UUID(), target.clock.Now()), providerrecovery.ErrPending)
+	// The exact operation lookup recovers an existing receipt or allows one
+	// real collection when none exists, even while the bulk report is down.
+	require.Eventually(t, func() bool {
+		return len(target.nmi.Attempts()) == 2 && target.subscription(embedded, member.sub).CurrentPeriodEndsAt.After(end)
+	}, 30*time.Second, 50*time.Millisecond, "exact operation evidence permits collection independently of bulk refresh")
+	require.Len(t, target.nmi.Attempts(), 2)
 	target.nmi.ClearIntercepts()
 	require.Eventually(t, func() bool {
 		var count int
@@ -204,8 +203,9 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 	require.Len(t, target.nmi.Attempts(), 2)
 	require.Len(t, target.nmi.Ledger(""), 2)
 	require.Eventually(t, func() bool {
-		return providerrecovery.CheckPSP(t.Context(), targetDB, mid.UUID(), target.psp["nmi"].UUID(), target.clock.Now()) == nil
-	}, 60*time.Second, 50*time.Millisecond, "catch-up completes after the provider is reachable")
+		at := target.refreshWatermark(target.psp["nmi"], "completed_events")
+		return at != nil && at.After(end)
+	}, 60*time.Second, 50*time.Millisecond, "provider observation catches up after the report is reachable")
 	require.True(t, end.Add(monthHours*time.Hour).Equal(*target.subscription(embedded, member.sub).CurrentPeriodEndsAt))
 	if alreadyPaid {
 		var status, notes string
@@ -216,43 +216,43 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 	require.Empty(t, target.nmi.Unexpected())
 }
 
-func TestRecoveryGateRequiresCompletedAccountCoverage(t *testing.T) {
+// Coverage and unresolved findings report the book's condition, but never
+// authorize unrelated payments. Exact operation checks remain in the pay path.
+func TestFindingsAndCoverageDoNotGatePayments(t *testing.T) {
 	w := prepareWorld(t, 12)
 	w.declare = func(psps map[string]openrails.PSPConfig) { delete(psps, "stripe"); delete(psps, "ccbill") }
 	w.start()
-	_ = enroll(t, w, "nmi", embedded)
-	mid := w.client[embedded].MerchantID()
-	psp := w.psp["nmi"]
-	w.stop()
-	w.advance(5 * 24 * time.Hour)
-	database, err := db.NewWithPGXPool(w.pool, w.schema)
-	require.NoError(t, err)
-	_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.psp_refresh_watermarks WHERE merchant_id=$1`), mid.UUID())
-	require.NoError(t, err)
-	check := func() error {
-		return providerrecovery.CheckPSP(t.Context(), database, mid.UUID(), psp.UUID(), w.clock.Now())
+	c := w.newCustomer()
+	method := c.saveCard("nmi", visa)
+	invoices := []billing.OrderID{
+		observedInvoice(t, w, c, 50_000_000),
+		observedInvoice(t, w, c, 60_000_000),
+		observedInvoice(t, w, c, 70_000_000),
 	}
-	require.ErrorIs(t, check(), providerrecovery.ErrPending)
+	require.NoError(t, w.jobs.Stop(t.Context()))
+	mid, psp := w.client[embedded].MerchantID(), w.psp["nmi"]
+	w.advance(5 * 24 * time.Hour)
+	_, err := w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.psp_refresh_watermarks WHERE merchant_id=$1`), mid.UUID())
+	require.NoError(t, err)
+	w.holdRecovery("nmi")
 	stamp := func(domain string, at time.Time) {
 		_, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.psp_refresh_watermarks(merchant_id,psp_id,event_domain,watermark_at) VALUES($1,$2,$3,$4) ON CONFLICT(merchant_id,psp_id,event_domain) DO UPDATE SET watermark_at=EXCLUDED.watermark_at`), mid.UUID(), psp.UUID(), domain, at)
 		require.NoError(t, err)
 	}
-	stamp("events", w.clock.Now())
-	stamp("applied_events", w.clock.Now().Add(-10*time.Minute))
-	require.ErrorIs(t, check(), providerrecovery.ErrPending, "an advisory or partial applied cursor never authorizes a write")
-	stamp("completed_events", w.clock.Now().Add(-5*time.Minute))
-	require.NoError(t, check())
-	// Starting another ordinary client does not clear shared completed coverage.
-	w.start()
-	require.NoError(t, check())
-	w.stop()
-	stamp("completed_events", w.clock.Now().Add(time.Hour))
-	require.ErrorIs(t, check(), providerrecovery.ErrPending, "future observation timestamps are not freshness")
-	stamp("completed_events", w.clock.Now().Add(-5*time.Minute))
-	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings(merchant_id,psp_id,rail,finding_type,subject_key,severity,status,resolved_at,resolution,recommended_action,evidence,source) VALUES($1,$2,'nmi','pull.charge.missing','unqualified-invoice','high','ignored',now(),'ignored','qualify actual receipt','{}','pull')`), mid.UUID(), psp.UUID())
-	require.NoError(t, err)
-	require.ErrorIs(t, check(), providerrecovery.ErrPending, "new unresolved financial evidence overrides even recent complete coverage")
-	require.Len(t, w.nmi.Ledger(""), 1)
+	for i, condition := range []string{"missing", "partial", "future"} {
+		if i == 1 {
+			stamp("events", w.clock.Now())
+			stamp("applied_events", w.clock.Now().Add(-10*time.Minute))
+		} else if i == 2 {
+			stamp("completed_events", w.clock.Now().Add(time.Hour))
+		}
+		answer := payNMIInvoice(t.Context(), w, c, invoices[i], method, "coverage-"+condition)
+		require.NoError(t, answer.err)
+		require.Equal(t, http.StatusOK, answer.status, "%s coverage: %s", condition, answer.body)
+		require.Equal(t, billing.OrderComplete, w.invoice(invoices[i]).Status)
+	}
+	require.Len(t, w.nmi.Attempts(), 3)
+	require.Len(t, w.nmi.Ledger(""), 3)
 }
 
 func TestStartupRecoversInvoiceOnlyBackupWithoutCharging(t *testing.T) {
@@ -294,15 +294,11 @@ func TestStartupRecoversInvoiceOnlyBackupWithoutCharging(t *testing.T) {
 			require.NoError(t, err)
 			armMerchant(t, target, mid)
 			target.advance(5 * 24 * time.Hour)
-			require.ErrorIs(t, providerrecovery.CheckPSP(t.Context(), targetDB, mid.UUID(), source.psp["nmi"].UUID(), target.clock.Now()), providerrecovery.ErrPending, "old unpaid invoice alone is an established book")
 			target.start()
 			require.Eventually(t, func() bool {
 				paid, err := target.client[embedded].GetOrder(t.Context(), invoice)
 				return err == nil && paid.Status == billing.OrderComplete && paid.Usage.AmountDue == 0
 			}, 60*time.Second, 50*time.Millisecond, "normal startup refresh allocates the verified receipt without inventing an operation")
-			require.Eventually(t, func() bool {
-				return providerrecovery.CheckPSP(t.Context(), targetDB, mid.UUID(), target.psp["nmi"].UUID(), target.clock.Now()) == nil
-			}, 60*time.Second, 50*time.Millisecond, "positive invoice recovery completes financial catch-up")
 			var operations, allocations int
 			require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='order_collection'`)).Scan(&operations))
 			require.Zero(t, operations)

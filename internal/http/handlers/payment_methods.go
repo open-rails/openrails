@@ -383,8 +383,7 @@ func createPaymentMethodProviderError(err error) *api.APIError {
 	return api.Coded(codePaymentMethodProviderOutcomeUnknown, "The payment provider did not confirm whether the card was saved. Refresh your payment methods before trying again.")
 }
 
-// DeletePaymentMethod (DELETE /me/payment-methods/{id}): 204, or 202 while
-// the provider converges.
+// DeletePaymentMethod returns 204 only after synchronous provider confirmation.
 func DeletePaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil {
@@ -431,8 +430,8 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 	fields := log.Fields{"payment_method_id": pm.ID, "user_id": userID, "rail": pm.Rail}
 	switch {
 	case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteProcessing):
-		log.WithError(err).WithFields(fields).Info("Payment method deletion is still converging")
-		r.Status(http.StatusAccepted)
+		log.WithError(err).WithFields(fields).Info("Payment method deletion was not confirmed; explicit retry required")
+		r.ErrorCode(billing.CodeServiceUnavailable, "Card removal could not be confirmed. Please try again.")
 	case errors.Is(err, paymentmethods.ErrPaymentMethodInUse):
 		r.ErrorCode(billing.CodeResourceConflict, "Cannot delete payment method linked to an active, pending, or past-due subscription")
 	case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe):
@@ -562,6 +561,9 @@ func paymentMethodsView(r *httprequest.Request, customer identity.CustomerID, me
 func PaymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCharge, defaults []string, now time.Time) billing.PaymentMethod {
 	subs := make([]billing.PaymentMethodSubscription, 0, len(pm.Subscriptions))
 	for _, s := range pm.Subscriptions {
+		if s == nil || (s.Status != models.StatusActive && s.Status != models.StatusPending && s.Status != models.StatusPastDue) {
+			continue
+		}
 		item := billing.PaymentMethodSubscription{ID: billing.SubscriptionID(s.ID), CreatedAt: s.CreatedAt}
 		if s.Product != nil {
 			item.DisplayName = s.Product.DisplayName
@@ -585,7 +587,7 @@ func PaymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 		DefaultCurrencies:   defaults,
 		CreatedAt:           pm.CreatedAt,
 	}
-	if pm.Status != string(billing.PaymentMethodActive) {
+	if !pm.Chargeable() {
 		out.Health.Active = false
 	}
 	if pm.ReplacedByID != nil {

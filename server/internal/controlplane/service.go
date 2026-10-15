@@ -121,6 +121,9 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 		auth.Token.IssuedAudiences = []string{billingauth.TokenAudience}
 	}
 	auth.Database.RiverSchema = config.RiverSchemaName(cfg)
+	// A standalone server's internal AuthKit must obey the engine's startup
+	// migration policy rather than silently upgrading a second schema.
+	auth.Database.SkipMigrations = auth.Database.SkipMigrations || cfg.Database.SkipMigrations
 	if auth.Resource.ID == "" {
 		auth.Resource.ID = defaultResource(cfg.PublicBillingBaseURL)
 	}

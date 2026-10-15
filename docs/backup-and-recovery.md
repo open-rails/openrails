@@ -88,22 +88,21 @@ grant log by convergence, not restored directly — which is why the grant log m
 3. Start the restored instance. A restore into another cluster, database or schema is a copy
    of the book: every provider write stays readonly until `openrails book arm --by NAME`,
    which you run only once the source is stopped for good. A point-in-time restore of the same
-   cluster keeps its identity. For established NMI and Stripe accounts, stale completed
-   coverage holds new collection and destructive work while provider reads recover qualified
-   financial receipts. Failed or incomplete reads and unresolved financial conflicts keep
-   that work held. See [provider recovery](provider-recovery.md) for coverage and limitations.
-4. If configured with `provider_write_mode: full`, eligible work resumes automatically after
-   verified catch-up. The separate destructive-action and ownership controls still apply.
+   cluster keeps its identity. Bulk provider observation and unresolved findings do not
+   hold normal operations; each operation still verifies its own authority and evidence.
+   See [provider recovery](provider-recovery.md) for coverage and limitations.
+4. If configured with `provider_write_mode: full`, eligible work runs under its ordinary
+   operation-specific checks. The separate destructive-action and ownership controls still apply.
    To inspect before permitting any provider writes, start with `readonly`: reads and verified
    local recovery continue, but this explicit setting never changes automatically. Change it
    to `full` only when ready to resume.
 5. Review unresolved findings and application-only state that the provider cannot reconstruct.
    Ignoring a finding does not prove that its financial conflict has been settled.
 
-CCBill and Solana retain their existing recovery controls and are outside the automatic NMI/Stripe
-freshness gate. Use `readonly` and their established review procedure for those books. A fresh
-coverage timestamp cannot detect every arbitrary clone, provider indexing delay, or account
-created after the backup. Never restart the old source copy after the destination begins writing.
+All rails retain their operation-specific recovery controls. Use `readonly` when review
+is required before permitting provider writes. Observation timestamps cannot detect every
+arbitrary clone, provider indexing delay, or account created after the backup. Never restart
+the old source copy after the destination begins writing.
 
 ## What is not a backup
 

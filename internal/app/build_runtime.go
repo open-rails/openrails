@@ -27,6 +27,8 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/email"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/pyth"
@@ -156,7 +158,11 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		}
 	}
 	// OpenRails' and River's tables, before anything else touches the database.
-	if err := migrate.Apply(ctx, database.Pool(), migrate.Options{
+	prepare := migrate.Apply
+	if cfg.Database.SkipMigrations {
+		prepare = migrate.Validate
+	}
+	if err := prepare(ctx, database.Pool(), migrate.Options{
 		Schema: config.SchemaName(cfg), RiverSchema: config.RiverSchemaName(cfg), Chain: chain,
 	}); err != nil {
 		if overrides == nil || database != overrides.DB {
@@ -351,6 +357,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// Redirect PSPs and bank challenges come back to the payment page itself.
 	serviceInstances.OrderAttemptService.SetCheckoutOrigin(runtime.CheckoutOrigin)
 	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
+	runtime.AdminSubscriptionService.SetRequestedCancellationLimiter(func(ctx context.Context, sub *models.Subscription) error {
+		return destructive.NewUserActionLimiter(runtime.DB, runtime.Config.UserActionRateLimit).Reserve(ctx, destructive.CancelSubscription, fmt.Sprintf("cancel:%s:%d", sub.ID, sub.LifecycleRev), sub.CustomerID)
+	})
 	runtime.PriceMigrationService.WithDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.MoneyService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.ProductAccessService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
@@ -470,10 +479,14 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if runtime.OrderAttemptService != nil {
 		runtime.OrderAttemptService.SetOrders(runtime.Orders)
 	}
-	// #674 tail: user-initiated payment-method deletes route through the
-	// durable nmi_vault_delete intent.
+	// User card removals execute only in the explicit request. The retained
+	// operation supplies idempotency and fences, without a background retry.
 	if runtime.RailPaymentMethodService != nil {
-		runtime.RailPaymentMethodService.DeleteIntents = &intents.PaymentMethodDeleteThrough{Runner: intentRunner}
+		runtime.RailPaymentMethodService.DeleteIntents = &intents.PaymentMethodDeleteThrough{Runner: intentRunner,
+			BeforeUserDelete: func(ctx context.Context, pm *models.PaymentMethod) error {
+				return destructive.NewUserActionLimiter(runtime.DB, runtime.Config.UserActionRateLimit).Reserve(ctx, destructive.DeletePaymentMethod, "method-delete:"+pm.ID.String(), pm.CustomerID)
+			},
+		}
 		runtime.RailPaymentMethodService.CardVaults = &intents.CardVaultThrough{Runner: intentRunner}
 	}
 	// #674: user/admin payment-method swaps route through the durable

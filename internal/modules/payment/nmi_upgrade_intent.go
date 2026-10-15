@@ -27,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -270,15 +269,9 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.BillingPro
 			progress.Update = &nmiScheduleUpdate{}
 		}
 		if err := h.pushScheduleAmount(ctx, client, in, p, send); err != nil {
-			if errors.Is(err, providerrecovery.ErrPending) {
-				return intents.RecoveryHeld(err.Error())
-			}
 			if errors.Is(err, errNMIScheduleWriteRequired) {
 				if blocked, reason := intents.GateExecution(ctx, h.Purchases.Posture, in.MerchantID, intents.Origin(in.Origin)); blocked || client.ReadOnly {
 					return intents.Parked("NMI schedule write held: " + reason)
-				}
-				if err := store.CheckRecovery(ctx, in, h.Purchases.now()); err != nil {
-					return intents.RecoveryHeld(err.Error())
 				}
 				return intents.Retryable(err.Error())
 			}
@@ -355,9 +348,6 @@ func (h *NMIUpgradeIntentHandler) pushScheduleAmount(ctx context.Context, client
 	// Recheck the gates at the write boundary after reading the current plan.
 	if blocked, _ := intents.GateExecution(ctx, h.Purchases.Posture, in.MerchantID, intents.Origin(in.Origin)); !send || blocked || client.ReadOnly {
 		return errNMIScheduleWriteRequired
-	}
-	if err := intents.NewStore(h.Purchases.SubscriptionService.Database()).CheckRecovery(ctx, in, h.Purchases.now()); err != nil {
-		return err
 	}
 	sub, err := h.Purchases.SubscriptionService.GetByID(ctx, p.OldSubscriptionID)
 	if err != nil {

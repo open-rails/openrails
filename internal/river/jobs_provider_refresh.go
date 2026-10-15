@@ -29,7 +29,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -372,9 +371,9 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		return river.JobSnooze(time.Second)
 	}
 	if stats.Held > 0 {
-		// Every read completed; recovery waits on an operator, not a retry.
-		// The open findings and the recovery gate are the signal.
-		logger.WithField("held_psps", stats.Held).Warn("Provider Refresh: financial recovery held until an operator resolves the PSP's open financial findings")
+		// Every read completed. Unresolved financial observations remain in
+		// the findings list for review; they do not pause ordinary billing.
+		logger.WithField("psps_with_unresolved_findings", stats.Held).Warn("Provider Refresh: unresolved financial observations need review")
 	}
 	return nil
 }
@@ -416,12 +415,10 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 				logger.WithFields(log.Fields{"psp_id": account.ID, "rail": account.Rail}).Debug("Provider Refresh: PSP not armed; not refreshable")
 				continue
 			case armed.Coverage[provider].Binding.ID != account.ID:
-				if providerrecovery.CheckPSP(tctx, w.DB, mid, account.ID, w.now()) != nil {
-					stats.ProviderErrors++
-				}
+				stats.ProviderErrors++
 				continue
 			}
-			accountOverwrite := overwrite && providerrecovery.CheckPSP(tctx, w.DB, mid, account.ID, w.now()) == nil
+			accountOverwrite := overwrite
 			mutations := &reconcile.LocalMutationPolicy{Insert: true, Overwrite: accountOverwrite}
 			accountResult := w.runEventRefresh(tctx, mid, reconcile.ModeEnforce, mutations, armed.Coverage, map[reconcile.Provider]reconcile.RailFetcher{provider: fetcher})
 			res.add(accountResult.providerRefreshProviderResult)
@@ -432,7 +429,7 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 				}
 			}
 		}
-		if !overwrite || providerrecovery.CheckMerchant(tctx, w.DB, mid, w.now()) != nil {
+		if !overwrite {
 			return nil
 		}
 		armed := builder.Build(tctx, billing.MerchantID(mid))
@@ -696,7 +693,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		} else if conflicts {
 			out.Held++
 		} else {
-			more, err := w.completeRecovery(ctx, mid, pspID, horizon)
+			more, err := w.completeObservation(ctx, mid, pspID, horizon)
 			if err != nil {
 				out.WatermarkErrors++
 				log.WithContext(ctx).WithError(err).WithField("psp_id", pspID).Warn("Provider Refresh: completion and recovery wakeups failed")
@@ -715,9 +712,9 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	return out
 }
 
-// Complete coverage and its recovery wakeups commit together. Scans use the
+// Complete coverage records reporting progress; it never grants write permission. Scans use the
 // existing collection policy/cadence; refresh never invokes a provider writer.
-func (w *ProviderRefreshWorker) completeRecovery(ctx context.Context, mid, psp uuid.UUID, horizon time.Time) (bool, error) {
+func (w *ProviderRefreshWorker) completeObservation(ctx context.Context, mid, psp uuid.UUID, horizon time.Time) (bool, error) {
 	const batch = 100
 	more := false
 	err := w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -728,9 +725,6 @@ func (w *ProviderRefreshWorker) completeRecovery(ctx context.Context, mid, psp u
 		}
 		if (writeposture.View{Config: w.Config, DB: d}).Posture(ctx, mid).Limited() {
 			return nil
-		}
-		if err := providerrecovery.CheckPSP(ctx, d, mid, psp, w.now()); err != nil {
-			return err
 		}
 		resumed, err := intents.NewStore(d).ResumeRecoveryHeld(ctx, w.now(), batch)
 		if err != nil {

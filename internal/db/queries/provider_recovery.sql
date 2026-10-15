@@ -31,37 +31,6 @@ SELECT COALESCE(min(at), sqlc.arg(fallback)::timestamptz)::timestamptz AS oldest
       AND EXISTS (SELECT 1 FROM billing.psps p WHERE p.merchant_id=i.merchant_id AND p.id=sqlc.arg(psp_id)::uuid AND p.rail IN ('nmi','stripe'))
 ) facts;
 
--- name: PSPRecoveryBookAge :one
--- This cold-path exemption uses EXISTS: one older bound fact is sufficient.
--- Fresh completed coverage is checked first; ordinary writes do not scan history.
-SELECT EXISTS (
-  SELECT 1 FROM billing.subscriptions
-    WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
-      AND started_at < sqlc.arg(before)::timestamptz
-  UNION ALL
-  SELECT 1 FROM billing.payments
-    WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
-      AND purchased_at < sqlc.arg(before)::timestamptz
-  UNION ALL
-  SELECT 1 FROM billing.payments ip
-    JOIN billing.orders i ON i.merchant_id=ip.merchant_id AND i.id=ip.order_id AND i.origin='usage'
-    WHERE ip.merchant_id=sqlc.arg(merchant_id)::uuid AND ip.psp_id=sqlc.arg(psp_id)::uuid
-      AND i.period_starts_at < sqlc.arg(before)::timestamptz
-  UNION ALL
-  SELECT 1 FROM billing.provider_intents pi
-    LEFT JOIN billing.orders i ON i.merchant_id=pi.merchant_id AND i.id::text=COALESCE(pi.payload->>'order_id', pi.payload->>'invoice_id')
-    WHERE pi.merchant_id=sqlc.arg(merchant_id)::uuid AND pi.psp_id=sqlc.arg(psp_id)::uuid
-      AND pi.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
-      AND COALESCE(i.period_starts_at, NULLIF(pi.payload->>'accepted_at','')::timestamptz,
-        NULLIF(pi.result_evidence->>'submitted_at','')::timestamptz, pi.created_at) < sqlc.arg(before)::timestamptz
-  UNION ALL
-  SELECT 1 FROM billing.orders i
-    WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND i.origin='usage'
-      AND i.status IN ('open','uncollectible')
-      AND i.period_starts_at < sqlc.arg(before)::timestamptz
-      AND EXISTS (SELECT 1 FROM billing.psps p WHERE p.merchant_id=i.merchant_id AND p.id=sqlc.arg(psp_id)::uuid AND p.rail IN ('nmi','stripe'))
-)::boolean;
-
 -- name: GetPSPCompletedRefreshWatermark :one
 SELECT watermark_at FROM billing.psp_refresh_watermarks
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
@@ -88,7 +57,8 @@ SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings f
    AND NOT COALESCE(f.evidence @> '{"quiet_foreign":true}', false))::boolean;
 
 -- name: ResumeProviderRecoveryHeldOperations :many
--- Only recovery delays are expedited; issuer retry dates and live leases stand.
+-- Upgrade compatibility: release obsolete blanket-hold delays through normal dispatch.
+-- Manual card deletions are excluded; issuer retry dates and live leases stand.
 UPDATE billing.provider_intents
 SET next_attempt_at=sqlc.arg(now)::timestamptz,
     result_evidence=result_evidence-'recovery_held', updated_at=now()
@@ -96,7 +66,7 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id IN (
  SELECT id FROM billing.provider_intents
  WHERE merchant_id=sqlc.arg(merchant_id)::uuid
    AND (sqlc.narg(intent_id)::uuid IS NULL OR id=sqlc.narg(intent_id)::uuid)
-   AND (psp_id=ANY(sqlc.arg(ready_psp_ids)::uuid[]) OR (psp_id IS NULL AND sqlc.arg(all_accounts_ready)::boolean))
+   AND intent_type NOT IN ('nmi_vault_delete','platform_method_delete','hyperswitch_method_delete')
    AND status IN ('pending','failed_retryable','unknown_needs_verify')
    AND result_evidence @> '{"recovery_held":true}'::jsonb
    AND (lease_expires_at IS NULL OR lease_expires_at<=sqlc.arg(now)::timestamptz)

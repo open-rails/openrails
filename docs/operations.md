@@ -64,12 +64,10 @@ ingestion. It does not make a running source
 quiescent. Where supported, revoking separately scoped source credentials at the
 provider offers stronger protection against accidentally restarting an old copy.
 
-Established NMI and Stripe books also hold new collections and destructive work
-when completed provider coverage is stale or known financial conflicts remain.
-Startup reads catch up while this gate is closed. Configured `full` resumes
-eligible work automatically after verified catch-up; explicit `readonly` remains
-readonly. See [provider recovery](provider-recovery.md) for the account scope,
-completion rules and limits. CCBill and Solana retain their existing controls.
+Provider coverage and unresolved findings are observations, not global write
+gates. Each operation still verifies its own target, ownership and payment
+evidence under the configured write mode. See [provider recovery](provider-recovery.md)
+for the observation scope and limits.
 
 ## Running several instances
 
@@ -294,6 +292,14 @@ deletes, NMI/Stripe refunds, dunning `manual_rebill` charges, CCBill
 cancels, payment-method swaps, vault deletes, purchase NMI sales, Solana
 recurring pulls and the payment page's Stripe payment-method domain
 registrations.
+
+Manual card removals also retain their target and receipt in this ledger, but
+never create an automatic job. Only an explicit request can execute or retry
+them, and HTTP success requires confirmed removal. After a timeout, the next
+manual request verifies the prior result; qualified native custodian DELETE
+contracts may instead safely repeat the exact accepted target. Local removed
+rows preserve order and card-version history while remaining unchargeable and
+hidden from customer card lists.
 
 Execution is **effectively-once**, never assumed exactly-once. Per class:
 money-movers park ambiguous outcomes as `unknown_needs_verify` and are
@@ -1048,6 +1054,7 @@ Row retention:
 | `host_outbox` | 30 days after delivery; an undelivered event is never deleted |
 | `customer_links` | revoked links, 24 months (731 days) after `revoked_at` |
 | `idempotency_keys`, `solana_pay_references` | at expiry, and after the 7-day watch window |
+| `user_destructive_reservations` | 24 hours after `reserved_at`; the card, subscription and operation history stay intact |
 | `failed_usage_windows` | once the window has ended, on the merchant's next failed usage |
 
 What is kept on purpose:
@@ -1292,9 +1299,9 @@ every rail: NMI direct-post gate, Stripe transport gate, CCBill DataLink
 read-only flag, Solana submission gate). Typical uses: `limited` = migration
 cutover with the site fully usable; `readonly` = reconciliation/forensics
 boots that may recover local records without initiating provider writes.
-Provider receipt recovery runs in every mode. The NMI/Stripe freshness gate is
-an additional prerequisite for existing-obligation collection and destructive
-work, including under `full`; see [provider recovery](provider-recovery.md).
+Provider receipt recovery runs in every mode. Bulk reconciliation findings and
+observation freshness are reports, not an additional write gate; see
+[provider recovery](provider-recovery.md).
 
 ### PSP environments — real money or not
 
@@ -1317,11 +1324,10 @@ A merchant mixes live and test PSPs freely. Fake providers
 ### Cutover: booting against production credentials
 
 Set the mode **before first start**. Imported `past_due` subscriptions are
-immediately due for evaluation. With `full`, established NMI/Stripe accounts
-first satisfy the automatic [provider recovery](provider-recovery.md) gate,
-then eligible collection resumes without another operator action. That gate
-does not establish ownership across independent copies; follow the controlled
-transfer procedure above.
+immediately due for evaluation. With `full`, eligible collection runs under
+operation-specific ownership and receipt checks. Bulk provider observation is
+separate and does not postpone normal work. Follow the controlled transfer
+procedure above before activating an independent copy.
 
 For a cutover that needs a manual review before collection, use
 `PROVIDER_WRITE_MODE=limited` (customer writes permitted, system-origin writes

@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/riverqueue/river"
 )
 
@@ -70,6 +69,9 @@ func (s *Store) WakeOperation(ctx context.Context, id uuid.UUID, now time.Time) 
 		if err != nil {
 			return err
 		}
+		if ManualPaymentMethodDelete(row) {
+			return nil
+		}
 		if row.Status != StatusUnknownNeedsVerify && row.Status != StatusInFlight {
 			return nil
 		}
@@ -104,6 +106,13 @@ func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, transition 
 		if rows != 1 {
 			return fmt.Errorf("operation transition affected %d rows", rows)
 		}
+		row, err := s.withTxDB(s.db.NewWithPgxTx(tx)).Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if ManualPaymentMethodDelete(row) {
+			return nil
+		}
 		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: mid.UUID(), IntentID: id}, operationInsertOpts(at.UTC()))
 	}
 	hook, _ := ctx.Value(successorCommitContextKey{}).(successorCommitHook)
@@ -122,9 +131,9 @@ func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, transition 
 	return rows, err
 }
 
-// ResumeRecoveryHeld advances only recovery-held work and durably schedules its
-// normal dispatcher. A newly ready account can unblock another account's invoice,
-// so the batch is merchant-scoped; every execution rechecks all its own guards.
+// ResumeRecoveryHeld releases obsolete blanket-hold markers through the normal
+// dispatcher. Every operation still rechecks its own guards. Manual card deletions
+// are excluded, including legacy requests.
 func (s *Store) ResumeRecoveryHeld(ctx context.Context, now time.Time, limit int32) (int, error) {
 	return s.resumeRecoveryHeld(ctx, nil, now, limit)
 }
@@ -141,19 +150,9 @@ func (s *Store) resumeRecoveryHeld(ctx context.Context, id *uuid.UUID, now time.
 	if err != nil {
 		return 0, err
 	}
-	accounts, err := s.db.Gen(ctx).ListPSPsForMerchant(ctx, mid.UUID())
-	if err != nil {
-		return 0, err
-	}
-	ready := make([]uuid.UUID, 0, len(accounts))
-	for _, account := range accounts {
-		if providerrecovery.CheckPSP(ctx, s.db, mid.UUID(), account.ID, now) == nil {
-			ready = append(ready, account.ID)
-		}
-	}
 	count := 0
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		ids, err := s.db.NewWithPgxTx(tx).Gen(ctx).ResumeProviderRecoveryHeldOperations(ctx, gen.ResumeProviderRecoveryHeldOperationsParams{MerchantID: mid.UUID(), IntentID: id, Now: now, BatchSize: limit, ReadyPspIds: ready, AllAccountsReady: len(ready) == len(accounts)})
+		ids, err := s.db.NewWithPgxTx(tx).Gen(ctx).ResumeProviderRecoveryHeldOperations(ctx, gen.ResumeProviderRecoveryHeldOperationsParams{MerchantID: mid.UUID(), IntentID: id, Now: now, BatchSize: limit})
 		if err != nil {
 			return err
 		}

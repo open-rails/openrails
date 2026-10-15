@@ -166,8 +166,8 @@ func (w *world) setMandateStatus(id billing.MandateID, status billing.MandateSta
 	require.EqualValues(w.t, 1, tag.RowsAffected())
 }
 
-// Deleting a card ends its agreements; the mandates stay as evidence without
-// the card.
+// Removing a card ends its agreements; its nonchargeable record and mandate
+// references stay as evidence for historical payments.
 func TestDeletedCardEndsItsMandates(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -179,7 +179,7 @@ func TestDeletedCardEndsItsMandates(t *testing.T) {
 	require.Equal(t, billing.MandateActive, saved[0].Status)
 
 	status, body := c.call(http.MethodDelete, "/payment-methods/"+method, "", nil)
-	require.Contains(t, []int{http.StatusAccepted, http.StatusNoContent}, status, "%v", body)
+	require.Equal(t, http.StatusNoContent, status, "%v", body)
 	w.settle()
 	require.Empty(t, w.mandates(embedded, c.cid()), "no card carries it any more")
 	var state, reason string
@@ -190,6 +190,7 @@ func TestDeletedCardEndsItsMandates(t *testing.T) {
 	require.Equal(t, string(billing.MandateEnded), state)
 	require.Equal(t, string(billing.MandateEndPaymentMethodRemoved), reason)
 	require.NotNil(t, endedAt)
-	require.Nil(t, card, "the card is gone")
+	require.NotNil(t, card)
+	require.Equal(t, method, "pm_"+*card, "the removed card remains as historical evidence")
 	require.Equal(t, saved[0].InitialTransactionID, initial, "its references stay as evidence")
 }

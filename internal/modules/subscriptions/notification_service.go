@@ -56,6 +56,9 @@ func (r *NotificationService) createParams(ctx context.Context, notification *mo
 	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, notification.CustomerID); err != nil {
 		return gen.CreateNotificationParams{}, err
 	}
+	if err := r.membershipAccess(ctx, notification); err != nil {
+		return gen.CreateNotificationParams{}, err
+	}
 	data, err := notification.DataJSONB()
 	if err != nil {
 		return gen.CreateNotificationParams{}, err
@@ -72,4 +75,38 @@ func (r *NotificationService) createParams(ctx context.Context, notification *mo
 		Data:       data,
 		CreatedAt:  notification.CreatedAt,
 	}, nil
+}
+
+// membershipAccess qualifies an end fact against the grants in the same
+// transaction. A canceled renewal cannot claim that retained paid access ended.
+func (r *NotificationService) membershipAccess(ctx context.Context, n *models.NotificationEvent) error {
+	if n.EventType != models.NotificationPremiumEnded || n.Data.SubscriptionID.IsZero() {
+		return nil
+	}
+	if n.CreatedAt.IsZero() {
+		return errors.New("membership end notification requires its observed time")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	access, err := r.db.Gen(ctx).SubscriptionNotificationAccess(ctx, gen.SubscriptionNotificationAccessParams{
+		MerchantID: mid.UUID(), CustomerID: n.CustomerID, SubscriptionID: n.Data.SubscriptionID.UUID().String(), AtTime: n.CreatedAt,
+	})
+	if err != nil {
+		return err
+	}
+	if access.Retained || access.ClosedAt.IsZero() {
+		n.EventType = models.NotificationSubscriptionCanceled
+		n.Data.AccessEnded = false
+		n.Data.EndedAt = nil
+		if !access.RetainedUntil.IsZero() {
+			at := access.RetainedUntil.UTC()
+			n.Data.EndedAt = &at
+		}
+		return nil
+	}
+	at := access.ClosedAt.UTC()
+	n.Data.AccessEnded, n.Data.EndedAt = true, &at
+	return nil
 }

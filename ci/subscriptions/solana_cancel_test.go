@@ -74,7 +74,7 @@ func TestSolanaCancelEndsAtPeriodEndWithoutTheWallet(t *testing.T) {
 	require.Equal(t, []any{"canceled", true, true}, []any{body["status"], body["cancel_scheduled"], body["resumable"]}, "%v", body)
 	require.Equal(t, walletTxs, s.fake.Transactions(b.wallet.PublicKey()), "the wallet signs nothing and pays no fee")
 	require.False(t, s.canceledOnChain(t, sub), "nothing changes on chain")
-	require.Equal(t, sub.String(), b.notificationData("premium_ended")["subscription_id"])
+	require.Equal(t, sub.String(), b.notificationData("subscription_canceled")["subscription_id"])
 
 	w.advance(monthHours*time.Hour - time.Hour)
 	require.True(t, b.entitled(s.key), "access runs to the paid period end")

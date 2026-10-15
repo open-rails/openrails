@@ -49,6 +49,7 @@ FROM billing.payment_methods
 WHERE merchant_id = $2::uuid
   AND custodian_id = $3::uuid
   AND rail_method_ref = $4::text
+  AND NOT COALESCE(park_reason LIKE 'removed:%', false)
 `
 
 type CountCustodianMethodAliasesParams struct {
@@ -79,6 +80,7 @@ const countNativeVaultAliases = `-- name: CountNativeVaultAliases :one
 SELECT count(*) FROM billing.payment_methods
 WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
   AND custodian='psp' AND rail_customer_ref=$3::text
+  AND NOT COALESCE(park_reason LIKE 'removed:%', false)
   AND id<>$4::uuid
 `
 
@@ -412,29 +414,107 @@ func (q *Queries) NativeVaultDeletionState(ctx context.Context, arg NativeVaultD
 	return i, err
 }
 
-const removeFencedPlatformPaymentMethod = `-- name: RemoveFencedPlatformPaymentMethod :execrows
+const removeFencedCustodianPaymentMethod = `-- name: RemoveFencedCustodianPaymentMethod :execrows
 UPDATE billing.payment_methods
 SET status = CASE WHEN status = 'active' THEN 'removed' ELSE status END,
-    updated_at = $1::timestamptz
-WHERE merchant_id = $2::uuid AND id = $3::uuid
-  AND custodian = 'platform' AND status IN ('active','closed','replaced','removed')
-  AND park_reason = 'delete:' || $4::uuid::text
+    park_reason = 'removed:' || $1::uuid::text,
+    updated_at = $2::timestamptz
+WHERE merchant_id = $3::uuid AND id = $4::uuid
+  AND custodian IN ('platform','hyperswitch') AND status IN ('active','closed','replaced','removed')
+  AND park_reason = 'delete:' || $1::uuid::text
 `
 
-type RemoveFencedPlatformPaymentMethodParams struct {
+type RemoveFencedCustodianPaymentMethodParams struct {
+	OperationID uuid.UUID
 	Now         time.Time
 	MerchantID  uuid.UUID
 	ID          uuid.UUID
-	OperationID uuid.UUID
 }
 
 // Keep the row and its versions as evidence for orders and payments. Terminal
 // issuer lifecycle states remain final even when the stored token is erased.
-func (q *Queries) RemoveFencedPlatformPaymentMethod(ctx context.Context, arg RemoveFencedPlatformPaymentMethodParams) (int64, error) {
-	result, err := q.db.Exec(ctx, removeFencedPlatformPaymentMethod,
+func (q *Queries) RemoveFencedCustodianPaymentMethod(ctx context.Context, arg RemoveFencedCustodianPaymentMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeFencedCustodianPaymentMethod,
+		arg.OperationID,
 		arg.Now,
 		arg.MerchantID,
 		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const removeFencedNativePaymentMethod = `-- name: RemoveFencedNativePaymentMethod :execrows
+UPDATE billing.payment_methods
+SET status = CASE WHEN status = 'active' THEN 'removed' ELSE status END,
+    park_reason = 'removed:' || $1::uuid::text,
+    updated_at = $2::timestamptz
+WHERE merchant_id = $3::uuid AND id = $4::uuid
+  AND custodian = 'psp' AND rail = 'nmi'
+  AND status IN ('active','closed','replaced','removed')
+  AND park_reason = 'delete:' || $1::uuid::text
+`
+
+type RemoveFencedNativePaymentMethodParams struct {
+	OperationID uuid.UUID
+	Now         time.Time
+	MerchantID  uuid.UUID
+	ID          uuid.UUID
+}
+
+// The provider credential is gone, but paid orders and immutable card versions
+// retain their original reference. Keep a nonchargeable completion tombstone.
+func (q *Queries) RemoveFencedNativePaymentMethod(ctx context.Context, arg RemoveFencedNativePaymentMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeFencedNativePaymentMethod,
+		arg.OperationID,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retireUnattemptedUserMethodDelete = `-- name: RetireUnattemptedUserMethodDelete :execrows
+WITH retired AS (
+  UPDATE billing.provider_intents
+  SET status='superseded', lease_expires_at=NULL,
+      result_evidence=COALESCE(result_evidence,'{}'::jsonb) || jsonb_build_object(
+        'retired_for_manual_delete',true,'retired_prior_reason',last_failure_reason),
+      last_failure_reason='queued card deletion retired; explicit manual retry required',
+      updated_at=$1::timestamptz
+  WHERE merchant_id=$2::uuid AND id=$4::uuid
+    AND origin='user' AND status='pending' AND attempts=0
+    AND intent_type IN ('nmi_vault_delete','platform_method_delete','hyperswitch_method_delete')
+    AND idempotency_key NOT LIKE 'manual:%'
+    AND (lease_expires_at IS NULL OR lease_expires_at<=$1::timestamptz)
+  RETURNING id
+)
+UPDATE billing.payment_methods
+SET park_reason=NULL,parked_at=NULL,updated_at=$1::timestamptz
+WHERE merchant_id=$2::uuid AND id=$3::uuid
+  AND park_reason='delete:' || $4::uuid::text
+  AND EXISTS(SELECT 1 FROM retired)
+`
+
+type RetireUnattemptedUserMethodDeleteParams struct {
+	Now             time.Time
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+	OperationID     uuid.UUID
+}
+
+// Explicit compatibility cleanup only: never abandon an attempted/ambiguous
+// provider operation, and never erase the original audit record.
+func (q *Queries) RetireUnattemptedUserMethodDelete(ctx context.Context, arg RetireUnattemptedUserMethodDeleteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retireUnattemptedUserMethodDelete,
+		arg.Now,
+		arg.MerchantID,
+		arg.PaymentMethodID,
 		arg.OperationID,
 	)
 	if err != nil {
