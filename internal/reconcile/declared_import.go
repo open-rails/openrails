@@ -3,6 +3,8 @@ package reconcile
 import (
 	"encoding/json"
 	"github.com/open-rails/openrails/internal/merchant"
+	"maps"
+	"slices"
 	"strings"
 
 	"context"
@@ -386,8 +388,10 @@ func ImportDeclaredSubscriptions(
 			// Fresh row from settled history: written faithfully above; no decider
 			// pass, but money truth still lands.
 			if err := retainingUnresolved(ctx, database, sub, subscriptionTxns(txns, f.RailSubscriptionID), func(kept []RemoteTransaction) error {
-				_, err := backfillSubscriptionPayments(ctx, database, sub, kept, asOf, declaredImportLookback)
-				return err
+				return database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+					_, err := backfillSubscriptionPayments(ctx, database.NewWithPgxTx(tx), sub, kept, asOf, declaredImportLookback)
+					return err
+				})
 			}); err != nil {
 				return out, fmt.Errorf("declared import: backfill %s: %w", f.SourceID, err)
 			}
@@ -578,14 +582,22 @@ func nilIfEmptyBytes(b []byte) []byte {
 // of the book lands. A failed attempt rolls back before the next.
 func retainingUnresolved(ctx context.Context, database *db.DB, sub *models.Subscription, txns []RemoteTransaction, run func([]RemoteTransaction) error) error {
 	for {
+		history := declaredHistoryOf(ctx)
+		var saved *DeclaredHistory
+		if history != nil && history.HasReceipts() {
+			saved = history.clone()
+		}
 		err := run(txns)
+		if err != nil && saved != nil {
+			*history = *saved
+		}
 		var unresolved *UnresolvedReceiptError
 		if !errors.As(err, &unresolved) {
 			return err
 		}
 		kept := make([]RemoteTransaction, 0, len(txns))
 		for _, t := range txns {
-			if t.TransactionID != unresolved.TransactionID || t.SubscriptionID != sub.RailSubscriptionID {
+			if (t.TransactionID != unresolved.TransactionID && (sub.Rail != models.RailNMI || t.OriginalTransactionID != unresolved.TransactionID)) || t.SubscriptionID != sub.RailSubscriptionID {
 				kept = append(kept, t)
 			}
 		}
@@ -594,6 +606,13 @@ func retainingUnresolved(ctx context.Context, database *db.DB, sub *models.Subsc
 		}
 		if err := recordUnresolvedReceipt(ctx, database.Gen(ctx), sub, unresolved); err != nil {
 			return err
+		}
+		if history != nil {
+			for _, t := range txns {
+				if t.SubscriptionID == sub.RailSubscriptionID && (t.TransactionID == unresolved.TransactionID || t.OriginalTransactionID == unresolved.TransactionID) {
+					history.outcomes[declaredReceiptKey(t.SubscriptionID, t.TransactionID)] = DeclaredOutcome{Code: DeclaredBlocked, Reason: unresolved.Error()}
+				}
+			}
 		}
 		txns = kept
 	}
@@ -703,18 +722,19 @@ func subscriptionTxns(txns []RemoteTransaction, railSubID string) []RemoteTransa
 // records them afterwards, one short transaction per subscription, rather
 // than holding the merchant's order numbering for the whole batch.
 type DeclaredHistory struct {
-	subs  map[uuid.UUID]*models.Subscription
-	txns  map[uuid.UUID][]RemoteTransaction
-	order []uuid.UUID
-	seen  map[string]bool
+	subs     map[uuid.UUID]*models.Subscription
+	txns     map[uuid.UUID][]RemoteTransaction
+	order    []uuid.UUID
+	seen     map[string]bool
+	outcomes map[string]DeclaredOutcome
 }
 
 // NewDeclaredHistory returns an empty collector.
 func NewDeclaredHistory() *DeclaredHistory {
-	return &DeclaredHistory{subs: map[uuid.UUID]*models.Subscription{}, txns: map[uuid.UUID][]RemoteTransaction{}, seen: map[string]bool{}}
+	return &DeclaredHistory{subs: map[uuid.UUID]*models.Subscription{}, txns: map[uuid.UUID][]RemoteTransaction{}, seen: map[string]bool{}, outcomes: map[string]DeclaredOutcome{}}
 }
 
-// Len is the number of collected charges.
+// Len is the number of collected receipts.
 func (h *DeclaredHistory) Len() int { return len(h.seen) }
 
 func (h *DeclaredHistory) add(sub *models.Subscription, t RemoteTransaction) {
@@ -745,7 +765,8 @@ func RecordDeclaredHistory(ctx context.Context, database *db.DB, h *DeclaredHist
 	if h == nil {
 		return nil
 	}
-	ctx = context.WithValue(ctx, declaredHistoryKey{}, (*DeclaredHistory)(nil))
+	ctx = context.WithValue(ctx, declaredHistoryKey{}, h)
+	ctx = context.WithValue(ctx, recordingDeclaredHistoryKey{}, true)
 	for _, id := range h.order {
 		if err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			txdb := database.NewWithPgxTx(tx)
@@ -753,9 +774,15 @@ func RecordDeclaredHistory(ctx context.Context, database *db.DB, h *DeclaredHist
 			if err != nil {
 				return err
 			}
-			return retainingUnresolved(ctx, txdb, sub, h.txns[id], func(kept []RemoteTransaction) error {
-				_, err := backfillSubscriptionPayments(ctx, txdb, sub, kept, now, declaredImportLookback)
+			if _, err := txdb.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: sub.MerchantID, ID: sub.CustomerID}); err != nil {
 				return err
+			}
+			return retainingUnresolved(ctx, txdb, sub, h.txns[id], func(kept []RemoteTransaction) error {
+				// Collector/outcome rollback must match database rollback before retrying.
+				return txdb.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+					_, err := backfillSubscriptionPayments(ctx, txdb.NewWithPgxTx(tx), sub, kept, now, declaredImportLookback)
+					return err
+				})
 			})
 		}); err != nil {
 			return fmt.Errorf("declared import: record history of %s: %w", billing.SubscriptionID(id), err)
@@ -763,3 +790,31 @@ func RecordDeclaredHistory(ctx context.Context, database *db.DB, h *DeclaredHist
 	}
 	return nil
 }
+
+// Track requests an outcome for an NMI receipt even when its subscription is blocked.
+func (h *DeclaredHistory) Track(subscription, transaction string) {
+	h.outcomes[declaredReceiptKey(subscription, transaction)] = DeclaredOutcome{Code: DeclaredBlocked, Reason: "the subscription receipt was not recorded; resolve its import evidence and retry"}
+}
+
+func (h *DeclaredHistory) Outcome(subscription, transaction string) DeclaredOutcome {
+	return h.outcomes[declaredReceiptKey(subscription, transaction)]
+}
+
+func declaredReceiptKey(subscription, transaction string) string {
+	return subscription + "\x1f" + transaction
+}
+
+type recordingDeclaredHistoryKey struct{}
+
+func (h *DeclaredHistory) clone() *DeclaredHistory {
+	c := *h
+	c.subs, c.seen, c.outcomes = maps.Clone(h.subs), maps.Clone(h.seen), maps.Clone(h.outcomes)
+	c.order = slices.Clone(h.order)
+	c.txns = make(map[uuid.UUID][]RemoteTransaction, len(h.txns))
+	for id, txns := range h.txns {
+		c.txns[id] = slices.Clone(txns)
+	}
+	return &c
+}
+
+func (h *DeclaredHistory) HasReceipts() bool { return len(h.outcomes) > 0 }

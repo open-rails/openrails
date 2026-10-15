@@ -83,7 +83,7 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 	}
 	for i, txn := range book.Transactions {
 		if err := scan(fmt.Sprintf("transactions[%d]", i),
-			txn.RailSubscriptionID, txn.TransactionID, txn.Type, txn.Currency,
+			txn.SourceID, txn.OriginalTransactionID, txn.RailSubscriptionID, txn.TransactionID, txn.Type, txn.Currency,
 		); err != nil {
 			return err
 		}

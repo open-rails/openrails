@@ -211,7 +211,7 @@ type declaration struct {
 	// subscriptions maps a source id to its record, txns to its transactions.
 	subscriptions map[string]uuid.UUID
 	txns          map[string][]uuid.UUID
-	historical    map[string][]uuid.UUID
+	receipts      map[string][]uuid.UUID
 	outcomes      map[uuid.UUID]outcome
 }
 
@@ -276,7 +276,7 @@ func (im *Importer) importBook(ctx context.Context, row gen.BillingPspImport, bo
 	return billingimport.Import(ctx, billingimport.Options{DB: im.DB, MerchantID: billing.MerchantID(row.MerchantID), Book: book, Clock: im.Clock})
 }
 
-// record maps the import's per-subscription results onto the records.
+// record maps subscription and receipt results onto their staged records.
 func (d *declaration) record(res billing.BillingImportResult) {
 	for _, id := range d.customers {
 		d.outcomes[id] = outcome{state: billing.PSPImportImported}
@@ -285,7 +285,7 @@ func (d *declaration) record(res billing.BillingImportResult) {
 	for _, src := range append(append([]string{}, res.Imported...), res.Skipped...) {
 		landed[src] = true
 	}
-	for src, ids := range d.historical {
+	for src, ids := range d.receipts {
 		for _, id := range ids {
 			if landed[src] {
 				d.outcomes[id] = outcome{state: billing.PSPImportImported}
@@ -319,7 +319,7 @@ func (d *declaration) record(res billing.BillingImportResult) {
 
 func (l *lander) declare(groups []customerGroup, known map[string]bool) (declaration, error) {
 	pspID := billing.PSPID(l.scope.ID)
-	d := declaration{historical: map[string][]uuid.UUID{}, subscriptions: map[string]uuid.UUID{}, txns: map[string][]uuid.UUID{}, outcomes: map[uuid.UUID]outcome{},
+	d := declaration{receipts: map[string][]uuid.UUID{}, subscriptions: map[string]uuid.UUID{}, txns: map[string][]uuid.UUID{}, outcomes: map[uuid.UUID]outcome{},
 		book: billing.DeclaredBilling{AsOf: l.asOf, DefaultPSP: billing.PSPRef{ID: &pspID}}}
 	for _, g := range groups {
 		customer := billing.CustomerID(g.customer)
@@ -379,7 +379,18 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 			}
 		}
 		for _, r := range g.records {
-			if r.Kind != string(billing.PSPImportTransaction) || r.State != string(billing.PSPImportLinked) {
+			if r.Kind != string(billing.PSPImportTransaction) || r.State != string(billing.PSPImportLinked) && !(l.scope.Rail == "nmi" && r.State == string(billing.PSPImportImported)) {
+				continue
+			}
+			var data transactionData
+			if err := json.Unmarshal(r.Data, &data); err != nil {
+				return d, err
+			}
+			if l.scope.Rail == "nmi" && data.Type == "refund" {
+				d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "refund requires its qualified original payment group"}
+				continue
+			}
+			if r.State == string(billing.PSPImportImported) && len(l.refunds[data.TransactionID]) == 0 {
 				continue
 			}
 			subRef := deref(r.SubscriptionRef)
@@ -392,10 +403,6 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 				if known[subRef] {
 					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "its subscription exists but is not linked to this customer"}
 					continue
-				}
-				var data transactionData
-				if err := json.Unmarshal(r.Data, &data); err != nil {
-					return d, err
 				}
 				if !data.Success || data.Type != "" && data.Type != "sale" {
 					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "history without a subscription requires a confirmed successful sale"}
@@ -415,7 +422,7 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 					continue
 				}
 				src := "history:" + r.ID.String()
-				d.historical[src] = append([]uuid.UUID{r.ID}, refundIDs...)
+				d.receipts[src] = append([]uuid.UUID{r.ID}, refundIDs...)
 				d.book.HistoricalPayments = append(d.book.HistoricalPayments, billing.DeclaredHistoricalPayment{
 					SourceID: src, Customer: customer, Rail: l.scope.Rail, TransactionID: data.TransactionID,
 					Amount: data.Amount, Currency: data.Currency, PaidAt: data.OccurredAt, Refunds: refunds,
@@ -426,10 +433,6 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 			if reason != "" {
 				d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "its subscription does not land: " + reason}
 				continue
-			}
-			var data transactionData
-			if err := json.Unmarshal(r.Data, &data); err != nil {
-				return d, err
 			}
 			if data.Currency == "" {
 				price := priced[subRef]
@@ -446,13 +449,42 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 					continue
 				}
 			}
+			receiptSource := ""
+			if l.scope.Rail == "nmi" && data.Success && (data.Type == "" || data.Type == "sale") {
+				if l.unqualifiedRefund {
+					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "a successful refund has no original payment ID; create a fresh import before importing payment history"}
+					continue
+				}
+				refunds, refundIDs, reason := l.historicalRefunds(g.customer, data)
+				for _, refund := range l.refunds[data.TransactionID] {
+					if ref := deref(refund.record.SubscriptionRef); ref != "" && ref != subRef {
+						reason = "the refund names a different subscription from its original payment"
+					}
+				}
+				if reason != "" {
+					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, reason}
+					continue
+				}
+				receiptSource = "receipt:" + r.ID.String()
+				d.receipts[receiptSource] = []uuid.UUID{r.ID}
+				for i, refund := range refunds {
+					source := "receipt:" + refundIDs[i].String()
+					d.receipts[source] = []uuid.UUID{refundIDs[i]}
+					d.book.Transactions = append(d.book.Transactions, billing.DeclaredTransaction{
+						SourceID: source, RailSubscriptionID: subRef, TransactionID: refund.TransactionID, OriginalTransactionID: data.TransactionID,
+						Type: "refund", Success: true, Amount: refund.Amount, Currency: data.Currency, OccurredAt: refund.RefundedAt,
+					})
+				}
+			}
 			typ := data.Type
 			if typ == "sale" {
 				typ = ""
 			}
-			d.book.Transactions = append(d.book.Transactions, billing.DeclaredTransaction{RailSubscriptionID: subRef, TransactionID: data.TransactionID, Type: typ,
+			d.book.Transactions = append(d.book.Transactions, billing.DeclaredTransaction{SourceID: receiptSource, RailSubscriptionID: subRef, TransactionID: data.TransactionID, Type: typ,
 				Success: data.Success, Amount: data.Amount, Currency: data.Currency, OccurredAt: data.OccurredAt, StripeInvoice: data.StripeInvoice})
-			d.txns[src] = append(d.txns[src], r.ID)
+			if receiptSource == "" {
+				d.txns[src] = append(d.txns[src], r.ID)
+			}
 		}
 	}
 	return d, nil

@@ -17146,6 +17146,12 @@
       "DeclaredTransaction": {
         "type": "object",
         "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "original_transaction_id": {
+            "type": "string"
+          },
           "rail_subscription_id": {
             "type": "string"
           },

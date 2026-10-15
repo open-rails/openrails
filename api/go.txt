@@ -2057,7 +2057,9 @@ pkg openrails/billing, type DeclaredTransaction struct, Amount int64 `json:"amou
 pkg openrails/billing, type DeclaredTransaction struct, Currency string `json:"currency"`
 pkg openrails/billing, type DeclaredTransaction struct, NextBillingAt *time.Time `json:"next_billing_at,omitempty"`
 pkg openrails/billing, type DeclaredTransaction struct, OccurredAt time.Time `json:"occurred_at"`
+pkg openrails/billing, type DeclaredTransaction struct, OriginalTransactionID string `json:"original_transaction_id,omitempty"`
 pkg openrails/billing, type DeclaredTransaction struct, RailSubscriptionID string `json:"rail_subscription_id"`
+pkg openrails/billing, type DeclaredTransaction struct, SourceID string `json:"source_id,omitempty"`
 pkg openrails/billing, type DeclaredTransaction struct, StripeInvoice *DeclaredStripeInvoice `json:"stripe_invoice,omitempty"`
 pkg openrails/billing, type DeclaredTransaction struct, Success bool `json:"success"`
 pkg openrails/billing, type DeclaredTransaction struct, TransactionID string `json:"transaction_id"`

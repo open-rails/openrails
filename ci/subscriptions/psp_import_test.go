@@ -374,3 +374,74 @@ func TestPSPImportNMIStandaloneRefundHistory(t *testing.T) {
 	}
 	require.Len(t, w.nmi.Calls(), mutations, "pull and apply do not request charges or refunds")
 }
+
+func TestPSPImportNMISubscriptionRefundHistory(t *testing.T) {
+	directory := &openrailstest.UserInfo{}
+	w := prepareWorld(t, 12)
+	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
+	w.start()
+	ctx, client := t.Context(), w.client[remote]
+	tier := w.bookTier("subscription-refund", 999, 30)
+	product, err := client.GetProduct(ctx, tier.price.ProductID)
+	require.NoError(t, err)
+	m := w.historyMember(tier, w.clock.Now().Add(10*day), 3)
+	directory.Put(userinfo.User{ID: m.c.id, Email: "refund@host.test"})
+	w.nmi.EditVault(m.vault, func(v *nmimock.Vault) { v.Email = "refund@host.test" })
+	old := w.nmi.AddScheduleSale(m.schedule, m.started).TransactionID
+	refundedAt := w.clock.Now().Add(-time.Hour)
+	w.nmi.Intercept(func(r *http.Request) bool { return true }, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
+		res := serve()
+		raw, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		body := string(raw)
+		for _, r := range []struct{ id, original, amount string }{{"9000000001", m.current, "-1.00"}, {"9000000002", old, "-9.99"}} {
+			if !strings.Contains(body, "<transaction_id>"+r.original+"</transaction_id>") {
+				continue
+			}
+			// Refunds need not repeat the subscription reference: the original ID proves the relationship.
+			txn := fmt.Sprintf("<transaction><transaction_id>%s</transaction_id><original_transaction_id>%s</original_transaction_id><customerid>%s</customerid><currency>USD</currency><action><amount>%s</amount><action_type>refund</action_type><date>%s</date><success>1</success></action></transaction>", r.id, r.original, m.vault, r.amount, refundedAt.UTC().Format("20060102150405"))
+			body = strings.Replace(body, "</nm_response>", txn+"</nm_response>", 1)
+		}
+		res.Body = io.NopCloser(strings.NewReader(body))
+		res.ContentLength = int64(len(body))
+		res.Header.Set("Content-Length", fmt.Sprint(len(body)))
+		return res, nil
+	})
+	calls := len(w.nmi.Calls())
+	since := m.started.Add(-day)
+	refundRef := "9000000002:refund:" + refundedAt.UTC().Format(time.RFC3339)
+	imp, err := client.CreatePSPImport(ctx, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since,
+		Products: []billing.PSPImportProduct{{Product: product.Key}}, Rules: []billing.PSPImportRule{{Fact: "email", Via: billing.PSPImportViaDirectory}}})
+	require.NoError(t, err)
+	w.pspImported(imp.ID, billing.PSPImportPulled)
+	records := w.pspRecords(imp.ID)
+	// A refund the operator has not linked must hold its payment, even though the subscription lands.
+	_, err = w.pool.Exec(ctx, w.q(`UPDATE billing.psp_import_records SET state = 'unmatched', customer_id = NULL, linked_via = NULL WHERE id = $1`), records[refundRef].ID.UUID())
+	require.NoError(t, err)
+	_, err = client.ApplyPSPImport(ctx, imp.ID)
+	require.NoError(t, err)
+	w.pspImported(imp.ID, billing.PSPImportApplied)
+	records = w.pspRecords(imp.ID)
+	require.Equal(t, billing.PSPImportImported, records[m.schedule].State)
+	require.Equal(t, billing.PSPImportBlocked, records[old].State)
+	require.Equal(t, billing.PSPImportUnmatched, records[refundRef].State)
+	require.Zero(t, w.countRows(`SELECT count(*) FROM billing.payments WHERE transaction_id = $1`, old))
+	require.Equal(t, 2, w.countRows(`SELECT count(*) FROM billing.payments`))
+	for range 2 {
+		_, err = client.LinkPSPImport(ctx, imp.ID, billing.LinkPSPImportParams{})
+		require.NoError(t, err)
+		_, err = client.ApplyPSPImport(ctx, imp.ID)
+		require.NoError(t, err)
+		w.pspImported(imp.ID, billing.PSPImportApplied)
+		records = w.pspRecords(imp.ID)
+		for _, id := range []string{old, m.current, refundRef, "9000000001:refund:" + refundedAt.UTC().Format(time.RFC3339)} {
+			require.Equal(t, billing.PSPImportImported, records[id].State, "%s: %v", id, records[id].Reason)
+		}
+		require.Equal(t, 4, w.countRows(`SELECT count(*) FROM billing.payments`))
+	}
+	require.True(t, m.c.entitled(tier.ent))
+	require.Equal(t, calls, len(w.nmi.Calls()))
+}

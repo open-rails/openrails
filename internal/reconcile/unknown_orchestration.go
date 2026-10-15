@@ -296,6 +296,15 @@ func applyUnknownDecision(ctx context.Context, database *db.DB, lc *subscription
 // are never charge rows. Bounded to lookbackCap. Returns the count inserted.
 func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *models.Subscription, txns []RemoteTransaction, now time.Time, lookbackCap time.Duration) (int, error) {
 	inserted := 0
+	sink := declaredHistoryOf(ctx)
+	refundGroups := map[string][]RemoteTransaction{}
+	if sink != nil && sub.Rail == models.RailNMI {
+		for _, t := range txns {
+			if t.Success && t.Type == TransactionTypeRefund && t.OriginalTransactionID != "" && t.SubscriptionID == sub.RailSubscriptionID {
+				refundGroups[t.OriginalTransactionID] = append(refundGroups[t.OriginalTransactionID], t)
+			}
+		}
+	}
 	// Oldest first: schedule receipts settle cycles in the order they ran.
 	order := make([]int, len(txns))
 	for i := range order {
@@ -313,6 +322,9 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 		if t.TransactionID == "" || t.OccurredAt.Before(now.Add(-lookbackCap)) {
 			continue
 		}
+		if sink != nil && sub.Rail == models.RailNMI && t.Success && t.Type == TransactionTypeRefund && t.OriginalTransactionID != "" {
+			continue
+		}
 		if t.StripeBill == nil && !chargeAttempt(t.Type) {
 			if t.Type == TransactionTypeRefund || t.Type == TransactionTypeChargeback {
 				recordUnlinkedReversalFinding(ctx, database.Gen(ctx), sub, *t)
@@ -324,6 +336,13 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 			continue
 		}
 		var result observed.Result
+		var receiptOutcomes map[string]DeclaredOutcome
+		tracked := false
+		if sink != nil {
+			_, tracked = sink.outcomes[declaredReceiptKey(t.SubscriptionID, t.TransactionID)]
+		}
+		refunds := refundGroups[t.TransactionID]
+		verify := sink != nil && sub.Rail == models.RailNMI && t.Success && (tracked || len(refunds) > 0)
 		err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			d := database.NewWithPgxTx(tx)
 			current, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, sub.ID)
@@ -355,13 +374,23 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 			}
 			receipt := observed.ScheduleReceipt{TransactionID: t.TransactionID, Amount: amount, Currency: currency, OccurredAt: t.OccurredAt, NextBillingAt: next, Approved: t.Success}
 			history, err := observed.HistoricalBill(ctx, d, current, receipt)
-			if err != nil || history.Skip {
+			if err != nil {
+				return err
+			}
+			if history.Skip {
+				if verify {
+					receiptOutcomes, err = recordDeclaredRefunds(ctx, d, current, *t, refunds, now)
+				}
 				return err
 			}
 			var bill observed.Bill
 			if history.Bill != nil {
-				if sink := declaredHistoryOf(ctx); sink != nil {
+				recording, _ := ctx.Value(recordingDeclaredHistoryKey{}).(bool)
+				if sink != nil && !recording {
 					sink.add(current, *t)
+					for _, r := range refunds {
+						sink.add(current, r)
+					}
 					return nil
 				}
 				bill = *history.Bill
@@ -376,6 +405,12 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 			}
 			if result, err = observed.Record(ctx, d, bill, now); err != nil {
 				return err
+			}
+			if verify {
+				receiptOutcomes, err = recordDeclaredRefunds(ctx, d, current, *t, refunds, now)
+				if err != nil {
+					return err
+				}
 			}
 			// Settled history renews nothing: only a cycle bill is renewal evidence.
 			if history.Bill == nil {
@@ -393,6 +428,16 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 				return inserted, fmt.Errorf("retain unresolved provider bill: %w", findingErr)
 			}
 			return inserted, unresolved
+		}
+		if receiptOutcomes != nil {
+			code := DeclaredAlreadyPresent
+			if result.PaymentCreated {
+				code = DeclaredImported
+			}
+			receiptOutcomes[declaredReceiptKey(t.SubscriptionID, t.TransactionID)] = DeclaredOutcome{Code: code}
+			for key, outcome := range receiptOutcomes {
+				sink.outcomes[key] = outcome
+			}
 		}
 		if result.PaymentCreated {
 			inserted++
