@@ -188,11 +188,34 @@ type declaration struct {
 	// subscriptions maps a source id to its record, txns to its transactions.
 	subscriptions map[string]uuid.UUID
 	txns          map[string][]uuid.UUID
+	historical    map[string]uuid.UUID
 	outcomes      map[uuid.UUID]outcome
 }
 
 func (l *lander) land(ctx context.Context, groups []customerGroup) error {
-	d, err := l.declare(groups)
+	// An existing subscription that is unmatched, blocked or linked to
+	// someone else is not missing history. Do not bypass that decision.
+	var refs []string
+	for _, g := range groups {
+		for _, r := range g.records {
+			if r.Kind == string(billing.PSPImportTransaction) && r.SubscriptionRef != nil {
+				refs = append(refs, *r.SubscriptionRef)
+			}
+		}
+	}
+	known := map[string]bool{}
+	if len(refs) > 0 {
+		rows, err := l.im.DB.Gen(ctx).ListPSPImportRecordsByRef(ctx, gen.ListPSPImportRecordsByRefParams{
+			MerchantID: l.row.MerchantID, ImportID: l.row.ID, Kind: string(billing.PSPImportSubscription), Refs: refs,
+		})
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			known[r.Ref] = true
+		}
+	}
+	d, err := l.declare(groups, known)
 	if err != nil {
 		return err
 	}
@@ -239,6 +262,13 @@ func (d *declaration) record(res billing.BillingImportResult) {
 	for _, src := range append(append([]string{}, res.Imported...), res.Skipped...) {
 		landed[src] = true
 	}
+	for src, id := range d.historical {
+		if landed[src] {
+			d.outcomes[id] = outcome{state: billing.PSPImportImported}
+		} else {
+			d.outcomes[id] = outcome{billing.PSPImportBlocked, res.Reasons[src]}
+		}
+	}
 	for src, id := range d.subscriptions {
 		if landed[src] {
 			if _, decided := d.outcomes[id]; !decided {
@@ -262,9 +292,9 @@ func (d *declaration) record(res billing.BillingImportResult) {
 	}
 }
 
-func (l *lander) declare(groups []customerGroup) (declaration, error) {
+func (l *lander) declare(groups []customerGroup, known map[string]bool) (declaration, error) {
 	pspID := billing.PSPID(l.scope.ID)
-	d := declaration{subscriptions: map[string]uuid.UUID{}, txns: map[string][]uuid.UUID{}, outcomes: map[uuid.UUID]outcome{},
+	d := declaration{historical: map[string]uuid.UUID{}, subscriptions: map[string]uuid.UUID{}, txns: map[string][]uuid.UUID{}, outcomes: map[uuid.UUID]outcome{},
 		book: billing.DeclaredBilling{AsOf: l.asOf, DefaultPSP: billing.PSPRef{ID: &pspID}}}
 	for _, g := range groups {
 		customer := billing.CustomerID(g.customer)
@@ -330,7 +360,28 @@ func (l *lander) declare(groups []customerGroup) (declaration, error) {
 			subRef := deref(r.SubscriptionRef)
 			sub, ok := subs[subRef]
 			if subRef == "" || !ok {
-				d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "no subscription of this customer names it: history without a subscription does not land yet"}
+				if known[subRef] {
+					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "its subscription exists but is not linked to this customer"}
+					continue
+				}
+				var data transactionData
+				if err := json.Unmarshal(r.Data, &data); err != nil {
+					return d, err
+				}
+				if !data.Success || data.Type != "" && data.Type != "sale" {
+					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "history without a subscription requires a confirmed successful sale"}
+					continue
+				}
+				if data.StripeInvoice != nil {
+					d.outcomes[r.ID] = outcome{billing.PSPImportBlocked, "invoice history requires its subscription; it cannot be replaced by a standalone payment"}
+					continue
+				}
+				src := "history:" + r.ID.String()
+				d.historical[src] = r.ID
+				d.book.HistoricalPayments = append(d.book.HistoricalPayments, billing.DeclaredHistoricalPayment{
+					SourceID: src, Customer: customer, Rail: l.scope.Rail, TransactionID: data.TransactionID,
+					Amount: data.Amount, Currency: data.Currency, PaidAt: data.OccurredAt,
+				})
 				continue
 			}
 			src, reason := declareSub(sub)

@@ -96,6 +96,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 
 	history := reconcile.NewDeclaredHistory()
 	var plans []plannedPurchase
+	var historical []historicalPayment
 	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := database.NewWithPgxTx(tx)
 		qx := txdb.Qx(ctx)
@@ -142,6 +143,11 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		// Purchases are checked and attributed with the book; each records in
 		// its own transaction once the book commits.
 		plans, err = planPurchases(ctx, q, merchantID.UUID(), psps, opts.Book.Purchases, asOf, &res)
+		if err != nil {
+			return err
+		}
+
+		historical, err = planHistoricalPayments(psps, opts.Book.HistoricalPayments, asOf, &res)
 		if err != nil {
 			return err
 		}
@@ -413,6 +419,10 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	if err := recordPurchases(ctx, database, merchantID.UUID(), plans, asOf, &res); err != nil {
 		return res, err
 	}
+	if err := recordHistoricalPayments(ctx, database, merchantID.UUID(), historical, asOf, &res); err != nil {
+		return res, err
+	}
+
 	sort.Strings(res.Imported)
 	sort.Strings(res.Skipped)
 	sort.Strings(res.Blocked)

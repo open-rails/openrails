@@ -1939,6 +1939,7 @@ pkg openrails/billing, type DeclaredBilling struct, AsOf time.Time `json:"as_of"
 pkg openrails/billing, type DeclaredBilling struct, Customers []DeclaredCustomer `json:"customers,omitempty"`
 pkg openrails/billing, type DeclaredBilling struct, DefaultPSP PSPRef `json:"default_psp,omitzero"`
 pkg openrails/billing, type DeclaredBilling struct, ExpectedSubscriptions *int `json:"expected_subscriptions,omitempty"`
+pkg openrails/billing, type DeclaredBilling struct, HistoricalPayments []DeclaredHistoricalPayment `json:"historical_payments,omitempty"`
 pkg openrails/billing, type DeclaredBilling struct, PaymentMethods []DeclaredPaymentMethod `json:"payment_methods,omitempty"`
 pkg openrails/billing, type DeclaredBilling struct, Purchases []DeclaredPurchase `json:"purchases,omitempty"`
 pkg openrails/billing, type DeclaredBilling struct, Subscriptions []DeclaredSubscription `json:"subscriptions,omitempty"`
@@ -1946,6 +1947,15 @@ pkg openrails/billing, type DeclaredBilling struct, SubscriptionsExhaustive bool
 pkg openrails/billing, type DeclaredBilling struct, Transactions []DeclaredTransaction `json:"transactions,omitempty"`
 pkg openrails/billing, type DeclaredCustomer struct
 pkg openrails/billing, type DeclaredCustomer struct, Customer CustomerID `json:"customer"`
+pkg openrails/billing, type DeclaredHistoricalPayment struct
+pkg openrails/billing, type DeclaredHistoricalPayment struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type DeclaredHistoricalPayment struct, Currency string `json:"currency"`
+pkg openrails/billing, type DeclaredHistoricalPayment struct, Customer CustomerID `json:"customer"`
+pkg openrails/billing, type DeclaredHistoricalPayment struct, PSP PSPRef `json:"psp,omitzero"`
+pkg openrails/billing, type DeclaredHistoricalPayment struct, PaidAt time.Time `json:"paid_at"`
+pkg openrails/billing, type DeclaredHistoricalPayment struct, Rail string `json:"rail"`
+pkg openrails/billing, type DeclaredHistoricalPayment struct, SourceID string `json:"source_id"`
+pkg openrails/billing, type DeclaredHistoricalPayment struct, TransactionID string `json:"transaction_id"`
 pkg openrails/billing, type DeclaredOrderLine struct
 pkg openrails/billing, type DeclaredOrderLine struct, AccessEndsAt *time.Time `json:"access_ends_at,omitempty"`
 pkg openrails/billing, type DeclaredOrderLine struct, Description string `json:"description,omitempty"`

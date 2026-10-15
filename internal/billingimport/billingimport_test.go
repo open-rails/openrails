@@ -29,8 +29,9 @@ func declaredBook() DeclaredBilling {
 			Rail: "nmi", RailSubscriptionID: uuid.NewString(),
 			Evidence: json.RawMessage(`{"legacy_id":"` + uuid.NewString() + `"}`),
 		}},
-		Transactions: []DeclaredTransaction{{RailSubscriptionID: uuid.NewString(), TransactionID: uuid.NewString(), Currency: "USD", OccurredAt: time.Now().UTC()}},
-		AdminGrants:  []DeclaredAdminGrant{{Customer: customer, Product: billing.ProductID(uuid.New()), SourceID: "grant_" + uuid.NewString()}},
+		Transactions:       []DeclaredTransaction{{RailSubscriptionID: uuid.NewString(), TransactionID: uuid.NewString(), Currency: "USD", OccurredAt: time.Now().UTC()}},
+		HistoricalPayments: []billing.DeclaredHistoricalPayment{{SourceID: "history", Customer: customer, Rail: "nmi", TransactionID: "123456789", Amount: 1000000, Currency: "USD", PaidAt: time.Now().UTC()}},
+		AdminGrants:        []DeclaredAdminGrant{{Customer: customer, Product: billing.ProductID(uuid.New()), SourceID: "grant_" + uuid.NewString()}},
 	}
 }
 
@@ -67,9 +68,14 @@ func TestDeclaredBookPANFirewall(t *testing.T) {
 		"sub.payment_method": func(b *DeclaredBilling) {
 			b.Subscriptions[0].PaymentMethod = &PaymentMethodRef{Rail: "nmi", RailMethodRef: visa}
 		},
-		"txn.transaction_id": func(b *DeclaredBilling) { b.Transactions[0].TransactionID = "3782 822463 10005" },
-		"grant.source_id":    func(b *DeclaredBilling) { b.AdminGrants[0].SourceID = "5555-5555-5555-4444" },
-		"default_psp.key":    func(b *DeclaredBilling) { b.DefaultPSP.Key = visa },
+		"txn.transaction_id":        func(b *DeclaredBilling) { b.Transactions[0].TransactionID = "3782 822463 10005" },
+		"historical.transaction_id": func(b *DeclaredBilling) { b.HistoricalPayments[0].TransactionID = visa },
+		"historical.source_id":      func(b *DeclaredBilling) { b.HistoricalPayments[0].SourceID = visa },
+		"historical.psp":            func(b *DeclaredBilling) { b.HistoricalPayments[0].PSP.Key = visa },
+		"historical.rail":           func(b *DeclaredBilling) { b.HistoricalPayments[0].Rail = visa },
+		"historical.currency":       func(b *DeclaredBilling) { b.HistoricalPayments[0].Currency = visa },
+		"grant.source_id":           func(b *DeclaredBilling) { b.AdminGrants[0].SourceID = "5555-5555-5555-4444" },
+		"default_psp.key":           func(b *DeclaredBilling) { b.DefaultPSP.Key = visa },
 	} {
 		book := declaredBook()
 		mutate(&book)

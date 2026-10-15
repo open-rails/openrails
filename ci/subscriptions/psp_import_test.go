@@ -58,7 +58,7 @@ func TestPSPImportFromNMI(t *testing.T) {
 	w := prepareWorld(t, 12)
 	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
 	w.start()
-	w.waive("recorded", "the conflicted member's charge and the one-off charge stay staged, never landed")
+	w.waive("recorded", "the conflicted member's charge stays staged, never landed")
 	ctx := t.Context()
 	embeddedClient, remoteClient := w.client[embedded], w.client[remote]
 	mutations := len(w.nmi.Calls())
@@ -178,8 +178,12 @@ func TestPSPImportFromNMI(t *testing.T) {
 	for _, ref := range []string{byEmail.vault, byEmail.schedule, byEmail.sale.TransactionID, byOrder.vault, unmatched.schedule} {
 		require.Equal(t, billing.PSPImportImported, state(ref), ref)
 	}
-	require.Equal(t, billing.PSPImportBlocked, recs[oneOff.TransactionID].State)
-	require.Contains(t, *recs[oneOff.TransactionID].Reason, "no subscription")
+	require.Equal(t, billing.PSPImportImported, recs[oneOff.TransactionID].State)
+	history, err := remoteClient.ListPayments(ctx, billing.PaymentListParams{CustomerID: a.cid(), TransactionID: oneOff.TransactionID})
+	require.NoError(t, err)
+	require.Len(t, history.Items, 1)
+	require.Equal(t, int64(4_990_000), history.Items[0].Amount)
+	require.Nil(t, history.Items[0].SubscriptionID)
 	require.Equal(t, billing.PSPImportConflict, recs[conflicted.schedule].State)
 
 	// A customer's second live schedule of the product cannot land beside the
