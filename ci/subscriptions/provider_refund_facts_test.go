@@ -55,14 +55,14 @@ func TestObservedRefundRetainsHistoryAndAccessReview(t *testing.T) {
 	}))
 	writer := &reconcile.PGLocalWriter{DB: d, Now: w.clock.Now}
 	refundedAt := now.Add(-32 * day)
-	action := reconcile.RecordRefundAction{PspID: &psp, Rail: "nmi", TransactionID: payment.TransactionID,
+	action := reconcile.RecordRefundAction{PspID: &psp, Rail: "nmi", TransactionID: "first-partial",
 		AmountCents: 200, Currency: "USD", PurchasedAt: refundedAt, RefundedPaymentID: &payment.ID, CustomerID: customerID,
-		Metadata: map[string]any{"reconcile_refund_backfill": true, "provider": "nmi", "provider_transaction_id": payment.TransactionID}}
+		Metadata: map[string]any{"reconcile_refund_backfill": true, "provider": "nmi", "provider_transaction_id": "first-partial"}}
 	changed, err := writer.RecordRefund(ctx, action)
 	require.NoError(t, err)
 	require.True(t, changed)
 	svc := payments.NewPaymentService(d, w.clock)
-	recorded, err := svc.GetByPSPTransactionID(db.WithPSPID(ctx, psp), models.RailNMI, "refund:"+payment.TransactionID)
+	recorded, err := svc.GetByPSPTransactionID(db.WithPSPID(ctx, psp), models.RailNMI, action.TransactionID)
 	require.NoError(t, err)
 	require.Equal(t, orderID, *recorded.OrderID)
 	require.True(t, refundedAt.Equal(recorded.PurchasedAt))
