@@ -8,12 +8,15 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Separate NMI refund transactions name both the receipt and its original
-// payment. Same-ID action reports retain their existing reconciliation path.
+// NMI refund transactions must identify both the receipt and its original payment.
 func makeNMIRefund(t *RemoteTransaction, local map[string]*LocalPayment, now time.Time) (Finding, bool) {
 	f := Finding{Provider: ProviderNMI, Type: FindingRefundUnrecorded, SubjectKey: t.TransactionID,
 		Severity: SeverityHigh, Status: FindingStatusRequiresReview, RequiresAdmin: true,
 		RemoteEvidence: remoteTxnEvidence(t)}
+	if strings.TrimSpace(t.OriginalTransactionID) == "" || t.OriginalTransactionID == t.TransactionID {
+		f.RecommendedAction = "NMI refund needs a separate provider refund ID and an explicit original payment link; review the provider evidence"
+		return f, true
+	}
 	original := local[t.OriginalTransactionID]
 	if original == nil {
 		f.RecommendedAction = "NMI refund references no locally-known original payment"
