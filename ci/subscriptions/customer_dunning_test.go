@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/delinquency"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 type delinquencyPass struct{}
@@ -266,6 +267,12 @@ func TestAwaitingMethodDunning(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, pastDue.Items)
 
+	setRecoveryPosture(t, w, writeposture.ReadOnly)
+	held := *d
+	held.Paused, held.PauseReason = true, billing.CodeProviderWritesDisabled
+	require.Equal(t, &held, w.subscription(remote, e.sub).Dunning, "pausing keeps the card requirement and deadline")
+	setRecoveryPosture(t, w, writeposture.Full)
+
 	w.advanceHealthyTo(d.FinalRetryAt.Add(time.Hour))
 	w.runRenewals()
 	sub = w.subscription(embedded, e.sub)
@@ -291,4 +298,8 @@ func TestProviderDunningHasNoSchedule(t *testing.T) {
 	require.Nil(t, d.FinalRetryAt)
 	require.Nil(t, d.NextRetryAt)
 	require.False(t, d.WaitingForNewCard)
+	setRecoveryPosture(t, w, writeposture.ReadOnly)
+	require.Equal(t, d, w.subscription(remote, l.sub).Dunning, "OpenRails cannot pause the provider's retries")
+	require.False(t, d.Paused)
+	require.Empty(t, d.PauseReason)
 }

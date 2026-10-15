@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/migrate"
+	"github.com/open-rails/openrails/internal/writeposture"
 
 	"context"
 	"fmt"
@@ -670,6 +671,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		return nil, err
 	}
 
+	postures := writeposture.View{Config: cfg, DB: database}
 	userSubscriptionService := subscriptions.NewUserSubscriptionService(
 		subscriptionService,
 		productService,
@@ -678,6 +680,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		notificationService,
 		entitlementService,
 		collectionResolver,
+		postures,
 		clock,
 	)
 
@@ -688,6 +691,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		entitlementService,
 		notificationService,
 		paymentService,
+		postures,
 		clock,
 	)
 	adminSubscriptionService.StripeService = &subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}

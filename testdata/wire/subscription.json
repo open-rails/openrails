@@ -1,6 +1,7 @@
 {
   "collection_policy": "nmi_schedule",
   "dunning": {
+    "paused": false,
     "attempts": 2,
     "retries_left": 3,
     "next_retry_at": "2026-09-16T00:00:00.123456789Z",

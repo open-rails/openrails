@@ -43,5 +43,6 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 			out.LastFailureReason = failure.Reason
 		}
 	}
+	s.holdRecoveryForWritePosture(ctx, sub.MerchantID, out)
 	return out, nil
 }

@@ -8,8 +8,11 @@ type PaymentRecovery struct {
 	// failure, never raw provider text. It is absent for successful recovery, old
 	// subscription periods, or a newer pending attempt.
 	LastFailureReason string `json:"last_failure_reason,omitempty"`
-	Retryable         bool   `json:"retryable"`
-	BlockedReason     string `json:"blocked_reason,omitempty"`
+	// Retryable is false while provider writes are disabled. Limited mode
+	// still permits otherwise eligible customer payments; automatic retries
+	// can remain paused. Commands recheck all eligibility before charging.
+	Retryable     bool   `json:"retryable"`
+	BlockedReason string `json:"blocked_reason,omitempty"`
 	// OrderID is an engine-owned subscription's unpaid renewal: the order its
 	// customer pays (POST /v1/me/orders/{id}/pay) or confirms.
 	OrderID *OrderID `json:"order_id,omitempty"`
