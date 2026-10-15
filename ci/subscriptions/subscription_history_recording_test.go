@@ -353,8 +353,13 @@ func TestSubscriptionHistoryHeldOperation(t *testing.T) {
 func TestSubscriptionHistoryWritePostureHold(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
-	e := enroll(t, w, "stripe", embedded)
-	w.settle()
+	e := enroll(t, w, "nmi", embedded)
+	e.refreshBeforePeriodEnd()
+	e.setDecline(visa.Last4, "insufficient_funds", "202")
+	e.toPeriodEnd()
+	w.runRenewals()
+	scheduled := nextRetry(w.subscription(embedded, e.sub))
+	require.NotNil(t, scheduled)
 	jobs := w.jobs
 	w.stop()
 	d, err := db.NewWithPGXPool(w.pool, w.schema)
@@ -396,6 +401,18 @@ func TestSubscriptionHistoryWritePostureHold(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, holds)
+
+	declines, retrySchedules := 0, 0
+	for _, row := range rows {
+		if row.Source == 2 && row.Reason == "insufficient_funds" {
+			declines++
+		}
+		if row.Source == 4 && row.Kind == "retry_schedule" && row.ToNextRetryAt != nil && row.ToNextRetryAt.Equal(*scheduled) {
+			retrySchedules++
+		}
+	}
+	require.Equal(t, 1, declines)
+	require.Equal(t, 1, retrySchedules, "the earlier retry schedule remains evidence, not a promise that the held operation can execute")
 }
 
 type historyHeldHandler struct{ t *testing.T }
