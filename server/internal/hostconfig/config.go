@@ -45,7 +45,8 @@ type Config struct {
 	// RouteGroups turns the server's route groups on (route_groups); each is
 	// off by default.
 	RouteGroups billing.RouteGroups
-	// AdminConsole declares app sign-in. The console is always served at /admin.
+	// AdminConsole controls the optional console at /admin and its app sign-in.
+	// Nil keeps the console available with no declared app issuers.
 	AdminConsole *ConsoleConfig
 	// CheckoutOrigin is where the server serves the payment page
 	// (checkout_origin); empty serves none.

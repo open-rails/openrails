@@ -997,7 +997,8 @@ If your app already has an authenticated Vault client, pass it as `Deps.Vault` i
 
 The standalone server's console is at `/admin`, with Billing, Access and
 Account tabs. Configure app sign-in with `admin_console.issuers`, or offer
-local accounts with `local_sign_in`; see the [standalone console](docs/billing-admin.md).
+local accounts with `local_sign_in`. Set `admin_console.disabled: true` for an
+API-only server; see the [standalone console](docs/billing-admin.md).
 
 The browser entry and JSON API have separate URLs. For a server hosted at
 `https://billing.doujins.com`, open `https://billing.doujins.com/admin`.

@@ -63,7 +63,7 @@ The app in `server/web/console` composes three tabs from the public packages:
 
 App-signed-in staff manage people, roles and account security in their app. The console explains this instead of sending their remote tokens to the server's local AuthKit account API. Local owners and operators manage API keys and backend signing keys. There is no site-wide user browser or merchant registration page.
 
-The authenticated `GET /admin/merchants` directory supplies the merchant selector. Root staff see live merchants; other staff see the merchants their verified credential permits. A name in a query or browser state grants nothing, and token exchange refuses an unauthorized merchant.
+The authenticated `GET /admin/merchants` directory supplies the merchant selector. It is console bootstrap, separate from the billing API under `/v1`. Root staff see live merchants; other staff see the merchants their verified credential permits. A name in a query or browser state grants nothing, and token exchange refuses an unauthorized merchant.
 
 Declare app sign-in with `admin_console.issuers`, keyed by a merchant id or name (`root` for operators):
 
@@ -85,6 +85,15 @@ MembersAdmin's email invitation leads to `/admin/invite`, where the recipient en
 
 Password-reset and verification links use the console's `/admin/reset` and `/admin/verify` landings. AuthKit credential creation and role grants retain native recent-sign-in challenges; billing operations use their permissions directly. Two-factor policy remains the app's AuthKit configuration.
 
-The console is always served at `/admin`. `admin_console.enabled` and `admin_console.path` are refused with migration instructions; singular `admin_console.issuer` is replaced by the keyed map. With neither app nor local sign-in configured, the page explains how to declare one and the server still boots.
+The console is on at `/admin` by default. For an API-only standalone server, set:
 
-`task admin-build` builds billing-ui and the standalone app into `server/web/console/dist`; release archives and Docker images embed it. A source-only Go build without frontend assets still starts, and the console answers 503 with the build instruction. A malformed supplied build remains a startup error. Pass a supplied build as `server.Deps.ConsoleAssets`, rooted at `index.html` with the build's `<base href="/admin/">` placeholder.
+```yaml
+admin_console:
+  disabled: true
+```
+
+The environment equivalent is `ADMIN_CONSOLE_DISABLED=true`; in Go, use `server.Config{AdminConsole: &server.AdminConsole{Disabled: true}}`. This removes the entire `/admin` subtree, including pages, static assets, `config.json` and `/admin/merchants`; requests return 404. Console assets and issuer declarations are not used or validated, and the server does not provision the console's OAuth client or supply `/admin` email-link landings. The `/v1` billing API, health routes, configured route groups and `local_sign_in` policy remain independent. If local accounts use another frontend, configure its `auth.frontend` links explicitly.
+
+`admin_console.enabled` and `admin_console.path` are refused with migration instructions; singular `admin_console.issuer` is replaced by the keyed map. With the console enabled but neither app nor local sign-in configured, the page explains how to declare one and the server still boots.
+
+`task admin-build` builds billing-ui and the standalone app into `server/web/console/dist`; release archives and Docker images embed it. A source-only Go build without frontend assets still starts; the enabled console answers 503 with the build instruction. A malformed supplied build is a startup error only when the console is enabled. Pass a supplied build as `server.Deps.ConsoleAssets`, rooted at `index.html` with the build's `<base href="/admin/">` placeholder. Disabling the console does not remove assets already compiled into a release binary.

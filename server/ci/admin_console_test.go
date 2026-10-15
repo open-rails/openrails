@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -151,7 +152,7 @@ func TestAdminConsoleFindsAuthKit(t *testing.T) {
 	}
 }
 
-// The standalone product always owns /admin, including a server whose staff
+// The standalone product owns /admin by default, including a server whose staff
 // use only AuthKit's account and access surfaces.
 func TestServerConsoleIsOnByDefault(t *testing.T) {
 	f := newFixture(t)
@@ -189,6 +190,39 @@ func TestServerConsoleBootsWithoutSignIn(t *testing.T) {
 	require.Contains(t, boot.Body.String(), `"issuers":[]`)
 	require.Equal(t, http.StatusUnauthorized, get(handler, "/admin/merchants").Code)
 	require.Equal(t, http.StatusNotFound, call(t, handler, "", http.MethodPost, "/"+f.schema+"/v1/register", map[string]string{}).Code, "issuer-only mode exposes no native enrollment")
+}
+
+// Disabling the UI removes its complete subtree and skips UI-only validation.
+// The billing API and independently enabled local AuthKit surface still work.
+func TestServerConsoleCanBeDisabled(t *testing.T) {
+	f := newFixture(t)
+	srv := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+		resourced(cfg, deps)
+		cfg.AdminConsole = &server.AdminConsole{Disabled: true, Issuers: map[string]server.ConsoleIssuer{
+			"unused": {URL: ":invalid", ClientID: ""},
+		}}
+		deps.ConsoleAssets = fstest.MapFS{"index.html": {Data: []byte("not a console build")}}
+	})
+	handler, err := standaloneHandler(srv)
+	require.NoError(t, err)
+	routes, err := srv.Routes()
+	require.NoError(t, err)
+	mux := http.NewServeMux()
+	for _, route := range routes {
+		require.False(t, route.Path == "/admin" || strings.HasPrefix(route.Path, "/admin/"), route.Path)
+		mux.Handle(route.Method+" "+route.Path, route.Handler)
+	}
+	for _, h := range []http.Handler{handler, mux} {
+		for _, path := range []string{"/admin", "/admin/", "/admin/index.html", "/admin/customers/42", "/admin/config.json", "/admin/assets/index-1a2b3c.js", "/admin/merchants"} {
+			require.Equal(t, http.StatusNotFound, get(h, path).Code, path)
+		}
+		require.Equal(t, http.StatusOK, get(h, "/v1/config").Code)
+		require.Equal(t, http.StatusUnauthorized, get(h, "/v1/admin/access").Code, "billing API remains mounted")
+		require.Equal(t, http.StatusOK, get(h, "/"+f.schema+"/v1/capabilities").Code, "local AuthKit remains mounted")
+	}
+	require.Equal(t, http.StatusOK, get(handler, "/health/live").Code)
+	_, session := newOwner(t, srv)
+	require.NotEmpty(t, session, "local accounts can still sign in without the console")
 }
 
 // An explicitly supplied build is owned by the server, validated before serving.

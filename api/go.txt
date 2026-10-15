@@ -4044,6 +4044,7 @@ pkg openrails/server, method (*Server) UnlinkCustomer(context.Context, billing.N
 pkg openrails/server, method (*Server) UnlockAdminLockout(context.Context, string) error
 pkg openrails/server, type AdminConsole = hostconfig.ConsoleConfig
 pkg openrails/server, type AdminConsole struct
+pkg openrails/server, type AdminConsole struct, Disabled bool `koanf:"disabled"`
 pkg openrails/server, type AdminConsole struct, Issuers map[string]hostconfig.ConsoleIssuer `koanf:"issuers"`
 pkg openrails/server, type Config struct
 pkg openrails/server, type Config struct, Addr string

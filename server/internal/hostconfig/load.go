@@ -338,7 +338,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 
 	for _, old := range []string{"admin_console.enabled", "admin_console.path"} {
 		if k.Exists(old) {
-			return nil, fmt.Errorf("%s was removed: the standalone console is always served at /admin; configure admin_console.issuers and local_sign_in", old)
+			return nil, fmt.Errorf("%s was removed: use admin_console.disabled to omit the console at /admin; configure admin_console.issuers and local_sign_in for sign-in", old)
 		}
 	}
 	if k.Exists("admin_console.issuer") {

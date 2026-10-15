@@ -221,12 +221,14 @@ route_groups:
   metrics: true          # business metrics, read-only
   programmatic: true     # your backend's calls and SCIM user provisioning
 
-# The standalone staff console is always served at /admin. Release builds
+# The standalone staff console defaults to /admin. Set disabled to true for
+# an API-only server; local_sign_in and route_groups stay independent. Release builds
 # include its assets; `task build` embeds server/web/console/dist after
 # `task admin-build`. A source build without assets serves build instructions
 # with status 503. Configure app issuers or local_sign_in for staff sign-in.
 admin_console:
-  issuers: {} # /admin is always served; add one sign-in choice per merchant
+  disabled: false
+  issuers: {} # add one sign-in choice per merchant
   # issuers:
   #   example-merchant: # merchant id or name; root for operators
   #     url: https://example.com/auth

@@ -341,9 +341,10 @@ merchants:
 - A token acts for its issuer's merchant only, the merchant whose group trusts
   the issuer; nothing in the request names it.
 - A token with `sub` equal to its `client_id` is a machine acting for itself.
-- Your console signs staff in at the issuer: register a client with the
-  redirect URI `<console URL>/callback` and set `admin_console.issuer` to the
-  issuer and its `client_id`. OpenRails' own sign-in is off unless you set
+- The enabled console signs staff in at the issuer: register a client with the
+  redirect URI `<console URL>/callback` and declare the issuer and its
+  `client_id` in `admin_console.issuers`, keyed by merchant id or name.
+  OpenRails' own sign-in is off unless you set
   `local_sign_in: true`; with it, a person's session acts at a merchant through
   a token exchanged for it (RFC 8693 `group_id`, the `openrails-console`
   client the server declares), so the server needs its resource: `auth.resource.id`,
@@ -466,17 +467,19 @@ embedded host mounts them, and each merchant's group as its scope.
 | `server.Config` | Meaning |
 |---|---|
 | `Engine` | The engine's `openrails.Config`. A declared merchant's `Issuer` is refused; each merchant manages its catalog through the API or `openrails catalog apply`. |
-| `Auth` | The server's AuthKit (`authkit.Config`), passed through: its issuer (required), keys, registration, rate limits, the resource it serves (`Resource`) and how it issues tokens (`SignIn`). The server sets the product's own: the merchant roles, the API key prefix and audience, the resource's scopes, AuthKit's River schema and HTTP mount; invitation-only registration and `/admin` link landings for local staff (closed without local sign-in), and the engine's trusted proxies when unset. Explicit closed enrollment stays restrictive; standalone open self-registration is refused. Hosted products supplying `server.Config.MerchantCreation` may explicitly enable open registration with local sign-in; verification still defaults to required. |
+| `Auth` | The server's AuthKit (`authkit.Config`), passed through: its issuer (required), keys, registration, rate limits, the resource it serves (`Resource`) and how it issues tokens (`SignIn`). The server sets the product's own: the merchant roles, the API key prefix and audience, the resource's scopes, AuthKit's River schema and HTTP mount; invitation-only registration for local staff (closed without local sign-in), `/admin` link landings when the local console is enabled, and the engine's trusted proxies when unset. Explicit closed enrollment stays restrictive; standalone open self-registration is refused. Hosted products supplying `server.Config.MerchantCreation` may explicitly enable open registration with local sign-in; verification still defaults to required. |
 | `LocalSignIn` | Serve sign-in to the server's own accounts. Without it people sign in at a trusted issuer. |
 | `Naming` | The rename policy for merchant names. |
 | `MerchantCreation` | The policy for merchants users create (`ProvisionMerchant` with an owner) and rename: reserved names, a pattern and a free allowance. |
-| `AdminConsole`, `ConsoleIssuer` | The admin console; `ConsoleIssuer` signs staff in to it at a trusted issuer, for `Auth.Resource.ID`. |
+| `AdminConsole`, `ConsoleIssuer` | The console defaults to on at `/admin`. Set `AdminConsole: &server.AdminConsole{Disabled: true}` to omit its pages, assets and bootstrap endpoints; billing and auth APIs remain independent. `ConsoleIssuer` signs staff in at a trusted issuer, for `Auth.Resource.ID`. |
 | `Addr` | Where `Run` listens; default `:3053`. |
 | `PrivateAddr` | Where `Run` also serves `PrivateHandler`, the operator's `/metrics`; empty serves none (`private_port`). |
 
-The console build is a server dependency: `server.Deps.ConsoleAssets` accepts
+The enabled console's build is a server dependency: `server.Deps.ConsoleAssets` accepts
 a filesystem rooted at `index.html`; nil uses the build embedded in the binary.
-The embedded `openrails.New` engine does not serve the console.
+Disabled consoles do not use or validate the build, declare a console OAuth
+client or default AuthKit's frontend links to `/admin`. Explicit AuthKit frontend
+settings remain unchanged. The embedded `openrails.New` engine does not serve the console.
 
 `server.Deps` holds the engine's `openrails.Deps` (`Engine`), AuthKit's own
 (`Auth`, an `authkit.Deps`: its senders, key source and the rest; nil Postgres

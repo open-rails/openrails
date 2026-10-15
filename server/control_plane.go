@@ -128,6 +128,6 @@ func (s *Server) CompletePendingMerchantRetirements(ctx context.Context, limit i
 // ConsoleClientID is the admin console's OAuth client at the server's
 // AuthKit, which the server declares: a public client exchanging a person's
 // session token for one bound to the merchant they act on (RFC 8693, the
-// merchant's id as group_id), with a DPoP proof. Absent with
-// Config.AdminConsole.Issuers.
+// merchant's id as group_id), with a DPoP proof. It is declared automatically
+// only when local sign-in and the console are enabled.
 const ConsoleClientID = controlplane.ConsoleClientID

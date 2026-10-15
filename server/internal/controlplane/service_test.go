@@ -53,7 +53,7 @@ func TestAuthKitConfiguration(t *testing.T) {
 		Resource:     authkit.ResourceConfig{ID: "https://api.openrails.example.com", Scopes: map[string][]string{"x": {"y"}}},
 		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeInviteOnly},
 		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
-	}, Options{LocalSignIn: true})
+	}, Options{LocalSignIn: true, Console: true})
 	require.NoError(t, err)
 	require.Equal(t, ResourceScopes, got.Resource.Scopes, "the resource's scopes are the product's")
 	require.Equal(t, iam.RegistrationVerificationRequired, got.Registration.Verification)
@@ -85,7 +85,7 @@ func TestAuthKitPreservesNoAutomaticMigrations(t *testing.T) {
 
 func TestLocalConsoleEnrollmentAndLinkDefaults(t *testing.T) {
 	engine := &config.Config{PublicBillingBaseURL: "https://billing.example.com/v1"}
-	got, err := AuthKit(engine, authkit.Config{Token: authkit.TokenConfig{Issuer: "https://billing.example.com/auth"}}, Options{LocalSignIn: true})
+	got, err := AuthKit(engine, authkit.Config{Token: authkit.TokenConfig{Issuer: "https://billing.example.com/auth"}}, Options{LocalSignIn: true, Console: true})
 	require.NoError(t, err)
 	require.Equal(t, iam.RegistrationModeInviteOnly, got.Registration.NativeUserMode)
 	require.Equal(t, "https://billing.example.com", got.Frontend.BaseURL)
@@ -94,6 +94,24 @@ func TestLocalConsoleEnrollmentAndLinkDefaults(t *testing.T) {
 	require.Equal(t, "/admin/verify", got.Frontend.VerifyPath)
 	require.Equal(t, "/admin/passwordless", got.Frontend.PasswordlessPath)
 	require.NotContains(t, got.HTTP.Groups, iam.RouteAdmin)
+}
+
+func TestLocalSignInWithoutConsole(t *testing.T) {
+	engine := &config.Config{PublicBillingBaseURL: "https://billing.example.com/v1"}
+	for _, frontend := range []authkit.FrontendConfig{{}, {
+		BaseURL: "https://accounts.example.com", InvitePath: "/join", PasswordResetPath: "/reset",
+		VerifyPath: "/verify", PasswordlessPath: "/sign-in",
+	}} {
+		got, err := AuthKit(engine, authkit.Config{
+			Token: authkit.TokenConfig{Issuer: "https://billing.example.com/auth"}, Frontend: frontend,
+		}, Options{LocalSignIn: true})
+		require.NoError(t, err)
+		require.Equal(t, frontend, got.Frontend, "API-only local sign-in does not assume /admin link landings")
+		require.Empty(t, got.AuthorizationServer.Clients, "no implicit console OAuth client")
+		require.Equal(t, iam.RegistrationModeInviteOnly, got.Registration.NativeUserMode)
+		require.Contains(t, got.HTTP.Groups, iam.RouteRegistration)
+		require.Equal(t, ResourceScopes, got.Resource.Scopes, "resource authority is independent of its console")
+	}
 }
 
 func TestHostedOpenRegistrationRequiresPolicyAndLocalSignIn(t *testing.T) {

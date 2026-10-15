@@ -1326,7 +1326,7 @@
       "var ErrRenamesDisabled = merchants.ErrRenamesDisabled"
     ],
     "server/internal/hostconfig": [
-      "type ConsoleConfig struct {\n\tIssuers map[string]ConsoleIssuer `koanf:\"issuers\"`\n}",
+      "type ConsoleConfig struct {\n\tDisabled bool `koanf:\"disabled\"`\n\n\tIssuers map[string]ConsoleIssuer `koanf:\"issuers\"`\n}",
       "type ConsoleIssuer struct {\n\tURL string\n\n\tClientID string\n\n\tName string\n\n\tScope string\n}",
       "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}"
     ],

@@ -66,7 +66,7 @@ type Options struct {
 	MerchantCreation *MerchantCreationConfig
 	// Console: the server's own accounts act on a merchant through a token
 	// exchanged for it (ConsoleClientID), as its admin console does; off
-	// when the console signs staff in at a trusted issuer.
+	// when the console is disabled or signs staff in at a trusted issuer.
 	Console bool
 }
 
@@ -150,7 +150,7 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 	if reg.NativeUserMode != iam.RegistrationModeClosed && reg.Verification == "" {
 		reg.Verification = iam.RegistrationVerificationRequired
 	}
-	if opts.LocalSignIn {
+	if opts.LocalSignIn && opts.Console {
 		consoleFrontend(&auth.Frontend, cfg.PublicBillingBaseURL, auth.Token.Issuer)
 	}
 	var http authkit.HTTPConfig

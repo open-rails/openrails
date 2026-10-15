@@ -13,10 +13,13 @@ import (
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
-// The standalone product always serves its console at /admin. Its JSON
+// The standalone product serves its enabled console at /admin. Its JSON
 // directory is authenticated separately; static assets and sign-in choices
 // contain no credentials or private directory data.
 func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
+	if s.adminConsole != nil && s.adminConsole.Disabled {
+		return nil
+	}
 	path := hostconfig.ConsolePath
 	for _, entry := range mux.Entries {
 		if entry.Path == path || strings.HasPrefix(entry.Path, path+"/") {

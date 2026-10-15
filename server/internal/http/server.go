@@ -41,7 +41,7 @@ type Dependencies struct {
 	ConsoleAssets fs.FS
 	// RouteGroups turns the merchant route groups on.
 	RouteGroups config.RouteGroups
-	// AdminConsole declares app sign-in methods; the console is always on.
+	// AdminConsole controls the optional console and its app sign-in methods.
 	AdminConsole *hostconfig.ConsoleConfig
 	// CheckoutOrigin serves the payment page there (by Host), from
 	// PaymentPageAssets; empty serves none.
@@ -252,7 +252,7 @@ func New(deps Dependencies) (*Server, error) {
 	// hosts still mount it — a pinned merchant has no payload-derived identity
 	// to resolve — via internal/http/embedhttp.
 
-	// The standalone console is always mounted at /admin; a source build
+	// Unless disabled, the standalone console mounts at /admin; a source build
 	// without assets serves build instructions with status 503.
 	if err := s.registerAdminConsoleRoutes(mux); err != nil {
 		return nil, err

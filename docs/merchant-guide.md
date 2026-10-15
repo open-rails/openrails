@@ -375,11 +375,13 @@ is the caller's reproducible idempotency key: retrying it can never double-credi
 
 ### The admin console
 
-The standalone server always serves its staff console at `/admin`, with
+The standalone server defaults to serving its staff console at `/admin`, with
 **Billing**, **Access** and **Account**. BillingAdmin supplies the billing pages;
 AuthKit components supply group administration and account security. Staff use
 configured app issuers or the separately enabled local sign-in. Release binaries
 include the assets; a source build without them answers 503 with build instructions.
+Set `admin_console.disabled: true` for an API-only server. Its `/admin` subtree
+then returns 404; billing APIs, route groups and local sign-in remain independent.
 
 Embedded hosts compose `@openrails/billing-ui/admin` at their chosen UI path;
 the embedded Go engine serves no console. Build and mounting details are in

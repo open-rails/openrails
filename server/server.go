@@ -42,7 +42,7 @@ type (
 	// MerchantCreationConfig is Config.MerchantCreation: the policy for
 	// merchants and names users claim.
 	MerchantCreationConfig = hostconfig.MerchantCreationConfig
-	// AdminConsole declares the apps staff sign in through at /admin.
+	// AdminConsole controls the optional console at /admin and its app sign-in.
 	AdminConsole = hostconfig.ConsoleConfig
 	// ConsoleIssuer is one merchant or operator authorization server.
 	ConsoleIssuer = hostconfig.ConsoleIssuer
@@ -79,7 +79,7 @@ type Config struct {
 	// every request is; the server only maps merchants to AuthKit groups.
 	// Auth.Token.Issuer is required. The server sets what is the product's:
 	// the merchant roles, the API key prefix, the issued audience, the
-	// resource's scopes, the admin console's OAuth client (openrails-console),
+	// resource's scopes, the enabled console's OAuth client (openrails-console),
 	// a 15-minute access-token lifetime unless
 	// Auth.AuthorizationServer.AccessTokenTTL sets one, AuthKit's River schema
 	// (the engine's) and its HTTP mount. An empty client-IP posture takes the engine's TrustedProxies
@@ -106,8 +106,8 @@ type Config struct {
 	// route behind the server's own merchant permission (the Merchant*
 	// permissions).
 	RouteGroups openrails.RouteGroups
-	// AdminConsole declares app sign-in methods. The console is always on at
-	// /admin; LocalSignIn separately enables local accounts.
+	// AdminConsole controls the console at /admin and declares app sign-in
+	// methods. Nil keeps it on; Disabled omits it. LocalSignIn is independent.
 	AdminConsole *AdminConsole
 	// CheckoutOrigin is the origin (https://pay.example.com) the server
 	// serves its payment page on, by Host; orders then take a pay URL. It
@@ -147,7 +147,7 @@ type Deps struct {
 	// module, when the binary was built with one.
 	PaymentPageAssets fs.FS
 	// ConsoleAssets is a built admin console rooted at index.html. Nil uses
-	// the console build embedded in the binary.
+	// the console build embedded in the binary. Ignored when the console is disabled.
 	ConsoleAssets fs.FS
 }
 
@@ -209,7 +209,8 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		return nil, err
 	}
 
-	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: cfg.Naming, Console: cfg.LocalSignIn}
+	consoleEnabled := cfg.AdminConsole == nil || !cfg.AdminConsole.Disabled
+	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: cfg.Naming, Console: cfg.LocalSignIn && consoleEnabled}
 	if c := cfg.MerchantCreation; c != nil {
 		policy := controlplane.MerchantCreationConfig{ReservedSlugs: c.ReservedSlugs, ReservedEscalationRole: c.ReservedEscalationRole, SlugPattern: c.SlugPattern}
 		if c.FreeAllowance > 0 {
@@ -269,7 +270,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		return fail(err)
 	}
 	consoleAssets := deps.ConsoleAssets
-	if consoleAssets == nil {
+	if consoleEnabled && consoleAssets == nil {
 		consoleAssets = admin.FS()
 	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
