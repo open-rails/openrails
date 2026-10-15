@@ -997,7 +997,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, txnID, refundAmount, payments.ReversalRefund); refundErr != nil {
+			if _, refundErr := s.recordNMIRefund(ctx, originalPayment, txnID, refundAmount); refundErr != nil {
 				log.WithContext(ctx).WithError(refundErr).WithFields(log.Fields{
 					"refund_transaction_id":   txnID,
 					"original_payment_id":     originalPayment.ID,
@@ -1083,7 +1083,7 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, body *NMI
 		if err != nil {
 			return err
 		}
-		if _, err := s.PaymentService.Refund(ctx, original.ID, txnID, refundAmount, payments.ReversalRefund); err != nil {
+		if _, err := s.recordNMIRefund(ctx, original, txnID, refundAmount); err != nil {
 			return fmt.Errorf("record NMI refund: %w", err)
 		}
 	}

@@ -47,18 +47,19 @@ type xmlAction struct {
 }
 
 type xmlTransaction struct {
-	XMLName          xml.Name `xml:"transaction"`
-	TransactionID    string   `xml:"transaction_id"`
-	TransactionType  string   `xml:"transaction_type"`
-	Condition        string   `xml:"condition"`
-	OrderID          string   `xml:"order_id"`
-	OrderDescription string   `xml:"order_description"`
-	CCNumber         string   `xml:"cc_number"`
-	CCBin            string   `xml:"cc_bin"`
-	CCType           string   `xml:"cc_type"`
-	AVSResponse      string   `xml:"avs_response"`
-	CSCResponse      string   `xml:"csc_response"`
-	CustomerVaultID  string   `xml:"customer_vault_id"`
+	XMLName               xml.Name `xml:"transaction"`
+	TransactionID         string   `xml:"transaction_id"`
+	OriginalTransactionID string   `xml:"original_transaction_id,omitempty"`
+	TransactionType       string   `xml:"transaction_type"`
+	Condition             string   `xml:"condition"`
+	OrderID               string   `xml:"order_id"`
+	OrderDescription      string   `xml:"order_description"`
+	CCNumber              string   `xml:"cc_number"`
+	CCBin                 string   `xml:"cc_bin"`
+	CCType                string   `xml:"cc_type"`
+	AVSResponse           string   `xml:"avs_response"`
+	CSCResponse           string   `xml:"csc_response"`
+	CustomerVaultID       string   `xml:"customer_vault_id"`
 	// CustomerID is the vault as live reports name it.
 	CustomerID string `xml:"customerid"`
 	Email      string `xml:"email"`
@@ -177,6 +178,7 @@ func (m *Mock) search(form url.Values) string {
 		refunded := cardTransaction(r.ID, "pendingsettlement", s.OrderID, s.Vault, s.Currency, s.Card, xmlAction{Amount: decimalCents(r.Cents), ActionType: "refund", Date: r.At.UTC().Format(queryTime),
 			Success: "1", Source: "api", ResponseText: "SUCCESS", ResponseCode: "100"})
 		refunded.MDF = bookField(s.Book)
+		refunded.OriginalTransactionID = s.TransactionID
 		add(refunded, r.At, s.ScheduleID)
 	}
 	if !schedules && !m.hideValidations {

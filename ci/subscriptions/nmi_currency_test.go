@@ -39,7 +39,8 @@ func TestNMIYenReversalsAreReadInYen(t *testing.T) {
 				"cc_number": "4xxxxxxxxxxx5100", "amount": "500.00", "reason_code": "10", "reason": "Fraud",
 			}}})
 			if kind == "refund" {
-				notice = nmiEvent("transaction.refund.success", obj{"transaction_id": "refund-" + paid[0].ID.String()[:8], "transaction_type": "cc", "condition": "complete",
+				refundID := w.nmi.Refund(paid[0].TransactionID, 50_000)
+				notice = nmiEvent("transaction.refund.success", obj{"transaction_id": refundID, "transaction_type": "cc", "condition": "complete",
 					"amount": "500.00", "currency": "JPY", "action": obj{"action_type": "refund", "amount": "500.00", "success": "1"},
 					"transaction": obj{"transaction_id": paid[0].TransactionID}})
 			}
