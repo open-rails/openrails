@@ -246,7 +246,7 @@ var jsonRules = map[string]jsonRule{
 		"renewal": acceptedRenewalJSON, "previous_period_end": textValue, "accepted_at": textValue,
 		"payment_method_id": uuidValue, "instrument": frozenInstrumentJSON,
 		"hyperswitch": object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
-		"attempt":     integerValue, "failure_count": integerValue, "amount_minor": moneyStringValue, "order_reference": uuidValue,
+		"attempt":     integerValue, "failure_count": integerValue, "amount_minor": moneyStringValue, "order_reference": uuidValue, "order_id": uuidValue,
 	}),
 	"provider_intents.subscription_collection.result_evidence": nullable(object(map[string]jsonRule{
 		"stripe_recurring_decline": object(map[string]jsonRule{"decline_code": textValue, "binding": receiptBindingJSON, "failure_code": textValue, "payment_intent_id": textValue}),
@@ -313,6 +313,7 @@ var jsonRules = map[string]jsonRule{
 		"qualified_receipt": collectedReceiptJSON, "sale_submitted": booleanValue, "transaction_id": textValue, "payment_id": uuidValue, "delayed_start": textValue,
 		"declined": booleanValue, "not_executed": booleanValue, "request_refused": booleanValue, "response_code": integerValue, "localization_id": textValue, "operator_resolution": operatorResolutionJSON,
 		"duplicate_refused": booleanValue, "failure_code": textValue, "resolved_absent": booleanValue,
+		"avs_response": textValue, "cvv_response": textValue, "decline_transaction_id": textValue,
 	})),
 	"provider_intents.initial_membership.payload": object(map[string]jsonRule{
 		"order_attempt_id":    uuidValue,
@@ -337,6 +338,8 @@ var jsonRules = map[string]jsonRule{
 	"catalog_applications.result": object(map[string]jsonRule{"application_id": textValue, "catalog_id": textValue, "base_revision": integerValue, "applied_revision": integerValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
 	// The model's legacy gateway_response column stores arbitrary subscription metadata.
 	"subscriptions.gateway_response":   metadataJSON,
+	"subscriptions.dunning_policy":     dunningPolicyJSON,
+	"orders.last_payment_error":        object(map[string]jsonRule{"reason": textValue, "message": textValue, "field": textValue}),
 	"catalog_meters.group_by":          nullable(dictionary(textValue)),
 	"price_psp_bindings.configuration": priceBindingConfigurationJSON,
 	"catalog_rate_cards.filter":        nullable(dictionary(array(textValue))),
