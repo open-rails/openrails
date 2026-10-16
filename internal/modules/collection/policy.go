@@ -65,7 +65,7 @@ func (p Policy) Validate() error {
 			}
 			prev = o
 		}
-		if prev+windowSlack(lower) >= lower {
+		if prev >= lower-windowSlack(lower) {
 			return fmt.Errorf("dunning tier %d: retries must end well inside the shortest cycle it covers (%s)", i+1, lower)
 		}
 		if !last {
