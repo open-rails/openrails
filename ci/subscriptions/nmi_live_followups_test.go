@@ -93,9 +93,8 @@ func (w *world) setProviderRefundAccess(policy string) {
 
 // #1080 item 5: a refund made in the provider's own dashboard follows the
 // merchant's provider_refund_access policy on every rail. Default: a full
-// refund ends the charge's access (an NMI-billed membership also has its
-// schedule deleted once; while disarmed the delete is held behind a finding),
-// a partial refund keeps it; keep never revokes.
+// refund ends the charge's access, a partial refund keeps it; keep never
+// revokes. Refunds do not delete the provider schedule.
 func TestProviderDashboardRefundAccessPolicy(t *testing.T) {
 	t.Parallel()
 	type row struct {

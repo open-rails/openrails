@@ -20,15 +20,14 @@ import (
 )
 
 // Stripe and CCBill bill the subscriptions they own; OpenRails mirrors them.
-// Access follows payment evidence, and revoking access stops provider billing.
+// Access follows payment evidence; refunds and cancellation are separate.
 
 func (l *legacy) stripeSubWrites() []providerCall {
 	return l.w.stripe.Mutations("/v1/subscriptions/" + l.railSub)
 }
 
-// A dispute or a refunded charge revokes a Stripe member's access, and the
-// same transaction queues the remote cancel: Stripe never bills a member
-// who has no access.
+// Disputes stop Stripe billing; refunds revoke the paid access without
+// canceling the provider subscription.
 func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 	t.Parallel()
 	t.Run("dispute", func(t *testing.T) {
@@ -77,10 +76,10 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		w.refreshProviders()
 		w.stripe.dashboardRefund(w.stripe.LatestCharge(l.railSub), 999)
 		require.Equal(t, http.StatusOK, w.deliver("stripe", w.refundNotice("stripe")))
-		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
+		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status)
 		require.False(t, l.c.entitled(l.ent))
-		require.Equal(t, true, w.stripe.Subscription(l.railSub)["cancel_at_period_end"])
-		require.Len(t, l.stripeSubWrites(), 1)
+		require.Equal(t, false, w.stripe.Subscription(l.railSub)["cancel_at_period_end"])
+		require.Empty(t, l.stripeSubWrites())
 	})
 	t.Run("stripe_unavailable", func(t *testing.T) {
 		t.Parallel()

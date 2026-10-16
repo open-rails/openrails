@@ -173,7 +173,7 @@ SELECT EXISTS (SELECT 1 WHERE NOT EXISTS (
    AND g.customer_id=w.customer_id AND g.source_id=w.subscription_id::text AND g.product_id=w.product_id
  WHERE g.source_type='subscription' AND g.kind='access' AND g.event='grant'
    AND NOT EXISTS (SELECT 1 FROM billing.grants t WHERE t.merchant_id=g.merchant_id AND t.supersedes_id=g.id)
-   AND ((g.starts_at=w.starts_at AND (g.ends_at IS DISTINCT FROM w.ends_at OR g.quantity IS DISTINCT FROM w.quantity))
+   AND ((g.starts_at=w.starts_at AND (g.ends_at IS DISTINCT FROM w.ends_at OR coalesce(g.quantity, 1) <> coalesce(w.quantity, 1)))
      OR (g.starts_at>w.starts_at AND g.ends_at IS NOT DISTINCT FROM w.ends_at))
  ) OR EXISTS (
  SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1::uuid
@@ -196,7 +196,7 @@ func (q *Queries) RefundAccessNeedsReview(ctx context.Context, arg RefundAccessN
 }
 
 const refundRevokedAccessWindow = `-- name: RefundRevokedAccessWindow :one
-WITH periods AS (
+WITH periods AS MATERIALIZED (
 SELECT p.id AS payment_id, p.merchant_id, p.customer_id,
        s.id AS subscription_id, l.product_id, l.quantity, o.subscription_bill_kind,
        coalesce(o.period_starts_at, s.started_at) AS starts_at,
@@ -211,7 +211,8 @@ JOIN billing.subscriptions s ON s.merchant_id=p.merchant_id AND s.customer_id=p.
 LEFT JOIN billing.provider_schedules ps ON ps.merchant_id=p.merchant_id
   AND ps.subscription_id=s.id AND ps.initial_order_id=o.id
   AND ps.source_reference='order:' || o.id::text
-WHERE p.merchant_id=$1::uuid AND p.metadata->>'refund_access_revoked'='true'
+WHERE p.merchant_id=$1::uuid AND p.customer_id=$2::uuid
+  AND p.metadata->>'refund_access_revoked'='true'
 )
 SELECT EXISTS (SELECT 1 WHERE EXISTS (
  SELECT 1 FROM billing.payments p
@@ -239,6 +240,7 @@ type RefundRevokedAccessWindowParams struct {
 }
 
 // Repair and ordinary grants honor the same retained access decision.
+// Resolve the customer's refunded windows before matching the requested product.
 func (q *Queries) RefundRevokedAccessWindow(ctx context.Context, arg RefundRevokedAccessWindowParams) (bool, error) {
 	row := q.db.QueryRow(ctx, refundRevokedAccessWindow,
 		arg.MerchantID,

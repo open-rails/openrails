@@ -488,8 +488,7 @@ func TestReplicasDunningRetryRace(t *testing.T) {
 	}
 }
 
-// Scenario 8: a cancel (or a refund that revokes access) lands on one
-// replica while another renews. Before the submission fence the cancel wins
+// Scenario 8: a cancel lands on one replica while another renews. Before the submission fence the cancel wins
 // and nothing is charged; after it, the cancel is refused until the charge
 // already sent settles the period, and then cancels at its end. Nothing is
 // charged afterwards.
@@ -514,21 +513,12 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 		_, err := r.client[remote].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "member left"})
 		require.NoError(t, err)
 	}
-	refund := func(t *testing.T, f *fleet, r *world, e *engineCase) {
-		page, err := r.client[remote].ListPayments(t.Context(), billing.PaymentListParams{CustomerID: e.c.cid(), PageRequest: billing.PageRequest{Limit: 10}})
-		require.NoError(t, err)
-		paid := completed(page.Items)
-		require.Len(t, paid, 1)
-		_, err = r.client[remote].RefundPayment(t.Context(), paid[0].ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: true, IdempotencyKey: "refund-" + paid[0].ID.String()})
-		require.NoError(t, err)
-	}
 	refused := func(t *testing.T, f *fleet, r *world, e *engineCase) {
 		_, err := r.client[remote].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "member left"})
 		requireCode(t, err, http.StatusConflict, "payment_in_progress")
 	}
 	races := []race{
 		{name: "cancel_before_fence", rails: []string{"nmi"}, gate: preFence, act: cancel},
-		{name: "refund_revoke_before_fence", rails: []string{"nmi"}, gate: preFence, act: refund},
 		{name: "cancel_after_fence", rails: rails, gate: afterFence, act: refused, charge: true, refused: true},
 	}
 	for _, rc := range races {
@@ -594,6 +584,38 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 			})
 		}
 	}
+}
+
+// Refunding the old period on another replica does not cancel an admitted
+// renewal, even while its worker is checking the saved card before submission.
+func TestReplicasRefundKeepsRenewal(t *testing.T) {
+	f := newFleet(t, 2)
+	e := enroll(t, f.replicas[0], "nmi", embedded)
+	original := completed(f.any().payments(embedded, e.c.id))[0]
+	f.toFreshDue(e)
+	vault := f.providerCustomers(e)[0]
+	h := f.hold("nmi", func(r *http.Request) bool {
+		return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/v5/customers/"+vault)
+	}, false)
+	f.startPasses()
+	renewing := h.wait()
+	refund, err := f.other(renewing).client[remote].RefundPayment(t.Context(), original.ID, billing.RefundPaymentParams{
+		Full: true, RevokeAccess: true, Reason: "requested_by_customer", IdempotencyKey: "refund-before-submission",
+	})
+	require.NoError(t, err)
+	require.Equal(t, billing.PaymentSucceeded, refund.Status, "the refund completes before renewal is released")
+	h.release()
+	f.settle()
+	require.Len(t, f.charges(e), 2)
+	require.Equal(t, 2, f.submissions(e))
+	require.Equal(t, billing.SubscriptionActive, f.subscription(e).Status)
+	require.True(t, e.c.entitled(e.ent))
+	f.toFreshDue(e)
+	f.passes()
+	require.Len(t, f.charges(e), 3)
+	require.Equal(t, 3, f.submissions(e))
+	require.Len(t, completed(f.any().payments(embedded, e.c.id)), 4, "three charges and one refund")
+	require.True(t, e.c.entitled(e.ent))
 }
 
 // Scenario 9: provider-owned (imported) memberships under three replicas.
