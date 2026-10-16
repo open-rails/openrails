@@ -15,7 +15,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -163,9 +165,14 @@ func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uui
 		if err != nil {
 			return err
 		}
+
 		if _, err := transactionDB.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: original.CustomerID}); err != nil {
 			return err
 		}
+		if _, err := transactionDB.Gen(ctx).LockPaymentSubscriptions(ctx, gen.LockPaymentSubscriptionsParams{MerchantID: mid.UUID(), PaymentID: originalPaymentID}); err != nil {
+			return err
+		}
+
 		if _, err := transactionDB.Gen(ctx).LockPaymentForRefund(ctx, gen.LockPaymentForRefundParams{MerchantID: mid.UUID(), PaymentID: originalPaymentID}); err != nil {
 			return err
 		}
@@ -174,7 +181,13 @@ func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uui
 		if err != nil {
 			return err
 		}
-		return scoped.syncPurchasedCreditRefund(ctx, originalPaymentID)
+		if err := scoped.syncPurchasedCreditRefund(ctx, originalPaymentID); err != nil {
+			return err
+		}
+		if reversalKind == ReversalRefund && refund.Metadata["admin_refund_idempotency_key"] == nil {
+			err = scoped.ApplyRefundAccessPolicy(ctx, originalPaymentID)
+		}
+		return err
 	})
 	return refund, err
 }
@@ -596,4 +609,23 @@ func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
 // RefundTotals reports the succeeded refunds against each listed charge.
 func (s *PaymentService) RefundTotals(ctx context.Context, paymentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
 	return s.repo.RefundTotals(ctx, paymentIDs)
+}
+
+// ApplyRefundAccessPolicy applies the same payment-scoped rule to imported,
+// reconciled and notified refunds. Explicit OpenRails refunds retain their
+// caller's access choice and do not use this provider policy.
+func (s *PaymentService) ApplyRefundAccessPolicy(ctx context.Context, paymentID uuid.UUID) error {
+	original, err := s.GetByID(ctx, paymentID)
+	if err != nil {
+		return err
+	}
+	total, err := s.GetRefundTotalByPaymentID(ctx, paymentID)
+	if err != nil {
+		return err
+	}
+	revoke, err := merchantconfig.ProviderRefundRevokes(ctx, s.repo.db, total, original.Amount)
+	if err != nil || !revoke {
+		return err
+	}
+	return entitlements.NewEntitlementService(s.repo.db, s.clock).RevokeRefundedPaymentAccess(ctx, paymentID)
 }

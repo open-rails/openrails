@@ -626,19 +626,12 @@ func TestEngineRenewalRefunds(t *testing.T) {
 				require.Equal(t, http.StatusOK, w.deliver(rail, w.refundNotice(rail)))
 				require.Equal(t, !revoke, e.c.entitled(e.ent), "access follows the merchant's revoke_access choice")
 				sub := w.subscription(tp, e.sub)
-				if !revoke {
-					require.Equal(t, billing.SubscriptionActive, sub.Status, "refunding money alone does not cancel the membership")
-					e.toFreshPeriodEnd()
-					w.runRenewals()
-					require.Len(t, e.providerLedger(), 3, "the membership renews after a refunded period")
-					require.True(t, e.c.entitled(e.ent))
-					return
-				}
-				require.Equal(t, billing.SubscriptionCanceled, sub.Status, "revoking a membership payment's access ends the membership")
+				require.Equal(t, billing.SubscriptionActive, sub.Status, "refund access and cancellation are separate")
+				w.checkMoneyInvariants()
 				e.toFreshPeriodEnd()
 				w.runRenewals()
-				require.Len(t, e.providerLedger(), 2, "a revoked membership never renews")
-				require.False(t, e.c.entitled(e.ent))
+				require.Len(t, e.providerLedger(), 3, "the membership renews after a refunded period")
+				require.True(t, e.c.entitled(e.ent))
 			})
 		}
 		t.Run("archive", func(t *testing.T) {

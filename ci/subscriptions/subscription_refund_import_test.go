@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -93,7 +94,8 @@ func TestSubscriptionRefundImport(t *testing.T) {
 				require.Empty(t, result.Blocked)
 				require.Equal(t, []string{"9000000004"}, result.Imported)
 				require.Equal(t, 6, w.countRows(`SELECT count(*) FROM billing.payments`))
-				require.Equal(t, grants, w.countRows(`SELECT count(*) FROM billing.grants`))
+				require.Greater(t, w.countRows(`SELECT count(*) FROM billing.grants`), grants, "full refund records access revocation")
+				require.False(t, m.c.entitled(tier.ent))
 				require.Equal(t, status, w.subscriptionOf(m.c).Status)
 				require.Equal(t, calls, len(w.nmi.Calls()), "importing refunds creates no provider request")
 			})
@@ -234,6 +236,7 @@ func TestSubscriptionRefundImportSharesReconciliation(t *testing.T) {
 			}
 			d, err := db.NewWithPGXPool(w.pool, w.schema)
 			require.NoError(t, err)
+			d.SetMerchantConfig(engine.Graph(w.rt).Runtime.DB.MerchantConfig())
 			ctx := merchant.WithID(t.Context(), client.MerchantID())
 			reader := reconcile.NewEngine(d, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderNMI: report}, nil)
 			reader.Now = w.clock.Now
@@ -271,7 +274,7 @@ func TestSubscriptionRefundImportSharesReconciliation(t *testing.T) {
 				require.NoError(t, <-done)
 			}
 			require.Equal(t, 4, w.countRows(`SELECT count(*) FROM billing.payments`))
-			require.Equal(t, grants, w.countRows(`SELECT count(*) FROM billing.grants`))
+			require.Equal(t, grants, w.countRows(`SELECT count(*) FROM billing.grants`), "partial refunds below the policy threshold preserve access")
 			require.Equal(t, billing.SubscriptionActive, w.subscriptionOf(m.c).Status)
 			require.True(t, m.c.entitled(tier.ent))
 		})

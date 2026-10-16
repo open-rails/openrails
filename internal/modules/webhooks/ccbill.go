@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -1241,149 +1240,40 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		return err
 	}
 
-	var refundLedgerErr error
-	var refundRepairAlert *alerting.LedgerRepair
-	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
-		paymentService := payments.NewPaymentService(txdb, s.Clock)
-
-		sub, err := subscriptions.NewSubscriptionRepo(txdb).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), pSubscriptionID)
+	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := s.DB.NewWithPgxTx(tx)
+		svc := payments.NewPaymentService(txdb, s.Clock)
+		sub, err := subscriptions.NewSubscriptionRepo(txdb).GetByPSPSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
 		if err != nil {
-			if db.IsNotFound(err) {
-				return fmt.Errorf("subscription not found for rail subscription ID: %s", pSubscriptionID)
-			}
-			return fmt.Errorf("failed to get subscription: %w", err)
+			return fmt.Errorf("load refunded CCBill subscription: %w", err)
 		}
-
-		// The merchant's provider_refund_access policy decides, against the
-		// charged price (CCBill reports the refund, not its original charge).
-		shouldTerminate := false
-		if sub.Price != nil && sub.Price.Amount > 0 {
-			var err error
-			if shouldTerminate, err = merchantconfig.ProviderRefundRevokes(ctx, txdb, int64(moneyutil.CentsToMicros(moneyutil.Cents(refundAmountCents))), sub.Price.Amount); err != nil {
-				return err
-			}
+		reversalID := "refund:" + strings.TrimSpace(refundTransactionID)
+		existing, err := svc.GetByPSPTransactionID(ctx, models.RailCCBill, reversalID)
+		var original *models.Payment
+		if err == nil && existing.RefundedPaymentID != nil {
+			original, err = svc.GetByID(ctx, *existing.RefundedPaymentID)
+		} else if db.IsNotFound(err) {
+			original, err = svc.GetByPSPTransactionID(ctx, models.RailCCBill, refundTransactionID)
 		}
-
-		var originalPayment *models.Payment
-		if refundTransactionID != "" && refundAmountCents > 0 {
-			reversalID := "refund:" + strings.TrimSpace(refundTransactionID)
-			existingRefund, lookupErr := paymentService.GetByPSPTransactionID(ctx, models.RailCCBill, reversalID)
-			switch {
-			case lookupErr == nil && existingRefund != nil:
-				log.WithContext(ctx).WithFields(log.Fields{
-					"refund_transaction_id": reversalID,
-					"payment_id":            existingRefund.ID,
-				}).Info("CCBill refund payment already exists; skipping duplicate ledger insert")
-			case lookupErr != nil && !db.IsNotFound(lookupErr):
-				err := fmt.Errorf("failed to check existing refund payment: %w", lookupErr)
-				if shouldTerminate {
-					refundLedgerErr = err
-					log.WithContext(ctx).WithError(err).Error("Failed to check CCBill refund ledger; continuing access revocation")
-				} else {
-					return err
-				}
-			default:
-				var originalErr error
-				originalPayment, originalErr = paymentService.GetByPSPTransactionID(ctx, models.RailCCBill, refundTransactionID)
-				if db.IsNotFound(originalErr) {
-					originalPayment, originalErr = paymentService.GetLatestChargeBySubscriptionID(ctx, sub.ID)
-				}
-				if originalErr != nil {
-					if !db.IsNotFound(originalErr) {
-						err := fmt.Errorf("failed to resolve original payment for refund: %w", originalErr)
-						if shouldTerminate {
-							refundLedgerErr = err
-							log.WithContext(ctx).WithError(err).Error("Failed to resolve CCBill refund ledger payment; continuing access revocation")
-						} else {
-							return err
-						}
-						break
-					}
-					if shouldTerminate {
-						refundLedgerErr = fmt.Errorf("failed to resolve original payment for terminating CCBill refund transaction %q", refundTransactionID)
-						log.WithContext(ctx).WithError(refundLedgerErr).Error("Failed to resolve CCBill refund ledger payment; continuing access revocation")
-						break
-					}
-					log.WithContext(ctx).WithFields(log.Fields{
-						"subscription_id":       sub.ID,
-						"refund_transaction_id": refundTransactionID,
-					}).Warn("No original payment found for CCBill refund ledger linkage")
-				} else {
-					if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, int64(moneyutil.CentsToMicros(moneyutil.Cents(refundAmountCents))), payments.ReversalRefund); refundErr != nil {
-						err := fmt.Errorf("failed to persist CCBill refund payment: %w", refundErr)
-						if shouldTerminate && !errors.Is(refundErr, payments.ErrRefundReservationPending) {
-							refundLedgerErr = err
-							log.WithContext(ctx).WithError(err).Error("Failed to persist CCBill refund ledger; continuing access revocation")
-						} else {
-							return err
-						}
-					}
-				}
-			}
+		if db.IsNotFound(err) || err == nil && original == nil {
+			// The notice does not prove which paid period was refunded. Never
+			// substitute the latest charge: it may fund unrelated newer access.
+			return alerting.RecordLedgerRepair(ctx, txdb, s.now(), alerting.LedgerRepair{
+				Provider: "ccbill", Operation: "refund_reversal", TransactionID: refundTransactionID,
+				CustomerID: sub.CustomerID.String(), SubscriptionID: &sub.ID,
+				Err:      fmt.Errorf("CCBill refund does not identify a recorded original payment"),
+				Metadata: map[string]any{"rail_subscription_id": pSubscriptionID, "refund_amount_cents": refundAmountCents, "refund_reason": refundReason},
+			})
 		}
-
-		if shouldTerminate {
-			// A refund returns the money: access ends now.
-			if sub.Status != models.StatusCanceled && refundReason != "" {
-				sub.CancelFeedback = &refundReason
-			}
-			_, err := s.ccbillMirrorTransition(ctx, txdb, sub, lifecycle.Cancel{Kind: lifecycle.CancelMerchant, Immediate: true, At: s.now().UTC()},
-				ccbillNotice{revoke: models.AccessRevokeRefund, ended: subscriptions.PremiumEndReasonRefund})
-			if err != nil {
-				return fmt.Errorf("cancel refunded subscription %s: %w", sub.ID, err)
-			}
-			if refundLedgerErr != nil {
-				var originalPaymentID *uuid.UUID
-				if originalPayment != nil {
-					id := originalPayment.ID
-					originalPaymentID = &id
-				}
-				subscriptionID := sub.ID
-				refundRepairAlert = &alerting.LedgerRepair{
-					Provider:          "ccbill",
-					Operation:         "refund_reversal",
-					TransactionID:     refundTransactionID,
-					CustomerID:        sub.CustomerID.String(),
-					OriginalPaymentID: originalPaymentID,
-					SubscriptionID:    &subscriptionID,
-					Err:               refundLedgerErr,
-					Metadata: map[string]any{
-						"rail_subscription_id": pSubscriptionID,
-						"refund_amount_cents":  refundAmountCents,
-						"refund_reason":        refundReason,
-					},
-				}
-			}
-
-		} else {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscriptionID":      sub.ID,
-				"refundAmount":        moneyutil.FormatRailMinor(refundAmountCents, currency),
-				"refundTransactionID": refundTransactionID,
-			}).Info("Partial refund processed - subscription remains active")
+		if err != nil {
+			return err
 		}
-
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscriptionID":         sub.ID,
-			"userID":                 sub.CustomerID.String(),
-			"refundAmount":           moneyutil.FormatRailMinor(refundAmountCents, currency),
-			"refundType":             "auto_detected",
-			"refundTransactionID":    refundTransactionID,
-			"subscriptionTerminated": shouldTerminate,
-		}).Info("Processed refund successfully")
-
-		return nil
-	}); err != nil {
+		if original.SubscriptionID == nil || *original.SubscriptionID != sub.ID || original.Currency != currency {
+			return fmt.Errorf("CCBill refund original does not match subscription and currency")
+		}
+		_, err = svc.Refund(ctx, original.ID, reversalID, int64(moneyutil.CentsToMicros(moneyutil.Cents(refundAmountCents))), payments.ReversalRefund)
 		return err
-	}
-	if refundRepairAlert != nil {
-		if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), *refundRepairAlert); err != nil {
-			return fmt.Errorf("record CCBill refund ledger repair alert: %w", err)
-		}
-	}
-
-	return nil
+	})
 }
 
 func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
@@ -1409,7 +1299,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 	}
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
+		txdb := s.DB.NewWithPgxTx(tx)
 		repo := subscriptions.NewSubscriptionRepo(txdb)
 		paymentService := payments.NewPaymentService(txdb)
 

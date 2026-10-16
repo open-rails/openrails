@@ -160,26 +160,11 @@ func TestProviderDashboardRefundAccessPolicy(t *testing.T) {
 
 			state := w.subscription(tp, sub)
 			require.Equal(t, !r.revoked, c.entitled(ent), "access follows the policy")
-			if r.revoked {
-				require.Equal(t, billing.SubscriptionCanceled, state.Status)
-			} else {
-				require.NotEqual(t, billing.SubscriptionCanceled, state.Status)
-			}
+			require.Equal(t, billing.SubscriptionActive, state.Status, "refund does not cancel renewal")
 			if r.kind == "legacy" {
-				switch {
-				case r.revoked && r.armed:
-					require.Equal(t, 1, w.nmi.ScheduleDeletes(railSub), "the NMI schedule ends exactly once")
-				case r.revoked:
-					require.Zero(t, w.nmi.ScheduleDeletes(railSub), "the delete waits for the switch")
-					require.Contains(t, w.openFindings(providerCancelHeld), sub.UUID().String())
-					w.armDestructive()
-					w.advance(time.Hour)
-					w.wake()
-					require.Equal(t, 1, w.nmi.ScheduleDeletes(railSub), "the held delete runs once armed")
-				default:
-					require.Zero(t, w.nmi.ScheduleDeletes(railSub))
-					require.True(t, w.nmi.ScheduleLive(railSub))
-				}
+				require.Zero(t, w.nmi.ScheduleDeletes(railSub))
+				require.True(t, w.nmi.ScheduleLive(railSub))
+				require.Empty(t, w.openFindings(providerCancelHeld))
 			}
 			// A later NMI or pull pass does not restore revoked access.
 			w.converge()

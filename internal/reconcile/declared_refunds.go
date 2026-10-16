@@ -59,6 +59,14 @@ func recordDeclaredRefunds(ctx context.Context, d *db.DB, sub *models.Subscripti
 			prior.Status != payments.PaymentStatusSucceededValue || !prior.PurchasedAt.Equal(r.OccurredAt.UTC().Truncate(time.Microsecond)) {
 			return nil, observed.ErrConflict
 		}
+		// Replaying a declared receipt follows the same access decision as a
+		// repeated provider notification. The payment service preserves an
+		// explicit admin refund's keep/revoke choice.
+		if code == DeclaredAlreadyPresent {
+			if _, err := svc.RecordObservedRefund(ctx, original.ID, r.TransactionID, amount, payments.ReversalRefund, r.OccurredAt, nil); err != nil {
+				return nil, err
+			}
+		}
 		outcomes[declaredReceiptKey(r.SubscriptionID, r.TransactionID)] = DeclaredOutcome{Code: code}
 	}
 	return outcomes, nil

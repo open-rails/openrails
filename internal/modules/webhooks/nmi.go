@@ -970,20 +970,14 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		}
 	}
 
-	terminated := false
 	if refunded != nil && s.PaymentService != nil {
-		total, err := s.PaymentService.GetRefundTotalByPaymentID(ctx, refunded.ID)
-		if err != nil {
-			return fmt.Errorf("calculate NMI refund total: %w", err)
-		}
-		if terminated, err = s.providerRefundAccess().apply(ctx, models.Rail(s.Rail), refunded, total, "NMI refund processed"); err != nil {
+		if err := s.PaymentService.ApplyRefundAccessPolicy(ctx, refunded.ID); err != nil {
 			return err
 		}
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"transaction_id": txnID,
-		"access_revoked": terminated,
 	}).Info("NMI refund processed")
 
 	return nil
@@ -1023,12 +1017,7 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, body *NMI
 			return fmt.Errorf("record NMI refund: %w", err)
 		}
 	}
-	refundedTotal, err := s.PaymentService.GetRefundTotalByPaymentID(ctx, original.ID)
-	if err != nil {
-		return fmt.Errorf("calculate NMI refund total: %w", err)
-	}
-	_, err = s.providerRefundAccess().apply(ctx, rail, original, refundedTotal, "NMI refund processed")
-	return err
+	return s.PaymentService.ApplyRefundAccessPolicy(ctx, original.ID)
 }
 
 // refundAmount reads a refund in the refunded payment's currency. An unreadable
@@ -1074,10 +1063,6 @@ func nmiRefundAmount(body *NMITransactionEventBody, currency string) (int64, err
 		return 0, errors.New("refund amount is zero")
 	}
 	return moneyutil.RailMinorToNative(currency, minor)
-}
-
-func (s *NMIWebhookService) providerRefundAccess() providerRefundAccess {
-	return providerRefundAccess{DB: s.DB, Clock: s.Clock, Lifecycle: s.SubscriptionLifecycleService}
 }
 
 // handleRefundFailure logs failed refund attempts
