@@ -2,17 +2,17 @@
 -- This local access decision survives later policy changes and receipt replay.
 UPDATE billing.payments
 SET metadata = coalesce(metadata, '{}'::jsonb) || '{"refund_access_revoked":true}'::jsonb
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(payment_id)::uuid;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(payment_id)::uuid AND deleted_at IS NULL;
 
 -- name: LockPaymentSubscriptions :many
 -- A cart payment can fund more than one membership. The caller locks the
 -- customer first; all affected memberships follow in a stable order.
 SELECT s.id FROM billing.subscriptions s
-WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND EXISTS (
+WHERE s.deleted_at IS NULL AND s.merchant_id=sqlc.arg(merchant_id)::uuid AND EXISTS (
  SELECT 1 FROM billing.payments p
  LEFT JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id
  LEFT JOIN billing.order_lines l ON l.merchant_id=o.merchant_id AND l.order_id=o.id
- WHERE p.merchant_id=s.merchant_id AND p.id=sqlc.arg(payment_id)::uuid
+ WHERE p.deleted_at IS NULL AND p.merchant_id=s.merchant_id AND p.id=sqlc.arg(payment_id)::uuid
    AND p.customer_id=s.customer_id AND s.id IN (p.subscription_id,o.subscription_id,l.subscription_id)
 )
 ORDER BY s.id FOR UPDATE;
@@ -31,15 +31,15 @@ FROM billing.payments p
 JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id AND o.customer_id=p.customer_id
 JOIN billing.order_lines l ON l.merchant_id=o.merchant_id AND l.order_id=o.id
 JOIN billing.subscriptions s ON s.merchant_id=p.merchant_id AND s.customer_id=p.customer_id
-  AND s.id=coalesce(o.subscription_id,l.subscription_id)
+  AND s.deleted_at IS NULL AND s.id=coalesce(o.subscription_id,l.subscription_id)
 LEFT JOIN billing.provider_schedules ps ON ps.merchant_id=p.merchant_id
   AND ps.subscription_id=s.id AND ps.initial_order_id=o.id
   AND ps.source_reference='order:' || o.id::text
-WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(payment_id)::uuid
+WHERE p.deleted_at IS NULL AND p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(payment_id)::uuid
 )
 SELECT g.* FROM billing.grants g
 JOIN billing.payments p ON p.merchant_id=g.merchant_id AND p.customer_id=g.customer_id
-WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(payment_id)::uuid
+WHERE p.deleted_at IS NULL AND p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(payment_id)::uuid
   AND g.kind='access' AND g.event='grant'
   AND (g.payment_id=p.id OR EXISTS (
     SELECT 1 FROM periods w WHERE g.source_id=w.subscription_id::text AND g.product_id=w.product_id
@@ -95,15 +95,15 @@ FROM billing.payments p
 JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id AND o.customer_id=p.customer_id
 JOIN billing.order_lines l ON l.merchant_id=o.merchant_id AND l.order_id=o.id
 JOIN billing.subscriptions s ON s.merchant_id=p.merchant_id AND s.customer_id=p.customer_id
-  AND s.id=coalesce(o.subscription_id,l.subscription_id)
+  AND s.deleted_at IS NULL AND s.id=coalesce(o.subscription_id,l.subscription_id)
 LEFT JOIN billing.provider_schedules ps ON ps.merchant_id=p.merchant_id
   AND ps.subscription_id=s.id AND ps.initial_order_id=o.id
   AND ps.source_reference='order:' || o.id::text
-WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(payment_id)::uuid
+WHERE p.deleted_at IS NULL AND p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(payment_id)::uuid
 )
 SELECT EXISTS (SELECT 1 WHERE NOT EXISTS (
  SELECT 1 FROM billing.payments p
- WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(payment_id)::uuid
+ WHERE p.deleted_at IS NULL AND p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(payment_id)::uuid
    AND p.metadata->>'refund_access_revoked'='true'
 ) AND (EXISTS (SELECT 1 FROM periods w WHERE w.subscription_bill_kind='adjustment')
  OR EXISTS (
@@ -114,6 +114,6 @@ SELECT EXISTS (SELECT 1 WHERE NOT EXISTS (
    AND ((g.starts_at=w.starts_at AND (g.ends_at IS DISTINCT FROM w.ends_at OR coalesce(g.quantity, 1) <> coalesce(w.quantity, 1)))
      OR (g.starts_at>w.starts_at AND g.ends_at IS NOT DISTINCT FROM w.ends_at))
  ) OR EXISTS (
- SELECT 1 FROM billing.payments p WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid
+ SELECT 1 FROM billing.payments p WHERE p.deleted_at IS NULL AND p.merchant_id=sqlc.arg(merchant_id)::uuid
    AND p.id=sqlc.arg(payment_id)::uuid AND p.subscription_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM periods)
  )));

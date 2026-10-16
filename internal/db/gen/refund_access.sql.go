@@ -24,15 +24,15 @@ FROM billing.payments p
 JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id AND o.customer_id=p.customer_id
 JOIN billing.order_lines l ON l.merchant_id=o.merchant_id AND l.order_id=o.id
 JOIN billing.subscriptions s ON s.merchant_id=p.merchant_id AND s.customer_id=p.customer_id
-  AND s.id=coalesce(o.subscription_id,l.subscription_id)
+  AND s.deleted_at IS NULL AND s.id=coalesce(o.subscription_id,l.subscription_id)
 LEFT JOIN billing.provider_schedules ps ON ps.merchant_id=p.merchant_id
   AND ps.subscription_id=s.id AND ps.initial_order_id=o.id
   AND ps.source_reference='order:' || o.id::text
-WHERE p.merchant_id=$1::uuid AND p.id=$2::uuid
+WHERE p.deleted_at IS NULL AND p.merchant_id=$1::uuid AND p.id=$2::uuid
 )
 SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason, g.quantity FROM billing.grants g
 JOIN billing.payments p ON p.merchant_id=g.merchant_id AND p.customer_id=g.customer_id
-WHERE p.merchant_id=$1::uuid AND p.id=$2::uuid
+WHERE p.deleted_at IS NULL AND p.merchant_id=$1::uuid AND p.id=$2::uuid
   AND g.kind='access' AND g.event='grant'
   AND (g.payment_id=p.id OR EXISTS (
     SELECT 1 FROM periods w WHERE g.source_id=w.subscription_id::text AND g.product_id=w.product_id
@@ -91,11 +91,11 @@ func (q *Queries) ListPaymentAccessGrants(ctx context.Context, arg ListPaymentAc
 
 const lockPaymentSubscriptions = `-- name: LockPaymentSubscriptions :many
 SELECT s.id FROM billing.subscriptions s
-WHERE s.merchant_id=$1::uuid AND EXISTS (
+WHERE s.deleted_at IS NULL AND s.merchant_id=$1::uuid AND EXISTS (
  SELECT 1 FROM billing.payments p
  LEFT JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id
  LEFT JOIN billing.order_lines l ON l.merchant_id=o.merchant_id AND l.order_id=o.id
- WHERE p.merchant_id=s.merchant_id AND p.id=$2::uuid
+ WHERE p.deleted_at IS NULL AND p.merchant_id=s.merchant_id AND p.id=$2::uuid
    AND p.customer_id=s.customer_id AND s.id IN (p.subscription_id,o.subscription_id,l.subscription_id)
 )
 ORDER BY s.id FOR UPDATE
@@ -131,7 +131,7 @@ func (q *Queries) LockPaymentSubscriptions(ctx context.Context, arg LockPaymentS
 const markPaymentAccessRevoked = `-- name: MarkPaymentAccessRevoked :exec
 UPDATE billing.payments
 SET metadata = coalesce(metadata, '{}'::jsonb) || '{"refund_access_revoked":true}'::jsonb
-WHERE merchant_id = $1::uuid AND id = $2::uuid
+WHERE merchant_id = $1::uuid AND id = $2::uuid AND deleted_at IS NULL
 `
 
 type MarkPaymentAccessRevokedParams struct {
@@ -157,15 +157,15 @@ FROM billing.payments p
 JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id AND o.customer_id=p.customer_id
 JOIN billing.order_lines l ON l.merchant_id=o.merchant_id AND l.order_id=o.id
 JOIN billing.subscriptions s ON s.merchant_id=p.merchant_id AND s.customer_id=p.customer_id
-  AND s.id=coalesce(o.subscription_id,l.subscription_id)
+  AND s.deleted_at IS NULL AND s.id=coalesce(o.subscription_id,l.subscription_id)
 LEFT JOIN billing.provider_schedules ps ON ps.merchant_id=p.merchant_id
   AND ps.subscription_id=s.id AND ps.initial_order_id=o.id
   AND ps.source_reference='order:' || o.id::text
-WHERE p.merchant_id=$1::uuid AND p.id=$2::uuid
+WHERE p.deleted_at IS NULL AND p.merchant_id=$1::uuid AND p.id=$2::uuid
 )
 SELECT EXISTS (SELECT 1 WHERE NOT EXISTS (
  SELECT 1 FROM billing.payments p
- WHERE p.merchant_id=$1::uuid AND p.id=$2::uuid
+ WHERE p.deleted_at IS NULL AND p.merchant_id=$1::uuid AND p.id=$2::uuid
    AND p.metadata->>'refund_access_revoked'='true'
 ) AND (EXISTS (SELECT 1 FROM periods w WHERE w.subscription_bill_kind='adjustment')
  OR EXISTS (
@@ -176,7 +176,7 @@ SELECT EXISTS (SELECT 1 WHERE NOT EXISTS (
    AND ((g.starts_at=w.starts_at AND (g.ends_at IS DISTINCT FROM w.ends_at OR coalesce(g.quantity, 1) <> coalesce(w.quantity, 1)))
      OR (g.starts_at>w.starts_at AND g.ends_at IS NOT DISTINCT FROM w.ends_at))
  ) OR EXISTS (
- SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1::uuid
+ SELECT 1 FROM billing.payments p WHERE p.deleted_at IS NULL AND p.merchant_id=$1::uuid
    AND p.id=$2::uuid AND p.subscription_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM periods)
  )))
 `

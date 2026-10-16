@@ -32,6 +32,9 @@ func (s *EntitlementService) RevokeRefundedPaymentAccess(ctx context.Context, pa
 		if _, err := q.LockPaymentSubscriptions(ctx, gen.LockPaymentSubscriptionsParams{MerchantID: mid.UUID(), PaymentID: paymentID}); err != nil {
 			return err
 		}
+		if _, err := q.LockPaymentForRefund(ctx, gen.LockPaymentForRefundParams{MerchantID: mid.UUID(), PaymentID: paymentID}); err != nil {
+			return err
+		}
 		review, err := q.RefundAccessNeedsReview(ctx, gen.RefundAccessNeedsReviewParams{MerchantID: mid.UUID(), PaymentID: paymentID})
 		if err != nil {
 			return err

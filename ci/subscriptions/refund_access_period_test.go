@@ -4,14 +4,19 @@ package subscriptions_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/stretchr/testify/require"
@@ -310,4 +315,63 @@ func TestRefundConcurrentRenewal(t *testing.T) {
 			w.checkMoneyInvariants()
 		})
 	}
+}
+
+// Pruning a source must not turn an already-refunded window into new access.
+func TestRefundAccessDecisionSurvivesTombstones(t *testing.T) {
+	w := newWorld(t)
+	e := enroll(t, w, "nmi", embedded)
+	original := completed(w.payments(embedded, e.c.id))[0]
+	var window gen.RefundRevokedAccessWindowParams
+	window.MerchantID = w.client[embedded].MerchantID().UUID()
+	window.SourceID = e.sub.UUID().String()
+	window.SourceType = "subscription"
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT customer_id, product_id, starts_at, ends_at FROM billing.grants WHERE merchant_id=$1 AND source_id=$2 AND source_type='subscription' AND event='grant' ORDER BY created_at LIMIT 1`), window.MerchantID, window.SourceID).Scan(&window.CustomerID, &window.ProductID, &window.StartsAt, &window.EndsAt))
+	require.NotNil(t, window.EndsAt)
+	_, err := w.client[embedded].RefundPayment(t.Context(), original.ID, billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "requested_by_customer", IdempotencyKey: "tombstone-refund"})
+	require.NoError(t, err)
+	w.settle()
+	require.False(t, e.c.entitled(e.ent))
+	database, err := db.NewWithPGXPool(w.pool, w.schema)
+	require.NoError(t, err)
+	ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
+	rollback := errors.New("restore fixture after tombstone check")
+	require.ErrorIs(t, database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE billing.payments SET deleted_at=now() WHERE merchant_id=$1 AND id=$2`, window.MerchantID, original.ID.UUID())
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE billing.subscriptions SET deleted_at=now() WHERE merchant_id=$1 AND id=$2`, window.MerchantID, e.sub.UUID())
+		if err != nil {
+			return err
+		}
+		q := gen.New(tx)
+		for _, source := range []string{"payment", "subscription", "grace"} {
+			candidate := window
+			candidate.SourceType = source
+			if source == "payment" {
+				candidate.PaymentID = new(original.ID.UUID())
+			}
+			if source == "grace" {
+				candidate.StartsAt = *window.EndsAt
+			}
+			revoked, err := q.RefundRevokedAccessWindow(ctx, candidate)
+			if err != nil {
+				return err
+			}
+			require.True(t, revoked, "%s must retain the refund decision", source)
+		}
+		later := window
+		later.StartsAt = *window.EndsAt
+		later.EndsAt = new(window.EndsAt.Add(30 * 24 * time.Hour))
+		revoked, err := q.RefundRevokedAccessWindow(ctx, later)
+		if err != nil {
+			return err
+		}
+		require.False(t, revoked, "a later paid period is not revoked")
+		_, err = q.LockPaymentForRefund(ctx, gen.LockPaymentForRefundParams{MerchantID: window.MerchantID, PaymentID: original.ID.UUID()})
+		require.ErrorIs(t, err, pgx.ErrNoRows, "new refund access commands refuse pruned payments")
+		return rollback
+	}), rollback)
+	w.checkMoneyInvariants()
 }
