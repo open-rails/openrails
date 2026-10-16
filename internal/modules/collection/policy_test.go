@@ -1,6 +1,7 @@
 package collection
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ func TestPolicyValidate(t *testing.T) {
 		{"decreasing offsets", Policy{Tiers: []Tier{{MaxCycle: 4 * day}, {Offsets: []time.Duration{3 * day, day}}}}, false},
 		{"open tier not last", Policy{Tiers: []Tier{{}, {MaxCycle: 4 * day}}}, false},
 		{"no tiers", Policy{}, false},
+		{"retry window overflow", Policy{Tiers: []Tier{{MaxCycle: 4 * day}, {Offsets: []time.Duration{math.MaxInt64}}}}, false},
 		{"long transient", Policy{Tiers: []Tier{{MaxCycle: 4 * day}, {Offsets: []time.Duration{day}}}, Transient: []time.Duration{3 * time.Hour}}, false},
 	} {
 		err := tc.p.Validate()

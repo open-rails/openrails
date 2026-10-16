@@ -911,14 +911,7 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 			return fmt.Errorf("record stripe refund: %w", err)
 		}
 	}
-	refundedTotal, err := s.PaymentService.GetRefundTotalByPaymentID(ctx, original.ID)
-	if err != nil {
-		return fmt.Errorf("calculate stripe refund total: %w", err)
-	}
-	if _, err := (providerRefundAccess{DB: s.DB, Clock: s.Clock, Lifecycle: s.SubscriptionLifecycleService}).apply(ctx, models.RailStripe, original, refundedTotal, "Stripe refund processed"); err != nil {
-		return err
-	}
-	return nil
+	return s.PaymentService.ApplyRefundAccessPolicy(ctx, original.ID)
 }
 
 func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType string, obj json.RawMessage) error {

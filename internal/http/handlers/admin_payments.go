@@ -169,7 +169,7 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 // before anything is reserved. Provider credentials are resolved outside the
 // reservation transaction: custody loads commit independently. A replay of an
 // accepted key skips the check and reports the recorded refund.
-func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, idempotencyKey string, revokeAccess bool) error {
+func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, idempotencyKey string) error {
 	paymentService := payments.NewPaymentService(r.State.DB, r.Clock)
 	if _, err := paymentService.GetRefundByAdminIdempotencyKey(ctx, paymentID, idempotencyKey); err == nil {
 		return nil
@@ -180,23 +180,7 @@ func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID
 	if err != nil {
 		return api.Coded(codePaymentNotFound, "")
 	}
-	if revokeAccess && payment.SubscriptionID != nil {
-		// Revoking a provider-billed membership's access ends it and deletes
-		// the provider schedule; refused (nothing reserved) while provider
-		// deletes are disarmed, or NMI would keep charging a revoked member.
-		sub, err := subscriptions.NewSubscriptionRepo(r.State.DB).GetByID(ctx, *payment.SubscriptionID)
-		if err != nil && !db.IsNotFound(err) {
-			return fmt.Errorf("load refunded subscription: %w", err)
-		}
-		if err == nil && sub.Status.Live() {
-			if _, err := subscriptions.RequireProviderCancelArmed(ctx, r.State.DB, sub, false); err != nil {
-				if errors.Is(err, subscriptions.ErrProviderCancelHeld) {
-					return api.Coded(billing.CodeProviderCancelHeld, err.Error())
-				}
-				return err
-			}
-		}
-	}
+
 	switch {
 	case payment.Rail == models.RailCCBill:
 		return api.Coded(refundCodeUnsupported, ccbill.ErrRefundUnsupported.Error())
@@ -633,7 +617,7 @@ func adminRefundCommand(ctx context.Context, r *httprequest.Request, paymentID u
 	if err := validateRefund(req); err != nil {
 		return destructive.Command{}, err
 	}
-	if err := checkAdminRefundRail(ctx, r, paymentID, key, req.RevokeAccess); err != nil {
+	if err := checkAdminRefundRail(ctx, r, paymentID, key); err != nil {
 		return destructive.Command{}, err
 	}
 	svc := r.State.PaymentService

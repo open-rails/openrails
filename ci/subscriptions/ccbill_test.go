@@ -288,10 +288,10 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 	t.Run("full refund reverses the sale and revokes access", func(t *testing.T) {
 		w := newWorld(t)
 		m := importCCBill(t, w)
-		refund := ccbillNumericID()
+		refund := m.saleTxn
 		w.deliverCCBill("Refund", m.reversal(refund, "9.99"))
 		require.False(t, m.c.entitled(m.ent), "a refunded member loses access")
-		require.NotEqual(t, billing.SubscriptionActive, w.subscription(embedded, m.sub).Status)
+		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, m.sub).Status)
 		m.requireReversal("refund:"+refund, "refund")
 
 		before := len(w.payments(embedded, m.c.id))

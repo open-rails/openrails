@@ -109,24 +109,24 @@ func TestCCBillDatesAreNotPayment(t *testing.T) {
 	require.Zero(t, w.engineCharges())
 }
 
-func TestCCBillRenewalAfterRefundIsRefundReview(t *testing.T) {
+func TestCCBillRenewalAfterRefundGrantsNewAccess(t *testing.T) {
 	w := newWorld(t)
 	m := importCCBill(t, w)
-	w.deliverCCBill("Refund", m.reversal(ccbillNumericID(), "9.99"))
-	require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, m.sub).Status)
+	w.deliverCCBill("Refund", m.reversal(m.saleTxn, "9.99"))
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, m.sub).Status)
 
 	w.advance(20 * day)
 	txn := ccbillNumericID()
 	w.deliverCCBill("RenewalSuccess", m.renewal(txn, m.paidThrough.Add(monthHours*time.Hour)))
 	sub := w.subscription(embedded, m.sub)
-	require.Equal(t, billing.SubscriptionCanceled, sub.Status, "a charge never reopens a refunded membership")
-	require.False(t, m.c.entitled(m.ent))
+	require.Equal(t, billing.SubscriptionActive, sub.Status, "refund left renewal active")
+	require.True(t, m.c.entitled(m.ent))
 	charge := m.payment(txn)
 	require.NotNil(t, charge, "the charge is on the ledger, not dropped")
 	require.Equal(t, billing.PaymentSucceeded, charge.Status)
 	var review string
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT coalesce(metadata->>'refund_review', '') FROM billing.payments WHERE transaction_id = $1`), txn).Scan(&review))
-	require.NotEmpty(t, review, "the charge waits for refund review")
+	require.Empty(t, review, "an ordinary renewal does not need refund review")
 
 	before := len(w.payments(embedded, m.c.id))
 	w.deliverCCBill("RenewalSuccess", m.renewal(txn, m.paidThrough.Add(monthHours*time.Hour)))

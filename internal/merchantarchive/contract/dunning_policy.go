@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
 )
 
@@ -23,23 +22,6 @@ func dunningPolicyJSON(v any) bool {
 	var declared billing.DunningPolicy
 	if json.Unmarshal(raw, &declared) != nil {
 		return false
-	}
-	// PolicyOf converts integers to durations. Refuse overflow before that conversion.
-	for _, tier := range declared.Tiers {
-		if tier.MaxCycleHours < 0 || tier.MaxCycleHours > catalog.MaxDurationHours {
-			return false
-		}
-		for _, hours := range tier.RetryAfterHours {
-			// Leave room for collection validation's maximum 24-hour window allowance.
-			if hours <= 0 || hours > catalog.MaxDurationHours-24 {
-				return false
-			}
-		}
-	}
-	for _, minutes := range declared.TransientRetryMinutes {
-		if minutes < 1 || minutes > 120 {
-			return false
-		}
 	}
 	_, err = collection.PolicyOf(&declared)
 	return err == nil

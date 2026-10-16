@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/nmimock"
@@ -35,6 +36,7 @@ func TestNMIRefundReconciliationSharesImportedReceipts(t *testing.T) {
 			client, buyer := w.client[embedded], w.newCustomer()
 			d, err := db.NewWithPGXPool(w.pool, w.schema)
 			require.NoError(t, err)
+			d.SetMerchantConfig(engine.Graph(w.rt).Runtime.DB.MerchantConfig())
 			ctx := merchant.WithID(t.Context(), client.MerchantID())
 			psp := w.psp["nmi"].UUID()
 			paid := w.clock.Now().Add(-90 * day)
@@ -153,6 +155,7 @@ func TestNMIAmbiguousRefundReconciliationDoesNotWrite(t *testing.T) {
 	client, buyer := w.client[embedded], w.newCustomer()
 	d, err := db.NewWithPGXPool(w.pool, w.schema)
 	require.NoError(t, err)
+	d.SetMerchantConfig(engine.Graph(w.rt).Runtime.DB.MerchantConfig())
 	ctx := merchant.WithID(t.Context(), client.MerchantID())
 	psp := w.psp["nmi"].UUID()
 	paid := w.clock.Now().Add(-day)

@@ -150,10 +150,7 @@ func (r refundReservations) finalize(ctx context.Context, p RefundPayload, provi
 			return nil
 		}
 		if p.RevokeAccess {
-			if err := r.revokeMembershipAccess(ctx, txDB, p.OriginalPaymentID); err != nil {
-				return err
-			}
-			if err := entitlements.NewEntitlementService(txDB, r.Clock).EndActiveByPayment(ctx, p.OriginalPaymentID, models.AccessRevokeRefund); err != nil {
+			if err := entitlements.NewEntitlementService(txDB, r.Clock).RevokeRefundedPaymentAccess(ctx, p.OriginalPaymentID); err != nil {
 				return err
 			}
 		}
@@ -184,50 +181,6 @@ func (r refundReservations) finalize(ctx context.Context, p RefundPayload, provi
 		_, err = svc.CompleteRefundReservation(ctx, p.ReservationID, providerRefundID, metadata)
 		return err
 	})
-}
-
-// revokeMembershipAccess ends the access a refunded membership payment
-// bought. An engine membership is also canceled: the engine would otherwise
-// renew it and grant access again; so is a provider-billed NMI membership,
-// whose schedule is deleted.
-func (r refundReservations) revokeMembershipAccess(ctx context.Context, d *db.DB, paymentID uuid.UUID) error {
-	original, err := payments.NewPaymentService(d, r.Clock).GetByID(ctx, paymentID)
-	if err != nil {
-		return err
-	}
-	if original.SubscriptionID == nil {
-		return nil
-	}
-	sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, *original.SubscriptionID)
-	if err != nil {
-		return err
-	}
-	if sub.CollectionPolicy == models.CollectionPolicyEngine && (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue) {
-		reason := "payment refunded with access revoked"
-		lifecycle := subscriptions.NewSubscriptionLifecycleService(d, nil, nil, nil, nil, payments.NewPaymentService(d, r.Clock), r.Clock)
-		_, err := lifecycle.CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{SubscriptionID: &sub.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: true})
-		return err
-	}
-	if subscriptions.NeedsProviderScheduleDelete(sub) && sub.Status.Live() {
-		// A provider-billed membership whose payment is refunded with access
-		// revoked ends now: otherwise the provider bills it again and the
-		// mirror re-grants access. Its schedule delete rides the same durable
-		// nmi_delete operation as a cancel.
-		now := r.now()
-		cancelType := models.CancelTypeMerchant
-		reason := "payment refunded with access revoked"
-		sub.Status, sub.CanceledAt, sub.CancelType, sub.CancelFeedback = models.StatusCanceled, &now, &cancelType, &reason
-		sub.DeletionScheduledAt = &now
-		sub.ClearRetrySchedule()
-		sub.MarkLifecycleDecision("refund_revoke")
-		if err := subscriptions.NewSubscriptionRepo(d).UpdateAt(ctx, sub, now); err != nil {
-			return err
-		}
-		if err := NewProviderCancelScheduler(d, nil, OriginAdmin, "refund with access revoked").ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now); err != nil {
-			return err
-		}
-	}
-	return entitlements.NewEntitlementService(d, r.Clock).RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, r.now(), models.AccessRevokeRefund, models.AccessSourceSubscription, models.AccessSourceGrace)
 }
 
 func (r refundReservations) now() time.Time {

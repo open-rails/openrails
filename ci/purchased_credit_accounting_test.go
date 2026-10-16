@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/grants"
@@ -29,12 +30,14 @@ import (
 // FIFO lot reversals and once-only posting all run against real PostgreSQL.
 func TestPurchasedCreditAccounting(t *testing.T) {
 	f := newFixture(t)
-	local := f.localRuntime(t, "credit-accounting-"+uuid.NewString()[:8])
-	client := local.Client
+	bill, client := f.runtimeWithStripe(t, "credit-accounting-"+uuid.NewString()[:8], nil)
+	local, err := bill.LocalMerchant(client.MerchantID())
+	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), client.MerchantID())
 	declareDynamicMeter(t, client, "api.call", "units")
 	database, err := db.NewWithPGXPool(f.pool, f.schema)
 	require.NoError(t, err)
+	database.SetMerchantConfig(engine.Graph(bill).Runtime.DB.MerchantConfig())
 	customer := billing.CustomerID(uuid.New())
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "credit-accounting", DisplayName: "API credit"})
 	require.NoError(t, err)

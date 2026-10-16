@@ -323,7 +323,11 @@ end.
 Destructive semantics are deliberate: refunds and cancels require an explicit
 `revoke_access` decision — refunding money and revoking access are separate choices.
 For refunds, requested access revocation commits with successful local refund
-completion. A queued or uncertain refund (HTTP 202) retains access until that
+completion. Only the refunded payment's access and its renewal grace are removed;
+newer paid periods stay available, and renewal remains scheduled. Cancellation is
+a separate action. If a seat or plan change combined access from several payments,
+the refund completes and a `consistency.refund_access` finding requests review;
+access stays intact rather than removing another payment's entitlement. A queued or uncertain refund (HTTP 202) retains access until that
 completion. The amount, reason, and revocation choice are immutable for an
 `Idempotency-Key`; reusing that key resumes the same operation. A different key
 creates a new operation, including an equal-sized partial refund within the
@@ -346,7 +350,9 @@ the refund is returned `pending` and settles when the gate allows it.
 A refund made in the provider's own dashboard carries no `revoke_access`
 choice; the merchant setting `provider_refund_access` decides it on every rail:
 `revoke_on_full` (default: access ends once the charge is fully refunded),
-`revoke_on_any`, or `keep`. Set it in the merchant configuration (`UpdateMerchantConfiguration`).
+`revoke_on_any`, or `keep`. The same rule applies when an import or background
+sync discovers the refund. These policies also preserve renewal and unrelated
+paid access. Set it in the merchant configuration (`UpdateMerchantConfiguration`).
 
 ### Archiving a product
 

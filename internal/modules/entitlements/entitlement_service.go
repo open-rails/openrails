@@ -252,6 +252,22 @@ func (s *EntitlementService) PushAccess(ctx context.Context, p PushAccessParams)
 		}
 		q := gen.New(tx)
 		l := s.ledger(q, merchantID.UUID())
+		if p.PaymentID != nil || p.SourceType == models.AccessSourceSubscription || p.SourceType == models.AccessSourceGrace {
+			start := now
+			if p.NotBefore != nil {
+				start = p.NotBefore.UTC()
+			}
+			revoked, err := q.RefundRevokedAccessWindow(ctx, gen.RefundRevokedAccessWindowParams{
+				MerchantID: merchantID.UUID(), CustomerID: p.CustomerID, SourceID: p.SourceID, PaymentID: p.PaymentID, EndsAt: p.EndsAt,
+				ProductID: p.ProductID, SourceType: string(p.SourceType), StartsAt: start,
+			})
+			if err != nil {
+				return err
+			}
+			if revoked {
+				return nil
+			}
+		}
 		// A subscription's accepted payment interval is immutable, even when a
 		// longer or indefinite grant already covers it. Exact interval replay
 		// keeps every paid period without stacking or truncating overlap.

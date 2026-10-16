@@ -25,6 +25,7 @@ const (
 var policedTables = []string{"order_attempts", "payments", "product_access", "subscriptions"}
 
 var allow = map[string]string{
+	"RefundRevokedAccessWindow":             "a retained refund revocation must still block access restoration after its payment or subscription is tombstoned",
 	"DeleteClosedUnpaidOrders":              "a tombstoned attempt still references its order, which retention must then keep",
 	"UsageRecoveryHasOtherPayment":          "a tombstoned payment still owns its provider transaction; recovery must not allocate it to another order",
 	"GetUsageRecoveryPayment":               "a tombstoned usage order payment still owns its provider transaction; recovery must not allocate it again",

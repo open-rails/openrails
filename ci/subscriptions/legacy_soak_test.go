@@ -13,11 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
-// With provider deletes disarmed, a revoke_access refund of an NMI-billed
-// payment is refused (NMI would keep charging a member without access); armed,
-// it ends the membership, deletes the schedule once, and nothing restores the
-// access later.
-func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
+// A refund revokes its paid access while the provider schedule stays live.
+func TestLegacyNMIRefundRevokeKeepsRenewal(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {
 		t.Run(string(tp), func(t *testing.T) {
@@ -32,20 +29,12 @@ func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 			params := billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: true, IdempotencyKey: "refund-" + legacy.ID.String()}
 
 			_, err := w.client[tp].RefundPayment(t.Context(), legacy.ID, params)
-			requireCode(t, err, http.StatusConflict, billing.CodeProviderCancelHeld)
-			w.settle()
-			require.Empty(t, w.nmi.CallsTo(http.MethodPost, "/payments/"+legacy.TransactionID+"/refund", nil), "nothing refunded")
-			require.Equal(t, billing.SubscriptionActive, w.subscription(tp, l.sub).Status)
-			require.True(t, l.c.entitled(l.ent))
-			require.Contains(t, w.openFindings(providerCancelHeld), l.sub.UUID().String())
 
-			w.armDestructive()
-			_, err = w.client[tp].RefundPayment(t.Context(), legacy.ID, params)
 			require.NoError(t, err)
 			w.settle()
 			require.Len(t, w.nmi.CallsTo(http.MethodPost, "/payments/"+legacy.TransactionID+"/refund", nil), 1)
-			require.Equal(t, billing.SubscriptionCanceled, w.subscription(tp, l.sub).Status)
-			w.until(func() bool { return w.nmi.ScheduleDeletes(l.railSub) > 0 }, "the NMI schedule delete")
+			require.Equal(t, billing.SubscriptionActive, w.subscription(tp, l.sub).Status)
+			require.True(t, w.nmi.ScheduleLive(l.railSub))
 			require.False(t, l.c.entitled(l.ent))
 
 			require.Equal(t, http.StatusOK, w.deliver("nmi", l.staleNotice()))
@@ -56,8 +45,8 @@ func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 			w.wake()
 			w.converge()
 			require.False(t, l.c.entitled(l.ent), "revoked access stays revoked")
-			require.Equal(t, billing.SubscriptionCanceled, w.subscription(tp, l.sub).Status)
-			require.Equal(t, 1, w.nmi.ScheduleDeletes(l.railSub))
+			require.Equal(t, billing.SubscriptionActive, w.subscription(tp, l.sub).Status)
+			require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
 			require.Zero(t, len(w.nmi.Attempts()))
 			require.Empty(t, w.nmi.Unexpected())
 		})

@@ -13,6 +13,7 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -26,11 +27,13 @@ import (
 // that claims it, and back to owed when the funding payment is charged back.
 func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 	f := newFixture(t)
-	local := f.localRuntime(t, "owed-"+uuid.NewString()[:8])
-	client := local.Client
+	bill, client := f.runtimeWithStripe(t, "owed-"+uuid.NewString()[:8], nil)
+	local, err := bill.LocalMerchant(client.MerchantID())
+	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), client.MerchantID())
 	database, err := db.NewWithPGXPool(f.pool, f.schema)
 	require.NoError(t, err)
+	database.SetMerchantConfig(engine.Graph(bill).Runtime.DB.MerchantConfig())
 	paymentService := payments.NewPaymentService(database)
 
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "owed-credit", DisplayName: "Credit"})

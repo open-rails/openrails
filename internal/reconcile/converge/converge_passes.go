@@ -170,7 +170,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			SubjectKey: "subscription:" + s.ID.String(),
 			Provider:   "self",
 			Evidence:   map[string]any{"subscription_id": billing.SubscriptionID(s.ID).String(), "status": string(s.Status), "cause": "subscription_without_grant"},
-			Repair:     func(ctx context.Context) error { return gl.DeriveSubscriptionGrant(ctx, s) },
+			Repair:     func(ctx context.Context) error { return p.lockedDeriveSubscription(ctx, scope, s) },
 		})
 	}
 
@@ -247,7 +247,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 				"direction": "grant", "product_id": billing.ProductID(s.ProductID).String(),
 			},
 			Repair: func(ctx context.Context) error {
-				return gl.DeriveSubscriptionGrant(ctx, gen.ListUngrantedSubscriptionsRow(s))
+				return p.lockedDeriveSubscription(ctx, scope, gen.ListUngrantedSubscriptionsRow(s))
 			},
 		})
 	}
@@ -371,6 +371,19 @@ func (p *derivePass) lockedMaterialize(ctx context.Context, scope Scope, g gen.B
 			return err
 		}
 		return gl.MaterializeGrant(ctx, g)
+	})
+}
+
+// Subscription repair shares the customer's lock with refund revocation.
+func (p *derivePass) lockedDeriveSubscription(ctx context.Context, scope Scope, sub gen.ListUngrantedSubscriptionsRow) error {
+	ctx = merchant.WithID(ctx, scope.Merchant)
+	return p.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		gl := grants.New(gen.New(tx), scope.Merchant.UUID())
+		gl.SetClock(p.e.Now)
+		if err := gl.LockCustomer(ctx, sub.CustomerID); err != nil {
+			return err
+		}
+		return gl.DeriveSubscriptionGrant(ctx, sub)
 	})
 }
 

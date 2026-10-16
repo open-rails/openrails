@@ -213,7 +213,12 @@ PSP alone accepts nothing extra.
   partial requests; combined cancel-and-refund refuses before cancellation.
   Existing unresolved refund intents retain their reserved balance and evidence
   for operator verification. Confirmed inbound refunds and manual accounting
-  remain supported. See [CCBill refunds](ccbill-refund-qualification.md).
+  remain supported. A refund notification must identify its original payment;
+  an unknown original raises a ledger-review finding without guessing the latest
+  charge. A matched refund follows the merchant's cumulative access policy and
+  does not cancel renewal. Separate provider cancellation events are still
+  mirrored. Distinct identities for repeated partial-refund notifications remain
+  unqualified. See [CCBill refunds](ccbill-refund-qualification.md).
 - An imported CCBill charge names CCBill's transaction id, which is digits.
   One declared without an amount is kept as an attribution to its
   subscription; no reader resolves CCBill attributions yet (DataLink is the

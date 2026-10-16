@@ -13,11 +13,11 @@ var (
 // at the payment currency's scale) or Full is required. IdempotencyKey is
 // mandatory: a retry with the same key returns the same refund and never
 // refunds twice; the same key with different terms is ErrIdempotencyKeyReused.
-// RevokeAccess also ends the entitlements and product access the payment
-// granted, in the refund's transaction; for a subscription payment it ends the
-// current access and cancels an engine-owned subscription so it does not
-// renew. The provider's notification of an OpenRails refund never changes
-// this decision.
+// RevokeAccess removes only access funded by this payment, in the refund's
+// transaction. Subscription renewal and newer paid periods are preserved.
+// If seat or plan changes make the funding ambiguous, the refund completes
+// and a merchant finding requests review while access stays intact.
+// Provider notifications of an OpenRails refund preserve this decision.
 type RefundPaymentParams struct {
 	Amount         int64  `json:"amount,omitempty,string"`
 	Full           bool   `json:"full,omitempty"`

@@ -305,6 +305,22 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 		if g.ProductID == nil || g.SourceID == nil {
 			return fmt.Errorf("grants: access grant %s lacks its product or source", g.ID)
 		}
+		revoked, err := l.q.RefundRevokedAccessWindow(ctx, gen.RefundRevokedAccessWindowParams{
+			MerchantID: l.merchant, CustomerID: g.CustomerID, SourceID: *g.SourceID, PaymentID: g.PaymentID,
+			ProductID: *g.ProductID, SourceType: g.SourceType, StartsAt: g.StartsAt, EndsAt: g.EndsAt,
+		})
+		if err != nil {
+			return err
+		}
+		if revoked {
+			if _, err := l.Revoke(ctx, g.ID, "refund"); err != nil {
+				return err
+			}
+			_, err := l.q.RevokeProductAccessByGrant(ctx, gen.RevokeProductAccessByGrantParams{
+				MerchantID: l.merchant, GrantID: g.ID, RevokedAt: l.now(), RevokeReason: "refund",
+			})
+			return err
+		}
 		if err := l.q.MaterializeProductAccess(ctx, gen.MaterializeProductAccessParams{
 			MerchantID: l.merchant, CustomerID: g.CustomerID, ProductID: *g.ProductID, GrantID: g.ID,
 			SourceType: g.SourceType, SourceID: *g.SourceID, PaymentID: g.PaymentID,

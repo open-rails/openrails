@@ -418,7 +418,7 @@ func TestReadonlyStripeReversalRecordsMoneyBeforeCancellation(t *testing.T) {
 	require.Equal(t, "succeeded", status)
 }
 
-func TestReadonlyWebhookRecordsRefundBeforeHeldCancellation(t *testing.T) {
+func TestReadonlyWebhookRecordsRefundWithoutCanceling(t *testing.T) {
 	w := newWorld(t)
 	e := enroll(t, w, "stripe", embedded)
 	original := completed(w.payments(embedded, e.c.id))[0]
@@ -428,16 +428,17 @@ func TestReadonlyWebhookRecordsRefundBeforeHeldCancellation(t *testing.T) {
 	w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
 	w.restart()
 	notice := obj{"id": "evt_readonly_refund", "type": "refund.created", "created": time.Now().Unix(), "data": obj{"object": refund}}
-	require.Equal(t, http.StatusInternalServerError, w.deliver("stripe", notice), "the provider retries policy-held lifecycle work")
+	require.Equal(t, http.StatusOK, w.deliver("stripe", notice), "recording a refund and revoking local access require no provider cancellation")
 	paid, err := w.client[embedded].GetPayment(t.Context(), original.ID)
 	require.NoError(t, err)
-	require.Equal(t, billing.PaymentRefunded, paid.Status, "authenticated financial facts committed before cancellation was held")
+	require.Equal(t, billing.PaymentRefunded, paid.Status, "the refund is recorded in readonly mode")
 	require.Equal(t, paid.Amount, paid.AmountRefunded)
+	require.False(t, e.c.entitled(e.ent))
 	require.NotEqual(t, billing.SubscriptionCanceled, w.subscription(embedded, e.sub).Status)
 	w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeFull }
 	w.restart()
-	require.Equal(t, http.StatusOK, w.deliver("stripe", notice), "the same signed event finishes after policy permits")
-	require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, e.sub).Status)
+	require.Equal(t, http.StatusOK, w.deliver("stripe", notice), "redelivery after switching mode remains idempotent")
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
 	var refunds int
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.payments WHERE refunded_payment_id=$1`), original.ID.UUID()).Scan(&refunds))
 	require.Equal(t, 1, refunds)

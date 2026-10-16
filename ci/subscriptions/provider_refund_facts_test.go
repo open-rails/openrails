@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
@@ -31,6 +32,7 @@ func TestObservedRefundRetainsHistoryAndAccessReview(t *testing.T) {
 	customerID := uuid.MustParse(c.id)
 	d, err := db.NewWithPGXPool(w.pool, w.schema)
 	require.NoError(t, err)
+	d.SetMerchantConfig(engine.Graph(w.rt).Runtime.DB.MerchantConfig())
 	ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
 	psp := w.psp["nmi"].UUID()
 	now, chargedAt := w.clock.Now(), w.clock.Now().Add(-60*day)

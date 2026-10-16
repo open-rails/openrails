@@ -23,7 +23,7 @@ func (w *world) providerCancels(intentType string, sub uuid.UUID) int {
 	return n
 }
 
-// A refund, void or chargeback CCBill reports ends access at once, and CCBill
+// A void or chargeback CCBill reports ends access at once, and CCBill
 // is told to stop rebilling: exactly one cancel, however often CCBill
 // redelivers the postback.
 func TestCCBillReversalStopsCCBillBilling(t *testing.T) {
@@ -32,7 +32,6 @@ func TestCCBillReversalStopsCCBillBilling(t *testing.T) {
 		name, event string
 		fields      func(*ccbillMember) map[string]string
 	}{
-		{"refund", "Refund", func(m *ccbillMember) map[string]string { return m.reversal(ccbillNumericID(), "9.99") }},
 		{"void", "Void", func(m *ccbillMember) map[string]string { return m.reversal(m.saleTxn, "9.99") }},
 		{"chargeback", "Chargeback", func(m *ccbillMember) map[string]string { return m.reversal(ccbillNumericID(), "9.99") }},
 	} {
