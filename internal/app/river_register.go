@@ -295,8 +295,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// Warns when a merchant's Solana cranker wallet is low on SOL. Alert-only,
 	// no auto-top-up.
 	if err := addTrackedWorker(r, workers, &riverjobs.SolanaGasAlertWorker{
-		DB:  r.DB,
-		RPC: r.SolanaRPCResolver.ChainReader(),
+		Check: r.SolanaCrankerBalances,
 	}); err != nil {
 		return fmt.Errorf("add solana gas alert worker: %w", err)
 	}

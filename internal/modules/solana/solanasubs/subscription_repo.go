@@ -224,6 +224,7 @@ func (r *SolanaSubscriptionRepo) SetNextPullAt(ctx context.Context, id uuid.UUID
 // MerchantWallet is a merchant's plan owner (a cranker) with active
 // subscriptions: how many, on how many plans.
 type MerchantWallet struct {
+	PSPID           uuid.UUID
 	MerchantID      uuid.UUID
 	MerchantAddress string
 	Subscriptions   int64
@@ -268,7 +269,7 @@ func (r *SolanaSubscriptionRepo) listActiveMerchantWalletsScoped(ctx context.Con
 	}
 	out := make([]MerchantWallet, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, MerchantWallet{MerchantID: row.MerchantID, MerchantAddress: row.MerchantAddress, Subscriptions: row.Subscriptions, Plans: row.Plans})
+		out = append(out, MerchantWallet{PSPID: row.PspID, MerchantID: row.MerchantID, MerchantAddress: row.MerchantAddress, Subscriptions: row.Subscriptions, Plans: row.Plans})
 	}
 	return out, nil
 }

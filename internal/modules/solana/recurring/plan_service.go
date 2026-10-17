@@ -84,7 +84,11 @@ func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID bill
 	if err != nil {
 		return solanago.Signature{}, err
 	}
-	return solanaint.BuildSignSubmitPresubmit(ctx, signer, rpc, instructions, presubmit)
+	signature, err := solanaint.BuildSignSubmitPresubmit(ctx, signer, rpc, instructions, presubmit)
+	if err != nil {
+		return solanago.Signature{}, fmt.Errorf("solana cranker %s on %s for merchant %s: %w", owner, rpc.Network(), tenantID, err)
+	}
+	return signature, nil
 }
 
 // planReader reads the Plan PDA back before create_plan for PublishPlan's

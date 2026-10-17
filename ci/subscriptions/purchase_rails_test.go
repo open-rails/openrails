@@ -89,6 +89,7 @@ func (s *solanaDeployment) plan(t *testing.T, id, amount uint64) solanago.Public
 func withSolana(t *testing.T, w *world) *solanaDeployment {
 	s := &solanaDeployment{fake: solanafake.New(), cranker: solanago.NewWallet().PrivateKey, treasury: solanago.NewWallet().PublicKey()}
 	t.Cleanup(s.fake.Close)
+	s.fake.SetSOLBalance(s.cranker.PublicKey(), 1_000_000_000)
 	// Chain receipts share the scenario's timeline, as the provider fakes do.
 	s.fake.SetClock(w.clock.Now)
 	s.fake.Fund(s.treasury, solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint), 0)

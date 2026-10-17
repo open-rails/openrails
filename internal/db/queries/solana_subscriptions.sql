@@ -61,10 +61,12 @@ WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
 
 -- name: ListActiveSolanaMerchantWallets :many
 -- Each plan owner with active subscriptions: how many, on how many plans.
-SELECT merchant_id, merchant_address, count(*)::bigint AS subscriptions, count(DISTINCT plan_pda)::bigint AS plans
-FROM billing.solana_subscriptions
-WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'active'
-GROUP BY merchant_id, merchant_address;
+SELECT s.merchant_id, sub.psp_id, s.merchant_address, count(*)::bigint AS subscriptions, count(DISTINCT s.plan_pda)::bigint AS plans
+FROM billing.solana_subscriptions s
+JOIN billing.subscriptions sub ON sub.id = s.subscription_id AND sub.merchant_id = s.merchant_id
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.status = 'active'
+  AND sub.deleted_at IS NULL AND sub.status <> 'canceled'
+GROUP BY s.merchant_id, sub.psp_id, s.merchant_address;
 
 -- name: ListActiveSolanaSubscriptionsWithSignature :many
 SELECT * FROM billing.solana_subscriptions

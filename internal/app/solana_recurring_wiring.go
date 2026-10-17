@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -72,10 +73,21 @@ func (p CrankerPins) Pin(ctx context.Context, name string, key solanago.PublicKe
 	return solanago.PublicKeyFromBase58(pinned)
 }
 
-// SolanaCrankersCheck warns while a listed cranker cannot answer for its key,
-// or active Solana subscriptions are owned by a key no listed cranker holds:
-// their renewals cannot be pulled. It never stops the engine.
+// SolanaCrankersCheck reports signer, ownership and funding warnings.
+// It is optional: these warnings never stop the engine.
 func (r *Runtime) SolanaCrankersCheck(ctx context.Context) error {
+	ownershipErr := r.solanaCrankerOwnershipCheck(ctx)
+	balances, balanceErr := r.SolanaCrankerBalances(ctx)
+	errs := []error{ownershipErr, balanceErr}
+	for _, balance := range balances {
+		if balance.Low() {
+			errs = append(errs, errors.New(balance.String()))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (r *Runtime) solanaCrankerOwnershipCheck(ctx context.Context) error {
 	if r == nil || r.DB == nil {
 		return nil
 	}
