@@ -60,6 +60,7 @@ type Node struct {
 	mu       sync.Mutex
 	accounts map[string]account
 	tokens   map[string]*tokenAccount
+	lamports map[string]uint64
 	// landed transactions by signature, and each address's signatures in
 	// landing order.
 	txs    map[string]*landed
@@ -132,12 +133,20 @@ type Transfer struct {
 
 // New starts a devnet node holding the devnet mints.
 func New() *Node {
-	n := &Node{accounts: map[string]account{}, tokens: map[string]*tokenAccount{}, txs: map[string]*landed{}, byAddr: map[string][]string{}, height: 1_000,
+	n := &Node{lamports: map[string]uint64{}, accounts: map[string]account{}, tokens: map[string]*tokenAccount{}, txs: map[string]*landed{}, byAddr: map[string][]string{}, height: 1_000,
 		token2022: map[string]*extensions{}, forgotten: map[string]int{}, network: "devnet"}
 	n.Mint(DevnetSOLMint, 9)
 	n.Mint(DevnetUSDCMint, 6)
 	n.server = httptest.NewServer(http.HandlerFunc(n.serve))
 	return n
+}
+
+// SetSOLBalance sets a native balance for monitoring tests. It does not
+// simulate transaction fees or change token balances.
+func (n *Node) SetSOLBalance(wallet solanago.PublicKey, lamports uint64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.lamports[wallet.String()] = lamports
 }
 
 func (n *Node) URL() string { return n.server.URL }
@@ -888,6 +897,14 @@ func (n *Node) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	reply := map[string]any{"jsonrpc": "2.0", "id": req.ID}
 	switch req.Method {
+	case "getBalance":
+		var address string
+		if len(req.Params) > 0 {
+			_ = json.Unmarshal(req.Params[0], &address)
+		}
+		n.mu.Lock()
+		reply["result"] = map[string]any{"context": map[string]any{"slot": n.height}, "value": n.lamports[address]}
+		n.mu.Unlock()
 	case "getAccountInfo":
 		var address string
 		if len(req.Params) > 0 {

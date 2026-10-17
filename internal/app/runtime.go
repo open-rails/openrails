@@ -31,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/fx"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -62,6 +63,7 @@ import (
 
 // Runtime aggregates infrastructure clients and application services.
 type Runtime struct {
+	solanaBalances solanaint.BalanceCache
 	// DestructiveAdmissions owns logical command limits and persistent incidents.
 	DestructiveAdmissions *destructive.Admissions
 	// providerPosture holds the PSP credentials verified at load; Ready

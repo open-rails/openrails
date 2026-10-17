@@ -118,14 +118,17 @@ func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, arg
 }
 
 const listActiveSolanaMerchantWallets = `-- name: ListActiveSolanaMerchantWallets :many
-SELECT merchant_id, merchant_address, count(*)::bigint AS subscriptions, count(DISTINCT plan_pda)::bigint AS plans
-FROM billing.solana_subscriptions
-WHERE solana_subscriptions.merchant_id = $1::uuid AND status = 'active'
-GROUP BY merchant_id, merchant_address
+SELECT s.merchant_id, sub.psp_id, s.merchant_address, count(*)::bigint AS subscriptions, count(DISTINCT s.plan_pda)::bigint AS plans
+FROM billing.solana_subscriptions s
+JOIN billing.subscriptions sub ON sub.id = s.subscription_id AND sub.merchant_id = s.merchant_id
+WHERE s.merchant_id = $1::uuid AND s.status = 'active'
+  AND sub.deleted_at IS NULL AND sub.status <> 'canceled'
+GROUP BY s.merchant_id, sub.psp_id, s.merchant_address
 `
 
 type ListActiveSolanaMerchantWalletsRow struct {
 	MerchantID      uuid.UUID
+	PspID           uuid.UUID
 	MerchantAddress string
 	Subscriptions   int64
 	Plans           int64
@@ -143,6 +146,7 @@ func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context, merchantI
 		var i ListActiveSolanaMerchantWalletsRow
 		if err := rows.Scan(
 			&i.MerchantID,
+			&i.PspID,
 			&i.MerchantAddress,
 			&i.Subscriptions,
 			&i.Plans,

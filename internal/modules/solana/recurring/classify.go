@@ -59,7 +59,7 @@ func ClassifyCrankError(err error) CrankFailure {
 	if IsOperationalFailure(err) {
 		return CrankFailure{Code: CommunicationError, Category: Operational, OnChainCode: -1, Raw: raw}
 	}
-	code := parseOnChainCode(raw)
+	code := parseOnChainCode(crankErrorCause(err).Error())
 	switch code {
 	case onchainCapReached:
 		return CrankFailure{Code: DuplicateTransaction, Category: AlreadyPaid, OnChainCode: code, Raw: raw}

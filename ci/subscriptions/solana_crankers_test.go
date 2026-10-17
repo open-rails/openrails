@@ -73,6 +73,7 @@ func TestSolanaCrankersKeepPullingThePlansTheyOwn(t *testing.T) {
 	require.Equal(t, uint64(solanaPlanAmount), s.fake.Balance(s.treasury, s.mint))
 
 	newer := solanago.NewWallet().PrivateKey
+	s.fake.SetSOLBalance(newer.PublicKey(), 1_000_000_000)
 	sol.crankers = []solanago.PrivateKey{newer, s.cranker}
 	w.restart()
 	w.advance(monthHours*time.Hour + time.Hour)
@@ -105,6 +106,7 @@ func TestSolanaUnlistedCrankerWarnsAndPullsNothing(t *testing.T) {
 	sub := s.subscribe(t)
 	old := s.cranker
 	newer := solanago.NewWallet().PrivateKey
+	s.fake.SetSOLBalance(newer.PublicKey(), 1_000_000_000)
 
 	sol.crankers = []solanago.PrivateKey{newer}
 	w.restart()

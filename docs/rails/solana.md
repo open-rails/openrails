@@ -76,7 +76,26 @@ solana:
   the key, or create a new Transit key and list it.
 
 Crankers sign on whichever network each Solana PSP names, so each needs SOL
-there for fees (~5000 lamports a pull). A monitor warns below ~0.05 SOL.
+there for fees. The optional `openrails_solana_crankers` probe and the scheduled
+operator alert warn below 0.05 SOL. They check the publishing cranker before
+its first subscription, and older plan owners while their subscriptions remain
+active, using each obligation's own merchant and configured PSP network (including archived
+PSPs). Unused keys do not need funding merely because they are listed.
+
+A warning names the wallet, merchant, PSP, network and observed balance. Fund
+that wallet on that network; funding the treasury does not fund a different
+cranker. The threshold is an operational warning, not a guarantee of a number
+of future payments. Successful network and balance checks are reused for up to
+five minutes, with a fresh check after the target or RPC configuration changes.
+A failed check reports an unknown balance, never a zero balance or an expired
+healthy result. The scheduled alert retries failed checks, while a low balance
+alone does not trigger immediate job retries. These warnings never fail the
+engine's mandatory readiness check or alter customer access. There is no
+automatic top-up.
+
+The network comes from the stored PSP configuration. This monitor cannot recover
+an earlier network if that configuration was overwritten; it does not add a
+network snapshot to existing subscriptions.
 
 A treasury is frozen into each plan when it is published. Changing a PSP's
 treasury applies to one-time payments at once, and the next catalog apply

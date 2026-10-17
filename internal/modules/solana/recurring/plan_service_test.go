@@ -4,15 +4,66 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"testing"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/internal/solanafake"
 )
+
+func TestSignerSubmitterErrorContextPreservesClassification(t *testing.T) {
+	node := solanafake.New()
+	t.Cleanup(node.Close)
+	key := randKey(t)
+	rpc := solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{Network: "devnet", PublicURL: node.URL()})
+	submitter := NewSignerSubmitter(NewCrankers(nil, Cranker{Name: "test", Signer: solanaint.NewKeypairSigner(key)}),
+		func(context.Context, billing.MerchantID) (*solanaint.RPCClient, error) { return rpc, nil }).(*signerSubmitter)
+	for _, digits := range []string{"502", "503"} {
+		t.Run(digits, func(t *testing.T) {
+			mid := billing.MerchantID(uuid.MustParse("00000" + digits + "-0000-4000-8000-000000000001"))
+			for _, tc := range []struct {
+				name string
+				err  error
+			}{
+				{"insufficient subscriber funds", errors.New(`{"InstructionError":[0,{"Custom":1}]}`)},
+				{"revoked delegate", errors.New(`{"InstructionError":[0,{"Custom":4}]}`)},
+				{"canceled subscription", errors.New(`{"InstructionError":[0,{"Custom":508}]}`)},
+				{"changed plan", errors.New(`{"InstructionError":[0,{"Custom":519}]}`)},
+				{"already paid", errors.New(`{"InstructionError":[0,{"Custom":400}]}`)},
+				{"unknown failure", errors.New("unexpected refusal")},
+				{"RPC outage", errors.New("503 service unavailable")},
+				{"fee payer out of funds", errors.New("insufficient funds for fee")},
+				{"canceled", context.Canceled},
+				{"deadline", context.DeadlineExceeded},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					// Exercise the real submitter's error wrapping without sending a
+					// transaction; the write-ahead callback supplies each failure.
+					_, err := submitter.SubmitWithPresubmit(t.Context(), mid, key.PublicKey(),
+						[]solanago.Instruction{solanago.NewInstruction(solanago.SystemProgramID, nil, []byte{0})},
+						func(solanago.Signature) error { return tc.err })
+					require.ErrorIs(t, err, tc.err)
+					require.ErrorContains(t, err, mid.String())
+					require.ErrorContains(t, err, key.PublicKey().String())
+					require.ErrorContains(t, err, "devnet")
+					for _, reported := range []error{err, fmt.Errorf("renewal: %w", err)} {
+						want := ClassifyCrankError(tc.err)
+						want.Raw = reported.Error()
+						require.Equal(t, want, ClassifyCrankError(reported))
+						require.Equal(t, IsOperationalFailure(tc.err), IsOperationalFailure(reported))
+					}
+				})
+			}
+		})
+	}
+	require.Empty(t, node.Transactions(key.PublicKey()))
+}
 
 // testPlanCreatedAt is the cluster clock the fake chain stamps on create_plan;
 // it differs from the service's own clock on purpose (subscribe must echo it).

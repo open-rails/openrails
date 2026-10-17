@@ -39,6 +39,9 @@ func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
 	return &RPCClient{fallback: NewRPCFallbackClient(RPCFallbackConfig(cfg))}
 }
 
+// Network is the configured cluster. CheckPosture verifies the endpoints.
+func (c *RPCClient) Network() string { return c.fallback.network }
+
 // GetBalance returns the SOL balance for an address.
 func (c *RPCClient) GetBalance(ctx context.Context, address solanago.PublicKey) (uint64, error) {
 	return c.fallback.GetBalance(ctx, address)

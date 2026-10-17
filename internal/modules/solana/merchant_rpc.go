@@ -6,6 +6,7 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
+	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -62,6 +63,30 @@ func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid billing.MerchantID
 		PublicURL: b.Endpoint,
 		ReadOnly:  b.Config != nil && config.IsProviderReadOnly(b.Config),
 	}), nil
+}
+
+// ResolvePSP resolves an exact Solana account for monitoring existing obligations.
+// Missing or removed accounts never fall back to the merchant's newest PSP.
+func (b *MerchantRPCBuilder) ResolvePSP(ctx context.Context, mid billing.MerchantID, pspID uuid.UUID) (*solanarpc.RPCClient, string, error) {
+	svc := b.merchants()
+	if svc == nil {
+		return nil, "", fmt.Errorf("solana: merchant configuration unavailable")
+	}
+	scope, ok, err := svc.PSPScopeByID(ctx, mid, pspID)
+	if err != nil {
+		return nil, "", err
+	}
+	if !ok || scope.Rail != "solana" {
+		return nil, "", fmt.Errorf("solana: PSP %s unavailable for merchant %s", pspID, mid)
+	}
+	rpcURL, err := svc.OptionalPSPSecret(ctx, mid, scope, config.SolanaSecretRPCURL)
+	if err != nil {
+		return nil, scope.Environment, err
+	}
+	return solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{
+		Network: scope.Environment, URL: rpcURL, PublicURL: b.Endpoint,
+		ReadOnly: b.Config != nil && config.IsProviderReadOnly(b.Config),
+	}), scope.Environment, nil
 }
 
 // Network is the network the ctx merchant's Solana PSP pays on, its
