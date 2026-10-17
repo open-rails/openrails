@@ -283,6 +283,7 @@ func TestRotatedTransitCrankerIsRefused(t *testing.T) {
 	slug := "rotate-" + uuid.NewString()[:8]
 	chain := solanafake.New()
 	t.Cleanup(chain.Close)
+	chain.SetSOLBalance(solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)), 1_000_000_000)
 	boot := func() (*openrails.Engine, *openrails.Client) {
 		return f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug, chain: chain})
 	}
