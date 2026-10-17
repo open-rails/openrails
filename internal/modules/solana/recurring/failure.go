@@ -57,11 +57,20 @@ func IsOperationalFailure(err error) bool {
 	if errors.Is(err, ErrUnheldPlan) || errors.Is(err, ErrNoCranker) || errors.As(err, &changed) {
 		return true
 	}
-	msg := strings.ToLower(err.Error())
+	msg := strings.ToLower(crankErrorCause(err).Error())
 	for _, sig := range operationalSignatures {
 		if strings.Contains(msg, sig) {
 			return true
 		}
 	}
 	return false
+}
+
+// Strip only our diagnostic wrapper, not provider error context such as a
+// timeout that takes precedence over a program error in the same response.
+func crankErrorCause(err error) error {
+	if submit, ok := errors.AsType[*crankerSubmitError](err); ok {
+		return submit.cause
+	}
+	return err
 }

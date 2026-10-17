@@ -41,6 +41,21 @@ type signerSubmitter struct {
 	resolve  RPCResolver
 }
 
+// crankerSubmitError keeps diagnostic identifiers separate from the failure
+// text used to decide whether a renewal should retry, dun or stop.
+type crankerSubmitError struct {
+	cause      error
+	merchantID billing.MerchantID
+	wallet     solanago.PublicKey
+	network    string
+}
+
+func (e *crankerSubmitError) Error() string {
+	return fmt.Sprintf("solana cranker %s on %s for merchant %s: %v", e.wallet, e.network, e.merchantID, e.cause)
+}
+
+func (e *crankerSubmitError) Unwrap() error { return e.cause }
+
 // NewSignerSubmitter builds the production Submitter; no crankers turn
 // rebilling off.
 func NewSignerSubmitter(crankers *Crankers, resolve RPCResolver) Submitter {
@@ -86,7 +101,7 @@ func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID bill
 	}
 	signature, err := solanaint.BuildSignSubmitPresubmit(ctx, signer, rpc, instructions, presubmit)
 	if err != nil {
-		return solanago.Signature{}, fmt.Errorf("solana cranker %s on %s for merchant %s: %w", owner, rpc.Network(), tenantID, err)
+		return solanago.Signature{}, &crankerSubmitError{cause: err, merchantID: tenantID, wallet: owner, network: rpc.Network()}
 	}
 	return signature, nil
 }
