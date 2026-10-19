@@ -91,6 +91,17 @@ know as they are.
 - **Breaking:** dropping or renaming a table or column; changing a column's
   type; a constraint existing rows may not satisfy.
 
+Hosts that share one schema roll out one after another, so a build keeps
+running on a schema the next release already migrated, before v1 as well as
+after. A breaking change therefore ships in two releases: the first stops
+using what is removed, the second removes it in a contract migration, one
+whose file name ends in `_contract.up.sql`. From migration 0110 a check fails
+a migration that drops or renames a table, column, view, type or
+sequence, changes a column's type or sets NOT NULL without that name. It
+reads SQL text, so review still decides what else is safe. A build that migrates a
+schema already holding newer migrations logs them, contract ones as a
+warning.
+
 `TestSchemaSnapshotNamesTheMigrations` (Checks) needs no database: it fails as
 soon as a migration file changes without the snapshot.
 

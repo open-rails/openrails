@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -68,6 +69,17 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	m.WithSchema(schema).WithStrictIntegrity().WithRender(render)
 	if err := m.ApplyMigrations(ctx, migrations); err != nil {
 		return fmt.Errorf("openrails: apply migrations: %w", err)
+	}
+	status, err := m.Status(ctx, migrations)
+	if err != nil {
+		return fmt.Errorf("openrails: migration status: %w", err)
+	}
+	contracts, others := newerMigrations(status.Applied, migrations)
+	if len(contracts) > 0 {
+		log.Warnf("OpenRails schema %q has contract migrations from a newer build (%s): this build runs only if it no longer uses what they removed", schema, strings.Join(contracts, ", "))
+	}
+	if len(others) > 0 {
+		log.Infof("OpenRails schema %q carries migrations from a newer build (%s)", schema, strings.Join(others, ", "))
 	}
 	// Partitions follow the calendar, not the migration chain: a database
 	// migrated months ago still needs this month's.
