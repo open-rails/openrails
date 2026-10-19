@@ -95,10 +95,11 @@ Hosts that share one schema roll out one after another, so a build keeps
 running on a schema the next release already migrated, before v1 as well as
 after. A breaking change therefore ships in two releases: the first stops
 using what is removed, the second removes it in a contract migration, one
-whose file name ends in `_contract.up.sql`. A check fails any later migration
-that drops, renames or retypes without that name. A build that finds a
-contract migration applied that it does not carry refuses to run; other
-migrations from a newer build only add, so it logs them and runs.
+whose file name ends in `_contract.up.sql`. From migration 0110 a check fails
+a migration that drops, renames, retypes or tightens without that name; it
+reads SQL text, so review still decides what is safe. A build that migrates a
+schema already holding newer migrations logs them, contract ones as a
+warning.
 
 `TestSchemaSnapshotNamesTheMigrations` (Checks) needs no database: it fails as
 soon as a migration file changes without the snapshot.

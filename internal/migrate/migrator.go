@@ -74,12 +74,12 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("openrails: migration status: %w", err)
 	}
-	newer, err := newerMigrations(status.Applied, migrations)
-	if err != nil {
-		return err
+	contracts, others := newerMigrations(status.Applied, migrations)
+	if len(contracts) > 0 {
+		log.Warnf("OpenRails schema %q has contract migrations from a newer build (%s): this build runs only if it no longer uses what they removed", schema, strings.Join(contracts, ", "))
 	}
-	if len(newer) > 0 {
-		log.Warnf("OpenRails schema %q carries migrations from a newer build (%s); they only add, so this build runs", schema, strings.Join(newer, ", "))
+	if len(others) > 0 {
+		log.Infof("OpenRails schema %q carries migrations from a newer build (%s)", schema, strings.Join(others, ", "))
 	}
 	// Partitions follow the calendar, not the migration chain: a database
 	// migrated months ago still needs this month's.
