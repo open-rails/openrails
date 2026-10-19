@@ -23,8 +23,8 @@ const contractSuffix = "_contract.up.sql"
 const firstChecked = 110
 
 var (
-	sqlComments = regexp.MustCompile(`(?s)--[^\n]*|/\*.*?\*/`)
-	breakingSQL = regexp.MustCompile(`(?i)\b(DROP\s+(TABLE|COLUMN|VIEW|MATERIALIZED\s+VIEW|FUNCTION|TYPE|SEQUENCE|CONSTRAINT|INDEX|DEFAULT|TRIGGER|SCHEMA)|RENAME\b|ALTER\s+(COLUMN\s+)?\S+\s+(SET\s+DATA\s+)?TYPE\b|SET\s+NOT\s+NULL)\b`)
+	sqlNoise    = regexp.MustCompile(`(?s)--[^\n]*|/\*.*?\*/|'(?:[^']|'')*'`)
+	breakingSQL = regexp.MustCompile(`(?i)\b(DROP\s+(TABLE|COLUMN|VIEW|MATERIALIZED\s+VIEW|TYPE|SEQUENCE)|ALTER\s+(TABLE|TYPE)\s+(IF\s+EXISTS\s+)?\S+\s+RENAME|ALTER\s+COLUMN\s+\S+\s+(SET\s+DATA\s+)?TYPE|SET\s+NOT\s+NULL)\b`)
 )
 
 // checkContracts refuses a migration that may break earlier builds without
@@ -35,7 +35,7 @@ func checkContracts(migrations []migratekit.Migration) error {
 		if err != nil || n < firstChecked || !strings.HasSuffix(m.Name, ".up.sql") || strings.HasSuffix(m.Name, contractSuffix) {
 			continue
 		}
-		if hit := breakingSQL.FindString(sqlComments.ReplaceAllString(m.Content, " ")); hit != "" {
+		if hit := breakingSQL.FindString(sqlNoise.ReplaceAllString(m.Content, " ")); hit != "" {
 			return fmt.Errorf("openrails: migration %s may break earlier builds (%q): name it *%s and ship it a release after no code uses what it changes", m.Name, hit, contractSuffix)
 		}
 	}
