@@ -172,24 +172,12 @@ func (p *SolanaPayPoller) release(ctx context.Context, refs []gen.BillingSolanaP
 
 func (p *SolanaPayPoller) pollMerchant(ctx context.Context, mid billing.MerchantID, refs []gen.BillingSolanaPayReference) {
 	ledger := NewPayLedger(p.db)
-	rpc, err := p.rpcBuilder.Resolve(ctx, mid)
-	if ctx.Err() != nil {
-		p.release(ctx, refs)
-		return
-	}
-	if rpc == nil {
-		log.WithError(err).WithField("merchant_id", mid.String()).Warn("Solana Pay pass deferred: merchant RPC not armed")
-		for _, r := range refs {
-			_ = ledger.Schedule(ctx, r.Reference, p.clock.Now().Add(errorRecheck))
-		}
-		return
-	}
 	for i, r := range refs {
 		if ctx.Err() != nil {
 			p.release(ctx, refs[i:])
 			return
 		}
-		next, err := p.check(ctx, rpc, ledger, r)
+		next, err := p.check(ctx, ledger, r)
 		if ctx.Err() != nil {
 			p.release(ctx, refs[i:])
 			return
@@ -205,7 +193,7 @@ func (p *SolanaPayPoller) pollMerchant(ctx context.Context, mid billing.Merchant
 }
 
 // check reads one reference and returns when to read it again.
-func (p *SolanaPayPoller) check(ctx context.Context, rpc *solanarpc.RPCClient, ledger *PayLedger, ref gen.BillingSolanaPayReference) (time.Duration, error) {
+func (p *SolanaPayPoller) check(ctx context.Context, ledger *PayLedger, ref gen.BillingSolanaPayReference) (time.Duration, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
@@ -217,6 +205,16 @@ func (p *SolanaPayPoller) check(ctx context.Context, rpc *solanarpc.RPCClient, l
 	session, err := models.OrderAttemptFromGen(row)
 	if err != nil {
 		return 0, err
+	}
+	if ReferenceKind(ref.Kind) == ReferenceSubscribe {
+		ctx = db.WithPSPID(ctx, session.PspID)
+	}
+	rpc, err := p.rpcBuilder.Resolve(ctx, mid)
+	if err != nil {
+		return 0, err
+	}
+	if rpc == nil {
+		return 0, errors.New("solana: merchant RPC not armed")
 	}
 	var readErr error
 	if ReferenceKind(ref.Kind) == ReferencePurchase {

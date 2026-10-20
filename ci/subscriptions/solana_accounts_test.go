@@ -103,6 +103,51 @@ func TestSolanaPendingSubscriptionKeepsOriginalAccount(t *testing.T) {
 	require.True(t, b.entitled(s.key), "cancel keeps the paid period")
 }
 
+func TestSolanaPendingSubscriptionIsDiscoveredAfterAccountChange(t *testing.T) {
+	for _, declaration := range []string{"archived", "removed", "all removed"} {
+		t.Run(declaration, func(t *testing.T) {
+			s := openSolanaShop(t)
+			b := s.buyer(t, false)
+			purchase := s.purchase(t, b, b.wallet.PublicKey())
+			signature := s.land(t, signAs(t, purchase.bundle, b.wallet), s.w.clock.Now())
+			other := replaceSolanaAccount(t, s)
+			rt := engine.Graph(s.w.rt).Runtime
+			mid := s.w.client[embedded].MerchantID()
+			if declaration != "archived" {
+				next, err := rt.MerchantConfig.Get(t.Context(), mid)
+				require.NoError(t, err)
+				next = next.Clone()
+				delete(next.PSPs, "solana")
+				if declaration == "all removed" {
+					delete(next.PSPs, "replacement")
+				}
+				rt.MerchantConfig.Source().(*merchantdocs.FileSource).Put(mid, next)
+				served, err := rt.MerchantConfig.Reload(t.Context(), mid)
+				require.NoError(t, err)
+				require.Empty(t, served.Rejected)
+			}
+
+			// Discover the payment without the caller supplying its signature
+			// or account. Later polls must not credit it again.
+			require.Empty(t, completed(s.w.payments(embedded, b.id)))
+			for range 2 {
+				require.NoError(t, rt.SolanaPayPoller.PollOnce(t.Context()))
+				payments := completed(s.w.payments(embedded, b.id))
+				require.Len(t, payments, 1)
+				require.Equal(t, signature, payments[0].TransactionID)
+				require.NotNil(t, payments[0].PSPID)
+				require.Equal(t, s.w.psp["solana"], *payments[0].PSPID)
+				require.NotNil(t, payments[0].SubscriptionID)
+				require.Equal(t, s.w.psp["solana"], s.w.subscription(embedded, *payments[0].SubscriptionID).PSPID)
+				require.True(t, b.entitled(s.key))
+				s.w.clock.Advance(time.Minute)
+			}
+			require.Equal(t, uint64(solanaPlanAmount), s.fake.Balance(s.treasury, s.mint))
+			require.Zero(t, other.Transactions(s.cranker.PublicKey()))
+		})
+	}
+}
+
 func TestSolanaAccountChangeRecoversRecordedPull(t *testing.T) {
 	s := openSolanaShop(t)
 	b, sub := s.subscribed(t)
