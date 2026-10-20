@@ -93,9 +93,20 @@ alone does not trigger immediate job retries. These warnings never fail the
 engine's mandatory readiness check or alter customer access. There is no
 automatic top-up.
 
-The network comes from the stored PSP configuration. This monitor cannot recover
-an earlier network if that configuration was overwritten; it does not add a
-network snapshot to existing subscriptions.
+Existing subscriptions and pending subscription payments keep their recorded
+PSP for transaction preparation, receipt verification, renewals and on-chain
+cancellation, including when that PSP is archived. Removing its declaration
+leaves its account and original network in the database. Existing billing can
+continue through that network's public RPC; keep the old declaration if it
+needs a private endpoint. It never switches to the replacement account.
+A missing account record, wrong rail or foreign merchant is refused.
+Recovery checks any recorded signature before another charge.
+
+A stored Solana PSP's network cannot be changed. In particular, devnet and
+testnet share an account identity for the same treasury, so a network edit is
+rejected and the original account is preserved. Use a different treasury for
+the other test network. Rotating an RPC endpoint on the same network is allowed.
+This does not repair network history overwritten before this restriction.
 
 A treasury is frozen into each plan when it is published. Changing a PSP's
 treasury applies to one-time payments at once, and the next catalog apply

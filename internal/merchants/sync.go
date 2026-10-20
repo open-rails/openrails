@@ -84,6 +84,18 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 			} else if err != nil {
 				return err
 			}
+			identity := docIdentity(p)
+			if identity.rail == "solana" {
+				for _, row := range rows {
+					if rowIdentity(row) == identity && row.Environment != p.Environment {
+						reject(merchantdocs.PSPDoc(key), fmt.Sprintf("Solana account network is fixed at %s; cannot change it to %s", row.Environment, p.Environment))
+						break
+					}
+				}
+				if _, refused := set.Rejected[merchantdocs.PSPDoc(key)]; refused {
+					continue
+				}
+			}
 			candidates[docIdentity(p)] = append(candidates[docIdentity(p)], key)
 		}
 		labels := oneLabelPerAccount(rows, candidates, reject)
@@ -320,6 +332,17 @@ func (s *Service) registerPSP(ctx context.Context, tx pgx.Tx, id billing.Merchan
 	var pgErr *pgconn.PgError
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
+		// The upsert also guards the network in case another reload registered
+		// this account after our preflight. Roll back any label moves on that race.
+		if rail == "solana" {
+			existing, lookupErr := gen.New(tx).GetPSP(ctx, gen.GetPSPParams{MerchantID: id.UUID(), ID: pspID})
+			if lookupErr == nil && existing.Environment != environment {
+				return gen.BillingPsp{}, "", fmt.Errorf("Solana account network is fixed at %s; cannot change it to %s", existing.Environment, environment)
+			}
+			if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
+				return gen.BillingPsp{}, "", lookupErr
+			}
+		}
 		return gen.BillingPsp{}, "the account belongs to another merchant's PSP", nil
 	case errors.As(err, &pgErr) && pgErr.Code == "23505":
 		return gen.BillingPsp{}, "another current PSP of this merchant holds the key", nil

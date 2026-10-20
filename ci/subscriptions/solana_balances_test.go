@@ -92,9 +92,10 @@ func TestSolanaBalanceKeepsArchivedObligationAndChecksOtherTargets(t *testing.T)
 	worker := riverjobs.SolanaGasAlertWorker{Check: rt.SolanaCrankerBalances}
 	require.Error(t, worker.Work(t.Context(), nil), "a partially failed sweep must retry")
 	require.Equal(t, billing.SubscriptionStatus("active"), s.w.subscription(embedded, sub).Status)
-	// Restore the new PSP's network and fund the old wallet; neither operation
+	// Replace the misconfigured account and fund the old wallet; neither operation
 	// changes an accepted subscription or executes a payment.
 	replacement.Value.Environment = "devnet"
+	replacement.Value.AccountID = solanago.NewWallet().PublicKey().String()
 	next.PSPs["new-solana"] = replacement
 	rt.MerchantConfig.Source().(*merchantdocs.FileSource).Put(mid, next)
 	served, err = rt.MerchantConfig.Reload(t.Context(), mid)

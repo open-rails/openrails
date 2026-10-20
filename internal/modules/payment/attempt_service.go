@@ -435,6 +435,7 @@ func (s *OrderAttemptService) BuildSolanaPayTransaction(ctx context.Context, ses
 	// for the POSTed account, with the reference injected and put under the
 	// poller's watch.
 	if solanaSubscribes(session) {
+		ctx = db.WithPSPID(ctx, session.PspID)
 		resp, err := s.buildSolanaSubscribeTransaction(ctx, session, account)
 		if err != nil {
 			return nil, err

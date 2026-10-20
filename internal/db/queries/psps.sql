@@ -6,7 +6,8 @@
 -- Records a PSP document's identity under its natural-key id, current under
 -- the document's key, with its declared environment: every non-live
 -- environment is one money class, so a declaration moving between them
--- corrects the row in place. An identity another merchant owns answers no row;
+-- corrects the row in place, except Solana whose network is immutable.
+-- An identity another merchant owns answers no row;
 -- a key another current PSP of the merchant holds violates psps_key_key.
 INSERT INTO billing.psps (id, merchant_id, key, rail, environment, account_id)
 VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(key)::text,
@@ -17,6 +18,7 @@ ON CONFLICT (rail, live, account_id) DO UPDATE SET
     superseded_at = NULL,
     updated_at = now()
 WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
+  AND (billing.psps.rail <> 'solana' OR billing.psps.environment = EXCLUDED.environment)
 RETURNING *;
 
 -- name: PSPHeldBilling :one
