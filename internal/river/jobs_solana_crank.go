@@ -185,6 +185,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 		// write-ahead: a crash resolves off the recorded signature, never a
 		// paid-but-unrenewed subscriber.
 		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "solana crank pull intent", func(mctx context.Context) error {
+			mctx = db.WithPSPID(mctx, row.PspID)
 			plan, err := w.resolvePlan(mctx, row)
 			if err != nil {
 				return err

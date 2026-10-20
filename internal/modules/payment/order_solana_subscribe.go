@@ -44,6 +44,7 @@ func solanaSubscribes(attempt *models.OrderAttempt) bool {
 // recurring line of price, paid in the plan's token. replaces is the attempt
 // whose offer expired, nil for the order's first.
 func (s *OrderAttemptService) startOrderSolanaSubscribe(ctx context.Context, order *orders.Order, attemptID, psp uuid.UUID, token string, price *models.Price, replaces uuid.UUID) error {
+	ctx = db.WithPSPID(ctx, psp)
 	if err := s.requireProviderWrites(ctx); err != nil {
 		return err
 	}
@@ -157,6 +158,7 @@ func (s *OrderAttemptService) enrollSolanaOrder(ctx context.Context, attempt *mo
 	if attempt.Amount != nil {
 		review.Amount = *attempt.Amount
 	}
+	ctx = db.WithPSPID(ctx, attempt.PspID)
 	enrolled, err := s.solanaEnroll.Verify(ctx, in)
 	var late *recurring.LatePaymentError
 	switch {
@@ -167,7 +169,6 @@ func (s *OrderAttemptService) enrollSolanaOrder(ctx context.Context, attempt *mo
 	case err != nil:
 		return err
 	}
-	ctx = db.WithPSPID(ctx, attempt.PspID)
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.db.NewWithPgxTx(tx)
 		q := d.Gen(ctx)

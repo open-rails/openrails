@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -35,10 +36,14 @@ func (b *MerchantRPCBuilder) merchants() *merchants.Service {
 	return b.MerchantsFn()
 }
 
-// Resolve arms the merchant's RPC client from its Solana PSP (active, else
-// newest archived for drain): its rpc_url first, its network's public
-// endpoint as fallback. nil client with nil error = no Solana PSP.
+// Resolve uses the operation's pinned PSP when present. Unpinned work uses
+// the merchant's active account, or newest archived account for draining.
+// A pinned account never falls back to a replacement account.
 func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid billing.MerchantID) (*solanarpc.RPCClient, error) {
+	if id := db.PSPIDFromContext(ctx); id != uuid.Nil {
+		client, _, err := b.ResolvePSP(ctx, mid, id)
+		return client, err
+	}
 	if b == nil {
 		return nil, nil
 	}
@@ -65,8 +70,8 @@ func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid billing.MerchantID
 	}), nil
 }
 
-// ResolvePSP resolves an exact Solana account for monitoring existing obligations.
-// Missing or removed accounts never fall back to the merchant's newest PSP.
+// ResolvePSP resolves the exact Solana account owning an operation.
+// A missing account record never falls back to the merchant's newest PSP.
 func (b *MerchantRPCBuilder) ResolvePSP(ctx context.Context, mid billing.MerchantID, pspID uuid.UUID) (*solanarpc.RPCClient, string, error) {
 	svc := b.merchants()
 	if svc == nil {
@@ -89,13 +94,23 @@ func (b *MerchantRPCBuilder) ResolvePSP(ctx context.Context, mid billing.Merchan
 	}), scope.Environment, nil
 }
 
-// Network is the network the ctx merchant's Solana PSP pays on, its
-// environment; mainnet when it has none.
+// Network follows the pinned PSP, or the merchant's current Solana account.
+// An unavailable pinned account returns no network.
 func (b *MerchantRPCBuilder) Network(ctx context.Context) string {
 	svc := b.merchants()
 	mid, err := merchant.Require(ctx)
 	if svc == nil || err != nil {
+		if db.PSPIDFromContext(ctx) != uuid.Nil {
+			return ""
+		}
 		return config.EnvironmentMainnet
+	}
+	if id := db.PSPIDFromContext(ctx); id != uuid.Nil {
+		scope, ok, err := svc.PSPScopeByID(ctx, mid, id)
+		if err != nil || !ok || scope.Rail != "solana" {
+			return ""
+		}
+		return scope.Environment
 	}
 	scope, ok, err := svc.PullPSPScope(ctx, mid, "solana")
 	if err != nil || !ok {
@@ -108,6 +123,9 @@ func (b *MerchantRPCBuilder) Network(ctx context.Context) string {
 // it: the recurring services' mint lookup.
 func (b *MerchantRPCBuilder) RecurringTokens(ctx context.Context) (string, map[string]config.TokenConfig) {
 	network := b.Network(ctx)
+	if network == "" {
+		return "", nil
+	}
 	return network, solanatokens.Accepted(network)
 }
 

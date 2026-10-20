@@ -101,8 +101,10 @@ func TestSolanaNetworkIsVerifiedOnEveryEndpoint(t *testing.T) {
 	require.NotContains(t, err.Error(), token)
 	require.NoError(t, bill.Close(ctx))
 
-	// A PSP declared testnet whose public endpoint is devnet is disarmed too,
-	// and keeps its id.
+	// A different account declared testnet whose public endpoint is devnet
+	// is disarmed too. Existing account networks cannot be changed.
+	treasury = solanago.NewWallet().PublicKey()
+	id = merchants.PspID("solana", openrails.EnvironmentTestnet, treasury.String())
 	bill, posture = boot(openrails.EnvironmentTestnet, "")
 	require.Eventually(t, func() bool { return engine.Graph(bill).Runtime.PSPPostureDisarmed(id) }, 20*time.Second, 50*time.Millisecond)
 	require.ErrorContains(t, posture(), "solana endpoint Solana testnet public is on devnet; the PSP declares testnet")
@@ -110,10 +112,16 @@ func TestSolanaNetworkIsVerifiedOnEveryEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	psps, err := shop.ListPSPs(ctx, billing.PSPListParams{})
 	require.NoError(t, err)
-	require.Len(t, psps.Items, 1)
-	require.Equal(t, openrails.EnvironmentTestnet, psps.Items[0].Environment)
-	require.Equal(t, treasury.String(), psps.Items[0].Treasury)
-	require.Equal(t, id, psps.Items[0].ID.UUID())
+	require.Len(t, psps.Items, 2)
+	var found bool
+	for _, psp := range psps.Items {
+		if psp.ID.UUID() == id {
+			require.Equal(t, openrails.EnvironmentTestnet, psp.Environment)
+			require.Equal(t, treasury.String(), psp.Treasury)
+			found = true
+		}
+	}
+	require.True(t, found)
 	require.NoError(t, bill.Close(ctx))
 
 	for _, entry := range logs.AllEntries() {

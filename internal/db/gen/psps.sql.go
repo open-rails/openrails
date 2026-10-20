@@ -496,6 +496,7 @@ ON CONFLICT (rail, live, account_id) DO UPDATE SET
     superseded_at = NULL,
     updated_at = now()
 WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
+  AND (billing.psps.rail <> 'solana' OR billing.psps.environment = EXCLUDED.environment)
 RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live
 `
 
@@ -514,7 +515,8 @@ type RegisterPSPParams struct {
 // Records a PSP document's identity under its natural-key id, current under
 // the document's key, with its declared environment: every non-live
 // environment is one money class, so a declaration moving between them
-// corrects the row in place. An identity another merchant owns answers no row;
+// corrects the row in place, except Solana whose network is immutable.
+// An identity another merchant owns answers no row;
 // a key another current PSP of the merchant holds violates psps_key_key.
 func (q *Queries) RegisterPSP(ctx context.Context, arg RegisterPSPParams) (BillingPsp, error) {
 	row := q.db.QueryRow(ctx, registerPSP,
