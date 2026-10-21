@@ -163,9 +163,14 @@ jobs:
           exit-code: '0'
           ignore-unfixed: true
           scanners: vuln
-          format: table
-          output: trivy-image-report.txt
+          format: json
+          output: trivy-image-report.json
 
+      # Trivy's own table/box-drawing format repeats each CVE once per
+      # affected package (libssl3 and libcrypto3 both list the same openssl
+      # CVEs) and wraps badly in a GitHub comment. Rebuilds it as a flat,
+      # deduped markdown table instead.
+      #
       # Forks' pull_request runs get a read-only token and can't comment --
       # continue-on-error so that alone doesn't fail the job; the gate below
       # still runs and still blocks the merge.
@@ -178,9 +183,42 @@ jobs:
           {
             echo '<!-- trivy-image-scan -->'
             echo '### Trivy image scan (amd64)'
-            echo '```'
-            head -c 60000 trivy-image-report.txt
-            echo '```'
+            echo
+            jq -r '
+              def sev_rank: {"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"UNKNOWN":4}[.] // 5;
+              [.Results[]?.Vulnerabilities[]?] as $v
+              | if ($v | length) == 0 then
+                  "No fixable vulnerabilities found."
+                else
+                  ($v | length) as $raw
+                  | ($v | group_by(.VulnerabilityID) | length) as $unique
+                  | ($v | group_by(.Severity) | sort_by(.[0].Severity | sev_rank)
+                     | map("\(length) \(.[0].Severity)") | join(", ")) as $bysev
+                  | "**\($raw)** finding(s) across affected packages (\($bysev)) -- **\($unique)** unique CVE(s) below:"
+                end
+            ' trivy-image-report.json
+            echo
+            jq -r '
+              def sev_rank: {"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"UNKNOWN":4}[.] // 5;
+              [.Results[]?.Vulnerabilities[]?] as $v
+              | if ($v | length) == 0 then empty else
+                  ["| Severity | CVE | Package | Installed → Fixed | Title |", "|---|---|---|---|---|"]
+                  + ($v
+                     | group_by(.VulnerabilityID)
+                     | map({
+                         id: .[0].VulnerabilityID,
+                         severity: .[0].Severity,
+                         title: ((.[0].Title // "") | gsub("\n"; " ") | gsub("\\|"; "\\|")),
+                         pkgs: ([.[] | .PkgName] | unique | join(", ")),
+                         installed: .[0].InstalledVersion,
+                         fixed: .[0].FixedVersion,
+                         url: .[0].PrimaryURL
+                       })
+                     | sort_by(.severity | sev_rank)
+                     | map("| \(.severity) | [\(.id)](\(.url)) | \(.pkgs) | \(.installed) → \(.fixed) | \(.title) |"))
+                  | .[]
+                end
+            ' trivy-image-report.json
           } > comment-body.md
           gh pr comment "${{ github.event.pull_request.number }}" \
             -R "$GITHUB_REPOSITORY" \
@@ -189,9 +227,9 @@ jobs:
 
       - name: Fail if the image has fixable CVEs
         run: |
-          total="$(grep -oE '^Total: [0-9]+' trivy-image-report.txt | awk '{print $2}')"
+          total="$(jq '[.Results[]?.Vulnerabilities[]?] | length' trivy-image-report.json)"
           if [[ "${total:-0}" -gt 0 ]]; then
-            echo "::error::Trivy found ${total} fixable CVE(s) in the image, see the report above"
+            echo "::error::Trivy found ${total} fixable CVE instance(s) in the image, see the PR comment"
             exit 1
           fi
 
