@@ -79,14 +79,19 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 # Stage 3: production
 # 2026-10-21: bumped for libssl3/libcrypto3 3.5.7-r0 -> 3.5.8-r0 (CVE-2026-14456
-# and 7 other openssl CVEs, see #1293). zlib is still 1.3.2-r0 on this alpine:3.24
-# build -- its CVE-2026-85091 fix isn't out yet upstream, unrelated to this bump.
+# and 7 other openssl CVEs, see #1293).
 FROM public.ecr.aws/docker/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 LABEL org.opencontainers.image.source="https://github.com/open-rails/openrails"
 
 # Install runtime dependencies (include wget for healthcheck)
 RUN apk --no-cache add ca-certificates tzdata wget
+
+# zlib 1.3.2-r1 (CVE-2026-85091 fix) isn't baked into this alpine:3.24 image
+# build yet, but is already published in Alpine's own v3.24 apk repo --
+# confirmed via the repo's APKINDEX, not assumed. Upgrade explicitly rather
+# than waiting on the next base image rebuild.
+RUN apk upgrade --no-cache zlib
 
 WORKDIR /app
 
