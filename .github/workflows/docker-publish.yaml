@@ -143,6 +143,20 @@ jobs:
           cache-from: type=gha,scope=openrails-amd64
           cache-to: type=gha,mode=max,scope=openrails-amd64
 
+      # ci.yaml's Required Security job only scans the Go dependency graph
+      # (go.sum) -- never the image contents, so base-image/OS-package CVEs
+      # ship unchecked. One arch is enough: amd64/arm64 share the same
+      # Dockerfile and package versions, so CVE coverage is identical.
+      # Runs before the arm64 build so a bad base image fails fast.
+      - name: Scan image for CVEs
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: openrails-smoke:${{ github.sha }}
+          exit-code: '1'
+          ignore-unfixed: true
+          scanners: vuln
+
       - name: Build arm64 image
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
