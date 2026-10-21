@@ -1,6 +1,6 @@
 module github.com/open-rails/openrails
 
-go 1.26.9
+go 1.26.10
 
 // Frontend dependencies can contain Go files; they are not Go packages.
 ignore ./sdk/billing-ui/node_modules

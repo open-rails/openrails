@@ -1,6 +1,6 @@
 module github.com/open-rails/openrails/server
 
-go 1.26.9
+go 1.26.10
 
 ignore ./web/console/node_modules
 

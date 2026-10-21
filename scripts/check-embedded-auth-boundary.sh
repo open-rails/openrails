@@ -26,7 +26,7 @@ trap 'rm -rf "$consumer_dir"' EXIT
 cat > "$consumer_dir/go.mod" <<MOD
 module example.org/independent-billing-host
 
-go 1.26.9
+go 1.26.10
 
 require github.com/open-rails/openrails v0.0.0-00010101000000-000000000000
 
