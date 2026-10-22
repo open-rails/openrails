@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,11 +48,11 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		riverjobs.ConvergeSweepArgs{}.Kind():             {15 * time.Minute, true},
 		riverjobs.LedgerIntegrityArgs{}.Kind():           {24 * time.Hour, true},
 		riverjobs.CleanupExpiredDataArgs{}.Kind():        {time.Hour, false},
-		riverjobs.IdempotencyGCArgs{}.Kind():             {15 * time.Minute, false},
+		riverjobs.IdempotencyGCArgs{}.Kind():             {time.Hour, false},
 		riverjobs.SolanaCrankArgs{}.Kind():               {time.Hour, false},
 		riverjobs.SolanaGasAlertArgs{}.Kind():            {6 * time.Hour, false},
 		riverjobs.SolanaReconcileArgs{}.Kind():           {6 * time.Hour, false},
-		riverjobs.SolanaPayGCArgs{}.Kind():               {15 * time.Minute, false},
+		riverjobs.SolanaPayGCArgs{}.Kind():               {time.Hour, false},
 		riverjobs.CreditExpiryArgs{}.Kind():              {time.Hour, false},
 		riverjobs.BalanceWatchArgs{}.Kind():              {riverjobs.BalanceWatchInterval, true},
 		riverjobs.AdmissionDenialFlushArgs{}.Kind():      {5 * time.Minute, false},
@@ -75,6 +76,20 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		require.Equal(t, riverjobs.QueueBilling, opts.Queue, args.Kind())
 		require.NotZero(t, opts.UniqueOpts, "%s must coalesce overlapping ticks", args.Kind())
 		runOnStart[args.Kind()] = runOnStart[args.Kind()] || periodicRunOnStart(job)
+		if usage, ok := args.(riverjobs.UsageOrderArgs); ok && usage.Collect {
+			require.True(t, opts.UniqueOpts.ByArgs, "hourly and monthly phases must stay distinct")
+			if usage.UseMonthlyFloor {
+				require.Equal(t, 30*24*time.Hour, opts.UniqueOpts.ByPeriod, "completed monthly slot survives restarts")
+			} else {
+				require.Zero(t, opts.UniqueOpts.ByPeriod, "an unfinished hourly scan coalesces across hour boundaries")
+				require.True(t, opts.UniqueOpts.ByQueue)
+				require.ElementsMatch(t, []rivertype.JobState{
+					rivertype.JobStateAvailable, rivertype.JobStatePending,
+					rivertype.JobStateRunning, rivertype.JobStateRetryable,
+					rivertype.JobStateScheduled,
+				}, opts.UniqueOpts.ByState)
+			}
+		}
 		// Leaders taking over at different instants of a period schedule its
 		// next run at the same boundary, where the next uniqueness bucket starts.
 		period := opts.UniqueOpts.ByPeriod

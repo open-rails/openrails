@@ -610,13 +610,14 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
-	// Every 15 minutes: delete expired request and webhook claims.
+	// Hourly: collect expired request and webhook claims. Expiry is checked
+	// when a key is claimed/reclaimed; this only reclaims storage.
 	jobs = append(jobs, r.healthPeriodic(
-		15*time.Minute,
+		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.IdempotencyGCArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
@@ -659,13 +660,14 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
-	// Every 15 minutes: delete settled Solana Pay references.
+	// Hourly: delete settled Solana Pay references past their watch window.
+	// Pending payments and review receipts are never selected by this GC.
 	jobs = append(jobs, r.healthPeriodic(
-		15*time.Minute,
+		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.SolanaPayGCArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
@@ -759,16 +761,21 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		return riverjobs.MerchantSecretCleanupArgs{}, &river.InsertOpts{Queue: riverjobs.QueueBilling, UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute}}
 	}, &river.PeriodicJobOpts{RunOnStart: true}))
 
-	// Usage-order jobs run on start to recover overdue work; period uniqueness
-	// keeps each cadence across replicas and restarts.
+	// Usage-order jobs run on start to recover overdue work. The hourly scan
+	// coalesces across periods while outstanding; monthly and daily phases
+	// retain their period slots across replicas and restarts.
 	// Every hour: collection.
 	jobs = append(jobs, r.healthPeriodic(
 		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			args := riverjobs.UsageOrderArgs{Collect: true}
 			opts := &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: time.Hour},
+				Queue: riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true, ByState: []rivertype.JobState{
+					rivertype.JobStateAvailable, rivertype.JobStatePending,
+					rivertype.JobStateRunning, rivertype.JobStateRetryable,
+					rivertype.JobStateScheduled,
+				}},
 			}
 			return args, opts
 		},

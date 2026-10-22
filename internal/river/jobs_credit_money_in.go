@@ -80,9 +80,21 @@ func (w UsageOrderWorker) Work(ctx context.Context, job *river.Job[UsageOrderArg
 		return nil
 	}
 	if job.Args.Collect && config.IsLimitedMode(w.Config) {
-		// Keep the durable period slot pending. Completing a disabled monthly
-		// scan would suppress collection for the rest of its thirty-day bucket,
-		// even after a restart with writes enabled.
+		if job.Args.MerchantID == nil && !job.Args.FinalizePreviousMonth {
+			if !job.Args.UseMonthlyFloor {
+				// This is a broad hourly scan, not an accepted charge. The next
+				// hourly tick (or startup after enabling writes) scans outstanding
+				// orders again, so retaining every disabled tick only piles up
+				// redundant work.
+				return nil
+			}
+			// Keep the monthly slot: completing it would suppress collection
+			// for the rest of its thirty-day uniqueness bucket. Retry at the
+			// ordinary collection cadence while writes remain disabled.
+			return river.JobSnooze(time.Hour)
+		}
+		// Explicit merchant-scoped or combined-phase work retains its existing
+		// retry contract.
 		return river.JobSnooze(time.Minute)
 	}
 	if job.Args.MerchantID != nil {
