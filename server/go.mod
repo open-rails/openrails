@@ -5,7 +5,7 @@ go 1.26.10
 ignore ./web/console/node_modules
 
 // The root module at the same release; scripts/release pins it.
-require github.com/open-rails/openrails v0.260.2
+require github.com/open-rails/openrails v0.260.3
 
 require (
 	github.com/gagliardetto/solana-go v1.20.0
