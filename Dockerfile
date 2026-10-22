@@ -87,11 +87,9 @@ LABEL org.opencontainers.image.source="https://github.com/open-rails/openrails"
 # Install runtime dependencies (include wget for healthcheck)
 RUN apk --no-cache add ca-certificates tzdata wget
 
-# zlib 1.3.2-r1 (CVE-2026-85091 fix) isn't baked into this alpine:3.24 image
-# build yet, but is already published in Alpine's own v3.24 apk repo --
-# confirmed via the repo's APKINDEX, not assumed. Upgrade explicitly rather
-# than waiting on the next base image rebuild.
-RUN apk upgrade --no-cache zlib
+# Alpine v3.24 publishes zlib 1.3.2-r1 (CVE-2026-85091) and musl 1.2.6-r3
+# (CVE-2026-107891) before this pinned base includes them.
+RUN apk upgrade --no-cache zlib musl musl-utils
 
 WORKDIR /app
 
