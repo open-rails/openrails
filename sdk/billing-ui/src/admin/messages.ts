@@ -318,7 +318,6 @@ export const billingAdminMessages = {
   Lines: "Lines",
   "Loading billing permissions…": "Loading billing permissions…",
   "Loading billing…": "Loading billing…",
-  "No billing activity yet.": "No billing activity yet.",
   "Loading grants…": "Loading grants…",
   "Loading invoice profile…": "Loading invoice profile…",
   "Loading order…": "Loading order…",
@@ -388,6 +387,7 @@ export const billingAdminMessages = {
   "No active products are available.": "No active products are available.",
   "No active subscriptions.": "No active subscriptions.",
   "No allowance": "No allowance",
+  "No billing activity yet.": "No billing activity yet.",
   "No credit grants in this currency.": "No credit grants in this currency.",
   "No declines in this range.": "No declines in this range.",
   "No default rate. Usage is recorded but is not billed by this meter.":
