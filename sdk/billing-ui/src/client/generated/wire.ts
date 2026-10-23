@@ -784,7 +784,7 @@ export type CustomerNetwork = {
 }
 
 export type CustomerSettings = {
-  usage_billing: UsageBillingAccount[]
+  usage_billing?: UsageBillingAccount[]
   credit_limits: CreditLimit[]
   trust_levels: TrustLevel[]
   low_balance_lines: LowBalanceLine[]

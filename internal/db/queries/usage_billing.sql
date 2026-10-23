@@ -25,14 +25,22 @@ UPDATE billing.money_settings SET usage_collection_due = true
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text;
 
 -- name: ListUsageBillingDueAccounts :many
+WITH scoped AS (
+    SELECT s.*, LEAST(CASE WHEN s.credit_limit_override THEN s.credit_limit_amount ELSE (sqlc.arg(limits)::jsonb->>s.currency)::bigint END,NULLIF((sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
+        CASE WHEN sqlc.arg(policies)::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
+        sqlc.arg(policies)::jsonb -> 'tiers' ->> s.tier,
+        sqlc.arg(policies)::jsonb ->> 'default') ->> 'outstanding_cap_amount')::bigint,0)) AS effective_credit_limit
+    FROM billing.money_settings s JOIN billing.customers c ON c.merchant_id=s.merchant_id AND c.id=s.customer_id
+    WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid
+)
 SELECT s.customer_id, s.currency
-FROM billing.money_settings s
+FROM scoped s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND sqlc.arg(limits)::jsonb ? s.currency
     AND (s.customer_id,s.currency) > (sqlc.arg(after_customer)::uuid,sqlc.arg(after_currency)::text) AND (
     s.usage_collection_due OR s.usage_next_bill_at <= sqlc.arg(now)::timestamptz OR
     EXISTS (SELECT 1 FROM billing.ledger_accounts ar
         WHERE ar.merchant_id=s.merchant_id AND ar.customer_id=s.customer_id AND ar.currency=s.currency AND ar.account_type='arrears_liability'
-        AND ar.debits_posted-ar.credits_posted >= CASE WHEN s.credit_limit_override THEN s.credit_limit_amount ELSE (sqlc.arg(limits)::jsonb->>s.currency)::bigint END
+        AND ar.debits_posted-ar.credits_posted >= s.effective_credit_limit
         AND ar.debits_posted-ar.credits_posted > 0
         AND ar.debits_posted-ar.credits_posted >= COALESCE(s.usage_minimum_invoice_amount,(sqlc.arg(minimums)::jsonb->>s.currency)::bigint,0)
         AND EXISTS (SELECT 1 FROM billing.owed_items oi WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency AND oi.status='pending' AND oi.order_id IS NULL
@@ -62,11 +70,16 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND customer_id=sqlc.arg(customer_
     AND period_starts_at=sqlc.arg(period_start)::timestamptz;
 
 -- name: FindInvalidUsageMinimum :one
-SELECT customer_id FROM billing.money_settings
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND currency=sqlc.arg(currency)::text
-    AND CASE WHEN credit_limit_override THEN credit_limit_amount ELSE sqlc.arg(default_credit)::bigint END > 0
-    AND COALESCE(usage_minimum_invoice_amount,sqlc.arg(default_minimum)::bigint) >
-        CASE WHEN credit_limit_override THEN credit_limit_amount ELSE sqlc.arg(default_credit)::bigint END
+WITH scoped AS (
+    SELECT s.customer_id, COALESCE(s.usage_minimum_invoice_amount,sqlc.arg(default_minimum)::bigint) AS minimum,
+        LEAST(CASE WHEN s.credit_limit_override THEN s.credit_limit_amount ELSE sqlc.arg(default_credit)::bigint END,NULLIF((sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
+        CASE WHEN sqlc.arg(policies)::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
+        sqlc.arg(policies)::jsonb -> 'tiers' ->> s.tier,
+        sqlc.arg(policies)::jsonb ->> 'default') ->> 'outstanding_cap_amount')::bigint,0)) AS credit_limit
+    FROM billing.money_settings s JOIN billing.customers c ON c.merchant_id=s.merchant_id AND c.id=s.customer_id
+    WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.currency=sqlc.arg(currency)::text
+)
+SELECT customer_id FROM scoped WHERE credit_limit>0 AND minimum>credit_limit
 ORDER BY customer_id LIMIT 1;
 
 -- name: LockUsagePolicy :exec

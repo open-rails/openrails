@@ -366,7 +366,7 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	}
 	code, blocked := DenyBudgetExceeded, "budget"
 	if dec.BlockedBalance {
-		if capacity.HardCreditLimit && outstanding > 0 {
+		if capacity.HardCreditLimit && outstanding > 0 && canFitAfterDebtSettlement(capacity, resolved, req.EstimatedAmount) {
 			if err := a.money.RequestUsageCollection(ctx, q, req.CustomerID, req.Currency); err != nil {
 				return AdmitDecision{}, err
 			}

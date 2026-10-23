@@ -16129,7 +16129,6 @@
           }
         },
         "required": [
-          "usage_billing",
           "credit_limits",
           "trust_levels",
           "low_balance_lines",

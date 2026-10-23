@@ -1899,7 +1899,7 @@ pkg openrails/billing, type CustomerSettings struct, CreditLimits []CreditLimit 
 pkg openrails/billing, type CustomerSettings struct, InvoiceProfile *InvoiceProfile `json:"invoice_profile"`
 pkg openrails/billing, type CustomerSettings struct, LowBalanceLines []LowBalanceLine `json:"low_balance_lines"`
 pkg openrails/billing, type CustomerSettings struct, TrustLevels []TrustLevel `json:"trust_levels"`
-pkg openrails/billing, type CustomerSettings struct, UsageBilling []UsageBillingAccount `json:"usage_billing"`
+pkg openrails/billing, type CustomerSettings struct, UsageBilling []UsageBillingAccount `json:"usage_billing,omitempty"`
 pkg openrails/billing, type CustomerSettingsResult struct
 pkg openrails/billing, type CustomerSettingsResult struct, ID CustomerID `json:"id"`
 pkg openrails/billing, type CustomerSettingsResult struct, Settings CustomerSettings `json:"settings"`

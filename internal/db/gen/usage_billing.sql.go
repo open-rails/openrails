@@ -88,27 +88,34 @@ func (q *Queries) EnsureUsageBillingAccount(ctx context.Context, arg EnsureUsage
 }
 
 const findInvalidUsageMinimum = `-- name: FindInvalidUsageMinimum :one
-SELECT customer_id FROM billing.money_settings
-WHERE merchant_id=$1::uuid AND currency=$2::text
-    AND CASE WHEN credit_limit_override THEN credit_limit_amount ELSE $3::bigint END > 0
-    AND COALESCE(usage_minimum_invoice_amount,$4::bigint) >
-        CASE WHEN credit_limit_override THEN credit_limit_amount ELSE $3::bigint END
+WITH scoped AS (
+    SELECT s.customer_id, COALESCE(s.usage_minimum_invoice_amount,$1::bigint) AS minimum,
+        LEAST(CASE WHEN s.credit_limit_override THEN s.credit_limit_amount ELSE $2::bigint END,NULLIF(($3::jsonb -> 'policies' -> COALESCE(
+        CASE WHEN $3::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
+        $3::jsonb -> 'tiers' ->> s.tier,
+        $3::jsonb ->> 'default') ->> 'outstanding_cap_amount')::bigint,0)) AS credit_limit
+    FROM billing.money_settings s JOIN billing.customers c ON c.merchant_id=s.merchant_id AND c.id=s.customer_id
+    WHERE s.merchant_id=$4::uuid AND s.currency=$5::text
+)
+SELECT customer_id FROM scoped WHERE credit_limit>0 AND minimum>credit_limit
 ORDER BY customer_id LIMIT 1
 `
 
 type FindInvalidUsageMinimumParams struct {
+	DefaultMinimum int64
+	DefaultCredit  int64
+	Policies       []byte
 	MerchantID     uuid.UUID
 	Currency       string
-	DefaultCredit  int64
-	DefaultMinimum int64
 }
 
 func (q *Queries) FindInvalidUsageMinimum(ctx context.Context, arg FindInvalidUsageMinimumParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, findInvalidUsageMinimum,
+		arg.DefaultMinimum,
+		arg.DefaultCredit,
+		arg.Policies,
 		arg.MerchantID,
 		arg.Currency,
-		arg.DefaultCredit,
-		arg.DefaultMinimum,
 	)
 	var customer_id uuid.UUID
 	err := row.Scan(&customer_id)
@@ -227,14 +234,22 @@ func (q *Queries) ListCustomerUsageBilling(ctx context.Context, arg ListCustomer
 }
 
 const listUsageBillingDueAccounts = `-- name: ListUsageBillingDueAccounts :many
+WITH scoped AS (
+    SELECT s.merchant_id, s.customer_id, s.billing_mode, s.created_at, s.updated_at, s.tier, s.currency, s.credit_limit_amount, s.default_payment_method_id, s.collection_revoked_at, s.credit_limit_override, s.usage_billing_anchor, s.usage_next_bill_at, s.usage_minimum_invoice_amount, s.usage_collection_due, LEAST(CASE WHEN s.credit_limit_override THEN s.credit_limit_amount ELSE ($2::jsonb->>s.currency)::bigint END,NULLIF(($8::jsonb -> 'policies' -> COALESCE(
+        CASE WHEN $8::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
+        $8::jsonb -> 'tiers' ->> s.tier,
+        $8::jsonb ->> 'default') ->> 'outstanding_cap_amount')::bigint,0)) AS effective_credit_limit
+    FROM billing.money_settings s JOIN billing.customers c ON c.merchant_id=s.merchant_id AND c.id=s.customer_id
+    WHERE s.merchant_id=$1::uuid
+)
 SELECT s.customer_id, s.currency
-FROM billing.money_settings s
+FROM scoped s
 WHERE s.merchant_id = $1::uuid AND $2::jsonb ? s.currency
     AND (s.customer_id,s.currency) > ($3::uuid,$4::text) AND (
     s.usage_collection_due OR s.usage_next_bill_at <= $5::timestamptz OR
     EXISTS (SELECT 1 FROM billing.ledger_accounts ar
         WHERE ar.merchant_id=s.merchant_id AND ar.customer_id=s.customer_id AND ar.currency=s.currency AND ar.account_type='arrears_liability'
-        AND ar.debits_posted-ar.credits_posted >= CASE WHEN s.credit_limit_override THEN s.credit_limit_amount ELSE ($2::jsonb->>s.currency)::bigint END
+        AND ar.debits_posted-ar.credits_posted >= s.effective_credit_limit
         AND ar.debits_posted-ar.credits_posted > 0
         AND ar.debits_posted-ar.credits_posted >= COALESCE(s.usage_minimum_invoice_amount,($6::jsonb->>s.currency)::bigint,0)
         AND EXISTS (SELECT 1 FROM billing.owed_items oi WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency AND oi.status='pending' AND oi.order_id IS NULL
@@ -254,6 +269,7 @@ type ListUsageBillingDueAccountsParams struct {
 	Now           time.Time
 	Minimums      []byte
 	RowLimit      int32
+	Policies      []byte
 }
 
 type ListUsageBillingDueAccountsRow struct {
@@ -270,6 +286,7 @@ func (q *Queries) ListUsageBillingDueAccounts(ctx context.Context, arg ListUsage
 		arg.Now,
 		arg.Minimums,
 		arg.RowLimit,
+		arg.Policies,
 	)
 	if err != nil {
 		return nil, err

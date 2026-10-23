@@ -98,7 +98,7 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 	if !cache.Writable() {
 		return nil, merchants.ErrConfigReadOnly
 	}
-	if s.rt.Config.UsageBillingEnabled && params.MerchantSettings != nil && params.MerchantSettings.UsageBilling != nil {
+	if s.rt.Config.UsageBillingEnabled && params.MerchantSettings != nil && (params.MerchantSettings.UsageBilling != nil || params.MerchantSettings.BillingPolicies != nil || params.MerchantSettings.BillingPolicyBindings != nil) {
 		unlock, err := s.rt.DB.LockUsagePolicy(ctx, mid)
 		if err != nil {
 			return nil, err
@@ -143,7 +143,7 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		if usage := settings.Config.UsageBilling; usage != nil {
 			for _, cur := range usage.Currencies {
 				err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-					customer, err := s.rt.DB.Gen(ctx).FindInvalidUsageMinimum(ctx, gen.FindInvalidUsageMinimumParams{MerchantID: mid.UUID(), Currency: cur.Currency, DefaultCredit: cur.CreditLimit, DefaultMinimum: cur.MinimumInvoiceAmount})
+					customer, err := s.rt.DB.Gen(ctx).FindInvalidUsageMinimum(ctx, gen.FindInvalidUsageMinimumParams{MerchantID: mid.UUID(), Currency: cur.Currency, DefaultCredit: cur.CreditLimit, DefaultMinimum: cur.MinimumInvoiceAmount, Policies: settings.PoliciesParam()})
 					if errors.Is(err, pgx.ErrNoRows) {
 						return nil
 					}

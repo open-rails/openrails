@@ -125,7 +125,10 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 	if err != nil {
 		return err
 	}
-	cap := usageCreditLimit(row, cur)
+	terms, err := s.resolveUsageTerms(ctx, q, row, cur)
+	if err != nil {
+		return err
+	}
 	if row.UsageCollectionDue {
 		return nil
 	}
@@ -137,11 +140,7 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 	if err != nil {
 		return err
 	}
-	threshold, err := s.usageCollectionThreshold(ctx, q, row, cap)
-	if err != nil {
-		return err
-	}
-	if (!force && owed < threshold) || owed <= 0 || owed < usageMinimumInvoice(row, cur) {
+	if (!force && owed < terms.threshold) || owed <= 0 || owed < terms.minimum {
 		return err
 	}
 	if err = q.FlagUsageCollectionDue(ctx, gen.FlagUsageCollectionDueParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency}); err != nil {
@@ -162,16 +161,16 @@ func (s *MoneyService) FinalizeDueUsage(ctx context.Context, now time.Time) (int
 	if err != nil {
 		return 0, err
 	}
-	settings, _, err := merchantconfig.NewStore(s.db).Get(ctx)
+	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
 	if err != nil {
 		return 0, err
 	}
-	if settings.UsageBilling == nil {
+	if settings.Config.UsageBilling == nil {
 		return 0, nil
 	}
 	limits := map[string]int64{}
 	minimums := map[string]int64{}
-	for _, cur := range settings.UsageBilling.Currencies {
+	for _, cur := range settings.Config.UsageBilling.Currencies {
 		limits[cur.Currency] = cur.CreditLimit
 		minimums[cur.Currency] = cur.MinimumInvoiceAmount
 	}
@@ -188,7 +187,7 @@ func (s *MoneyService) FinalizeDueUsage(ctx context.Context, now time.Time) (int
 	deadline := time.Now().Add(30 * time.Second)
 	afterCustomer, afterCurrency := uuid.Nil, ""
 	for {
-		rows, err := s.db.Gen(ctx).ListUsageBillingDueAccounts(ctx, gen.ListUsageBillingDueAccountsParams{MerchantID: mid.UUID(), Now: now, RowLimit: 200, Limits: encoded, Minimums: encodedMinimums, AfterCustomer: afterCustomer, AfterCurrency: afterCurrency})
+		rows, err := s.db.Gen(ctx).ListUsageBillingDueAccounts(ctx, gen.ListUsageBillingDueAccountsParams{MerchantID: mid.UUID(), Now: now, RowLimit: 200, Limits: encoded, Minimums: encodedMinimums, Policies: settings.PoliciesParam(), AfterCustomer: afterCustomer, AfterCurrency: afterCurrency})
 		if err != nil {
 			return count, errors.Join(append(failures, err)...)
 		}
@@ -238,7 +237,10 @@ func (s *MoneyService) finalizeUsageAccount(ctx context.Context, customer uuid.U
 			return err
 		}
 		due := row.UsageNextBillAt != nil && !row.UsageNextBillAt.After(now)
-		limit := usageCreditLimit(row, cur)
+		terms, err := s.resolveUsageTerms(ctx, q, row, cur)
+		if err != nil {
+			return err
+		}
 		owed, err := s.moneyLedger(q, mid.UUID()).OutstandingOwed(ctx, customer, currency)
 		if err != nil {
 			return err
@@ -252,11 +254,7 @@ func (s *MoneyService) finalizeUsageAccount(ctx context.Context, customer uuid.U
 		if err := q.CompleteUsageBillingCheck(ctx, gen.CompleteUsageBillingCheckParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, NextBillAt: next, Now: now}); err != nil {
 			return err
 		}
-		threshold, err := s.usageCollectionThreshold(ctx, q, row, limit)
-		if err != nil {
-			return err
-		}
-		if !due && !row.UsageCollectionDue && owed < threshold {
+		if !due && !row.UsageCollectionDue && owed < terms.threshold {
 			return nil
 		}
 		from, err := q.EarliestPendingOwedAccrual(ctx, gen.EarliestPendingOwedAccrualParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
@@ -287,7 +285,7 @@ func (s *MoneyService) finalizeUsageAccount(ctx context.Context, customer uuid.U
 			return err
 		}
 		amount := min(pending, max(owed-claimed, 0))
-		if amount <= 0 || amount < usageMinimumInvoice(row, cur) {
+		if amount <= 0 || amount < terms.minimum {
 			return nil
 		}
 		order, err := s.finalizeUsageTx(ctx, q, identity.CustomerID(customer), currency, from, cutoff)
@@ -325,13 +323,17 @@ func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Querie
 	}
 	row, err := q.GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: currency})
 	if errors.Is(err, pgx.ErrNoRows) {
-		row = gen.BillingMoneySetting{}
+		row = gen.BillingMoneySetting{MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: currency}
 	} else if err != nil {
 		return capacity, err
 	}
+	terms, err := s.resolveUsageTerms(ctx, q, row, cur)
+	if err != nil {
+		return capacity, err
+	}
 	capacity.HardCreditLimit = true
-	capacity.CreditLimit = usageCreditLimit(row, cur)
-	if capacity.CreditLimit > 0 && usageMinimumInvoice(row, cur) > capacity.CreditLimit {
+	capacity.CreditLimit = terms.creditLimit
+	if terms.creditLimit > 0 && terms.minimum > terms.creditLimit {
 		return capacity, fmt.Errorf("usage minimum invoice exceeds the credit limit for %s", currency)
 	}
 	capacity.BillingMode = BillingModeArrears
@@ -373,27 +375,25 @@ func (s *MoneyService) ValidateUsageBillingAccountTx(ctx context.Context, q *gen
 	if err != nil {
 		return err
 	}
-	cap := usageCreditLimit(row, cur)
-	if cap > 0 && usageMinimumInvoice(row, cur) > cap {
+	terms, err := s.resolveUsageTerms(ctx, q, row, cur)
+	if err != nil {
+		return err
+	}
+	if terms.creditLimit > 0 && terms.minimum > terms.creditLimit {
 		return fmt.Errorf("minimum_invoice_amount cannot exceed the credit limit")
 	}
 	return nil
 }
 
-// A legacy threshold may collect earlier, but never authorizes more debt than
-// the effective credit limit. The account credit limit is the default trigger.
-func (s *MoneyService) usageCollectionThreshold(ctx context.Context, q *gen.Queries, row gen.BillingMoneySetting, cap int64) (int64, error) {
+type usageTerms struct{ creditLimit, minimum, threshold int64 }
+
+// Resolve the account override, merchant default and any tighter hard policy
+// once. A collection threshold changes when to invoice, never how much is owed.
+func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, row gen.BillingMoneySetting, cur *billing.UsageBillingCurrency) (usageTerms, error) {
+	terms := usageTerms{creditLimit: usageCreditLimit(row, cur), minimum: usageMinimumInvoice(row, cur)}
 	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
 	if err != nil {
-		return 0, err
-	}
-	threshold := cap
-	if v := settings.Config.CollectionThreshold; v != nil && *v > 0 && *v < threshold {
-		threshold = *v
-	}
-	customer, err := q.GetCustomer(ctx, gen.GetCustomerParams{MerchantID: row.MerchantID, ID: row.CustomerID})
-	if err != nil {
-		return 0, err
+		return terms, err
 	}
 	name := settings.Default
 	if row.Tier != nil {
@@ -401,15 +401,27 @@ func (s *MoneyService) usageCollectionThreshold(ctx context.Context, q *gen.Quer
 			name = n
 		}
 	}
-	if customer.BillingPolicy != nil {
+	customer, err := q.GetCustomer(ctx, gen.GetCustomerParams{MerchantID: row.MerchantID, ID: row.CustomerID})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return terms, err
+	}
+	if err == nil && customer.BillingPolicy != nil {
 		if _, ok := settings.Policies[*customer.BillingPolicy]; ok {
 			name = *customer.BillingPolicy
 		}
 	}
-	if policy, ok := settings.Policies[name]; ok && policy.CollectionThresholdAmount != nil && *policy.CollectionThresholdAmount > 0 && *policy.CollectionThresholdAmount < cap {
-		threshold = *policy.CollectionThresholdAmount
+	policy := settings.Policies[name]
+	if policy.OutstandingCapAmount > 0 && policy.OutstandingCapAmount < terms.creditLimit {
+		terms.creditLimit = policy.OutstandingCapAmount
 	}
-	return threshold, nil
+	terms.threshold = terms.creditLimit
+	if v := settings.Config.CollectionThreshold; v != nil && *v > 0 && *v < terms.threshold {
+		terms.threshold = *v
+	}
+	if v := policy.CollectionThresholdAmount; v != nil && *v > 0 {
+		terms.threshold = min(*v, terms.creditLimit)
+	}
+	return terms, nil
 }
 
 // WakeUsageBillingTx rechecks a customer's changed settings in the same commit.
@@ -429,7 +441,11 @@ func (s *MoneyService) usagePolicySettings(ctx context.Context, row gen.BillingM
 		row.BillingMode = BillingModePrepaid
 		return row, nil
 	}
-	row.CreditLimitAmount = usageCreditLimit(row, cur)
+	terms, err := s.resolveUsageTerms(ctx, s.db.Gen(ctx), row, cur)
+	if err != nil {
+		return row, err
+	}
+	row.CreditLimitAmount = terms.creditLimit
 	row.BillingMode = BillingModeArrears
 	if row.CreditLimitAmount == 0 {
 		row.BillingMode = BillingModePrepaid

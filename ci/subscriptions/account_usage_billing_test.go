@@ -44,6 +44,13 @@ func TestUsageBillingThresholdAndDateShareOneCollection(t *testing.T) {
 	_, err = recordUsage(t.Context(), a.client[remote], billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "invoice-safety", Dimensions: map[string]int64{"units": 1}, Amount: new(int64(98_000_000)), Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	expires := a.clock.Now().Add(time.Hour)
+	oversized, err := a.client[remote].Admit(t.Context(), []billing.AdmitParams{{CustomerID: c.cid(), Invoker: c.id, InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: 101_000_000, RequestID: uuid.NewString(), ExpiresAt: &expires}})
+	require.NoError(t, err)
+	require.Len(t, oversized, 1)
+	require.False(t, oversized[0].Allowed())
+	var due bool
+	require.NoError(t, a.pool.QueryRow(t.Context(), a.q(`SELECT usage_collection_due FROM billing.money_settings WHERE customer_id=$1 AND currency='USD'`), c.cid().UUID()).Scan(&due))
+	require.False(t, due, "a request above full credit capacity must not trigger early collection")
 	decision, err := a.client[remote].Admit(t.Context(), []billing.AdmitParams{{CustomerID: c.cid(), Invoker: c.id, InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: 5_000_000, RequestID: uuid.NewString(), ExpiresAt: &expires}})
 	require.NoError(t, err)
 	require.Len(t, decision, 1)

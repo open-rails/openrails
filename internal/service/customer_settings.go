@@ -45,7 +45,7 @@ func (s *Service) UpdateCustomer(ctx context.Context, customer identity.Customer
 	if err != nil {
 		return nil, err
 	}
-	if s.rt.Config.UsageBillingEnabled && (len(change.creditLimits) > 0 || len(change.usageBilling) > 0) {
+	if s.rt.Config.UsageBillingEnabled && (len(change.creditLimits) > 0 || len(change.usageBilling) > 0 || len(change.trustLevels) > 0 || change.setPolicy) {
 		unlock, err := s.rt.DB.LockUsagePolicy(ctx, mid)
 		if err != nil {
 			return nil, err
@@ -75,20 +75,18 @@ func (s *Service) UpdateCustomer(ctx context.Context, customer identity.Customer
 		if err := change.apply(ctx, q, mid.UUID(), s.rt.Clock.Now().UTC()); err != nil {
 			return err
 		}
-		for _, limit := range change.creditLimits {
-			if err := s.moneyService().ValidateUsageBillingAccountTx(ctx, q, change.customer, limit.Currency); err != nil {
-				return apperr.Invalidf("%s", err).WithParam("credit_limits")
-			}
-			if err := s.moneyService().WithDatabase(s.rt.DB.NewWithPgxTx(tx)).WakeUsageBillingTx(ctx, q, change.customer, limit.Currency); err != nil {
+		if len(change.creditLimits) > 0 || len(change.usageBilling) > 0 || len(change.trustLevels) > 0 || change.setPolicy {
+			accounts, err := q.ListMoneyAccountSettingsByCustomer(ctx, gen.ListMoneyAccountSettingsByCustomerParams{MerchantID: mid.UUID(), CustomerID: change.customer})
+			if err != nil {
 				return err
 			}
-		}
-		for _, account := range change.usageBilling {
-			if err := s.moneyService().ValidateUsageBillingAccountTx(ctx, q, change.customer, account.Currency); err != nil {
-				return apperr.Invalidf("%s", err).WithParam("usage_billing")
-			}
-			if err := s.moneyService().WithDatabase(s.rt.DB.NewWithPgxTx(tx)).WakeUsageBillingTx(ctx, q, change.customer, account.Currency); err != nil {
-				return err
+			for _, account := range accounts {
+				if err := s.moneyService().ValidateUsageBillingAccountTx(ctx, q, change.customer, account.Currency); err != nil {
+					return apperr.Invalidf("%s", err).WithParam("usage_billing")
+				}
+				if err := s.moneyService().WithDatabase(s.rt.DB.NewWithPgxTx(tx)).WakeUsageBillingTx(ctx, q, change.customer, account.Currency); err != nil {
+					return err
+				}
 			}
 		}
 		settings, err := customerSettings(ctx, q, mid.UUID(), []uuid.UUID{change.customer})

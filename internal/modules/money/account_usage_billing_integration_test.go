@@ -214,7 +214,7 @@ func TestAccountUsageBillingIntegration(t *testing.T) {
 			return gen.New(tx).UpdateUsageBillingAccount(ctx, gen.UpdateUsageBillingAccountParams{MerchantID: mid.UUID(), CustomerID: id.UUID(), Currency: "USD", SetMinimum: true, MinimumInvoiceAmount: &minimum, Now: clock.Now()})
 		}))
 		require.NoError(t, database.RunInMerchantConn(ctx, func(ctx context.Context) error {
-			bad, err := database.Gen(ctx).FindInvalidUsageMinimum(ctx, gen.FindInvalidUsageMinimumParams{MerchantID: mid.UUID(), Currency: "USD", DefaultCredit: 20_000_000, DefaultMinimum: 5_000_000})
+			bad, err := database.Gen(ctx).FindInvalidUsageMinimum(ctx, gen.FindInvalidUsageMinimumParams{MerchantID: mid.UUID(), Currency: "USD", DefaultCredit: 20_000_000, DefaultMinimum: 5_000_000, Policies: []byte(`{}`)})
 			require.NoError(t, err)
 			require.Equal(t, id.UUID(), bad)
 			return nil
@@ -227,7 +227,7 @@ func TestAccountUsageBillingIntegration(t *testing.T) {
 			return gen.New(tx).SetMoneyAccountCreditLimit(ctx, gen.SetMoneyAccountCreditLimitParams{MerchantID: mid.UUID(), CustomerID: id.UUID(), Currency: "USD", CreditLimit: 0, Now: clock.Now()})
 		}))
 		require.NoError(t, database.RunInMerchantConn(ctx, func(ctx context.Context) error {
-			_, err := database.Gen(ctx).FindInvalidUsageMinimum(ctx, gen.FindInvalidUsageMinimumParams{MerchantID: mid.UUID(), Currency: "USD", DefaultCredit: 20_000_000, DefaultMinimum: 5_000_000})
+			_, err := database.Gen(ctx).FindInvalidUsageMinimum(ctx, gen.FindInvalidUsageMinimumParams{MerchantID: mid.UUID(), Currency: "USD", DefaultCredit: 20_000_000, DefaultMinimum: 5_000_000, Policies: []byte(`{}`)})
 			require.ErrorIs(t, err, pgx.ErrNoRows)
 			return nil
 		}))
@@ -253,6 +253,47 @@ func TestAccountUsageBillingIntegration(t *testing.T) {
 		unlock, err = one.LockUsagePolicy(ctx, mid)
 		require.NoError(t, err)
 		unlock()
+	})
+	t.Run("bound hard cap constrains minimum and invoice trigger", func(t *testing.T) {
+		id := customer()
+		accrue(id, 1_000_000)
+		oldPolicies, oldBindings := cfg.settings.BillingPolicies, cfg.settings.BillingPolicyBindings
+		defer func() { cfg.settings.BillingPolicies = oldPolicies; cfg.settings.BillingPolicyBindings = oldBindings }()
+		cfg.settings.BillingPolicies = []billing.BillingPolicy{{Name: "tight", Kind: "outstanding_cap", OutstandingCapAmount: 20_000_000}}
+		cfg.settings.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "tight"}}
+		minimum := int64(50_000_000)
+		setMinimum := func() {
+			require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				return gen.New(tx).UpdateUsageBillingAccount(ctx, gen.UpdateUsageBillingAccountParams{MerchantID: mid.UUID(), CustomerID: id.UUID(), Currency: "USD", SetMinimum: true, MinimumInvoiceAmount: &minimum, Now: clock.Now()})
+			}))
+		}
+		setMinimum()
+		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			require.ErrorContains(t, service.ValidateUsageBillingAccountTx(ctx, gen.New(tx), id.UUID(), "USD"), "minimum_invoice_amount")
+			return nil
+		}))
+		policy, err := service.GetAccountSettings(ctx, id, "USD")
+		require.NoError(t, err)
+		require.EqualValues(t, 20_000_000, policy.CreditLimitAmount)
+		// A lower collection trigger alone is not a lower credit limit.
+		cfg.settings.BillingPolicies[0].OutstandingCapAmount = 0
+		trigger := int64(20_000_000)
+		cfg.settings.BillingPolicies[0].CollectionThresholdAmount = &trigger
+		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			return service.ValidateUsageBillingAccountTx(ctx, gen.New(tx), id.UUID(), "USD")
+		}))
+		cfg.settings.BillingPolicies[0].OutstandingCapAmount = 20_000_000
+		cfg.settings.BillingPolicies[0].CollectionThresholdAmount = nil
+		minimum = 5_000_000
+		setMinimum()
+		accrue(id, 19_000_000)
+		require.True(t, settings(id).UsageCollectionDue)
+		billed, err := service.finalizeUsageAccount(ctx, id.UUID(), "USD", clock.Now())
+		require.NoError(t, err)
+		require.True(t, billed)
+		orders, total := count(id)
+		require.Equal(t, 1, orders)
+		require.EqualValues(t, 20_000_000, total)
 	})
 	t.Run("configuration inheritance is explicit", func(t *testing.T) {
 		id := customer()

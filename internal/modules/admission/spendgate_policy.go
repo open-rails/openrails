@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"math"
 	"strings"
 	"time"
 
@@ -96,10 +97,7 @@ func payerCapacity(capacity money.AdmissionCapacity, policy ResolvedPolicy) (ava
 		// Prepaid: money already owed is not available to new work.
 		return available - outstanding, 0, outstanding
 	}
-	limit := capacity.CreditLimit
-	if policy.OutstandingCapAmount > 0 && (!capacity.HardCreditLimit || policy.OutstandingCapAmount < limit) {
-		limit = policy.OutstandingCapAmount
-	}
+	limit := creditLimitForPolicy(capacity, policy)
 	if limit <= 0 {
 		return available, 0, outstanding
 	}
@@ -111,4 +109,26 @@ func payerCapacity(capacity money.AdmissionCapacity, policy ResolvedPolicy) (ava
 		}
 	}
 	return available, creditLine, outstanding
+}
+
+func creditLimitForPolicy(capacity money.AdmissionCapacity, policy ResolvedPolicy) int64 {
+	limit := capacity.CreditLimit
+	if policy.OutstandingCapAmount > 0 && (!capacity.HardCreditLimit || policy.OutstandingCapAmount < limit) {
+		limit = policy.OutstandingCapAmount
+	}
+	return max(limit, 0)
+}
+
+// Debt settlement frees the credit line, but not other live reservations. Do
+// not collect early for a request that still could not fit after payment.
+func canFitAfterDebtSettlement(capacity money.AdmissionCapacity, policy ResolvedPolicy, cost int64) bool {
+	if capacity.Held > 0 && capacity.Balance < math.MinInt64+capacity.Held {
+		return false
+	}
+	available := capacity.Balance - capacity.Held
+	limit := creditLimitForPolicy(capacity, policy)
+	if available > math.MaxInt64-limit {
+		return true
+	}
+	return cost <= available+limit
 }
