@@ -1102,6 +1102,29 @@ export type ErrorDetails = {
   order?: Order
 }
 
+export type Event = {
+  id: string
+  merchant_id: string
+  source: string
+  type: string
+  version: number
+  occurred_at: string
+  subject: EventSubject
+  data: unknown | null
+}
+
+export type EventPage = {
+  events: Event[]
+  next_cursor: string
+  has_more: boolean
+  retention_seconds: number
+}
+
+export type EventSubject = {
+  type: string
+  id: string
+}
+
 export type ExtendAdmissionBatchParams = {
   items?: ExtendAdmissionParams[]
 }

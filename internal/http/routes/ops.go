@@ -8,6 +8,7 @@ import (
 // opsRoutes is how a merchant watches its books: findings (the one inbox),
 // worker health, metrics, the dashboard and host events.
 var opsRoutes = []Route{
+	{Method: GET, Path: "/v1/app/events", Group: App, Auth: AuthApplication, Permission: needEvents, Name: "ListEvents", Query: queryOf(handlers.EventLogQuery{}), Responses: []Reply{{200, billing.EventPage{}}}, Errors: codes("invalid_cursor", "invalid_query", "invalid_param", "event_cursor_expired"), Handler: h(handlers.ListEvents)},
 	{Method: GET, Path: "/v1/merchant/destructive-holds", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListDestructiveHolds", Level: LevelRead, Query: params(page, idsParam), Responses: []Reply{{200, billing.ListPage[billing.DestructiveHold]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.ListDestructiveHolds)},
 	{Method: POST, Path: "/v1/merchant/destructive-holds/{id}/clear", Group: MerchantConfig, Auth: AuthMerchant, Name: "ClearDestructiveHold", Level: LevelUpdate, Request: billing.ClearDestructiveHoldParams{}, Responses: []Reply{{200, billing.DestructiveHold{}}}, Errors: codes("invalid_param", "permission_required", "resource_not_found", "resource_conflict", "service_unavailable"), Bind: incidentClear},
 

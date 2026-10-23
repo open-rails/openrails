@@ -7,7 +7,18 @@ notification API or email scheduler. AuthKit's existing account events can be
 consumed separately when an application wants to present them; OpenRails does
 not turn account operations into billing notifications.
 
-## Independent consumers
+## Reading new integrations
+
+Use [`Client.ListEvents` or `GET /v1/app/events`](event-log.md). Each reader
+stores its own cursor; no registration or acknowledgment is needed. The log
+snapshots customer/account identity and issuer so retained facts can still be
+routed after customer removal. The destination must keep its account-erasure
+fence and must not recreate an erased inbox.
+
+The older transport below remains temporarily for existing integrations during
+migration. New integrations should use the retained log.
+
+## Legacy independent consumers
 
 A merchant application uses these application-only routes with its normal
 merchant-bound credential and `merchant:events:read` permission:

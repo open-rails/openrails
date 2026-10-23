@@ -30,6 +30,10 @@ const ConfigContextKey configContextKey = "config"
 // outside the process is in Deps. ProviderWriteMode is required. Whether money
 // is real is each PSP's declared environment, never the deployment's.
 type Config struct {
+	// EventRetention is the retained event-log lifetime, as a Go duration.
+	// Empty is 90 days. Reader progress never extends retention.
+	EventRetention string `yaml:"event_retention" json:"event_retention"`
+
 	// ProviderWriteMode is how much OpenRails may do against payment
 	// providers: "full" (normal operation), "limited" (no system-initiated
 	// provider writes) or "readonly" (no provider writes: it never charges

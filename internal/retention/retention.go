@@ -43,6 +43,8 @@ const (
 // Row periods. Where a table refuses ad-hoc deletes, its trigger in the
 // baseline declares the same number of days.
 const (
+	// EventLog is the default retained event lifetime, independent of readers.
+	EventLog = 90 * Day
 	// SubscriptionTransitions keeps a subscription status change 25 months.
 	SubscriptionTransitions = 761 * Day
 	// ProviderWrites keeps a finished outbox intent (OutboxIntentTypes) and a

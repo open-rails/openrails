@@ -8,6 +8,9 @@ provider_write_mode: full # full | limited | readonly; REQUIRED: boot refuses it
 # Whether money is real is each PSP's declared environment (live | test |
 # sandbox) in the merchant configuration, never this file's.
 
+# Independent of reader progress; 2160h = 90 days.
+# event_retention: 2160h
+
 host: 0.0.0.0
 port: 3053
 # private_port: 9090 # the operator's /metrics, apart from the public port; unset serves none

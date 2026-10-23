@@ -175,6 +175,7 @@ var errorCodes = []ErrorCode{
 	{CodeUnknownField, 400, invalid, "The JSON body names a field the route does not accept; param is the field."},
 	{CodeInvalidQuery, 400, invalid, "A query parameter is malformed or out of range; param is the parameter."},
 	{CodeInvalidCursor, 400, invalid, "The cursor is not one this list issued."},
+	{CodeEventCursorExpired, 410, invalid, "The event cursor is no longer retained; resynchronize current state."},
 	{CodeInvalidRequestBody, 400, invalid, "The request body could not be read or is not one JSON value."},
 	{CodeRequestBodyTooLarge, 413, invalid, "The request body exceeds the deployment's cap."},
 	{CodeUnsupportedMediaType, 415, invalid, "The request body is not application/json."},

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/eventlog"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/notificationevents"
@@ -48,6 +49,9 @@ const (
 
 // CleanupConfig defines retention periods for various data types
 type CleanupConfig struct {
+	// EventRetention bounds retained facts independently of reader progress.
+	EventRetention time.Duration
+
 	// NotificationSeenRetention is how long to keep seen notifications
 	// Default: 90 days (matches model's IsExpiredForCleanup)
 	NotificationSeenRetention time.Duration
@@ -91,6 +95,7 @@ func clampInt32(v int) int32 {
 // zero retention fails loudly instead of mass-deleting.
 func DefaultCleanupConfig() CleanupConfig {
 	return CleanupConfig{
+		EventRetention:              retention.EventLog,
 		NotificationSeenRetention:   retention.NotificationsRead,
 		NotificationUnseenRetention: retention.NotificationsUnread,
 		WebhookEventRetention:       webhooks.WebhookEventRetention,
@@ -102,7 +107,7 @@ func DefaultCleanupConfig() CleanupConfig {
 }
 
 func (c CleanupConfig) validate() error {
-	if c.NotificationSeenRetention <= 0 || c.NotificationUnseenRetention <= 0 || c.WebhookEventRetention <= 0 ||
+	if c.EventRetention <= 0 || c.NotificationSeenRetention <= 0 || c.NotificationUnseenRetention <= 0 || c.WebhookEventRetention <= 0 ||
 		c.PaymentSettlementAckedRetention <= 0 || c.HostLifecycleEventAckedRetention <= 0 || c.PaymentAttemptRetention <= 0 {
 		return fmt.Errorf("cleanup worker config requires positive retentions (wire DefaultCleanupConfig()): %+v", c)
 	}
@@ -132,6 +137,8 @@ func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
 
 // CleanupResult holds the count of deleted records per table
 type CleanupResult struct {
+	EventLog int64
+
 	UserActionReservations     int64
 	NotificationEvents         int64
 	OrderAttemptsExpired       int64
@@ -206,6 +213,18 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	}
 
 	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
+
+	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
+		n, err := eventlog.Prune(ctx, w.DB, now, config.EventRetention, cleanupDeleteBatch)
+		if err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+			break
+		}
+		result.EventLog += int64(n)
+		if n < cleanupDeleteBatch {
+			break
+		}
+	}
 
 	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
 		n, err := notificationevents.Prune(ctx, w.DB, now, cleanupDeleteBatch)
@@ -346,6 +365,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"order_attempts_expired":       result.OrderAttemptsExpired,
 		"carts":                        result.Carts,
 		"notification_events":          result.NotificationEvents,
+		"event_log":                    result.EventLog,
 		"notifications_seen":           result.NotificationsSeen,
 		"notifications_unseen":         result.NotificationsAll,
 		"webhook_events":               result.WebhookEvents,

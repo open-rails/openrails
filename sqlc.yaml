@@ -102,6 +102,7 @@ sql:
       - "internal/migrate/postgres/0107_user_action_retention.up.sql"
       - "internal/migrate/postgres/0108_subscription_history.up.sql"
       - "internal/migrate/postgres/0109_tenant_merchant_binding.up.sql"
+      - "internal/migrate/postgres/0110_retained_event_log.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

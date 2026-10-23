@@ -108,6 +108,7 @@ migration 0106_user_destructive_reservations.up.sql sha256:338ebf15379b9abb3165f
 migration 0107_user_action_retention.up.sql sha256:f8963bbe29d458e72f2a7e64b819ff92204de84ea0e8d06849380a93d71f9dda
 migration 0108_subscription_history.up.sql sha256:fbd81b4e32710a7e12db21fc0f5a0f5d64e6ad906b83b01c33d6c341373a1dd4
 migration 0109_tenant_merchant_binding.up.sql sha256:5597e671dfe1443fdeffa5378e62aa0c61d7be36534715d6a91b42cddf8ce097
+migration 0110_retained_event_log.up.sql sha256:5ab62242c7235e5615d3971f32531f8d5aa4433ea0bae29f9b8d11adecb4a516
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -689,6 +690,54 @@ table billing.destructive_run_before_images
   index CREATE UNIQUE INDEX destructive_run_before_images_pkey ON billing.destructive_run_before_images USING btree (merchant_id, id)
   trigger CREATE TRIGGER immutable_destructive_before_images BEFORE DELETE OR UPDATE ON billing.destructive_run_before_images FOR EACH ROW EXECUTE FUNCTION billing.guard_before_image()
 
+table billing.event_log
+  column merchant_id uuid NOT NULL
+  column "position" bigint NOT NULL
+  column id text NOT NULL
+  column source text NOT NULL
+  column event_type text NOT NULL
+  column version integer NOT NULL DEFAULT 1
+  column occurred_at timestamp with time zone NOT NULL
+  column recorded_at timestamp with time zone NOT NULL
+  column subject_type text NOT NULL
+  column subject_id text NOT NULL
+  column data jsonb NOT NULL
+  constraint event_log_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.event_log_streams(merchant_id) ON DELETE CASCADE
+  constraint event_log_merchant_id_id_key UNIQUE (merchant_id, id)
+  constraint event_log_pkey PRIMARY KEY (merchant_id, "position")
+  constraint event_log_position_check CHECK (("position" > 0))
+  constraint event_log_source_check CHECK ((source = ANY (ARRAY['host'::text, 'notification'::text])))
+  constraint event_log_version_check CHECK ((version > 0))
+  index CREATE UNIQUE INDEX event_log_merchant_id_id_key ON billing.event_log USING btree (merchant_id, id)
+  index CREATE INDEX event_log_merchant_retention_idx ON billing.event_log USING btree (merchant_id, recorded_at, "position")
+  index CREATE UNIQUE INDEX event_log_pkey ON billing.event_log USING btree (merchant_id, "position")
+  index CREATE INDEX event_log_retention_idx ON billing.event_log USING btree (recorded_at, merchant_id, "position")
+  index CREATE INDEX event_log_type_position_idx ON billing.event_log USING btree (merchant_id, event_type, "position")
+  trigger CREATE TRIGGER event_log_fact_immutable BEFORE UPDATE ON billing.event_log FOR EACH ROW EXECUTE FUNCTION billing.guard_event_log_fact()
+
+table billing.event_log_pending
+  column transaction_id bigint NOT NULL
+  column entries jsonb NOT NULL
+  constraint event_log_flush TRIGGER DEFERRABLE INITIALLY DEFERRED
+  constraint event_log_pending_entries_check CHECK ((jsonb_typeof(entries) = 'array'::text))
+  constraint event_log_pending_pkey PRIMARY KEY (transaction_id)
+  index CREATE UNIQUE INDEX event_log_pending_pkey ON billing.event_log_pending USING btree (transaction_id)
+  trigger CREATE CONSTRAINT TRIGGER event_log_flush AFTER INSERT ON billing.event_log_pending DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.flush_event_log()
+
+table billing.event_log_streams
+  column merchant_id uuid NOT NULL
+  column epoch uuid NOT NULL DEFAULT uuidv7()
+  column "position" bigint NOT NULL DEFAULT 0
+  column head_id text NOT NULL DEFAULT ''::text
+  column pruned_through bigint NOT NULL DEFAULT 0
+  column pruned_id text NOT NULL DEFAULT ''::text
+  column recorded_at timestamp with time zone NOT NULL DEFAULT '-infinity'::timestamp with time zone
+  constraint event_log_streams_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
+  constraint event_log_streams_pkey PRIMARY KEY (merchant_id)
+  constraint event_log_streams_position_check CHECK (("position" >= 0))
+  constraint event_log_streams_pruned_through_check CHECK ((pruned_through >= 0))
+  index CREATE UNIQUE INDEX event_log_streams_pkey ON billing.event_log_streams USING btree (merchant_id)
+
 table billing.failed_usage_windows
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
@@ -794,6 +843,7 @@ table billing.host_outbox
   index CREATE INDEX host_outbox_event_type_id_idx ON billing.host_outbox USING btree (merchant_id, event_type, id) WHERE (delivered_at IS NULL)
   index CREATE UNIQUE INDEX host_outbox_payment_id_key ON billing.host_outbox USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL)
   index CREATE UNIQUE INDEX host_outbox_pkey ON billing.host_outbox USING btree (merchant_id, id)
+  trigger CREATE TRIGGER host_event_log_capture AFTER INSERT ON billing.host_outbox FOR EACH ROW EXECUTE FUNCTION billing.capture_host_event_log()
 
 table billing.idempotency_keys
   column merchant_id uuid NOT NULL
@@ -1042,6 +1092,7 @@ table billing.merchants
   trigger CREATE TRIGGER guard_merchant_name BEFORE INSERT OR UPDATE OF slug, deleted_at ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_name()
   trigger CREATE TRIGGER guard_merchant_restore BEFORE UPDATE ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_restore()
   trigger CREATE TRIGGER immutable_merchant_group_binding BEFORE UPDATE OF permission_group_id ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_group_binding()
+  trigger CREATE TRIGGER merchant_event_log_stream AFTER INSERT ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.create_event_log_stream()
   trigger CREATE TRIGGER merchants_tenant_binding_immutable BEFORE UPDATE OF tenant_id, permission_group_id ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_tenant_binding()
 
 table billing.meter_period_quantities
@@ -1163,6 +1214,7 @@ table billing.notification_events
   index CREATE INDEX notification_events_ended_idx ON billing.notification_events USING btree (merchant_id, customer_id, created_at) WHERE (event_type = 'premium_ended'::text)
   index CREATE UNIQUE INDEX notification_events_pkey ON billing.notification_events USING btree (merchant_id, id)
   trigger CREATE TRIGGER notification_event_immutable BEFORE UPDATE ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.guard_notification_event()
+  trigger CREATE TRIGGER notification_event_log_capture AFTER INSERT ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.capture_notification_event_log()
 
 table billing.notifications
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3058,6 +3110,30 @@ function billing.book_armed()
   END;
   $function$
 
+function billing.capture_host_event_log()
+  CREATE OR REPLACE FUNCTION billing.capture_host_event_log()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      PERFORM billing.queue_event_log(billing.host_event_record(NEW));
+      RETURN NEW;
+  END;
+  $function$
+
+function billing.capture_notification_event_log()
+  CREATE OR REPLACE FUNCTION billing.capture_notification_event_log()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      PERFORM billing.queue_event_log(billing.notification_event_record(NEW));
+      RETURN NEW;
+  END;
+  $function$
+
 function billing.catalog_authored_entitlements()
   CREATE OR REPLACE FUNCTION billing.catalog_authored_entitlements()
    RETURNS trigger
@@ -3276,6 +3352,18 @@ function billing.convert_entitlement_windows(uuid,regclass,timestamp with time z
       RETURN converted;
   END $function$
 
+function billing.create_event_log_stream()
+  CREATE OR REPLACE FUNCTION billing.create_event_log_stream()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      INSERT INTO billing.event_log_streams(merchant_id) VALUES(NEW.id) ON CONFLICT DO NOTHING;
+      RETURN NEW;
+  END;
+  $function$
+
 function billing.current_merchant_id()
   CREATE OR REPLACE FUNCTION billing.current_merchant_id()
    RETURNS uuid
@@ -3399,6 +3487,50 @@ function billing.escape_price_key(text)
   END;
   $function$
 
+function billing.event_log_data(jsonb)
+  CREATE OR REPLACE FUNCTION billing.event_log_data(value jsonb)
+   RETURNS jsonb
+   LANGUAGE plpgsql
+   IMMUTABLE PARALLEL SAFE
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE key text; prefix text;
+  BEGIN
+      value := COALESCE(value,'{}'::jsonb);
+      -- Keep monetary integers lossless for JavaScript consumers, just like the
+      -- existing typed billing API. Do not reinterpret arbitrary payload fields.
+      FOREACH key IN ARRAY ARRAY['amount','total','overdue_amount','amount_floor',
+        'available_amount','owed_amount','accrual_rate_per_hour','usage_rate_per_hour',
+        'low_balance_amount','old_amount','new_amount','amount_due'] LOOP
+          IF jsonb_typeof(value->key)='number' THEN
+              value:=jsonb_set(value,ARRAY[key],to_jsonb(value->>key));
+          END IF;
+      END LOOP;
+      FOR key,prefix IN SELECT * FROM (VALUES
+        ('payment_id','pay_'),('product_id','prod_'),('subscription_id','sub_'),
+        ('order_id','ord_'),('mandate_id','mdt_'),('price_migration_id','pmig_'),
+        ('from_product_id','prod_'),('to_product_id','prod_')) AS ids(key,prefix) LOOP
+          IF value->>key ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+              value:=jsonb_set(value,ARRAY[key],to_jsonb(prefix||(value->>key)));
+          END IF;
+      END LOOP;
+      RETURN value;
+  END;
+  $function$
+
+function billing.event_subject_id(text,uuid)
+  CREATE OR REPLACE FUNCTION billing.event_subject_id(kind text, id uuid)
+   RETURNS text
+   LANGUAGE sql
+   IMMUTABLE PARALLEL SAFE
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+      SELECT CASE WHEN id IS NULL THEN NULL ELSE
+        CASE kind WHEN 'payment' THEN 'pay_' WHEN 'product' THEN 'prod_'
+        WHEN 'subscription' THEN 'sub_' WHEN 'order' THEN 'ord_'
+        WHEN 'mandate' THEN 'mdt_' WHEN 'destructive_hold' THEN 'dsh_' ELSE '' END || id::text END
+  $function$
+
 function billing.finish_billing_restore(uuid,text,bigint)
   CREATE OR REPLACE FUNCTION billing.finish_billing_restore(p_merchant uuid, p_digest text, p_rows bigint)
    RETURNS void
@@ -3412,6 +3544,39 @@ function billing.finish_billing_restore(uuid,text,bigint)
       PERFORM billing.check_billing_restore_ledger(p_merchant);
       UPDATE billing.maintenance_runs SET status='completed',finished_at=now(),summary=jsonb_build_object('digest',p_digest,'rows',p_rows)
           WHERE merchant_id=p_merchant AND kind='billing_restore' AND id::text=current_setting('openrails.billing_restore_id',true);
+  END;
+  $function$
+
+function billing.flush_event_log()
+  CREATE OR REPLACE FUNCTION billing.flush_event_log()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE facts jsonb; merchant uuid; event jsonb; next_position bigint; committed_at timestamptz;
+  BEGIN
+      -- Read the final row: NEW from its initial INSERT predates later events in
+      -- this same transaction. An already-consumed deferred callback is a no-op.
+      SELECT entries INTO facts FROM billing.event_log_pending WHERE transaction_id=NEW.transaction_id FOR UPDATE;
+      IF NOT FOUND THEN RETURN NULL; END IF;
+      -- Every transaction takes all its stream locks in the same order, across
+      -- both source tables and every statement, before allocating any position.
+      FOR merchant IN SELECT DISTINCT (value->>'merchant_id')::uuid FROM jsonb_array_elements(facts) ORDER BY 1 LOOP
+          PERFORM 1 FROM billing.event_log_streams WHERE merchant_id=merchant FOR UPDATE;
+      END LOOP;
+      FOR event IN SELECT value FROM jsonb_array_elements(facts) LOOP
+          merchant:=(event->>'merchant_id')::uuid;
+          IF NOT EXISTS(SELECT 1 FROM billing.event_log_streams WHERE merchant_id=merchant) THEN CONTINUE; END IF;
+          IF EXISTS(SELECT 1 FROM billing.event_log WHERE merchant_id=merchant AND id=event->>'id') THEN CONTINUE; END IF;
+          UPDATE billing.event_log_streams SET position=position+1,
+             recorded_at=greatest(recorded_at,clock_timestamp()),head_id=event->>'id'
+          WHERE merchant_id=merchant RETURNING position,recorded_at INTO next_position,committed_at;
+          INSERT INTO billing.event_log(merchant_id,position,id,source,event_type,occurred_at,recorded_at,subject_type,subject_id,data)
+          VALUES(merchant,next_position,event->>'id',event->>'source',event->>'type',
+             (event->>'occurred_at')::timestamptz,committed_at,event->>'subject_type',event->>'subject_id',event->'data');
+      END LOOP;
+      DELETE FROM billing.event_log_pending WHERE transaction_id=NEW.transaction_id;
+      RETURN NULL;
   END;
   $function$
 
@@ -3503,6 +3668,7 @@ function billing.guard_billing_restore_receipt()
                     'destructive_actions',
                     'destructive_holds',
                     'destructive_run_before_images',
+                    'event_log',
                     'failed_usage_windows',
                     'grants',
                     'host_outbox',
@@ -3632,6 +3798,20 @@ function billing.guard_destructive_hold_clear()
    END IF;
    RETURN NEW;
   END; $function$
+
+function billing.guard_event_log_fact()
+  CREATE OR REPLACE FUNCTION billing.guard_event_log_fact()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF to_jsonb(OLD) IS DISTINCT FROM to_jsonb(NEW) THEN
+          RAISE EXCEPTION 'event log facts are immutable' USING ERRCODE='23514';
+      END IF;
+      RETURN NEW;
+  END;
+  $function$
 
 function billing.guard_ledger_account_facts()
   CREATE OR REPLACE FUNCTION billing.guard_ledger_account_facts()
@@ -3881,6 +4061,40 @@ function billing.guard_retention_delete()
   END;
   $function$
 
+function billing.host_event_record(billing.host_outbox)
+  CREATE OR REPLACE FUNCTION billing.host_event_record(h billing.host_outbox)
+   RETURNS jsonb
+   LANGUAGE plpgsql
+   STABLE
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE payload jsonb; payment record;
+      source_merchant uuid:=h.merchant_id; source_payment uuid:=h.payment_id;
+      account uuid; authority text;
+  BEGIN
+      payload:=h.data || jsonb_strip_nulls(jsonb_build_object('currency',NULLIF(h.currency,''),'amount',h.amount::text));
+      IF h.subject_type='customer' THEN payload:=payload||jsonb_build_object('customer_id',h.subject_id::text); END IF;
+      IF h.subject_type='order' THEN payload:=payload||jsonb_build_object('order_id','ord_'||h.subject_id); END IF;
+      IF h.subject_type='product' THEN payload:=payload||jsonb_build_object('product_id','prod_'||h.subject_id); END IF;
+      IF h.subject_type='mandate' THEN payload:=payload||jsonb_build_object('mandate_id','mdt_'||h.subject_id); END IF;
+      IF h.payment_id IS NOT NULL THEN
+          SELECT customer_id,subscription_id,order_id INTO payment
+          FROM billing.payments WHERE merchant_id=source_merchant AND id=source_payment;
+          payload:=payload||jsonb_strip_nulls(jsonb_build_object('payment_id','pay_'||h.payment_id,
+            'customer_id',payment.customer_id,'subscription_id',payment.subscription_id,'order_id',payment.order_id));
+      END IF;
+      IF payload ? 'customer_id' THEN
+          account:=(payload->>'customer_id')::uuid;
+          SELECT COALESCE(issuer,'') INTO authority FROM billing.customers
+            WHERE merchant_id=source_merchant AND id=account;
+          payload:=payload||jsonb_build_object('account_id',account,'account_issuer',authority);
+      END IF;
+      RETURN jsonb_build_object('merchant_id',h.merchant_id,'id','hev_'||h.id,'source','host',
+        'type',h.event_type,'occurred_at',h.occurred_at,'subject_type',h.subject_type,
+        'subject_id',billing.event_subject_id(h.subject_type,h.subject_id),'data',billing.event_log_data(payload));
+  END;
+  $function$
+
 function billing.ledger_transfers_apply_counters()
   CREATE OR REPLACE FUNCTION billing.ledger_transfers_apply_counters()
    RETURNS trigger
@@ -3962,6 +4176,24 @@ function billing.monthly_normalized_amount(bigint,integer)
       WHEN p_hours >= 648 THEN round(p_amount::numeric / greatest(round(p_hours / 730.0), 1))::bigint
       ELSE round(p_amount::numeric * 730.0 / p_hours)::bigint
   END
+  $function$
+
+function billing.notification_event_record(billing.notification_events)
+  CREATE OR REPLACE FUNCTION billing.notification_event_record(n billing.notification_events)
+   RETURNS jsonb
+   LANGUAGE plpgsql
+   STABLE
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE source_merchant uuid:=n.merchant_id; account uuid:=n.customer_id; authority text;
+  BEGIN
+      SELECT COALESCE(issuer,'') INTO authority FROM billing.customers
+        WHERE merchant_id=source_merchant AND id=account;
+      RETURN jsonb_build_object('merchant_id',n.merchant_id,'id','ntf_'||n.id,'source','notification',
+        'type',n.event_type,'occurred_at',n.created_at,'subject_type','customer',
+        'subject_id',n.customer_id::text,'data',billing.event_log_data(n.data||
+          jsonb_build_object('customer_id',account,'account_id',account,'account_issuer',authority)));
+  END;
   $function$
 
 function billing.preserve_subscription_collection_policy()
@@ -4085,6 +4317,22 @@ function billing.products_propagate_tier_group()
           WHERE merchant_id = NEW.merchant_id AND product_id = NEW.id AND deleted_at IS NULL;
       END IF;
       RETURN NULL;
+  END;
+  $function$
+
+function billing.queue_event_log(jsonb)
+  CREATE OR REPLACE FUNCTION billing.queue_event_log(event jsonb)
+   RETURNS void
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE scope text:=NULLIF(current_setting('openrails.merchant_id',true),'');
+  BEGIN
+      IF scope IS NOT NULL AND scope IS DISTINCT FROM event->>'merchant_id' THEN
+          RAISE EXCEPTION 'event source differs from the pinned merchant' USING ERRCODE='42501';
+      END IF;
+      INSERT INTO billing.event_log_pending(transaction_id,entries) VALUES(txid_current(),jsonb_build_array(event))
+      ON CONFLICT(transaction_id) DO UPDATE SET entries=billing.event_log_pending.entries||EXCLUDED.entries;
   END;
   $function$
 

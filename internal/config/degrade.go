@@ -31,6 +31,10 @@ func Degrade(cfg *Config) []Degradation {
 	var out []Degradation
 	off := func(field string, err error) { out = append(out, Degradation{Field: field, Err: err}) }
 
+	if _, err := EventRetentionDuration(cfg); err != nil {
+		cfg.EventRetention = ""
+		off("event_retention", fmt.Errorf("%w; the default 90 days applies", err))
+	}
 	if cfg.RateLimits != nil {
 		limits := maps.Clone(*cfg.RateLimits)
 		for _, bucket := range slices.Sorted(maps.Keys(limits)) {

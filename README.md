@@ -432,6 +432,7 @@ When running in embedded mode (as in this example) you wouldn't usually mount th
 | `POST /v1/app/admissions/extend` | move holds' deadlines | Usage |
 | `POST /v1/app/running-charges` | charge a customer at a rate per hour until you stop it | Usage |
 | `POST /v1/app/running-charges/{reference}/stop` | stop it and post what it charged | Usage |
+| `GET /v1/app/events` | retained facts after your own cursor; no registration or ACK | Events |
 | `GET /v1/app/host-events` | events for your backend to process, oldest first | Events |
 | `POST /v1/app/host-events/acknowledge` | mark them processed | Events |
 | `POST /v1/app/notification-consumers/{name}` | register an independent billing notification consumer | Events |
@@ -1596,7 +1597,7 @@ AuthKit shares only an email the user proved, so require it (`Registration.Verif
 
 #### Receipts
 
-OpenRails records customer billing facts; your application renders and sends receipts and payment notices. Consume them through `Client.NotificationEvents` or the application notification-consumer routes, persisting each event idempotently before acknowledging it. See [customer notification events](docs/customer-notifications.md).
+OpenRails records customer billing facts; your application renders and sends receipts and payment notices. Read them through `Client.ListEvents` or `GET /v1/app/events`, then save the returned cursor after processing the facts idempotently. Reading never registers a consumer or changes delivery state. See [the retained event log](docs/event-log.md). The older ACK-based routes remain temporarily while existing integrations migrate.
 
 #### PSP webhooks
 

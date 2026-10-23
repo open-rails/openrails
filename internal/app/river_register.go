@@ -107,10 +107,16 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
 	}
+	cleanupConfig := riverjobs.DefaultCleanupConfig()
+	eventRetention, err := config.EventRetentionDuration(r.Config)
+	if err != nil {
+		return err
+	}
+	cleanupConfig.EventRetention = eventRetention
 	if err := addTrackedWorker(r, workers, &riverjobs.CleanupExpiredDataWorker{
 		DB:     r.DB,
 		Clock:  clock,
-		Config: riverjobs.DefaultCleanupConfig(),
+		Config: cleanupConfig,
 	}); err != nil {
 		return fmt.Errorf("add cleanup expired data worker: %w", err)
 	}

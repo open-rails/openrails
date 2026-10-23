@@ -439,6 +439,38 @@ type BillingDestructiveRunBeforeImage struct {
 	DestructiveRunClass string
 }
 
+// Retained merchant facts, independent of readers. Retention: events expire after the configured event retention, independently of reader progress.
+type BillingEventLog struct {
+	MerchantID  uuid.UUID
+	Position    int64
+	ID          string
+	Source      string
+	EventType   string
+	Version     int32
+	OccurredAt  time.Time
+	RecordedAt  time.Time
+	SubjectType string
+	SubjectID   string
+	Data        []byte
+}
+
+// Internal transaction scratch; no row survives a successful commit. Retention: transaction lifetime only.
+type BillingEventLogPending struct {
+	TransactionID int64
+	Entries       []byte
+}
+
+// Committed event positions and retention boundaries; no reader state. Retention: state owned by the merchant.
+type BillingEventLogStream struct {
+	MerchantID    uuid.UUID
+	Epoch         uuid.UUID
+	Position      int64
+	HeadID        string
+	PrunedThrough int64
+	PrunedID      string
+	RecordedAt    time.Time
+}
+
 // Failed usage counted per customer and configured window: the customer's grace (invoker empty) or a delegated invoker's cutoff. Retention: rows are deleted once their window has ended.
 type BillingFailedUsageWindow struct {
 	MerchantID uuid.UUID

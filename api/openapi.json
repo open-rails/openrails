@@ -10309,6 +10309,80 @@
         ]
       }
     },
+    "/v1/app/events": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:events:read",
+          "root": "root:events:read"
+        },
+        "x-openrails-errors": [
+          "event_cursor_expired",
+          "invalid_cursor",
+          "invalid_param",
+          "invalid_query"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
+        ]
+      }
+    },
     "/v1/merchant/destructive-holds": {
       "get": {
         "tags": [
@@ -17552,6 +17626,92 @@
           "type",
           "code",
           "message"
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "merchant_id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/EventSubject"
+          },
+          "data": {
+            "oneOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "merchant_id",
+          "source",
+          "type",
+          "version",
+          "occurred_at",
+          "subject",
+          "data"
+        ]
+      },
+      "EventPage": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "retention_seconds": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "events",
+          "next_cursor",
+          "has_more",
+          "retention_seconds"
+        ]
+      },
+      "EventSubject": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
         ]
       },
       "ExtendAdmissionBatchParams": {
@@ -25817,6 +25977,11 @@
       "status": 403,
       "type": "invalid_request_error",
       "meaning": "A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks."
+    },
+    "event_cursor_expired": {
+      "status": 410,
+      "type": "invalid_request_error",
+      "meaning": "The event cursor is no longer retained; resynchronize current state."
     },
     "finding_action_failed": {
       "status": 502,

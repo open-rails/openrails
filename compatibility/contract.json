@@ -70,6 +70,7 @@
       "func (c *Client) ListCustomers(ctx context.Context, params billing.CustomerListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Customer], error)",
       "func (c *Client) ListDestructiveHolds(ctx context.Context, params billing.DestructiveHoldListParams, options ...RequestOption) (*billing.ListPage[billing.DestructiveHold], error)",
       "func (c *Client) ListEntitlements(ctx context.Context, params billing.EntitlementListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error)",
+      "func (c *Client) ListEvents(ctx context.Context, query billing.EventQuery, options ...RequestOption) (*billing.EventPage, error)",
       "func (c *Client) ListFindings(ctx context.Context, req billing.FindingListParams, options ...RequestOption) (*billing.ListPage[billing.Finding], error)",
       "func (c *Client) ListHostEvents(ctx context.Context, req billing.HostEventListParams, options ...RequestOption) (*billing.ListPage[billing.HostEvent], error)",
       "func (c *Client) ListMeters(ctx context.Context, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.Meter], error)",
@@ -340,6 +341,7 @@
       "const CardVaultPlatform = \"platform\"",
       "const CodeCatalogBenefitOverlap = \"catalog_benefit_overlap\"",
       "const CodeCustomerActionRequired = \"customer_action_required\"",
+      "const CodeEventCursorExpired = \"event_cursor_expired\"",
       "const CodePaymentMethodPSPMismatch = \"payment_method_psp_mismatch\"",
       "const CodeProductInUse = \"product_in_use\"",
       "const CodeRevisionMismatch = \"revision_mismatch\"",
@@ -762,6 +764,10 @@
       "type EntitlementListParams struct {\n\tPageRequest\n\tCustomerIDs  []CustomerID\n\tEntitlements []string\n\tPrefix       string\n\tAt           time.Time\n}",
       "type ErrorCode struct {\n\tCode    string\n\tStatus  int\n\tType    string\n\tMeaning string\n}",
       "type ErrorDetails struct {\n\tType      string         `json:\"type\"`\n\tCode      string         `json:\"code\"`\n\tMessage   string         `json:\"message\"`\n\tRequestID string         `json:\"request_id,omitempty\"`\n\tParam     *string        `json:\"param,omitempty\"`\n\tMetadata  map[string]any `json:\"metadata,omitempty\"`\n\n\tOrder *Order `json:\"order,omitempty\"`\n}",
+      "type Event struct {\n\tID         string          `json:\"id\"`\n\tMerchantID MerchantID      `json:\"merchant_id\"`\n\tSource     string          `json:\"source\"`\n\tType       string          `json:\"type\"`\n\tVersion    int             `json:\"version\"`\n\tOccurredAt time.Time       `json:\"occurred_at\"`\n\tSubject    EventSubject    `json:\"subject\"`\n\tData       json.RawMessage `json:\"data\"`\n}",
+      "type EventPage struct {\n\tEvents           []Event `json:\"events\"`\n\tNextCursor       string  `json:\"next_cursor\"`\n\tHasMore          bool    `json:\"has_more\"`\n\tRetentionSeconds int64   `json:\"retention_seconds\"`\n}",
+      "type EventQuery struct {\n\tAfter string\n\tLimit int\n\tTypes []string\n}",
+      "type EventSubject struct {\n\tType string `json:\"type\"`\n\tID   string `json:\"id\"`\n}",
       "type ExtendAdmissionBatchParams struct {\n\tItems []ExtendAdmissionParams `json:\"items\"`\n}",
       "type ExtendAdmissionParams struct {\n\tRequestID string    `json:\"request_id\"`\n\tExpiresAt time.Time `json:\"expires_at\"`\n}",
       "type Finding struct {\n\tID                 FindingID      `json:\"id\"`\n\tType               string         `json:\"finding_type\"`\n\tProvider           *string        `json:\"provider\"`\n\tPSPID              *PSPID         `json:\"psp_id\"`\n\tResourceType       *string        `json:\"resource_type\"`\n\tResourceID         *string        `json:\"resource_id\"`\n\tExternalResourceID *string        `json:\"external_resource_id\"`\n\tField              *string        `json:\"field\"`\n\tOpenRailsValue     *string        `json:\"openrails_value\"`\n\tExternalValue      *string        `json:\"external_value\"`\n\tSubjectKey         string         `json:\"subject_key\"`\n\tSeverity           string         `json:\"severity\"`\n\tStatus             FindingStatus  `json:\"status\"`\n\tRecommendedAction  *string        `json:\"recommended_action\"`\n\tEvidence           map[string]any `json:\"evidence\"`\n\n\tRecommendation *FindingRecommendation `json:\"recommendation\"`\n\tLastSeenAt     time.Time              `json:\"last_seen_at\"`\n\tResolvedAt     *time.Time             `json:\"resolved_at\"`\n\tResolution     *string                `json:\"resolution\"`\n\tResolvedBy     *string                `json:\"resolved_by\"`\n\tNotes          *string                `json:\"operator_notes\"`\n\n\tSource        *ProposalSource `json:\"source\"`\n\tChange        *FindingChange  `json:\"change\"`\n\tApprovalRunID *RunID          `json:\"approval_run_id\"`\n\tCreatedAt     time.Time       `json:\"created_at\"`\n\tUpdatedAt     time.Time       `json:\"updated_at\"`\n}",
@@ -1181,7 +1187,7 @@
       "type AlertWebhookConfig struct {\n\tName string `yaml:\"name,omitempty\"`\n\tURL  string `yaml:\"url\"`\n\n\tFormat string `yaml:\"format,omitempty\"`\n\n\tEnabled *bool `yaml:\"enabled,omitempty\"`\n}",
       "type CaptchaConfig struct {\n\tProvider  string `yaml:\"provider\" json:\"provider\"`\n\tSiteKey   string `yaml:\"site_key\" json:\"site_key\"`\n\tSecretKey string `yaml:\"secret_key\" json:\"secret_key\"`\n}",
       "type CardVaultConfig struct {\n\tKind string `yaml:\"kind\" json:\"kind\"`\n\n\tTenantID string `yaml:\"tenant_id\" json:\"tenant_id\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n}",
-      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\" json:\"user_action_rate_limit\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
+      "type Config struct {\n\tEventRetention string `yaml:\"event_retention\" json:\"event_retention\"`\n\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\" json:\"user_action_rate_limit\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type Custodians map[string]CustodianConfig",
       "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n}",
@@ -1304,6 +1310,7 @@
       "func (s *Server) GetMerchant(ctx context.Context, id billing.MerchantID) (*billing.Merchant, error)",
       "func (s *Server) Handler() http.Handler",
       "func (s *Server) ListActiveMerchantIDs(ctx context.Context, page billing.PageRequest) (*billing.ListPage[billing.MerchantID], error)",
+      "func (s *Server) ListEvents(ctx context.Context, id billing.MerchantID, query billing.EventQuery) (*billing.EventPage, error)",
       "func (s *Server) ListMerchantRetirementCandidates(ctx context.Context, req billing.MerchantRetirementCandidateListParams) (billing.MerchantRetirementCandidatePage, error)",
       "func (s *Server) ListMerchants(ctx context.Context, params billing.MerchantListParams) (*billing.ListPage[billing.Merchant], error)",
       "func (s *Server) ListMerchantsForSubject(ctx context.Context, subject string) ([]billing.MerchantRef, error)",
@@ -1450,7 +1457,7 @@
     "internal/config": [
       "type CaptchaConfig struct {\n\tProvider  string `yaml:\"provider\" json:\"provider\"`\n\tSiteKey   string `yaml:\"site_key\" json:\"site_key\"`\n\tSecretKey string `yaml:\"secret_key\" json:\"secret_key\"`\n}",
       "type CardVaultConfig struct {\n\tKind string `yaml:\"kind\" json:\"kind\"`\n\n\tTenantID string `yaml:\"tenant_id\" json:\"tenant_id\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n}",
-      "type Config struct {\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\" json:\"user_action_rate_limit\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
+      "type Config struct {\n\tEventRetention string `yaml:\"event_retention\" json:\"event_retention\"`\n\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\" json:\"user_action_rate_limit\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
       "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n}",
       "type DatabaseConfig struct {\n\tSkipMigrations bool `yaml:\"skip_migrations\" json:\"skip_migrations\"`\n\n\tSchema string `yaml:\"schema\" json:\"schema\"`\n\n\tRiverSchema string `yaml:\"river_schema\" json:\"river_schema\"`\n}",
       "type EmailAddress struct {\n\tName    string `yaml:\"name\" json:\"name\"`\n\tAddress string `yaml:\"address\" json:\"address\"`\n}",
@@ -1517,6 +1524,9 @@
     ],
     "internal/destructive": [
       "type userActionRateEvidence struct {\n\tWindow                 string `json:\"window\"`\n\tHourlyCustomers        int64  `json:\"hourly_customers\"`\n\tMaximumHourlyCustomers int64  `json:\"maximum_hourly_customers\"`\n\tDailyCustomers         int64  `json:\"daily_customers\"`\n\tMaximumDailyCustomers  int64  `json:\"maximum_daily_customers\"`\n\tRetryAfterSeconds      int64  `json:\"retry_after_seconds\"`\n}"
+    ],
+    "internal/eventlog": [
+      "type cursor struct {\n\tVersion  int       `json:\"v\"`\n\tEpoch    uuid.UUID `json:\"epoch\"`\n\tMerchant string    `json:\"merchant\"`\n\tTypes    []string  `json:\"types,omitempty\"`\n\tPosition int64     `json:\"position\"`\n\tBoundary string    `json:\"boundary,omitempty\"`\n}"
     ],
     "internal/history": [
       "type Attribution struct {\n\tOrigin      string     `json:\"origin,omitempty\"`\n\tActor       string     `json:\"actor,omitempty\"`\n\tExecutor    string     `json:\"executor,omitempty\"`\n\tOperationID *uuid.UUID `json:\"operation_id,omitempty\"`\n}"
@@ -2090,6 +2100,10 @@
       "fmt": "fmt",
       "http": "net/http"
     },
+    "billing/event_log.go": {
+      "json": "encoding/json",
+      "time": "time"
+    },
     "billing/findings.go": {
       "json": "encoding/json",
       "time": "time",
@@ -2290,6 +2304,13 @@
       "json": "encoding/json",
       "strings": "strings",
       "time": "time",
+      "url": "net/url"
+    },
+    "client_event_log.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "http": "net/http",
+      "strconv": "strconv",
       "url": "net/url"
     },
     "client_host_events.go": {
@@ -2649,6 +2670,27 @@
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/eventlog/log.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
+      "base64": "encoding/base64",
+      "billing": "github.com/open-rails/openrails/billing",
+      "bytes": "bytes",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "io": "io",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "retention": "github.com/open-rails/openrails/internal/retention",
+      "slices": "slices",
+      "sort": "sort",
       "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid",
@@ -5130,6 +5172,15 @@
     },
     "server/errors.go": {
       "merchants": "github.com/open-rails/openrails/internal/merchants"
+    },
+    "server/event_log.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
+      "billing": "github.com/open-rails/openrails/billing",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "eventlog": "github.com/open-rails/openrails/internal/eventlog",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "time": "time"
     },
     "server/internal/adminconsole/adminconsole.go": {
       "api": "github.com/open-rails/openrails/internal/api",

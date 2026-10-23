@@ -52,6 +52,7 @@ export type OpenRailsErrorCode =
   | "destructive_actions_held"
   | "embed_origins_required"
   | "entitlement_required"
+  | "event_cursor_expired"
   | "finding_action_failed"
   | "finding_not_actionable"
   | "finding_requires_merchant_config"
@@ -257,6 +258,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   destructive_actions_held: { status: 409, type: "invalid_request_error", meaning: "The kill switch holds changes that end access or write to a provider; the proposal stays open." },
   embed_origins_required: { status: 400, type: "invalid_request_error", meaning: "An embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins." },
   entitlement_required: { status: 403, type: "invalid_request_error", meaning: "A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks." },
+  event_cursor_expired: { status: 410, type: "invalid_request_error", meaning: "The event cursor is no longer retained; resynchronize current state." },
   finding_action_failed: { status: 502, type: "api_error", meaning: "Running the finding's recommendation failed; the finding stays open with the error in its notes." },
   finding_not_actionable: { status: 422, type: "invalid_request_error", meaning: "The finding carries no recommendation to approve; ignore it or fix it out of band." },
   finding_requires_merchant_config: { status: 409, type: "invalid_request_error", meaning: "The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config." },
