@@ -5,7 +5,7 @@ go 1.26.10
 ignore ./web/console/node_modules
 
 // The root module at the same release; scripts/release pins it.
-require github.com/open-rails/openrails v0.261.0
+require github.com/open-rails/openrails v0.262.0
 
 require (
 	github.com/gagliardetto/solana-go v1.20.0
@@ -22,8 +22,8 @@ require (
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/providers/rawbytes v1.0.0
 	github.com/knadh/koanf/v2 v2.2.2
-	github.com/open-rails/authkit v1.34.1
-	github.com/open-rails/helpers v1.14.2-0.20261023055349-0636028b685e
+	github.com/open-rails/authkit v1.35.0
+	github.com/open-rails/helpers v1.15.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/riverqueue/river v0.48.0
 	github.com/riverqueue/river/rivertype v0.48.0

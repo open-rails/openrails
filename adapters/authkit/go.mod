@@ -5,8 +5,8 @@ go 1.26.10
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/open-rails/authkit v1.34.1
-	github.com/open-rails/openrails v0.261.0
+	github.com/open-rails/authkit v1.35.0
+	github.com/open-rails/openrails v0.262.0
 	github.com/stretchr/testify v1.12.1
 )
 
@@ -71,7 +71,7 @@ require (
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/nyaruka/phonenumbers v1.8.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
-	github.com/open-rails/helpers v1.14.2-0.20261023055349-0636028b685e // indirect
+	github.com/open-rails/helpers v1.15.0 // indirect
 	github.com/open-rails/migratekit v1.11.1 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/redis/go-redis/v9 v9.22.0 // indirect
