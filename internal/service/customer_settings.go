@@ -45,6 +45,13 @@ func (s *Service) UpdateCustomer(ctx context.Context, customer identity.Customer
 	if err != nil {
 		return nil, err
 	}
+	if s.rt.Config.UsageBillingEnabled && (len(change.creditLimits) > 0 || len(change.usageBilling) > 0) {
+		unlock, err := s.rt.DB.LockUsagePolicy(ctx, mid)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+	}
 	if change.policy != nil {
 		settings, err := merchantconfig.NewStore(s.rt.DB).Settings(ctx)
 		if err != nil {
@@ -67,6 +74,22 @@ func (s *Service) UpdateCustomer(ctx context.Context, customer identity.Customer
 		}
 		if err := change.apply(ctx, q, mid.UUID(), s.rt.Clock.Now().UTC()); err != nil {
 			return err
+		}
+		for _, limit := range change.creditLimits {
+			if err := s.moneyService().ValidateUsageBillingAccountTx(ctx, q, change.customer, limit.Currency); err != nil {
+				return apperr.Invalidf("%s", err).WithParam("credit_limits")
+			}
+			if err := s.moneyService().WithDatabase(s.rt.DB.NewWithPgxTx(tx)).WakeUsageBillingTx(ctx, q, change.customer, limit.Currency); err != nil {
+				return err
+			}
+		}
+		for _, account := range change.usageBilling {
+			if err := s.moneyService().ValidateUsageBillingAccountTx(ctx, q, change.customer, account.Currency); err != nil {
+				return apperr.Invalidf("%s", err).WithParam("usage_billing")
+			}
+			if err := s.moneyService().WithDatabase(s.rt.DB.NewWithPgxTx(tx)).WakeUsageBillingTx(ctx, q, change.customer, account.Currency); err != nil {
+				return err
+			}
 		}
 		settings, err := customerSettings(ctx, q, mid.UUID(), []uuid.UUID{change.customer})
 		if err != nil {
@@ -135,10 +158,30 @@ type customerSettingsChange struct {
 	policy          *string
 	setProfile      bool
 	invoiceProfile  *money.CustomerInvoiceProfile
+	usageBilling    []billing.UsageBillingAccountUpdate
 }
 
 func validateCustomerSettings(customer uuid.UUID, params billing.UpdateCustomerParams) (customerSettingsChange, error) {
 	c := customerSettingsChange{customer: customer}
+	usageCurrencies := map[string]bool{}
+	for i, account := range params.UsageBilling {
+		field := fmt.Sprintf("usage_billing[%d]", i)
+		currency, err := settingsCurrency(account.Currency, field+".currency", usageCurrencies)
+		if err != nil {
+			return c, err
+		}
+		account.Currency = currency
+		if account.BillingAnchor.Set && !account.BillingAnchor.Null {
+			if account.BillingAnchor.Value.IsZero() {
+				return c, apperr.Invalidf("billing_anchor must be a timestamp").WithParam(field + ".billing_anchor")
+			}
+			account.BillingAnchor.Value = account.BillingAnchor.Value.UTC()
+		}
+		if account.MinimumInvoiceAmount.Set && !account.MinimumInvoiceAmount.Null && account.MinimumInvoiceAmount.Value < 0 {
+			return c, apperr.Invalidf("minimum_invoice_amount must be nonnegative").WithParam(field + ".minimum_invoice_amount")
+		}
+		c.usageBilling = append(c.usageBilling, account)
+	}
 	currencies := map[string]bool{}
 	for j, limit := range params.CreditLimits {
 		field := fmt.Sprintf("credit_limits[%d]", j)
@@ -146,10 +189,13 @@ func validateCustomerSettings(customer uuid.UUID, params billing.UpdateCustomerP
 		if err != nil {
 			return c, err
 		}
+		if limit.Inherit && limit.Amount != 0 {
+			return c, apperr.Invalidf("inherit requires amount zero").WithParam(field + ".amount")
+		}
 		if limit.Amount < 0 {
 			return c, apperr.Invalidf("amount must be nonnegative").WithParam(field + ".amount")
 		}
-		c.creditLimits = append(c.creditLimits, billing.CreditLimit{Currency: currency, Amount: limit.Amount})
+		c.creditLimits = append(c.creditLimits, billing.CreditLimit{Currency: currency, Amount: limit.Amount, Inherit: limit.Inherit})
 	}
 	currencies = map[string]bool{}
 	for j, level := range params.TrustLevels {
@@ -243,14 +289,18 @@ func validInvoiceProfile(p billing.InvoiceProfile, param string) (*money.Custome
 // writes nothing: the row's absence already means none.
 func (c customerSettingsChange) apply(ctx context.Context, q *gen.Queries, mid uuid.UUID, now time.Time) error {
 	for _, limit := range c.creditLimits {
-		if limit.Amount > 0 {
+		if !limit.Inherit {
 			if _, err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{
 				MerchantID: mid, CustomerID: c.customer, Currency: limit.Currency, BillingMode: money.BillingModeArrears, Now: now,
 			}); err != nil {
 				return err
 			}
 		}
-		if err := q.SetMoneyAccountCreditLimit(ctx, gen.SetMoneyAccountCreditLimitParams{
+		if limit.Inherit {
+			if err := q.InheritMoneyAccountCreditLimit(ctx, gen.InheritMoneyAccountCreditLimitParams{MerchantID: mid, CustomerID: c.customer, Currency: limit.Currency, Now: now}); err != nil {
+				return err
+			}
+		} else if err := q.SetMoneyAccountCreditLimit(ctx, gen.SetMoneyAccountCreditLimitParams{
 			MerchantID: mid, CustomerID: c.customer, Currency: limit.Currency, CreditLimit: limit.Amount, Now: now,
 		}); err != nil {
 			return err
@@ -260,6 +310,25 @@ func (c customerSettingsChange) apply(ctx context.Context, q *gen.Queries, mid u
 		if err := q.WatchCustomerBalance(ctx, gen.WatchCustomerBalanceParams{
 			MerchantID: mid, CustomerID: c.customer, Currency: limit.Currency, Funded: true, Now: now,
 		}); err != nil {
+			return err
+		}
+	}
+	for _, account := range c.usageBilling {
+		if _, err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{MerchantID: mid, CustomerID: c.customer, Currency: account.Currency, BillingMode: money.BillingModePrepaid, Now: now}); err != nil {
+			return err
+		}
+		var anchor, next *time.Time
+		if account.BillingAnchor.Set && !account.BillingAnchor.Null {
+			a := account.BillingAnchor.Value.UTC()
+			n := money.NextUsageBillingDate(now, a)
+			anchor, next = &a, &n
+		}
+		var minimum *int64
+		if account.MinimumInvoiceAmount.Set && !account.MinimumInvoiceAmount.Null {
+			v := account.MinimumInvoiceAmount.Value
+			minimum = &v
+		}
+		if err := q.UpdateUsageBillingAccount(ctx, gen.UpdateUsageBillingAccountParams{MerchantID: mid, CustomerID: c.customer, Currency: account.Currency, SetAnchor: account.BillingAnchor.Set, Anchor: anchor, NextBillAt: next, SetMinimum: account.MinimumInvoiceAmount.Set, MinimumInvoiceAmount: minimum, Now: now}); err != nil {
 			return err
 		}
 	}
@@ -310,13 +379,30 @@ func customerSettings(ctx context.Context, q *gen.Queries, mid uuid.UUID, custom
 	}
 	for _, a := range accounts {
 		doc := out[a.CustomerID]
-		if a.CreditLimitAmount != 0 {
+		if a.CreditLimitOverride {
 			doc.CreditLimits = append(doc.CreditLimits, billing.CreditLimit{Currency: a.Currency, Amount: a.CreditLimitAmount})
 		}
 		if a.Tier != nil && *a.Tier != "" {
 			doc.TrustLevels = append(doc.TrustLevels, billing.TrustLevel{Currency: a.Currency, TrustLevel: *a.Tier})
 		}
 		out[a.CustomerID] = doc
+	}
+	usageAccounts, err := q.ListCustomerUsageBilling(ctx, gen.ListCustomerUsageBillingParams{MerchantID: mid, CustomerIds: customers})
+	if err != nil {
+		return nil, err
+	}
+	for _, account := range usageAccounts {
+		doc := out[account.CustomerID]
+		if account.UsageBillingAnchor != nil {
+			v := account.UsageBillingAnchor.UTC()
+			account.UsageBillingAnchor = &v
+		}
+		if account.UsageNextBillAt != nil {
+			v := account.UsageNextBillAt.UTC()
+			account.UsageNextBillAt = &v
+		}
+		doc.UsageBilling = append(doc.UsageBilling, billing.UsageBillingAccount{Currency: account.Currency, BillingAnchor: account.UsageBillingAnchor, NextBillAt: account.UsageNextBillAt, MinimumInvoiceAmount: account.UsageMinimumInvoiceAmount})
+		out[account.CustomerID] = doc
 	}
 	lines, err := q.ListCustomerLowBalanceLines(ctx, gen.ListCustomerLowBalanceLinesParams{MerchantID: mid, CustomerIds: customers, RowLimit: int32(len(customers) * len(billing.Currencies()))}) // #nosec G115 -- customers is at most 100 ids or one page (MaxPageLimit), times the currency registry
 	if err != nil {

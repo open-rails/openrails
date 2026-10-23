@@ -15,11 +15,12 @@ type CustomerSettingsResult struct {
 // BillingPolicy inherits the customer's tier's or the merchant's default
 // policy, and a null InvoiceProfile invoices at net 0, charged automatically.
 type CustomerSettings struct {
-	CreditLimits    []CreditLimit    `json:"credit_limits"`
-	TrustLevels     []TrustLevel     `json:"trust_levels"`
-	LowBalanceLines []LowBalanceLine `json:"low_balance_lines"`
-	BillingPolicy   *string          `json:"billing_policy"`
-	InvoiceProfile  *InvoiceProfile  `json:"invoice_profile"`
+	UsageBilling    []UsageBillingAccount `json:"usage_billing,omitempty"`
+	CreditLimits    []CreditLimit         `json:"credit_limits"`
+	TrustLevels     []TrustLevel          `json:"trust_levels"`
+	LowBalanceLines []LowBalanceLine      `json:"low_balance_lines"`
+	BillingPolicy   *string               `json:"billing_policy"`
+	InvoiceProfile  *InvoiceProfile       `json:"invoice_profile"`
 }
 
 // MaxLowBalanceRunwayHours bounds a runway line: one year.
@@ -67,6 +68,8 @@ type EffectiveLowBalanceLine struct {
 // CreditLimit is how much a customer may owe in arrears in one currency;
 // zero allows no arrears.
 type CreditLimit struct {
+	// Inherit clears an override. Amount zero without Inherit explicitly disables credit.
+	Inherit  bool   `json:"inherit,omitempty"`
 	Currency string `json:"currency"`
 	Amount   int64  `json:"amount,string"`
 }
@@ -86,6 +89,7 @@ type TrustLevel struct {
 // customer's spending authority: a person signed in needs a recent sign-in for
 // any write.
 type UpdateCustomerParams struct {
+	UsageBilling    []UsageBillingAccountUpdate   `json:"usage_billing,omitempty"`
 	CreditLimits    []CreditLimit                 `json:"credit_limits,omitempty"`
 	TrustLevels     []TrustLevel                  `json:"trust_levels,omitempty"`
 	LowBalanceLines []LowBalanceLine              `json:"low_balance_lines,omitempty"`

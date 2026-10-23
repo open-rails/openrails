@@ -285,12 +285,13 @@ const CardVaultPlatform = "platform"
 // MerchantSettings is the merchant-owned admission/policy document installed by
 // standalone policy sync jobs.
 type MerchantSettings struct {
-	Profile                 *MerchantProfile `json:"profile,omitempty"`
-	CollectionThreshold     *int64           `json:"collection_threshold,omitempty,string"`
-	MonthlyFloor            *int64           `json:"monthly_floor,omitempty,string"`
-	BillingPeriodBoundary   string           `json:"billing_period_boundary,omitempty"`
-	AlertEmail              *string          `json:"alert_email,omitempty"`
-	RepriceNoticeWindowDays *int             `json:"reprice_notice_window_days,omitempty"`
+	UsageBilling            *UsageBillingSettings `json:"usage_billing,omitempty"`
+	Profile                 *MerchantProfile      `json:"profile,omitempty"`
+	CollectionThreshold     *int64                `json:"collection_threshold,omitempty,string"`
+	MonthlyFloor            *int64                `json:"monthly_floor,omitempty,string"`
+	BillingPeriodBoundary   string                `json:"billing_period_boundary,omitempty"`
+	AlertEmail              *string               `json:"alert_email,omitempty"`
+	RepriceNoticeWindowDays *int                  `json:"reprice_notice_window_days,omitempty"`
 	// ProviderRefundAccess decides what a refund made in the provider's own
 	// dashboard does to access, on every rail: ProviderRefundRevokeOnFull
 	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made

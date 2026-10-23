@@ -137,7 +137,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, params billing.Capt
 	s.db.EnsurePartitions(ctx, s.now())
 	var receipt *billing.CaptureReceipt
 	err = gate.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingAdmissionOperation) error {
-		txSvc := NewMoneyService(d, s.clock)
+		txSvc := s.WithDatabase(d)
 		if row.State == "captured" {
 			var rerr error
 			receipt, rerr = txSvc.captureReplay(ctx, d.Gen(ctx), row, terms, u)

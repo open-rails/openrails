@@ -735,7 +735,10 @@ func (w *ProviderRefreshWorker) completeObservation(ctx context.Context, mid, ps
 			return nil
 		}
 		merchantID := billing.MerchantID(mid)
-		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}, UsageOrderArgs{MerchantID: &merchantID, Collect: true}, UsageOrderArgs{MerchantID: &merchantID, Collect: true, UseMonthlyFloor: true}}
+		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}}
+		if w.Config != nil && w.Config.UsageBillingEnabled {
+			jobs = append(jobs, UsageOrderArgs{MerchantID: &merchantID, Automatic: true})
+		}
 		for _, args := range jobs {
 			// Do not deduplicate against a scan sleeping on an earlier outage.
 			// Canonical usage/renewal admission and durable cadence own money.

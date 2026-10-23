@@ -65,7 +65,20 @@ func (s *MoneyService) FinalizeUsage(ctx context.Context, payer identity.Custome
 	}
 	var out *gen.BillingOrder
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
+		var err error
+		out, err = s.finalizeUsageTx(ctx, gen.New(tx), payer, cur, from, to)
+		return err
+	})
+	return out, err
+}
+
+func (s *MoneyService) finalizeUsageTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, cur string, from, to time.Time) (*gen.BillingOrder, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out *gen.BillingOrder
+	err = func() error {
 		merchantID, payerID, pfrom, pto := mid.UUID(), payer.UUID(), from.UTC(), to.UTC()
 		// Concurrent closes and money writes serialize on the payer.
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID, ID: payerID}); err != nil {
@@ -152,7 +165,7 @@ func (s *MoneyService) FinalizeUsage(ctx context.Context, payer identity.Custome
 		}
 		out = &order
 		return nil
-	})
+	}()
 	return out, err
 }
 

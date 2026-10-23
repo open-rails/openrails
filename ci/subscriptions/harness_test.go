@@ -491,9 +491,10 @@ func (w *world) start() {
 		w.replica.configureRiver(riverConfig)
 	}
 	cfg := &openrails.Config{
-		Database:          openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
-		ProviderWriteMode: openrails.ProviderWritesFull,
-		DB:                &openrails.DBConfig{URL: dbURL},
+		UsageBillingEnabled: true, // this harness explicitly exercises usage invoices and collection
+		Database:            openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
+		ProviderWriteMode:   openrails.ProviderWritesFull,
+		DB:                  &openrails.DBConfig{URL: dbURL},
 		// The test server's loopback peer is the site's reverse proxy.
 		TrustedProxies: []string{"127.0.0.1/32"},
 		ReturnOrigins:  []string{"https://e2e.test"},

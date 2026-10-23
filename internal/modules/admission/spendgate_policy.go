@@ -97,14 +97,14 @@ func payerCapacity(capacity money.AdmissionCapacity, policy ResolvedPolicy) (ava
 		return available - outstanding, 0, outstanding
 	}
 	limit := capacity.CreditLimit
-	if policy.OutstandingCapAmount > 0 {
+	if policy.OutstandingCapAmount > 0 && (!capacity.HardCreditLimit || policy.OutstandingCapAmount < limit) {
 		limit = policy.OutstandingCapAmount
 	}
 	if limit <= 0 {
 		return available, 0, outstanding
 	}
 	creditLine = limit
-	if policy.GatesOnOutstandingOwed() {
+	if capacity.HardCreditLimit || policy.GatesOnOutstandingOwed() {
 		creditLine = limit - outstanding
 		if creditLine < 0 {
 			creditLine = 0

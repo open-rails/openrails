@@ -63,3 +63,12 @@ to concrete code (enum, table, or manifest key).
 
 See [operations.md](operations.md#the-convergence-engine) for the full reconciliation model and
 `docs/merchant-guide.md` for catalog vocabulary.
+
+## Usage billing
+
+| Term | Meaning |
+|---|---|
+| Credit limit | The maximum unpaid usage debt a customer may incur with a merchant in one currency. |
+| Billing anchor | The fixed monthly date and time that closes a customer's usage period. Paying early does not move it. |
+| Minimum invoice amount | The smallest usage balance worth invoicing. Smaller balances carry forward into a later period. |
+| Collection threshold | The debt amount that triggers an invoice before the billing date. It cannot exceed the credit limit. |

@@ -103,7 +103,8 @@ func (s *MoneyService) postRunningChargeOnce(ctx context.Context, q *gen.Queries
 	if amount == 0 {
 		return row, nil
 	}
-	posting := &MoneyService{db: s.db, clock: s.clock, posting: &runningChargePosting{through: through}}
+	posting := s.WithDatabase(s.db)
+	posting.posting = &runningChargePosting{through: through}
 	if c.Resource != nil {
 		posting.posting.resource = *c.Resource
 	}

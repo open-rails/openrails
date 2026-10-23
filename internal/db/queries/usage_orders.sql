@@ -351,24 +351,6 @@ WHERE i.merchant_id = sqlc.arg(merchant_id)::uuid AND i.intent_type = 'order_col
 ORDER BY i.id
 LIMIT sqlc.arg(page_size)::int;
 
--- name: GetUsageMonthlyCollectionPeriod :one
-SELECT monthly_period_started_at FROM billing.usage_collection_cadence
-WHERE merchant_id = $1;
-
--- name: CompleteUsageMonthlyCollectionPeriod :exec
-INSERT INTO billing.usage_collection_cadence (merchant_id, monthly_period_started_at, completed_at)
-VALUES ($1, $2, $3)
-ON CONFLICT (merchant_id) DO UPDATE
-SET monthly_period_started_at = EXCLUDED.monthly_period_started_at,
-    completed_at = GREATEST(billing.usage_collection_cadence.completed_at, EXCLUDED.completed_at)
-WHERE EXCLUDED.monthly_period_started_at >= billing.usage_collection_cadence.monthly_period_started_at;
-
--- name: TryLockUsageMonthlyCollection :one
-SELECT pg_try_advisory_lock(hashtextextended('openrails.usage_monthly_collection:' || sqlc.arg(merchant_id)::uuid::text, 0))::boolean;
-
--- name: UnlockUsageMonthlyCollection :exec
-SELECT pg_advisory_unlock(hashtextextended('openrails.usage_monthly_collection:' || sqlc.arg(merchant_id)::uuid::text, 0));
-
 -- name: GetUsageRecoveryPayment :many
 SELECT p.* FROM billing.payments p
 JOIN billing.orders o ON o.merchant_id = p.merchant_id AND o.id = p.order_id AND o.origin = 'usage'

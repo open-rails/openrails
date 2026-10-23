@@ -51,6 +51,13 @@ type Settings struct {
 func Normalize(displayName string, in billing.MerchantSettings) (Settings, error) {
 	out := Settings{Policies: map[string]models.BillingPolicy{}, Tiers: map[string]string{}}
 	cfg := &out.Config
+	if in.UsageBilling != nil {
+		usage, err := NormalizeUsageBilling(*in.UsageBilling)
+		if err != nil {
+			return Settings{}, err
+		}
+		cfg.UsageBilling = &usage
+	}
 	cfg.Profile.DisplayName = strings.TrimSpace(displayName)
 	if p := in.Profile; p != nil {
 		for field, raw := range map[string]string{"logo_url": p.LogoURL, "support_url": p.SupportURL, "subscribe_url": p.SubscribeURL, "billing_url": p.BillingURL, "terms_url": p.TermsURL, "privacy_url": p.PrivacyURL} {

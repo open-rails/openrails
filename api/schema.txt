@@ -112,6 +112,7 @@ migration 0110_retained_event_log.up.sql sha256:89069d9cb379aaedc3da024b410211b7
 migration 0111_remove_event_consumers_contract.up.sql sha256:ab6f344a51e804810d6ffe7953e0b69e3a8870e91c8ea3c0fec9eb7583a536fd
 migration 0112_network_event_cursor.up.sql sha256:fe38ca31bba8bf4364f2e1309a3106ce435b44c541f53ddec99408ea0b8a74b3
 migration 0113_shared_eventlog_contract.up.sql sha256:15e7ef39ceaa6a0553473b8fab7772731b80aeadeb034f26e8c8680840683895
+migration 0114_account_usage_billing.up.sql sha256:220fa73f7046556aa60733442688a4289f2e29801e73fdf75eb2f70ef7936b1b
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1153,6 +1154,11 @@ table billing.money_settings
   column credit_limit_amount bigint NOT NULL DEFAULT 0
   column default_payment_method_id uuid
   column collection_revoked_at timestamp with time zone
+  column credit_limit_override boolean NOT NULL DEFAULT false
+  column usage_billing_anchor timestamp with time zone
+  column usage_next_bill_at timestamp with time zone
+  column usage_minimum_invoice_amount bigint
+  column usage_collection_due boolean NOT NULL DEFAULT false
   constraint money_settings_billing_mode_check CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text])))
   constraint money_settings_credit_limit_amount_nonneg_check CHECK ((credit_limit_amount >= 0))
   constraint money_settings_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
@@ -1160,7 +1166,9 @@ table billing.money_settings
   constraint money_settings_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint money_settings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint money_settings_pkey PRIMARY KEY (merchant_id, customer_id, currency)
+  constraint money_settings_usage_minimum_invoice_amount_check CHECK ((usage_minimum_invoice_amount >= 0))
   index CREATE UNIQUE INDEX money_settings_pkey ON billing.money_settings USING btree (merchant_id, customer_id, currency)
+  index CREATE INDEX money_settings_usage_due ON billing.money_settings USING btree (merchant_id, usage_next_bill_at) WHERE ((usage_next_bill_at IS NOT NULL) OR usage_collection_due)
   trigger CREATE TRIGGER trg_subscription_history_default AFTER UPDATE OF default_payment_method_id ON billing.money_settings FOR EACH ROW EXECUTE FUNCTION billing.subscription_history_default_card()
 
 table billing.network_event_cursors

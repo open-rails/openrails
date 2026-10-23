@@ -58,7 +58,6 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		riverjobs.AdmissionDenialFlushArgs{}.Kind():      {5 * time.Minute, false},
 		riverjobs.CatalogReconciliationPullArgs{}.Kind(): {time.Hour, false},
 		riverjobs.StripeWebhookReconcileArgs{}.Kind():    {time.Hour, false},
-		riverjobs.UsageOrderArgs{}.Kind():                {time.Hour, true}, // hourly + daily + monthly; shortest wins
 		riverjobs.DelinquencyArgs{}.Kind():               {15 * time.Minute, false},
 		riverjobs.RebillWatchArgs{}.Kind():               {riverjobs.RebillWatchInterval, false},
 		riverjobs.AttemptEnrichmentArgs{}.Kind():         {riverjobs.AttemptEnrichmentInterval, false},
@@ -151,6 +150,26 @@ func TestPythPriceProviderDevnetParity(t *testing.T) {
 			require.Equal(t, 1.0, price)
 		} else {
 			require.Error(t, err)
+		}
+	}
+}
+
+func TestUsageBillingSchedulesOneOptInPass(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		rt := &Runtime{Config: &config.Config{UsageBillingEnabled: enabled}}
+		jobs, err := rt.buildRiverPeriodicJobs(context.Background())
+		require.NoError(t, err)
+		count := 0
+		for _, job := range jobs {
+			args, _ := periodicArgs(job)
+			if args.Kind() == riverjobs.KindUsageOrders {
+				count++
+			}
+		}
+		if enabled {
+			require.Equal(t, 1, count)
+		} else {
+			require.Zero(t, count)
 		}
 	}
 }

@@ -788,6 +788,14 @@ type BillingMoneySetting struct {
 	DefaultPaymentMethodID *uuid.UUID
 	// When the customer revoked its collection agreement in the currency: from then admission spends only its balance, whatever billing_mode, until a new default card gives another.
 	CollectionRevokedAt *time.Time
+	// False inherits the merchant usage-billing limit; true honors credit_limit_amount including zero.
+	CreditLimitOverride bool
+	// Fixed monthly UTC anchor used for usage pricing and invoicing; threshold payments never alter it.
+	UsageBillingAnchor *time.Time
+	// Next monthly usage billing check. A below-minimum balance advances the check while its unbilled accruals carry forward.
+	UsageNextBillAt           *time.Time
+	UsageMinimumInvoiceAmount *int64
+	UsageCollectionDue        bool
 }
 
 // State: optional standalone customer-network account event reading position, scoped to its AuthKit issuer and account tenant; retained until that server authority is retired.

@@ -592,6 +592,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
 	moneyService.EngineAdmissionHold = cfg.EngineAdmissionHold
+	moneyService.UsageBillingEnabled = cfg.UsageBillingEnabled
 	var hyperSwitchErr error
 	if cfg.HyperSwitch != nil {
 		if err := moneyService.SetHyperSwitchDeployment(cfg.HyperSwitch.APIBaseURL); err != nil {

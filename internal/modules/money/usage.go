@@ -117,6 +117,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 	var ev *models.UsageEvent
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		bound := s.WithDatabase(s.db.NewWithPgxTx(tx))
 		tid, terr := merchant.Require(ctx)
 		if terr != nil {
 			return terr
@@ -248,7 +249,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		var debitID *uuid.UUID
 		if !params.Failed {
 			var rerr error
-			if charges, debitID, rerr = s.rateUsageTx(ctx, q, payer, params.Invoker, cur, eventID, occurred, quantities); rerr != nil {
+			if charges, debitID, rerr = bound.rateUsageTx(ctx, q, payer, params.Invoker, cur, eventID, occurred, quantities); rerr != nil {
 				return rerr
 			}
 			charge = 0
@@ -257,7 +258,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			}
 		} else if charge > 0 {
 			// The host's price: prepaid balance first, the rest owed.
-			_, _, applied, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, charge, true)
+			_, _, applied, derr := bound.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, charge, true)
 			if derr != nil {
 				return derr
 			}

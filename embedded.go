@@ -282,12 +282,12 @@ func (e *Engine) RiverJobs() riverhelpers.Contribution {
 // concurrency in the shared River config; it needs at least one worker.
 const QueueBilling = riverjobs.QueueBilling
 
-// UsageSweepArgs is the usage-order job OpenRails schedules on QueueBilling
-// (daily billing of the previous period, hourly collection, monthly-floor
-// collection). A host whose fleet runs RiverJobs may insert one run itself,
-// e.g. UsageSweepArgs{FinalizePreviousMonth: true} to bill every customer's
-// previous period now. Every run is idempotent.
+// UsageSweepArgs requests one usage-billing pass. Automatic selects the configured
+// account policy; otherwise its phase flags retain the manual billing API.
+// OpenRails does not schedule separate monthly phases.
 type UsageSweepArgs struct {
+	// Automatic applies the configured account policy instead of manual phase flags.
+	Automatic bool `json:"automatic,omitempty"`
 	// MerchantID limits this run to one merchant; nil visits active merchants.
 	MerchantID *billing.MerchantID `json:"merchant_id,omitempty"`
 	// Collect runs the collection pass over unpaid usage orders.

@@ -84,6 +84,7 @@ type MoneyService struct {
 	destructiveAdmissions *destructive.Admissions
 	// EngineAdmissionHold is fixed during runtime wiring; accepted work still reconciles.
 	EngineAdmissionHold   bool
+	UsageBillingEnabled   bool
 	hyperSwitchDeployment string
 	usageRecoveryResolver NMIClientResolver
 	db                    *db.DB
@@ -94,6 +95,13 @@ type MoneyService struct {
 
 func NewMoneyService(database *db.DB, clocks ...clockwork.Clock) *MoneyService {
 	return &MoneyService{db: database, clock: timeutil.FirstClock(clocks...)}
+}
+
+// WithDatabase derives a transaction-scoped service without losing host configuration.
+func (s *MoneyService) WithDatabase(database *db.DB) *MoneyService {
+	copy := *s
+	copy.db = database
+	return &copy
 }
 
 func (s *MoneyService) SetClock(c clockwork.Clock) {
@@ -195,10 +203,11 @@ func (s *MoneyService) ListBalancesForCustomer(ctx context.Context, payer identi
 // AdmissionCapacity is the affordability snapshot consumed by the SQL
 // service-admit gate.
 type AdmissionCapacity struct {
-	Balance     int64
-	Held        int64
-	BillingMode string
-	CreditLimit int64
+	HardCreditLimit bool
+	Balance         int64
+	Held            int64
+	BillingMode     string
+	CreditLimit     int64
 	// OutstandingOwed is the payer's unpaid arrears (positive), read O(1) from
 	// their own arrears account in the same lookup. The credit line caps debt,
 	// so the line still available is CreditLimit - this.
@@ -236,7 +245,7 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 		if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
 			return err
 		}
-		txSvc := &MoneyService{db: s.db.NewWithPgxTx(tx), clock: s.clock}
+		txSvc := s.WithDatabase(s.db.NewWithPgxTx(tx))
 		if _, err := txSvc.lockBalance(ctx, q, payer, payerID.String(), cur); err != nil {
 			return err
 		}
@@ -254,7 +263,11 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 		if err != nil {
 			return err
 		}
-		return fn(ctx, s.db.NewWithPgxTx(tx), admissionCapacityFromRow(row))
+		capacity, err := txSvc.usageAdmissionCapacity(ctx, q, payer, cur, admissionCapacityFromRow(row))
+		if err != nil {
+			return err
+		}
+		return fn(ctx, s.db.NewWithPgxTx(tx), capacity)
 	})
 }
 
@@ -294,7 +307,7 @@ func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.
 	if err != nil {
 		return AdmissionCapacity{}, err
 	}
-	return admissionCapacityFromRow(row), nil
+	return s.usageAdmissionCapacity(ctx, q, payer, cur, admissionCapacityFromRow(row))
 }
 
 func admissionCapacityFromRow(row gen.GetAdmissionCapacityRow) AdmissionCapacity {

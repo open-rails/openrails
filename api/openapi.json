@@ -15673,6 +15673,9 @@
       "CreditLimit": {
         "type": "object",
         "properties": {
+          "inherit": {
+            "type": "boolean"
+          },
           "currency": {
             "type": "string"
           },
@@ -16080,6 +16083,12 @@
       "CustomerSettings": {
         "type": "object",
         "properties": {
+          "usage_billing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageBillingAccount"
+            }
+          },
           "credit_limits": {
             "type": "array",
             "items": {
@@ -16120,6 +16129,7 @@
           }
         },
         "required": [
+          "usage_billing",
           "credit_limits",
           "trust_levels",
           "low_balance_lines",
@@ -17895,6 +17905,9 @@
           },
           "display_name": {
             "type": "string"
+          },
+          "usage_billing": {
+            "$ref": "#/components/schemas/UsageBillingSettings"
           },
           "profile": {
             "$ref": "#/components/schemas/MerchantProfile"
@@ -23858,6 +23871,12 @@
       "UpdateCustomerParams": {
         "type": "object",
         "properties": {
+          "usage_billing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageBillingAccountUpdate"
+            }
+          },
           "credit_limits": {
             "type": "array",
             "items": {
@@ -23913,6 +23932,9 @@
           },
           "display_name": {
             "type": "string"
+          },
+          "usage_billing": {
+            "$ref": "#/components/schemas/UsageBillingSettings"
           },
           "profile": {
             "$ref": "#/components/schemas/MerchantProfile"
@@ -24242,6 +24264,121 @@
           "group_by",
           "rows",
           "next_cursor"
+        ]
+      },
+      "UsageBillingAccount": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "billing_anchor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_bill_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minimum_invoice_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "currency",
+          "billing_anchor",
+          "next_bill_at",
+          "minimum_invoice_amount"
+        ]
+      },
+      "UsageBillingAccountUpdate": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "billing_anchor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minimum_invoice_amount": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "UsageBillingCurrency": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "credit_limit": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "minimum_invoice_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "currency",
+          "credit_limit",
+          "minimum_invoice_amount"
+        ]
+      },
+      "UsageBillingSettings": {
+        "type": "object",
+        "properties": {
+          "billing_day": {
+            "type": "integer"
+          },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageBillingCurrency"
+            }
+          }
+        },
+        "required": [
+          "billing_day",
+          "currencies"
         ]
       },
       "UsageCharge": {

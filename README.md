@@ -15,6 +15,8 @@ OpenRails acts as the source of truth for your user's purchases (what items have
 
 OpenRails can also do usage-based metering and rate-limiting; for example, allocate premium-tier users to only 100-AI-gen credits per week, and OpenRails handles the state + rate limiting. As another example, you can meter a user's API-usage for the month, produce an invoice, and then charge their stored payment method on file.
 
+Automatic usage billing is opt-in, with merchant credit limits, fixed customer billing dates, and minimum invoice carryover. See [usage billing](docs/usage-billing.md) for configuration and customer overrides.
+
 ### Example Apps:
 
 - SaaS products: Define your tier-list of plans customers can buy, and then bill them per seat. Your customers can upgrade/downgrade their plan with proration.

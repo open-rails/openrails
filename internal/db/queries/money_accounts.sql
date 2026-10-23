@@ -48,6 +48,7 @@ SELECT
     -- A revoked collection agreement leaves only the balance to spend.
     CASE WHEN s.collection_revoked_at IS NULL THEN COALESCE(s.billing_mode, 'prepaid') ELSE 'prepaid' END::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
+    COALESCE(s.credit_limit_override, false)::boolean AS credit_limit_override,
     -- The customer's own arrears account, in the same point lookup. Debt is a
     -- negative arrears balance, so exposure is (debits - credits), floored at 0.
     COALESCE(GREATEST(ar.debits_posted - ar.credits_posted, 0), 0)::bigint AS outstanding_owed
@@ -92,7 +93,7 @@ ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
 -- Admin-only credit-line setter, not part of UpsertMoneyAccountSettings. The
 -- settings row must already exist.
 UPDATE billing.money_settings
-SET credit_limit_amount = sqlc.arg(credit_limit)::bigint, updated_at = sqlc.arg(now)
+SET credit_limit_amount = sqlc.arg(credit_limit)::bigint, credit_limit_override = true, updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: SetMoneyAccountDefaultPaymentMethod :execrows
@@ -189,9 +190,9 @@ LIMIT sqlc.arg(row_limit)::int;
 -- name: ListCustomerSettingsAccounts :many
 -- The customers' credit limits and trust levels, by currency. A customer has
 -- at most one row per registered currency, which bounds row_limit.
-SELECT customer_id, currency, credit_limit_amount, tier FROM billing.money_settings
+SELECT customer_id, currency, credit_limit_amount, credit_limit_override, tier FROM billing.money_settings
 WHERE merchant_id = sqlc.arg(merchant_id) AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
-  AND (credit_limit_amount <> 0 OR tier IS NOT NULL)
+  AND (credit_limit_override OR tier IS NOT NULL)
 ORDER BY customer_id, currency
 LIMIT sqlc.arg(row_limit)::int;
 

@@ -122,3 +122,5 @@ unbounded-many ListRecordedSubscriptionCharges           # or#837 fan-out per su
 # The whole "missing indexes" group is gone: or#846 added them (0012) and every
 # entry here went STALE. Leave the heading out — a new missing index is a
 # migration, not an exemption.
+
+unbounded-many ListCustomerUsageBilling                  # bounded caller customer_ids: one row per supported currency

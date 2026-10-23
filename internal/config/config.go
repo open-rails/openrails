@@ -30,6 +30,9 @@ const ConfigContextKey configContextKey = "config"
 // outside the process is in Deps. ProviderWriteMode is required. Whether money
 // is real is each PSP's declared environment, never the deployment's.
 type Config struct {
+	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
+	UsageBillingEnabled bool `yaml:"usage_billing_enabled" json:"usage_billing_enabled"`
+
 	// EventRetention is the retained event-log lifetime, as a Go duration.
 	// Empty is 90 days. Reader progress never extends retention.
 	EventRetention string `yaml:"event_retention" json:"event_retention"`

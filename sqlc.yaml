@@ -106,6 +106,7 @@ sql:
       - "internal/migrate/postgres/0111_remove_event_consumers_contract.up.sql"
       - "internal/migrate/postgres/0112_network_event_cursor.up.sql"
       - "internal/migrate/postgres/0113_shared_eventlog_contract.up.sql"
+      - "internal/migrate/postgres/0114_account_usage_billing.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

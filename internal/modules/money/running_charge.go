@@ -97,7 +97,7 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 	if err := moneyutil.ValidateCurrency(in.Currency); err != nil {
 		return nil, false, apperr.New(http.StatusBadRequest, "currency_unsupported", err.Error()).WithParam("currency")
 	}
-	txSvc := &MoneyService{db: txDB, clock: s.clock}
+	txSvc := s.WithDatabase(txDB)
 	now := instant(txSvc.now())
 	startedAt, err := validateRunningChargeStart(in, now)
 	if err != nil {
@@ -210,7 +210,7 @@ func (s *MoneyService) StopRunningChargeInTx(ctx context.Context, txDB *db.DB, r
 	if err != nil {
 		return nil, err
 	}
-	txSvc := &MoneyService{db: txDB, clock: s.clock}
+	txSvc := s.WithDatabase(txDB)
 	q := txDB.Gen(ctx)
 	byReference := gen.GetRunningChargeByReferenceParams{MerchantID: merchantID.UUID(), Reference: reference}
 	row, err := q.GetRunningChargeByReference(ctx, byReference)

@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,4 +48,11 @@ func TestUsageOrderEnabledCollectionLeavesDisabledGate(t *testing.T) {
 	worker := UsageOrderWorker{Money: &money.MoneyService{}, Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}}
 	err := worker.Work(t.Context(), &river.Job[UsageOrderArgs]{Args: UsageOrderArgs{Collect: true, MerchantID: &merchantID}})
 	require.EqualError(t, err, "a usage-order pass requires a nonzero merchant ID")
+}
+
+func TestLegacyPeriodicUsageCannotBypassHostOptIn(t *testing.T) {
+	for _, args := range []UsageOrderArgs{{Collect: true}, {UseMonthlyFloor: true, Collect: true}, {FinalizePreviousMonth: true}} {
+		w := UsageOrderWorker{Money: &money.MoneyService{}, Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}}
+		require.NoError(t, w.Work(t.Context(), &river.Job[UsageOrderArgs]{JobRow: &rivertype.JobRow{Metadata: []byte(`{"periodic":true}`)}, Args: args}))
+	}
 }

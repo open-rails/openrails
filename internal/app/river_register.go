@@ -767,56 +767,15 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		return riverjobs.MerchantSecretCleanupArgs{}, &river.InsertOpts{Queue: riverjobs.QueueBilling, UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute}}
 	}, &river.PeriodicJobOpts{RunOnStart: true}))
 
-	// Usage-order jobs run on start to recover overdue work. The hourly scan
-	// coalesces across periods while outstanding; monthly and daily phases
-	// retain their period slots across replicas and restarts.
-	// Every hour: collection.
-	jobs = append(jobs, r.healthPeriodic(
-		time.Hour,
-		func() (river.JobArgs, *river.InsertOpts) {
-			args := riverjobs.UsageOrderArgs{Collect: true}
-			opts := &river.InsertOpts{
-				Queue: riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true, ByState: []rivertype.JobState{
-					rivertype.JobStateAvailable, rivertype.JobStatePending,
-					rivertype.JobStateRunning, rivertype.JobStateRetryable,
-					rivertype.JobStateScheduled,
-				}},
-			}
-			return args, opts
-		},
-		&river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".collect", RunOnStart: true},
-	))
-	// Monthly sweep: collect the long tail above the merchant's floor
-	// that the hourly threshold trigger leaves behind.
-	jobs = append(jobs, r.healthPeriodic(
-		30*24*time.Hour,
-		func() (river.JobArgs, *river.InsertOpts) {
-			args := riverjobs.UsageOrderArgs{
-				Collect:         true,
-				UseMonthlyFloor: true,
-			}
-			opts := &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: 30 * 24 * time.Hour},
-			}
-			return args, opts
-		},
-		&river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".monthly_floor", RunOnStart: true},
-	))
-
-	// Daily: bill each customer's previous period. Idempotent per
-	// (customer, currency, period).
-	jobs = append(jobs, r.healthPeriodic(
-		24*time.Hour,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.UsageOrderArgs{FinalizePreviousMonth: true}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
-			}
-		},
-		&river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".finalize", RunOnStart: true},
-	))
+	// One usage-billing pass checks fixed account dates and pending threshold
+	// wakeups. Subscription-only hosts schedule no usage-billing scan.
+	if r.Config != nil && r.Config.UsageBillingEnabled {
+		jobs = append(jobs, r.healthPeriodic(5*time.Minute, func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.UsageOrderArgs{Automatic: true}, &river.InsertOpts{Queue: riverjobs.QueueBilling, UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true, ByState: []rivertype.JobState{
+				rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
+			}}}
+		}, &river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".due", RunOnStart: true}))
+	}
 
 	// Every 15 minutes: arrears delinquency evaluation. Tighter than hourly
 	// collection on purpose: the exit half stops telling a customer who has

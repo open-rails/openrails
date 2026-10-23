@@ -306,6 +306,17 @@ func (u usageQuantity) price(before int64) (int64, error) {
 // to: the one usage orders close, under the merchant's boundary and anchored
 // on the customer's first activity.
 func (s *MoneyService) usagePeriodStart(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string, occurred time.Time) (time.Time, error) {
+	cfg, cur, err := s.usageBillingConfig(ctx, currency)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if cur != nil {
+		row, err := s.ensureUsageBillingAccount(ctx, q, customerID, currency, cfg)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return CurrentBillingPeriodStart(occurred, *row.UsageBillingAnchor, BillingBoundaryAnniversary)
+	}
 	settings, err := s.UsageSettings(ctx)
 	if err != nil && !errors.Is(err, merchantconfig.ErrNoSettings) {
 		return time.Time{}, err

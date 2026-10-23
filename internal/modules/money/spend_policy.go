@@ -61,13 +61,18 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Cu
 		MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
 	})
 	if err == nil {
+		row, err = s.usagePolicySettings(ctx, row)
+		if err != nil {
+			return nil, err
+		}
 		return settingsFromGen(row), nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
-		d := DefaultAccountSettings(payer)
-		d.MerchantID = tenantID
-		d.Currency = cur
-		return d, nil
+		row, err := s.usagePolicySettings(ctx, gen.BillingMoneySetting{MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur, BillingMode: BillingModePrepaid})
+		if err != nil {
+			return nil, err
+		}
+		return settingsFromGen(row), nil
 	}
 	return nil, err
 }
@@ -98,7 +103,7 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 			return err
 		}
 		var err error
-		out, err = NewMoneyService(s.db.NewWithPgxTx(tx), s.clock).upsertAccountSettingsTx(ctx, payer, currency, in)
+		out, err = s.WithDatabase(s.db.NewWithPgxTx(tx)).upsertAccountSettingsTx(ctx, payer, currency, in)
 		return err
 	})
 	return out, err

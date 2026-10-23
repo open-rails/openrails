@@ -52,26 +52,6 @@ func (q *Queries) AttachPendingOwedItemsToOrder(ctx context.Context, arg AttachP
 	return result.RowsAffected(), nil
 }
 
-const completeUsageMonthlyCollectionPeriod = `-- name: CompleteUsageMonthlyCollectionPeriod :exec
-INSERT INTO billing.usage_collection_cadence (merchant_id, monthly_period_started_at, completed_at)
-VALUES ($1, $2, $3)
-ON CONFLICT (merchant_id) DO UPDATE
-SET monthly_period_started_at = EXCLUDED.monthly_period_started_at,
-    completed_at = GREATEST(billing.usage_collection_cadence.completed_at, EXCLUDED.completed_at)
-WHERE EXCLUDED.monthly_period_started_at >= billing.usage_collection_cadence.monthly_period_started_at
-`
-
-type CompleteUsageMonthlyCollectionPeriodParams struct {
-	MerchantID             uuid.UUID
-	MonthlyPeriodStartedAt time.Time
-	CompletedAt            time.Time
-}
-
-func (q *Queries) CompleteUsageMonthlyCollectionPeriod(ctx context.Context, arg CompleteUsageMonthlyCollectionPeriodParams) error {
-	_, err := q.db.Exec(ctx, completeUsageMonthlyCollectionPeriod, arg.MerchantID, arg.MonthlyPeriodStartedAt, arg.CompletedAt)
-	return err
-}
-
 const completeUsageOrder = `-- name: CompleteUsageOrder :execrows
 UPDATE billing.orders
 SET status = 'complete', payment_status = 'succeeded', number = $1::bigint,
@@ -327,18 +307,6 @@ func (q *Queries) GetOrderPayment(ctx context.Context, arg GetOrderPaymentParams
 		&i.Quantity,
 	)
 	return i, err
-}
-
-const getUsageMonthlyCollectionPeriod = `-- name: GetUsageMonthlyCollectionPeriod :one
-SELECT monthly_period_started_at FROM billing.usage_collection_cadence
-WHERE merchant_id = $1
-`
-
-func (q *Queries) GetUsageMonthlyCollectionPeriod(ctx context.Context, merchantID uuid.UUID) (time.Time, error) {
-	row := q.db.QueryRow(ctx, getUsageMonthlyCollectionPeriod, merchantID)
-	var monthly_period_started_at time.Time
-	err := row.Scan(&monthly_period_started_at)
-	return monthly_period_started_at, err
 }
 
 const getUsageOrderByPeriod = `-- name: GetUsageOrderByPeriod :one
@@ -1467,26 +1435,6 @@ func (q *Queries) SumPendingOwedItemAmountBySourceInPeriod(ctx context.Context, 
 		return nil, err
 	}
 	return items, nil
-}
-
-const tryLockUsageMonthlyCollection = `-- name: TryLockUsageMonthlyCollection :one
-SELECT pg_try_advisory_lock(hashtextextended('openrails.usage_monthly_collection:' || $1::uuid::text, 0))::boolean
-`
-
-func (q *Queries) TryLockUsageMonthlyCollection(ctx context.Context, merchantID uuid.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, tryLockUsageMonthlyCollection, merchantID)
-	var column_1 bool
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const unlockUsageMonthlyCollection = `-- name: UnlockUsageMonthlyCollection :exec
-SELECT pg_advisory_unlock(hashtextextended('openrails.usage_monthly_collection:' || $1::uuid::text, 0))
-`
-
-func (q *Queries) UnlockUsageMonthlyCollection(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, unlockUsageMonthlyCollection, merchantID)
-	return err
 }
 
 const usageRecoveryAccounts = `-- name: UsageRecoveryAccounts :many

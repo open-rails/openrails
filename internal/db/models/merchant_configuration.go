@@ -7,7 +7,8 @@ import (
 // MerchantConfiguration is a merchant's validated settings, as readers use
 // them (merchantconfig.Normalize).
 type MerchantConfiguration struct {
-	Profile MerchantProfileConfiguration `json:"profile,omitempty"`
+	UsageBilling *billing.UsageBillingSettings `json:"usage_billing,omitempty"`
+	Profile      MerchantProfileConfiguration  `json:"profile,omitempty"`
 
 	// Usage billing settings: the billing period and collection knobs.
 	// Missing values use money service defaults.

@@ -45,6 +45,7 @@ SELECT
     -- A revoked collection agreement leaves only the balance to spend.
     CASE WHEN s.collection_revoked_at IS NULL THEN COALESCE(s.billing_mode, 'prepaid') ELSE 'prepaid' END::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
+    COALESCE(s.credit_limit_override, false)::boolean AS credit_limit_override,
     -- The customer's own arrears account, in the same point lookup. Debt is a
     -- negative arrears balance, so exposure is (debits - credits), floored at 0.
     COALESCE(GREATEST(ar.debits_posted - ar.credits_posted, 0), 0)::bigint AS outstanding_owed
@@ -74,11 +75,12 @@ type GetAdmissionCapacityParams struct {
 }
 
 type GetAdmissionCapacityRow struct {
-	Balance           int64
-	Held              int64
-	BillingMode       string
-	CreditLimitAmount int64
-	OutstandingOwed   int64
+	Balance             int64
+	Held                int64
+	BillingMode         string
+	CreditLimitAmount   int64
+	CreditLimitOverride bool
+	OutstandingOwed     int64
 }
 
 // Hot-path affordability snapshot for service admit: customer_balance counters,
@@ -98,6 +100,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 		&i.Held,
 		&i.BillingMode,
 		&i.CreditLimitAmount,
+		&i.CreditLimitOverride,
 		&i.OutstandingOwed,
 	)
 	return i, err
@@ -105,7 +108,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
 
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at, credit_limit_override, usage_billing_anchor, usage_next_bill_at, usage_minimum_invoice_amount, usage_collection_due FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -133,6 +136,11 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.CreditLimitAmount,
 		&i.DefaultPaymentMethodID,
 		&i.CollectionRevokedAt,
+		&i.CreditLimitOverride,
+		&i.UsageBillingAnchor,
+		&i.UsageNextBillAt,
+		&i.UsageMinimumInvoiceAmount,
+		&i.UsageCollectionDue,
 	)
 	return i, err
 }
@@ -215,9 +223,9 @@ func (q *Queries) ListCustomerBalanceCurrencies(ctx context.Context, arg ListCus
 }
 
 const listCustomerSettingsAccounts = `-- name: ListCustomerSettingsAccounts :many
-SELECT customer_id, currency, credit_limit_amount, tier FROM billing.money_settings
+SELECT customer_id, currency, credit_limit_amount, credit_limit_override, tier FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = ANY($2::uuid[])
-  AND (credit_limit_amount <> 0 OR tier IS NOT NULL)
+  AND (credit_limit_override OR tier IS NOT NULL)
 ORDER BY customer_id, currency
 LIMIT $3::int
 `
@@ -229,10 +237,11 @@ type ListCustomerSettingsAccountsParams struct {
 }
 
 type ListCustomerSettingsAccountsRow struct {
-	CustomerID        uuid.UUID
-	Currency          string
-	CreditLimitAmount int64
-	Tier              *string
+	CustomerID          uuid.UUID
+	Currency            string
+	CreditLimitAmount   int64
+	CreditLimitOverride bool
+	Tier                *string
 }
 
 // The customers' credit limits and trust levels, by currency. A customer has
@@ -250,6 +259,7 @@ func (q *Queries) ListCustomerSettingsAccounts(ctx context.Context, arg ListCust
 			&i.CustomerID,
 			&i.Currency,
 			&i.CreditLimitAmount,
+			&i.CreditLimitOverride,
 			&i.Tier,
 		); err != nil {
 			return nil, err
@@ -367,7 +377,7 @@ func (q *Queries) ListCustomersMoneyAccounts(ctx context.Context, arg ListCustom
 }
 
 const listCustomersMoneySettings = `-- name: ListCustomersMoneySettings :many
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at, credit_limit_override, usage_billing_anchor, usage_next_bill_at, usage_minimum_invoice_amount, usage_collection_due FROM billing.money_settings
 WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
 ORDER BY customer_id, currency
 LIMIT $3::int
@@ -400,6 +410,11 @@ func (q *Queries) ListCustomersMoneySettings(ctx context.Context, arg ListCustom
 			&i.CreditLimitAmount,
 			&i.DefaultPaymentMethodID,
 			&i.CollectionRevokedAt,
+			&i.CreditLimitOverride,
+			&i.UsageBillingAnchor,
+			&i.UsageNextBillAt,
+			&i.UsageMinimumInvoiceAmount,
+			&i.UsageCollectionDue,
 		); err != nil {
 			return nil, err
 		}
@@ -451,7 +466,7 @@ func (q *Queries) ListDefaultPaymentMethodsByCustomers(ctx context.Context, arg 
 }
 
 const listMoneyAccountSettingsByCustomer = `-- name: ListMoneyAccountSettingsByCustomer :many
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at, credit_limit_override, usage_billing_anchor, usage_next_bill_at, usage_minimum_invoice_amount, usage_collection_due FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY currency
 `
@@ -481,6 +496,11 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 			&i.CreditLimitAmount,
 			&i.DefaultPaymentMethodID,
 			&i.CollectionRevokedAt,
+			&i.CreditLimitOverride,
+			&i.UsageBillingAnchor,
+			&i.UsageNextBillAt,
+			&i.UsageMinimumInvoiceAmount,
+			&i.UsageCollectionDue,
 		); err != nil {
 			return nil, err
 		}
@@ -493,7 +513,7 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at, credit_limit_override, usage_billing_anchor, usage_next_bill_at, usage_minimum_invoice_amount, usage_collection_due FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -518,6 +538,11 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.CreditLimitAmount,
 		&i.DefaultPaymentMethodID,
 		&i.CollectionRevokedAt,
+		&i.CreditLimitOverride,
+		&i.UsageBillingAnchor,
+		&i.UsageNextBillAt,
+		&i.UsageMinimumInvoiceAmount,
+		&i.UsageCollectionDue,
 	)
 	return i, err
 }
@@ -577,7 +602,7 @@ func (q *Queries) RevokeMoneyCollection(ctx context.Context, arg RevokeMoneyColl
 
 const setMoneyAccountCreditLimit = `-- name: SetMoneyAccountCreditLimit :exec
 UPDATE billing.money_settings
-SET credit_limit_amount = $3::bigint, updated_at = $4
+SET credit_limit_amount = $3::bigint, credit_limit_override = true, updated_at = $4
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
 `
 

@@ -693,6 +693,7 @@ export type CreditGrantSpec = {
 }
 
 export type CreditLimit = {
+  inherit?: boolean
   currency: string
   amount: string
 }
@@ -783,6 +784,7 @@ export type CustomerNetwork = {
 }
 
 export type CustomerSettings = {
+  usage_billing: UsageBillingAccount[]
   credit_limits: CreditLimit[]
   trust_levels: TrustLevel[]
   low_balance_lines: LowBalanceLine[]
@@ -1216,6 +1218,7 @@ export type MerchantCheckoutSettings = {
 export type MerchantConfigurationState = {
   revision: number
   display_name: string
+  usage_billing?: UsageBillingSettings
   profile?: MerchantProfile
   collection_threshold?: string
   monthly_floor?: string
@@ -2473,6 +2476,7 @@ export type UpdateAlertWebhookParams = {
 }
 
 export type UpdateCustomerParams = {
+  usage_billing?: UsageBillingAccountUpdate[]
   credit_limits?: CreditLimit[]
   trust_levels?: TrustLevel[]
   low_balance_lines?: LowBalanceLine[]
@@ -2483,6 +2487,7 @@ export type UpdateCustomerParams = {
 export type UpdateMerchantConfigurationParams = {
   expected_revision?: number | null
   display_name?: string
+  usage_billing?: UsageBillingSettings
   profile?: MerchantProfile
   collection_threshold?: string
   monthly_floor?: string
@@ -2552,6 +2557,30 @@ export type Usage = {
   group_by: "event_type" | "invoker" | "meter" | "resource"
   rows: UsageRow[]
   next_cursor: string | null
+}
+
+export type UsageBillingAccount = {
+  currency: string
+  billing_anchor: string | null
+  next_bill_at: string | null
+  minimum_invoice_amount: string | null
+}
+
+export type UsageBillingAccountUpdate = {
+  currency?: string
+  billing_anchor?: string | null
+  minimum_invoice_amount?: string | null
+}
+
+export type UsageBillingCurrency = {
+  currency: string
+  credit_limit: string
+  minimum_invoice_amount: string
+}
+
+export type UsageBillingSettings = {
+  billing_day: number
+  currencies: UsageBillingCurrency[]
 }
 
 export type UsageCharge = {

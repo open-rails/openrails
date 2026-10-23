@@ -191,7 +191,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	var result AdmitDecision
 	err := a.money.WithLockedAdmissionCapacity(ctx, req.CustomerID, req.Currency, func(ctx context.Context, d *db.DB, capacity money.AdmissionCapacity) error {
 		bound := *a
-		bound.money = money.NewMoneyService(d, a.money.Clock())
+		bound.money = a.money.WithDatabase(d)
 		bound.loader = NewSpendgatePolicyLoader(NewBillingPolicyStore(d), a.loader.fx)
 		if a.rates != nil {
 			rates := *a.rates
@@ -366,6 +366,11 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	}
 	code, blocked := DenyBudgetExceeded, "budget"
 	if dec.BlockedBalance {
+		if capacity.HardCreditLimit && outstanding > 0 {
+			if err := a.money.RequestUsageCollection(ctx, q, req.CustomerID, req.Currency); err != nil {
+				return AdmitDecision{}, err
+			}
+		}
 		code, blocked = money.DenyInsufficientBalance, "money"
 		if creditLine > 0 {
 			code = money.DenyInsufficientCredit

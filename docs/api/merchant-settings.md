@@ -56,3 +56,19 @@ automatically.
 ```json
 {"items": [{"customer_id": "…", "credit_limits": [{"currency": "USD", "amount": "50000000"}], "billing_policy": "cloud_monthly"}]}
 ```
+
+## Automatic usage billing
+
+A host enables automatic collection with `usage_billing_enabled: true`; the
+merchant's `usage_billing` block declares its default billing day and currency
+credit limits/minimum invoice amounts. See [usage billing](../usage-billing.md).
+The billing day seeds each new account's fixed anchor; changing the merchant
+value does not move existing anchors or reset their pricing periods. Clearing
+an account's `billing_anchor` adopts the current merchant default.
+
+A customer's `credit_limits` entry with `amount: "0"` explicitly disables
+credit; `inherit: true` clears the override. Customer `usage_billing` entries
+patch the fixed anchor and minimum by currency. The configuration APIs reject a
+minimum invoice above the resulting positive credit limit, including when
+merchant defaults and customer overrides change concurrently. Direct external
+file edits still undergo admission checks; invalid combinations grant no credit.

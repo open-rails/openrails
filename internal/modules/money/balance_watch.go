@@ -178,6 +178,11 @@ func (s *MoneyService) viewBalance(ctx context.Context, q *gen.Queries, bal *mod
 	settings, err := q.GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{MerchantID: bal.MerchantID, CustomerID: bal.CustomerID, Currency: bal.Currency})
 	switch {
 	case err == nil:
+		capacity, err := s.usageAdmissionCapacity(ctx, q, identity.CustomerID(bal.CustomerID), bal.Currency, AdmissionCapacity{BillingMode: settings.BillingMode, CreditLimit: settings.CreditLimitAmount, OutstandingOwed: v.owed})
+		if err != nil {
+			return v, err
+		}
+		settings.BillingMode, settings.CreditLimitAmount = capacity.BillingMode, capacity.CreditLimit
 		v.settings = &settings
 	case !errors.Is(err, pgx.ErrNoRows):
 		return v, err
@@ -328,7 +333,7 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 	if err != nil {
 		return err
 	}
-	txSvc := &MoneyService{db: txDB, clock: s.clock}
+	txSvc := s.WithDatabase(txDB)
 	q := txDB.Gen(ctx)
 	if _, err := txSvc.lockBalance(ctx, q, customer, customer.UUID().String(), currency); err != nil {
 		return err

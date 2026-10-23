@@ -57,6 +57,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) (*m
 	var trx *models.MoneyTransaction
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		bound := s.WithDatabase(s.db.NewWithPgxTx(tx))
 
 		// Serialize per account and guard idempotency on the spend coordinates.
 		if _, err := s.lockBalance(ctx, q, payer, params.Invoker, cur); err != nil {
@@ -81,7 +82,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) (*m
 			// A replay must not reach the spend arithmetic: the balance already
 			// moved, so re-deriving it would split the charge and could deny a
 			// prepaid payer, answering a replay with a hard failure.
-			_, _, applied, serr = s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, params.Amount, false)
+			_, _, applied, serr = bound.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, params.Amount, false)
 			if serr != nil {
 				return serr
 			}
@@ -193,21 +194,21 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			if serr != nil {
 				return 0, 0, false, serr
 			}
-			settings := settingsFromGen(settingsRow)
-			if !settings.ExtendsCredit() {
-				return 0, 0, false, ErrInsufficientCredits // prepay-only: credit limit 0
+			capacity, err := s.usageAdmissionCapacity(ctx, q, payer, cur, AdmissionCapacity{BillingMode: settingsRow.BillingMode, CreditLimit: settingsRow.CreditLimitAmount})
+			if err != nil {
+				return 0, 0, false, err
 			}
-			if settings.CreditLimitAmount <= 0 {
+			if capacity.BillingMode != BillingModeArrears || capacity.CreditLimit <= 0 {
 				return 0, 0, false, ErrInsufficientCredits
 			}
-			// Exposure is ledger-measured; invoices lag it by a finalize cycle.
-			exposure, eerr := s.moneyLedger(q, tenantID).OutstandingOwed(ctx, payerID, cur)
-			if eerr != nil {
-				return 0, 0, false, eerr
+			exposure, err := s.moneyLedger(q, tenantID).OutstandingOwed(ctx, payerID, cur)
+			if err != nil {
+				return 0, 0, false, err
 			}
-			if exposure+fromOwed > settings.CreditLimitAmount {
-				return 0, 0, false, ErrInsufficientCredits // would exceed the credit line
+			if fromOwed > capacity.CreditLimit-max(exposure, 0) {
+				return 0, 0, false, ErrInsufficientCredits
 			}
+
 		}
 	}
 
@@ -231,6 +232,9 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			"operation": string(key.Operation()),
 			"source":    key.Source(),
 		}); err != nil {
+			return 0, 0, false, err
+		}
+		if err := s.queueUsageBilling(ctx, q, payerID, cur); err != nil {
 			return 0, 0, false, err
 		}
 		owedAccrued = fromOwed

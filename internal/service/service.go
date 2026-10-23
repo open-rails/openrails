@@ -100,7 +100,7 @@ func (s *Service) CaptureAdmission(ctx context.Context, params billing.CaptureAd
 // host's pool: the capture commits with the host's record of the work.
 func (s *Service) CaptureAdmissionTx(ctx context.Context, tx pgx.Tx, params billing.CaptureAdmissionParams) (receipt *billing.CaptureReceipt, err error) {
 	err = s.inRunningChargeTx(ctx, tx, func(ctx context.Context, txDB *db.DB) error {
-		receipt, err = money.NewMoneyService(txDB, s.rt.Clock).CaptureAdmission(ctx, params)
+		receipt, err = s.moneyService().WithDatabase(txDB).CaptureAdmission(ctx, params)
 		return err
 	})
 	return receipt, err

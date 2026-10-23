@@ -129,7 +129,7 @@ func TestCustomerSettingsDocument(t *testing.T) {
 		require.Equal(t, updated.Settings, read.Settings, "the write answers the saved settings")
 
 		// Clearing every field returns the document to its defaults.
-		cleared, err := client.UpdateCustomer(t.Context(), a.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD"}}, TrustLevels: []billing.TrustLevel{{Currency: "USD"}}, BillingPolicy: catalog.Null[string](), InvoiceProfile: catalog.Null[billing.InvoiceProfile]()})
+		cleared, err := client.UpdateCustomer(t.Context(), a.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Inherit: true}}, TrustLevels: []billing.TrustLevel{{Currency: "USD"}}, BillingPolicy: catalog.Null[string](), InvoiceProfile: catalog.Null[billing.InvoiceProfile]()})
 		require.NoError(t, err)
 		require.Equal(t, defaults, cleared.Settings)
 		cleared, err = client.UpdateCustomer(t.Context(), b.cid(), billing.UpdateCustomerParams{TrustLevels: []billing.TrustLevel{{Currency: "USD"}}})

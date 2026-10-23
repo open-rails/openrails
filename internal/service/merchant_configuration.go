@@ -98,6 +98,13 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 	if !cache.Writable() {
 		return nil, merchants.ErrConfigReadOnly
 	}
+	if s.rt.Config.UsageBillingEnabled && params.MerchantSettings != nil && params.MerchantSettings.UsageBilling != nil {
+		unlock, err := s.rt.DB.LockUsagePolicy(ctx, mid)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+	}
 	terms := params
 	terms.ExpectedRevision = nil
 	ctx, finishEdit, err := cache.BeginEdit(ctx, terms)
@@ -132,6 +139,23 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		}
 		if err := s.refuseAssignedPolicyRemoval(ctx, mid, settings); err != nil {
 			return nil, err
+		}
+		if usage := settings.Config.UsageBilling; usage != nil {
+			for _, cur := range usage.Currencies {
+				err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+					customer, err := s.rt.DB.Gen(ctx).FindInvalidUsageMinimum(ctx, gen.FindInvalidUsageMinimumParams{MerchantID: mid.UUID(), Currency: cur.Currency, DefaultCredit: cur.CreditLimit, DefaultMinimum: cur.MinimumInvoiceAmount})
+					if errors.Is(err, pgx.ErrNoRows) {
+						return nil
+					}
+					if err != nil {
+						return err
+					}
+					return apperr.Invalidf("customer %s has a minimum invoice above its resulting %s credit limit", customer, cur.Currency).WithParam("settings.usage_billing")
+				})
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 		if err := s.rt.Merchants.CheckCardVault(ctx, mid, next, set.PSPs); err != nil {
 			return nil, err
@@ -204,6 +228,9 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 			p.StatementDescriptor = patch.Profile.StatementDescriptor
 		}
 		current.Profile = &p
+	}
+	if patch.UsageBilling != nil {
+		current.UsageBilling = patch.UsageBilling
 	}
 	if patch.CollectionThreshold != nil {
 		current.CollectionThreshold = patch.CollectionThreshold

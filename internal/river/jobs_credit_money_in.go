@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -52,6 +53,7 @@ const KindUsageOrders = "openrails.invoice"
 // UsageOrderArgs selects the phases of one usage-order pass: bill periods,
 // notify overdue orders and collect them.
 type UsageOrderArgs struct {
+	Automatic             bool                `json:"automatic,omitempty"`
 	MerchantID            *billing.MerchantID `json:"merchant_id,omitempty"`
 	Collect               bool                `json:"collect,omitempty"`
 	UseMonthlyFloor       bool                `json:"use_monthly_floor,omitempty"`
@@ -79,22 +81,30 @@ func (w UsageOrderWorker) Work(ctx context.Context, job *river.Job[UsageOrderArg
 		logger.Debug("money service not configured; skipping usage orders")
 		return nil
 	}
-	if job.Args.Collect && config.IsLimitedMode(w.Config) {
+	var metadata struct {
+		Periodic bool `json:"periodic"`
+	}
+	if job.JobRow != nil {
+		_ = json.Unmarshal(job.Metadata, &metadata)
+	}
+	if metadata.Periodic {
+		// Old releases scheduled phase-specific jobs. Their metadata identifies
+		// them as automatic work; they never bypass the host opt-in.
+		copy := *job
+		copy.Args = UsageOrderArgs{MerchantID: job.Args.MerchantID, Automatic: true}
+		job = &copy
+	}
+	manual := !job.Args.Automatic
+	if !manual && (w.Config == nil || !w.Config.UsageBillingEnabled) {
+		return nil
+	}
+	if manual && job.Args.Collect && config.IsLimitedMode(w.Config) {
 		if job.Args.MerchantID == nil && !job.Args.FinalizePreviousMonth {
-			if !job.Args.UseMonthlyFloor {
-				// This is a broad hourly scan, not an accepted charge. The next
-				// hourly tick (or startup after enabling writes) scans outstanding
-				// orders again, so retaining every disabled tick only piles up
-				// redundant work.
-				return nil
+			if job.Args.UseMonthlyFloor {
+				return river.JobSnooze(time.Hour)
 			}
-			// Keep the monthly slot: completing it would suppress collection
-			// for the rest of its thirty-day uniqueness bucket. Retry at the
-			// ordinary collection cadence while writes remain disabled.
-			return river.JobSnooze(time.Hour)
+			return nil
 		}
-		// Explicit merchant-scoped or combined-phase work retains its existing
-		// retry contract.
 		return river.JobSnooze(time.Minute)
 	}
 	if job.Args.MerchantID != nil {
@@ -117,55 +127,50 @@ func (w UsageOrderWorker) workMerchant(ctx context.Context, job *river.Job[Usage
 	if w.Clock != nil {
 		now = w.Clock.Now().UTC()
 	}
-	settings, err := w.Money.UsageSettings(ctx)
-	if err != nil {
-		return err
-	}
-
-	finalized, err := w.Money.FinalizeThresholdUsage(ctx, now, money.UsageThresholdOptions{
-		CollectionThresholdAmount: settings.CollectionThresholdAmount,
-		BillingPeriodBoundary:     settings.BillingPeriodBoundary,
-	})
-	if err != nil {
-		return err
-	}
-	if finalized > 0 {
-		logger.WithField("orders", finalized).Info("threshold usage orders billed")
-	}
-
-	if job.Args.FinalizePreviousMonth {
-		n, err := w.Money.FinalizeDueUsageForBoundary(ctx, settings.BillingPeriodBoundary, now)
+	// Explicit phase flags remain the host's manual billing API. Automatic
+	// work uses no phase flags and always follows the account due records.
+	if !job.Args.Automatic {
+		settings, err := w.Money.UsageSettings(ctx)
 		if err != nil {
 			return err
 		}
-		if n > 0 {
-			logger.WithField("orders", n).Info("monthly usage orders billed")
-		}
-	}
-
-	if job.Args.Collect {
-		// Customers hear about overdue net-N orders before collection,
-		// even when no charger is armed.
-		if n, err := w.Money.NotifyOverdueUsageOrders(ctx, now); err != nil {
+		if _, err = w.Money.FinalizeThresholdUsage(ctx, now, money.UsageThresholdOptions{CollectionThresholdAmount: settings.CollectionThresholdAmount, BillingPeriodBoundary: settings.BillingPeriodBoundary}); err != nil {
 			return err
-		} else if n > 0 {
-			logger.WithField("orders", n).Info("overdue order notices queued")
 		}
-		if w.Intents == nil {
-			logger.Debug("order collection runner not configured; skipping collection")
+		if job.Args.FinalizePreviousMonth {
+			if _, err = w.Money.FinalizeDueUsageForBoundary(ctx, settings.BillingPeriodBoundary, now); err != nil {
+				return err
+			}
+		}
+		if !job.Args.Collect || w.Intents == nil {
 			return nil
 		}
-		threshold, collect := settings.CollectionThresholdAmount, w.Money.ChargeOutstanding
+		minimum := settings.CollectionThresholdAmount
 		if job.Args.UseMonthlyFloor {
-			threshold, collect = settings.MonthlyFloorAmount, w.Money.ChargeMonthlyOutstanding
+			minimum = settings.MonthlyFloorAmount
 		}
-		n, err := collect(ctx, w.Intents, threshold)
-		if err != nil {
-			return err
-		}
-		if n > 0 {
-			logger.WithField("charged", n).Info("usage order collection completed")
-		}
+		_, err = w.Money.ChargeOutstanding(ctx, w.Intents, minimum)
+		return err
 	}
-	return nil
+	finalized, finalizeErr := w.Money.FinalizeDueUsage(ctx, now)
+	var failures []error
+	if finalizeErr != nil {
+		failures = append(failures, finalizeErr)
+	}
+	if finalized > 0 {
+		logger.WithField("orders", finalized).Info("usage orders billed")
+	}
+	if ctx.Err() != nil {
+		return errors.Join(append(failures, ctx.Err())...)
+	}
+	if _, err := w.Money.NotifyOverdueUsageOrders(ctx, now); err != nil {
+		failures = append(failures, err)
+	}
+	if w.Intents == nil || config.IsLimitedMode(w.Config) {
+		return errors.Join(failures...)
+	}
+	if _, err := w.Money.ChargeOutstanding(ctx, w.Intents, 0); err != nil {
+		failures = append(failures, err)
+	}
+	return errors.Join(failures...)
 }

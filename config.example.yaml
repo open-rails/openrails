@@ -265,3 +265,7 @@ admin_console:
 #                            # proposal tools; #781 notice-window enforcement remains server-side
 #                            # and this gate requires separate deployment consent; env
 #                            # LLM_CATALOG_DRAFTING_ENABLED
+
+# Opt in only for hosts that sell metered usage on credit.
+# Merchants configure usage_billing in their own document.
+usage_billing_enabled: false

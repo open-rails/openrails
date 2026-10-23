@@ -92,10 +92,13 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 			return err
 		}
 		trx = moneyTransactionFromTransfer(tr)
-		return insertPendingOwedItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, key.owedItemSourceID(), amount, now, map[string]any{
+		if err := insertPendingOwedItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, key.owedItemSourceID(), amount, now, map[string]any{
 			"operation": string(key.Operation()),
 			"source":    key.Source(),
-		})
+		}); err != nil {
+			return err
+		}
+		return s.WithDatabase(s.db.NewWithPgxTx(tx)).queueUsageBilling(ctx, q, payerID, cur)
 	})
 	if err != nil {
 		return nil, err
