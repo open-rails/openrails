@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/testevents"
+
 	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -244,7 +246,7 @@ func TestOrderOneCallBuy(t *testing.T) {
 	list := c.order(http.MethodGet, "/orders", "", nil)
 	require.Equal(t, id, list.body["data"].([]any)[0].(map[string]any)["id"])
 
-	events, err := w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{Type: billing.HostEventOrderCompleted})
+	events, err := testevents.Hosts(ctx, w.client[embedded], billing.HostEventOrderCompleted)
 	require.NoError(t, err)
 	require.Len(t, events.Items, 1)
 	require.Equal(t, id, events.Items[0].Order.OrderID.String())

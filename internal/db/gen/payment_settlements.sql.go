@@ -12,26 +12,26 @@ import (
 	"github.com/google/uuid"
 )
 
-const deleteDeliveredPaymentSettlementsBefore = `-- name: DeleteDeliveredPaymentSettlementsBefore :execrows
+const deletePaymentSettlementsBefore = `-- name: DeletePaymentSettlementsBefore :execrows
 DELETE FROM billing.host_outbox
  WHERE ctid IN (
     SELECT pse.ctid FROM billing.host_outbox pse
      WHERE pse.merchant_id = $1::uuid
-       AND pse.event_type = 'payment.settled' AND pse.delivered_at IS NOT NULL
-       AND pse.delivered_at < $2::timestamptz
+       AND pse.event_type = 'payment.settled'
+       AND pse.recorded_at < $2::timestamptz
      LIMIT $3::int
 )
 `
 
-type DeleteDeliveredPaymentSettlementsBeforeParams struct {
+type DeletePaymentSettlementsBeforeParams struct {
 	MerchantID uuid.UUID
 	Cutoff     time.Time
 	RowLimit   int32
 }
 
 // Batched: row_limit bounds one statement, the caller loops.
-func (q *Queries) DeleteDeliveredPaymentSettlementsBefore(ctx context.Context, arg DeleteDeliveredPaymentSettlementsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteDeliveredPaymentSettlementsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+func (q *Queries) DeletePaymentSettlementsBefore(ctx context.Context, arg DeletePaymentSettlementsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deletePaymentSettlementsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}

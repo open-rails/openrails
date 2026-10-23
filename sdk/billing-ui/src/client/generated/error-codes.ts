@@ -67,7 +67,6 @@ export type OpenRailsErrorCode =
   | "internal_error"
   | "invalid_cursor"
   | "invalid_customer_id"
-  | "invalid_host_event_request"
   | "invalid_param"
   | "invalid_payment_method"
   | "invalid_psp_reference"
@@ -273,7 +272,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   internal_error: { status: 500, type: "api_error", meaning: "OpenRails failed; request_id identifies the failure in its logs." },
   invalid_cursor: { status: 400, type: "invalid_request_error", meaning: "The cursor is not one this list issued." },
   invalid_customer_id: { status: 400, type: "invalid_request_error", meaning: "The customer id is missing or malformed." },
-  invalid_host_event_request: { status: 400, type: "invalid_request_error", meaning: "The host event request is invalid." },
   invalid_param: { status: 400, type: "invalid_request_error", meaning: "The request is malformed or a parameter is invalid; param names the parameter when known." },
   invalid_payment_method: { status: 400, type: "invalid_request_error", meaning: "The payment method is not eligible for this operation." },
   invalid_psp_reference: { status: 400, type: "invalid_request_error", meaning: "The PSP reference is invalid." },

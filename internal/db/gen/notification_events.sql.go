@@ -12,68 +12,12 @@ import (
 	"github.com/google/uuid"
 )
 
-const acknowledgeNotificationEvent = `-- name: AcknowledgeNotificationEvent :exec
-INSERT INTO billing.notification_event_acks(consumer_id,merchant_id,event_id)
-SELECT c.id,e.merchant_id,e.id FROM billing.notification_consumers c JOIN billing.notification_events e ON (c.merchant_id IS NULL OR c.merchant_id=e.merchant_id)
-WHERE c.id=$1::uuid AND e.merchant_id=$2::uuid AND e.id=$3::uuid
-ON CONFLICT DO NOTHING
-`
-
-type AcknowledgeNotificationEventParams struct {
-	ConsumerID uuid.UUID
-	MerchantID uuid.UUID
-	EventID    uuid.UUID
-}
-
-func (q *Queries) AcknowledgeNotificationEvent(ctx context.Context, arg AcknowledgeNotificationEventParams) error {
-	_, err := q.db.Exec(ctx, acknowledgeNotificationEvent, arg.ConsumerID, arg.MerchantID, arg.EventID)
-	return err
-}
-
-const countMerchantNotificationConsumers = `-- name: CountMerchantNotificationConsumers :one
-SELECT count(*) FROM billing.notification_consumers WHERE merchant_id=$1
-`
-
-func (q *Queries) CountMerchantNotificationConsumers(ctx context.Context, merchantID *uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantNotificationConsumers, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countMerchantNotificationEventAcks = `-- name: CountMerchantNotificationEventAcks :one
-SELECT count(*) FROM billing.notification_event_acks WHERE merchant_id=$1
-`
-
-func (q *Queries) CountMerchantNotificationEventAcks(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantNotificationEventAcks, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countMerchantNotificationEvents = `-- name: CountMerchantNotificationEvents :one
 SELECT count(*) FROM billing.notification_events WHERE merchant_id=$1
 `
 
 func (q *Queries) CountMerchantNotificationEvents(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMerchantNotificationEvents, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countNotificationConsumers = `-- name: CountNotificationConsumers :one
-SELECT count(*) FROM billing.notification_consumers WHERE merchant_id IS NOT DISTINCT FROM $1::uuid AND owner=$2::text
-`
-
-type CountNotificationConsumersParams struct {
-	MerchantID *uuid.UUID
-	Owner      string
-}
-
-func (q *Queries) CountNotificationConsumers(ctx context.Context, arg CountNotificationConsumersParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countNotificationConsumers, arg.MerchantID, arg.Owner)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -93,116 +37,26 @@ func (q *Queries) EraseCustomerNotificationEvents(ctx context.Context, arg Erase
 	return err
 }
 
-const getNotificationConsumer = `-- name: GetNotificationConsumer :one
-SELECT id, merchant_id, owner, name, created_at FROM billing.notification_consumers WHERE merchant_id IS NOT DISTINCT FROM $1::uuid AND owner=$2::text AND name=$3::text
+const pruneNotificationJournal = `-- name: PruneNotificationJournal :execrows
+DELETE FROM billing.notification_events WHERE (merchant_id,id) IN (
+ SELECT merchant_id,id FROM billing.notification_events WHERE inserted_at < $1::timestamptz
+ ORDER BY inserted_at,merchant_id,id LIMIT $2::int
+)
 `
 
-type GetNotificationConsumerParams struct {
-	MerchantID *uuid.UUID
-	Owner      string
-	Name       string
-}
-
-func (q *Queries) GetNotificationConsumer(ctx context.Context, arg GetNotificationConsumerParams) (BillingNotificationConsumer, error) {
-	row := q.db.QueryRow(ctx, getNotificationConsumer, arg.MerchantID, arg.Owner, arg.Name)
-	var i BillingNotificationConsumer
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Owner,
-		&i.Name,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const lockNotificationConsumers = `-- name: LockNotificationConsumers :exec
-SELECT pg_advisory_xact_lock(hashtextextended('openrails.notification-consumers',0))
-`
-
-// Consumer registration and GC serialize without blocking domain producers.
-func (q *Queries) LockNotificationConsumers(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, lockNotificationConsumers)
-	return err
-}
-
-const pendingNotificationEvents = `-- name: PendingNotificationEvents :many
-SELECT e.merchant_id, e.id, e.customer_id, e.event_type, e.data, e.created_at, e.inserted_at FROM billing.notification_events e JOIN billing.notification_consumers c ON c.id=$1::uuid
-WHERE (c.merchant_id IS NULL OR c.merchant_id=e.merchant_id)
-AND NOT EXISTS(SELECT 1 FROM billing.notification_event_acks a WHERE a.consumer_id=c.id AND a.merchant_id=e.merchant_id AND a.event_id=e.id)
-ORDER BY e.inserted_at,e.merchant_id,e.id LIMIT $2::int
-`
-
-type PendingNotificationEventsParams struct {
-	ConsumerID uuid.UUID
-	RowLimit   int32
-}
-
-func (q *Queries) PendingNotificationEvents(ctx context.Context, arg PendingNotificationEventsParams) ([]BillingNotificationEvent, error) {
-	rows, err := q.db.Query(ctx, pendingNotificationEvents, arg.ConsumerID, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingNotificationEvent
-	for rows.Next() {
-		var i BillingNotificationEvent
-		if err := rows.Scan(
-			&i.MerchantID,
-			&i.ID,
-			&i.CustomerID,
-			&i.EventType,
-			&i.Data,
-			&i.CreatedAt,
-			&i.InsertedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const pruneNotificationEvents = `-- name: PruneNotificationEvents :execrows
-DELETE FROM billing.notification_events e WHERE (merchant_id,id) IN (
- SELECT x.merchant_id,x.id FROM billing.notification_events x WHERE x.inserted_at<$1::timestamptz
- AND NOT EXISTS(SELECT 1 FROM billing.notification_consumers c WHERE (c.merchant_id IS NULL OR c.merchant_id=x.merchant_id)
- AND NOT EXISTS(SELECT 1 FROM billing.notification_event_acks a WHERE a.consumer_id=c.id AND a.merchant_id=x.merchant_id AND a.event_id=x.id AND a.acknowledged_at<$1::timestamptz))
- ORDER BY x.inserted_at,x.merchant_id,x.id LIMIT $2::int)
-`
-
-type PruneNotificationEventsParams struct {
+type PruneNotificationJournalParams struct {
 	Cutoff   time.Time
 	RowLimit int32
 }
 
-func (q *Queries) PruneNotificationEvents(ctx context.Context, arg PruneNotificationEventsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, pruneNotificationEvents, arg.Cutoff, arg.RowLimit)
+// Private producer-journal retention. The public event log has independent
+// bounded retention; neither source keeps consumer state.
+func (q *Queries) PruneNotificationJournal(ctx context.Context, arg PruneNotificationJournalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneNotificationJournal, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const purgeMerchantNotificationConsumers = `-- name: PurgeMerchantNotificationConsumers :exec
-DELETE FROM billing.notification_consumers WHERE merchant_id=$1
-`
-
-func (q *Queries) PurgeMerchantNotificationConsumers(ctx context.Context, merchantID *uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantNotificationConsumers, merchantID)
-	return err
-}
-
-const purgeMerchantNotificationEventAcks = `-- name: PurgeMerchantNotificationEventAcks :exec
-DELETE FROM billing.notification_event_acks WHERE merchant_id=$1
-`
-
-func (q *Queries) PurgeMerchantNotificationEventAcks(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantNotificationEventAcks, merchantID)
-	return err
 }
 
 const purgeMerchantNotificationEvents = `-- name: PurgeMerchantNotificationEvents :exec
@@ -211,35 +65,5 @@ DELETE FROM billing.notification_events WHERE merchant_id=$1
 
 func (q *Queries) PurgeMerchantNotificationEvents(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantNotificationEvents, merchantID)
-	return err
-}
-
-const registerNotificationConsumer = `-- name: RegisterNotificationConsumer :exec
-INSERT INTO billing.notification_consumers(merchant_id,owner,name) VALUES($1::uuid,$2::text,$3::text) ON CONFLICT DO NOTHING
-`
-
-type RegisterNotificationConsumerParams struct {
-	MerchantID *uuid.UUID
-	Owner      string
-	Name       string
-}
-
-func (q *Queries) RegisterNotificationConsumer(ctx context.Context, arg RegisterNotificationConsumerParams) error {
-	_, err := q.db.Exec(ctx, registerNotificationConsumer, arg.MerchantID, arg.Owner, arg.Name)
-	return err
-}
-
-const retireNotificationConsumer = `-- name: RetireNotificationConsumer :exec
-DELETE FROM billing.notification_consumers WHERE merchant_id IS NOT DISTINCT FROM $1::uuid AND owner=$2::text AND name=$3::text
-`
-
-type RetireNotificationConsumerParams struct {
-	MerchantID *uuid.UUID
-	Owner      string
-	Name       string
-}
-
-func (q *Queries) RetireNotificationConsumer(ctx context.Context, arg RetireNotificationConsumerParams) error {
-	_, err := q.db.Exec(ctx, retireNotificationConsumer, arg.MerchantID, arg.Owner, arg.Name)
 	return err
 }

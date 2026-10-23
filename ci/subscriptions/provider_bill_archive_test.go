@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -71,17 +70,7 @@ func TestProviderBillArchiveRestoresIdentityAndMultiplePayments(t *testing.T) {
 	require.True(t, second.PaymentCreated)
 	require.False(t, second.Completed)
 	w.settle()
-	for {
-		events, err := w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{})
-		require.NoError(t, err)
-		if len(events.Items) == 0 {
-			break
-		}
-		for _, event := range events.Items {
-			_, err := w.client[embedded].AcknowledgeHostEvents(ctx, []billing.HostEventID{event.ID})
-			require.NoError(t, err)
-		}
-	}
+
 	w.stop()
 	charges, setups := w.providerWrites("nmi")
 	var artifact bytes.Buffer
@@ -210,17 +199,7 @@ func TestProviderScheduleArchiveRestoresCycleBinding(t *testing.T) {
 		return err
 	}))
 	w.settle()
-	for {
-		events, err := w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{})
-		require.NoError(t, err)
-		if len(events.Items) == 0 {
-			break
-		}
-		for _, event := range events.Items {
-			_, err := w.client[embedded].AcknowledgeHostEvents(ctx, []billing.HostEventID{event.ID})
-			require.NoError(t, err)
-		}
-	}
+
 	w.stop()
 	before := w.nmiWrites()
 	var artifact bytes.Buffer

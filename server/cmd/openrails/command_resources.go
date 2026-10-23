@@ -112,7 +112,7 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 	}
 	c.cleanups = append(c.cleanups, func() { _ = ak.Close(context.WithoutCancel(ctx)) })
 	if network.Enabled(akCfg) {
-		c.network, err = network.New(c.db, ak, abusestate.New(nil), nil)
+		c.network, err = network.New(c.db, ak, abusestate.New(nil), nil, akCfg.DefaultTenantID, akCfg.Token.Issuer)
 		if err != nil {
 			return nil, err
 		}

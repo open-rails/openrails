@@ -108,7 +108,9 @@ migration 0106_user_destructive_reservations.up.sql sha256:338ebf15379b9abb3165f
 migration 0107_user_action_retention.up.sql sha256:f8963bbe29d458e72f2a7e64b819ff92204de84ea0e8d06849380a93d71f9dda
 migration 0108_subscription_history.up.sql sha256:fbd81b4e32710a7e12db21fc0f5a0f5d64e6ad906b83b01c33d6c341373a1dd4
 migration 0109_tenant_merchant_binding.up.sql sha256:5597e671dfe1443fdeffa5378e62aa0c61d7be36534715d6a91b42cddf8ce097
-migration 0110_retained_event_log.up.sql sha256:5ab62242c7235e5615d3971f32531f8d5aa4433ea0bae29f9b8d11adecb4a516
+migration 0110_retained_event_log.up.sql sha256:9c6e552fbb5dce3290ceba94f46ce6e4e078dc5f331ebe28af15febc8eb63e4f
+migration 0111_remove_event_consumers.up.sql sha256:ab6f344a51e804810d6ffe7953e0b69e3a8870e91c8ea3c0fec9eb7583a536fd
+migration 0112_network_event_cursor.up.sql sha256:fe38ca31bba8bf4364f2e1309a3106ce435b44c541f53ddec99408ea0b8a74b3
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -831,18 +833,17 @@ table billing.host_outbox
   column currency text
   column occurred_at timestamp with time zone NOT NULL DEFAULT now()
   column data jsonb NOT NULL DEFAULT '{}'::jsonb
-  column delivered_at timestamp with time zone
   column dedupe_key text NOT NULL
+  column recorded_at timestamp with time zone NOT NULL DEFAULT clock_timestamp()
   constraint host_outbox_currency_check CHECK ((((currency IS NULL) = (event_type = ANY (ARRAY['product.entitlements_changed'::text, 'customer.network_linked'::text, 'customer.network_unlinked'::text, 'mandate.revoked'::text, 'destructive.hold_opened'::text, 'destructive.hold_cleared'::text]))) AND ((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))))
   constraint host_outbox_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text, 'balance.low'::text, 'balance.depleted'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'product.entitlements_changed'::text) AND (subject_type = 'product'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['order.completed'::text, 'order.requires_action'::text, 'order.payment_failed'::text, 'order.canceled'::text, 'order.expired'::text, 'order.voided'::text])) AND (subject_type = 'order'::text) AND (payment_id IS NULL) AND (amount IS NOT NULL) AND (amount >= 0) AND (currency IS NOT NULL)) OR ((event_type = ANY (ARRAY['customer.network_linked'::text, 'customer.network_unlinked'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'mandate.revoked'::text) AND (subject_type = 'mandate'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['destructive.hold_opened'::text, 'destructive.hold_cleared'::text])) AND (subject_type = 'destructive_hold'::text) AND (payment_id IS NULL) AND (amount IS NULL) AND (currency IS NULL) AND (jsonb_typeof(data) = 'object'::text))))
   constraint host_outbox_payment_id_fkey FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE CASCADE
   constraint host_outbox_pkey PRIMARY KEY (merchant_id, id)
   index CREATE UNIQUE INDEX host_outbox_dedupe_key_key ON billing.host_outbox USING btree (merchant_id, dedupe_key)
-  index CREATE INDEX host_outbox_delivered_at_idx ON billing.host_outbox USING btree (merchant_id, delivered_at) WHERE (delivered_at IS NOT NULL)
-  index CREATE INDEX host_outbox_event_type_id_idx ON billing.host_outbox USING btree (merchant_id, event_type, id) WHERE (delivered_at IS NULL)
   index CREATE UNIQUE INDEX host_outbox_payment_id_key ON billing.host_outbox USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL)
   index CREATE UNIQUE INDEX host_outbox_pkey ON billing.host_outbox USING btree (merchant_id, id)
+  index CREATE INDEX host_outbox_retention_idx ON billing.host_outbox USING btree (merchant_id, recorded_at, id)
   trigger CREATE TRIGGER host_event_log_capture AFTER INSERT ON billing.host_outbox FOR EACH ROW EXECUTE FUNCTION billing.capture_host_event_log()
 
 table billing.idempotency_keys
@@ -1135,6 +1136,14 @@ table billing.money_settings
   index CREATE UNIQUE INDEX money_settings_pkey ON billing.money_settings USING btree (merchant_id, customer_id, currency)
   trigger CREATE TRIGGER trg_subscription_history_default AFTER UPDATE OF default_payment_method_id ON billing.money_settings FOR EACH ROW EXECUTE FUNCTION billing.subscription_history_default_card()
 
+table billing.network_event_cursors
+  column issuer text NOT NULL
+  column tenant_id uuid NOT NULL
+  column cursor text NOT NULL DEFAULT ''::text
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint network_event_cursors_pkey PRIMARY KEY (issuer, tenant_id)
+  index CREATE UNIQUE INDEX network_event_cursors_pkey ON billing.network_event_cursors USING btree (issuer, tenant_id)
+
 table billing.nmi_bulk_checkpoints
   column merchant_id uuid NOT NULL
   column psp_id uuid NOT NULL
@@ -1171,32 +1180,6 @@ table billing.nmi_history_reads
   constraint nmi_history_reads_pkey PRIMARY KEY (merchant_id, psp_id)
   constraint nmi_history_reads_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
   index CREATE UNIQUE INDEX nmi_history_reads_pkey ON billing.nmi_history_reads USING btree (merchant_id, psp_id)
-
-table billing.notification_consumers
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column merchant_id uuid
-  column owner text NOT NULL
-  column name text NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint notification_consumers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id)
-  constraint notification_consumers_merchant_id_owner_name_key UNIQUE NULLS NOT DISTINCT (merchant_id, owner, name)
-  constraint notification_consumers_name_check CHECK ((name ~ '^[A-Za-z0-9_.-]{1,64}$'::text))
-  constraint notification_consumers_owner_check CHECK (((length(owner) >= 1) AND (length(owner) <= 512)))
-  constraint notification_consumers_pkey PRIMARY KEY (id)
-  index CREATE UNIQUE INDEX notification_consumers_merchant_id_owner_name_key ON billing.notification_consumers USING btree (merchant_id, owner, name) NULLS NOT DISTINCT
-  index CREATE UNIQUE INDEX notification_consumers_pkey ON billing.notification_consumers USING btree (id)
-
-table billing.notification_event_acks
-  column consumer_id uuid NOT NULL
-  column merchant_id uuid NOT NULL
-  column event_id uuid NOT NULL
-  column acknowledged_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint notification_event_acks_consumer_id_fkey FOREIGN KEY (consumer_id) REFERENCES billing.notification_consumers(id) ON DELETE CASCADE
-  constraint notification_event_acks_merchant_id_event_id_fkey FOREIGN KEY (merchant_id, event_id) REFERENCES billing.notification_events(merchant_id, id) ON DELETE CASCADE
-  constraint notification_event_acks_pkey PRIMARY KEY (consumer_id, merchant_id, event_id)
-  index CREATE INDEX notification_event_acks_event_idx ON billing.notification_event_acks USING btree (merchant_id, event_id, consumer_id)
-  index CREATE UNIQUE INDEX notification_event_acks_pkey ON billing.notification_event_acks USING btree (consumer_id, merchant_id, event_id)
-  index CREATE INDEX notification_event_acks_retention_idx ON billing.notification_event_acks USING btree (acknowledged_at)
 
 table billing.notification_events
   column merchant_id uuid NOT NULL
@@ -3117,6 +3100,7 @@ function billing.capture_host_event_log()
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
   AS $function$
   BEGIN
+      IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
       PERFORM billing.queue_event_log(billing.host_event_record(NEW));
       RETURN NEW;
   END;
@@ -3129,6 +3113,7 @@ function billing.capture_notification_event_log()
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
   AS $function$
   BEGIN
+      IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
       PERFORM billing.queue_event_log(billing.notification_event_record(NEW));
       RETURN NEW;
   END;
@@ -3683,7 +3668,6 @@ function billing.guard_billing_restore_receipt()
                     'nmi_bulk_checkpoints',
                     'nmi_history_months',
                     'nmi_history_reads',
-                    'notification_event_acks',
                     'notification_events',
                     'notifications',
                     'order_attempts',

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/testevents"
+
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/destructive"
@@ -71,7 +73,7 @@ func TestDestructiveIncidentProjectsAndRetriesAlert(t *testing.T) {
 	require.Len(t, findings.Items, 1)
 	_, err = w.client[embedded].ResolveFinding(ctx, findings.Items[0].ID, billing.ResolveFindingParams{Outcome: billing.FindingIgnore, Notes: "cannot clear through ignore"})
 	require.Error(t, err)
-	events, err := w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{Type: billing.HostEventDestructiveHoldOpened})
+	events, err := testevents.Hosts(ctx, w.client[embedded], billing.HostEventDestructiveHoldOpened)
 	require.NoError(t, err)
 	require.Len(t, events.Items, 1)
 	require.Equal(t, billing.DestructiveHoldID(trip.Hold.ID), events.Items[0].DestructiveHold.HoldID)
@@ -92,7 +94,7 @@ func TestDestructiveIncidentProjectsAndRetriesAlert(t *testing.T) {
 	cleared, err := w.rt.ClearDestructiveHold(ctx, mid, billing.DestructiveHoldID(trip.Hold.ID), billing.DestructiveOperator{Issuer: "https://operators.example", ID: "reviewer"}, "credential revoked and reviewed")
 	require.NoError(t, err)
 	require.NotNil(t, cleared.ClearedAt)
-	events, err = w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{Type: billing.HostEventDestructiveHoldCleared})
+	events, err = testevents.Hosts(ctx, w.client[embedded], billing.HostEventDestructiveHoldCleared)
 	require.NoError(t, err)
 	require.Len(t, events.Items, 1)
 	_, err = gate.Admit(ctx, command(7))

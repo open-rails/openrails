@@ -47,12 +47,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	require.NoError(t, err)
 	w.waitJob(cadence.Job.ID)
 	merchantID := client.MerchantID()
-	events, err := client.ListHostEvents(t.Context(), billing.HostEventListParams{})
-	require.NoError(t, err)
-	for _, event := range events.Items {
-		_, err := client.AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-		require.NoError(t, err)
-	}
+
 	w.stop() // The source has no writer while its billing book is moved.
 	providerAttempts := e.providerAttempts()
 
@@ -246,12 +241,7 @@ func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 	declinedPay(t, paid, err)
 	w.settle()
 	// The host has its events: the export waits only on what is undelivered.
-	events, err := w.client[embedded].ListHostEvents(t.Context(), billing.HostEventListParams{})
-	require.NoError(t, err)
-	for _, event := range events.Items {
-		_, err := w.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-		require.NoError(t, err)
-	}
+
 	archiveResult := func() (int, string) {
 		status, body := w.staff(http.MethodGet, "/v1/merchant/billing-archive")
 		if status == http.StatusOK {

@@ -60,7 +60,7 @@ func TestHostSettlementDedupeKeyNamesItsPayment(t *testing.T) {
 	// enqueue_payment_settlement_event; only the coordinate check confines it.
 	payment := "41111111-1111-4115-a111-111111111111"
 	event := func(typ, pay, key string) map[string]string {
-		return map[string]string{"event_type": typ, "payment_id": pay, "dedupe_key": key, "delivered_at": "2026-09-18 00:00:00+00"}
+		return map[string]string{"event_type": typ, "payment_id": pay, "dedupe_key": key, "recorded_at": "2026-09-18 00:00:00+00"}
 	}
 	cases := []rowCase{
 		{"luhn-looking uuid key", "host_outbox", event("payment.settled", payment, "payment:"+payment), true},

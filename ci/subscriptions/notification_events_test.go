@@ -4,6 +4,8 @@ package subscriptions_test
 
 import (
 	"encoding/json"
+
+	"github.com/open-rails/openrails/internal/testevents"
 	"github.com/stretchr/testify/require"
 )
 
@@ -12,11 +14,8 @@ import (
 func (c *customer) notificationEvents() []any {
 	t := c.w.t
 	t.Helper()
-	consumer, err := c.w.client[embedded].NotificationEvents("domain-test")
-	require.NoError(t, err)
-	require.NoError(t, consumer.Register(t.Context()))
-	defer func() { require.NoError(t, consumer.Retire(t.Context())) }()
-	events, err := consumer.Pending(t.Context(), 100)
+	consumer := testevents.Notifications(c.w.client[embedded])
+	events, err := consumer.Read(t.Context())
 	require.NoError(t, err)
 	out := []any{}
 	for _, event := range events {

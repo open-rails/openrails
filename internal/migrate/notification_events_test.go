@@ -14,7 +14,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/notificationevents"
+	"github.com/open-rails/openrails/internal/eventlog"
+	"github.com/open-rails/openrails/internal/retention"
 	"github.com/stretchr/testify/require"
 )
 
@@ -60,13 +61,14 @@ func TestNotificationEventsMigrationAndRetention(t *testing.T) {
 	require.NoError(t, migrator.ApplyMigrations(ctx, migrations))
 	database, err := db.NewWithPGXPool(pool, schema)
 	require.NoError(t, err)
-	global, err := notificationevents.New(database, nil, "host:global", "portal")
-	require.NoError(t, err)
-	require.NoError(t, global.Register(ctx))
-	events, err := global.Pending(ctx, 100)
-	require.NoError(t, err)
-	require.Len(t, events, 2)
-	for _, e := range events {
+	read := func() billing.EventPage {
+		page, err := eventlog.List(ctx, database, billing.MerchantID(mid), billing.EventQuery{}, retention.EventLog, time.Now())
+		require.NoError(t, err)
+		return page
+	}
+	page := read()
+	require.Len(t, page.Events, 2)
+	for _, e := range page.Events {
 		require.NotContains(t, string(e.Data), "user_email")
 		require.Equal(t, billing.MerchantID(mid), e.MerchantID)
 	}
@@ -74,60 +76,34 @@ func TestNotificationEventsMigrationAndRetention(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, sql(`SELECT count(*) FROM billing.notifications WHERE recipient_kind='merchant'`)).Scan(&count))
 	require.Equal(t, 1, count, "operator alerts survive migration")
 	_, err = pool.Exec(ctx, sql(`UPDATE billing.notification_events SET event_type='changed' WHERE merchant_id=$1`), mid)
-	require.Error(t, err, "facts are immutable")
-	require.NoError(t, global.Acknowledge(ctx, []billing.NotificationEventRef{{MerchantID: billing.MerchantID(mid), ID: billing.NotificationID(first)}}))
-	now := time.Now().UTC()
-	n, err := notificationevents.Prune(ctx, database, now, 1000)
+	require.Error(t, err, "producer facts are immutable")
+	_, err = pool.Exec(ctx, sql(`UPDATE billing.event_log SET event_type='changed' WHERE merchant_id=$1`), mid)
+	require.Error(t, err, "public facts are immutable")
+	q := database.GenDirectory()
+	// An imported historical occurrence is fresh dedupe evidence now, not due
+	// for immediate retirement merely because its business date is old.
+	exec(`INSERT INTO billing.host_outbox(merchant_id,event_type,subject_type,subject_id,occurred_at,data,dedupe_key)
+        VALUES($1,'customer.network_unlinked','customer',$2,now()-interval '10 years','{"revoked_by":"customer"}','backdated-import')`, mid, customer)
+	dropped, err := q.DeleteHostLifecycleEventsBefore(ctx, gen.DeleteHostLifecycleEventsBeforeParams{MerchantID: mid, Cutoff: time.Now().Add(-retention.EventLog), RowLimit: 1000})
 	require.NoError(t, err)
-	require.Zero(t, n, "acknowledgment starts grace, not immediate deletion")
-	n, err = notificationevents.Prune(ctx, database, now.Add(31*24*time.Hour), 1000)
+	require.Zero(t, dropped, "dedupe retention starts at ingestion, not historical occurrence")
+	dropped, err = q.DeleteHostLifecycleEventsBefore(ctx, gen.DeleteHostLifecycleEventsBeforeParams{MerchantID: mid, Cutoff: time.Now().Add(time.Hour), RowLimit: 1000})
 	require.NoError(t, err)
-	require.EqualValues(t, 1, n)
-	events, err = global.Pending(ctx, 100)
+	require.EqualValues(t, 1, dropped)
+	expected := read()
+	require.Len(t, expected.Events, 3, "producer cleanup preserves its retained public snapshot")
+	n, err := q.PruneNotificationJournal(ctx, gen.PruneNotificationJournalParams{Cutoff: time.Now().Add(-retention.EventLog), RowLimit: 1000})
 	require.NoError(t, err)
-	require.Len(t, events, 1)
-	require.Equal(t, billing.NotificationID(second), events[0].ID)
-	// GC and registration use the same transaction fence. A registered but not\n // yet committed consumer must prevent old eligibility from being reclaimed.
-	require.NoError(t, global.Acknowledge(ctx, []billing.NotificationEventRef{{MerchantID: billing.MerchantID(mid), ID: billing.NotificationID(second)}}))
-	_, err = notificationevents.Prune(ctx, database, now, 1000)
+	require.Zero(t, n, "fresh ingestion has its full dedupe retention")
+	n, err = q.PruneNotificationJournal(ctx, gen.PruneNotificationJournalParams{Cutoff: time.Now().Add(time.Hour), RowLimit: 1000})
 	require.NoError(t, err)
-	tx, err := database.DataPool().Begin(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback(ctx)
-	q := gen.New(tx)
-	require.NoError(t, q.LockNotificationConsumers(ctx))
-	require.NoError(t, q.RegisterNotificationConsumer(ctx, gen.RegisterNotificationConsumerParams{Owner: "host:global", Name: "new-consumer"}))
-	started := make(chan struct{})
-	done := make(chan error, 1)
-	go func() {
-		close(started)
-		_, err := notificationevents.Prune(ctx, database, now.Add(31*24*time.Hour), 1000)
-		done <- err
-	}()
-	<-started
-	// This timeout is a bounded proof of blocking while the transaction is held.
-	select {
-	case err := <-done:
-		t.Fatalf("GC passed uncommitted registration: %v", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-	require.NoError(t, tx.Commit(ctx))
-	require.NoError(t, <-done)
-	newcomer, err := notificationevents.New(database, nil, "host:global", "new-consumer")
-	require.NoError(t, err)
-	events, err = newcomer.Pending(ctx, 100)
-	require.NoError(t, err)
-	require.Len(t, events, 1)
-	require.NoError(t, newcomer.Retire(ctx))
-	require.NoError(t, newcomer.Register(ctx))
-	events, err = newcomer.Pending(ctx, 100)
-	require.NoError(t, err)
-	require.Len(t, events, 1, "new incarnation replays retained events")
-	// Physical customer erasure cascades through facts and all consumer ACKs.
+	require.EqualValues(t, 2, n)
+	require.Equal(t, expected, read(), "producer cleanup cannot consume a reader's public facts")
 	exec(`DELETE FROM billing.customers WHERE merchant_id=$1 AND id=$2`, mid, customer)
-	events, err = global.Pending(ctx, 100)
-	require.NoError(t, err)
-	require.Empty(t, events)
-	require.NoError(t, pool.QueryRow(ctx, sql(`SELECT count(*) FROM billing.notification_event_acks`)).Scan(&count))
-	require.Zero(t, count)
+	require.Equal(t, expected, read(), "committed identity snapshot survives deletion; the receiving app enforces erasure")
+	for _, name := range []string{"notification_consumers", "notification_event_acks"} {
+		var exists bool
+		require.NoError(t, pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+"."+name).Scan(&exists))
+		require.False(t, exists, name+" is retired")
+	}
 }

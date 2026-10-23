@@ -433,12 +433,6 @@ When running in embedded mode (as in this example) you wouldn't usually mount th
 | `POST /v1/app/running-charges` | charge a customer at a rate per hour until you stop it | Usage |
 | `POST /v1/app/running-charges/{reference}/stop` | stop it and post what it charged | Usage |
 | `GET /v1/app/events` | retained facts after your own cursor; no registration or ACK | Events |
-| `GET /v1/app/host-events` | events for your backend to process, oldest first | Events |
-| `POST /v1/app/host-events/acknowledge` | mark them processed | Events |
-| `POST /v1/app/notification-consumers/{name}` | register an independent billing notification consumer | Events |
-| `GET /v1/app/notification-consumers/{name}/events` | pending billing facts for this consumer | Events |
-| `POST /v1/app/notification-consumers/{name}/acknowledge` | acknowledge facts after the application persists them | Events |
-| `DELETE /v1/app/notification-consumers/{name}` | retire a consumer and release its retention claim | Events |
 | `POST /v1/app/scim/v2/Bulk` | your directory's batch of user changes (AuthKit sends one every 5 minutes) | — |
 | `POST /v1/app/scim/v2/Users` | create a user (for directories that don't batch: Okta, Entra ID) | ? |
 | `GET /v1/app/scim/v2/Users` | list or filter users | ? |
@@ -1597,7 +1591,7 @@ AuthKit shares only an email the user proved, so require it (`Registration.Verif
 
 #### Receipts
 
-OpenRails records customer billing facts; your application renders and sends receipts and payment notices. Read them through `Client.ListEvents` or `GET /v1/app/events`, then save the returned cursor after processing the facts idempotently. Reading never registers a consumer or changes delivery state. See [the retained event log](docs/event-log.md). The older ACK-based routes remain temporarily while existing integrations migrate.
+OpenRails records customer billing facts; your application renders and sends receipts and payment notices. Read them through `Client.ListEvents` or `GET /v1/app/events`, then save the returned cursor after processing the facts idempotently. Reading never registers a consumer or changes delivery state. See [the retained event log](docs/event-log.md).
 
 #### PSP webhooks
 

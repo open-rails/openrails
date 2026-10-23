@@ -119,35 +119,32 @@ func TestUsageBatchesAnswerPerItem(t *testing.T) {
 	require.Equal(t, billing.CodeApplicationRequired, body["error"].(map[string]any)["code"])
 }
 
-// A drained page of host events is acknowledged in one call; an unknown id
-// answers null and acknowledging again changes nothing.
-func TestHostEventsAcknowledgeInBatches(t *testing.T) {
+// Independent HTTP/native readers hold their own immutable stream positions.
+func TestHostEventsHaveIndependentCursors(t *testing.T) {
 	w := newWorld(t)
 	for range 2 {
 		c := w.newCustomer()
-		entitlement := "post:ack-" + uuidShort()
+		entitlement := "post:cursor-" + uuidShort()
 		c.buy(w.permanent(entitlement).ID.String(), entitlement, c.saveCard("stripe", visa))
 	}
-	client := w.client[embedded]
-	page, err := client.ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventPaymentSettled})
+	query := billing.EventQuery{Types: []string{string(billing.HostEventPaymentSettled)}, Limit: 1}
+	first, err := w.client[embedded].ListEvents(t.Context(), query)
 	require.NoError(t, err)
-	require.Len(t, page.Items, 2)
-	unknown := billing.HostEventID(uuid.New())
-	ids := []billing.HostEventID{page.Items[0].ID, unknown, page.Items[1].ID}
-	acked, err := w.client[remote].AcknowledgeHostEvents(t.Context(), ids)
+	require.Len(t, first.Events, 1)
+	require.True(t, first.HasMore)
+	independent, err := w.client[remote].ListEvents(t.Context(), query)
 	require.NoError(t, err)
-	require.Len(t, acked, 3)
-	require.Nil(t, acked[unknown])
-	for _, event := range page.Items {
-		require.NotNil(t, acked[event.ID].AcknowledgedAt)
-		require.NotNil(t, acked[event.ID].Payment, "the acknowledged event keeps its payload")
-	}
-	again, err := client.AcknowledgeHostEvents(t.Context(), ids[:1])
+	require.Equal(t, first, independent)
+	query.After = first.NextCursor
+	next, err := w.client[embedded].ListEvents(t.Context(), query)
 	require.NoError(t, err)
-	require.Equal(t, acked[ids[0]].AcknowledgedAt, again[ids[0]].AcknowledgedAt, "acknowledging again changes nothing")
-	pending, err := client.ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventPaymentSettled})
+	require.Len(t, next.Events, 1)
+	require.NotEqual(t, first.Events[0].ID, next.Events[0].ID)
+	require.False(t, next.HasMore)
+	query.After = ""
+	replay, err := w.client[remote].ListEvents(t.Context(), query)
 	require.NoError(t, err)
-	require.Empty(t, pending.Items)
+	require.Equal(t, first, replay, "another reader never consumes the source")
 }
 
 // A usage source identity owns its receipt. Equivalent JSON retries and a

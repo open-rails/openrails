@@ -409,17 +409,14 @@ or `{full: true}`, an optional `reason`, and an explicit `revoke_access`.
 automatic refund is `400 refund_unsupported`; one that cannot take it now is
 `409 refund_rail_unavailable`.
 
-## Host events
+## Retained events
 
-`GET /v1/app/host-events` is the feed a host's backend drains: `payment.settled`,
-`delinquency.grace`, `delinquency.entered`, `delinquency.cleared`,
-`balance.low`, `balance.depleted` ([balance notices](../balance-notices.md)),
-`mandate.revoked` ([charge agreements](../agreements.md)), oldest
-first, filtered by `type`. Acknowledge them, up to 100 at a time
-(`POST /v1/app/host-events/acknowledge`), after the host's own
-processing commits, then fetch again. Acknowledgment is idempotent and
-independent of notification read state. Acknowledged events are kept 30 days;
-pending ones are never deleted.
+`GET /v1/app/events` returns committed merchant facts such as `payment.settled`,
+`delinquency.*`, `balance.*` and `mandate.revoked`. Use `after` plus optional
+repeated `type` filters, then persist the returned `next_cursor` only after your
+idempotent work is durable. Readers never register or acknowledge source facts.
+Default retention is 90 days; expired history returns an explicit 410. See
+[the event log contract](../event-log.md).
 
 ## Provider webhooks
 

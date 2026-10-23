@@ -410,12 +410,7 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	_, err = createCreditGrant(t.Context(), c, buyer.cid(), billing.CreateCreditGrantParams{Amount: 2_000_000, Currency: "USD", Source: "archive-catalog", SourceID: "retained-credit"})
 	require.NoError(t, err)
 	w.settle()
-	events, err := c.ListHostEvents(t.Context(), billing.HostEventListParams{})
-	require.NoError(t, err)
-	for _, event := range events.Items {
-		_, err = c.AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-		require.NoError(t, err)
-	}
+
 	merchantID := c.MerchantID()
 	w.stop()
 	// The archive carries the same explicitly provisioned identity into its

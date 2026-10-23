@@ -261,8 +261,13 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	}
 	if network.Enabled(akCfg) {
 		rt := s.graph.Runtime
-		if s.network, err = network.New(rt.DB, ak, rt.AbuseState, rt.Clock.Now); err != nil {
+		// Identity proof lifetime and AuthKit event times use wall time; a
+		// simulated billing clock must not advance or expire account proofs.
+		if s.network, err = network.New(rt.DB, ak, rt.AbuseState, nil, akCfg.DefaultTenantID, akCfg.Token.Issuer); err != nil {
 			_ = ak.Close(context.WithoutCancel(ctx))
+			return fail(err)
+		}
+		if err := rt.AddRiverContribution(s.network.RiverJobs()); err != nil {
 			return fail(err)
 		}
 		rt.Network = s.network

@@ -47,6 +47,33 @@ cursor. HTTP 400 `invalid_cursor` means malformed input or a merchant/filter
 mismatch. Cursors are not credentials. They are portable positions only within
 the same deployment history; merchant archives exclude the log and its cursors.
 
-The older host-event and notification-consumer ACK routes are transitional.
-New integrations should use this log. Provider execution, account cleanup and
-other actual domain work remain separate from reading facts.
+The old host-event and notification-consumer ACK routes are removed. The
+private host and notification tables remain producer deduplication journals,
+retained from ingestion for at least 90 days and never less than event_retention.
+They contain no reader offsets or acknowledgments. Provider execution, account
+cleanup and other actual domain work remain separate from reading facts.
+
+### Standalone customer-network account events
+
+When the optional customer network is enabled, the server polls its configured
+AuthKit account tenant once a minute, at most 100 committed facts per pass.
+`billing.network_event_cursors` belongs to the server. Link changes and that
+cursor commit in one billing transaction, so retries cannot reorder projection
+changes. A replayed revocation predating a newly proved link cannot revoke
+that newer relationship. Account proof times use the same wall-clock domain
+as AuthKit, independently of a simulated billing clock. This is not a source registration or an acknowledgment. Other embedded
+apps do not run this job. The normal credential, consent and deletion checks
+still run on requests; a payment-page proof's displayed network link follows the
+bounded background projection.
+
+A lost cursor stops this reader with an explicit error. **Do not delete the
+cursor alone:** retained history might no longer contain a revoked independent
+payment-page proof. Restore a matching AuthKit history and server cursor when
+possible. If the history cannot be recovered, take the network offline, revoke
+all its active customer links in a controlled repair transaction (emit the
+usual `customer.network_unlinked` facts), and only then clear this authority's
+cursor. Resume reading from the oldest retained fact and require new proofs to
+link independent payment-page accounts again. Customer records, subscriptions
+and payments remain intact. Apply the same procedure before replacing the
+configured account issuer or tenant; those identities cannot inherit an old
+network projection merely because UUIDs happen to match.

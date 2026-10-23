@@ -40,7 +40,7 @@ open `usage_order`.
 
 ## What the merchant and the customer are told
 
-- The merchant gets the host event `mandate.revoked` (`GET /v1/app/host-events`):
+- The merchant gets the host event `mandate.revoked` (`GET /v1/app/events`):
   `mandate_id`, `kind`, `customer_id`, `currency` and, for `recurring`,
   `subscription_id`.
 - OpenRails records a customer notification event describing the cancellation

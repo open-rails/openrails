@@ -134,15 +134,14 @@ type DelinquencyHostEvent struct {
 	AmountFloor      int64      `json:"amount_floor,string"`
 }
 
-// HostEvent has exactly one payload, selected by Type. Acknowledgment is a
-// durable consumer action; it never changes a customer or merchant notification.
+// HostEvent is a typed host-fact projection with one payload selected by Type.
+// The retained Event log is the transport; reading never mutates a fact.
 type HostEvent struct {
 	DestructiveHold *DestructiveHoldEvent `json:"destructive_hold"`
 	ID              HostEventID           `json:"id"`
 	MerchantID      MerchantID            `json:"merchant_id"`
 	Type            HostEventType         `json:"type"`
 	OccurredAt      time.Time             `json:"occurred_at"`
-	AcknowledgedAt  *time.Time            `json:"acknowledged_at"`
 	Payment         *PaymentSettledEvent  `json:"payment"`
 	Delinquency     *DelinquencyHostEvent `json:"delinquency"`
 	// ProductEntitlements is set for product.entitlements_changed.
@@ -155,32 +154,4 @@ type HostEvent struct {
 	Mandate *MandateHostEvent `json:"mandate"`
 	// Balance is set for balance.low and balance.depleted.
 	Balance *BalanceHostEvent `json:"balance"`
-}
-
-// AcknowledgeHostEventsParams names 1 to MaxBatchItems host events to
-// acknowledge.
-type AcknowledgeHostEventsParams struct {
-	HostEventIDs []HostEventID `json:"host_event_ids"`
-}
-
-// HostEventLookup answers every requested host event; one that does not exist
-// is null.
-type HostEventLookup struct {
-	HostEvents map[HostEventID]*HostEvent `json:"host_events"`
-}
-
-// HostEventListParams pages the merchant's host events, oldest first:
-// unacknowledged ones unless IncludeAcknowledged. A consumer can select its
-// event type so unrelated pending events cannot starve its work. Acknowledge
-// processed events and list again from the start; a cursor is for reading
-// history, never a high-water mark.
-//
-// IDs instead reads 1 to MaxBatchItems named events in one page, acknowledged
-// or not; unknown ones are absent.
-type HostEventListParams struct {
-	PageRequest
-	IDs                 []HostEventID
-	Type                HostEventType
-	IncludeAcknowledged bool
-	PaymentID           PaymentID
 }

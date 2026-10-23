@@ -58,12 +58,7 @@ func purchasedCreditArchive(t *testing.T, rail string) {
 		available += grant.RemainingAmount
 	}
 	require.Equal(t, int64(100_000_000), available, "only the unrefunded deposit remains spendable")
-	events, err := c.ListHostEvents(t.Context(), billing.HostEventListParams{})
-	require.NoError(t, err)
-	for _, event := range events.Items {
-		_, err = c.AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-		require.NoError(t, err)
-	}
+
 	merchantID := c.MerchantID()
 	w.stop()
 	source, err := db.NewWithPGXPool(w.pool, w.schema)

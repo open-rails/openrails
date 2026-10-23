@@ -30,12 +30,7 @@ func TestNMISameCardRecoveryArchiveRestore(t *testing.T) {
 	require.Len(t, source.nmi.Attempts(), 1)
 	source.settle()
 	client := source.client[embedded]
-	events, err := client.ListHostEvents(t.Context(), billing.HostEventListParams{})
-	require.NoError(t, err)
-	for _, event := range events.Items {
-		_, err = client.AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-		require.NoError(t, err)
-	}
+
 	source.stop()
 	validations := len(source.nmi.Validations(l.railCust))
 	mid := client.MerchantID()

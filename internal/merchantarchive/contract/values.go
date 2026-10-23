@@ -252,9 +252,6 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "webhook_events" && value(p, values, "completed_at") == nil {
 		return fmt.Errorf("unfinished webhook event")
 	}
-	if p.Name == "host_outbox" && value(p, values, "delivered_at") == nil {
-		return fmt.Errorf("undelivered host event")
-	}
 	if p.Name == "provider_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")

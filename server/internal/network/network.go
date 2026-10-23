@@ -55,24 +55,26 @@ func Enabled(cfg authkit.Config) bool {
 
 // Service is the customer network.
 type Service struct {
-	db    *db.DB
-	ak    *authkit.Client
-	store *abusestate.Store
-	now   func() time.Time
+	db     *db.DB
+	ak     *authkit.Client
+	store  *abusestate.Store
+	now    func() time.Time
+	tenant iam.TenantID
+	issuer string
 }
 
 var _ customernetwork.Network = (*Service)(nil)
 
 // New is the network over the engine's database, the server's AuthKit and
 // the short-lived store challenges live in.
-func New(database *db.DB, ak *authkit.Client, store *abusestate.Store, now func() time.Time) (*Service, error) {
-	if database == nil || ak == nil || store == nil {
-		return nil, errors.New("network: database, AuthKit and the abuse store are required")
+func New(database *db.DB, ak *authkit.Client, store *abusestate.Store, now func() time.Time, tenant iam.TenantID, issuer string) (*Service, error) {
+	if database == nil || ak == nil || store == nil || tenant.IsZero() || issuer == "" {
+		return nil, errors.New("network: database, AuthKit, abuse store and account authority are required")
 	}
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{db: database, ak: ak, store: store, now: now}, nil
+	return &Service{db: database, ak: ak, store: store, now: now, tenant: tenant, issuer: issuer}, nil
 }
 
 var (

@@ -5,10 +5,11 @@ package subscriptions_test
 import (
 	"bytes"
 	"errors"
-	"github.com/google/uuid"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -38,17 +39,7 @@ func TestDunningPolicyArchiveRestore(t *testing.T) {
 			require.Equal(t, 24*time.Hour, nextRetry(sub).Sub(first).Round(time.Hour))
 			source.settle()
 			client := source.client[embedded]
-			for {
-				events, err := client.ListHostEvents(t.Context(), billing.HostEventListParams{})
-				require.NoError(t, err)
-				if len(events.Items) == 0 {
-					break
-				}
-				for _, event := range events.Items {
-					_, err = client.AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-					require.NoError(t, err)
-				}
-			}
+
 			source.stop()
 			attempts := e.providerAttempts()
 			providerCalls := len(source.nmi.Calls())

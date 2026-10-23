@@ -3,6 +3,7 @@
 package ci_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/testevents"
 	"github.com/open-rails/openrails/internal/vaultfake"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 	"github.com/open-rails/openrails/server"
@@ -104,10 +106,9 @@ merchants:
 	paid := me(http.MethodPost, "/orders", map[string]any{"lines": []any{map[string]any{"price_id": price.ID}}, "expected_total": "9990000", "payment": map[string]any{"payment_method_id": card}})
 	require.Equal(t, "complete", paid["status"], "%v", paid)
 
-	consumer, err := srv.NotificationEvents("contact-claims-test")
-	require.NoError(t, err)
-	require.NoError(t, consumer.Register(ctx))
-	events, err := consumer.Pending(ctx, 100)
+	events, err := testevents.ReadNotifications(ctx, func(ctx context.Context, query billing.EventQuery) (*billing.EventPage, error) {
+		return srv.ListEvents(ctx, m.ID, query)
+	})
 	require.NoError(t, err)
 	require.NotEmpty(t, events, "purchase emits source facts, not customer email")
 	require.Equal(t, user, events[0].CustomerID.String())

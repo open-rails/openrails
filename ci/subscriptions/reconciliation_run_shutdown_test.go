@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/failpoint"
@@ -45,17 +44,7 @@ func TestCanceledReconciliationRunDoesNotStrandArchive(t *testing.T) {
 	w.settleCollectionScans()
 	w.settle()
 	mid, psp := w.client[embedded].MerchantID(), w.psp["nmi"]
-	for {
-		events, err := w.client[embedded].ListHostEvents(t.Context(), billing.HostEventListParams{})
-		require.NoError(t, err)
-		if len(events.Items) == 0 {
-			break
-		}
-		for _, event := range events.Items {
-			_, err = w.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-			require.NoError(t, err)
-		}
-	}
+
 	require.NoError(t, w.jobs.Stop(t.Context()))
 	w.stop()
 	database, err := db.NewWithPGXPool(w.pool, w.schema)

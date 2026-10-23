@@ -3,16 +3,11 @@ package server
 import (
 	"context"
 	"fmt"
-	"github.com/open-rails/openrails"
+	"net/http"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/routes"
-	"net/http"
 )
-
-// NotificationEvents binds the host's independent global notification consumer.
-func (s *Server) NotificationEvents(name string) (*openrails.NotificationConsumer, error) {
-	return s.engine.NotificationEvents(name)
-}
 
 // NetworkAccountHandler admits only this server's native self-acting users who
 // accepted network terms. The hosted application owns next and its inbox API.

@@ -81,17 +81,7 @@ func copyStripeBook(t *testing.T, armBoth bool) (*engineCase, *engineCase, *cloc
 	one.refreshBeforePeriodEnd()
 	a.settle()
 	merchantID := a.client[embedded].MerchantID()
-	for {
-		events, err := a.client[embedded].ListHostEvents(t.Context(), billing.HostEventListParams{})
-		require.NoError(t, err)
-		if len(events.Items) == 0 {
-			break
-		}
-		for _, event := range events.Items {
-			_, err := a.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-			require.NoError(t, err)
-		}
-	}
+
 	a.stop()
 	sourceDB, err := db.NewWithPGXPool(a.pool, a.schema)
 	require.NoError(t, err)

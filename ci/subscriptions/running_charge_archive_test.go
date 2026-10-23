@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/testevents"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
@@ -25,7 +27,7 @@ import (
 )
 
 // A merchant archive carries running charges as they stand, a running one
-// included, with the balance events the host acknowledged, and a restore
+// included, with the retained balance events, and a restore
 // watches every running one again: the watch is derived, not archived.
 func TestRunningChargesSurviveAMerchantArchive(t *testing.T) {
 	for _, at := range []struct {
@@ -66,7 +68,7 @@ func runningChargesSurviveArchiveAt(t *testing.T, sinceMidnight time.Duration) {
 	start("archive-running")
 
 	// A customer already past its balance: the watcher tells the host, which
-	// acknowledges the event before the cutover.
+	// retains the event across the cutover.
 	broke := w.newCustomer()
 	_, err = c.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{
 		Reference: "archive-depleted", CustomerID: broke.cid(), Currency: "USD", RatePerHour: 3_600_000, StartedAt: &startedAt,
@@ -74,7 +76,7 @@ func runningChargesSurviveArchiveAt(t *testing.T, sinceMidnight time.Duration) {
 	require.NoError(t, err)
 	watcher := riverjobs.BalanceWatchWorker{DB: engine.Graph(w.rt).Runtime.DB, Money: engine.Graph(w.rt).Runtime.MoneyService}
 	require.NoError(t, watcher.Work(t.Context(), &river.Job[riverjobs.BalanceWatchArgs]{}))
-	events, err := c.ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventBalanceDepleted})
+	events, err := testevents.Hosts(t.Context(), c, billing.HostEventBalanceDepleted)
 	require.NoError(t, err)
 	require.Len(t, events.Items, 1)
 	require.Equal(t, broke.cid(), events.Items[0].Balance.CustomerID)
@@ -84,14 +86,9 @@ func runningChargesSurviveArchiveAt(t *testing.T, sinceMidnight time.Duration) {
 	fmt.Printf("archive balance at %s: available=%d owed=%d\n", balance.AsOf.UTC().Format(time.RFC3339), balance.AvailableAmount, balance.OwedAmount)
 	require.EqualValues(t, -3_600_000, balance.AvailableAmount-balance.OwedAmount)
 	// The built-in 24-hour runway has told the host of the low balances too.
-	low, err := c.ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventBalanceLow})
+	low, err := testevents.Hosts(t.Context(), c, billing.HostEventBalanceLow)
 	require.NoError(t, err)
-	acks := []billing.HostEventID{events.Items[0].ID}
-	for _, e := range low.Items {
-		acks = append(acks, e.ID)
-	}
-	_, err = c.AcknowledgeHostEvents(t.Context(), acks)
-	require.NoError(t, err)
+	require.NotEmpty(t, low.Items)
 	// A customer's own low-balance line travels with the merchant.
 	lineAmount := int64(3_000_000)
 	_, err = c.UpdateCustomer(t.Context(), payer.cid(), billing.UpdateCustomerParams{LowBalanceLines: []billing.LowBalanceLine{{Currency: "USD", Amount: &lineAmount}}})
@@ -132,7 +129,7 @@ func runningChargesSurviveArchiveAt(t *testing.T, sinceMidnight time.Duration) {
 	}
 	original := pgx.Identifier{w.schema}.Sanitize()
 	require.JSONEq(t, rows(original, "running_charges", "id"), rows(quoted, "running_charges", "id"), "every charge, exactly as it stood")
-	require.JSONEq(t, rows(original, "host_outbox", "id"), rows(quoted, "host_outbox", "id"), "the acknowledged balance event")
+	require.JSONEq(t, rows(original, "host_outbox", "id"), rows(quoted, "host_outbox", "id"), "the retained balance event")
 	require.JSONEq(t, rows(original, "customer_low_balance_lines", "customer_id"), rows(quoted, "customer_low_balance_lines", "customer_id"), "the customer's line")
 	require.Contains(t, rows(quoted, "customer_low_balance_lines", "customer_id"), `"amount": 3000000`)
 	var watched, due int

@@ -70,8 +70,6 @@ const (
 	// once read, 180 days if never read.
 	NotificationsRead   = 90 * Day
 	NotificationsUnread = 180 * Day
-	// DeliveredHostEvents keeps an acknowledged host event 30 days.
-	DeliveredHostEvents = 30 * Day
 	// RevokedCustomerLinks keeps a revoked customer link 24 months.
 	RevokedCustomerLinks = 731 * Day
 )

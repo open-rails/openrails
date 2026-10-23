@@ -473,3 +473,10 @@ func syncRateCard(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, spe
 		ID: id, CreatedAt: created, Overwrite: overwrite,
 	})
 }
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/testevents"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/userinfo"
 	"github.com/open-rails/helpers/smtp/smtptest"
@@ -86,7 +88,7 @@ func TestRevokingAgreements(t *testing.T) {
 	require.Nil(t, live[billing.MandateUnscheduled]["subscription"])
 	require.Equal(t, card, live[billing.MandateUnscheduled]["payment_method_id"])
 	revoked := func(kind billing.MandateKind) []billing.MandateHostEvent {
-		events, err := client.ListHostEvents(ctx, billing.HostEventListParams{Type: billing.HostEventMandateRevoked})
+		events, err := testevents.Hosts(ctx, client, billing.HostEventMandateRevoked)
 		require.NoError(t, err)
 		var out []billing.MandateHostEvent
 		for _, ev := range events.Items {

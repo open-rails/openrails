@@ -12,26 +12,26 @@ import (
 	"github.com/google/uuid"
 )
 
-const deleteDeliveredHostLifecycleEventsBefore = `-- name: DeleteDeliveredHostLifecycleEventsBefore :execrows
+const deleteHostLifecycleEventsBefore = `-- name: DeleteHostLifecycleEventsBefore :execrows
 DELETE FROM billing.host_outbox
 WHERE ctid IN (
     SELECT hle.ctid FROM billing.host_outbox hle
     WHERE hle.merchant_id = $1::uuid
-      AND hle.event_type <> 'payment.settled' AND hle.delivered_at IS NOT NULL
-      AND hle.delivered_at < $2::timestamptz
+      AND hle.event_type <> 'payment.settled'
+      AND hle.recorded_at < $2::timestamptz
     LIMIT $3::int
 )
 `
 
-type DeleteDeliveredHostLifecycleEventsBeforeParams struct {
+type DeleteHostLifecycleEventsBeforeParams struct {
 	MerchantID uuid.UUID
 	Cutoff     time.Time
 	RowLimit   int32
 }
 
 // Batched: row_limit bounds one statement, the caller loops.
-func (q *Queries) DeleteDeliveredHostLifecycleEventsBefore(ctx context.Context, arg DeleteDeliveredHostLifecycleEventsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteDeliveredHostLifecycleEventsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+func (q *Queries) DeleteHostLifecycleEventsBefore(ctx context.Context, arg DeleteHostLifecycleEventsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteHostLifecycleEventsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -60,10 +60,8 @@ type EnqueueHostLifecycleEventParams struct {
 	DedupeKey   string
 }
 
-// Delinquency writes to host_outbox: merchant-scoped, explicitly acked, pruned
-// after delivery. A missed cut-off is a revenue leak and a missed restore an
-// outage, so neither is a fire-and-forget webhook. Hosts read and ack through
-// host_events.sql.
+// Private typed producer journal for idempotent financial transitions.
+// Public readers use event_log; this table has no delivery state.
 // Idempotent on the transition's dedupe key: re-announcing a transition is a
 // no-op, never a second instruction to the host.
 func (q *Queries) EnqueueHostLifecycleEvent(ctx context.Context, arg EnqueueHostLifecycleEventParams) (int64, error) {

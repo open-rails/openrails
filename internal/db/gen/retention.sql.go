@@ -347,15 +347,15 @@ FROM (
     (SELECT DISTINCT pse.merchant_id AS mid
        FROM billing.host_outbox pse
       WHERE ($1::uuid IS NULL OR pse.merchant_id > $1::uuid)
-        AND pse.event_type = 'payment.settled' AND pse.delivered_at IS NOT NULL
-        AND pse.delivered_at < $7::timestamptz
+        AND pse.event_type = 'payment.settled'
+        AND pse.recorded_at < $7::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT hle.merchant_id AS mid
        FROM billing.host_outbox hle
       WHERE ($1::uuid IS NULL OR hle.merchant_id > $1::uuid)
-        AND hle.event_type <> 'payment.settled' AND hle.delivered_at IS NOT NULL
-        AND hle.delivered_at < $8::timestamptz
+        AND hle.event_type <> 'payment.settled'
+        AND hle.recorded_at < $8::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT pa.merchant_id AS mid

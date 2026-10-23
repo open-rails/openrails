@@ -33,15 +33,15 @@ FROM (
     (SELECT DISTINCT pse.merchant_id AS mid
        FROM billing.host_outbox pse
       WHERE (sqlc.narg(after)::uuid IS NULL OR pse.merchant_id > sqlc.narg(after)::uuid)
-        AND pse.event_type = 'payment.settled' AND pse.delivered_at IS NOT NULL
-        AND pse.delivered_at < sqlc.arg(settlement_cutoff)::timestamptz
+        AND pse.event_type = 'payment.settled'
+        AND pse.recorded_at < sqlc.arg(settlement_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT hle.merchant_id AS mid
        FROM billing.host_outbox hle
       WHERE (sqlc.narg(after)::uuid IS NULL OR hle.merchant_id > sqlc.narg(after)::uuid)
-        AND hle.event_type <> 'payment.settled' AND hle.delivered_at IS NOT NULL
-        AND hle.delivered_at < sqlc.arg(lifecycle_cutoff)::timestamptz
+        AND hle.event_type <> 'payment.settled'
+        AND hle.recorded_at < sqlc.arg(lifecycle_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT pa.merchant_id AS mid

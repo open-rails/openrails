@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/testevents"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
@@ -161,7 +163,7 @@ func (w *chargeWorld) watched(customer billing.CustomerID) *gen.BillingBalanceWa
 // events are the customer's host events of one type, oldest first.
 func (w *chargeWorld) events(eventType billing.HostEventType, customer billing.CustomerID) []billing.BalanceHostEvent {
 	w.t.Helper()
-	page, err := w.client.ListHostEvents(w.ctx, billing.HostEventListParams{Type: eventType, PageRequest: billing.PageRequest{Limit: billing.MaxPageLimit}})
+	page, err := testevents.Hosts(w.ctx, w.client, eventType)
 	require.NoError(w.t, err)
 	var out []billing.BalanceHostEvent
 	for _, event := range page.Items {
@@ -1089,7 +1091,7 @@ func TestBalanceWatcherRunsOnTheEnginesRiver(t *testing.T) {
 
 	require.NoError(t, bill.Start(t.Context()))
 	require.Eventually(t, func() bool {
-		page, err := client.ListHostEvents(ctx, billing.HostEventListParams{Type: billing.HostEventBalanceDepleted})
+		page, err := testevents.Hosts(ctx, client, billing.HostEventBalanceDepleted)
 		return err == nil && len(page.Items) == 1 && page.Items[0].Balance.CustomerID == customer
 	}, 45*time.Second, 200*time.Millisecond, "the pass at start, or the next one 30 seconds on")
 	page, err := client.ListRunningCharges(ctx, billing.RunningChargeListParams{Depleted: true})

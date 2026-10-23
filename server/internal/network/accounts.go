@@ -158,10 +158,13 @@ func (s *Service) revoke(ctx context.Context, row gen.BillingCustomerLink, by bi
 	return out, err
 }
 
-// OnEvent follows the account's AuthKit changes: a revoked consent to a
+// applyEvent follows the account's retained AuthKit changes: a revoked consent to a
 // merchant's client unlinks that merchant; accepting the network terms links
 // the merchants whose client signs the account in as their own customer.
-func (s *Service) OnEvent(ctx context.Context, e iam.Event) error {
+func (s *Service) applyEvent(ctx context.Context, e iam.Event) error {
+	if e.TenantID != s.tenant {
+		return fmt.Errorf("network: event belongs to a different account tenant")
+	}
 	switch e.Kind {
 	case iam.EventOAuthConsentRevoked:
 		mid, err := billing.ParseMerchantID(e.GroupID)
@@ -169,12 +172,17 @@ func (s *Service) OnEvent(ctx context.Context, e iam.Event) error {
 		if e.GroupID == "" || err != nil || aerr != nil {
 			return nil
 		}
-		row, err := s.db.GenDirectory().GetActiveCustomerLinkByAccount(ctx, gen.GetActiveCustomerLinkByAccountParams{AccountID: account, MerchantID: mid.UUID()})
+		row, err := s.db.Gen(ctx).GetActiveCustomerLinkByAccount(ctx, gen.GetActiveCustomerLinkByAccountParams{AccountID: account, MerchantID: mid.UUID()})
 		switch {
 		case db.IsNotFound(err):
 			return nil
 		case err != nil:
 			return err
+		}
+		// This fact may be replayed after a later, freshly proved link was
+		// created. An earlier revocation cannot revoke that new relationship.
+		if row.LinkedAt.After(e.OccurredAt) {
+			return nil
 		}
 		_, err = s.revoke(ctx, row, billing.CustomerLinkRevokedByCustomer)
 		return err
@@ -182,7 +190,19 @@ func (s *Service) OnEvent(ctx context.Context, e iam.Event) error {
 		if e.Agreement != TermsAgreement {
 			return nil
 		}
-		return s.linkSignedIn(ctx, e.UserID)
+		// Retained acceptances may predate soft deletion. Never recreate a
+		// deleted account's links while its later purge is being completed.
+		if _, err := s.ak.User(ctx, iam.UserByID(e.UserID)); err != nil {
+			if errors.Is(err, iam.ErrUserNotFound) {
+				return nil
+			}
+			return err
+		}
+		err := s.linkSignedIn(ctx, e.UserID)
+		if errors.Is(err, iam.ErrUserNotFound) {
+			return nil // A retained acceptance never recreates a purged account link.
+		}
+		return err
 	}
 	return nil
 }
@@ -221,6 +241,9 @@ func (s *Service) linkSignedIn(ctx context.Context, account string) error {
 
 // OnPurge revokes a deleted account's links.
 func (s *Service) OnPurge(ctx context.Context, d iam.UserDeletion) error {
+	if d.TenantID != s.tenant {
+		return nil
+	}
 	account, err := uuid.Parse(d.UserID)
 	if err != nil {
 		return nil

@@ -72,7 +72,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `internal_error` | 500 | `api_error` | OpenRails failed; request_id identifies the failure in its logs. |
 | `invalid_cursor` | 400 | `invalid_request_error` | The cursor is not one this list issued. |
 | `invalid_customer_id` | 400 | `invalid_request_error` | The customer id is missing or malformed. |
-| `invalid_host_event_request` | 400 | `invalid_request_error` | The host event request is invalid. |
 | `invalid_param` | 400 | `invalid_request_error` | The request is malformed or a parameter is invalid; param names the parameter when known. |
 | `invalid_payment_method` | 400 | `invalid_request_error` | The payment method is not eligible for this operation. |
 | `invalid_psp_reference` | 400 | `invalid_request_error` | The PSP reference is invalid. |

@@ -11,14 +11,6 @@ export type AccessTenure = {
   seconds: Record<string, number> | null
 }
 
-export type AcknowledgeHostEventsParams = {
-  host_event_ids?: string[]
-}
-
-export type AcknowledgeNotificationEventsParams = {
-  notification_ids?: string[]
-}
-
 export type AdminAccess = {
   admin: "none" | "read" | "update"
   catalog: "none" | "read" | "update"
@@ -211,19 +203,6 @@ export type Balance = {
   accrual_rate_per_hour: string
   as_of: string
   depletes_at: string | null
-}
-
-export type BalanceHostEvent = {
-  customer_id: string
-  currency: string
-  available_amount: string
-  owed_amount: string
-  accrual_rate_per_hour: string
-  usage_rate_per_hour: string
-  low_balance_amount: string
-  as_of: string
-  depletes_at: string | null
-  runway_ends_at: string | null
 }
 
 export type BalanceNoticeAmount = {
@@ -803,13 +782,6 @@ export type CustomerNetwork = {
   method: "connect" | "payment_page" | "sign_in"
 }
 
-export type CustomerNetworkHostEvent = {
-  customer_id: string
-  account_id: string
-  method: "connect" | "payment_page" | "sign_in" | null
-  revoked_by: "account_deleted" | "customer" | "merchant_left" | null
-}
-
 export type CustomerSettings = {
   credit_limits: CreditLimit[]
   trust_levels: TrustLevel[]
@@ -1011,18 +983,6 @@ export type DefaultPaymentMethod = {
   payment_method_id: string
 }
 
-export type DelinquencyHostEvent = {
-  customer_id: string
-  currency: string
-  from_state: string
-  to_state: string
-  overdue_started_at?: string
-  overdue_amount: string
-  overdue_orders: number
-  grace_days: number
-  amount_floor: string
-}
-
 export type DestructiveHold = {
   id: string
   merchant_id: string
@@ -1034,11 +994,6 @@ export type DestructiveHold = {
   ceiling: number
   opened_at: string
   cleared_at: string | null
-}
-
-export type DestructiveHoldEvent = {
-  hold_id: string
-  scope: string
 }
 
 export type DriftField = {
@@ -1199,26 +1154,6 @@ export type HeldEntitlements = {
   truncated: boolean
 }
 
-export type HostEvent = {
-  destructive_hold: DestructiveHoldEvent | null
-  id: string
-  merchant_id: string
-  type: "balance.depleted" | "balance.low" | "customer.network_linked" | "customer.network_unlinked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "destructive.hold_cleared" | "destructive.hold_opened" | "mandate.revoked" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
-  occurred_at: string
-  acknowledged_at: string | null
-  payment: PaymentSettledEvent | null
-  delinquency: DelinquencyHostEvent | null
-  product_entitlements: ProductEntitlementsChangedEvent | null
-  order: OrderHostEvent | null
-  customer_network: CustomerNetworkHostEvent | null
-  mandate: MandateHostEvent | null
-  balance: BalanceHostEvent | null
-}
-
-export type HostEventLookup = {
-  host_events: Record<string, HostEvent | null> | null
-}
-
 export type InvoiceContact = {
   name: string
   email: string
@@ -1261,15 +1196,6 @@ export type Mandate = {
   storing_attempt_id: string | null
   accepted_at: string
   created_at: string
-}
-
-export type MandateHostEvent = {
-  mandate_id: string
-  kind: "card_on_file" | "recurring" | "unscheduled"
-  customer_id: string
-  currency: string
-  subscription_id: string | null
-  revoked_at: string
 }
 
 export type Matrix = {
@@ -1475,21 +1401,6 @@ export type NextAction = {
   payload: Record<string, string> | null
 }
 
-export type NotificationEvent = {
-  id: string
-  merchant_id: string
-  customer_id: string
-  event_type: string
-  data: unknown | null
-  created_at: string
-  action_requested?: boolean
-  optional?: boolean
-}
-
-export type NotificationEvents = {
-  data: NotificationEvent[]
-}
-
 export type Order = {
   id: string
   customer_id: string
@@ -1519,17 +1430,6 @@ export type Order = {
   voided_at: string | null
   uncollectible_at: string | null
   created_at: string
-}
-
-export type OrderHostEvent = {
-  order_id: string
-  customer_id: string
-  status: "canceled" | "complete" | "expired" | "open" | "processing" | "uncollectible" | "void"
-  payment_status: "processing" | "requires_action" | "requires_payment_method" | "succeeded"
-  total: string
-  currency: string
-  number: number | null
-  payment_id: string | null
 }
 
 export type OrderLine = {
@@ -1926,15 +1826,6 @@ export type PaymentRecovery = {
   order_id?: string
 }
 
-export type PaymentSettledEvent = {
-  payment_id: string
-  customer_id: string
-  order_id?: string
-  subscription_id?: string
-  amount: string
-  currency: string
-}
-
 export type PerUnitPrice = {
   unit_amount?: string
   divide_by?: number
@@ -2105,14 +1996,6 @@ export type ProductAccessGrant = {
   revoke_reason: string | null
   created_at: string
   updated_at: string
-}
-
-export type ProductEntitlementsChangedEvent = {
-  product_id: string
-  product_key: string
-  added: string[]
-  removed: string[]
-  holders: number
 }
 
 export type ProductSummary = {

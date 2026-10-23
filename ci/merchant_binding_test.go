@@ -232,7 +232,7 @@ func TestBoundScopeOfNoMerchantIsRefused(t *testing.T) {
 		{http.MethodGet, "/v1/me"},
 		{http.MethodGet, "/v1/merchant/findings"},
 		{http.MethodGet, "/v1/admin/access"},
-		{http.MethodGet, "/v1/app/host-events"},
+		{http.MethodGet, "/v1/app/events"},
 		{http.MethodGet, "/v1/app/scim/v2/Users"},
 	}
 	for name, scope := range map[string]billingauth.Scope{

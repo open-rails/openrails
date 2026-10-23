@@ -72,12 +72,7 @@ func TestManualHyperSwitchCardRemoval(t *testing.T) {
 			m.hs.mu.Unlock()
 			status, out = m.c.call(http.MethodDelete, "/payment-methods/"+id, "", nil)
 			require.Equal(t, http.StatusNoContent, status, "%v", out)
-			events, err := w.client[embedded].ListHostEvents(t.Context(), billing.HostEventListParams{})
-			require.NoError(t, err)
-			for _, event := range events.Items {
-				_, err = w.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-				require.NoError(t, err)
-			}
+
 			require.NoError(t, w.exportArchive(), "retained removal history must remain exportable")
 		})
 	}

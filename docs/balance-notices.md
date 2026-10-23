@@ -71,7 +71,7 @@ Changing a customer's line re-arms its low notice.
 
 ## Host events
 
-[`GET /v1/app/host-events`](api/endpoints.md#host-events) carries `balance`:
+[`GET /v1/app/events`](event-log.md) carries the balance payload in `data`:
 
 | Field | |
 | --- | --- |

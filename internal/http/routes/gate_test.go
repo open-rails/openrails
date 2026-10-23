@@ -540,19 +540,19 @@ func TestStaffGate(t *testing.T) {
 	// permission: a person is refused, whatever their roles grant or their
 	// credential is.
 	for _, who := range []billingauth.Identity{person, personalKey} {
-		got = runRoute(t, rt, &recordingAuth{who: who}, "GET /v1/app/host-events", nil)
+		got = runRoute(t, rt, &recordingAuth{who: who}, "GET /v1/app/events", nil)
 		require.Equal(t, http.StatusForbidden, got.status, who.Credential.Kind)
 		require.Equal(t, "application_required", got.code)
 	}
-	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[billing.Permission]bool{billing.RootUsageManage: true, billing.RootEntitlementsRead: true}}, "GET /v1/app/host-events", nil)
+	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[billing.Permission]bool{billing.RootUsageManage: true, billing.RootEntitlementsRead: true}}, "GET /v1/app/events", nil)
 	require.Equal(t, http.StatusForbidden, got.status, "every permission but events")
 	require.Equal(t, "permission_required", got.code)
-	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[billing.Permission]bool{billing.RootEventsRead: true}}, "GET /v1/app/host-events", nil)
+	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[billing.Permission]bool{billing.RootEventsRead: true}}, "GET /v1/app/events", nil)
 	require.Equal(t, http.StatusNoContent, got.status, "events alone")
-	require.Equal(t, "GET /v1/app/host-events", got.staff.Route)
-	// Naturally identified writes need no redundant HTTP retry key.
-	got = runRoute(t, rt, &recordingAuth{who: service}, "POST /v1/app/host-events/acknowledge", nil)
-	require.Equal(t, http.StatusNoContent, got.status, "acknowledging named events needs no Idempotency-Key")
+	require.Equal(t, "GET /v1/app/events", got.staff.Route)
+	// Reading facts takes no write idempotency key.
+	got = runRoute(t, rt, &recordingAuth{who: service}, "GET /v1/app/events", nil)
+	require.Equal(t, http.StatusNoContent, got.status, "reading events needs no Idempotency-Key")
 
 	// The retired selector header names nothing.
 	got = runRoute(t, rt, &recordingAuth{who: person}, "GET /v1/admin/payments", map[string]string{retiredSelector: "id:" + merchantB.String()})

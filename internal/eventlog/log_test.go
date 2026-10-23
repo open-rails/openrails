@@ -88,6 +88,7 @@ func newFixture(t *testing.T) fixture {
 		require.NoError(t, err)
 	})
 	f.exec(t, `CREATE SCHEMA `+pgx.Identifier{f.schema}.Sanitize())
+	f.exec(t, `CREATE FUNCTION `+f.schema+`.billing_restore_active(uuid) RETURNS boolean LANGUAGE sql AS $$ SELECT COALESCE(current_setting('test.billing_restore',true),'')='true' $$`)
 	f.exec(t, `CREATE TABLE billing.merchants(id uuid PRIMARY KEY);
 CREATE TABLE billing.customers(merchant_id uuid REFERENCES billing.merchants,id uuid,issuer text,PRIMARY KEY(merchant_id,id));
 CREATE TABLE billing.payments(merchant_id uuid,id uuid,customer_id uuid,subscription_id uuid,order_id uuid);
@@ -248,6 +249,28 @@ func TestEventLog(t *testing.T) {
 		require.Equal(t, billing.CodeInvalidParam, errorCode(err))
 
 		f.pendingEmpty(t)
+	})
+	t.Run("archive restore preserves log cursor and emits no new activity", func(t *testing.T) {
+		mid, c := f.merchant(t)
+		f.add(t, mid, c, "live")
+		before := f.list(t, mid, billing.EventQuery{})
+		tx, err := f.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback(t.Context())
+		_, err = tx.Exec(t.Context(), `SELECT set_config('test.billing_restore','true',true)`)
+		require.NoError(t, err)
+		_, err = f.insert(t.Context(), tx, mid, c, "restored")
+		require.NoError(t, err)
+		_, err = tx.Exec(t.Context(), f.sql(`INSERT INTO billing.host_outbox(id,merchant_id,event_type,subject_type,subject_id,currency) VALUES($1,$2,'delinquency.entered','customer',$3,'USD')`), uuid.New(), mid.UUID(), c)
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit(t.Context()))
+		after := f.list(t, mid, billing.EventQuery{After: before.NextCursor})
+		require.Empty(t, after.Events)
+		require.Equal(t, before.NextCursor, after.NextCursor)
+		f.add(t, mid, c, "after_restore")
+		resumed := f.list(t, mid, billing.EventQuery{After: before.NextCursor})
+		require.Len(t, resumed.Events, 1)
+		require.Equal(t, "after_restore", resumed.Events[0].Type)
 	})
 	t.Run("host facts preserve money and typed IDs", func(t *testing.T) {
 		mid, c := f.merchant(t)

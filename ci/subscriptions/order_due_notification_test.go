@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/testevents"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -22,9 +24,7 @@ func TestOrderDueEventsRecordCollectionMethod(t *testing.T) {
 	w.settleRefreshes()
 	w.jobs.PeriodicJobs().Clear()
 	ctx, client := t.Context(), w.client[remote]
-	consumer, err := w.client[embedded].NotificationEvents("order-due-method")
-	require.NoError(t, err)
-	require.NoError(t, consumer.Register(ctx))
+	consumer := testevents.Notifications(w.client[embedded])
 	declareDynamicMeter(t, client, "order-due-method", "units")
 	const owed = int64(50_000_000)
 	for _, method := range []billing.InvoiceCollectionMethod{billing.CollectChargeAutomatically, billing.CollectSendInvoice} {
@@ -46,7 +46,7 @@ func TestOrderDueEventsRecordCollectionMethod(t *testing.T) {
 			require.Len(t, orders.Items, 1)
 			order := orders.Items[0]
 			eventsForOrder := func() []billing.NotificationEvent {
-				events, err := consumer.Pending(ctx, 100)
+				events, err := consumer.Read(ctx)
 				require.NoError(t, err)
 				var found []billing.NotificationEvent
 				for _, event := range events {

@@ -30,7 +30,7 @@ CREATE INDEX event_log_type_position_idx ON billing.event_log(merchant_id,event_
 CREATE INDEX event_log_retention_idx ON billing.event_log(recorded_at,merchant_id,position);
 CREATE INDEX event_log_merchant_retention_idx ON billing.event_log(merchant_id,recorded_at,position);
 COMMENT ON TABLE billing.event_log IS 'Retained merchant facts, independent of readers. Retention: events expire after the configured event retention, independently of reader progress.';
-COMMENT ON TABLE billing.event_log_streams IS 'Committed event positions and retention boundaries; no reader state. Retention: state owned by the merchant.';
+COMMENT ON TABLE billing.event_log_streams IS 'Committed event positions and retention boundaries; no reader state. State owned by the merchant.';
 
 -- This is private transaction scratch, not a queue: its row is inserted,
 -- consumed and deleted in the same successful commit; rollback exposes none.
@@ -38,7 +38,7 @@ CREATE TABLE billing.event_log_pending (
     transaction_id bigint PRIMARY KEY,
     entries jsonb NOT NULL CHECK (jsonb_typeof(entries)='array')
 );
-COMMENT ON TABLE billing.event_log_pending IS 'Internal transaction scratch; no row survives a successful commit. Retention: transaction lifetime only.';
+COMMENT ON TABLE billing.event_log_pending IS 'Internal transaction scratch; no row survives a successful commit. Exists only for the transaction lifetime.';
 
 CREATE FUNCTION billing.event_subject_id(kind text, id uuid) RETURNS text
 LANGUAGE sql IMMUTABLE PARALLEL SAFE SET search_path TO 'pg_catalog','billing','pg_temp' AS $$
@@ -156,12 +156,14 @@ END;
 $$;
 CREATE FUNCTION billing.capture_host_event_log() RETURNS trigger LANGUAGE plpgsql SET search_path TO 'pg_catalog','billing','pg_temp' AS $$
 BEGIN
+    IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
     PERFORM billing.queue_event_log(billing.host_event_record(NEW));
     RETURN NEW;
 END;
 $$;
 CREATE FUNCTION billing.capture_notification_event_log() RETURNS trigger LANGUAGE plpgsql SET search_path TO 'pg_catalog','billing','pg_temp' AS $$
 BEGIN
+    IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
     PERFORM billing.queue_event_log(billing.notification_event_record(NEW));
     RETURN NEW;
 END;

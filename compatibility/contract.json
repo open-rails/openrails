@@ -5,7 +5,6 @@
       "const QueueBilling = riverjobs.QueueBilling",
       "func (UsageSweepArgs) InsertOpts() river.InsertOpts",
       "func (UsageSweepArgs) Kind() string",
-      "func (c *Client) AcknowledgeHostEvents(ctx context.Context, ids []billing.HostEventID, options ...RequestOption) (map[billing.HostEventID]*billing.HostEvent, error)",
       "func (c *Client) Admit(ctx context.Context, requests []billing.AdmitParams, requestOptions ...RequestOption) ([]billing.AdmissionVerdict, error)",
       "func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application, params billing.ApplyCatalogParams, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error)",
       "func (c *Client) ApplyPSPImport(ctx context.Context, id billing.PSPImportID, requestOptions ...RequestOption) (*billing.PSPImport, error)",
@@ -72,7 +71,6 @@
       "func (c *Client) ListEntitlements(ctx context.Context, params billing.EntitlementListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error)",
       "func (c *Client) ListEvents(ctx context.Context, query billing.EventQuery, options ...RequestOption) (*billing.EventPage, error)",
       "func (c *Client) ListFindings(ctx context.Context, req billing.FindingListParams, options ...RequestOption) (*billing.ListPage[billing.Finding], error)",
-      "func (c *Client) ListHostEvents(ctx context.Context, req billing.HostEventListParams, options ...RequestOption) (*billing.ListPage[billing.HostEvent], error)",
       "func (c *Client) ListMeters(ctx context.Context, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.Meter], error)",
       "func (c *Client) ListNetworkCustomers(ctx context.Context, params billing.NetworkCustomerListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Customer], error)",
       "func (c *Client) ListOrders(ctx context.Context, params billing.OrderListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Order], error)",
@@ -94,7 +92,6 @@
       "func (c *Client) ListUsageEvents(ctx context.Context, params billing.UsageEventListParams, options ...RequestOption) (*billing.ListPage[billing.UsageEvent], error)",
       "func (c *Client) MarkOrderUncollectible(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error)",
       "func (c *Client) MerchantID() billing.MerchantID",
-      "func (c *Client) NotificationEvents(name string) (*NotificationConsumer, error)",
       "func (c *Client) PreviewOrder(ctx context.Context, params billing.PreviewOrderParams, requestOptions ...RequestOption) (*billing.OrderPreview, error)",
       "func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPSPRoutingParams, requestOptions ...RequestOption) (*billing.PSPRoutingPreview, error)",
       "func (c *Client) PreviewPriceMigration(ctx context.Context, params billing.CreatePriceMigrationParams, requestOptions ...RequestOption) (*billing.PriceMigrationPreview, error)",
@@ -130,10 +127,6 @@
       "func (c *LocalClient) SCIMHandler() (http.Handler, error)",
       "func (c *LocalClient) StartRunningChargeTx(ctx context.Context, tx pgx.Tx, params billing.StartRunningChargeParams) (*billing.RunningCharge, error)",
       "func (c *LocalClient) StopRunningChargeTx(ctx context.Context, tx pgx.Tx, reference string, params billing.StopRunningChargeParams) (*billing.RunningCharge, error)",
-      "func (c *NotificationConsumer) Acknowledge(ctx context.Context, refs []billing.NotificationEventRef) error",
-      "func (c *NotificationConsumer) Pending(ctx context.Context, limit int) ([]billing.NotificationEvent, error)",
-      "func (c *NotificationConsumer) Register(ctx context.Context) error",
-      "func (c *NotificationConsumer) Retire(ctx context.Context) error",
       "func (e *BoundMerchantError) Error() string",
       "func (e *Engine) CheckoutPage(origin string, assets fs.FS) (string, http.Handler, error)",
       "func (e *Engine) ClearDestructiveHold(ctx context.Context, merchant billing.MerchantID, id billing.DestructiveHoldID, operator billing.DestructiveOperator, reason string) (*billing.DestructiveHold, error)",
@@ -143,7 +136,6 @@
       "func (e *Engine) LocalMerchant(id billing.MerchantID) (*LocalClient, error)",
       "func (e *Engine) Merchant(id billing.MerchantID) (*Client, error)",
       "func (e *Engine) MerchantBySlug(slug string) (*Client, error)",
-      "func (e *Engine) NotificationEvents(name string) (*NotificationConsumer, error)",
       "func (e *Engine) Probes() []Probe",
       "func (e *Engine) PublicConfig(selection Routes) (*billing.PublicConfig, error)",
       "func (e *Engine) Ready(ctx context.Context) error",
@@ -199,7 +191,6 @@
       "type MerchantDeclaration = config.MerchantDeclaration",
       "type MerchantSecrets = config.MerchantSecrets",
       "type NMIPSP struct {\n\tGatewayID string `psp:\"gateway_id\"`\n\n\tEnvironment string `psp:\"environment\"`\n\tArchived    bool   `psp:\"archived\"`\n\n\tCustodian string `psp:\"custodian\"`\n\n\tSecurityKey          string `psp:\"secrets.security_key,required\"`\n\tWebhookSigningSecret string `psp:\"secrets.webhook_signing_secret,required\"`\n\n\tWebhookSigningSecretPrevious string    `psp:\"secrets.webhook_signing_secret_previous\"`\n\tWebhookOverlapExpiresAt      time.Time `psp:\"webhook_overlap_expires_at\"`\n\n\tTokenizationKey string `psp:\"tokenization_key\"`\n\n\tTokenizationURL string `psp:\"tokenization_url\"`\n\n\tCardEntry string `psp:\"card_entry\"`\n}",
-      "type NotificationConsumer struct {\n}",
       "type PSPConfig = config.PSPConfig",
       "type PSPs = config.PSPs",
       "type Probe struct {\n\tName string\n\n\tCheck func(context.Context) error\n}",
@@ -603,8 +594,6 @@
       "type AccessNoteKind string",
       "type AccessTenure struct {\n\tAsOf    time.Time        `json:\"as_of\"`\n\tSeconds map[string]int64 `json:\"seconds\"`\n}",
       "type AccessTenureParams struct {\n\tCustomerID   CustomerID\n\tEntitlements []string\n\tAt           time.Time\n}",
-      "type AcknowledgeHostEventsParams struct {\n\tHostEventIDs []HostEventID `json:\"host_event_ids\"`\n}",
-      "type AcknowledgeNotificationEventsParams struct {\n\tNotificationIDs []NotificationID `json:\"notification_ids\"`\n}",
       "type AdminAccess struct {\n\tAdmin          AccessLevel     `json:\"admin\"`\n\tCatalog        AccessLevel     `json:\"catalog\"`\n\tMerchantConfig AccessLevel     `json:\"merchant_config\"`\n\tMetrics        bool            `json:\"metrics\"`\n\tScopeID        string          `json:\"scope_id\"`\n\tAssistants     AdminAssistants `json:\"assistants\"`\n\n\tApplicationPermissions []Permission `json:\"application_permissions\"`\n}",
       "type AdminAssistants struct {\n\tCatalogCopilot  bool `json:\"catalog_copilot\"`\n\tCatalogDrafting bool `json:\"catalog_drafting\"`\n}",
       "type Admission struct {\n\tRequestID  string     `json:\"request_id\"`\n\tCustomerID CustomerID `json:\"customer_id\"`\n\tAllowed    bool       `json:\"allowed\"`\n\n\tBlockedBy         *AdmissionBlock `json:\"blocked_by\"`\n\tDenyCode          *string         `json:\"deny_code\"`\n\tRetryAfterSeconds *int64          `json:\"retry_after_seconds\"`\n\tCurrency          string          `json:\"currency\"`\n\tEstimatedAmount   int64           `json:\"estimated_amount,string\"`\n\n\tStartCapacityAmount int64 `json:\"start_capacity_amount,string\"`\n\n\tState          *AdmissionState `json:\"state\"`\n\tExpiresAt      *time.Time      `json:\"expires_at\"`\n\tCapturedAmount *int64          `json:\"captured_amount,string\"`\n\n\tReplayed bool `json:\"replayed\"`\n}",
@@ -790,10 +779,8 @@
       "type GetUsageParams struct {\n\tCurrency string       `form:\"currency\"`\n\tFrom     time.Time    `form:\"from\"`\n\tTo       time.Time    `form:\"to\"`\n\tGroupBy  UsageGroupBy `form:\"group_by\"`\n\tPageRequest\n}",
       "type GrantReason string",
       "type HeldEntitlements struct {\n\tKeys      []string `json:\"keys\"`\n\tTruncated bool     `json:\"truncated\"`\n}",
-      "type HostEvent struct {\n\tDestructiveHold *DestructiveHoldEvent `json:\"destructive_hold\"`\n\tID              HostEventID           `json:\"id\"`\n\tMerchantID      MerchantID            `json:\"merchant_id\"`\n\tType            HostEventType         `json:\"type\"`\n\tOccurredAt      time.Time             `json:\"occurred_at\"`\n\tAcknowledgedAt  *time.Time            `json:\"acknowledged_at\"`\n\tPayment         *PaymentSettledEvent  `json:\"payment\"`\n\tDelinquency     *DelinquencyHostEvent `json:\"delinquency\"`\n\n\tProductEntitlements *ProductEntitlementsChangedEvent `json:\"product_entitlements\"`\n\n\tOrder *OrderHostEvent `json:\"order\"`\n\n\tCustomerNetwork *CustomerNetworkHostEvent `json:\"customer_network\"`\n\n\tMandate *MandateHostEvent `json:\"mandate\"`\n\n\tBalance *BalanceHostEvent `json:\"balance\"`\n}",
+      "type HostEvent struct {\n\tDestructiveHold *DestructiveHoldEvent `json:\"destructive_hold\"`\n\tID              HostEventID           `json:\"id\"`\n\tMerchantID      MerchantID            `json:\"merchant_id\"`\n\tType            HostEventType         `json:\"type\"`\n\tOccurredAt      time.Time             `json:\"occurred_at\"`\n\tPayment         *PaymentSettledEvent  `json:\"payment\"`\n\tDelinquency     *DelinquencyHostEvent `json:\"delinquency\"`\n\n\tProductEntitlements *ProductEntitlementsChangedEvent `json:\"product_entitlements\"`\n\n\tOrder *OrderHostEvent `json:\"order\"`\n\n\tCustomerNetwork *CustomerNetworkHostEvent `json:\"customer_network\"`\n\n\tMandate *MandateHostEvent `json:\"mandate\"`\n\n\tBalance *BalanceHostEvent `json:\"balance\"`\n}",
       "type HostEventID uuid.UUID",
-      "type HostEventListParams struct {\n\tPageRequest\n\tIDs                 []HostEventID\n\tType                HostEventType\n\tIncludeAcknowledged bool\n\tPaymentID           PaymentID\n}",
-      "type HostEventLookup struct {\n\tHostEvents map[HostEventID]*HostEvent `json:\"host_events\"`\n}",
       "type HostEventType string",
       "type InvoiceCollectionMethod string",
       "type InvoiceContact struct {\n\tName  string `json:\"name\"`\n\tEmail string `json:\"email\"`\n}",
@@ -856,8 +843,6 @@
       "type NextAction struct {\n\tType         string            `json:\"type\"`\n\tURL          *string           `json:\"url\"`\n\tTransactions []string          `json:\"transactions\"`\n\tPSPID        *PSPID            `json:\"psp_id\"`\n\tPayload      map[string]string `json:\"payload\"`\n}",
       "type NotificationData struct {\n\tReason  string `json:\"reason,omitempty\"`\n\tMessage string `json:\"message,omitempty\"`\n\n\tSource    string     `json:\"source,omitempty\"`\n\tProductID ProductID  `json:\"product_id,omitzero\"`\n\tEndedAt   *time.Time `json:\"ended_at,omitempty\"`\n\n\tAccessEnded bool   `json:\"access_ended,omitempty\"`\n\tCurrency    string `json:\"currency,omitempty\"`\n\n\tSubscriptionID   SubscriptionID   `json:\"subscription_id,omitzero\"`\n\tPriceMigrationID PriceMigrationID `json:\"price_migration_id,omitzero\"`\n\tFromPriceID      PriceID          `json:\"from_price_id,omitzero\"`\n\tFromProductID    ProductID        `json:\"from_product_id,omitzero\"`\n\tFromProductName  string           `json:\"from_product_name,omitempty\"`\n\tToPriceID        PriceID          `json:\"to_price_id,omitzero\"`\n\tToProductID      ProductID        `json:\"to_product_id,omitzero\"`\n\tToProductName    string           `json:\"to_product_name,omitempty\"`\n\tOldAmount        *int64           `json:\"old_amount,omitempty,string\"`\n\tNewAmount        *int64           `json:\"new_amount,omitempty,string\"`\n\tEffectiveAt      *time.Time       `json:\"effective_at,omitempty\"`\n\n\tPeriodStartsAt   *time.Time `json:\"period_starts_at,omitempty\"`\n\tPeriodEndsAt     *time.Time `json:\"period_ends_at,omitempty\"`\n\tDowngradeApplied bool       `json:\"downgrade_applied,omitempty\"`\n\tNewProduct       string     `json:\"new_product,omitempty\"`\n\n\tOverdueAmount    *int64     `json:\"overdue_amount,omitempty,string\"`\n\tOverdueOrders    int        `json:\"overdue_orders,omitempty\"`\n\tOverdueStartedAt *time.Time `json:\"overdue_started_at,omitempty\"`\n\tFromState        string     `json:\"from_state,omitempty\"`\n\tToState          string     `json:\"to_state,omitempty\"`\n\n\tAmountDue        *int64                     `json:\"amount_due,omitempty,string\"`\n\tDueAt            *time.Time                 `json:\"due_at,omitempty\"`\n\tCollectionMethod InvoiceCollectionMethod    `json:\"collection_method,omitempty\"`\n\tFailureCode      string                     `json:\"failure_code,omitempty\"`\n\tFailureReason    string                     `json:\"failure_reason,omitempty\"`\n\tDeclineOutcome   string                     `json:\"decline_outcome,omitempty\"`\n\tNextAttemptAt    *time.Time                 `json:\"next_attempt_at,omitempty\"`\n\tRetryStatus      NotificationRetryStatus    `json:\"retry_status,omitempty\"`\n\tRecoveryAction   NotificationRecoveryAction `json:\"recovery_action,omitempty\"`\n\n\tAvailableAmount  *int64     `json:\"available_amount,omitempty,string\"`\n\tOwedAmount       *int64     `json:\"owed_amount,omitempty,string\"`\n\tLowBalanceAmount *int64     `json:\"low_balance_amount,omitempty,string\"`\n\tRunwayEndsAt     *time.Time `json:\"runway_ends_at,omitempty\"`\n\n\tRail               string `json:\"rail,omitempty\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id,omitempty\"`\n\tTransactionID      string `json:\"transaction_id,omitempty\"`\n\n\tQuantity *int `json:\"quantity,omitempty\"`\n\n\tAmount        *int64    `json:\"amount,omitempty,string\"`\n\tProductName   string    `json:\"product_name,omitempty\"`\n\tPaymentMethod string    `json:\"payment_method,omitempty\"`\n\tPaymentID     PaymentID `json:\"payment_id,omitzero\"`\n\tOrderID       OrderID   `json:\"order_id,omitzero\"`\n\tOrderNumber   int64     `json:\"order_number,omitempty\"`\n}",
       "type NotificationEvent struct {\n\tID         NotificationID  `json:\"id\"`\n\tMerchantID MerchantID      `json:\"merchant_id\"`\n\tCustomerID CustomerID      `json:\"customer_id\"`\n\tEventType  string          `json:\"event_type\"`\n\tData       json.RawMessage `json:\"data\"`\n\tCreatedAt  time.Time       `json:\"created_at\"`\n\n\tActionRequested bool `json:\"action_requested,omitempty\"`\n\n\tOptional bool `json:\"optional,omitempty\"`\n}",
-      "type NotificationEventRef struct {\n\tMerchantID MerchantID     `json:\"merchant_id\"`\n\tID         NotificationID `json:\"id\"`\n}",
-      "type NotificationEvents struct {\n\tData []NotificationEvent `json:\"data\"`\n}",
       "type NotificationID uuid.UUID",
       "type NotificationRecoveryAction string",
       "type NotificationRetryStatus string",
@@ -1321,7 +1306,6 @@
       "func (s *Server) MerchantScope(ctx context.Context, id billing.MerchantID) (auth.Scope, error)",
       "func (s *Server) NetworkAccountHandler(next func(http.ResponseWriter, *http.Request, billing.NetworkAccountID)) http.Handler",
       "func (s *Server) NetworkLinks(ctx context.Context, account billing.NetworkAccountID) ([]billing.CustomerLink, error)",
-      "func (s *Server) NotificationEvents(name string) (*openrails.NotificationConsumer, error)",
       "func (s *Server) PrivateHandler() http.Handler",
       "func (s *Server) ProvisionMerchant(ctx context.Context, req billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)",
       "func (s *Server) RenameMerchant(ctx context.Context, id billing.MerchantID, req billing.RenameMerchantParams) (*billing.MerchantName, error)",
@@ -2313,11 +2297,6 @@
       "strconv": "strconv",
       "url": "net/url"
     },
-    "client_host_events.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
     "config.go": {
       "billingauth": "github.com/open-rails/openrails/internal/billingauth",
       "config": "github.com/open-rails/openrails/internal/config",
@@ -2694,6 +2673,7 @@
       "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid",
+      "v2": "github.com/ccoveille/go-safecast/v2",
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/history/attribution.go": {
@@ -4978,13 +4958,6 @@
       "migrate": "github.com/open-rails/openrails/internal/migrate",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool"
     },
-    "notification_events.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "notificationevents": "github.com/open-rails/openrails/internal/notificationevents",
-      "strconv": "strconv"
-    },
     "openrailstest/auth.go": {
       "authtest": "github.com/open-rails/authkit/auth/authtest",
       "http": "net/http",
@@ -5260,7 +5233,6 @@
       "context": "context",
       "fmt": "fmt",
       "http": "net/http",
-      "openrails": "github.com/open-rails/openrails",
       "routes": "github.com/open-rails/openrails/internal/http/routes"
     },
     "server/operations.go": {

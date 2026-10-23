@@ -315,7 +315,7 @@ func TestAuthKitRefusals(t *testing.T) {
 		"forged":                {h.customer + "x", http.MethodGet, "/billing/v1/admin/payments", 401, "authentication_required", `Bearer error="invalid_token"`},
 		"signed out":            {h.gone, http.MethodGet, "/billing/v1/admin/payments", 401, "credential_revoked", `Bearer error="invalid_token"`},
 		"a permission not held": {h.customer, http.MethodGet, "/billing/v1/admin/payments", 403, "permission_required", ""},
-		"a person on /v1/app":   {h.owner, http.MethodGet, "/billing/v1/app/host-events", 403, "application_required", ""},
+		"a person on /v1/app":   {h.owner, http.MethodGet, "/billing/v1/app/events", 403, "application_required", ""},
 		"a customer on /v1/app": {h.customer, http.MethodPost, "/billing/v1/app/entitlements/check", 403, "application_required", ""},
 	} {
 		got := ask(t, mux, tc.token, tc.method, tc.path, map[string]any{})
@@ -327,9 +327,9 @@ func TestAuthKitRefusals(t *testing.T) {
 	require.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, stale.status, "a stale staff session reaches the refund handler: %s", stale.body)
 	require.Empty(t, stale.challenge)
 
-	for _, path := range []string{refund, "/billing/v1/app/host-events"} {
+	for _, path := range []string{refund, "/billing/v1/app/events"} {
 		method := http.MethodPost
-		if strings.HasSuffix(path, "host-events") {
+		if strings.HasSuffix(path, "events") {
 			method = http.MethodGet
 		}
 		got := ask(t, mux, h.merchantKey(t, shop.MerchantID()), method, path, map[string]any{})

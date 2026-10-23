@@ -161,4 +161,4 @@ need none.
 | `customer.network_linked` | `customer_id`, `account_id`, `method` |
 | `customer.network_unlinked` | `customer_id`, `account_id`, `revoked_by`: `customer`, `account_deleted` or `merchant_left` |
 
-Read and acknowledge them like every host event (`GET /v1/app/host-events`).
+Read them through `GET /v1/app/events` and save your own cursor after applying them; source events are never acknowledged.

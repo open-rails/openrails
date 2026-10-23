@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/paymentpage"
+	"github.com/open-rails/openrails/internal/testevents"
 	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 	"github.com/open-rails/openrails/server"
@@ -415,7 +416,7 @@ func TestPaymentPagePays(t *testing.T) {
 	paid := s.pay(secret, first, map[string]any{"token": s.gateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), "psp_id": s.psp})
 	require.Equal(t, http.StatusOK, paid.Code, paid.Body.String())
 	require.Equal(t, billing.OrderComplete, decode[billing.Order](t, paid).Status)
-	events, err := handle(s.t, s.srv, s.mid).ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventOrderCompleted})
+	events, err := testevents.Hosts(t.Context(), handle(s.t, s.srv, s.mid), billing.HostEventOrderCompleted)
 	require.NoError(t, err)
 	require.Len(t, events.Items, 1)
 	require.Equal(t, first.ID, events.Items[0].Order.OrderID)

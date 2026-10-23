@@ -103,7 +103,7 @@ just settled is never held out by our evaluation lag.
 
 ## What you enforce: the signal
 
-Delinquency transitions land on a durable, acknowledged feed —
+Delinquency transitions land on a retained event log —
 `billing.host_outbox`, the typed host event feed that also carries payment settlements.
 Not a webhook: a missed cut-off signal is a revenue leak and a missed restore
 signal is an outage for someone who has already paid.
@@ -120,34 +120,23 @@ Payload: `from_state`, `to_state`, `overdue_amount`, `overdue_started_at`,
 Embedded hosts:
 
 ```go
-// client is the merchant's handle, from an Engine or a Remote; both have the same operations.
-for _, kind := range []billing.HostEventType{
-    billing.HostEventDelinquencyGrace,
-    billing.HostEventDelinquencyEntered,
-    billing.HostEventDelinquencyCleared,
-} {
-    page, err := client.ListHostEvents(ctx, billing.HostEventListParams{
-        Type: kind, PageRequest: billing.PageRequest{Limit: 100},
-    })
-    if err != nil { return err }
-    var done []billing.HostEventID
-    var failed error
-    for _, event := range page.Items {
-        if failed = applyHostAction(ctx, event.Type, event.Delinquency); failed != nil {
-            break // leave this and later events pending for replay
-        }
-        done = append(done, event.ID)
-    }
-    if len(done) > 0 {
-        if _, err := client.AcknowledgeHostEvents(ctx, done); err != nil { return err }
-    }
-    if failed != nil { return failed }
+page, err := client.ListEvents(ctx, billing.EventQuery{
+    After: savedCursor,
+    Types: []string{"delinquency.grace", "delinquency.entered", "delinquency.cleared"},
+})
+if err != nil { return err } // a lost-retention cursor requires resynchronization
+for _, event := range page.Events {
+    var data billing.DelinquencyHostEvent
+    if err := json.Unmarshal(event.Data, &data); err != nil { return err }
+    if err := applyHostAction(ctx, event.Type, &data); err != nil { return err }
 }
+// Persist with local effects atomically, or make them idempotent before saving.
+return saveCursor(ctx, page.NextCursor)
 ```
 
-Ack **after** your own action is durable. An unacked event is redelivered; an
-acked one is gone. Acked rows are pruned after 30 days; pending rows are never
-pruned.
+Save the cursor after your action is durable. Each reader owns its position;
+reading never changes source facts. Events expire after the configured retention
+(default 90 days), so lost history must be handled explicitly.
 
 Re-announcing the same transition is a no-op — events carry a deterministic
 dedupe key, so a re-run never instructs you to shut the same customer off twice.

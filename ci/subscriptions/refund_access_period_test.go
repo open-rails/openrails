@@ -151,17 +151,7 @@ func TestRefundAccessDecisionSurvivesArchive(t *testing.T) {
 	require.NoError(t, err)
 	source.settle()
 	require.False(t, e.c.entitled(e.ent))
-	for {
-		events, err := source.client[embedded].ListHostEvents(t.Context(), billing.HostEventListParams{})
-		require.NoError(t, err)
-		if len(events.Items) == 0 {
-			break
-		}
-		for _, event := range events.Items {
-			_, err = source.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-			require.NoError(t, err)
-		}
-	}
+
 	source.stop()
 	source.checkMoneyInvariants()
 	mid := source.client[embedded].MerchantID()

@@ -20,23 +20,6 @@ type NotificationEvent struct {
 	Optional bool `json:"optional,omitempty"`
 }
 
-// NotificationEventRef identifies an event across merchants.
-type NotificationEventRef struct {
-	MerchantID MerchantID     `json:"merchant_id"`
-	ID         NotificationID `json:"id"`
-}
-
-// NotificationEvents is one bounded batch of pending facts, with no watermark.
-type NotificationEvents struct {
-	Data []NotificationEvent `json:"data"`
-}
-
-// AcknowledgeNotificationEventsParams names source deliveries persisted or
-// deliberately skipped by this application's consumer, never read inbox items.
-type AcknowledgeNotificationEventsParams struct {
-	NotificationIDs []NotificationID `json:"notification_ids"`
-}
-
 // NotificationRetryStatus records the collection decision when a failure was
 // observed. Unknown never promises an automatic retry.
 type NotificationRetryStatus string

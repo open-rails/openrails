@@ -65,7 +65,7 @@ func TestSecurityHostAuthRefusals(t *testing.T) {
 		"a customer on the admin":  {bearer(member.token), http.MethodGet, "/v1/admin/customers", 403, "permission_required", ""},
 		"a stale person":           {bearer(w.auth.staleToken(t, "staff")), http.MethodPost, access, 201, "", ""},
 		"a person's API key":       {bearer(w.auth.apiKeyToken(t, "staff")), http.MethodPost, access, 201, "", ""},
-		"a person on /v1/app":      {bearer(w.auth.token(t, "staff")), http.MethodGet, "/v1/app/host-events", 403, "application_required", ""},
+		"a person on /v1/app":      {bearer(w.auth.token(t, "staff")), http.MethodGet, "/v1/app/events", 403, "application_required", ""},
 		"an application on /v1/me": {bearer(w.auth.hostToken(t)), http.MethodGet, "/v1/me", 403, "invoker_scoped_principal", ""},
 	} {
 		got := send(tc.authorization, tc.method, tc.path, grant)
@@ -77,7 +77,7 @@ func TestSecurityHostAuthRefusals(t *testing.T) {
 	got := send(bearer(w.auth.hostToken(t)), http.MethodPost, access, grant)
 	require.Equal(t, http.StatusCreated, got.status, "the backend's key passes on its permission alone: %+v", got)
 	require.True(t, member.entitled("content:refusals"))
-	got = send(bearer(w.auth.hostToken(t)), http.MethodGet, "/v1/app/host-events", nil)
+	got = send(bearer(w.auth.hostToken(t)), http.MethodGet, "/v1/app/events", nil)
 	require.Equal(t, http.StatusOK, got.status, "/v1/app takes the application: %+v", got)
 
 	w.auth.down.Store(true)

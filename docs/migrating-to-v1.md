@@ -225,8 +225,7 @@ no offset and no total; every list's params embed `billing.PageRequest`
 Every merchant route has exactly one Client method, named for it, and a
 request type is `…Params` named for its method: `CreateCheckoutSessionRequest`
 is `billing.CreateCheckoutSessionParams`, `CaptureParams` is
-`billing.CaptureAdmissionParams`, `ListHostEventsRequest` is
-`billing.HostEventListParams`. Settings nouns lose their `Input` suffix
+`billing.CaptureAdmissionParams`; retained event readers use `billing.EventQuery`. Settings nouns lose their `Input` suffix
 (`billing.BillingPolicy`, `billing.MerchantProfile`).
 
 ### The engine and merchant handles
@@ -366,7 +365,7 @@ upgrade; its buyer buys through an order.
 | `client.PaymentProviders.List`, `Retrieve`, `Upsert`, `Archive`; `RefreshProviders` | `client.ListPSPs(`, `client.GetPSP(`, `client.CreatePSP(`, `client.UpdatePSP(` (which also archives), `client.PreviewPSPRouting(`, `client.RefreshPSPs(`; the rail registry is `rails` in the public `GET /v1/config` |
 | `psp_id` as a UUID string; `DeclarePSP` returned a `uuid.UUID` | `billing.PSPID` (`psp_…` on the wire); `local.DeclarePSP(` returns the `billing.PSP` |
 | `GetMerchantSettings`, `SetMerchantSettings`, `Verify`, `client.MerchantConfiguration` | `client.GetMerchantConfiguration(`, `client.UpdateMerchantConfiguration(`. A `Remote`'s `Ready` checks reachability; any authenticated call proves the credential |
-| `ListHostEvents(ctx, HostEventListOptions)` returned a slice; `AcknowledgeHostEvent(ctx, uuid.UUID)` | `client.ListHostEvents(` with `billing.HostEventListParams`, a page; `client.AcknowledgeHostEvents(` takes up to 100 `billing.HostEventID`s and answers each event |
+| `ListHostEvents` and source acknowledgments | `client.ListEvents(ctx, billing.EventQuery{After: cursor})`; persist your own cursor after idempotent effects, with no source registration or acknowledgment |
 | Merchant webhooks | `client.ListAlertWebhooks(`, `client.CreateAlertWebhook(`, `client.UpdateAlertWebhook(`, `client.DeleteAlertWebhook(` |
 | `FleetAnalytics` and `FleetTimeseries` clamped an out-of-range window | `billing.ErrInvalid` |
 | `ExportMerchantCustomer`, `ImportMerchantCustomer` | `client.ExportBillingArchive(`, `client.ImportBillingArchive(` |

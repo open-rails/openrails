@@ -67,7 +67,7 @@ func TestClassifyMapsDatabaseRefusals(t *testing.T) {
 // contact copy and PSP import working state are not billing data: a restore destination may hold them (a
 // renamed merchant, invited staff, a destination fenced before its restore,
 // provisioning tokens) and still be empty.
-var restoreOccupancyExempt = []string{"event_log_streams", "user_destructive_reservations", "notification_consumers", "customer_contacts", "merchant_slug_aliases", "merchant_write_posture", "provisioning_tokens",
+var restoreOccupancyExempt = []string{"event_log_streams", "user_destructive_reservations", "customer_contacts", "merchant_slug_aliases", "merchant_write_posture", "provisioning_tokens",
 	"psp_imports", "psp_import_records", "psp_import_mappings"}
 
 var (

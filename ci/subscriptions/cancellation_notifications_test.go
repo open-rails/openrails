@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/testevents"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
@@ -29,12 +31,10 @@ func TestCancellationNotificationReplayAndRollback(t *testing.T) {
 	ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
 	subID := l.sub.UUID()
 	params := &subscriptions.CancelMembershipParams{SubscriptionID: &subID, CancelType: models.CancelTypeUser}
-	consumer, err := w.client[embedded].NotificationEvents("cancellation-regression")
-	require.NoError(t, err)
-	require.NoError(t, consumer.Register(ctx))
+	consumer := testevents.Notifications(w.client[embedded])
 	notices := func() []billing.NotificationEvent {
 		t.Helper()
-		events, err := consumer.Pending(ctx, 100)
+		events, err := consumer.Read(ctx)
 		require.NoError(t, err)
 		var ended []billing.NotificationEvent
 		for _, event := range events {
@@ -47,7 +47,7 @@ func TestCancellationNotificationReplayAndRollback(t *testing.T) {
 	before := w.subscription(embedded, l.sub)
 	rollback := errors.New("later domain write failed")
 	var rolledBackID uuid.UUID
-	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		result, err := rt.SubscriptionLifecycleService.CancelMembershipTx(ctx, rt.DB.NewWithPgxTx(tx), params)
 		if err != nil {
 			return err

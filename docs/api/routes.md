@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (192), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (186), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -228,12 +228,6 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 | GET | `/v1/app/running-charges/{reference}` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `RunningCharge` |  |
 | GET | `/v1/app/running-charges` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `ListPage<RunningCharge>` |  |
 | GET | `/v1/app/events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `EventPage` |  |
-| POST | `/v1/app/notification-consumers/{name}` | application | `merchant:events:read`<br>`root:events:read` | — | 204 — |  |
-| GET | `/v1/app/notification-consumers/{name}/events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `NotificationEvents` |  |
-| POST | `/v1/app/notification-consumers/{name}/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeNotificationEventsParams` | 204 — |  |
-| DELETE | `/v1/app/notification-consumers/{name}` | application | `merchant:events:read`<br>`root:events:read` | — | 204 — |  |
-| GET | `/v1/app/host-events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `ListPage<HostEvent>` |  |
-| POST | `/v1/app/host-events/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` |  |
 | GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
 | GET | `/v1/app/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
 | GET | `/v1/app/scim/v2/ResourceTypes/{id}` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |

@@ -14,6 +14,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/open-rails/openrails/internal/testevents"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
@@ -53,9 +55,9 @@ func (w *chargeWorld) hold(customer billing.CustomerID, amount int64) string {
 
 // notices are the customer's notification events of the application's
 // consumer, oldest first.
-func (w *chargeWorld) notices(consumer *openrails.NotificationConsumer, customer billing.CustomerID) []billing.NotificationEvent {
+func (w *chargeWorld) notices(consumer *testevents.NotificationReader, customer billing.CustomerID) []billing.NotificationEvent {
 	w.t.Helper()
-	events, err := consumer.Pending(w.ctx, 100)
+	events, err := consumer.Read(w.ctx)
 	require.NoError(w.t, err)
 	var out []billing.NotificationEvent
 	for _, e := range events {
@@ -66,11 +68,9 @@ func (w *chargeWorld) notices(consumer *openrails.NotificationConsumer, customer
 	return out
 }
 
-func (w *chargeWorld) consumer() *openrails.NotificationConsumer {
+func (w *chargeWorld) consumer() *testevents.NotificationReader {
 	w.t.Helper()
-	consumer, err := w.bill.NotificationEvents("balance-" + uuid.NewString()[:8])
-	require.NoError(w.t, err)
-	require.NoError(w.t, consumer.Register(w.ctx))
+	consumer := testevents.Notifications(w.client)
 	return consumer
 }
 

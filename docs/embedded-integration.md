@@ -504,7 +504,7 @@ The merchant's handle, the shared concrete `*openrails.Client`, grouped by job:
 | Orders | `CreateOrder`, `PreviewOrder`, `CancelOrder` (merchant orders: unpaid orders a customer pays on your site); `ListOrders`, `GetOrder` (staff read); `WaiveOrderBalance`, `MarkOrderUncollectible` (usage orders). Only the customer pays with a card they enter |
 | Payments | `GetPayment`, `ListPayments`, `RecordExternalPayment` (money received outside OpenRails), `RefundPayment`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRenewals`, `GetRenewal`, `ListPaymentMethods` |
 | Running charges | `StartRunningCharge`, `StopRunningCharge`, `GetRunningCharge`, `ListRunningCharges` |
-| Host feed / import | `ListHostEvents`, `AcknowledgeHostEvents`, `ImportBilling` |
+| Host feed / import | `ListEvents`, `ImportBilling` |
 
 ```go
 verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
@@ -580,35 +580,24 @@ this one, which composes this engine with its own AuthKit like any host does; se
 For arrears billing, OpenRails decides when a customer's unpaid debt has outlived
 the merchant's grace window and refuses their new spend at admission — but only
 your app can shut off what your app runs. Transitions land on a durable,
-acknowledged feed you drain:
+retained log with a cursor your application owns:
 
 ```go
-// client is a merchant's handle, from an Engine or a Remote; both have the same operations.
-for _, kind := range []billing.HostEventType{
-    billing.HostEventDelinquencyGrace,
-    billing.HostEventDelinquencyEntered,
-    billing.HostEventDelinquencyCleared,
-} {
-    page, err := client.ListHostEvents(ctx, billing.HostEventListParams{
-        Type: kind, PageRequest: billing.PageRequest{Limit: 100},
-    })
-    if err != nil { return err }
-    var done []billing.HostEventID
-    var failed error
-    for _, event := range page.Items {
-        if failed = applyHostAction(ctx, event.Type, event.Delinquency); failed != nil {
-            break // leave this and later events pending for replay
-        }
-        done = append(done, event.ID)
-    }
-    if len(done) > 0 {
-        if _, err := client.AcknowledgeHostEvents(ctx, done); err != nil { return err }
-    }
-    if failed != nil { return failed }
+page, err := client.ListEvents(ctx, billing.EventQuery{
+    After: savedCursor,
+    Types: []string{"delinquency.grace", "delinquency.entered", "delinquency.cleared"},
+})
+if err != nil { return err } // a lost-retention cursor requires resynchronization
+for _, event := range page.Events {
+    var data billing.DelinquencyHostEvent
+    if err := json.Unmarshal(event.Data, &data); err != nil { return err }
+    if err := applyHostAction(ctx, event.Type, &data); err != nil { return err }
 }
+// Persist with local effects atomically, or make them idempotent before saving.
+return saveCursor(ctx, page.NextCursor)
 ```
 
-Ack after your action is durable — an unacked event is redelivered. OpenRails
+Save your cursor after the action is durable; retries reuse the event ID. OpenRails
 never revokes an entitlement for an unpaid arrears bill. Full boundary and policy:
 [arrears-delinquency.md](arrears-delinquency.md).
 

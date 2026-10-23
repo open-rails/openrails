@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/testevents"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -80,7 +82,7 @@ func TestRenewalIsAnOrder(t *testing.T) {
 		mine := e.c.order(http.MethodGet, "/orders?subscription_id="+e.sub.String(), "", nil)
 		require.Equal(t, http.StatusOK, mine.status, "%v", mine.body)
 		require.Len(t, mine.body["data"], 2, "the customer reads their renewals")
-		events, err := w.client[tp].ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventOrderCompleted})
+		events, err := testevents.Hosts(t.Context(), w.client[tp], billing.HostEventOrderCompleted)
 		require.NoError(t, err)
 		renewals, renewed := e.renewalOrders(), 0
 		for _, ev := range events.Items {
@@ -245,7 +247,7 @@ func TestRenewalOrderVoidedWithItsSubscription(t *testing.T) {
 	paid := e.c.order(http.MethodPost, "/orders/"+id+"/pay", "pay-"+uuid.NewString(), map[string]any{"payment": map[string]any{"payment_method_id": e.method}, "expected_total": open.body["total"]})
 	require.Equal(t, http.StatusConflict, paid.status, "%v", paid.body)
 	require.Equal(t, "order_not_payable", orderError(paid))
-	events, err := w.client[embedded].ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventOrderVoided})
+	events, err := testevents.Hosts(t.Context(), w.client[embedded], billing.HostEventOrderVoided)
 	require.NoError(t, err)
 	require.True(t, slices.ContainsFunc(events.Items, func(ev billing.HostEvent) bool { return ev.Order != nil && ev.Order.OrderID.String() == id }), "order.voided")
 	overdue, err := w.client[embedded].ListOrders(t.Context(), billing.OrderListParams{Overdue: true, SubscriptionID: e.sub})

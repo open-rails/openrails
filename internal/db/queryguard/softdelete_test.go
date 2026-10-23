@@ -40,8 +40,6 @@ var allow = map[string]string{
 	"MerchantHasActivity":                   "retirement is only for never-used merchants; tombstoned rows disqualify",
 	"ProductHoldsReferences":                "a tombstoned subscription or access still referred to the product, which therefore is never deleted",
 	"PricesHoldReferences":                  "a tombstoned payment, subscription or order line still referred to the price, which therefore is never deleted",
-	"ListHostEvents":                        "a settled event stays deliverable after its payment is tombstoned",
-	"ListHostEventsByIDs":                   "a settled event stays deliverable after its payment is tombstoned",
 	"RestoreSubscriptionsByDestructiveRun":  "prune rollback: finds soft-deleted rows",
 	"RestorePaymentsByDestructiveRun":       "prune rollback",
 	"RestoreOrderAttemptsByDestructiveRun":  "prune rollback",

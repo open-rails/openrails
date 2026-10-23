@@ -228,7 +228,6 @@ func TestListsReadNamedRecords(t *testing.T) {
 		"GET /v1/merchant/provisioning-tokens":                       {"/v1/merchant/provisioning-tokens", "", "provisioning_tokens", ", token_sha256 = sha256(token_sha256)", ""},
 		"GET /v1/merchant/psp-imports":                               {"/v1/merchant/psp-imports", "", "psp_imports", "", ""},
 		"GET /v1/merchant/psp-imports/{id}/records":                  {"/v1/merchant/psp-imports/" + imports[0].String() + "/records", "", "psp_import_records", "", ""},
-		"GET /v1/app/host-events":                                    {"/v1/app/host-events", "include_acknowledged=true", "host_outbox", "", ""},
 		"GET /v1/merchant/findings":                                  {"/v1/merchant/findings", "", "reconciliation_findings", "", ""},
 		"GET /v1/merchant/destructive-holds":                         {"/v1/merchant/destructive-holds", "", "destructive_holds", ", scope_key = scope_key || ':elsewhere'", ""},
 	}

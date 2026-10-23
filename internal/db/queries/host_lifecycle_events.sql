@@ -1,7 +1,5 @@
--- Delinquency writes to host_outbox: merchant-scoped, explicitly acked, pruned
--- after delivery. A missed cut-off is a revenue leak and a missed restore an
--- outage, so neither is a fire-and-forget webhook. Hosts read and ack through
--- host_events.sql.
+-- Private typed producer journal for idempotent financial transitions.
+-- Public readers use event_log; this table has no delivery state.
 
 -- name: EnqueueHostLifecycleEvent :execrows
 -- Idempotent on the transition's dedupe key: re-announcing a transition is a
@@ -15,13 +13,13 @@ VALUES (
 ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
 
 -- Batched: row_limit bounds one statement, the caller loops.
--- name: DeleteDeliveredHostLifecycleEventsBefore :execrows
+-- name: DeleteHostLifecycleEventsBefore :execrows
 DELETE FROM billing.host_outbox
 WHERE ctid IN (
     SELECT hle.ctid FROM billing.host_outbox hle
     WHERE hle.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND hle.event_type <> 'payment.settled' AND hle.delivered_at IS NOT NULL
-      AND hle.delivered_at < sqlc.arg(cutoff)::timestamptz
+      AND hle.event_type <> 'payment.settled'
+      AND hle.recorded_at < sqlc.arg(cutoff)::timestamptz
     LIMIT sqlc.arg(row_limit)::int
 );
 

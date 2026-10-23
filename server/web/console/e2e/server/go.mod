@@ -5,9 +5,9 @@ go 1.26.10
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/open-rails/authkit v1.30.0
-	github.com/open-rails/openrails v0.260.3
-	github.com/open-rails/openrails/server v0.259.0
+	github.com/open-rails/authkit v1.34.0
+	github.com/open-rails/openrails v0.261.0
+	github.com/open-rails/openrails/server v0.261.0
 )
 
 require (

@@ -440,17 +440,7 @@ func TestSubscriptionHistoryArchiveRoundTrip(t *testing.T) {
 	e.c.setDefault(other)
 	w.settle()
 	ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
-	for {
-		events, err := w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{})
-		require.NoError(t, err)
-		if len(events.Items) == 0 {
-			break
-		}
-		for _, event := range events.Items {
-			_, err = w.client[embedded].AcknowledgeHostEvents(ctx, []billing.HostEventID{event.ID})
-			require.NoError(t, err)
-		}
-	}
+
 	w.stop()
 	d, err := db.NewWithPGXPool(w.pool, w.schema)
 	require.NoError(t, err)

@@ -45,12 +45,7 @@ func TestResumeAfterCardRemovalRequiresDefault(t *testing.T) {
 	require.Equal(t, 1, deletes)
 	e.c.must(http.MethodDelete, "/payment-methods/"+e.method, "", nil)
 	require.Len(t, w.nmi.CallsTo(http.MethodDelete, "/customers/", nil), deletes, "repeat removal does not call the provider again")
-	events, err := w.client[embedded].ListHostEvents(t.Context(), billing.HostEventListParams{})
-	require.NoError(t, err)
-	for _, event := range events.Items {
-		_, err := w.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-		require.NoError(t, err)
-	}
+
 	require.NoError(t, w.exportArchive(), "the retained deletion receipt is valid archive evidence")
 	status, out := e.c.call(http.MethodPost, "/subscriptions/"+e.sub.String()+"/resume", "", nil)
 	require.Equal(t, http.StatusPaymentRequired, status, "%v", out)

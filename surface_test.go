@@ -30,10 +30,9 @@ import (
 // handleMethods say what a handle is or ask the token endpoint, which is no
 // merchant route.
 var handleMethods = map[string]string{
-	"NotificationEvents": "binds a named durable source consumer; its methods perform delivery operations",
-	"MerchantID":         "the handle's merchant",
-	"CustomerToken":      "mints a customer's access token at the issuer's token endpoint",
-	"CustomerAssertion":  "signs the assertion a frontend redeems for that token",
+	"MerchantID":        "the handle's merchant",
+	"CustomerToken":     "mints a customer's access token at the issuer's token endpoint",
+	"CustomerAssertion": "signs the assertion a frontend redeems for that token",
 }
 
 // engineMethods are everything an Engine has: its lifecycle, the HTTP surface
@@ -41,7 +40,6 @@ var handleMethods = map[string]string{
 // on it.
 var engineMethods = map[string]string{
 	"CheckoutPage":             "configures the isolated hosted-order surface before startup",
-	"NotificationEvents":       "a trusted global consumer across every merchant",
 	"Start":                    "starts the workers",
 	"Close":                    "stops the engine",
 	"Ready":                    "the readiness probe",
@@ -105,7 +103,7 @@ var verbs = map[string][]string{
 
 // documents are the requests that are not named ...Params: what the route
 // stores or runs, sent whole.
-var documents = []string{"DeclaredBilling", "MetricsQuery", "PageRequest", "Application"}
+var documents = []string{"DeclaredBilling", "MetricsQuery", "EventQuery", "PageRequest", "Application"}
 
 // synonyms are spellings of the seven verbs the API does not use.
 var synonyms = []string{"Retrieve", "Fetch", "Read", "Find", "Lookup", "Search", "Upsert", "Put", "Add", "New", "Make", "Remove", "Destroy", "Modify", "Edit", "Patch"}
@@ -289,25 +287,6 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 			t.Errorf("%s returns %s by value: return a pointer", m.Name, out)
 		}
 	}
-	// A named consumer is a sub-handle: its four methods each own one source route.
-	consumer, err := p.client.NotificationEvents("surface")
-	require.NoError(t, err)
-	for name, op := range map[string]func() error{
-		"RegisterNotificationConsumer": func() error { return consumer.Register(t.Context()) },
-		"PendingNotificationEvents":    func() error { _, err := consumer.Pending(t.Context(), 1); return err },
-		"AcknowledgeNotificationEvents": func() error {
-			return consumer.Acknowledge(t.Context(), []billing.NotificationEventRef{{MerchantID: testMerchant, ID: billing.NotificationID(uuid.New())}})
-		},
-		"RetireNotificationConsumer": func() error { return consumer.Retire(t.Context()) },
-	} {
-		p.seen = nil
-		require.NoError(t, op())
-		require.Len(t, p.seen, 1, name)
-		route := catalogRoutes[p.seen[0]]
-		require.Equal(t, name, route.Name)
-		methodsOf[route.Key()] = append(methodsOf[route.Key()], name)
-	}
-
 	for name := range handleMethods {
 		require.True(t, names[name], "handleMethods lists %s, which Client does not have", name)
 	}

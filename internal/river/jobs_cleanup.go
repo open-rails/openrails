@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/eventlog"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
-	"github.com/open-rails/openrails/internal/notificationevents"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 	"github.com/open-rails/openrails/internal/shared/progress"
@@ -64,16 +63,6 @@ type CleanupConfig struct {
 	// (webhook_events) are kept. Default: 90 days.
 	WebhookEventRetention time.Duration
 
-	// PaymentSettlementAckedRetention is how long acknowledged payment
-	// settlement events are kept. Default: 30 days. Pending events are never
-	// pruned.
-	PaymentSettlementAckedRetention time.Duration
-
-	// HostLifecycleEventAckedRetention is how long acknowledged host-lifecycle
-	// events (delinquency transitions) are kept. Default: 30 days. Pending
-	// events are never pruned: an unread shutoff or restore is undone work.
-	HostLifecycleEventAckedRetention time.Duration
-
 	// PaymentAttemptRetention is how long payment attempts, rebill cycles and
 	// NMI history months are kept. Default: 25 months.
 	PaymentAttemptRetention time.Duration
@@ -100,15 +89,13 @@ func DefaultCleanupConfig() CleanupConfig {
 		NotificationUnseenRetention: retention.NotificationsUnread,
 		WebhookEventRetention:       webhooks.WebhookEventRetention,
 
-		PaymentSettlementAckedRetention:  retention.DeliveredHostEvents,
-		HostLifecycleEventAckedRetention: retention.DeliveredHostEvents,
-		PaymentAttemptRetention:          retention.PaymentAttempts,
+		PaymentAttemptRetention: retention.PaymentAttempts,
 	}
 }
 
 func (c CleanupConfig) validate() error {
 	if c.EventRetention <= 0 || c.NotificationSeenRetention <= 0 || c.NotificationUnseenRetention <= 0 || c.WebhookEventRetention <= 0 ||
-		c.PaymentSettlementAckedRetention <= 0 || c.HostLifecycleEventAckedRetention <= 0 || c.PaymentAttemptRetention <= 0 {
+		c.PaymentAttemptRetention <= 0 {
 		return fmt.Errorf("cleanup worker config requires positive retentions (wire DefaultCleanupConfig()): %+v", c)
 	}
 	return nil
@@ -227,7 +214,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	}
 
 	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
-		n, err := notificationevents.Prune(ctx, w.DB, now, cleanupDeleteBatch)
+		n, err := w.DB.GenDirectory().PruneNotificationJournal(ctx, gen.PruneNotificationJournalParams{Cutoff: now.Add(-max(retention.EventLog, config.EventRetention)), RowLimit: cleanupDeleteBatch})
 		if err != nil {
 			cleanupErr = errors.Join(cleanupErr, err)
 			break
@@ -296,8 +283,8 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			NotificationCutoff:     now.Add(-config.NotificationUnseenRetention),
 			NotificationSeenCutoff: now.Add(-config.NotificationSeenRetention),
 			WebhookCutoff:          now.Add(-config.WebhookEventRetention),
-			SettlementCutoff:       now.Add(-config.PaymentSettlementAckedRetention),
-			LifecycleCutoff:        now.Add(-config.HostLifecycleEventAckedRetention),
+			SettlementCutoff:       now.Add(-max(retention.EventLog, config.EventRetention)),
+			LifecycleCutoff:        now.Add(-max(retention.EventLog, config.EventRetention)),
 			AttemptCutoff:          now.Add(-config.PaymentAttemptRetention),
 			TransitionCutoff:       now.Add(-retention.SubscriptionTransitions),
 			OrderAttemptCutoff:     now.Add(-retention.ExpiredOrderAttempts),
@@ -464,17 +451,17 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		})
 	})
 
-	// 4. Acked payment settlement events. Pending events are never pruned.
+	// 4. Private payment dedupe journal, retained from ingestion.
 	sweep("delete payment settlements", &result.PaymentSettlements, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.DeleteDeliveredPaymentSettlementsBefore(ctx, gen.DeleteDeliveredPaymentSettlementsBeforeParams{
-			MerchantID: mid, Cutoff: now.Add(-config.PaymentSettlementAckedRetention), RowLimit: limit,
+		return q.DeletePaymentSettlementsBefore(ctx, gen.DeletePaymentSettlementsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-max(retention.EventLog, config.EventRetention)), RowLimit: limit,
 		})
 	})
 
-	// 5. Acked host-lifecycle events. Pending events are never pruned.
+	// 5. Private lifecycle dedupe journal, retained from ingestion.
 	sweep("delete host lifecycle events", &result.HostLifecycleEvents, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.DeleteDeliveredHostLifecycleEventsBefore(ctx, gen.DeleteDeliveredHostLifecycleEventsBeforeParams{
-			MerchantID: mid, Cutoff: now.Add(-config.HostLifecycleEventAckedRetention), RowLimit: limit,
+		return q.DeleteHostLifecycleEventsBefore(ctx, gen.DeleteHostLifecycleEventsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-max(retention.EventLog, config.EventRetention)), RowLimit: limit,
 		})
 	})
 

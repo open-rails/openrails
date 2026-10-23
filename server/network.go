@@ -42,26 +42,15 @@ func (s *Server) UnlinkCustomer(ctx context.Context, account billing.NetworkAcco
 }
 
 // networkHooks has AuthKit tell the network about accounts, before the
-// host's own hooks: consents revoked and terms accepted (OnEvent), deleted
-// accounts (OnPurge), and the refusals while linked customers' cards still
+// host's own hooks: deleted accounts (OnPurge), and the refusals while
+// linked customers' cards still
 // pay subscriptions (DeletionCheck, ConsentRevocationCheck). Consent screens
 // name a merchant's client by the merchant's name unless the host does.
 func (s *Server) networkHooks(d *authkit.Deps) {
 	if d.GroupName == nil {
 		d.GroupName = s.merchantName
 	}
-	onEvent, onPurge, deletion, revocation := d.OnEvent, d.OnPurge, d.DeletionCheck, d.ConsentRevocationCheck
-	d.OnEvent = func(ctx context.Context, e iam.Event) error {
-		if s.network != nil {
-			if err := s.network.OnEvent(ctx, e); err != nil {
-				return err
-			}
-		}
-		if onEvent != nil {
-			return onEvent(ctx, e)
-		}
-		return nil
-	}
+	onPurge, deletion, revocation := d.OnPurge, d.DeletionCheck, d.ConsentRevocationCheck
 	d.OnPurge = func(ctx context.Context, del iam.UserDeletion) error {
 		if s.network != nil {
 			if err := s.network.OnPurge(ctx, del); err != nil {

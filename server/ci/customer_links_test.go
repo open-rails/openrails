@@ -70,6 +70,7 @@ type world struct {
 	as                   *authtest.AuthorizationServer
 	gateway, martGateway *nmimock.Mock
 	now                  func() time.Time
+	tenant               iam.TenantID
 
 	shop, rival, mart       billing.MerchantID
 	shopLogin, rivalLogin   issuerKey
@@ -81,7 +82,7 @@ func newWorld(t *testing.T) *world { return newWorldAt(t, nil) }
 
 // newWorldAt is a world whose engine and gateway keep clock's time; nil is
 // the wall clock.
-func newWorldAt(t *testing.T, clock *clockwork.FakeClock) *world {
+func newWorldAt(t *testing.T, clock *clockwork.FakeClock, edit ...func(*server.Config, *server.Deps)) *world {
 	t.Helper()
 	f := newFixture(t)
 	ctx := t.Context()
@@ -129,6 +130,9 @@ func newWorldAt(t *testing.T, clock *clockwork.FakeClock) *world {
 		if clock != nil {
 			deps.Engine.Clock = clock
 		}
+		for _, customize := range edit {
+			customize(cfg, deps)
+		}
 	})
 	shop, mart := uniqueName("network-shop"), uniqueName("network-mart")
 	manifest := filepath.Join(t.TempDir(), "merchants.yaml")
@@ -158,14 +162,14 @@ merchants:
 	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
 	served.Store(&handler)
-	require.NoError(t, srv.Start(ctx), "River delivers AuthKit's account events")
+	require.NoError(t, srv.Start(ctx), "River polls the server-owned AuthKit event cursor")
 
 	m, err := graph.Runtime.Merchants.GetBySlug(ctx, shop)
 	require.NoError(t, err)
 	mm, err := graph.Runtime.Merchants.GetBySlug(ctx, mart)
 	require.NoError(t, err)
 	label := strings.ReplaceAll(f.schema, "_", "-")
-	w := &world{t: t, srv: srv, handler: handler, as: authtest.Attach(t, srv.AuthKit(), ts), gateway: gateway, martGateway: martGateway, now: now,
+	w := &world{tenant: f.tenantID(), t: t, srv: srv, handler: handler, as: authtest.Attach(t, srv.AuthKit(), ts), gateway: gateway, martGateway: martGateway, now: now,
 		shop: m.ID, mart: mm.ID, rival: provision(t, srv, uniqueName("network-rival")),
 		shopLogin: newIssuerKey(t, "https://shop-"+label+".e2e.test"), rivalLogin: newIssuerKey(t, "https://rival-"+label+".e2e.test")}
 	trust(t, srv, w.shop, w.shopLogin.app(t, "viewer", nil))
@@ -288,14 +292,23 @@ func (w *world) adminCustomer(key iam.APIKeyCreated, id string) (billing.Custome
 	return c, raw
 }
 
-// events are the merchant's unacknowledged host events of kind.
+// events reads retained merchant facts without changing another reader's position.
 func (w *world) events(key iam.APIKeyCreated, kind billing.HostEventType) []billing.HostEvent {
 	w.t.Helper()
-	r := call(w.t, w.handler, key.Secret, http.MethodGet, "/v1/app/host-events?type="+string(kind), nil)
+	r := call(w.t, w.handler, key.Secret, http.MethodGet, "/v1/app/events?type="+url.QueryEscape(string(kind)), nil)
 	require.Equal(w.t, http.StatusOK, r.Code, r.Body.String())
-	var page billing.ListPage[billing.HostEvent]
+	var page billing.EventPage
 	require.NoError(w.t, json.Unmarshal(r.Body.Bytes(), &page))
-	return page.Items
+	out := make([]billing.HostEvent, 0, len(page.Events))
+	for _, fact := range page.Events {
+		require.Equal(w.t, "host", fact.Source)
+		id, err := billing.ParseHostEventID(fact.ID)
+		require.NoError(w.t, err)
+		event := billing.HostEvent{ID: id, MerchantID: fact.MerchantID, Type: billing.HostEventType(fact.Type), OccurredAt: fact.OccurredAt, CustomerNetwork: new(billing.CustomerNetworkHostEvent)}
+		require.NoError(w.t, json.Unmarshal(fact.Data, event.CustomerNetwork))
+		out = append(out, event)
+	}
+	return out
 }
 
 func (w *world) linkedEvent(key iam.APIKeyCreated, kind billing.HostEventType, customer string) *billing.CustomerNetworkHostEvent {
@@ -666,6 +679,8 @@ func TestUnlinkingCustomers(t *testing.T) {
 
 	gone := func(id string) func() bool {
 		return func() bool {
+			_, err := pollNetworkEvents(t, w.srv)
+			require.NoError(t, err)
 			c, _ := w.adminCustomer(w.shopKey, id)
 			return c.Network == nil
 		}
@@ -798,7 +813,12 @@ func TestUnlinkingAgainFinishesTheUnlink(t *testing.T) {
 	require.True(t, held(app.ClientID))
 
 	require.NoError(t, w.srv.AuthKit().RevokeConsent(ctx, ann.ID, w.shopClient.ClientID))
-	require.Eventually(t, func() bool { c, _ := w.adminCustomer(w.shopKey, sub); return c.Network == nil }, 30*time.Second, 100*time.Millisecond,
+	require.Eventually(t, func() bool {
+		_, err := pollNetworkEvents(t, w.srv)
+		require.NoError(t, err)
+		c, _ := w.adminCustomer(w.shopKey, sub)
+		return c.Network == nil
+	}, 30*time.Second, 100*time.Millisecond,
 		"oauth_consent.revoked ends the link")
 	require.True(t, held(app.ClientID), "the merchant's other client still holds the account's consent")
 
@@ -860,7 +880,7 @@ func TestLinkChallengesCrossInstancesThroughRedis(t *testing.T) {
 	}
 	graph, _ := operator.Of(w.srv)
 	instance := func(rdb redis.UniversalClient) *network.Service {
-		s, err := network.New(graph.Runtime.DB, w.srv.AuthKit(), abusestate.New(rdb), nil)
+		s, err := network.New(graph.Runtime.DB, w.srv.AuthKit(), abusestate.New(rdb), nil, w.tenant, w.as.URL)
 		require.NoError(t, err)
 		return s
 	}
@@ -938,7 +958,7 @@ func TestNativeCustomersLinkWhenTheyAcceptNewTerms(t *testing.T) {
 	handler, err = standaloneHandler(after)
 	require.NoError(t, err)
 	served.Store(&handler)
-	require.NoError(t, after.Start(ctx), "River delivers the acceptance")
+	require.NoError(t, after.Start(ctx), "River polls the acceptance")
 	r := serve(handler, rsRequest{path: "/v1/me", authorization: "Bearer " + tokens.AccessToken})
 	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
 	owner := merchantKey(t, after, shop, "owner")
@@ -951,7 +971,12 @@ func TestNativeCustomersLinkWhenTheyAcceptNewTerms(t *testing.T) {
 	}
 	require.Nil(t, linked(), "the new terms are due: a customer, not yet linked")
 	require.NoError(t, after.AuthKit().AcceptAgreements(ctx, sam.ID, []iam.AgreementRef{{Key: network.TermsAgreement, Version: "2026-11"}}))
-	require.Eventually(t, func() bool { n := linked(); return n != nil && n.Method == billing.CustomerLinkSignIn }, 30*time.Second, 100*time.Millisecond,
+	require.Eventually(t, func() bool {
+		_, err := pollNetworkEvents(t, after)
+		require.NoError(t, err)
+		n := linked()
+		return n != nil && n.Method == billing.CustomerLinkSignIn
+	}, 30*time.Second, 100*time.Millisecond,
 		"user.agreement_accepted links the merchants whose client the account let act as itself")
 }
 

@@ -326,10 +326,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.CreateCreditGrants(ctx, nil)
 			return err
 		},
-		"host events empty": func() error {
-			_, err := c.AcknowledgeHostEvents(ctx, nil)
-			return err
-		},
 		"entitlements over bound": func() error {
 			_, err := c.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{customerID}, Entitlements: make([]string, billing.MaxBatchItems+1)})
 			return err
@@ -401,10 +397,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	uuidCalls := map[string]func() error{
 		"get price migration":    func() error { _, err := c.GetPriceMigration(ctx, billing.PriceMigrationID{}); return err },
 		"cancel price migration": func() error { _, err := c.CancelPriceMigration(ctx, billing.PriceMigrationID{}); return err },
-		"acknowledge host event": func() error {
-			_, err := c.AcknowledgeHostEvents(ctx, []billing.HostEventID{{}})
-			return err
-		},
 	}
 
 	requireInvalidParam := func(t *testing.T, name string, err error) {

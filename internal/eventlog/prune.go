@@ -6,6 +6,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -34,7 +35,11 @@ func Prune(ctx context.Context, database *db.DB, now time.Time, retention time.D
 			if err := q.LockEventLogStream(ctx, mid); err != nil {
 				return err
 			}
-			gone, err := q.PruneEventLog(ctx, gen.PruneEventLogParams{MerchantID: mid, Cutoff: cutoff, RowLimit: int32(limit - removed)})
+			remaining, err := safecast.Convert[int32](limit - removed)
+			if err != nil {
+				return err
+			}
+			gone, err := q.PruneEventLog(ctx, gen.PruneEventLogParams{MerchantID: mid, Cutoff: cutoff, RowLimit: remaining})
 			if err != nil {
 				return err
 			}

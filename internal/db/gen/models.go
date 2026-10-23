@@ -454,13 +454,13 @@ type BillingEventLog struct {
 	Data        []byte
 }
 
-// Internal transaction scratch; no row survives a successful commit. Retention: transaction lifetime only.
+// Internal transaction scratch; no row survives a successful commit. Exists only for the transaction lifetime.
 type BillingEventLogPending struct {
 	TransactionID int64
 	Entries       []byte
 }
 
-// Committed event positions and retention boundaries; no reader state. Retention: state owned by the merchant.
+// Committed event positions and retention boundaries; no reader state. State owned by the merchant.
 type BillingEventLogStream struct {
 	MerchantID    uuid.UUID
 	Epoch         uuid.UUID
@@ -514,7 +514,7 @@ type BillingGrant struct {
 	Quantity *int32
 }
 
-// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes, order transitions, customer links, revoked charge agreements and the low and depleted balance of a watched customer. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
+// Internal typed financial emission and deduplication journal; the public feed is event_log. Retention: rows are deleted after at least 90 days from recorded_at and never earlier than the configured event retention, independently of readers.
 type BillingHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -524,12 +524,12 @@ type BillingHostOutbox struct {
 	Amount      *int64
 	SubjectID   uuid.UUID
 	// The transition's currency; NULL only for a product's key change, which has none.
-	Currency    *string
-	OccurredAt  time.Time
-	Data        []byte
-	DeliveredAt *time.Time
+	Currency   *string
+	OccurredAt time.Time
+	Data       []byte
 	// Deterministic per transition (delinquency:<customer>:<currency>:<transition_seq>) so a re-run collapses instead of instructing a second shutoff.
-	DedupeKey string
+	DedupeKey  string
+	RecordedAt time.Time
 }
 
 // One claim per (merchant, operation, key). processing = owned until lease_expires_at, then reclaimable by exactly one caller; succeeded = replay result; failed = reclaimable. token fences a superseded owner; claims counts claims. Rows past expires_at are deleted by retention. Retention: rows are deleted at expires_at.
@@ -745,6 +745,14 @@ type BillingMoneySetting struct {
 	CollectionRevokedAt *time.Time
 }
 
+// State: optional standalone customer-network account event reading position, scoped to its AuthKit issuer and account tenant; retained until that server authority is retired.
+type BillingNetworkEventCursor struct {
+	Issuer    string
+	TenantID  uuid.UUID
+	Cursor    string
+	UpdatedAt time.Time
+}
+
 // The in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.
 type BillingNmiBulkCheckpoint struct {
 	MerchantID     uuid.UUID
@@ -793,15 +801,7 @@ type BillingNotification struct {
 	EmailLeaseExpiresAt *time.Time
 }
 
-type BillingNotificationConsumer struct {
-	ID         uuid.UUID
-	MerchantID *uuid.UUID
-	Owner      string
-	Name       string
-	CreatedAt  time.Time
-}
-
-// Immutable customer billing facts, independent of application inbox state. Retention: events are deleted 30 days after every active scoped and global consumer acknowledges; pending events never expire.
+// Internal notification emission and deduplication journal; the public feed is event_log. Retention: rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers.
 type BillingNotificationEvent struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
@@ -810,13 +810,6 @@ type BillingNotificationEvent struct {
 	Data       []byte
 	CreatedAt  time.Time
 	InsertedAt time.Time
-}
-
-type BillingNotificationEventAck struct {
-	ConsumerID     uuid.UUID
-	MerchantID     uuid.UUID
-	EventID        uuid.UUID
-	AcknowledgedAt time.Time
 }
 
 // One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from order_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.

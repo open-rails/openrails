@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
@@ -108,6 +109,10 @@ func List(ctx context.Context, database *db.DB, merchantID billing.MerchantID, q
 	if err != nil {
 		return page, err
 	}
+	rowLimit, err := safecast.Convert[int32](q.Limit + 1)
+	if err != nil {
+		return page, err
+	}
 	var prior cursor
 	if q.After != "" {
 		prior, err = decode(q.After)
@@ -157,10 +162,10 @@ func List(ctx context.Context, database *db.DB, merchantID billing.MerchantID, q
 		}
 		var rows []gen.ListEventLogRow
 		if len(q.Types) == 0 {
-			rows, err = queries.ListEventLog(ctx, gen.ListEventLogParams{MerchantID: merchantID.UUID(), AfterPosition: after, RowLimit: int32(q.Limit + 1)})
+			rows, err = queries.ListEventLog(ctx, gen.ListEventLogParams{MerchantID: merchantID.UUID(), AfterPosition: after, RowLimit: rowLimit})
 		} else {
 			var filtered []gen.ListEventLogByTypesRow
-			filtered, err = queries.ListEventLogByTypes(ctx, gen.ListEventLogByTypesParams{MerchantID: merchantID.UUID(), AfterPosition: after, EventTypes: q.Types, RowLimit: int32(q.Limit + 1)})
+			filtered, err = queries.ListEventLogByTypes(ctx, gen.ListEventLogByTypesParams{MerchantID: merchantID.UUID(), AfterPosition: after, EventTypes: q.Types, RowLimit: rowLimit})
 			for _, row := range filtered {
 				rows = append(rows, gen.ListEventLogRow(row))
 			}

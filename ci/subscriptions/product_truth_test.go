@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/testevents"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -16,7 +18,7 @@ import (
 // keysEvents is the product key-change host events of one product.
 func (w *world) keysEvents(product billing.ProductID) []billing.ProductEntitlementsChangedEvent {
 	w.t.Helper()
-	page, err := w.client[embedded].ListHostEvents(w.t.Context(), billing.HostEventListParams{Type: billing.HostEventProductEntitlementsChanged, PageRequest: billing.PageRequest{Limit: 100}})
+	page, err := testevents.Hosts(w.t.Context(), w.client[embedded], billing.HostEventProductEntitlementsChanged)
 	require.NoError(w.t, err)
 	var out []billing.ProductEntitlementsChangedEvent
 	for _, event := range page.Items {

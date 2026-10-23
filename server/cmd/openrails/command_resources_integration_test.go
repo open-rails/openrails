@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/open-rails/openrails/internal/eventlog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -21,10 +24,8 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payment"
@@ -250,8 +251,7 @@ func TestOneOffHoldClearKeepsAdmissionChecksAndEvents(t *testing.T) {
 	hold, err := gate.GetHold(f.ctx, f.mid.UUID(), trip.Hold.ID)
 	require.NoError(t, err)
 	require.NotNil(t, hold.ClearedAt)
-	events, err := f.db.Gen(merchant.WithID(f.ctx, f.mid)).ListHostEvents(f.ctx, gen.ListHostEventsParams{
-		MerchantID: f.mid.UUID(), EventType: string(billing.HostEventDestructiveHoldCleared), RowLimit: 10})
+	events, err := eventlog.List(f.ctx, f.db, f.mid, billing.EventQuery{Types: []string{string(billing.HostEventDestructiveHoldCleared)}}, eventlog.DefaultRetention, time.Now())
 	require.NoError(t, err)
-	require.Len(t, events, 1, "clearing retains its transactional host event")
+	require.Len(t, events.Events, 1, "clearing retains its transactional event")
 }

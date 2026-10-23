@@ -28,14 +28,13 @@ const permanent = "permanent, never pruned."
 // Tables classifies every table of the baseline. A table without an entry
 // fails TestEveryTableHasARetentionClass.
 var Tables = map[string]Table{
-	"event_log":               {Rows, "events expire after the configured event retention, independently of reader progress."},
-	"event_log_streams":       {Class: State},
-	"event_log_pending":       {Class: State},
-	"destructive_actions":     {Permanent, permanent},
-	"destructive_holds":       {Permanent, permanent},
-	"notification_consumers":  {Class: State},
-	"notification_event_acks": {Class: State},
-	"notification_events":     {Rows, "events are deleted 30 days after every active scoped and global consumer acknowledges; pending events never expire."},
+	"event_log":             {Rows, "events expire after the configured event retention, independently of reader progress."},
+	"event_log_streams":     {Class: State},
+	"network_event_cursors": {Class: State},
+	"event_log_pending":     {Class: State},
+	"destructive_actions":   {Permanent, permanent},
+	"destructive_holds":     {Permanent, permanent},
+	"notification_events":   {Rows, "rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers."},
 	// Money, grants, owed usage and receipts.
 	"ledger_accounts":               {Permanent, permanent},
 	"ledger_transfers":              {Permanent, permanent},
@@ -77,7 +76,7 @@ var Tables = map[string]Table{
 	"carts":                           {Rows, "carts are deleted 30 days after last_changed_at."},
 	"notifications":                   {Rows, "rows are deleted 90 days after created_at once read, 180 days if never read."},
 	"webhook_events":                  {Rows, "completed events are deleted 90 days after completed_at."},
-	"host_outbox":                     {Rows, "delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted."},
+	"host_outbox":                     {Rows, "rows are deleted after at least 90 days from recorded_at and never earlier than the configured event retention, independently of readers."},
 	"payment_attempts":                {Rows, "rows are deleted 25 months (761 days) after attempted_at."},
 	"rebill_cycles":                   {Rows, "rows are deleted 25 months (761 days) after due_at, once their attempts are gone."},
 	"nmi_history_months":              {Rows, "rows are deleted 25 months (761 days) after their month."},

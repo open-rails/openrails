@@ -21,13 +21,12 @@ import (
 var excludedTables = map[string]string{
 	"event_log":                     "retained deployment facts; readers resynchronize at the destination",
 	"event_log_streams":             "deployment cursor identity; never import source cursors",
+	"network_event_cursors":         "standalone server-owned account event reading position",
 	"event_log_pending":             "transaction scratch, empty at commit",
 	"user_destructive_reservations": "rolling-day abuse reservations; never imported or reset by merchant restore",
 	"destructive_actions":           "deployment command admissions; never imported, re-exported or reset by merchant restore",
 	"destructive_holds":             "deployment incident authority and clears; never imported or reset by merchant restore",
-	"notification_consumers":        "deployment delivery subscriptions; hosts register at destination",
-	"notification_event_acks":       "deployment consumer processing receipts",
-	"notification_events":           "immutable source facts, drained before archive",
+	"notification_events":           "private producer deduplication journal; retained public facts and receiving applications own delivery",
 	"catalog_restore_receipts":      "local restore replay receipts, excluded from re-export like billing_restore maintenance receipts",
 	"merchants":                     "destination identity is explicitly provisioned",
 	"merchant_slug_aliases":         "former names are directory identity, not billing history",
@@ -74,6 +73,7 @@ var excludedTables = map[string]string{
 var excludedColumns = map[string]string{
 	"event_log":                     "merchant_id position id source event_type version occurred_at recorded_at subject_type subject_id data",
 	"event_log_streams":             "merchant_id epoch position head_id pruned_through pruned_id recorded_at",
+	"network_event_cursors":         "issuer tenant_id cursor updated_at",
 	"event_log_pending":             "transaction_id entries",
 	"user_destructive_reservations": "merchant_id action_key customer_id kind reserved_at",
 	"destructive_actions":           "merchant_id id admission_sequence kind target action_key request_digest origin actor_issuer actor_id actor_key credential units admitted_at state started_at finished_at completion_sequence result",
@@ -99,8 +99,6 @@ var excludedColumns = map[string]string{
 	"customer_contacts":             "merchant_id customer_id email display_name user_name active provisioned_at directory_updated_at created_at updated_at",
 	"provisioning_tokens":           "merchant_id id name declared token_sha256 last_used_at created_at",
 	"merchant_destructive_policy":   "merchant_id destructive_actions_enabled enforce_armed_at first_pull_completed_at updated_by reason updated_at",
-	"notification_consumers":        "id merchant_id owner name created_at",
-	"notification_event_acks":       "consumer_id merchant_id event_id acknowledged_at",
 	"notification_events":           "merchant_id id customer_id event_type data created_at inserted_at",
 	"notifications":                 "id event_type data recipient_kind read_at severity title body link created_at merchant_id customer_id emailed_at email_lease_expires_at",
 	"provider_mutation_logs":        "id merchant_id rail psp_id provider_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id origin actor executor operation_id subscription_id reason_code",
@@ -266,7 +264,6 @@ type rowCheck struct{ table, predicate string }
 
 // preflightChecks are states the archive cannot carry.
 var preflightChecks = []rowCheck{
-	{"notification_events", `EXISTS (SELECT 1 FROM billing.notification_consumers c WHERE (c.merchant_id IS NULL OR c.merchant_id=notification_events.merchant_id) AND NOT EXISTS(SELECT 1 FROM billing.notification_event_acks a WHERE a.consumer_id=c.id AND a.merchant_id=notification_events.merchant_id AND a.event_id=notification_events.id))`},
 	{"destructive_run_before_images", "true"}, {"account_updater_batches", "true"},
 	{"order_attempts", "status NOT IN ('succeeded','failed','expired','canceled')"},
 	// A request still running under a live claim has an outcome the archive
@@ -279,7 +276,7 @@ var preflightChecks = []rowCheck{
 	{"provider_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')"},
 	{"payments", "status='pending'"},
 	{"admission_operations", "state='open'"},
-	{"host_outbox", "delivered_at IS NULL"}, {"webhook_events", "completed_at IS NULL"},
+	{"webhook_events", "completed_at IS NULL"},
 	{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','reconciliation','prune','approval','merchant_purge')"},
 	{"maintenance_runs", "kind IN ('prune','approval','merchant_purge') AND (coverage IS NOT NULL OR affected IS NOT NULL OR summary IS NOT NULL OR inventory_manifest IS NOT NULL OR inventory_total_rows IS NOT NULL)"},
 }

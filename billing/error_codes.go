@@ -313,7 +313,6 @@ var errorCodes = []ErrorCode{
 	{"invalid_customer_id", 400, invalid, "The customer id is missing or malformed."},
 	{"billing_policy_not_found", 404, invalid, "The billing policy does not exist."},
 	{"host_event_not_found", 404, invalid, "The host event does not exist."},
-	{"invalid_host_event_request", 400, invalid, "The host event request is invalid."},
 
 	// Catalog and metering.
 	{"product_not_found", 404, invalid, "The product does not exist."},

@@ -97,17 +97,7 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 	end := member.periodEnd()
 	source.settle()
 	source.checkMoneyInvariants()
-	for {
-		events, err := source.client[embedded].ListHostEvents(t.Context(), billing.HostEventListParams{})
-		require.NoError(t, err)
-		if len(events.Items) == 0 {
-			break
-		}
-		for _, event := range events.Items {
-			_, err := source.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-			require.NoError(t, err)
-		}
-	}
+
 	source.stop()
 	source.waive("recorded", "the stopped backup retains pre-recovery payments; the restored destination owns subsequent provider activity")
 	sourceDB, err := db.NewWithPGXPool(source.pool, source.schema)

@@ -57,7 +57,7 @@ func TestBoundTokensAreAccessTokensForThisResource(t *testing.T) {
 		require.NoError(t, err)
 		return signed
 	}
-	routes := map[string]func(jwt.MapClaims){"/v1/me": customer, "/v1/merchant/findings": machine, "/v1/app/host-events": machine}
+	routes := map[string]func(jwt.MapClaims){"/v1/me": customer, "/v1/merchant/findings": machine, "/v1/app/events": machine}
 	for path, shape := range routes {
 		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: path, authorization: "Bearer " + host.mint(t, shape)}).Code, "control: %s", path)
 		for name, token := range map[string]string{

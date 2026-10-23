@@ -5,15 +5,15 @@ package subscriptions_test
 import (
 	"bytes"
 	"context"
-	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/merchantarchive"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/merchantarchive"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
@@ -96,12 +96,7 @@ func TestRestoreRaisesOrderNumberSequence(t *testing.T) {
 	enroll(t, w, "nmi", embedded)
 	client := w.client[embedded]
 	w.settle()
-	events, err := client.ListHostEvents(t.Context(), billing.HostEventListParams{})
-	require.NoError(t, err)
-	for _, event := range events.Items {
-		_, err := client.AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
-		require.NoError(t, err)
-	}
+
 	w.stop()
 	merchantID := client.MerchantID()
 	var top int64

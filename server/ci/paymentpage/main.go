@@ -39,6 +39,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/testevents"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 	"github.com/open-rails/openrails/openrailstest/stripemock"
 	"github.com/open-rails/openrails/server"
@@ -342,7 +343,7 @@ func (h *harness) advance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *harness) hostEvents(w http.ResponseWriter, r *http.Request) {
-	page, err := h.shop.ListHostEvents(r.Context(), billing.HostEventListParams{Type: billing.HostEventType(strings.TrimSpace(r.URL.Query().Get("type")))})
+	page, err := testevents.Hosts(r.Context(), h.shop, billing.HostEventType(strings.TrimSpace(r.URL.Query().Get("type"))))
 	if err != nil {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
