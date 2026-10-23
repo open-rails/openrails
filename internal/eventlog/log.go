@@ -34,27 +34,11 @@ type cursor struct {
 	Boundary string    `json:"boundary,omitempty"`
 }
 
-type stream struct {
-	Epoch    uuid.UUID
-	Position int64
-	HeadID   string
-	Floor    int64
-	FloorID  string
-}
-
 func invalid(message string) error {
 	return apperr.New(http.StatusBadRequest, billing.CodeInvalidCursor, message).WithParam("after")
 }
 func expired() error {
 	return apperr.New(http.StatusGone, billing.CodeEventCursorExpired, "event cursor is no longer retained; resynchronize current state").WithParam("after")
-}
-
-func normalize(q billing.EventQuery) (billing.EventQuery, error) {
-	n, err := shared.Normalize(shared.Query{After: q.After, Types: q.Types, Limit: q.Limit})
-	if err != nil {
-		return q, apperr.Invalidf("%v", err)
-	}
-	return billing.EventQuery{After: n.After, Types: n.Types, Limit: n.Limit}, nil
 }
 
 func decode(raw string) (cursor, error) {
