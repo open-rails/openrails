@@ -59,13 +59,17 @@ func (w *world) pspRecords(id billing.PSPImportID) map[string]billing.PSPImportR
 func TestPSPImportFromNMI(t *testing.T) {
 	t.Parallel()
 	directory := &openrailstest.UserInfo{}
-	w := prepareWorld(t, 12)
+	// Import reads provider history. Disarm unrelated startup credential
+	// write probes so the no-mutation assertion measures this import alone.
+	w := prepareWorld(t, 12, func(cfg *openrails.Config) {
+		cfg.ProviderWriteMode = openrails.ProviderWritesReadOnly
+	})
 	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
 	w.start()
 	w.waive("recorded", "the conflicted member's charge stays staged, never landed")
 	ctx := t.Context()
 	embeddedClient, remoteClient := w.client[embedded], w.client[remote]
-	mutations := len(w.nmi.Calls())
+	require.Empty(t, w.nmi.Calls(), "the read-only fixture sends no startup financial probes")
 
 	entitlement := "content:imported-" + uuid.NewString()[:6]
 	product, err := embeddedClient.CreateProduct(ctx, billing.CreateProductParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", Entitlements: []string{entitlement}})
@@ -292,7 +296,7 @@ func TestPSPImportFromNMI(t *testing.T) {
 	require.Len(t, subs.Items, 1)
 	require.Equal(t, billing.PSPImportImported, w.pspRecords(imp.ID)[byEmail.schedule].State)
 
-	require.Len(t, w.nmi.Calls(), mutations, "the import only read NMI")
+	require.Empty(t, w.nmi.Calls(), "the import only read NMI")
 	require.Positive(t, w.nmi.Reads()["query:recurring"])
 
 	require.NoError(t, remoteClient.DeletePSPImport(ctx, imp.ID))
