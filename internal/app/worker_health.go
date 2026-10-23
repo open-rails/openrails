@@ -124,6 +124,9 @@ func (r *Runtime) periodic(cfg *river.Config, leased bool, interval time.Duratio
 	if opts != nil {
 		own = *opts
 	}
+	// RunOnStart asks the shared helper to catch up due or never-seen work.
+	// Its retained-history check suppresses recent runs after a restart.
+	own.RunOnStart = true
 	if args, _ := ctor(); args != nil {
 		r.workerHealthRegistrations().NotePeriod(args.Kind(), interval)
 		if own.ID == "" {

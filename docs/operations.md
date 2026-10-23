@@ -1161,29 +1161,29 @@ version match the ones it was built from. A stale cache is never used.
 ## Background worker schedule
 
 Everything runs under River once `run-server` (or `run-worker`) is up.
-“Overdue startup” means the elected leader catches up only if the last retained
-periodic run is older than the interval. A quick restart does not enqueue
-another run. Queued and retrying work keeps its normal retry behavior; explicit
+Every interval catches up on startup when its last retained periodic run is
+older than the interval or no retained run exists. A quick restart does not enqueue another run. Queued
+and retrying work keeps its normal retry behavior; explicit
 user-triggered work does not wait for a periodic deadline. Each River schema
 has one scheduling leader, and OpenRails' cross-fleet leases additionally
 coalesce merchant-wide passes when multiple embedded fleets share merchants.
 
-| Worker | Cadence | Overdue startup |
-|---|---|---|
-| Balance watch (due customer watches only) | 30 s | Yes |
-| Due renewals and retries; job rescue | 1 min | Yes |
-| Merchant-secret cleanup | 5 min | Yes |
-| Order expiry; admission-denial flush | 5 min | No |
-| Convergence sweep | 15 min | Yes |
-| Rebill watch; charge-attribution read; arrears delinquency | 15 min | No |
-| Price-migration re-driver; usage order collection | 1 h | Yes |
-| Attempt enrichment; due daily NMI history read; expired-data cleanup; idempotency cleanup; credit expiry; Solana crank; Solana Pay reference GC; Stripe webhook reconciliation | 1 h | No |
-| Provider refresh scheduler (fans out per merchant) | 2 h | Yes |
-| Account updater batch | 6 h | Yes |
-| Solana gas alert; Solana ledger reconciliation | 6 h | No |
-| Catalog reconciliation pull (alert only) | `catalog_reconciliation_interval` (default 1 h; `0` disables) | No |
-| Usage period finalization; ledger integrity audit | 24 h | Yes |
-| Usage collection below the normal threshold but above the monthly floor | 30 d | Yes |
+| Worker | Cadence |
+|---|---|
+| Balance watch (due customer watches only) | 30 s |
+| Due renewals and retries; job rescue | 1 min |
+| Merchant-secret cleanup | 5 min |
+| Order expiry; admission-denial flush | 5 min |
+| Convergence sweep | 15 min |
+| Rebill watch; charge-attribution read; arrears delinquency | 15 min |
+| Price-migration re-driver; usage order collection | 1 h |
+| Attempt enrichment; due daily NMI history read; expired-data cleanup; idempotency cleanup; credit expiry; Solana crank; Solana Pay reference GC; Stripe webhook reconciliation | 1 h |
+| Provider refresh scheduler (fans out per merchant) | 2 h |
+| Account updater batch | 6 h |
+| Solana gas alert; Solana ledger reconciliation | 6 h |
+| Catalog reconciliation pull (alert only) | `catalog_reconciliation_interval` (default 1 h; `0` disables) |
+| Usage period finalization; ledger integrity audit | 24 h |
+| Usage collection below the normal threshold but above the monthly floor | 30 d |
 
 The monthly-floor pass is for metered usage charged in arrears, not subscription
 renewals. For example, with a $50 collection threshold and a $1 monthly floor,
@@ -1192,6 +1192,12 @@ charge on every hourly scan. The billing book separately records each
 merchant's completed 30-day collection period, so a duplicate job or retained
 history cleanup cannot collect that monthly slot twice. Normal collection and
 payment retries continue at their shorter cadences.
+
+Usage schedules remain registered even for subscription-only hosts. No usage
+orders means there is nothing to collect. Omitting billing policies at startup
+is not an off switch: a merchant's file or Vault configuration can change while
+the server runs, and outstanding usage debt still needs collection after a
+policy is removed. OpenRails has no separate usage-scheduler capability flag.
 
 The health checker seeds `billing.worker_state` and raises a critical
 `life.worker.stalled` finding in every merchant when a periodic kind stops

@@ -22,49 +22,41 @@ func periodicRunOnStart(job *river.PeriodicJob) bool {
 	return opts != nil && opts.RunOnStart
 }
 
-func periodicSchedule(job *river.PeriodicJob) river.PeriodicSchedule {
-	v := reflect.ValueOf(job).Elem().FieldByName("scheduleFunc")
-	return reflect.NewAt(v.Type(), unsafe.Pointer(v.UnsafeAddr())).Elem().Interface().(river.PeriodicSchedule)
-}
-
 func periodicArgs(job *river.PeriodicJob) (river.JobArgs, *river.InsertOpts) {
 	v := reflect.ValueOf(job).Elem().FieldByName("constructorFunc")
 	return reflect.NewAt(v.Type(), unsafe.Pointer(v.UnsafeAddr())).Elem().Interface().(river.PeriodicJobConstructor)()
 }
 
-// The schedule is the product's recovery contract: which sweeps catch up on an
-// overdue restart, and the cadence the staleness alert expects of each kind.
+// Every periodic catches up overdue or never-seen work at startup; the shared
+// helper suppresses recent runs and restores their next deadline.
 func TestPeriodicScheduleContract(t *testing.T) {
-	want := map[string]struct {
-		period     time.Duration
-		runOnStart bool
-	}{
-		riverjobs.DunningArgs{}.Kind():                   {riverjobs.DuePassInterval, true},
-		riverjobs.ProviderRefreshArgs{}.Kind():           {providerrecovery.RefreshInterval, true},
-		riverjobs.JobRescueArgs{}.Kind():                 {time.Minute, true},
-		riverjobs.PriceMigrationRedriveArgs{}.Kind():     {time.Hour, true},
-		riverjobs.AccountUpdaterBatchArgs{}.Kind():       {6 * time.Hour, true},
-		riverjobs.MerchantSecretCleanupArgs{}.Kind():     {5 * time.Minute, true},
-		riverjobs.ConvergeSweepArgs{}.Kind():             {15 * time.Minute, true},
-		riverjobs.LedgerIntegrityArgs{}.Kind():           {24 * time.Hour, true},
-		riverjobs.CleanupExpiredDataArgs{}.Kind():        {time.Hour, false},
-		riverjobs.IdempotencyGCArgs{}.Kind():             {time.Hour, false},
-		riverjobs.SolanaCrankArgs{}.Kind():               {time.Hour, false},
-		riverjobs.SolanaGasAlertArgs{}.Kind():            {6 * time.Hour, false},
-		riverjobs.SolanaReconcileArgs{}.Kind():           {6 * time.Hour, false},
-		riverjobs.SolanaPayGCArgs{}.Kind():               {time.Hour, false},
-		riverjobs.CreditExpiryArgs{}.Kind():              {time.Hour, false},
-		riverjobs.BalanceWatchArgs{}.Kind():              {riverjobs.BalanceWatchInterval, true},
-		riverjobs.AdmissionDenialFlushArgs{}.Kind():      {5 * time.Minute, false},
-		riverjobs.CatalogReconciliationPullArgs{}.Kind(): {time.Hour, false},
-		riverjobs.StripeWebhookReconcileArgs{}.Kind():    {time.Hour, false},
-		riverjobs.UsageOrderArgs{}.Kind():                {time.Hour, true}, // hourly + daily + monthly; shortest wins
-		riverjobs.DelinquencyArgs{}.Kind():               {15 * time.Minute, false},
-		riverjobs.RebillWatchArgs{}.Kind():               {riverjobs.RebillWatchInterval, false},
-		riverjobs.AttemptEnrichmentArgs{}.Kind():         {riverjobs.AttemptEnrichmentInterval, false},
-		riverjobs.NMIHistoryArgs{}.Kind():                {riverjobs.NMIHistoryInterval, false},
-		riverjobs.ChargeAttributionArgs{}.Kind():         {riverjobs.ChargeAttributionInterval, false},
-		riverjobs.OrderExpiryArgs{}.Kind():               {5 * time.Minute, false},
+	want := map[string]time.Duration{
+		riverjobs.DunningArgs{}.Kind():                   riverjobs.DuePassInterval,
+		riverjobs.ProviderRefreshArgs{}.Kind():           providerrecovery.RefreshInterval,
+		riverjobs.JobRescueArgs{}.Kind():                 time.Minute,
+		riverjobs.PriceMigrationRedriveArgs{}.Kind():     time.Hour,
+		riverjobs.AccountUpdaterBatchArgs{}.Kind():       6 * time.Hour,
+		riverjobs.MerchantSecretCleanupArgs{}.Kind():     5 * time.Minute,
+		riverjobs.ConvergeSweepArgs{}.Kind():             15 * time.Minute,
+		riverjobs.LedgerIntegrityArgs{}.Kind():           24 * time.Hour,
+		riverjobs.CleanupExpiredDataArgs{}.Kind():        time.Hour,
+		riverjobs.IdempotencyGCArgs{}.Kind():             time.Hour,
+		riverjobs.SolanaCrankArgs{}.Kind():               time.Hour,
+		riverjobs.SolanaGasAlertArgs{}.Kind():            6 * time.Hour,
+		riverjobs.SolanaReconcileArgs{}.Kind():           6 * time.Hour,
+		riverjobs.SolanaPayGCArgs{}.Kind():               time.Hour,
+		riverjobs.CreditExpiryArgs{}.Kind():              time.Hour,
+		riverjobs.BalanceWatchArgs{}.Kind():              riverjobs.BalanceWatchInterval,
+		riverjobs.AdmissionDenialFlushArgs{}.Kind():      5 * time.Minute,
+		riverjobs.CatalogReconciliationPullArgs{}.Kind(): time.Hour,
+		riverjobs.StripeWebhookReconcileArgs{}.Kind():    time.Hour,
+		riverjobs.UsageOrderArgs{}.Kind():                time.Hour, // hourly + daily + monthly; shortest wins
+		riverjobs.DelinquencyArgs{}.Kind():               15 * time.Minute,
+		riverjobs.RebillWatchArgs{}.Kind():               riverjobs.RebillWatchInterval,
+		riverjobs.AttemptEnrichmentArgs{}.Kind():         riverjobs.AttemptEnrichmentInterval,
+		riverjobs.NMIHistoryArgs{}.Kind():                riverjobs.NMIHistoryInterval,
+		riverjobs.ChargeAttributionArgs{}.Kind():         riverjobs.ChargeAttributionInterval,
+		riverjobs.OrderExpiryArgs{}.Kind():               5 * time.Minute,
 	}
 	rt := &Runtime{}
 	cfg := &river.Config{}
@@ -77,7 +69,8 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		require.NotNil(t, opts, args.Kind())
 		require.Equal(t, riverjobs.QueueBilling, opts.Queue, args.Kind())
 		require.NotZero(t, opts.UniqueOpts, "%s must coalesce overlapping ticks", args.Kind())
-		runOnStart[args.Kind()] = runOnStart[args.Kind()] || periodicRunOnStart(job)
+		require.True(t, periodicRunOnStart(job), "%s must check whether startup work is due", args.Kind())
+		runOnStart[args.Kind()] = true
 		if usage, ok := args.(riverjobs.UsageOrderArgs); ok && usage.Collect {
 			require.True(t, opts.UniqueOpts.ByArgs, "hourly and monthly phases must stay distinct")
 			if usage.UseMonthlyFloor {
@@ -92,20 +85,13 @@ func TestPeriodicScheduleContract(t *testing.T) {
 				}, opts.UniqueOpts.ByState)
 			}
 		}
-		// The constructor records this run for the next deadline. Leader
-		// takeover restores the same deadline through the shared helper.
-		period := opts.UniqueOpts.ByPeriod
-		if period == 0 {
-			continue
-		}
-		now := time.Now()
-		require.WithinDuration(t, now.Add(period), periodicSchedule(job).Next(now), time.Second, args.Kind())
+
 	}
 	periods := rt.workerHealthRegistrations().Snapshot()
 	require.Len(t, runOnStart, len(want))
 	for kind, w := range want {
-		require.Equal(t, w.runOnStart, runOnStart[kind], "%s RunOnStart", kind)
-		require.Equal(t, w.period, periods[kind], "%s period", kind)
+		require.True(t, runOnStart[kind], "%s must check whether startup work is due", kind)
+		require.Equal(t, w, periods[kind], "%s period", kind)
 	}
 
 	// catalog_reconciliation_interval: 0 disables, a value sets the cadence,

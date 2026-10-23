@@ -487,7 +487,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				}},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: true},
+		nil,
 	))
 
 	// Every 15 minutes: overdue rebills with no attempt are probed (NMI) or
@@ -500,7 +500,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.RebillWatchInterval},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Hourly: NMI attempts are enriched from the transaction report.
@@ -512,7 +512,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.AttemptEnrichmentInterval},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Hourly: read the history of NMI PSPs due their daily read.
@@ -524,7 +524,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.NMIHistoryInterval},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Every 15 minutes: read due declared charge attributions.
@@ -536,7 +536,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.ChargeAttributionInterval},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Every providerrecovery.RefreshInterval: the provider refresh scheduler
@@ -549,7 +549,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: providerrecovery.RefreshInterval, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled}},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: true},
+		nil,
 	))
 
 	// Every minute, including overdue startup: return jobs whose process died.
@@ -568,7 +568,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				}},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: true},
+		nil,
 	))
 
 	// Hourly: price-migration re-drive. Period granularity is days, so
@@ -582,7 +582,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: true},
+		nil,
 	))
 
 	// Every 6 hours: batch account updater. Its window is weeks wide, so 6h
@@ -597,7 +597,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: true},
+		nil,
 	))
 
 	// Every hour: retention cleanup of expired and aged rows.
@@ -609,7 +609,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Hourly: collect expired request and webhook claims. Expiry is checked
@@ -622,7 +622,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Every hour: crank due Solana recurring subscriptions. The next_pull_at
@@ -635,7 +635,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Every 6 hours: alert on low Solana cranker-wallet SOL gas.
@@ -647,7 +647,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Every 6 hours: reconcile confirmed Solana pulls against the ledger.
@@ -659,7 +659,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Hourly: delete settled Solana Pay references past their watch window.
@@ -672,7 +672,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Every hour: expire credit batches
@@ -684,7 +684,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Every 30 seconds: the balance watches that are due, of customers with
@@ -702,7 +702,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				}},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: true},
+		nil,
 	))
 
 	// Every 5 minutes: expire orders past their expiry.
@@ -714,7 +714,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Every 5 minutes: flush admission-denial counters from Redis to PG.
@@ -726,7 +726,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Catalog reconciliation: pull the Stripe and NMI catalogs and record drift
@@ -745,7 +745,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 					UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: interval},
 				}
 			},
-			&river.PeriodicJobOpts{RunOnStart: false},
+			nil,
 		))
 	}
 	jobs = append(jobs, r.healthPeriodic(cfg,
@@ -756,12 +756,12 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	jobs = append(jobs, r.healthPeriodic(cfg, 5*time.Minute, func() (river.JobArgs, *river.InsertOpts) {
 		return riverjobs.MerchantSecretCleanupArgs{}, &river.InsertOpts{Queue: riverjobs.QueueBilling, UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute}}
-	}, &river.PeriodicJobOpts{RunOnStart: true}))
+	}, nil))
 
 	// Usage-order jobs catch up on overdue startup. The hourly scan
 	// coalesces across periods while outstanding; monthly and daily phases
@@ -781,7 +781,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 			}
 			return args, opts
 		},
-		&river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".collect", RunOnStart: true},
+		&river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".collect"},
 	))
 	// Monthly sweep: collect the long tail above the merchant's floor
 	// that the hourly threshold trigger leaves behind.
@@ -798,7 +798,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 			}
 			return args, opts
 		},
-		&river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".monthly_floor", RunOnStart: true},
+		&river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".monthly_floor"},
 	))
 
 	// Daily: bill each customer's previous period. Idempotent per
@@ -811,7 +811,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".finalize", RunOnStart: true},
+		&river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".finalize"},
 	))
 
 	// Every 15 minutes: arrears delinquency evaluation. Tighter than hourly
@@ -825,7 +825,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		nil,
 	))
 
 	// Every 15 minutes: converge sweep, remediating internal drift (stalled
@@ -839,7 +839,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: true},
+		nil,
 	))
 
 	// Daily: ledger integrity audit. The account counters are a trigger-
@@ -854,7 +854,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: true},
+		nil,
 	))
 
 	// No worker-health job: the progress detector runs outside River
