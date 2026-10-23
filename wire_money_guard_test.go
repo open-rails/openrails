@@ -36,8 +36,6 @@ var pendingNumericMoney = map[string]string{
 	"billing/control_plane.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                    notMoneyCount,
 	"internal/modules/copilot/tools_draft.go:draftCatalogDiffArgs.UnitAmount unit_amount":                                        notHTTPToolArgs,
 	"internal/modules/copilot/tools_draft.go:draftPriceChangeArgs.NewAmount new_amount":                                          notHTTPToolArgs,
-	"internal/service/host_events.go:func hostEvents.AmountFloor amount_floor":                                                   notHTTPStoredPayload,
-	"internal/service/host_events.go:func hostEvents.OverdueAmount overdue_amount":                                               notHTTPStoredPayload,
 	"internal/intents/collection_payload.go:OrderCollectionPayload.Amount amount":                                                notHTTPIntentPayload,
 	"internal/db/models/billing_policy.go:BillingPolicy.AccrualRateCapPerHour accrual_rate_cap_per_hour":                         notHTTPStorageRow,
 	"internal/db/models/billing_policy.go:BillingPolicy.CollectionThresholdAmount collection_threshold_amount":                   notHTTPStorageRow,

@@ -10,11 +10,14 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 )
 
-func Hosts(ctx context.Context, c *openrails.Client, kind billing.HostEventType) (*billing.ListPage[billing.HostEvent], error) {
+type Reader[Option any] interface {
+	ListEvents(context.Context, billing.EventQuery, ...Option) (*billing.EventPage, error)
+}
+
+func Hosts[Option any](ctx context.Context, c Reader[Option], kind billing.HostEventType) (*billing.ListPage[billing.HostEvent], error) {
 	out := &billing.ListPage[billing.HostEvent]{Items: []billing.HostEvent{}}
 	query := billing.EventQuery{Limit: 500}
 	if kind != "" {
@@ -75,13 +78,17 @@ func Hosts(ctx context.Context, c *openrails.Client, kind billing.HostEventType)
 	}
 }
 
-type NotificationReader struct{ Client *openrails.Client }
+type NotificationReader struct {
+	read func(context.Context, billing.EventQuery) (*billing.EventPage, error)
+}
 
-func Notifications(c *openrails.Client) *NotificationReader { return &NotificationReader{Client: c} }
+func Notifications[Option any](c Reader[Option]) *NotificationReader {
+	return &NotificationReader{read: func(ctx context.Context, q billing.EventQuery) (*billing.EventPage, error) {
+		return c.ListEvents(ctx, q)
+	}}
+}
 func (n *NotificationReader) Read(ctx context.Context) ([]billing.NotificationEvent, error) {
-	return ReadNotifications(ctx, func(ctx context.Context, q billing.EventQuery) (*billing.EventPage, error) {
-		return n.Client.ListEvents(ctx, q)
-	})
+	return ReadNotifications(ctx, n.read)
 }
 func ReadNotifications(ctx context.Context, read func(context.Context, billing.EventQuery) (*billing.EventPage, error)) ([]billing.NotificationEvent, error) {
 	out := []billing.NotificationEvent{}

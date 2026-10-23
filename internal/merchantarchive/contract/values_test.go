@@ -103,7 +103,7 @@ func TestOnlyTerminalStateIsPortable(t *testing.T) {
 		{"unportable maintenance kind", "maintenance_runs", map[string]string{"kind": "reconcile"}, false},
 		{"unfinished webhook", "webhook_events", map[string]string{"op": "x"}, false},
 		{"finished webhook", "webhook_events", map[string]string{"op": "x", "completed_at": done}, true},
-		{"undelivered host event", "host_outbox", map[string]string{"event_type": "delinquency.entered"}, false},
+		{"retained host fact", "host_outbox", map[string]string{"event_type": "delinquency.entered"}, true},
 	})
 }
 

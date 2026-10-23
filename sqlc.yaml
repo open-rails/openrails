@@ -103,7 +103,7 @@ sql:
       - "internal/migrate/postgres/0108_subscription_history.up.sql"
       - "internal/migrate/postgres/0109_tenant_merchant_binding.up.sql"
       - "internal/migrate/postgres/0110_retained_event_log.up.sql"
-      - "internal/migrate/postgres/0111_remove_event_consumers.up.sql"
+      - "internal/migrate/postgres/0111_remove_event_consumers_contract.up.sql"
       - "internal/migrate/postgres/0112_network_event_cursor.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"

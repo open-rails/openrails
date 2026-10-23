@@ -61,8 +61,8 @@ importers:
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.8.1(jiti@2.7.0))
       '@openrails/auth-ui':
-        specifier: 1.34.0
-        version: 1.34.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 1.34.1
+        version: 1.34.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@playwright/test':
         specifier: 1.60.0
         version: 1.60.0
@@ -427,8 +427,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@openrails/auth-ui@1.34.0':
-    resolution: {integrity: sha512-NCg3Elbi0nI0UC8m1xfXi7sJPDt7wAl6HSwcZGWg4TfXvGmdfS0hV3Sdoe0J56FviVIolYmrTe6okGhvtK7kaw==}
+  '@openrails/auth-ui@1.34.1':
+    resolution: {integrity: sha512-e4kIFb+m7SSbwUq83pKTRDjol1Ni9zgV38o5r3lCMQdCD1xF9NXkqvTtNU/NaYpR1wXHBHAjrk1hj7i+NVjZsw==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@solana/wallet-adapter-react': '>=0.15 <1'
@@ -3042,7 +3042,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
-  '@openrails/auth-ui@1.34.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@openrails/auth-ui@1.34.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@base-ui/react': 1.9.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@hugeicons/core-free-icons': 4.3.5

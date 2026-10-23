@@ -239,7 +239,8 @@ func (w *world) challenge(authorization string) billing.NetworkLinkChallenge {
 	var c billing.NetworkLinkChallenge
 	require.NoError(w.t, json.Unmarshal(r.Body.Bytes(), &c))
 	require.True(w.t, strings.HasPrefix(c.ID, "lnc_"))
-	require.WithinDuration(w.t, w.now().Add(network.ChallengeTTL), c.ExpiresAt, 10*time.Second)
+	// Account proof lifetime uses wall time, independently of simulated billing.
+	require.WithinDuration(w.t, time.Now().Add(network.ChallengeTTL), c.ExpiresAt, 10*time.Second)
 	return c
 }
 
@@ -304,8 +305,19 @@ func (w *world) events(key iam.APIKeyCreated, kind billing.HostEventType) []bill
 		require.Equal(w.t, "host", fact.Source)
 		id, err := billing.ParseHostEventID(fact.ID)
 		require.NoError(w.t, err)
-		event := billing.HostEvent{ID: id, MerchantID: fact.MerchantID, Type: billing.HostEventType(fact.Type), OccurredAt: fact.OccurredAt, CustomerNetwork: new(billing.CustomerNetworkHostEvent)}
-		require.NoError(w.t, json.Unmarshal(fact.Data, event.CustomerNetwork))
+		event := billing.HostEvent{ID: id, MerchantID: fact.MerchantID, Type: billing.HostEventType(fact.Type), OccurredAt: fact.OccurredAt}
+		var payload any
+		switch event.Type {
+		case billing.HostEventCustomerNetworkLinked, billing.HostEventCustomerNetworkUnlinked:
+			event.CustomerNetwork = new(billing.CustomerNetworkHostEvent)
+			payload = event.CustomerNetwork
+		case billing.HostEventMandateRevoked:
+			event.Mandate = new(billing.MandateHostEvent)
+			payload = event.Mandate
+		default:
+			w.t.Fatalf("unexpected network fixture event %s", event.Type)
+		}
+		require.NoError(w.t, json.Unmarshal(fact.Data, payload))
 		out = append(out, event)
 	}
 	return out

@@ -26,9 +26,9 @@ import (
 	"github.com/open-rails/openrails/server"
 )
 
-// An unavailable second factor degrades its feature rather than the whole
-// server; required-MFA accounts still cannot acquire a full identity. Development
-// keys include a persisted TOTP key so restarts keep enrollments.
+// A user-verifying passkey remains an enrollable second factor while code
+// factors are unavailable. Required-MFA accounts still cannot acquire a full
+// identity before enrollment. Development keys persist their TOTP key.
 func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	f := newFixture(t)
 	attach := func(keys authkit.KeysConfig, source authkitKeys.Source) (*server.Server, error) {
@@ -48,8 +48,10 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		var caps struct {
 			TwoFactor struct{ Methods []string } `json:"two_factor"`
+			Passkeys  struct{ Login bool }       `json:"passkeys"`
 		}
 		require.NoError(t, json.NewDecoder(w.Body).Decode(&caps))
+		require.True(t, caps.Passkeys.Login, "a user-verifying passkey remains available without code factors")
 		return caps.TwoFactor.Methods
 	}
 
@@ -61,7 +63,7 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	cp, err := attach(authkit.KeysConfig{Path: keys}, signing)
 	require.NoError(t, err)
 	require.Empty(t, methods(cp))
-	require.ErrorContains(t, authProbe(t, cp, "authkit_two_factor"), "no second factor can be enrolled")
+	require.NoError(t, authProbe(t, cp, "authkit_two_factor"), "a user-verifying passkey can still satisfy mandatory MFA")
 	u := newAccount(t, cp)
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)

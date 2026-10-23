@@ -53,6 +53,14 @@ retained from ingestion for at least 90 days and never less than event_retention
 They contain no reader offsets or acknowledgments. Provider execution, account
 cleanup and other actual domain work remain separate from reading facts.
 
+### Migrating from source acknowledgments
+
+Stop all writers sharing the billing schema and take a verified database backup
+before applying migrations 0110–0112. They preserve retained facts and remove the
+old reader bookkeeping. Deploy all readers with application-owned cursors before
+resuming writes. An older binary that still uses the removed tables cannot run
+on the migrated schema; restoring it also requires restoring the matching backup.
+
 ### Standalone customer-network account events
 
 When the optional customer network is enabled, the server polls its configured

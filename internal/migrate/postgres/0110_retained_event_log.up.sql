@@ -91,7 +91,10 @@ BEGIN
         payload:=payload||jsonb_strip_nulls(jsonb_build_object('payment_id','pay_'||h.payment_id,
           'customer_id',payment.customer_id,'subscription_id',payment.subscription_id,'order_id',payment.order_id));
     END IF;
-    IF payload ? 'customer_id' THEN
+    -- A host fact may already name a different account (for example the
+    -- network account linked to this merchant's customer). Keep that domain
+    -- identity; only fill a missing generic customer-account snapshot.
+    IF payload ? 'customer_id' AND NOT payload ? 'account_id' THEN
         account:=(payload->>'customer_id')::uuid;
         SELECT COALESCE(issuer,'') INTO authority FROM billing.customers
           WHERE merchant_id=source_merchant AND id=account;

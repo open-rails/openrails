@@ -108,8 +108,8 @@ migration 0106_user_destructive_reservations.up.sql sha256:338ebf15379b9abb3165f
 migration 0107_user_action_retention.up.sql sha256:f8963bbe29d458e72f2a7e64b819ff92204de84ea0e8d06849380a93d71f9dda
 migration 0108_subscription_history.up.sql sha256:fbd81b4e32710a7e12db21fc0f5a0f5d64e6ad906b83b01c33d6c341373a1dd4
 migration 0109_tenant_merchant_binding.up.sql sha256:5597e671dfe1443fdeffa5378e62aa0c61d7be36534715d6a91b42cddf8ce097
-migration 0110_retained_event_log.up.sql sha256:9c6e552fbb5dce3290ceba94f46ce6e4e078dc5f331ebe28af15febc8eb63e4f
-migration 0111_remove_event_consumers.up.sql sha256:ab6f344a51e804810d6ffe7953e0b69e3a8870e91c8ea3c0fec9eb7583a536fd
+migration 0110_retained_event_log.up.sql sha256:89069d9cb379aaedc3da024b410211b748738dfd9c8bcd205be14f456d03e19e
+migration 0111_remove_event_consumers_contract.up.sql sha256:ab6f344a51e804810d6ffe7953e0b69e3a8870e91c8ea3c0fec9eb7583a536fd
 migration 0112_network_event_cursor.up.sql sha256:fe38ca31bba8bf4364f2e1309a3106ce435b44c541f53ddec99408ea0b8a74b3
 
 table billing.access_cutover_approvals
@@ -4067,7 +4067,10 @@ function billing.host_event_record(billing.host_outbox)
           payload:=payload||jsonb_strip_nulls(jsonb_build_object('payment_id','pay_'||h.payment_id,
             'customer_id',payment.customer_id,'subscription_id',payment.subscription_id,'order_id',payment.order_id));
       END IF;
-      IF payload ? 'customer_id' THEN
+      -- A host fact may already name a different account (for example the
+      -- network account linked to this merchant's customer). Keep that domain
+      -- identity; only fill a missing generic customer-account snapshot.
+      IF payload ? 'customer_id' AND NOT payload ? 'account_id' THEN
           account:=(payload->>'customer_id')::uuid;
           SELECT COALESCE(issuer,'') INTO authority FROM billing.customers
             WHERE merchant_id=source_merchant AND id=account;

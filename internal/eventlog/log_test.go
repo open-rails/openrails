@@ -116,6 +116,19 @@ CREATE TABLE billing.notification_events(id uuid,merchant_id uuid,customer_id uu
 
 func TestEventLog(t *testing.T) {
 	f := newFixture(t)
+	t.Run("host domain account identity is preserved", func(t *testing.T) {
+		mid, customer := f.merchant(t)
+		account := uuid.New()
+		payload, err := json.Marshal(map[string]any{"account_id": account, "method": "connect"})
+		require.NoError(t, err)
+		f.exec(t, `INSERT INTO billing.host_outbox(id,merchant_id,event_type,subject_type,subject_id,data) VALUES($1,$2,'customer.network_linked','customer',$3,$4)`, uuid.New(), mid.UUID(), customer, payload)
+		page := f.list(t, mid, billing.EventQuery{})
+		require.Len(t, page.Events, 1)
+		var got billing.CustomerNetworkHostEvent
+		require.NoError(t, json.Unmarshal(page.Events[0].Data, &got))
+		require.Equal(t, account, got.AccountID.UUID())
+		require.Equal(t, customer, got.CustomerID.UUID())
+	})
 	t.Run("readers are independent and source deletion keeps account snapshot", func(t *testing.T) {
 		mid, customer := f.merchant(t)
 		empty := f.list(t, mid, billing.EventQuery{})

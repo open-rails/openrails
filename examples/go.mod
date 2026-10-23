@@ -6,7 +6,7 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/open-rails/authkit v1.34.0
+	github.com/open-rails/authkit v1.34.1
 	github.com/open-rails/helpers v1.13.0
 	github.com/open-rails/openrails v0.261.0
 	github.com/stretchr/testify v1.12.1
