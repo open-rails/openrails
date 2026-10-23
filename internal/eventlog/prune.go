@@ -25,7 +25,11 @@ func Prune(ctx context.Context, database *db.DB, now time.Time, retention time.D
 		return 0, err
 	}
 	removed := 0
-	for _, mid := range merchants {
+	for _, scopedID := range merchants {
+		if scopedID == nil {
+			return removed, fmt.Errorf("event log has a missing merchant scope")
+		}
+		mid := *scopedID
 		if removed >= limit {
 			break
 		}

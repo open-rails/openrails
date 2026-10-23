@@ -73,10 +73,10 @@ var excludedTables = map[string]string{
 // unclassified even on a diagnostic table and must receive a new decision.
 var excludedColumns = map[string]string{
 	"eventlog_migrations":           "version",
-	"eventlog_events":               "source scope position id event_source event_type version occurred_at recorded_at subject_type subject_id data merchant_id",
+	"eventlog_events":               "source scope position id boundary event_source event_type version occurred_at recorded_at subject_type subject_id data merchant_id",
 	"eventlog_streams":              "source scope epoch position head_id pruned_through pruned_id recorded_at merchant_id",
 	"network_event_cursors":         "issuer tenant_id cursor updated_at",
-	"eventlog_pending":              "ordinal transaction_id source scope id event_source event_type version occurred_at subject_type subject_id data",
+	"eventlog_pending":              "ordinal transaction_id source scope id boundary event_source event_type version occurred_at subject_type subject_id data",
 	"user_destructive_reservations": "merchant_id action_key customer_id kind reserved_at",
 	"destructive_actions":           "merchant_id id admission_sequence kind target action_key request_digest origin actor_issuer actor_id actor_key credential units admitted_at state started_at finished_at completion_sequence result",
 	"destructive_holds":             "merchant_id id scope scope_key actor_issuer actor_id credential action_kind target window_name observed requested ceiling opened_at cleared_at clear_through_sequence cleared_by_issuer cleared_by_id clear_reason",
