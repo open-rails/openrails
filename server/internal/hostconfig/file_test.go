@@ -101,12 +101,27 @@ func TestConfigExampleLoads(t *testing.T) {
 	require.Equal(t, "0.0.0.0", cfg.Host)
 	require.Equal(t, 3053, cfg.Port)
 	require.Equal(t, billing.ProviderWriteModeFull, cfg.ProviderWriteMode)
+	require.Equal(t, "2160h", cfg.EventRetention)
 	require.Equal(t, "http://localhost:3053", cfg.Auth.Token.Issuer)
 	require.True(t, cfg.Auth.Keys.AllowEphemeralDevKeys)
 	require.True(t, cfg.Auth.HTTP.DirectPeerIP)
 	require.Equal(t, 2160*time.Hour, *cfg.Naming.FormerNames.Duration)
 	require.Equal(t, 1200, (*cfg.RateLimits)["webhook"].RequestsPerMinute)
 	require.Contains(t, cfg.DB.URL, "@localhost:5434/openrails_db")
+}
+
+func TestEventRetentionFileAndEnvironment(t *testing.T) {
+	bootEnv(t)
+	unsetenv(t, "EVENT_RETENTION")
+	path := writeFile(t, filepath.Join(t.TempDir(), "config.yaml"), "event_retention: 168h\n")
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.Equal(t, "168h", cfg.EventRetention)
+
+	t.Setenv("EVENT_RETENTION", "72h")
+	cfg, err = Load(path)
+	require.NoError(t, err)
+	require.Equal(t, "72h", cfg.EventRetention)
 }
 
 // auth is AuthKit's configuration, decoded by AuthKit's own keys: the

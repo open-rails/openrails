@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,6 +45,9 @@ func get(url string) (reply, error) {
 // then closes the listener and still answers the request already in flight.
 func TestDrainServesThenFinishesInFlight(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ok", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("/slow", func(w http.ResponseWriter, _ *http.Request) {
@@ -53,13 +57,14 @@ func TestDrainServesThenFinishesInFlight(t *testing.T) {
 	})
 	hs, url, served := listen(t, mux)
 
-	slow := make(chan reply, 1)
+	type result struct {
+		reply reply
+		err   error
+	}
+	slow := make(chan result, 1)
 	go func() {
 		r, err := get(url + "/slow")
-		if err != nil {
-			t.Error(err)
-		}
-		slow <- r
+		slow <- result{r, err}
 	}()
 	<-started
 
@@ -77,7 +82,12 @@ func TestDrainServesThenFinishesInFlight(t *testing.T) {
 	ok, err := get(url + "/ok")
 	require.NoError(t, err, "the drain keeps serving")
 	require.Equal(t, http.StatusNoContent, ok.status)
-	require.True(t, ok.close, "with keep-alives off")
+	// Readiness changes first; disabling keep-alives follows in the drain
+	// goroutine. Wait for that transition instead of racing its next line.
+	require.Eventually(t, func() bool {
+		r, err := get(url + "/ok")
+		return err == nil && r.status == http.StatusNoContent && r.close
+	}, time.Second, time.Millisecond, "the drain disables keep-alives while still serving")
 
 	require.Eventually(t, func() bool {
 		conn, err := net.DialTimeout("tcp", url[len("http://"):], 100*time.Millisecond)
@@ -95,8 +105,10 @@ func TestDrainServesThenFinishesInFlight(t *testing.T) {
 	default:
 	}
 
-	close(release)
-	require.Equal(t, reply{http.StatusOK, "done", true}, <-slow)
+	unblock()
+	completed := <-slow
+	require.NoError(t, completed.err)
+	require.Equal(t, reply{http.StatusOK, "done", true}, completed.reply)
 	require.NoError(t, <-stopped)
 }
 
