@@ -113,8 +113,8 @@ type ListEventLogRow struct {
 	Source      string
 	EventType   string
 	Version     int32
-	RecordedAt time.Time
- OccurredAt  time.Time
+	OccurredAt  time.Time
+	RecordedAt  time.Time
 	SubjectType string
 	SubjectID   string
 	Data        []byte
@@ -136,7 +136,7 @@ func (q *Queries) ListEventLog(ctx context.Context, arg ListEventLogParams) ([]L
 			&i.EventType,
 			&i.Version,
 			&i.OccurredAt,
- &i.RecordedAt,
+			&i.RecordedAt,
 			&i.SubjectType,
 			&i.SubjectID,
 			&i.Data,
@@ -172,8 +172,8 @@ type ListEventLogByTypesRow struct {
 	Source      string
 	EventType   string
 	Version     int32
-	RecordedAt time.Time
- OccurredAt  time.Time
+	OccurredAt  time.Time
+	RecordedAt  time.Time
 	SubjectType string
 	SubjectID   string
 	Data        []byte
@@ -200,7 +200,7 @@ func (q *Queries) ListEventLogByTypes(ctx context.Context, arg ListEventLogByTyp
 			&i.EventType,
 			&i.Version,
 			&i.OccurredAt,
- &i.RecordedAt,
+			&i.RecordedAt,
 			&i.SubjectType,
 			&i.SubjectID,
 			&i.Data,
