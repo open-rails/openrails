@@ -4,6 +4,15 @@ Use `Client.ListEvents` on an `Engine.Merchant(id)` or remote merchant handle, o
 `GET /v1/app/events` with `merchant:events:read`. The same merchant authorization
 applies on every request. OpenRails keeps no readers, offsets or acknowledgments.
 
+`Client.EventReader()` implements `helpers/eventlog.Reader` over that same
+client. Pass it to `eventlog.Consumer` to keep polling/effect code identical when
+switching from `Engine.Merchant` to `NewRemoteMerchant`. Checkpoint keys include
+source, merchant, subscription and normalized filters. The consumer's commit
+function must apply effects and save the cursor atomically (including empty
+pages), comparing the prior checkpoint or serializing writers. HTTP and embedded
+cursor refusals both match `eventlog.ErrInvalidCursor` or
+`eventlog.ErrExpiredCursor`; the underlying `billing.StatusError` is preserved.
+
 The privileged platform can call `Server.ListEvents(ctx, merchantID, query)` to
 read retained facts for a soft-deleted or archived merchant. This uses the same
 scoped cursor checks and rechecks directory existence each time. The caller
@@ -26,7 +35,8 @@ page still carries a cursor; poll from it later. The HTTP parameters are `after`
 changing them starts a separate reader position.
 
 The event envelope contains `id`, `merchant_id`, `source`, `type`, `version`,
-`occurred_at`, `subject` and `data`. Existing IDs retain their `hev_` or `ntf_`
+`occurred_at`, `recorded_at`, `subject` and `data`. `occurred_at` is domain
+time; `recorded_at` is when the fact entered the ordered log. Existing IDs retain their `hev_` or `ntf_`
 prefix. Money values in data are decimal strings, and billing resource IDs keep
 their usual prefixes. Notification events snapshot `customer_id` and `account_id`
 (the host/AuthKit UUID), plus `account_issuer` (empty for native users), so
@@ -85,3 +95,11 @@ link independent payment-page accounts again. Customer records, subscriptions
 and payments remain intact. Apply the same procedure before replacing the
 configured account issuer or tenant; those identities cannot inherit an old
 network projection merely because UUIDs happen to match.
+
+### Shared implementation adoption
+
+Helpers supplies the reader, consumer and paging/cursor/retention algorithm.
+This first adapter keeps the existing SQL tables, product capture triggers,
+deferred transaction flush and original cursor envelopes. No history is copied,
+reset or renumbered. Shared PostgreSQL producer storage is a separately tracked
+migration; this change does not claim that migration has happened.
