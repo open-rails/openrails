@@ -67,16 +67,17 @@ func TestClassifyMapsDatabaseRefusals(t *testing.T) {
 // contact copy and PSP import working state are not billing data: a restore destination may hold them (a
 // renamed merchant, invited staff, a destination fenced before its restore,
 // provisioning tokens) and still be empty.
-var restoreOccupancyExempt = []string{"event_log_streams", "user_destructive_reservations", "customer_contacts", "merchant_slug_aliases", "merchant_write_posture", "provisioning_tokens",
+var restoreOccupancyExempt = []string{"eventlog_streams", "user_destructive_reservations", "customer_contacts", "merchant_slug_aliases", "merchant_write_posture", "provisioning_tokens",
 	"psp_imports", "psp_import_records", "psp_import_mappings"}
 
 var (
-	createTable    = regexp.MustCompile(`(?s)CREATE TABLE billing\.(\w+) \((.*?)\n\)(?: PARTITION BY [^;]*)?;`)
-	merchantColumn = regexp.MustCompile(`(?m)^\s*merchant_id uuid\b`)
-	dropTable      = regexp.MustCompile(`(?m)^DROP TABLE billing\.(\w+);`)
-	renameTable    = regexp.MustCompile(`(?m)^ALTER TABLE billing\.(\w+) RENAME TO (\w+);`)
-	restoreList    = regexp.MustCompile(`(?s)FUNCTION billing\.guard_billing_restore_receipt\(\).*?AND c\.relname = ANY\(ARRAY\[(.*?)\]::text\[\]\)`)
-	quoted         = regexp.MustCompile(`'(\w+)'`)
+	createTable       = regexp.MustCompile(`(?s)CREATE TABLE(?: IF NOT EXISTS)? (?:"billing"|billing)\.(\w+)\s*\((.*?)\)(?: PARTITION BY [^;]*)?;`)
+	generatedMerchant = regexp.MustCompile(`ALTER TABLE billing\.(\w+) ADD COLUMN merchant_id uuid`)
+	merchantColumn    = regexp.MustCompile(`(?m)^\s*merchant_id uuid\b`)
+	dropTable         = regexp.MustCompile(`(?m)^DROP TABLE billing\.(\w+);`)
+	renameTable       = regexp.MustCompile(`(?m)^ALTER TABLE billing\.(\w+) RENAME TO (\w+);`)
+	restoreList       = regexp.MustCompile(`(?s)FUNCTION billing\.guard_billing_restore_receipt\(\).*?AND c\.relname = ANY\(ARRAY\[(.*?)\]::text\[\]\)`)
+	quoted            = regexp.MustCompile(`'(\w+)'`)
 )
 
 // Every table the migrations create is owned (and so has an archive decision),
@@ -98,6 +99,9 @@ func TestOwnedTablesAndRestoreOccupancyCoverTheSchema(t *testing.T) {
 			if merchantColumn.MatchString(m[2]) {
 				scoped = append(scoped, m[1])
 			}
+		}
+		for _, m := range generatedMerchant.FindAllStringSubmatch(string(b), -1) {
+			scoped = append(scoped, m[1])
 		}
 		for _, m := range renameTable.FindAllStringSubmatch(string(b), -1) {
 			for _, names := range []*[]string{&all, &scoped} {

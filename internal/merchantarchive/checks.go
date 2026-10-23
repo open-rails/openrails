@@ -19,10 +19,11 @@ import (
 // Every OpenRails-owned table has an explicit decision. These are deployment/operations
 // data or unsupported opaque evidence, not additional archive row profiles.
 var excludedTables = map[string]string{
-	"event_log":                     "retained deployment facts; readers resynchronize at the destination",
-	"event_log_streams":             "deployment cursor identity; never import source cursors",
+	"eventlog_migrations":           "shared event-log schema version ledger",
+	"eventlog_events":               "retained deployment facts; readers resynchronize at the destination",
+	"eventlog_streams":              "deployment cursor identity; never import source cursors",
 	"network_event_cursors":         "standalone server-owned account event reading position",
-	"event_log_pending":             "transaction scratch, empty at commit",
+	"eventlog_pending":              "transaction scratch, empty at commit",
 	"user_destructive_reservations": "rolling-day abuse reservations; never imported or reset by merchant restore",
 	"destructive_actions":           "deployment command admissions; never imported, re-exported or reset by merchant restore",
 	"destructive_holds":             "deployment incident authority and clears; never imported or reset by merchant restore",
@@ -71,10 +72,11 @@ var excludedTables = map[string]string{
 // Explicit exclusions cover only these reviewed columns. A later column is
 // unclassified even on a diagnostic table and must receive a new decision.
 var excludedColumns = map[string]string{
-	"event_log":                     "merchant_id position id source event_type version occurred_at recorded_at subject_type subject_id data",
-	"event_log_streams":             "merchant_id epoch position head_id pruned_through pruned_id recorded_at",
+	"eventlog_migrations":           "version",
+	"eventlog_events":               "source scope position id event_source event_type version occurred_at recorded_at subject_type subject_id data merchant_id",
+	"eventlog_streams":              "source scope epoch position head_id pruned_through pruned_id recorded_at merchant_id",
 	"network_event_cursors":         "issuer tenant_id cursor updated_at",
-	"event_log_pending":             "transaction_id entries",
+	"eventlog_pending":              "ordinal transaction_id source scope id event_source event_type version occurred_at subject_type subject_id data",
 	"user_destructive_reservations": "merchant_id action_key customer_id kind reserved_at",
 	"destructive_actions":           "merchant_id id admission_sequence kind target action_key request_digest origin actor_issuer actor_id actor_key credential units admitted_at state started_at finished_at completion_sequence result",
 	"destructive_holds":             "merchant_id id scope scope_key actor_issuer actor_id credential action_kind target window_name observed requested ceiling opened_at cleared_at clear_through_sequence cleared_by_issuer cleared_by_id clear_reason",

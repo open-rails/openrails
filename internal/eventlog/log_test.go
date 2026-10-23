@@ -32,9 +32,12 @@ type fixture struct {
 	pool     *pgxpool.Pool
 	database *db.DB
 	schema   string
+	shared   bool
 }
 
-func (f fixture) sql(s string) string { return strings.ReplaceAll(s, "billing.", f.schema+".") }
+func (f fixture) sql(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "billing.", f.schema+"."), `"billing".`, pgx.Identifier{f.schema}.Sanitize()+".")
+}
 func (f fixture) exec(t *testing.T, s string, args ...any) {
 	t.Helper()
 	_, err := f.pool.Exec(t.Context(), f.sql(s), args...)
@@ -69,11 +72,15 @@ func (f fixture) list(t *testing.T, mid billing.MerchantID, q billing.EventQuery
 func (f fixture) pendingEmpty(t *testing.T) {
 	t.Helper()
 	var n int
-	require.NoError(t, f.pool.QueryRow(t.Context(), f.sql(`SELECT count(*) FROM billing.event_log_pending`)).Scan(&n))
+	table := "billing.event_log_pending"
+	if f.shared {
+		table = "billing.eventlog_pending"
+	}
+	require.NoError(t, f.pool.QueryRow(t.Context(), f.sql(`SELECT count(*) FROM `+table)).Scan(&n))
 	require.Zero(t, n)
 }
 
-func newFixture(t *testing.T) fixture {
+func newFixture(t *testing.T, shared ...bool) fixture {
 	t.Helper()
 	dsn := os.Getenv("SQLC_DATABASE_URL")
 	if dsn == "" {
@@ -111,11 +118,30 @@ CREATE TABLE billing.notification_events(id uuid,merchant_id uuid,customer_id uu
 	seeded := f.list(t, billing.MerchantID(seedMid), billing.EventQuery{})
 	require.Len(t, seeded.Events, 1)
 	require.Equal(t, "ntf_"+seedEvent.String(), seeded.Events[0].ID)
+	if len(shared) > 0 && shared[0] {
+		migration, err := os.ReadFile("../migrate/postgres/0113_shared_eventlog_contract.up.sql")
+		require.NoError(t, err)
+		tx, err := pool.Begin(t.Context())
+		require.NoError(t, err)
+		_, err = tx.Exec(t.Context(), f.sql(string(migration)))
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit(t.Context()))
+		f.shared = true
+		require.Equal(t, seeded, f.list(t, billing.MerchantID(seedMid), billing.EventQuery{}), "migration preserves issued cursor and exact retained fact")
+	}
 	return f
 }
 
 func TestEventLog(t *testing.T) {
-	f := newFixture(t)
+	for _, mode := range []bool{false, true} {
+		name := "legacy"
+		if mode {
+			name = "shared"
+		}
+		t.Run(name, func(t *testing.T) { testEventLog(t, newFixture(t, mode)) })
+	}
+}
+func testEventLog(t *testing.T, f fixture) {
 	t.Run("host domain account identity is preserved", func(t *testing.T) {
 		mid, customer := f.merchant(t)
 		account := uuid.New()
