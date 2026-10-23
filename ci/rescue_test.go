@@ -15,22 +15,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Each process has a fixed insertion clock, so crossing a uniqueness period
-// does not require a wall-clock sleep. River still executes against PostgreSQL.
-type rescueClock struct{ at time.Time }
-
-func (c rescueClock) Now() time.Time       { return c.at }
-func (c rescueClock) NowOrNil() *time.Time { return &c.at }
-
 func TestRescuerSurvivesItsOwnInterruptedJob(t *testing.T) {
 	f := newFixture(t)
 	jobsTable := pgx.Identifier{f.schema, "river_job"}.Sanitize()
-	start := func(at time.Time) func() {
+	start := func() func() {
 		rt, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 		require.NoError(t, err)
 		jobs, err := riverkit.New(t.Context(), f.pool, &river.Config{
 			Schema: f.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
-			TestOnly: true, Test: river.TestConfig{Time: rescueClock{at}},
 			FetchCooldown: 5 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond,
 		}, rt.RiverJobs())
 		require.NoError(t, err)
@@ -54,28 +46,29 @@ func TestRescuerSurvivesItsOwnInterruptedJob(t *testing.T) {
 		return latest
 	}
 
-	// Keep River ahead of database wall time so a rescued job scheduled by
-	// SQL now() is immediately eligible under its stubbed fetch clock.
-	priorPeriod := time.Now().UTC().Truncate(time.Minute).Add(5 * time.Minute)
-	stop := start(priorPeriod)
+	stop := start()
 	orphan := completed(1)
 	stop()
-	// Model process loss during the rescuer itself, preserving River's actual
-	// production-generated uniqueness key. Its stopped heartbeat proves death.
-	_, err := f.pool.Exec(t.Context(), "UPDATE "+jobsTable+" SET state = 'running', finalized_at = NULL, attempted_at = now() - interval '10 minutes' WHERE id = $1", orphan)
+	// Model process loss during a prior-period rescuer. Its stopped heartbeat
+	// proves death; the old period's uniqueness key cannot cover the new pass.
+	_, err := f.pool.Exec(t.Context(), "UPDATE "+jobsTable+" SET state = 'running', finalized_at = NULL, created_at = now() - interval '10 minutes', scheduled_at = now() - interval '10 minutes', attempted_at = now() - interval '10 minutes', unique_key = NULL WHERE id = $1", orphan)
 	require.NoError(t, err)
 
-	nextPeriod := priorPeriod.Add(time.Minute)
-	stop = start(nextPeriod)
+	stop = start()
 	completed(2) // The new pass runs and the formerly orphaned rescuer also runs.
 	stop()
 	var state string
 	require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT state FROM "+jobsTable+" WHERE id = $1", orphan).Scan(&state))
 	require.Equal(t, "completed", state)
 
-	// A completed pass cannot suppress RunOnStart even within the same minute.
-	stop = start(nextPeriod)
-	completed(3)
+	// A recent completed pass suppresses a same-minute restart. Both the
+	// rescued original and its recovery pass remain the only two rows.
+	stop = start()
+	require.Never(t, func() bool {
+		var count int
+		require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+jobsTable+" WHERE kind = 'openrails.job_rescue'").Scan(&count))
+		return count != 2
+	}, 2*time.Second, 20*time.Millisecond)
 	stop()
 }
 

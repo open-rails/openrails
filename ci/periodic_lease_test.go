@@ -39,13 +39,7 @@ func periodicLeases(t *testing.T, merchants0, merchants1 []string) {
 	})
 	leases := pgx.Identifier{f.schema, "periodic_leases"}.Sanitize()
 
-	// the next clock hour at least a minute away; River's clock stands 12s before it
-	now := time.Now()
-	hour := now.Truncate(time.Hour).Add(time.Hour)
-	if hour.Sub(now) < time.Minute {
-		hour = hour.Add(time.Hour)
-	}
-	start := func(schema string, merchants []string, boundary time.Time) (rt *openrails.Engine, stop func()) {
+	start := func(schema string, merchants []string) (rt *openrails.Engine, stop func()) {
 		cfg := f.config()
 		cfg.Merchants = map[string]openrails.MerchantDeclaration{}
 		for _, slug := range merchants {
@@ -55,10 +49,8 @@ func periodicLeases(t *testing.T, merchants0, merchants1 []string) {
 		cfg.Database.RiverSchema = schema
 		rt, err = openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 		require.NoError(t, err)
-		clock := riverClock{offset: boundary.Add(-12 * time.Second).Sub(time.Now())}
 		fleet, err := riverkit.New(t.Context(), f.pool, &river.Config{
 			ID: schema, Schema: schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
-			TestOnly: true, Test: river.TestConfig{Time: clock},
 			FetchCooldown: 5 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond,
 		}, rt.RiverJobs())
 		require.NoError(t, err)
@@ -77,14 +69,13 @@ func periodicLeases(t *testing.T, merchants0, merchants1 []string) {
 		t.Cleanup(stop)
 		return rt, stop
 	}
-	// queued counts a kind's jobs scheduled in the boundary's first seconds, per fleet.
-	queued := func(kind string, boundary time.Time) map[string]int {
+	// queued counts only this periodic schedule, excluding explicit events.
+	queued := func(kind string) map[string]int {
 		out := map[string]int{}
 		for _, schema := range schemas {
 			var n int
 			require.NoError(t, f.pool.QueryRow(t.Context(),
-				"SELECT count(*) FROM "+pgx.Identifier{schema, "river_job"}.Sanitize()+" WHERE kind = $1 AND scheduled_at >= $2 AND scheduled_at < $3",
-				kind, boundary, boundary.Add(5*time.Second)).Scan(&n))
+				"SELECT count(*) FROM "+pgx.Identifier{schema, "river_job"}.Sanitize()+" WHERE metadata->>'river:periodic_job_id' = $1", kind).Scan(&n))
 			out[schema] = n
 		}
 		return out
@@ -100,22 +91,23 @@ func periodicLeases(t *testing.T, merchants0, merchants1 []string) {
 		require.Eventually(t, ok, 40*time.Second, 50*time.Millisecond, what)
 	}
 
-	// Both fleets tick at the hour: each leased pass is queued once across
-	// them, and the fleet-local pass by both.
-	_, stopOne := start(schemas[0], sets[0], hour)
-	_, stopTwo := start(schemas[1], sets[1], hour)
+	// Both fresh fleets start due: leased passes run once across the merchant
+	// set, while fleet-local passes run independently.
+	_, stopOne := start(schemas[0], sets[0])
+	_, stopTwo := start(schemas[1], sets[1])
 	eventually("each leased pass is queued", func() bool {
 		for _, kind := range leased {
-			if q := queued(kind, hour); q[schemas[0]]+q[schemas[1]] < 1 {
+			q := queued(kind)
+			if (shared && q[schemas[0]]+q[schemas[1]] < 1) || (!shared && (q[schemas[0]] < 1 || q[schemas[1]] < 1)) {
 				return false
 			}
 		}
-		q := queued(perFleet[0], hour)
+		q := queued(perFleet[0])
 		return q[schemas[0]] == 1 && q[schemas[1]] == 1
 	})
 	time.Sleep(2 * time.Second)
 	for _, kind := range leased {
-		q := queued(kind, hour)
+		q := queued(kind)
 		if !shared {
 			require.Equal(t, map[string]int{schemas[0]: 1, schemas[1]: 1}, q, "%s is queued by each fleet", kind)
 			continue
@@ -129,19 +121,22 @@ func periodicLeases(t *testing.T, merchants0, merchants1 []string) {
 		return
 	}
 
-	// Both fleets stop; their leases are the dead holder's and lapse a few
-	// seconds from now. A fleet that starts afterwards, ticking a period later,
-	// finds them expired and queues the passes.
+	// The holder stops. Age the survivor's retained checkpoints and expire the
+	// old lease, then verify overdue work is taken over immediately.
 	stopOne()
 	stopTwo()
-	_, err := f.pool.Exec(t.Context(), "UPDATE "+leases+" SET holder = $1, expires_at = now() + interval '5 seconds'", schemas[0])
+	before := map[string]int{}
+	for _, kind := range leased {
+		before[kind] = queued(kind)[schemas[1]]
+	}
+	agePeriodicHistory(t, f.pool, schemas[1], leased)
+	_, err := f.pool.Exec(t.Context(), "UPDATE "+leases+" SET holder = $1, expires_at = now() - interval '1 second'", schemas[0])
 	require.NoError(t, err)
-	next := hour.Add(time.Hour)
-	_, stopThree := start(schemas[1], sets[1], next)
+	_, stopThree := start(schemas[1], sets[1])
 	defer stopThree()
 	eventually("the survivor takes the passes over", func() bool {
 		for _, kind := range leased {
-			if queued(kind, next)[schemas[1]] != 1 {
+			if queued(kind)[schemas[1]] != before[kind]+1 {
 				return false
 			}
 		}
