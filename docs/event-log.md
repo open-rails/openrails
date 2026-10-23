@@ -98,8 +98,18 @@ network projection merely because UUIDs happen to match.
 
 ### Shared implementation adoption
 
-Helpers supplies the reader, consumer and paging/cursor/retention algorithm.
-This first adapter keeps the existing SQL tables, product capture triggers,
-deferred transaction flush and original cursor envelopes. No history is copied,
-reset or renumbered. Shared PostgreSQL producer storage is a separately tracked
-migration; this change does not claim that migration has happened.
+Helpers supplies the reader, consumer, paging/cursor/retention algorithm and
+PostgreSQL deferred queue. Contract migration0113 copies the existing facts and
+stream state without changing IDs, positions, epochs, boundaries or timestamps.
+The old read/prune table names become compatibility views; source-journal capture,
+merchant pinning and restore suppression remain product-owned and unchanged.
+Merchant deletion still cascades through the shared streams to their facts.
+Same-transaction pending facts are discarded when that merchant is deleted.
+
+The canonical Helpers SQL is copied verbatim in the migration and checked by a
+contract test. Exact retained fact replay is an idempotent no-op; reusing a retained
+ID with conflicting data aborts the transaction. Neither case overwrites history.
+
+Stop older writers and retain a database backup before applying0113. It changes
+physical storage and requires a coordinated fleet rollout. This is separate from
+merging source or adopting the read-only shared client interface.
