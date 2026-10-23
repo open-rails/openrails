@@ -2,7 +2,7 @@ import { AdminMessage } from "#orck/admin/ui-context"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { appearanceStyle } from "../appearance"
 import type { AdminAccess } from "../client/generated/wire"
-import { createAdminClient } from "./lib/api/client"
+import { ApiError, createAdminClient } from "./lib/api/client"
 import { createAdminAPI } from "./lib/api"
 import { formatNativeAmount } from "./lib/format"
 import type { BillingAdminProps } from "./types"
@@ -86,6 +86,10 @@ export interface BillingCustomerSummaryProps extends Connection {
   className?: string
 }
 
+// An account that never reached billing has no customer yet: that is a state, not a failure.
+const missingCustomer = (error: Error) =>
+  error instanceof ApiError && error.code === "customer_not_found"
+
 /** A bounded preview for the host's customer or user page. */
 export function BillingCustomerSummary(props: BillingCustomerSummaryProps) {
   const theme = useAdminTheme(props.appearance?.theme)
@@ -130,7 +134,12 @@ export function BillingCustomerSummary(props: BillingCustomerSummaryProps) {
             <AdminMessage id={"Loading billing…"} />
           </p>
         )}
-        {error && (
+        {error && missingCustomer(error) && (
+          <p>
+            <AdminMessage id={"No billing activity yet."} />
+          </p>
+        )}
+        {error && !missingCustomer(error) && (
           <p role="alert">
             {error.message}{" "}
             <button type="button" onClick={refetch}>

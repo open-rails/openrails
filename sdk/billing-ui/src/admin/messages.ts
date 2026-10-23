@@ -318,6 +318,7 @@ export const billingAdminMessages = {
   Lines: "Lines",
   "Loading billing permissions…": "Loading billing permissions…",
   "Loading billing…": "Loading billing…",
+  "No billing activity yet.": "No billing activity yet.",
   "Loading grants…": "Loading grants…",
   "Loading invoice profile…": "Loading invoice profile…",
   "Loading order…": "Loading order…",
