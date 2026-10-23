@@ -1,8 +1,9 @@
 package billing
 
 import (
-	"github.com/open-rails/openrails/catalog"
 	"time"
+
+	"github.com/open-rails/openrails/catalog"
 )
 
 // UsageBillingSettings configures monthly, threshold-triggered usage billing.

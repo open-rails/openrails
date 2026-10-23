@@ -1,11 +1,12 @@
 package money
 
 import (
+	"testing"
+	"time"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func TestUsageBillingDatesKeepOriginalAnchor(t *testing.T) {

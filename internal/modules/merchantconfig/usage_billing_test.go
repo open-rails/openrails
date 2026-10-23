@@ -1,9 +1,10 @@
 package merchantconfig
 
 import (
+	"testing"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestUsageBillingConfiguration(t *testing.T) {

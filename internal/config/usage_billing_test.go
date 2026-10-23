@@ -1,9 +1,10 @@
 package config
 
 import (
+	"testing"
+
 	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestUsageBillingYAMLConfiguration(t *testing.T) {

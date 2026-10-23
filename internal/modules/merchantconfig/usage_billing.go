@@ -2,6 +2,7 @@ package merchantconfig
 
 import (
 	"fmt"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )

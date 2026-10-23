@@ -205,7 +205,10 @@ func (s *MoneyService) FinalizeDueUsage(ctx context.Context, now time.Time) (int
 				count++
 			}
 		}
-		if len(rows) < 200 || time.Now().After(deadline) {
+		if len(rows) < 200 {
+			break
+		}
+		if time.Now().After(deadline) {
 			break
 		}
 	}

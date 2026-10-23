@@ -8,7 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/open-rails/authkit v1.35.4
 	github.com/open-rails/helpers v1.16.1
-	github.com/open-rails/openrails v0.262.1
+	github.com/open-rails/openrails v0.263.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/oauth2 v0.37.0
 )

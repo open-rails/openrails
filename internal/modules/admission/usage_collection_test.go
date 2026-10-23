@@ -1,10 +1,11 @@
 package admission
 
 import (
-	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/stretchr/testify/require"
 	"math"
 	"testing"
+
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUsagePreemptiveCollectionRequiresUsefulCapacity(t *testing.T) {
