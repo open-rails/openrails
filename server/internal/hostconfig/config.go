@@ -81,8 +81,9 @@ type fileConfig struct {
 	DrainDelay      time.Duration `koanf:"drain_delay"`
 	ShutdownTimeout time.Duration `koanf:"shutdown_timeout"`
 
-	ProviderWriteMode string `koanf:"provider_write_mode"`
-	EventRetention    string `koanf:"event_retention"`
+	ProviderWriteMode   string `koanf:"provider_write_mode"`
+	UsageBillingEnabled bool   `koanf:"usage_billing_enabled"`
+	EventRetention      string `koanf:"event_retention"`
 
 	PublicBillingBaseURL string `koanf:"public_billing_base_url"`
 	DashboardBaseURL     string `koanf:"dashboard_base_url"`
@@ -224,6 +225,7 @@ func (f *fileConfig) config() (*Config, error) {
 	return &Config{
 		Config: &billing.Config{
 			ProviderWriteMode:             f.ProviderWriteMode,
+			UsageBillingEnabled:           f.UsageBillingEnabled,
 			EventRetention:                f.EventRetention,
 			Database:                      f.Database,
 			PublicBillingBaseURL:          f.PublicBillingBaseURL,

@@ -102,12 +102,27 @@ func TestConfigExampleLoads(t *testing.T) {
 	require.Equal(t, 3053, cfg.Port)
 	require.Equal(t, billing.ProviderWriteModeFull, cfg.ProviderWriteMode)
 	require.Equal(t, "2160h", cfg.EventRetention)
+	require.False(t, cfg.UsageBillingEnabled)
 	require.Equal(t, "http://localhost:3053", cfg.Auth.Token.Issuer)
 	require.True(t, cfg.Auth.Keys.AllowEphemeralDevKeys)
 	require.True(t, cfg.Auth.HTTP.DirectPeerIP)
 	require.Equal(t, 2160*time.Hour, *cfg.Naming.FormerNames.Duration)
 	require.Equal(t, 1200, (*cfg.RateLimits)["webhook"].RequestsPerMinute)
 	require.Contains(t, cfg.DB.URL, "@localhost:5434/openrails_db")
+}
+
+func TestUsageBillingFileAndEnvironment(t *testing.T) {
+	bootEnv(t)
+	unsetenv(t, "USAGE_BILLING_ENABLED")
+	path := writeFile(t, filepath.Join(t.TempDir(), "config.yaml"), "usage_billing_enabled: true\n")
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.True(t, cfg.UsageBillingEnabled)
+
+	t.Setenv("USAGE_BILLING_ENABLED", "false")
+	cfg, err = Load(path)
+	require.NoError(t, err)
+	require.False(t, cfg.UsageBillingEnabled)
 }
 
 func TestEventRetentionFileAndEnvironment(t *testing.T) {

@@ -22,9 +22,9 @@ func TestExampleManifestsParse(t *testing.T) {
 	require.Len(t, manifest.Merchants["static-jwks-stack"].RemoteApplication.JWKS.Keys, 1)
 
 	m := manifest.Merchants["local-stack"]
-	require.Equal(t, "calendar_month", m.MerchantSettings.BillingPeriodBoundary)
-	require.Equal(t, int64(50_000_000), *m.MerchantSettings.CollectionThreshold)
-	require.Equal(t, int64(1_000_000), *m.MerchantSettings.MonthlyFloor)
+	require.NotNil(t, m.MerchantSettings.UsageBilling)
+	require.Equal(t, 13, m.MerchantSettings.UsageBilling.BillingDay)
+	require.Equal(t, []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 100_000_000, MinimumInvoiceAmount: 1_000_000}}, m.MerchantSettings.UsageBilling.Currencies)
 	require.Equal(t, 7, *m.MerchantSettings.ArrearsGraceDays)
 	require.Equal(t, []billing.BudgetWindow{{Key: "burst", WindowSeconds: 900, Limit: 5_000_000}, {Key: "sustained", WindowSeconds: 18_000, Limit: 20_000_000}}, m.MerchantSettings.DelegatedInvokerWastedSpendLimits)
 	require.Len(t, *m.MerchantSettings.PSPRouting, 3)
