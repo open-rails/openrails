@@ -14,8 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -43,13 +41,15 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 2_500_000, balance.BalanceAmount)
 	w.settle()
-	cadence, err := w.jobs.Insert(t.Context(), riverjobs.UsageOrderArgs{Collect: true, UseMonthlyFloor: true}, &river.InsertOpts{Queue: openrails.QueueBilling})
-	require.NoError(t, err)
-	w.waitJob(cadence.Job.ID)
 	merchantID := client.MerchantID()
 
 	w.stop() // The source has no writer while its billing book is moved.
 	providerAttempts := e.providerAttempts()
+
+	// New account billing no longer writes the retired merchant-wide cadence.
+	// Books from earlier versions still retain and archive their old checkpoint.
+	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.usage_collection_cadence (merchant_id, monthly_period_started_at, completed_at) VALUES ($1, now() - interval '30 days', now())`), merchantID.UUID())
+	require.NoError(t, err)
 
 	const metadata = `{"application":{"nested":[null,true,1.25,{"new_key":"value"}],"exact":9007199254740993},"solana_subscription_pda":"subscription-pda","solana_token_symbol":"USDC","solana_token_mint":"token-mint","solana_token_amount":9007199254740993,"application_solana":{"signature":"transfer-1"},"campaign":"sk_test_campaign","order_number":"4111111111111111"}`
 	for _, update := range []string{

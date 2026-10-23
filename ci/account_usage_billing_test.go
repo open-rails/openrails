@@ -1,6 +1,6 @@
-//go:build integration
+//go:build e2e && integration
 
-package money
+package ci_test
 
 import (
 	"context"
@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/migrate"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/require"
@@ -31,10 +32,8 @@ func (c *usageTestConfig) MerchantSettings(context.Context, billing.MerchantID) 
 }
 
 func TestAccountUsageBillingIntegration(t *testing.T) {
-	dsn := os.Getenv("SQLC_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SQLC_DATABASE_URL is required")
-	}
+	dsn := os.Getenv("OPENRAILS_E2E_DSN")
+	require.NotEmpty(t, dsn, "OPENRAILS_E2E_DSN must point at a disposable PostgreSQL server")
 	ctx := t.Context()
 	pc, err := pgxpool.ParseConfig(dsn)
 	require.NoError(t, err)
@@ -60,7 +59,7 @@ func TestAccountUsageBillingIntegration(t *testing.T) {
 	ctx = merchant.WithID(ctx, mid)
 	require.NoError(t, database.GenDirectory().InsertMerchant(ctx, gen.InsertMerchantParams{ID: mid.UUID(), Slug: "usage", GroupID: uuid.NewString()}))
 	clock := clockwork.NewFakeClockAt(time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC))
-	service := NewMoneyService(database, clock)
+	service := money.NewMoneyService(database, clock)
 	service.UsageBillingEnabled = true
 	customer := func() identity.CustomerID {
 		id := identity.CustomerID(uuid.New())
@@ -145,7 +144,7 @@ func TestAccountUsageBillingIntegration(t *testing.T) {
 		capacity, err := service.GetAdmissionCapacity(ctx, id, "USD")
 		require.NoError(t, err)
 		require.Zero(t, capacity.CreditLimit)
-		require.Equal(t, BillingModePrepaid, capacity.BillingMode)
+		require.Equal(t, money.BillingModePrepaid, capacity.BillingMode)
 		policy, err := service.GetAccountSettings(ctx, id, "USD")
 		require.NoError(t, err)
 		require.EqualValues(t, 100_000_000, policy.CreditLimitAmount, "missing card changes usable credit, not configured policy")
@@ -168,30 +167,11 @@ func TestAccountUsageBillingIntegration(t *testing.T) {
 		require.Equal(t, 1, orders)
 		require.EqualValues(t, 100_000_000, total)
 	})
-	t.Run("one malformed profile cannot starve later customers", func(t *testing.T) {
-		bad, good := customer(), customer()
-		if bad.String() > good.String() {
-			bad, good = good, bad
-		}
-		accrue(bad, 100_000_000)
-		accrue(good, 100_000_000)
-		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			return gen.New(tx).UpsertCustomerInvoiceProfile(ctx, gen.UpsertCustomerInvoiceProfileParams{MerchantID: mid.UUID(), CustomerID: bad.UUID(), CollectionMethod: CollectionChargeAutomatically, Tax: []byte(`{}`), BillingContacts: []byte(`[{"email":1}]`), Now: clock.Now()})
-		}))
-		n, err := service.FinalizeDueUsage(ctx, clock.Now())
-		require.Error(t, err)
-		require.GreaterOrEqual(t, n, 1)
-		orders, _ := count(good)
-		require.Equal(t, 1, orders)
-		orders, _ = count(bad)
-		require.Zero(t, orders)
-		require.True(t, settings(bad).UsageCollectionDue, "failed account remains due for retry")
-	})
 	t.Run("active automatic policy offers no undeclared currency credit", func(t *testing.T) {
 		id := customer()
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			q := gen.New(tx)
-			if _, err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{MerchantID: mid.UUID(), CustomerID: id.UUID(), Currency: "EUR", BillingMode: BillingModeArrears, Now: clock.Now()}); err != nil {
+			if _, err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{MerchantID: mid.UUID(), CustomerID: id.UUID(), Currency: "EUR", BillingMode: money.BillingModeArrears, Now: clock.Now()}); err != nil {
 				return err
 			}
 			return q.SetMoneyAccountCreditLimit(ctx, gen.SetMoneyAccountCreditLimitParams{MerchantID: mid.UUID(), CustomerID: id.UUID(), Currency: "EUR", CreditLimit: 100_000_000, Now: clock.Now()})
@@ -199,7 +179,7 @@ func TestAccountUsageBillingIntegration(t *testing.T) {
 		capacity, err := service.GetAdmissionCapacity(ctx, id, "EUR")
 		require.NoError(t, err)
 		require.Zero(t, capacity.CreditLimit)
-		require.Equal(t, BillingModePrepaid, capacity.BillingMode)
+		require.Equal(t, money.BillingModePrepaid, capacity.BillingMode)
 		manual := service.WithDatabase(database)
 		manual.UsageBillingEnabled = false
 		capacity, err = manual.GetAdmissionCapacity(ctx, id, "EUR")
@@ -288,9 +268,9 @@ func TestAccountUsageBillingIntegration(t *testing.T) {
 		setMinimum()
 		accrue(id, 19_000_000)
 		require.True(t, settings(id).UsageCollectionDue)
-		billed, err := service.finalizeUsageAccount(ctx, id.UUID(), "USD", clock.Now())
+		billed, err := service.FinalizeDueUsage(ctx, clock.Now())
 		require.NoError(t, err)
-		require.True(t, billed)
+		require.GreaterOrEqual(t, billed, 1)
 		orders, total := count(id)
 		require.Equal(t, 1, orders)
 		require.EqualValues(t, 20_000_000, total)
@@ -305,6 +285,25 @@ func TestAccountUsageBillingIntegration(t *testing.T) {
 		}))
 		row = settings(id)
 		require.True(t, row.CreditLimitOverride)
-		require.Zero(t, usageCreditLimit(row, &cfg.settings.UsageBilling.Currencies[0]))
+		require.Zero(t, row.CreditLimitAmount)
+	})
+	t.Run("one malformed profile cannot starve later customers", func(t *testing.T) {
+		bad, good := customer(), customer()
+		if bad.String() > good.String() {
+			bad, good = good, bad
+		}
+		accrue(bad, 100_000_000)
+		accrue(good, 100_000_000)
+		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			return gen.New(tx).UpsertCustomerInvoiceProfile(ctx, gen.UpsertCustomerInvoiceProfileParams{MerchantID: mid.UUID(), CustomerID: bad.UUID(), CollectionMethod: money.CollectionChargeAutomatically, Tax: []byte(`{}`), BillingContacts: []byte(`[{"email":1}]`), Now: clock.Now()})
+		}))
+		n, err := service.FinalizeDueUsage(ctx, clock.Now())
+		require.Error(t, err)
+		require.GreaterOrEqual(t, n, 1)
+		orders, _ := count(good)
+		require.Equal(t, 1, orders)
+		orders, _ = count(bad)
+		require.Zero(t, orders)
+		require.True(t, settings(bad).UsageCollectionDue, "failed account remains due for retry")
 	})
 }

@@ -36,7 +36,7 @@ Amounts below the minimum remain unbilled and carry into the next period. A
 threshold payment never resets the monthly date. Existing invoice retries and
 unknown-provider-result recovery continue independently.
 
-`PATCH /v1/admin/customers/{id}` customizes a customer:
+`PATCH /v1/admin/customers/{customer_id}` customizes a customer:
 
 ```json
 {
