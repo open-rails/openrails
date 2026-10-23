@@ -135,6 +135,7 @@ func TestUsageBillingSchedulesOneOptInPass(t *testing.T) {
 		for _, job := range jobs {
 			args, opts := periodicArgs(job)
 			if args.Kind() == riverjobs.KindUsageOrders {
+				require.True(t, periodicRunOnStart(job), "the shared helper checks whether startup work is overdue")
 				require.True(t, opts.UniqueOpts.ByArgs)
 				require.Contains(t, opts.UniqueOpts.ByState, rivertype.JobStateRunning)
 				count++

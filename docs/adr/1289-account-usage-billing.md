@@ -1,6 +1,6 @@
 # Account usage billing
 
-Status: implementation in progress. Tracks OpenRails #1289.
+Status: accepted. Implementation tracked by OpenRails #1289.
 
 A customer may accumulate usage debt within a merchant's configured credit limit.
 The customer must authorize a default payment method before new work can spend

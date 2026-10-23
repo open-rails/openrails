@@ -24,7 +24,9 @@ to R of its total exactly: per-event rounding never drifts. 1,000 events of
 1,234 tokens at $0.15 per million each cost 185.1 micros, rounded where they
 fall, and together cost exactly 185,100.
 
-The period is the one [usage orders](usage-orders.md) close: the merchant's
+With [automatic usage billing](usage-billing.md), the customer's fixed monthly
+anchor defines both pricing and invoice periods. A threshold payment does not
+reset it. Explicit manual billing retains the merchant's
 `billing_period_boundary`, anchored on the customer's first activity. The
 quantities are kept in `meter_period_quantities`, 100 days per period.
 

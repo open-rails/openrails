@@ -383,17 +383,14 @@ boundary. `TestNMIFiveDayRestartRecovery` exercises real process termination and
 restart with two replicas; provider fixtures establish the local contract, not
 live processor qualification.
 
-Usage order collection and billing also scan at startup. Monthly small-balance
-collection retains its last completed thirty-day period in the merchant book,
-including export/restore; pruning completed River jobs cannot reset its cadence.
-The marker advances only after the entire eligible scan succeeds. Partial errors
-leave the scan retryable, while already accepted payment operations retain their
-own claims and receipts. Monthly scans serialize through a PostgreSQL session
-lock without holding a transaction across provider requests. Worker pools need
-at least two connections (coordination and billing); a five-second coordination
-acquisition failure leaves the scan retryable. A collection scan held by
-`limited` or `readonly` remains queued,
-so it can resume after writes are enabled instead of consuming its monthly slot.
+Automatic usage billing checks per-account due records every five minutes and
+catches up overdue work after a restart. A fixed account billing date and its
+minimum invoice amount decide when pending accruals become an invoice; threshold
+crossings also wake the same processor. Smaller balances carry forward without
+creating an invoice, and threshold payments never move the monthly billing date.
+There is no global thirty-day collection slot. Existing payment operations retain
+their claims, retries and uncertain-result recovery. Subscription-only hosts keep
+`usage_billing_enabled: false`. See [usage billing](usage-billing.md).
 
 **Inbound — durability is the PROVIDER's job.** NMI, CCBill and Stripe
 deliver webhooks at-least-once and retry from their end; our handlers are
@@ -1176,28 +1173,20 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 | Order expiry; admission-denial flush | 5 min |
 | Convergence sweep | 15 min |
 | Rebill watch; charge-attribution read; arrears delinquency | 15 min |
-| Price-migration re-driver; usage order collection | 1 h |
+| Price-migration re-driver | 1 h |
 | Attempt enrichment; due daily NMI history read; expired-data cleanup; idempotency cleanup; credit expiry; Solana crank; Solana Pay reference GC; Stripe webhook reconciliation | 1 h |
 | Provider refresh scheduler (fans out per merchant) | 2 h |
 | Account updater batch | 6 h |
 | Solana gas alert; Solana ledger reconciliation | 6 h |
 | Catalog reconciliation pull (alert only) | `catalog_reconciliation_interval` (default 1 h; `0` disables) |
-| Usage period finalization; ledger integrity audit | 24 h |
-| Usage collection below the normal threshold but above the monthly floor | 30 d |
+| Ledger integrity audit | 24 h |
+| Automatic usage billing (opt-in) | 5 min, plus threshold wakeups |
 
-The monthly-floor pass is for metered usage charged in arrears, not subscription
-renewals. For example, with a $50 collection threshold and a $1 monthly floor,
-a customer's $3 usage order waits for this pass rather than generating a small
-charge on every hourly scan. The billing book separately records each
-merchant's completed 30-day collection period, so a duplicate job or retained
-history cleanup cannot collect that monthly slot twice. Normal collection and
-payment retries continue at their shorter cadences.
-
-Usage schedules remain registered even for subscription-only hosts. No usage
-orders means there is nothing to collect. Omitting billing policies at startup
-is not an off switch: a merchant's file or Vault configuration can change while
-the server runs, and outstanding usage debt still needs collection after a
-policy is removed. OpenRails has no separate usage-scheduler capability flag.
+Automatic usage billing is enabled by the host's `usage_billing_enabled` option.
+It is not scheduled by subscription-only hosts. Merchants configure their
+`usage_billing` defaults; each customer's due record preserves its fixed billing
+date across restarts and supports minimum-amount carryover. Explicit manual
+invoice operations remain available independently. See [usage billing](usage-billing.md).
 
 The health checker seeds `billing.worker_state` and raises a critical
 `life.worker.stalled` finding in every merchant when a periodic kind stops
