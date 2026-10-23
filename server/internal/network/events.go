@@ -58,7 +58,7 @@ func (s *Service) RiverJobs() riverhelpers.Contribution {
 		if _, ok := cfg.Queues[queue]; !ok {
 			cfg.Queues[queue] = river.QueueConfig{MaxWorkers: 1}
 		}
-		cfg.PeriodicJobs = append(cfg.PeriodicJobs, river.NewPeriodicJob(river.PeriodicInterval(eventPollInterval), func() (river.JobArgs, *river.InsertOpts) {
+		cfg.PeriodicJobs = append(cfg.PeriodicJobs, riverhelpers.NewPeriodicJob(cfg, eventPollInterval, func() (river.JobArgs, *river.InsertOpts) {
 			return accountEventsArgs{}, &river.InsertOpts{Queue: queue, MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByQueue: true, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled}}}
 		}, &river.PeriodicJobOpts{ID: eventPollKind, RunOnStart: true}))
 		return nil

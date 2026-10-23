@@ -32,8 +32,8 @@ func periodicArgs(job *river.PeriodicJob) (river.JobArgs, *river.InsertOpts) {
 	return reflect.NewAt(v.Type(), unsafe.Pointer(v.UnsafeAddr())).Elem().Interface().(river.PeriodicJobConstructor)()
 }
 
-// The schedule is the product's recovery contract: which sweeps run the moment
-// a process restarts, and the cadence the staleness alert expects of each kind.
+// The schedule is the product's recovery contract: which sweeps catch up on an
+// overdue restart, and the cadence the staleness alert expects of each kind.
 func TestPeriodicScheduleContract(t *testing.T) {
 	want := map[string]struct {
 		period     time.Duration
@@ -67,8 +67,10 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		riverjobs.OrderExpiryArgs{}.Kind():               {5 * time.Minute, false},
 	}
 	rt := &Runtime{}
-	jobs, err := rt.buildRiverPeriodicJobs(context.Background())
+	cfg := &river.Config{}
+	jobs, err := rt.buildRiverPeriodicJobs(context.Background(), cfg)
 	require.NoError(t, err)
+	require.NotEmpty(t, cfg.Hooks, "restart checkpoints must belong to the composed fleet")
 	runOnStart := map[string]bool{}
 	for _, job := range jobs {
 		args, opts := periodicArgs(job)
@@ -90,16 +92,14 @@ func TestPeriodicScheduleContract(t *testing.T) {
 				}, opts.UniqueOpts.ByState)
 			}
 		}
-		// Leaders taking over at different instants of a period schedule its
-		// next run at the same boundary, where the next uniqueness bucket starts.
+		// The constructor records this run for the next deadline. Leader
+		// takeover restores the same deadline through the shared helper.
 		period := opts.UniqueOpts.ByPeriod
 		if period == 0 {
 			continue
 		}
-		boundary := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC).Truncate(period).Add(period)
-		for _, takeover := range []time.Time{boundary.Add(-period), boundary.Add(-period / 2), boundary.Add(-time.Nanosecond)} {
-			require.Equal(t, boundary, periodicSchedule(job).Next(takeover), "%s after a takeover at %s", args.Kind(), takeover)
-		}
+		now := time.Now()
+		require.WithinDuration(t, now.Add(period), periodicSchedule(job).Next(now), time.Second, args.Kind())
 	}
 	periods := rt.workerHealthRegistrations().Snapshot()
 	require.Len(t, runOnStart, len(want))
@@ -112,13 +112,13 @@ func TestPeriodicScheduleContract(t *testing.T) {
 	// a typo refuses instead of silently picking a schedule.
 	for raw, period := range map[string]time.Duration{"0": 0, "30m": 30 * time.Minute} {
 		rt := &Runtime{Config: &config.Config{CatalogReconciliationInterval: raw}}
-		_, err := rt.buildRiverPeriodicJobs(context.Background())
+		_, err := rt.buildRiverPeriodicJobs(context.Background(), &river.Config{})
 		require.NoError(t, err)
 		got, scheduled := rt.workerHealthRegistrations().Snapshot()[riverjobs.CatalogReconciliationPullArgs{}.Kind()]
 		require.Equal(t, period != 0, scheduled, raw)
 		require.Equal(t, period, got, raw)
 	}
-	_, err = (&Runtime{Config: &config.Config{CatalogReconciliationInterval: "30minutes"}}).buildRiverPeriodicJobs(context.Background())
+	_, err = (&Runtime{Config: &config.Config{CatalogReconciliationInterval: "30minutes"}}).buildRiverPeriodicJobs(context.Background(), &river.Config{})
 	require.Error(t, err)
 }
 

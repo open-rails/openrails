@@ -553,10 +553,11 @@ func cancelOnly(ctx context.Context) context.Context {
 	return run
 }
 
-// GetBillingPeriodicJobs returns billing's periodic jobs for external River client setup.
-// This is used by embedded hosts who want to add billing's periodic jobs to their client.
-func (r *Runtime) GetBillingPeriodicJobs(ctx context.Context) ([]*river.PeriodicJob, error) {
-	return r.buildRiverPeriodicJobs(ctx)
+// ValidateBillingPeriodicJobs checks configured cadences before workers start.
+// Embedded hosts compose the actual schedules and their hooks through RiverJobs.
+func (r *Runtime) ValidateBillingPeriodicJobs(ctx context.Context) error {
+	_, err := r.buildRiverPeriodicJobs(ctx, &river.Config{})
+	return err
 }
 
 // SetRiverSchema records the schema the bound River client keeps its tables

@@ -129,12 +129,13 @@ or `run-worker`) works River jobs; River hands each job to one instance. A job
 whose instance dies stops its liveness beat and is rescued about five minutes
 later. Periodic work is scheduled by River's leader alone: the first instance
 to start leads, an instance that closes resigns and another takes over at once,
-and a crashed leader is replaced within about 20 seconds. Each schedule fires
-on its period's clock boundaries and is unique per period, so the fleet runs
-each sweep once a period whoever leads; a new leader repeats only the passes
-that run on start (the due pass, rescue, provider refresh), which are
-idempotent. A host fleet (`openrails.WithRiverClient`) follows the same rules,
-and every replica's fleet in that River schema must carry OpenRails' jobs:
+and a crashed leader is replaced within about 20 seconds. Periodic deadlines
+survive leadership changes and restarts through retained River job history. Startup recovery catches up an overdue pass; it does not
+repeat a pass whose interval has not elapsed. A new leader preserves the next
+deadline rather than delaying it by another interval. Job history is retained
+for at least the longest configured interval (30 days for usage collection);
+operators may retain it longer. A host fleet (`openrails.WithRiverClient`)
+follows the same rules, and every replica's fleet in that River schema must carry OpenRails' jobs:
 whichever replica leads schedules them.
 
 Outside River, every instance runs the Solana Pay poller, which shares
@@ -1159,25 +1160,38 @@ version match the ones it was built from. A stale cache is never used.
 
 ## Background worker schedule
 
-Everything runs by itself under River once `run-server` (or `run-worker`) is
-up. "start" = RunOnStart: the replica that takes River's leadership runs the
-job then. Only the leader schedules, and each cadence fires on the clock's
-boundaries (an hourly job at :00, a 15-minute one at :00, :15, …), so a change
-of leader neither delays nor repeats a period's run.
+Everything runs under River once `run-server` (or `run-worker`) is up.
+“Overdue startup” means the elected leader catches up only if the last retained
+periodic run is older than the interval. A quick restart does not enqueue
+another run. Queued and retrying work keeps its normal retry behavior; explicit
+user-triggered work does not wait for a periodic deadline. Each River schema
+has one scheduling leader, and OpenRails' cross-fleet leases additionally
+coalesce merchant-wide passes when multiple embedded fleets share merchants.
 
-| Worker | Cadence |
-|---|---|
-| Balance watch (+ start; only the watches that are due) | 30 s |
-| Provider-intent executor | 1 min + start |
-| Provider-intent verifier · admission-denial flush · worker health check (health check + start) | 5 min |
-| Notification email sweep | 10 min |
-| Convergence sweep (+ start) · arrears delinquency evaluation · Solana Pay reference GC | 15 min |
-| Credit-ledger reconcile (alert-only) | 30 min |
-| Price-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · usage order collection | 1 h |
-| Dunning · Provider Refresh scheduler (+ start; fans out per-merchant jobs) | 4 h |
-| Solana gas alert · Solana ledger reconcile | 6 h |
-| Catalog reconciliation pull (alert-only) | `catalog_reconciliation_interval` (default 1h; `0` disables) |
-| Usage period billing / monthly-floor sweep | daily / 30 d |
+| Worker | Cadence | Overdue startup |
+|---|---|---|
+| Balance watch (due customer watches only) | 30 s | Yes |
+| Due renewals and retries; job rescue | 1 min | Yes |
+| Merchant-secret cleanup | 5 min | Yes |
+| Order expiry; admission-denial flush | 5 min | No |
+| Convergence sweep | 15 min | Yes |
+| Rebill watch; charge-attribution read; arrears delinquency | 15 min | No |
+| Price-migration re-driver; usage order collection | 1 h | Yes |
+| Attempt enrichment; due daily NMI history read; expired-data cleanup; idempotency cleanup; credit expiry; Solana crank; Solana Pay reference GC; Stripe webhook reconciliation | 1 h | No |
+| Provider refresh scheduler (fans out per merchant) | 2 h | Yes |
+| Account updater batch | 6 h | Yes |
+| Solana gas alert; Solana ledger reconciliation | 6 h | No |
+| Catalog reconciliation pull (alert only) | `catalog_reconciliation_interval` (default 1 h; `0` disables) | No |
+| Usage period finalization; ledger integrity audit | 24 h | Yes |
+| Usage collection below the normal threshold but above the monthly floor | 30 d | Yes |
+
+The monthly-floor pass is for metered usage charged in arrears, not subscription
+renewals. For example, with a $50 collection threshold and a $1 monthly floor,
+a customer's $3 usage order waits for this pass rather than generating a small
+charge on every hourly scan. The billing book separately records each
+merchant's completed 30-day collection period, so a duplicate job or retained
+history cleanup cannot collect that monthly slot twice. Normal collection and
+payment retries continue at their shorter cadences.
 
 The health checker seeds `billing.worker_state` and raises a critical
 `life.worker.stalled` finding in every merchant when a periodic kind stops

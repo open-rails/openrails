@@ -14,6 +14,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails/internal/db/gen"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
@@ -103,22 +104,22 @@ func (r *Runtime) riverTableAccess() (*pgxpool.Pool, string) {
 	return r.riverStatsPool(), r.riverSchemaOrDefault()
 }
 
-// healthPeriodic wraps river.NewPeriodicJob with a fixed interval, recording
+// healthPeriodic registers a restart-safe interval, recording
 // kind -> interval (shortest wins) for the staleness alert rule. A periodic's
 // River ID is its job kind unless opts names one, so a River client can turn
 // a single periodic off (PeriodicJobs().RemoveByID). The pass is queued only
 // by the fleet holding the kind's lease (see claimPeriodic).
-func (r *Runtime) healthPeriodic(interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
-	return r.periodic(true, interval, ctor, opts)
+func (r *Runtime) healthPeriodic(cfg *river.Config, interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
+	return r.periodic(cfg, true, interval, ctor, opts)
 }
 
 // fleetPeriodic is a periodic over this fleet's own state (its River jobs, its
 // Redis): every fleet runs it.
-func (r *Runtime) fleetPeriodic(interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
-	return r.periodic(false, interval, ctor, opts)
+func (r *Runtime) fleetPeriodic(cfg *river.Config, interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
+	return r.periodic(cfg, false, interval, ctor, opts)
 }
 
-func (r *Runtime) periodic(leased bool, interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
+func (r *Runtime) periodic(cfg *river.Config, leased bool, interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
 	own := river.PeriodicJobOpts{}
 	if opts != nil {
 		own = *opts
@@ -139,7 +140,7 @@ func (r *Runtime) periodic(leased bool, interval time.Duration, ctor river.Perio
 			return inner()
 		}
 	}
-	return river.NewPeriodicJob(periodBoundaries(interval), ctor, &own)
+	return riverhelpers.NewPeriodicJob(cfg, interval, ctor, &own)
 }
 
 // merchantSetKey identifies the merchants this fleet declares: a hash of their
@@ -191,14 +192,3 @@ func (r *Runtime) claimPeriodic(id string, interval time.Duration) bool {
 // PeriodicJobIDs are the River IDs of the periodic jobs this runtime gave its
 // River client.
 func (r *Runtime) PeriodicJobIDs() []string { return slices.Clone(r.periodicIDs) }
-
-// periodBoundaries fires at each multiple of the period on the clock, where
-// a ByPeriod uniqueness bucket starts. Only the River leader schedules, and a
-// new leader starts its schedule afresh: counted from its own start, a sweep
-// would slip by up to a period at every change of leader and never run while
-// leaders change faster than that.
-type periodBoundaries time.Duration
-
-func (p periodBoundaries) Next(t time.Time) time.Time {
-	return t.Truncate(time.Duration(p)).Add(time.Duration(p))
-}

@@ -147,7 +147,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		e.admit(m, id, false)
 	}
 	e.publishDeclared()
-	if _, err := rt.GetBillingPeriodicJobs(ctx); err != nil {
+	if err := rt.ValidateBillingPeriodicJobs(ctx); err != nil {
 		return fail(fmt.Errorf("build billing periodic jobs: %w", err))
 	}
 	if e.svc, err = service.New(rt); err != nil {
