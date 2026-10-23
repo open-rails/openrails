@@ -45,8 +45,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   # Docker Hub rate-limits anonymous pulls, and pull requests get no secrets.
   # The smoke database, binfmt and BuildKit come from Google's Docker Hub
-  # mirror; the Dockerfile's digest-pinned bases from ECR Public, which keeps
-  # every digest. Same digests as Docker Hub.
+  # mirror, as do the Dockerfile's digest-pinned official base images.
+  # BASE_REGISTRY remains overrideable without changing any digest.
   BINFMT_IMAGE: mirror.gcr.io/tonistiigi/binfmt:latest
   BUILDKIT_IMAGE: mirror.gcr.io/moby/buildkit:buildx-stable-1
 

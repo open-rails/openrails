@@ -1,10 +1,11 @@
-# Base images are the Docker official images from ECR Public (same digests as
-# Docker Hub, without its anonymous pull rate limit).
+# Digest-pinned Docker official images. Override BASE_REGISTRY with
+# public.ecr.aws/docker/library if the default mirror is unavailable.
+ARG BASE_REGISTRY=mirror.gcr.io/library
 
 # Stage 1: admin console SPA into server/web/console/dist, which server/web/console/embed.go
 # go:embeds (#754). Node is a BUILD-time dependency only. Its output is static
 # files, so it runs once on the build platform for every target platform.
-FROM --platform=$BUILDPLATFORM public.ecr.aws/docker/library/node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS billing-ui
+FROM --platform=$BUILDPLATFORM ${BASE_REGISTRY}/node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS billing-ui
 
 RUN npm install -g --ignore-scripts pnpm@11.0.0
 WORKDIR /src/sdk/billing-ui
@@ -27,7 +28,7 @@ RUN pnpm install --frozen-lockfile --ignore-scripts && pnpm --config.verify-deps
 
 # Stage 2: build. Cross-compiles on the build platform (the binary needs no cgo),
 # so only the runtime stage runs as the target platform.
-FROM --platform=$BUILDPLATFORM public.ecr.aws/docker/library/golang:1.26.10-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca AS builder
+FROM --platform=$BUILDPLATFORM ${BASE_REGISTRY}/golang:1.26.10-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates
@@ -80,7 +81,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Stage 3: production
 # 2026-10-21: bumped for libssl3/libcrypto3 3.5.7-r0 -> 3.5.8-r0 (CVE-2026-14456
 # and 7 other openssl CVEs, see #1293).
-FROM public.ecr.aws/docker/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+FROM ${BASE_REGISTRY}/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 LABEL org.opencontainers.image.source="https://github.com/open-rails/openrails"
 
