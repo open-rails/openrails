@@ -28,6 +28,7 @@ type Event struct {
 	Source     string          `json:"source"`
 	Type       string          `json:"type"`
 	Version    int             `json:"version"`
+	RecordedAt time.Time       `json:"recorded_at"`
 	OccurredAt time.Time       `json:"occurred_at"`
 	Subject    EventSubject    `json:"subject"`
 	Data       json.RawMessage `json:"data"`

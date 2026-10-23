@@ -95,7 +95,7 @@ func (q *Queries) GetExpiredEventLogBoundary(ctx context.Context, arg GetExpired
 }
 
 const listEventLog = `-- name: ListEventLog :many
-SELECT position,id,source,event_type,version,occurred_at,subject_type,subject_id,data
+SELECT position,id,source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data
 FROM billing.event_log
 WHERE merchant_id=$1::uuid AND position>$2::bigint
 ORDER BY position LIMIT $3::int
@@ -113,7 +113,8 @@ type ListEventLogRow struct {
 	Source      string
 	EventType   string
 	Version     int32
-	OccurredAt  time.Time
+	RecordedAt time.Time
+ OccurredAt  time.Time
 	SubjectType string
 	SubjectID   string
 	Data        []byte
@@ -135,6 +136,7 @@ func (q *Queries) ListEventLog(ctx context.Context, arg ListEventLogParams) ([]L
 			&i.EventType,
 			&i.Version,
 			&i.OccurredAt,
+ &i.RecordedAt,
 			&i.SubjectType,
 			&i.SubjectID,
 			&i.Data,
@@ -150,7 +152,7 @@ func (q *Queries) ListEventLog(ctx context.Context, arg ListEventLogParams) ([]L
 }
 
 const listEventLogByTypes = `-- name: ListEventLogByTypes :many
-SELECT position,id,source,event_type,version,occurred_at,subject_type,subject_id,data
+SELECT position,id,source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data
 FROM billing.event_log
 WHERE merchant_id=$1::uuid AND position>$2::bigint
 AND event_type=ANY($3::text[])
@@ -170,7 +172,8 @@ type ListEventLogByTypesRow struct {
 	Source      string
 	EventType   string
 	Version     int32
-	OccurredAt  time.Time
+	RecordedAt time.Time
+ OccurredAt  time.Time
 	SubjectType string
 	SubjectID   string
 	Data        []byte
@@ -197,6 +200,7 @@ func (q *Queries) ListEventLogByTypes(ctx context.Context, arg ListEventLogByTyp
 			&i.EventType,
 			&i.Version,
 			&i.OccurredAt,
+ &i.RecordedAt,
 			&i.SubjectType,
 			&i.SubjectID,
 			&i.Data,

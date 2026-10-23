@@ -12,13 +12,13 @@ SELECT id FROM billing.event_log
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND position=sqlc.arg(position)::bigint;
 
 -- name: ListEventLog :many
-SELECT position,id,source,event_type,version,occurred_at,subject_type,subject_id,data
+SELECT position,id,source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data
 FROM billing.event_log
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND position>sqlc.arg(after_position)::bigint
 ORDER BY position LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListEventLogByTypes :many
-SELECT position,id,source,event_type,version,occurred_at,subject_type,subject_id,data
+SELECT position,id,source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data
 FROM billing.event_log
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND position>sqlc.arg(after_position)::bigint
 AND event_type=ANY(sqlc.arg(event_types)::text[])
