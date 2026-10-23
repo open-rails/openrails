@@ -59,7 +59,7 @@ func normalize(q billing.EventQuery) (billing.EventQuery, error) {
 
 func decode(raw string) (cursor, error) {
 	var c cursor
-	if len(raw) > 8192 {
+	if len(raw) > 32768 {
 		return c, invalid("invalid event cursor")
 	}
 	data, err := base64.RawURLEncoding.DecodeString(raw)
