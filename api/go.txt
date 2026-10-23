@@ -59,6 +59,7 @@ pkg openrails, method (*Client) DeleteAlertWebhook(context.Context, billing.Aler
 pkg openrails, method (*Client) DeletePSPImport(context.Context, billing.PSPImportID, ...RequestOption) error
 pkg openrails, method (*Client) DeleteProduct(context.Context, billing.ProductID, ...RequestOption) error
 pkg openrails, method (*Client) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID, ...RequestOption) error
+pkg openrails, method (*Client) EventReader() eventlog.Reader
 pkg openrails, method (*Client) ExportBillingArchive(context.Context, io.Writer, ...RequestOption) error
 pkg openrails, method (*Client) ExtendAdmissions(context.Context, []billing.ExtendAdmissionParams, ...RequestOption) ([]billing.AdmissionResult, error)
 pkg openrails, method (*Client) GetAccessTenure(context.Context, billing.AccessTenureParams, ...RequestOption) (*billing.AccessTenure, error)
@@ -199,6 +200,7 @@ pkg openrails, method (LocalClient) DeleteAlertWebhook(context.Context, billing.
 pkg openrails, method (LocalClient) DeletePSPImport(context.Context, billing.PSPImportID, ...RequestOption) error
 pkg openrails, method (LocalClient) DeleteProduct(context.Context, billing.ProductID, ...RequestOption) error
 pkg openrails, method (LocalClient) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID, ...RequestOption) error
+pkg openrails, method (LocalClient) EventReader() eventlog.Reader
 pkg openrails, method (LocalClient) ExportBillingArchive(context.Context, io.Writer, ...RequestOption) error
 pkg openrails, method (LocalClient) ExtendAdmissions(context.Context, []billing.ExtendAdmissionParams, ...RequestOption) ([]billing.AdmissionResult, error)
 pkg openrails, method (LocalClient) GetAccessTenure(context.Context, billing.AccessTenureParams, ...RequestOption) (*billing.AccessTenure, error)
@@ -2152,6 +2154,7 @@ pkg openrails/billing, type Event struct, Data json.RawMessage `json:"data"`
 pkg openrails/billing, type Event struct, ID string `json:"id"`
 pkg openrails/billing, type Event struct, MerchantID MerchantID `json:"merchant_id"`
 pkg openrails/billing, type Event struct, OccurredAt time.Time `json:"occurred_at"`
+pkg openrails/billing, type Event struct, RecordedAt time.Time `json:"recorded_at"`
 pkg openrails/billing, type Event struct, Source string `json:"source"`
 pkg openrails/billing, type Event struct, Subject EventSubject `json:"subject"`
 pkg openrails/billing, type Event struct, Type string `json:"type"`

@@ -303,7 +303,7 @@ func dump(ctx context.Context, conn *pgx.Conn, schema string) ([]byte, error) {
 		   FROM pg_trigger tg
 		   JOIN pg_class c ON c.oid = tg.tgrelid
 		   JOIN pg_namespace n ON n.oid = c.relnamespace
-		  WHERE n.nspname = $1 AND NOT c.relispartition AND NOT tg.tgisinternal
+		  WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') AND NOT c.relispartition AND NOT tg.tgisinternal
 		  ORDER BY c.relname, tg.tgname`,
 	} {
 		lines, err := section(query, schema)
@@ -334,6 +334,15 @@ func dump(ctx context.Context, conn *pgx.Conn, schema string) ([]byte, error) {
 		  FROM pg_class c
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
 		 WHERE n.nspname = $1 AND c.relkind IN ('v', 'm')
+		UNION ALL
+        -- View triggers have no table block; keep their full definition as an
+        -- independent object beside the view rather than dropping the trigger.
+        SELECT 'view trigger ' || c.oid::regclass::text || '.' || quote_ident(tg.tgname),
+               pg_get_triggerdef(tg.oid) || CASE tg.tgenabled WHEN 'O' THEN '' WHEN 'D' THEN ' (disabled)' WHEN 'R' THEN ' (replica)' ELSE ' (always)' END
+          FROM pg_trigger tg
+          JOIN pg_class c ON c.oid=tg.tgrelid
+          JOIN pg_namespace n ON n.oid=c.relnamespace
+         WHERE n.nspname=$1 AND c.relkind IN ('v', 'm') AND NOT tg.tgisinternal
 		UNION ALL
 		SELECT CASE p.prokind WHEN 'p' THEN 'procedure ' WHEN 'a' THEN 'aggregate ' WHEN 'w' THEN 'window function ' ELSE 'function ' END || p.oid::regprocedure::text,
 		       CASE WHEN p.prokind IN ('f', 'p') THEN pg_get_functiondef(p.oid) ELSE 'RETURNS ' || format_type(p.prorettype, NULL) END

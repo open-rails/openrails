@@ -1063,6 +1063,7 @@ export type Event = {
   source: string
   type: string
   version: number
+  recorded_at: string
   occurred_at: string
   subject: EventSubject
   data: unknown | null

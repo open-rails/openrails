@@ -17046,6 +17046,10 @@
           "version": {
             "type": "integer"
           },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          },
           "occurred_at": {
             "type": "string",
             "format": "date-time"
@@ -17068,6 +17072,7 @@
           "source",
           "type",
           "version",
+          "recorded_at",
           "occurred_at",
           "subject",
           "data"

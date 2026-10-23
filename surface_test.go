@@ -30,6 +30,7 @@ import (
 // handleMethods say what a handle is or ask the token endpoint, which is no
 // merchant route.
 var handleMethods = map[string]string{
+	"EventReader":       "constructs the shared reader adapter; polling calls ListEvents",
 	"MerchantID":        "the handle's merchant",
 	"CustomerToken":     "mints a customer's access token at the issuer's token endpoint",
 	"CustomerAssertion": "signs the assertion a frontend redeems for that token",
