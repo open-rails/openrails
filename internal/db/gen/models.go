@@ -439,9 +439,8 @@ type BillingDestructiveRunBeforeImage struct {
 	DestructiveRunClass string
 }
 
-// Retained merchant facts, independent of readers. Retention: events expire after the configured event retention, independently of reader progress.
 type BillingEventLog struct {
-	MerchantID  uuid.UUID
+	MerchantID  *uuid.UUID
 	Position    int64
 	ID          string
 	Source      string
@@ -454,21 +453,67 @@ type BillingEventLog struct {
 	Data        []byte
 }
 
-// Internal transaction scratch; no row survives a successful commit. Exists only for the transaction lifetime.
-type BillingEventLogPending struct {
-	TransactionID int64
-	Entries       []byte
-}
-
-// Committed event positions and retention boundaries; no reader state. State owned by the merchant.
 type BillingEventLogStream struct {
-	MerchantID    uuid.UUID
+	MerchantID    *uuid.UUID
 	Epoch         uuid.UUID
 	Position      int64
 	HeadID        string
 	PrunedThrough int64
 	PrunedID      string
 	RecordedAt    time.Time
+}
+
+// Shared retained merchant facts. Retention: events expire after the configured event retention, independently of reader progress.
+type BillingEventlogEvent struct {
+	Source      string
+	Scope       string
+	Position    int64
+	ID          string
+	Boundary    string
+	EventSource string
+	EventType   string
+	Version     int32
+	OccurredAt  time.Time
+	RecordedAt  time.Time
+	SubjectType string
+	SubjectID   string
+	Data        []byte
+	MerchantID  *uuid.UUID
+}
+
+// Installed shared event-log schema versions.
+type BillingEventlogMigration struct {
+	Version int32
+}
+
+// Shared transaction scratch; empty after commit.
+type BillingEventlogPending struct {
+	Ordinal       int64
+	TransactionID pgtype.Uint64
+	Source        string
+	Scope         string
+	ID            string
+	Boundary      *string
+	EventSource   string
+	EventType     string
+	Version       int32
+	OccurredAt    time.Time
+	SubjectType   string
+	SubjectID     string
+	Data          []byte
+}
+
+// Shared committed event positions and retention boundaries; merchant-owned state.
+type BillingEventlogStream struct {
+	Source        string
+	Scope         string
+	Epoch         string
+	Position      int64
+	HeadID        string
+	PrunedThrough int64
+	PrunedID      string
+	RecordedAt    time.Time
+	MerchantID    *uuid.UUID
 }
 
 // Failed usage counted per customer and configured window: the customer's grace (invoker empty) or a delegated invoker's cutoff. Retention: rows are deleted once their window has ended.

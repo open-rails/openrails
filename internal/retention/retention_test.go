@@ -31,7 +31,7 @@ func baseline(t *testing.T) string {
 }
 
 var (
-	createTable  = regexp.MustCompile(`(?m)^CREATE TABLE billing\.(\w+) \(`)
+	createTable  = regexp.MustCompile(`(?m)^CREATE TABLE(?: IF NOT EXISTS)? (?:"billing"|billing)\.(\w+)\s*\(`)
 	dropTable    = regexp.MustCompile(`(?m)^DROP TABLE billing\.(\w+);`)
 	renameTable  = regexp.MustCompile(`(?m)^ALTER TABLE billing\.(\w+) RENAME TO (\w+);`)
 	partitionBy  = regexp.MustCompile(`(?m)^\) PARTITION BY RANGE \((\w+)\);$`)

@@ -4,6 +4,15 @@ Use `Client.ListEvents` on an `Engine.Merchant(id)` or remote merchant handle, o
 `GET /v1/app/events` with `merchant:events:read`. The same merchant authorization
 applies on every request. OpenRails keeps no readers, offsets or acknowledgments.
 
+`Client.EventReader()` implements `helpers/eventlog.Reader` over that same
+client. Pass it to `eventlog.Consumer` to keep polling/effect code identical when
+switching from `Engine.Merchant` to `NewRemoteMerchant`. Checkpoint keys include
+source, merchant, subscription and normalized filters. The consumer's commit
+function must apply effects and save the cursor atomically (including empty
+pages), comparing the prior checkpoint or serializing writers. HTTP and embedded
+cursor refusals both match `eventlog.ErrInvalidCursor` or
+`eventlog.ErrExpiredCursor`; the underlying `billing.StatusError` is preserved.
+
 The privileged platform can call `Server.ListEvents(ctx, merchantID, query)` to
 read retained facts for a soft-deleted or archived merchant. This uses the same
 scoped cursor checks and rechecks directory existence each time. The caller
@@ -26,7 +35,8 @@ page still carries a cursor; poll from it later. The HTTP parameters are `after`
 changing them starts a separate reader position.
 
 The event envelope contains `id`, `merchant_id`, `source`, `type`, `version`,
-`occurred_at`, `subject` and `data`. Existing IDs retain their `hev_` or `ntf_`
+`occurred_at`, `recorded_at`, `subject` and `data`. `occurred_at` is domain
+time; `recorded_at` is when the fact entered the ordered log. Existing IDs retain their `hev_` or `ntf_`
 prefix. Money values in data are decimal strings, and billing resource IDs keep
 their usual prefixes. Notification events snapshot `customer_id` and `account_id`
 (the host/AuthKit UUID), plus `account_issuer` (empty for native users), so
@@ -85,3 +95,21 @@ link independent payment-page accounts again. Customer records, subscriptions
 and payments remain intact. Apply the same procedure before replacing the
 configured account issuer or tenant; those identities cannot inherit an old
 network projection merely because UUIDs happen to match.
+
+### Shared implementation adoption
+
+Helpers supplies the reader, consumer, paging/cursor/retention algorithm and
+PostgreSQL deferred queue. Contract migration0113 copies the existing facts and
+stream state without changing IDs, positions, epochs, boundaries or timestamps.
+The old read/prune table names become compatibility views; source-journal capture,
+merchant pinning and restore suppression remain product-owned and unchanged.
+Merchant deletion still cascades through the shared streams to their facts.
+Same-transaction pending facts are discarded when that merchant is deleted.
+
+The canonical Helpers SQL is copied verbatim in the migration and checked by a
+contract test. Exact retained fact replay is an idempotent no-op; reusing a retained
+ID with conflicting data aborts the transaction. Neither case overwrites history.
+
+Stop older writers and retain a database backup before applying0113. It changes
+physical storage and requires a coordinated fleet rollout. This is separate from
+merging source or adopting the read-only shared client interface.

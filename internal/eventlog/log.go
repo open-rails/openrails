@@ -9,14 +9,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"slices"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	shared "github.com/open-rails/helpers/eventlog"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -36,14 +34,6 @@ type cursor struct {
 	Boundary string    `json:"boundary,omitempty"`
 }
 
-type stream struct {
-	Epoch    uuid.UUID
-	Position int64
-	HeadID   string
-	Floor    int64
-	FloorID  string
-}
-
 func invalid(message string) error {
 	return apperr.New(http.StatusBadRequest, billing.CodeInvalidCursor, message).WithParam("after")
 }
@@ -51,32 +41,9 @@ func expired() error {
 	return apperr.New(http.StatusGone, billing.CodeEventCursorExpired, "event cursor is no longer retained; resynchronize current state").WithParam("after")
 }
 
-func normalize(q billing.EventQuery) (billing.EventQuery, error) {
-	if q.Limit == 0 {
-		q.Limit = 100
-	}
-	if q.Limit < 1 || q.Limit > 500 {
-		return q, apperr.Invalidf("limit must be between 1 and 500").WithParam("limit")
-	}
-	if len(q.Types) > 32 {
-		return q, apperr.Invalidf("at most 32 event types may be selected").WithParam("type")
-	}
-	q.Types = slices.Clone(q.Types)
-	for i, value := range q.Types {
-		value = strings.TrimSpace(value)
-		if value == "" || len(value) > 128 {
-			return q, apperr.Invalidf("invalid event type").WithParam("type")
-		}
-		q.Types[i] = value
-	}
-	sort.Strings(q.Types)
-	q.Types = slices.Compact(q.Types)
-	return q, nil
-}
-
 func decode(raw string) (cursor, error) {
 	var c cursor
-	if len(raw) > 8192 {
+	if len(raw) > 32768 {
 		return c, invalid("invalid event cursor")
 	}
 	data, err := base64.RawURLEncoding.DecodeString(raw)
@@ -95,100 +62,95 @@ func encode(c cursor) string {
 	return base64.RawURLEncoding.EncodeToString(data)
 }
 
-// List uses one read-only snapshot for the head, retention floor and page.
-// A transaction that has not committed cannot advance the returned cursor.
+// legacyCodec keeps already-issued OpenRails cursors valid during adoption.
+type legacyCodec struct{}
+
+func (legacyCodec) Encode(c shared.Cursor) string {
+	epoch, _ := uuid.Parse(c.Epoch)
+	return encode(cursor{Version: c.Version, Epoch: epoch, Merchant: c.Scope, Types: c.Types, Position: c.Position, Boundary: c.Boundary})
+}
+func (legacyCodec) Decode(raw string) (shared.Cursor, error) {
+	c, err := decode(raw)
+	return shared.Cursor{Version: c.Version, Source: "openrails", Scope: c.Merchant, Epoch: c.Epoch.String(), Types: c.Types, Position: c.Position, Boundary: c.Boundary}, err
+}
+
+// List uses shared cursor, retention and paging mechanics over the existing
+// committed SQL journal. Domain capture/deferred flush remain unchanged.
 func List(ctx context.Context, database *db.DB, merchantID billing.MerchantID, query billing.EventQuery, retention time.Duration, now time.Time) (billing.EventPage, error) {
-	page := billing.EventPage{Events: []billing.Event{}, RetentionSeconds: int64(retention / time.Second)}
 	if merchantID.IsZero() {
-		return page, apperr.Invalidf("merchant is required")
+		return billing.EventPage{}, apperr.Invalidf("merchant is required")
 	}
 	if scoped, ok := merchant.FromContext(ctx); ok && scoped != merchantID {
-		return page, apperr.Invalidf("event merchant differs from the authorized scope")
+		return billing.EventPage{}, apperr.Invalidf("event merchant differs from the authorized scope")
 	}
-	q, err := normalize(query)
-	if err != nil {
-		return page, err
+	log := shared.Log{Source: "openrails", Scope: merchantID.String(), Retention: retention, Now: func() time.Time { return now }, Codec: legacyCodec{}, ReadSnapshot: func(ctx context.Context, fn func(shared.Snapshot) error) error {
+		return database.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error { return fn(snapshot{q: gen.New(tx), mid: merchantID}) })
+	}}
+	p, err := log.ListEvents(ctx, shared.Query{After: query.After, Types: query.Types, Limit: query.Limit})
+	if errors.Is(err, shared.ErrInvalidCursor) {
+		err = invalid("event cursor belongs to another merchant or filter")
 	}
-	rowLimit, err := safecast.Convert[int32](q.Limit + 1)
-	if err != nil {
-		return page, err
+	if errors.Is(err, shared.ErrExpiredCursor) {
+		err = expired()
 	}
-	var prior cursor
-	if q.After != "" {
-		prior, err = decode(q.After)
-		if err != nil {
-			return page, err
-		}
-		if prior.Merchant != merchantID.String() || !slices.Equal(prior.Types, q.Types) {
-			return page, invalid("event cursor belongs to another merchant or filter")
-		}
+	if errors.Is(err, shared.ErrInvalidQuery) {
+		err = apperr.Invalidf("%v", err)
 	}
-	err = database.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		queries := gen.New(tx)
-		head, err := queries.GetEventLogStream(ctx, merchantID.UUID())
-		if err != nil {
-			return err
-		}
-		s := stream{Epoch: head.Epoch, Position: head.Position, HeadID: head.HeadID, Floor: head.PrunedThrough, FloorID: head.PrunedID}
-		floor, err := queries.GetExpiredEventLogBoundary(ctx, gen.GetExpiredEventLogBoundaryParams{MerchantID: merchantID.UUID(), Cutoff: now.Add(-retention)})
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if floor.Position > s.Floor {
-			s.Floor, s.FloorID = floor.Position, floor.ID
-		}
-		after := s.Floor
-		if q.After != "" {
-			if prior.Epoch != s.Epoch || prior.Position > s.Position || prior.Position < s.Floor {
-				return expired()
-			}
-			after = prior.Position
-			boundary := ""
-			if after == s.Floor {
-				boundary = s.FloorID
-			} else if after > 0 {
-				var err error
-				boundary, err = queries.GetEventLogBoundary(ctx, gen.GetEventLogBoundaryParams{MerchantID: merchantID.UUID(), Position: after})
-				if err != nil {
-					if errors.Is(err, pgx.ErrNoRows) {
-						return expired()
-					}
-					return err
-				}
-			}
-			if boundary != prior.Boundary {
-				return expired()
-			}
-		}
-		var rows []gen.ListEventLogRow
-		if len(q.Types) == 0 {
-			rows, err = queries.ListEventLog(ctx, gen.ListEventLogParams{MerchantID: merchantID.UUID(), AfterPosition: after, RowLimit: rowLimit})
-		} else {
-			var filtered []gen.ListEventLogByTypesRow
-			filtered, err = queries.ListEventLogByTypes(ctx, gen.ListEventLogByTypesParams{MerchantID: merchantID.UUID(), AfterPosition: after, EventTypes: q.Types, RowLimit: rowLimit})
-			for _, row := range filtered {
-				rows = append(rows, gen.ListEventLogRow(row))
-			}
-		}
-		if err != nil {
-			return err
-		}
+	out := billing.EventPage{Events: []billing.Event{}, NextCursor: p.NextCursor, HasMore: p.HasMore, RetentionSeconds: p.RetentionSeconds}
+	for _, e := range p.Events {
+		out.Events = append(out.Events, billing.Event{ID: e.ID, MerchantID: merchantID, Source: e.Source, Type: e.Type, Version: e.Version, OccurredAt: e.OccurredAt, RecordedAt: e.RecordedAt, Subject: billing.EventSubject{Type: e.Subject.Type, ID: e.Subject.ID}, Data: e.Data})
+	}
+	return out, err
+}
 
-		position, boundary := s.Position, s.HeadID
-		for _, row := range rows {
-			if len(page.Events) == q.Limit {
-				page.HasMore = true
-				break
-			}
-			event := billing.Event{ID: row.ID, MerchantID: merchantID, Source: row.Source, Type: row.EventType, Version: int(row.Version), OccurredAt: row.OccurredAt, Subject: billing.EventSubject{Type: row.SubjectType, ID: row.SubjectID}, Data: row.Data}
-			page.Events = append(page.Events, event)
-			position, boundary = row.Position, row.ID
+type snapshot struct {
+	q   *gen.Queries
+	mid billing.MerchantID
+}
+
+func (s snapshot) Stream(ctx context.Context, cutoff time.Time) (shared.Stream, error) {
+	head, err := s.q.GetEventLogStream(ctx, s.mid.UUID())
+	if err != nil {
+		return shared.Stream{}, err
+	}
+	out := shared.Stream{Epoch: head.Epoch.String(), Head: shared.Position{Number: head.Position, ID: head.HeadID}, Floor: shared.Position{Number: head.PrunedThrough, ID: head.PrunedID}}
+	floor, err := s.q.GetExpiredEventLogBoundary(ctx, gen.GetExpiredEventLogBoundaryParams{MerchantID: s.mid.UUID(), Cutoff: cutoff})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
+	}
+	if floor.Position > out.Floor.Number {
+		out.Floor = shared.Position{Number: floor.Position, ID: floor.ID}
+	}
+	return out, nil
+}
+func (s snapshot) Boundary(ctx context.Context, pos int64) (string, error) {
+	id, err := s.q.GetEventLogBoundary(ctx, gen.GetEventLogBoundaryParams{MerchantID: s.mid.UUID(), Position: pos})
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = shared.ErrExpiredCursor
+	}
+	return id, err
+}
+func (s snapshot) Events(ctx context.Context, after int64, types []string, limit int) ([]shared.Record, error) {
+	rowLimit, err := safecast.Convert[int32](limit)
+	if err != nil {
+		return nil, err
+	}
+	var rows []gen.ListEventLogRow
+	if len(types) == 0 {
+		rows, err = s.q.ListEventLog(ctx, gen.ListEventLogParams{MerchantID: s.mid.UUID(), AfterPosition: after, RowLimit: rowLimit})
+	} else {
+		var filtered []gen.ListEventLogByTypesRow
+		filtered, err = s.q.ListEventLogByTypes(ctx, gen.ListEventLogByTypesParams{MerchantID: s.mid.UUID(), AfterPosition: after, RowLimit: rowLimit, EventTypes: types})
+		for _, r := range filtered {
+			rows = append(rows, gen.ListEventLogRow(r))
 		}
-		if !page.HasMore {
-			position, boundary = s.Position, s.HeadID
-		}
-		page.NextCursor = encode(cursor{Version: 1, Epoch: s.Epoch, Merchant: merchantID.String(), Types: q.Types, Position: position, Boundary: boundary})
-		return nil
-	})
-	return page, err
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]shared.Record, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, shared.Record{Position: r.Position, Event: shared.Event{ID: r.ID, Source: r.Source, Scope: s.mid.String(), Type: r.EventType, Version: int(r.Version), OccurredAt: r.OccurredAt, RecordedAt: r.RecordedAt, Subject: shared.Subject{Type: r.SubjectType, ID: r.SubjectID}, Data: r.Data}})
+	}
+	return out, nil
 }

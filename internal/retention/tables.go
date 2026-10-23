@@ -28,10 +28,11 @@ const permanent = "permanent, never pruned."
 // Tables classifies every table of the baseline. A table without an entry
 // fails TestEveryTableHasARetentionClass.
 var Tables = map[string]Table{
-	"event_log":             {Rows, "events expire after the configured event retention, independently of reader progress."},
-	"event_log_streams":     {Class: State},
+	"eventlog_migrations":   {Class: State},
+	"eventlog_events":       {Rows, "events expire after the configured event retention, independently of reader progress."},
+	"eventlog_streams":      {Class: State},
 	"network_event_cursors": {Class: State},
-	"event_log_pending":     {Class: State},
+	"eventlog_pending":      {Class: State},
 	"destructive_actions":   {Permanent, permanent},
 	"destructive_holds":     {Permanent, permanent},
 	"notification_events":   {Rows, "rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers."},

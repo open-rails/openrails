@@ -95,7 +95,7 @@ func (q *Queries) GetExpiredEventLogBoundary(ctx context.Context, arg GetExpired
 }
 
 const listEventLog = `-- name: ListEventLog :many
-SELECT position,id,source,event_type,version,occurred_at,subject_type,subject_id,data
+SELECT position,id,source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data
 FROM billing.event_log
 WHERE merchant_id=$1::uuid AND position>$2::bigint
 ORDER BY position LIMIT $3::int
@@ -114,6 +114,7 @@ type ListEventLogRow struct {
 	EventType   string
 	Version     int32
 	OccurredAt  time.Time
+	RecordedAt  time.Time
 	SubjectType string
 	SubjectID   string
 	Data        []byte
@@ -135,6 +136,7 @@ func (q *Queries) ListEventLog(ctx context.Context, arg ListEventLogParams) ([]L
 			&i.EventType,
 			&i.Version,
 			&i.OccurredAt,
+			&i.RecordedAt,
 			&i.SubjectType,
 			&i.SubjectID,
 			&i.Data,
@@ -150,7 +152,7 @@ func (q *Queries) ListEventLog(ctx context.Context, arg ListEventLogParams) ([]L
 }
 
 const listEventLogByTypes = `-- name: ListEventLogByTypes :many
-SELECT position,id,source,event_type,version,occurred_at,subject_type,subject_id,data
+SELECT position,id,source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data
 FROM billing.event_log
 WHERE merchant_id=$1::uuid AND position>$2::bigint
 AND event_type=ANY($3::text[])
@@ -171,6 +173,7 @@ type ListEventLogByTypesRow struct {
 	EventType   string
 	Version     int32
 	OccurredAt  time.Time
+	RecordedAt  time.Time
 	SubjectType string
 	SubjectID   string
 	Data        []byte
@@ -197,6 +200,7 @@ func (q *Queries) ListEventLogByTypes(ctx context.Context, arg ListEventLogByTyp
 			&i.EventType,
 			&i.Version,
 			&i.OccurredAt,
+			&i.RecordedAt,
 			&i.SubjectType,
 			&i.SubjectID,
 			&i.Data,
@@ -223,15 +227,15 @@ type ListExpiredEventLogMerchantsParams struct {
 }
 
 // CROSS-MERCHANT: bounded retention discovery returns only merchant IDs.
-func (q *Queries) ListExpiredEventLogMerchants(ctx context.Context, arg ListExpiredEventLogMerchantsParams) ([]uuid.UUID, error) {
+func (q *Queries) ListExpiredEventLogMerchants(ctx context.Context, arg ListExpiredEventLogMerchantsParams) ([]*uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listExpiredEventLogMerchants, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []*uuid.UUID
 	for rows.Next() {
-		var merchant_id uuid.UUID
+		var merchant_id *uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}
