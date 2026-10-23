@@ -84,7 +84,7 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 		if err := r.addBillingWorkersToRegistry(ctx, cfg.Workers, refreshQueue); err != nil {
 			return err
 		}
-		periodic, err := r.buildRiverPeriodicJobs(ctx)
+		periodic, err := r.buildRiverPeriodicJobs(ctx, cfg)
 		if err != nil {
 			return err
 		}
