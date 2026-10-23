@@ -87,12 +87,13 @@ SELECT p.proname, l.lanname, pg_get_functiondef(p.oid), p.prosrc,
 	return out, rows.Err()
 }
 
+// Include views: INSTEAD OF triggers bind NEW/OLD to view columns too.
 func loadColumnTypes(ctx context.Context, conn *pgx.Conn) (map[string]map[string]string, error) {
 	rows, err := conn.Query(ctx, `
 SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod)
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
   JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
- WHERE n.nspname = 'billing' AND c.relkind IN ('r', 'p')`)
+ WHERE n.nspname = 'billing' AND c.relkind IN ('r', 'p', 'v')`)
 	if err != nil {
 		return nil, err
 	}
