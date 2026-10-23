@@ -10,6 +10,7 @@ import {
 import { useLocation, useNavigate } from "react-router-dom"
 import { afterEach, expect, it } from "vitest"
 import { BillingAdmin } from "./billing-admin"
+import { BillingCustomerSummary } from "./summary"
 import type { BillingAdminAuth } from "./types"
 
 const access = {
@@ -243,3 +244,41 @@ it("refuses to display customer data when the supplied transport names another m
   expect(requests.every((url) => url.endsWith("/admin/access"))).toBe(true)
   expect(screen.queryByText("Wrong merchant data")).toBeNull()
 })
+
+it.each([
+  [404, "customer_not_found", "No billing activity yet.", false],
+  [500, "internal_error", "billing is down", true],
+])(
+  "a customer summary answered %s %s shows a state or the failure",
+  async (status, code, text, alert) => {
+    const auth: BillingAdminAuth = {
+      async authFetch(url) {
+        if (
+          new URL(url, "http://local").pathname.endsWith(
+            "/admin/customers/user-1"
+          )
+        )
+          return Response.json(
+            {
+              error: {
+                type: "invalid_request_error",
+                code,
+                message: "billing is down",
+              },
+            },
+            { status }
+          )
+        return Response.json({ data: [], next_cursor: null })
+      },
+    }
+    render(
+      <BillingCustomerSummary
+        baseUrl="http://local/v1"
+        auth={auth}
+        customer="user-1"
+      />
+    )
+    expect(await screen.findByText(text, { exact: false })).toBeInTheDocument()
+    expect(screen.queryByRole("alert") !== null).toBe(alert)
+  }
+)
