@@ -185,6 +185,11 @@ func (r *reads) cacheOf(read Read) *cache.Cache[readKey, answer] {
 // read is a GET of path that read's policy may answer from memory. Cached,
 // requestOptions are not sent: no read takes one.
 func (c *Client) read(ctx context.Context, read Read, path string, out any, requestOptions ...RequestOption) error {
+	if c.engine != nil {
+		if err := c.engine.CheckOpen(); err != nil {
+			return err
+		}
+	}
 	answers := c.reads.cacheOf(read)
 	if answers == nil || ctx.Err() != nil {
 		return c.do(ctx, http.MethodGet, path, nil, out, requestOptions...)
@@ -282,6 +287,11 @@ func productBatch(params billing.ProductListParams) (by string, values []string,
 // readProducts answers ListProducts from its items, loading the ones not
 // cached in one request, in the server's order: newest first, then by id.
 func (c *Client) readProducts(ctx context.Context, query, by string, values []string) (*billing.ListPage[billing.Product], error) {
+	if c.engine != nil {
+		if err := c.engine.CheckOpen(); err != nil {
+			return nil, err
+		}
+	}
 	gen := c.reads.gen(c.merchantID)
 	keys := make([]itemKey, len(values))
 	for i, value := range values {

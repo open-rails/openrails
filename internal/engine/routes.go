@@ -139,6 +139,9 @@ func logMount(sel config.Routes, routes int) {
 // the engine is the authority. An engine reading Deps.UserInfo keeps no copy
 // and refuses.
 func (e *Engine) SCIMHandler(mid billing.MerchantID) (http.Handler, error) {
+	if err := e.CheckOpen(); err != nil {
+		return nil, err
+	}
 	rt := e.App.Runtime
 	if rt.HostUserInfo {
 		return nil, fmt.Errorf("openrails: Deps.UserInfo reads your directory; there is no copy to provision")
@@ -148,5 +151,12 @@ func (e *Engine) SCIMHandler(mid billing.MerchantID) (http.Handler, error) {
 	}
 	table := &router.Table{}
 	httproutes.RegisterSCIMRoutes(router.NewMux(table, "", rt), rt, mid)
-	return table.Handler(), nil
+	handler := table.Handler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := e.CheckOpen(); err != nil {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}), nil
 }
