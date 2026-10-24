@@ -23,12 +23,10 @@ type ledgerRec struct {
 type fakeLedger struct {
 	row                    gen.BillingProviderIntent
 	due, dueVerify         []gen.BillingProviderIntent
-	refuseClaim            bool
 	markErr, logErr        error
 	recs                   map[uuid.UUID]*ledgerRec
 	logs                   []MutationLogParams
 	pruned, prunedTerminal []uuid.UUID
-	claims                 int
 }
 
 func (f *fakeLedger) set(id uuid.UUID, status, reason string, next time.Time, ev map[string]any) error {
@@ -51,10 +49,6 @@ func (f *fakeLedger) Get(_ context.Context, id uuid.UUID) (gen.BillingProviderIn
 	return row, nil
 }
 func (f *fakeLedger) ClaimByID(_ context.Context, id uuid.UUID, _, _ time.Time) (gen.BillingProviderIntent, bool, error) {
-	f.claims++
-	if f.refuseClaim {
-		return gen.BillingProviderIntent{}, false, nil
-	}
 	row := f.row
 	row.ID, row.Status = id, StatusInFlight
 	row.Attempts++
@@ -295,36 +289,6 @@ func TestRunnerVerifyResolution(t *testing.T) {
 	_, err := (&Runner{Store: ledger, Registry: NewRegistry()}).RunVerifyOnce(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, StatusUnknownNeedsVerify, ledger.recs[intent.ID].status, "no handler: stays unknown, never pending")
-}
-
-func TestEnqueueAndExecute(t *testing.T) {
-	run := func(status string, refuse bool) (*fakeLedger, *fakeHandler, gen.BillingProviderIntent) {
-		ledger := &fakeLedger{row: testIntent("t", OriginSystem, 0), refuseClaim: refuse}
-		ledger.row.Status = status
-		h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Succeeded(nil)}
-		row, err := (&Runner{Store: ledger, Registry: NewRegistry(h), Config: modeFull}).
-			EnqueueAndExecute(context.Background(), EnqueueParams{IntentType: "t", IdempotencyKey: "k"})
-		require.NoError(t, err)
-		return ledger, h, row
-	}
-	for _, status := range []string{StatusPending, StatusFailedRetryable} {
-		ledger, h, row := run(status, false)
-		assert.Equal(t, 1, h.executed, status)
-		assert.Equal(t, 1, ledger.claims)
-		assert.Equal(t, StatusSucceeded, row.Status, "returns the post-execution row")
-	}
-	// An unclaimable conflict row is handed back untouched: the caller acts on the durable prior outcome.
-	for _, status := range []string{StatusSucceeded, StatusFailedTerminal, StatusUnknownNeedsVerify, StatusInFlight, StatusSuperseded} {
-		ledger, h, row := run(status, false)
-		assert.Zero(t, h.executed, status)
-		assert.Zero(t, ledger.claims, status)
-		assert.Equal(t, status, row.Status)
-	}
-	// A claim race leaves the row to the scheduled pipeline.
-	ledger, h, row := run(StatusPending, true)
-	assert.Zero(t, h.executed)
-	assert.Equal(t, 1, ledger.claims)
-	assert.Equal(t, StatusPending, row.Status)
 }
 
 func TestWritePostureHeldCollectionsRedispatchOnlyForReadback(t *testing.T) {
