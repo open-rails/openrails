@@ -1,11 +1,13 @@
 package engine
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	log "github.com/sirupsen/logrus"
@@ -116,7 +118,22 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 		return nil, err
 	}
 	logMount(sel, len(table.Entries))
-	return routebundle.FromTable(table), nil
+	routes = routebundle.FromTable(table)
+	for i := range routes {
+		handler := routes[i].Handler
+		routes[i].Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The host owns its HTTP server, but a retained mounted route must
+			// obey the same engine lifetime as an embedded Client.
+			if err := e.CheckOpen(); err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_ = json.NewEncoder(w).Encode(api.Coded(billing.CodeServiceUnavailable, "OpenRails engine is closed").ToResponse())
+				return
+			}
+			handler.ServeHTTP(w, r)
+		})
+	}
+	return routes, nil
 }
 
 // logMount names the Auth the mounted route groups answer to: the admin API
