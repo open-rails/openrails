@@ -7,17 +7,21 @@ import re
 import subprocess
 
 SOURCE = ("core", "runtime", "browser", "examples", "chart", "security")
-ALL = (*SOURCE, "artifacts")
+ALL = (*SOURCE, "prose", "artifacts")
+
+
+def full():
+    return {key: key != "prose" for key in ALL}
 
 
 def select(changes):
     selected = {key: False for key in ALL}
     reasons = []
     if not changes:
-        return {key: True for key in ALL}, ["empty or unknown comparison: full qualification"]
+        return full(), ["empty or unknown comparison: full qualification"]
     for status, path in changes:
         if status not in ("A", "M"):
-            return {key: True for key in ALL}, ["deleted, renamed or unusual Git status: full qualification"]
+            return full(), ["deleted, renamed or unusual Git status: full qualification"]
         # Dependency, generated API, schema and CI changes can cross all boundaries.
         name = Path(path).name
         if (name in ("go.mod", "go.sum", "package.json", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "Chart.lock")
@@ -28,13 +32,21 @@ def select(changes):
             reasons.append("shared/dependency/schema/CI input: " + path)
             continue
         if path in ("Dockerfile", ".dockerignore", ".goreleaser.yaml"):
-            selected.update({key: True for key in ALL})
+            selected.update(full())
             reasons.append("artifact build input: " + path)
             continue
-        if path == "LICENSE" or ((path.endswith(".md") or path.endswith(".rst")) and ("/" not in path or path.startswith("docs/"))):
-            reasons.append("documentation: " + path)
+        if path == "LICENSE":
+            reasons.append("license prose: " + path)
             continue
-        browser_roots = ("sdk/billing-ui/src/", "sdk/billing-ui/tests/", "web/pay/src/", "web/pay/tests/", "server/web/console/src/", "server/web/console/tests/")
+        if path.endswith(".md") and ("/" not in path or path.startswith(("docs/", "sdk/billing-ui/", "compatibility/")) or path in (".claude/CLAUDE.md", "server/web/console/README.md")):
+            selected["prose"] = True
+            reasons.append("documentation contract: " + path)
+            continue
+        if path.startswith(("sdk/billing-ui/src/client", "sdk/billing-ui/src/api", "sdk/billing-ui/src/types", "sdk/billing-ui/src/hooks")) or path == "sdk/billing-ui/src/index.ts":
+            selected.update({key: True for key in SOURCE})
+            reasons.append("shared SDK client/API: " + path)
+            continue
+        browser_roots = ("sdk/billing-ui/src/components/", "sdk/billing-ui/src/ui/", "sdk/billing-ui/src/styles/", "sdk/billing-ui/src/locales/", "sdk/billing-ui/tests/", "web/pay/src/", "web/pay/tests/", "server/web/console/src/", "server/web/console/tests/")
         if path.startswith(browser_roots) and Path(path).suffix in (".ts", ".tsx", ".js", ".jsx", ".css", ".svg", ".png", ".webp"):
             selected["browser"] = selected["security"] = True
             reasons.append("isolated browser source: " + path)
@@ -50,6 +62,9 @@ def select(changes):
             continue
         selected.update({key: True for key in SOURCE})
         reasons.append("unclassified/shared source: " + path)
+    # The ordinary core suite already runs the whole contract package.
+    if selected["core"]:
+        selected["prose"] = False
     return selected, reasons
 
 
@@ -79,7 +94,7 @@ def main():
     parser.add_argument("--github-output", type=Path)
     args = parser.parse_args()
     if args.full:
-        selected, reasons = {key: True for key in ALL}, ["explicit full qualification"]
+        selected, reasons = full(), ["explicit full qualification"]
     else:
         if not all(re.fullmatch(r"[0-9a-f]{40}", value or "") for value in (args.base, args.head)):
             parser.error("base and head must be full commit SHAs")

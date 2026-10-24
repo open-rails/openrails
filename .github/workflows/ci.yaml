@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      prose: ${{ steps.scope.outputs.prose }}
       core: ${{ steps.scope.outputs.core }}
       runtime: ${{ steps.scope.outputs.runtime }}
       browser: ${{ steps.scope.outputs.browser }}
@@ -81,6 +82,21 @@ jobs:
       - run: python3 scripts/ci-scope_test.py
       - run: bash scripts/check.sh guards
       - run: bash scripts/scan-injected-code.sh --self-test
+
+  prose:
+    name: Documentation contracts
+    needs: scope
+    if: ${{ needs.scope.outputs.prose == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - run: go test -vet=all -race -count=1 ./internal/contract
 
   go-test:
     name: Go tests
@@ -433,8 +449,8 @@ jobs:
       pull-requests: write
 
   gate:
-    name: CI Gate
-    needs: [scope, guards, go-test, lint, console, chart, sql, e2e-shards, examples-e2e, security, browser, artifact-release, artifact-image]
+    name: ${{ (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}
+    needs: [scope, guards, prose, go-test, lint, console, chart, sql, e2e-shards, examples-e2e, security, browser, artifact-release, artifact-image]
     if: ${{ always() && (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -455,7 +471,7 @@ jobs:
           if result['scope']['result'] != 'success':
               raise SystemExit('Scope verification failed or did not run')
           plan = result['scope']['outputs']
-          required = {'guards': None, 'go-test': 'core', 'lint': 'core', 'console': 'browser',
+          required = {'guards': None, 'prose': 'prose', 'go-test': 'core', 'lint': 'core', 'console': 'browser',
                       'chart': 'chart', 'sql': 'runtime', 'e2e-shards': 'runtime',
                       'examples-e2e': 'examples', 'security': 'security', 'browser': 'browser',
                       'artifact-release': 'artifacts', 'artifact-image': 'artifacts'}

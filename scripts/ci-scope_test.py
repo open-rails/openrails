@@ -21,10 +21,16 @@ class ScopeTests(unittest.TestCase):
         return {key for key, value in scope.select(changes)[0].items() if value}
 
     def test_docs_keep_cheap_guards_only(self):
-        self.assertEqual(self.active([("M", "docs/architecture.md"), ("A", "README.md")]), set())
+        self.assertEqual(self.active([("M", "LICENSE")]), set())
+        self.assertEqual(self.active([("M", "docs/architecture.md"), ("A", "README.md")]), {"prose"})
+
+    def test_documentation_contract_inputs(self):
+        for path in ("README.md", "docs/migrating-to-v1.md", "sdk/billing-ui/README.md", "server/web/console/README.md", "compatibility/README.md"):
+            with self.subTest(path=path):
+                self.assertEqual(self.active([("M", path)]), {"prose"})
 
     def test_browser_region_keeps_all_browser_consumers(self):
-        self.assertEqual(self.active([("M", "sdk/billing-ui/src/client.ts")]), {"browser", "security"})
+        self.assertEqual(self.active([("M", "sdk/billing-ui/src/components/Price.tsx")]), {"browser", "security"})
         self.assertEqual(self.active([("M", "web/pay/src/pay.tsx")]), {"browser", "security"})
 
     def test_examples_keep_go_and_browser_hosts(self):
@@ -34,17 +40,17 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(self.active([("M", "deploy/helm/openrails/templates/deployment.yaml")]), {"chart", "security"})
 
     def test_shared_and_unknown_paths_are_broad(self):
-        for path in ("engine.go", "internal/config/runtime.go", "migrations/0114.sql", "go.mod", "sdk/billing-ui/pnpm-lock.yaml", "docs/api/routes.md", "new-directory/check.ts"):
+        for path in ("engine.go", "internal/config/runtime.go", "migrations/0114.sql", "go.mod", "sdk/billing-ui/pnpm-lock.yaml", "docs/api/routes.md", "new-directory/check.ts", "sdk/billing-ui/src/client.ts", "sdk/billing-ui/src/client/request.ts"):
             with self.subTest(path=path):
                 self.assertTrue(set(scope.SOURCE) <= self.active([("M", path)]))
 
     def test_ci_and_deletion_include_artifact_checks(self):
         for change in (("M", ".github/workflows/ci.yaml"), ("D", "docs/old.md"), ("R100", "docs/old.md"), ("M", "Dockerfile")):
             with self.subTest(change=change):
-                self.assertEqual(self.active([change]), set(scope.ALL))
+                self.assertEqual(self.active([change]), set(scope.SOURCE) | {"artifacts"})
 
     def test_empty_is_never_a_quiet_skip(self):
-        self.assertEqual(self.active([]), set(scope.ALL))
+        self.assertEqual(self.active([]), set(scope.SOURCE) | {"artifacts"})
 
     def test_mixed_regions_union(self):
         self.assertEqual(self.active([("M", "web/pay/src/pay.tsx"), ("M", "deploy/helm/openrails/values.yaml")]), {"browser", "chart", "security"})
@@ -76,7 +82,7 @@ class WorkflowBoundaryTests(unittest.TestCase):
         cls.gate_python = textwrap.dedent(cls.workflow.split("          python3 - <<'CHECK'\n", 1)[1].split('          CHECK', 1)[0])
 
     def test_gate_rejects_failed_cancelled_or_missing_selected_suites(self):
-        jobs = ['guards', 'go-test', 'lint', 'console', 'chart', 'sql', 'e2e-shards', 'examples-e2e', 'security', 'browser', 'artifact-release', 'artifact-image']
+        jobs = ['guards', 'prose', 'go-test', 'lint', 'console', 'chart', 'sql', 'e2e-shards', 'examples-e2e', 'security', 'browser', 'artifact-release', 'artifact-image']
         good = {job: {'result': 'success'} for job in jobs}
         good['scope'] = {'result': 'success', 'outputs': {key: 'true' for key in scope.ALL}}
         def run(value):
@@ -119,6 +125,7 @@ class WorkflowBoundaryTests(unittest.TestCase):
                 return subprocess.run(['bash', '-c', self.scope_shell], cwd=repo, env={**environment, **updates}, capture_output=True)
             self.assertEqual(verify().returncode, 0)
             self.assertIn('runtime=false', out.read_text())
+            self.assertIn('prose=true', out.read_text())
             self.assertNotEqual(verify(HEAD_SHA=base).returncode, 0)
             self.assertNotEqual(verify(GITHUB_REF='refs/heads/feature').returncode, 0)
             (repo/'later.md').write_text('base advanced\n'); git('add', '.'); git('commit', '-qm', 'later'); git('push', '-q', 'origin', 'master')

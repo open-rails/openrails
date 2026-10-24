@@ -6,12 +6,14 @@ There is no duplicate full suite on master push or release tags. Manual `Validat
 
 | Changes | Selected work |
 |---|---|
-| Root/docs Markdown prose and LICENSE | Existing cheap source/security guards |
-| Explicit UI source/assets in billing-ui, payment page or admin console | All browser SDK/payment/example/admin checks and security |
+| Markdown prose used by contract tests | Existing cheap guards and the complete documentation-contract package |
+| Explicit visual components/assets in billing-ui, payment page or admin console | All browser SDK/payment/example/admin checks and security |
 | Explicit own-auth, standalone or embedded example files | Core Go/build/lint, examples, browser consumers and security |
 | Helm chart | Chart and security |
-| Dependencies, schemas, generated API, shared Go, unknown paths | All source suites |
+| Dependencies, schemas, generated API/SDK clients, shared Go, unknown paths | All source suites |
 | CI/build tooling, image/package inputs, deletion/rename or uncertain comparison | All source suites plus artifact snapshots |
+
+LICENSE-only edits retain the cheap guards. Documentation contracts are already included when the full core suite runs, so they are not duplicated.
 
 The source suites retain the full Go test commands across root/server/adapter/examples, the full twelve-way runtime E2E suite, SQL generation and `TestQueryAudit`, all SDK/browser consumers, and security checks. Selection never chooses individual tests or reduces the shard roster. The allowlist is intentionally small; mixed changes take the union, unknown paths expand coverage, and malformed comparisons fail.
 
