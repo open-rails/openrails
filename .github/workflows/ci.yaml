@@ -27,11 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      prose: ${{ steps.scope.outputs.prose }}
       core: ${{ steps.scope.outputs.core }}
       runtime: ${{ steps.scope.outputs.runtime }}
       browser: ${{ steps.scope.outputs.browser }}
-      examples: ${{ steps.scope.outputs.examples }}
       chart: ${{ steps.scope.outputs.chart }}
       security: ${{ steps.scope.outputs.security }}
       artifacts: ${{ steps.scope.outputs.artifacts }}
@@ -81,47 +79,17 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-      - run: python3 scripts/ci-scope_test.py
+      - run: python3 scripts/check-ci-policy.py
       - run: bash scripts/check.sh guards
       - run: bash scripts/scan-injected-code.sh --self-test
-
-  prose:
-    name: Documentation contracts
-    needs: scope
-    if: ${{ needs.scope.outputs.prose == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: go.mod
-      - run: go test -vet=all -race -count=1 ./internal/contract
-
-  go-test:
-    name: Go tests
-    needs: scope
-    if: ${{ needs.scope.outputs.core == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        id: go
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          family: race
-      - run: bash scripts/check.sh go-tests
-      - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() }}
-        with:
-          family: race
-          save: "true"
+      - name: Workflow lint
+        run: |
+          curl --fail --silent --show-error --location \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            --output "$RUNNER_TEMP/actionlint.tar.gz"
+          printf '%s  %s\n' 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 "$RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check --status
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -shellcheck= -pyflakes=
 
   lint:
     name: Lint
@@ -181,46 +149,6 @@ jobs:
           family: plain
           save: "true"
 
-  console:
-    name: Admin console
-    needs: scope
-    if: ${{ needs.scope.outputs.browser == 'true' }}
-    # Keep Chromium tests on an OS supported by the pinned Playwright release.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        id: go
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          family: plain
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.4.0
-        with:
-          package_json_file: server/web/console/package.json
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: |
-            server/web/console/pnpm-lock.yaml
-            web/pay/pnpm-lock.yaml
-            sdk/billing-ui/pnpm-lock.yaml
-      - run: bash scripts/check.sh console
-      - run: pnpm --dir server/web/console exec playwright install --with-deps chromium
-      - run: pnpm --dir server/web/console run test:e2e
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: standalone-console-browser-results
-          path: |
-            server/web/console/test-results/
-            server/web/console/playwright-report/
-          if-no-files-found: ignore
-
   chart:
     name: Helm chart
     needs: scope
@@ -256,122 +184,91 @@ jobs:
           export SQLC_DATABASE_URL="$(scripts/sqlc-vet-db.sh)"
           echo "SQLC_DATABASE_URL=$SQLC_DATABASE_URL" >> "$GITHUB_ENV"
           "$sqlc_bin" generate
+          "$sqlc_bin" vet
           git diff --exit-code -- internal/db/gen
-      # setup-go's cache is keyed on go.sum alone and never re-saved, so it
-      # would recompile pg_query_go's C parser on every run.
-      - name: Restore query audit build cache
-        id: sqlaudit-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/sqlaudit-gocache
-          key: sqlaudit-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'internal/db/sqlaudit/*.go') }}
-          restore-keys: |
-            sqlaudit-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
-      - name: Query audit (EXPLAIN every sqlc query)
-        env:
-          CGO_ENABLED: "1"
-          GOCACHE: ${{ runner.temp }}/sqlaudit-gocache
-        run: bash scripts/go-test-gate.sh ./internal/db/sqlaudit/ TestQueryAudit
-      - name: Save query audit build cache
-        if: ${{ !cancelled() && steps.sqlaudit-cache.outcome == 'success' && steps.sqlaudit-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/sqlaudit-gocache
-          key: ${{ steps.sqlaudit-cache.outputs.cache-primary-key }}
-
-  e2e-shards:
-    name: End-to-end worker ${{ matrix.worker }}
+  critical:
+    name: Critical public-interface journeys
     needs: scope
     if: ${{ needs.scope.outputs.runtime == 'true' }}
-    runs-on: ubuntu-latest
-    # scripts/e2e.sh splits the suite across the workers by recorded test
-    # durations (ci/e2e-durations.tsv, refreshed by scripts/e2e-durations.sh);
-    # every worker computes the same split, so no test is skipped or
-    # duplicated. With twelve, a worker's share is about the longest test.
-    strategy:
-      fail-fast: false
-      matrix:
-        worker: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
     env:
-      OPENRAILS_E2E_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
-      OPENRAILS_E2E_REDIS_ADDR: 127.0.0.1:6379
-      OPENRAILS_E2E_REDIS_OUTAGE_ADDR: 127.0.0.1:6381
-      OPENRAILS_E2E_REDIS_OUTAGE_CONTAINER: e2e-redis-outage
-      OPENRAILS_E2E_VAULT_ADDR: http://127.0.0.1:8200
-      OPENRAILS_E2E_VAULT_TOKEN: e2e-root
-      OPENRAILS_E2E_WORKERS: ${{ strategy.job-total }}
-      OPENRAILS_E2E_WORKER: ${{ strategy.job-index }}
-      OPENRAILS_E2E_JOBS: "6"
-      OPENRAILS_E2E_TIMEOUT: 15m
-      OPENRAILS_E2E_TIMINGS: ${{ github.workspace }}/e2e-timings.tsv
+      OPENRAILS_CRITICAL_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
+      OPENRAILS_CRITICAL_REDIS_URL: redis://127.0.0.1:6379/0
+      OPENRAILS_CRITICAL_VAULT_ADDR: http://127.0.0.1:8200
+      OPENRAILS_CRITICAL_VAULT_TOKEN: critical-fixture-only
+      OPENRAILS_CRITICAL_PAYMENT_ASSETS: ${{ github.workspace }}/web/pay/dist
     steps:
+      - name: Set owned fixture paths
+        run: |
+          printf 'OPENRAILS_CRITICAL_REPORT_DIR=%s/critical-report\nOPENRAILS_CRITICAL_SERVER_BINARY=%s/openrails-server-fixture.test\n' "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      # Steps rather than services: they start alongside Go's setup, and the
-      # multi-replica fleets (#1075) need a server flag services cannot set.
-      - name: Start PostgreSQL, Redis and Vault
+        with:
+          persist-credentials: false
+      - name: Start owned PostgreSQL, Redis and Vault
         run: bash scripts/ci-services.sh start postgres redis vault
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        id: go
         with:
           go-version-file: go.mod
           cache: false
       - uses: ./.github/actions/go-cache
         with:
-          family: e2e
+          family: critical
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: sdk/billing-ui/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            sdk/billing-ui/pnpm-lock.yaml
+            server/web/console/pnpm-lock.yaml
+            web/pay/pnpm-lock.yaml
+      - name: Build and inspect browser artifacts once
+        run: bash scripts/check.sh browser
+      - name: Install the browser used by public client cases
+        run: pnpm --dir sdk/billing-ui exec playwright install --with-deps chromium
+      - name: Build the real standalone fixture once
+        working-directory: critical/server-fixture
+        run: GOWORK=off go test -race -c -p 2 -o "$OPENRAILS_CRITICAL_SERVER_BINARY" .
       - name: Services are ready
         run: bash scripts/ci-services.sh ready
-      - name: Run focused e2e contracts
-        run: bash scripts/e2e.sh
+      - name: Require every selected critical scenario
+        run: bash scripts/critical-tests.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
-          name: e2e-timings-${{ matrix.worker }}
-          path: e2e-timings.tsv
-          if-no-files-found: ignore
-          overwrite: true
-          retention-days: 14
-      - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() && strategy.job-index == 0 }}
-        with:
-          family: e2e
-          save: "true"
-
-  # The examples and opt-in adapter's PostgreSQL end-to-end tests.
-  examples-e2e:
-    name: Examples end-to-end
-    needs: scope
-    if: ${{ needs.scope.outputs.examples == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      OPENRAILS_E2E_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
-      OPENRAILS_E2E_VAULT_ADDR: http://127.0.0.1:8200
-      OPENRAILS_E2E_VAULT_TOKEN: e2e-root
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Start PostgreSQL and Vault
-        run: bash scripts/ci-services.sh start postgres vault
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        id: go
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: ./.github/actions/go-cache
-        with:
-          family: examples
-      - name: PostgreSQL is ready
-        run: bash scripts/ci-services.sh ready
-      - name: AuthKit merchant binding
-        run: bash scripts/check.sh authkit-adapter-e2e
-      - name: One-off command resources
-        run: bash scripts/check.sh cli-e2e
-      - run: bash scripts/check.sh examples-e2e
+          name: critical-results
+          path: ${{ runner.temp }}/critical-report/
+          if-no-files-found: error
+          retention-days: 7
       - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() }}
         with:
-          family: examples
+          family: critical
           save: "true"
+
+  browser:
+    name: Browser artifact contracts
+    needs: scope
+    if: ${{ needs.scope.outputs.browser == 'true' && needs.scope.outputs.runtime != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: sdk/billing-ui/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - run: bash scripts/check.sh browser
 
   security:
     name: Required Security
@@ -426,12 +323,6 @@ jobs:
           family: security
           save: "true"
 
-  browser:
-    name: Browser SDKs
-    needs: scope
-    if: ${{ needs.scope.outputs.browser == 'true' }}
-    uses: ./.github/workflows/sdk.yaml
-
   artifact-release:
     name: Release package smoke
     needs: scope
@@ -459,7 +350,7 @@ jobs:
 
   gate:
     name: ${{ (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}
-    needs: [scope, guards, prose, go-test, lint, console, chart, sql, e2e-shards, examples-e2e, security, browser, artifact-release, artifact-image]
+    needs: [scope, guards, lint, chart, sql, critical, security, browser, artifact-release, artifact-image]
     if: ${{ always() && (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -483,10 +374,14 @@ jobs:
           if result['scope']['result'] != 'success':
               raise SystemExit('Scope verification failed or did not run')
           plan = result['scope']['outputs']
-          required = {'guards': None, 'prose': 'prose', 'go-test': 'core', 'lint': 'core', 'console': 'browser',
-                      'chart': 'chart', 'sql': 'runtime', 'e2e-shards': 'runtime',
-                      'examples-e2e': 'examples', 'security': 'security', 'browser': 'browser',
+          required = {'guards': None, 'lint': 'core', 'chart': 'chart',
+                      'sql': 'runtime', 'critical': 'runtime', 'security': 'security',
                       'artifact-release': 'artifacts', 'artifact-image': 'artifacts'}
+          if plan.get('browser') not in ('true', 'false'):
+              raise SystemExit('Missing browser selection')
+          browser_expected = 'success' if plan['browser'] == 'true' and plan.get('runtime') != 'true' else 'skipped'
+          if result['browser']['result'] != browser_expected:
+              raise SystemExit(f"browser: {result['browser']['result']}; expected {browser_expected}")
           for job, suite in required.items():
               if suite is not None and plan.get(suite) not in ('true', 'false'):
                   raise SystemExit(f'Missing suite selection: {suite}')

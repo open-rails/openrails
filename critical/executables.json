@@ -1,0 +1,176 @@
+{
+  "meaning": "Reviewed executable paths, frozen independently of runtime reports. All paths for a selected scenario must run and pass once. A passing nested subtest cannot replace its selected parent. This partial map must be completed before the full148 gate can pass.",
+  "scenarios": {
+    "OR-J01-S01": [
+      "TestAuthorityBoundaries/OR-J01-S01/merchant-and-root-authority-read-owned-state"
+    ],
+    "OR-J01-S02": [
+      "TestAuthorityBoundaries/OR-J01-S02/missing-and-malformed-credential-create-nothing"
+    ],
+    "OR-J01-S03": [
+      "TestAuthorityBoundaries/OR-J01-S03/expired-and-revoked-credentials-fail-closed"
+    ],
+    "OR-J01-S04": [
+      "TestAuthorityBoundaries/OR-J01-S04/issuer-audience-signature-and-sender-proof"
+    ],
+    "OR-J01-S05": [
+      "TestAuthorityBoundaries/OR-J01-S05/correct-permission-in-wrong-merchant"
+    ],
+    "OR-J01-S06": [
+      "TestAuthority/OR-J01-S06/human-cannot-use-application-authority"
+    ],
+    "OR-J01-S07": [
+      "TestAuthorityBoundaries/OR-J01-S07/foreign-resource-detail-list-batch-and-cursor"
+    ],
+    "OR-J01-S08": [
+      "TestAuthorityBoundaries/OR-J01-S08/real-authority-storage-failure-denies-mutations"
+    ],
+    "OR-J09-S01": [
+      "TestCheckout/OR-J09-S01/real-charge-order-access-and-committed-event"
+    ],
+    "OR-J09-S02": [
+      "TestCheckoutBoundaries/OR-J09-S02/customer-challenge-settles-only-after-confirmation"
+    ],
+    "OR-J09-S03": [
+      "TestCheckoutBoundaries/OR-J09-S03/definitive-decline-keeps-order-unpaid"
+    ],
+    "OR-J10-S01": [
+      "TestPaymentReplay/OR-J10-S01/concurrent-identical-purchase-has-one-economic-debit"
+    ],
+    "OR-J10-S02": [
+      "TestCheckoutBoundaries/OR-J10-S02/lost-client-response-replays-original-committed-result"
+    ],
+    "OR-J10-S03": [
+      "TestPaymentReplay/OR-J10-S03/accepted-key-refuses-changed-purchase"
+    ],
+    "OR-J10-S04": [
+      "TestPaymentReplay/OR-J10-S04/different-orders-remain-independent-obligations"
+    ],
+    "OR-J11-S01": [
+      "TestProviderRecovery/OR-J11-S01/accepted-payment-response-loss-recovers-without-new-debit"
+    ],
+    "OR-J11-S02": [
+      "TestProviderRecovery/OR-J11-S02/unavailable-evidence-keeps-money-unresolved"
+    ],
+    "OR-J13-S01": [
+      "TestSubscriptions/OR-J13-S01/paid-enrollment-has-one-charge-and-period"
+    ],
+    "OR-J14-S01": [
+      "TestRenewal/OR-J14-S01/before-boundary-workers-cannot-admit-renewal"
+    ],
+    "OR-J14-S02": [
+      "TestRenewal/OR-J14-S02/two-due-workers-settle-one-period"
+    ],
+    "OR-J14-S03": [
+      "TestRenewal/OR-J14-S03/overdue-engine-restart-keeps-original-obligation"
+    ],
+    "OR-J14-S04": [
+      "TestRenewal/OR-J14-S04/admitted-renewal-keeps-terms-after-price-replacement"
+    ],
+    "OR-J14-S05": [
+      "TestProcessRecovery/OR-J14-S05/settled-renewal-survives-death-before-queue-ack"
+    ],
+    "OR-J15-S01": [
+      "TestNMIRecovery/OR-J15-S01/missing-callback-is-repaired-from-provider-query"
+    ],
+    "OR-J15-S02": [
+      "TestNMIRecovery/OR-J15-S02"
+    ],
+    "OR-J15-S03": [
+      "TestNMIRecovery/OR-J15-S03/provider-skipped-cycle-is-collected-after-authoritative-absence"
+    ],
+    "OR-J15-S04": [
+      "TestNMIRecovery/OR-J15-S04"
+    ],
+    "OR-J16-S01": [
+      "TestDunning/OR-J16-S01/retryable-decline-recovers-on-bounded-weekly-schedule"
+    ],
+    "OR-J16-S02": [
+      "TestDunning/OR-J16-S02/withdrawn-mandate-stops-future-billing"
+    ],
+    "OR-J16-S03": [
+      "TestDunning/OR-J16-S03/awaiting-method-expires-at-declared-deadline"
+    ],
+    "OR-J16-S04": [
+      "TestDunning/OR-J16-S04/unknown-renewal-is-not-a-decline-or-replacement-obligation"
+    ],
+    "OR-J17-S01": [
+      "TestSubscriptions/OR-J17-S01/cancel-resume-keeps-the-purchased-window"
+    ],
+    "OR-J20-S01": [
+      "TestRefunds/OR-J20-S01/partial-then-final-refund-conserves-settled-value"
+    ],
+    "OR-J20-S02": [
+      "TestRefundRecovery/OR-J20-S02/overlapping-refunds-conserve-original-charge"
+    ],
+    "OR-J20-S03": [
+      "TestRefundRecovery/OR-J20-S03/lost-refund-response-resolves-original-provider-refund"
+    ],
+    "OR-J21-S01": [
+      "TestExternalPayments/OR-J21-S01/record-confirmed-external-money-without-provider-charge"
+    ],
+    "OR-J21-S02": [
+      "TestExternalPayments/OR-J21-S02/external-receipt-replay-is-one-payment"
+    ],
+    "OR-J21-S03": [
+      "TestExternalPayments/OR-J21-S03/receipt-cannot-be-relinked-to-another-customer-or-merchant"
+    ],
+    "OR-J21-S04": [
+      "TestImportedReceipt/OR-J21-S04/import-preserves-receipt-refund-allowance-and-event-identity"
+    ],
+    "OR-J22-S01": [
+      "TestCredits/OR-J22-S01/reservation-capture-conserves-native-units"
+    ],
+    "OR-J22-S02": [
+      "TestAdmissionBoundaries/OR-J22-S02/capture-and-credit-revocation-conserve-funds"
+    ],
+    "OR-J22-S03": [
+      "TestCreditExpiry/OR-J22-S03/expiry-preserves-spent-value-and-live-funded-reservation"
+    ],
+    "OR-J22-S04": [
+      "TestCreditAtomicity/OR-J22-S04/batch-conflict-rolls-back-ledger-and-events"
+    ],
+    "OR-J23-S01": [
+      "TestAdmissionBoundaries/OR-J23-S01/batch-results-and-hold-lifecycle"
+    ],
+    "OR-J23-S02": [
+      "TestAdmissionBoundaries/OR-J23-S02/capture-release-race-has-one-terminal-outcome"
+    ],
+    "OR-J23-S03": [
+      "TestAdmissionBoundaries/OR-J23-S03/request-identity-refuses-changed-terms"
+    ],
+    "OR-J23-S04": [
+      "TestHostTransactions/OR-J23-S04/host-transaction-owns-financial-commit"
+    ],
+    "OR-J23-S05": [
+      "TestHostTransactions/OR-J23-S05/host-transaction-owns-financial-commit"
+    ],
+    "OR-J24-S01": [
+      "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
+    ],
+    "OR-J24-S02": [
+      "TestUsageContracts/OR-J24-S02/late-event-uses-ingest-price-and-prior-event-stays-pinned"
+    ],
+    "OR-J24-S03": [
+      "TestUsageContracts/OR-J24-S03/batch-item-errors-preserve-neighbors-and-merchant-boundary"
+    ],
+    "OR-J24-S04": [
+      "TestUsageContracts/OR-J24-S04/grouped-pagination-retains-exact-customer-totals"
+    ],
+    "OR-J25-S01": [
+      "TestRunningChargeContracts/OR-J25-S01/whole-seconds-post-once-at-explicit-stop"
+    ],
+    "OR-J25-S02": [
+      "TestRunningChargeContracts/OR-J25-S02/concurrent-stops-retain-one-final-segment"
+    ],
+    "OR-J25-S04": [
+      "TestRunningChargeContracts/OR-J25-S04/depletion-notifies-host-and-explicit-stop-never-reopens"
+    ],
+    "OR-J29-S01": [
+      "TestProcessRecovery/OR-J29-S01"
+    ],
+    "OR-J29-S04": [
+      "TestProcessRecovery/OR-J29-S04"
+    ]
+  }
+}

@@ -1,81 +1,16 @@
-# Security tests
+# Critical security and money coverage
 
-Each important attack on an embedded, multi-replica OpenRails is a permanent
-test in the required `End-to-end` job (`scripts/e2e.sh`): real
-PostgreSQL, fake NMI/Stripe transports, mounted HTTP routes, and the embedded
-and remote Client. Tests live in `ci/subscriptions/security_*_test.go`
-unless noted.
+The required public-interface suite is `critical/`, selected by `critical/coverage.json` and its exact executable map. It uses real AuthKit, PostgreSQL, Redis, Vault and registered OpenRails workers. Passing endpoint refusals alone do not establish complete successful-function coverage.
 
-| Threat | Test | Control |
-| --- | --- | --- |
-| Customer reads or acts on another customer's subscription, card or purchase by id (IDOR) | `TestSecurityCustomerCannotActOnAnotherCustomer` | Every `/v1/me` lookup is bound to the signed-in customer and merchant |
-| Customer's card pays for someone else (foreign `payment_method_id` in confirm, subscription or collection method) | `TestSecurityCustomerCannotActOnAnotherCustomer` | Payment methods are owner-checked on every path |
-| Merchant B, or staff of merchant A, reads, refunds or cancels merchant A's objects; sells A's price; charges A's saved card | `TestSecurityMerchantIsolation` | Merchant-scoped predicates; principal-pinned merchant selection |
-| Customer credential used as merchant authority | `TestSecurityMerchantIsolation` | Merchant routes require merchant authority |
-| A host's auth that admits without saying who, panics, is down, or whose answers a gate misreads: a person on `/v1/app`, an application on `/v1/me`, or staff without the required permission | `TestSecurityHostAuthRefusals`; `server/ci/auth_conformance_test.go` `TestAuthKitRefusals` | OpenRails asks `Authenticate` once and answers every refusal itself: 401 with its challenge, 403, 503 when the auth cannot answer |
-| Staff of one merchant acting at another; a `merchant:` permission held in the root scope, or a `root:` one held at a merchant, admitting; a route group mounted behind an Authenticator with no root scope, or one that knows neither of a route's permissions | `ci/subscriptions/permissions_test.go` `TestStaffHoldMerchantOrRootPermission`, `TestMountNeedsARootAuthenticator`; `TestProgrammaticRoutesNeedTheirPermission`; `server/ci` `TestRootActsOnlyThroughABoundToken`, `TestRouteGroupPermissions`, `TestMountFailsClosed` | Each route asks its `merchant:` permission in the scope of the merchant acted on and its `root:` twin in the Authenticator's `RootScope`, nowhere else; a name the Authenticator does not know is never asked, and `Mount` fails without one |
-| A host's Authenticator, or the standalone server's, granting a permission outside its scope, a pattern, or to a stale or signed-out sign-in | `TestHarnessAuthConforms`; `server/ci` `TestAuthKitPassesCheckAuth`, `TestStandaloneAuthPassesCheckAuth` | helpers' `authtest.Check` through `openrailstest.CheckAuth`, with the route groups' `root:` permissions in the Authenticator's `RootScope`, or a merchant's in its own scope |
-| Forged, stale, future, tampered, unsigned or foreign-secret webhooks; another merchant's endpoint naming this merchant's subscription | `TestSecurityWebhookAuthenticity` | Per-account HMAC, ±5 min tolerance, merchant-bound lookups |
-| Double charge by concurrent confirmation across replicas | `TestSecurityConcurrentConfirmChargesOnce` | Customer lock, operation claim, submission fence |
-| Over-refund by concurrent refunds across replicas and topologies | `TestSecurityConcurrentRefundsNeverExceedPayment` | Per-payment lock; pending reservations count |
-| Two purchases of one permanent product racing an in-flight charge | `TestSecurityConcurrentPermanentPurchaseChargesOnce` | Unresolved-purchase and ownership guards |
-| Two upgrades of one membership racing on two replicas | `TestSecurityConcurrentUpgradesChargeOnce` | One unresolved tier change per subscription, including engine upgrades (unique index) |
-| Tier change into or out of an ungrouped product | `TestSecurityTierChangeStaysInGroup` | Both products must share a declared tier group |
-| Refunded stacked pass or revoked future grant restored by convergence | `TestSecurityRevokedAccessStaysRevoked` | Retracting a window terminates its grant |
-| Replayed completion after a full refund grants again | `ci/security_test.go` `TestSecurityRefundedPurchaseIsNotRegranted` | A purchase projects access once |
-| Admin policy accidentally reintroduces a recent-sign-in requirement or refuses an authorized personal API key | `TestSecurityAdminOperationsNeedNoRecentSignIn`; `server/ci/step_up_test.go` `TestSecurityOwnerOperationsNeedNoRecentSignIn`; `TestGatesAskTheVerified` | Admin operations ask for their permission without step-up; a route-catalog guard forbids `Sensitive` on `AuthMerchant`. AuthKit credential and role grants keep their separate step-up policy |
-| A viewer or read-only API key mints prepaid credit or opens an unsecured credit line | `ci/credit_authority_test.go` `TestSecurityOnlyStaffWritesMintCredit` | Credit grants and customer-settings writes (credit limits) are staff writes (`billing.MerchantCustomerManage`, or its `root:` twin) |
-| Automation or unknown-class customer credential starts a card charge | `TestSecurityAutomationCredentialCannotCharge` | Upgrade and saved-card purchase require the customer's interactive session |
-| `findings:resolve` retargets a recommendation at another payment or subscription | `TestSecurityFindingOverrideCannotRetarget` | Overrides cannot change the ids a recommendation names |
-| Browser-chosen cheaper price, archived price, negative price or duration, tampered confirm fields | `TestSecurityPurchaseTermsAreServerSide` | Catalog-derived terms; DB amount and duration checks |
-| Live Stripe key reachable through an injected transport or a loopback fake | `TestSecurityProviderConfigurationSafety` | A live key never reaches a fake provider; a key disagreeing with its PSP's environment refuses to load |
-| Merchant-configured Collect.js origin skims cards | `TestSecurityProviderConfigurationSafety` | Only NMI's Collect.js is served |
-| Card testing through card saves | `TestSecurityCardTestingIsThrottled` | Per-customer and per-address `payment` rate limit |
-| Leaked rotated-out webhook secret forges "paid" notices after rotation, Stripe and NMI | `TestSecurityRotatedWebhookSecretExpires` | The previous secret verifies only until `webhook_overlap_expires_at` (default 24h, max 168h), never without one; `retire_webhook_overlap` ends it at once |
-| One merchant's card declines put every merchant's API, API keys and consoles included, behind a captcha | `TestSecurityCardAttackModeIsPerMerchant` | Attack mode is per merchant and challenges only its card routes; merchant and API routes never meet a captcha |
-| Card testing with no captcha, on one instance without Redis or across instances with Redis | `TestSecurityCardTestingLedger` | Decline ledger per customer, client address and merchant (attack mode) in Redis or the instance's memory, never PostgreSQL; with Redis down each instance counts its own; blocked attempts never reach the gateway |
-| A Redis that is not the declared one (an untrusted certificate, plain TCP, no ACL credential) | `TestRedisOverTLSWithACLUser` (`ci/`) | TLS verified against the system roots or `redis.ca_cert`; the ACL user's credentials; until the declared Redis answers, each instance counts its limits in its own memory |
-| Spreading requests over instances to multiply a rate limit, act on through an admin lockout, or skip a captcha | `TestInstancesWithRedisShareAbuseLimits` | Rate-limit windows, admin lockouts and captcha challenges in Redis, counted by every instance |
-| Abuse limits with no Redis, or with a declared Redis down | `TestOneInstanceWithoutRedisEnforcesAbuseLimits`, `TestRedisDownKeepsAbuseLimitsPerInstance` | Each instance enforces every limit in its own memory, readiness reports Redis degraded, and none of it reaches PostgreSQL |
-| Guessing passwords past the standalone server's limit, on one instance or across several | `TestAuthKitLimits` (`server/ci/`) | AuthKit keeps its limits and spent proofs in Redis, shared by every instance, or without it in the instance's memory; several instances need Redis |
-| A program's API key reaching more than its task, or keeping a permission its role lost, or a deleted role's key still working | `TestMerchantCustomRoles` (`server/ci/`) | A custom role grants only the permissions the merchant picked; AuthKit reads it on every request, so an edit applies to the next one, and deleting it revokes the keys carrying it; only `server.MerchantRolesManage` changes it |
-| A merchant's API key or trusted issuer's token acting at another merchant | `TestTrustedIssuerTokens`, `TestMerchantAPIKeysAreAuthKits` (`server/ci/`) | A credential bound to a merchant's AuthKit group acts there only; nothing in the request names another |
-| A second trusted issuer presenting another issuer's customer's `sub`, or reaching the merchant's own customer | `TestCustomersArePinnedToTheirIssuer` (`server/ci/`) | A customer is its issuer's subject (OIDC Core §5.7): the issuer that made it is recorded, and any other is `403 customer_issuer_mismatch` |
-| A token for another audience, typed `JWT`, or from an issuer no merchant trusts | `TestBoundTokensAreAccessTokensForThisResource` (`server/ci/`) | Only an `at+jwt` for the server's resource from a trusted issuer authenticates: 401 on `/v1/me`, `/v1/admin` and `/v1/app` |
-| Replaying or stretching a merchant backend's customer assertion | `TestCustomerAssertionLimits` (`server/ci/`) | An assertion lives at most two minutes, redeems once, and only at the token endpoint |
-| One issuer binding two merchants | `TestIssuerDeclaredTwiceBindsNeither` (`ci/`), `TestRemoteIssuerBelongsToOneMerchant` (`server/ci/`) | An issuer belongs to one merchant: declared twice in an engine, it binds neither and `openrails_configuration` names it; registered in a second group, AuthKit refuses |
-| A bound scope that is no live merchant's read as another binding | `TestBoundScopeOfNoMerchantIsRefused` (`ci/`) | A scope of no group, of a deleted merchant or of another authority is `403 merchant_unresolved` on every tier, never the issuer binding |
-| A request naming its merchant (a header, a merchant Host, a query, a body field, a path) | `TestRequestCannotNameItsMerchant` (`ci/`, `server/ci/`) | The credential's merchant answers; an unknown field is refused and no path names a merchant |
-| A credential bound to merchant A reading merchant B | `TestEmbeddedEngineServesTwoMerchants`, `TestSCIMProvisioningTokensIsolateMerchants` (`ci/`), `TestCredentialsReachOnlyTheirMerchant` (`server/ci/`) | A customer token, staff key, programmatic key and provisioning token read only their merchant; B's ids are not found |
-| A person acting at a merchant they hold no role at, or through their own sign-in | `TestRootActsOnlyThroughABoundToken`, `TestMerchantStaffStayInTheirMerchant` (`server/ci/`) | A person's own sign-in reaches no merchant; the exchange for a merchant is refused (`invalid_target`) without a role there; a root role acts through a token bound to the merchant |
-| A public route reading a merchant's catalog, or answering a merchant's setup to no bound credential | `TestCatalogReadsNameNoMerchant`, `TestPublicConfigHasNoMerchantPart` (`server/ci/`) | No public route reads the catalog, and `?merchant=` opens nothing; `GET /v1/config` is the deployment's, and a merchant's setup is `GET /v1/me/config`, for a credential bound to it |
-| A customer's pay URL chosen by the browser, minted by someone else, or outliving its replacement; two clicks making two orders | `TestCustomerOrderWithEmbeddedPayment` (`ci/`) | Only the merchant's own person in a session of their own gets one, for their own order; it names no return URL; a retry's new URL ends the last without moving the order's expiry; a redirect PSP returns only to the frame's own page |
-| A host's own auth, without AuthKit, granting outside its roles, or a session acting at a merchant it was not bound to | `TestOwnAuthConforms`, `TestOwnAuthGates` (`examples/own-auth/`) | The example's sessions and roles pass `openrailstest.CheckAuth`; a session acts at the merchant the host bound it to and holds there only its roles; bound to none, `403 merchant_unresolved` |
-| A credential filed under another merchant's ID in the Go client | `TestSwappedCredentialsFailEveryCall` (`server/ci/`) | Every answer names its merchant (`OpenRails-Bound-Merchant`); a mismatch fails the call with `*openrails.BoundMerchantError` |
-| Tokens, assertions, API keys or pay URL secrets leaking into logs, URLs or caches | `TestBoundTokensStayOutOfLogsAndURLs` (`server/ci/`) | None appears in a log line or a request URL; a pay URL carries its secret in the fragment; answers carrying one are `no-store` |
-| Junk card saves from a few accounts lock every buyer of a merchant out of card routes for the day (no captcha configured) | `TestSecurityCardAttackModeWithoutCaptcha` | Only provider refusals count; attack mode needs declines from many customers and addresses, slides with its window, and without a captcha blocks only subjects with a recent decline |
-| Open redirect through purchase success/cancel URLs | `TestSecurityPurchaseReturnURLsStayOnHost` | Exact-origin `return_origins` allow-list; the billing portal returns only to an allowed origin |
-| Another customer pre-claims a predictable tier-change idempotency key | `TestSecurityTierChangeKeysAreCustomerScoped` | Tier-change keys are scoped to the customer |
-| Probing another customer's payment-method or subscription ids | `TestSecurityForeignIDsLookMissing` | A foreign id answers exactly like a missing one |
-| Enumerating provider accounts through webhook responses | `TestSecurityWebhookResponsesRevealNoAccounts` | Unknown account, missing secret and bad signature share one 401 |
-| A request arrives at a host spelled after another merchant | `TestMerchantHostNamesNothing` | A request's Host names no merchant: the credential's merchant answers, and a request without one is refused |
-| Squatting another merchant's provider account id to receive its events | `TestSecurityProviderAccountClaimsNeedProof` | A merchant-API claim needs a successful credential probe; the operator declares otherwise |
-| NMI account left in test mode under live posture grants access without payment | `internal/integrations/nmi` `TestLivePostureRefusesTestModeAccount` | Live posture arms NMI only on `test_mode_enabled=false` (read-only query); e2e cannot run live posture because transport injection is refused under live by design |
-| Client-written first `X-Forwarded-For` line spoofs the CCBill source allowlist behind a proxy that appends its own line | `TestSecurityForwardedForReadsEveryLine` | Every `X-Forwarded-For` line counts, walked right to left past trusted hops |
-| Renewal grace kept after a period-end cancel | `TestEngineCancelAndResume/cancel_at_period_end` | Cancel removes the future grace window |
-| Provider refund notice arriving before OpenRails' own refund finalizes records it twice or revokes against `revoke_access=false` | `TestSecurityRefundNoticeDuringOwnRefundCountsOnce` | Provider refund facts wait for redelivery while a refund reservation is pending; finalize takes over an already-recorded refund |
-| NMI chargeback of a one-time purchase leaves access granted; unmatched chargebacks vanish | `TestSecurityNMIChargebackRevokesOneTimePurchase` | Chargeback matching covers one-off charges and revokes entitlements and product access; unmatched entries raise a durable repair alert |
-| Late `charge.dispute.created` after a won dispute revokes; a won dispute revives an unrelated cancellation | `TestSecurityStripeDisputeOrdering` | Won outcome stored durably; reactivation only for the chargeback cancellation this dispute caused |
-| Unsigned CCBill post buys years of access (RenewalSuccess/BillingDateChange date, UserReactivation without payment) | `TestSecurityCCBillPeriodEndsAreBounded` | Period ends capped at one cycle + 72h past the paid anchor; reactivation never extends the paid end |
-| Solana transfer landing long after its quote settles at a stale price | `TestSettlementTooLate` (`internal/integrations/solana`) and `TestSolanaPayLatePaymentIsFlagged` | 30-minute late window; later landings grant nothing and raise an operator repair alert |
+- J01/J02/J03: credential and merchant boundaries, current customer-network proof, hosted checkout capabilities and origins.
+- J09–J21/J28/J29: accepted monetary terms, payment/rebill/refund identity, unknown provider outcomes, authenticated callbacks and process-death recovery.
+- J22–J27: conservation of credits, reservations, measured usage, running charges, paid access and entitlement tenure.
+- J31/J32/J34: archive/customer/merchant authority, destructive controls and custody boundaries.
+- J37: the selected Solana transfer/recurring protocol and settlement evidence.
+- J04/J05 and the public client cases: typed wire/amount/identifier boundaries, embedded/HTTP behavior, cache/owner lifecycle and actual shipped SDK behavior.
 
-## Documented decisions
+Exact provider amounts and ledger effects come from independent literal examples and external provider journals, not from counting requests or recomputing expectations using the implementation. Focused parsing/arithmetic/signature vectors complement the real workflows. Faults act on transport, process lifetime, external provider evidence or declared time boundaries.
 
-- NMI account claims through the admin API prove the security key works,
-  not that the account id belongs to it. NMI events are HMAC-signed with the
-  claimer's own secret, so a squatter cannot receive or forge the owner's
-  events; the owner's operator can still reassign the id.
-- Another customer's order is 404: an order id is never a credential.
-- Webhook routes must load an account's secret before verifying its HMAC. The
-  `webhook` rate-limit bucket bounds that work, and every refusal answers
-  alike.
+The current network cases stay qualified while that feature ships in OpenRails. SaaS issue67 will move their implementation and tests together; it must not remove the protections from both repositories. Optional protocols and UI behavior outside the selected manifest remain explicitly deferred.
+
+Source/security scanners, SQLC preparation, migration checks and the embedded dependency-boundary build remain additional gates. No source-managed consumer/ACK protocol or internal authorization mock is introduced by the replacement.

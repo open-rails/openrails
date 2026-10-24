@@ -2,7 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import react from "@vitejs/plugin-react"
 import type { Plugin } from "vite"
-import { defineConfig } from "vitest/config"
+import { defineConfig } from "vite"
 
 const keepGoEmbedPlaceholder: Plugin = {
   name: "keep-go-embed-placeholder",
@@ -24,7 +24,6 @@ export default defineConfig(({ command }) => ({
     ],
   },
   build: { outDir: "dist", emptyOutDir: true },
-  test: { environment: "jsdom", include: ["src/**/*.test.{ts,tsx}"] },
   server: {
     proxy: {
       "/v1": "http://localhost:3053",

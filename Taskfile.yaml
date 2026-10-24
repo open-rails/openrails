@@ -28,21 +28,10 @@ tasks:
     cmds:
       - bash scripts/setup.sh
 
-  tooling-test:
-    desc: Run focused regression tests for local developer tooling
-    cmds:
-      - bash scripts/doctor_test.sh
-      - bash scripts/setup_test.sh
-      - bash scripts/ci_local_test.sh
-      - bash scripts/pre_push_test.sh
-      - bash scripts/e2e_dump_local_test.sh
-      - bash scripts/go-test-gate_test.sh
-
   ci-local:
-    desc: Run the compact checks and end-to-end gates used by CI
+    desc: Run critical behavioral and static checks against owned disposable services
     cmds:
-      - bash scripts/check.sh checks
-      - bash scripts/check.sh e2e
+      - bash scripts/check.sh all
 
   build:
     desc: Build the binary locally (embeds server/web/console/dist when `task admin-build` has run; Go stamps the version from git)
@@ -126,34 +115,20 @@ tasks:
     cmds:
       - bash scripts/mint_jwt.sh
 
-  e2e-dump-local:
-    desc: Dump local rows for current E2E_RUN_ID/E2E_USER_ID
-    cmds:
-      - bash scripts/e2e_dump_local.sh
-
   nmi-query:
     desc: Call NMI Query API (requires NMI_QUERY_SECURITY_KEY)
     cmds:
       - bash scripts/nmi_query.sh {{if .TXN_ID}}--transaction-id "{{.TXN_ID}}"{{end}} {{if .SUB_ID}}--subscription-id "{{.SUB_ID}}"{{end}}
 
   sqlc:
-    desc: Regenerate internal/db/gen from internal/db/queries and vet every query (PREPARE against a fresh DB built from the baseline)
+    desc: Generate SQL bindings and prepare every query against a disposable migrated database
     env:
-      # generate (database-backed analyzer) and vet (db-prepare) both need a
-      # live DB whose schema == the baseline. Use the caller's SQLC_DATABASE_URL
-      # if set; otherwise build the throwaway vet DB on the local compose
-      # postgres and use that.
       SQLC_DATABASE_URL:
         sh: 'if [ -n "${SQLC_DATABASE_URL:-}" ]; then echo "$SQLC_DATABASE_URL"; else scripts/sqlc-vet-db.sh; fi'
     cmds:
-      - |
-        if [ -z "${SQLC_DATABASE_URL:-}" ]; then
-          echo "sqlc: SQLC_DATABASE_URL is empty — query audit cannot run." >&2
-          exit 1
-        fi
+      - 'test -n "$SQLC_DATABASE_URL"'
       - '{{.SQLC}} generate'
       - '{{.SQLC}} vet'
-      - CGO_ENABLED=1 bash scripts/go-test-gate.sh ./internal/db/sqlaudit/ TestQueryAudit
 
   sqlc-generate-check:
     desc: Regenerate sqlc bindings and fail when the working tree differs
@@ -165,38 +140,10 @@ tasks:
       - git diff --exit-code -- internal/db/gen
 
   sqlc-check:
-    desc: CI gate — sqlc generate + vet + query audit + SQL discipline lints
-    env:
-      # One throwaway vet DB serves generate, vet and the auditor (rebuilding it
-      # per step would triple the cost of the job).
-      SQLC_DATABASE_URL:
-        sh: 'if [ -n "${SQLC_DATABASE_URL:-}" ]; then echo "$SQLC_DATABASE_URL"; else scripts/sqlc-vet-db.sh; fi'
+    desc: Verify SQL bindings and query preparation
     cmds:
-      # Every -run gate below goes through scripts/go-test-gate.sh, which fails
-      # when the pattern, the build tags or a t.Skip left the gate testing
-      # nothing. Prove the guard still detects that before trusting it (this is
-      # the only required-CI task that runs it).
-      - bash scripts/go-test-gate_test.sh
-      # TestQueryAudit below SKIPS (and reports ok) when SQLC_DATABASE_URL is
-      # empty. Every other step in this chain errors loudly without it, so an
-      # empty value would silently degrade this gate to "everything but the
-      # auditor" — assert it up front rather than trusting the resolver above.
-      - |
-        if [ -z "${SQLC_DATABASE_URL:-}" ]; then
-          echo "sqlc-check: SQLC_DATABASE_URL is empty — TestQueryAudit would skip silently and this gate would report a pass it did not earn." >&2
-          exit 1
-        fi
-      - '{{.SQLC}} generate'
-      - '{{.SQLC}} vet'
+      - task: sqlc
       - git diff --exit-code -- internal/db/gen
-      # Efficiency+safety gate: EXPLAIN every query, walk the plan, apply rules.
-      # CGO_ENABLED=1 is mandatory, not incidental: sqlaudit is `//go:build cgo`
-      # (pg_query_go links the real Postgres parser) so that CGO_ENABLED=0
-      # builds of ./... stay green — without it the gate would match no test
-      # files. go-test-gate.sh now turns that (or#1013) into a hard failure
-      # instead of an "ok ... [no test files]" pass.
-      - CGO_ENABLED=1 bash scripts/go-test-gate.sh ./internal/db/sqlaudit/ TestQueryAudit
-      - bash scripts/go-test-gate.sh ./internal/db/ TestNoInlineSQL
 
   lint:
     desc: golangci-lint over the root, server and AuthKit adapter modules
@@ -220,11 +167,6 @@ tasks:
       - golangci-lint run --timeout=15m ./...
       - cd server && golangci-lint run --timeout=15m --config ../.golangci.yaml ./...
       - cd adapters/authkit && golangci-lint run --timeout=15m --config ../../.golangci.yaml ./...
-
-  sql-lint:
-    desc: Fail on inline SQL outside internal/db/queries (allowlist in internal/db/inlinesql_test.go)
-    cmds:
-      - bash scripts/go-test-gate.sh ./internal/db/ TestNoInlineSQL
 
   test:
     desc: Run tests

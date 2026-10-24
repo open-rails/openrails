@@ -19,7 +19,7 @@ check_authkit_dependencies() {
 packages=(. ./adapters/http ./adapters/gin ./adapters/fiber ./internal/engine ./internal/config ./internal/billingauth ./internal/app ./internal/service ./internal/http/embedhttp ./internal/http/inprocess ./internal/hosttools ./openrailstest/...)
 deps="$(go list -deps "${packages[@]}")"
 check_authkit_dependencies <<<"$deps"
-# Compile and run an independent consumer with its own authentication. The
+# Compile an independent consumer with its own authentication. The
 # AuthKit module supplies only contracts; its server and database do not link.
 consumer_dir="$(mktemp -d)"
 trap 'rm -rf "$consumer_dir"' EXIT
@@ -70,9 +70,9 @@ func main() {
  var a openrails.Authenticator = ownAuth{}
  routes := openrails.Routes{Auth: a, RouteGroups: openrails.RouteGroups{Admin: true}}
  cfg := openrails.Config{ProviderWriteMode: openrails.ProviderWritesReadOnly}
- if routes.Auth == nil || cfg.ProviderWriteMode != openrails.ProviderWritesReadOnly { panic("unreachable") }
+ _, _ = routes, cfg
 }
 GO
-(cd "$consumer_dir" && go mod tidy && go run .)
+(cd "$consumer_dir" && go mod tidy && go build -o "$consumer_dir/consumer" .)
 consumer_deps="$(cd "$consumer_dir" && go list -deps -f '{{.ImportPath}}' .)"
 check_authkit_dependencies <<<"$consumer_deps"

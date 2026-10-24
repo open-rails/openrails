@@ -6,12 +6,12 @@ from pathlib import Path
 import re
 import subprocess
 
-SOURCE = ("core", "runtime", "browser", "examples", "chart", "security")
-ALL = (*SOURCE, "prose", "artifacts")
+SOURCE = ("core", "runtime", "browser", "chart", "security")
+ALL = (*SOURCE, "artifacts")
 
 
 def full():
-    return {key: key != "prose" for key in ALL}
+    return {key: True for key in ALL}
 
 
 def select(changes):
@@ -21,7 +21,7 @@ def select(changes):
         return full(), ["empty or unknown comparison: full qualification"]
     for status, path in changes:
         if status not in ("A", "M"):
-            return full(), ["deleted, renamed or unusual Git status: full qualification"]
+            return full(), [f"deleted, renamed or unusual Git status ({status}): {path}; full qualification"]
         # Dependency, generated API, schema and CI changes can cross all boundaries.
         name = Path(path).name
         if (name in ("go.mod", "go.sum", "package.json", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "Chart.lock")
@@ -39,8 +39,7 @@ def select(changes):
             reasons.append("license prose: " + path)
             continue
         if path.endswith(".md") and ("/" not in path or path.startswith(("docs/", "sdk/billing-ui/", "compatibility/")) or path in (".claude/CLAUDE.md", "server/web/console/README.md")):
-            selected["prose"] = True
-            reasons.append("documentation contract: " + path)
+            reasons.append("documentation-only input; behavioral suites unchanged: " + path)
             continue
         if path.startswith(("sdk/billing-ui/src/client", "sdk/billing-ui/src/api", "sdk/billing-ui/src/types", "sdk/billing-ui/src/hooks")) or path == "sdk/billing-ui/src/index.ts":
             selected.update({key: True for key in SOURCE})
@@ -57,7 +56,7 @@ def select(changes):
             reasons.append("isolated browser source: " + path)
             continue
         if path.startswith(("examples/own-auth/", "examples/standalone/", "examples/embedded/")):
-            for key in ("core", "examples", "browser", "security"):
+            for key in ("core", "browser", "security"):
                 selected[key] = True
             reasons.append("example application: " + path)
             continue
@@ -67,9 +66,6 @@ def select(changes):
             continue
         selected.update({key: True for key in SOURCE})
         reasons.append("unclassified/shared source: " + path)
-    # The ordinary core suite already runs the whole contract package.
-    if selected["core"]:
-        selected["prose"] = False
     return selected, reasons
 
 
@@ -108,7 +104,18 @@ def main():
         with args.github_output.open("a") as output:
             for key, value in selected.items():
                 output.write(f"{key}={str(value).lower()}\n")
-    print(json.dumps({"suites": selected, "reasons": reasons}, indent=2))
+    explanations = {}
+    for suite, enabled in selected.items():
+        if not enabled:
+            explanations[suite] = {"selected": False, "reason": "No changed input reaches this suite under the explicit isolation rules."}
+        elif args.full:
+            explanations[suite] = {"selected": True, "reason": "Explicit full qualification."}
+        else:
+            inputs = [reason for change in read_changes(args.base, args.head)
+                      for flags, why in [select([change])] if flags[suite] for reason in why]
+            explanations[suite] = {"selected": True, "affected_inputs": len(inputs),
+                                   "examples": inputs[:8] or reasons}
+    print(json.dumps({"suites": selected, "reasons": reasons, "suite_explanations": explanations}, indent=2))
 
 
 if __name__ == "__main__":

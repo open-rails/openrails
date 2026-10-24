@@ -17,6 +17,7 @@ if [[ ${CI:-} == true && ${#selected[@]} -gt 0 ]]; then
 fi
 report_dir="${OPENRAILS_CRITICAL_REPORT_DIR:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/openrails-critical-$$}"
 mkdir -p "$report_dir"
+export OPENRAILS_CRITICAL_REPORT_DIR="$report_dir"
 run=()
 check=()
 if ((${#selected[@]})); then
@@ -29,7 +30,7 @@ if ((${#selected[@]})); then
   run=(-run "^Test/($pattern)$")
 fi
 set +e
-go test -json -tags=integration -count=1 -p 2 -parallel 2 -timeout 20m "${run[@]}" ./critical | tee "$report_dir/events.jsonl"
+go test -race -json -tags=integration -count=1 -p 2 -parallel 2 -timeout 60m "${run[@]}" ./critical | tee "$report_dir/events.jsonl"
 status=${PIPESTATUS[0]}
 set -e
 python3 scripts/critical-results.py critical/coverage.json "$report_dir/events.jsonl" "${check[@]}"

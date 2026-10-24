@@ -64,7 +64,7 @@ rule PREPAREs every query) need a live Postgres whose schema matches
 So the usual loop: `task docker-up`, edit queries or migrations, `task sqlc`,
 commit the regenerated `internal/db/gen`. `task sqlc-check` checks generated
 code, query plans and SQL discipline locally; CI's `End-to-end` job regenerates
-the bindings and runs the query audit (`TestQueryAudit`).
+the bindings and prepares every query against a disposable migrated PostgreSQL database.
 
 ## Frozen contracts
 
@@ -123,7 +123,7 @@ In the root module:
 - `internal/` — everything else: `modules/` (domain), `db/` (queries/gen/models), `river/` (jobs), `integrations/` (nmi, stripeapi, solana, …), `http/` (the route catalog in `http/routes`)
 - `internal/migrate/postgres/` — the authored PostgreSQL migration baseline
 - `api/` — the frozen-contract snapshots: `go.txt`, `openapi.json`, `schema.txt`
-- `ci/` — the end-to-end suite: public-client contracts with disposable PostgreSQL schemas and deterministic provider transports; `server/ci` is the server's (`scripts/e2e.sh` runs both)
+- `critical/` — the selected public-client journeys with isolated real services, independent provider evidence and exact required executable accounting
 - `scripts/` — Task-target implementations
 - `server/web/console/` — admin console SPA source; `embed.go` embeds its `dist/` build
 

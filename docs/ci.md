@@ -1,22 +1,15 @@
-# Validation and release jobs
+# CI and releases
 
-Ready pull requests are validated against GitHub's synthetic merge commit and the current target branch. Scope checks both parents before selecting suites. The single `CI Gate` requires every selected job to succeed and rechecks that the base did not move while tests ran. Failed/canceled/missing jobs cannot become a green gate through skips. Updating a stale PR requires another validation run.
+Ready PRs into `master` or `release/**` qualify the synthetic merge with the current target branch. Explicit manual runs select the full suite. Draft/closed PRs and ordinary branch/master/tag pushes do not run source CI. The final `CI Gate` requires every selected job to pass and rechecks that the target branch has not moved.
 
-There is no duplicate full suite on master push or release tags. Manual `Validate` runs every source suite and the artifact snapshots. Local `scripts/check.sh` and `scripts/e2e.sh` keep their full commands and tests.
+`scripts/ci-scope.py` classifies changed paths automatically and reports each suite's selection and reasons. Unknown/shared source selects the broad source suite. Deleted/renamed inputs, dependency changes and artifact-build inputs select broader qualification. Only known isolated documentation, UI or chart inputs skip unrelated suites. `scripts/check-ci-policy.py` verifies this through actual Git diffs and the CLI.
 
-| Changes | Selected work |
-|---|---|
-| Markdown prose used by contract tests | Existing cheap guards and the complete documentation-contract package |
-| Explicit visual components/assets in billing-ui, payment page or admin console | All browser SDK/payment/example/admin checks and security |
-| Explicit own-auth, standalone or embedded example files | Core Go/build/lint, examples, browser consumers and security |
-| Helm chart | Chart and security |
-| Dependencies, schemas, generated API/SDK clients, shared Go, unknown paths | All source suites |
-| CI/build tooling, image/package inputs, deletion/rename or uncertain comparison | All source suites plus artifact snapshots |
+The required behavioral suite is `critical/`: 148 selected logical scenarios, with exact executable paths in `critical/executables.json`. Source-only fixtures and helper tests are not scenario passes. Missing required owners, successful nested tests without their parent, duplicate mappings, skips, failures and empty runs fail qualification. Focused `--case` runs are local development only.
 
-LICENSE-only edits retain the cheap guards. Documentation contracts are already included when the full core suite runs, so they are not duplicated.
+One critical job supplies actual PostgreSQL18, Redis7, Vault2.1.1, real AuthKit, the current embedded/standalone OpenRails and independent external provider fixtures. It builds the SDK, console and payment assets once; the Go-hosted SDK cases own the browser execution. The standalone fixture binary is built once and reused with isolated per-scenario resources. Pure money/parser/cryptographic boundary vectors use literal independent oracles and do not need browser fixtures.
 
-The source suites retain the full Go test commands across root/server/adapter/examples, the full twelve-way runtime E2E suite, SQL generation and `TestQueryAudit`, all SDK/browser consumers, and security checks. Selection never chooses individual tests or reduces the shard roster. The allowlist is intentionally small; mixed changes take the union, unknown paths expand coverage, and malformed comparisons fail.
+Static checks retain source clock/migration/injection guards, compilation and lint for the published modules/examples, independent-host dependency proof, SQLC generation/query preparation, browser artifact/contract checks, chart checks and security scans. The retired wildcard test launches, twelve runtime shards, test-name gates, old browser fixtures and test-only EXPLAIN auditor are removed. The separate SDK workflow is a static/manual artifact check; it does not repeat the Go-hosted browser cases.
 
-`SDK` is reused by the central gate. Release/package and container workflows retain their artifact build, migration/readiness and security smoke checks, reused as nonpublishing snapshots when relevant to a PR. Version tags retain publication; explicit npm/image manual workflows remain available. Those artifact workflows do not rerun the source unit/E2E suites.
+Artifact snapshots run when their build inputs require them. Published releases build/package the tested source and verify the artifacts; they do not repeat the source suite. Deployment uses immutable artifacts and remains distinct from a passing source gate.
 
-The branch protection requirement is `CI Gate`. Changing protection is a separate reviewed repository operation after this workflow exists; this source change does not mutate GitHub settings.
+The new candidate must complete its entire selected manifest before entering ready CI. A partial implementation is not a passing reduced suite. Full-run timeout is a ceiling; calibrate it from the combined qualified run, not an estimate from test counts.
