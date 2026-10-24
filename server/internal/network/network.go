@@ -180,7 +180,21 @@ func (s *Service) Link(ctx context.Context, proof customernetwork.Proof, params 
 		return billing.CustomerLink{}, false, err
 	}
 	if native && account.UUID() != proof.Customer.UUID() {
-		return billing.CustomerLink{}, false, errLinkConflict
+		// issuer NULL also names a merchant's own asserted customer. Only
+		// AuthKit can establish that this UUID is a platform account; that
+		// account, including its recovery-window tombstone, cannot be linked
+		// to another person. An unavailable directory is not absence.
+		accounts, err := s.ak.ForTenant(ctx, s.tenant)
+		if err != nil {
+			return billing.CustomerLink{}, false, fmt.Errorf("network: select account directory: %w", err)
+		}
+		_, err = accounts.User(ctx, iam.UserByID(proof.Customer.String()), authkit.IncludeDeleted())
+		if err == nil {
+			return billing.CustomerLink{}, false, errLinkConflict
+		}
+		if !errors.Is(err, iam.ErrUserNotFound) {
+			return billing.CustomerLink{}, false, fmt.Errorf("network: read native account: %w", err)
+		}
 	}
 	credential := string(proof.Credential)
 	insert := gen.InsertCustomerLinkParams{
