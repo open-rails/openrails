@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The guard is implemented as a Go test so it runs on stock macOS Bash 3.2 and
-# automatically participates in `go test ./...`. An optional root preserves the
-# fixture/testing entrypoint used by tooling.
+# Run the source guard directly; a removed test must not silently pass with
+# "no test files". This is a static clock-boundary check, not a behavioral suite.
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 guard_root="$(cd "${1:-${repo_root}}" && pwd)"
-export OPENRAILS_BUSINESS_TIME_ROOT="${guard_root}"
 cd "${repo_root}"
-go test ./internal/businesstime -run '^TestRepositoryBusinessTimeGuard$' -count=1
+GOWORK=off go run ./scripts/business-time "$guard_root"
 echo "business-time guardrail passed"
