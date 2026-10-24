@@ -566,7 +566,7 @@
     {
       "id": "OR-J25-S04",
       "journey": "J25",
-      "name": "Funds or authorization limit stops further accrual without resurrection"
+      "name": "Insufficient funds refuse admission; depletion signals host stop without resurrection"
     },
     {
       "id": "OR-J26-S01",

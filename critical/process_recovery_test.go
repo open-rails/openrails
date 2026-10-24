@@ -18,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
+	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
@@ -38,6 +39,45 @@ type workerProcessConfig struct {
 	Config                             openrails.Config
 	At                                 time.Time
 	StripeURL, FXURL, Ready, ClockFile string
+	AfterWork                          string
+	IgnoreIntents                      []string
+}
+
+// River calls this public hook after the real worker returns and before its
+// completion is persisted. It changes neither the worker nor its result.
+type afterWorkBarrier struct {
+	river.HookDefaults
+	path   string
+	ignore map[string]bool
+	once   sync.Once
+}
+
+func (h *afterWorkBarrier) WorkEnd(ctx context.Context, job *rivertype.JobRow, workErr error) error {
+	if workErr != nil || job.Kind != "openrails.provider_operation" {
+		return workErr
+	}
+	var args struct {
+		IntentID string `json:"intent_id"`
+	}
+	if err := json.Unmarshal(job.EncodedArgs, &args); err != nil {
+		return err
+	}
+	if args.IntentID == "" || h.ignore[args.IntentID] {
+		return workErr
+	}
+	var saveErr error
+	h.once.Do(func() {
+		var data []byte
+		data, saveErr = json.Marshal(job)
+		if saveErr == nil {
+			saveErr = os.WriteFile(h.path, data, 0600)
+		}
+	})
+	if saveErr != nil {
+		return saveErr
+	}
+	<-ctx.Done()
+	return workErr
 }
 
 // This is a subprocess entry point, not a scenario. Only the parent scenarios
@@ -65,7 +105,22 @@ func TestWorkerProcess(t *testing.T) {
 	require.NoError(t, err)
 	defer engine.Close(context.Background()) //nolint:errcheck
 	w := &world{pool: pool, schema: config.Config.Database.Schema, engine: engine, clock: clock}
-	startFleet(t, w)
+	if config.AfterWork == "" {
+		startFleet(t, w)
+	} else {
+		ignored := map[string]bool{}
+		for _, id := range config.IgnoreIntents {
+			ignored[id] = true
+		}
+		fleet, err := riverhelpers.New(t.Context(), pool, &river.Config{
+			Schema: w.schema,
+			Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
+			Hooks:  []rivertype.Hook{&afterWorkBarrier{path: config.AfterWork, ignore: ignored}},
+		}, engine.RiverJobs())
+		require.NoError(t, err)
+		require.NoError(t, engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+	}
 	require.NoError(t, os.WriteFile(config.Ready, []byte("running"), 0600))
 	// This control changes only the declared clock, never financial state.
 	tick := time.NewTicker(20 * time.Millisecond)
@@ -98,10 +153,13 @@ type ownedWorkerProcess struct {
 	clockFile string
 }
 
-func startWorkerProcess(t *testing.T, w *world, p *providerLedger) *ownedWorkerProcess {
+func startWorkerProcess(t *testing.T, w *world, p *providerLedger, configure ...func(*workerProcessConfig)) *ownedWorkerProcess {
 	t.Helper()
 	dir := t.TempDir()
 	config := workerProcessConfig{Config: w.cfg, At: w.clock.Now(), StripeURL: p.server.URL, FXURL: w.deps.FXTransport.(loopbackWire).target.String(), Ready: filepath.Join(dir, "ready"), ClockFile: filepath.Join(dir, "clock")}
+	for _, change := range configure {
+		change(&config)
+	}
 	data, err := json.Marshal(config)
 	require.NoError(t, err)
 	configPath := filepath.Join(dir, "config.json")
@@ -181,6 +239,45 @@ func (replayedOperation) Kind() string                   { return "openrails.pro
 func (j replayedOperation) MarshalJSON() ([]byte, error) { return j.Payload, nil }
 
 func TestProcessRecovery(t *testing.T) {
+	t.Run("OR-J14-S05/settled-renewal-survives-death-before-queue-ack", func(t *testing.T) {
+		a, p, sub := purchasedMembership(t)
+		due := *sub.CurrentPeriodEndsAt
+		a.clock.Advance(due.Sub(a.clock.Now()))
+		queue := hostFleet(t, a.world)
+		prior, err := queue.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
+		require.NoError(t, err)
+		var ignored []string
+		for _, job := range prior.Jobs {
+			var args map[string]string
+			require.NoError(t, json.Unmarshal(job.EncodedArgs, &args))
+			ignored = append(ignored, args["intent_id"])
+		}
+		atCommit := filepath.Join(t.TempDir(), "after-work.json")
+		child := startWorkerProcess(t, a.world, p, func(c *workerProcessConfig) {
+			c.AfterWork, c.IgnoreIntents = atCommit, ignored
+		})
+		_, err = queue.Insert(t.Context(), registeredJob{KindName: "openrails.dunning"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		require.NoError(t, err)
+		var operation rivertype.JobRow
+		require.Eventually(t, func() bool {
+			data, err := os.ReadFile(atCommit)
+			return err == nil && json.Unmarshal(data, &operation) == nil
+		}, 20*time.Second, 20*time.Millisecond, "real worker did not finish at the before-ACK barrier")
+		renewalSettled(t, a, p, sub, due)
+		job, err := queue.JobGet(t.Context(), operation.ID)
+		require.NoError(t, err)
+		require.Equal(t, rivertype.JobStateRunning, job.State, "local money committed before River acknowledgment")
+		child.kill(t)
+		startWorkerProcess(t, a.world, p)
+		replay, err := queue.Insert(t.Context(), replayedOperation{Payload: operation.EncodedArgs}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			job, err := queue.JobGet(t.Context(), replay.Job.ID)
+			return err == nil && job.State == rivertype.JobStateCompleted
+		}, 20*time.Second, 20*time.Millisecond, "retained operation did not complete on replay")
+		renewalSettled(t, a, p, sub, due)
+		require.Len(t, p.core.Submitted("/v1/payment_intents"), 2, "settled operation replay must not submit a third debit")
+	})
 	for _, scenario := range []struct {
 		id       string
 		accepted bool
