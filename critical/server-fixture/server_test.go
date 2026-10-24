@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
@@ -26,12 +27,13 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/server"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
 type config struct {
-	Schema, Ready, ControlKey, FXURL string
-	At                               time.Time
+	Schema, Ready, ControlKey, FXURL, RedisURL string
+	At                                         time.Time
 }
 type merchant struct {
 	ID            billing.MerchantID
@@ -121,8 +123,16 @@ func TestServerFixture(t *testing.T) {
 	signer, err := keys.SignerFromKey("standalone-fixture", key)
 	require.NoError(t, err)
 	clock := clockwork.NewFakeClockAt(cfg.At)
+	var shared redis.UniversalClient
+	if cfg.RedisURL != "" {
+		options, err := redis.ParseURL(cfg.RedisURL)
+		require.NoError(t, err)
+		shared = redis.NewClient(options)
+		defer shared.Close()
+		require.NoError(t, shared.Ping(t.Context()).Err())
+	}
 	srv, err := server.New(t.Context(), server.Config{
-		Engine: openrails.Config{Database: openrails.DatabaseConfig{Schema: cfg.Schema, RiverSchema: cfg.Schema}, PublicBillingBaseURL: httpServer.URL, ProviderWriteMode: openrails.ProviderWritesReadOnly, RateLimitsDisabled: true, CatalogReconciliationInterval: "0"},
+		Engine: openrails.Config{Database: openrails.DatabaseConfig{Schema: cfg.Schema, RiverSchema: cfg.Schema}, PublicBillingBaseURL: httpServer.URL, ProviderWriteMode: openrails.ProviderWritesFull, RateLimitsDisabled: true, CatalogReconciliationInterval: "0"},
 		Auth: authkit.Config{
 			DefaultTenantID: iam.NewTenantID(), Database: authkit.DatabaseConfig{Schema: cfg.Schema + "_auth", RiverSchema: cfg.Schema},
 			Token: authkit.TokenConfig{Issuer: httpServer.URL, AllowPrivateNetworkJWKS: true}, Resource: authkit.ResourceConfig{ID: httpServer.URL, PublicURL: httpServer.URL},
@@ -131,7 +141,7 @@ func TestServerFixture(t *testing.T) {
 			HTTP:       &authkit.HTTPConfig{DirectPeerIP: true},
 		},
 		LocalSignIn: true, AdminConsole: &server.AdminConsole{Disabled: true}, RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true},
-	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Clock: clock, FXTransport: wire{fx, transport}}, Auth: authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}}})
+	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Redis: shared, Clock: clock, FXTransport: wire{fx, transport}}, Auth: authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}}})
 	require.NoError(t, err)
 	defer srv.Close(context.Background())
 	handler := srv.Handler()
@@ -196,6 +206,23 @@ func TestServerFixture(t *testing.T) {
 					scopes = []string{"openid", "openrails:link"}
 				}
 				result.Result = as.Authorize(t, user, authtest.CodeFlow{ClientID: shop.OAuth.ClientID, ClientSecret: *shop.OAuth.ClientSecret, RedirectURI: "https://" + cmd.Merchant + ".critical.invalid/callback", Resource: httpServer.URL, Scopes: scopes, Nonce: cmd.Nonce, Consent: true})
+			case "stale-sign-in":
+				// A freshly issued/renewed token may carry an older sign-in.
+				// Preserve the real session and every authority claim, changing
+				// only issuer-owned auth_time at this negative time boundary.
+				raw := alice.AccessToken
+				if cmd.Account == "bob" {
+					raw = bob.AccessToken
+				}
+				claims := jwt.MapClaims{}
+				original, _, err := jwt.NewParser().ParseUnverified(raw, claims)
+				require.NoError(t, err)
+				claims["auth_time"] = time.Now().Add(-16 * time.Minute).Unix()
+				token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+				token.Header = original.Header
+				signed, err := token.SignedString(key)
+				require.NoError(t, err)
+				result.Result = map[string]string{"access_token": signed}
 			case "customer-token":
 				id, err := billing.ParseCustomerID(cmd.ID)
 				require.NoError(t, err)

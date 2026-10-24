@@ -306,12 +306,12 @@
     {
       "id": "OR-J13-S03",
       "journey": "J13",
-      "name": "Eligible free or paid introductory phase produces exact declared terms"
+      "name": "Imported paid introductory period and accepted recurring terms remain distinct"
     },
     {
       "id": "OR-J13-S04",
       "journey": "J13",
-      "name": "Unsupported trial or rail combination is refused explicitly"
+      "name": "New checkout explicitly refuses free and paid introductory trial prices"
     },
     {
       "id": "OR-J14-S01",

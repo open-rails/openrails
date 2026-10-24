@@ -55,15 +55,22 @@ func newStandaloneWorld(t *testing.T) *standaloneWorld {
 		pool.Close()
 	})
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "server-fixture.test")
-	build := exec.CommandContext(t.Context(), "go", "test", "-c", "-p", "2", "-o", binary, ".")
-	build.Dir = "server-fixture"
-	build.Env = append(os.Environ(), "GOWORK=off", "GOMAXPROCS=2")
-	output, err := build.CombinedOutput()
-	require.NoError(t, err, string(output))
+	binary := os.Getenv("OPENRAILS_CRITICAL_SERVER_BINARY")
+	if binary == "" {
+		binary = filepath.Join(dir, "server-fixture.test")
+		build := exec.CommandContext(t.Context(), "go", "test", "-c", "-p", "2", "-o", binary, ".")
+		build.Dir = "server-fixture"
+		build.Env = append(os.Environ(), "GOWORK=off", "GOMAXPROCS=2")
+		output, err := build.CombinedOutput()
+		require.NoError(t, err, string(output))
+	} else {
+		stat, err := os.Stat(binary)
+		require.NoError(t, err, "prebuilt standalone fixture must exist")
+		require.NotZero(t, stat.Mode()&0111, "prebuilt standalone fixture must be executable")
+	}
 	ready := filepath.Join(dir, "ready.json")
 	fx := fixedFX(t).(loopbackWire)
-	data, err := json.Marshal(map[string]any{"Schema": schema, "Ready": ready, "ControlKey": uuid.NewString(), "FXURL": fx.target.String(), "At": time.Now().UTC()})
+	data, err := json.Marshal(map[string]any{"Schema": schema, "Ready": ready, "ControlKey": uuid.NewString(), "FXURL": fx.target.String(), "At": time.Now().UTC(), "RedisURL": os.Getenv("OPENRAILS_CRITICAL_REDIS_URL")})
 	require.NoError(t, err)
 	config := filepath.Join(dir, "config.json")
 	require.NoError(t, os.WriteFile(config, data, 0600))
@@ -173,4 +180,15 @@ func (w *standaloneWorld) proof(t *testing.T, merchant, account, nonce string) s
 	w.command(t, map[string]any{"Op": "authorize", "Merchant": merchant, "Account": account, "Nonce": nonce}, &tokens)
 	require.NotEmpty(t, tokens.IDToken)
 	return tokens.IDToken
+}
+
+func (w *standaloneWorld) link(t *testing.T, merchant, account string) billing.CustomerLink {
+	t.Helper()
+	challenge := w.challenge(t, merchant)
+	proof := w.proof(t, merchant, account, challenge.Nonce)
+	status, raw := w.request(t, http.MethodPost, "/v1/me/network-link", w.Merchants[merchant].CustomerToken, billing.CreateNetworkLinkParams{ChallengeID: challenge.ID, IDToken: proof})
+	require.Equal(t, http.StatusCreated, status, string(raw))
+	var link billing.CustomerLink
+	require.NoError(t, json.Unmarshal(raw, &link))
+	return link
 }

@@ -3,12 +3,14 @@ module github.com/open-rails/openrails/critical/server-fixture
 go 1.26.10
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jonboulle/clockwork v0.5.0
 	github.com/open-rails/authkit v1.35.5
 	github.com/open-rails/openrails v0.263.1
 	github.com/open-rails/openrails/server v0.263.1
+	github.com/redis/go-redis/v9 v9.22.0
 	github.com/stretchr/testify v1.12.1
 )
 
@@ -37,7 +39,6 @@ require (
 	github.com/go-webauthn/x v0.3.1 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
@@ -80,7 +81,6 @@ require (
 	github.com/open-rails/helpers v1.16.1 // indirect
 	github.com/open-rails/migratekit v1.11.1 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
-	github.com/redis/go-redis/v9 v9.22.0 // indirect
 	github.com/riverqueue/river v0.48.0 // indirect
 	github.com/riverqueue/river/riverdriver v0.48.0 // indirect
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.48.0 // indirect
