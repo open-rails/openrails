@@ -14,13 +14,14 @@ import (
 func TestCardRefundsRefuseTokenAmountsBeforeProviderIO(t *testing.T) {
 	for _, currency := range []string{"SOL", "USDC"} {
 		intent := refundIntent(t, TypeStripeRefund, func(p *RefundPayload) { p.Currency = currency; p.ProviderTarget = "ch_original" })
+		intent.Rail = "stripe"
 		provider := stripemock.NewUnstarted(stripemock.Options{})
 		rails := railresolve.FixedSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}}
 		stripe := NewStripeRefundHandler(nil, &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, rails, nil, stripeapi.NewFactory(provider))
 		out := stripe.Execute(t.Context(), intent)
 		require.Equal(t, OutcomeTerminal, out.Class)
 		require.Contains(t, out.Reason, "not supported by card payment rails")
-		require.Empty(t, provider.Submitted(""), "Stripe must never receive native token units in its currencyless refund amount")
+		require.Empty(t, provider.Submitted("/v1/refunds"), "Stripe must never receive native token units in its currencyless refund amount")
 		intent.IntentType, intent.Rail = TypeNMIRefund, "nmi"
 		out = (&NMIRefundHandler{}).Execute(t.Context(), intent)
 		require.Equal(t, OutcomeTerminal, out.Class)

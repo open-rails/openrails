@@ -134,6 +134,7 @@ func TestNMISubscriptionPresence(t *testing.T) {
 func TestStripeRefundClassification(t *testing.T) {
 	rails := railresolve.FixedSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}}
 	intent := refundIntent(t, TypeStripeRefund, func(p *RefundPayload) { p.ProviderTarget = "ch_1" })
+	intent.Rail = "stripe"
 
 	unconfigured := NewStripeRefundHandler(nil, &config.Config{}, nil, nil, nil).Execute(context.Background(), intent)
 	assert.Equal(t, OutcomeParked, unconfigured.Class)
