@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/intents"
@@ -22,8 +23,6 @@ import (
 // execution. Re-enqueue revives canceled/expired non-money work, preserves
 // settled outcomes, and cannot steal an operation from a live executor.
 func TestInlineProviderOperationUsesDurableLedger(t *testing.T) {
-	w := newWorld(t)
-	w.armDestructive()
 	cases := []struct {
 		status   string
 		executes bool
@@ -37,6 +36,12 @@ func TestInlineProviderOperationUsesDurableLedger(t *testing.T) {
 		{intents.StatusUnknownNeedsVerify, false},
 		{intents.StatusInFlight, false},
 	}
+	w := newWorld(t, func(cfg *config.Config) {
+		// This ledger scenario cancels nine distinct customers in one merchant;
+		// give its fixture that ordinary documented hourly allowance.
+		cfg.UserActionRateLimit.MinimumCustomersPerHour = int64(len(cases) + 1)
+	})
+	w.armDestructive()
 	// Import while the fixture's ordinary workers can settle their setup, then
 	// stop them so only the inline callers under test can claim these rows.
 	members := make([]*legacy, len(cases)+1)
@@ -49,19 +54,22 @@ func TestInlineProviderOperationUsesDurableLedger(t *testing.T) {
 	ctx := merchant.WithID(t.Context(), w.client[embedded].MerchantID())
 	params := func(l *legacy) intents.EnqueueParams {
 		sub := l.sub.UUID()
+		var key, origin string
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT idempotency_key, origin FROM billing.provider_intents
+			WHERE subscription_id = $1 AND intent_type = $2`), sub, intents.TypeStripeCancelSubscription).Scan(&key, &origin))
 		return intents.EnqueueParams{
 			MerchantID: w.client[embedded].MerchantID().UUID(), Provider: "stripe",
 			IntentType: intents.TypeStripeCancelSubscription, SubscriptionID: &sub,
-			PspID: w.psp["stripe"].UUID(), Origin: intents.OriginSystem,
+			PspID: w.psp["stripe"].UUID(), Origin: intents.Origin(origin),
 			Payload:        intents.StripeCancelPayload{RailSubscriptionID: l.railSub},
-			IdempotencyKey: "inline-cancel:" + sub.String(), NextAttemptAt: w.clock.Now(),
+			IdempotencyKey: key, NextAttemptAt: w.clock.Now(),
 		}
 	}
 	for i, tc := range cases {
 		t.Run(tc.status, func(t *testing.T) {
 			l := members[i]
-			_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.subscriptions SET status = 'canceled' WHERE id = $1`), l.sub.UUID())
-			require.NoError(t, err)
+			status, body := l.meCancel(l.sub)
+			require.Equal(t, http.StatusOK, status, "%v", body)
 			p := params(l)
 			prior, err := store.Enqueue(ctx, p)
 			require.NoError(t, err)
@@ -70,7 +78,8 @@ func TestInlineProviderOperationUsesDurableLedger(t *testing.T) {
 				attempts = 0
 			}
 			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.provider_intents
-				SET status = $2, attempts = $3, lease_expires_at = $4 WHERE id = $1`),
+				SET status = $2, attempts = $3, lease_expires_at = $4,
+				    executed_at = CASE WHEN $2 = 'succeeded' THEN $4::timestamptz ELSE NULL END WHERE id = $1`),
 				prior.ID, tc.status, attempts, w.clock.Now().Add(time.Hour))
 			require.NoError(t, err)
 			before, err := store.Get(ctx, prior.ID)
@@ -78,6 +87,9 @@ func TestInlineProviderOperationUsesDurableLedger(t *testing.T) {
 			row, err := runner.EnqueueAndExecute(ctx, p)
 			require.NoError(t, err)
 			require.Equal(t, prior.ID, row.ID, "the original operation keeps its identity")
+			durable, err := store.Get(ctx, row.ID)
+			require.NoError(t, err)
+			require.Equal(t, row, durable, "the inline response is the committed ledger row")
 			if tc.executes {
 				require.Equal(t, intents.StatusSucceeded, row.Status)
 				require.Equal(t, true, w.stripe.Subscription(l.railSub)["cancel_at_period_end"])
@@ -99,16 +111,13 @@ func TestInlineProviderOperationUsesDurableLedger(t *testing.T) {
 				require.Equal(t, before.Payload, row.Payload)
 				require.Empty(t, l.stripeSubWrites())
 			}
-			durable, err := store.Get(ctx, row.ID)
-			require.NoError(t, err)
-			require.Equal(t, row, durable, "the inline response is the committed ledger row")
 		})
 	}
 
 	t.Run("competing caller", func(t *testing.T) {
 		l := members[len(cases)]
-		_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.subscriptions SET status = 'canceled' WHERE id = $1`), l.sub.UUID())
-		require.NoError(t, err)
+		status, body := l.meCancel(l.sub)
+		require.Equal(t, http.StatusOK, status, "%v", body)
 		p := params(l)
 		g := newGate(func(r *http.Request) bool {
 			return r.Method == http.MethodGet && r.URL.Path == "/v1/subscriptions/"+l.railSub
@@ -137,7 +146,12 @@ func TestInlineProviderOperationUsesDurableLedger(t *testing.T) {
 		require.EqualValues(t, 1, other.Attempts, "the second caller cannot steal the live claim")
 		require.Empty(t, l.stripeSubWrites())
 		release()
-		got := <-first
+		var got answer
+		select {
+		case got = <-first:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the first executor did not finish after Stripe was released")
+		}
 		require.NoError(t, got.err)
 		require.Equal(t, other.ID, got.row.ID)
 		require.Equal(t, intents.StatusSucceeded, got.row.Status)
