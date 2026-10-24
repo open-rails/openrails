@@ -20,15 +20,11 @@
       "react": ["./node_modules/@types/react"],
       "class-variance-authority": ["./node_modules/class-variance-authority"]
     },
-    "types": ["vite/client", "vitest/globals"]
+    "types": ["vite/client"]
   },
   "include": [
     "src",
-    "e2e",
-    "playwright.e2e.config.ts",
     "vite.config.ts",
-    "vitest.config.ts",
     "eslint.config.js"
-  ],
-  "exclude": ["e2e/openrails/app"]
+  ]
 }

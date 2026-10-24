@@ -35,12 +35,27 @@ func (e *Engine) Transport() http.RoundTripper {
 		e.handlerOnce.Do(func() { e.handler = newServiceHandler(rt) })
 		e.handler.ServeHTTP(w, r)
 	})
-	return inprocess.NewTransport(served)
+	return engineTransport{engine: e, next: inprocess.NewTransport(served)}
+}
+
+type engineTransport struct {
+	engine *Engine
+	next   http.RoundTripper
+}
+
+func (t engineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if err := t.engine.CheckOpen(); err != nil {
+		return nil, err
+	}
+	return t.next.RoundTrip(r)
 }
 
 // LiveMerchant is id's directory row while it is a live merchant:
 // billing.ErrMerchantUnresolved for an unknown, deleted or archived one.
 func (e *Engine) LiveMerchant(ctx context.Context, id billing.MerchantID) (*merchants.Merchant, error) {
+	if err := e.CheckOpen(); err != nil {
+		return nil, err
+	}
 	directory := e.App.Runtime.Merchants
 	if id.IsZero() || directory == nil {
 		return nil, billing.ErrMerchantUnresolved

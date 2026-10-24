@@ -371,3 +371,15 @@ func (e *Engine) Close(ctx context.Context) error {
 	})
 	return e.closeErr
 }
+
+// CheckOpen refuses new handle operations after Close. Borrowed dependencies
+// stay usable by their host, so their availability cannot stand in for this
+// engine's lifetime.
+func (e *Engine) CheckOpen() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return fmt.Errorf("%w: engine is closed", billing.ErrUnreachable)
+	}
+	return nil
+}

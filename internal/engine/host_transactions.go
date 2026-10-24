@@ -86,6 +86,9 @@ func (e *Engine) ReleaseAdmissionsTx(ctx context.Context, mid billing.MerchantID
 // bind pins mid for a call inside tx, after reading it live through tx: an
 // unknown, deleted or archived merchant is billing.ErrMerchantUnresolved.
 func (e *Engine) bind(ctx context.Context, mid billing.MerchantID, tx pgx.Tx) (context.Context, error) {
+	if err := e.CheckOpen(); err != nil {
+		return ctx, err
+	}
 	if tx == nil {
 		return ctx, fmt.Errorf("openrails: a transaction is required")
 	}
