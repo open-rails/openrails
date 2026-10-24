@@ -3,13 +3,18 @@
 package critical_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
+	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/stripemock"
@@ -222,15 +227,34 @@ func TestPublicCatalog(t *testing.T) {
 		psps, err := a.alphaRemote.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
 		require.Len(t, psps.Items, 1)
-		_, err = a.alphaRemote.UpdatePSP(t.Context(), psps.Items[0].ID, billing.UpdatePSPParams{PublishableKey: ptr("pk_test_rotated"), ExpectedRevision: &psps.Items[0].Revision})
+		// This host owns a declared-file profile. PSP mutation through the
+		// merchant API requires Vault; the supported edit here is a real
+		// restart with the revised declaration, preserving the same database.
+		cfg := a.cfg
+		cfg.Merchants = maps.Clone(a.cfg.Merchants)
+		declaration := cfg.Merchants["alpha"]
+		declaration.PSPs = openrails.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_rotated"}.PSPConfig()}
+		cfg.Merchants["alpha"] = declaration
+		a.server.Close()
+		require.NoError(t, a.engine.Close(t.Context()))
+		reopened, err := openrails.New(t.Context(), cfg, a.deps)
 		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, reopened.Close(context.Background())) })
+		mux := http.NewServeMux()
+		require.NoError(t, openrailshttp.Mount(mux, reopened, openrails.Routes{Auth: a.auth.Authenticator(), RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Programmatic: true}}))
+		a.server = httptest.NewServer(mux)
+		t.Cleanup(a.server.Close)
+		a.alphaRemote = a.remote(t, a.alpha.MerchantID(), a.alphaKey.Secret)
+		updatedPSP, err := a.alphaRemote.GetPSP(t.Context(), psps.Items[0].ID)
+		require.NoError(t, err)
+		require.Equal(t, "pk_test_rotated", updatedPSP.PublishableKey)
 		kept, err := a.alphaRemote.GetOrder(t.Context(), order.ID)
 		require.NoError(t, err)
 		require.EqualValues(t, 29_970_000, kept.Total)
 		require.Equal(t, price.ID, *kept.Lines[0].PriceID)
 		require.EqualValues(t, 9_990_000, kept.Lines[0].UnitAmount)
 		require.Equal(t, 24, *kept.Lines[0].AccessDurationHours)
-		status, raw := a.request(t, "POST", "/v1/me/orders/"+order.ID.String()+"/pay", a.aliceToken, billing.PayOrderParams{ExpectedTotal: 29_970_000, Payment: billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}})
+		status, raw := a.request(t, "POST", "/v1/me/orders/"+order.ID.String()+"/pay", a.aliceToken, billing.PayOrderParams{ExpectedTotal: 29_970_000, Payment: billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}, map[string]string{"Idempotency-Key": "immutable-order-pay"})
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var paid billing.Order
 		require.NoError(t, json.Unmarshal(raw, &paid))
