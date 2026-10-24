@@ -11,13 +11,20 @@ export interface Fixture {
   subscriptionPrice: string
   upgradePrice: string
   psp: string
+  networkToken?: string
+  networkMerchant?: string
+  networkCustomer?: string
+  networkAccount?: string
+  nmiToken?: string
+  nmiPSP?: string
+  nmiCardToken?: string
 }
 declare global {
   interface Window {
     fixture: Fixture
     billing: Client
     calls: string[]
-    makeBilling: (token?: string, fault?: string) => Client
+    makeBilling: (token?: string, fault?: string, baseUrl?: string) => Client
     makeRefreshingBilling: () => Client
     refreshes: number
     fault: string
@@ -39,10 +46,10 @@ const observe = (client: Client): Client =>
       }
     },
   })
-window.makeBilling = (token = fixture.token, fault = "") =>
+window.makeBilling = (token = fixture.token, fault = "", baseUrl = "/v1") =>
   observe(
     createBillingClient({
-      baseUrl: "/v1",
+      baseUrl,
       getToken: () => token,
       fetch: (input, init) => {
         const headers = new Headers(init.headers)

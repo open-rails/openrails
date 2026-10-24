@@ -69,9 +69,16 @@ func TestPublicLifecycle(t *testing.T) {
 		require.Equal(t, alpha.ID, stillUsable.ID)
 	})
 	t.Run("OR-J04-S05/close-preserves-borrowed-pool-and-worker-fleet", func(t *testing.T) {
-		a := newAuthorityWorld(t)
+		// Keep a local customer directory so this owner also exposes its
+		// public in-process SCIM handler; HTTP authority still uses real AuthKit.
+		a := newAuthorityWorld(t, func(w *world) { w.deps.UserInfo = nil })
 		w := a.world
-		_, err := a.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "before-network-close", DisplayName: "Mounted authority control"})
+		scim, err := w.local.SCIMHandler()
+		require.NoError(t, err)
+		beforeSCIM := httptest.NewRecorder()
+		scim.ServeHTTP(beforeSCIM, httptest.NewRequest("GET", "/ServiceProviderConfig", nil))
+		require.Equal(t, http.StatusOK, beforeSCIM.Code, beforeSCIM.Body.String())
+		_, err = a.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "before-network-close", DisplayName: "Mounted authority control"})
 		require.NoError(t, err)
 		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "durable-before-close", DisplayName: "Durable"})
 		require.NoError(t, err)
@@ -101,6 +108,11 @@ func TestPublicLifecycle(t *testing.T) {
 		require.NoError(t, err)
 		_, localErr := w.local.ReleaseAdmissionsTx(t.Context(), tx, []string{"closed-owner"})
 		require.NoError(t, tx.Rollback(t.Context()))
+		_, scimErr := w.local.SCIMHandler()
+		require.ErrorIs(t, scimErr, billing.ErrUnreachable)
+		closedSCIM := httptest.NewRecorder()
+		scim.ServeHTTP(closedSCIM, httptest.NewRequest("GET", "/ServiceProviderConfig", nil))
+		require.Equal(t, http.StatusServiceUnavailable, closedSCIM.Code)
 		status, raw := a.request(t, "POST", "/v1/catalog/products", a.alphaKey.Secret, billing.CreateProductParams{Key: "after-network-close", DisplayName: "Must not commit over mounted HTTP"})
 		t.Logf("after Close: warm read=%v; write=%v; batched cache=%v; uncached read=%v; local transaction=%v", readErr, writeErr, batchErr, uncachedErr, localErr)
 		require.ErrorIs(t, readErr, billing.ErrUnreachable, "closed handles cannot serve cached state")

@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import path from "node:path"
 
 const [reportPath, selection] = process.argv.slice(2)
 const required = new Set(selection.split(","))
@@ -39,7 +40,10 @@ const methods = {
   ],
   "OR-UI-04": ["getAccount", "setCartLine"],
   "OR-UI-05": ["createOrder", "getOrder"],
+  "OR-UI-06": ["createNetworkLinkChallenge", "createNetworkLink"],
+  "OR-UI-07": ["addPaymentMethod", "listPaymentMethods", "removePaymentMethod"],
 }
+const observed = new Set()
 const seen = new Set(),
   errors = [...(report.errors ?? [])]
 function walk(suite) {
@@ -64,7 +68,10 @@ function walk(suite) {
           const body = attachment.body
             ? Buffer.from(attachment.body, "base64").toString()
             : fs.readFileSync(attachment.path, "utf8")
-          for (const method of JSON.parse(body)) invoked.add(method)
+          for (const method of JSON.parse(body)) {
+            invoked.add(method)
+            observed.add(method)
+          }
         }
       for (const method of methods[id] ?? [])
         if (!invoked.has(method)) errors.push(`${id} did not invoke ${method}`)
@@ -73,6 +80,19 @@ function walk(suite) {
 for (const suite of report.suites ?? []) walk(suite)
 for (const id of required)
   if (!seen.has(id) || !methods[id]) errors.push(`Missing/unmapped case: ${id}`)
+fs.writeFileSync(
+  path.join(path.dirname(reportPath), "coverage.json"),
+  JSON.stringify(
+    {
+      required: [...required].sort(),
+      executed: [...seen].sort(),
+      methods: [...observed].sort(),
+      errors,
+    },
+    null,
+    2
+  ) + "\n"
+)
 if (!required.size || errors.length) {
   console.error(errors)
   process.exit(1)

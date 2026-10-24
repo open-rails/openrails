@@ -5,6 +5,7 @@ package critical_test
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"testing"
 
@@ -61,6 +62,62 @@ func TestPublicCatalog(t *testing.T) {
 		require.EqualValues(t, 2997, effects[0].Amount, "USD native units are micros; the external charge settles exact cents")
 	})
 	t.Run("OR-J05-S02/invalid-money-quantity-and-trial-cannot-create-a-price", func(t *testing.T) {
+		t.Run("public-value-boundaries", func(t *testing.T) {
+			for _, sample := range []struct {
+				input    string
+				units    int64
+				currency string
+			}{{"9.99 USD", 9_990_000, "USD"}, {"0.000001 USD", 1, "USD"}, {"9223372036854.775807 USD", math.MaxInt64, "USD"}, {"0.000000001 SOL", 1, "SOL"}} {
+				doc, err := catalog.ParseApplicationJSON([]byte(fmt.Sprintf(`{"schema_version":1,"products":{"exact":{"display_name":"Exact","prices":{"exact":{"amount":%q}}}}}`, sample.input)))
+				require.NoError(t, err)
+				price := doc.Products["exact"].Prices["exact"]
+				require.Equal(t, sample.units, price.UnitAmount.Value)
+				require.Equal(t, sample.currency, price.Currency.Value)
+			}
+			for _, sample := range []struct {
+				input string
+				hours int
+			}{{"1 hour", 1}, {"30 days", 720}, {"2 weeks", 336}, {"2562047 hours", 2562047}} {
+				hours, err := catalog.ParseDurationHours(sample.input)
+				require.NoError(t, err)
+				require.Equal(t, sample.hours, hours)
+			}
+			for _, invalid := range []string{"0 hours", "-1 day", "1.5 days", "1 month", "2562048 hours", "9223372036854775807 weeks"} {
+				_, err := catalog.ParseDurationHours(invalid)
+				require.Error(t, err, invalid)
+			}
+			id, err := billing.NewPriceID("media/a:b", "monthly plus", 7)
+			require.NoError(t, err)
+			require.Equal(t, "media%2Fa%3Ab:monthly%20plus:v7", id.String())
+			parsed, err := billing.ParsePriceID("media%2Fa%3Ab:monthly%20plus:v7")
+			require.NoError(t, err)
+			require.Equal(t, id, parsed)
+			for _, invalid := range []string{"media%2fa%3Ab:monthly%20plus:v7", "media/a:monthly:v1", "media:monthly:v0", "media:monthly:v01", "media:monthly:v9223372036854775808", "media%00:monthly:v1"} {
+				_, err := billing.ParsePriceID(invalid)
+				require.Error(t, err, invalid)
+			}
+			_, err = billing.ParseProductID("pay_00000000-0000-4000-8000-000000000001")
+			require.Error(t, err, "resource kind cannot be exchanged through its wire ID")
+			_, err = billing.ParseMerchantID("")
+			require.Error(t, err, "a merchant identity is required")
+			for _, sample := range []struct {
+				wire   string
+				amount int64
+			}{{"9007199254740993", 9_007_199_254_740_993}, {"9223372036854775807", math.MaxInt64}, {"-9223372036854775808", math.MinInt64}} {
+				var payment billing.Payment
+				require.NoError(t, json.Unmarshal([]byte(`{"amount":"`+sample.wire+`","currency":"USD"}`), &payment))
+				require.Equal(t, sample.amount, payment.Amount)
+				raw, err := json.Marshal(payment)
+				require.NoError(t, err)
+				var encoded map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(raw, &encoded))
+				require.Equal(t, `"`+sample.wire+`"`, string(encoded["amount"]))
+			}
+			for _, invalid := range []string{`{"amount":"9223372036854775808"}`, `{"amount":"-9223372036854775809"}`, `{"amount":9.99}`, `{"amount":"1e6"}`} {
+				var payment billing.Payment
+				require.Error(t, json.Unmarshal([]byte(invalid), &payment), invalid)
+			}
+		})
 		for _, amount := range []string{"9.9900001 USD", "9223372036854.775808 USD", "9.99 UNKNOWN", "-1 USD"} {
 			t.Run(amount, func(t *testing.T) {
 				_, err := catalog.ParseApplicationJSON([]byte(fmt.Sprintf(`{"schema_version":1,"products":{"bad":{"display_name":"Bad","prices":{"bad":{"amount":%q}}}}}`, amount)))

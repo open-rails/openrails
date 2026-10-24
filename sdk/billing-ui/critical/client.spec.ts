@@ -110,7 +110,9 @@ test("OR-UI-01: exact cart, order ownership, account and customer policy", async
   })
   expect(facts.changed.low_balance_lines).toContainEqual(facts.low)
   expect(facts.usage.customer_id).toBe(facts.f.alice)
-  expect(facts.usage.rows).toMatchObject([{ key: "sdk-compute", amount: "20", event_count: 1 }])
+  expect(facts.usage.rows).toMatchObject([
+    { key: "sdk-compute", amount: "20", event_count: 1 },
+  ])
   const entered = await card(page)
   const paid = await page.evaluate(
     async ({ id, token }) =>
@@ -289,7 +291,7 @@ test("OR-UI-02: bank challenges, saved cards and subscription changes", async ({
     purchase.order.id
   )
   expect(complete.order.status).toBe("complete")
-  const subscriptionID = complete.order.lines[0].subscription_id!
+  let subscriptionID = complete.order.lines[0].subscription_id!
   const original = await page.evaluate(
     (id) => window.billing.getSubscription(id),
     subscriptionID
@@ -307,7 +309,13 @@ test("OR-UI-02: bank challenges, saved cards and subscription changes", async ({
       }),
     subscriptionID
   )
-  expect(preview).toMatchObject({ currency: "USD" })
+  expect(preview).toMatchObject({
+    currency: "USD",
+    effective: "now",
+    amount_due_now: "10000000",
+    next_charge_amount: "20000000",
+    price_id: await page.evaluate(() => window.fixture.upgradePrice),
+  })
   const change = await page.evaluate(
     (id) =>
       window.billing.changeSubscription(id, {
@@ -323,6 +331,8 @@ test("OR-UI-02: bank challenges, saved cards and subscription changes", async ({
     subscriptionID
   )
   expect(upgraded.status).toBe("succeeded")
+  expect(upgraded.subscription_id).toBeTruthy()
+  subscriptionID = upgraded.subscription_id!
   const live = await page.evaluate(
     (id) => window.billing.getSubscription(id),
     subscriptionID
@@ -350,9 +360,23 @@ test("OR-UI-02: bank challenges, saved cards and subscription changes", async ({
       window.billing.addPaymentMethod({ psp_id: window.fixture.psp, token }),
     disposable.token
   )
-  await page.evaluate((id) => window.billing.removePaymentMethod(id), extra.id)
+  const unsupported = await page.evaluate(async (id) => {
+    try {
+      await window.billing.removePaymentMethod(id)
+      return null
+    } catch (error) {
+      return {
+        status: (error as { status: number }).status,
+        code: (error as { code: string }).code,
+      }
+    }
+  }, extra.id)
+  expect(unsupported).toEqual({
+    status: 400,
+    code: "payment_method_delete_unsupported",
+  })
   const kept = await page.evaluate(() => window.billing.listPaymentMethods())
-  expect(kept.data.map((item) => item.id)).not.toContain(extra.id)
+  expect(kept.data.map((item) => item.id)).toContain(extra.id)
   expect(kept.data.map((item) => item.id)).toContain(saved.id)
 })
 
@@ -407,4 +431,84 @@ test("OR-UI-03: unavailable network and invalid checkout reporting retain typed 
   expect((await page.evaluate(() => window.billing.getAccount())).id).toBe(
     await page.evaluate(() => window.fixture.alice)
   )
+})
+
+test("OR-UI-06: enabled network linking consumes a real consented OAuth proof", async ({
+  page,
+}) => {
+  const result = await page.evaluate(async () => {
+    const f = window.fixture
+    if (!f.networkToken)
+      throw new Error("real standalone network fixture is required")
+    const client = window.makeBilling(f.networkToken, "", "/__network/v1")
+    const challenge = await client.createNetworkLinkChallenge()
+    const response = await fetch("/__fixture/network-proof", {
+      method: "POST",
+      body: JSON.stringify({ nonce: challenge.nonce }),
+    })
+    const proof = (await response.json()) as {
+      result?: { id_token?: string }
+      error?: string
+    }
+    if (!response.ok || proof.error || !proof.result?.id_token)
+      throw new Error(
+        "real OAuth sign-in and consent did not return the nonce-bound ID token"
+      )
+    const input = { challengeId: challenge.id, idToken: proof.result.id_token }
+    const linked = await client.createNetworkLink(input)
+    let replay: unknown
+    try {
+      await client.createNetworkLink(input)
+    } catch (error) {
+      replay = {
+        status: (error as { status: number }).status,
+        code: (error as { code: string }).code,
+      }
+    }
+    return {
+      linked,
+      replay,
+      challenge,
+      merchant: f.networkMerchant,
+      customer: f.networkCustomer,
+      account: f.networkAccount,
+    }
+  })
+  expect(result.challenge.id).toBeTruthy()
+  expect(result.challenge.nonce).toBeTruthy()
+  expect(result.linked).toMatchObject({
+    merchant_id: result.merchant,
+    customer_id: result.customer,
+    account_id: result.account,
+    method: "connect",
+    status: "active",
+  })
+  expect(result.replay).toEqual({
+    status: 400,
+    code: "network_link_challenge_invalid",
+  })
+})
+
+test("OR-UI-07: supported card deletion removes actual NMI custody", async ({
+  page,
+}) => {
+  const result = await page.evaluate(async () => {
+    const f = window.fixture
+    if (!f.nmiToken || !f.nmiPSP || !f.nmiCardToken)
+      throw new Error("the actual NMI wire fixture is required")
+    const client = window.makeBilling(f.nmiToken, "", "/__nmi/v1")
+    const saved = await client.addPaymentMethod({
+      psp_id: f.nmiPSP,
+      token: f.nmiCardToken,
+    })
+    const before = await client.listPaymentMethods()
+    await client.removePaymentMethod(saved.id)
+    const after = await client.listPaymentMethods()
+    return { saved, before, after }
+  })
+  expect(result.saved.card).toMatchObject({ brand: "visa", last4: "5454" })
+  expect(result.before.data.map((method) => method.id)).toEqual([
+    result.saved.id,
+  ])
+  expect(result.after.data).toEqual([])
 })
