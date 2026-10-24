@@ -126,6 +126,8 @@ examples_e2e() {
 }
 
 case "${1:-all}" in
+  guards) guards ;;
+  go-tests) go_tests ;;
   checks) checks ;;
   build) build ;;
   go) guards; go_tests ;;
@@ -136,5 +138,5 @@ case "${1:-all}" in
   cli-e2e) cli_e2e ;;
   examples-e2e) examples_e2e ;;
   all) checks; e2e ;;
-  *) echo "usage: bash scripts/check.sh [checks|build|go|console|chart|e2e|authkit-adapter-e2e|cli-e2e|examples-e2e|all]" >&2; exit 2 ;;
+  *) echo "usage: bash scripts/check.sh [guards|go-tests|checks|build|go|console|chart|e2e|authkit-adapter-e2e|cli-e2e|examples-e2e|all]" >&2; exit 2 ;;
 esac

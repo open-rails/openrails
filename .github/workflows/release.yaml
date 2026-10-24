@@ -15,19 +15,11 @@ on:
       tag:
         description: Release whose attached billing-ui tarball to publish to npm (e.g. v0.230.0)
         required: true
-  pull_request:
-    branches: [master]
-    paths:
-      - .goreleaser.yaml
-      - .github/workflows/release.yaml
-      - server/go.mod
-      - adapters/authkit/go.mod
-      - scripts/release
-      - scripts/build-admin-console.sh
-      - scripts/pack-billing-ui.sh
-      - internal/buildinfo/**
-      - server/web/console/embed.go
-      - server/web/console/vite.config.ts
+  workflow_call:
+    inputs:
+      snapshot:
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -39,7 +31,7 @@ concurrency:
 jobs:
   goreleaser:
     name: GoReleaser
-    if: github.event_name != 'workflow_dispatch'
+    if: github.event_name != 'workflow_dispatch' || inputs.snapshot
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -104,7 +96,7 @@ jobs:
   chart:
     name: Publish the Helm chart
     needs: goreleaser
-    if: github.event_name != 'workflow_dispatch'
+    if: github.event_name != 'workflow_dispatch' || inputs.snapshot
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -133,7 +125,7 @@ jobs:
   npm:
     name: Publish @openrails/billing-ui to npm
     needs: goreleaser
-    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && needs.goreleaser.result == 'success')) }}
+    if: ${{ !cancelled() && !inputs.snapshot && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && needs.goreleaser.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
