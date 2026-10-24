@@ -36,7 +36,7 @@ type world struct {
 	deps   openrails.Deps
 }
 
-func newWorld(t *testing.T) *world {
+func newWorld(t *testing.T, configure ...func(*world)) *world {
 	t.Helper()
 	dsn := os.Getenv("OPENRAILS_CRITICAL_DSN")
 	require.NotEmpty(t, dsn, "OPENRAILS_CRITICAL_DSN must name a disposable PostgreSQL database; critical scenarios never skip")
@@ -65,6 +65,9 @@ func newWorld(t *testing.T) *world {
 		},
 	}
 	w.deps = openrails.Deps{Postgres: pool, Clock: w.clock, FXTransport: fixedFX(t)}
+	for _, change := range configure {
+		change(w)
+	}
 	w.engine, err = openrails.New(t.Context(), w.cfg, w.deps)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, w.engine.Close(context.Background())) })
