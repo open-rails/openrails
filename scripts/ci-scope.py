@@ -46,7 +46,12 @@ def select(changes):
             selected.update({key: True for key in SOURCE})
             reasons.append("shared SDK client/API: " + path)
             continue
-        browser_roots = ("sdk/billing-ui/src/components/", "sdk/billing-ui/src/ui/", "sdk/billing-ui/src/styles/", "sdk/billing-ui/src/locales/", "sdk/billing-ui/tests/", "web/pay/src/", "web/pay/tests/", "server/web/console/src/", "server/web/console/tests/")
+        frontend = path.startswith(("sdk/billing-ui/src/", "web/pay/src/", "server/web/console/src/"))
+        if frontend and (any(part in {"api", "client", "types", "hooks", "services", "store", "stores"} for part in Path(path).parts) or any(word in Path(path).stem.lower() for word in ("api", "client", "request", "fetch"))):
+            selected.update({key: True for key in SOURCE})
+            reasons.append("shared frontend API/client: " + path)
+            continue
+        browser_roots = tuple(root + region for root in ("sdk/billing-ui/src/", "web/pay/src/", "server/web/console/src/") for region in ("components/", "ui/", "styles/", "locales/", "assets/")) + ("sdk/billing-ui/tests/", "web/pay/tests/", "server/web/console/tests/")
         if path.startswith(browser_roots) and Path(path).suffix in (".ts", ".tsx", ".js", ".jsx", ".css", ".svg", ".png", ".webp"):
             selected["browser"] = selected["security"] = True
             reasons.append("isolated browser source: " + path)

@@ -46,6 +46,7 @@ jobs:
         id: scope
         env:
           EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -58,7 +59,8 @@ jobs:
             test "$(git rev-parse HEAD^1)" = "$BASE_SHA"
             test "$(git rev-parse HEAD^2)" = "$HEAD_SHA"
             git check-ref-format "refs/heads/$BASE_REF"
-            current="$(git ls-remote --exit-code origin "refs/heads/$BASE_REF" | cut -f1)"
+            encoded="$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe="/"))' "$BASE_REF")"
+            current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$encoded" --jq .object.sha)"
             test "$current" = "$BASE_SHA" || { echo 'Base moved; update the PR and rerun.' >&2; exit 1; }
             printf 'base_ref=%s\nbase_sha=%s\n' "$BASE_REF" "$BASE_SHA" >> "$GITHUB_OUTPUT"
             python3 scripts/ci-scope.py --base "$BASE_SHA" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT" | tee "$RUNNER_TEMP/suites.json"
@@ -461,12 +463,15 @@ jobs:
       - name: Require every selected suite and the current base
         env:
           RESULTS: ${{ toJSON(needs) }}
-          BASE_REF: ${{ needs.scope.outputs.base_ref }}
-          BASE_SHA: ${{ needs.scope.outputs.base_sha }}
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           python3 - <<'CHECK'
-          import json, os
+          import json, os, re, subprocess
+          from urllib.parse import quote
           result = json.loads(os.environ['RESULTS'])
           if result['scope']['result'] != 'success':
               raise SystemExit('Scope verification failed or did not run')
@@ -483,8 +488,14 @@ jobs:
               actual = result[job]['result']
               if actual != expected:
                   raise SystemExit(f'{job}: {actual}; expected {expected}')
+          if os.environ['EVENT_NAME'] == 'pull_request':
+              ref, base = plan.get('base_ref', ''), plan.get('base_sha', '')
+              if not ref or not re.fullmatch(r'[0-9a-f]{40}', base):
+                  raise SystemExit('Missing tested PR base identity')
+              if ref != os.environ['EVENT_BASE_REF'] or base != os.environ['EVENT_BASE_SHA']:
+                  raise SystemExit('Tested base differs from the PR event')
+              endpoint = f'repos/{os.environ["GITHUB_REPOSITORY"]}/git/ref/heads/{quote(ref, safe="/")}'
+              current = subprocess.check_output(['gh', 'api', endpoint, '--jq', '.object.sha'], text=True).strip()
+              if current != base:
+                  raise SystemExit('Base moved during tests; update the PR and rerun')
           CHECK
-          if [[ -n "$BASE_REF" ]]; then
-            current="$(git ls-remote --exit-code origin "refs/heads/$BASE_REF" | cut -f1)"
-            test "$current" = "$BASE_SHA" || { echo 'Base moved during tests; update the PR and rerun.' >&2; exit 1; }
-          fi

@@ -31,7 +31,7 @@ class ScopeTests(unittest.TestCase):
 
     def test_browser_region_keeps_all_browser_consumers(self):
         self.assertEqual(self.active([("M", "sdk/billing-ui/src/components/Price.tsx")]), {"browser", "security"})
-        self.assertEqual(self.active([("M", "web/pay/src/pay.tsx")]), {"browser", "security"})
+        self.assertEqual(self.active([("M", "web/pay/src/components/PayButton.tsx")]), {"browser", "security"})
 
     def test_examples_keep_go_and_browser_hosts(self):
         self.assertEqual(self.active([("A", "examples/own-auth/main.go")]), {"core", "examples", "browser", "security"})
@@ -40,7 +40,7 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(self.active([("M", "deploy/helm/openrails/templates/deployment.yaml")]), {"chart", "security"})
 
     def test_shared_and_unknown_paths_are_broad(self):
-        for path in ("engine.go", "internal/config/runtime.go", "migrations/0114.sql", "go.mod", "sdk/billing-ui/pnpm-lock.yaml", "docs/api/routes.md", "new-directory/check.ts", "sdk/billing-ui/src/client.ts", "sdk/billing-ui/src/client/request.ts"):
+        for path in ("engine.go", "internal/config/runtime.go", "migrations/0114.sql", "go.mod", "sdk/billing-ui/pnpm-lock.yaml", "docs/api/routes.md", "new-directory/check.ts", "sdk/billing-ui/src/client.ts", "sdk/billing-ui/src/client/request.ts", "web/pay/src/api.ts", "web/pay/src/components/ApiClient.ts", "server/web/console/src/hooks/useMerchant.ts"):
             with self.subTest(path=path):
                 self.assertTrue(set(scope.SOURCE) <= self.active([("M", path)]))
 
@@ -53,7 +53,7 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(self.active([]), set(scope.SOURCE) | {"artifacts"})
 
     def test_mixed_regions_union(self):
-        self.assertEqual(self.active([("M", "web/pay/src/pay.tsx"), ("M", "deploy/helm/openrails/values.yaml")]), {"browser", "chart", "security"})
+        self.assertEqual(self.active([("M", "web/pay/src/components/PayButton.tsx"), ("M", "deploy/helm/openrails/values.yaml")]), {"browser", "chart", "security"})
 
     def test_real_git_rename_is_not_lost(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -86,7 +86,7 @@ class WorkflowBoundaryTests(unittest.TestCase):
         good = {job: {'result': 'success'} for job in jobs}
         good['scope'] = {'result': 'success', 'outputs': {key: 'true' for key in scope.ALL}}
         def run(value):
-            return subprocess.run([sys.executable, '-c', self.gate_python], env={**os.environ, 'RESULTS': json.dumps(value)}, capture_output=True)
+            return subprocess.run([sys.executable, '-c', self.gate_python], env={**os.environ, 'EVENT_NAME': 'workflow_dispatch', 'RESULTS': json.dumps(value)}, capture_output=True)
         self.assertEqual(run(good).returncode, 0)
         for status in ['failure', 'cancelled', 'skipped']:
             broken = json.loads(json.dumps(good))
@@ -94,6 +94,26 @@ class WorkflowBoundaryTests(unittest.TestCase):
             self.assertNotEqual(run(broken).returncode, 0, status)
         good['scope']['outputs'].pop('runtime')
         self.assertNotEqual(run(good).returncode, 0)
+
+    def test_gate_requires_event_bound_current_base(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tools = Path(directory)
+            gh = tools/'gh'; gh.write_text('#!/bin/sh\nprintf "%s\\n" "$CURRENT_TEST_BASE"\n'); gh.chmod(0o700)
+            base = 'a' * 40
+            plan = {key:'false' for key in scope.ALL}
+            plan.update(base_ref='master', base_sha=base)
+            jobs = ['prose', 'go-test', 'lint', 'console', 'chart', 'sql', 'e2e-shards', 'examples-e2e', 'security', 'browser', 'artifact-release', 'artifact-image']
+            good = {job:{'result':'skipped'} for job in jobs}
+            good.update(guards={'result':'success'}, scope={'result':'success', 'outputs':plan})
+            env = {**os.environ, 'PATH':str(tools)+os.pathsep+os.environ['PATH'], 'EVENT_NAME':'pull_request', 'EVENT_BASE_REF':'master', 'EVENT_BASE_SHA':base, 'CURRENT_TEST_BASE':base, 'GITHUB_REPOSITORY':'example/project'}
+            def run(value, **extra):
+                return subprocess.run([sys.executable, '-c', self.gate_python], env={**env, **extra, 'RESULTS':json.dumps(value)}, capture_output=True)
+            self.assertEqual(run(good).returncode, 0)
+            for missing in ['base_ref', 'base_sha']:
+                broken = json.loads(json.dumps(good)); broken['scope']['outputs'].pop(missing)
+                self.assertNotEqual(run(broken).returncode, 0)
+            self.assertNotEqual(run(good, CURRENT_TEST_BASE='b'*40).returncode, 0)
+            self.assertNotEqual(run(good, EVENT_BASE_SHA='b'*40).returncode, 0)
 
     def test_real_synthetic_merge_and_changed_base(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -118,7 +138,9 @@ class WorkflowBoundaryTests(unittest.TestCase):
             git('checkout', '-q', 'master'); git('merge', '--no-ff', '-qm', 'synthetic', 'feature')
             merged = git('rev-parse', 'HEAD')
             out = root/'outputs'; out.touch()
-            environment = {**os.environ, 'EVENT':'pull_request', 'BASE_REF':'master', 'BASE_SHA':base, 'HEAD_SHA':head,
+            tools = root/'bin'; tools.mkdir()
+            gh = tools/'gh'; gh.write_text('#!/bin/sh\ngit --git-dir="$CI_TEST_ORIGIN" rev-parse refs/heads/master\n'); gh.chmod(0o700)
+            environment = {**os.environ, 'PATH':str(tools)+os.pathsep+os.environ['PATH'], 'CI_TEST_ORIGIN':str(origin), 'GITHUB_REPOSITORY':'example/project', 'EVENT':'pull_request', 'BASE_REF':'master', 'BASE_SHA':base, 'HEAD_SHA':head,
                            'GITHUB_SHA':merged, 'GITHUB_REF':'refs/pull/1/merge', 'GITHUB_OUTPUT':str(out),
                            'GITHUB_STEP_SUMMARY':str(root/'summary'), 'RUNNER_TEMP':str(root)}
             def verify(**updates):
