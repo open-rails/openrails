@@ -120,7 +120,7 @@ func (p *nmiJournal) money(t *testing.T, transactions int, net int64) {
 	require.Equal(t, net, amount)
 }
 
-func nmiMembership(t *testing.T) (*authorityWorld, *nmiJournal, *billing.Subscription) {
+func nmiMembership(t *testing.T, configure ...func(*nmimock.Schedule)) (*authorityWorld, *nmiJournal, *billing.Subscription) {
 	t.Helper()
 	a, p := newNMIWorld(t)
 	p.core.AddPlan(nmimock.Plan{ID: "weekly", Name: "Weekly", Amount: "10.00", Days: 7})
@@ -134,7 +134,11 @@ func nmiMembership(t *testing.T) (*authorityWorld, *nmiJournal, *billing.Subscri
 	started, due := a.clock.Now(), a.clock.Now().Add(7*24*time.Hour)
 	vaultID := p.core.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
 	vault := p.core.Vault(vaultID)
-	scheduleID := p.core.AddSchedule(nmimock.Schedule{Vault: vaultID, Plan: "weekly", Amount: "10.00", Days: 7, Created: started, NextBilling: due, Order: "legacy-nmi-membership"})
+	schedule := nmimock.Schedule{Vault: vaultID, Plan: "weekly", Amount: "10.00", Days: 7, Created: started, NextBilling: due, Order: "legacy-nmi-membership"}
+	for _, change := range configure {
+		change(&schedule)
+	}
+	scheduleID := p.core.AddSchedule(schedule)
 	initial := p.core.AddScheduleSale(scheduleID, started)
 	require.NoError(t, p.persist(t.Context()))
 	customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
