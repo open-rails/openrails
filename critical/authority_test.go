@@ -142,31 +142,44 @@ func (a *authorityWorld) remote(t *testing.T, merchant billing.MerchantID, crede
 
 func (a *authorityWorld) request(t *testing.T, method, path, credential string, body any, extraHeaders ...map[string]string) (int, []byte) {
 	t.Helper()
+	status, raw, err := a.do(t.Context(), method, path, credential, body, extraHeaders...)
+	require.NoError(t, err)
+	return status, raw
+}
+
+// Concurrent callers return errors to the test goroutine; they never call
+// testing.FailNow from an application/request goroutine.
+func (a *authorityWorld) do(ctx context.Context, method, path, credential string, body any, extraHeaders ...map[string]string) (int, []byte, error) {
 	var data []byte
 	if body != nil {
 		var err error
 		data, err = json.Marshal(body)
-		require.NoError(t, err)
+		if err != nil {
+			return 0, nil, err
+		}
 	}
-	r, err := http.NewRequestWithContext(t.Context(), method, a.server.URL+path, bytes.NewReader(data))
-	require.NoError(t, err)
+	request, err := http.NewRequestWithContext(ctx, method, a.server.URL+path, bytes.NewReader(data))
+	if err != nil {
+		return 0, nil, err
+	}
 	if credential != "" {
-		r.Header.Set("Authorization", "Bearer "+credential)
+		request.Header.Set("Authorization", "Bearer "+credential)
 	}
 	if body != nil {
-		r.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Content-Type", "application/json")
 	}
 	for _, headers := range extraHeaders {
 		for key, value := range headers {
-			r.Header.Set(key, value)
+			request.Header.Set(key, value)
 		}
 	}
-	res, err := a.server.Client().Do(r)
-	require.NoError(t, err)
-	defer res.Body.Close()
-	raw, err := io.ReadAll(res.Body)
-	require.NoError(t, err)
-	return res.StatusCode, raw
+	response, err := a.server.Client().Do(request)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	return response.StatusCode, raw, err
 }
 
 func TestAuthority(t *testing.T) {

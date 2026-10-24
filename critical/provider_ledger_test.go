@@ -3,6 +3,7 @@
 package critical_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -62,13 +63,19 @@ func newProviderLedger(t *testing.T, w *world) *providerLedger {
 }
 
 func (p *providerLedger) serve(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Authorization") != "Bearer sk_test_critical" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","code":"api_key_expired","message":"fixture credential refused"}}`))
+		return
+	}
 	response := httptest.NewRecorder()
 	p.core.ServeHTTP(response, r)
 	// Materialize independent external economic evidence, including a successful
 	// response whose connection will be deliberately lost below. Duplicate HTTP
 	// requests do not themselves create another economic effect.
 	journalContext, cancelJournal := context.WithTimeout(context.Background(), 5*time.Second)
-	err := p.persist(journalContext)
+	err := p.persist(journalContext, r, response)
 	cancelJournal()
 	if err != nil {
 		p.mu.Lock()
@@ -99,7 +106,7 @@ func (p *providerLedger) serve(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(response.Body.Bytes())
 }
 
-func (p *providerLedger) persist(ctx context.Context) error {
+func (p *providerLedger) persist(ctx context.Context, request *http.Request, response *httptest.ResponseRecorder) error {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -120,22 +127,31 @@ func (p *providerLedger) persist(ctx context.Context) error {
 			return err
 		}
 	}
-	for _, object := range p.core.Refunds() {
-		if object["status"] != "succeeded" {
-			continue
-		}
-		data, err := json.Marshal(object)
-		if err != nil {
+	// Record the exact external refund response with JSON integer semantics.
+	// Replaying the same response repeats no economic fact; a new refund ID
+	// remains a distinct debit that conservation assertions must account for.
+	if request.Method == http.MethodPost && request.URL.Path == "/v1/refunds" && response.Code == http.StatusOK {
+		var object map[string]any
+		decoder := json.NewDecoder(bytes.NewReader(response.Body.Bytes()))
+		decoder.UseNumber()
+		if err := decoder.Decode(&object); err != nil {
 			return err
 		}
-		amount, ok := object["amount"].(int64)
-		if !ok {
-			return fmt.Errorf("provider refund amount type %T", object["amount"])
-		}
-		if _, err = tx.Exec(ctx, insert, object["id"], "refund", object["payment_intent"], object["currency"], amount, data); err != nil {
-			return err
+		if object["status"] == "succeeded" {
+			number, ok := object["amount"].(json.Number)
+			if !ok {
+				return fmt.Errorf("provider refund amount type %T", object["amount"])
+			}
+			amount, err := number.Int64()
+			if err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, insert, object["id"], "refund", object["payment_intent"], object["currency"], amount, response.Body.Bytes()); err != nil {
+				return err
+			}
 		}
 	}
+
 	return tx.Commit(ctx)
 }
 
