@@ -408,14 +408,18 @@ jobs:
       - name: Filesystem and dependency scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
-          # Match the chart's minimum supported Kubernetes version.
-          TRIVY_HELM_KUBE_VERSION: "1.30.0"
+          # The next step scans raw chart bytes and its actual release render.
+          TRIVY_SKIP_DIRS: deploy/helm/openrails
         with:
           scan-type: fs
           scan-ref: .
           exit-code: '1'
           ignore-unfixed: true
           scanners: vuln,secret,misconfig
+      - name: Helm release security
+        env:
+          TRIVY_CACHE_DIR: ${{ github.workspace }}/.cache/trivy
+        run: bash scripts/ci/security-chart.sh
       - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() }}
         with:
