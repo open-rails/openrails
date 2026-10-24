@@ -55,6 +55,8 @@ sboms:
 
 release:
   prerelease: auto
+  extra_files:
+    - glob: build/billing-ui/openrails-billing-ui-{{ .Version }}.tgz
   footer: |
     **CLI:** the `openrails` archives below, or the Docker image
     **Docker:** `docker.io/openrails/openrails:{{ .Tag }}` · `ghcr.io/open-rails/openrails:{{ .Tag }}`
