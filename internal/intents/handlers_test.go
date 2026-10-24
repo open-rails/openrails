@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -18,9 +19,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/stripemock"
 )
 
 type fakeNMIResolver struct {
@@ -129,62 +129,88 @@ func TestNMISubscriptionPresence(t *testing.T) {
 	}
 }
 
-type fakeStripeRefunds struct {
-	result    *subscriptions.RefundResult
-	createErr error
-	found     bool
-	findErr   error
-	gotParams subscriptions.RefundParams
-}
-
-func (f *fakeStripeRefunds) CreateRefund(_ context.Context, p subscriptions.RefundParams) (*subscriptions.RefundResult, error) {
-	f.gotParams = p
-	return f.result, f.createErr
-}
-func (f *fakeStripeRefunds) FindRefundByIdempotencyKey(context.Context, string, string) (*subscriptions.RefundResult, bool, error) {
-	return f.result, f.found, f.findErr
-}
-
-// Stripe refunds carry the intent key and classify so that only a
-// provably-unexecuted refund is retried.
+// Stripe refunds use the real request/response codec and the shared provider
+// fixture; faults are injected at the HTTP boundary, below the write guard.
 func TestStripeRefundClassification(t *testing.T) {
 	rails := railresolve.FixedSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}}
-	apiErr := func(code int) error { return &subscriptions.StripeAPICallError{StatusCode: code, Message: "x"} }
-	pending := &subscriptions.RefundResult{ID: "re_pending", Status: "pending"}
 	intent := refundIntent(t, TypeStripeRefund, func(p *RefundPayload) { p.ProviderTarget = "ch_1" })
+	intent.Rail = "stripe"
 
 	unconfigured := NewStripeRefundHandler(nil, &config.Config{}, nil, nil, nil).Execute(context.Background(), intent)
 	assert.Equal(t, OutcomeParked, unconfigured.Class)
 	assert.Contains(t, unconfigured.Reason, "stripe not configured")
 
+	const pending = `{"id":"re_pending","status":"pending","metadata":{"openrails_idempotency_key":"the-intent-key"}}`
 	for _, tc := range []struct {
-		name   string
-		fake   fakeStripeRefunds
-		verify bool
-		want   OutcomeClass
+		name     string
+		status   int
+		body     string
+		failure  error
+		readonly bool
+		verify   bool
+		want     OutcomeClass
 	}{
-		{"rate limit is a clean retry", fakeStripeRefunds{createErr: apiErr(429)}, false, OutcomeRetryable},
-		{"5xx may have created it", fakeStripeRefunds{createErr: apiErr(500)}, false, OutcomeAmbiguous},
-		{"transport error may have created it", fakeStripeRefunds{createErr: errors.New("reset")}, false, OutcomeAmbiguous},
-		{"readonly choke parks", fakeStripeRefunds{createErr: fmt.Errorf("post: %w", stripeapi.ErrProviderReadOnly)}, false, OutcomeParked},
-		{"pending is not completion", fakeStripeRefunds{result: pending}, false, OutcomeAmbiguous},
-		{"verify: clean miss proves not executed", fakeStripeRefunds{}, true, OutcomeRetryable},
-		{"verify: read failure stays unknown", fakeStripeRefunds{findErr: errors.New("down")}, true, OutcomeAmbiguous},
-		{"verify: pending is not completion", fakeStripeRefunds{result: pending, found: true}, true, OutcomeAmbiguous},
+		{name: "rate limit is a clean retry", status: 429, body: `{"error":{"message":"rate limited"}}`, want: OutcomeRetryable},
+		{name: "5xx may have created it", status: 500, body: `{"error":{"message":"server error"}}`, want: OutcomeAmbiguous},
+		{name: "transport error may have created it", failure: errors.New("reset"), want: OutcomeAmbiguous},
+		{name: "readonly choke parks", readonly: true, want: OutcomeParked},
+		{name: "pending is not completion", body: pending, want: OutcomeAmbiguous},
+		{name: "malformed response stays unknown", body: `{`, want: OutcomeAmbiguous},
+		{name: "verify: clean miss proves not executed", verify: true, want: OutcomeRetryable},
+		{name: "verify: read failure stays unknown", verify: true, failure: errors.New("down"), want: OutcomeAmbiguous},
+		{name: "verify: pending is not completion", verify: true, body: `{"data":[` + pending + `],"has_more":false}`, want: OutcomeAmbiguous},
 	} {
-		h := NewStripeRefundHandler(nil, &config.Config{}, rails, nil, nil)
-		fake := tc.fake
-		h.Stripe = &fake
-		var out Outcome
-		if tc.verify {
-			out = h.Verify(context.Background(), intent)
-		} else {
-			out = h.Execute(context.Background(), intent)
-			assert.Equal(t, "the-intent-key", fake.gotParams.IdempotencyKey, tc.name)
-			assert.Equal(t, moneyutil.Cents(500), fake.gotParams.Amount, "%s: payload cents reach Stripe verbatim (#671)", tc.name)
-			assert.Equal(t, "ch_1", fake.gotParams.ChargeID, tc.name)
-		}
-		assert.Equal(t, tc.want, out.Class, tc.name)
+		t.Run(tc.name, func(t *testing.T) {
+			gateway := stripemock.NewUnstarted(stripemock.Options{})
+			var requests []*http.Request
+			gateway.Intercept(func(r *http.Request) bool { return r.URL.Path == "/v1/refunds" }, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
+				require.NoError(t, r.ParseForm())
+				requests = append(requests, r)
+				if tc.failure != nil {
+					return nil, tc.failure
+				}
+				if tc.body == "" {
+					return serve(), nil
+				}
+				status := tc.status
+				if status == 0 {
+					status = http.StatusOK
+				}
+				return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+			})
+			cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}
+			if tc.readonly {
+				cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly
+			}
+			h := NewStripeRefundHandler(nil, cfg, rails, nil, stripeapi.NewFactory(gateway))
+			var out Outcome
+			if tc.verify {
+				out = h.Verify(t.Context(), intent)
+			} else {
+				out = h.Execute(t.Context(), intent)
+			}
+			require.Equal(t, tc.want, out.Class, out.Reason)
+			if tc.readonly {
+				require.Empty(t, requests, "readonly refuses before the provider transport")
+				return
+			}
+			require.Len(t, requests, 1)
+			r := requests[0]
+			require.Equal(t, stripeapi.APIVersion, r.Header.Get(stripeapi.VersionHeader))
+			require.Equal(t, "Bearer sk_test_123", r.Header.Get("Authorization"))
+			if tc.verify {
+				require.Equal(t, http.MethodGet, r.Method)
+				require.Equal(t, "ch_1", r.URL.Query().Get("charge"))
+				require.Empty(t, gateway.Mutations(""), "verification never mutates the provider")
+			} else {
+				require.Equal(t, http.MethodPost, r.Method)
+				require.Equal(t, "the-intent-key", r.Header.Get(stripeapi.IdempotencyKeyHeader))
+				require.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
+				require.Equal(t, "500", r.PostForm.Get("amount"), "minor units reach Stripe without conversion")
+				require.Equal(t, "ch_1", r.PostForm.Get("charge"))
+				require.Equal(t, "the-intent-key", r.PostForm.Get("metadata[openrails_idempotency_key]"))
+			}
+		})
 	}
 }
 
