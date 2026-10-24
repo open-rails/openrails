@@ -14,12 +14,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func purchasedMembership(t *testing.T) (*authorityWorld, *providerLedger, *billing.Subscription) {
+func purchasedMembership(t *testing.T, intervalHours ...int) (*authorityWorld, *providerLedger, *billing.Subscription) {
 	t.Helper()
-	a, provider := newPaymentWorld(t)
+	hours := 24
+	if len(intervalHours) > 0 {
+		hours = intervalHours[0]
+	}
+	// Keep accelerated business periods in the past: PostgreSQL correctly
+	// refuses payment observations dated in its future. AuthKit sign-in uses
+	// its actual clock and remains independent of these financial periods.
+	a, provider := newPaymentWorld(t, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) })
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "membership", DisplayName: "Membership", Entitlements: []string{"membership:paid"}})
 	require.NoError(t, err)
-	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "membership-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
+	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "membership-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(hours), AccessDurationHours: ptr(hours)})
 	require.NoError(t, err)
 	token := provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
 	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
@@ -39,7 +46,7 @@ func purchasedMembership(t *testing.T) (*authorityWorld, *providerLedger, *billi
 	require.NoError(t, err)
 	require.NotNil(t, sub.CurrentPeriodStartsAt)
 	require.NotNil(t, sub.CurrentPeriodEndsAt)
-	require.Equal(t, 24*time.Hour, sub.CurrentPeriodEndsAt.Sub(*sub.CurrentPeriodStartsAt))
+	require.Equal(t, time.Duration(hours)*time.Hour, sub.CurrentPeriodEndsAt.Sub(*sub.CurrentPeriodStartsAt))
 	effects := provider.effects(t)
 	require.Len(t, effects, 1)
 	require.Equal(t, "charge", effects[0].Kind)
