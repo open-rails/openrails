@@ -34,8 +34,10 @@ type providerLedger struct {
 	schema              string
 	mu                  sync.Mutex
 	lostResponse        bool
+	lostRefundResponse  bool
 	evidenceUnavailable bool
 	evidenceRequested   chan struct{}
+	responseGate        *wireGate
 	errors              []error
 }
 
@@ -100,7 +102,18 @@ func (p *providerLedger) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.mu.Lock()
-	lose := p.lostResponse && r.Method == http.MethodPost && r.URL.Path == "/v1/payment_intents" && response.Code == 200
+	gate := p.responseGate
+	p.mu.Unlock()
+	if gate != nil && r.Method == http.MethodPost && r.URL.Path == "/v1/payment_intents" && response.Code == http.StatusOK {
+		gate.once.Do(func() { close(gate.arrived) })
+		select {
+		case <-gate.release:
+		case <-r.Context().Done():
+			return
+		}
+	}
+	p.mu.Lock()
+	lose := r.Method == http.MethodPost && response.Code == 200 && ((p.lostResponse && r.URL.Path == "/v1/payment_intents") || (p.lostRefundResponse && r.URL.Path == "/v1/refunds"))
 	p.mu.Unlock()
 	if lose {
 		connection, _, err := w.(http.Hijacker).Hijack()
@@ -188,10 +201,13 @@ func (p *providerLedger) interruptPaymentResponses() {
 	p.mu.Unlock()
 }
 
-func newPaymentWorld(t *testing.T) (*authorityWorld, *providerLedger) {
+func newPaymentWorld(t *testing.T, configure ...func(*world)) (*authorityWorld, *providerLedger) {
 	t.Helper()
 	var provider *providerLedger
 	a := newAuthorityWorld(t, func(w *world) {
+		for _, change := range configure {
+			change(w)
+		}
 		provider = newProviderLedger(t, w)
 		target, err := url.Parse(provider.server.URL)
 		require.NoError(t, err)

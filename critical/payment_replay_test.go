@@ -24,6 +24,43 @@ func saleInput(t *testing.T, a *authorityWorld, p *providerLedger) billing.Creat
 }
 
 func TestPaymentReplay(t *testing.T) {
+	t.Run("OR-J10-S04/different-orders-remain-independent-obligations", func(t *testing.T) {
+		a, p := newPaymentWorld(t)
+		input := saleInput(t, a, p)
+		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		var accepted []billing.Order
+		for _, key := range []string{"first-independent-order", "second-independent-order"} {
+			order, err := a.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, IdempotencyKey: key})
+			require.NoError(t, err)
+			require.NotEqual(t, billing.OrderComplete, order.Status)
+			accepted = append(accepted, *order)
+		}
+		require.NotEqual(t, accepted[0].ID, accepted[1].ID)
+		require.Empty(t, p.effects(t), "creating independent debts cannot charge a saved instrument")
+		var payments []billing.PaymentID
+		for _, order := range accepted {
+			token := p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
+			pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: token}, ExpectedTotal: 30_000_000, Reusable: ptr(true)}
+			status, raw := a.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", a.aliceToken, pay, map[string]string{"Idempotency-Key": "same-key-different-order"})
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var complete billing.Order
+			require.NoError(t, json.Unmarshal(raw, &complete))
+			require.Equal(t, order.ID, complete.ID)
+			require.Equal(t, billing.OrderComplete, complete.Status)
+			require.NotNil(t, complete.Payment.PaymentID)
+			payments = append(payments, *complete.Payment.PaymentID)
+		}
+		require.NotEqual(t, payments[0], payments[1])
+		effects := p.effects(t)
+		require.Len(t, effects, 2)
+		for _, effect := range effects {
+			require.Equal(t, "charge", effect.Kind)
+			require.EqualValues(t, 3000, effect.Amount)
+		}
+		read, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
+		require.NoError(t, err)
+		require.Len(t, read.Items, 2)
+	})
 	t.Run("OR-J10-S01/concurrent-identical-purchase-has-one-economic-debit", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		input := saleInput(t, a, p)
