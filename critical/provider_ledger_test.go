@@ -28,6 +28,7 @@ import (
 // fixture-owned PostgreSQL journal before the response reaches the application.
 // Application restarts never delete/reinitialize this journal or provider.
 type providerLedger struct {
+	secret              string
 	core                *stripemock.Mock
 	server              *httptest.Server
 	pool                *pgxpool.Pool
@@ -48,7 +49,7 @@ type providerEffect struct {
 
 func newProviderLedger(t *testing.T, w *world) *providerLedger {
 	t.Helper()
-	p := &providerLedger{core: stripemock.NewUnstarted(stripemock.Options{Clock: w.clock.Now}), pool: w.pool, schema: "provider_" + strings.ReplaceAll(uuid.NewString(), "-", ""), evidenceRequested: make(chan struct{}, 1)}
+	p := &providerLedger{secret: "sk_test_critical", core: stripemock.NewUnstarted(stripemock.Options{Clock: w.clock.Now}), pool: w.pool, schema: "provider_" + strings.ReplaceAll(uuid.NewString(), "-", ""), evidenceRequested: make(chan struct{}, 1)}
 	schema := pgx.Identifier{p.schema}.Sanitize()
 	_, err := p.pool.Exec(t.Context(), "CREATE SCHEMA "+schema+"; CREATE TABLE "+schema+".effects (id text PRIMARY KEY, kind text NOT NULL, operation text NOT NULL, currency text NOT NULL, amount bigint NOT NULL, object jsonb NOT NULL)")
 	require.NoError(t, err)
@@ -67,7 +68,7 @@ func newProviderLedger(t *testing.T, w *world) *providerLedger {
 }
 
 func (p *providerLedger) serve(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Authorization") != "Bearer sk_test_critical" {
+	if r.Header.Get("Authorization") != "Bearer "+p.secret {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","code":"api_key_expired","message":"fixture credential refused"}}`))
@@ -205,9 +206,6 @@ func newPaymentWorld(t *testing.T, configure ...func(*world)) (*authorityWorld, 
 	t.Helper()
 	var provider *providerLedger
 	a := newAuthorityWorld(t, func(w *world) {
-		for _, change := range configure {
-			change(w)
-		}
 		provider = newProviderLedger(t, w)
 		target, err := url.Parse(provider.server.URL)
 		require.NoError(t, err)
@@ -219,6 +217,9 @@ func newPaymentWorld(t *testing.T, configure ...func(*world)) (*authorityWorld, 
 		declaration.PSPs = openrails.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}
 		declaration.CardVault = "stripe"
 		w.cfg.Merchants["alpha"] = declaration
+		for _, change := range configure {
+			change(w)
+		}
 	})
 	return a, provider
 }

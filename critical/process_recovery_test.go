@@ -20,6 +20,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -39,8 +40,11 @@ type workerProcessConfig struct {
 	Config                             openrails.Config
 	At                                 time.Time
 	StripeURL, FXURL, Ready, ClockFile string
+	NMIURL                             string
 	AfterWork                          string
 	IgnoreIntents                      []string
+	StopReference                      string
+	BeforeStop                         bool
 }
 
 // River calls this public hook after the real worker returns and before its
@@ -101,11 +105,24 @@ func TestWorkerProcess(t *testing.T) {
 	clock := clockwork.NewFakeClockAt(config.At)
 	wire := http.DefaultTransport.(*http.Transport).Clone()
 	defer wire.CloseIdleConnections()
-	engine, err := openrails.New(t.Context(), config.Config, openrails.Deps{Postgres: pool, Clock: clock, StripeTransport: loopbackWire{target: stripe, wire: wire}, FXTransport: loopbackWire{target: fx, wire: wire}})
+	deps := openrails.Deps{Postgres: pool, Clock: clock, StripeTransport: loopbackWire{target: stripe, wire: wire}, FXTransport: loopbackWire{target: fx, wire: wire}}
+	if config.NMIURL != "" {
+		nmi, err := url.Parse(config.NMIURL)
+		require.NoError(t, err)
+		deps.NMITransport = loopbackWire{target: nmi, wire: wire}
+	}
+	engine, err := openrails.New(t.Context(), config.Config, deps)
 	require.NoError(t, err)
 	defer engine.Close(context.Background()) //nolint:errcheck
 	w := &world{pool: pool, schema: config.Config.Database.Schema, engine: engine, clock: clock}
-	if config.AfterWork == "" {
+	if config.StopReference != "" {
+		if !config.BeforeStop {
+			client, err := engine.MerchantBySlug("alpha")
+			require.NoError(t, err)
+			_, err = client.StopRunningCharge(t.Context(), config.StopReference, billing.StopRunningChargeParams{StoppedAt: &config.At})
+			require.NoError(t, err)
+		}
+	} else if config.AfterWork == "" {
 		startFleet(t, w)
 	} else {
 		ignored := map[string]bool{}
@@ -156,7 +173,13 @@ type ownedWorkerProcess struct {
 func startWorkerProcess(t *testing.T, w *world, p *providerLedger, configure ...func(*workerProcessConfig)) *ownedWorkerProcess {
 	t.Helper()
 	dir := t.TempDir()
-	config := workerProcessConfig{Config: w.cfg, At: w.clock.Now(), StripeURL: p.server.URL, FXURL: w.deps.FXTransport.(loopbackWire).target.String(), Ready: filepath.Join(dir, "ready"), ClockFile: filepath.Join(dir, "clock")}
+	config := workerProcessConfig{Config: w.cfg, At: w.clock.Now(), FXURL: w.deps.FXTransport.(loopbackWire).target.String(), Ready: filepath.Join(dir, "ready"), ClockFile: filepath.Join(dir, "clock")}
+	if p != nil {
+		config.StripeURL = p.server.URL
+	}
+	if nmi, ok := w.deps.NMITransport.(loopbackWire); ok {
+		config.NMIURL = nmi.target.String()
+	}
 	for _, change := range configure {
 		change(&config)
 	}
