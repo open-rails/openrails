@@ -1,0 +1,747 @@
+{
+  "schema_version": 1,
+  "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
+  "scenario_count": 148,
+  "scenarios": [
+    {
+      "id": "OR-J01-S01",
+      "journey": "J01",
+      "name": "Valid merchant and root authority reaches the same owned operation"
+    },
+    {
+      "id": "OR-J01-S02",
+      "journey": "J01",
+      "name": "Missing or malformed credential performs no effect"
+    },
+    {
+      "id": "OR-J01-S03",
+      "journey": "J01",
+      "name": "Expired and revoked credentials fail closed"
+    },
+    {
+      "id": "OR-J01-S04",
+      "journey": "J01",
+      "name": "Wrong issuer audience signature or sender proof is refused"
+    },
+    {
+      "id": "OR-J01-S05",
+      "journey": "J01",
+      "name": "Correct permission in the wrong tenant scope is refused"
+    },
+    {
+      "id": "OR-J01-S06",
+      "journey": "J01",
+      "name": "Human cannot use application-only authority and application cannot act as customer"
+    },
+    {
+      "id": "OR-J01-S07",
+      "journey": "J01",
+      "name": "Foreign resource sentinel never leaks through detail list batch or cursor"
+    },
+    {
+      "id": "OR-J01-S08",
+      "journey": "J01",
+      "name": "Authentication or authorization dependency failure does not admit caller"
+    },
+    {
+      "id": "OR-J02-S01",
+      "journey": "J02",
+      "name": "Link challenge binds both verified identities and redeems once"
+    },
+    {
+      "id": "OR-J02-S02",
+      "journey": "J02",
+      "name": "Foreign or expired challenge and changed redemption are refused"
+    },
+    {
+      "id": "OR-J02-S03",
+      "journey": "J02",
+      "name": "Owned network alias inherits only the linked customer authority"
+    },
+    {
+      "id": "OR-J02-S04",
+      "journey": "J02",
+      "name": "Recent sign-in refusal blocks sensitive alias without effect"
+    },
+    {
+      "id": "OR-J02-S05",
+      "journey": "J02",
+      "name": "Unlink refuses a required vaulted association and otherwise removes access"
+    },
+    {
+      "id": "OR-J03-S01",
+      "journey": "J03",
+      "name": "Valid pay capability opens only its order and permitted routes"
+    },
+    {
+      "id": "OR-J03-S02",
+      "journey": "J03",
+      "name": "Expired or foreign capability and changed order ID are refused"
+    },
+    {
+      "id": "OR-J03-S03",
+      "journey": "J03",
+      "name": "Checkout Host and frame origin cannot reach ordinary privileged API"
+    },
+    {
+      "id": "OR-J03-S04",
+      "journey": "J03",
+      "name": "Iframe completion and fallback messages require expected origin and order"
+    },
+    {
+      "id": "OR-J03-S05",
+      "journey": "J03",
+      "name": "Assets and configuration reveal no private capability or account data"
+    },
+    {
+      "id": "OR-J04-S01",
+      "journey": "J04",
+      "name": "Embedded HTTP and TS critical calls return equal known outcomes"
+    },
+    {
+      "id": "OR-J04-S02",
+      "journey": "J04",
+      "name": "Wrong merchant binding and stale cached read never cross accounts"
+    },
+    {
+      "id": "OR-J04-S03",
+      "journey": "J04",
+      "name": "Abort timeout and bounded GET retry preserve caller control"
+    },
+    {
+      "id": "OR-J04-S04",
+      "journey": "J04",
+      "name": "One expired-token refresh retries safely without blind write retry"
+    },
+    {
+      "id": "OR-J04-S05",
+      "journey": "J04",
+      "name": "Start close and borrowed-resource ownership preserve host resources"
+    },
+    {
+      "id": "OR-J04-S06",
+      "journey": "J04",
+      "name": "Missing auth bad mount and encoded path differences fail closed across adapters"
+    },
+    {
+      "id": "OR-J05-S01",
+      "journey": "J05",
+      "name": "Exact 9.99 USD quantity three yields 2997 native units"
+    },
+    {
+      "id": "OR-J05-S02",
+      "journey": "J05",
+      "name": "Fraction rounding overflow wrong currency and invalid quantity are refused"
+    },
+    {
+      "id": "OR-J05-S03",
+      "journey": "J05",
+      "name": "Apply catalog respects revision and manual-edit ownership"
+    },
+    {
+      "id": "OR-J05-S04",
+      "journey": "J05",
+      "name": "Archive product retains purchased financial history"
+    },
+    {
+      "id": "OR-J05-S05",
+      "journey": "J05",
+      "name": "Accepted payment terms survive subsequent price and PSP edits"
+    },
+    {
+      "id": "OR-J06-S01",
+      "journey": "J06",
+      "name": "Valid PSP routing binds the intended account environment and currency"
+    },
+    {
+      "id": "OR-J06-S02",
+      "journey": "J06",
+      "name": "Wrong environment or unarmed credentials prohibit provider writes"
+    },
+    {
+      "id": "OR-J06-S03",
+      "journey": "J06",
+      "name": "Readonly limited and copied-book holds lower write authority"
+    },
+    {
+      "id": "OR-J06-S04",
+      "journey": "J06",
+      "name": "Credential rotation and archive preserve account identity and redact secrets"
+    },
+    {
+      "id": "OR-J06-S05",
+      "journey": "J06",
+      "name": "Configured outbound URL and redirect cannot reach forbidden network peer"
+    },
+    {
+      "id": "OR-J07-S01",
+      "journey": "J07",
+      "name": "Provision then patch a user retains issuer-qualified customer identity"
+    },
+    {
+      "id": "OR-J07-S02",
+      "journey": "J07",
+      "name": "Replayed provisioning does not duplicate or merge another issuer customer"
+    },
+    {
+      "id": "OR-J07-S03",
+      "journey": "J07",
+      "name": "Deleted provisioning token and wrong scope cannot update directory"
+    },
+    {
+      "id": "OR-J07-S04",
+      "journey": "J07",
+      "name": "Host UserInfo mode exposes no copied SCIM write authority"
+    },
+    {
+      "id": "OR-J08-S01",
+      "journey": "J08",
+      "name": "Cart and preview return literal expected line totals"
+    },
+    {
+      "id": "OR-J08-S02",
+      "journey": "J08",
+      "name": "Application creates unpaid order without charging a saved card"
+    },
+    {
+      "id": "OR-J08-S03",
+      "journey": "J08",
+      "name": "Invalid quantity unavailable line or changed total is refused"
+    },
+    {
+      "id": "OR-J08-S04",
+      "journey": "J08",
+      "name": "Cancel or expiry cannot invalidate an already settled order"
+    },
+    {
+      "id": "OR-J09-S01",
+      "journey": "J09",
+      "name": "Successful one-off charge commits exact payment order access and event"
+    },
+    {
+      "id": "OR-J09-S02",
+      "journey": "J09",
+      "name": "Required customer action resolves once through confirmation"
+    },
+    {
+      "id": "OR-J09-S03",
+      "journey": "J09",
+      "name": "Definitive decline returns the correct order and no successful payment"
+    },
+    {
+      "id": "OR-J09-S04",
+      "journey": "J09",
+      "name": "Rollback cannot produce successful response or financial event"
+    },
+    {
+      "id": "OR-J10-S01",
+      "journey": "J10",
+      "name": "Two concurrent same-key pay requests cause one economic debit"
+    },
+    {
+      "id": "OR-J10-S02",
+      "journey": "J10",
+      "name": "Lost client response replays the same completed result"
+    },
+    {
+      "id": "OR-J10-S03",
+      "journey": "J10",
+      "name": "Changed payload with accepted key is refused"
+    },
+    {
+      "id": "OR-J10-S04",
+      "journey": "J10",
+      "name": "Different order or merchant remains an independent obligation"
+    },
+    {
+      "id": "OR-J11-S01",
+      "journey": "J11",
+      "name": "Accepted debit followed by response loss verifies instead of resubmitting"
+    },
+    {
+      "id": "OR-J11-S02",
+      "journey": "J11",
+      "name": "Delayed provider query evidence keeps operation unresolved"
+    },
+    {
+      "id": "OR-J11-S04",
+      "journey": "J11",
+      "name": "Unknown outcome forbids alternate PSP or replacement charge"
+    },
+    {
+      "id": "OR-J12-S01",
+      "journey": "J12",
+      "name": "Owned capture reference is saved and confirmed exactly once"
+    },
+    {
+      "id": "OR-J12-S02",
+      "journey": "J12",
+      "name": "Foreign reused or stale instrument reference is refused"
+    },
+    {
+      "id": "OR-J12-S03",
+      "journey": "J12",
+      "name": "Changing default or attached method preserves accepted operation instrument"
+    },
+    {
+      "id": "OR-J12-S04",
+      "journey": "J12",
+      "name": "Deleting instrument races safely with accepted payment and retry"
+    },
+    {
+      "id": "OR-J12-S05",
+      "journey": "J12",
+      "name": "Captured PAN CVC and secrets are absent from public outputs and logs"
+    },
+    {
+      "id": "OR-J13-S01",
+      "journey": "J13",
+      "name": "Membership enrollment records one first payment period access and event"
+    },
+    {
+      "id": "OR-J13-S02",
+      "journey": "J13",
+      "name": "Concurrent signup replay does not create two memberships or charges"
+    },
+    {
+      "id": "OR-J13-S03",
+      "journey": "J13",
+      "name": "Eligible free or paid introductory phase produces exact declared terms"
+    },
+    {
+      "id": "OR-J13-S04",
+      "journey": "J13",
+      "name": "Unsupported trial or rail combination is refused explicitly"
+    },
+    {
+      "id": "OR-J14-S01",
+      "journey": "J14",
+      "name": "Before due boundary no renewal is admitted"
+    },
+    {
+      "id": "OR-J14-S02",
+      "journey": "J14",
+      "name": "Two workers at exact due boundary settle one cycle once"
+    },
+    {
+      "id": "OR-J14-S03",
+      "journey": "J14",
+      "name": "Overdue restart catches up the existing obligation once"
+    },
+    {
+      "id": "OR-J14-S04",
+      "journey": "J14",
+      "name": "Price edited after admission does not change accepted renewal amount"
+    },
+    {
+      "id": "OR-J14-S05",
+      "journey": "J14",
+      "name": "Committed renewal payment/event and period survive process death before River acknowledgement"
+    },
+    {
+      "id": "OR-J15-S01",
+      "journey": "J15",
+      "name": "Missing callback is repaired from authoritative provider evidence"
+    },
+    {
+      "id": "OR-J15-S02",
+      "journey": "J15",
+      "name": "Lagging or unavailable query does not authorize another debit"
+    },
+    {
+      "id": "OR-J15-S03",
+      "journey": "J15",
+      "name": "Provider-skipped cycle is collected only after proven absence"
+    },
+    {
+      "id": "OR-J15-S04",
+      "journey": "J15",
+      "name": "Reversed or unrecorded existing charge is never recollected"
+    },
+    {
+      "id": "OR-J16-S01",
+      "journey": "J16",
+      "name": "Retryable decline recovers within bounded dunning policy"
+    },
+    {
+      "id": "OR-J16-S02",
+      "journey": "J16",
+      "name": "Definitive terminal decline stops according to the contract"
+    },
+    {
+      "id": "OR-J16-S03",
+      "journey": "J16",
+      "name": "Awaiting-method expiry and paid-access cutoff are exact"
+    },
+    {
+      "id": "OR-J16-S04",
+      "journey": "J16",
+      "name": "Unknown provider result remains distinct from declined or unpaid"
+    },
+    {
+      "id": "OR-J17-S01",
+      "journey": "J17",
+      "name": "Cancel then resume before cutoff preserves the paid runway"
+    },
+    {
+      "id": "OR-J17-S02",
+      "journey": "J17",
+      "name": "Cancellation concurrent with admitted renewal preserves custody"
+    },
+    {
+      "id": "OR-J17-S03",
+      "journey": "J17",
+      "name": "Terminal cancellation retains durable remote-delete obligation"
+    },
+    {
+      "id": "OR-J17-S04",
+      "journey": "J17",
+      "name": "Agreement revocation and late callback cannot revive future billing"
+    },
+    {
+      "id": "OR-J17-S05",
+      "journey": "J17",
+      "name": "Cancellation after boundary follows irreversible rail policy"
+    },
+    {
+      "id": "OR-J18-S01",
+      "journey": "J18",
+      "name": "Known price or seat change preview and confirmation agree"
+    },
+    {
+      "id": "OR-J18-S02",
+      "journey": "J18",
+      "name": "Stale preview or unsupported quantity is refused"
+    },
+    {
+      "id": "OR-J18-S03",
+      "journey": "J18",
+      "name": "Required customer action completes the accepted change once"
+    },
+    {
+      "id": "OR-J18-S04",
+      "journey": "J18",
+      "name": "Concurrent renewal and change retain one financial agreement"
+    },
+    {
+      "id": "OR-J19-S01",
+      "journey": "J19",
+      "name": "Scheduled price migration moves only eligible subscriptions at boundary"
+    },
+    {
+      "id": "OR-J19-S02",
+      "journey": "J19",
+      "name": "Failed push is redriven after restart without duplicate migration"
+    },
+    {
+      "id": "OR-J19-S03",
+      "journey": "J19",
+      "name": "Cancellation leaves completed and ineligible subscriptions unchanged"
+    },
+    {
+      "id": "OR-J19-S04",
+      "journey": "J19",
+      "name": "Active financial lease preserves its original terms"
+    },
+    {
+      "id": "OR-J20-S01",
+      "journey": "J20",
+      "name": "Partial refund 1000 then final refund 2000 exactly returns a 3000-unit charge"
+    },
+    {
+      "id": "OR-J20-S02",
+      "journey": "J20",
+      "name": "Concurrent overlapping refunds cannot exceed refundable value"
+    },
+    {
+      "id": "OR-J20-S03",
+      "journey": "J20",
+      "name": "Response-loss refund converges from provider evidence once"
+    },
+    {
+      "id": "OR-J20-S04",
+      "journey": "J20",
+      "name": "Wrong currency account or unsupported refund is refused without mutation"
+    },
+    {
+      "id": "OR-J21-S01",
+      "journey": "J21",
+      "name": "External payment records exact known amount without outgoing charge"
+    },
+    {
+      "id": "OR-J21-S02",
+      "journey": "J21",
+      "name": "Same provider transaction replay creates no duplicate payment or credit"
+    },
+    {
+      "id": "OR-J21-S03",
+      "journey": "J21",
+      "name": "Conflicting merchant customer or account linkage is refused"
+    },
+    {
+      "id": "OR-J21-S04",
+      "journey": "J21",
+      "name": "Imported settled payment retains original refund allowance and event identity"
+    },
+    {
+      "id": "OR-J22-S01",
+      "journey": "J22",
+      "name": "Grant 1000 reserve 600 capture 450 release 150 leaves 550 available units"
+    },
+    {
+      "id": "OR-J22-S02",
+      "journey": "J22",
+      "name": "Concurrent spend or revoke cannot make balance negative"
+    },
+    {
+      "id": "OR-J22-S03",
+      "journey": "J22",
+      "name": "Expiry ignores already spent or still-authorized reserved quantities"
+    },
+    {
+      "id": "OR-J22-S04",
+      "journey": "J22",
+      "name": "Credit ledger and financial event roll back together"
+    },
+    {
+      "id": "OR-J23-S01",
+      "journey": "J23",
+      "name": "Batch admit capture release and extend report accurate per-item results"
+    },
+    {
+      "id": "OR-J23-S02",
+      "journey": "J23",
+      "name": "Concurrent terminal actions resolve one reservation once"
+    },
+    {
+      "id": "OR-J23-S03",
+      "journey": "J23",
+      "name": "Same request ID with changed payload is refused"
+    },
+    {
+      "id": "OR-J23-S04",
+      "journey": "J23",
+      "name": "Local Tx commit persists host and admission outcome together"
+    },
+    {
+      "id": "OR-J23-S05",
+      "journey": "J23",
+      "name": "Local Tx rollback leaves no reservation charge or event"
+    },
+    {
+      "id": "OR-J24-S01",
+      "journey": "J24",
+      "name": "Duplicate usage event has one immutable quantity and attribution"
+    },
+    {
+      "id": "OR-J24-S02",
+      "journey": "J24",
+      "name": "Late event and changed meter retain documented accepted pricing"
+    },
+    {
+      "id": "OR-J24-S03",
+      "journey": "J24",
+      "name": "Batch boundary errors do not leak another customer item"
+    },
+    {
+      "id": "OR-J24-S04",
+      "journey": "J24",
+      "name": "Known usage group and pagination returns exact seeded totals"
+    },
+    {
+      "id": "OR-J25-S01",
+      "journey": "J25",
+      "name": "Start and stop charge account for the exact known elapsed segment"
+    },
+    {
+      "id": "OR-J25-S02",
+      "journey": "J25",
+      "name": "Concurrent or repeated stop never bills a segment twice"
+    },
+    {
+      "id": "OR-J25-S03",
+      "journey": "J25",
+      "name": "Crash around final segment preserves durable stop outcome"
+    },
+    {
+      "id": "OR-J25-S04",
+      "journey": "J25",
+      "name": "Funds or authorization limit stops further accrual without resurrection"
+    },
+    {
+      "id": "OR-J26-S01",
+      "journey": "J26",
+      "name": "Opted-in date or threshold creates and collects one usage obligation"
+    },
+    {
+      "id": "OR-J26-S02",
+      "journey": "J26",
+      "name": "Subscription-only host starts no usage billing sweep"
+    },
+    {
+      "id": "OR-J26-S03",
+      "journey": "J26",
+      "name": "Paid waived and uncollectible debt is not charged again"
+    },
+    {
+      "id": "OR-J26-S04",
+      "journey": "J26",
+      "name": "Delinquency clears correctly after payment or approved debt action"
+    },
+    {
+      "id": "OR-J27-S01",
+      "journey": "J27",
+      "name": "Purchase and grant overlap yields correct union of entitlement windows"
+    },
+    {
+      "id": "OR-J27-S02",
+      "journey": "J27",
+      "name": "Revoke or expire one source preserves another valid source"
+    },
+    {
+      "id": "OR-J27-S03",
+      "journey": "J27",
+      "name": "Exact start end and historical tenure boundaries agree"
+    },
+    {
+      "id": "OR-J27-S04",
+      "journey": "J27",
+      "name": "Refunded or archived content follows declared access and retained-history policy"
+    },
+    {
+      "id": "OR-J28-S01",
+      "journey": "J28",
+      "name": "Valid signed callback binds correct PSP account and environment"
+    },
+    {
+      "id": "OR-J28-S02",
+      "journey": "J28",
+      "name": "Tampered missing or wrong-account signature is refused"
+    },
+    {
+      "id": "OR-J28-S03",
+      "journey": "J28",
+      "name": "Secret rotation accepts overlap and rejects it after deadline"
+    },
+    {
+      "id": "OR-J28-S04",
+      "journey": "J28",
+      "name": "Duplicate and out-of-order callback settles once without regression"
+    },
+    {
+      "id": "OR-J28-S05",
+      "journey": "J28",
+      "name": "Callback during active fetch causes a durable follow-up observation"
+    },
+    {
+      "id": "OR-J29-S01",
+      "journey": "J29",
+      "name": "Crash before provider submission resumes one authorized operation"
+    },
+    {
+      "id": "OR-J29-S02",
+      "journey": "J29",
+      "name": "Checkout process death after provider acceptance repairs order/payment outcome from stored evidence"
+    },
+    {
+      "id": "OR-J29-S04",
+      "journey": "J29",
+      "name": "Expired lease with two workers retains one execution authority"
+    },
+    {
+      "id": "OR-J29-S05",
+      "journey": "J29",
+      "name": "Catalog edit deployment skew or supersession cannot erase unresolved money"
+    },
+    {
+      "id": "OR-J29-S06",
+      "journey": "J29",
+      "name": "GC retention and archive refuse to discard unresolved financial evidence"
+    },
+    {
+      "id": "OR-J31-S01",
+      "journey": "J31",
+      "name": "Valid empty-target archive restore preserves totals identities events and custody"
+    },
+    {
+      "id": "OR-J31-S02",
+      "journey": "J31",
+      "name": "Wrong tenant occupied target or corrupt archive fails atomically"
+    },
+    {
+      "id": "OR-J31-S03",
+      "journey": "J31",
+      "name": "Copied book blocks provider writes until explicitly authorized"
+    },
+    {
+      "id": "OR-J31-S04",
+      "journey": "J31",
+      "name": "Unresolved financial operation remains intact through export and restore"
+    },
+    {
+      "id": "OR-J32-S01",
+      "journey": "J32",
+      "name": "Provision find list and rename merchant retain stable identity"
+    },
+    {
+      "id": "OR-J32-S02",
+      "journey": "J32",
+      "name": "Concurrent or too-early rename respects ownership and cooldown"
+    },
+    {
+      "id": "OR-J32-S03",
+      "journey": "J32",
+      "name": "Delete or retire refuses active obligations and closes authority"
+    },
+    {
+      "id": "OR-J32-S04",
+      "journey": "J32",
+      "name": "Restore and retried secret cleanup cannot revive billing or touch another tenant"
+    },
+    {
+      "id": "OR-J34-S01",
+      "journey": "J34",
+      "name": "Destructive ceiling records and enforces hold for original actor and command"
+    },
+    {
+      "id": "OR-J34-S02",
+      "journey": "J34",
+      "name": "Wrong authority cannot clear a hold or evade it through impersonation"
+    },
+    {
+      "id": "OR-J34-S03",
+      "journey": "J34",
+      "name": "Authorized clear permits only the original unchanged admitted action"
+    },
+    {
+      "id": "OR-J34-S04",
+      "journey": "J34",
+      "name": "Finding corrective action uses the normal financial admission guards"
+    },
+    {
+      "id": "OR-J37-S01",
+      "journey": "J37",
+      "name": "One-off transfer verifies exact treasury mint network and amount"
+    },
+    {
+      "id": "OR-J37-S02",
+      "journey": "J37",
+      "name": "Recurring crank persists signed operation before submission and resumes safely"
+    },
+    {
+      "id": "OR-J37-S03",
+      "journey": "J37",
+      "name": "Unknown transaction waits while confirmed or reverted evidence resolves correctly"
+    },
+    {
+      "id": "OR-J37-S04",
+      "journey": "J37",
+      "name": "Duplicate confirmations and workers cannot debit one period twice"
+    },
+    {
+      "id": "OR-J37-S05",
+      "journey": "J37",
+      "name": "Wrong instruction authority account stale blockhash or insufficient gas is refused safely"
+    }
+  ]
+}

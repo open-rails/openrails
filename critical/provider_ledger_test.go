@@ -28,13 +28,15 @@ import (
 // fixture-owned PostgreSQL journal before the response reaches the application.
 // Application restarts never delete/reinitialize this journal or provider.
 type providerLedger struct {
-	core         *stripemock.Mock
-	server       *httptest.Server
-	pool         *pgxpool.Pool
-	schema       string
-	mu           sync.Mutex
-	lostResponse bool
-	errors       []error
+	core                *stripemock.Mock
+	server              *httptest.Server
+	pool                *pgxpool.Pool
+	schema              string
+	mu                  sync.Mutex
+	lostResponse        bool
+	evidenceUnavailable bool
+	evidenceRequested   chan struct{}
+	errors              []error
 }
 
 type providerEffect struct {
@@ -44,7 +46,7 @@ type providerEffect struct {
 
 func newProviderLedger(t *testing.T, w *world) *providerLedger {
 	t.Helper()
-	p := &providerLedger{core: stripemock.NewUnstarted(stripemock.Options{Clock: w.clock.Now}), pool: w.pool, schema: "provider_" + strings.ReplaceAll(uuid.NewString(), "-", "")}
+	p := &providerLedger{core: stripemock.NewUnstarted(stripemock.Options{Clock: w.clock.Now}), pool: w.pool, schema: "provider_" + strings.ReplaceAll(uuid.NewString(), "-", ""), evidenceRequested: make(chan struct{}, 1)}
 	schema := pgx.Identifier{p.schema}.Sanitize()
 	_, err := p.pool.Exec(t.Context(), "CREATE SCHEMA "+schema+"; CREATE TABLE "+schema+".effects (id text PRIMARY KEY, kind text NOT NULL, operation text NOT NULL, currency text NOT NULL, amount bigint NOT NULL, object jsonb NOT NULL)")
 	require.NoError(t, err)
@@ -69,6 +71,19 @@ func (p *providerLedger) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","code":"api_key_expired","message":"fixture credential refused"}}`))
 		return
 	}
+	p.mu.Lock()
+	noEvidence := p.evidenceUnavailable && r.Method == http.MethodGet && (strings.HasPrefix(r.URL.Path, "/v1/payment_intents") || strings.HasPrefix(r.URL.Path, "/v1/charges"))
+	p.mu.Unlock()
+	if noEvidence {
+		select {
+		case p.evidenceRequested <- struct{}{}:
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"type":"api_error","code":"api_error","message":"fixture evidence temporarily unavailable"}}`))
+		return
+	}
 	response := httptest.NewRecorder()
 	p.core.ServeHTTP(response, r)
 	// Materialize independent external economic evidence, including a successful
@@ -86,9 +101,6 @@ func (p *providerLedger) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	p.mu.Lock()
 	lose := p.lostResponse && r.Method == http.MethodPost && r.URL.Path == "/v1/payment_intents" && response.Code == 200
-	if lose {
-		p.lostResponse = false
-	}
 	p.mu.Unlock()
 	if lose {
 		connection, _, err := w.(http.Hijacker).Hijack()
@@ -170,7 +182,11 @@ func (p *providerLedger) effects(t *testing.T) []providerEffect {
 	return effects
 }
 
-func (p *providerLedger) loseNextResponse() { p.mu.Lock(); p.lostResponse = true; p.mu.Unlock() }
+func (p *providerLedger) interruptPaymentResponses() {
+	p.mu.Lock()
+	p.lostResponse = true
+	p.mu.Unlock()
+}
 
 func newPaymentWorld(t *testing.T) (*authorityWorld, *providerLedger) {
 	t.Helper()
@@ -189,4 +205,16 @@ func newPaymentWorld(t *testing.T) (*authorityWorld, *providerLedger) {
 		w.cfg.Merchants["alpha"] = declaration
 	})
 	return a, provider
+}
+
+func (p *providerLedger) restorePaymentResponses() {
+	p.mu.Lock()
+	p.lostResponse = false
+	p.mu.Unlock()
+}
+
+func (p *providerLedger) unavailableEvidence(down bool) {
+	p.mu.Lock()
+	p.evidenceUnavailable = down
+	p.mu.Unlock()
 }
