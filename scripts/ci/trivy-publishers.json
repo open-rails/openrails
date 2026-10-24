@@ -1,0 +1,9 @@
+{
+  "ksv0125": {
+    "trusted_registries": ["docker.io", "ghcr.io"]
+  },
+  "openrails_image_repositories": [
+    "docker.io/openrails/openrails",
+    "ghcr.io/open-rails/openrails"
+  ]
+}
