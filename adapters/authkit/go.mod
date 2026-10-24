@@ -3,11 +3,9 @@ module github.com/open-rails/openrails/adapters/authkit
 go 1.26.10
 
 require (
-	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/open-rails/authkit v1.35.4
+	github.com/open-rails/authkit v1.35.5
 	github.com/open-rails/openrails v0.263.1
-	github.com/stretchr/testify v1.12.1
 )
 
 require (
@@ -36,6 +34,7 @@ require (
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
