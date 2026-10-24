@@ -4,7 +4,10 @@ package critical_test
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -33,11 +36,42 @@ func TestAuthorityBoundaries(t *testing.T) {
 	})
 	t.Run("OR-J01-S02/missing-and-malformed-credential-create-nothing", func(t *testing.T) {
 		a := newAuthorityWorld(t)
-		for _, credential := range []string{"", "not-a-valid-credential"} {
-			status, raw := a.request(t, "POST", "/v1/catalog/products", credential, billing.CreateProductParams{Key: "refused", DisplayName: "Refused"})
-			require.Equal(t, http.StatusUnauthorized, status, string(raw))
-			require.Contains(t, string(raw), `"code":"authentication_required"`)
+		rawContract, err := os.ReadFile("http_contract.json")
+		require.NoError(t, err)
+		var contract struct {
+			Operations []struct{ Method, Path, Auth, Feature string }
 		}
+		require.NoError(t, json.Unmarshal(rawContract, &contract))
+		routes, err := a.engine.Routes(openrails.Routes{Auth: a.auth.Authenticator(), RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}})
+		require.NoError(t, err)
+		mounted := map[string]bool{}
+		for _, route := range routes {
+			mounted[route.Method+" "+route.Path] = true
+		}
+		parameter := regexp.MustCompile(`\{[^}]+\}`)
+		checked, mandatory := 0, 0
+		for _, operation := range contract.Operations {
+			if operation.Auth == "public" || operation.Auth == "provider_signature" {
+				continue
+			}
+			key := operation.Method + " " + operation.Path
+			if operation.Feature == "" {
+				mandatory++
+			}
+			if !mounted[key] {
+				require.NotEmpty(t, operation.Feature, "mandatory protected operation was not mounted: %s", key)
+				continue // Enabled optional profiles own their additional gate probes.
+			}
+			checked++
+			path := parameter.ReplaceAllString(operation.Path, "11111111-1111-4111-8111-111111111111")
+			for _, credential := range []string{"", "not-a-valid-credential"} {
+				status, raw := a.request(t, operation.Method, path, credential, map[string]any{})
+				require.Equal(t, http.StatusUnauthorized, status, key+": "+string(raw))
+			}
+		}
+		require.NotZero(t, mandatory, "the reviewed contract must include the protected core")
+		require.GreaterOrEqual(t, checked, mandatory, "every mandatory protected operation must be exercised")
+		t.Logf("exercised missing and malformed credentials on %d reviewed mounted operations (%d mandatory core operations)", checked, mandatory)
 		products, err := a.alpha.ListProducts(t.Context(), billing.ProductListParams{})
 		require.NoError(t, err)
 		require.Empty(t, products.Items)

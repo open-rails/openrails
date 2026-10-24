@@ -1,0 +1,1121 @@
+{
+  "source": "b85d9ff6e21d4b07d9a97599a3e3e21a21893308",
+  "operations": [
+    {
+      "method": "GET",
+      "path": "/health/live",
+      "auth": "public",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/health/ready",
+      "auth": "public",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/access",
+      "auth": "signed_in",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/credit-grants",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/credit-grants",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/credit-grants/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/credit-grants/{id}/revoke",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/customers",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/customers/{customer_id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/admin/customers/{customer_id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/customers/{customer_id}/access-tenure",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/customers/{customer_id}/balance",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/customers/{customer_id}/balance/transactions",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/customers/{customer_id}/payment-methods",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/entitlements",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/orders",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/orders/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/orders/{id}/mark-uncollectible",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/orders/{id}/waive-balance",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/payment-attempts",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/payment-attempts/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/payments",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/payments",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/payments/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/payments/{id}/refunds",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/product-access",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/product-access",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/product-access/{id}/revoke",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/renewals",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/renewals/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/subscriptions",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/subscriptions/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/subscriptions/{id}/cancel",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/subscriptions/{id}/change",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/subscriptions/{id}/change/preview",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/subscriptions/{id}/history",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/admin/subscriptions/{id}/payment-method",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/subscriptions/{id}/resume",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/admissions",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/admissions",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/admissions/capture",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/admissions/extend",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/admissions/release",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/admissions/{request_id}",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/customers",
+      "auth": "application",
+      "feature": "customer_network"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/entitlements/check",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/events",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/orders",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/orders/preview",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/orders/{id}/cancel",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/running-charges",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/running-charges",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/running-charges/{reference}",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/running-charges/{reference}/stop",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/scim/v2/Bulk",
+      "auth": "provisioning",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/scim/v2/ResourceTypes",
+      "auth": "provisioning",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/scim/v2/ResourceTypes/{id}",
+      "auth": "provisioning",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/scim/v2/Schemas",
+      "auth": "provisioning",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/scim/v2/Schemas/{id}",
+      "auth": "provisioning",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/scim/v2/ServiceProviderConfig",
+      "auth": "provisioning",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/scim/v2/Users",
+      "auth": "provisioning",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/scim/v2/Users",
+      "auth": "provisioning",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/app/scim/v2/Users/{id}",
+      "auth": "provisioning",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/scim/v2/Users/{id}",
+      "auth": "provisioning",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/app/scim/v2/Users/{id}",
+      "auth": "provisioning",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/app/scim/v2/Users/{id}",
+      "auth": "provisioning",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/usage-events",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/app/usage-events",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/usage-events/{id}",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/catalog/apply",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/catalog/meters",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/catalog/meters/{key}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/catalog/meters/{key}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/catalog/price-migrations",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/catalog/price-migrations",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/catalog/price-migrations/preview",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/catalog/price-migrations/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/catalog/price-migrations/{id}/cancel",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/catalog/prices",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/catalog/prices",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/catalog/prices/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/catalog/prices/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/catalog/prices/{id}/history",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/catalog/products",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/catalog/products",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/catalog/products/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/catalog/products/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/catalog/products/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/catalog/provider-prices",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/config",
+      "auth": "public",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/console/catalog/ask",
+      "auth": "merchant",
+      "feature": "catalog_copilot"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/access-tenure",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/agreements",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/agreements/{id}/revoke",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/balance/transactions",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/me/cart",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/cart",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/me/cart/lines/{price_id}",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/config",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/me/default-payment-methods/{currency}",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/entitlements",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/me/low-balance-lines/{currency}",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/network-link",
+      "auth": "customer",
+      "feature": "customer_network"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/network-link/challenges",
+      "auth": "customer",
+      "feature": "customer_network"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/orders",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/orders",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/orders/preview",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/orders/{id}",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/orders/{id}/cancel",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/orders/{id}/confirm",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/orders/{id}/pay",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/orders/{id}/pay-url-failure",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/payment-methods",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/payment-methods",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/me/payment-methods/{id}",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/me/payment-methods/{id}",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/payment-methods/{id}/confirm",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/payments",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/stripe/billing-portal-sessions",
+      "auth": "customer",
+      "feature": "stripe_portal"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/subscriptions",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/subscriptions/{id}",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/subscriptions/{id}/cancel",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/subscriptions/{id}/change",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/subscriptions/{id}/change/options",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/subscriptions/{id}/change/preview",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/subscriptions/{id}/confirm",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/me/subscriptions/{id}/payment-method",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/subscriptions/{id}/resume",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/subscriptions/{id}/retry-now",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/usage",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/merchant/alert-webhooks",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/alert-webhooks",
+      "auth": "merchant",
+      "feature": "merchant_config_edits"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/merchant/alert-webhooks/{id}",
+      "auth": "merchant",
+      "feature": "merchant_config_edits"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/merchant/alert-webhooks/{id}",
+      "auth": "merchant",
+      "feature": "merchant_config_edits"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/merchant/billing-archive",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/billing-archive",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/billing-import",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/merchant/configuration",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/merchant/configuration",
+      "auth": "merchant",
+      "feature": "merchant_config_edits"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/merchant/dashboard",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/merchant/destructive-holds",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/destructive-holds/{id}/clear",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/merchant/findings",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/merchant/findings/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/findings/{id}/resolve",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/merchant/provisioning-tokens",
+      "auth": "merchant",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/provisioning-tokens",
+      "auth": "merchant",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/merchant/provisioning-tokens/{id}",
+      "auth": "merchant",
+      "feature": "customer_provisioning"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/psp-import-mappings",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/merchant/psp-imports",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/psp-imports",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/merchant/psp-imports/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/merchant/psp-imports/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/merchant/psp-imports/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/psp-imports/{id}/apply",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/psp-imports/{id}/link",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/merchant/psp-imports/{id}/records",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/merchant/psps",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/psps",
+      "auth": "merchant",
+      "feature": "merchant_config_edits"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/psps/refresh",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/merchant/psps/routing-preview",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/merchant/psps/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/merchant/psps/{id}",
+      "auth": "merchant",
+      "feature": "merchant_config_edits"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metrics/dashboard",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
+      "path": "/v1/metrics/query",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metrics/schema",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/network/links",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/network/links/{link_id}",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/network/links/{link_id}/agreements",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/network/links/{link_id}/agreements/{id}/revoke",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/network/links/{link_id}/orders/{id}",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/network/links/{link_id}/orders/{id}/confirm",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/network/links/{link_id}/orders/{id}/pay",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/network/links/{link_id}/payment-methods",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/network/links/{link_id}/payment-methods",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/network/links/{link_id}/payment-methods/{id}",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/network/links/{link_id}/subscriptions/{id}",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/network/links/{link_id}/subscriptions/{id}/cancel",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/network/links/{link_id}/subscriptions/{id}/payment-method",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/network/links/{link_id}/subscriptions/{id}/resume",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/network/orders",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/network/subscriptions",
+      "auth": "network",
+      "feature": "customer_network"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orders/{id}/solana-pay",
+      "auth": "public",
+      "feature": "solana"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orders/{id}/solana-pay",
+      "auth": "public",
+      "feature": "solana"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/webhooks/{rail}/{account_id}",
+      "auth": "provider_signature",
+      "feature": ""
+    }
+  ]
+}
