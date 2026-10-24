@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { afterEach, expect, it } from "vitest"
+import { afterEach, expect, it, vi } from "vitest"
 import { BillingAdmin } from "./billing-admin"
 import { BillingCustomerSummary } from "./summary"
 import type { BillingAdminAuth } from "./types"
@@ -96,6 +96,7 @@ it("isolates two authenticated instances even when their host shares one QueryCl
       </section>
     </>
   )
+  await vi.dynamicImportSettled()
   expect(
     await within(screen.getByTestId("first")).findByText("Customer A")
   ).toBeVisible()
