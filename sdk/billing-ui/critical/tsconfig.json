@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "types": ["node"] },
+  "include": ["./*.ts", "../playwright.critical.config.ts"],
+  "exclude": []
+}
