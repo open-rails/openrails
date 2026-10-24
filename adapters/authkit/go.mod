@@ -6,7 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/open-rails/authkit v1.35.4
-	github.com/open-rails/openrails v0.263.0
+	github.com/open-rails/openrails v0.263.1
 	github.com/stretchr/testify v1.12.1
 )
 

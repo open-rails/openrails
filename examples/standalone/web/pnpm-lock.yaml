@@ -773,8 +773,8 @@ packages:
       yaml:
         optional: true
 
-  zod@4.6.5:
-    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
+  zod@4.6.6:
+    resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
 
 snapshots:
 
@@ -863,7 +863,7 @@ snapshots:
       recharts: 3.10.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
       sonner: 2.0.8(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       tailwind-merge: 3.7.0
-      zod: 4.6.5
+      zod: 4.6.6
     transitivePeerDependencies:
       - '@date-fns/tz'
       - '@tanstack/react-start'
@@ -1365,4 +1365,4 @@ snapshots:
       '@types/node': 26.6.4
       fsevents: 2.3.3
 
-  zod@4.6.5: {}
+  zod@4.6.6: {}
