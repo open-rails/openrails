@@ -82,7 +82,7 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 	})
 	t.Run("OR-J29-S05/catalog-and-account-retirement-preserve-accepted-terms", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
-		queue, order, _ := unknownSale(t, a, p)
+		_, order, _ := unknownSale(t, a, p)
 		products, err := a.alpha.ListProducts(t.Context(), billing.ProductListParams{})
 		require.NoError(t, err)
 		require.Len(t, products.Items, 1)
@@ -107,7 +107,7 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 		require.NoError(t, err)
 		a.alpha, err = a.engine.MerchantBySlug("alpha")
 		require.NoError(t, err)
-		queue = hostFleet(t, a.world)
+		queue := hostFleet(t, a.world)
 		settled := recoverSale(t, a, p, queue, order.ID)
 		require.EqualValues(t, 30_000_000, settled.Total)
 		require.Equal(t, order.ID, settled.ID)
