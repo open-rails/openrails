@@ -78,7 +78,7 @@ Keep the shared standalone fixture machinery in `critical/standalone_fixture_tes
 4. Publish the tested generic core and paired server/adapters. Qualify SaaS against those public versions, with no implicit old-owner activation or policy bypass.
 5. Rehearse the owned restored-data cutover/rollback, then build and deploy the same qualified artifact through the root release lane. Provider shared-wallet execution remains its own evidence boundary.
 
-No deletion, migration application, source activation, hosted CI, tag or deployment is performed by this planning branch.
+The original planning branch performed no source deletion. This separate implementation draft is now active; no migration application, source activation, hosted CI, tag or deployment has occurred. Shipping master remains unchanged.
 
 ## Existing admission controls and the remaining seam
 
