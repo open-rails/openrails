@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 153,
+  "scenario_count": 154,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -767,6 +767,11 @@
       "id": "OR-J22-S05",
       "journey": "J22",
       "name": "Recurring $20 payments grant 25 service credits once per paid cycle with independent expiry and cash-limited refunds"
+    },
+    {
+      "id": "OR-J06-S06",
+      "journey": "J06",
+      "name": "Merchant custody configuration preserves tenant ownership secrets and accepted billing"
     }
   ]
 }

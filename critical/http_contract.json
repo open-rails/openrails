@@ -824,6 +824,12 @@
       "feature": "merchant_config_edits"
     },
     {
+      "method": "GET",
+      "path": "/v1/merchant/custodians",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
       "method": "PUT",
       "path": "/v1/merchant/dashboard",
       "auth": "merchant",

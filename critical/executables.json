@@ -495,6 +495,9 @@
     ],
     "OR-J22-S05": [
       "TestRecurringCredits/OR-J22-S05/recurring-payment-grants-independent-service-credit"
+    ],
+    "OR-J06-S06": [
+      "TestMerchantCustodyConfiguration/OR-J06-S06/merchant-custody-settings-preserve-ownership-and-secrets"
     ]
   },
   "suites": {
