@@ -9,9 +9,10 @@ on:
 permissions:
   contents: read
 
-# Closed/draft events cancel the old PR run; master never repeats source tests.
+# Closing or drafting cancels the PR run. Ordinary draft updates use a separate
+# group so a delayed draft event cannot cancel a newer ready-to-review run.
 concurrency:
-  group: validate-${{ github.event.pull_request.number || github.ref }}
+  group: validate-${{ github.event.pull_request.draft && github.event.action != 'converted_to_draft' && github.event.action != 'closed' && format('draft-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
