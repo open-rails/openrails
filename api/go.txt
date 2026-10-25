@@ -160,7 +160,7 @@ pkg openrails, method (*Engine) MerchantBySlug(string) (*Client, error)
 pkg openrails, method (*Engine) Probes() []Probe
 pkg openrails, method (*Engine) PublicConfig(Routes) (*billing.PublicConfig, error)
 pkg openrails, method (*Engine) Ready(context.Context) error
-pkg openrails, method (*Engine) ResolveCustomer(context.Context, auth.Authenticator, auth.Verified) (CustomerBinding, error)
+pkg openrails, method (*Engine) ResolveCustomer(context.Context, auth.Authenticator, auth.Verified) (CustomerProof, error)
 pkg openrails, method (*Engine) RiverJobs() river.Contribution
 pkg openrails, method (*Engine) Routes(Routes) ([]Route, error)
 pkg openrails, method (*Engine) Start(context.Context, ...StartOption) error
@@ -384,6 +384,11 @@ pkg openrails, type CustomerBinding = config.CustomerBinding
 pkg openrails, type CustomerBinding struct
 pkg openrails, type CustomerBinding struct, CustomerID billing.CustomerID
 pkg openrails, type CustomerBinding struct, MerchantID billing.MerchantID
+pkg openrails, type CustomerProof = config.CustomerProof
+pkg openrails, type CustomerProof struct
+pkg openrails, type CustomerProof struct, CustomerID billing.CustomerID
+pkg openrails, type CustomerProof struct, Issuer *string
+pkg openrails, type CustomerProof struct, MerchantID billing.MerchantID
 pkg openrails, type CustomerRoutes = config.CustomerRoutes
 pkg openrails, type CustomerRoutes struct
 pkg openrails, type CustomerRoutes struct, Auth billingauth.Authenticator
