@@ -5,9 +5,9 @@
 #   scripts/release prepare vX.Y.Z           # opens the release PR
 #   scripts/release publish vX.Y.Z ["note"]  # once that PR is green
 #
-# prepare pins the server and AuthKit adapter to vX.Y.Z
+# prepare pins the server, AuthKit adapter and standalone test fixture to vX.Y.Z
 # (replaces keep in-repository builds on local source) on origin/master, commits
-# that to release/vX.Y.Z and opens its PR. publish fast-forwards master to the
+# that to chore/release-vX.Y.Z and opens its PR. publish fast-forwards master to the
 # green PR head and pushes it with the signed, annotated vX.Y.Z and
 # server/vX.Y.Z and adapters/authkit/vX.Y.Z tags at once. The vX.Y.Z tag runs release.yaml and
 # docker-publish.yaml.
@@ -21,7 +21,8 @@ step="${1:-}"
 version="${2:-}"
 note="${3:-}"
 [[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] || die "$usage"
-branch="release/$version"
+# release/** branches are protected merge targets, not mutable PR heads.
+branch="chore/release-$version"
 cd "$(git rev-parse --show-toplevel)"
 export GOWORK=off
 git fetch --quiet origin master --tags
@@ -51,7 +52,13 @@ PY
   for manifest in server/go.mod adapters/authkit/go.mod; do
     (cd "$work/${manifest%/go.mod}" && go mod edit -require="github.com/open-rails/openrails@$version" && go build -o /dev/null ./...)
   done
-  git -C "$work" commit --quiet -S -am "Release $version: pin server and adapter to the paired root"
+  # The real standalone fixture replaces both modules with this checkout.
+  # Its requirements must still agree with the server's newly selected root;
+  # otherwise release qualification asks for go mod tidy before tests can run.
+  (cd "$work/critical/server-fixture" &&
+    go mod edit -require="github.com/open-rails/openrails@$version" -require="github.com/open-rails/openrails/server@$version" &&
+    go test -mod=readonly -c -p 2 -o "$admin/server-fixture.test" .)
+  git -C "$work" commit --quiet -S -am "Release $version: pin server, adapter and test fixture to the paired root"
   git -C "$work" push --quiet origin "HEAD:refs/heads/$branch"
   gh pr create --base master --head "$branch" --title "Release $version" \
     --body "Pins server and AuthKit adapter to the paired root. When its checks pass: \`scripts/release publish $version\`."
@@ -70,7 +77,7 @@ publish)
     git tag -d "$version" "server/$version" "adapters/authkit/$version" >/dev/null
     die "push refused; tags removed locally"
   fi
-  git push --quiet origin --delete "$branch" || true
+  # Preserve the owned release branch/worktree and its qualification receipts.
   echo "release: $version, server/$version and adapters/authkit/$version at ${head:0:9}"
   ;;
 *)
