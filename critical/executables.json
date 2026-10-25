@@ -290,6 +290,25 @@
     "OR-J25-S04": [
       "TestRunningChargeContracts/OR-J25-S04/depletion-notifies-host-and-explicit-stop-never-reopens"
     ],
+    "OR-J26-S01": [
+      "TestUsageBillingContracts/OR-J26-S01/threshold",
+      "TestUsageBillingContracts/OR-J26-S01/monthly-date",
+      "TestUsageBillingContracts/OR-J26-S01"
+    ],
+    "OR-J26-S02": [
+      "TestUsageBillingContracts/OR-J26-S02/disabled-host-does-not-collect-automatic-wakeups"
+    ],
+    "OR-J26-S03": [
+      "TestUsageBillingContracts/OR-J26-S03/paid",
+      "TestUsageBillingContracts/OR-J26-S03/waived",
+      "TestUsageBillingContracts/OR-J26-S03/uncollectible",
+      "TestUsageBillingContracts/OR-J26-S03"
+    ],
+    "OR-J26-S04": [
+      "TestUsageBillingContracts/OR-J26-S04/paid",
+      "TestUsageBillingContracts/OR-J26-S04/waived",
+      "TestUsageBillingContracts/OR-J26-S04"
+    ],
     "OR-J27-S01": [
       "TestPublicEntitlements/OR-J27-S01/purchase-and-grant-overlap-counts-once"
     ],
@@ -301,6 +320,22 @@
     ],
     "OR-J27-S04": [
       "TestPublicEntitlements/OR-J27-S04/archive-and-refund-obey-explicit-access-policy"
+    ],
+    "OR-J28-S01": [
+      "TestCallbackContracts/OR-J28-S01/signed-account-bound-evidence-settles-the-original-order"
+    ],
+    "OR-J28-S02": [
+      "TestCallbackContracts/OR-J28-S02/invalid-signature-and-account-cannot-admit-money/missing",
+      "TestCallbackContracts/OR-J28-S02/invalid-signature-and-account-cannot-admit-money/wrong-secret",
+      "TestCallbackContracts/OR-J28-S02/invalid-signature-and-account-cannot-admit-money/tampered",
+      "TestCallbackContracts/OR-J28-S02/invalid-signature-and-account-cannot-admit-money/foreign-account",
+      "TestCallbackContracts/OR-J28-S02/invalid-signature-and-account-cannot-admit-money"
+    ],
+    "OR-J28-S03": [
+      "TestCallbackContracts/OR-J28-S03/previous-signing-secret-expires-at-the-declared-deadline"
+    ],
+    "OR-J28-S04": [
+      "TestCallbackContracts/OR-J28-S04/duplicate-and-old-observations-cannot-regress-settlement"
     ],
     "OR-J29-S01": [
       "TestProcessRecovery/OR-J29-S01"
