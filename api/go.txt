@@ -1854,7 +1854,6 @@ pkg openrails/billing, type Customer struct, CreatedAt time.Time `json:"created_
 pkg openrails/billing, type Customer struct, DefaultPaymentMethods []DefaultPaymentMethod `json:"default_payment_methods"`
 pkg openrails/billing, type Customer struct, ID CustomerID `json:"id"`
 pkg openrails/billing, type Customer struct, LastSeenAt time.Time `json:"last_seen_at"`
-pkg openrails/billing, type Customer struct, Network *CustomerNetwork `json:"network"`
 pkg openrails/billing, type Customer struct, Settings CustomerSettings `json:"settings"`
 pkg openrails/billing, type CustomerAccount struct
 pkg openrails/billing, type CustomerAccount struct, Balances []Balance `json:"balances"`
@@ -1894,10 +1893,6 @@ pkg openrails/billing, type CustomerListParams struct
 pkg openrails/billing, type CustomerListParams struct, IDs []CustomerID `form:"-"`
 pkg openrails/billing, type CustomerListParams struct, Search string `form:"search"`
 pkg openrails/billing, type CustomerListParams struct, embedded PageRequest
-pkg openrails/billing, type CustomerNetwork struct
-pkg openrails/billing, type CustomerNetwork struct, AccountID NetworkAccountID `json:"account_id"`
-pkg openrails/billing, type CustomerNetwork struct, LinkedAt time.Time `json:"linked_at"`
-pkg openrails/billing, type CustomerNetwork struct, Method CustomerLinkMethod `json:"method"`
 pkg openrails/billing, type CustomerNetworkHostEvent struct
 pkg openrails/billing, type CustomerNetworkHostEvent struct, AccountID NetworkAccountID `json:"account_id"`
 pkg openrails/billing, type CustomerNetworkHostEvent struct, CustomerID CustomerID `json:"customer_id"`

@@ -25,12 +25,6 @@ SET status = 'revoked', revoked_at = sqlc.arg(revoked_at)::timestamptz, revoked_
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'active'
 RETURNING *;
 
--- name: ListActiveCustomerLinksByCustomers :many
--- The links of a page of the merchant's customers: at most one each.
-SELECT * FROM billing.customer_links
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[]) AND status = 'active'
-LIMIT cardinality(sqlc.arg(customer_ids)::uuid[]);
-
 -- name: ListActiveCustomerLinksByAccount :many
 -- The account's links, one per merchant, by merchant after a cursor.
 SELECT * FROM billing.customer_links

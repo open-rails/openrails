@@ -7,8 +7,6 @@ package customernetwork
 import (
 	"context"
 
-	"github.com/google/uuid"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
@@ -41,8 +39,6 @@ type Network interface {
 	// answered it, presented with the same proof. created is false when the
 	// customer was already linked to that account.
 	Link(ctx context.Context, proof Proof, params billing.CreateNetworkLinkParams) (link billing.CustomerLink, created bool, err error)
-	// Networks are the merchant's customers' active links, by customer.
-	Networks(ctx context.Context, merchant billing.MerchantID, customers []uuid.UUID) (map[uuid.UUID]billing.CustomerNetwork, error)
 	// CustomerOf is the merchant's customer linked to account.
 	CustomerOf(ctx context.Context, merchant billing.MerchantID, account billing.NetworkAccountID) (billing.CustomerID, bool, error)
 	// AdmitNative admits the deployment's own account subject as the
