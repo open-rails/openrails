@@ -33,17 +33,20 @@ import (
 
 type config struct {
 	Schema, Ready, ControlKey, FXURL, RedisURL string
+	CheckoutOrigin, PaymentAssets              string
 	At                                         time.Time
 }
 type merchant struct {
-	ID            billing.MerchantID
-	Key           string
-	CustomerID    billing.CustomerID
-	CustomerToken string
-	OAuth         iam.OAuthClientCreated
+	ID                                          billing.MerchantID
+	Key                                         string
+	CustomerID                                  billing.CustomerID
+	CustomerToken                               string
+	OAuth                                       iam.OAuthClientCreated
+	DirectoryKey, DirectoryKeyID, ApplicationID string
 }
 type ready struct {
 	URL, ControlURL                      string
+	DirectoryURL                         string
 	AliceID, BobID, AliceToken, BobToken string
 	Merchants                            map[string]merchant
 }
@@ -131,6 +134,7 @@ func TestServerFixture(t *testing.T) {
 		defer shared.Close()
 		require.NoError(t, shared.Ping(t.Context()).Err())
 	}
+	renameInterval := 72 * time.Hour
 	srv, err := server.New(t.Context(), server.Config{
 		Engine: openrails.Config{Database: openrails.DatabaseConfig{Schema: cfg.Schema, RiverSchema: cfg.Schema}, PublicBillingBaseURL: httpServer.URL, ProviderWriteMode: openrails.ProviderWritesFull, RateLimitsDisabled: true, CatalogReconciliationInterval: "0"},
 		Auth: authkit.Config{
@@ -140,8 +144,10 @@ func TestServerFixture(t *testing.T) {
 			Agreements: []authkit.AgreementConfig{{Key: "network-terms", Version: "critical-v1", URL: "https://critical.invalid/network-terms"}},
 			HTTP:       &authkit.HTTPConfig{DirectPeerIP: true},
 		},
-		LocalSignIn: true, AdminConsole: &server.AdminConsole{Disabled: true}, RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true},
-	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Redis: shared, Clock: clock, FXTransport: wire{fx, transport}}, Auth: authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}}})
+		CheckoutOrigin: cfg.CheckoutOrigin,
+		Naming:         server.NamingConfig{RenameInterval: &renameInterval},
+		LocalSignIn:    true, AdminConsole: &server.AdminConsole{Disabled: true}, RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true},
+	}, server.Deps{PaymentPageAssets: hostPaymentAssets(cfg.PaymentAssets), Engine: openrails.Deps{Postgres: pool, Redis: shared, Clock: clock, FXTransport: wire{fx, transport}}, Auth: authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}}})
 	require.NoError(t, err)
 	defer srv.Close(context.Background())
 	handler := srv.Handler()
@@ -154,8 +160,9 @@ func TestServerFixture(t *testing.T) {
 	alice := authtest.SignIn(t, ak, users["alice"])
 	bob := authtest.SignIn(t, ak, users["bob"])
 	as := authtest.Attach(t, ak, httpServer)
-	out := ready{URL: httpServer.URL, ControlURL: httpServer.URL + controlPath, AliceID: users["alice"].ID, BobID: users["bob"].ID, AliceToken: alice.AccessToken, BobToken: bob.AccessToken, Merchants: map[string]merchant{}}
+	out := ready{DirectoryURL: httpServer.URL + "/directory/scim/v2", URL: httpServer.URL, ControlURL: httpServer.URL + controlPath, AliceID: users["alice"].ID, BobID: users["bob"].ID, AliceToken: alice.AccessToken, BobToken: bob.AccessToken, Merchants: map[string]merchant{}}
 	clients := map[string]*openrails.Client{}
+	issuerKeys := map[string]ed25519.PrivateKey{}
 	for _, slug := range []string{"alpha", "beta"} {
 		created, err := srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: slug})
 		require.NoError(t, err)
@@ -169,6 +176,7 @@ func TestServerFixture(t *testing.T) {
 		der, err := x509.MarshalPKIXPublicKey(assertionKey.Public())
 		require.NoError(t, err)
 		issuer := "https://" + slug + ".critical.invalid"
+		issuerKeys[slug] = assertionKey
 		app, err := ak.UpsertRemoteApplication(t.Context(), iam.SystemIdentity(), group, iam.RemoteApplication{Issuer: issuer, Mode: iam.RemoteApplicationModeStatic, PublicKeys: []iam.RemoteApplicationKey{{KID: "merchant-key", PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}}, Enabled: true})
 		require.NoError(t, err)
 		_, err = ak.SetGroupRole(t.Context(), iam.SystemIdentity(), group, iam.RemoteApplicationSubject(app.ID), owner)
@@ -183,7 +191,9 @@ func TestServerFixture(t *testing.T) {
 		customer := billing.CustomerID(uuid.New())
 		token, err := client.CustomerToken(t.Context(), billing.CustomerTokenParams{CustomerID: customer, Email: slug + "@critical.invalid", EmailVerified: true})
 		require.NoError(t, err)
-		out.Merchants[slug] = merchant{ID: created.MerchantID, Key: apiKey.Secret, CustomerID: customer, CustomerToken: token.AccessToken, OAuth: registered}
+		directoryKey, err := ak.CreateAPIKey(t.Context(), iam.SystemIdentity(), group, iam.NewAPIKey{Name: "directory provisioner", Role: owner, ProvisionsFor: app.ID})
+		require.NoError(t, err)
+		out.Merchants[slug] = merchant{DirectoryKey: directoryKey.Secret, DirectoryKeyID: directoryKey.APIKey.ID, ApplicationID: app.ID, ID: created.MerchantID, Key: apiKey.Secret, CustomerID: customer, CustomerToken: token.AccessToken, OAuth: registered}
 		clients[slug] = client
 	}
 	data, err = json.Marshal(out)
@@ -223,6 +233,13 @@ func TestServerFixture(t *testing.T) {
 				signed, err := token.SignedString(key)
 				require.NoError(t, err)
 				result.Result = map[string]string{"access_token": signed}
+			case "external-user-token":
+				token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, jwt.MapClaims{"iss": "https://" + cmd.Merchant + ".critical.invalid", "aud": httpServer.URL, "sub": cmd.ID, "client_id": "critical-directory-client", "scope": "openrails:self", "iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix(), "jti": uuid.NewString()})
+				token.Header["kid"] = "merchant-key"
+				token.Header["typ"] = "at+jwt"
+				signed, err := token.SignedString(issuerKeys[cmd.Merchant])
+				require.NoError(t, err)
+				result.Result = billing.CustomerToken{AccessToken: signed, TokenType: "Bearer", ExpiresAt: time.Now().Add(5 * time.Minute)}
 			case "customer-token":
 				id, err := billing.ParseCustomerID(cmd.ID)
 				require.NoError(t, err)
@@ -248,7 +265,7 @@ func TestServerFixture(t *testing.T) {
 					result.Error = err.Error()
 				}
 			default:
-				result.Error = "unknown fixture command"
+				result = hostCommand(t, srv, clock, cmd)
 			}
 			cmd.reply <- result
 		}
