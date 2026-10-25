@@ -421,6 +421,14 @@ func documentPriceFields(d catalogwire.ApplyPrice) map[string]json.RawMessage {
 		"customer_amount": d.CustomerAmount.Set, "quantity": d.Quantity.Set, "archived": d.Archived.Set,
 		"sell_via": d.SellVia.Set,
 	}
+	// Changing cadence units also clears the old unit. Include that clearing
+	// in field ownership checks without changing old document hashes.
+	if d.BillingIntervalHours.Set && !d.BillingIntervalMonths.Set {
+		values["billing_interval_months"], named["billing_interval_months"] = catalogJSON(nil), true
+	}
+	if d.BillingIntervalMonths.Set && !d.BillingIntervalMonths.Null && !d.BillingIntervalHours.Set {
+		values["billing_interval_hours"], named["billing_interval_hours"] = catalogJSON(nil), true
+	}
 	for field := range values {
 		if !named[field] {
 			delete(values, field)

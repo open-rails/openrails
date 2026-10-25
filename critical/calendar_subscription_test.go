@@ -34,6 +34,32 @@ func TestCalendarSubscription(t *testing.T) {
 			require.ErrorIs(t, err, billing.ErrInvalid)
 		}
 		require.Empty(t, provider.effects(t), "invalid or unsupported calendar terms cannot move money")
+		document, err := catalog.ParseApplicationYAML([]byte(`schema_version: 1
+products:
+  calendar-doc:
+    display_name: Calendar catalog
+    prices:
+      monthly: {amount: 20 USD, billing_interval: 1 month}
+      fixed: {amount: 20 USD, billing_interval: 30 days}
+`))
+		require.NoError(t, err)
+		_, err = a.alpha.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		products, err := a.alpha.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{"calendar-doc"}})
+		require.NoError(t, err)
+		require.Len(t, products.Items, 1)
+		require.Len(t, products.Items[0].Prices, 2)
+		for _, authored := range products.Items[0].Prices {
+			if authored.Key == "monthly" {
+				require.Equal(t, ptr(1), authored.BillingIntervalMonths)
+				require.Nil(t, authored.BillingIntervalHours)
+			}
+			if authored.Key == "fixed" {
+				require.Equal(t, ptr(720), authored.BillingIntervalHours)
+				require.Nil(t, authored.BillingIntervalMonths)
+			}
+		}
+
 		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalMonths: ptr(1)})
 		require.NoError(t, err)
 		require.Nil(t, price.BillingIntervalHours)
@@ -85,6 +111,14 @@ func TestCalendarSubscription(t *testing.T) {
 		require.NoError(t, err)
 		fleet = startFleet(t, a.world)
 		a.clock.Advance(march.Sub(a.clock.Now()) + time.Hour)
+		provider.core.SetDecline("4242", "insufficient_funds")
+		runRegistered(t, fleet, "openrails.dunning", 2)
+		declined := subscriptionState(t, a, subID, "past_due")
+		require.Equal(t, march, *declined.CurrentPeriodEndsAt)
+		require.NotNil(t, declined.Dunning.NextRetryAt)
+		require.Len(t, provider.effects(t), 2, "a declined calendar renewal charges nothing")
+		provider.core.SetDecline("4242", "")
+		a.clock.Advance(declined.Dunning.NextRetryAt.Sub(a.clock.Now()))
 		runRegistered(t, fleet, "openrails.dunning", 2)
 		april := time.Date(2025, 4, 30, 12, 34, 56, 0, time.UTC)
 		require.Eventually(t, func() bool {
