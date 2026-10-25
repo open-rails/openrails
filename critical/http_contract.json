@@ -831,6 +831,12 @@
     },
     {
       "method": "PUT",
+      "path": "/v1/merchant/custodians/{key}",
+      "auth": "merchant",
+      "feature": "merchant_config_edits"
+    },
+    {
+      "method": "PUT",
       "path": "/v1/merchant/dashboard",
       "auth": "merchant",
       "feature": ""

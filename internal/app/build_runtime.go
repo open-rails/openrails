@@ -75,16 +75,18 @@ const (
 
 type runtimeOverrides struct {
 	StripeTransport http.RoundTripper
-	NMITransport    http.RoundTripper
-	FXTransport     http.RoundTripper
-	DB              *db.DB
-	Redis           redis.UniversalClient
-	Clock           clockwork.Clock
-	EmailSender     config.EmailSender
-	UserInfo        userinfo.Lookup
-	Notifications   *config.NotificationChannel
-	Migrations      fs.FS
-	Vault           *vaultapi.Client
+	// CustodianCredentialTransport substitutes read-only vendor account verification; test claims only.
+	CustodianCredentialTransport http.RoundTripper
+	NMITransport                 http.RoundTripper
+	FXTransport                  http.RoundTripper
+	DB                           *db.DB
+	Redis                        redis.UniversalClient
+	Clock                        clockwork.Clock
+	EmailSender                  config.EmailSender
+	UserInfo                     userinfo.Lookup
+	Notifications                *config.NotificationChannel
+	Migrations                   fs.FS
+	Vault                        *vaultapi.Client
 }
 
 // devnetParityPriceProvider wraps the Pyth client (#360) for a merchant whose
@@ -408,7 +410,11 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if overrides != nil {
 		borrowedVault = overrides.Vault
 	}
-	if err := runtime.wireMerchantConfig(ctx, borrowedVault); err != nil {
+	var custodianTransport http.RoundTripper
+	if overrides != nil {
+		custodianTransport = overrides.CustodianCredentialTransport
+	}
+	if err := runtime.wireMerchantConfig(ctx, borrowedVault, custodianTransport); err != nil {
 		return nil, fmt.Errorf("initialize merchant configuration: %w", err)
 	}
 

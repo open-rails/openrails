@@ -108,16 +108,17 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		cfg.DB = &db
 	}
 	bootstrap := &app.BootstrapOptions{
-		PGXPool:         deps.Postgres,
-		Redis:           deps.Redis,
-		StripeTransport: deps.StripeTransport,
-		NMITransport:    deps.NMITransport,
-		FXTransport:     deps.FXTransport,
-		Clock:           deps.Clock,
-		EmailSender:     deps.Email,
-		UserInfo:        deps.UserInfo,
-		Notifications:   deps.Notifications,
-		Vault:           deps.Vault,
+		PGXPool:                      deps.Postgres,
+		Redis:                        deps.Redis,
+		StripeTransport:              deps.StripeTransport,
+		CustodianCredentialTransport: deps.CustodianCredentialTransport,
+		NMITransport:                 deps.NMITransport,
+		FXTransport:                  deps.FXTransport,
+		Clock:                        deps.Clock,
+		EmailSender:                  deps.Email,
+		UserInfo:                     deps.UserInfo,
+		Notifications:                deps.Notifications,
+		Vault:                        deps.Vault,
 	}
 	application, err := app.BootstrapWithOptions(ctx, &cfg, bootstrap)
 	if err != nil {
@@ -279,7 +280,7 @@ func fakeProviders(cfg *config.Config, deps config.Deps) []string {
 func seams(deps config.Deps) []string {
 	var out []string
 	for name, set := range map[string]bool{
-		"Deps.StripeTransport": deps.StripeTransport != nil, "Deps.NMITransport": deps.NMITransport != nil, "Deps.FXTransport": deps.FXTransport != nil,
+		"Deps.CustodianCredentialTransport": deps.CustodianCredentialTransport != nil, "Deps.StripeTransport": deps.StripeTransport != nil, "Deps.NMITransport": deps.NMITransport != nil, "Deps.FXTransport": deps.FXTransport != nil,
 		"Deps.Clock": deps.Clock != nil,
 	} {
 		if set {

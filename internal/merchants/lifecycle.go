@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -82,9 +83,10 @@ func (deniedPolicy) AllowDestructive(context.Context, uuid.UUID) (bool, string) 
 // secrets. Control-plane callers create/resolve the AuthKit permission-group and
 // pass its id explicitly; this service never creates AuthKit authority itself.
 type Service struct {
-	StripeClients *stripeapi.Factory
-	pool          *db.Pool
-	database      *db.DB
+	custodianCredentialTransport http.RoundTripper
+	StripeClients                *stripeapi.Factory
+	pool                         *db.Pool
+	database                     *db.DB
 	// Changed hears each committed change to a merchant's directory entry.
 	Changed func(billing.MerchantID)
 	// config is the merchants' configuration: their documents in a file or

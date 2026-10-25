@@ -13,6 +13,8 @@ func pspWriteErrors(own ...string) []string {
 // pspsRoutes is a merchant's PSPs (accounts on rails), the rails they can be
 // armed on, and the callbacks providers send.
 var pspsRoutes = []Route{
+	{Method: PUT, Path: "/v1/merchant/custodians/{key}", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "PutCustodian", When: FeatureMerchantConfigManages,
+		Request: billing.PutCustodianParams{}, Responses: []Reply{{200, billing.Custodian{}}}, Errors: codes("invalid_param", "resource_conflict", "revision_mismatch", "service_unavailable"), Handler: h(handlers.PutCustodian)},
 	{Method: GET, Path: "/v1/merchant/custodians", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListCustodians",
 		Responses: []Reply{{200, billing.ListPage[billing.Custodian]{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.ListCustodians)},
 	{Method: GET, Path: "/v1/merchant/psps", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListPSPs",

@@ -86,8 +86,9 @@ func New(cfg Config) (*Client, error) {
 		webhookKeyURL: keyURL,
 		readOnly:      cfg.ReadOnly,
 		httpClient: &http.Client{
-			Timeout:   timeout,
-			Transport: &guardTransport{readOnly: cfg.ReadOnly, base: cfg.Transport},
+			Timeout:       timeout,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+			Transport:     &guardTransport{readOnly: cfg.ReadOnly, base: cfg.Transport},
 		},
 		verifier: NewWebhookVerifier(keyURL),
 		outbound: cfg.Outbound,

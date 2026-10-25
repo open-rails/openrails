@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"reflect"
 	"slices"
 	"time"
@@ -33,7 +34,7 @@ import (
 // Vault when a KV mount is named, else from files) and the merchants service
 // over it, and binds the settings reader every database handle reads through.
 // Login and loads run later: nothing here waits on Vault.
-func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Client) error {
+func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Client, custodianTransport http.RoundTripper) error {
 	conn, err := vaultconn.Open(ctx, r.Config, borrowed)
 	if err != nil {
 		return err
@@ -58,6 +59,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 		return err
 	}
 	svc.WithPlatformVaultStore(conn.PlatformKV)
+	svc.WithCustodianCredentialTransport(custodianTransport)
 	// or#858: the merchant purge answers to the same #836 kill switch and #835
 	// per-merchant policy as a mass cancellation.
 	svc.WithDestructivePolicy(destructive.New(r.DB))

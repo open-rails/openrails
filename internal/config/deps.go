@@ -54,9 +54,11 @@ type Deps struct {
 	// source's, which each process reads its rates from into memory; Clock
 	// drives renewal dates, retries and entitlement windows.
 	StripeTransport http.RoundTripper
-	NMITransport    http.RoundTripper
-	FXTransport     http.RoundTripper
-	Clock           clockwork.Clock
+	// CustodianCredentialTransport substitutes read-only vendor account verification; test claims only.
+	CustodianCredentialTransport http.RoundTripper
+	NMITransport                 http.RoundTripper
+	FXTransport                  http.RoundTripper
+	Clock                        clockwork.Clock
 }
 
 // NotificationRecipient is a source identity, not proof that the account may
