@@ -1,6 +1,43 @@
 import type { BillingUiMessageBundle } from "../i18n/messages"
 
 export const ja: BillingUiMessageBundle = {
+  billingNotifications: {
+    paymentMethodRequiredTitle: "支払い方法を更新してください",
+    authenticationRequiredTitle: "支払いの認証が必要です",
+    collectionStoppedTitle: "自動支払いが停止されました",
+
+    paymentFailed: "支払いに失敗しました",
+    membershipEnded: "プレミアム会員期間が終了しました",
+    membershipDowngraded: "会員プランがダウングレードされました",
+    retryScheduled:
+      "この通知の作成時点では、次の支払い試行は{date}に予定されていました。",
+    paymentMethodRequired:
+      "再度支払いを試す前に、新しい支払い方法が必要でした。",
+    retryStopped: "自動支払いの再試行は予定されていませんでした。",
+    retryUnknown: "この通知の作成時点では、再試行の日程は未定でした。",
+    endedAt: "プレミアムアクセスは{date}に終了しました。",
+    ended: "プレミアムアクセスが終了しました。",
+    downgradedTo: "会員プランが{from}から{to}に変更されました。",
+    downgraded: "予定されていた会員プランのダウングレードが適用されました。",
+    instructions: {
+      update_payment_method:
+        "支払い方法を更新し、請求ページで現在の支払い状況を確認してください。",
+      resubscribe:
+        "アクセスを再開するには会員プランを選択してください。新しい登録の前に請求ページを確認してください。",
+      authenticate_payment: "請求ページで支払い認証を完了してください。",
+      contact_support: "この支払いについてサポートにお問い合わせください。",
+      manage_billing:
+        "請求ページで現在の支払い状況と次の手順を確認してください。",
+    },
+    actions: {
+      update_payment_method: "支払い方法を更新",
+      resubscribe: "会員プランを選択",
+      authenticate_payment: "認証を完了",
+      contact_support: "サポートに問い合わせ",
+      manage_billing: "請求を確認",
+    },
+  },
+
   common: {
     cancel: "キャンセル",
     close: "閉じる",

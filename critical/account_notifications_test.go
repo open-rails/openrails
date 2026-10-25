@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/notify"
 	notifypg "github.com/open-rails/authkit/notify/postgres"
@@ -119,6 +120,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 		require.Len(t, adoption.Adoptions, 1)
 		require.Equal(t, item.Origin, adoption.Adoptions[0].Current.Origin)
 		require.False(t, adoption.Adoptions[0].Current.Withdrawn)
+		assertAdoptionPublisherReplay(t, a, adoption)
 		require.Len(t, adoption.Adoptions[0].Previous, 1)
 		repeated, err := a.local.ExportNotificationAdoption(t.Context())
 		require.NoError(t, err)
@@ -317,4 +319,41 @@ func TestOrderNotificationRecovery(t *testing.T) {
 		require.Empty(t, accountNotices(t, inbox, a.alice.ID))
 		require.Len(t, p.effects(t), 2, "only enrollment and confirmed renewal charge money")
 	})
+}
+
+// A legacy receipt may carry source-subject and workflow fields that are not
+// producer inputs in the scoped API. Explicit adoption must canonicalize them
+// before an unchanged source revision is retried through the real publisher.
+func assertAdoptionPublisherReplay(t *testing.T, a *authorityWorld, snapshot billing.NotificationAdoption) {
+	t.Helper()
+	schema := a.schema + "_adoption"
+	t.Cleanup(func() {
+		_, err := a.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+		require.NoError(t, err)
+	})
+	accounts := authtest.Replica(t, a.auth, authtest.WithConfig(func(c *authkit.Config) {
+		c.Notifications = &authkit.NotificationsConfig{Schema: schema, Scopes: map[string]string{a.tenant.String(): "accounts"}, Producers: []authkit.NotificationProducer{{Name: "openrails", TenantID: a.tenant, Origin: notify.OriginScope{System: "openrails", Scope: a.alpha.MerchantID().String()}, Visibility: notify.VisibilityTenant}}}
+	}))
+	raw, err := notifypg.New(a.pool, notifypg.Config{Schema: schema, Scope: "accounts"})
+	require.NoError(t, err)
+	adoption := snapshot.Adoptions[0]
+	legacy := adoption.Current.Input
+	legacy.Origin = adoption.Previous[0]
+	legacy.Origin.Subject = a.alice.ID
+	legacy.Status = notify.StatusOpen
+	prior, err := raw.Publish(t.Context(), legacy)
+	require.NoError(t, err)
+	_, err = raw.SetRead(t.Context(), legacy.Recipient, prior.ID, true)
+	require.NoError(t, err)
+	require.NoError(t, accounts.AdoptNotifications(t.Context(), "openrails", []notify.Adoption{adoption}))
+	before, err := accounts.GetNotification(t.Context(), a.alice.ID, prior.ID)
+	require.NoError(t, err)
+	require.NotNil(t, before.ReadAt)
+	publisher, err := accounts.Notifications("openrails")
+	require.NoError(t, err)
+	m := adoption.Current
+	require.NoError(t, publisher.Publish(t.Context(), []notify.Publication{{RecipientID: m.Recipient.ID, ID: m.Origin.ID, Revision: m.Revision, Kind: m.Kind, Data: m.Data, CreatedAt: m.CreatedAt, ActionRequested: m.ActionRequested, Severity: m.Severity}}))
+	after, err := accounts.GetNotification(t.Context(), a.alice.ID, prior.ID)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "same-revision scoped publisher replay preserves adopted receipt ID/read state and hash")
 }
