@@ -432,8 +432,8 @@ func claimRefusal(c gen.BillingOwnershipClaim) *billing.OrderLineRefusal {
 // creditSnapshot is a credit product's frozen benefit for one unit.
 func creditSnapshot(product *models.Product, price *models.Price) (*models.CreditGrantSnapshot, error) {
 	policy := product.CreditGrant
-	if price.IsRecurring() {
-		return nil, fmt.Errorf("recurring credit benefits are not supported")
+	if price.IsRecurring() && price.ProviderOwned {
+		return nil, fmt.Errorf("recurring credit benefits require an engine-owned price")
 	}
 	currency := strings.ToUpper(strings.TrimSpace(policy.Currency))
 	if currency != strings.ToUpper(strings.TrimSpace(price.Currency)) {

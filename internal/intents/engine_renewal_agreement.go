@@ -2,6 +2,7 @@ package intents
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -159,5 +160,10 @@ func orderAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, op 
 	agreement = subscriptions.RenewalTerms{PSPID: *op.PspID, SubscriptionID: sub.ID, CustomerID: order.CustomerID, FromPriceID: *line.PriceID, FromProductID: *line.ProductID,
 		PriceID: *line.PriceID, ProductID: *line.ProductID, ProductName: line.Description, Amount: line.Amount, Currency: order.Currency,
 		PeriodStart: start, PeriodEnd: start.Add(time.Duration(*line.BillingIntervalHours) * time.Hour), AccessDurationHours: access}
+	if len(line.CreditGrant) > 0 && string(line.CreditGrant) != "null" {
+		if err := json.Unmarshal(line.CreditGrant, &agreement.CreditGrant); err != nil {
+			return agreement, payment, fmt.Errorf("%w: order credit promise is unreadable: %w", ErrRebillNotRetryable, err)
+		}
+	}
 	return agreement, payment, nil
 }

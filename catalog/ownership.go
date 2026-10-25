@@ -32,13 +32,18 @@ type OwnershipPrice struct {
 }
 
 // DeriveOwnership is a product's rule: the declared one, else consumable for a
-// credit product, extend when every live price is one-time with an access
+// one-time credit product, unique for recurring credit, extend when every live price is one-time with an access
 // duration, unique otherwise.
 func DeriveOwnership(declared Ownership, creditGrant bool, prices []OwnershipPrice) Ownership {
 	if declared != "" {
 		return declared
 	}
 	if creditGrant {
+		for _, price := range prices {
+			if price.Recurring {
+				return OwnershipUnique
+			}
+		}
 		return OwnershipConsumable
 	}
 	extend := len(prices) > 0

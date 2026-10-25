@@ -50,8 +50,11 @@ func validateCreditPrice(credit *catalogwire.CreditGrantSpec, price billing.Crea
 		}
 		return nil
 	}
-	if price.BillingIntervalHours != nil {
-		return apperr.Invalidf("recurring credit grants are not supported")
+	if price.TrialUnitAmount != nil || price.TrialDurationHours != nil {
+		return apperr.Invalidf("credit products do not support trial prices")
+	}
+	if price.Quantity != nil {
+		return apperr.Invalidf("credit products do not support per-seat prices")
 	}
 	if !strings.EqualFold(credit.Currency, price.Currency) {
 		return apperr.Invalidf("credit_grant currency must match the price currency")
@@ -68,12 +71,20 @@ func validateCreditPrice(credit *catalogwire.CreditGrantSpec, price billing.Crea
 // Validate available prices against the current benefit. Historical prices stay
 // intact; reactivation checks their compatibility before making them available.
 func (s *Service) validateProductCreditUpdate(ctx context.Context, id billing.ProductID, credit *catalogwire.CreditGrantSpec) error {
+	product, err := s.GetProduct(ctx, id)
+	if err != nil {
+		return err
+	}
 	prices, err := s.ListPricesByProduct(ctx, id, true)
 	if err != nil {
 		return err
 	}
 	for _, price := range prices {
-		if err := validateCreditPrice(credit, billing.CreatePriceParams{Currency: price.Currency, UnitAmount: price.UnitAmount, BillingIntervalHours: price.BillingIntervalHours, CustomerAmount: price.CustomerAmount}); err != nil {
+		if price.BillingIntervalHours != nil && (product.CreditGrant == nil) != (credit == nil) {
+			return apperr.Invalidf("a product with recurring prices cannot change between service credit and access; create a new product")
+		}
+		if err := validateCreditPrice(credit, billing.CreatePriceParams{Currency: price.Currency, UnitAmount: price.UnitAmount, BillingIntervalHours: price.BillingIntervalHours, CustomerAmount: price.CustomerAmount,
+			TrialUnitAmount: price.TrialUnitAmount, TrialDurationHours: price.TrialDurationHours, Quantity: price.Quantity}); err != nil {
 			return err
 		}
 	}

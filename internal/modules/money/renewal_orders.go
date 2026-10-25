@@ -34,7 +34,7 @@ func (h *SubscriptionCollectionHandler) renewalOrderPaid(ctx context.Context, d 
 	case !db.IsNotFound(err):
 		return err
 	}
-	return orders.RenewalPaid(ctx, d, in.MerchantID, p.OrderID, in.ID, paid, transactionID, h.now())
+	return orders.RenewalPaid(ctx, d, in.MerchantID, p.OrderID, in.ID, paid, transactionID, h.now(), h.Clock)
 }
 
 // renewalOrderUnpaid returns the collection's renewal order to the customer

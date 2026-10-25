@@ -30,7 +30,8 @@ var creditGrantJSON = nullable(func(v any) bool {
 })
 
 var acceptedRenewalJSON = object(map[string]jsonRule{
-	"psp_id": uuidValue, "subscription_id": uuidValue, "customer_id": uuidValue,
+	"credit_grant": creditGrantJSON,
+	"psp_id":       uuidValue, "subscription_id": uuidValue, "customer_id": uuidValue,
 	"from_price_id": uuidValue, "from_product_id": uuidValue, "price_id": uuidValue, "product_id": uuidValue,
 	"product_name": textValue, "quantity": integerValue, "amount": moneyStringValue, "currency": textValue,
 	"period_start": textValue, "period_end": textValue, "access_duration_hours": nullable(integerValue), "provider_access_default": booleanValue,

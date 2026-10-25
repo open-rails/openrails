@@ -13,7 +13,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -24,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	paycharge "github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -369,21 +367,8 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 			}
 		}
 	case len(line.CreditGrant) > 0 && string(line.CreditGrant) != "null":
-		credit, err := creditOf(line)
-		if err != nil {
-			return err
-		}
-		if charge == nil {
-			return errors.New("a credit line needs its charge")
-		}
-		expires := now.AddDate(0, 0, credit.ExpiresAfterDays)
-		if _, err := purchasedcredits.New(d, s.Clock).Fund(ctx, purchasedcredits.Params{
-			CustomerID: identity.CustomerID(order.CustomerID), PaymentID: charge.PaymentID, ProductID: models.DerefUUID(line.ProductID), OrderLineID: line.ID,
-			Amount: credit.Amount * int64(seats(line.Quantity)), PaidAmount: line.Amount, Currency: credit.Currency, StartsAt: now, ExpiresAt: &expires,
-			Description: line.Description,
-		}); err != nil {
-			return err
-		}
+		// Credit delivery is shared with recurring lines below. A one-time
+		// credit purchase produces no subscription or product-access window.
 	default:
 		params := entitlements.PushAccessParams{UserID: order.CustomerID.String(), CustomerID: order.CustomerID, ProductID: models.DerefUUID(line.ProductID),
 			SourceType: models.AccessSourcePurchase, SourceID: line.ID.String()}
@@ -405,6 +390,14 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 			if err := q.SetOrderLineProduced(ctx, gen.SetOrderLineProducedParams{MerchantID: order.MerchantID, ID: line.ID, ProductAccessID: &access.ID}); err != nil {
 				return err
 			}
+		}
+	}
+	if len(line.CreditGrant) > 0 && string(line.CreditGrant) != "null" {
+		if charge == nil {
+			return errors.New("a credit line needs its charge")
+		}
+		if err := fundCreditLine(ctx, d, line, charge.PaymentID, now, s.Clock); err != nil {
+			return err
 		}
 	}
 	if line.ClaimKey == nil || holderType == "" || catalog.Ownership(models.DerefStr(line.Ownership)) != catalog.OwnershipUnique {

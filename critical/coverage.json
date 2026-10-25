@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 155,
+  "scenario_count": 156,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -777,6 +777,11 @@
       "id": "OR-J01-S15",
       "journey": "J01",
       "name": "Customer proof refuses expiry, revocation and unavailable authority after storage waits"
+    },
+    {
+      "id": "OR-J22-S05",
+      "journey": "J22",
+      "name": "Recurring $20 payments grant 25 service credits once per paid cycle with independent expiry and cash-limited refunds"
     }
   ]
 }

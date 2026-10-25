@@ -62,6 +62,21 @@ func ScheduleChange(ctx context.Context, d *db.DB, sub *models.Subscription, c N
 	if err := requireTx(d); err != nil {
 		return nil, err
 	}
+	q := d.Gen(ctx)
+	for _, priceID := range []uuid.UUID{sub.PriceID, c.PriceID} {
+		price, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: sub.MerchantID, ID: priceID})
+		if err != nil {
+			return nil, err
+		}
+		product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: sub.MerchantID, ID: price.ProductID})
+		if err != nil {
+			return nil, err
+		}
+		if len(product.CreditGrant) > 0 && string(product.CreditGrant) != "null" {
+			return nil, apperr.New(http.StatusConflict, billing.CodeSubscriptionChangeRefused,
+				"credit subscriptions cannot change plans or seats; cancel and purchase the new plan")
+		}
+	}
 	if err := RefuseOwnedRebillTerms(ctx, d, sub); err != nil {
 		return nil, err
 	}

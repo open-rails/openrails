@@ -501,6 +501,9 @@
     ],
     "OR-J01-S15": [
       "TestCustomerProofResolution/OR-J01-S15/expiry-revocation-and-storage-failure-refuse-retained-customer-proof"
+    ],
+    "OR-J22-S05": [
+      "TestRecurringCredits/OR-J22-S05/recurring-payment-grants-independent-service-credit"
     ]
   },
   "suites": {

@@ -370,6 +370,10 @@ func (s *PurchaseService) resolveChange(ctx context.Context, req *SubscriptionCh
 			return nil, ErrTierChangeSameProduct
 		}
 	}
+	if c.product.CreditGrant != nil || c.currentProduct.CreditGrant != nil {
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeRefused,
+			Message: "credit subscriptions cannot change plans or seats; cancel and purchase the new plan"}
+	}
 	if c.tier {
 		if !sameTierGroup(c.currentProduct, c.product) {
 			return nil, ErrTierChangeDifferentGroup

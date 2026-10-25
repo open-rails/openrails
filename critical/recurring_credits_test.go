@@ -18,6 +18,10 @@ import (
 // The money charged and the service credit granted are deliberately different.
 // Exercise the public purchase API and registered renewal/expiry workers.
 func TestRecurringCredits(t *testing.T) {
+	t.Run("OR-J22-S05/recurring-payment-grants-independent-service-credit", recurringCredits)
+}
+
+func recurringCredits(t *testing.T) {
 	a, provider := newPaymentWorld(t, func(w *world) { w.clock.Advance(-800 * 24 * time.Hour) })
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{
 		Key: "monthly-credit", DisplayName: "Monthly service credits", Ownership: catalog.OwnershipUnique,
@@ -49,10 +53,29 @@ func TestRecurringCredits(t *testing.T) {
 
 	sub, err := a.alpha.GetSubscription(t.Context(), *order.Lines[0].SubscriptionID)
 	require.NoError(t, err)
+	// Existing accepted benefits survive a catalog edit before renewal.
+	_, err = a.alpha.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{
+		CreditGrant: catalog.Value(catalog.CreditGrantSpec{Currency: "USD", Amount: ptr(int64(99_000_000)), ExpiresAfterDays: ptr(10)}),
+	})
+	require.NoError(t, err)
 	due := *sub.CurrentPeriodEndsAt
+	_, err = a.alpha.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{CreditGrant: catalog.Null[catalog.CreditGrantSpec]()})
+	require.Error(t, err, "an accepted credit subscription must not become an access product")
+	_, err = a.alpha.PreviewSubscriptionChange(t.Context(), sub.ID, billing.ChangeSubscriptionParams{Quantity: ptr(2)})
+	require.Error(t, err, "credit-plan changes are refused before charging")
+	require.Len(t, provider.effects(t), 1)
 	require.Equal(t, 30*24*time.Hour, due.Sub(*sub.CurrentPeriodStartsAt))
+	provider.core.SetDecline("4242", "insufficient_funds")
 	a.clock.Advance(due.Sub(a.clock.Now()))
 	fleet := startFleet(t, a.world)
+	runRegistered(t, fleet, "openrails.dunning", 2)
+	declined := subscriptionState(t, a, sub.ID, "past_due")
+	require.NotNil(t, declined.Dunning)
+	require.NotNil(t, declined.Dunning.NextRetryAt)
+	balance(t, a.alpha, customer, 25_000_000, 0, 25_000_000)
+	require.Len(t, provider.effects(t), 1, "a failed renewal grants no credit and collects no money")
+	provider.core.SetDecline("4242", "")
+	a.clock.Advance(declined.Dunning.NextRetryAt.Sub(a.clock.Now()))
 	runRegistered(t, fleet, "openrails.dunning", 2)
 	require.Eventually(t, func() bool {
 		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
@@ -74,12 +97,31 @@ func TestRecurringCredits(t *testing.T) {
 		require.EqualValues(t, 2000, effect.Amount)
 	}
 
+	// A full cash refund returns $20 and reverses the matching 25-credit lot.
+	payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
+	require.NoError(t, err)
+	require.Len(t, payments.Items, 2)
+	var renewalPayment billing.PaymentID
+	for _, payment := range payments.Items {
+		if payment.ID != *order.Payment.PaymentID {
+			renewalPayment = payment.ID
+		}
+	}
+	refund, err := a.alpha.RefundPayment(t.Context(), renewalPayment, billing.RefundPaymentParams{Full: true, Reason: "Refund renewal", IdempotencyKey: "credit-renewal-refund"})
+	require.NoError(t, err)
+	require.EqualValues(t, -20_000_000, refund.Amount)
+	balance(t, a.alpha, customer, 25_000_000, 0, 25_000_000)
+	replay, err := a.alpha.RefundPayment(t.Context(), renewalPayment, billing.RefundPaymentParams{Full: true, Reason: "Refund renewal", IdempotencyKey: "credit-renewal-refund"})
+	require.NoError(t, err)
+	require.Equal(t, refund.ID, replay.ID)
+	balance(t, a.alpha, customer, 25_000_000, 0, 25_000_000)
+
 	status, raw = a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Stop future credit purchases"})
 	require.Equal(t, http.StatusOK, status, string(raw))
-	balance(t, a.alpha, customer, 50_000_000, 0, 50_000_000)
+	balance(t, a.alpha, customer, 25_000_000, 0, 25_000_000)
 	a.clock.Advance(first.ExpiresAt.Sub(a.clock.Now()))
 	runRegistered(t, fleet, "openrails.credit_expiry", 1)
-	balance(t, a.alpha, customer, 25_000_000, 0, 25_000_000)
+	balance(t, a.alpha, customer, 0, 0, 0)
 	runRegistered(t, fleet, "openrails.dunning", 2)
-	require.Len(t, provider.effects(t), 2, "cancellation stops future payments without taking away paid credits")
+	require.Len(t, provider.effects(t), 3, "cancellation stops future payments without taking away paid credits")
 }
