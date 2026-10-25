@@ -1,6 +1,42 @@
 import type { BillingUiMessageBundle } from "../i18n/messages"
 
 export const ko: BillingUiMessageBundle = {
+  billingNotifications: {
+    paymentMethodRequiredTitle: "결제 수단 업데이트 필요",
+    authenticationRequiredTitle: "결제 인증 필요",
+    collectionStoppedTitle: "자동 결제 중단",
+
+    paymentFailed: "결제 실패",
+    membershipEnded: "프리미엄 멤버십 종료",
+    membershipDowngraded: "멤버십 다운그레이드",
+    retryScheduled:
+      "이 알림이 생성될 때 다음 결제 시도는 {date}로 예정되어 있었습니다.",
+    paymentMethodRequired: "다시 결제하려면 새로운 결제 수단이 필요했습니다.",
+    retryStopped: "추가 자동 결제 시도가 예정되어 있지 않았습니다.",
+    retryUnknown: "이 알림 생성 당시 재시도 일정이 없었습니다.",
+    endedAt: "프리미엄 이용 권한이 {date}에 종료되었습니다.",
+    ended: "프리미엄 이용 권한이 종료되었습니다.",
+    downgradedTo: "멤버십이 {from}에서 {to}로 변경되었습니다.",
+    downgraded: "예약된 멤버십 다운그레이드가 적용되었습니다.",
+    instructions: {
+      update_payment_method:
+        "결제 수단을 업데이트하고 청구 페이지에서 현재 결제 상태를 확인하세요.",
+      resubscribe:
+        "이용 권한을 복원하려면 멤버십을 선택하세요. 새 구독 전에 청구 페이지를 확인하세요.",
+      authenticate_payment: "청구 페이지에서 결제 인증을 완료하세요.",
+      contact_support: "이 결제에 도움이 필요하면 지원팀에 문의하세요.",
+      manage_billing:
+        "청구 페이지에서 현재 결제 상태와 다음 단계를 확인하세요.",
+    },
+    actions: {
+      update_payment_method: "결제 수단 업데이트",
+      resubscribe: "멤버십 선택",
+      authenticate_payment: "인증 완료",
+      contact_support: "지원팀 문의",
+      manage_billing: "청구 보기",
+    },
+  },
+
   common: {
     cancel: "취소",
     close: "닫기",

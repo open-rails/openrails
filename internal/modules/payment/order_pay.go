@@ -135,6 +135,9 @@ func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models
 		var line []OrderOption
 		for _, c := range decision.Candidates {
 			rail := models.Rail(c.Rail)
+			if products[i].CreditGrant != nil && price.IsRecurring() && rail != models.RailStripe && rail != models.RailNMI {
+				continue // recurring credit is delivered by the engine's renewal order
+			}
 			if c.Skip != "" || c.PSPID == uuid.Nil || (rail != models.RailNMI && rail != models.RailStripe && rail != models.RailSolana && rail != models.RailCCBill) {
 				continue
 			}
@@ -154,7 +157,7 @@ func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models
 		}
 		out = line
 	}
-	if len(linked) == 1 {
+	if len(linked) == 1 && products[0].CreditGrant == nil {
 		stand, err := s.ccbillStandIns(ctx, linked[0], products[0])
 		if err != nil {
 			return nil, err

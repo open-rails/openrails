@@ -492,6 +492,9 @@
     ],
     "OR-J31-S05": [
       "TestHostedOwnershipContracts/OR-J31-S05/guarded-hosted-state-removal-preserves-progress"
+    ],
+    "OR-J22-S05": [
+      "TestRecurringCredits/OR-J22-S05/recurring-payment-grants-independent-service-credit"
     ]
   },
   "suites": {

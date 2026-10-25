@@ -116,6 +116,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		Clock:           deps.Clock,
 		EmailSender:     deps.Email,
 		UserInfo:        deps.UserInfo,
+		Notifications:   deps.Notifications,
 		Vault:           deps.Vault,
 	}
 	application, err := app.BootstrapWithOptions(ctx, &cfg, bootstrap)

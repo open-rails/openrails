@@ -118,7 +118,7 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 			return err
 		}
 		// Only the paid part repays debt; promotional value never does.
-		if _, err := owed.Repay(ctx, q, mid.UUID(), grant, min(p.Amount, p.PaidAmount), s.now()); err != nil {
+		if _, err := owed.Repay(ctx, s.db.NewWithPgxTx(tx), mid.UUID(), grant, min(p.Amount, p.PaidAmount), s.now()); err != nil {
 			return err
 		}
 		result = grant.ID

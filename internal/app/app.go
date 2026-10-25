@@ -46,7 +46,8 @@ type BootstrapOptions struct {
 	// EmailSender replaces the sender Config.SMTP selects.
 	EmailSender config.EmailSender
 	// UserInfo is the host's directory (Deps.UserInfo); nil keeps a copy.
-	UserInfo userinfo.Lookup
+	UserInfo      userinfo.Lookup
+	Notifications *config.NotificationChannel
 	// Migrations replaces this build's migration files (test seam: an older
 	// build's chain).
 	Migrations fs.FS
@@ -153,6 +154,12 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		UserInfo: func() userinfo.Lookup {
 			if opts != nil {
 				return opts.UserInfo
+			}
+			return nil
+		}(),
+		Notifications: func() *config.NotificationChannel {
+			if opts != nil {
+				return opts.Notifications
 			}
 			return nil
 		}(),

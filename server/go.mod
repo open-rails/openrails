@@ -5,7 +5,7 @@ go 1.26.10
 ignore ./web/console/node_modules
 
 // The root module at the same release; scripts/release pins it.
-require github.com/open-rails/openrails v0.264.0
+require github.com/open-rails/openrails v0.267.0
 
 require (
 	github.com/go-viper/mapstructure/v2 v2.5.0
@@ -20,8 +20,8 @@ require (
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/providers/rawbytes v1.0.0
 	github.com/knadh/koanf/v2 v2.2.2
-	github.com/open-rails/authkit v1.37.2
-	github.com/open-rails/helpers v1.16.1
+	github.com/open-rails/authkit v1.39.0
+	github.com/open-rails/helpers v1.18.0
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/riverqueue/river v0.49.0
 	github.com/riverqueue/river/rivertype v0.49.0

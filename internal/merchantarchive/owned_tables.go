@@ -53,6 +53,8 @@ var ownedTables = []string{
 	"nmi_history_months",
 	"nmi_history_reads",
 	"notification_events",
+	"notification_issue_revisions",
+	"notification_channel_state",
 	"notifications",
 	"order_lines",
 	"orders",

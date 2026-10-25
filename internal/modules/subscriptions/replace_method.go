@@ -57,5 +57,22 @@ func WakeForReplacedMethod(ctx context.Context, d *db.DB, merchantID, paymentMet
 			return err
 		}
 	}
+	// Active subscriptions can also have an update-method notice (for example
+	// an account updater requested a replacement before the next renewal).
+	if d.Notifications() != nil {
+		ids, err := d.Gen(ctx).ListLiveSubscriptionsOnMethod(ctx, gen.ListLiveSubscriptionsOnMethodParams{MerchantID: merchantID, PaymentMethodID: paymentMethodID})
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			sub, err := repo.GetByID(ctx, id)
+			if err != nil {
+				return err
+			}
+			if err := WithdrawMethodNotice(ctx, d, sub.CustomerID, sub.ID); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }

@@ -1,6 +1,38 @@
 import type { BillingUiMessageBundle } from "../i18n/messages"
 
 export const zh: BillingUiMessageBundle = {
+  billingNotifications: {
+    paymentMethodRequiredTitle: "请更新付款方式",
+    authenticationRequiredTitle: "需要验证付款",
+    collectionStoppedTitle: "自动付款已停止",
+
+    paymentFailed: "付款失败",
+    membershipEnded: "高级会员已到期",
+    membershipDowngraded: "会员等级已降低",
+    retryScheduled: "创建此通知时，下次付款尝试安排在{date}。",
+    paymentMethodRequired: "再次尝试付款前需要新的付款方式。",
+    retryStopped: "当时未安排进一步的自动付款尝试。",
+    retryUnknown: "创建此通知时没有可用的重试计划。",
+    endedAt: "您的高级会员访问权限已于{date}结束。",
+    ended: "您的高级会员访问权限已结束。",
+    downgradedTo: "您的会员从{from}变更为{to}。",
+    downgraded: "您预约的会员降级已生效。",
+    instructions: {
+      update_payment_method: "请更新付款方式，并在账单页面查看当前付款状态。",
+      resubscribe: "请选择会员以恢复访问。在开始新订阅前请查看账单页面。",
+      authenticate_payment: "请在账单页面完成付款验证。",
+      contact_support: "请联系支持人员获取此付款的帮助。",
+      manage_billing: "请打开账单页面查看当前付款状态和后续步骤。",
+    },
+    actions: {
+      update_payment_method: "更新付款方式",
+      resubscribe: "选择会员",
+      authenticate_payment: "完成验证",
+      contact_support: "联系支持",
+      manage_billing: "查看账单",
+    },
+  },
+
   common: {
     cancel: "取消",
     close: "关闭",

@@ -270,5 +270,8 @@ func (s *SubscriptionLifecycleService) moveRecurring(ctx context.Context, d *db.
 			return err
 		}
 	}
-	return NewSubscriptionRepo(d).UpdateAt(ctx, sub, now)
+	if err := NewSubscriptionRepo(d).UpdateAt(ctx, sub, now); err != nil {
+		return err
+	}
+	return WithdrawMethodNotice(ctx, d, sub.CustomerID, sub.ID)
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders/orderevent"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/notificationinbox"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -201,6 +202,9 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 		result.Order.Status, result.Order.PaymentStatus = "complete", "succeeded"
 		result.Order.PaymentID = paymentID
 		if err := orderevent.Enqueue(ctx, q, &result.Order, "order.completed", now, map[string]any{"number": number, "settlement_source": bill.SettlementSource}); err != nil {
+			return result, err
+		}
+		if err := notificationinbox.WithdrawOrder(ctx, d, result.Order.CustomerID, result.Order.ID); err != nil {
 			return result, err
 		}
 	}

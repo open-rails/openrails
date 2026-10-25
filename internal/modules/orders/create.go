@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders/orderevent"
+	"github.com/open-rails/openrails/internal/notificationinbox"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -496,7 +497,10 @@ func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status bi
 			return err
 		}
 		order.Status, order.PaymentStatus = string(status), string(billing.OrderPaymentRequiresPaymentMethod)
-		return s.event(ctx, q, &order.BillingOrder, "order."+string(status), now, nil)
+		if err := s.event(ctx, q, &order.BillingOrder, "order."+string(status), now, nil); err != nil {
+			return err
+		}
+		return notificationinbox.WithdrawOrder(ctx, s.DB.NewWithPgxTx(tx), order.CustomerID, order.ID)
 	})
 	if err != nil || awaiting == nil || s.Abandon == nil {
 		return err

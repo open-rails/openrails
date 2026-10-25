@@ -507,7 +507,7 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 			payer := identity.CustomerIDFromString(p.CustomerID.String())
 			key := "invoice-rounding:" + intent.ID.String()
 			reason := "Rounding credit from order " + billing.OrderID(p.OrderID).String()
-			_, err = NewMoneyService(h.DB, h.Clock).depositTx(ctx, q, DepositParams{
+			_, err = NewMoneyService(h.DB, h.Clock).depositTx(ctx, h.DB.NewWithPgxTx(tx), DepositParams{
 				CustomerID: &payer, Currency: currency, Amount: excess,
 				Source: "invoice_rounding_purchase", SourceID: &key, Description: &reason,
 			})
@@ -534,7 +534,7 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 			}
 		}
 		attempt := intent.ID
-		paid, err := usage.Pay(ctx, q, intent.MerchantID, p.OrderID, p.Amount, &p.PaymentID, &attempt, now)
+		paid, err := usage.Pay(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.OrderID, p.Amount, &p.PaymentID, &attempt, now)
 		if err != nil {
 			// The order changed under its own live collection (only raw
 			// surgery can do that). Fail closed: the receipt stays on the

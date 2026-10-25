@@ -226,6 +226,21 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 			return nil, err
 		}
 		req.CreditGrant = credit
+		current, err := products.GetByID(ctx, id.UUID())
+		if err != nil {
+			return nil, productLookup(err)
+		}
+		if (current.CreditGrant == nil) != (credit == nil) {
+			prices, err := s.ListPricesByProduct(ctx, id, false)
+			if err != nil {
+				return nil, err
+			}
+			for _, price := range prices {
+				if price.BillingIntervalHours != nil {
+					return nil, apperr.Invalidf("a product with recurring prices cannot change between service credit and access; create a new product")
+				}
+			}
+		}
 	}
 	if !req.DeferCreditPriceValidation && (req.SetCreditGrant || req.Archived != nil && !*req.Archived) {
 		current, err := products.GetByID(ctx, id.UUID())

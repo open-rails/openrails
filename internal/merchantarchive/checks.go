@@ -27,6 +27,8 @@ var excludedTables = map[string]string{
 	"destructive_actions":           "deployment command admissions; never imported, re-exported or reset by merchant restore",
 	"destructive_holds":             "deployment incident authority and clears; never imported or reset by merchant restore",
 	"notification_events":           "private producer deduplication journal; retained public facts and receiving applications own delivery",
+	"notification_issue_revisions":  "account-notification ordering transferred explicitly, not financial history",
+	"notification_channel_state":    "destination restore guard; cleared only by explicit notification ordering adoption",
 	"catalog_restore_receipts":      "local restore replay receipts, excluded from re-export like billing_restore maintenance receipts",
 	"merchants":                     "destination identity is explicitly provisioned",
 	"merchant_slug_aliases":         "former names are directory identity, not billing history",
@@ -99,6 +101,8 @@ var excludedColumns = map[string]string{
 	"provisioning_tokens":           "merchant_id id name declared token_sha256 last_used_at created_at",
 	"merchant_destructive_policy":   "merchant_id destructive_actions_enabled enforce_armed_at first_pull_completed_at updated_by reason updated_at",
 	"notification_events":           "merchant_id id customer_id event_type data created_at inserted_at",
+	"notification_issue_revisions":  "merchant_id customer_id issue_key revision withdrawn source_event",
+	"notification_channel_state":    "merchant_id restore_required",
 	"notifications":                 "id event_type data recipient_kind read_at severity title body link created_at merchant_id customer_id emailed_at email_lease_expires_at",
 	"provider_mutation_logs":        "id merchant_id rail psp_id provider_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id origin actor executor operation_id subscription_id reason_code",
 	"subscription_verifications":    "merchant_id subscription_id unverified_at reads last_read_at last_error",
@@ -300,8 +304,7 @@ var referenceChecks = []rowCheck{
 	{"prices", `NOT archived AND EXISTS (SELECT 1 FROM billing.products pr
    WHERE pr.merchant_id=$1 AND pr.id=prices.product_id AND NOT pr.archived AND (
     (prices.customer_amount IS NOT NULL AND (pr.credit_grant IS NULL OR NOT COALESCE((pr.credit_grant->>'from_payment')::boolean,false)))
-    OR (pr.credit_grant IS NOT NULL AND (prices.billing_interval_hours IS NOT NULL
-       OR prices.currency IS DISTINCT FROM pr.credit_grant->>'currency'
+    OR (pr.credit_grant IS NOT NULL AND (prices.currency IS DISTINCT FROM pr.credit_grant->>'currency'
        OR (prices.customer_amount IS NULL AND prices.amount<=0)))))`},
 
 	// A native lot retains its payment's accepted promise. The product's current

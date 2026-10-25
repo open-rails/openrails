@@ -454,7 +454,7 @@ func (s *MoneyService) Deposit(ctx context.Context, params DepositParams) (*mode
 	var trx *models.MoneyTransaction
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var terr error
-		trx, terr = s.depositTx(ctx, gen.New(tx), params)
+		trx, terr = s.depositTx(ctx, s.db.NewWithPgxTx(tx), params)
 		return terr
 	})
 	if err != nil {
@@ -497,9 +497,9 @@ func (s *MoneyService) DepositBatch(ctx context.Context, items []DepositParams) 
 	sort.SliceStable(order, func(a, b int) bool { return lockKey(order[a]) < lockKey(order[b]) })
 	out := make([]*models.MoneyTransaction, len(items))
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
+		d := s.db.NewWithPgxTx(tx)
 		for _, i := range order {
-			trx, err := s.depositTx(ctx, q, items[i])
+			trx, err := s.depositTx(ctx, d, items[i])
 			if err != nil {
 				return &DepositItemError{Index: i, Err: err}
 			}
@@ -534,7 +534,8 @@ func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUI
 // ledger deposit (DR processor_clearing / CR customer_balance); the grant IS
 // the FIFO lot. Idempotent on (merchant, payer, source_id) via the credit-grant
 // lookup. Runs under the customers-row lock so deposits serialize per customer.
-func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params DepositParams) (*models.MoneyTransaction, error) {
+func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositParams) (*models.MoneyTransaction, error) {
+	q := d.Gen(ctx)
 	now := s.now()
 	expiresAt, err := params.expiryAt(now)
 	if err != nil {
@@ -614,7 +615,7 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		return nil, err
 	}
 	if params.RepayOwed {
-		if _, err := owed.Repay(ctx, q, tenantID, g, params.Amount, now); err != nil {
+		if _, err := owed.Repay(ctx, d, tenantID, g, params.Amount, now); err != nil {
 			return nil, err
 		}
 	}

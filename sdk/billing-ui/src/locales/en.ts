@@ -1,5 +1,44 @@
 // Source of truth: every other locale is a partial of this tree.
 export const en = {
+  billingNotifications: {
+    paymentMethodRequiredTitle: "Update payment method",
+    authenticationRequiredTitle: "Payment authentication required",
+    collectionStoppedTitle: "Automatic payments stopped",
+
+    paymentFailed: "Payment failed",
+    membershipEnded: "Premium membership ended",
+    membershipDowngraded: "Membership downgraded",
+    retryScheduled:
+      "When this notice was created, another payment attempt was scheduled for {date}.",
+    paymentMethodRequired:
+      "A new payment method was required before another payment attempt.",
+    retryStopped: "No further automatic payment attempt was scheduled.",
+    retryUnknown:
+      "No retry schedule was available when this notice was created.",
+    endedAt: "Your premium access ended on {date}.",
+    ended: "Your premium access has ended.",
+    downgradedTo: "Your membership changed from {from} to {to}.",
+    downgraded: "Your queued membership downgrade has taken effect.",
+    instructions: {
+      update_payment_method:
+        "Update your payment method and check your billing page for the current payment status.",
+      resubscribe:
+        "Choose a membership to restore access. Check your billing page before starting a new subscription.",
+      authenticate_payment:
+        "Complete payment authentication on your billing page.",
+      contact_support: "Contact support for help with this payment.",
+      manage_billing:
+        "Open your billing page to check the current payment status and available next steps.",
+    },
+    actions: {
+      update_payment_method: "Update payment method",
+      resubscribe: "Choose membership",
+      authenticate_payment: "Complete authentication",
+      contact_support: "Contact support",
+      manage_billing: "View billing",
+    },
+  },
+
   common: {
     cancel: "Cancel",
     close: "Close",

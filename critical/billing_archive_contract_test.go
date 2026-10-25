@@ -13,17 +13,19 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	notifypg "github.com/open-rails/authkit/notify/postgres"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
 )
 
-func archiveTarget(t *testing.T, source *world) (*world, *openrails.Client) {
+func archiveTarget(t *testing.T, source *world, configure ...func(*world)) (*world, *openrails.Client) {
 	t.Helper()
-	target := newWorld(t, func(w *world) {
+	configure = append([]func(*world){func(w *world) {
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		w.deps.StripeTransport = source.deps.StripeTransport
-	})
+	}}, configure...)
+	target := newWorld(t, configure...)
 	id := source.alpha.MerchantID()
 	hostCLI(t, target, "billing", "prepare-target", "--merchant", id.String(), "--slug", "restored-source", "--unbound-merchants")
 	client, err := target.engine.Merchant(id)
@@ -52,13 +54,24 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, before.Events)
 		archive := archiveBytes(t, source.alpha)
-		_, target := archiveTarget(t, source)
+		var inbox *notifypg.Store
+		targetWorld, target := archiveTarget(t, source, accountInbox(t, &inbox))
 		receipt, err := target.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
 		require.NoError(t, err)
 		require.Equal(t, source.alpha.MerchantID(), receipt.MerchantID)
 		require.NotEmpty(t, receipt.Digest)
 		require.Positive(t, receipt.Rows)
 		require.False(t, receipt.AlreadyImported)
+		local, err := targetWorld.engine.LocalMerchant(target.MerchantID())
+		require.NoError(t, err)
+		_, err = local.ExportNotificationAdoption(t.Context())
+		require.ErrorContains(t, err, "ordering-state restoration")
+		// This fixture had no notification channel before moving its book.
+		require.NoError(t, local.RestoreNotificationOrdering(t.Context(), billing.NotificationAdoption{MerchantID: target.MerchantID()}))
+		adoption, err := local.ExportNotificationAdoption(t.Context())
+		require.NoError(t, err)
+		require.Empty(t, adoption.Ordering)
+		require.Empty(t, adoption.Adoptions, "a financial restore must not replay old inbox messages")
 		balance(t, target, customer, 12345, 0, 12345)
 		after, err := target.ListCreditGrants(t.Context(), billing.CreditGrantListParams{CustomerID: customer})
 		require.NoError(t, err)

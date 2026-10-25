@@ -7,6 +7,7 @@ import (
 	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/authkit/notify"
 	"github.com/open-rails/authkit/userinfo"
 	"github.com/open-rails/openrails/billing"
 	"github.com/redis/go-redis/v9"
@@ -43,6 +44,11 @@ type Deps struct {
 	// customers get no email.
 	UserInfo UserInfo
 
+	// Notifications is the optional account-inbox channel. It records notices
+	// or durable remote delivery in the billing transaction. Nil disables this
+	// channel only; retained billing events are still recorded.
+	Notifications *NotificationChannel
+
 	// Test seams, refused beside a live PSP. StripeTransport and
 	// NMITransport replace the provider wires; FXTransport replaces the FX
 	// source's, which each process reads its rates from into memory; Clock
@@ -51,6 +57,23 @@ type Deps struct {
 	NMITransport    http.RoundTripper
 	FXTransport     http.RoundTripper
 	Clock           clockwork.Clock
+}
+
+// NotificationRecipient is a source identity, not proof that the account may
+// receive a notice. The host maps the exact issuer and customer UUID.
+type NotificationRecipient struct {
+	MerchantID billing.MerchantID
+	CustomerID billing.CustomerID
+	Issuer     string
+}
+
+// NotificationChannel connects billing to an account inbox. Recipient returns
+// false for identities intentionally outside the destination's namespace. An
+// error leaves the billing transaction retryable. The sink must not perform
+// network delivery inside ApplyTx: a remote implementation enqueues locally.
+type NotificationChannel struct {
+	Sink      notify.Publisher
+	Recipient func(context.Context, NotificationRecipient) (accountID string, deliver bool, err error)
 }
 
 // UserInfo is authkit/userinfo's Lookup: the host's directory, read in

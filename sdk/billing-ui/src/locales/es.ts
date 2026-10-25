@@ -1,6 +1,45 @@
 import type { BillingUiMessageBundle } from "../i18n/messages"
 
 export const es: BillingUiMessageBundle = {
+  billingNotifications: {
+    paymentMethodRequiredTitle: "Actualiza el método de pago",
+    authenticationRequiredTitle: "Se requiere autenticar el pago",
+    collectionStoppedTitle: "Pagos automáticos detenidos",
+
+    paymentFailed: "Error de pago",
+    membershipEnded: "La membresía premium ha terminado",
+    membershipDowngraded: "Membresía reducida",
+    retryScheduled:
+      "Cuando se creó este aviso, había otro intento de pago programado para {date}.",
+    paymentMethodRequired:
+      "Se necesitaba un nuevo método de pago antes de otro intento.",
+    retryStopped: "No había más intentos de pago automáticos programados.",
+    retryUnknown:
+      "No había una fecha de reintento disponible al crear este aviso.",
+    endedAt: "Tu acceso premium terminó el {date}.",
+    ended: "Tu acceso premium ha terminado.",
+    downgradedTo: "Tu membresía cambió de {from} a {to}.",
+    downgraded: "La reducción programada de tu membresía se ha aplicado.",
+    instructions: {
+      update_payment_method:
+        "Actualiza tu método de pago y consulta el estado actual en la página de facturación.",
+      resubscribe:
+        "Elige una membresía para recuperar el acceso. Consulta tu facturación antes de iniciar una nueva suscripción.",
+      authenticate_payment:
+        "Completa la autenticación del pago en la página de facturación.",
+      contact_support: "Contacta con soporte para obtener ayuda con este pago.",
+      manage_billing:
+        "Abre la página de facturación para consultar el estado actual y los siguientes pasos.",
+    },
+    actions: {
+      update_payment_method: "Actualizar método de pago",
+      resubscribe: "Elegir membresía",
+      authenticate_payment: "Completar autenticación",
+      contact_support: "Contactar con soporte",
+      manage_billing: "Ver facturación",
+    },
+  },
+
   common: {
     cancel: "Cancelar",
     close: "Cerrar",

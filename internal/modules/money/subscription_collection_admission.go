@@ -261,5 +261,6 @@ func RenewalOrderOf(terms subscriptions.RenewalTerms) orders.Renewal {
 	hours := int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour)
 	return orders.Renewal{SubscriptionID: terms.SubscriptionID, CustomerID: terms.CustomerID, PriceID: terms.PriceID, ProductID: terms.ProductID,
 		Description: terms.ProductName, Quantity: terms.Quantity, Amount: terms.Amount, Currency: terms.Currency,
-		PeriodStart: terms.PeriodStart, PeriodEnd: terms.PeriodEnd, BillingIntervalHours: &hours, AccessDurationHours: terms.AccessDurationHours}
+		PeriodStart: terms.PeriodStart, PeriodEnd: terms.PeriodEnd, BillingIntervalHours: &hours, AccessDurationHours: terms.AccessDurationHours,
+		CreditGrant: terms.CreditGrant}
 }

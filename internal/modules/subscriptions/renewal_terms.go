@@ -23,18 +23,19 @@ import (
 // Preparation reads catalog and scheduled changes before admission; settlement
 // consumes these facts without reinterpreting a subsequently edited catalog.
 type RenewalTerms struct {
-	Rail                  models.Rail     `json:"rail,omitempty"`
-	LegacyEntitlements    map[string]*int `json:"legacy_entitlements,omitzero"`
-	ProviderAccessDefault bool            `json:"provider_access_default,omitempty"`
-	AccessDurationHours   *int            `json:"access_duration_hours"`
-	PSPID                 uuid.UUID       `json:"psp_id"`
-	SubscriptionID        uuid.UUID       `json:"subscription_id"`
-	CustomerID            uuid.UUID       `json:"customer_id"`
-	FromPriceID           uuid.UUID       `json:"from_price_id"`
-	FromProductID         uuid.UUID       `json:"from_product_id"`
-	PriceID               uuid.UUID       `json:"price_id"`
-	ProductID             uuid.UUID       `json:"product_id"`
-	ProductName           string          `json:"product_name"`
+	Rail                  models.Rail                 `json:"rail,omitempty"`
+	LegacyEntitlements    map[string]*int             `json:"legacy_entitlements,omitzero"`
+	ProviderAccessDefault bool                        `json:"provider_access_default,omitempty"`
+	AccessDurationHours   *int                        `json:"access_duration_hours"`
+	CreditGrant           *models.CreditGrantSnapshot `json:"credit_grant,omitempty"`
+	PSPID                 uuid.UUID                   `json:"psp_id"`
+	SubscriptionID        uuid.UUID                   `json:"subscription_id"`
+	CustomerID            uuid.UUID                   `json:"customer_id"`
+	FromPriceID           uuid.UUID                   `json:"from_price_id"`
+	FromProductID         uuid.UUID                   `json:"from_product_id"`
+	PriceID               uuid.UUID                   `json:"price_id"`
+	ProductID             uuid.UUID                   `json:"product_id"`
+	ProductName           string                      `json:"product_name"`
 	// Quantity is the seats of a per-seat price, nil otherwise; Amount is the
 	// unit price times Quantity.
 	Quantity    *int      `json:"quantity,omitempty"`
@@ -53,6 +54,12 @@ type RenewalTerms struct {
 func (t RenewalTerms) UnitAmount() int64 { return t.Amount / int64(SeatCount(t.Quantity)) }
 
 func (t RenewalTerms) Validate() error {
+	if err := t.CreditGrant.Validate(); err != nil {
+		return err
+	}
+	if credit := t.CreditGrant; credit != nil && (credit.Currency != t.Currency || !credit.StartsAt.IsZero() || credit.ExpiresAt != nil) {
+		return errors.New("renewal credit promise contradicts its currency or already has delivery dates")
+	}
 	if err := validateAccessChoice(t.AccessDurationHours, t.ProviderAccessDefault); err != nil {
 		return err
 	}
@@ -114,6 +121,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		terms.Amount, terms.Currency, terms.ProductName = amount, agreement.Currency, agreement.ProductName
 		terms.AccessDurationHours = agreement.AccessDurationHours
 		terms.ProviderAccessDefault = agreement.ProviderAccessDefault
+		terms.CreditGrant = models.CloneCreditGrantSnapshot(agreement.CreditGrant)
 		terms.PeriodEnd = terms.PeriodStart.Add(duration)
 	} else if agreement != nil {
 		return terms, errors.New("native renewal cannot substitute an engine agreement")
@@ -165,6 +173,17 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		return terms, fmt.Errorf("prepare renewal product: %w", err)
 	}
 	terms.ProductName = product.DisplayName
+	terms.CreditGrant = nil
+	if policy := product.CreditGrant; policy != nil {
+		amount, days := price.Amount, 365
+		if policy.Amount != nil {
+			amount = *policy.Amount
+		}
+		if policy.ExpiresAfterDays != nil {
+			days = *policy.ExpiresAfterDays
+		}
+		terms.CreditGrant = &models.CreditGrantSnapshot{Amount: amount, Currency: policy.Currency, ExpiresAfterDays: days}
+	}
 	return terms, terms.Validate()
 }
 

@@ -28,6 +28,30 @@ provenance.
 pnpm add @openrails/billing-ui@X.Y.Z
 ```
 
+## Account notification wording
+
+AuthKit UI owns the notification bell, inbox and read/archive controls.
+BillingUI supplies the billing-specific wording and action links through
+`BillingNotification` and `isBillingNotification`; it owns no inbox or polling
+client. Pass the component through AuthKit UI's optional `renderItem` callback
+and supply your application's authorized billing destinations:
+
+```tsx
+import { NotificationInbox } from "@openrails/auth-ui"
+import { BillingNotification, isBillingNotification } from "@openrails/billing-ui"
+
+<NotificationInbox renderItem={(item) =>
+  isBillingNotification(item)
+    ? <BillingNotification item={item} actions={{ manage_billing: "/account/billing" }} />
+    : null
+} />
+```
+
+The formatter supports the six BillingUI locales. It inherits the current
+locale/theme when rendered in a billing context, or accepts explicit `language`,
+`messages` and `appearance` options for a global header. Unknown notification
+kinds fall back to AuthKit UI's generic presentation.
+
 ## Buying
 
 A React app imports from one place:

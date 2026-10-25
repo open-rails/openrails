@@ -34,7 +34,7 @@ func (h *SubscriptionCollectionHandler) renewalOrderPaid(ctx context.Context, d 
 	case !db.IsNotFound(err):
 		return err
 	}
-	return orders.RenewalPaid(ctx, d.Gen(ctx), in.MerchantID, p.OrderID, in.ID, paid, transactionID, h.now())
+	return orders.RenewalPaid(ctx, d, in.MerchantID, p.OrderID, in.ID, paid, transactionID, h.now(), h.Clock)
 }
 
 // renewalOrderUnpaid returns the collection's renewal order to the customer
@@ -43,7 +43,7 @@ func (h *SubscriptionCollectionHandler) renewalOrderUnpaid(ctx context.Context, 
 	if p.OrderID == uuid.Nil {
 		return nil
 	}
-	return orders.RenewalUnpaid(ctx, d.Gen(ctx), in.MerchantID, p.OrderID, in.ID, failure, h.now())
+	return orders.RenewalUnpaid(ctx, d, in.MerchantID, p.OrderID, in.ID, failure, h.now())
 }
 
 // renewalAwaitsCustomer: the bank asks the customer to authenticate the

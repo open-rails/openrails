@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 152,
+  "scenario_count": 153,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -762,6 +762,11 @@
       "id": "OR-J31-S05",
       "journey": "J31",
       "name": "Hosted account removal refuses ambiguous or populated legacy state and preserves transferred reader progress"
+    },
+    {
+      "id": "OR-J22-S05",
+      "journey": "J22",
+      "name": "Recurring $20 payments grant 25 service credits once per paid cycle with independent expiry and cash-limited refunds"
     }
   ]
 }
