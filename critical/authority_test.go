@@ -52,6 +52,11 @@ type authorityWorld struct {
 
 func newAuthorityWorld(t *testing.T, configure ...func(*world)) *authorityWorld {
 	t.Helper()
+	return newAuthorityWorldWithAuth(t, nil, configure...)
+}
+
+func newAuthorityWorldWithAuth(t *testing.T, configureAuth func(*authkit.Config), configure ...func(*world)) *authorityWorld {
+	t.Helper()
 	a := &authorityWorld{tenant: iam.NewTenantID()}
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -59,7 +64,7 @@ func newAuthorityWorld(t *testing.T, configure ...func(*world)) *authorityWorld 
 	require.NoError(t, err)
 	a.privateSigner = private
 	roles := authkit.NewRoles(authkit.APIKeys)
-	a.merchant = roles.Persona(billing.MerchantGroupPersona, authkit.APIKeys, authkit.CustomRoles)
+	a.merchant = roles.Persona(billing.MerchantGroupPersona, authkit.APIKeys, authkit.CustomRoles, authkit.RemoteApplications)
 	for _, permission := range billing.Permissions() {
 		if permission.Persona() == billing.MerchantGroupPersona {
 			a.merchant.Declare(string(permission))
@@ -88,6 +93,9 @@ func newAuthorityWorld(t *testing.T, configure ...func(*world)) *authorityWorld 
 			c.Database.Schema, c.Database.RiverSchema = authSchema, authSchema
 			c.Roles = roles
 			c.TwoFactor.Mode = iam.TwoFactorDisabled
+			if configureAuth != nil {
+				configureAuth(c)
+			}
 		}), authtest.WithDeps(func(d *authkit.Deps) {
 			d.Postgres = a.authPool
 			d.KeySource = keys.Static{Active: a.signer, Public: map[string]crypto.PublicKey{a.signer.KID(): a.signer.Public()}}

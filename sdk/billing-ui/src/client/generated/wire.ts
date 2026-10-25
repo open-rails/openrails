@@ -718,7 +718,6 @@ export type Customer = {
   settings: CustomerSettings
   balances: Balance[]
   default_payment_methods: DefaultPaymentMethod[]
-  network: CustomerNetwork | null
 }
 
 export type CustomerAccount = {
@@ -775,12 +774,6 @@ export type CustomerLink = {
   linked_at: string
   revoked_at: string | null
   revoked_by: "account_deleted" | "customer" | "merchant_left" | null
-}
-
-export type CustomerNetwork = {
-  account_id: string
-  linked_at: string
-  method: "connect" | "payment_page" | "sign_in"
 }
 
 export type CustomerSettings = {

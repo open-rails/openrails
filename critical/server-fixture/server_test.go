@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/auth"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/keys"
@@ -32,6 +33,7 @@ import (
 )
 
 type config struct {
+	MappedCustomers                            bool
 	Schema, Ready, ControlKey, FXURL, RedisURL string
 	CheckoutOrigin, PaymentAssets              string
 	At                                         time.Time
@@ -195,6 +197,32 @@ func TestServerFixture(t *testing.T) {
 		require.NoError(t, err)
 		out.Merchants[slug] = merchant{DirectoryKey: directoryKey.Secret, DirectoryKeyID: directoryKey.APIKey.ID, ApplicationID: app.ID, ID: created.MerchantID, Key: apiKey.Secret, CustomerID: customer, CustomerToken: token.AccessToken, OAuth: registered}
 		clients[slug] = client
+	}
+	if cfg.MappedCustomers {
+		mapped, err := srv.Engine().CustomerRoutes(openrails.CustomerRoutes{Prefix: "/__mapped/{merchant}/me", Auth: ak.Authenticator(), Resolve: func(r *http.Request, verified auth.Verified) (openrails.CustomerBinding, error) {
+			actor, err := ak.ResolveTenantActor(r.Context(), verified)
+			if err != nil {
+				return openrails.CustomerBinding{}, err
+			}
+			slug := r.PathValue("merchant")
+			customer, exists := out.Merchants[slug]
+			owner := out.AliceID
+			if slug == "beta" {
+				owner = out.BobID
+			}
+			if !exists || actor.AccountID != owner {
+				return openrails.CustomerBinding{}, billing.ErrNotFound
+			}
+			return openrails.CustomerBinding{MerchantID: customer.ID, CustomerID: customer.CustomerID}, nil
+		}})
+		require.NoError(t, err)
+		mux := http.NewServeMux()
+		for _, route := range mapped {
+			mux.Handle(route.Method+" "+route.Path, route.Handler)
+		}
+		mux.Handle("/", handler)
+		var combined http.Handler = mux
+		current.Store(&combined)
 	}
 	data, err = json.Marshal(out)
 	require.NoError(t, err)

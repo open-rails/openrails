@@ -152,6 +152,7 @@ pkg openrails, method (*Engine) CheckoutPage(string, fs.FS) (string, http.Handle
 pkg openrails, method (*Engine) ClearDestructiveHold(context.Context, billing.MerchantID, billing.DestructiveHoldID, billing.DestructiveOperator, string) (*billing.DestructiveHold, error)
 pkg openrails, method (*Engine) Close(context.Context) error
 pkg openrails, method (*Engine) CustomerConfig(Routes, *http.Request) (*billing.CustomerConfig, error)
+pkg openrails, method (*Engine) CustomerRoutes(CustomerRoutes) ([]Route, error)
 pkg openrails, method (*Engine) ListOpenDestructiveHolds(context.Context, int, billing.DestructiveHoldID) ([]billing.DestructiveHoldReview, error)
 pkg openrails, method (*Engine) LocalMerchant(billing.MerchantID) (*LocalClient, error)
 pkg openrails, method (*Engine) Merchant(billing.MerchantID) (*Client, error)
@@ -159,6 +160,7 @@ pkg openrails, method (*Engine) MerchantBySlug(string) (*Client, error)
 pkg openrails, method (*Engine) Probes() []Probe
 pkg openrails, method (*Engine) PublicConfig(Routes) (*billing.PublicConfig, error)
 pkg openrails, method (*Engine) Ready(context.Context) error
+pkg openrails, method (*Engine) ResolveCustomer(context.Context, auth.Authenticator, auth.Verified) (CustomerProof, error)
 pkg openrails, method (*Engine) RiverJobs() river.Contribution
 pkg openrails, method (*Engine) Routes(Routes) ([]Route, error)
 pkg openrails, method (*Engine) Start(context.Context, ...StartOption) error
@@ -380,6 +382,20 @@ pkg openrails, type CustodianConfig struct, Secrets map[string]string `yaml:"sec
 pkg openrails, type CustodianConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
 pkg openrails, type Custodians = config.Custodians
 pkg openrails, type Custodians map[string]config.CustodianConfig
+pkg openrails, type CustomerBinding = config.CustomerBinding
+pkg openrails, type CustomerBinding struct
+pkg openrails, type CustomerBinding struct, CustomerID billing.CustomerID
+pkg openrails, type CustomerBinding struct, MerchantID billing.MerchantID
+pkg openrails, type CustomerProof = config.CustomerProof
+pkg openrails, type CustomerProof struct
+pkg openrails, type CustomerProof struct, CustomerID billing.CustomerID
+pkg openrails, type CustomerProof struct, Issuer *string
+pkg openrails, type CustomerProof struct, MerchantID billing.MerchantID
+pkg openrails, type CustomerRoutes = config.CustomerRoutes
+pkg openrails, type CustomerRoutes struct
+pkg openrails, type CustomerRoutes struct, Auth billingauth.Authenticator
+pkg openrails, type CustomerRoutes struct, Prefix string
+pkg openrails, type CustomerRoutes struct, Resolve func(*http.Request, billingauth.Verified) (config.CustomerBinding, error)
 pkg openrails, type DBConfig = config.DBConfig
 pkg openrails, type DBConfig struct
 pkg openrails, type DBConfig struct, Database string `yaml:"database" json:"database"`
@@ -1857,7 +1873,6 @@ pkg openrails/billing, type Customer struct, CreatedAt time.Time `json:"created_
 pkg openrails/billing, type Customer struct, DefaultPaymentMethods []DefaultPaymentMethod `json:"default_payment_methods"`
 pkg openrails/billing, type Customer struct, ID CustomerID `json:"id"`
 pkg openrails/billing, type Customer struct, LastSeenAt time.Time `json:"last_seen_at"`
-pkg openrails/billing, type Customer struct, Network *CustomerNetwork `json:"network"`
 pkg openrails/billing, type Customer struct, Settings CustomerSettings `json:"settings"`
 pkg openrails/billing, type CustomerAccount struct
 pkg openrails/billing, type CustomerAccount struct, Balances []Balance `json:"balances"`
@@ -1897,10 +1912,6 @@ pkg openrails/billing, type CustomerListParams struct
 pkg openrails/billing, type CustomerListParams struct, IDs []CustomerID `form:"-"`
 pkg openrails/billing, type CustomerListParams struct, Search string `form:"search"`
 pkg openrails/billing, type CustomerListParams struct, embedded PageRequest
-pkg openrails/billing, type CustomerNetwork struct
-pkg openrails/billing, type CustomerNetwork struct, AccountID NetworkAccountID `json:"account_id"`
-pkg openrails/billing, type CustomerNetwork struct, LinkedAt time.Time `json:"linked_at"`
-pkg openrails/billing, type CustomerNetwork struct, Method CustomerLinkMethod `json:"method"`
 pkg openrails/billing, type CustomerNetworkHostEvent struct
 pkg openrails/billing, type CustomerNetworkHostEvent struct, AccountID NetworkAccountID `json:"account_id"`
 pkg openrails/billing, type CustomerNetworkHostEvent struct, CustomerID CustomerID `json:"customer_id"`

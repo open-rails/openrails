@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
@@ -26,6 +27,22 @@ func BuildCustomerRoutes(a *app.App, auth billingauth.Authenticator) (*router.Ta
 	httproutes.RegisterCustomerRoutes(router.NewMux(table, CustomerPrefix, a.Runtime), a.Runtime,
 		httproutes.CustomerMount{Auth: auth, Providers: providers})
 	return wrapCustomerRoutes(a.Runtime, table, auth), nil
+}
+
+// BuildMappedCustomerRoutes uses a host-authorized binding without entering
+// the ordinary customer issuer/native-network enrollment path.
+func BuildMappedCustomerRoutes(a *app.App, selection config.CustomerRoutes) (*router.Table, error) {
+	if a == nil || a.Runtime == nil || httproutes.IsNilAuth(selection.Auth) || selection.Resolve == nil {
+		return nil, fmt.Errorf("openrails: CustomerRoutes requires an initialized engine, Auth and Resolve")
+	}
+	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime)
+	if err != nil {
+		return nil, err
+	}
+	table := &router.Table{}
+	httproutes.RegisterMappedCustomerRoutes(router.NewMux(table, CustomerPrefix, a.Runtime), a.Runtime,
+		httproutes.CustomerMount{Auth: selection.Auth, Providers: providers}, selection.Resolve)
+	return wrapCustomerRoutes(a.Runtime, table, selection.Auth), nil
 }
 
 // CustomerPrefix is the customer surface's path beneath the mount.

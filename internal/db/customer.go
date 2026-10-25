@@ -93,6 +93,34 @@ func EnsureCustomerRowQ(ctx context.Context, q *gen.Queries, tenantID uuid.UUID,
 // ErrCustomerIssuerMismatch: the customer is another issuer's subject.
 var ErrCustomerIssuerMismatch = errors.New("db: the customer belongs to another issuer")
 
+// ExistingCustomer checks the same issuer constraint as admission, without
+// creating a row or changing any customer state.
+func ExistingCustomer(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUID, issuer string) (*string, error) {
+	row, err := q.GetCustomer(ctx, gen.GetCustomerParams{MerchantID: merchantID, ID: id})
+	if err != nil {
+		return nil, err
+	}
+	if err := customerIssuerMatches(row, issuer); err != nil {
+		return nil, err
+	}
+	if row.Issuer == nil {
+		return nil, nil
+	}
+	stored := *row.Issuer
+	return &stored, nil
+}
+
+func customerIssuerMatches(row gen.BillingCustomer, issuer string) error {
+	have := ""
+	if row.Issuer != nil {
+		have = *row.Issuer
+	}
+	if have != strings.TrimSpace(issuer) {
+		return ErrCustomerIssuerMismatch
+	}
+	return nil
+}
+
 // AdmitCustomer admits issuer's subject id as merchantID's customer: an
 // existing customer only when its issuer is issuer, else a new one made
 // with it. "" is the host's own users (the native issuer); a trusted
@@ -104,14 +132,7 @@ func AdmitCustomer(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUID
 		row, err := q.GetCustomer(ctx, gen.GetCustomerParams{MerchantID: merchantID, ID: id})
 		switch {
 		case err == nil:
-			have := ""
-			if row.Issuer != nil {
-				have = *row.Issuer
-			}
-			if have != want {
-				return ErrCustomerIssuerMismatch
-			}
-			return nil
+			return customerIssuerMatches(row, want)
 		case !errors.Is(err, pgx.ErrNoRows) || attempt > 0:
 			return err
 		}

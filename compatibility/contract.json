@@ -135,6 +135,7 @@
       "func (e *Engine) ClearDestructiveHold(ctx context.Context, merchant billing.MerchantID, id billing.DestructiveHoldID, operator billing.DestructiveOperator, reason string) (*billing.DestructiveHold, error)",
       "func (e *Engine) Close(ctx context.Context) error",
       "func (e *Engine) CustomerConfig(selection Routes, r *http.Request) (*billing.CustomerConfig, error)",
+      "func (e *Engine) CustomerRoutes(selection CustomerRoutes) ([]Route, error)",
       "func (e *Engine) ListOpenDestructiveHolds(ctx context.Context, limit int, after billing.DestructiveHoldID) ([]billing.DestructiveHoldReview, error)",
       "func (e *Engine) LocalMerchant(id billing.MerchantID) (*LocalClient, error)",
       "func (e *Engine) Merchant(id billing.MerchantID) (*Client, error)",
@@ -142,6 +143,7 @@
       "func (e *Engine) Probes() []Probe",
       "func (e *Engine) PublicConfig(selection Routes) (*billing.PublicConfig, error)",
       "func (e *Engine) Ready(ctx context.Context) error",
+      "func (e *Engine) ResolveCustomer(ctx context.Context, authority auth.Authenticator, verified auth.Verified) (CustomerProof, error)",
       "func (e *Engine) RiverJobs() riverhelpers.Contribution",
       "func (e *Engine) Routes(selection Routes) ([]Route, error)",
       "func (e *Engine) Start(ctx context.Context, opts ...StartOption) error",
@@ -178,6 +180,9 @@
       "type CredentialKind = billingauth.CredentialKind",
       "type CustodianConfig = config.CustodianConfig",
       "type Custodians = config.Custodians",
+      "type CustomerBinding = config.CustomerBinding",
+      "type CustomerProof = config.CustomerProof",
+      "type CustomerRoutes = config.CustomerRoutes",
       "type DBConfig = config.DBConfig",
       "type DatabaseConfig = config.DatabaseConfig",
       "type Deps = config.Deps",
@@ -703,7 +708,7 @@
       "type CreditLimit struct {\n\tInherit  bool   `json:\"inherit,omitempty\"`\n\tCurrency string `json:\"currency\"`\n\tAmount   int64  `json:\"amount,string\"`\n}",
       "type CurrencyUnits struct {\n\tCode          string `json:\"code\"`\n\tDecimals      int    `json:\"decimals\"`\n\tMinorDecimals int    `json:\"minor_decimals\"`\n}",
       "type CustodianCaptureReference struct {\n\tCustodianID string `json:\"custodian_id\"`\n\tSessionID   string `json:\"session_id\"`\n\tToken       string `json:\"token\"`\n}",
-      "type Customer struct {\n\tID         CustomerID       `json:\"id\"`\n\tContact    *CustomerContact `json:\"contact\"`\n\tCreatedAt  time.Time        `json:\"created_at\"`\n\tLastSeenAt time.Time        `json:\"last_seen_at\"`\n\tSettings   CustomerSettings `json:\"settings\"`\n\n\tBalances []Balance `json:\"balances\"`\n\n\tDefaultPaymentMethods []DefaultPaymentMethod `json:\"default_payment_methods\"`\n\n\tNetwork *CustomerNetwork `json:\"network\"`\n}",
+      "type Customer struct {\n\tID         CustomerID       `json:\"id\"`\n\tContact    *CustomerContact `json:\"contact\"`\n\tCreatedAt  time.Time        `json:\"created_at\"`\n\tLastSeenAt time.Time        `json:\"last_seen_at\"`\n\tSettings   CustomerSettings `json:\"settings\"`\n\n\tBalances []Balance `json:\"balances\"`\n\n\tDefaultPaymentMethods []DefaultPaymentMethod `json:\"default_payment_methods\"`\n}",
       "type CustomerAccount struct {\n\tID                    CustomerID                `json:\"id\"`\n\tBalances              []Balance                 `json:\"balances\"`\n\tDefaultPaymentMethods []DefaultPaymentMethod    `json:\"default_payment_methods\"`\n\tLowBalanceLines       []EffectiveLowBalanceLine `json:\"low_balance_lines\"`\n}",
       "type CustomerConfig struct {\n\tPayment PaymentConfig `json:\"payment\"`\n\n\tMerchant PublicMerchant `json:\"merchant\"`\n\n\tClientCountry string `json:\"client_country\"`\n}",
       "type CustomerContact struct {\n\tEmail    *string `json:\"email\"`\n\tName     *string `json:\"name\"`\n\tUsername *string `json:\"username\"`\n\n\tActive *bool `json:\"active\"`\n\n\tSyncedAt *time.Time `json:\"synced_at\"`\n}",
@@ -715,7 +720,6 @@
       "type CustomerLinkRevokedBy string",
       "type CustomerLinkStatus string",
       "type CustomerListParams struct {\n\tSearch string       `form:\"search\"`\n\tIDs    []CustomerID `form:\"-\"`\n\tPageRequest\n}",
-      "type CustomerNetwork struct {\n\tAccountID NetworkAccountID   `json:\"account_id\"`\n\tLinkedAt  time.Time          `json:\"linked_at\"`\n\tMethod    CustomerLinkMethod `json:\"method\"`\n}",
       "type CustomerNetworkHostEvent struct {\n\tCustomerID CustomerID             `json:\"customer_id\"`\n\tAccountID  NetworkAccountID       `json:\"account_id\"`\n\tMethod     *CustomerLinkMethod    `json:\"method\"`\n\tRevokedBy  *CustomerLinkRevokedBy `json:\"revoked_by\"`\n}",
       "type CustomerSettings struct {\n\tUsageBilling    []UsageBillingAccount `json:\"usage_billing,omitempty\"`\n\tCreditLimits    []CreditLimit         `json:\"credit_limits\"`\n\tTrustLevels     []TrustLevel          `json:\"trust_levels\"`\n\tLowBalanceLines []LowBalanceLine      `json:\"low_balance_lines\"`\n\tBillingPolicy   *string               `json:\"billing_policy\"`\n\tInvoiceProfile  *InvoiceProfile       `json:\"invoice_profile\"`\n}",
       "type CustomerSettingsResult struct {\n\tID       CustomerID       `json:\"id\"`\n\tSettings CustomerSettings `json:\"settings\"`\n}",
@@ -1162,7 +1166,8 @@
       "type CredentialKind = auth.CredentialKind",
       "type Identity = auth.Identity",
       "type Invoker = auth.Invoker",
-      "type SubjectKind = auth.SubjectKind"
+      "type SubjectKind = auth.SubjectKind",
+      "type Verified = auth.Verified"
     ],
     "internal/cardguard": [
       "func (Card) Format(f fmt.State, _ rune)",
@@ -1187,6 +1192,9 @@
       "type Config struct {\n\tUsageBillingEnabled bool `yaml:\"usage_billing_enabled\" json:\"usage_billing_enabled\"`\n\n\tEventRetention string `yaml:\"event_retention\" json:\"event_retention\"`\n\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\" json:\"user_action_rate_limit\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type Custodians map[string]CustodianConfig",
+      "type CustomerBinding struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n}",
+      "type CustomerProof struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\n\tIssuer *string\n}",
+      "type CustomerRoutes struct {\n\tPrefix string\n\n\tAuth billingauth.Authenticator\n\n\tResolve func(*http.Request, billingauth.Verified) (CustomerBinding, error)\n}",
       "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n}",
       "type DatabaseConfig struct {\n\tSkipMigrations bool `yaml:\"skip_migrations\" json:\"skip_migrations\"`\n\n\tSchema string `yaml:\"schema\" json:\"schema\"`\n\n\tRiverSchema string `yaml:\"river_schema\" json:\"river_schema\"`\n}",
       "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tMerchantGroups billing.MerchantGroupReader\n\n\tRedis redis.UniversalClient\n\n\tVault *vaultapi.Client\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tNotifications *NotificationChannel\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tFXTransport     http.RoundTripper\n\tClock           clockwork.Clock\n}",
@@ -2339,6 +2347,17 @@
       "strconv": "strconv",
       "url": "net/url"
     },
+    "customer_proof.go": {
+      "auth": "github.com/open-rails/authkit/auth",
+      "billing": "github.com/open-rails/openrails/billing",
+      "billingauth": "github.com/open-rails/openrails/internal/billingauth",
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt"
+    },
+    "customer_routes.go": {
+      "fmt": "fmt"
+    },
     "customer_tokens.go": {
       "asn1": "encoding/asn1",
       "big": "math/big",
@@ -2471,7 +2490,9 @@
       "strings": "strings"
     },
     "internal/config/embedding.go": {
-      "billingauth": "github.com/open-rails/openrails/internal/billingauth"
+      "billing": "github.com/open-rails/openrails/billing",
+      "billingauth": "github.com/open-rails/openrails/internal/billingauth",
+      "http": "net/http"
     },
     "internal/config/hyperswitch.go": {
       "fmt": "fmt",
@@ -5259,7 +5280,6 @@
       "slices": "slices",
       "subtle": "crypto/subtle",
       "time": "time",
-      "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
     "server/merchants.go": {

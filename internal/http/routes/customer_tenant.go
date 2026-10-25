@@ -16,6 +16,11 @@ import (
 // before customer admission can create or touch a row. Staff use their own
 // route policy; a global operator is never manufactured into a customer.
 func requireCustomerTenant(ctx context.Context, rt *app.Runtime, merchant billing.MerchantID, customer billing.CustomerID) error {
+	verified, _ := billingauth.VerifiedFrom(ctx)
+	return requireCustomerTenantFor(ctx, rt, merchant, customer, verified)
+}
+
+func requireCustomerTenantFor(ctx context.Context, rt *app.Runtime, merchant billing.MerchantID, customer billing.CustomerID, verified auth.Verified) error {
 	row, err := rt.DB.GenDirectory().GetMerchantTenantBinding(ctx, merchant.UUID())
 	if errors.Is(err, pgx.ErrNoRows) {
 		return billingauth.Refusal(billing.CodeMerchantUnresolved)
@@ -26,8 +31,7 @@ func requireCustomerTenant(ctx context.Context, rt *app.Runtime, merchant billin
 	if row.TenantID == nil {
 		return nil // the explicit legacy, unbound mode
 	}
-	verified, ok := billingauth.VerifiedFrom(ctx)
-	if !ok {
+	if verified == nil {
 		return billingauth.Refusal(billing.CodeCustomerTenantMismatch)
 	}
 	identity, err := identityOf(verified)

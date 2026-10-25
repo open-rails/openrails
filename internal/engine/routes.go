@@ -119,6 +119,10 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 	}
 	logMount(sel, len(table.Entries))
 	routes = routebundle.FromTable(table)
+	return e.guardRouteLifetimes(routes), nil
+}
+
+func (e *Engine) guardRouteLifetimes(routes []routebundle.Route) []routebundle.Route {
 	for i := range routes {
 		handler := routes[i].Handler
 		routes[i].Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +137,7 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 			handler.ServeHTTP(w, r)
 		})
 	}
-	return routes, nil
+	return routes
 }
 
 // logMount names the Auth the mounted route groups answer to: the admin API
