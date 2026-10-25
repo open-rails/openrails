@@ -40,12 +40,19 @@ export function formatMoney(
 /** "every 30 days", "30 days of access" or "one-time". */
 export function intervalLabel(
   price:
-    | Pick<Price, "access_duration_hours" | "billing_interval_hours">
+    | Pick<
+        Price,
+        | "access_duration_hours"
+        | "billing_interval_hours"
+        | "billing_interval_months"
+      >
     | null
     | undefined,
   m: Translator
 ): string | null {
   if (!price) return null
+  if (price.billing_interval_months)
+    return m.plural("interval.every.month", price.billing_interval_months)
   if (price.billing_interval_hours)
     return everyLabel(price.billing_interval_hours, m)
   return accessLabel(price.access_duration_hours, m) ?? m.t("interval.once")
@@ -78,9 +85,11 @@ export function paymentItem(
     name:
       names.join(", ") ||
       m.t(p.subscription_id ? "history.subscription" : "history.purchase"),
-    detail: line?.billing_interval_hours
-      ? everyLabel(line.billing_interval_hours, m)
-      : null,
+    detail: line?.billing_interval_months
+      ? m.plural("interval.every.month", line.billing_interval_months)
+      : line?.billing_interval_hours
+        ? everyLabel(line.billing_interval_hours, m)
+        : null,
   }
 }
 

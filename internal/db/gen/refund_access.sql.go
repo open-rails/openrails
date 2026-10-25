@@ -17,7 +17,9 @@ WITH periods AS (
 SELECT p.id AS payment_id, p.merchant_id, p.customer_id,
        s.id AS subscription_id, l.product_id, l.quantity, o.subscription_bill_kind,
        coalesce(o.period_starts_at, s.started_at) AS starts_at,
-       CASE WHEN l.provider_access_default THEN
+       CASE WHEN l.billing_interval_months IS NOT NULL AND l.access_duration_hours IS NULL THEN
+         coalesce(o.period_ends_at, ((s.started_at AT TIME ZONE 'UTC') + make_interval(months => l.billing_interval_months)) AT TIME ZONE 'UTC')
+       WHEN l.provider_access_default THEN
          coalesce(o.period_ends_at, ps.first_due_at, s.started_at + l.billing_interval_hours * interval '1 hour')
        ELSE coalesce(o.period_starts_at, s.started_at) + l.access_duration_hours * interval '1 hour' END AS ends_at
 FROM billing.payments p
@@ -150,7 +152,9 @@ WITH periods AS (
 SELECT p.id AS payment_id, p.merchant_id, p.customer_id,
        s.id AS subscription_id, l.product_id, l.quantity, o.subscription_bill_kind,
        coalesce(o.period_starts_at, s.started_at) AS starts_at,
-       CASE WHEN l.provider_access_default THEN
+       CASE WHEN l.billing_interval_months IS NOT NULL AND l.access_duration_hours IS NULL THEN
+         coalesce(o.period_ends_at, ((s.started_at AT TIME ZONE 'UTC') + make_interval(months => l.billing_interval_months)) AT TIME ZONE 'UTC')
+       WHEN l.provider_access_default THEN
          coalesce(o.period_ends_at, ps.first_due_at, s.started_at + l.billing_interval_hours * interval '1 hour')
        ELSE coalesce(o.period_starts_at, s.started_at) + l.access_duration_hours * interval '1 hour' END AS ends_at
 FROM billing.payments p
@@ -200,7 +204,9 @@ WITH periods AS MATERIALIZED (
 SELECT p.id AS payment_id, p.merchant_id, p.customer_id,
        s.id AS subscription_id, l.product_id, l.quantity, o.subscription_bill_kind,
        coalesce(o.period_starts_at, s.started_at) AS starts_at,
-       CASE WHEN l.provider_access_default THEN
+       CASE WHEN l.billing_interval_months IS NOT NULL AND l.access_duration_hours IS NULL THEN
+         coalesce(o.period_ends_at, ((s.started_at AT TIME ZONE 'UTC') + make_interval(months => l.billing_interval_months)) AT TIME ZONE 'UTC')
+       WHEN l.provider_access_default THEN
          coalesce(o.period_ends_at, ps.first_due_at, s.started_at + l.billing_interval_hours * interval '1 hour')
        ELSE coalesce(o.period_starts_at, s.started_at) + l.access_duration_hours * interval '1 hour' END AS ends_at
 FROM billing.payments p

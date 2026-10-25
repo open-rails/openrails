@@ -993,6 +993,8 @@ type BillingOrderLine struct {
 	ProviderAmount bool
 	// Frozen access choice accepted on a provider bill: use its verified service-period end, otherwise the explicit hourly duration.
 	ProviderAccessDefault bool
+	// Accepted calendar-month cadence. NULL preserves historical fixed-hour and one-time lines. The initial completed order fixes the UTC calendar anchor.
+	BillingIntervalMonths *int32
 }
 
 // Owed charges awaiting their usage order: an accrual is born pending and gates arrears exposure; finalization moves it onto an order (order_id, status billed), so it bills once. Retention: permanent, never pruned.
@@ -1265,7 +1267,7 @@ type BillingPrice struct {
 	ProviderPspID *uuid.UUID
 	// Immutable provider object and native cadence accepted for this price version; retained even when its normalized lookup binding moves to a newer version.
 	ProviderSnapshot []byte
-	// Provider calendar cadence, independent of fixed hours; a year is twelve months. NULL on our prices and fixed-duration provider prices.
+	// Calendar-month cadence, independent of fixed hours. Own subscriptions retain their original UTC calendar anchor in accepted agreements; provider-owned subscriptions retain provider-observed periods.
 	BillingIntervalMonths *int32
 	// Access ends at the verified provider service-period end. False retains the explicit hourly access duration, including all pre-split accepted terms.
 	ProviderAccessDefault bool

@@ -98,7 +98,8 @@ type ProductListParams struct {
 
 // Price is one way to buy a product: UnitAmount (micros of Currency) for
 // AccessDurationHours of access (null: no scheduled expiry). BillingIntervalHours
-// separately sets its recurring cadence (null: one-time charge).
+// or BillingIntervalMonths separately sets its cadence (both null: one-time).
+// On an own calendar price, absent access duration follows each billing period.
 // A recurring price may start with a trial at TrialUnitAmount. A credit-only
 // product delivers a credit lot instead of product ownership. A price's terms
 // never change; Key names its current version, and selling on other terms
@@ -237,6 +238,8 @@ type CreatePriceParams struct {
 	AccessDurationHours *int `json:"access_duration_hours,omitempty"`
 	// BillingIntervalHours is nil for one-time charges, or positive for recurring billing.
 	BillingIntervalHours *int `json:"billing_interval_hours,omitempty"`
+	// BillingIntervalMonths is a calendar cadence (1 to 1200), mutually exclusive with hours.
+	BillingIntervalMonths *int `json:"billing_interval_months,omitempty"`
 	// TrialUnitAmount and TrialDurationHours are a first period on other
 	// terms (0 is a free trial); set both or neither, with a recurring billing interval.
 	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty,string"`

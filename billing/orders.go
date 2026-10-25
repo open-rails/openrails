@@ -297,10 +297,11 @@ type OrderLine struct {
 	Ownership  *catalog.Ownership `json:"ownership"`
 	// BillingIntervalHours is set on a recurring line, whose subscription
 	// renews every interval (for Quantity seats on a per-seat price).
-	BillingIntervalHours *int             `json:"billing_interval_hours"`
-	AccessDurationHours  *int             `json:"access_duration_hours"`
-	SubscriptionID       *SubscriptionID  `json:"subscription_id"`
-	ProductAccessID      *ProductAccessID `json:"product_access_id"`
+	BillingIntervalHours  *int             `json:"billing_interval_hours"`
+	BillingIntervalMonths *int             `json:"billing_interval_months"`
+	AccessDurationHours   *int             `json:"access_duration_hours"`
+	SubscriptionID        *SubscriptionID  `json:"subscription_id"`
+	ProductAccessID       *ProductAccessID `json:"product_access_id"`
 }
 
 // OrderPaymentOption is one PSP that can take an order's lines, and what it
@@ -328,16 +329,17 @@ type OrderPreview struct {
 
 // OrderPreviewLine is one priced line, or why it cannot be bought.
 type OrderPreviewLine struct {
-	PriceID              PriceID           `json:"price_id"`
-	ProductID            ProductID         `json:"product_id"`
-	Description          string            `json:"description"`
-	Quantity             *int              `json:"quantity"`
-	UnitAmount           int64             `json:"unit_amount,string"`
-	Amount               int64             `json:"amount,string"`
-	Ownership            catalog.Ownership `json:"ownership"`
-	BillingIntervalHours *int              `json:"billing_interval_hours"`
-	AccessDurationHours  *int              `json:"access_duration_hours"`
-	Refusal              *OrderLineRefusal `json:"refusal"`
+	PriceID               PriceID           `json:"price_id"`
+	ProductID             ProductID         `json:"product_id"`
+	Description           string            `json:"description"`
+	Quantity              *int              `json:"quantity"`
+	UnitAmount            int64             `json:"unit_amount,string"`
+	Amount                int64             `json:"amount,string"`
+	Ownership             catalog.Ownership `json:"ownership"`
+	BillingIntervalHours  *int              `json:"billing_interval_hours"`
+	BillingIntervalMonths *int              `json:"billing_interval_months"`
+	AccessDurationHours   *int              `json:"access_duration_hours"`
+	Refusal               *OrderLineRefusal `json:"refusal"`
 }
 
 // OrderLineRefusal is why a line cannot be bought. Code is already_owned,

@@ -57,13 +57,13 @@ LIMIT 1;
 -- name: CreateOrderLine :exec
 INSERT INTO billing.order_lines (
     merchant_id, id, order_id, customer_id, "position", price_id, product_id, description,
-    quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours,
+    quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, billing_interval_months,
     access_duration_hours, provider_access_default, credit_grant, created_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(order_id)::uuid, sqlc.arg(customer_id)::uuid,
     sqlc.arg(position)::int, sqlc.arg(price_id)::uuid, sqlc.arg(product_id)::uuid, sqlc.arg(description)::text,
     sqlc.narg(quantity)::int, sqlc.arg(unit_amount)::bigint, sqlc.arg(amount)::bigint, sqlc.arg(ownership)::text,
-    sqlc.narg(claim_key)::text, sqlc.narg(billing_interval_hours)::int, sqlc.narg(access_duration_hours)::int, sqlc.arg(provider_access_default)::boolean,
+    sqlc.narg(claim_key)::text, sqlc.narg(billing_interval_hours)::int, sqlc.narg(billing_interval_months)::int, sqlc.narg(access_duration_hours)::int, sqlc.arg(provider_access_default)::boolean,
     sqlc.narg(credit_grant)::jsonb, sqlc.arg(now)::timestamptz
 );
 

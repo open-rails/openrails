@@ -298,7 +298,9 @@ func (s *Service) writeProviderPrice(ctx context.Context, product *models.Produc
 		if _, link, bound := version.ProviderLink(); bound && (link[models.RailKeyPSPID] != pspID.String() || !sameProviderRefs(link, providerRefs(p.link))) {
 			return nil, false, apperr.Invalidf("provider price key %q names another provider object: use a new key for a different PSP or reference", p.key)
 		}
-		if samePriceTerms(version.View(), p.request) && optionalHours(version.BillingIntervalMonths) == optionalHours(p.months) && version.ProviderAccessDefault == p.accessDefault {
+		comparison := p.request
+		comparison.BillingIntervalMonths = p.months
+		if samePriceTerms(version.View(), comparison) && version.ProviderAccessDefault == p.accessDefault {
 			// Populated upgrades preserve their existing identities, and old
 			// terms reactivate their existing immutable financial row.
 			id = version.ID

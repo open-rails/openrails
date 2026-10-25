@@ -402,20 +402,21 @@ func documentPriceFields(d catalogwire.ApplyPrice) map[string]json.RawMessage {
 		trial = catalogMoney(d.TrialUnitAmount.Value)
 	}
 	values := map[string]json.RawMessage{
-		"currency":               catalogJSON(moneyutil.NormalizeCurrency(d.Currency.Value)),
-		"unit_amount":            catalogMoney(d.UnitAmount.Value),
-		"access_duration_hours":  hours(d.AccessDurationHours),
-		"billing_interval_hours": hours(d.BillingIntervalHours),
-		"trial_unit_amount":      trial,
-		"trial_duration_hours":   hours(d.TrialDurationHours),
-		"customer_amount":        nullable(d.CustomerAmount.Null, d.CustomerAmount.Value),
-		"quantity":               nullable(d.Quantity.Null, d.Quantity.Value),
-		"archived":               catalogJSON(d.Archived.Value),
-		"sell_via":               nullable(d.SellVia.Null, d.SellVia.Value),
+		"currency":                catalogJSON(moneyutil.NormalizeCurrency(d.Currency.Value)),
+		"unit_amount":             catalogMoney(d.UnitAmount.Value),
+		"access_duration_hours":   hours(d.AccessDurationHours),
+		"billing_interval_hours":  hours(d.BillingIntervalHours),
+		"billing_interval_months": hours(d.BillingIntervalMonths),
+		"trial_unit_amount":       trial,
+		"trial_duration_hours":    hours(d.TrialDurationHours),
+		"customer_amount":         nullable(d.CustomerAmount.Null, d.CustomerAmount.Value),
+		"quantity":                nullable(d.Quantity.Null, d.Quantity.Value),
+		"archived":                catalogJSON(d.Archived.Value),
+		"sell_via":                nullable(d.SellVia.Null, d.SellVia.Value),
 	}
 	named := map[string]bool{
 		"currency": d.Currency.Set, "unit_amount": d.UnitAmount.Set,
-		"access_duration_hours": d.AccessDurationHours.Set, "billing_interval_hours": d.BillingIntervalHours.Set,
+		"access_duration_hours": d.AccessDurationHours.Set, "billing_interval_hours": d.BillingIntervalHours.Set, "billing_interval_months": d.BillingIntervalMonths.Set,
 		"trial_unit_amount": d.TrialUnitAmount.Set, "trial_duration_hours": d.TrialDurationHours.Set,
 		"customer_amount": d.CustomerAmount.Set, "quantity": d.Quantity.Set, "archived": d.Archived.Set,
 		"sell_via": d.SellVia.Set,

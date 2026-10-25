@@ -116,8 +116,9 @@ func typedDimValue(parse func(string) (fmt.Stringer, error)) func(string) (strin
 const (
 	// monthlyNormExpr and billingCycleExpr are the schema's shared definitions
 	// (migration 0004), also used by fleet MRR.
-	monthlyNormExpr  = `billing.monthly_normalized_amount(pr.amount, pr.billing_interval_hours)`
-	billingCycleExpr = `billing.billing_cycle_label(pr.billing_interval_hours)`
+	monthlyNormExpr = `CASE WHEN pr.billing_interval_months IS NOT NULL THEN round(pr.amount::numeric / pr.billing_interval_months)::bigint ELSE billing.monthly_normalized_amount(pr.amount, pr.billing_interval_hours) END`
+	// Analytics retains its existing coarse buckets; this never sets a billing boundary.
+	billingCycleExpr = `billing.billing_cycle_label(COALESCE(pr.billing_interval_hours, pr.billing_interval_months * 730))`
 
 	// streamExpr classifies a payment's revenue stream.
 	streamExpr = `CASE
@@ -834,12 +835,12 @@ var Measures = []Measure{
 	{Name: "mrr", Class: ClassSnapshot, Family: FamSubsSnapshot, Money: true, Unit: "money",
 		Description: "monthly-normalized recurring price of auto-renew subs existing at t; group by status to split healthy vs in-dunning",
 		Formula:     "SUM(monthly-normalized price) over auto-renewing subscriptions at t",
-		Expr:        `COALESCE(SUM(` + monthlyNormExpr + `) FILTER (WHERE pr.billing_interval_hours IS NOT NULL), 0)::bigint`,
+		Expr:        `COALESCE(SUM(` + monthlyNormExpr + `) FILTER (WHERE pr.billing_interval_hours IS NOT NULL OR pr.billing_interval_months IS NOT NULL), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "status"}},
 	{Name: "billable_subscriptions", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count",
 		Description: "subs at t projected to keep billing: auto-renew price, non-terminal status, not canceled/scheduled for deletion",
 		Formula:     "COUNT(auto-renewing subscriptions at t that are pending, active, past_due or unknown, not canceled and not scheduled for deletion)",
-		Expr:        `COUNT(s.id) FILTER (WHERE pr.billing_interval_hours IS NOT NULL AND s.status IN ('pending','active','past_due','unknown') AND s.canceled_at IS NULL AND s.deletion_scheduled_at IS NULL)`,
+		Expr:        `COUNT(s.id) FILTER (WHERE (pr.billing_interval_hours IS NOT NULL OR pr.billing_interval_months IS NOT NULL) AND s.status IN ('pending','active','past_due','unknown') AND s.canceled_at IS NULL AND s.deletion_scheduled_at IS NULL)`,
 		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle"}},
 	{Name: "entitled_customers", Class: ClassSnapshot, Family: FamEntitlSnapshot, Unit: "count",
 		Description: "distinct customers holding a live entitlement at t: a key of a product they hold (includes timed/comped access, not just subscribers)",

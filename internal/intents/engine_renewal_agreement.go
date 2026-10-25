@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // PrepareEngineRenewalTerms qualifies the exact paid predecessor under the
@@ -48,7 +49,7 @@ func PrepareEngineRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscr
 			return agreement, fmt.Errorf("%w: engine initial agreement lacks its customer acceptance", ErrRebillNotRetryable)
 		}
 		accepted = p.Terms
-		agreement = subscriptions.RenewalTerms{PSPID: accepted.PSPID, SubscriptionID: accepted.SubscriptionID, CustomerID: accepted.CustomerID, FromPriceID: accepted.PriceID, FromProductID: accepted.ProductID, PriceID: accepted.PriceID, ProductID: accepted.ProductID, ProductName: accepted.ProductName, Quantity: accepted.Quantity, Amount: accepted.RecurringAmount, Currency: accepted.Currency, PeriodStart: accepted.PeriodStart, PeriodEnd: accepted.PeriodEnd, AccessDurationHours: accepted.AccessDurationHours}
+		agreement = subscriptions.RenewalTerms{PSPID: accepted.PSPID, SubscriptionID: accepted.SubscriptionID, CustomerID: accepted.CustomerID, FromPriceID: accepted.PriceID, FromProductID: accepted.ProductID, PriceID: accepted.PriceID, ProductID: accepted.ProductID, ProductName: accepted.ProductName, Quantity: accepted.Quantity, Amount: accepted.RecurringAmount, Currency: accepted.Currency, PeriodStart: accepted.PeriodStart, PeriodEnd: accepted.PeriodEnd, AccessDurationHours: accepted.AccessDurationHours, RecurringIntervalMonths: accepted.RecurringIntervalMonths, CalendarAnchor: accepted.CalendarAnchor, CalendarAccessDefault: accepted.CalendarAccessDefault}
 		payment, err = d.Gen(ctx).GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: accepted.PaymentID})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -141,7 +142,7 @@ func orderAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, op 
 	if err != nil {
 		return agreement, payment, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)
 	}
-	if line.OrderID != order.ID || line.PriceID == nil || line.ProductID == nil || order.CompletedAt == nil || order.PaymentID == nil || *order.PaymentID != p.PaymentID || line.BillingIntervalHours == nil || order.CustomerID != sub.CustomerID {
+	if line.OrderID != order.ID || line.PriceID == nil || line.ProductID == nil || order.CompletedAt == nil || order.PaymentID == nil || *order.PaymentID != p.PaymentID || (line.BillingIntervalHours == nil && line.BillingIntervalMonths == nil) || order.CustomerID != sub.CustomerID {
 		return agreement, payment, fmt.Errorf("%w: order line contradicts its subscription", ErrRebillNotRetryable)
 	}
 	if payment, err = q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: p.PaymentID}); err != nil {
@@ -156,8 +157,24 @@ func orderAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, op 
 		access = &hours
 	}
 	start := *order.CompletedAt
+	end := start
+	if line.BillingIntervalMonths != nil {
+		end, err = calendarutil.NextBoundary(start, start, int(*line.BillingIntervalMonths))
+		if err != nil {
+			return agreement, payment, err
+		}
+	} else {
+		end = start.Add(time.Duration(*line.BillingIntervalHours) * time.Hour)
+	}
 	agreement = subscriptions.RenewalTerms{PSPID: *op.PspID, SubscriptionID: sub.ID, CustomerID: order.CustomerID, FromPriceID: *line.PriceID, FromProductID: *line.ProductID,
 		PriceID: *line.PriceID, ProductID: *line.ProductID, ProductName: line.Description, Amount: line.Amount, Currency: order.Currency,
-		PeriodStart: start, PeriodEnd: start.Add(time.Duration(*line.BillingIntervalHours) * time.Hour), AccessDurationHours: access}
+		PeriodStart: start, PeriodEnd: end, AccessDurationHours: access}
+	if line.BillingIntervalMonths != nil {
+		agreement.RecurringIntervalMonths, agreement.CalendarAnchor = new(int(*line.BillingIntervalMonths)), &start
+		agreement.CalendarAccessDefault = access == nil
+		if agreement.CalendarAccessDefault {
+			agreement.AccessDurationHours = new(int(end.Sub(start) / time.Hour))
+		}
+	}
 	return agreement, payment, nil
 }

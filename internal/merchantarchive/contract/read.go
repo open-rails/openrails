@@ -111,11 +111,14 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		}
 		// Order lines before usage orders named no accrual source.
 		if p.Name == "order_lines" {
-			if len(r.Values) == len(p.Columns)-2 {
+			if len(r.Values) == len(p.Columns)-3 {
 				r.Values = append(r.Values, nil)
 			}
-			if len(r.Values) == len(p.Columns)-1 {
+			if len(r.Values) == len(p.Columns)-2 {
 				r.Values = append(r.Values, new("false"))
+			}
+			if len(r.Values) == len(p.Columns)-1 {
+				r.Values = append(r.Values, nil)
 			}
 		}
 		// Rate cards before migration 66 carried a customer, set on a rate

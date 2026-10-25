@@ -35,3 +35,20 @@ export function parseHours(text: string): number | null {
   return Number.isSafeInteger(hours) && hours > 0 ? hours : null
 }
 
+// Calendar recurrence is kept in months; 30 days always remains 720 hours.
+export function parseBillingInterval(text: string): {
+  billing_interval_hours?: number
+  billing_interval_months?: number
+} | null {
+  const calendar = /^\s*(\d+)\s*(months?|years?)\s*$/i.exec(text)
+  if (calendar) {
+    const months =
+      Number(calendar[1]) *
+      (calendar[2].toLowerCase().startsWith("year") ? 12 : 1)
+    return Number.isSafeInteger(months) && months > 0 && months <= 1200
+      ? { billing_interval_months: months }
+      : null
+  }
+  const hours = parseHours(text)
+  return hours && hours <= 2_562_047 ? { billing_interval_hours: hours } : null
+}

@@ -79,7 +79,7 @@ type Price struct {
 	// With ProviderAccessDefault false, nil grants access without scheduled expiry.
 	AccessDurationHours *int `json:"access_duration_hours"`
 
-	// BillingIntervalHours is a fixed recurring cadence. Calendar provider
+	// BillingIntervalHours is a fixed recurring cadence. Calendar
 	// prices use BillingIntervalMonths instead; both nil means one-time.
 	BillingIntervalHours *int `json:"billing_interval_hours"`
 
@@ -195,7 +195,7 @@ func (p *Price) IsRecurring() bool {
 	return p != nil && ((p.BillingIntervalHours != nil && *p.BillingIntervalHours > 0) || (p.BillingIntervalMonths != nil && *p.BillingIntervalMonths > 0))
 }
 
-// RecurringCycleHours returns a fixed recurring interval. Calendar provider
+// RecurringCycleHours returns a fixed recurring interval. Calendar
 // prices retain BillingIntervalMonths and never acquire estimated hours.
 func (p *Price) RecurringCycleHours() *int {
 	if !p.IsRecurring() || p.BillingIntervalHours == nil {

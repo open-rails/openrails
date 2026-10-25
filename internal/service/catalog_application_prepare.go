@@ -327,7 +327,7 @@ func sellViaRefusal(req billing.CreatePriceParams, accounts []merchants.PSPScope
 	if len(req.SellVia) == 0 {
 		return ""
 	}
-	recurring := req.BillingIntervalHours != nil
+	recurring := req.BillingIntervalHours != nil || req.BillingIntervalMonths != nil
 	trial := req.TrialUnitAmount != nil || req.TrialDurationHours != nil
 	var why []string
 	if slices.Contains(req.SellVia, catalogwire.SellViaCard) {

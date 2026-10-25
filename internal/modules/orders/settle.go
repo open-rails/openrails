@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -306,17 +307,33 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 	var holderType string
 	var holder uuid.UUID
 	switch {
-	case line.BillingIntervalHours != nil:
+	case line.BillingIntervalHours != nil || line.BillingIntervalMonths != nil:
 		if charge == nil || s.Memberships == nil {
 			return errors.New("a recurring line needs its charge and the membership service")
 		}
-		interval := time.Duration(*line.BillingIntervalHours) * time.Hour
+		end := now
+		if line.BillingIntervalMonths != nil {
+			var err error
+			end, err = calendarutil.NextBoundary(now, now, int(*line.BillingIntervalMonths))
+			if err != nil {
+				return err
+			}
+		} else {
+			end = now.Add(time.Duration(*line.BillingIntervalHours) * time.Hour)
+		}
 		terms := subscriptions.InitialMembershipTerms{
 			Rail: models.Rail(charge.Rail), CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), CustomerID: order.CustomerID, PSPID: charge.PSPID,
 			ProductID: models.DerefUUID(line.ProductID), PriceID: models.DerefUUID(line.PriceID), PaymentMethodID: charge.PaymentMethodID, ProductName: line.Description,
 			RecurringAmount: line.Amount, Currency: order.Currency, AccessDurationHours: intPtr(line.AccessDurationHours), ProviderAccessDefault: line.ProviderAccessDefault,
 			RecurringIntervalHours: intPtr(line.BillingIntervalHours),
-			AcceptedAt:             now, PeriodStart: now, PeriodEnd: now.Add(interval), Quantity: models.DerefIntPtr(line.Quantity),
+			AcceptedAt:             now, PeriodStart: now, PeriodEnd: end, Quantity: models.DerefIntPtr(line.Quantity),
+		}
+		if line.BillingIntervalMonths != nil {
+			terms.RecurringIntervalMonths, terms.CalendarAnchor = intPtr(line.BillingIntervalMonths), &now
+			terms.CalendarAccessDefault = line.AccessDurationHours == nil
+			if terms.CalendarAccessDefault {
+				terms.AccessDurationHours = new(int(end.Sub(now) / time.Hour))
+			}
 		}
 		terms.AwaitingMethod = charge.PaymentMethodID == uuid.Nil && charge.TokenType == paycharge.TokenTypePANViaProxy
 		params := &subscriptions.CreateMembershipParams{

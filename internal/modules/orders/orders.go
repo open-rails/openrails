@@ -141,7 +141,7 @@ func (o *Order) AwaitsCustomer() bool {
 // recurringLines counts the order's subscriptions.
 func (o *Order) HasRecurring() bool {
 	for _, l := range o.Lines {
-		if l.BillingIntervalHours != nil {
+		if l.BillingIntervalHours != nil || l.BillingIntervalMonths != nil {
 			return true
 		}
 	}
@@ -152,7 +152,7 @@ func (o *Order) HasRecurring() bool {
 // purchase with its own receipt, beside any subscription it starts.
 func (o *Order) HasOneOff() bool {
 	for _, l := range o.Lines {
-		if l.BillingIntervalHours == nil {
+		if l.BillingIntervalHours == nil && l.BillingIntervalMonths == nil {
 			return true
 		}
 	}
@@ -222,7 +222,7 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 	}
 	for _, l := range o.Lines {
 		line := billing.OrderLine{ID: billing.OrderLineID(l.ID), Description: l.Description, Quantity: intPtr(l.Quantity), UnitAmount: l.UnitAmount, Amount: l.Amount,
-			BillingIntervalHours: intPtr(l.BillingIntervalHours), AccessDurationHours: intPtr(l.AccessDurationHours), Source: l.Source}
+			BillingIntervalHours: intPtr(l.BillingIntervalHours), BillingIntervalMonths: intPtr(l.BillingIntervalMonths), AccessDurationHours: intPtr(l.AccessDurationHours), Source: l.Source}
 		if l.PriceID != nil && l.ProductID != nil && l.Ownership != nil {
 			price, product, ownership := o.PriceReferences[*l.PriceID], billing.ProductID(*l.ProductID), catalog.Ownership(*l.Ownership)
 			line.PriceID, line.ProductID, line.Ownership = &price, &product, &ownership

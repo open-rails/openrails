@@ -1766,6 +1766,7 @@ pkg openrails/billing, type CreatePriceParams struct
 pkg openrails/billing, type CreatePriceParams struct, AccessDurationHours *int `json:"access_duration_hours,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, Archived bool `json:"archived,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, BillingIntervalHours *int `json:"billing_interval_hours,omitempty"`
+pkg openrails/billing, type CreatePriceParams struct, BillingIntervalMonths *int `json:"billing_interval_months,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, Currency string `json:"currency"`
 pkg openrails/billing, type CreatePriceParams struct, CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, ExpectedRevision *int64 `json:"expected_revision,omitempty"`
@@ -2699,6 +2700,7 @@ pkg openrails/billing, type OrderLine struct
 pkg openrails/billing, type OrderLine struct, AccessDurationHours *int `json:"access_duration_hours"`
 pkg openrails/billing, type OrderLine struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type OrderLine struct, BillingIntervalHours *int `json:"billing_interval_hours"`
+pkg openrails/billing, type OrderLine struct, BillingIntervalMonths *int `json:"billing_interval_months"`
 pkg openrails/billing, type OrderLine struct, Description string `json:"description"`
 pkg openrails/billing, type OrderLine struct, ID OrderLineID `json:"id"`
 pkg openrails/billing, type OrderLine struct, Ownership *catalog.Ownership `json:"ownership"`
@@ -2765,6 +2767,7 @@ pkg openrails/billing, type OrderPreviewLine struct
 pkg openrails/billing, type OrderPreviewLine struct, AccessDurationHours *int `json:"access_duration_hours"`
 pkg openrails/billing, type OrderPreviewLine struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type OrderPreviewLine struct, BillingIntervalHours *int `json:"billing_interval_hours"`
+pkg openrails/billing, type OrderPreviewLine struct, BillingIntervalMonths *int `json:"billing_interval_months"`
 pkg openrails/billing, type OrderPreviewLine struct, Description string `json:"description"`
 pkg openrails/billing, type OrderPreviewLine struct, Ownership catalog.Ownership `json:"ownership"`
 pkg openrails/billing, type OrderPreviewLine struct, PriceID PriceID `json:"price_id"`
@@ -3877,6 +3880,7 @@ pkg openrails/catalog, func NormalizeRequiredEntitlements([]string) ([]string, e
 pkg openrails/catalog, func Null[T any]() Field[T]
 pkg openrails/catalog, func ParseApplicationJSON([]byte) (*Application, error)
 pkg openrails/catalog, func ParseApplicationYAML([]byte) (*Application, error)
+pkg openrails/catalog, func ParseBillingInterval(string) (int, int, error)
 pkg openrails/catalog, func ParseDurationHours(string) (int, error)
 pkg openrails/catalog, func ReadFile(string) (*Application, error)
 pkg openrails/catalog, func ValidateSellVia([]string) error
@@ -3916,6 +3920,7 @@ pkg openrails/catalog, type ApplyPrice struct
 pkg openrails/catalog, type ApplyPrice struct, AccessDurationHours Field[int] `json:"access_duration_hours,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, Archived Field[bool] `json:"archived,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, BillingIntervalHours Field[int] `json:"billing_interval_hours,omitzero"`
+pkg openrails/catalog, type ApplyPrice struct, BillingIntervalMonths Field[int] `json:"billing_interval_months,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, Currency Field[string] `json:"currency,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, CustomerAmount Field[CustomerAmount] `json:"customer_amount,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, ID string `json:"id,omitempty"`

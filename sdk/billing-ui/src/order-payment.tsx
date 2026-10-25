@@ -230,7 +230,7 @@ export function OrderPayment({
     )
   const hosted = redirects.filter((item) => !fallsBack(item))
   const revealed = redirects.filter(fallsBack)
-  const recurring = order?.lines.some((line) => line.billing_interval_hours !== null) ?? false
+  const recurring = order?.lines.some((line) => !!(line.billing_interval_hours || line.billing_interval_months)) ?? false
   const tokens = solana
     ? (merchant?.payment.solana?.tokens ?? []).filter(
         (token) => !recurring || token.recurring_eligible === true
