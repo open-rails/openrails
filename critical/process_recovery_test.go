@@ -4,9 +4,12 @@ package critical_test
 
 import (
 	"context"
+	"crypto"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -18,8 +21,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/authtest"
+	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/authkit/keys"
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
+	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
@@ -45,6 +53,8 @@ type workerProcessConfig struct {
 	IgnoreIntents                      []string
 	StopReference                      string
 	BeforeStop                         bool
+	HTTPAuthTenant                     iam.TenantID
+	HTTPAuthPrivate                    []byte
 }
 
 // River calls this public hook after the real worker returns and before its
@@ -111,11 +121,43 @@ func TestWorkerProcess(t *testing.T) {
 		require.NoError(t, err)
 		deps.NMITransport = loopbackWire{target: nmi, wire: wire}
 	}
+	var realAuth *authkit.Client
+	if len(config.HTTPAuthPrivate) != 0 {
+		roles := authkit.NewRoles(authkit.APIKeys)
+		merchant := roles.Persona(billing.MerchantGroupPersona, authkit.APIKeys, authkit.CustomRoles)
+		for _, permission := range billing.Permissions() {
+			if permission.Persona() == billing.MerchantGroupPersona {
+				merchant.Declare(string(permission))
+			} else {
+				roles.Root.Declare(string(permission))
+			}
+		}
+		signer, err := keys.SignerFromKey("critical-issuer", ed25519.PrivateKey(config.HTTPAuthPrivate))
+		require.NoError(t, err)
+		realAuth, _ = authtest.New(t, authtest.WithConfig(func(c *authkit.Config) {
+			c.DefaultTenantID = config.HTTPAuthTenant
+			c.Database.Schema, c.Database.RiverSchema = config.Config.Database.Schema+"_auth", config.Config.Database.Schema+"_auth"
+			c.Roles = roles
+			c.TwoFactor.Mode = iam.TwoFactorDisabled
+		}), authtest.WithDeps(func(d *authkit.Deps) {
+			d.Postgres = pool
+			d.KeySource = keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}
+		}))
+		deps.UserInfo = realAuth.UserInfo()
+	}
 	engine, err := openrails.New(t.Context(), config.Config, deps)
 	require.NoError(t, err)
 	defer engine.Close(context.Background()) //nolint:errcheck
 	w := &world{pool: pool, schema: config.Config.Database.Schema, engine: engine, clock: clock}
-	if config.StopReference != "" {
+	ready := "running"
+	if realAuth != nil {
+		hostFleet(t, w) // accepts durable jobs without executing them in the request process
+		mux := http.NewServeMux()
+		require.NoError(t, openrailshttp.Mount(mux, engine, openrails.Routes{Auth: realAuth.Authenticator()}))
+		server := httptest.NewServer(mux)
+		defer server.Close()
+		ready = server.URL
+	} else if config.StopReference != "" {
 		if !config.BeforeStop {
 			client, err := engine.MerchantBySlug("alpha")
 			require.NoError(t, err)
@@ -138,7 +180,7 @@ func TestWorkerProcess(t *testing.T) {
 		require.NoError(t, engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
 	}
-	require.NoError(t, os.WriteFile(config.Ready, []byte("running"), 0600))
+	require.NoError(t, os.WriteFile(config.Ready, []byte(ready), 0600))
 	// This control changes only the declared clock, never financial state.
 	tick := time.NewTicker(20 * time.Millisecond)
 	defer tick.Stop()
@@ -168,6 +210,7 @@ type ownedWorkerProcess struct {
 	done      chan error
 	stopped   bool
 	clockFile string
+	url       string
 }
 
 func startWorkerProcess(t *testing.T, w *world, p *providerLedger, configure ...func(*workerProcessConfig)) *ownedWorkerProcess {
@@ -218,7 +261,8 @@ func startWorkerProcess(t *testing.T, w *world, p *providerLedger, configure ...
 			data, _ := os.ReadFile(logPath)
 			t.Fatalf("owned worker exited before readiness: %v\n%s", err, data)
 		case <-tick.C:
-			if _, err := os.Stat(config.Ready); err == nil {
+			if data, err := os.ReadFile(config.Ready); err == nil {
+				child.url = string(data)
 				t.Logf("owned worker PID %d running", command.Process.Pid)
 				return child
 			}
