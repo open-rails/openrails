@@ -54,6 +54,7 @@ export type {
   CardCaptureReference,
   NextAction,
   Order,
+  OrderPaymentAttempt,
   OrderLine,
   OrderLineRefusal,
   OrderPaymentInput,

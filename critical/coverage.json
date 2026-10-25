@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 154,
+  "scenario_count": 157,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -772,6 +772,21 @@
       "id": "OR-J06-S06",
       "journey": "J06",
       "name": "Merchant custody configuration preserves tenant ownership secrets and accepted billing"
+    },
+    {
+      "id": "OR-J10-S05",
+      "journey": "J10",
+      "name": "Exact payment key reads its own retained outcome without attributing another payment"
+    },
+    {
+      "id": "OR-J12-S06",
+      "journey": "J12",
+      "name": "Merchant and hosted vault custody retain original card and charge authority through recovery and removal"
+    },
+    {
+      "id": "OR-J12-S07",
+      "journey": "J12",
+      "name": "Admitted merchant card removal preserves customer scope and provider write posture"
     }
   ]
 }

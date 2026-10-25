@@ -1447,6 +1447,18 @@ export type OrderPayment = {
   payment_id: string | null
 }
 
+export type OrderPaymentAttempt = {
+  order_id: string
+  customer_id: string
+  attempt_id: string
+  state: string
+  payment_id?: string
+  payment_method_id?: string
+  psp_id: string
+  amount: string
+  currency: string
+}
+
 export type OrderPaymentOption = {
   saved_payment_method_ids?: string[]
   psp_id: string

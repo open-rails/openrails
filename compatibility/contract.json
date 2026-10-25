@@ -30,6 +30,7 @@
       "func (c *Client) CustomerToken(ctx context.Context, params billing.CustomerTokenParams) (*billing.CustomerToken, error)",
       "func (c *Client) DeleteAlertWebhook(ctx context.Context, id billing.AlertWebhookID, options ...RequestOption) error",
       "func (c *Client) DeletePSPImport(ctx context.Context, id billing.PSPImportID, requestOptions ...RequestOption) error",
+      "func (c *Client) DeletePaymentMethod(ctx context.Context, customerID billing.CustomerID, methodID billing.PaymentMethodID, requestOptions ...RequestOption) error",
       "func (c *Client) DeleteProduct(ctx context.Context, id billing.ProductID, requestOptions ...RequestOption) error",
       "func (c *Client) DeleteProvisioningToken(ctx context.Context, id billing.ProvisioningTokenID, options ...RequestOption) error",
       "func (c *Client) EventReader() eventlog.Reader",
@@ -47,6 +48,7 @@
       "func (c *Client) GetMeter(ctx context.Context, key string, requestOptions ...RequestOption) (*billing.Meter, error)",
       "func (c *Client) GetMetricsSchema(ctx context.Context, options ...RequestOption) (*billing.MetricsSchema, error)",
       "func (c *Client) GetOrder(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error)",
+      "func (c *Client) GetOrderPaymentAttempt(ctx context.Context, id billing.OrderID, key string, requestOptions ...RequestOption) (*billing.OrderPaymentAttempt, error)",
       "func (c *Client) GetPSP(ctx context.Context, id billing.PSPID, requestOptions ...RequestOption) (*billing.PSP, error)",
       "func (c *Client) GetPSPImport(ctx context.Context, id billing.PSPImportID, requestOptions ...RequestOption) (*billing.PSPImport, error)",
       "func (c *Client) GetPayment(ctx context.Context, id billing.PaymentID, requestOptions ...RequestOption) (*billing.Payment, error)",
@@ -843,6 +845,7 @@
       "type OrderOrigin string",
       "type OrderPayURLParams struct {\n\tEmbedded   bool   `json:\"embedded,omitempty\"`\n\tSuccessURL string `json:\"success_url\"`\n\n\tCancelURL *string `json:\"cancel_url,omitempty\"`\n\n\tExpiresAt *time.Time `json:\"expires_at,omitempty\"`\n\n\tSavedPaymentMethods bool `json:\"saved_payment_methods,omitempty\"`\n}",
       "type OrderPayment struct {\n\tStatus OrderPaymentStatus `json:\"status\"`\n\n\tNextAction *NextAction `json:\"next_action\"`\n\n\tLastPaymentError *PaymentFailure `json:\"last_payment_error\"`\n\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id\"`\n\n\tPaymentID *PaymentID `json:\"payment_id\"`\n}",
+      "type OrderPaymentAttempt struct {\n\tOrderID    OrderID        `json:\"order_id\"`\n\tCustomerID CustomerID     `json:\"customer_id\"`\n\tAttemptID  OrderAttemptID `json:\"attempt_id\"`\n\n\tState     string     `json:\"state\"`\n\tPaymentID *PaymentID `json:\"payment_id,omitempty\"`\n\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id,omitempty\"`\n\tPSPID           PSPID            `json:\"psp_id\"`\n\tAmount          int64            `json:\"amount,string\"`\n\tCurrency        string           `json:\"currency\"`\n}",
       "type OrderPaymentOption struct {\n\tSavedPaymentMethodIDs []PaymentMethodID `json:\"saved_payment_method_ids,omitempty\"`\n\tPSPID                 PSPID             `json:\"psp_id\"`\n\tRail                  string            `json:\"rail\"`\n\tAccepts               []string          `json:\"accepts\"`\n\tFailedAttempts        int               `json:\"failed_attempts\"`\n}",
       "type OrderPaymentParams struct {\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id,omitempty\"`\n\n\tToken string `json:\"token,omitempty\"`\n\n\tPSPID          *PSPID          `json:\"psp_id,omitempty\"`\n\tBillingDetails *BillingDetails `json:\"billing_details,omitempty\"`\n\n\tTokenSymbol string `json:\"token_symbol,omitempty\"`\n\n\tReturnURL string `json:\"return_url,omitempty\"`\n}",
       "type OrderPaymentStatus string",
@@ -5010,6 +5013,11 @@
       "url": "net/url"
     },
     "operations.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "http": "net/http"
+    },
+    "order_payment_attempt.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "http": "net/http"

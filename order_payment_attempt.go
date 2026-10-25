@@ -8,7 +8,8 @@ import (
 )
 
 // GetOrderPaymentAttempt reads one retained purchase payment attempt by its
-// original Idempotency-Key. It never retries or performs a provider write.
+// original POST /me/orders/{id}/pay Idempotency-Key. It does not look up
+// create-order-with-payment or renewal/usage keys, retry or perform a provider write.
 func (c *Client) GetOrderPaymentAttempt(ctx context.Context, id billing.OrderID, key string, requestOptions ...RequestOption) (*billing.OrderPaymentAttempt, error) {
 	order, err := requireTypedID("order_id", id)
 	if err != nil {

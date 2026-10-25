@@ -498,6 +498,16 @@
     ],
     "OR-J06-S06": [
       "TestMerchantCustodyConfiguration/OR-J06-S06/merchant-custody-settings-preserve-ownership-and-secrets"
+    ],
+    "OR-J10-S05": [
+      "TestOrderPaymentReceipts/OR-J10-S05/exact-payment-key-cannot-claim-another-attempt"
+    ],
+    "OR-J12-S06": [
+      "TestMerchantOwnedBasisTheoryCardLifecycle/OR-J12-S06/merchant-owned-vault",
+      "TestMerchantOwnedBasisTheoryCardLifecycle/OR-J12-S06/hosted-isolated-vault"
+    ],
+    "OR-J12-S07": [
+      "TestMerchantCardRemoval/OR-J12-S07/merchant-card-removal-keeps-customer-scope"
     ]
   },
   "suites": {

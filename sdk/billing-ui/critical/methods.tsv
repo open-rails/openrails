@@ -16,6 +16,7 @@ confirmPaymentMethod	OR-UI-02	Actual external setup authentication transitions t
 setDefaultPaymentMethod	OR-UI-02	Actual account read returns the selected card for uppercaseUSD.
 confirmOrder	OR-UI-02	Actual external payment authentication settles the original membership order.
 getSubscription	OR-UI-02	Membership and successor upgrade retain actual IDs, selected price and active state.
+getOrderPaymentAttempt	OR-UI-01	Exact original payment key returns its own retained succeeded payment and method without another provider write.
 setSubscriptionPaymentMethod	OR-UI-02	Returned subscription binds the selected saved card.
 previewSubscriptionChange	OR-UI-02	A fresh $10 to $20 upgrade quotes $10 due now and $20 at renewal in exact USD native units, then settles through the real provider.
 changeSubscription	OR-UI-02	Real upgrade requires the bank challenge instead of declaring success prematurely.

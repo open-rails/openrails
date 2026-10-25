@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -274,31 +273,6 @@ func (b *MerchantCollectionAdapterBuilder) nmiClient(ctx context.Context, _ *mer
 
 func (b *MerchantCollectionAdapterBuilder) requireSecret(ctx context.Context, _ *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope, key string) (string, error) {
 	return b.nmiArmer().RequireSecret(ctx, mid, scope, key)
-}
-
-// requireCustodianSecret is the custody sibling: the credential is scoped to
-// the CUSTODIAN's identity, not to the PSP that happens to charge through it.
-func (b *MerchantCollectionAdapterBuilder) requireCustodianSecret(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, custodian merchants.CustodianScope, key string) (string, error) {
-	// Same versioned read as every other provider credential.
-	ref, err := custodian.SecretRef(key)
-	if err != nil {
-		return "", err
-	}
-	if svc == nil || svc.Secrets() == nil {
-		return "", fmt.Errorf("merchant %s custodian %s: secret store is not armed", mid.String(), custodian.Key)
-	}
-	sec, err := merchants.ReadSecretRef(ctx, svc.Secrets(), mid, ref)
-	if errors.Is(err, merchants.ErrSecretNotFound) {
-		return "", fmt.Errorf("merchant %s custodian %s: secret %s missing (#725: a declared custodian never falls back to boot rails)", mid.String(), custodian.Key, ref.Name)
-	}
-	if err != nil {
-		return "", fmt.Errorf("merchant %s custodian %s: secret %s backend failed: %w", mid.String(), custodian.Key, ref.Name, err)
-	}
-	value := strings.TrimSpace(sec.Value)
-	if value == "" {
-		return "", fmt.Errorf("merchant %s custodian %s: secret %s is empty", mid.String(), custodian.Key, ref.Name)
-	}
-	return value, nil
 }
 
 // ReadCollectionReceipt resolves the immutable accepted account before reading

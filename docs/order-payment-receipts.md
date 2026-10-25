@@ -17,6 +17,10 @@ The routes are `GET /v1/me/orders/{id}/payment-attempt` and the merchant-scoped
 and remote clients use the same contract. Mapped customer routes preserve the
 original authenticated actor and selected customer.
 
+Use the original `POST /v1/me/orders/{id}/pay` key. Keys used to create an order
+and pay it in one request belong to a different operation; the read does not
+guess between those namespaces.
+
 The receipt describes a purchase payment, including the initial order of a
 subscription. Existing renewal and usage collection mechanisms remain separate.
 A declined attempt stays declined after another key pays the order. Its intended

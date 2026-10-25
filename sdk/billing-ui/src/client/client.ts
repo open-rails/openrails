@@ -19,6 +19,7 @@ import {
   publicConfigSchema,
   listPageSchema,
   orderSchema,
+  orderPaymentAttemptSchema,
   cartSchema,
   paymentMethodSchema,
   paymentSchema,
@@ -39,6 +40,7 @@ import {
   type NextAction,
   type Cart,
   type Order,
+  type OrderPaymentAttempt,
   type OrderPaymentInput,
   type Payment,
   type PaymentMethod,
@@ -644,6 +646,23 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     /** One of the customer's orders: the resumable handle of a purchase. */
     getOrder(orderId: string, signal?: AbortSignal): Promise<Order> {
       return json(orderSchema, `/me/orders/${id(orderId)}`, { signal })
+    },
+
+    /** Read the exact original payOrder key, without retrying payment. This
+     * does not look up createOrder payment keys or renewal/usage collections. */
+    getOrderPaymentAttempt(
+      orderId: string,
+      idempotencyKey: string,
+      signal?: AbortSignal
+    ): Promise<OrderPaymentAttempt> {
+      return json(
+        orderPaymentAttemptSchema,
+        `/me/orders/${id(orderId)}/payment-attempt`,
+        {
+          headers: { "Idempotency-Key": idempotencyKey },
+          signal,
+        }
+      )
     },
 
     /**

@@ -442,6 +442,20 @@ export const orderSchema = z.object({
 })
 export type Order = z.infer<typeof orderSchema>
 
+/** Exact original /orders/{id}/pay request; reading never executes payment. */
+export const orderPaymentAttemptSchema = z.object({
+  order_id: z.string(),
+  customer_id: z.string(),
+  attempt_id: z.string(),
+  state: z.string(),
+  payment_id: z.string().optional(),
+  payment_method_id: z.string().optional(),
+  psp_id: z.string(),
+  amount,
+  currency: z.string(),
+})
+export type OrderPaymentAttempt = z.infer<typeof orderPaymentAttemptSchema>
+
 /** Why a line cannot be bought: `already_owned`, `entitlement_required`, `unavailable`, ... */
 export const orderLineRefusalSchema = z.object({
   code: z.string(),

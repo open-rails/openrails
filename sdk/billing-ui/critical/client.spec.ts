@@ -129,6 +129,19 @@ test("OR-UI-01: exact cart, order ownership, account and customer policy", async
     status: "complete",
     total: "29970000",
   })
+  const receipt = await page.evaluate(
+    (id) => window.billing.getOrderPaymentAttempt(id, "sdk-oneoff"),
+    facts.order.id
+  )
+  expect(receipt).toMatchObject({
+    order_id: facts.order.id,
+    customer_id: facts.f.alice,
+    state: "succeeded",
+    amount: "29970000",
+    currency: "USD",
+    payment_id: paid.order.payment.payment_id,
+  })
+  expect(receipt.payment_method_id).toBeTruthy()
   await page.evaluate(
     (id) => window.billing.reportPayURLFailure(id),
     facts.order.id

@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (169), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (172), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -40,6 +40,7 @@ A customer acting on its own account.
 | POST | `/v1/me/orders` | customer | — | `CreateMyOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
 | GET | `/v1/me/orders` | customer | — | — | 200 `ListPage<Order>` |  |
 | GET | `/v1/me/orders/{id}` | customer | — | — | 200 `Order` |  |
+| GET | `/v1/me/orders/{id}/payment-attempt` | customer | — | — | 200 `OrderPaymentAttempt` | `Idempotency-Key` |
 | POST | `/v1/me/orders/{id}/pay` | customer | — | `PayOrderParams` | 200 `Order` | `Idempotency-Key` |
 | POST | `/v1/me/orders/{id}/confirm` | customer | — | `ConfirmOrderParams` | 200 `Order` |  |
 | POST | `/v1/me/orders/{id}/pay-url-failure` | customer | — | — | 204 — |  |
@@ -115,6 +116,7 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | GET | `/v1/admin/renewals` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Renewal>` |  |
 | GET | `/v1/admin/renewals/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Renewal` |  |
 | GET | `/v1/admin/customers/{customer_id}/payment-methods` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<PaymentMethod>` |  |
+| DELETE | `/v1/admin/customers/{customer_id}/payment-methods/{id}` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 204 — |  |
 
 ## Catalog
 
@@ -211,6 +213,7 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/v1/app/orders/preview` | application | `merchant:orders:manage`<br>`root:orders:manage` | `PreviewOrderParams` | 200 `OrderPreview` |  |
+| GET | `/v1/app/orders/{id}/payment-attempt` | application | `merchant:orders:manage`<br>`root:orders:manage` | — | 200 `OrderPaymentAttempt` | `Idempotency-Key` |
 | POST | `/v1/app/orders` | application | `merchant:orders:manage`<br>`root:orders:manage` | `CreateOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
 | POST | `/v1/app/orders/{id}/cancel` | application | `merchant:orders:manage`<br>`root:orders:manage` | — | 200 `Order` |  |
 | POST | `/v1/app/entitlements/check` | application | `merchant:entitlements:read`<br>`root:entitlements:read` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |

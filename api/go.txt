@@ -57,6 +57,7 @@ pkg openrails, method (*Client) CustomerAssertion(context.Context, billing.Custo
 pkg openrails, method (*Client) CustomerToken(context.Context, billing.CustomerTokenParams) (*billing.CustomerToken, error)
 pkg openrails, method (*Client) DeleteAlertWebhook(context.Context, billing.AlertWebhookID, ...RequestOption) error
 pkg openrails, method (*Client) DeletePSPImport(context.Context, billing.PSPImportID, ...RequestOption) error
+pkg openrails, method (*Client) DeletePaymentMethod(context.Context, billing.CustomerID, billing.PaymentMethodID, ...RequestOption) error
 pkg openrails, method (*Client) DeleteProduct(context.Context, billing.ProductID, ...RequestOption) error
 pkg openrails, method (*Client) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID, ...RequestOption) error
 pkg openrails, method (*Client) EventReader() eventlog.Reader
@@ -74,6 +75,7 @@ pkg openrails, method (*Client) GetMerchantConfiguration(context.Context, ...Req
 pkg openrails, method (*Client) GetMeter(context.Context, string, ...RequestOption) (*billing.Meter, error)
 pkg openrails, method (*Client) GetMetricsSchema(context.Context, ...RequestOption) (*billing.MetricsSchema, error)
 pkg openrails, method (*Client) GetOrder(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
+pkg openrails, method (*Client) GetOrderPaymentAttempt(context.Context, billing.OrderID, string, ...RequestOption) (*billing.OrderPaymentAttempt, error)
 pkg openrails, method (*Client) GetPSP(context.Context, billing.PSPID, ...RequestOption) (*billing.PSP, error)
 pkg openrails, method (*Client) GetPSPImport(context.Context, billing.PSPImportID, ...RequestOption) (*billing.PSPImport, error)
 pkg openrails, method (*Client) GetPayment(context.Context, billing.PaymentID, ...RequestOption) (*billing.Payment, error)
@@ -203,6 +205,7 @@ pkg openrails, method (LocalClient) CustomerAssertion(context.Context, billing.C
 pkg openrails, method (LocalClient) CustomerToken(context.Context, billing.CustomerTokenParams) (*billing.CustomerToken, error)
 pkg openrails, method (LocalClient) DeleteAlertWebhook(context.Context, billing.AlertWebhookID, ...RequestOption) error
 pkg openrails, method (LocalClient) DeletePSPImport(context.Context, billing.PSPImportID, ...RequestOption) error
+pkg openrails, method (LocalClient) DeletePaymentMethod(context.Context, billing.CustomerID, billing.PaymentMethodID, ...RequestOption) error
 pkg openrails, method (LocalClient) DeleteProduct(context.Context, billing.ProductID, ...RequestOption) error
 pkg openrails, method (LocalClient) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID, ...RequestOption) error
 pkg openrails, method (LocalClient) EventReader() eventlog.Reader
@@ -220,6 +223,7 @@ pkg openrails, method (LocalClient) GetMerchantConfiguration(context.Context, ..
 pkg openrails, method (LocalClient) GetMeter(context.Context, string, ...RequestOption) (*billing.Meter, error)
 pkg openrails, method (LocalClient) GetMetricsSchema(context.Context, ...RequestOption) (*billing.MetricsSchema, error)
 pkg openrails, method (LocalClient) GetOrder(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
+pkg openrails, method (LocalClient) GetOrderPaymentAttempt(context.Context, billing.OrderID, string, ...RequestOption) (*billing.OrderPaymentAttempt, error)
 pkg openrails, method (LocalClient) GetPSP(context.Context, billing.PSPID, ...RequestOption) (*billing.PSP, error)
 pkg openrails, method (LocalClient) GetPSPImport(context.Context, billing.PSPImportID, ...RequestOption) (*billing.PSPImport, error)
 pkg openrails, method (LocalClient) GetPayment(context.Context, billing.PaymentID, ...RequestOption) (*billing.Payment, error)
@@ -2686,6 +2690,16 @@ pkg openrails/billing, type OrderPayment struct, NextAction *NextAction `json:"n
 pkg openrails/billing, type OrderPayment struct, PaymentID *PaymentID `json:"payment_id"`
 pkg openrails/billing, type OrderPayment struct, PaymentMethodID *PaymentMethodID `json:"payment_method_id"`
 pkg openrails/billing, type OrderPayment struct, Status OrderPaymentStatus `json:"status"`
+pkg openrails/billing, type OrderPaymentAttempt struct
+pkg openrails/billing, type OrderPaymentAttempt struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type OrderPaymentAttempt struct, AttemptID OrderAttemptID `json:"attempt_id"`
+pkg openrails/billing, type OrderPaymentAttempt struct, Currency string `json:"currency"`
+pkg openrails/billing, type OrderPaymentAttempt struct, CustomerID CustomerID `json:"customer_id"`
+pkg openrails/billing, type OrderPaymentAttempt struct, OrderID OrderID `json:"order_id"`
+pkg openrails/billing, type OrderPaymentAttempt struct, PSPID PSPID `json:"psp_id"`
+pkg openrails/billing, type OrderPaymentAttempt struct, PaymentID *PaymentID `json:"payment_id,omitempty"`
+pkg openrails/billing, type OrderPaymentAttempt struct, PaymentMethodID *PaymentMethodID `json:"payment_method_id,omitempty"`
+pkg openrails/billing, type OrderPaymentAttempt struct, State string `json:"state"`
 pkg openrails/billing, type OrderPaymentOption struct
 pkg openrails/billing, type OrderPaymentOption struct, Accepts []string `json:"accepts"`
 pkg openrails/billing, type OrderPaymentOption struct, FailedAttempts int `json:"failed_attempts"`

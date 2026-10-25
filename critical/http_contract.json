@@ -1,5 +1,5 @@
 {
-  "source": "f535f36cf879d0ee5c960904ca12abc0f02ae24d",
+  "source": "025d683f1f43521b723d00ff7daf18ea6270b292",
   "operations": [
     {
       "method": "GET",
@@ -1013,6 +1013,24 @@
       "method": "POST",
       "path": "/v1/webhooks/{rail}/{account_id}",
       "auth": "provider_signature",
+      "feature": ""
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/admin/customers/{customer_id}/payment-methods/{id}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/orders/{id}/payment-attempt",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/orders/{id}/payment-attempt",
+      "auth": "customer",
       "feature": ""
     }
   ]

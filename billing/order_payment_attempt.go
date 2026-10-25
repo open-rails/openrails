@@ -1,7 +1,9 @@
 package billing
 
 // OrderPaymentAttempt is the retained receipt of one purchase payment request.
-// Its original Idempotency-Key selects the attempt; the latest order payment
+// Its original POST /me/orders/{id}/pay Idempotency-Key selects the attempt;
+// create-order-with-payment keys and recurring/usage collection keys are separate.
+// The latest order payment
 // does not. Reading it neither executes nor retries a charge. A missing key
 // returns not found even when a different request paid the order.
 type OrderPaymentAttempt struct {
