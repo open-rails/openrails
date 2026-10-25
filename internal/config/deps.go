@@ -7,8 +7,8 @@ import (
 	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/authkit/notify"
 	"github.com/open-rails/authkit/userinfo"
-	notifypg "github.com/open-rails/helpers/notify/postgres"
 	"github.com/open-rails/openrails/billing"
 	"github.com/redis/go-redis/v9"
 )
@@ -72,7 +72,7 @@ type NotificationRecipient struct {
 // error leaves the billing transaction retryable. The sink must not perform
 // network delivery inside ApplyTx: a remote implementation enqueues locally.
 type NotificationChannel struct {
-	Sink      notifypg.TxSink
+	Sink      notify.Publisher
 	Recipient func(context.Context, NotificationRecipient) (accountID string, deliver bool, err error)
 }
 

@@ -2,7 +2,7 @@ package billing
 
 import (
 	"github.com/google/uuid"
-	"github.com/open-rails/helpers/notify"
+	"github.com/open-rails/authkit/notify"
 )
 
 // NotificationOrdering is source-owned ordering metadata for one exact issue.

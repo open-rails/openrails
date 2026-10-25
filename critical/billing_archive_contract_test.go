@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	notifypg "github.com/open-rails/helpers/notify/postgres"
+	notifypg "github.com/open-rails/authkit/notify/postgres"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"

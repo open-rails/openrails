@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/helpers/notify"
+	"github.com/open-rails/authkit/notify"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -85,7 +85,7 @@ func Withdraw(ctx context.Context, d *db.DB, customerID uuid.UUID, keys []string
 			return err
 		}
 		for batch := range slices.Chunk(keys, notify.MaxMutations) {
-			mutations := make([]notify.Mutation, 0, len(batch))
+			withdrawals := make([]notify.Withdrawal, 0, len(batch))
 			for _, key := range batch {
 				// A delivered or queued publication always created this source
 				// row in the same transaction. Ordinary successful payments must
@@ -101,13 +101,12 @@ WHERE merchant_id=$1 AND customer_id=$2 AND issue_key=$3 AND NOT withdrawn RETUR
 				if err != nil {
 					return fmt.Errorf("withdraw notification %s: %w", key, err)
 				}
-				mutations = append(mutations, notify.Mutation{Input: notify.Input{Recipient: recipient,
-					Origin: notify.Origin{System: "openrails", Scope: mid.String(), ID: key}, Visibility: notify.VisibilityTenant}, Revision: revision, Withdrawn: true})
+				withdrawals = append(withdrawals, notify.Withdrawal{RecipientID: recipient.ID, ID: key, Revision: revision})
 			}
-			if len(mutations) == 0 {
+			if len(withdrawals) == 0 {
 				continue
 			}
-			if err := channel.Sink.ApplyTx(ctx, tx, mutations); err != nil {
+			if err := channel.Sink.Withdraw(ctx, withdrawals, tx); err != nil {
 				return err
 			}
 		}

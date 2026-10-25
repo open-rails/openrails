@@ -12,10 +12,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/authtest"
-	"github.com/open-rails/helpers/notify"
-	notifypg "github.com/open-rails/helpers/notify/postgres"
+	"github.com/open-rails/authkit/notify"
+	notifypg "github.com/open-rails/authkit/notify/postgres"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,10 +33,49 @@ func accountInbox(t *testing.T, destination **notifypg.Store) func(*world) {
 		require.NoError(t, notifypg.Migrate(t.Context(), w.pool, schema))
 		*destination, err = notifypg.New(w.pool, notifypg.Config{Schema: schema, Scope: "accounts"})
 		require.NoError(t, err)
-		w.deps.Notifications = &openrails.NotificationChannel{Sink: *destination, Recipient: func(_ context.Context, source openrails.NotificationRecipient) (string, bool, error) {
+		w.deps.Notifications = &openrails.NotificationChannel{Sink: accountTestPublisher{store: *destination}, Recipient: func(_ context.Context, source openrails.NotificationRecipient) (string, bool, error) {
 			return source.CustomerID.UUID().String(), source.Issuer == "" || source.Issuer == authtest.Issuer, nil
 		}}
 	}
+}
+
+// accountTestPublisher isolates billing producer behavior against canonical AuthKit
+// persistence. Host/client authorization is covered by the real host inbox journeys.
+// The test binds provenance from the trusted merchant transaction, never payloads.
+type accountTestPublisher struct{ store *notifypg.Store }
+
+func (p accountTestPublisher) Publish(ctx context.Context, values []notify.Publication, transaction ...pgx.Tx) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	changes := make([]notify.Mutation, len(values))
+	for i, value := range values {
+		changes[i] = notify.Mutation{Input: notify.Input{Recipient: notify.Recipient{Audience: notify.AudienceUser, ID: value.RecipientID}, Origin: notify.Origin{System: "openrails", Scope: mid.String(), ID: value.ID}, Visibility: notify.VisibilityTenant, Kind: value.Kind, Data: value.Data, CreatedAt: value.CreatedAt, ActionRequested: value.ActionRequested, Severity: value.Severity}, Revision: value.Revision}
+	}
+	return p.apply(ctx, changes, transaction...)
+}
+
+func (p accountTestPublisher) Withdraw(ctx context.Context, values []notify.Withdrawal, transaction ...pgx.Tx) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	changes := make([]notify.Mutation, len(values))
+	for i, value := range values {
+		changes[i] = notify.Mutation{Input: notify.Input{Recipient: notify.Recipient{Audience: notify.AudienceUser, ID: value.RecipientID}, Origin: notify.Origin{System: "openrails", Scope: mid.String(), ID: value.ID}, Visibility: notify.VisibilityTenant}, Revision: value.Revision, Withdrawn: true}
+	}
+	return p.apply(ctx, changes, transaction...)
+}
+
+func (p accountTestPublisher) apply(ctx context.Context, changes []notify.Mutation, transaction ...pgx.Tx) error {
+	if len(transaction) == 0 {
+		return p.store.Apply(ctx, changes)
+	}
+	if len(transaction) != 1 || transaction[0] == nil {
+		return notify.ErrInvalid
+	}
+	return p.store.ApplyTx(ctx, transaction[0], changes)
 }
 
 func accountNotices(t *testing.T, store *notifypg.Store, user string) []notify.Item {

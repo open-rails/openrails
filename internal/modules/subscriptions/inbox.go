@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/helpers/notify"
+	"github.com/open-rails/authkit/notify"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -82,10 +82,10 @@ func publishInbox(ctx context.Context, d *db.DB, tx pgx.Tx, n *models.Notificati
 	if err != nil {
 		return err
 	}
-	in := notify.Input{Recipient: recipient, Origin: notify.Origin{System: "openrails", Scope: mid.String(), ID: key},
-		Kind: string(n.EventType), Data: data, CreatedAt: n.CreatedAt, Visibility: notify.VisibilityTenant,
+	in := notify.Publication{RecipientID: recipient.ID, ID: key, Revision: revision,
+		Kind: string(n.EventType), Data: data, CreatedAt: n.CreatedAt,
 		ActionRequested: billing.CustomerNotificationActionRequested(string(n.EventType))}
-	return channel.Sink.ApplyTx(ctx, tx, []notify.Mutation{{Input: in, Revision: revision}})
+	return channel.Sink.Publish(ctx, []notify.Publication{in}, tx)
 }
 
 // A new subscription may restore the same product that an older one lost.

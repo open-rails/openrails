@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	notifypg "github.com/open-rails/helpers/notify/postgres"
+	"github.com/open-rails/authkit/notify"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 )
@@ -17,7 +17,7 @@ import (
 // same account UUID; other issuers are skipped. The destination publisher
 // verifies that the account is live in its bound tenant. There is no email or
 // display-name identity matching, or second directory read inside billing's tx.
-func Notifications(sink notifypg.TxSink, merchant billing.MerchantID, issuers ...string) *openrails.NotificationChannel {
+func Notifications(sink notify.Publisher, merchant billing.MerchantID, issuers ...string) *openrails.NotificationChannel {
 	allowed := slices.Clone(issuers)
 	return &openrails.NotificationChannel{Sink: sink, Recipient: func(_ context.Context, source openrails.NotificationRecipient) (string, bool, error) {
 		if merchant.IsZero() || source.MerchantID.IsZero() {
