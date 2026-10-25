@@ -42,7 +42,11 @@ export interface EmbeddedPaymentProps {
 // The pay page posts its height on mount; silence this long means it failed.
 const LOAD_TIMEOUT_MS = 12_000
 
-export function EmbeddedPayment({
+export function EmbeddedPayment(props: EmbeddedPaymentProps) {
+  return <PaymentFrame key={props.url} {...props} />
+}
+
+function PaymentFrame({
   url,
   onComplete,
   fallbacks,
@@ -64,16 +68,20 @@ export function EmbeddedPayment({
   React.useEffect(() => {
     completed.current = onComplete
   })
-  const origin = React.useMemo(() => {
+  const destination = React.useMemo(() => {
     try {
       const parsed = new URL(url)
-      return parsed.protocol === "https:" || parsed.protocol === "http:"
-        ? parsed.origin
+      const orderId = /^\/pay\/([^/]+)$/.exec(parsed.pathname)?.[1]
+      return (parsed.protocol === "https:" || parsed.protocol === "http:") &&
+        orderId
+        ? { origin: parsed.origin, orderId }
         : null
     } catch {
       return null
     }
   }, [url])
+  const origin = destination?.origin
+  const orderId = destination?.orderId
 
   React.useEffect(() => {
     if (!origin) return
@@ -101,6 +109,7 @@ export function EmbeddedPayment({
       if (
         message.type !== PAYMENT_COMPLETE_MESSAGE ||
         typeof message.order_id !== "string" ||
+        message.order_id !== orderId ||
         done
       )
         return
@@ -114,7 +123,7 @@ export function EmbeddedPayment({
     }
     window.addEventListener("message", heard)
     return () => window.removeEventListener("message", heard)
-  }, [origin])
+  }, [origin, orderId])
 
   React.useEffect(() => {
     if (!origin || loaded || failed) return
@@ -136,8 +145,7 @@ export function EmbeddedPayment({
           The secure payment page didn&apos;t load.
         </p>
         <p className="text-sm text-muted-foreground">
-          You haven&apos;t been charged. We&apos;ve been notified; please try
-          again in a moment.
+          Please try again in a moment.
         </p>
         <button
           type="button"
