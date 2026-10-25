@@ -50,3 +50,16 @@ was copied from the qualified `f535` source; the changed browser harness is rebu
 and typechecks. The retained SDK browser subset also passes in 17.908s across J04-S01 and
 J04-S03 (five real Chromium cases, zero method-ledger errors); final destination
 receipts are still pending. No full-suite or race claim is made for this local run.
+
+## Current release baseline
+
+The extraction now includes OpenRails v0.267.0, including notification issue
+ordering (migration 0115) and recurring service-credit billing. Migration 0116
+keeps its original number and no published migration file changed. The current
+roster is 153 logical scenarios and 189 required paths (156 current core scenarios,
+minus five moved product cases, plus two extraction cases).
+
+OR-J31-S05 also exercises public `openrails.Migrate`: populated reader state
+refuses without advancing its migration ledger, explicit offline schema transfer
+preserves the cursor, and repeated public migration then succeeds. Destination
+SaaS qualification and restored-backup rehearsal still gate merge/release.
