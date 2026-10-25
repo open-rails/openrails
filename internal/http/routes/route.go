@@ -67,9 +67,6 @@ const (
 	App Group = "app"
 	// Webhooks is inbound provider callbacks.
 	Webhooks Group = "webhooks"
-	// Network is the openrails.dev account across its linked merchants
-	// (/v1/network): the network portal's API.
-	Network Group = "network"
 )
 
 // Tier is what a route checks before its handler runs.
@@ -96,11 +93,6 @@ const (
 	// AuthProvisioning: the merchant's provisioning token, which opens only
 	// these routes, or what AuthApplication admits.
 	AuthProvisioning Tier = "provisioning"
-	// AuthNetwork: the deployment's own account acting for itself, signed in
-	// to it (not through a merchant's client), having accepted the network
-	// terms; under one of its links, as the customer that link names. A
-	// Sensitive route needs a recent sign-in.
-	AuthNetwork Tier = "network"
 )
 
 // Feature is the configuration a route needs to be mounted.
@@ -121,9 +113,6 @@ const (
 	FeatureMerchantConfigManages Feature = "merchant_config_edits"
 	// FeatureCatalogCopilot: llm.api_key and llm.catalog_copilot_enabled.
 	FeatureCatalogCopilot Feature = "catalog_copilot"
-	// FeatureCustomerNetwork: the deployment runs the customer network
-	// (openrails.dev).
-	FeatureCustomerNetwork Feature = "customer_network"
 	// FeatureCustomerProvisioning: OpenRails keeps the pushed customer directory.
 	FeatureCustomerProvisioning Feature = "customer_provisioning"
 )
@@ -161,9 +150,6 @@ const (
 	// PayURLSavedCards: a customer route served only when the pay URL
 	// offers saved cards.
 	PayURLSavedCards PayURLAccess = "saved_cards"
-	// PayURLLink: a customer route the order's customer uses to link its
-	// openrails.dev account, the pay URL proving the merchant's side.
-	PayURLLink PayURLAccess = "link"
 )
 
 // Reply is one success outcome of a route: its status and body. Body is a
@@ -300,7 +286,7 @@ type Route struct {
 	// Permission is a programmatic route's: the pair its caller holds one
 	// of. A staff route's follows from its Group and Level (Needs).
 	Permission Pair
-	// Sensitive: a customer or network operation needs a recent sign-in.
+	// Sensitive: a customer operation needs a recent sign-in.
 	// Never set on an AuthMerchant route.
 	Sensitive bool
 	// Limit meters the operation per human administrator, after authorization.
@@ -383,7 +369,7 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 	for _, resource := range [][]Route{
 		metaRoutes, configRoutes, ordersRoutes, cartsRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
 		creditsRoutes, meteringRoutes, paymentsRoutes, paymentMethodsRoutes, agreementsRoutes, pspsRoutes,
-		merchantRoutes, opsRoutes, provisioningRoutes, customerNetworkRoutes, networkRoutes(),
+		merchantRoutes, opsRoutes, provisioningRoutes,
 	} {
 		all = append(all, resource...)
 	}
@@ -402,9 +388,6 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		appRead := r.Group == App && r.Level == LevelRead && r.Method == POST
 		if leveled != (r.Level == LevelRead || r.Level == LevelUpdate) && !appRead || !leveled && r.Level != "" && !appRead {
 			panic("routes: " + r.Key() + ": an admin, catalog or merchant-config route reads or updates; a programmatic POST may say it reads")
-		}
-		if (r.Group == Network) != (r.Auth == AuthNetwork) || r.Group == Network && !strings.HasPrefix(r.Path, "/v1/network/") {
-			panic("routes: " + r.Key() + ": a network route, and only one, is the account's, under /v1/network")
 		}
 		if (r.Group == Access) != (r.Auth == AuthSignedIn) {
 			panic("routes: " + r.Key() + ": the access route, and only it, takes any signed-in caller")
@@ -442,7 +425,7 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 			if r.Auth != AuthPublic {
 				panic("routes: " + r.Key() + ": a public pay URL route takes no credential")
 			}
-		case PayURLOrder, PayURLSavedCards, PayURLLink, PayURLMerchant:
+		case PayURLOrder, PayURLSavedCards, PayURLMerchant:
 			if r.Auth != AuthCustomer || (r.PayURL == PayURLOrder) != strings.Contains(r.Path, "{id}") {
 				panic("routes: " + r.Key() + ": a pay URL customer route is a customer route; an order route names the order as {id}")
 			}
@@ -475,17 +458,13 @@ func TierErrors(tier Tier) []string {
 	var own []string
 	switch tier {
 	case AuthCustomer:
-		// network_account_linked: an account linked to another customer of
-		// the merchant, where the customer network runs.
-		own = append([]string{billing.CodeInvokerScopedPrincipal, billing.CodeCustomerIssuerMismatch, billing.CodeCustomerTenantMismatch, billing.CodeNetworkAccountLinked}, authenticated...)
+		own = append([]string{billing.CodeInvokerScopedPrincipal, billing.CodeCustomerIssuerMismatch, billing.CodeCustomerTenantMismatch}, authenticated...)
 	case AuthMerchant:
 		own = append(staff, authenticated...)
 	case AuthSignedIn:
 		own = append(slices.Clone(staff), authenticated...)
 	case AuthApplication:
 		own = append(append([]string{billing.CodeApplicationRequired}, staff...), authenticated...)
-	case AuthNetwork:
-		own = append([]string{billing.CodeNetworkTermsRequired, billing.CodeStepUpRequired, billing.CodeStepUpUnavailable, billing.CodeResourceNotFound}, authenticated...)
 	default:
 		// No credential: a public route names its own merchant, a provider's
 		// callback its PSP.

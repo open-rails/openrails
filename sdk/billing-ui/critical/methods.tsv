@@ -24,5 +24,3 @@ cancelSubscription	OR-UI-02	Native customer cancellation changes live status to 
 resumeSubscription	OR-UI-02	Resumption restores active status and preserves the paid period end.
 removePaymentMethod	OR-UI-02,OR-UI-07	Unsupported Stripe custody returns a typed refusal; actual NMI deletion removes the instrument and external vault record.
 reportPayURLFailure	OR-UI-01,OR-UI-03	Owned order report creates a public merchant finding; unknown order preserves typed404.
-createNetworkLinkChallenge	OR-UI-03,OR-UI-06	Disabled embedded profile refuses; enabled standalone returns a real nonce-bearing challenge.
-createNetworkLink	OR-UI-03,OR-UI-06	Real OAuth consent links the exact merchant customer to the native account; consumed challenge replay is400.

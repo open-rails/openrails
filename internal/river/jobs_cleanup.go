@@ -145,7 +145,6 @@ type CleanupResult struct {
 	ReconciliationRuns         int64
 	ProviderIntents            int64
 	ProviderMutationLogs       int64
-	CustomerLinks              int64
 	// PartitionsCreated and PartitionsDropped count whole monthly partitions.
 	PartitionsCreated int
 	PartitionsDropped int
@@ -291,7 +290,6 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			FindingCutoff:          now.Add(-retention.ResolvedFindings),
 			RunCutoff:              now.Add(-retention.ReconciliationRuns),
 			ProviderWriteCutoff:    now.Add(-retention.ProviderWrites),
-			LinkCutoff:             now.Add(-retention.RevokedCustomerLinks),
 			After:                  after,
 			MerchantLimit:          limit,
 		})
@@ -368,7 +366,6 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"reconciliation_runs":          result.ReconciliationRuns,
 		"provider_intents":             result.ProviderIntents,
 		"provider_mutation_logs":       result.ProviderMutationLogs,
-		"customer_links":               result.CustomerLinks,
 		"partitions_created":           result.PartitionsCreated,
 		"partitions_dropped":           result.PartitionsDropped,
 	})
@@ -516,14 +513,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		})
 	})
 
-	// 10. Revoked customer links.
-	sweep("delete revoked customer links", &result.CustomerLinks, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.DeleteRevokedCustomerLinksBefore(ctx, gen.DeleteRevokedCustomerLinksBeforeParams{
-			MerchantID: mid, Cutoff: now.Add(-retention.RevokedCustomerLinks), RowLimit: limit,
-		})
-	})
-
-	// 11. Resolved findings, then the reconciliation runs nothing names any more.
+	// 10. Resolved findings, then the reconciliation runs nothing names any more.
 	sweep("delete resolved findings", &result.ReconciliationFindings, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteResolvedFindingsBefore(ctx, gen.DeleteResolvedFindingsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.ResolvedFindings), RowLimit: limit,

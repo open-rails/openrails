@@ -5,14 +5,12 @@ import {
   PAYMENT_RESIZE_MESSAGE,
   OrderPayment,
   createBillingClient,
-  type BillingClient,
   type PaymentFallbacks,
 } from "@openrails/billing-ui"
 import { isBillingError, type Order, type PublicConfig, type PublicMerchant } from "@openrails/billing-ui/client"
 
 import { paymentPageFetch } from "./api"
 import { CaptchaPrompt, captchaFetch } from "./captcha"
-import { beginSignIn, finishSignIn, linkedHere, signInInPopup, type NetworkSignIn } from "./network"
 
 type Ended = "not_found" | "expired" | "canceled" | "unavailable"
 
@@ -102,7 +100,7 @@ export function App({ orderId, secret, fallbacks }: { orderId: string; secret: s
   if (state.kind === "loading") return <Shell><p className="muted">Loading…</p></Shell>
   if (state.kind === "ended") return <Shell><Notice reason={state.reason} /></Shell>
 
-  const { config: loaded, merchant, order } = state
+  const { merchant, order } = state
   const leaving = !embedded && !!order.success_url
   return (
     <Shell
@@ -122,7 +120,6 @@ export function App({ orderId, secret, fallbacks }: { orderId: string; secret: s
         </p>
       ) : (
         <BillingProvider client={client!}>
-          {loaded.network ? <SaveWithNetwork network={loaded.network} client={client!} orderId={order.id} /> : null}
           <OrderPayment
             orderId={order.id}
             client={client!}
@@ -136,62 +133,6 @@ export function App({ orderId, secret, fallbacks }: { orderId: string; secret: s
         </BillingProvider>
       )}
     </Shell>
-  )
-}
-
-// SaveWithNetwork offers, before the card, to link this payment to the
-// shopper's account on the customer network (decision: every purchase
-// offers it prominently).
-function SaveWithNetwork({ network, client, orderId }: { network: NetworkSignIn; client: BillingClient; orderId: string }) {
-  const [state, setState] = useState<"idle" | "busy" | "linked">(() => (linkedHere(orderId) ? "linked" : "idle"))
-  const [error, setError] = useState<string>()
-  const name = useMemo(() => {
-    try {
-      return new URL(network.issuer).host
-    } catch {
-      return "your account"
-    }
-  }, [network.issuer])
-  if (state === "linked")
-    return (
-      <p className="network" role="status">
-        Saved to your {name} account.
-      </p>
-    )
-  const save = async () => {
-    setError(undefined)
-    setState("busy")
-    // A framed page cannot leave its frame: the sign-in opens in a popup,
-    // opened by the click itself.
-    const popup = framed ? window.open("about:blank", "openrails-sign-in", "popup,width=480,height=720") : null
-    try {
-      const url = await beginSignIn(network, client, orderId, framed)
-      if (!framed) {
-        window.location.assign(url)
-        return
-      }
-      if (!popup) throw new Error("Allow pop-ups to sign in.")
-      const { state: signIn, code } = await signInInPopup(popup, url)
-      await finishSignIn(signIn, code, client)
-      setState("linked")
-    } catch (err) {
-      popup?.close()
-      setError(err instanceof Error && err.message ? err.message : "The sign-in did not finish.")
-      setState("idle")
-    }
-  }
-  return (
-    <div className="network">
-      <button type="button" onClick={() => void save()} disabled={state === "busy"}>
-        Save with {name}
-      </button>
-      <span className="muted">Keep this payment in your {name} account.</span>
-      {error ? (
-        <span role="alert" className="error">
-          {error}
-        </span>
-      ) : null}
-    </div>
   )
 }
 

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/authkit/auth"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -26,8 +27,9 @@ import (
 )
 
 type Dependencies struct {
-	Config  *config.Config
-	Runtime *app.Runtime
+	CustomerAdmissionPolicy func(context.Context, auth.Verified, config.CustomerBinding) error
+	Config                  *config.Config
+	Runtime                 *app.Runtime
 	// ControlPlane is the standalone server's control plane over its own
 	// AuthKit, whose Authenticator says who every request is. Required: the
 	// server selectively mounts the intentional AuthKit route groups (never
@@ -50,8 +52,9 @@ type Dependencies struct {
 }
 
 type Server struct {
-	cfg     *config.Config
-	runtime *app.Runtime
+	customerAdmissionPolicy func(context.Context, auth.Verified, config.CustomerBinding) error
+	cfg                     *config.Config
+	runtime                 *app.Runtime
 	// draining fails readiness while the process stops (Drain).
 	draining atomic.Bool
 	// auth is AuthKit's Authenticator: who every request is.
@@ -188,17 +191,18 @@ func New(deps Dependencies) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:               deps.Config,
-		runtime:           deps.Runtime,
-		auth:              deps.ControlPlane.Core().Authenticator(),
-		controlPlane:      deps.ControlPlane,
-		resource:          deps.Resource,
-		captchaStore:      deps.Runtime.CaptchaStore,
-		adminLimiter:      middleware.NewAdminOperationLimiter(deps.Runtime.AbuseState),
-		consoleAssets:     deps.ConsoleAssets,
-		adminConsole:      deps.AdminConsole,
-		groups:            deps.RouteGroups,
-		browserTierRoutes: middleware.NewBrowserTierRoutes(),
+		customerAdmissionPolicy: deps.CustomerAdmissionPolicy,
+		cfg:                     deps.Config,
+		runtime:                 deps.Runtime,
+		auth:                    deps.ControlPlane.Core().Authenticator(),
+		controlPlane:            deps.ControlPlane,
+		resource:                deps.Resource,
+		captchaStore:            deps.Runtime.CaptchaStore,
+		adminLimiter:            middleware.NewAdminOperationLimiter(deps.Runtime.AbuseState),
+		consoleAssets:           deps.ConsoleAssets,
+		adminConsole:            deps.AdminConsole,
+		groups:                  deps.RouteGroups,
+		browserTierRoutes:       middleware.NewBrowserTierRoutes(),
 	}
 
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
@@ -237,8 +241,6 @@ func New(deps Dependencies) (*Server, error) {
 	// a host-supplied DelegatedAuthenticator overrides the control plane's
 	// delegated-token verifier (#339).
 	s.registerSelfServiceRoutes(mux)
-	// The openrails.dev account's own routes, with the customer network.
-	s.registerNetworkRoutes(mux)
 
 	// Canonical account-specific webhook surface: /v1/webhooks/:provider/:account_id for
 	// direct Stripe. The handler resolves the PSP from the payload/route, derives

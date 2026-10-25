@@ -324,30 +324,6 @@ type BillingCustomerInvoiceProfile struct {
 	UpdatedAt        time.Time
 }
 
-// An openrails.dev account linked to one merchant's customer: unique while active per customer and per (account, merchant). openrails.dev's data, not the merchant's: never archived, revoked when the merchant leaves. Retention: revoked links are deleted 24 months (731 days) after revoked_at; an active link is kept while it lasts.
-type BillingCustomerLink struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-	// The openrails.dev account: its AuthKit user id, the public network id (OIDC sub).
-	AccountID uuid.UUID
-	// payment_page: on the payment page, by an order's pay URL; connect: the merchant's own customer, from its site; sign_in: the merchant signs its customers in with openrails.dev, so the customer is the account itself.
-	Method string
-	// The merchant-side proof: the customer's token at the merchant, or the pay URL secret of order_id. NULL for sign_in.
-	Credential *string
-	// The order whose pay URL made the link; evidence only, kept after the order goes.
-	OrderID *uuid.UUID
-	// The network sign-in the link was proven with (OIDC auth_time, amr). NULL for sign_in.
-	AuthTime *time.Time
-	Amr      []string
-	// The network-terms version the account had accepted when linked.
-	TermsVersion string
-	Status       string
-	LinkedAt     time.Time
-	RevokedAt    *time.Time
-	RevokedBy    *string
-}
-
 // A customer's own low-balance line per currency: the amount line and the runway line (hours of spend at its burn rate). A null part inherits the merchant's settings.balance_notices; a line with no part set has no row.
 type BillingCustomerLowBalanceLine struct {
 	MerchantID  uuid.UUID
@@ -796,14 +772,6 @@ type BillingMoneySetting struct {
 	UsageNextBillAt           *time.Time
 	UsageMinimumInvoiceAmount *int64
 	UsageCollectionDue        bool
-}
-
-// State: optional standalone customer-network account event reading position, scoped to its AuthKit issuer and account tenant; retained until that server authority is retired.
-type BillingNetworkEventCursor struct {
-	Issuer    string
-	TenantID  uuid.UUID
-	Cursor    string
-	UpdatedAt time.Time
 }
 
 // The in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.

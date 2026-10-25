@@ -1,5 +1,5 @@
 {
-  "source": "b85d9ff6e21d4b07d9a97599a3e3e21a21893308",
+  "source": "f535f36cf879d0ee5c960904ca12abc0f02ae24d",
   "operations": [
     {
       "method": "GET",
@@ -264,12 +264,6 @@
       "path": "/v1/app/admissions/{request_id}",
       "auth": "application",
       "feature": ""
-    },
-    {
-      "method": "GET",
-      "path": "/v1/app/customers",
-      "auth": "application",
-      "feature": "customer_network"
     },
     {
       "method": "POST",
@@ -618,18 +612,6 @@
       "path": "/v1/me/low-balance-lines/{currency}",
       "auth": "customer",
       "feature": ""
-    },
-    {
-      "method": "POST",
-      "path": "/v1/me/network-link",
-      "auth": "customer",
-      "feature": "customer_network"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/me/network-link/challenges",
-      "auth": "customer",
-      "feature": "customer_network"
     },
     {
       "method": "GET",
@@ -1002,102 +984,6 @@
       "path": "/v1/metrics/schema",
       "auth": "merchant",
       "feature": ""
-    },
-    {
-      "method": "GET",
-      "path": "/v1/network/links",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "DELETE",
-      "path": "/v1/network/links/{link_id}",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/network/links/{link_id}/agreements",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/network/links/{link_id}/agreements/{id}/revoke",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/network/links/{link_id}/orders/{id}",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/network/links/{link_id}/orders/{id}/confirm",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/network/links/{link_id}/orders/{id}/pay",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/network/links/{link_id}/payment-methods",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/network/links/{link_id}/payment-methods",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "DELETE",
-      "path": "/v1/network/links/{link_id}/payment-methods/{id}",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/network/links/{link_id}/subscriptions/{id}",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/network/links/{link_id}/subscriptions/{id}/cancel",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "PUT",
-      "path": "/v1/network/links/{link_id}/subscriptions/{id}/payment-method",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/network/links/{link_id}/subscriptions/{id}/resume",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/network/orders",
-      "auth": "network",
-      "feature": "customer_network"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/network/subscriptions",
-      "auth": "network",
-      "feature": "customer_network"
     },
     {
       "method": "GET",

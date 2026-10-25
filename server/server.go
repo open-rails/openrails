@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/auth"
 	"github.com/open-rails/authkit/userinfo"
 	riverhelpers "github.com/open-rails/helpers/river"
 	log "github.com/sirupsen/logrus"
@@ -31,7 +32,6 @@ import (
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	httpserver "github.com/open-rails/openrails/server/internal/http"
-	"github.com/open-rails/openrails/server/internal/network"
 	"github.com/open-rails/openrails/server/internal/operator"
 	admin "github.com/open-rails/openrails/server/web/console"
 )
@@ -85,9 +85,7 @@ type Config struct {
 	// a 15-minute access-token lifetime unless
 	// Auth.AuthorizationServer.AccessTokenTTL sets one, AuthKit's River schema
 	// (the engine's) and its HTTP mount. An empty client-IP posture takes the engine's TrustedProxies
-	// and CloudflareProxies. Declaring the network-terms agreement runs the
-	// customer network (docs/customer-network.md): it needs Auth.Resource,
-	// and the server adds the network's scopes and consent policy.
+	// and CloudflareProxies. Hosted account policy belongs to the host.
 	Auth authkit.Config
 	// LocalSignIn serves sign-in to the server's own accounts (password,
 	// passwordless, registration). Off, the default, people sign in at a
@@ -141,6 +139,11 @@ type Deps struct {
 	// nil Email renders AuthKit's email and sends it through the engine's
 	// sender.
 	Auth authkit.Deps
+	// CustomerAdmissionPolicy may refuse an otherwise verified ordinary customer
+	// request before automatic customer admission. The original identity and
+	// resolved merchant/customer are preserved. Nil keeps the normal behavior;
+	// staff, AuthKit, host-mapped routes and immutable pay URLs do not call it.
+	CustomerAdmissionPolicy func(context.Context, auth.Verified, openrails.CustomerBinding) error
 	// HasVaultedPaymentMethod answers whether a user has a payment method on
 	// file, unlocking merchant creation beyond MerchantCreation.FreeAllowance.
 	HasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)
@@ -161,9 +164,6 @@ type Server struct {
 	pool    *pgxpool.Pool
 	cp      *controlplane.ControlPlane
 	surface *httpserver.Server
-	// network is the customer network: on when AuthKit declares the
-	// network-terms agreement.
-	network *network.Service
 
 	closeOnce sync.Once
 	closeErr  error
@@ -249,28 +249,12 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if err != nil {
 		return fail(err)
 	}
-	if network.Enabled(akCfg) {
-		if err := network.Configure(&akCfg, origin); err != nil {
-			return fail(err)
-		}
-		s.networkHooks(&akDeps)
+	if akDeps.GroupName == nil {
+		akDeps.GroupName = s.merchantName
 	}
 	ak, err := authkit.New(ctx, akCfg, akDeps)
 	if err != nil {
 		return fail(fmt.Errorf("server: build AuthKit: %w", err))
-	}
-	if network.Enabled(akCfg) {
-		rt := s.graph.Runtime
-		// Identity proof lifetime and AuthKit event times use wall time; a
-		// simulated billing clock must not advance or expire account proofs.
-		if s.network, err = network.New(rt.DB, ak, rt.AbuseState, nil, akCfg.DefaultTenantID, akCfg.Token.Issuer); err != nil {
-			_ = ak.Close(context.WithoutCancel(ctx))
-			return fail(err)
-		}
-		if err := rt.AddRiverContribution(s.network.RiverJobs()); err != nil {
-			return fail(err)
-		}
-		rt.Network = s.network
 	}
 	if s.cp, err = controlplane.New(ak, s.graph.Config, akCfg, akDeps.Postgres, opts); err != nil {
 		_ = ak.Close(context.WithoutCancel(ctx))
@@ -285,7 +269,8 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
 		RouteGroups: cfg.RouteGroups, AdminConsole: cfg.AdminConsole, Resource: akCfg.Resource.ID,
-		CheckoutOrigin: origin, PaymentPageAssets: paymentPageAssets(deps.PaymentPageAssets), ConsoleAssets: consoleAssets,
+		CustomerAdmissionPolicy: deps.CustomerAdmissionPolicy,
+		CheckoutOrigin:          origin, PaymentPageAssets: paymentPageAssets(deps.PaymentPageAssets), ConsoleAssets: consoleAssets,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))
 	}

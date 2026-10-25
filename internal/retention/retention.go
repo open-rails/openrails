@@ -70,8 +70,6 @@ const (
 	// once read, 180 days if never read.
 	NotificationsRead   = 90 * Day
 	NotificationsUnread = 180 * Day
-	// RevokedCustomerLinks keeps a revoked customer link 24 months.
-	RevokedCustomerLinks = 731 * Day
 )
 
 // Days is a period as the whole days the sweep statements take.

@@ -168,33 +168,3 @@ func (w *standaloneWorld) command(t *testing.T, in any, out any) {
 	require.Empty(t, envelope.Error)
 	require.NoError(t, json.Unmarshal(envelope.Result, out))
 }
-func (w *standaloneWorld) challenge(t *testing.T, merchant string) billing.NetworkLinkChallenge {
-	t.Helper()
-	status, raw := w.request(t, http.MethodPost, "/v1/me/network-link/challenges", w.Merchants[merchant].CustomerToken, map[string]any{})
-	require.Equal(t, http.StatusCreated, status, string(raw))
-	var challenge billing.NetworkLinkChallenge
-	require.NoError(t, json.Unmarshal(raw, &challenge))
-	require.NotEmpty(t, challenge.ID)
-	require.NotEmpty(t, challenge.Nonce)
-	return challenge
-}
-func (w *standaloneWorld) proof(t *testing.T, merchant, account, nonce string) string {
-	t.Helper()
-	var tokens struct {
-		IDToken string `json:"id_token"`
-	}
-	w.command(t, map[string]any{"Op": "authorize", "Merchant": merchant, "Account": account, "Nonce": nonce}, &tokens)
-	require.NotEmpty(t, tokens.IDToken)
-	return tokens.IDToken
-}
-
-func (w *standaloneWorld) link(t *testing.T, merchant, account string) billing.CustomerLink {
-	t.Helper()
-	challenge := w.challenge(t, merchant)
-	proof := w.proof(t, merchant, account, challenge.Nonce)
-	status, raw := w.request(t, http.MethodPost, "/v1/me/network-link", w.Merchants[merchant].CustomerToken, billing.CreateNetworkLinkParams{ChallengeID: challenge.ID, IDToken: proof})
-	require.Equal(t, http.StatusCreated, status, string(raw))
-	var link billing.CustomerLink
-	require.NoError(t, json.Unmarshal(raw, &link))
-	return link
-}

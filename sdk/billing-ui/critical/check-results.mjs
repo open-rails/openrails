@@ -33,14 +33,9 @@ const methods = {
     "resumeSubscription",
     "removePaymentMethod",
   ],
-  "OR-UI-03": [
-    "createNetworkLinkChallenge",
-    "createNetworkLink",
-    "reportPayURLFailure",
-  ],
+  "OR-UI-03": ["reportPayURLFailure"],
   "OR-UI-04": ["getAccount", "setCartLine"],
   "OR-UI-05": ["createOrder", "getOrder"],
-  "OR-UI-06": ["createNetworkLinkChallenge", "createNetworkLink"],
   "OR-UI-07": ["addPaymentMethod", "listPaymentMethods", "removePaymentMethod"],
 }
 const observed = new Set()

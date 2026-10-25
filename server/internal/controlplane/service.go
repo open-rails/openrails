@@ -97,12 +97,10 @@ var merchantCeiling = func() []string {
 // ResourceScopes are the scopes of the server's resource (RFC 6749 §3.3)
 // and the permissions each grants: openrails:merchant the merchant
 // permissions and OpenRails' root: ones, openrails:self none (a customer's
-// own billing), openrails:link none (consent to link the merchant's own
-// customer to the account).
+// own billing). Hosted applications declare their own additional consent scopes.
 var ResourceScopes = map[string][]string{
 	billing.ScopeMerchant: merchantCeiling,
 	billing.ScopeSelf:     {},
-	"openrails:link":      {},
 }
 
 // AuthKit is the server's AuthKit configuration: the host's auth, passed
@@ -131,7 +129,17 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 		auth.Resource.ID = defaultResource(cfg.PublicBillingBaseURL)
 	}
 	if auth.Resource.ID != "" {
-		auth.Resource.Scopes = ResourceScopes
+		// Preserve explicit host scopes, while the billing scopes keep their
+		// fixed permission ceilings. Copy both maps and slices: constructing a
+		// server must not mutate host configuration or global defaults.
+		scopes := make(map[string][]string, len(auth.Resource.Scopes)+len(ResourceScopes))
+		for name, permissions := range auth.Resource.Scopes {
+			scopes[name] = slices.Clone(permissions)
+		}
+		for name, permissions := range ResourceScopes {
+			scopes[name] = slices.Clone(permissions)
+		}
+		auth.Resource.Scopes = scopes
 		if auth.AuthorizationServer.AccessTokenTTL == 0 {
 			auth.AuthorizationServer.AccessTokenTTL = AccessTokenTTL
 		}

@@ -51,9 +51,6 @@ const (
 	// HostEventOrderVoided: a renewal order its subscription's end left
 	// unowed.
 	HostEventOrderVoided HostEventType = "order.voided"
-	// A customer linked to, or unlinked from, an openrails.dev account.
-	HostEventCustomerNetworkLinked   HostEventType = "customer.network_linked"
-	HostEventCustomerNetworkUnlinked HostEventType = "customer.network_unlinked"
 	// HostEventMandateRevoked: the customer revoked one of its charge
 	// agreements; the merchant charges nothing more under it.
 	HostEventMandateRevoked HostEventType = "mandate.revoked"
@@ -148,8 +145,6 @@ type HostEvent struct {
 	ProductEntitlements *ProductEntitlementsChangedEvent `json:"product_entitlements"`
 	// Order is set for the order.* events.
 	Order *OrderHostEvent `json:"order"`
-	// CustomerNetwork is set for the customer.network_* events.
-	CustomerNetwork *CustomerNetworkHostEvent `json:"customer_network"`
 	// Mandate is set for mandate.revoked.
 	Mandate *MandateHostEvent `json:"mandate"`
 	// Balance is set for balance.low and balance.depleted.

@@ -40,7 +40,6 @@ func New(rt *app.Runtime, origin string, assets fs.FS, issuers []string, limiter
 		settings = rt.Merchants
 	}
 	mux.Handle("GET /pay/{order_id}", page)
-	mux.Handle("GET "+paymentpage.SignInPath, page)
 	mux.Handle("GET /assets/{file...}", page)
 	mux.Handle("GET "+paymentpage.ApplePayDomainAssociationPath, paymentpage.ApplePayDomainAssociation())
 	handler := middleware.ChainHTTP(mux.Handler(),

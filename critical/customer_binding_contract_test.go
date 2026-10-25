@@ -169,7 +169,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 		status, raw = a.request(t, http.MethodGet, request.URL.Path, a.bobToken, nil)
 		require.Equal(t, http.StatusServiceUnavailable, status, "retained mount obeys engine lifetime: "+string(raw))
 	})
-	t.Run("OR-J01-S09/standalone-mapping-does-not-enroll-a-network-account", func(t *testing.T) {
+	t.Run("OR-J01-S09/standalone-mapping-remains-independent-of-hosted-account-owner", func(t *testing.T) {
 		w := newStandaloneWorld(t, func(settings map[string]any) { settings["MappedCustomers"] = true })
 		customer := w.Merchants["alpha"].CustomerID
 		_, err := w.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{})
@@ -187,10 +187,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 		status, raw = w.request(t, http.MethodGet, path, w.BobToken, nil)
 		require.Equal(t, http.StatusNotFound, status, string(raw))
 		status, raw = w.request(t, http.MethodGet, "/v1/network/links", w.AliceToken, nil)
-		require.Equal(t, http.StatusOK, status, string(raw))
-		var links billing.ListPage[billing.NetworkLink]
-		require.NoError(t, json.Unmarshal(raw, &links))
-		require.Empty(t, links.Items, "mapped reads never enter legacy native-account enrollment")
+		require.Equal(t, http.StatusNotFound, status, string(raw), "the removed hosted account route is not a fallback enrollment path")
 		require.Empty(t, w.hostResult(t, map[string]any{"Op": "host-delete", "Merchant": w.Merchants["alpha"].ID.String()}, nil))
 		status, raw = w.request(t, http.MethodGet, path, w.AliceToken, nil)
 		require.Equal(t, http.StatusForbidden, status, string(raw))

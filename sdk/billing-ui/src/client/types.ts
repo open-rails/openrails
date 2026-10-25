@@ -801,11 +801,6 @@ export const publicConfigSchema = z.object({
     .nullish()
     .transform((v) => v ?? []),
   captcha: captchaConfigSchema.nullish(),
-  /**
-   * The payment page's sign-in to the customer network (OpenID Connect,
-   * code and PKCE); null without the network or a payment page.
-   */
-  network: z.object({ issuer: z.string(), client_id: z.string() }).nullish(),
 })
 export type PublicConfig = z.infer<typeof publicConfigSchema>
 
@@ -823,26 +818,6 @@ export const customerConfigSchema = z.object({
     .transform((v) => v ?? ""),
 })
 export type CustomerConfig = z.infer<typeof customerConfigSchema>
-
-export const networkLinkChallengeSchema = z.object({
-  id: z.string(),
-  nonce: z.string(),
-  expires_at: time,
-})
-export type NetworkLinkChallenge = z.infer<typeof networkLinkChallengeSchema>
-
-export const customerLinkSchema = z.object({
-  id: z.string(),
-  merchant_id: z.string(),
-  customer_id: z.string(),
-  account_id: z.string(),
-  method: z.string(),
-  status: z.string(),
-  linked_at: time,
-  revoked_at: time.nullish(),
-  revoked_by: z.string().nullish(),
-})
-export type CustomerLink = z.infer<typeof customerLinkSchema>
 
 /**
  * What a card setup hands the server: tokenized data only, never a PAN.

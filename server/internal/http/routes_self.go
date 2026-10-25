@@ -14,19 +14,8 @@ import (
 func (s *Server) registerSelfServiceRoutes(mux router.Registrar) {
 	httproutes.RegisterCustomerRoutes(
 		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.SelfRoutePrefix, s.runtime, s.recordBrowserRoute),
-		s.runtime, httproutes.CustomerMount{Auth: s.auth, Providers: embedhttp.ProviderRoutesForRuntime(s.runtime, nil)})
+		s.runtime, httproutes.CustomerMount{Auth: s.auth, AdmissionPolicy: s.customerAdmissionPolicy, Providers: embedhttp.ProviderRoutesForRuntime(s.runtime, nil)})
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("self-service API routes registered on public handler")
-}
-
-// registerNetworkRoutes mounts the network portal's API under /v1/network
-// where the customer network runs: the openrails.dev account across its
-// linked merchants, called from the browser.
-func (s *Server) registerNetworkRoutes(mux router.Registrar) {
-	if s.runtime.Network == nil {
-		return
-	}
-	httproutes.RegisterNetworkRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix+"/network", s.runtime, s.recordBrowserRoute),
-		s.runtime, httproutes.NetworkMount{Auth: s.auth})
 }
