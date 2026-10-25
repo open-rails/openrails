@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -69,6 +70,8 @@ type CustodianSalePayload struct {
 
 // CustodianSaleService runs one-time sales on custodian-held cards.
 type CustodianSaleService struct {
+	BasisTheoryTransport http.RoundTripper
+	NMIClients           *railresolve.NMIFactory
 	DB                   *db.DB
 	Fulfillment          *FulfillmentService
 	PaymentMethodService custodianInstrumentStore
@@ -132,12 +135,18 @@ func (s *CustodianSaleService) resolveConfig(ctx context.Context) (*custodialPSP
 // nmiFactory is the single PSP-scoped factory; the proxy destination seam is
 // a loopback fixture like any other endpoint override.
 func (s *CustodianSaleService) nmiFactory() *railresolve.NMIFactory {
+	if s.NMIClients != nil {
+		return s.NMIClients
+	}
 	return &railresolve.NMIFactory{Config: s.Config, Endpoints: railresolve.NMIEndpoints{DirectPostURL: s.GatewayDirectPostURLOverride}}
 }
 
 func (s *CustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client, error) {
 	if cfg == nil || cfg.Custody == nil || (cfg.Custody.Custodian != models.CustodianBasisTheory && cfg.Custody.Custodian != models.CustodianPlatform) {
 		return nil, errors.New("this custodian does not support the Basis Theory sale transport")
+	}
+	if s.BasisTheoryTransport != nil && cfg.Custody.Environment != config.ClassTest {
+		return nil, errors.New("live custody cannot use a test wire")
 	}
 	baseURL := s.BTBaseURLOverride
 	if baseURL == "" {
@@ -148,6 +157,7 @@ func (s *CustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client,
 		BaseURL:       baseURL,
 		WebhookKeyURL: cfg.Custody.WebhookKeyURL,
 		ReadOnly:      s.Config != nil && config.IsProviderReadOnly(s.Config),
+		Transport:     s.BasisTheoryTransport,
 	})
 }
 
@@ -231,7 +241,7 @@ func decodeCustodianSalePayload(intent gen.BillingProviderIntent) (CustodianSale
 
 // gatewayQueryClient builds the NMI query-leg client for verify-by-orderid.
 func (h *CustodianSaleIntentHandler) gatewayQueryClient(cfg *custodialPSP) (*nmi.NMIClient, error) {
-	return (&railresolve.NMIFactory{Config: h.Sale.Config}).ClientFor(cfg.MerchantID, cfg.Scope, cfg.Settings)
+	return h.Sale.nmiFactory().ClientFor(cfg.MerchantID, cfg.Scope, cfg.Settings)
 }
 
 func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
@@ -650,6 +660,12 @@ func (h *CustodianSaleIntentHandler) recordAttempt(ctx context.Context, intent g
 // validatePlatformCollection trusts vendor-reported identity, never browser
 // metadata. A shared tenant alone cannot establish which merchant collected it.
 func validatePlatformCollection(c *config.ResolvedCustodian, intent *basistheory.TokenIntent) error {
+	if c.Custodian == models.CustodianBasisTheory {
+		if intent == nil || intent.Type != "card" || intent.TenantID != c.AccountID {
+			return apperr.Invalidf("payment.token was not collected in this merchant's vault").WithParam("payment.token")
+		}
+		return nil
+	}
 	if c.Custodian != models.CustodianPlatform {
 		return nil
 	}

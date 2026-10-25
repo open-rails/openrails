@@ -44,10 +44,10 @@ func (s *Service) CustodianConfigurations(ctx context.Context, merchant billing.
 	return out, nil
 }
 
-// WithCustodianCredentialTransport replaces only the read-only vendor account
+// WithBasisTheoryTransport replaces only the read-only vendor account
 // verification wire. A supplied wire is refused for live custodian claims.
-func (s *Service) WithCustodianCredentialTransport(transport http.RoundTripper) {
-	s.custodianCredentialTransport = transport
+func (s *Service) WithBasisTheoryTransport(transport http.RoundTripper) {
+	s.basisTheoryTransport = transport
 }
 
 func (s *Service) validatePSPCustodian(ctx context.Context, mid billing.MerchantID, rail, environment, key string) error {
@@ -129,14 +129,14 @@ func (s *Service) PutCustodianConfiguration(ctx context.Context, mid billing.Mer
 	if public == next.Secrets[custodians.SecretAPIKey] || public != "" && public == held.Value.Secrets[custodians.SecretAPIKey] {
 		return zero, apperr.Invalidf("the public collection key must differ from the private credential").WithParam("settings.public_api_key")
 	}
-	if s.custodianCredentialTransport != nil && next.Environment != config.ClassTest {
+	if s.basisTheoryTransport != nil && next.Environment != config.ClassTest {
 		return zero, apperr.Invalidf("a live custodian cannot use a test credential wire").WithParam("environment")
 	}
 	baseURL := basistheory.DefaultBaseURL
 	if next.Environment == config.ClassTest {
 		baseURL = "https://api.test.basistheory.com"
 	}
-	client, err := basistheory.New(basistheory.Config{APIKey: next.Secrets[custodians.SecretAPIKey], BaseURL: baseURL, ReadOnly: true, Transport: s.custodianCredentialTransport})
+	client, err := basistheory.New(basistheory.Config{APIKey: next.Secrets[custodians.SecretAPIKey], BaseURL: baseURL, ReadOnly: true, Transport: s.basisTheoryTransport})
 	if err != nil {
 		return zero, apperr.Invalidf("custodian credential required").WithParam("credentials")
 	}

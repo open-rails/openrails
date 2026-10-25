@@ -49,7 +49,7 @@ func TestMerchantCustodyConfiguration(t *testing.T) {
 		require.NoError(t, err)
 		a, _ := newPSPWorld(t, func(w *world) {
 			w.deps.NMITransport = loopbackWire{target: gatewayTarget, wire: wire}
-			w.deps.CustodianCredentialTransport = custodianProbeWire{loopback: loopbackWire{target: target, wire: wire}, wire: wire}
+			w.deps.BasisTheoryTransport = custodianProbeWire{loopback: loopbackWire{target: target, wire: wire}, wire: wire}
 		})
 		for name, client := range map[string]*openrails.Client{"alpha": a.alphaRemote, "beta": a.betaRemote} {
 			_, err := a.deps.Vault.Logical().WriteWithContext(t.Context(), a.cfg.Vault.KVMount+"/data/openrails/merchants/"+client.MerchantID().UUID().String()+"/custodians/cards", map[string]any{"data": map[string]any{

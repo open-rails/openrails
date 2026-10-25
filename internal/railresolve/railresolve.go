@@ -305,6 +305,7 @@ func (s *MerchantsSource) custodianConfig(ctx context.Context, mid billing.Merch
 		return nil, fmt.Errorf("custodian %q: %w", custodian.Key, err)
 	}
 	out := &config.ResolvedCustodian{
+		Environment:                 custodian.Environment,
 		Key:                         custodian.Key,
 		Custodian:                   d.Kind,
 		AccountID:                   custodian.AccountID,
@@ -313,6 +314,9 @@ func (s *MerchantsSource) custodianConfig(ctx context.Context, mid billing.Merch
 		NetworkTokens:               settings.NetworkTokens,
 		AccountUpdater:              settings.AccountUpdater,
 		AccountUpdaterLookaheadDays: settings.LookaheadDays(),
+	}
+	if custodian.Kind == models.CustodianBasisTheory && custodian.Environment == config.ClassTest {
+		out.APIBaseURL = "https://api.test.basistheory.com"
 	}
 	for _, slot := range d.Secrets {
 		value, found, err := s.custodianSecret(ctx, mid, custodian, slot.Name)

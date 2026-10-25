@@ -48,6 +48,16 @@ func (m *Mock) directPost(form url.Values) string {
 
 // resolveCard is the vault and card a request names.
 func (m *Mock) resolveCard(form url.Values) (*Vault, *Card, string) {
+	// A custodian proxy sends a PAN straight to the gateway without creating
+	// an NMI customer vault. Keep the fixture's gateway receipt independent of
+	// OpenRails' saved-method rows and do not synthesize a vault for this path.
+	if pan := form.Get("ccnumber"); pan != "" {
+		if pan != "4242424242424242" {
+			return nil, nil, "Unsupported fixture card"
+		}
+		card := Card{Brand: "visa", Last4: "4242", Exp: form.Get("ccexp")}
+		return &Vault{Card: card}, &card, ""
+	}
 	v := m.vaults[form.Get("customer_vault_id")]
 	if v == nil {
 		return nil, nil, "Invalid Customer Vault Id"

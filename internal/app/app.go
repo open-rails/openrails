@@ -35,8 +35,8 @@ type App struct {
 // override was removed with the ORM (#334).
 type BootstrapOptions struct {
 	StripeTransport http.RoundTripper
-	// CustodianCredentialTransport substitutes read-only vendor account verification; test claims only.
-	CustodianCredentialTransport http.RoundTripper
+	// BasisTheoryTransport substitutes the Basis Theory wire; test custody only.
+	BasisTheoryTransport http.RoundTripper
 	// NMITransport replaces the NMI wire at the real endpoints (test seam);
 	// posture is still verified through it.
 	NMITransport http.RoundTripper
@@ -110,9 +110,9 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 	}
 
 	runtime, err := buildRuntimeWithOverrides(ctx, cfg, &runtimeOverrides{
-		CustodianCredentialTransport: func() http.RoundTripper {
+		BasisTheoryTransport: func() http.RoundTripper {
 			if opts != nil {
-				return opts.CustodianCredentialTransport
+				return opts.BasisTheoryTransport
 			}
 			return nil
 		}(),

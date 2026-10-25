@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 )
 
 type RailPaymentMethodService struct {
+	BasisTheoryTransport http.RoundTripper
 	PaymentMethodService paymentMethodStore
 	SubscriptionService  subscriptionReader
 	MerchantSecrets      merchants.MerchantSecretReader

@@ -586,6 +586,7 @@ type StripeRailConfig struct {
 // custodians row and may be shared by every PSP that references it — the
 // gateway credentials themselves stay on the PSP, one source of truth.
 type ResolvedCustodian struct {
+	Environment string
 	// Container and CollectionApplicationID bind platform card collection to a merchant.
 	Container               string
 	CollectionApplicationID string

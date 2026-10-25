@@ -129,6 +129,18 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			r.ErrorCode(billing.CodeServiceUnavailable, "card custody unavailable")
 			return
 		}
+		// The same verified token-intent flow supports a merchant-owned BT
+		// tenant. Preserve its actual custody kind; it is not a platform vault.
+		if platform == nil && found && psp.CustodianID != nil {
+			custodian, ok, err := registry.CustodianScopeByID(r.Request.Context(), mid, *psp.CustodianID)
+			if err != nil {
+				r.ErrorCode(billing.CodeServiceUnavailable, "card custody unavailable")
+				return
+			}
+			if ok && !custodian.Archived && custodian.Kind == models.CustodianBasisTheory {
+				platform = &custodian
+			}
+		}
 		if platform != nil {
 			if !found || psp.Archived || psp.Rail != string(models.RailNMI) {
 				r.APIError(api.Coded(billing.CodeInvalidParam, "platform card setup requires an available NMI PSP").WithParam("psp_id"))
@@ -149,7 +161,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			}
 			ctx, cancel := r.Budget(createPaymentMethodTimeout)
 			defer cancel()
-			saved, err := r.State.PurchaseService.SavePlatformCard(db.WithCustodianID(ctx, platform.ID), req, user)
+			saved, err := r.State.PurchaseService.SaveBasisTheoryCard(db.WithCustodianID(ctx, platform.ID), req, user)
 			writeSavedCard(r, user, http.StatusCreated, saved, err)
 			return
 		}

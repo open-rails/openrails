@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
@@ -77,11 +78,12 @@ type NMIClientResolver = railresolve.NMIClientResolver
 // charge time. MerchantsFn is late-bound (Runtime.Merchants is wired after the
 // charger is constructed); a nil fn/service = nothing armable.
 type MerchantCollectionAdapterBuilder struct {
-	StripeClients *stripeapi.Factory
-	Config        *config.Config
-	DB            *db.DB
-	MerchantsFn   func() *merchants.Service
-	Endpoints     CollectionEndpoints
+	BasisTheoryTransport http.RoundTripper
+	StripeClients        *stripeapi.Factory
+	Config               *config.Config
+	DB                   *db.DB
+	MerchantsFn          func() *merchants.Service
+	Endpoints            CollectionEndpoints
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
 	// one from Config and Endpoints.
 	NMIClients *railresolve.NMIFactory

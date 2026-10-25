@@ -21,9 +21,9 @@ import (
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
-// SavePlatformCard verifies a collected card without taking money and saves it
+// SaveBasisTheoryCard verifies a collected card without taking money and saves it
 // for this customer. It neither selects a default nor changes any subscription.
-func (s *PurchaseService) SavePlatformCard(ctx context.Context, req billing.CreatePaymentMethodParams, user *UserIdentity) (SavedCard, error) {
+func (s *PurchaseService) SaveBasisTheoryCard(ctx context.Context, req billing.CreatePaymentMethodParams, user *UserIdentity) (SavedCard, error) {
 	token := strings.TrimSpace(req.Token)
 	collectedID, err := uuid.Parse(token)
 	if err != nil || collectedID == uuid.Nil || req.Card != nil || req.PSPID.IsZero() {
@@ -60,7 +60,7 @@ func (s *PurchaseService) SavePlatformCard(ctx context.Context, req billing.Crea
 	if err != nil {
 		return SavedCard{}, err
 	}
-	if cfg.Custody.Custodian != models.CustodianPlatform {
+	if cfg.Custody.Custodian != models.CustodianPlatform && cfg.Custody.Custodian != models.CustodianBasisTheory {
 		return SavedCard{}, ErrOrderAttemptValidation
 	}
 
@@ -94,14 +94,14 @@ func (s *PurchaseService) SavePlatformCard(ctx context.Context, req billing.Crea
 	if err != nil {
 		return SavedCard{}, err
 	}
-	if saved.ID != id.String() || saved.Type != "card" || saved.TenantID != cfg.Custody.AccountID || len(saved.Containers) != 1 || saved.Containers[0] != cfg.Custody.Container || saved.Metadata["customer_id"] != customer.String() || saved.Metadata["psp_id"] != req.PSPID.String() || saved.Metadata["account_id"] != cfg.Scope.AccountID || saved.Metadata["verification_id"] == "" {
+	if saved.ID != id.String() || saved.Type != "card" || saved.TenantID != cfg.Custody.AccountID || cfg.Custody.Container != "" && (len(saved.Containers) != 1 || saved.Containers[0] != cfg.Custody.Container) || saved.Metadata["customer_id"] != customer.String() || saved.Metadata["psp_id"] != req.PSPID.String() || saved.Metadata["account_id"] != cfg.Scope.AccountID || saved.Metadata["verification_id"] == "" {
 		return SavedCard{}, ErrOrderAttemptConflict
 	}
 	if saved.Card == nil || saved.Card.Last4 == "" || saved.Card.ExpirationMonth < 1 || saved.Card.ExpirationMonth > 12 || saved.Card.ExpirationYear < 2000 {
 		return SavedCard{}, errors.New("platform vault returned incomplete card details")
 	}
 	now := s.now().UTC()
-	method := &models.PaymentMethod{ID: id, Status: paymentmethods.StatusActive, CustomerID: customer, Rail: models.RailNMI, Custodian: models.CustodianPlatform, CustodianID: &custody,
+	method := &models.PaymentMethod{ID: id, Status: paymentmethods.StatusActive, CustomerID: customer, Rail: models.RailNMI, Custodian: cfg.Custody.Custodian, CustodianID: &custody,
 		RailMethodRef: saved.ID, Fingerprint: saved.Fingerprint, ChargeVia: nmiproxy.ViaPANProxy, CreatedAt: now, UpdatedAt: now,
 		Card: models.ParseCard(saved.Card.Brand, saved.Card.Last4, ""), Metadata: paymentmethods.MergeBillingDetails(nil, req.BillingDetails)}
 	method.Card.ExpMonth, method.Card.ExpYear = saved.Card.ExpirationMonth, saved.Card.ExpirationYear

@@ -75,18 +75,18 @@ const (
 
 type runtimeOverrides struct {
 	StripeTransport http.RoundTripper
-	// CustodianCredentialTransport substitutes read-only vendor account verification; test claims only.
-	CustodianCredentialTransport http.RoundTripper
-	NMITransport                 http.RoundTripper
-	FXTransport                  http.RoundTripper
-	DB                           *db.DB
-	Redis                        redis.UniversalClient
-	Clock                        clockwork.Clock
-	EmailSender                  config.EmailSender
-	UserInfo                     userinfo.Lookup
-	Notifications                *config.NotificationChannel
-	Migrations                   fs.FS
-	Vault                        *vaultapi.Client
+	// BasisTheoryTransport substitutes the Basis Theory wire; test custody only.
+	BasisTheoryTransport http.RoundTripper
+	NMITransport         http.RoundTripper
+	FXTransport          http.RoundTripper
+	DB                   *db.DB
+	Redis                redis.UniversalClient
+	Clock                clockwork.Clock
+	EmailSender          config.EmailSender
+	UserInfo             userinfo.Lookup
+	Notifications        *config.NotificationChannel
+	Migrations           fs.FS
+	Vault                *vaultapi.Client
 }
 
 // devnetParityPriceProvider wraps the Pyth client (#360) for a merchant whose
@@ -224,6 +224,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		DB:            database,
 		MerchantsFn:   merchantsFn,
 		NMIClients:    nmiClients,
+	}
+	if overrides != nil {
+		collectionResolver.BasisTheoryTransport = overrides.BasisTheoryTransport
 	}
 	// #728/#788: per-merchant Solana RPC (poller, crank, intent verify legs,
 	// request-plane transaction builds).
@@ -388,12 +391,21 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime.NMIClients = nmiClients
 	if serviceInstances.PurchaseService != nil {
 		serviceInstances.PurchaseService.NMIClients = nmiClients
+		if held := serviceInstances.PurchaseService.CustodianSaleService; held != nil {
+			held.NMIClients = nmiClients
+			if overrides != nil {
+				held.BasisTheoryTransport = overrides.BasisTheoryTransport
+			}
+		}
 	}
 	if serviceInstances.OrderAttemptService != nil {
 		serviceInstances.OrderAttemptService.SetPSPPosture(runtime.PSPPostureDisarmed)
 	}
 	if runtime.RailPaymentMethodService != nil {
 		runtime.RailPaymentMethodService.NMIClients = nmiClients
+		if overrides != nil {
+			runtime.RailPaymentMethodService.BasisTheoryTransport = overrides.BasisTheoryTransport
+		}
 	}
 	runtime.SolanaRPCResolver = solanaRPCResolver
 	// #817: decimals come from the SPL mint on-chain, read through the same
@@ -412,7 +424,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	}
 	var custodianTransport http.RoundTripper
 	if overrides != nil {
-		custodianTransport = overrides.CustodianCredentialTransport
+		custodianTransport = overrides.BasisTheoryTransport
 	}
 	if err := runtime.wireMerchantConfig(ctx, borrowedVault, custodianTransport); err != nil {
 		return nil, fmt.Errorf("initialize merchant configuration: %w", err)

@@ -90,6 +90,7 @@ func (s *Service) PlatformCustodianConfig(ctx context.Context, id billing.Mercha
 		}
 	}
 	return &config.ResolvedCustodian{Key: config.PlatformCustodianKey, Custodian: models.CustodianPlatform,
-		AccountID: s.platformVault.TenantID, APIKey: keys.APIKey, PublicAPIKey: app.PublicAPIKey,
+		Environment: c.Environment,
+		AccountID:   s.platformVault.TenantID, APIKey: keys.APIKey, PublicAPIKey: app.PublicAPIKey,
 		CollectionApplicationID: applicationID.String(), Container: "/merchants/" + id.UUID().String() + "/"}, nil
 }
