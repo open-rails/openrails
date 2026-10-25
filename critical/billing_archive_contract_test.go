@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/open-rails/openrails/internal/stripemock"
+	"maps"
 	"net/url"
 	"testing"
 	"time"
@@ -124,22 +125,32 @@ func TestBillingArchive(t *testing.T) {
 		require.Len(t, psps.Items, 1)
 		require.Equal(t, "acct_e2e", psps.Items[0].AccountID)
 		require.False(t, psps.Items[0].Credentials["secret_key"].Configured, "credentials are never copied with the billing archive")
-		_, err = client.UpdatePSP(t.Context(), psps.Items[0].ID, billing.UpdatePSPParams{Credentials: map[string]string{"secret_key": "sk_test_critical", "webhook_signing_secret": "whsec_critical_fixture"}, PublishableKey: ptr("pk_test_critical")})
+		// File-owned deployments change credentials through their declaration.
+		require.NoError(t, target.engine.Close(t.Context()))
+		cfg := target.cfg
+		cfg.Merchants = maps.Clone(target.cfg.Merchants)
+		cfg.Merchants["restored-source"] = openrails.MerchantDeclaration{DisplayName: "Restored", PSPs: openrails.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}, MerchantSettings: billing.MerchantSettings{CardVault: "stripe"}}
+		target.engine, err = openrails.New(t.Context(), cfg, target.deps)
+		require.NoError(t, err)
+		client, err = target.engine.Merchant(source.alpha.MerchantID())
 		require.NoError(t, err)
 		page := hostCheckoutPage(t, target)
 		customer := billing.CustomerID(uuid.MustParse(source.alice.ID))
-		order, err := client.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, IdempotencyKey: "destination-order", PayURL: &billing.OrderPayURLParams{SuccessURL: "https://critical.invalid/done"}})
-		require.NoError(t, err)
-		address, err := url.Parse(*order.PayURL)
-		require.NoError(t, err)
-		payment := billing.PayOrderParams{ExpectedTotal: 30_000_000, Payment: billing.OrderPaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-		status, _, raw = hostPageRequest(t, page, "POST", "/v1/me/orders/"+order.ID.String()+"/pay", address.Fragment, payment, map[string]string{"Idempotency-Key": "before-arm"})
-		require.Equal(t, 503, status, string(raw))
-		require.Contains(t, string(raw), billing.CodeProviderWritesDisabled)
+		request := billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, IdempotencyKey: "destination-order", PayURL: &billing.OrderPayURLParams{SuccessURL: "https://critical.invalid/done"}}
+		_, err = client.CreateOrder(t.Context(), request)
+		var held *billing.StatusError
+		require.ErrorAs(t, err, &held)
+		require.Equal(t, billing.CodeProviderWritesDisabled, held.Code)
 		require.Len(t, provider.effects(t), 1)
 		// Final source writers really stop before the operator authorizes the copy.
 		require.NoError(t, source.engine.Close(context.Background()))
 		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
+		request.IdempotencyKey = "destination-after-arm"
+		order, err := client.CreateOrder(t.Context(), request)
+		require.NoError(t, err)
+		address, err := url.Parse(*order.PayURL)
+		require.NoError(t, err)
+		payment := billing.PayOrderParams{ExpectedTotal: 30_000_000, Payment: billing.OrderPaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
 		status, _, raw = hostPageRequest(t, page, "POST", "/v1/me/orders/"+order.ID.String()+"/pay", address.Fragment, payment, map[string]string{"Idempotency-Key": "after-arm"})
 		require.Equal(t, 200, status, string(raw))
 		var completed billing.Order

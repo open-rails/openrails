@@ -661,7 +661,7 @@
     {
       "id": "OR-J31-S01",
       "journey": "J31",
-      "name": "Valid empty-target archive restore preserves totals identities events and custody"
+      "name": "Empty-target restore preserves billing identities and totals while source events remain and foreign cursors expire"
     },
     {
       "id": "OR-J31-S02",
@@ -676,7 +676,7 @@
     {
       "id": "OR-J31-S04",
       "journey": "J31",
-      "name": "Unresolved financial operation remains intact through export and restore"
+      "name": "Unresolved operation refuses export without changing custody or source write posture"
     },
     {
       "id": "OR-J32-S01",
@@ -696,7 +696,7 @@
     {
       "id": "OR-J32-S04",
       "journey": "J32",
-      "name": "Restore and retried secret cleanup cannot revive billing or touch another tenant"
+      "name": "Unused merchant retirement releases exact group and retries preserve a reclaimed name owner"
     },
     {
       "id": "OR-J34-S01",
@@ -711,12 +711,12 @@
     {
       "id": "OR-J34-S03",
       "journey": "J34",
-      "name": "Authorized clear permits only the original unchanged admitted action"
+      "name": "Reviewed clear resumes held action without replaying prior financial effects"
     },
     {
       "id": "OR-J34-S04",
       "journey": "J34",
-      "name": "Finding corrective action uses the normal financial admission guards"
+      "name": "Finding resolution cannot bypass destructive incident authority"
     },
     {
       "id": "OR-J37-S01",

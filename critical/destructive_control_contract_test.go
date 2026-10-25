@@ -118,8 +118,11 @@ func TestDestructiveControls(t *testing.T) {
 		_, err = a.alphaRemote.ResolveFinding(t.Context(), findings.Items[0].ID, billing.ResolveFindingParams{Outcome: billing.FindingApprove, Notes: "attempt bypass"})
 		require.Error(t, err)
 		_, err = a.alphaRemote.ResolveFinding(t.Context(), findings.Items[0].ID, billing.ResolveFindingParams{Outcome: billing.FindingIgnore, Notes: "hide incident"})
-		// Whether a finding can be hidden is separate from command authority.
-		// Neither presentation operation is the trusted incident-clear operation.
+		require.Error(t, err)
+		var refusal *billing.StatusError
+		require.ErrorAs(t, err, &refusal)
+		require.Equal(t, billing.CodePermissionRequired, refusal.Code)
+		// Finding presentation operations cannot clear financial authority.
 		_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), grants[6].ID, billing.RevokeCreditGrantParams{Reason: "another correction"})
 		require.Error(t, err)
 		reviews, err := a.engine.ListOpenDestructiveHolds(t.Context(), 100, billing.DestructiveHoldID{})

@@ -8,38 +8,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-var hostCLIBuild struct {
-	sync.Once
-	binary string
-	err    error
-	output []byte
-}
-
 func hostCLI(t *testing.T, w *world, args ...string) string {
 	t.Helper()
 	binary := os.Getenv("OPENRAILS_CRITICAL_CLI_BINARY")
-	if binary == "" {
-		hostCLIBuild.Do(func() {
-			dir, err := os.MkdirTemp("", "openrails-critical-cli-")
-			if err != nil {
-				hostCLIBuild.err = err
-				return
-			}
-			hostCLIBuild.binary = filepath.Join(dir, "openrails")
-			build := exec.Command("go", "build", "-p", "2", "-o", hostCLIBuild.binary, "./cmd/openrails")
-			build.Dir = "../server"
-			build.Env = append(os.Environ(), "GOWORK=off", "GOMAXPROCS=2")
-			hostCLIBuild.output, hostCLIBuild.err = build.CombinedOutput()
-		})
-		require.NoError(t, hostCLIBuild.err, string(hostCLIBuild.output))
-		binary = hostCLIBuild.binary
-	}
+	require.NotEmpty(t, binary, "build server/cmd/openrails once and set OPENRAILS_CRITICAL_CLI_BINARY")
+	info, err := os.Stat(binary)
+	require.NoError(t, err)
+	require.NotZero(t, info.Mode()&0111, "operator CLI must be executable")
 	config := filepath.Join(t.TempDir(), "config.yaml")
 	data, err := json.Marshal(map[string]any{"db": map[string]string{"url": os.Getenv("OPENRAILS_CRITICAL_DSN")}, "database": map[string]string{"schema": w.schema, "river_schema": w.schema}, "provider_write_mode": "readonly"})
 	require.NoError(t, err)

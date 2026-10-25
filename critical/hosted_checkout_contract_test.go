@@ -117,10 +117,12 @@ func TestHostedCheckout(t *testing.T) {
 		require.Empty(t, money.Items)
 	})
 	t.Run("OR-J03-S03/checkout-and-api-authority-stay-separate", func(t *testing.T) {
-		a, _ := newPaymentWorld(t)
+		a, _ := newPaymentWorld(t, func(w *world) {
+			declaration := w.cfg.Merchants["alpha"]
+			declaration.Checkout = &billing.MerchantCheckoutSettings{EmbedOrigins: []string{"https://merchant.critical.invalid"}}
+			w.cfg.Merchants["alpha"] = declaration
+		})
 		page := hostCheckoutPage(t, a.world)
-		_, err := a.alpha.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{"https://merchant.critical.invalid"}}}})
-		require.NoError(t, err)
 		order, secret := hostPayOrder(t, a, "embedded", true)
 		for _, token := range []string{secret, a.alphaKey.Secret, a.aliceToken} {
 			status, _, raw := hostPageRequest(t, page, "GET", "/v1/admin/customers", token, nil)

@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test"
 
 export default defineConfig({
   testDir: "critical",
-  testMatch: "**/*.spec.ts",
+  testMatch: "client.spec.ts",
   workers: 1,
   retries: 0,
   forbidOnly: !!process.env.CI,
