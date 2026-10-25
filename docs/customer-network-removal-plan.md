@@ -79,3 +79,26 @@ Keep the shared standalone fixture machinery in `critical/standalone_fixture_tes
 5. Rehearse the owned restored-data cutover/rollback, then build and deploy the same qualified artifact through the root release lane. Provider shared-wallet execution remains its own evidence boundary.
 
 No deletion, migration application, source activation, hosted CI, tag or deployment is performed by this planning branch.
+
+## Existing admission controls and the remaining seam
+
+`server/internal/http/server.go` always calls `registerSelfServiceRoutes`. `LocalSignIn=false` changes AuthKit sign-in/registration/console exposure; it does not disable `/v1/me`. `RouteGroups` deliberately controls only staff/programmatic groups. Public `server.Config` and `Deps` contain no separate customer Auth override; the old internal comment mentioning `DelegatedAuthenticator` is not an available public option. Embedded `Engine.Routes` likewise always adds customers, while a standalone engine refuses that method and directs hosts to `Server.Routes`.
+
+The automatic path is `registerSelfServiceRoutes → RegisterCustomerRoutes → customerCheck → customerIssuer → admitCustomer → db.AdmitCustomer`. Today its platform-account branch goes through `rt.Network.AdmitNative`. Simply removing that branch preserves automatic native customer allocation, so SaaS needs an explicit customer-only policy before this admission step. Do not use URL-prefix heuristics, reauthenticate the request, alter its original verified identity, or deny native staff at the whole server. Generic mapped routes already take a separate path and must remain separate.
+
+A small customer-only credential/admission policy seam is the candidate gap; its exact API remains a root integration decision. It must preserve the default OSS behavior and let SaaS require its explicit policy/link resolution for native platform and isolated accounts while retaining legitimate merchant-issued customer APIs.
+
+| HTTP entry and original credential | Acceptance requirement |
+|---|---|
+| Default OSS `/v1/me`, valid self-acting merchant-bound native credential | Preserve ordinary merchant customer behavior and issuer/tenant checks. |
+| SaaS automatic `/v1/me`, platform-native credential with valid merchant binding and self scope | Refuse before allocating or reading a UUID-equal customer outside the account policy. Test both missing and pre-existing matching customer rows. |
+| SaaS automatic `/v1/me`, native isolated-realm credential | Require its explicit mapped/account-policy path; no fallback to direct subject UUID admission. |
+| SaaS automatic `/v1/me`, legitimate merchant assertion or trusted merchant customer issuer | Preserve merchant-specific access and normal first admission; create no platform relationship. Unsupported/unknown credential metadata fails closed. |
+| Native staff credential on merchant/admin routes | Preserve normal permission-checked staff behavior; customer policy does not blanket-deny staff. |
+| AuthKit local sign-in endpoints | Remain available for the hosted platform; do not misuse `LocalSignIn=false` as customer policy. |
+| SaaS mapped platform customer route | Require the exact current owned active link; preserve original liveness and sensitive-action recent-auth checks. No auto-enrollment. |
+| SaaS mapped isolated customer route | Require the exact issuer/tenant/subject and merchant relationship; no shared wallet or portal authority. |
+| Explicit shared/isolated checkout enrollment | Apply current policy/revision and terms before fixing a billing customer and admitting its order. |
+| Existing pay-URL payment surface | Remain scoped to the immutable order's payer; it grants no platform history/link authority and does not enter native auto-admission. |
+
+The SaaS migration fixtures also need a version boundary. Current `platform_link_reader_integration_test.go` creates legacy proof through core network HTTP and compiles against `Server.CustomerLinks` / `UnlinkCustomer`. Removing those public methods requires a separate legacy fixture module/process pinned to the last qualified old-owner release, while destination runtime/tests compile against the removal candidate. Do not keep product APIs in core solely for historical fixture setup.
