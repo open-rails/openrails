@@ -61,6 +61,10 @@ func recurringCredits(t *testing.T) {
 	due := *sub.CurrentPeriodEndsAt
 	_, err = a.alpha.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{CreditGrant: catalog.Null[catalog.CreditGrantSpec]()})
 	require.Error(t, err, "an accepted credit subscription must not become an access product")
+	_, err = a.alpha.UpdatePrice(t.Context(), price.ID, billing.UpdatePriceParams{Archived: catalog.Value(true)})
+	require.NoError(t, err)
+	_, err = a.alpha.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{CreditGrant: catalog.Null[catalog.CreditGrantSpec]()})
+	require.Error(t, err, "archiving the sale price cannot erase existing subscribers' credit promise")
 	_, err = a.alpha.PreviewSubscriptionChange(t.Context(), sub.ID, billing.ChangeSubscriptionParams{Quantity: ptr(2)})
 	require.Error(t, err, "credit-plan changes are refused before charging")
 	require.Len(t, provider.effects(t), 1)

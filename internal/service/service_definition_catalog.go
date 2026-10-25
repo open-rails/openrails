@@ -231,7 +231,7 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 			return nil, productLookup(err)
 		}
 		if (current.CreditGrant == nil) != (credit == nil) {
-			prices, err := s.ListPricesByProduct(ctx, id, true)
+			prices, err := s.ListPricesByProduct(ctx, id, false)
 			if err != nil {
 				return nil, err
 			}
