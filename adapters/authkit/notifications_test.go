@@ -11,7 +11,7 @@ import (
 
 func TestNotificationsVerifyIssuerBeforeMappingAccount(t *testing.T) {
 	merchant, customer := billing.MerchantID(uuid.New()), billing.CustomerID(uuid.New())
-	channel := Notifications(nil, "https://accounts.example")
+	channel := Notifications(nil, merchant, "https://accounts.example")
 	for _, tc := range []struct {
 		name, issuer string
 		deliver      bool
@@ -36,5 +36,13 @@ func TestNotificationsVerifyIssuerBeforeMappingAccount(t *testing.T) {
 	}
 	if _, _, err := channel.Recipient(context.Background(), openrails.NotificationRecipient{}); err == nil {
 		t.Fatal("missing merchant/customer identity was accepted")
+	}
+	foreign := openrails.NotificationRecipient{MerchantID: billing.MerchantID(uuid.New()), CustomerID: customer, Issuer: "https://accounts.example"}
+	if id, deliver, err := channel.Recipient(context.Background(), foreign); err != nil || deliver || id != "" {
+		t.Fatalf("another merchant reached the fixed-scope publisher: account=%q deliver=%v err=%v", id, deliver, err)
+	}
+	unbound := Notifications(nil, billing.MerchantID{})
+	if _, _, err := unbound.Recipient(context.Background(), openrails.NotificationRecipient{MerchantID: merchant, CustomerID: customer}); err == nil {
+		t.Fatal("unbound channel accepted a recipient")
 	}
 }

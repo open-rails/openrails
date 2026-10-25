@@ -614,7 +614,7 @@ pkg openrails, var ErrMigrationsRequired error
 pkg openrails, var ErrUnauthenticated error
 pkg openrails/adapters/authkit, func BindMerchant(context.Context, *pgxpool.Pool, openrails.DatabaseConfig, *authkit.Client, billing.MerchantBinding) error
 pkg openrails/adapters/authkit, func MerchantGroups(*authkit.Client) billing.MerchantGroupReader
-pkg openrails/adapters/authkit, func Notifications(postgres.TxSink, ...string) *openrails.NotificationChannel
+pkg openrails/adapters/authkit, func Notifications(postgres.TxSink, billing.MerchantID, ...string) *openrails.NotificationChannel
 pkg openrails/adapters/fiber, const RouteNamePrefix untyped string = "openrails."
 pkg openrails/adapters/fiber, func Mount(*fiber.App, *openrails.Engine, openrails.Routes) error
 pkg openrails/adapters/gin, func CheckoutOrigin(string, http.Handler) (gin.HandlerFunc, error)

@@ -233,7 +233,7 @@
     "adapters/authkit": [
       "func BindMerchant(ctx context.Context, pool *pgxpool.Pool, database openrails.DatabaseConfig, client *native.Client, binding billing.MerchantBinding) error",
       "func MerchantGroups(client *native.Client) billing.MerchantGroupReader",
-      "func Notifications(sink notifypg.TxSink, issuers ...string) *openrails.NotificationChannel"
+      "func Notifications(sink notifypg.TxSink, merchant billing.MerchantID, issuers ...string) *openrails.NotificationChannel"
     ],
     "adapters/fiber": [
       "const RouteNamePrefix = \"openrails.\"",
@@ -1968,6 +1968,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "adapters/authkit/notifications.go": {
+      "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "fmt": "fmt",
       "notifypg": "github.com/open-rails/helpers/notify/postgres",

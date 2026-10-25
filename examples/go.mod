@@ -7,7 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/open-rails/authkit v1.35.5
-	github.com/open-rails/openrails v0.263.0
+	github.com/open-rails/openrails v0.263.2-0.20261025030616-97cb1dce3573
 	golang.org/x/oauth2 v0.37.0
 )
 
@@ -81,7 +81,7 @@ require (
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/nyaruka/phonenumbers v1.8.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
-	github.com/open-rails/helpers v1.16.1 // indirect
+	github.com/open-rails/helpers v1.16.2-0.20261025024957-47f4de657abc // indirect
 	github.com/open-rails/migratekit v1.11.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect

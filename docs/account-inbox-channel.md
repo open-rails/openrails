@@ -13,13 +13,15 @@ only inbox publication, not the underlying billing event.
 ```go
 publisher, err := accounts.Notifications("openrails")
 if err != nil { return err }
-deps.Notifications = authkitadapter.Notifications(publisher, accountIssuer)
+deps.Notifications = authkitadapter.Notifications(publisher, merchantID, accountIssuer)
 ```
 
 The AuthKit producer declaration must bind source system `openrails`, the exact
 merchant ID as its source scope, and tenant-wide account visibility. Multiple
 merchants require an explicitly routing channel with verified recipient mappings;
-the single-merchant adapter never infers another tenant from a customer UUID.
+the single-merchant adapter skips unrelated merchants before invoking its sink
+and never infers another tenant from a customer UUID. Its merchant binding must
+be nonzero; an absent binding is a configuration error, not a wildcard.
 
 For a shared database the sink applies notifications in the billing transaction.
 A remote sink records its delivery job in that transaction and retries after
