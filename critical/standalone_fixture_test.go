@@ -25,20 +25,22 @@ import (
 )
 
 type standaloneMerchant struct {
-	ID            billing.MerchantID
-	Key           string
-	CustomerID    billing.CustomerID
-	CustomerToken string
-	OAuth         iam.OAuthClientCreated
+	ID                                          billing.MerchantID
+	Key                                         string
+	CustomerID                                  billing.CustomerID
+	CustomerToken                               string
+	OAuth                                       iam.OAuthClientCreated
+	DirectoryKey, DirectoryKeyID, ApplicationID string
 }
 type standaloneWorld struct {
 	URL, ControlURL                      string
+	DirectoryURL                         string
 	AliceID, BobID, AliceToken, BobToken string
 	Merchants                            map[string]standaloneMerchant
 	alpha, beta                          *openrails.Client
 }
 
-func newStandaloneWorld(t *testing.T) *standaloneWorld {
+func newStandaloneWorld(t *testing.T, configure ...func(map[string]any)) *standaloneWorld {
 	t.Helper()
 	dsn := os.Getenv("OPENRAILS_CRITICAL_DSN")
 	require.NotEmpty(t, dsn)
@@ -70,7 +72,11 @@ func newStandaloneWorld(t *testing.T) *standaloneWorld {
 	}
 	ready := filepath.Join(dir, "ready.json")
 	fx := fixedFX(t).(loopbackWire)
-	data, err := json.Marshal(map[string]any{"Schema": schema, "Ready": ready, "ControlKey": uuid.NewString(), "FXURL": fx.target.String(), "At": time.Now().UTC(), "RedisURL": os.Getenv("OPENRAILS_CRITICAL_REDIS_URL")})
+	settings := map[string]any{"Schema": schema, "Ready": ready, "ControlKey": uuid.NewString(), "FXURL": fx.target.String(), "At": time.Now().UTC(), "RedisURL": os.Getenv("OPENRAILS_CRITICAL_REDIS_URL")}
+	for _, change := range configure {
+		change(settings)
+	}
+	data, err := json.Marshal(settings)
 	require.NoError(t, err)
 	config := filepath.Join(dir, "config.json")
 	require.NoError(t, os.WriteFile(config, data, 0600))
