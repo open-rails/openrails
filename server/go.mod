@@ -5,7 +5,7 @@ go 1.26.10
 ignore ./web/console/node_modules
 
 // The root module at the same release; scripts/release pins it.
-require github.com/open-rails/openrails v0.263.2-0.20261025025526-d4431de77483
+require github.com/open-rails/openrails v0.263.2-0.20261025030616-97cb1dce3573
 
 require (
 	github.com/go-viper/mapstructure/v2 v2.5.0
