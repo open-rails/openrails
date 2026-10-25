@@ -49,12 +49,6 @@ func (s *Service) customers(ctx context.Context, mid billing.MerchantID, rows []
 	if err != nil {
 		return nil, err
 	}
-	var networks map[uuid.UUID]billing.CustomerNetwork
-	if s.rt.Network != nil && len(ids) > 0 {
-		if networks, err = s.rt.Network.Networks(ctx, mid, ids); err != nil {
-			return nil, err
-		}
-	}
 	out := make([]billing.Customer, len(rows))
 	for i, row := range rows {
 		m := money[row.ID]
@@ -64,9 +58,6 @@ func (s *Service) customers(ctx context.Context, mid billing.MerchantID, rows []
 		}
 		if contact, ok := found[row.ID]; ok {
 			out[i].Contact = customerContact(contact)
-		}
-		if n, ok := networks[row.ID]; ok {
-			out[i].Network = &n
 		}
 	}
 	return out, nil

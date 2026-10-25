@@ -17,7 +17,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
@@ -290,19 +289,6 @@ func (s *Service) termsVersion(ctx context.Context, account string) (string, err
 		return "", nil
 	}
 	return latest.Version, nil
-}
-
-// Networks are the merchant's customers' active links.
-func (s *Service) Networks(ctx context.Context, mid billing.MerchantID, customers []uuid.UUID) (map[uuid.UUID]billing.CustomerNetwork, error) {
-	rows, err := s.db.Gen(ctx).ListActiveCustomerLinksByCustomers(ctx, gen.ListActiveCustomerLinksByCustomersParams{MerchantID: mid.UUID(), CustomerIds: customers})
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[uuid.UUID]billing.CustomerNetwork, len(rows))
-	for _, row := range rows {
-		out[row.CustomerID] = billing.CustomerNetwork{AccountID: billing.NetworkAccountID(row.AccountID), LinkedAt: row.LinkedAt.UTC(), Method: billing.CustomerLinkMethod(row.Method)}
-	}
-	return out, nil
 }
 
 // CustomerOf is the merchant's customer linked to account.
