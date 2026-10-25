@@ -47,6 +47,7 @@ type authorityWorld struct {
 	merchant                *authkit.PersonaDef
 	reader                  iam.Role
 	signer                  keys.Signer
+	privateSigner           ed25519.PrivateKey
 }
 
 func newAuthorityWorld(t *testing.T, configure ...func(*world)) *authorityWorld {
@@ -56,6 +57,7 @@ func newAuthorityWorld(t *testing.T, configure ...func(*world)) *authorityWorld 
 	require.NoError(t, err)
 	a.signer, err = keys.SignerFromKey("critical-issuer", private)
 	require.NoError(t, err)
+	a.privateSigner = private
 	roles := authkit.NewRoles(authkit.APIKeys)
 	a.merchant = roles.Persona(billing.MerchantGroupPersona, authkit.APIKeys, authkit.CustomRoles)
 	for _, permission := range billing.Permissions() {

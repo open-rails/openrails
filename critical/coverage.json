@@ -66,7 +66,7 @@
     {
       "id": "OR-J02-S05",
       "journey": "J02",
-      "name": "Unlink refuses a required vaulted association and otherwise removes access"
+      "name": "Unlink refuses a live provider agreement and otherwise removes account access while retaining merchant history"
     },
     {
       "id": "OR-J03-S01",
@@ -721,7 +721,7 @@
     {
       "id": "OR-J37-S01",
       "journey": "J37",
-      "name": "One-off transfer verifies exact treasury mint network and amount"
+      "name": "One-off transfer binds treasury and mint and rejects underpayment"
     },
     {
       "id": "OR-J37-S02",

@@ -114,6 +114,12 @@ func Resumable(sub *models.Subscription, now time.Time) bool {
 	if sub == nil {
 		return false
 	}
+	// A merchant's terminal cancellation includes account deletion. A held
+	// provider-side delete must not turn that decision into a customer-resumable
+	// cancellation merely because the old paid period is still running.
+	if sub.CancelType != nil && *sub.CancelType == models.CancelTypeMerchant {
+		return false
+	}
 	// A renewal OpenRails collects (engine, Solana pulls) resumes only from an
 	// ordinary user cancellation. Terminal failures, merchant revocation and
 	// chargebacks require a new decision.

@@ -144,12 +144,33 @@ func TestUsageBillingContracts(t *testing.T) {
 				}
 				require.NoError(t, err)
 				before := oneUsageOrder(t, a, customer)
+				require.EqualValues(t, 30_000_000, before.Total)
+				expectedStatus, expectedPaid, expectedDue, expectedOwed := billing.OrderComplete, int64(30_000_000), int64(0), int64(0)
+				switch disposition {
+				case "waived":
+					expectedStatus, expectedPaid, expectedDue = billing.OrderVoid, 0, 0
+					require.NotNil(t, before.VoidedAt)
+				case "uncollectible":
+					expectedStatus, expectedPaid, expectedDue, expectedOwed = billing.OrderUncollectible, 0, 30_000_000, 30_000_000
+					require.NotNil(t, before.UncollectibleAt)
+				}
+				require.Equal(t, expectedStatus, before.Status)
+				require.Equal(t, expectedPaid, before.Usage.AmountPaid)
+				require.Equal(t, expectedDue, before.Usage.AmountDue)
+				funds, err := a.alpha.GetBalance(t.Context(), customer, "USD")
+				require.NoError(t, err)
+				require.Equal(t, expectedOwed, funds.OwedAmount)
+				require.Zero(t, funds.BalanceAmount)
 				a.clock.Advance(35 * 24 * time.Hour)
 				runUsageDue(t, fleet)
 				after := oneUsageOrder(t, a, customer)
 				require.Equal(t, before.ID, after.ID)
-				require.Equal(t, before.Status, after.Status)
-				require.Equal(t, before.Usage.AmountDue, after.Usage.AmountDue)
+				require.Equal(t, expectedStatus, after.Status)
+				require.Equal(t, expectedPaid, after.Usage.AmountPaid)
+				require.Equal(t, expectedDue, after.Usage.AmountDue)
+				funds, err = a.alpha.GetBalance(t.Context(), customer, "USD")
+				require.NoError(t, err)
+				require.Equal(t, expectedOwed, funds.OwedAmount)
 				p.money(t, 0, 0)
 			})
 		}
@@ -175,11 +196,27 @@ func TestUsageBillingContracts(t *testing.T) {
 				runRegistered(t, fleet, "openrails.delinquency", 1)
 				require.False(t, oneUsageOrder(t, a, customer).Usage.Delinquent)
 				balance(t, a.alpha, customer, 0, 0, 0)
-				events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Limit: 100})
+				events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"delinquency.cleared"}, Limit: 100})
 				require.NoError(t, err)
-				encoded, err := json.Marshal(events.Events)
+				require.Len(t, events.Events, 1)
+				cleared := events.Events[0]
+				require.Equal(t, "delinquency.cleared", cleared.Type)
+				require.Equal(t, a.alpha.MerchantID(), cleared.MerchantID)
+				require.Equal(t, customer.String(), cleared.Subject.ID)
+				var transition struct {
+					From     string `json:"from_state"`
+					To       string `json:"to_state"`
+					Currency string `json:"currency"`
+				}
+				err = json.Unmarshal(cleared.Data, &transition)
 				require.NoError(t, err)
-				require.Contains(t, string(encoded), "delinquency")
+				require.Equal(t, "delinquent", transition.From)
+				require.Equal(t, "current", transition.To)
+				require.Equal(t, "USD", transition.Currency)
+				runRegistered(t, fleet, "openrails.delinquency", 1)
+				repeated, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"delinquency.cleared"}, Limit: 100})
+				require.NoError(t, err)
+				require.Len(t, repeated.Events, 1, "replaying evaluation must not emit another clearance")
 				p.money(t, 0, 0)
 			})
 		}
