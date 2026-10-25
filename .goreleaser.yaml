@@ -13,9 +13,8 @@ git:
 
 before:
   hooks:
-    # server/web/console/embed.go go:embeds the console build into every binary.
-    - bash scripts/build-admin-console.sh
-    - bash scripts/pack-billing-ui.sh {{ .Version }} build/billing-ui
+    # Both applications and the npm package use the same freshly built SDK.
+    - bash scripts/build-release-assets.sh {{ .Version }} build/billing-ui
 
 builds:
   - id: openrails
@@ -31,6 +30,11 @@ builds:
         goarch: arm64
     flags:
       - -trimpath
+    hooks:
+      post:
+        - cmd: python3 scripts/smoke-native-assets.py --binary "{{ .Path }}" --target "{{ .Target }}" --report test-results/native-assets/report.json
+          dir: .
+          output: true
     ldflags:
       - -s -w
       - -X github.com/open-rails/openrails/internal/buildinfo.version=v{{ .Version }}

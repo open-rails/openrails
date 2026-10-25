@@ -34,14 +34,15 @@ type solanaWorld struct {
 }
 
 type solanaWire struct {
-	server  *httptest.Server
-	mu      sync.Mutex
-	sent    int
-	reads   map[string]int
-	gate    *wireGate
-	signed  chan string
-	aborted chan struct{}
-	failure string
+	server      *httptest.Server
+	mu          sync.Mutex
+	sent        int
+	reads       map[string]int
+	gate        *wireGate
+	historyGate *wireGate
+	signed      chan string
+	aborted     chan struct{}
+	failure     string
 }
 
 func newSolanaWire(t *testing.T, node *solanafake.Node) *solanaWire {
@@ -68,6 +69,7 @@ func newSolanaWire(t *testing.T, node *solanafake.Node) *solanaWire {
 		}
 		w.mu.Lock()
 		gate, failure := w.gate, w.failure
+		var historyGate *wireGate
 		if rpc.Method == "sendTransaction" {
 			w.sent++
 		}
@@ -80,11 +82,30 @@ func newSolanaWire(t *testing.T, node *solanafake.Node) *solanaWire {
 			var reference string
 			_ = json.Unmarshal(rpc.Params[0], &reference)
 			w.reads["reference:"+reference]++
+			historyGate, w.historyGate = w.historyGate, nil
 		}
 		if rpc.Method == "sendTransaction" && gate != nil {
 			w.gate = nil
 		}
 		w.mu.Unlock()
+		if historyGate != nil {
+			// Capture the node's history before admitting a later transfer, but
+			// delay delivery to reproduce an in-flight poll finishing afterward.
+			response := httptest.NewRecorder()
+			proxy.ServeHTTP(response, r)
+			historyGate.once.Do(func() { close(historyGate.arrived) })
+			select {
+			case <-historyGate.release:
+			case <-r.Context().Done():
+				return
+			}
+			for key, values := range response.Header() {
+				out.Header()[key] = values
+			}
+			out.WriteHeader(response.Code)
+			_, _ = out.Write(response.Body.Bytes())
+			return
+		}
 		if rpc.Method == "sendTransaction" {
 			if gate != nil {
 				var signed string
@@ -124,6 +145,7 @@ func (w *solanaWire) sends() int { w.mu.Lock(); defer w.mu.Unlock(); return w.se
 
 type solanaFixtureOptions struct {
 	freshWallet bool
+	manualFleet bool
 	network     string
 }
 
@@ -163,7 +185,7 @@ func newSolanaWorld(t *testing.T, recurring bool, options ...solanaFixtureOption
 		}
 	})
 	s.server.Client().Timeout = 30 * time.Second
-	if !recurring {
+	if !recurring && !option.manualFleet {
 		startFleet(t, s.world)
 	}
 	return s
@@ -454,7 +476,7 @@ func TestSolanaContracts(t *testing.T) {
 		}
 	})
 	t.Run("OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order", func(t *testing.T) {
-		s := newSolanaWorld(t, false)
+		s := newSolanaWorld(t, false, solanaFixtureOptions{manualFleet: true})
 		order := s.order(t, false)
 		prepared := s.walletTransaction(t, order)
 		action := order.Payment.NextAction
@@ -464,6 +486,7 @@ func TestSolanaContracts(t *testing.T) {
 		ref := action.Payload["reference"]
 		require.NotEmpty(t, ref)
 		base := solanafake.Transfer{Payer: s.payer.PublicKey(), Recipient: s.treasury.PublicKey().String(), Mint: solanafake.DevnetUSDCMint, Amount: 10_000_000, Reference: ref, BlockTime: s.clock.Now(), Memo: solanaMemo(t, prepared)}
+		var invalidSignatures []string
 		for _, profile := range []string{"foreign-treasury", "wrong-mint", "underpaid"} {
 			t.Run(profile, func(t *testing.T) {
 				bad := base
@@ -477,13 +500,43 @@ func TestSolanaContracts(t *testing.T) {
 				}
 				sig, err := s.node.Pay(bad)
 				require.NoError(t, err)
+				invalidSignatures = append(invalidSignatures, sig)
 				s.confirm(t, order, sig)
 				s.noAccess(t, order)
 			})
 		}
+		gate := &wireGate{arrived: make(chan struct{}), release: make(chan struct{})}
+		defer gate.unblock()
+		s.wire.mu.Lock()
+		s.wire.historyGate = gate
+		s.wire.mu.Unlock()
+		startFleet(t, s.world)
+		select {
+		case <-gate.arrived:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the poller never read the invalid transfers")
+		}
 		sig, err := s.node.Pay(base)
 		require.NoError(t, err)
 		s.confirm(t, order, sig)
+		gate.unblock()
+		require.Eventually(t, func() bool {
+			for _, invalid := range invalidSignatures {
+				if !s.wire.read(invalid) {
+					return false
+				}
+			}
+			return true
+		}, 10*time.Second, 20*time.Millisecond)
+		s.noAccess(t, order)
+		// The in-flight history response did not contain the later payment.
+		// Let the injected business clock advance through normal rechecks;
+		// waiting in wall time alone leaves the next poll permanently in future.
+		require.Eventually(t, func() bool {
+			s.clock.Advance(time.Second)
+			current, err := s.alpha.GetOrder(t.Context(), order.ID)
+			return err == nil && current.Status == billing.OrderComplete
+		}, 20*time.Second, 100*time.Millisecond)
 		s.paid(t, order, sig)
 	})
 	t.Run("OR-J37-S03/unknown-reverted-and-unfinalized-transfers-do-not-create-money", func(t *testing.T) {

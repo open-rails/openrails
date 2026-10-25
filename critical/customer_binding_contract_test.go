@@ -232,6 +232,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 	})
 	t.Run("OR-J01-S10/mapped-customer-keeps-next-action-idempotency-and-original-step-up", func(t *testing.T) {
 		a, provider := newPaymentWorld(t)
+		foreignCard := saveMethod(t, a, provider, a.bobToken, "5555", "auth")
 		customer := billing.CustomerID(uuid.New())
 		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{})
 		require.NoError(t, err)
@@ -268,6 +269,41 @@ func TestCustomerBindingContracts(t *testing.T) {
 		require.Contains(t, string(raw), "step_up_required")
 		require.Empty(t, provider.effects(t))
 		fresh := authtest.SignIn(t, a.auth, a.alice).AccessToken
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, psps.Items, 1)
+		status, raw = a.request(t, http.MethodPost, "/mapped/payment-methods", fresh, billing.CreatePaymentMethodParams{
+			PSPID: psps.Items[0].ID,
+			Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242", Decline: "auth"}),
+		})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var saved billing.PaymentMethod
+		require.NoError(t, json.Unmarshal(raw, &saved))
+		require.Equal(t, customer, saved.CustomerID)
+		require.Equal(t, billing.PaymentMethodRequiresAction, saved.Status)
+		require.NotNil(t, saved.NextAction)
+		setup, _, ok := strings.Cut(saved.NextAction.Payload["client_secret"], "_secret_")
+		require.True(t, ok)
+		require.True(t, provider.core.AuthenticateSetup(setup), "the bank completes the saved card's authentication")
+		cardPath := "/mapped/payment-methods/" + saved.ID.String() + "/confirm"
+		status, raw = a.request(t, http.MethodPost, cardPath, stale, billing.ConfirmPaymentMethodParams{})
+		require.Equal(t, http.StatusUnauthorized, status, string(raw))
+		require.Contains(t, string(raw), "step_up_required")
+		status, raw = a.request(t, http.MethodPost, cardPath, a.bobToken, billing.ConfirmPaymentMethodParams{})
+		require.Equal(t, http.StatusNotFound, status, string(raw))
+		status, raw = a.request(t, http.MethodPost, "/mapped/payment-methods/"+foreignCard.ID.String()+"/confirm", fresh, billing.ConfirmPaymentMethodParams{})
+		require.Equal(t, http.StatusNotFound, status, string(raw))
+		for range 2 {
+			status, raw = a.request(t, http.MethodPost, cardPath, fresh, billing.ConfirmPaymentMethodParams{})
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var confirmed billing.PaymentMethod
+			require.NoError(t, json.Unmarshal(raw, &confirmed))
+			require.Equal(t, saved.ID, confirmed.ID)
+			require.Equal(t, customer, confirmed.CustomerID)
+			require.Equal(t, billing.PaymentMethodActive, confirmed.Status)
+			require.Nil(t, confirmed.NextAction)
+		}
+		require.Empty(t, provider.effects(t), "saved-card authentication must never collect money")
 		var waiting billing.Order
 		for range 2 {
 			status, raw = a.request(t, http.MethodPost, path+"/pay", fresh, payment, map[string]string{"Idempotency-Key": "mapped-pay"})
@@ -316,6 +352,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 			{http.MethodPost, subPath + "/resume"},
 			{http.MethodPut, subPath + "/payment-method"},
 			{http.MethodPost, "/mapped/payment-methods"},
+			{http.MethodPost, cardPath},
 			{http.MethodDelete, "/mapped/payment-methods/" + uuid.NewString()},
 			{http.MethodPost, "/mapped/agreements/" + uuid.NewString() + "/revoke"},
 		} {
