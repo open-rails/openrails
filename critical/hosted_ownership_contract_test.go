@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/migratekit"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/stretchr/testify/require"
@@ -81,6 +82,39 @@ func hostedStateRemoval(t *testing.T) {
 	extractionOK(t, err)
 	defer migrator.Close()
 	extractionOK(t, migrator.WithSchema("billing").ApplyMigrations(t.Context(), before))
+	t.Run("public migration refuses before transfer and recovers afterwards", func(t *testing.T) {
+		legacy := extractionDatabase(t)
+		ledger, err := migratekit.NewPostgresFromPGXPool(legacy, "openrails")
+		extractionOK(t, err)
+		defer ledger.Close()
+		extractionOK(t, ledger.WithSchema("billing").ApplyMigrations(t.Context(), before))
+		_, err = legacy.Exec(t.Context(), `INSERT INTO billing.network_event_cursors(issuer,tenant_id,cursor)
+ VALUES('https://accounts.invalid','00000000-0000-4000-8000-000000000001','opaque-public-upgrade-position')`)
+		extractionOK(t, err)
+
+		err = openrails.Migrate(t.Context(), legacy, openrails.Config{})
+		require.ErrorContains(t, err, "transfer", "startup migration must refuse untransferred reader state")
+		var cursor string
+		extractionOK(t, legacy.QueryRow(t.Context(), "SELECT cursor FROM billing.network_event_cursors").Scan(&cursor))
+		require.Equal(t, "opaque-public-upgrade-position", cursor)
+		applied, err := ledger.Applied(t.Context())
+		extractionOK(t, err)
+		require.NotContains(t, applied, migratekit.Prefix(removal.Name), "refusal must not record removal as applied")
+
+		// This explicit offline ownership move stands in for the independently
+		// qualified SaaS transfer; public core migration must resume afterwards.
+		_, err = legacy.Exec(t.Context(), `CREATE SCHEMA saas;
+ ALTER TABLE billing.customer_links SET SCHEMA saas;
+ ALTER TABLE billing.network_event_cursors SET SCHEMA saas`)
+		extractionOK(t, err)
+		extractionOK(t, openrails.Migrate(t.Context(), legacy, openrails.Config{}))
+		extractionOK(t, openrails.Migrate(t.Context(), legacy, openrails.Config{}))
+		extractionOK(t, legacy.QueryRow(t.Context(), "SELECT cursor FROM saas.network_event_cursors").Scan(&cursor))
+		require.Equal(t, "opaque-public-upgrade-position", cursor)
+		applied, err = ledger.Applied(t.Context())
+		extractionOK(t, err)
+		require.Contains(t, applied, migratekit.Prefix(removal.Name))
+	})
 	for _, tc := range []struct{ name, setup string }{
 		{"cursor state is not empty data", `INSERT INTO billing.network_event_cursors(issuer,tenant_id,cursor) VALUES('https://accounts.invalid','00000000-0000-4000-8000-000000000001','')`},
 		{"partial legacy pair", `ALTER TABLE billing.customer_links RENAME TO saved_customer_links`},
