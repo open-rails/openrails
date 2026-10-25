@@ -229,9 +229,12 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 	if _, supplied := credentials["webhook_signing_secret_previous"]; supplied {
 		return billing.PSP{}, apperr.Invalidf("webhook_signing_secret_previous is retained by rotation and cannot be supplied").WithParam("credentials")
 	}
-	doc := merchantdocs.PSP{Rail: rail, Environment: environment, AccountID: accountID, Settings: mergeSettings(nil, settings), Secrets: credentials}
+	doc := merchantdocs.PSP{Rail: rail, Environment: environment, AccountID: accountID, Custodian: req.Custodian, Settings: mergeSettings(nil, settings), Secrets: credentials}
 	set, err := s.config.Get(ctx, id)
 	if err != nil {
+		return billing.PSP{}, err
+	}
+	if err := s.validatePSPCustodian(ctx, id, rail, environment, req.Custodian); err != nil {
 		return billing.PSP{}, err
 	}
 	if existing, ok := set.PSPs[key]; ok {
@@ -309,7 +312,7 @@ func pspAccount(psp, rail string, account billing.PSPAccount) (string, error) {
 
 // samePSP reports whether a create repeats the document already held.
 func samePSP(a, b merchantdocs.PSP) bool {
-	return a.Rail == b.Rail && a.Environment == b.Environment && a.AccountID == b.AccountID && !a.Archived &&
+	return a.Rail == b.Rail && a.Environment == b.Environment && a.AccountID == b.AccountID && a.Custodian == b.Custodian && !a.Archived &&
 		maps.Equal(a.Secrets, b.Secrets) && fmt.Sprint(a.Settings) == fmt.Sprint(b.Settings)
 }
 
@@ -325,7 +328,7 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 		return billing.PSP{}, apperr.Invalidf("expected_revision must not be negative").WithParam("expected_revision")
 	}
 	settings := apiSettings(req.TokenizationKey, req.PublishableKey)
-	if req.Archived && (len(settings) > 0 || len(req.Credentials) > 0 || req.RetireWebhookOverlap) {
+	if req.Archived && (len(settings) > 0 || len(req.Credentials) > 0 || req.RetireWebhookOverlap || req.Custodian != nil) {
 		return billing.PSP{}, apperr.Invalidf("archived goes alone in its request").WithParam("archived")
 	}
 	terms := req
@@ -385,6 +388,15 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 				return billing.PSP{}, err
 			}
 			next.Settings = mergeSettings(next.Settings, settings)
+			if req.Custodian != nil {
+				if err := s.validatePSPCustodian(ctx, id, scope.Rail, next.Environment, *req.Custodian); err != nil {
+					return billing.PSP{}, err
+				}
+				next.Custodian = *req.Custodian
+				if err := s.refusePSPForCardVault(j.set.Merchant.Value.MerchantSettings, j.set.PSPs, scope.Key, next); err != nil {
+					return billing.PSP{}, err
+				}
+			}
 			if len(credentials) > 0 {
 				if err := s.verifyNMIEnvironment(ctx, id, next); err != nil {
 					return billing.PSP{}, err

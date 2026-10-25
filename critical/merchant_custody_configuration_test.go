@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,7 +43,12 @@ func TestMerchantCustodyConfiguration(t *testing.T) {
 		require.NoError(t, err)
 		wire := http.DefaultTransport.(*http.Transport).Clone()
 		t.Cleanup(wire.CloseIdleConnections)
+		gateway := nmimock.New(nmimock.Options{})
+		t.Cleanup(gateway.Close)
+		gatewayTarget, err := url.Parse(gateway.URL())
+		require.NoError(t, err)
 		a, _ := newPSPWorld(t, func(w *world) {
+			w.deps.NMITransport = loopbackWire{target: gatewayTarget, wire: wire}
 			w.deps.CustodianCredentialTransport = custodianProbeWire{loopback: loopbackWire{target: target, wire: wire}, wire: wire}
 		})
 		for name, client := range map[string]*openrails.Client{"alpha": a.alphaRemote, "beta": a.betaRemote} {
@@ -156,6 +162,15 @@ func TestMerchantCustodyConfiguration(t *testing.T) {
 		raw, err = json.Marshal(rotated)
 		require.NoError(t, err)
 		require.NotContains(t, string(raw), "private-rotated")
+		status, raw = a.request(t, http.MethodPost, "/v1/merchant/psps", a.alphaKey.Secret, map[string]any{
+			"key": "nmi", "rail": "nmi", "environment": "test", "gateway_id": "gateway-config-alpha",
+			"custodian": "owned", "tokenization_key": "collect-alpha",
+			"credentials": map[string]string{"security_key": "critical-nmi-key", "webhook_signing_secret": "critical-nmi-webhook"},
+		})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var processor billing.PSP
+		require.NoError(t, json.Unmarshal(raw, &processor))
+		require.Equal(t, "owned", processor.Custodian)
 	})
 }
 

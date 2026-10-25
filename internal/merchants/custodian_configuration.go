@@ -50,6 +50,27 @@ func (s *Service) WithCustodianCredentialTransport(transport http.RoundTripper) 
 	s.custodianCredentialTransport = transport
 }
 
+func (s *Service) validatePSPCustodian(ctx context.Context, mid billing.MerchantID, rail, environment, key string) error {
+	if key == "" {
+		return nil
+	}
+	if !merchantdocs.KeyShape.MatchString(key) || key == config.PlatformCustodianKey {
+		return apperr.Invalidf("custodian must name this merchant's declared vault").WithParam("custodian")
+	}
+	scope, found, err := s.CustodianScopeByKey(ctx, mid, key)
+	if err != nil {
+		return err
+	}
+	if !found || scope.Archived || scope.Environment != config.EnvironmentClass(rail, environment) {
+		return apperr.Invalidf("custodian must be active in the PSP's environment").WithParam("custodian")
+	}
+	descriptor, ok := custodians.Get(scope.Kind)
+	if !ok || !descriptor.SupportsRail(models.Rail(rail)) {
+		return apperr.Invalidf("custodian cannot charge through this PSP rail").WithParam("custodian")
+	}
+	return nil
+}
+
 func (s *Service) PutCustodianConfiguration(ctx context.Context, mid billing.MerchantID, key string, request billing.PutCustodianParams) (billing.Custodian, error) {
 	var zero billing.Custodian
 	if !s.config.Writable() {

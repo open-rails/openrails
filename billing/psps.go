@@ -116,6 +116,8 @@ type CreatePSPParams struct {
 	Key         string `json:"key"`
 	Rail        Rail   `json:"rail"`
 	Environment string `json:"environment,omitempty"`
+	// Custodian names a declared merchant-owned vault; empty keeps PSP custody.
+	Custodian string `json:"custodian,omitempty"`
 	PSPAccount
 	TokenizationKey string            `json:"tokenization_key,omitempty"`
 	PublishableKey  string            `json:"publishable_key,omitempty"`
@@ -131,6 +133,9 @@ type UpdatePSPParams struct {
 	TokenizationKey  *string           `json:"tokenization_key,omitempty"`
 	PublishableKey   *string           `json:"publishable_key,omitempty"`
 	Credentials      map[string]string `json:"credentials"`
+	// Custodian changes new-card custody only; existing saved instruments and
+	// accepted obligations retain their original custodian. Empty selects PSP custody.
+	Custodian *string `json:"custodian,omitempty"`
 	// RetireWebhookOverlap refuses the rotated-out webhook signing secret at
 	// once instead of at the end of its overlap.
 	RetireWebhookOverlap bool `json:"retire_webhook_overlap"`
