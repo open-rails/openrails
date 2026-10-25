@@ -21,7 +21,7 @@ require (
 	github.com/knadh/koanf/providers/rawbytes v1.0.0
 	github.com/knadh/koanf/v2 v2.2.2
 	github.com/open-rails/authkit v1.35.5
-	github.com/open-rails/helpers v1.16.2-0.20261025024957-47f4de657abc
+	github.com/open-rails/helpers v1.16.2-0.20261025033036-8c93ee4139d4
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/riverqueue/river v0.48.0
 	github.com/riverqueue/river/rivertype v0.48.0
