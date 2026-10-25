@@ -10,6 +10,17 @@ the merchant's customer identity (issuer and UUID) to an account. Equal UUIDs
 from unrelated issuers are not the same recipient. A missing channel disables
 only inbox publication, not the underlying billing event.
 
+```go
+publisher, err := accounts.Notifications("openrails")
+if err != nil { return err }
+deps.Notifications = authkitadapter.Notifications(publisher, accountIssuer)
+```
+
+The AuthKit producer declaration must bind source system `openrails`, the exact
+merchant ID as its source scope, and tenant-wide account visibility. Multiple
+merchants require an explicitly routing channel with verified recipient mappings;
+the single-merchant adapter never infers another tenant from a customer UUID.
+
 For a shared database the sink applies notifications in the billing transaction.
 A remote sink records its delivery job in that transaction and retries after
 commit. OpenRails never performs a best-effort network notification after a

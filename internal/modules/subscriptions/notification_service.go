@@ -12,8 +12,8 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// NotificationService publishes source facts in its database transaction.
-// It owns no inbox or delivery-channel state.
+// NotificationService records source facts and optional account-inbox mutations
+// in its database transaction. Recipient inbox state belongs to the destination.
 type NotificationService struct {
 	db *db.DB
 }

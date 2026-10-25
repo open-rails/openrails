@@ -165,7 +165,9 @@ pkg openrails, method (*Engine) Start(context.Context, ...StartOption) error
 pkg openrails, method (*LocalClient) AdmitTx(context.Context, pgx.Tx, []billing.AdmitParams) ([]billing.AdmissionVerdict, error)
 pkg openrails, method (*LocalClient) CaptureAdmissionsTx(context.Context, pgx.Tx, []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error)
 pkg openrails, method (*LocalClient) DeclarePSP(context.Context, billing.PSPDeclaration) (*billing.PSP, error)
+pkg openrails, method (*LocalClient) ExportNotificationAdoption(context.Context) (billing.NotificationAdoption, error)
 pkg openrails, method (*LocalClient) ReleaseAdmissionsTx(context.Context, pgx.Tx, []string) ([]billing.AdmissionResult, error)
+pkg openrails, method (*LocalClient) RestoreNotificationOrdering(context.Context, billing.NotificationAdoption) error
 pkg openrails, method (*LocalClient) SCIMHandler() (http.Handler, error)
 pkg openrails, method (*LocalClient) StartRunningChargeTx(context.Context, pgx.Tx, billing.StartRunningChargeParams) (*billing.RunningCharge, error)
 pkg openrails, method (*LocalClient) StopRunningChargeTx(context.Context, pgx.Tx, string, billing.StopRunningChargeParams) (*billing.RunningCharge, error)
@@ -400,6 +402,7 @@ pkg openrails, type Deps struct, Email config.EmailSender
 pkg openrails, type Deps struct, FXTransport http.RoundTripper
 pkg openrails, type Deps struct, MerchantGroups billing.MerchantGroupReader
 pkg openrails, type Deps struct, NMITransport http.RoundTripper
+pkg openrails, type Deps struct, Notifications *config.NotificationChannel
 pkg openrails, type Deps struct, Postgres *pgxpool.Pool
 pkg openrails, type Deps struct, Redis redis.UniversalClient
 pkg openrails, type Deps struct, StripeTransport http.RoundTripper
@@ -467,6 +470,15 @@ pkg openrails, type NMIPSP struct, TokenizationURL string `psp:"tokenization_url
 pkg openrails, type NMIPSP struct, WebhookOverlapExpiresAt time.Time `psp:"webhook_overlap_expires_at"`
 pkg openrails, type NMIPSP struct, WebhookSigningSecret string `psp:"secrets.webhook_signing_secret,required"`
 pkg openrails, type NMIPSP struct, WebhookSigningSecretPrevious string `psp:"secrets.webhook_signing_secret_previous"`
+pkg openrails, type NotificationChannel = config.NotificationChannel
+pkg openrails, type NotificationChannel struct
+pkg openrails, type NotificationChannel struct, Recipient func(context.Context, config.NotificationRecipient) (string, bool, error)
+pkg openrails, type NotificationChannel struct, Sink postgres.TxSink
+pkg openrails, type NotificationRecipient = config.NotificationRecipient
+pkg openrails, type NotificationRecipient struct
+pkg openrails, type NotificationRecipient struct, CustomerID billing.CustomerID
+pkg openrails, type NotificationRecipient struct, Issuer string
+pkg openrails, type NotificationRecipient struct, MerchantID billing.MerchantID
 pkg openrails, type PSPConfig = config.PSPConfig
 pkg openrails, type PSPConfig struct
 pkg openrails, type PSPConfig struct, AccountID string `yaml:"account_id,omitempty"`
@@ -602,6 +614,7 @@ pkg openrails, var ErrMigrationsRequired error
 pkg openrails, var ErrUnauthenticated error
 pkg openrails/adapters/authkit, func BindMerchant(context.Context, *pgxpool.Pool, openrails.DatabaseConfig, *authkit.Client, billing.MerchantBinding) error
 pkg openrails/adapters/authkit, func MerchantGroups(*authkit.Client) billing.MerchantGroupReader
+pkg openrails/adapters/authkit, func Notifications(postgres.TxSink, ...string) *openrails.NotificationChannel
 pkg openrails/adapters/fiber, const RouteNamePrefix untyped string = "openrails."
 pkg openrails/adapters/fiber, func Mount(*fiber.App, *openrails.Engine, openrails.Routes) error
 pkg openrails/adapters/gin, func CheckoutOrigin(string, http.Handler) (gin.HandlerFunc, error)
@@ -2557,6 +2570,10 @@ pkg openrails/billing, type NextAction struct, Payload map[string]string `json:"
 pkg openrails/billing, type NextAction struct, Transactions []string `json:"transactions"`
 pkg openrails/billing, type NextAction struct, Type string `json:"type"`
 pkg openrails/billing, type NextAction struct, URL *string `json:"url"`
+pkg openrails/billing, type NotificationAdoption struct
+pkg openrails/billing, type NotificationAdoption struct, Adoptions []notify.Adoption `json:"adoptions"`
+pkg openrails/billing, type NotificationAdoption struct, MerchantID MerchantID `json:"merchant_id"`
+pkg openrails/billing, type NotificationAdoption struct, Ordering []NotificationOrdering `json:"ordering"`
 pkg openrails/billing, type NotificationData struct
 pkg openrails/billing, type NotificationData struct, AccessEnded bool `json:"access_ended,omitempty"`
 pkg openrails/billing, type NotificationData struct, Amount *int64 `json:"amount,omitempty,string"`
@@ -2618,6 +2635,12 @@ pkg openrails/billing, type NotificationEvent struct, ID NotificationID `json:"i
 pkg openrails/billing, type NotificationEvent struct, MerchantID MerchantID `json:"merchant_id"`
 pkg openrails/billing, type NotificationEvent struct, Optional bool `json:"optional,omitempty"`
 pkg openrails/billing, type NotificationID [16]byte
+pkg openrails/billing, type NotificationOrdering struct
+pkg openrails/billing, type NotificationOrdering struct, CustomerID CustomerID `json:"customer_id"`
+pkg openrails/billing, type NotificationOrdering struct, Key string `json:"key"`
+pkg openrails/billing, type NotificationOrdering struct, Revision int64 `json:"revision"`
+pkg openrails/billing, type NotificationOrdering struct, SourceEvent *uuid.UUID `json:"source_event,omitempty"`
+pkg openrails/billing, type NotificationOrdering struct, Withdrawn bool `json:"withdrawn"`
 pkg openrails/billing, type NotificationRecoveryAction string
 pkg openrails/billing, type NotificationRetryStatus string
 pkg openrails/billing, type Order struct

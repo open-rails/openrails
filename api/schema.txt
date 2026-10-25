@@ -113,6 +113,7 @@ migration 0111_remove_event_consumers_contract.up.sql sha256:ab6f344a51e804810d6
 migration 0112_network_event_cursor.up.sql sha256:fe38ca31bba8bf4364f2e1309a3106ce435b44c541f53ddec99408ea0b8a74b3
 migration 0113_shared_eventlog_contract.up.sql sha256:15e7ef39ceaa6a0553473b8fab7772731b80aeadeb034f26e8c8680840683895
 migration 0114_account_usage_billing.up.sql sha256:1b818744089d9dc86b08b384be8610120c5b30147cce99e2fbf51f3dd9cdc713
+migration 0115_notification_issue_revisions.up.sql sha256:f720b146566426f56c3b85c5051b07ede1283b9e3e06ca5f1395703e2673a3bd
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1216,6 +1217,13 @@ table billing.nmi_history_reads
   constraint nmi_history_reads_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
   index CREATE UNIQUE INDEX nmi_history_reads_pkey ON billing.nmi_history_reads USING btree (merchant_id, psp_id)
 
+table billing.notification_channel_state
+  column merchant_id uuid NOT NULL
+  column restore_required boolean NOT NULL DEFAULT false
+  constraint notification_channel_state_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
+  constraint notification_channel_state_pkey PRIMARY KEY (merchant_id)
+  index CREATE UNIQUE INDEX notification_channel_state_pkey ON billing.notification_channel_state USING btree (merchant_id)
+
 table billing.notification_events
   column merchant_id uuid NOT NULL
   column id uuid NOT NULL
@@ -1233,6 +1241,18 @@ table billing.notification_events
   index CREATE UNIQUE INDEX notification_events_pkey ON billing.notification_events USING btree (merchant_id, id)
   trigger CREATE TRIGGER notification_event_immutable BEFORE UPDATE ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.guard_notification_event()
   trigger CREATE TRIGGER notification_event_log_capture AFTER INSERT ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.capture_notification_event_log()
+
+table billing.notification_issue_revisions
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column issue_key text NOT NULL
+  column revision bigint NOT NULL
+  column withdrawn boolean NOT NULL
+  column source_event uuid
+  constraint notification_issue_revisions_merchant_id_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
+  constraint notification_issue_revisions_pkey PRIMARY KEY (merchant_id, customer_id, issue_key)
+  constraint notification_issue_revisions_revision_check CHECK ((revision > 0))
+  index CREATE UNIQUE INDEX notification_issue_revisions_pkey ON billing.notification_issue_revisions USING btree (merchant_id, customer_id, issue_key)
 
 table billing.notifications
   column id uuid NOT NULL DEFAULT uuidv7()

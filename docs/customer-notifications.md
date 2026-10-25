@@ -2,11 +2,16 @@
 
 OpenRails records billing facts. Applications own their inboxes, recipient
 mapping, read/archive state, rendering, email and delivery preferences.
-OpenRails has no customer-facing inbox or per-event delivery jobs.
+OpenRails has no customer-facing inbox. An optional injected
+[account-inbox channel](account-inbox-channel.md) publishes selected user notices
+and exact withdrawals in the billing transaction. An AuthKit notification
+publisher can supply this channel directly; remote delivery is durably queued by
+the injected publisher. The general event log remains available independently
+for host applications that need custom reactions to billing facts.
 
 ## Reading facts
 
-Use [`Client.ListEvents` or `GET /v1/app/events`](event-log.md), then save the
+For a custom event consumer, use [`Client.ListEvents` or `GET /v1/app/events`](event-log.md), then save the
 returned cursor with local inbox changes atomically, or after idempotent
 processing. A reader never registers with or acknowledges the source. The
 retained envelope supplies `id`, `merchant_id`, `source`, `type`, `version`,

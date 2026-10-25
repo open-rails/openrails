@@ -124,7 +124,9 @@
       "func (c *LocalClient) AdmitTx(ctx context.Context, tx pgx.Tx, requests []billing.AdmitParams) ([]billing.AdmissionVerdict, error)",
       "func (c *LocalClient) CaptureAdmissionsTx(ctx context.Context, tx pgx.Tx, items []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error)",
       "func (c *LocalClient) DeclarePSP(ctx context.Context, declaration billing.PSPDeclaration) (*billing.PSP, error)",
+      "func (c *LocalClient) ExportNotificationAdoption(ctx context.Context) (billing.NotificationAdoption, error)",
       "func (c *LocalClient) ReleaseAdmissionsTx(ctx context.Context, tx pgx.Tx, requestIDs []string) ([]billing.AdmissionResult, error)",
+      "func (c *LocalClient) RestoreNotificationOrdering(ctx context.Context, snapshot billing.NotificationAdoption) error",
       "func (c *LocalClient) SCIMHandler() (http.Handler, error)",
       "func (c *LocalClient) StartRunningChargeTx(ctx context.Context, tx pgx.Tx, params billing.StartRunningChargeParams) (*billing.RunningCharge, error)",
       "func (c *LocalClient) StopRunningChargeTx(ctx context.Context, tx pgx.Tx, reference string, params billing.StopRunningChargeParams) (*billing.RunningCharge, error)",
@@ -192,6 +194,8 @@
       "type MerchantDeclaration = config.MerchantDeclaration",
       "type MerchantSecrets = config.MerchantSecrets",
       "type NMIPSP struct {\n\tGatewayID string `psp:\"gateway_id\"`\n\n\tEnvironment string `psp:\"environment\"`\n\tArchived    bool   `psp:\"archived\"`\n\n\tCustodian string `psp:\"custodian\"`\n\n\tSecurityKey          string `psp:\"secrets.security_key,required\"`\n\tWebhookSigningSecret string `psp:\"secrets.webhook_signing_secret,required\"`\n\n\tWebhookSigningSecretPrevious string    `psp:\"secrets.webhook_signing_secret_previous\"`\n\tWebhookOverlapExpiresAt      time.Time `psp:\"webhook_overlap_expires_at\"`\n\n\tTokenizationKey string `psp:\"tokenization_key\"`\n\n\tTokenizationURL string `psp:\"tokenization_url\"`\n\n\tCardEntry string `psp:\"card_entry\"`\n}",
+      "type NotificationChannel = config.NotificationChannel",
+      "type NotificationRecipient = config.NotificationRecipient",
       "type PSPConfig = config.PSPConfig",
       "type PSPs = config.PSPs",
       "type Probe struct {\n\tName string\n\n\tCheck func(context.Context) error\n}",
@@ -228,7 +232,8 @@
     ],
     "adapters/authkit": [
       "func BindMerchant(ctx context.Context, pool *pgxpool.Pool, database openrails.DatabaseConfig, client *native.Client, binding billing.MerchantBinding) error",
-      "func MerchantGroups(client *native.Client) billing.MerchantGroupReader"
+      "func MerchantGroups(client *native.Client) billing.MerchantGroupReader",
+      "func Notifications(sink notifypg.TxSink, issuers ...string) *openrails.NotificationChannel"
     ],
     "adapters/fiber": [
       "const RouteNamePrefix = \"openrails.\"",
@@ -842,9 +847,11 @@
       "type NetworkSubscription struct {\n\tLinkID       CustomerLinkID `json:\"link_id\"`\n\tMerchantID   MerchantID     `json:\"merchant_id\"`\n\tSubscription Subscription   `json:\"subscription\"`\n}",
       "type NewPriceDraft struct {\n\tProductKey  string            `json:\"product_key\"`\n\tReviewText  string            `json:\"review_text\"`\n\tCreatePrice CreatePriceParams `json:\"create_price\"`\n}",
       "type NextAction struct {\n\tType         string            `json:\"type\"`\n\tURL          *string           `json:\"url\"`\n\tTransactions []string          `json:\"transactions\"`\n\tPSPID        *PSPID            `json:\"psp_id\"`\n\tPayload      map[string]string `json:\"payload\"`\n}",
+      "type NotificationAdoption struct {\n\tMerchantID MerchantID             `json:\"merchant_id\"`\n\tAdoptions  []notify.Adoption      `json:\"adoptions\"`\n\tOrdering   []NotificationOrdering `json:\"ordering\"`\n}",
       "type NotificationData struct {\n\tReason  string `json:\"reason,omitempty\"`\n\tMessage string `json:\"message,omitempty\"`\n\n\tSource    string     `json:\"source,omitempty\"`\n\tProductID ProductID  `json:\"product_id,omitzero\"`\n\tEndedAt   *time.Time `json:\"ended_at,omitempty\"`\n\n\tAccessEnded bool   `json:\"access_ended,omitempty\"`\n\tCurrency    string `json:\"currency,omitempty\"`\n\n\tSubscriptionID   SubscriptionID   `json:\"subscription_id,omitzero\"`\n\tPriceMigrationID PriceMigrationID `json:\"price_migration_id,omitzero\"`\n\tFromPriceID      PriceID          `json:\"from_price_id,omitzero\"`\n\tFromProductID    ProductID        `json:\"from_product_id,omitzero\"`\n\tFromProductName  string           `json:\"from_product_name,omitempty\"`\n\tToPriceID        PriceID          `json:\"to_price_id,omitzero\"`\n\tToProductID      ProductID        `json:\"to_product_id,omitzero\"`\n\tToProductName    string           `json:\"to_product_name,omitempty\"`\n\tOldAmount        *int64           `json:\"old_amount,omitempty,string\"`\n\tNewAmount        *int64           `json:\"new_amount,omitempty,string\"`\n\tEffectiveAt      *time.Time       `json:\"effective_at,omitempty\"`\n\n\tPeriodStartsAt   *time.Time `json:\"period_starts_at,omitempty\"`\n\tPeriodEndsAt     *time.Time `json:\"period_ends_at,omitempty\"`\n\tDowngradeApplied bool       `json:\"downgrade_applied,omitempty\"`\n\tNewProduct       string     `json:\"new_product,omitempty\"`\n\n\tOverdueAmount    *int64     `json:\"overdue_amount,omitempty,string\"`\n\tOverdueOrders    int        `json:\"overdue_orders,omitempty\"`\n\tOverdueStartedAt *time.Time `json:\"overdue_started_at,omitempty\"`\n\tFromState        string     `json:\"from_state,omitempty\"`\n\tToState          string     `json:\"to_state,omitempty\"`\n\n\tAmountDue        *int64                     `json:\"amount_due,omitempty,string\"`\n\tDueAt            *time.Time                 `json:\"due_at,omitempty\"`\n\tCollectionMethod InvoiceCollectionMethod    `json:\"collection_method,omitempty\"`\n\tFailureCode      string                     `json:\"failure_code,omitempty\"`\n\tFailureReason    string                     `json:\"failure_reason,omitempty\"`\n\tDeclineOutcome   string                     `json:\"decline_outcome,omitempty\"`\n\tNextAttemptAt    *time.Time                 `json:\"next_attempt_at,omitempty\"`\n\tRetryStatus      NotificationRetryStatus    `json:\"retry_status,omitempty\"`\n\tRecoveryAction   NotificationRecoveryAction `json:\"recovery_action,omitempty\"`\n\n\tAvailableAmount  *int64     `json:\"available_amount,omitempty,string\"`\n\tOwedAmount       *int64     `json:\"owed_amount,omitempty,string\"`\n\tLowBalanceAmount *int64     `json:\"low_balance_amount,omitempty,string\"`\n\tRunwayEndsAt     *time.Time `json:\"runway_ends_at,omitempty\"`\n\n\tRail               string `json:\"rail,omitempty\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id,omitempty\"`\n\tTransactionID      string `json:\"transaction_id,omitempty\"`\n\n\tQuantity *int `json:\"quantity,omitempty\"`\n\n\tAmount        *int64    `json:\"amount,omitempty,string\"`\n\tProductName   string    `json:\"product_name,omitempty\"`\n\tPaymentMethod string    `json:\"payment_method,omitempty\"`\n\tPaymentID     PaymentID `json:\"payment_id,omitzero\"`\n\tOrderID       OrderID   `json:\"order_id,omitzero\"`\n\tOrderNumber   int64     `json:\"order_number,omitempty\"`\n}",
       "type NotificationEvent struct {\n\tID         NotificationID  `json:\"id\"`\n\tMerchantID MerchantID      `json:\"merchant_id\"`\n\tCustomerID CustomerID      `json:\"customer_id\"`\n\tEventType  string          `json:\"event_type\"`\n\tData       json.RawMessage `json:\"data\"`\n\tCreatedAt  time.Time       `json:\"created_at\"`\n\n\tActionRequested bool `json:\"action_requested,omitempty\"`\n\n\tOptional bool `json:\"optional,omitempty\"`\n}",
       "type NotificationID uuid.UUID",
+      "type NotificationOrdering struct {\n\tCustomerID  CustomerID `json:\"customer_id\"`\n\tKey         string     `json:\"key\"`\n\tRevision    int64      `json:\"revision\"`\n\tWithdrawn   bool       `json:\"withdrawn\"`\n\tSourceEvent *uuid.UUID `json:\"source_event,omitempty\"`\n}",
       "type NotificationRecoveryAction string",
       "type NotificationRetryStatus string",
       "type Order struct {\n\tID         OrderID     `json:\"id\"`\n\tCustomerID CustomerID  `json:\"customer_id\"`\n\tOrigin     OrderOrigin `json:\"origin\"`\n\tStatus     OrderStatus `json:\"status\"`\n\n\tCollectionOwner OrderCollectionOwner `json:\"collection_owner\"`\n\n\tCollectionPSPID *PSPID `json:\"collection_psp_id\"`\n\n\tProviderBills []OrderProviderBill `json:\"provider_bills\"`\n\n\tNumber   *int64       `json:\"number\"`\n\tCurrency string       `json:\"currency\"`\n\tTotal    int64        `json:\"total,string\"`\n\tLines    []OrderLine  `json:\"lines\"`\n\tPayment  OrderPayment `json:\"payment\"`\n\n\tPaymentOptions []OrderPaymentOption `json:\"payment_options\"`\n\n\tPayURL *string `json:\"pay_url\"`\n\n\tPayURLExpiresAt *time.Time `json:\"pay_url_expires_at\"`\n\n\tEmbedded bool `json:\"embedded\"`\n\n\tSuccessURL          *string `json:\"success_url\"`\n\tCancelURL           *string `json:\"cancel_url\"`\n\tSavedPaymentMethods bool    `json:\"saved_payment_methods\"`\n\n\tRenewal *OrderRenewal `json:\"renewal\"`\n\n\tUsage *OrderUsage `json:\"usage\"`\n\n\tExpiresAt   *time.Time `json:\"expires_at\"`\n\tCompletedAt *time.Time `json:\"completed_at\"`\n\tCanceledAt  *time.Time `json:\"canceled_at\"`\n\tExpiredAt   *time.Time `json:\"expired_at\"`\n\tVoidedAt    *time.Time `json:\"voided_at\"`\n\n\tUncollectibleAt *time.Time `json:\"uncollectible_at\"`\n\tCreatedAt       time.Time  `json:\"created_at\"`\n}",
@@ -1182,7 +1189,7 @@
       "type Custodians map[string]CustodianConfig",
       "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n}",
       "type DatabaseConfig struct {\n\tSkipMigrations bool `yaml:\"skip_migrations\" json:\"skip_migrations\"`\n\n\tSchema string `yaml:\"schema\" json:\"schema\"`\n\n\tRiverSchema string `yaml:\"river_schema\" json:\"river_schema\"`\n}",
-      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tMerchantGroups billing.MerchantGroupReader\n\n\tRedis redis.UniversalClient\n\n\tVault *vaultapi.Client\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tFXTransport     http.RoundTripper\n\tClock           clockwork.Clock\n}",
+      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tMerchantGroups billing.MerchantGroupReader\n\n\tRedis redis.UniversalClient\n\n\tVault *vaultapi.Client\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tNotifications *NotificationChannel\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tFXTransport     http.RoundTripper\n\tClock           clockwork.Clock\n}",
       "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n}",
       "type EmailAddress struct {\n\tName    string `yaml:\"name\" json:\"name\"`\n\tAddress string `yaml:\"address\" json:\"address\"`\n}",
       "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
@@ -1194,6 +1201,8 @@
       "type MerchantDeclaration struct {\n\tSlug string `yaml:\"-\"`\n\n\tBinding *billing.MerchantBinding `yaml:\"-\" json:\"-\"`\n\n\tIssuer      string `yaml:\"-\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tPSPs PSPs `yaml:\"psps,omitempty\"`\n\n\tCustodians Custodians `yaml:\"custodians,omitempty\"`\n\n\tbilling.MerchantSettings `yaml:\",inline\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
       "type MerchantSecrets struct {\n\tSCIMToken string `yaml:\"scim_token,omitempty\"`\n}",
       "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
+      "type NotificationChannel struct {\n\tSink      notifypg.TxSink\n\tRecipient func(context.Context, NotificationRecipient) (accountID string, deliver bool, err error)\n}",
+      "type NotificationRecipient struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\tIssuer     string\n}",
       "type PSPConfig struct {\n\tRail billing.Rail `yaml:\"rail\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
       "type PSPs map[string]PSPConfig",
       "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string `yaml:\"nmi_gateway_url\" json:\"nmi_gateway_url\"`\n\n\tStripeAPIURL string `yaml:\"stripe_api_url\" json:\"stripe_api_url\"`\n\n\tSolanaRPCURL string `yaml:\"solana_rpc_url\" json:\"solana_rpc_url\"`\n\n\tCCBillDataLinkURL string `yaml:\"ccbill_datalink_url\" json:\"ccbill_datalink_url\"`\n}",
@@ -1958,6 +1967,13 @@
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "v5": "github.com/jackc/pgx/v5"
     },
+    "adapters/authkit/notifications.go": {
+      "context": "context",
+      "fmt": "fmt",
+      "notifypg": "github.com/open-rails/helpers/notify/postgres",
+      "openrails": "github.com/open-rails/openrails",
+      "slices": "slices"
+    },
     "adapters/fiber/fiber.go": {
       "adaptor": "github.com/gofiber/fiber/v3/middleware/adaptor",
       "fmt": "fmt",
@@ -2133,6 +2149,10 @@
     },
     "billing/metrics.go": {
       "time": "time"
+    },
+    "billing/notification_adoption.go": {
+      "notify": "github.com/open-rails/helpers/notify",
+      "uuid": "github.com/google/uuid"
     },
     "billing/notifications.go": {
       "json": "encoding/json",
@@ -2431,6 +2451,7 @@
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "http": "net/http",
+      "notifypg": "github.com/open-rails/helpers/notify/postgres",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "userinfo": "github.com/open-rails/authkit/userinfo",
       "v9": "github.com/redis/go-redis/v9",
@@ -4975,6 +4996,11 @@
       "engine": "github.com/open-rails/openrails/internal/engine",
       "migrate": "github.com/open-rails/openrails/internal/migrate",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool"
+    },
+    "notification_adoption.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions"
     },
     "openrailstest/auth.go": {
       "authtest": "github.com/open-rails/authkit/auth/authtest",

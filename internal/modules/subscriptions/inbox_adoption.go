@@ -29,6 +29,9 @@ func ExportNotificationAdoption(ctx context.Context, d *db.DB, id billing.Mercha
 	}
 	ctx = merchant.WithID(ctx, id)
 	err := d.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireNotificationOrdering(ctx, tx, id.UUID()); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `LOCK TABLE billing.notification_events,billing.notification_issue_revisions,
 billing.subscriptions,billing.orders,billing.product_access IN SHARE ROW EXCLUSIVE MODE`); err != nil {
 			return err
