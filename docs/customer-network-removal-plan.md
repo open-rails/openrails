@@ -1,10 +1,10 @@
 # Move the hosted account product out of core
 
-Status: **plan only; source deletion is gated on destination qualification**. This inventory was read against signed candidate `5dccddefec0a7c3fdcd9ed9484eb3a2125733a03` (generic mapped routes, customer proof resolution, projection removal and proposed v0.264.0 dependency pins), based on fetched master `31cb304e72b30eedc0deab5d72cca54ee07345a6`.
+Status: **reviewed removal plan; an isolated implementation draft may proceed, while merge and release remain gated on destination qualification**. This inventory was read against signed candidate `5dccddefec0a7c3fdcd9ed9484eb3a2125733a03` (generic mapped routes, customer proof resolution, projection removal and proposed v0.264.0 dependency pins), based on fetched master `31cb304e72b30eedc0deab5d72cca54ee07345a6`.
 
 The destination is the SaaS account-policy, proof, linking, lifecycle and UI composition. Core continues to own merchant billing customers, ordinary merchant-scoped authentication, orders, subscriptions, payment authority and generic `CustomerRoutes` / `ResolveCustomer`. This plan removes no source, tests, schemas or queued jobs yet.
 
-## Gate before the removal patch
+## Gate before merging the removal patch
 
 - Qualify controlled dual-proof linking, explicit isolated-to-shared conversion, replay/conflict handling and original credential liveness in SaaS. Merely creating a platform account or seeing equal IDs/contacts is not proof.
 - Qualify unlink, consent withdrawal, account purge, merchant retirement, original AuthKit cursor continuation and bounded pruning. Keep live read authorization independent of eventual event consumption.
@@ -38,12 +38,12 @@ Do not remove code merely because a symbol contains “network”: Solana networ
 
 The candidate ends at migration0114. A separate notification lane already owns `0115_notification_issue_revisions.up.sql`. Allocate the next available number only after coordinating that lane; this plan reserves no core migration number.
 
-The removal migration needs explicit state handling under locks:
+Keep the procedural preflight separate from ordinary `DROP TABLE IF EXISTS` statements so SQLC sees the final absent tables. Use no `CASCADE`. The removal migration needs explicit state handling under locks:
 
 1. Intact legacy pair with any link row **or any cursor row**: refuse with an actionable transfer/export requirement. An empty-string cursor row is still reader state. Do not copy, delete or reset populated data.
 2. Intact empty legacy pair and no SaaS destination pair: drop the two old tables normally, without `CASCADE`; this is the fresh self-hosted path through the unchanged historical migration chain.
 3. Neither old table and a complete, qualified SaaS destination pair: leave SaaS storage and its FK untouched. This is the explicit offline-transfer path. Preserve the exact issuer/tenant/cursor/filter boundary and old retained event-log source.
-4. Partial/conflicting source/destination locations or unexpected dependencies: refuse. Do not resolve conflicting owners by deleting a supposedly empty table. Decide and test the already-removed standalone state against actual migration-ledger semantics before implementation.
+4. Partial/conflicting source/destination locations or unexpected dependencies: refuse. Do not resolve conflicting owners by deleting a supposedly empty table. If both source tables and both destinations are missing before this migration is first recorded, refuse rather than infer that historical data was empty. Normal already-migrated standalone restarts skip the recorded migration and remain valid.
 
 SaaS transfer PR133 at `8a5768e12927d3a0d9c633637043953776acad4b` qualifies the explicit transactional two-table move. Storage PR135 at `1993da326a6c308a8c530d1227da7377e30dbf73` qualifies fresh destination schema parity and repeated ownership checks. They do not qualify this future core removal migration.
 
