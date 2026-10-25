@@ -327,6 +327,7 @@ export const orderLineSchema = z.object({
   unit_amount: amount,
   amount: amount,
   billing_interval_hours: z.number().nullish(),
+  billing_interval_months: z.number().int().positive().nullish(),
   access_duration_hours: z.number().nullish(),
   subscription_id: z.string().nullish(),
   product_access_id: z.string().nullish(),
@@ -463,6 +464,7 @@ export const orderPreviewLineSchema = z.object({
   amount: amount,
   ownership: z.string(),
   billing_interval_hours: z.number().nullish(),
+  billing_interval_months: z.number().int().positive().nullish(),
   access_duration_hours: z.number().nullish(),
   refusal: orderLineRefusalSchema.nullish(),
 })

@@ -10,6 +10,7 @@ export function priceLabel(
     | "unit_amount"
     | "currency"
     | "billing_interval_hours"
+    | "billing_interval_months"
     | "access_duration_hours"
   >,
   scales: CurrencyScales,
@@ -19,6 +20,11 @@ export function priceLabel(
   const amount =
     formatMoney(price.unit_amount, price.currency, scales, locale) ??
     `${price.unit_amount} ${price.currency}`
+  if (price.billing_interval_months)
+    return m.t("products.recurring", {
+      amount,
+      every: m.plural("interval.every.month", price.billing_interval_months),
+    })
   const every = periodOf(price.billing_interval_hours)
   if (every)
     return m.t("products.recurring", {

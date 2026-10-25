@@ -62,6 +62,7 @@ export interface RawPrice {
   key?: string
   access_duration_hours?: number
   billing_interval_hours?: number
+  billing_interval_months?: number
   [k: string]: unknown
 }
 

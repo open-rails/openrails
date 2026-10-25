@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -21,7 +22,10 @@ type InitialMembershipTerms struct {
 	Rail models.Rail `json:"rail,omitempty"`
 	// RecurringIntervalHours freezes the ongoing cadence separately from an
 	// initial trial or prorated service period. Provider schedules require it.
-	RecurringIntervalHours *int `json:"recurring_interval_hours,omitempty"`
+	RecurringIntervalHours  *int       `json:"recurring_interval_hours,omitempty"`
+	RecurringIntervalMonths *int       `json:"recurring_interval_months,omitempty"`
+	CalendarAnchor          *time.Time `json:"calendar_anchor,omitempty"`
+	CalendarAccessDefault   bool       `json:"calendar_access_default,omitempty"`
 
 	LegacyEntitlements    map[string]*int         `json:"legacy_entitlements,omitzero"`
 	CancelAfterInitial    bool                    `json:"cancel_after_initial,omitempty"`
@@ -89,6 +93,20 @@ type ReplacedMembership struct {
 }
 
 func (t InitialMembershipTerms) Validate() error {
+	if t.RecurringIntervalMonths != nil {
+		if t.RecurringIntervalHours != nil || t.CollectionPolicy != models.CollectionPolicyEngine || t.Rail == models.RailSolana || t.CalendarAnchor == nil || t.Replaces != nil || t.Adds != nil {
+			return errors.New("calendar enrollment requires its original engine schedule")
+		}
+		end, err := calendarutil.NextBoundary(*t.CalendarAnchor, t.PeriodStart, *t.RecurringIntervalMonths)
+		if err != nil || !end.Equal(t.PeriodEnd) {
+			return errors.New("calendar enrollment contradicts its original anchor")
+		}
+		if t.CalendarAccessDefault && (t.AccessDurationHours == nil || *t.AccessDurationHours != int(t.PeriodEnd.Sub(t.PeriodStart)/time.Hour)) {
+			return errors.New("calendar enrollment access does not match its accepted period")
+		}
+	} else if t.CalendarAnchor != nil || t.CalendarAccessDefault {
+		return errors.New("calendar anchor requires a calendar cadence")
+	}
 	if t.RecurringIntervalHours != nil && *t.RecurringIntervalHours <= 0 || t.CollectionPolicy != models.CollectionPolicyEngine && t.RecurringIntervalHours == nil {
 		return errors.New("accepted provider enrollment requires its recurring cadence")
 	}

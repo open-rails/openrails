@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -37,11 +38,14 @@ type RenewalTerms struct {
 	ProductName           string          `json:"product_name"`
 	// Quantity is the seats of a per-seat price, nil otherwise; Amount is the
 	// unit price times Quantity.
-	Quantity    *int      `json:"quantity,omitempty"`
-	Amount      int64     `json:"amount,string"`
-	Currency    string    `json:"currency"`
-	PeriodStart time.Time `json:"period_start"`
-	PeriodEnd   time.Time `json:"period_end"`
+	Quantity                *int       `json:"quantity,omitempty"`
+	Amount                  int64      `json:"amount,string"`
+	Currency                string     `json:"currency"`
+	PeriodStart             time.Time  `json:"period_start"`
+	PeriodEnd               time.Time  `json:"period_end"`
+	RecurringIntervalMonths *int       `json:"recurring_interval_months,omitempty"`
+	CalendarAnchor          *time.Time `json:"calendar_anchor,omitempty"`
+	CalendarAccessDefault   bool       `json:"calendar_access_default,omitempty"`
 	// Entitlements is the keys a renewal admitted before product access, kept
 	// only to reproduce its provider binding. Access follows ProductID.
 	Entitlements json.RawMessage `json:"entitlements,omitempty"`
@@ -53,6 +57,20 @@ type RenewalTerms struct {
 func (t RenewalTerms) UnitAmount() int64 { return t.Amount / int64(SeatCount(t.Quantity)) }
 
 func (t RenewalTerms) Validate() error {
+	if t.RecurringIntervalMonths != nil {
+		if t.CalendarAnchor == nil {
+			return errors.New("calendar renewal has no original anchor")
+		}
+		end, err := calendarutil.NextBoundary(*t.CalendarAnchor, t.PeriodStart, *t.RecurringIntervalMonths)
+		if err != nil || !end.Equal(t.PeriodEnd) {
+			return errors.New("calendar renewal contradicts its original anchor")
+		}
+		if t.CalendarAccessDefault && (t.AccessDurationHours == nil || *t.AccessDurationHours != int(t.PeriodEnd.Sub(t.PeriodStart)/time.Hour)) {
+			return errors.New("calendar renewal access does not match its accepted period")
+		}
+	} else if t.CalendarAnchor != nil || t.CalendarAccessDefault {
+		return errors.New("calendar anchor requires a calendar cadence")
+	}
 	if err := validateAccessChoice(t.AccessDurationHours, t.ProviderAccessDefault); err != nil {
 		return err
 	}
@@ -115,6 +133,16 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		terms.AccessDurationHours = agreement.AccessDurationHours
 		terms.ProviderAccessDefault = agreement.ProviderAccessDefault
 		terms.PeriodEnd = terms.PeriodStart.Add(duration)
+		terms.RecurringIntervalMonths, terms.CalendarAnchor, terms.CalendarAccessDefault = agreement.RecurringIntervalMonths, agreement.CalendarAnchor, agreement.CalendarAccessDefault
+		if terms.RecurringIntervalMonths != nil {
+			terms.PeriodEnd, err = calendarutil.NextBoundary(*terms.CalendarAnchor, terms.PeriodStart, *terms.RecurringIntervalMonths)
+			if err != nil {
+				return terms, err
+			}
+			if terms.CalendarAccessDefault {
+				terms.AccessDurationHours = new(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour))
+			}
+		}
 	} else if agreement != nil {
 		return terms, errors.New("native renewal cannot substitute an engine agreement")
 	}
@@ -124,6 +152,9 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		return terms, fmt.Errorf("prepare renewal scheduled change: %w", err)
 	}
 	if change.IsDue(now) {
+		if agreement != nil && agreement.RecurringIntervalMonths != nil {
+			return terms, errors.New("calendar subscription plan changes are not supported")
+		}
 		if change.FromPriceID != sub.PriceID {
 			return terms, errors.New("renewal scheduled change contradicts the current subscription")
 		}

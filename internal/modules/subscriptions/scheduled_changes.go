@@ -65,6 +65,17 @@ func ScheduleChange(ctx context.Context, d *db.DB, sub *models.Subscription, c N
 	if err := RefuseOwnedRebillTerms(ctx, d, sub); err != nil {
 		return nil, err
 	}
+	if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		for _, id := range []uuid.UUID{sub.PriceID, c.PriceID} {
+			price, err := d.Gen(ctx).GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: sub.MerchantID, ID: id})
+			if err != nil {
+				return nil, err
+			}
+			if price.BillingIntervalMonths != nil {
+				return nil, apperr.Invalidf("calendar subscription plan changes are not supported")
+			}
+		}
+	}
 	return insertChange(ctx, d, sub, c, now)
 }
 

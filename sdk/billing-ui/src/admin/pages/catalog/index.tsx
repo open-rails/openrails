@@ -52,7 +52,7 @@ import {
   shortId,
   supportedCurrencies,
 } from "#orck/admin/lib/format"
-import { parseHours } from "#orck/admin/lib/duration"
+import { parseHours, parseBillingInterval } from "#orck/admin/lib/duration"
 
 import { CatalogApplicationDialog } from "#orck/admin/pages/catalog/application-dialog"
 import { CatalogCopilotPanel } from "#orck/admin/pages/catalog/copilot-panel"
@@ -741,6 +741,11 @@ const durationError = ({ value }: { value: string }) =>
     ? undefined
     : "Use hours, days or weeks, such as 30 days"
 
+const billingIntervalError = ({ value }: { value: string }) =>
+  !value || parseBillingInterval(value)
+    ? undefined
+    : "Use a fixed interval, such as 30 days, or a calendar interval, such as 1 month"
+
 function PriceDialog({ products }: { products: Product[] }) {
   const { toast, toastApiError, adminMutations } = useAdminServices()
 
@@ -761,10 +766,10 @@ function PriceDialog({ products }: { products: Product[] }) {
       const unitAmount = nativeAmountFromInput(value.amount, value.currency)
       if (unitAmount === null || BigInt(unitAmount) <= 0n) return
       const accessHours = parseHours(value.accessDuration)
-      const billingHours = parseHours(value.billingInterval)
+      const billing = parseBillingInterval(value.billingInterval)
       if (
         (value.accessDuration && !accessHours) ||
-        (value.billingInterval && !billingHours)
+        (value.billingInterval && !billing)
       )
         return
       try {
@@ -773,7 +778,7 @@ function PriceDialog({ products }: { products: Product[] }) {
           unit_amount: unitAmount,
           currency: value.currency,
           ...(accessHours ? { access_duration_hours: accessHours } : {}),
-          ...(billingHours ? { billing_interval_hours: billingHours } : {}),
+          ...billing,
         })
         form.reset()
         toast.success("Price created")
@@ -943,7 +948,7 @@ function PriceDialog({ products }: { products: Product[] }) {
             </form.Field>
             <form.Field
               name="billingInterval"
-              validators={{ onBlur: durationError }}
+              validators={{ onBlur: billingIntervalError }}
             >
               {(field) => (
                 <div className="grid gap-3 rounded-md border p-3">
@@ -963,7 +968,7 @@ function PriceDialog({ products }: { products: Product[] }) {
                     <Field
                       label={adminText("Billing interval")}
                       id={"pr-billing"}
-                      hint="Time between payments, such as 30 days, until the customer cancels."
+                      hint="Use 30 days for a fixed interval, or 1 month to keep the original billing day (UTC)."
                     >
                       <Input
                         id={adminId("pr-billing")}
@@ -1022,7 +1027,8 @@ function PriceDialog({ products }: { products: Product[] }) {
                     BigInt(nativeAmountFromInput(amount, currency) ?? "0") <=
                       0n ||
                     durationError({ value: accessDuration }) !== undefined ||
-                    durationError({ value: billingInterval }) !== undefined
+                    billingIntervalError({ value: billingInterval }) !==
+                      undefined
                   }
                 >
                   {isSubmitting ? "Creating…" : "Create price"}
@@ -1043,7 +1049,9 @@ function DriftTab() {
   const queryClient = useQueryClient()
   const canRead = useMerchantConfig()
   const canRefresh = useMerchantConfigUpdates()
-  const { data, isPending: loading } = useQuery(adminQueries.catalogDrift(canRead))
+  const { data, isPending: loading } = useQuery(
+    adminQueries.catalogDrift(canRead)
+  )
   const refreshDrift = useMutation(adminMutations.refreshPSPs(queryClient))
 
   return (

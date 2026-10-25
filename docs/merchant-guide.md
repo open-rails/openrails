@@ -93,13 +93,15 @@ Price fields worth knowing:
 | `amount` | decimal plus explicit currency, such as `9.99 USD`; sets amount and currency together |
 | `unit_amount`, `currency` | numeric alternative: integer native units at the registered scale plus a currency code; JSON applications spell `unit_amount` as a decimal string |
 | `access_duration` | how long access lasts, such as `30 days`. Omitted: a recurring price's billing interval, a one-off's `forever`. `forever` (never expires) is for one-off prices only; `access_duration_hours` is the numeric form |
-| `billing_interval` | time between recurring payments, such as `30 days`, or null for a one-time purchase; independent of access duration; `billing_interval_hours` is the numeric form |
+| `billing_interval` | fixed duration such as `30 days`, or a calendar interval such as `1 month`; null for a one-time purchase. Numeric forms are `billing_interval_hours` or `billing_interval_months`, never both. |
 | `trial_unit_amount`, `trial_duration` | first-phase terms; supply both together with a billing interval; `trial_duration_hours` is the numeric form |
 | `archived` | explicit true retires, explicit false reactivates; omission preserves an existing value |
 | `sell_via` | the methods the price sells through: `card` (the merchant's `card_vault` and `charge_psps`) and `solana`; null or omitted on a new price: every method the merchant has. Not a term: changing it keeps the version |
 
 Trial terms are supported only on rails with native trial settlement; current
 engine-managed purchase refuses trials before charging.
+
+Calendar billing retains the original UTC day through short months (January 31 → February 28 → March 31). Fixed `30 days` remains exactly 720 hours. [Billing intervals](billing-intervals.md) describes supported combinations and accepted-anchor behavior.
 
 **A one-time purchase** — null `billing_interval`; access is forever unless
 `access_duration` sets a rental:

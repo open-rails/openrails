@@ -258,8 +258,11 @@ func sameEngineMethodRequest(a, b *uuid.UUID) bool {
 
 // RenewalOrderOf is the renewal order of terms' period.
 func RenewalOrderOf(terms subscriptions.RenewalTerms) orders.Renewal {
-	hours := int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour)
+	hours := new(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour))
+	if terms.RecurringIntervalMonths != nil {
+		hours = nil
+	}
 	return orders.Renewal{SubscriptionID: terms.SubscriptionID, CustomerID: terms.CustomerID, PriceID: terms.PriceID, ProductID: terms.ProductID,
 		Description: terms.ProductName, Quantity: terms.Quantity, Amount: terms.Amount, Currency: terms.Currency,
-		PeriodStart: terms.PeriodStart, PeriodEnd: terms.PeriodEnd, BillingIntervalHours: &hours, AccessDurationHours: terms.AccessDurationHours}
+		PeriodStart: terms.PeriodStart, PeriodEnd: terms.PeriodEnd, BillingIntervalHours: hours, BillingIntervalMonths: terms.RecurringIntervalMonths, AccessDurationHours: terms.AccessDurationHours}
 }

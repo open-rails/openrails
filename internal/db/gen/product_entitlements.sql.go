@@ -106,8 +106,8 @@ JOIN billing.products pa ON pa.merchant_id = a.merchant_id AND pa.id = a.product
 JOIN billing.products pb ON pb.merchant_id = b.merchant_id AND pb.id = b.product_id
 WHERE a.merchant_id = $1::uuid AND a.removed_at IS NULL
   AND (pa.tier_group IS NULL OR pb.tier_group IS NULL OR pa.tier_group <> pb.tier_group)
-  AND EXISTS (SELECT 1 FROM billing.prices x WHERE x.merchant_id = pa.merchant_id AND x.product_id = pa.id AND x.billing_interval_hours IS NOT NULL)
-  AND EXISTS (SELECT 1 FROM billing.prices y WHERE y.merchant_id = pb.merchant_id AND y.product_id = pb.id AND y.billing_interval_hours IS NOT NULL)
+  AND EXISTS (SELECT 1 FROM billing.prices x WHERE x.merchant_id = pa.merchant_id AND x.product_id = pa.id AND (x.billing_interval_hours IS NOT NULL OR x.billing_interval_months IS NOT NULL))
+  AND EXISTS (SELECT 1 FROM billing.prices y WHERE y.merchant_id = pb.merchant_id AND y.product_id = pb.id AND (y.billing_interval_hours IS NOT NULL OR y.billing_interval_months IS NOT NULL))
 ORDER BY a.entitlement, pa.key, pb.key
 LIMIT 1000
 `

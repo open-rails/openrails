@@ -46,7 +46,10 @@ func (s *OrderAttemptService) railSkipReason(price *models.Price, target railTar
 		return models.PSPRoutingSkipModeUnsupported
 	}
 	subscription := mode == models.PurchaseSubscription
-	if subscription && (price.Amount <= 0 || price.RecurringCycleHours() == nil) {
+	if subscription && (price.Amount <= 0 || !price.IsRecurring() || price.ProviderOwned && price.RecurringCycleHours() == nil) {
+		return models.PSPRoutingSkipModeUnsupported
+	}
+	if !price.ProviderOwned && price.BillingIntervalMonths != nil && rail != models.RailStripe && rail != models.RailNMI {
 		return models.PSPRoutingSkipModeUnsupported
 	}
 	trial := price.TrialUnitAmount != nil || price.TrialDurationHours != nil

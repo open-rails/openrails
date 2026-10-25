@@ -448,7 +448,7 @@ func createPricePlan(req billing.CreatePriceParams) catalogClassification {
 		}
 		fields := map[string]json.RawMessage{
 			"currency": catalogJSON(req.Currency), "unit_amount": catalogMoney(req.UnitAmount), "access_duration_hours": catalogJSON(req.AccessDurationHours),
-			"billing_interval_hours": catalogJSON(req.BillingIntervalHours), "trial_unit_amount": catalogOptionalMoney(req.TrialUnitAmount),
+			"billing_interval_hours": catalogJSON(req.BillingIntervalHours), "billing_interval_months": catalogJSON(req.BillingIntervalMonths), "trial_unit_amount": catalogOptionalMoney(req.TrialUnitAmount),
 			"trial_duration_hours": catalogJSON(req.TrialDurationHours), "archived": catalogJSON(req.Archived), "customer_amount": catalogJSON(req.CustomerAmount), "quantity": catalogJSON(req.Quantity),
 		}
 		if req.SellVia != nil {

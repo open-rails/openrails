@@ -558,6 +558,9 @@ func catalogApplicationPriceRequest(product *billing.Product, key string, decl c
 		}
 		if current == nil && len(byKey[key]) > 1 {
 			for _, prior := range byKey[key] {
+				if prior.BillingIntervalMonths != nil && !decl.BillingIntervalMonths.Set {
+					return nil, req, apperr.Invalidf("archived calendar price key %q is ambiguous; select a price id or include billing_interval_months", key)
+				}
 				if prior.CustomerAmount != nil && !decl.CustomerAmount.Set {
 					return nil, req, apperr.Invalidf("archived deposit key %q is ambiguous; select a price id or include customer_amount in complete terms", key)
 				}
@@ -575,6 +578,7 @@ func catalogApplicationPriceRequest(product *billing.Product, key string, decl c
 		req.Currency = current.Currency
 		req.AccessDurationHours = current.AccessDurationHours
 		req.BillingIntervalHours = current.BillingIntervalHours
+		req.BillingIntervalMonths = current.BillingIntervalMonths
 		req.TrialUnitAmount = current.TrialUnitAmount
 		req.TrialDurationHours = current.TrialDurationHours
 		req.Archived = current.Archived
@@ -616,10 +620,21 @@ func catalogApplicationPriceRequest(product *billing.Product, key string, decl c
 		}
 	}
 	if decl.BillingIntervalHours.Set {
+		req.BillingIntervalMonths = nil
 		req.BillingIntervalHours = nil
 		if !decl.BillingIntervalHours.Null {
 			req.BillingIntervalHours = &decl.BillingIntervalHours.Value
 		}
+	}
+	if decl.BillingIntervalMonths.Set {
+		req.BillingIntervalMonths = nil
+		if !decl.BillingIntervalMonths.Null {
+			req.BillingIntervalHours = nil
+			req.BillingIntervalMonths = &decl.BillingIntervalMonths.Value
+		}
+	}
+	if req.BillingIntervalMonths != nil && !decl.AccessDurationHours.Set && current != nil && current.BillingIntervalMonths == nil && reflect.DeepEqual(current.AccessDurationHours, current.BillingIntervalHours) {
+		req.AccessDurationHours = nil
 	}
 	// A recurring price's access follows its billing interval unless declared,
 	// or the key already grants access of another length; never forever.

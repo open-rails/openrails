@@ -368,7 +368,7 @@ func readableCatalogValue(field string, raw json.RawMessage, currency string) st
 				return fmt.Sprintf("%d micros", amount)
 			}
 		}
-	case "access_duration_hours", "billing_interval_hours", "trial_duration_hours":
+	case "access_duration_hours", "billing_interval_hours", "billing_interval_months", "trial_duration_hours":
 		var hours int
 		if json.Unmarshal(raw, &hours) == nil {
 			return cadence.FormatHours(hours)

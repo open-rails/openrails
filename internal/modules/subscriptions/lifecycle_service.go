@@ -322,6 +322,9 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	var err error
 	if terms := params.Prepared; terms != nil {
 		price = &models.Price{ID: terms.PriceID, ProductID: terms.ProductID, Amount: terms.RecurringAmount, Currency: terms.Currency, BillingIntervalHours: new(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour)), AccessDurationHours: terms.AccessDurationHours, ProviderAccessDefault: terms.ProviderAccessDefault}
+		if terms.RecurringIntervalMonths != nil {
+			price.BillingIntervalHours, price.BillingIntervalMonths = nil, terms.RecurringIntervalMonths
+		}
 	} else {
 		price, err = priceService.GetByID(ctx, params.PriceID)
 	}

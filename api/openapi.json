@@ -13269,6 +13269,18 @@
               }
             ]
           },
+          "billing_interval_months": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "archived": {
             "oneOf": [
               {
@@ -13347,7 +13359,7 @@
             "oneOf": [
               {
                 "type": "string",
-                "description": "A positive whole number of hours, days, or weeks; for example, 72 hours or 3 days. Normalized to access_duration_hours. Calendar months and years are not supported."
+                "description": "A positive whole number of hours, days, or weeks, normalized to access_duration_hours. Calendar units are not fixed durations."
               },
               {
                 "type": "null"
@@ -13358,7 +13370,7 @@
             "oneOf": [
               {
                 "type": "string",
-                "description": "A positive whole number of hours, days, or weeks; for example, 72 hours or 3 days. Normalized to billing_interval_hours. Calendar months and years are not supported."
+                "description": "A positive fixed duration (30 days) or calendar interval (1 month, 1 year). Calendar years normalize to twelve months; month anchors use UTC and clamp only the target month."
               },
               {
                 "type": "null"
@@ -13369,7 +13381,7 @@
             "oneOf": [
               {
                 "type": "string",
-                "description": "A positive whole number of hours, days, or weeks; for example, 72 hours or 3 days. Normalized to trial_duration_hours. Calendar months and years are not supported."
+                "description": "A positive whole number of hours, days, or weeks, normalized to trial_duration_hours. Calendar units are not fixed durations."
               },
               {
                 "type": "null"
@@ -13399,6 +13411,14 @@
               "required": [
                 "trial_duration",
                 "trial_duration_hours"
+              ]
+            }
+          },
+          {
+            "not": {
+              "required": [
+                "billing_interval",
+                "billing_interval_months"
               ]
             }
           },
@@ -15241,6 +15261,9 @@
             "type": "integer"
           },
           "billing_interval_hours": {
+            "type": "integer"
+          },
+          "billing_interval_months": {
             "type": "integer"
           },
           "trial_unit_amount": {
@@ -18970,6 +18993,16 @@
               }
             ]
           },
+          "billing_interval_months": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "access_duration_hours": {
             "oneOf": [
               {
@@ -19012,6 +19045,7 @@
           "amount",
           "ownership",
           "billing_interval_hours",
+          "billing_interval_months",
           "access_duration_hours",
           "subscription_id",
           "product_access_id"
@@ -19290,6 +19324,16 @@
               }
             ]
           },
+          "billing_interval_months": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "access_duration_hours": {
             "oneOf": [
               {
@@ -19320,6 +19364,7 @@
           "amount",
           "ownership",
           "billing_interval_hours",
+          "billing_interval_months",
           "access_duration_hours",
           "refusal"
         ]

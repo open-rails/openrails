@@ -168,14 +168,14 @@ func (q *Queries) CreateOrderAttempt(ctx context.Context, arg CreateOrderAttempt
 const createOrderLine = `-- name: CreateOrderLine :exec
 INSERT INTO billing.order_lines (
     merchant_id, id, order_id, customer_id, "position", price_id, product_id, description,
-    quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours,
+    quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, billing_interval_months,
     access_duration_hours, provider_access_default, credit_grant, created_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::uuid,
     $5::int, $6::uuid, $7::uuid, $8::text,
     $9::int, $10::bigint, $11::bigint, $12::text,
-    $13::text, $14::int, $15::int, $16::boolean,
-    $17::jsonb, $18::timestamptz
+    $13::text, $14::int, $15::int, $16::int, $17::boolean,
+    $18::jsonb, $19::timestamptz
 )
 `
 
@@ -194,6 +194,7 @@ type CreateOrderLineParams struct {
 	Ownership             string
 	ClaimKey              *string
 	BillingIntervalHours  *int32
+	BillingIntervalMonths *int32
 	AccessDurationHours   *int32
 	ProviderAccessDefault bool
 	CreditGrant           []byte
@@ -216,6 +217,7 @@ func (q *Queries) CreateOrderLine(ctx context.Context, arg CreateOrderLineParams
 		arg.Ownership,
 		arg.ClaimKey,
 		arg.BillingIntervalHours,
+		arg.BillingIntervalMonths,
 		arg.AccessDurationHours,
 		arg.ProviderAccessDefault,
 		arg.CreditGrant,
@@ -665,7 +667,7 @@ func (q *Queries) GetOrderByIdempotencyKey(ctx context.Context, arg GetOrderById
 }
 
 const getOrderLine = `-- name: GetOrderLine :one
-SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source, provider_amount, provider_access_default FROM billing.order_lines
+SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source, provider_amount, provider_access_default, billing_interval_months FROM billing.order_lines
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -700,12 +702,13 @@ func (q *Queries) GetOrderLine(ctx context.Context, arg GetOrderLineParams) (Bil
 		&i.Source,
 		&i.ProviderAmount,
 		&i.ProviderAccessDefault,
+		&i.BillingIntervalMonths,
 	)
 	return i, err
 }
 
 const getOrderLineBySubscription = `-- name: GetOrderLineBySubscription :one
-SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source, provider_amount, provider_access_default FROM billing.order_lines
+SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source, provider_amount, provider_access_default, billing_interval_months FROM billing.order_lines
 WHERE merchant_id = $1::uuid AND order_id = $2::uuid
   AND subscription_id = $3::uuid
 `
@@ -744,6 +747,7 @@ func (q *Queries) GetOrderLineBySubscription(ctx context.Context, arg GetOrderLi
 		&i.Source,
 		&i.ProviderAmount,
 		&i.ProviderAccessDefault,
+		&i.BillingIntervalMonths,
 	)
 	return i, err
 }
@@ -980,7 +984,7 @@ func (q *Queries) ListLiveOwnership(ctx context.Context, arg ListLiveOwnershipPa
 }
 
 const listOrderLines = `-- name: ListOrderLines :many
-SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source, provider_amount, provider_access_default FROM billing.order_lines
+SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source, provider_amount, provider_access_default, billing_interval_months FROM billing.order_lines
 WHERE merchant_id = $1::uuid AND order_id = ANY($2::uuid[])
 ORDER BY order_id, "position"
 `
@@ -1022,6 +1026,7 @@ func (q *Queries) ListOrderLines(ctx context.Context, arg ListOrderLinesParams) 
 			&i.Source,
 			&i.ProviderAmount,
 			&i.ProviderAccessDefault,
+			&i.BillingIntervalMonths,
 		); err != nil {
 			return nil, err
 		}

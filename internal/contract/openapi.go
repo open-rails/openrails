@@ -143,8 +143,12 @@ func (m *model) objectSchema(o *object) *obj {
 	if o.t == reflect.TypeFor[catalog.ApplyPrice]() {
 		var aliases []any
 		for _, name := range []string{"access_duration", "billing_interval", "trial_duration"} {
+			description := "A positive whole number of hours, days, or weeks, normalized to " + name + "_hours. Calendar units are not fixed durations."
+			if name == "billing_interval" {
+				description = "A positive fixed duration (30 days) or calendar interval (1 month, 1 year). Calendar years normalize to twelve months; month anchors use UTC and clamp only the target month."
+			}
 			props.set(name, newObj("oneOf", []any{
-				newObj("type", "string", "description", "A positive whole number of hours, days, or weeks; for example, 72 hours or 3 days. Normalized to "+name+"_hours. Calendar months and years are not supported."),
+				newObj("type", "string", "description", description),
 				newObj("type", "null"),
 			}))
 			props.set(name+"_hours", newObj("oneOf", []any{
@@ -153,6 +157,8 @@ func (m *model) objectSchema(o *object) *obj {
 			}))
 			aliases = append(aliases, newObj("not", newObj("required", []string{name, name + "_hours"})))
 		}
+		props.set("billing_interval_months", newObj("oneOf", []any{newObj("type", "integer", "minimum", 1, "maximum", 1200), newObj("type", "null")}))
+		aliases = append(aliases, newObj("not", newObj("required", []string{"billing_interval", "billing_interval_months"})))
 		props.set("amount", newObj("type", "string", "description", "A non-negative plain decimal followed by its required registered currency. Uses the currency's native precision exactly, without rounding or currency conversion. Cannot be combined with unit_amount or currency.", "examples", []string{"9.99 USD", "1 SOL", "10 USDC"}))
 		for _, name := range []string{"unit_amount", "currency"} {
 			aliases = append(aliases, newObj("not", newObj("required", []string{"amount", name})))

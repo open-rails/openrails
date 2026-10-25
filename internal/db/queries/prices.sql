@@ -157,6 +157,7 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND product_id=sqlc.arg(product_id
   AND amount=sqlc.arg(amount)::bigint AND currency=sqlc.arg(currency)::text
   AND access_duration_hours IS NOT DISTINCT FROM sqlc.narg(access_duration_hours)::int
   AND billing_interval_hours IS NOT DISTINCT FROM sqlc.narg(billing_interval_hours)::int
+  AND billing_interval_months IS NOT DISTINCT FROM sqlc.narg(billing_interval_months)::int
   AND trial_unit_amount IS NOT DISTINCT FROM sqlc.narg(trial_unit_amount)::bigint
   AND trial_duration_hours IS NOT DISTINCT FROM sqlc.narg(trial_duration_hours)::int
   AND customer_amount IS NOT DISTINCT FROM sqlc.narg(customer_amount)::jsonb

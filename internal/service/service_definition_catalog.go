@@ -332,6 +332,9 @@ func priceDeterministicID(productID uuid.UUID, key string, amount int64, currenc
 // stored price already holds them.
 func newPriceID(productID uuid.UUID, key string, req billing.CreatePriceParams) uuid.UUID {
 	id := priceDeterministicID(productID, key, req.UnitAmount, req.Currency, req.AccessDurationHours, req.BillingIntervalHours, req.TrialUnitAmount, req.TrialDurationHours)
+	if req.BillingIntervalMonths != nil {
+		id = uuidutil.DeterministicID(id, "calendar_months", strconv.Itoa(*req.BillingIntervalMonths))
+	}
 	if req.CustomerAmount != nil {
 		id = uuidutil.DeterministicID(id, "customer_amount", strconv.FormatInt(req.CustomerAmount.MinAmount, 10), strconv.FormatInt(req.CustomerAmount.MaxAmount, 10))
 	}
@@ -657,11 +660,22 @@ func defaultRecurringAccess(req *billing.CreatePriceParams) {
 }
 
 func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
+	if req.BillingIntervalMonths != nil {
+		if req.BillingIntervalHours != nil || *req.BillingIntervalMonths < 1 || *req.BillingIntervalMonths > 1200 {
+			return apperr.Invalidf("billing_interval_months must be 1 to 1200 and cannot be combined with billing_interval_hours")
+		}
+		if req.TrialUnitAmount != nil || req.TrialDurationHours != nil || req.Quantity != nil {
+			return apperr.Invalidf("calendar prices do not yet support trials or per-seat quantities")
+		}
+		if len(req.SellVia) == 1 && req.SellVia[0] == models.SellViaSolana {
+			return apperr.Invalidf("calendar prices require Stripe or NMI engine collection")
+		}
+	}
 	if err := catalogwire.ValidateSellVia(req.SellVia); err != nil {
 		return apperr.Invalidf("%v", err)
 	}
 	if req.CustomerAmount != nil {
-		if req.UnitAmount != 0 || req.BillingIntervalHours != nil || req.AccessDurationHours != nil || req.TrialUnitAmount != nil || req.TrialDurationHours != nil {
+		if req.UnitAmount != 0 || req.BillingIntervalHours != nil || req.BillingIntervalMonths != nil || req.AccessDurationHours != nil || req.TrialUnitAmount != nil || req.TrialDurationHours != nil {
 			return apperr.Invalidf("customer_amount requires a one-off price with unit_amount zero and no access or trial duration")
 		}
 		if req.CustomerAmount.MinAmount <= 0 || req.CustomerAmount.MaxAmount < req.CustomerAmount.MinAmount {
@@ -724,7 +738,7 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 // was minted. Financial identity includes the product-local key.
 func samePriceTerms(p billing.Price, req billing.CreatePriceParams) bool {
 	return p.ProductID == req.ProductID && p.Key == req.Key && p.UnitAmount == req.UnitAmount && strings.EqualFold(p.Currency, req.Currency) &&
-		reflect.DeepEqual(p.BillingIntervalHours, req.BillingIntervalHours) && reflect.DeepEqual(p.AccessDurationHours, req.AccessDurationHours) &&
+		reflect.DeepEqual(p.BillingIntervalHours, req.BillingIntervalHours) && reflect.DeepEqual(p.BillingIntervalMonths, req.BillingIntervalMonths) && reflect.DeepEqual(p.AccessDurationHours, req.AccessDurationHours) &&
 		reflect.DeepEqual(p.TrialUnitAmount, req.TrialUnitAmount) && reflect.DeepEqual(p.TrialDurationHours, req.TrialDurationHours) && reflect.DeepEqual(p.CustomerAmount, req.CustomerAmount) &&
 		reflect.DeepEqual(p.Quantity, req.Quantity)
 }

@@ -214,7 +214,7 @@ func (s *OrderAttemptService) ccbillStandIns(ctx context.Context, price *models.
 // sameSaleTerms reports two prices a customer pays and is granted alike.
 func sameSaleTerms(a, b *models.Price) bool {
 	eq := func(x, y *int) bool { return x == nil && y == nil || x != nil && y != nil && *x == *y }
-	return a.Amount == b.Amount && a.Currency == b.Currency && eq(a.BillingIntervalHours, b.BillingIntervalHours) && eq(a.AccessDurationHours, saleAccessHours(b)) &&
+	return a.Amount == b.Amount && a.Currency == b.Currency && eq(a.BillingIntervalHours, b.BillingIntervalHours) && eq(a.BillingIntervalMonths, b.BillingIntervalMonths) && eq(a.AccessDurationHours, saleAccessHours(b)) &&
 		a.TrialUnitAmount == nil && b.TrialUnitAmount == nil && a.Quantity == nil && b.Quantity == nil
 }
 

@@ -620,7 +620,7 @@ func (s *PriceService) FindByTerms(ctx context.Context, req billing.CreatePriceP
 	row, err := s.db.Gen(ctx).GetPriceByTerms(ctx, gen.GetPriceByTermsParams{
 		Quantity:   quantity,
 		MerchantID: mid.UUID(), ProductID: req.ProductID.UUID(), Key: key,
-		Amount: req.UnitAmount, Currency: req.Currency, AccessDurationHours: models.IntPtrTo32(req.AccessDurationHours), BillingIntervalHours: models.IntPtrTo32(req.BillingIntervalHours),
+		Amount: req.UnitAmount, Currency: req.Currency, AccessDurationHours: models.IntPtrTo32(req.AccessDurationHours), BillingIntervalHours: models.IntPtrTo32(req.BillingIntervalHours), BillingIntervalMonths: models.IntPtrTo32(req.BillingIntervalMonths),
 		TrialUnitAmount: req.TrialUnitAmount, TrialDurationHours: models.IntPtrTo32(req.TrialDurationHours), CustomerAmount: customAmount,
 	})
 	if err != nil {

@@ -114,6 +114,7 @@ migration 0112_network_event_cursor.up.sql sha256:fe38ca31bba8bf4364f2e1309a3106
 migration 0113_shared_eventlog_contract.up.sql sha256:15e7ef39ceaa6a0553473b8fab7772731b80aeadeb034f26e8c8680840683895
 migration 0114_account_usage_billing.up.sql sha256:1b818744089d9dc86b08b384be8610120c5b30147cce99e2fbf51f3dd9cdc713
 migration 0115_notification_issue_revisions.up.sql sha256:f720b146566426f56c3b85c5051b07ede1283b9e3e06ca5f1395703e2673a3bd
+migration 0116_calendar_billing_intervals.up.sql sha256:768d25ac275ed7183fc721bd75da8b681934264c1cc9c8de82f6ec6bbc32bba9
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1357,9 +1358,11 @@ table billing.order_lines
   column source text
   column provider_amount boolean NOT NULL DEFAULT false
   column provider_access_default boolean NOT NULL DEFAULT false
+  column billing_interval_months integer
   constraint order_lines_access_duration_hours_check CHECK ((access_duration_hours > 0))
   constraint order_lines_amount_check CHECK ((((NOT provider_amount) AND (unit_amount >= 0) AND (amount = (unit_amount * COALESCE(quantity, 1)))) OR (provider_amount AND ((amount >= 0) OR (source = 'provider_adjustment'::text)))))
   constraint order_lines_billing_interval_hours_check CHECK ((billing_interval_hours > 0))
+  constraint order_lines_calendar_cadence_check CHECK (((billing_interval_months IS NULL) OR ((billing_interval_hours IS NULL) AND ((billing_interval_months >= 1) AND (billing_interval_months <= 1200)))))
   constraint order_lines_claim_key_check CHECK (((claim_key IS NOT NULL) = (ownership = 'unique'::text)))
   constraint order_lines_description_check CHECK ((description <> ''::text))
   constraint order_lines_order_id_fkey FOREIGN KEY (merchant_id, customer_id, order_id) REFERENCES billing.orders(merchant_id, customer_id, id) ON DELETE CASCADE
@@ -1371,7 +1374,7 @@ table billing.order_lines
   constraint order_lines_product_access_id_fkey FOREIGN KEY (merchant_id, product_access_id) REFERENCES billing.product_access(merchant_id, id)
   constraint order_lines_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
   constraint order_lines_provider_access_choice_check CHECK (((NOT provider_access_default) OR (access_duration_hours IS NULL)))
-  constraint order_lines_quantified_check CHECK (((quantity IS NOT NULL) OR (billing_interval_hours IS NOT NULL) OR (source IS NOT NULL)))
+  constraint order_lines_quantified_check CHECK (((quantity IS NOT NULL) OR (billing_interval_hours IS NOT NULL) OR (billing_interval_months IS NOT NULL) OR (source IS NOT NULL)))
   constraint order_lines_quantity_check CHECK ((quantity >= 1))
   constraint order_lines_seats_check CHECK (((quantity IS NULL) OR (quantity = 1) OR (ownership = 'consumable'::text) OR (billing_interval_hours IS NOT NULL)))
   constraint order_lines_source_check CHECK ((((source IS NULL) = ((price_id IS NOT NULL) AND (product_id IS NOT NULL) AND (ownership IS NOT NULL))) AND (source <> ''::text)))
@@ -1943,7 +1946,7 @@ table billing.prices
   constraint prices_access_duration_positive_check CHECK (((access_duration_hours IS NULL) OR (access_duration_hours > 0)))
   constraint prices_amount_nonneg_check CHECK ((amount >= 0))
   constraint prices_billing_interval_positive_check CHECK (((billing_interval_hours IS NULL) OR (billing_interval_hours > 0)))
-  constraint prices_calendar_cadence_check CHECK (((billing_interval_months IS NULL) OR (provider_owned AND (billing_interval_hours IS NULL) AND ((billing_interval_months >= 1) AND (billing_interval_months <= 1200)))))
+  constraint prices_calendar_cadence_check CHECK (((billing_interval_months IS NULL) OR ((billing_interval_hours IS NULL) AND (customer_amount IS NULL) AND ((billing_interval_months >= 1) AND (billing_interval_months <= 1200)))))
   constraint prices_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint prices_customer_amount_terms CHECK (((customer_amount IS NULL) OR ((jsonb_typeof(customer_amount) = 'object'::text) AND (amount = 0) AND (billing_interval_hours IS NULL) AND (access_duration_hours IS NULL) AND (trial_unit_amount IS NULL) AND (trial_duration_hours IS NULL) AND (customer_amount ? 'min_amount'::text) AND (customer_amount ? 'max_amount'::text) AND COALESCE((((customer_amount ->> 'min_amount'::text))::bigint > 0), false) AND COALESCE((((customer_amount ->> 'max_amount'::text))::bigint >= ((customer_amount ->> 'min_amount'::text))::bigint), false))))
   constraint prices_deleted_archived_check CHECK (((deleted_at IS NULL) OR archived))

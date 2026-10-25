@@ -22,13 +22,16 @@ func resolvePriceKey(product *models.Product, req billing.CreatePriceParams) (st
 	if key != "" {
 		return key, false
 	}
+	if req.BillingIntervalMonths != nil {
+		return fmt.Sprintf("%s-%d-months", product.Key, *req.BillingIntervalMonths), true
+	}
 	return product.Key + "-" + cadence.PriceIntervalLabel(req.BillingIntervalHours), true
 }
 
 // defaultKeyCadenceConflict refuses a defaulted key whose current holder bills
 // on another cadence: a default key never repoints across cadences.
 func defaultKeyCadenceConflict(defaulted bool, holder *models.Price, req billing.CreatePriceParams, key string) error {
-	if !defaulted || holder == nil || cadence.Same(holder.BillingIntervalHours, req.BillingIntervalHours) {
+	if !defaulted || holder == nil || cadence.Same(holder.BillingIntervalHours, req.BillingIntervalHours) && cadence.Same(holder.BillingIntervalMonths, req.BillingIntervalMonths) {
 		return nil
 	}
 	return fmt.Errorf("%w: default key %q is held by price %s on another cadence; supply an explicit key", ErrPriceKeyCadenceConflict, key, holder.ID)

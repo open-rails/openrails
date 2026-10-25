@@ -14,6 +14,7 @@ import (
 )
 
 var initialMembershipTermsJSON = object(map[string]jsonRule{"collection_policy": textValue, "subscription_id": uuidValue, "payment_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "product_id": uuidValue, "price_id": uuidValue, "payment_method_id": uuidValue, "product_name": textValue, "quantity": integerValue, "amount": moneyStringValue, "recurring_amount": moneyStringValue, "currency": textValue, "accepted_at": textValue, "period_start": textValue, "period_end": textValue, "pending": booleanValue, "cancel_after_initial": booleanValue, "access_duration_hours": nullable(integerValue), "provider_access_default": booleanValue, "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)),
+	"recurring_interval_months": integerValue, "calendar_anchor": textValue, "calendar_access_default": booleanValue,
 	"replaces": object(map[string]jsonRule{"subscription_id": uuidValue, "price_id": uuidValue, "period_end": textValue, "credit": moneyStringValue}),
 	"adds":     object(map[string]jsonRule{"from_quantity": integerValue})})
 
@@ -35,7 +36,7 @@ var acceptedRenewalJSON = object(map[string]jsonRule{
 	"product_name": textValue, "quantity": integerValue, "amount": moneyStringValue, "currency": textValue,
 	"period_start": textValue, "period_end": textValue, "access_duration_hours": nullable(integerValue), "provider_access_default": booleanValue,
 	"entitlements": nullable(acceptedEntitlementsJSON), "legacy_entitlements": dictionary(nullable(integerValue)), "previous_entitlements": nullable(acceptedEntitlementsJSON),
-	"scheduled_change_id": uuidValue,
+	"scheduled_change_id": uuidValue, "recurring_interval_months": integerValue, "calendar_anchor": textValue, "calendar_access_default": booleanValue,
 })
 
 // mandateJSON is the mandate lineage an operation cites; it is not card data.

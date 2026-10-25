@@ -144,6 +144,7 @@ export type ApplyPrice = {
   unit_amount?: string | null
   access_duration_hours?: number | null
   billing_interval_hours?: number | null
+  billing_interval_months?: number | null
   archived?: boolean | null
   trial_unit_amount?: string | null
   trial_duration_hours?: number | null
@@ -589,6 +590,7 @@ export type CreatePriceParams = {
   currency: string
   access_duration_hours?: number
   billing_interval_hours?: number
+  billing_interval_months?: number
   trial_unit_amount?: string
   trial_duration_hours?: number
   sell_via?: string[]
@@ -1440,6 +1442,7 @@ export type OrderLine = {
   amount: string
   ownership: "consumable" | "extend" | "unique" | null
   billing_interval_hours: number | null
+  billing_interval_months: number | null
   access_duration_hours: number | null
   subscription_id: string | null
   product_access_id: string | null
@@ -1508,6 +1511,7 @@ export type OrderPreviewLine = {
   amount: string
   ownership: "consumable" | "extend" | "unique"
   billing_interval_hours: number | null
+  billing_interval_months: number | null
   access_duration_hours: number | null
   refusal: OrderLineRefusal | null
 }

@@ -25,6 +25,25 @@
     "OR-J01-S08": [
       "TestAuthorityBoundaries/OR-J01-S08/real-authority-storage-failure-denies-mutations"
     ],
+    "OR-J01-S09": [
+      "TestCustomerBindingContracts/OR-J01-S09/host-mapping-preserves-source-and-owned-customer-views",
+      "TestCustomerBindingContracts/OR-J01-S09/standalone-mapping-does-not-enroll-a-network-account"
+    ],
+    "OR-J01-S10": [
+      "TestCustomerBindingContracts/OR-J01-S10/mapped-customer-keeps-next-action-idempotency-and-original-step-up"
+    ],
+    "OR-J01-S12": [
+      "TestCustomerProofResolution/OR-J01-S12/existing-native-customer-proof-is-read-only"
+    ],
+    "OR-J01-S13": [
+      "TestCustomerProofResolution/OR-J01-S13/customer-proof-preserves-issuer-tenant-and-credential-boundaries"
+    ],
+    "OR-J01-S14": [
+      "TestCustomerProofResolution/OR-J01-S14/asserted-and-sender-bound-resource-proofs-retain-source-authority"
+    ],
+    "OR-J01-S15": [
+      "TestCustomerProofResolution/OR-J01-S15/expiry-revocation-and-storage-failure-refuse-retained-customer-proof"
+    ],
     "OR-J02-S01": [
       "TestNetworkContracts/OR-J02-S01/both-real-identities-link-through-consented-one-use-proof"
     ],
@@ -122,6 +141,9 @@
     "OR-J07-S04": [
       "TestCustomerDirectory/OR-J07-S04/live-host-directory-exposes-no-copied-write-authority"
     ],
+    "OR-J07-S05": [
+      "TestCustomerProjectionContracts/OR-J07-S05/merchant-customer-reads-survive-hosted-link-storage-transfer"
+    ],
     "OR-J08-S01": [
       "TestPublicCart/OR-J08-S01/cart-preview-and-consumption-have-exact-totals"
     ],
@@ -210,6 +232,9 @@
     ],
     "OR-J14-S05": [
       "TestProcessRecovery/OR-J14-S05/settled-renewal-survives-death-before-queue-ack"
+    ],
+    "OR-J14-S06": [
+      "TestCalendarSubscription/OR-J14-S06/calendar-anchor-survives-short-month-restart-and-archive"
     ],
     "OR-J15-S01": [
       "TestNMIRecovery/OR-J15-S01/missing-callback-is-repaired-from-provider-query"
@@ -479,28 +504,6 @@
       "TestSolanaContracts/OR-J37-S05/foreign-wallet-and-unrelated-instructions",
       "TestSolanaContracts/OR-J37-S05/BlockhashNotFound",
       "TestSolanaContracts/OR-J37-S05/insufficient_funds_for_fee"
-    ],
-    "OR-J01-S09": [
-      "TestCustomerBindingContracts/OR-J01-S09/host-mapping-preserves-source-and-owned-customer-views",
-      "TestCustomerBindingContracts/OR-J01-S09/standalone-mapping-does-not-enroll-a-network-account"
-    ],
-    "OR-J01-S10": [
-      "TestCustomerBindingContracts/OR-J01-S10/mapped-customer-keeps-next-action-idempotency-and-original-step-up"
-    ],
-    "OR-J07-S05": [
-      "TestCustomerProjectionContracts/OR-J07-S05/merchant-customer-reads-survive-hosted-link-storage-transfer"
-    ],
-    "OR-J01-S12": [
-      "TestCustomerProofResolution/OR-J01-S12/existing-native-customer-proof-is-read-only"
-    ],
-    "OR-J01-S13": [
-      "TestCustomerProofResolution/OR-J01-S13/customer-proof-preserves-issuer-tenant-and-credential-boundaries"
-    ],
-    "OR-J01-S14": [
-      "TestCustomerProofResolution/OR-J01-S14/asserted-and-sender-bound-resource-proofs-retain-source-authority"
-    ],
-    "OR-J01-S15": [
-      "TestCustomerProofResolution/OR-J01-S15/expiry-revocation-and-storage-failure-refuse-retained-customer-proof"
     ]
   },
   "suites": {
