@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
@@ -402,6 +403,9 @@ func (s *OrderAttemptService) BuildSolanaPayTransaction(ctx context.Context, ses
 	account = strings.TrimSpace(account)
 	if account == "" {
 		return nil, fmt.Errorf("%w: account is required", ErrOrderAttemptValidation)
+	}
+	if _, err := solanago.PublicKeyFromBase58(account); err != nil {
+		return nil, fmt.Errorf("%w: account must be a Solana public key", ErrOrderAttemptValidation)
 	}
 
 	session, err := s.repo.GetByID(ctx, sessionID)
