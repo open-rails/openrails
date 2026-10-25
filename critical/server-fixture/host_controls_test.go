@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/server"
 	"io/fs"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -26,9 +27,65 @@ func hostCommand(t *testing.T, srv *server.Server, clock *clockwork.FakeClock, c
 	var err error
 	mid, _ := billing.ParseMerchantID(cmd.Merchant)
 	switch cmd.Op {
+	case "declare-psp":
+		var declaration billing.PSPDeclaration
+		if err = json.Unmarshal(cmd.Body, &declaration); err == nil {
+			local, localErr := srv.Engine().LocalMerchant(mid)
+			if localErr != nil {
+				err = localErr
+			} else {
+				result, err = local.DeclarePSP(t.Context(), declaration)
+			}
+		}
+	case "new-directory":
+		apps, listErr := srv.AuthKit().ListRemoteApplications(t.Context(), iam.GroupByID(mid.String()), iam.PageRequest{})
+		if listErr != nil {
+			return answer{Error: listErr.Error()}
+		}
+		app := apps.Items[0]
+		app.ID = ""
+		app.Issuer = cmd.ID
+		app, err = srv.AuthKit().UpsertRemoteApplication(t.Context(), iam.SystemIdentity(), iam.GroupByID(mid.String()), app)
+		if err == nil {
+			owner, _ := server.MerchantRole("owner")
+			result, err = srv.AuthKit().CreateAPIKey(t.Context(), iam.SystemIdentity(), iam.GroupByID(mid.String()), iam.NewAPIKey{Name: "other issuer", Role: owner, ProvisionsFor: app.ID})
+		}
 	case "revoke-directory-key":
 		err = srv.AuthKit().RevokeAPIKey(t.Context(), iam.SystemIdentity(), iam.GroupByID(mid.String()), cmd.ID)
 		result = true
+	case "host-membership":
+		role, _ := server.MerchantRole("owner")
+		_, err = srv.AuthKit().SetGroupRole(t.Context(), iam.SystemIdentity(), iam.GroupByID(mid.String()), iam.UserSubject(cmd.ID), role)
+		result = true
+	case "host-key":
+		role, _ := server.MerchantRole("owner")
+		result, err = srv.AuthKit().CreateAPIKey(t.Context(), iam.SystemIdentity(), iam.GroupByID(mid.String()), iam.NewAPIKey{Name: "lifecycle", Role: role})
+	case "host-concurrent-renames":
+		var requests []struct {
+			Merchant billing.MerchantID
+			Name     string
+		}
+		if err = json.Unmarshal(cmd.Body, &requests); err != nil {
+			break
+		}
+		outcomes := make([]answer, len(requests))
+		var wg sync.WaitGroup
+		gate := make(chan struct{})
+		for i, request := range requests {
+			wg.Add(1)
+			go func(i int, mid billing.MerchantID, name string) {
+				defer wg.Done()
+				<-gate
+				value, e := srv.RenameMerchant(t.Context(), mid, billing.RenameMerchantParams{Name: name})
+				outcomes[i] = answer{Result: value}
+				if e != nil {
+					outcomes[i].Error = e.Error()
+				}
+			}(i, request.Merchant, request.Name)
+		}
+		close(gate)
+		wg.Wait()
+		result = outcomes
 	case "host-provision":
 		var p billing.ProvisionMerchantParams
 		err = json.Unmarshal(cmd.Body, &p)
@@ -51,6 +108,7 @@ func hostCommand(t *testing.T, srv *server.Server, clock *clockwork.FakeClock, c
 	case "host-rename":
 		var p billing.RenameMerchantParams
 		err = json.Unmarshal(cmd.Body, &p)
+		p.ActorUserID = cmd.Account
 		if err == nil {
 			result, err = srv.RenameMerchant(t.Context(), mid, p)
 		}
