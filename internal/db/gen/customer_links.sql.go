@@ -325,53 +325,6 @@ func (q *Queries) ListActiveCustomerLinksByAccount(ctx context.Context, arg List
 	return items, nil
 }
 
-const listActiveCustomerLinksByCustomers = `-- name: ListActiveCustomerLinksByCustomers :many
-SELECT merchant_id, id, customer_id, account_id, method, credential, order_id, auth_time, amr, terms_version, status, linked_at, revoked_at, revoked_by FROM billing.customer_links
-WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[]) AND status = 'active'
-LIMIT cardinality($2::uuid[])
-`
-
-type ListActiveCustomerLinksByCustomersParams struct {
-	MerchantID  uuid.UUID
-	CustomerIds []uuid.UUID
-}
-
-// The links of a page of the merchant's customers: at most one each.
-func (q *Queries) ListActiveCustomerLinksByCustomers(ctx context.Context, arg ListActiveCustomerLinksByCustomersParams) ([]BillingCustomerLink, error) {
-	rows, err := q.db.Query(ctx, listActiveCustomerLinksByCustomers, arg.MerchantID, arg.CustomerIds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingCustomerLink
-	for rows.Next() {
-		var i BillingCustomerLink
-		if err := rows.Scan(
-			&i.MerchantID,
-			&i.ID,
-			&i.CustomerID,
-			&i.AccountID,
-			&i.Method,
-			&i.Credential,
-			&i.OrderID,
-			&i.AuthTime,
-			&i.Amr,
-			&i.TermsVersion,
-			&i.Status,
-			&i.LinkedAt,
-			&i.RevokedAt,
-			&i.RevokedBy,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listActiveCustomerLinksOfMerchant = `-- name: ListActiveCustomerLinksOfMerchant :many
 SELECT merchant_id, id, customer_id, account_id, method, credential, order_id, auth_time, amr, terms_version, status, linked_at, revoked_at, revoked_by FROM billing.customer_links
 WHERE merchant_id = $1::uuid AND status = 'active'

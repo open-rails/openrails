@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 150,
+  "scenario_count": 151,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -752,6 +752,11 @@
       "id": "OR-J37-S05",
       "journey": "J37",
       "name": "Wrong instruction authority account stale blockhash or insufficient gas is refused safely"
+    },
+    {
+      "id": "OR-J07-S05",
+      "journey": "J07",
+      "name": "Merchant customer reads retain billing state without hosted account-link storage"
     }
   ]
 }

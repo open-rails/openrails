@@ -84,15 +84,6 @@ const (
 	CustomerLinkRevokedByMerchantLeft CustomerLinkRevokedBy = "merchant_left"
 )
 
-// CustomerNetwork is what a merchant sees of its customer's openrails.dev
-// account: its one stable id, and when and how it was linked. Never the
-// account's other merchants, cards or links.
-type CustomerNetwork struct {
-	AccountID NetworkAccountID   `json:"account_id"`
-	LinkedAt  time.Time          `json:"linked_at"`
-	Method    CustomerLinkMethod `json:"method"`
-}
-
 // CustomerLink is an openrails.dev account linked to one merchant's
 // customer.
 type CustomerLink struct {

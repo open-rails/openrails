@@ -486,6 +486,9 @@
     ],
     "OR-J01-S10": [
       "TestCustomerBindingContracts/OR-J01-S10/mapped-customer-keeps-next-action-idempotency-and-original-step-up"
+    ],
+    "OR-J07-S05": [
+      "TestCustomerProjectionContracts/OR-J07-S05/merchant-customer-reads-survive-hosted-link-storage-transfer"
     ]
   },
   "suites": {

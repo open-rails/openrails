@@ -15760,16 +15760,6 @@
             "items": {
               "$ref": "#/components/schemas/DefaultPaymentMethod"
             }
-          },
-          "network": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/CustomerNetwork"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
@@ -15779,8 +15769,7 @@
           "last_seen_at",
           "settings",
           "balances",
-          "default_payment_methods",
-          "network"
+          "default_payment_methods"
         ]
       },
       "CustomerAccount": {
@@ -16053,31 +16042,6 @@
           "linked_at",
           "revoked_at",
           "revoked_by"
-        ]
-      },
-      "CustomerNetwork": {
-        "type": "object",
-        "properties": {
-          "account_id": {
-            "type": "string"
-          },
-          "linked_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "method": {
-            "type": "string",
-            "enum": [
-              "connect",
-              "payment_page",
-              "sign_in"
-            ]
-          }
-        },
-        "required": [
-          "account_id",
-          "linked_at",
-          "method"
         ]
       },
       "CustomerSettings": {

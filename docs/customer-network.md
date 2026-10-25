@@ -32,10 +32,10 @@ AuthKit (group OAuth clients); the consent screen names the merchant.
 
 - One account is one customer per merchant, and one customer has one account:
   each side holds one active link.
-- The merchant sees `network` on its customer, `{account_id, linked_at,
-  method}`, in `GET /v1/admin/customers/{customer_id}` and the lists. It never
-  sees the account's other merchants, cards or links. `account_id` is the
-  account's stable public id, the `sub` every merchant's client receives.
+- Generic merchant customer reads contain billing data, without a `network`
+  field or platform-link lookup. The hosted product presents account links
+  through its owned relationship API. An account's other merchants, cards and
+  links are never part of the generic customer DTO.
 - `method` is how it was proven: `connect` (from the merchant's site),
   `sign_in` (the merchant signs its customers in with openrails.dev) or
   `payment_page` (on the payment page).
