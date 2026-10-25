@@ -659,7 +659,7 @@ func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *
 	if pm == nil {
 		return errors.New("payment method is required")
 	}
-	if pm.Custodian != models.CustodianPSP && pm.Custodian != models.CustodianHyperSwitch && pm.Custodian != models.CustodianPlatform {
+	if pm.Custodian != models.CustodianPSP && pm.Custodian != models.CustodianHyperSwitch && !models.BasisTheoryCustody(pm.Custodian) {
 		return ErrPaymentMethodCustodianUnsupported
 	}
 	if pm.Custodian == models.CustodianPSP && !rails.SupportsPaymentMethodCRUD(models.Rail(strings.ToLower(string(pm.Rail)))) {

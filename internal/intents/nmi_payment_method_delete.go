@@ -414,7 +414,7 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 		row, err := t.executeManual(ctx, prior)
 		return methodDeleteOutcome(row), err
 	}
-	if pm.Custodian == models.CustodianPlatform {
+	if models.BasisTheoryCustody(pm.Custodian) {
 		h, ok := t.Runner.Registry.Lookup(TypePlatformMethodDelete).(*PlatformMethodDeleteHandler)
 		store, stored := t.Runner.Store.(*Store)
 		if !ok || !stored {
@@ -511,7 +511,7 @@ func (t *PaymentMethodDeleteThrough) admitStaffDeletion(ctx context.Context, pm 
 	key := manualMethodDeleteKey(TypeNMIPaymentMethodDelete, pm.ID)
 	if pm.Custodian == models.CustodianHyperSwitch {
 		key = manualMethodDeleteKey(TypeHyperSwitchMethodDelete, pm.ID)
-	} else if pm.Custodian == models.CustodianPlatform {
+	} else if models.BasisTheoryCustody(pm.Custodian) {
 		key = manualMethodDeleteKey(TypePlatformMethodDelete, pm.ID)
 	}
 	// The canonical admission below validates the old row's frozen ownership.

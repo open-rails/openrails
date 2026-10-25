@@ -125,20 +125,26 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 		if h.Sale.Config == nil || config.IsProviderReadOnly(h.Sale.Config) {
 			return intents.Parked("Basis Theory sale writes unavailable")
 		}
-		cfg, proxy, bt, err := h.Sale.Custody.basisTheory(ctx, *in.PspID)
+		if p.Instrument.CustodianID == nil {
+			return intents.Parked("accepted custody is missing")
+		}
+		cfg, proxy, bt, err := h.Sale.Custody.basisTheory(db.WithCustodianID(ctx, *p.Instrument.CustodianID), *in.PspID)
 		if err != nil {
 			return intents.Parked("Basis Theory custody cannot be armed: " + err.Error())
 		}
 		held = proxy
-		if p.Instrument.Custodian == models.CustodianPlatform && p.Token == "" {
+		if cfg.Custody.Custodian != p.Instrument.Custodian {
+			return intents.Parked("accepted custody kind changed")
+		}
+		if p.Token == "" {
 			token, err := bt.GetToken(ctx, p.Instrument.RailMethodRef)
 			if err != nil {
 				return intents.Parked("platform saved card cannot be verified")
 			}
-			if token.ID != p.Instrument.RailMethodRef || token.Type != "card" || token.TenantID != cfg.Custody.AccountID || len(token.Containers) != 1 || token.Containers[0] != cfg.Custody.Container {
+			if token.ID != p.Instrument.RailMethodRef || token.Type != "card" || token.TenantID != cfg.Custody.AccountID || cfg.Custody.Container != "" && (len(token.Containers) != 1 || token.Containers[0] != cfg.Custody.Container) {
 				return h.complete(ctx, in, nil, intents.TerminalWithEvidence("platform saved card belongs to another merchant", map[string]any{"not_executed": true}))
 			}
-		} else if p.Instrument.Custodian == models.CustodianPlatform {
+		} else {
 			token, err := bt.GetTokenIntent(ctx, p.Token)
 			if err != nil {
 				return intents.Parked("platform collection cannot be verified")
@@ -411,7 +417,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 	var storageErr error
 	if p.OrderID != uuid.Nil && outcome.Class == intents.OutcomeSucceeded {
 		if saved, err = h.newCardMethod(ctx, in, p, receipt); err != nil {
-			if !p.Recurring || p.Instrument.Custodian != models.CustodianPlatform {
+			if !p.Recurring || !models.BasisTheoryCustody(p.Instrument.Custodian) {
 				return intents.Ambiguous("sale receipt retained; the new card's method is unread: " + err.Error())
 			}
 			storageErr = err

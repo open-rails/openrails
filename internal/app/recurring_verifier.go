@@ -30,14 +30,14 @@ func (rt *Runtime) RecurringVerifier(merchantID uuid.UUID, origin intents.Origin
 		}
 		var ref string
 		var err error
-		if method.Custodian == models.CustodianPlatform {
+		if models.BasisTheoryCustody(method.Custodian) {
 			resolver, ok := rt.CollectionResolver.(interface {
-				ResolvePlatformNMICharge(context.Context, gen.BillingPaymentMethod, uuid.UUID) (*nmiproxy.Charger, error)
+				ResolveBasisTheoryNMICharge(context.Context, gen.BillingPaymentMethod, uuid.UUID) (*nmiproxy.Charger, error)
 			})
 			if !ok {
 				return "", errors.New("platform card verification is unavailable")
 			}
-			proxy, resolveErr := resolver.ResolvePlatformNMICharge(ctx, method, psp)
+			proxy, resolveErr := resolver.ResolveBasisTheoryNMICharge(ctx, method, psp)
 			if resolveErr != nil {
 				return "", resolveErr
 			}

@@ -45,7 +45,7 @@ func engineCollectionBinding(ctx context.Context, q *gen.Queries, custody charge
 	if method.Custodian == models.CustodianHyperSwitch {
 		return charge.FreezeHyperSwitchBinding(ctx, q, custody, method, psp, deployment)
 	}
-	if method.Custodian == models.CustodianPlatform && method.CustodianID != nil {
+	if models.BasisTheoryCustody(method.Custodian) && method.CustodianID != nil {
 		return binding, charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, psp), nil)
 	}
 	if method.Custodian != models.CustodianPSP || method.CustodianID != nil {
@@ -60,14 +60,14 @@ type recurringNMICharger interface {
 }
 
 func prepareEngineNMICharge(ctx context.Context, resolver CollectionPlane, method gen.BillingPaymentMethod, psp uuid.UUID, binding charge.HyperSwitchBinding) (recurringNMICharger, error) {
-	if method.Custodian == models.CustodianPlatform {
+	if models.BasisTheoryCustody(method.Custodian) {
 		platform, ok := resolver.(interface {
-			ResolvePlatformNMICharge(context.Context, gen.BillingPaymentMethod, uuid.UUID) (*nmiproxy.Charger, error)
+			ResolveBasisTheoryNMICharge(context.Context, gen.BillingPaymentMethod, uuid.UUID) (*nmiproxy.Charger, error)
 		})
 		if !ok {
 			return nil, errors.New("platform NMI collection is unavailable")
 		}
-		return platform.ResolvePlatformNMICharge(ctx, method, psp)
+		return platform.ResolveBasisTheoryNMICharge(ctx, method, psp)
 	}
 	if method.Custodian == models.CustodianHyperSwitch {
 		return PrepareHyperSwitchCharge(ctx, resolver, method, psp, binding)

@@ -18,7 +18,7 @@ func ValidateEngineInstrument(rail string, instrument FrozenInstrument, binding 
 	if strings.TrimSpace(instrument.RailMethodRef) == "" {
 		return errors.New("engine collection requires an exact saved method")
 	}
-	if instrument.Custodian != models.CustodianPlatform && strings.TrimSpace(instrument.RailCustomerRef) == "" {
+	if !models.BasisTheoryCustody(instrument.Custodian) && strings.TrimSpace(instrument.RailCustomerRef) == "" {
 		return errors.New("engine collection requires an exact saved customer")
 	}
 	switch instrument.Custodian {
@@ -31,7 +31,7 @@ func ValidateEngineInstrument(rail string, instrument FrozenInstrument, binding 
 			return errors.New("engine collection requires its accepted HyperSwitch binding")
 		}
 		return binding.Validate()
-	case models.CustodianPlatform:
+	case models.CustodianPlatform, models.CustodianBasisTheory:
 		if rail != string(models.RailNMI) || binding != nil || instrument.RailCustomerRef != "" {
 			return errors.New("platform engine collection requires an NMI proxy token")
 		}

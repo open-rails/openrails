@@ -22,7 +22,7 @@ func (h *PlatformMethodDeleteHandler) admit(ctx context.Context, store *Store, p
 	if err != nil {
 		return operation, err
 	}
-	if pm == nil || pm.CustomerID == uuid.Nil || pm.Custodian != models.CustodianPlatform || pm.CustodianID == nil || pm.RailCustomerRef != "" || pm.RailMethodRef == "" || h.Rails == nil {
+	if pm == nil || pm.CustomerID == uuid.Nil || !models.BasisTheoryCustody(pm.Custodian) || pm.CustodianID == nil || pm.RailCustomerRef != "" || pm.RailMethodRef == "" || h.Rails == nil {
 		return operation, paymentmethods.ErrPaymentMethodDeleteUnsafe
 	}
 	origin, actor := paymentMethodDeleteAuthority(ctx, pm.CustomerID)
@@ -84,14 +84,17 @@ func (h *PlatformMethodDeleteHandler) admit(ctx context.Context, store *Store, p
 		if err != nil {
 			return err
 		}
-		if !ok || account.Archived || account.Kind != models.CustodianPlatform {
+		if !ok || account.Archived || account.Kind != pm.Custodian {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
-		tenant, ok := strings.CutSuffix(account.AccountID, "/"+mid.UUID().String())
+		tenant := account.AccountID
+		if pm.Custodian == models.CustodianPlatform {
+			tenant, ok = strings.CutSuffix(account.AccountID, "/"+mid.UUID().String())
+		}
 		if !ok || tenant == "" || strings.Contains(tenant, "/") {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
-		operation, err = scoped.enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: models.CustodianPlatform, CustodianID: *pm.CustodianID, IntentType: TypePlatformMethodDelete, IdempotencyKey: key, Origin: origin, Actor: actor, OriginReason: "user payment-method delete", NextAttemptAt: h.Clock.Now().UTC(), Inline: true, Payload: PlatformMethodDeletePayload{CustomerID: pm.CustomerID, PaymentMethodID: pm.ID, Instrument: charge.FreezeCustody(current), TenantID: tenant, Environment: account.Environment}})
+		operation, err = scoped.enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: pm.Custodian, CustodianID: *pm.CustodianID, IntentType: TypePlatformMethodDelete, IdempotencyKey: key, Origin: origin, Actor: actor, OriginReason: "user payment-method delete", NextAttemptAt: h.Clock.Now().UTC(), Inline: true, Payload: PlatformMethodDeletePayload{CustomerID: pm.CustomerID, PaymentMethodID: pm.ID, Instrument: charge.FreezeCustody(current), TenantID: tenant, Environment: account.Environment}})
 		if err != nil {
 			return err
 		}

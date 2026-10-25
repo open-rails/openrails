@@ -204,16 +204,16 @@ func validateOrderSale(in gen.BillingProviderIntent, p NMISalePayload, customer 
 		custody = hs != nil && hs.Validate() == nil && in.Rail == "nmi" && p.Recurring && !p.NewCard
 	case models.CustodianBasisTheory, models.CustodianPlatform:
 		source := p.Token != ""
-		if p.Instrument.Custodian == models.CustodianPlatform && !p.NewCard && p.Token == "" {
+		if !p.NewCard && p.Token == "" {
 			consent := p.Instrument.Mandate
 			if p.Recurring {
 				consent = p.ReuseConsent
 			}
 			source = consent != nil && consent.Kind == charge.AgreementCardOnFile && consent.InitialTransactionID != ""
 		}
-		custody = p.HyperSwitch == nil && in.Rail == "nmi" && (!p.Recurring || p.Instrument.Custodian == models.CustodianPlatform) && source && p.Instrument.RailCustomerRef == "" && p.NewCard == (p.Instrument.RailMethodRef == "")
+		custody = p.HyperSwitch == nil && in.Rail == "nmi" && source && p.Instrument.RailCustomerRef == "" && p.NewCard == (p.Instrument.RailMethodRef == "")
 	}
-	if p.ReuseConsent != nil && (!p.Recurring || p.NewCard || p.Token != "" || p.Instrument.Custodian != models.CustodianPlatform || p.Instrument.Mandate != nil) {
+	if p.ReuseConsent != nil && (!p.Recurring || p.NewCard || p.Token != "" || !models.BasisTheoryCustody(p.Instrument.Custodian) || p.Instrument.Mandate != nil) {
 		return errors.New("reuse consent is only for a saved platform card opening a recurring agreement")
 	}
 	if !custody {
@@ -252,7 +252,10 @@ func (p *NMISalePayload) UnmarshalJSON(data []byte) error {
 // Platform custody is independent of the PSP: accepted orders must retain its
 // exact address. Older merchant-custodian sales keep their existing PSP address.
 func invalidOrderCustodianAddress(in gen.BillingProviderIntent, instrument charge.FrozenInstrument) bool {
-	if instrument.Custodian != models.CustodianPlatform {
+	if instrument.Custodian == models.CustodianBasisTheory && in.CustodianID == nil {
+		return false
+	} // Historical accepted merchant-vault sales.
+	if !models.BasisTheoryCustody(instrument.Custodian) {
 		return in.CustodianID != nil
 	}
 	return in.CustodianID == nil || instrument.CustodianID == nil || *in.CustodianID != *instrument.CustodianID

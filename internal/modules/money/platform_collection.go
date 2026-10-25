@@ -18,14 +18,14 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 )
 
-// ResolvePlatformNMICharge arms one saved platform card on its accepted account.
+// ResolveBasisTheoryNMICharge arms a saved vendor card on its accepted account.
 // The caller owns the recurring agreement and durable submission fence.
-func (b *MerchantCollectionAdapterBuilder) ResolvePlatformNMICharge(ctx context.Context, method gen.BillingPaymentMethod, psp uuid.UUID) (*nmiproxy.Charger, error) {
+func (b *MerchantCollectionAdapterBuilder) ResolveBasisTheoryNMICharge(ctx context.Context, method gen.BillingPaymentMethod, psp uuid.UUID) (*nmiproxy.Charger, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if mid.UUID() != method.MerchantID || method.Custodian != models.CustodianPlatform {
+	if mid.UUID() != method.MerchantID || !models.BasisTheoryCustody(method.Custodian) || method.CustodianID == nil {
 		return nil, charge.ErrInstrumentChanged
 	}
 	if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, psp), nil); err != nil {
@@ -42,11 +42,18 @@ func (b *MerchantCollectionAdapterBuilder) ResolvePlatformNMICharge(ctx context.
 	if !ok || !scope.Declared || scope.Archived {
 		return nil, errors.New("platform collection account is unavailable")
 	}
-	custody, err := svc.PlatformCustodianConfig(ctx, mid, *method.CustodianID)
+	custody, err := svc.BasisTheoryCustodianConfig(ctx, mid, *method.CustodianID)
 	if err != nil {
 		return nil, err
 	}
-	bt, err := basistheory.New(basistheory.Config{APIKey: custody.APIKey, BaseURL: b.Endpoints.BTBaseURL})
+	if custody.Custodian != method.Custodian || b.BasisTheoryTransport != nil && custody.Environment != config.ClassTest {
+		return nil, charge.ErrInstrumentChanged
+	}
+	base := custody.APIBaseURL
+	if b.Endpoints.BTBaseURL != "" {
+		base = b.Endpoints.BTBaseURL
+	}
+	bt, err := basistheory.New(basistheory.Config{APIKey: custody.APIKey, BaseURL: base, Transport: b.BasisTheoryTransport})
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +61,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolvePlatformNMICharge(ctx context.
 	if err != nil {
 		return nil, err
 	}
-	if token.ID != *method.RailMethodRef || token.Type != "card" || token.TenantID != custody.AccountID || len(token.Containers) != 1 || token.Containers[0] != custody.Container {
+	if token.ID != *method.RailMethodRef || token.Type != "card" || token.TenantID != custody.AccountID || custody.Container != "" && (len(token.Containers) != 1 || token.Containers[0] != custody.Container) {
 		return nil, errors.New("platform card is outside the merchant's vault container")
 	}
 	posture, err := b.nmiProxyPosture(ctx, svc, mid, scope)

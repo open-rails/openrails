@@ -92,7 +92,7 @@ SET status = CASE WHEN status = 'active' THEN 'removed' ELSE status END,
     park_reason = 'removed:' || sqlc.arg(operation_id)::uuid::text,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND custodian IN ('platform','hyperswitch') AND status IN ('active','closed','replaced','removed')
+  AND custodian IN ('platform','basis_theory','hyperswitch') AND status IN ('active','closed','replaced','removed')
   AND park_reason = 'delete:' || sqlc.arg(operation_id)::uuid::text;
 
 -- name: RemoveFencedNativePaymentMethod :execrows

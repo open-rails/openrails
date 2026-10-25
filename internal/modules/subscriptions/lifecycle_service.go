@@ -1246,7 +1246,7 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 				}
 				return err
 			}
-			if method.CustomerID != subscription.CustomerID || !charge.ChargeableOn(method, subscription.PspID) || !paymentmethods.Chargeable(method) || method.Rail != string(subscription.Rail) || (method.RailCustomerRef == nil && method.Custodian != models.CustodianPlatform) || method.RailMethodRef == nil || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP && method.Custodian != models.CustodianPlatform) || observedInstrument.Matches(method) != nil {
+			if method.CustomerID != subscription.CustomerID || !charge.ChargeableOn(method, subscription.PspID) || !paymentmethods.Chargeable(method) || method.Rail != string(subscription.Rail) || (method.RailCustomerRef == nil && !models.BasisTheoryCustody(method.Custodian)) || method.RailMethodRef == nil || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP && !models.BasisTheoryCustody(method.Custodian)) || observedInstrument.Matches(method) != nil {
 				return fmt.Errorf("resume engine: %w", ErrCardUnusable)
 			}
 			if _, err := mandates.ForSubscription(ctx, q, subscription.MerchantID, subscription.CustomerID, subscription.ID, method.ID, subscription.PspID); err != nil {

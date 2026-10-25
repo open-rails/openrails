@@ -265,6 +265,12 @@ func Custodians() []string {
 	return []string{CustodianPSP, CustodianBasisTheory, CustodianHyperSwitch, CustodianPlatform}
 }
 
+// BasisTheoryCustody identifies the two ownership arrangements served by the
+// same vendor protocol. The actual kind and custodian ID remain distinct.
+func BasisTheoryCustody(kind string) bool {
+	return kind == CustodianBasisTheory || kind == CustodianPlatform
+}
+
 // PaymentMethodCharge is a payment method's last-charge health, derived from
 // payments at query time, never stored.
 type PaymentMethodCharge struct {

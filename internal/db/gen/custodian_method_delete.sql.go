@@ -420,7 +420,7 @@ SET status = CASE WHEN status = 'active' THEN 'removed' ELSE status END,
     park_reason = 'removed:' || $1::uuid::text,
     updated_at = $2::timestamptz
 WHERE merchant_id = $3::uuid AND id = $4::uuid
-  AND custodian IN ('platform','hyperswitch') AND status IN ('active','closed','replaced','removed')
+  AND custodian IN ('platform','basis_theory','hyperswitch') AND status IN ('active','closed','replaced','removed')
   AND park_reason = 'delete:' || $1::uuid::text
 `
 

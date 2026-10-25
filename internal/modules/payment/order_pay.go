@@ -177,9 +177,7 @@ func (s *OrderAttemptService) OrderOptions(ctx context.Context, prices []*models
 				return nil, err
 			}
 		}
-		if o.Custodian != models.CustodianBasisTheory || oneTime {
-			options = append(options, o)
-		}
+		options = append(options, o)
 	}
 	return options, nil
 }
@@ -251,7 +249,7 @@ func (s *OrderAttemptService) CustomerOrderOptions(ctx context.Context, customer
 	}
 	var ids []uuid.UUID
 	for _, method := range methods {
-		if method.Custodian == models.CustodianPlatform && method.Rail == string(models.RailNMI) && paymentmethods.Chargeable(method) && method.CustodianID != nil && method.RailMethodRef != nil && *method.RailMethodRef != "" {
+		if models.BasisTheoryCustody(method.Custodian) && method.Rail == string(models.RailNMI) && paymentmethods.Chargeable(method) && method.CustodianID != nil && method.RailMethodRef != nil && *method.RailMethodRef != "" {
 			ids = append(ids, method.ID)
 		}
 	}
@@ -550,15 +548,14 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 		case method.CustodianID == nil:
 			return OrderCharge{}, orders.ErrOptionMissing
 		case method.Custodian == models.CustodianHyperSwitch && order.HasRecurring() && collected == "":
-		case method.Custodian == models.CustodianPlatform && collected == "":
-		case (method.Custodian == models.CustodianPlatform || method.Custodian == models.CustodianBasisTheory && !order.HasRecurring()) && collected != "":
+		case models.BasisTheoryCustody(method.Custodian):
 		default:
 			return OrderCharge{}, orders.ErrOptionMissing
 		}
 		if collected == "" {
 			chosen = nil
 			for i, o := range options {
-				if method.Custodian == models.CustodianPlatform {
+				if models.BasisTheoryCustody(method.Custodian) {
 					if slices.Contains(o.SavedPaymentMethodIDs, methodID) {
 						chosen = &options[i]
 						break
@@ -637,7 +634,7 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 			if order.HasRecurring() {
 				agreement = charge.AgreementRecurring
 			}
-			if row.Custodian == models.CustodianPlatform && collected == "" {
+			if models.BasisTheoryCustody(row.Custodian) && collected == "" {
 				consent, err := q.GetCitableMandateForShare(ctx, gen.GetCitableMandateForShareParams{MerchantID: mid.UUID(), CustomerID: order.CustomerID, PaymentMethodID: methodID, PspID: chosen.PSPID, Kinds: []string{string(charge.AgreementCardOnFile)}})
 				if errors.Is(err, pgx.ErrNoRows) {
 					return orders.ErrOptionMissing
@@ -668,7 +665,7 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 			payload.PaymentMethodID, payload.Instrument, payload.Token, charged = methodID, instrument, collected, &methodID
 		}
 		custodianID := uuid.Nil
-		if payload.Instrument.Custodian == models.CustodianPlatform && payload.Instrument.CustodianID != nil {
+		if models.BasisTheoryCustody(payload.Instrument.Custodian) && payload.Instrument.CustodianID != nil {
 			custodianID = *payload.Instrument.CustodianID
 		}
 		intent, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: target.Rail, PspID: chosen.PSPID, CustodianID: custodianID,

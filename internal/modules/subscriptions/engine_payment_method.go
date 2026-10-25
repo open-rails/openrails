@@ -204,7 +204,7 @@ func recurringLineage(ctx context.Context, q *gen.Queries, sub *models.Subscript
 	if verified != nil {
 		return verified, nil, nil
 	}
-	if method.Rail == string(models.RailNMI) && (method.Custodian == models.CustodianPSP || method.Custodian == models.CustodianPlatform) {
+	if method.Rail == string(models.RailNMI) && (method.Custodian == models.CustodianPSP || models.BasisTheoryCustody(method.Custodian)) {
 		return nil, &verification{method: method, psp: sub.PspID}, nil
 	}
 	return nil, nil, ErrRecurringAgreementRequired
@@ -222,7 +222,7 @@ func (s *SubscriptionLifecycleService) verifyRecurring(ctx context.Context, veri
 		return nil, err
 	}
 	tokenType := charge.TokenTypePSPToken
-	if v.method.Custodian == models.CustodianPlatform {
+	if models.BasisTheoryCustody(v.method.Custodian) {
 		tokenType = charge.TokenTypePANViaProxy
 	}
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

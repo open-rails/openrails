@@ -24,6 +24,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
+// The persisted operation name is retained for existing history. The payload
+// carries the exact Basis Theory custody kind and tenant for both arrangements.
 const TypePlatformMethodDelete = "platform_method_delete"
 
 type PlatformMethodDeletePayload struct {
@@ -42,7 +44,7 @@ func DecodePlatformMethodDelete(in gen.BillingProviderIntent) (PlatformMethodDel
 	if in.ID == uuid.Nil ||
 		in.MerchantID == uuid.Nil ||
 		in.IntentType != TypePlatformMethodDelete ||
-		in.Rail != models.CustodianPlatform ||
+		in.Rail != p.Instrument.Custodian ||
 		in.PspID != nil ||
 		in.SubscriptionID != nil ||
 		in.PaymentID != nil ||
@@ -52,7 +54,7 @@ func DecodePlatformMethodDelete(in gen.BillingProviderIntent) (PlatformMethodDel
 		*in.CustodianID == uuid.Nil ||
 		p.CustomerID == uuid.Nil ||
 		p.PaymentMethodID == uuid.Nil ||
-		p.Instrument.Custodian != models.CustodianPlatform ||
+		!models.BasisTheoryCustody(p.Instrument.Custodian) ||
 		p.Instrument.CustodianID == nil ||
 		*p.Instrument.CustodianID != *in.CustodianID ||
 		p.Instrument.PSPID != uuid.Nil ||
@@ -118,16 +120,15 @@ func (h *PlatformMethodDeleteHandler) resolve(ctx context.Context, in gen.Billin
 	if err != nil || !ok || account.Environment != p.Environment {
 		return Ambiguous("accepted platform vault account is unavailable")
 	}
-	cfg, err := configuration.PlatformCustodianConfig(ctx, mid, *current.CustodianID)
-	container := "/merchants/" + current.MerchantID.String() + "/"
-	if err != nil || cfg.AccountID != p.TenantID || cfg.Container != container {
+	cfg, err := configuration.BasisTheoryCustodianConfig(ctx, mid, *current.CustodianID)
+	if err != nil || cfg.AccountID != p.TenantID || cfg.Custodian != p.Instrument.Custodian || h.Rails.BasisTheoryTransport != nil && cfg.Environment != config.ClassTest {
 		return Ambiguous("accepted platform vault binding or credentials are unavailable")
 	}
 	baseURL := cfg.APIBaseURL
 	if h.Rails.BTBaseURLOverride != "" {
 		baseURL = h.Rails.BTBaseURLOverride
 	}
-	client, err := basistheory.New(basistheory.Config{APIKey: cfg.APIKey, BaseURL: baseURL, ReadOnly: h.Rails.Config != nil && config.IsProviderReadOnly(h.Rails.Config)})
+	client, err := basistheory.New(basistheory.Config{APIKey: cfg.APIKey, BaseURL: baseURL, ReadOnly: h.Rails.Config != nil && config.IsProviderReadOnly(h.Rails.Config), Transport: h.Rails.BasisTheoryTransport})
 	if err != nil {
 		return Ambiguous("platform vault client is unavailable")
 	}
@@ -143,7 +144,7 @@ func (h *PlatformMethodDeleteHandler) resolve(ctx context.Context, in gen.Billin
 		return Ambiguous("platform vault did not confirm whether the card exists")
 	}
 	if err == nil {
-		if token.ID != p.Instrument.RailMethodRef || token.TenantID != p.TenantID || token.Type != "card" || len(token.Containers) != 1 || token.Containers[0] != container {
+		if token.ID != p.Instrument.RailMethodRef || token.TenantID != p.TenantID || token.Type != "card" || cfg.Container != "" && (len(token.Containers) != 1 || token.Containers[0] != cfg.Container) {
 			return Ambiguous("platform token ownership does not match accepted removal")
 		}
 		if !execute {

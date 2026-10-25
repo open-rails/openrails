@@ -9,7 +9,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -17,6 +19,33 @@ import (
 
 // WithPlatformVaultStore uses the engine's authenticated Vault connection.
 func (s *Service) WithPlatformVaultStore(kv *vault.KVv2Adapter) { s.platformKV = kv }
+
+// BasisTheoryCustodianConfig resolves the saved instrument's original custody.
+// Merchant credentials never fall back to the operator's hosted vault.
+func (s *Service) BasisTheoryCustodianConfig(ctx context.Context, id billing.MerchantID, custodianID uuid.UUID) (*config.ResolvedCustodian, error) {
+	c, ok, err := s.CustodianScopeByID(ctx, id, custodianID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || c.Archived {
+		return nil, ErrCustodianNotDeclared
+	}
+	if c.Kind == models.CustodianPlatform {
+		return s.PlatformCustodianConfig(ctx, id, custodianID)
+	}
+	if c.Kind != models.CustodianBasisTheory || c.Secret(custodians.SecretAPIKey) == "" {
+		return nil, ErrCustodianNotDeclared
+	}
+	settings, err := custodians.ParseSettings(c.Kind, c.Settings)
+	if err != nil {
+		return nil, err
+	}
+	base := basistheory.DefaultBaseURL
+	if c.Environment == config.ClassTest {
+		base = "https://api.test.basistheory.com"
+	}
+	return &config.ResolvedCustodian{Key: c.Key, Custodian: c.Kind, Environment: c.Environment, AccountID: c.AccountID, APIKey: c.Secret(custodians.SecretAPIKey), PublicAPIKey: settings.PublicAPIKey, APIBaseURL: base}, nil
+}
 
 // PlatformCardCustodian is the platform vault holding new cards when the
 // merchant's card_vault is platform; nil otherwise. Existing instruments and

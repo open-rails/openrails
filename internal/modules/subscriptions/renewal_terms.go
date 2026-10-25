@@ -254,7 +254,7 @@ func lockedRenewalSubscription(ctx context.Context, d *db.DB, params *RenewMembe
 		return nil, errors.New("accepted renewal provider binding changed")
 	}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
-		if params.PreviousPeriodEnd == nil || (params.PaymentCustodian != models.CustodianHyperSwitch && params.PaymentCustodian != models.CustodianPSP && params.PaymentCustodian != models.CustodianPlatform) || sub.RailSubscriptionID != "" {
+		if params.PreviousPeriodEnd == nil || (params.PaymentCustodian != models.CustodianHyperSwitch && params.PaymentCustodian != models.CustodianPSP && !models.BasisTheoryCustody(params.PaymentCustodian)) || sub.RailSubscriptionID != "" {
 			return nil, errors.New("engine renewal lacks accepted boundary or custody")
 		}
 	} else if params.PreviousPeriodEnd != nil || params.PaymentCustodian != "" {
