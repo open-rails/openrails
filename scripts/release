@@ -5,7 +5,7 @@
 #   scripts/release prepare vX.Y.Z           # opens the release PR
 #   scripts/release publish vX.Y.Z ["note"]  # once that PR is green
 #
-# prepare pins the server, AuthKit adapter and browser fixture to vX.Y.Z
+# prepare pins the server and AuthKit adapter to vX.Y.Z
 # (replaces keep in-repository builds on local source) on origin/master, commits
 # that to release/vX.Y.Z and opens its PR. publish fast-forwards master to the
 # green PR head and pushes it with the signed, annotated vX.Y.Z and
@@ -33,18 +33,28 @@ done
 
 case "$step" in
 prepare)
-  work="$(mktemp -d)"
-  trap 'git worktree remove --force "$work" >/dev/null 2>&1 || true' EXIT
-  git worktree add --quiet --detach "$work" origin/master
-  # The browser fixture imports both modules, so its direct root requirement
-  # must advance with the server's.
-  for manifest in server/go.mod adapters/authkit/go.mod server/web/console/e2e/server/go.mod; do
+  work="$HOME/cozy/.worktrees/openrails/release-$version"
+  [[ ! -e "$work" ]] || die "$work already exists; resume its owned release work"
+  mkdir -p "${work%/*}"
+  git worktree add --quiet -b "$branch" "$work" origin/master
+  admin="$(git -C "$work" rev-parse --absolute-git-dir)"
+  python3 - "$admin/OWNER.json" "$branch" "$(git rev-parse origin/master)" "$work" <<'PY'
+import json, sys
+from pathlib import Path
+Path(sys.argv[1]).write_text(json.dumps({
+    "owner": "Paul Fidika", "purpose": "Prepare the paired OpenRails release",
+    "branch": sys.argv[2], "base": sys.argv[3], "worktree": sys.argv[4],
+}, indent=2) + "\n")
+PY
+  git -C "$work" config user.name 'Paul Fidika'
+  git -C "$work" config user.email 'paul@fidika.com'
+  for manifest in server/go.mod adapters/authkit/go.mod; do
     (cd "$work/${manifest%/go.mod}" && go mod edit -require="github.com/open-rails/openrails@$version" && go build -o /dev/null ./...)
   done
-  git -C "$work" commit --quiet -S -am "Release $version: pin server, adapter and browser fixture to the paired root"
+  git -C "$work" commit --quiet -S -am "Release $version: pin server and adapter to the paired root"
   git -C "$work" push --quiet origin "HEAD:refs/heads/$branch"
   gh pr create --base master --head "$branch" --title "Release $version" \
-    --body "Pins server, AuthKit adapter and the console browser fixture to the paired root. When its checks pass: \`scripts/release publish $version\`."
+    --body "Pins server and AuthKit adapter to the paired root. When its checks pass: \`scripts/release publish $version\`."
   ;;
 publish)
   git fetch --quiet origin "$branch"

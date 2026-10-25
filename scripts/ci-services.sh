@@ -14,11 +14,13 @@ state="${RUNNER_TEMP:?}/ci-services"
 start_postgres() {
   local image
   image="$(scripts/ci-pull-image.sh postgres:18-alpine)"
-  # The multi-replica fleets (#1075) need more than the default 100 connections.
+  # Public recovery cases open several independent engines. Bound WAL for
+  # this disposable tmpfs; PostgreSQL's default 1 GiB target can exhaust it.
   docker run -d --pull never --name critical-postgres -p 5432:5432 \
     --tmpfs /var/lib/postgresql:rw,size=2g \
     -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
-    "$image" -c max_connections=500 -c max_locks_per_transaction=256
+    "$image" -c max_connections=500 -c max_locks_per_transaction=256 \
+    -c max_wal_size=256MB -c min_wal_size=32MB -c checkpoint_timeout=30s
   timeout 60 bash -c 'until docker exec critical-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_test; do sleep 1; done'
 }
 

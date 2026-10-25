@@ -201,7 +201,7 @@ jobs:
     steps:
       - name: Set owned fixture paths
         run: |
-          printf 'OPENRAILS_CRITICAL_REPORT_DIR=%s/critical-report\nOPENRAILS_CRITICAL_SERVER_BINARY=%s/openrails-server-fixture.test\n' "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'OPENRAILS_CRITICAL_REPORT_DIR=%s/critical-report\nOPENRAILS_CRITICAL_SERVER_BINARY=%s/openrails-server-fixture.test\nOPENRAILS_CRITICAL_CLI_BINARY=%s/openrails\n' "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
@@ -232,6 +232,9 @@ jobs:
       - name: Build the real standalone fixture once
         working-directory: critical/server-fixture
         run: GOWORK=off go test -race -c -p 2 -o "$OPENRAILS_CRITICAL_SERVER_BINARY" .
+      - name: Build the public operator CLI once
+        working-directory: server
+        run: GOWORK=off go build -p 2 -o "$OPENRAILS_CRITICAL_CLI_BINARY" ./cmd/openrails
       - name: Services are ready
         run: bash scripts/ci-services.sh ready
       - name: Require every selected critical scenario

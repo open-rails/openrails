@@ -25,6 +25,63 @@
     "OR-J01-S08": [
       "TestAuthorityBoundaries/OR-J01-S08/real-authority-storage-failure-denies-mutations"
     ],
+    "OR-J02-S01": [
+      "TestNetworkContracts/OR-J02-S01/both-real-identities-link-through-consented-one-use-proof"
+    ],
+    "OR-J02-S02": [
+      "TestNetworkContracts/OR-J02-S02/foreign-nonce-customer-and-expired-challenges-change-no-link"
+    ],
+    "OR-J02-S03": [
+      "TestNetworkContracts/OR-J02-S03/network-alias-is-only-the-linked-owned-customer"
+    ],
+    "OR-J02-S04": [
+      "TestNetworkContracts/OR-J02-S04/stale-real-session-cannot-unlink-until-fresh-sign-in"
+    ],
+    "OR-J04-S01": [
+      "TestPublicSDK/OR-J04-S01/built-client-and-real-HTTP-preserve-domain-outcomes"
+    ],
+    "OR-J04-S02": [
+      "TestPublicLifecycle/OR-J04-S02/cached-catalog-and-credentials-remain-merchant-bound"
+    ],
+    "OR-J04-S03": [
+      "TestPublicSDK/OR-J04-S03/browser-network-retry-and-cancellation-stay-bounded"
+    ],
+    "OR-J04-S04": [
+      "TestPublicSDK/OR-J04-S04/expired-token-retry-commits-only-one-order"
+    ],
+    "OR-J04-S05": [
+      "TestPublicLifecycle/OR-J04-S05/close-preserves-borrowed-pool-and-worker-fleet"
+    ],
+    "OR-J04-S06": [
+      "TestPublicLifecycle/OR-J04-S06/adapters-preserve-credential-and-encoded-path-boundaries"
+    ],
+    "OR-J05-S01": [
+      "TestPublicCatalog/OR-J05-S01/exact-price-quantity-and-provider-settlement"
+    ],
+    "OR-J05-S02": [
+      "TestPublicCatalog/OR-J05-S02/invalid-money-quantity-and-trial-cannot-create-a-price"
+    ],
+    "OR-J05-S03": [
+      "TestPublicCatalog/OR-J05-S03/replay-manual-ownership-and-revision-conflicts"
+    ],
+    "OR-J05-S04": [
+      "TestPublicCatalog/OR-J05-S04/archive-keeps-purchased-access-and-money-history"
+    ],
+    "OR-J05-S05": [
+      "TestPublicCatalog/OR-J05-S05/accepted-order-terms-survive-price-and-PSP-edits"
+    ],
+    "OR-J08-S01": [
+      "TestPublicCart/OR-J08-S01/cart-preview-and-consumption-have-exact-totals"
+    ],
+    "OR-J08-S02": [
+      "TestPublicCart/OR-J08-S02/application-order-never-charges-the-saved-card"
+    ],
+    "OR-J08-S03": [
+      "TestPublicCart/OR-J08-S03/unavailable-quantity-and-stale-total-cannot-charge"
+    ],
+    "OR-J08-S04": [
+      "TestPublicCart/OR-J08-S04/cancel-and-expiry-preserve-settled-order"
+    ],
     "OR-J09-S01": [
       "TestCheckout/OR-J09-S01/real-charge-order-access-and-committed-event"
     ],
@@ -52,8 +109,34 @@
     "OR-J11-S02": [
       "TestProviderRecovery/OR-J11-S02/unavailable-evidence-keeps-money-unresolved"
     ],
+    "OR-J11-S04": [
+      "TestUnresolvedRouting/OR-J11-S04/unknown-debit-forbids-replacement-and-alternate-account"
+    ],
+    "OR-J12-S01": [
+      "TestPaymentMethodContracts/OR-J12-S01/owned-card-setup-confirms-once-without-a-charge"
+    ],
+    "OR-J12-S02": [
+      "TestPaymentMethodContracts/OR-J12-S02/foreign-reused-and-removed-card-references-cannot-pay"
+    ],
+    "OR-J12-S03": [
+      "TestPaymentMethodContracts/OR-J12-S03/default-and-attached-card-change-preserve-accepted-instrument"
+    ],
+    "OR-J12-S04": [
+      "TestPaymentMethodContracts/OR-J12-S04/provider-detach-after-acceptance-preserves-payment-and-replay"
+    ],
     "OR-J13-S01": [
       "TestSubscriptions/OR-J13-S01/paid-enrollment-has-one-charge-and-period"
+    ],
+    "OR-J13-S02": [
+      "TestEnrollmentContracts/OR-J13-S02/concurrent-signup-key-creates-one-membership-and-charge"
+    ],
+    "OR-J13-S03": [
+      "TestEnrollmentContracts/OR-J13-S03/imported-paid-introduction-retains-first-and-recurring-terms",
+      "TestEnrollmentContracts/OR-J13-S03/imported-paid-introduction-retains-first-and-recurring-terms/intro-2-days-to-seven",
+      "TestEnrollmentContracts/OR-J13-S03/imported-paid-introduction-retains-first-and-recurring-terms/intro-14-days-to-seven"
+    ],
+    "OR-J13-S04": [
+      "TestEnrollmentContracts/OR-J13-S04/trial-price-is-explicitly-unavailable-to-new-checkout"
     ],
     "OR-J14-S01": [
       "TestRenewal/OR-J14-S01/before-boundary-workers-cannot-admit-renewal"
@@ -74,13 +157,17 @@
       "TestNMIRecovery/OR-J15-S01/missing-callback-is-repaired-from-provider-query"
     ],
     "OR-J15-S02": [
-      "TestNMIRecovery/OR-J15-S02"
+      "TestNMIRecovery/OR-J15-S02",
+      "TestNMIRecovery/OR-J15-S02/unavailable-query",
+      "TestNMIRecovery/OR-J15-S02/lagging-index"
     ],
     "OR-J15-S03": [
       "TestNMIRecovery/OR-J15-S03/provider-skipped-cycle-is-collected-after-authoritative-absence"
     ],
     "OR-J15-S04": [
-      "TestNMIRecovery/OR-J15-S04"
+      "TestNMIRecovery/OR-J15-S04",
+      "TestNMIRecovery/OR-J15-S04/provider_reversed",
+      "TestNMIRecovery/OR-J15-S04/provider_unrecorded"
     ],
     "OR-J16-S01": [
       "TestDunning/OR-J16-S01/retryable-decline-recovers-on-bounded-weekly-schedule"
@@ -97,6 +184,35 @@
     "OR-J17-S01": [
       "TestSubscriptions/OR-J17-S01/cancel-resume-keeps-the-purchased-window"
     ],
+    "OR-J17-S02": [
+      "TestCancellationCustody/OR-J17-S02/cancel-cannot-discard-an-accepted-renewal"
+    ],
+    "OR-J18-S01": [
+      "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
+    ],
+    "OR-J18-S02": [
+      "TestSubscriptionChangeContracts/OR-J18-S02/unsupported-seats-and-retired-preview-target-refuse-without-charge"
+    ],
+    "OR-J18-S03": [
+      "TestSubscriptionChangeContracts/OR-J18-S03/strong-customer-action-settles-one-prorated-upgrade"
+    ],
+    "OR-J18-S04": [
+      "TestSubscriptionChangeContracts/OR-J18-S04/admitted-renewal-fences-concurrent-customer-upgrade"
+    ],
+    "OR-J19-S01": [
+      "TestPriceMigrationContracts/OR-J19-S01/only-eligible-subscription-moves-at-the-paid-boundary"
+    ],
+    "OR-J19-S02": [
+      "TestPriceMigrationContracts/OR-J19-S02/failed-provider-push-is-redriven-by-a-replacement-worker"
+    ],
+    "OR-J19-S03": [
+      "TestPriceMigrationContracts/OR-J19-S03/pending",
+      "TestPriceMigrationContracts/OR-J19-S03/already-applied",
+      "TestPriceMigrationContracts/OR-J19-S03"
+    ],
+    "OR-J19-S04": [
+      "TestPriceMigrationContracts/OR-J19-S04/active-renewal-keeps-its-admitted-price"
+    ],
     "OR-J20-S01": [
       "TestRefunds/OR-J20-S01/partial-then-final-refund-conserves-settled-value"
     ],
@@ -105,6 +221,9 @@
     ],
     "OR-J20-S03": [
       "TestRefundRecovery/OR-J20-S03/lost-refund-response-resolves-original-provider-refund"
+    ],
+    "OR-J20-S04": [
+      "TestRefundBoundaryContract/OR-J20-S04/foreign-account-and-off-rail-refunds-have-no-effect"
     ],
     "OR-J21-S01": [
       "TestExternalPayments/OR-J21-S01/record-confirmed-external-money-without-provider-charge"
@@ -163,8 +282,25 @@
     "OR-J25-S02": [
       "TestRunningChargeContracts/OR-J25-S02/concurrent-stops-retain-one-final-segment"
     ],
+    "OR-J25-S03": [
+      "TestRunningChargeContracts/OR-J25-S03/before-stop",
+      "TestRunningChargeContracts/OR-J25-S03/after-commit",
+      "TestRunningChargeContracts/OR-J25-S03"
+    ],
     "OR-J25-S04": [
       "TestRunningChargeContracts/OR-J25-S04/depletion-notifies-host-and-explicit-stop-never-reopens"
+    ],
+    "OR-J27-S01": [
+      "TestPublicEntitlements/OR-J27-S01/purchase-and-grant-overlap-counts-once"
+    ],
+    "OR-J27-S02": [
+      "TestPublicEntitlements/OR-J27-S02/revoking-one-source-preserves-the-other"
+    ],
+    "OR-J27-S03": [
+      "TestPublicEntitlements/OR-J27-S03/exact-window-boundaries-and-historical-tenure"
+    ],
+    "OR-J27-S04": [
+      "TestPublicEntitlements/OR-J27-S04/archive-and-refund-obey-explicit-access-policy"
     ],
     "OR-J29-S01": [
       "TestProcessRecovery/OR-J29-S01"

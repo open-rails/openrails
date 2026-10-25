@@ -1507,10 +1507,6 @@
       "type UsageCharge struct {\n\tMeterKey string        `json:\"meter_key\"`\n\tModel    catalog.Model `json:\"model\"`\n\tCell     string        `json:\"cell,omitempty\"`\n\tQuantity int64         `json:\"quantity\"`\n\tAmount   int64         `json:\"amount,string\"`\n}",
       "type UsageEvent struct {\n\tID uuid.UUID `json:\"id\"`\n\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\n\tCustomerID uuid.UUID `json:\"customer_id\"`\n\n\tInvoker string `json:\"invoker\"`\n\n\tCurrency string `json:\"currency\"`\n\n\tResource *string `json:\"resource,omitempty\"`\n\n\tEventType string `json:\"event_type\"`\n\n\tDimensions map[string]int64 `json:\"dimensions,omitempty\"`\n\n\tAmount int64 `json:\"amount\"`\n\n\tOutcome        string `json:\"outcome\"`\n\tForgivenAmount int64  `json:\"forgiven_amount\"`\n\n\tSource   string `json:\"source\"`\n\tSourceID string `json:\"source_id\"`\n\n\tLedgerTransferID *uuid.UUID `json:\"ledger_transfer_id,omitempty\"`\n\n\tStatedAmount *int64 `json:\"stated_amount,string\"`\n\n\tCharges    []UsageCharge  `json:\"charges\"`\n\tMetadata   map[string]any `json:\"metadata,omitempty\"`\n\tOccurredAt time.Time      `json:\"occurred_at\"`\n\tCreatedAt  time.Time      `json:\"created_at\"`\n\n\tReplayed bool `json:\"replayed,omitempty\"`\n}"
     ],
-    "internal/db/sqlaudit": [
-      "type explainRoot struct {\n\tPlan planNode `json:\"Plan\"`\n}",
-      "type planNode struct {\n\tNodeType     string     `json:\"Node Type\"`\n\tRelationName string     `json:\"Relation Name\"`\n\tSchema       string     `json:\"Schema\"`\n\tAlias        string     `json:\"Alias\"`\n\tIndexName    string     `json:\"Index Name\"`\n\tIndexCond    string     `json:\"Index Cond\"`\n\tRecheckCond  string     `json:\"Recheck Cond\"`\n\tFilter       string     `json:\"Filter\"`\n\tPlans        []planNode `json:\"Plans\"`\n}"
-    ],
     "internal/destructive": [
       "type userActionRateEvidence struct {\n\tWindow                 string `json:\"window\"`\n\tHourlyCustomers        int64  `json:\"hourly_customers\"`\n\tMaximumHourlyCustomers int64  `json:\"maximum_hourly_customers\"`\n\tDailyCustomers         int64  `json:\"daily_customers\"`\n\tMaximumDailyCustomers  int64  `json:\"maximum_daily_customers\"`\n\tRetryAfterSeconds      int64  `json:\"retry_after_seconds\"`\n}"
     ],
@@ -2644,12 +2640,6 @@
       "catalog": "github.com/open-rails/openrails/catalog",
       "time": "time",
       "uuid": "github.com/google/uuid"
-    },
-    "internal/db/sqlaudit/plan.go": {
-      "context": "context",
-      "fmt": "fmt",
-      "json": "encoding/json",
-      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/destructive/user_actions.go": {
       "billing": "github.com/open-rails/openrails/billing",
