@@ -8,16 +8,16 @@ import (
 	"github.com/open-rails/openrails/internal/http/routes"
 )
 
-func (e *Engine) ResolveCustomer(ctx context.Context, authority auth.Authenticator, verified auth.Verified) (config.CustomerBinding, error) {
+func (e *Engine) ResolveCustomer(ctx context.Context, authority auth.Authenticator, verified auth.Verified) (config.CustomerProof, error) {
 	if err := e.CheckOpen(); err != nil {
-		return config.CustomerBinding{}, err
+		return config.CustomerProof{}, err
 	}
 	binding, err := routes.ResolveExistingCustomer(ctx, e.App.Runtime, authority, verified)
 	if err != nil {
-		return config.CustomerBinding{}, err
+		return config.CustomerProof{}, err
 	}
 	if err := e.CheckOpen(); err != nil {
-		return config.CustomerBinding{}, err
+		return config.CustomerProof{}, err
 	}
 	return binding, nil
 }

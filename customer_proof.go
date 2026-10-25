@@ -14,9 +14,9 @@ import (
 // request. Authority is the same trusted provider's metadata, never client input.
 // It requires auth.CredentialChecker, performs no authentication or admission,
 // and grants no platform link or permission beyond returning the proven pair.
-func (e *Engine) ResolveCustomer(ctx context.Context, authority auth.Authenticator, verified auth.Verified) (CustomerBinding, error) {
+func (e *Engine) ResolveCustomer(ctx context.Context, authority auth.Authenticator, verified auth.Verified) (CustomerProof, error) {
 	if e == nil || e.engine == nil {
-		return CustomerBinding{}, fmt.Errorf("%w: an initialized Engine is required", billing.ErrUnreachable)
+		return CustomerProof{}, fmt.Errorf("%w: an initialized Engine is required", billing.ErrUnreachable)
 	}
 	binding, err := e.engine.ResolveCustomer(ctx, authority, verified)
 	var refusal billingauth.GateError

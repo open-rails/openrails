@@ -27,6 +27,8 @@ type (
 	CustomerRoutes = config.CustomerRoutes
 	// CustomerBinding is the existing customer a host authorizes for one request.
 	CustomerBinding = config.CustomerBinding
+	// CustomerProof is the existing customer and stored issuer proved by one request.
+	CustomerProof = config.CustomerProof
 	// RouteGroups is Routes.RouteGroups: the route groups turned on.
 	RouteGroups = config.RouteGroups
 	// MerchantDeclaration is one entry of Config.Merchants: a merchant the

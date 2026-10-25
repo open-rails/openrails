@@ -95,12 +95,19 @@ var ErrCustomerIssuerMismatch = errors.New("db: the customer belongs to another 
 
 // ExistingCustomer checks the same issuer constraint as admission, without
 // creating a row or changing any customer state.
-func ExistingCustomer(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUID, issuer string) error {
+func ExistingCustomer(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUID, issuer string) (*string, error) {
 	row, err := q.GetCustomer(ctx, gen.GetCustomerParams{MerchantID: merchantID, ID: id})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return customerIssuerMatches(row, issuer)
+	if err := customerIssuerMatches(row, issuer); err != nil {
+		return nil, err
+	}
+	if row.Issuer == nil {
+		return nil, nil
+	}
+	stored := *row.Issuer
+	return &stored, nil
 }
 
 func customerIssuerMatches(row gen.BillingCustomer, issuer string) error {

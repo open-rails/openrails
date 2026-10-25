@@ -17,8 +17,8 @@ import (
 // ResolveExistingCustomer shares ordinary customer authority resolution, but
 // never calls admission: no customer creation, issuer reassignment or network
 // enrollment can be a side effect of proving the existing customer.
-func ResolveExistingCustomer(ctx context.Context, rt *app.Runtime, authority auth.Authenticator, verified auth.Verified) (config.CustomerBinding, error) {
-	refused := func(err error) (config.CustomerBinding, error) { return config.CustomerBinding{}, err }
+func ResolveExistingCustomer(ctx context.Context, rt *app.Runtime, authority auth.Authenticator, verified auth.Verified) (config.CustomerProof, error) {
+	refused := func(err error) (config.CustomerProof, error) { return config.CustomerProof{}, err }
 	if rt == nil || IsNilAuth(authority) {
 		return refused(auth.ErrUnavailable)
 	}
@@ -60,7 +60,8 @@ func ResolveExistingCustomer(ctx context.Context, rt *app.Runtime, authority aut
 	if err := requireCustomerTenantFor(ctx, rt, target.MerchantID, customer, verified); err != nil {
 		return refused(err)
 	}
-	if err := db.ExistingCustomer(ctx, rt.DB.GenDirectory(), target.MerchantID.UUID(), customer.UUID(), owner.issuer); err != nil {
+	issuer, err := db.ExistingCustomer(ctx, rt.DB.GenDirectory(), target.MerchantID.UUID(), customer.UUID(), owner.issuer)
+	if err != nil {
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			return refused(billingauth.Refusal(billing.CodeResourceNotFound))
@@ -85,7 +86,7 @@ func ResolveExistingCustomer(ctx context.Context, rt *app.Runtime, authority aut
 	if err := checkCustomerCredential(ctx, verified); err != nil {
 		return refused(err)
 	}
-	return config.CustomerBinding{MerchantID: target.MerchantID, CustomerID: customer}, nil
+	return config.CustomerProof{MerchantID: target.MerchantID, CustomerID: customer, Issuer: issuer}, nil
 }
 
 func checkCustomerCredential(ctx context.Context, verified auth.Verified) (err error) {

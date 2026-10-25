@@ -90,6 +90,7 @@ func TestCustomerProofResolution(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, a.alpha.MerchantID(), binding.MerchantID)
 			require.Equal(t, customer, binding.CustomerID)
+			require.Nil(t, binding.Issuer, "the native customer's stored SQL NULL is preserved")
 		}
 		require.EqualValues(t, 1, provider.calls.Load())
 		after, err := a.alpha.GetCustomer(t.Context(), customer)
@@ -151,6 +152,12 @@ func TestCustomerProofResolution(t *testing.T) {
 		require.NoError(t, err)
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, verified)
 		requireProofCode(t, err, billing.CodeCustomerIssuerMismatch)
+		_, err = a.pool.Exec(t.Context(), "UPDATE "+customers+" SET issuer='' WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), customer.UUID())
+		require.NoError(t, err)
+		emptyIssuer, err := a.engine.ResolveCustomer(t.Context(), provider, verified)
+		require.NoError(t, err)
+		require.NotNil(t, emptyIssuer.Issuer, "an empty stored value must not be normalized into SQL NULL provenance")
+		require.Empty(t, *emptyIssuer.Issuer)
 		_, err = a.pool.Exec(t.Context(), "UPDATE "+customers+" SET issuer=NULL WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), customer.UUID())
 		require.NoError(t, err)
 		_, err = a.beta.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{})
@@ -199,7 +206,7 @@ func TestCustomerProofResolution(t *testing.T) {
 		require.True(t, asserted.(auth.Asserted).Asserted())
 		binding, err := a.engine.ResolveCustomer(t.Context(), provider, asserted)
 		require.NoError(t, err)
-		require.Equal(t, openrails.CustomerBinding{MerchantID: a.alpha.MerchantID(), CustomerID: customer}, binding)
+		require.Equal(t, openrails.CustomerProof{MerchantID: a.alpha.MerchantID(), CustomerID: customer}, binding)
 
 		sender := authtest.NewDPoPKey(t)
 		claims := map[string]any{"iss": app.Issuer, "sub": customer.String(), "aud": resource, "client_id": "merchant-ui", "scope": billing.ScopeSelf, "iat": now.Unix(), "exp": now.Add(10 * time.Minute).Unix(), "jti": uuid.NewString(), "cnf": map[string]any{"jkt": sender.Thumbprint()}}
@@ -214,7 +221,7 @@ func TestCustomerProofResolution(t *testing.T) {
 		for range 2 {
 			got, err := a.engine.ResolveCustomer(t.Context(), provider, foreign)
 			require.NoError(t, err)
-			require.Equal(t, binding, got)
+			require.Equal(t, openrails.CustomerProof{MerchantID: binding.MerchantID, CustomerID: binding.CustomerID, Issuer: &app.Issuer}, got)
 		}
 		require.Equal(t, calls, provider.calls.Load())
 		_, err = provider.Authenticate(request)

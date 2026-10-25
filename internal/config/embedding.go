@@ -14,6 +14,17 @@ type CustomerBinding struct {
 	CustomerID billing.CustomerID
 }
 
+// CustomerProof is request-scoped evidence of an existing billing customer.
+// It grants no durable relationship or permission.
+type CustomerProof struct {
+	MerchantID billing.MerchantID
+	CustomerID billing.CustomerID
+	// Issuer is copied from the validated stored customer. Nil means exactly
+	// SQL NULL: the host's or merchant's native customer namespace. It does
+	// not prove that a platform account exists or owns this customer.
+	Issuer *string
+}
+
 // CustomerRoutes mounts customer operations with a host-authorized binding.
 // The host owns the live relationship policy; OpenRails keeps the original
 // verified identity, customer views and sensitive-operation checks.
