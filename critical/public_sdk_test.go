@@ -3,10 +3,8 @@
 package critical_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -32,7 +30,7 @@ import (
 // Browser drivers import the built SDK. This server only hosts its assets,
 // supplies real fixture identities, and controls external provider/network
 // boundaries. Every business response comes from the real OpenRails router.
-func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, network *standaloneWorld, cases ...string) {
+func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...string) {
 	t.Helper()
 	directory, err := filepath.Abs("../sdk/billing-ui")
 	require.NoError(t, err)
@@ -94,12 +92,7 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, network *
 		configuration["nmiPSP"] = psps.Items[0].ID.String()
 		configuration["nmiCardToken"] = vault.Tokenize(nmimock.Card{Brand: "visa", Last4: "5454", CVV: "M", AVS: "Y"})
 	}
-	if network != nil {
-		configuration["networkToken"] = network.Merchants["alpha"].CustomerToken
-		configuration["networkMerchant"] = network.Merchants["alpha"].ID.String()
-		configuration["networkCustomer"] = network.Merchants["alpha"].CustomerID.String()
-		configuration["networkAccount"] = network.AliceID
-	}
+
 	target, err := url.Parse(a.server.URL)
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(target)
@@ -116,40 +109,7 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, network *
 			cardProxy.ServeHTTP(w, r)
 		})
 	}
-	if network != nil {
-		networkURL, err := url.Parse(network.URL)
-		require.NoError(t, err)
-		networkProxy := httputil.NewSingleHostReverseProxy(networkURL)
-		mux.HandleFunc("/__network/", func(w http.ResponseWriter, r *http.Request) {
-			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/__network")
-			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/__network")
-			networkProxy.ServeHTTP(w, r)
-		})
-		mux.HandleFunc("POST /__fixture/network-proof", func(w http.ResponseWriter, r *http.Request) {
-			var in struct {
-				Nonce string `json:"nonce"`
-			}
-			if json.NewDecoder(r.Body).Decode(&in) != nil || in.Nonce == "" {
-				http.Error(w, "missing actual challenge nonce", 400)
-				return
-			}
-			body, _ := json.Marshal(map[string]string{"Op": "authorize", "Merchant": "alpha", "Account": "alice", "Nonce": in.Nonce})
-			req, err := http.NewRequestWithContext(r.Context(), "POST", network.ControlURL, bytes.NewReader(body))
-			if err != nil {
-				http.Error(w, err.Error(), 500)
-				return
-			}
-			response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-			if err != nil {
-				http.Error(w, err.Error(), 502)
-				return
-			}
-			defer response.Body.Close()
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(response.StatusCode)
-			_, _ = io.Copy(w, response.Body)
-		})
-	}
+
 	mux.HandleFunc("GET /__fixture/config", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(configuration)
@@ -262,8 +222,7 @@ func TestPublicSDK(t *testing.T) {
 		require.NoError(t, err, string(output))
 		t.Log(string(output))
 		a, p := newPaymentWorld(t, func(w *world) { publicPastClock(w, 0) })
-		network := newStandaloneWorld(t)
-		publicBrowser(t, a, p, network, "OR-UI-01", "OR-UI-02", "OR-UI-03", "OR-UI-06", "OR-UI-07")
+		publicBrowser(t, a, p, "OR-UI-01", "OR-UI-02", "OR-UI-03", "OR-UI-07")
 		effects := p.effects(t)
 		require.Len(t, effects, 3, "one-off purchase, membership enrollment, and one upgrade")
 		amounts := []int64{}
@@ -282,17 +241,11 @@ func TestPublicSDK(t *testing.T) {
 			}
 		}
 		require.True(t, found, "the SDK's report created its real observable merchant finding")
-		linked, err := network.alpha.ListNetworkCustomers(t.Context(), billing.NetworkCustomerListParams{NetworkAccountID: billing.NetworkAccountID(uuid.MustParse(network.AliceID))})
-		require.NoError(t, err)
-		require.Len(t, linked.Items, 1)
-		require.Equal(t, network.Merchants["alpha"].CustomerID, linked.Items[0].ID)
-		foreign, err := network.beta.ListNetworkCustomers(t.Context(), billing.NetworkCustomerListParams{NetworkAccountID: billing.NetworkAccountID(uuid.MustParse(network.AliceID))})
-		require.NoError(t, err)
-		require.Empty(t, foreign.Items)
+
 	})
 	t.Run("OR-J04-S03/browser-network-retry-and-cancellation-stay-bounded", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
-		publicBrowser(t, a, p, nil, "OR-UI-04")
+		publicBrowser(t, a, p, "OR-UI-04")
 		// The Go transport also honors its declared timeout even when the
 		// host's injected HTTP client has none. The accepted request remains
 		// blocked at a network boundary until cancellation reaches it.
@@ -316,7 +269,7 @@ func TestPublicSDK(t *testing.T) {
 	})
 	t.Run("OR-J04-S04/expired-token-retry-commits-only-one-order", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
-		publicBrowser(t, a, p, nil, "OR-UI-05")
+		publicBrowser(t, a, p, "OR-UI-05")
 		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{})
 		require.NoError(t, err)
 		require.Len(t, orders.Items, 1)

@@ -18,6 +18,7 @@ import (
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit"
@@ -33,7 +34,7 @@ import (
 )
 
 type config struct {
-	MappedCustomers                            bool
+	MappedCustomers, CustomerAdmissionPolicy   bool
 	Schema, Ready, ControlKey, FXURL, RedisURL string
 	CheckoutOrigin, PaymentAssets              string
 	At                                         time.Time
@@ -136,20 +137,40 @@ func TestServerFixture(t *testing.T) {
 		defer shared.Close()
 		require.NoError(t, shared.Ping(t.Context()).Err())
 	}
+	var denyNative atomic.Bool
+	denyNative.Store(cfg.CustomerAdmissionPolicy)
+	var customerPolicy func(context.Context, auth.Verified, openrails.CustomerBinding) error
+	if cfg.CustomerAdmissionPolicy {
+		customerPolicy = func(_ context.Context, v auth.Verified, binding openrails.CustomerBinding) error {
+			id := v.Identity()
+			if binding.MerchantID.IsZero() || binding.CustomerID.String() != id.Subject {
+				return auth.ErrForbidden
+			}
+			if asserted, ok := v.(auth.Asserted); ok && asserted.Asserted() {
+				return nil
+			}
+			if denyNative.Load() && id.Issuer == httpServer.URL {
+				return auth.ErrForbidden
+			}
+			return nil
+		}
+	}
+	resourceScopes := map[string][]string{"fixture:host": {}, billing.ScopeSelf: {"merchant:*"}}
 	renameInterval := 72 * time.Hour
 	srv, err := server.New(t.Context(), server.Config{
 		Engine: openrails.Config{Database: openrails.DatabaseConfig{Schema: cfg.Schema, RiverSchema: cfg.Schema}, PublicBillingBaseURL: httpServer.URL, ProviderWriteMode: openrails.ProviderWritesFull, RateLimitsDisabled: true, CatalogReconciliationInterval: "0"},
 		Auth: authkit.Config{
 			DefaultTenantID: iam.NewTenantID(), Database: authkit.DatabaseConfig{Schema: cfg.Schema + "_auth", RiverSchema: cfg.Schema},
-			Token: authkit.TokenConfig{Issuer: httpServer.URL, AllowPrivateNetworkJWKS: true}, Resource: authkit.ResourceConfig{ID: httpServer.URL, PublicURL: httpServer.URL},
-			Registration: authkit.RegistrationConfig{AllowMissingSenders: true}, TwoFactor: authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
+			Token: authkit.TokenConfig{Issuer: httpServer.URL, AllowPrivateNetworkJWKS: true}, Resource: authkit.ResourceConfig{ID: httpServer.URL, PublicURL: httpServer.URL, Scopes: resourceScopes},
+			AuthorizationServer: authkit.AuthorizationServerConfig{Resources: []authkit.ResourceServerConfig{{ID: httpServer.URL, Scopes: []string{billing.ScopeSelf, "fixture:host"}}}, GroupClients: authkit.GroupClientsConfig{Scopes: []authkit.GroupClientScope{{Name: billing.ScopeSelf, Resource: httpServer.URL, Description: "Use own billing"}, {Name: "fixture:host", Resource: httpServer.URL, Description: "Host-owned consent"}}}},
+			Registration:        authkit.RegistrationConfig{AllowMissingSenders: true}, TwoFactor: authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
 			Agreements: []authkit.AgreementConfig{{Key: "network-terms", Version: "critical-v1", URL: "https://critical.invalid/network-terms"}},
 			HTTP:       &authkit.HTTPConfig{DirectPeerIP: true},
 		},
 		CheckoutOrigin: cfg.CheckoutOrigin,
 		Naming:         server.NamingConfig{RenameInterval: &renameInterval},
 		LocalSignIn:    true, AdminConsole: &server.AdminConsole{Disabled: true}, RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true},
-	}, server.Deps{PaymentPageAssets: hostPaymentAssets(cfg.PaymentAssets), Engine: openrails.Deps{Postgres: pool, Redis: shared, Clock: clock, FXTransport: wire{fx, transport}}, Auth: authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}}})
+	}, server.Deps{CustomerAdmissionPolicy: customerPolicy, PaymentPageAssets: hostPaymentAssets(cfg.PaymentAssets), Engine: openrails.Deps{Postgres: pool, Redis: shared, Clock: clock, FXTransport: wire{fx, transport}}, Auth: authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}}})
 	require.NoError(t, err)
 	defer srv.Close(context.Background())
 	handler := srv.Handler()
@@ -183,7 +204,7 @@ func TestServerFixture(t *testing.T) {
 		require.NoError(t, err)
 		_, err = ak.SetGroupRole(t.Context(), iam.SystemIdentity(), group, iam.RemoteApplicationSubject(app.ID), owner)
 		require.NoError(t, err)
-		registered, err := ak.CreateGroupOAuthClient(t.Context(), iam.SystemIdentity(), group, iam.NewOAuthClient{ClientName: slug + " sign-in", RedirectURIs: []string{"https://" + slug + ".critical.invalid/callback"}, TokenEndpointAuthMethod: iam.OAuthClientSecretBasic, Scope: "openid openrails:self openrails:link"})
+		registered, err := ak.CreateGroupOAuthClient(t.Context(), iam.SystemIdentity(), group, iam.NewOAuthClient{ClientName: slug + " sign-in", RedirectURIs: []string{"https://" + slug + ".critical.invalid/callback"}, TokenEndpointAuthMethod: iam.OAuthClientSecretBasic, Scope: "openid openrails:self fixture:host"})
 		require.NoError(t, err)
 		remote, err := openrails.NewRemote(httpServer.URL, openrails.RemoteOptions{Credentials: map[billing.MerchantID]openrails.RemoteCredential{created.MerchantID: {APIKey: apiKey.Secret, Assertion: &openrails.AssertionKey{Issuer: issuer, KeyID: "merchant-key", Signer: assertionKey, TokenURL: httpServer.URL + iam.OAuthTokenPath}}}})
 		require.NoError(t, err)
@@ -234,6 +255,29 @@ func TestServerFixture(t *testing.T) {
 		case cmd := <-calls:
 			result := answer{}
 			switch cmd.Op {
+			case "customer-policy":
+				denyNative.Store(cmd.ID != "allow")
+				result.Result = map[string]bool{"denied": denyNative.Load()}
+			case "native-customer-token":
+				token, err := ak.MintAccessToken(t.Context(), users[cmd.Account].ID, iam.AccessTokenOptions{Group: iam.GroupByID(out.Merchants[cmd.Merchant].ID.String())})
+				require.NoError(t, err)
+				result.Result = token
+			case "grant-customer-owner":
+				owner, ok := server.MerchantRole("owner")
+				require.True(t, ok)
+				_, err := ak.SetGroupRole(t.Context(), iam.SystemIdentity(), iam.GroupByID(out.Merchants[cmd.Merchant].ID.String()), iam.UserSubject(users[cmd.Account].ID), owner)
+				require.NoError(t, err)
+				result.Result = map[string]bool{"granted": true}
+			case "legacy-account-fact":
+				tx, err := pool.Begin(t.Context())
+				require.NoError(t, err)
+				mid := out.Merchants[cmd.Merchant].ID
+				_, err = tx.Exec(t.Context(), "SELECT set_config('openrails.merchant_id',$1,true)", mid.String())
+				require.NoError(t, err)
+				_, err = tx.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{cfg.Schema, "host_outbox"}.Sanitize()+"(merchant_id,event_type,subject_type,subject_id,occurred_at,data,dedupe_key) VALUES($1,'customer.network_linked','customer',$2,now(),'{\"legacy\":true}'::jsonb,'legacy:read')", mid.UUID(), uuid.MustParse(users[cmd.Account].ID))
+				require.NoError(t, err)
+				require.NoError(t, tx.Commit(t.Context()))
+				result.Result = map[string]bool{"inserted": true}
 			case "authorize":
 				shop, ok := out.Merchants[cmd.Merchant]
 				require.True(t, ok)
@@ -241,7 +285,7 @@ func TestServerFixture(t *testing.T) {
 				require.True(t, ok)
 				scopes := cmd.Scopes
 				if len(scopes) == 0 {
-					scopes = []string{"openid", "openrails:link"}
+					scopes = []string{"openid", billing.ScopeSelf}
 				}
 				result.Result = as.Authorize(t, user, authtest.CodeFlow{ClientID: shop.OAuth.ClientID, ClientSecret: *shop.OAuth.ClientSecret, RedirectURI: "https://" + cmd.Merchant + ".critical.invalid/callback", Resource: httpServer.URL, Scopes: scopes, Nonce: cmd.Nonce, Consent: true})
 			case "stale-sign-in":
