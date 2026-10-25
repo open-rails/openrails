@@ -60,6 +60,34 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		_, err = a.alpha.ResumeSubscription(t.Context(), sub.ID)
 		require.Error(t, err)
 		p.money(t, 1, 1000)
+		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.provider_cancel.held"})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 1)
+		require.Equal(t, sub.ID.String(), findings.Items[0].Evidence["subscription_id"])
+		require.Equal(t, *sub.RailSubscriptionID, findings.Items[0].Evidence["rail_subscription_id"])
+		require.Equal(t, true, findings.Items[0].Evidence["account_deletion"])
+		// This documented operator SQL changes only the owned fixture's
+		// deployment switch. The retained financial operation is never edited;
+		// the actual registered workers must finish its original provider delete.
+		enableLifecycleMaintenance(t, a)
+		a.clock.Advance(20 * time.Minute)
+		third := startWorkerProcess(t, a.world, nil)
+		_, err = queue.Insert(t.Context(), registeredJob{KindName: "openrails.dunning"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		require.NoError(t, err)
+		for _, original := range jobs.Jobs {
+			for range 2 {
+				_, err := queue.Insert(t.Context(), replayedOperation{Payload: original.EncodedArgs}, &river.InsertOpts{Queue: openrails.QueueBilling})
+				require.NoError(t, err)
+			}
+		}
+		require.Eventually(t, func() bool { return !p.core.ScheduleLive(*sub.RailSubscriptionID) }, 20*time.Second, 20*time.Millisecond)
+		require.Equal(t, 1, p.core.ScheduleDeletes(*sub.RailSubscriptionID), "replayed retained cancellation must delete the provider schedule once")
+		third.kill(t)
+		retained, err = a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionCanceled, retained.Status)
+		require.False(t, retained.Resumable)
+		p.money(t, 1, 1000)
 	})
 	t.Run("OR-J17-S04/revoked-agreement-and-late-callback-cannot-restart-renewal", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t)
