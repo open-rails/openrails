@@ -6,8 +6,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/open-rails/authkit v1.37.2
-	github.com/open-rails/helpers v1.16.2-0.20261025033036-8c93ee4139d4
-	github.com/open-rails/openrails v0.264.0
+	github.com/open-rails/helpers v1.17.0
+	github.com/open-rails/openrails v0.265.0
 )
 
 require (
