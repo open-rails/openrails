@@ -497,7 +497,7 @@ func (e *Env) customerCheck(route Route, a billingauth.Authenticator) router.Mid
 			}
 			if e.customerAdmissionPolicy != nil {
 				if err := e.customerAdmissionPolicy(r.Request.Context(), v, config.CustomerBinding{MerchantID: target.MerchantID, CustomerID: id}); err != nil {
-					refuse(r, route, a, stepCan, err)
+					refuse(r, route, a, stepAuthenticate, err)
 					return
 				}
 			}

@@ -527,11 +527,6 @@ export type CreateMyOrderParams = {
   pay_url?: MyOrderPayURLParams
 }
 
-export type CreateNetworkLinkParams = {
-  challenge_id?: string
-  id_token?: string
-}
-
 export type CreateOrderParams = {
   customer_id?: string
   lines?: OrderLineParams[]
@@ -762,18 +757,6 @@ export type CustomerEntitlement = {
   customer_id: string
   entitlement: string
   quantity: number | null
-}
-
-export type CustomerLink = {
-  id: string
-  merchant_id: string
-  customer_id: string
-  account_id: string
-  method: "connect" | "payment_page" | "sign_in"
-  status: "active" | "revoked"
-  linked_at: string
-  revoked_at: string | null
-  revoked_by: "account_deleted" | "customer" | "merchant_left" | null
 }
 
 export type CustomerSettings = {
@@ -1359,29 +1342,6 @@ export type MetricsSchema = {
 
 export type MyOrderPayURLParams = {
   embedded?: boolean
-}
-
-export type NetworkLink = {
-  link: CustomerLink
-  merchant: PublicMerchant
-}
-
-export type NetworkLinkChallenge = {
-  id: string
-  nonce: string
-  expires_at: string
-}
-
-export type NetworkOrder = {
-  link_id: string
-  merchant_id: string
-  order: Order
-}
-
-export type NetworkSubscription = {
-  link_id: string
-  merchant_id: string
-  subscription: Subscription
 }
 
 export type NewPriceDraft = {
@@ -2018,7 +1978,6 @@ export type PublicConfig = {
   currencies: CurrencyUnits[]
   rails: RailDefinition[]
   captcha: CaptchaConfig | null
-  network: PublicNetwork | null
 }
 
 export type PublicMerchant = {
@@ -2029,11 +1988,6 @@ export type PublicMerchant = {
   privacy_url: string | null
   statement_descriptor: string | null
   embed_origins: string[]
-}
-
-export type PublicNetwork = {
-  issuer: string
-  client_id: string
 }
 
 export type Quantity = {

@@ -150,9 +150,6 @@ const (
 	// PayURLSavedCards: a customer route served only when the pay URL
 	// offers saved cards.
 	PayURLSavedCards PayURLAccess = "saved_cards"
-	// PayURLLink: a customer route the order's customer uses to link its
-	// openrails.dev account, the pay URL proving the merchant's side.
-	PayURLLink PayURLAccess = "link"
 )
 
 // Reply is one success outcome of a route: its status and body. Body is a
@@ -428,7 +425,7 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 			if r.Auth != AuthPublic {
 				panic("routes: " + r.Key() + ": a public pay URL route takes no credential")
 			}
-		case PayURLOrder, PayURLSavedCards, PayURLLink, PayURLMerchant:
+		case PayURLOrder, PayURLSavedCards, PayURLMerchant:
 			if r.Auth != AuthCustomer || (r.PayURL == PayURLOrder) != strings.Contains(r.Path, "{id}") {
 				panic("routes: " + r.Key() + ": a pay URL customer route is a customer route; an order route names the order as {id}")
 			}

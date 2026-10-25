@@ -179,8 +179,9 @@ func TestCustomerAdmissionPolicyPreservesGenericSurfaces(t *testing.T) {
 		return nil
 	}
 	srv, err := server.New(t.Context(), server.Config{
-		Engine:      openrails.Config{Database: openrails.DatabaseConfig{Schema: "isolated_billing", RiverSchema: "isolated_river"}, PublicBillingBaseURL: httpServer.URL, ProviderWriteMode: openrails.ProviderWritesFull, RateLimitsDisabled: true, CatalogReconciliationInterval: "0"},
-		Auth:        authkit.Config{DefaultTenantID: iam.NewTenantID(), Database: authkit.DatabaseConfig{Schema: "isolated_auth", RiverSchema: "isolated_river"}, Token: authkit.TokenConfig{Issuer: httpServer.URL, AllowPrivateNetworkJWKS: true}, Resource: authkit.ResourceConfig{ID: httpServer.URL, PublicURL: httpServer.URL}, Registration: authkit.RegistrationConfig{AllowMissingSenders: true}, TwoFactor: authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled}, HTTP: &authkit.HTTPConfig{DirectPeerIP: true}, Agreements: []authkit.AgreementConfig{{Key: "network-terms", Version: "test", URL: "https://example.invalid/terms"}}},
+		Engine: openrails.Config{Database: openrails.DatabaseConfig{Schema: "isolated_billing", RiverSchema: "isolated_river"}, PublicBillingBaseURL: httpServer.URL, ProviderWriteMode: openrails.ProviderWritesFull, RateLimitsDisabled: true, CatalogReconciliationInterval: "0"},
+		Auth: authkit.Config{DefaultTenantID: iam.NewTenantID(), Database: authkit.DatabaseConfig{Schema: "isolated_auth", RiverSchema: "isolated_river"}, Token: authkit.TokenConfig{Issuer: httpServer.URL, AllowPrivateNetworkJWKS: true}, Resource: authkit.ResourceConfig{ID: httpServer.URL, PublicURL: httpServer.URL, Scopes: map[string][]string{"app:link": {}, billing.ScopeSelf: {"merchant:*"}}},
+			AuthorizationServer: authkit.AuthorizationServerConfig{Resources: []authkit.ResourceServerConfig{{ID: httpServer.URL, Scopes: []string{"app:link", billing.ScopeSelf}}}, GroupClients: authkit.GroupClientsConfig{Scopes: []authkit.GroupClientScope{{Name: "app:link", Description: "Link the host account", Resource: httpServer.URL}, {Name: billing.ScopeSelf, Description: "Read own billing", Resource: httpServer.URL}}}}, Registration: authkit.RegistrationConfig{AllowMissingSenders: true}, TwoFactor: authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled}, HTTP: &authkit.HTTPConfig{DirectPeerIP: true}, Agreements: []authkit.AgreementConfig{{Key: "network-terms", Version: "test", URL: "https://example.invalid/terms"}}},
 		LocalSignIn: true, AdminConsole: &server.AdminConsole{Disabled: true}, RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
 	}, server.Deps{CustomerAdmissionPolicy: policy, Engine: openrails.Deps{Postgres: pool}, Auth: authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}}})
 	extractionOK(t, err)
@@ -258,6 +259,47 @@ func TestCustomerAdmissionPolicyPreservesGenericSurfaces(t *testing.T) {
 	mux.ServeHTTP(w, r)
 	if w.Code != 200 {
 		t.Fatalf("mapped routes affected by ordinary policy: %d %s", w.Code, w.Body.String())
+	}
+	// A host-owned consent scope is usable, while a host cannot broaden the
+	// canonical self scope into merchant administration.
+	_, err = ak.SetGroupRole(t.Context(), iam.SystemIdentity(), iam.GroupByID(merchant.GroupID), iam.UserSubject(user.ID), owner)
+	extractionOK(t, err)
+	oauth, err := ak.CreateGroupOAuthClient(t.Context(), iam.SystemIdentity(), iam.GroupByID(merchant.GroupID), iam.NewOAuthClient{ClientName: "host link", RedirectURIs: []string{"https://merchant.invalid/callback"}, TokenEndpointAuthMethod: iam.OAuthClientSecretBasic, Scope: "openid app:link openrails:self"})
+	extractionOK(t, err)
+	if oauth.ClientSecret == nil {
+		t.Fatal("confidential client has no secret")
+	}
+	as := authtest.Attach(t, ak, httpServer)
+	issued := as.Authorize(t, user, authtest.CodeFlow{ClientID: oauth.ClientID, ClientSecret: *oauth.ClientSecret, RedirectURI: "https://merchant.invalid/callback", Resource: httpServer.URL, Scopes: []string{"openid", "app:link", billing.ScopeSelf}, Consent: true})
+	if !strings.Contains(issued.Scope, "app:link") {
+		t.Fatal("host scope was discarded")
+	}
+	deny.Store(false)
+	if status := request("/v1/me/orders", issued.AccessToken); status != 200 {
+		t.Fatalf("self scope refused: %d", status)
+	}
+	if status := request("/v1/admin/customers", issued.AccessToken); status != 403 {
+		t.Fatalf("host overrode billing scope ceiling: %d", status)
+	}
+	// Historical producer kinds remain readable as raw retained facts.
+	tx, err := pool.Begin(t.Context())
+	extractionOK(t, err)
+	_, err = tx.Exec(t.Context(), "SELECT set_config('openrails.merchant_id',$1,true)", merchant.MerchantID.String())
+	extractionOK(t, err)
+	_, err = tx.Exec(t.Context(), `INSERT INTO isolated_billing.host_outbox(merchant_id,event_type,subject_type,subject_id,occurred_at,data,dedupe_key) VALUES($1,'customer.network_linked','customer',$2,now(),'{"legacy":true}'::jsonb,'legacy:read')`, merchant.MerchantID.UUID(), customer.UUID())
+	extractionOK(t, err)
+	extractionOK(t, tx.Commit(t.Context()))
+	events, err := client.ListEvents(t.Context(), billing.EventQuery{Types: []string{"customer.network_linked"}})
+	extractionOK(t, err)
+	if len(events.Events) != 1 || events.Events[0].Type != "customer.network_linked" {
+		t.Fatalf("historical event changed: %#v", events)
+	}
+	var legacy struct {
+		Legacy bool `json:"legacy"`
+	}
+	extractionOK(t, json.Unmarshal(events.Events[0].Data, &legacy))
+	if !legacy.Legacy {
+		t.Fatal("historical raw payload lost")
 	}
 	// Declaring a formerly activating agreement does not expose product configuration.
 	r = httptest.NewRequest(http.MethodGet, "/v1/config", nil)

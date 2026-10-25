@@ -113,6 +113,7 @@ migration 0111_remove_event_consumers_contract.up.sql sha256:ab6f344a51e804810d6
 migration 0112_network_event_cursor.up.sql sha256:fe38ca31bba8bf4364f2e1309a3106ce435b44c541f53ddec99408ea0b8a74b3
 migration 0113_shared_eventlog_contract.up.sql sha256:15e7ef39ceaa6a0553473b8fab7772731b80aeadeb034f26e8c8680840683895
 migration 0114_account_usage_billing.up.sql sha256:1b818744089d9dc86b08b384be8610120c5b30147cce99e2fbf51f3dd9cdc713
+migration 0116_remove_hosted_account_state.up.sql sha256:8dc46947ff04dd7bd60c6a71fd2b6c059e0d60ec2298577f0fe4237bef303dde
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -503,35 +504,6 @@ table billing.customer_invoice_profiles
   constraint customer_invoice_profiles_net_terms_check CHECK ((net_terms_days >= 0))
   constraint customer_invoice_profiles_pkey PRIMARY KEY (merchant_id, customer_id)
   index CREATE UNIQUE INDEX customer_invoice_profiles_pkey ON billing.customer_invoice_profiles USING btree (merchant_id, customer_id)
-
-table billing.customer_links
-  column merchant_id uuid NOT NULL
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column customer_id uuid NOT NULL
-  column account_id uuid NOT NULL
-  column method text NOT NULL
-  column credential text
-  column order_id uuid
-  column auth_time timestamp with time zone
-  column amr text[]
-  column terms_version text NOT NULL
-  column status text NOT NULL
-  column linked_at timestamp with time zone NOT NULL DEFAULT now()
-  column revoked_at timestamp with time zone
-  column revoked_by text
-  constraint customer_links_customer_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT
-  constraint customer_links_method_check CHECK ((method = ANY (ARRAY['payment_page'::text, 'connect'::text, 'sign_in'::text])))
-  constraint customer_links_pkey PRIMARY KEY (merchant_id, id)
-  constraint customer_links_proof_check CHECK ((((method = 'payment_page'::text) AND (credential = 'pay_url'::text) AND (order_id IS NOT NULL) AND (auth_time IS NOT NULL) AND (amr IS NOT NULL)) OR ((method = 'connect'::text) AND (credential = 'customer_token'::text) AND (order_id IS NULL) AND (auth_time IS NOT NULL) AND (amr IS NOT NULL)) OR ((method = 'sign_in'::text) AND (credential IS NULL) AND (order_id IS NULL) AND (auth_time IS NULL) AND (amr IS NULL) AND (customer_id = account_id))))
-  constraint customer_links_revocation_check CHECK ((((status = 'revoked'::text) = (revoked_at IS NOT NULL)) AND ((revoked_at IS NULL) = (revoked_by IS NULL)) AND ((revoked_at IS NULL) OR (revoked_at >= linked_at))))
-  constraint customer_links_revoked_by_check CHECK ((revoked_by = ANY (ARRAY['customer'::text, 'account_deleted'::text, 'merchant_left'::text])))
-  constraint customer_links_status_check CHECK ((status = ANY (ARRAY['active'::text, 'revoked'::text])))
-  constraint customer_links_terms_version_check CHECK (((terms_version = btrim(terms_version)) AND (terms_version <> ''::text)))
-  index CREATE UNIQUE INDEX customer_links_account_active_key ON billing.customer_links USING btree (account_id, merchant_id) WHERE (status = 'active'::text)
-  index CREATE INDEX customer_links_account_idx ON billing.customer_links USING btree (account_id, id)
-  index CREATE UNIQUE INDEX customer_links_customer_active_key ON billing.customer_links USING btree (merchant_id, customer_id) WHERE (status = 'active'::text)
-  index CREATE UNIQUE INDEX customer_links_pkey ON billing.customer_links USING btree (merchant_id, id)
-  index CREATE INDEX customer_links_revoked_at_idx ON billing.customer_links USING btree (merchant_id, revoked_at) WHERE (status = 'revoked'::text)
 
 table billing.customer_low_balance_lines
   column merchant_id uuid NOT NULL
@@ -1170,14 +1142,6 @@ table billing.money_settings
   index CREATE UNIQUE INDEX money_settings_pkey ON billing.money_settings USING btree (merchant_id, customer_id, currency)
   index CREATE INDEX money_settings_usage_due ON billing.money_settings USING btree (merchant_id, usage_next_bill_at) WHERE ((usage_next_bill_at IS NOT NULL) OR usage_collection_due)
   trigger CREATE TRIGGER trg_subscription_history_default AFTER UPDATE OF default_payment_method_id ON billing.money_settings FOR EACH ROW EXECUTE FUNCTION billing.subscription_history_default_card()
-
-table billing.network_event_cursors
-  column issuer text NOT NULL
-  column tenant_id uuid NOT NULL
-  column cursor text NOT NULL DEFAULT ''::text
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint network_event_cursors_pkey PRIMARY KEY (issuer, tenant_id)
-  index CREATE UNIQUE INDEX network_event_cursors_pkey ON billing.network_event_cursors USING btree (issuer, tenant_id)
 
 table billing.nmi_bulk_checkpoints
   column merchant_id uuid NOT NULL
@@ -3707,7 +3671,6 @@ function billing.guard_billing_restore_receipt()
                     'customer_entitlement_cache_stamps',
                     'customer_invoice_profiles',
                     'customer_low_balance_lines',
-                    'customer_links',
                     'customers',
                     'dashboard_configs',
                     'destructive_actions',

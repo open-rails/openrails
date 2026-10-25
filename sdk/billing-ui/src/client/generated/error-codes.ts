@@ -82,11 +82,6 @@ export type OpenRailsErrorCode =
   | "method_not_allowed"
   | "metrics_query_invalid"
   | "model_unavailable"
-  | "network_account_linked"
-  | "network_link_challenge_invalid"
-  | "network_link_conflict"
-  | "network_link_in_use"
-  | "network_terms_required"
   | "order_action_not_allowed"
   | "order_attempt_closed"
   | "order_attempt_expired"
@@ -287,11 +282,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   method_not_allowed: { status: 405, type: "invalid_request_error", meaning: "The path exists but not for this method; Allow lists its methods." },
   metrics_query_invalid: { status: 400, type: "invalid_request_error", meaning: "The metrics query is invalid; metadata.errors lists why." },
   model_unavailable: { status: 502, type: "api_error", meaning: "The language model did not answer; retry, or ask a narrower question." },
-  network_account_linked: { status: 409, type: "invalid_request_error", meaning: "The openrails.dev account is linked to another customer of this merchant." },
-  network_link_challenge_invalid: { status: 400, type: "invalid_request_error", meaning: "The link challenge is unknown, expired or spent, or the ID token does not answer it: another client, nonce or merchant, a sign-in older than the challenge, or no openrails:link consent; ask for a new challenge." },
-  network_link_conflict: { status: 409, type: "invalid_request_error", meaning: "The customer is linked to another openrails.dev account; sign in with that one." },
-  network_link_in_use: { status: 409, type: "invalid_request_error", meaning: "The customer's subscriptions at this merchant still charge its cards; cancel them or move them to another card first." },
-  network_terms_required: { status: 403, type: "authorization_error", meaning: "The openrails.dev account has not accepted the network terms." },
   order_action_not_allowed: { status: 409, type: "invalid_request_error", meaning: "The order's origin or status does not allow this action." },
   order_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The order attempt already completed or was canceled." },
   order_attempt_expired: { status: 410, type: "invalid_request_error", meaning: "The order attempt expired before it was paid." },

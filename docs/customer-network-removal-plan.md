@@ -2,7 +2,31 @@
 
 Status: **reviewed removal plan; an isolated implementation draft may proceed, while merge and release remain gated on destination qualification**. This inventory was read against signed candidate `5dccddefec0a7c3fdcd9ed9484eb3a2125733a03` (generic mapped routes, customer proof resolution, projection removal and proposed v0.264.0 dependency pins), based on fetched master `31cb304e72b30eedc0deab5d72cca54ee07345a6`.
 
-The destination is the SaaS account-policy, proof, linking, lifecycle and UI composition. Core continues to own merchant billing customers, ordinary merchant-scoped authentication, orders, subscriptions, payment authority and generic `CustomerRoutes` / `ResolveCustomer`. This plan removes no source, tests, schemas or queued jobs yet.
+The destination is the SaaS account-policy, proof, linking, lifecycle and UI composition. Core continues to own merchant billing customers, ordinary merchant-scoped authentication, orders, subscriptions, payment authority and generic `CustomerRoutes` / `ResolveCustomer`. The original planning checkpoint removed no source. The separate extraction draft now implements the production removal described below; shipping master and the old critical/browser scenarios remain intact pending destination qualification.
+
+## Current isolated implementation
+
+The draft removes the old service, implicit configuration/hooks, River reader,
+network HTTP/client/DTO/query owners, platform sign-in on the generic payment
+page, and old retention/archive ownership. Migration0116 preserves released SQL
+and refuses populated or conflicting untransferred state. No queued job or live
+database was changed. Notification migration0115 remains a separate lane and
+must be integrated before the final release ordering is fixed.
+
+The new standalone `CustomerAdmissionPolicy` hook is customer-only and runs
+before ordinary admission. Explicit host OAuth resource scopes survive server
+composition; canonical billing scope ceilings remain authoritative. Host
+consent/resources/group-client declarations are explicit; see
+[the host guide](customer-admission-policy.md).
+
+Production root/server builds, SQLC generation/live query preparation and
+contract generation pass. Two narrow real-service journeys cover migration
+refusal/continuation and actual AuthKit/customer policy behavior, including
+OAuth scope isolation and retained old-event reads. SDK and payment-page
+production builds pass. These checks do not replace the destination browser,
+full combined suite, restored-data rehearsal or release gates below. The narrow
+server tests must be integrated into the existing critical fixture/ledger before
+merge; they are not intended to become an extra parallel CI suite.
 
 ## Gate before merging the removal patch
 
@@ -86,7 +110,7 @@ The original planning branch performed no source deletion. This separate impleme
 
 The automatic path is `registerSelfServiceRoutes → RegisterCustomerRoutes → customerCheck → customerIssuer → admitCustomer → db.AdmitCustomer`. Today its platform-account branch goes through `rt.Network.AdmitNative`. Simply removing that branch preserves automatic native customer allocation, so SaaS needs an explicit customer-only policy before this admission step. Do not use URL-prefix heuristics, reauthenticate the request, alter its original verified identity, or deny native staff at the whole server. Generic mapped routes already take a separate path and must remain separate.
 
-A small customer-only credential/admission policy seam is the candidate gap; its exact API remains a root integration decision. It must preserve the default OSS behavior and let SaaS require its explicit policy/link resolution for native platform and isolated accounts while retaining legitimate merchant-issued customer APIs.
+The approved seam is `server.Deps.CustomerAdmissionPolicy(context.Context, auth.Verified, openrails.CustomerBinding) error`, implemented in the isolated draft. It must preserve the default OSS behavior and let SaaS require its explicit policy/link resolution for native platform and isolated accounts while retaining legitimate merchant-issued customer APIs.
 
 | HTTP entry and original credential | Acceptance requirement |
 |---|---|

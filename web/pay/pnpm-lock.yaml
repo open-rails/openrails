@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@openrails/auth-ui':
-        specifier: 1.29.1
-        version: 1.29.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/billing-ui':
         specifier: file:../../sdk/billing-ui
         version: file:../../sdk/billing-ui(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
@@ -100,17 +97,6 @@ packages:
     resolution: {integrity: sha512-9tAsd92yMVVGP+E+d8cM+wc0VnXuYZHNbWQi7TOe8k2neawmhiaFmVFbzyruejhOMa197/LbgvSED32ayUo3ZA==}
     peerDependencies:
       react: '>=16.0.0'
-
-  '@openrails/auth-ui@1.29.1':
-    resolution: {integrity: sha512-xkKRVuv/fkB71viAVDHrU1EwF31qE5BhzefOb5io27OpJfOpAVDCM+cM9WX8Dlb8+xSeffRGJUdctpo8ehGbcA==}
-    engines: {node: '>=22.12.0'}
-    peerDependencies:
-      '@solana/wallet-adapter-react': '>=0.15 <1'
-      react: '>=19 <20'
-      react-dom: '>=19 <20'
-    peerDependenciesMeta:
-      '@solana/wallet-adapter-react':
-        optional: true
 
   '@openrails/billing-ui@file:../../sdk/billing-ui':
     resolution: {directory: ../../sdk/billing-ui, type: directory}
@@ -436,12 +422,6 @@ packages:
   immer@11.1.21:
     resolution: {integrity: sha512-bZSadeCPGdaY5/qRLgr6mDSH1ra21rD3rqpiWk7+QTr4ayYPTE9qZYdLh/NdPhMe0wSrTvHD/Lk8q5EwhUs0aw==}
 
-  input-otp@1.5.0:
-    resolution: {integrity: sha512-3AcfdW1sNG0FmSA5hHMBXG7jNW5CdcdKs8ln8JOmn6S2SRkoXoJx+2UwC+ZvjflfnOdHJx0SfQ9/YjlxVYLtGQ==}
-    peerDependencies:
-      react: ^16.8 || ^17.0 || ^18.0 || ^19.0.0 || ^19.0.0-rc
-      react-dom: ^16.8 || ^17.0 || ^18.0 || ^19.0.0 || ^19.0.0-rc
-
   internmap@2.0.3:
     resolution: {integrity: sha512-5Hh7Y1wQbvY5ooGgPbDaL5iYLAPzMTUrjMulskHLH6wnv/A+1q5rgEaiuqEjB+oxGXIVZs1FF+R/KPN3ZSQYYg==}
     engines: {node: '>=12'}
@@ -559,9 +539,6 @@ packages:
   prop-types@15.8.1:
     resolution: {integrity: sha512-oj87CgZICdulUohogVAR7AjlC0327U4el4L6eAvOqCeudMDVU0NThNaV+b9Df4dXgSP1gXMTnPdhfe/2qDH5cg==}
 
-  qrcode-generator@2.0.4:
-    resolution: {integrity: sha512-mZSiP6RnbHl4xL2Ap5HfkjLnmxfKcPWpWe/c+5XxCuetEenqmNFf1FH/ftXPCtFG5/TDobjsjz6sSNL0Sr8Z9g==}
-
   react-dom@19.3.0:
     resolution: {integrity: sha512-JDk8dgif51OjFoDE70+OT9ICyYr+69HlmihNwp1+Nsfbna3t5sIiCa9ZJktDmQ4/1b/rn26hIAR2uYXDMr5r0Q==}
     peerDependencies:
@@ -581,11 +558,6 @@ packages:
 
   react-is@16.13.1:
     resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
-
-  react-qr-code@2.2.0:
-    resolution: {integrity: sha512-e5nS0UUN22K3Nf8KBRUzemfdJ6OmnN5w+kbnj1lvJaol9RyVRFeGl05bCkxSN2ZegbLxjjYjX1+mmAoX9+fAhw==}
-    peerDependencies:
-      react: '*'
 
   react-redux@9.3.0:
     resolution: {integrity: sha512-KQopgqFo/p/fgmAs5qz6p5RWaNAzq40WAu7fJIXnQpYxFPbJYtsJPWvGeF2rOBaY/kEuV77AVsX8TsQzKm+A/g==}
@@ -779,22 +751,6 @@ snapshots:
   '@hugeicons/react@1.1.10(react@19.3.0)':
     dependencies:
       react: 19.3.0
-
-  '@openrails/auth-ui@1.29.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
-    dependencies:
-      '@base-ui/react': 1.9.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@hugeicons/core-free-icons': 4.3.5
-      '@hugeicons/react': 1.1.10(react@19.3.0)
-      class-variance-authority: 0.7.1
-      cn: 0.4.0
-      input-otp: 1.5.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      react: 19.3.0
-      react-dom: 19.3.0(react@19.3.0)
-      react-qr-code: 2.2.0(react@19.3.0)
-    transitivePeerDependencies:
-      - '@date-fns/tz'
-      - '@types/react'
-      - date-fns
 
   '@openrails/billing-ui@file:../../sdk/billing-ui(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)':
     dependencies:
@@ -1036,11 +992,6 @@ snapshots:
 
   immer@11.1.21: {}
 
-  input-otp@1.5.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
-    dependencies:
-      react: 19.3.0
-      react-dom: 19.3.0(react@19.3.0)
-
   internmap@2.0.3: {}
 
   js-tokens@4.0.0: {}
@@ -1124,8 +1075,6 @@ snapshots:
       object-assign: 4.1.1
       react-is: 16.13.1
 
-  qrcode-generator@2.0.4: {}
-
   react-dom@19.3.0(react@19.3.0):
     dependencies:
       react: 19.3.0
@@ -1150,12 +1099,6 @@ snapshots:
       resize-observer-polyfill: 1.5.1
 
   react-is@16.13.1: {}
-
-  react-qr-code@2.2.0(react@19.3.0):
-    dependencies:
-      prop-types: 15.8.1
-      qrcode-generator: 2.0.4
-      react: 19.3.0
 
   react-redux@9.3.0(@types/react@19.3.0)(react@19.3.0)(redux@5.0.1):
     dependencies:

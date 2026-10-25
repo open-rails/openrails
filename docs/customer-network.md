@@ -11,7 +11,8 @@ through their current owned account mapping. The original verified credential
 and sensitive-action checks remain intact. A standalone host may supply
 `server.Deps.CustomerAdmissionPolicy` to refuse ordinary automatic customer
 admission before any customer row is created. This hook does not change staff,
-AuthKit, mapped-customer or pay-URL routes.
+AuthKit, mapped-customer or pay-URL routes. See the [host admission and OAuth
+configuration guide](customer-admission-policy.md) for the explicit scope setup.
 
 The removed network routes and SDK methods have no compatibility aliases.
 Existing hosted deployments must follow the explicit stopped-writer
