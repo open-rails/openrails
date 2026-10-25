@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/auth"
@@ -23,6 +24,8 @@ func TestOrderPaymentReceipts(t *testing.T) {
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		order, err := a.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, IdempotencyKey: "receipt-order"})
 		require.NoError(t, err)
+		require.Equal(t, billing.OrderOpen, order.Status)
+		require.Equal(t, billing.OrderPaymentRequiresPaymentMethod, order.Payment.Status, "an untouched cart has no admitted payment")
 		path := "/v1/me/orders/" + order.ID.String() + "/payment-attempt"
 		key := map[string]string{"Idempotency-Key": "accepted-payment"}
 		status, raw := a.request(t, http.MethodGet, path, a.aliceToken, nil, key)
@@ -39,14 +42,64 @@ func TestOrderPaymentReceipts(t *testing.T) {
 		require.Equal(t, "failed", declinedReceipt.State)
 		require.Nil(t, declinedReceipt.PaymentID)
 		require.Nil(t, declinedReceipt.PaymentMethodID, "an intended method UUID is not evidence of a retained card after decline")
+		afterDecline, err := a.alphaRemote.GetOrder(t.Context(), order.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.OrderOpen, afterDecline.Status)
+		require.Equal(t, billing.OrderPaymentRequiresPaymentMethod, afterDecline.Payment.Status, "a definitive decline clears the admitted processing state")
+		require.NotNil(t, afterDecline.Payment.LastPaymentError)
+		require.Empty(t, provider.effects(t))
 		token := provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
 		pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: token}, ExpectedTotal: 30_000_000, Reusable: ptr(true)}
-		status, raw = a.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", a.aliceToken, pay, key)
+		gate := &wireGate{arrived: make(chan struct{}), release: make(chan struct{})}
+		provider.mu.Lock()
+		provider.responseGate = gate
+		provider.mu.Unlock()
+		defer gate.unblock()
+		type answer struct {
+			status int
+			raw    []byte
+			err    error
+		}
+		finished := make(chan answer, 1)
+		go func() {
+			status, raw, err := a.do(t.Context(), http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", a.aliceToken, pay, key)
+			finished <- answer{status, raw, err}
+		}()
+		select {
+		case <-gate.arrived:
+		case <-time.After(10 * time.Second):
+			t.Fatal("payment did not reach the held provider response")
+		}
+		// Independent public requests must see the committed admission while
+		// the provider outcome is still unavailable to the paying handler.
+		// A process exit here cannot leave this payment looking like a cart.
+		pending, err := a.alphaRemote.GetOrder(t.Context(), order.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.OrderProcessing, pending.Status)
+		require.Equal(t, billing.OrderPaymentProcessing, pending.Payment.Status)
+		require.Nil(t, pending.Payment.PaymentID)
+		status, raw = a.request(t, http.MethodGet, path, a.aliceToken, nil, key)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var pendingReceipt billing.OrderPaymentAttempt
+		require.NoError(t, json.Unmarshal(raw, &pendingReceipt))
+		require.Equal(t, "created", pendingReceipt.State)
+		require.Nil(t, pendingReceipt.PaymentID)
+		require.Len(t, provider.effects(t), 1, "the external journal already has the debit whose reply is held")
+		gate.unblock()
+		paid := <-finished
+		require.NoError(t, paid.err)
+		status, raw = paid.status, paid.raw
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var completed billing.Order
 		require.NoError(t, json.Unmarshal(raw, &completed))
 		require.Equal(t, billing.OrderComplete, completed.Status)
 		require.NotNil(t, completed.Payment.PaymentID)
+		status, raw = a.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", a.aliceToken, pay, key)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var replay billing.Order
+		require.NoError(t, json.Unmarshal(raw, &replay))
+		require.Equal(t, completed.Payment.PaymentID, replay.Payment.PaymentID)
+		require.Len(t, provider.effects(t), 1, "replaying the admitted key cannot add a debit")
 		status, raw = a.request(t, http.MethodGet, path, a.aliceToken, nil, key)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var receipt struct {
