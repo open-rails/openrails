@@ -2,10 +2,10 @@
 
 OpenRails can publish selected billing notices directly to an optional account
 inbox supplied by the host. The inbox implementation and its authenticated user
-interface belong to AuthKit; the shared mutation contract belongs to Helpers.
+interface belong to AuthKit, including the small `authkit/notify` contract.
 The retained OpenRails event log remains an independent host integration feed.
 
-The host supplies a transactional notification sink and an explicit mapping from
+The host supplies an AuthKit notification publisher and an explicit mapping from
 the merchant's customer identity (issuer and UUID) to an account. Equal UUIDs
 from unrelated issuers are not the same recipient. A missing channel disables
 only inbox publication, not the underlying billing event.
@@ -23,8 +23,14 @@ the single-merchant adapter skips unrelated merchants before invoking its sink
 and never infers another tenant from a customer UUID. Its merchant binding must
 be nonzero; an absent binding is a configuration error, not a wildcard.
 
-For a shared database the sink applies notifications in the billing transaction.
-A remote sink records its delivery job in that transaction and retries after
+The producer interface has only `Publish` and `Withdraw`. Each accepts a bounded
+batch of deterministic notification IDs and revisions, with an optional source
+transaction. AuthKit binds source, audience and application visibility once;
+OpenRails does not configure inbox tables, read receipts or manage a delivery
+transport. No Helpers notification package is required.
+
+For a shared database the publisher applies notifications in the billing transaction.
+A remote publisher records its delivery job in that transaction and retries after
 commit. OpenRails never performs a best-effort network notification after a
 financial commit.
 
@@ -60,7 +66,8 @@ only after the producer channel and host wiring have been qualified.
 
 1. Stop old billing writers and the ContentKit billing inbox importer. Retain a
    database backup of the source ordering metadata and account inbox. Apply the
-   additive Helpers, AuthKit and OpenRails migrations.
+   AuthKit-owned inbox and OpenRails source-ordering migrations. The package
+   move preserves the six existing inbox migration files and their ledger.
 2. Configure the AuthKit producer and issuer-verifying OpenRails notification
    channel. Call the trusted local merchant's `ExportNotificationAdoption` while
    writers remain stopped. Save the returned artifact durably. Repeating the
