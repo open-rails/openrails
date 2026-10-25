@@ -94,6 +94,7 @@ pkg openrails, method (*Client) ListAdmissions(context.Context, billing.Admissio
 pkg openrails, method (*Client) ListAlertWebhooks(context.Context, billing.AlertWebhookListParams, ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error)
 pkg openrails, method (*Client) ListBalanceTransactions(context.Context, billing.CustomerID, billing.BalanceTransactionListParams, ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error)
 pkg openrails, method (*Client) ListCreditGrants(context.Context, billing.CreditGrantListParams, ...RequestOption) (*billing.ListPage[billing.CreditGrant], error)
+pkg openrails, method (*Client) ListCustodians(context.Context, ...RequestOption) (*billing.ListPage[billing.Custodian], error)
 pkg openrails, method (*Client) ListCustomers(context.Context, billing.CustomerListParams, ...RequestOption) (*billing.ListPage[billing.Customer], error)
 pkg openrails, method (*Client) ListDestructiveHolds(context.Context, billing.DestructiveHoldListParams, ...RequestOption) (*billing.ListPage[billing.DestructiveHold], error)
 pkg openrails, method (*Client) ListEntitlements(context.Context, billing.EntitlementListParams, ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error)
@@ -123,6 +124,7 @@ pkg openrails, method (*Client) PreviewOrder(context.Context, billing.PreviewOrd
 pkg openrails, method (*Client) PreviewPSPRouting(context.Context, billing.PreviewPSPRoutingParams, ...RequestOption) (*billing.PSPRoutingPreview, error)
 pkg openrails, method (*Client) PreviewPriceMigration(context.Context, billing.CreatePriceMigrationParams, ...RequestOption) (*billing.PriceMigrationPreview, error)
 pkg openrails, method (*Client) PreviewSubscriptionChange(context.Context, billing.SubscriptionID, billing.ChangeSubscriptionParams, ...RequestOption) (*billing.SubscriptionChangePreview, error)
+pkg openrails, method (*Client) PutCustodian(context.Context, string, billing.PutCustodianParams, ...RequestOption) (*billing.Custodian, error)
 pkg openrails, method (*Client) QueryMetrics(context.Context, billing.MetricsQuery, ...RequestOption) (*billing.MetricsResult, error)
 pkg openrails, method (*Client) RecordExternalPayment(context.Context, billing.RecordExternalPaymentParams, ...RequestOption) (*billing.Payment, error)
 pkg openrails, method (*Client) RecordUsage(context.Context, []billing.RecordUsageParams, ...RequestOption) ([]billing.UsageEventResult, error)
@@ -238,6 +240,7 @@ pkg openrails, method (LocalClient) ListAdmissions(context.Context, billing.Admi
 pkg openrails, method (LocalClient) ListAlertWebhooks(context.Context, billing.AlertWebhookListParams, ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error)
 pkg openrails, method (LocalClient) ListBalanceTransactions(context.Context, billing.CustomerID, billing.BalanceTransactionListParams, ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error)
 pkg openrails, method (LocalClient) ListCreditGrants(context.Context, billing.CreditGrantListParams, ...RequestOption) (*billing.ListPage[billing.CreditGrant], error)
+pkg openrails, method (LocalClient) ListCustodians(context.Context, ...RequestOption) (*billing.ListPage[billing.Custodian], error)
 pkg openrails, method (LocalClient) ListCustomers(context.Context, billing.CustomerListParams, ...RequestOption) (*billing.ListPage[billing.Customer], error)
 pkg openrails, method (LocalClient) ListDestructiveHolds(context.Context, billing.DestructiveHoldListParams, ...RequestOption) (*billing.ListPage[billing.DestructiveHold], error)
 pkg openrails, method (LocalClient) ListEntitlements(context.Context, billing.EntitlementListParams, ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error)
@@ -267,6 +270,7 @@ pkg openrails, method (LocalClient) PreviewOrder(context.Context, billing.Previe
 pkg openrails, method (LocalClient) PreviewPSPRouting(context.Context, billing.PreviewPSPRoutingParams, ...RequestOption) (*billing.PSPRoutingPreview, error)
 pkg openrails, method (LocalClient) PreviewPriceMigration(context.Context, billing.CreatePriceMigrationParams, ...RequestOption) (*billing.PriceMigrationPreview, error)
 pkg openrails, method (LocalClient) PreviewSubscriptionChange(context.Context, billing.SubscriptionID, billing.ChangeSubscriptionParams, ...RequestOption) (*billing.SubscriptionChangePreview, error)
+pkg openrails, method (LocalClient) PutCustodian(context.Context, string, billing.PutCustodianParams, ...RequestOption) (*billing.Custodian, error)
 pkg openrails, method (LocalClient) QueryMetrics(context.Context, billing.MetricsQuery, ...RequestOption) (*billing.MetricsResult, error)
 pkg openrails, method (LocalClient) RecordExternalPayment(context.Context, billing.RecordExternalPaymentParams, ...RequestOption) (*billing.Payment, error)
 pkg openrails, method (LocalClient) RecordUsage(context.Context, []billing.RecordUsageParams, ...RequestOption) ([]billing.UsageEventResult, error)
@@ -411,6 +415,7 @@ pkg openrails, type DatabaseConfig struct, Schema string `yaml:"schema" json:"sc
 pkg openrails, type DatabaseConfig struct, SkipMigrations bool `yaml:"skip_migrations" json:"skip_migrations"`
 pkg openrails, type Deps = config.Deps
 pkg openrails, type Deps struct
+pkg openrails, type Deps struct, BasisTheoryTransport http.RoundTripper
 pkg openrails, type Deps struct, Clock clockwork.Clock
 pkg openrails, type Deps struct, Email config.EmailSender
 pkg openrails, type Deps struct, FXTransport http.RoundTripper
@@ -1709,6 +1714,7 @@ pkg openrails/billing, type CreatePSPImportParams struct, Products []PSPImportPr
 pkg openrails/billing, type CreatePSPImportParams struct, Rules []PSPImportRule `json:"rules,omitempty"`
 pkg openrails/billing, type CreatePSPParams struct
 pkg openrails/billing, type CreatePSPParams struct, Credentials map[string]string `json:"credentials"`
+pkg openrails/billing, type CreatePSPParams struct, Custodian string `json:"custodian,omitempty"`
 pkg openrails/billing, type CreatePSPParams struct, Environment string `json:"environment,omitempty"`
 pkg openrails/billing, type CreatePSPParams struct, Key string `json:"key"`
 pkg openrails/billing, type CreatePSPParams struct, PublishableKey string `json:"publishable_key,omitempty"`
@@ -1829,6 +1835,15 @@ pkg openrails/billing, type CurrencyUnits struct
 pkg openrails/billing, type CurrencyUnits struct, Code string `json:"code"`
 pkg openrails/billing, type CurrencyUnits struct, Decimals int `json:"decimals"`
 pkg openrails/billing, type CurrencyUnits struct, MinorDecimals int `json:"minor_decimals"`
+pkg openrails/billing, type Custodian struct
+pkg openrails/billing, type Custodian struct, AccountID string `json:"account_id"`
+pkg openrails/billing, type Custodian struct, Archived bool `json:"archived"`
+pkg openrails/billing, type Custodian struct, Credentials map[string]PSPCredential `json:"credentials"`
+pkg openrails/billing, type Custodian struct, Environment string `json:"environment"`
+pkg openrails/billing, type Custodian struct, Key string `json:"key"`
+pkg openrails/billing, type Custodian struct, Kind string `json:"kind"`
+pkg openrails/billing, type Custodian struct, Revision int64 `json:"revision"`
+pkg openrails/billing, type Custodian struct, Settings map[string]any `json:"settings"`
 pkg openrails/billing, type CustodianCaptureReference struct
 pkg openrails/billing, type CustodianCaptureReference struct, CustodianID string `json:"custodian_id"`
 pkg openrails/billing, type CustodianCaptureReference struct, SessionID string `json:"session_id"`
@@ -3254,6 +3269,13 @@ pkg openrails/billing, type PublicMerchant struct, PrivacyURL *string `json:"pri
 pkg openrails/billing, type PublicMerchant struct, StatementDescriptor *string `json:"statement_descriptor"`
 pkg openrails/billing, type PublicMerchant struct, SupportURL *string `json:"support_url"`
 pkg openrails/billing, type PublicMerchant struct, TermsURL *string `json:"terms_url"`
+pkg openrails/billing, type PutCustodianParams struct
+pkg openrails/billing, type PutCustodianParams struct, AccountID string `json:"account_id"`
+pkg openrails/billing, type PutCustodianParams struct, Credentials map[string]string `json:"credentials,omitempty"`
+pkg openrails/billing, type PutCustodianParams struct, Environment string `json:"environment"`
+pkg openrails/billing, type PutCustodianParams struct, ExpectedRevision int64 `json:"expected_revision"`
+pkg openrails/billing, type PutCustodianParams struct, Kind string `json:"kind"`
+pkg openrails/billing, type PutCustodianParams struct, Settings map[string]any `json:"settings,omitempty"`
 pkg openrails/billing, type Rail string
 pkg openrails/billing, type RailDefinition struct
 pkg openrails/billing, type RailDefinition struct, AccountFields []string `json:"account_fields"`
@@ -3613,6 +3635,7 @@ pkg openrails/billing, type UpdatePSPParams struct
 pkg openrails/billing, type UpdatePSPParams struct, AllowLast bool `json:"allow_last"`
 pkg openrails/billing, type UpdatePSPParams struct, Archived bool `json:"archived"`
 pkg openrails/billing, type UpdatePSPParams struct, Credentials map[string]string `json:"credentials"`
+pkg openrails/billing, type UpdatePSPParams struct, Custodian *string `json:"custodian,omitempty"`
 pkg openrails/billing, type UpdatePSPParams struct, ExpectedRevision *int64 `json:"expected_revision"`
 pkg openrails/billing, type UpdatePSPParams struct, PublishableKey *string `json:"publishable_key,omitempty"`
 pkg openrails/billing, type UpdatePSPParams struct, RetireWebhookOverlap bool `json:"retire_webhook_overlap"`

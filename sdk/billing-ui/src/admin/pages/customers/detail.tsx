@@ -73,6 +73,7 @@ import {
 } from "./grant-duration"
 import { dunningSummary } from "#orck/admin/pages/subscriptions/dunning"
 import { useAdminUpdates } from "#orck/admin/lib/capabilities"
+import { useConfirm } from "#orck/admin/lib/confirm"
 
 export function CustomerDetailPage() {
   const { text: adminText } = useAdminUI()
@@ -357,9 +358,24 @@ function CustomerPayments({ customerId }: { customerId: string }) {
 }
 
 function CustomerPaymentMethods({ customerId }: { customerId: string }) {
-  const { adminQueries, queryKeys } = useAdminServices()
+  const {
+    adminQueries,
+    queryKeys,
+    deleteCustomerPaymentMethod,
+    toastApiError,
+  } = useAdminServices()
+  const canUpdate = useAdminUpdates()
+  const confirm = useConfirm()
 
   const queryClient = useQueryClient()
+  const remove = useMutation({
+    mutationFn: (id: string) => deleteCustomerPaymentMethod(customerId, id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: [...queryKeys.customer(customerId), "payment-methods"],
+      }),
+    onError: (error) => toastApiError(error, "Remove payment method"),
+  })
   const pages = useCursorPages(customerId, 25)
   const { data, isFetching } = useQuery(
     adminQueries.customerPaymentMethodsPage(
@@ -403,6 +419,27 @@ function CustomerPaymentMethods({ customerId }: { customerId: string }) {
                   {formatCardExpiry(pm.card)}
                 </p>
                 <DefaultCardBadges currencies={pm.default_currencies ?? []} />
+                {canUpdate && pm.rail === "nmi" && pm.status !== "removed" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-2"
+                    disabled={remove.isPending}
+                    onClick={async () => {
+                      if (
+                        await confirm({
+                          title: "Remove this saved card?",
+                          description:
+                            "The vault will remove the card once no active subscription or payment uses it. Transaction history remains.",
+                          confirmLabel: "Remove saved card",
+                        })
+                      )
+                        remove.mutate(pm.id)
+                    }}
+                  >
+                    Remove saved card
+                  </Button>
+                )}
                 {pm.health.expiry_status &&
                   pm.health.expiry_status !== "valid" && (
                     <Badge

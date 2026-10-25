@@ -75,6 +75,7 @@ import {
   SettingEditField,
 } from "./setting-fields"
 import { NotificationsTab } from "./notifications"
+import { CustodySettings } from "./custody"
 
 const LINE_TAB =
   "flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
@@ -591,6 +592,7 @@ export function PSPsTab() {
           </Table>
         )}
       </section>
+      <CustodySettings />
     </div>
   )
 }

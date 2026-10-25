@@ -8620,6 +8620,144 @@
         ]
       }
     },
+    "/v1/merchant/custodians/{key}": {
+      "put": {
+        "tags": [
+          "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutCustodianParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Custodian"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
+        "x-openrails-mounted-when": "merchant_config_edits",
+        "x-openrails-errors": [
+          "invalid_param",
+          "resource_conflict",
+          "revision_mismatch",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/custodians": {
+      "get": {
+        "tags": [
+          "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Custodian"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
+        },
+        "x-openrails-errors": [
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
+        ]
+      }
+    },
     "/v1/merchant/psps": {
       "get": {
         "tags": [
@@ -13868,6 +14006,9 @@
           "environment": {
             "type": "string"
           },
+          "custodian": {
+            "type": "string"
+          },
           "gateway_id": {
             "type": "string"
           },
@@ -14452,6 +14593,63 @@
           "code",
           "decimals",
           "minor_decimals"
+        ]
+      },
+      "Custodian": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "settings": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credentials": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/PSPCredential"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "environment",
+          "account_id",
+          "settings",
+          "credentials",
+          "archived",
+          "revision"
         ]
       },
       "CustodianCaptureReference": {
@@ -20596,6 +20794,33 @@
           "embed_origins"
         ]
       },
+      "PutCustodianParams": {
+        "type": "object",
+        "properties": {
+          "expected_revision": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "Quantity": {
         "type": "object",
         "properties": {
@@ -22595,6 +22820,9 @@
                 "type": "null"
               }
             ]
+          },
+          "custodian": {
+            "type": "string"
           },
           "retire_webhook_overlap": {
             "type": "boolean"

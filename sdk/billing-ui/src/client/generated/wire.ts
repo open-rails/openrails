@@ -545,6 +545,7 @@ export type CreatePSPParams = {
   key?: string
   rail?: "ccbill" | "nmi" | "solana" | "stripe"
   environment?: string
+  custodian?: string
   gateway_id?: string
   account_id?: string
   client_accnum?: string
@@ -697,6 +698,17 @@ export type CurrencyUnits = {
   code: string
   decimals: number
   minor_decimals: number
+}
+
+export type Custodian = {
+  key: string
+  kind: string
+  environment: string
+  account_id: string
+  settings: Record<string, unknown> | null
+  credentials: Record<string, PSPCredential> | null
+  archived: boolean
+  revision: number
 }
 
 export type CustodianCaptureReference = {
@@ -1990,6 +2002,15 @@ export type PublicMerchant = {
   embed_origins: string[]
 }
 
+export type PutCustodianParams = {
+  expected_revision?: number
+  kind?: string
+  environment?: string
+  account_id?: string
+  settings?: Record<string, unknown>
+  credentials?: Record<string, string>
+}
+
 export type Quantity = {
   min: number
   max: number
@@ -2465,6 +2486,7 @@ export type UpdatePSPParams = {
   tokenization_key?: string
   publishable_key?: string
   credentials?: Record<string, string> | null
+  custodian?: string
   retire_webhook_overlap?: boolean
   archived?: boolean
   allow_last?: boolean

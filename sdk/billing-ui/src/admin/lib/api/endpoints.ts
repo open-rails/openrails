@@ -8,6 +8,8 @@ import type {
   CatalogApplicationReceipt,
   CreateAlertWebhookParams,
   CreatePSPParams,
+  Custodian,
+  PutCustodianParams,
   PSPRefresh,
   CreatePriceParams,
   Customer,
@@ -485,15 +487,21 @@ export function createEndpoints(client: AdminClient) {
   // updatePrice archives or restores a price, or changes its PSP links
   // (a PSP set to null is unlinked).
   const updatePrice = (id: string, body: UpdatePriceParams) =>
-    api<Price>(`/catalog/prices/${encodeURIComponent(id)}`, { method: "PATCH", body })
+    api<Price>(`/catalog/prices/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body,
+    })
 
   // getPriceHistory returns the history of a price's key, most recent first:
   // when the key moved to which price.
   const getPriceHistory = (priceId: string, signal?: AbortSignal) =>
-    api<ListPage<PriceKeyMovement>>(`/catalog/prices/${encodeURIComponent(priceId)}/history`, {
-      query: { limit: PAGE_MAX },
-      signal,
-    })
+    api<ListPage<PriceKeyMovement>>(
+      `/catalog/prices/${encodeURIComponent(priceId)}/history`,
+      {
+        query: { limit: PAGE_MAX },
+        signal,
+      }
+    )
 
   // --- Price migrations ---
 
@@ -601,6 +609,21 @@ export function createEndpoints(client: AdminClient) {
   // A merchant has a handful of PSPs: one page holds them all.
   const listPSPs = (signal?: AbortSignal) =>
     api<ListPage<PSP>>("/merchant/psps?limit=500", { signal })
+
+  const listCustodians = (signal?: AbortSignal) =>
+    api<{ data: Custodian[] }>("/merchant/custodians", { signal })
+
+  const deleteCustomerPaymentMethod = (customer: string, method: string) =>
+    api<void>(
+      `/admin/customers/${encodeURIComponent(customer)}/payment-methods/${encodeURIComponent(method)}`,
+      { method: "DELETE" }
+    )
+
+  const putCustodian = (key: string, body: PutCustodianParams) =>
+    api<Custodian>(`/merchant/custodians/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body,
+    })
 
   // The rail registry is static per build: it arrives with the configuration.
   const listRails = async (signal?: AbortSignal) =>
@@ -717,6 +740,9 @@ export function createEndpoints(client: AdminClient) {
     listPSPs,
     listRails,
     createPSP,
+    listCustodians,
+    putCustodian,
+    deleteCustomerPaymentMethod,
     updatePSP,
     previewPSPRouting,
     getConfig,

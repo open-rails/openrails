@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (167), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (169), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -150,6 +150,8 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
+| PUT | `/v1/merchant/custodians/{key}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `PutCustodianParams` | 200 `Custodian` | when `merchant_config_edits` |
+| GET | `/v1/merchant/custodians` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<Custodian>` |  |
 | GET | `/v1/merchant/psps` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<PSP>` |  |
 | POST | `/v1/merchant/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreatePSPParams` | 201 `PSP` | when `merchant_config_edits` |
 | GET | `/v1/merchant/psps/{id}` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `PSP` |  |

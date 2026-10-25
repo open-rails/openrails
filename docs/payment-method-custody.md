@@ -28,7 +28,7 @@ charges through that PSP, provided it still reaches the custodian.
 |---|---|---|---|
 | `psp` | `stripe` | `pm_…` on a Stripe Customer (`rail_method_ref`) | yes |
 | `psp` | `nmi` | `customer_vault_id` (`rail_customer_ref`) | yes |
-| `basis_theory` | `nmi` | BT card-token id (`rail_method_ref`) | yes |
+| `basis_theory` | `nmi` | merchant-owned BT card-token id (`rail_method_ref`) | verified save, one-time/subscription orders, engine renewals on the original gateway and confirmed unused-card removal; live vendor qualification pending |
 | `basis_theory` | `stripe` | BT token proxied to Stripe | not built |
 | `hyperswitch` | `nmi` | persistent HyperSwitch method (`rail_method_ref`) | yes |
 | `platform` | `nmi` | the platform vault's token in the merchant's partition (`rail_method_ref`) | one-time and subscription orders; engine renewals on the original account; live vendor qualification pending |
@@ -102,6 +102,23 @@ not served (the previous one keeps serving). `platform` is also refused with:
 Changing either setting moves no existing card. OpenRails-run renewals charge through
 the PSP their subscription was sold through, which holds its recurring agreement.
 `GET /v1/merchant/configuration` reports `platform_vault: {available}`.
+
+Merchant Settings separates card custody from charge PSP selection. Configure a
+merchant-owned Basis Theory account through `PUT /v1/merchant/custodians/{key}`
+with its tenant, environment, public collection key and write-only private
+credential; `GET /v1/merchant/custodians` returns configured flags, never secret
+values. A credential must prove the exact vendor account before it can claim
+that custody identity. `custodian` on PSP create/update references that merchant's
+active vault in the same environment; an empty reference selects the PSP vault.
+These settings do not turn on the separate SaaS shared-customer product.
+
+An unused NMI or supported custodian card can be removed by its customer, or by
+authorized merchant staff at
+`DELETE /v1/admin/customers/{customer_id}/payment-methods/{id}`. Both paths use
+the same account/alias/in-use guards and return success only after holder
+confirmation. Existing financial instrument identity and transaction evidence
+remain. A lost provider reply requires verification or an explicit retry, not a
+fresh destructive operation.
 
 The platform vault is operator configuration, not a merchant custodian:
 
