@@ -160,6 +160,7 @@ pkg openrails, method (*Engine) MerchantBySlug(string) (*Client, error)
 pkg openrails, method (*Engine) Probes() []Probe
 pkg openrails, method (*Engine) PublicConfig(Routes) (*billing.PublicConfig, error)
 pkg openrails, method (*Engine) Ready(context.Context) error
+pkg openrails, method (*Engine) ResolveCustomer(context.Context, auth.Authenticator, auth.Verified) (CustomerBinding, error)
 pkg openrails, method (*Engine) RiverJobs() river.Contribution
 pkg openrails, method (*Engine) Routes(Routes) ([]Route, error)
 pkg openrails, method (*Engine) Start(context.Context, ...StartOption) error

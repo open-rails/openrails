@@ -489,6 +489,18 @@
     ],
     "OR-J07-S05": [
       "TestCustomerProjectionContracts/OR-J07-S05/merchant-customer-reads-survive-hosted-link-storage-transfer"
+    ],
+    "OR-J01-S12": [
+      "TestCustomerProofResolution/OR-J01-S12/existing-native-customer-proof-is-read-only"
+    ],
+    "OR-J01-S13": [
+      "TestCustomerProofResolution/OR-J01-S13/customer-proof-preserves-issuer-tenant-and-credential-boundaries"
+    ],
+    "OR-J01-S14": [
+      "TestCustomerProofResolution/OR-J01-S14/asserted-and-sender-bound-resource-proofs-retain-source-authority"
+    ],
+    "OR-J01-S15": [
+      "TestCustomerProofResolution/OR-J01-S15/expiry-revocation-and-storage-failure-refuse-retained-customer-proof"
     ]
   },
   "suites": {

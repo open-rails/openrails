@@ -6,7 +6,7 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/open-rails/authkit v1.35.7
+	github.com/open-rails/authkit v1.37.2
 	github.com/open-rails/openrails v0.263.0
 	golang.org/x/oauth2 v0.37.0
 )

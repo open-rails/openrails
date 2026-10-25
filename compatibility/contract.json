@@ -141,6 +141,7 @@
       "func (e *Engine) Probes() []Probe",
       "func (e *Engine) PublicConfig(selection Routes) (*billing.PublicConfig, error)",
       "func (e *Engine) Ready(ctx context.Context) error",
+      "func (e *Engine) ResolveCustomer(ctx context.Context, authority auth.Authenticator, verified auth.Verified) (CustomerBinding, error)",
       "func (e *Engine) RiverJobs() riverhelpers.Contribution",
       "func (e *Engine) Routes(selection Routes) ([]Route, error)",
       "func (e *Engine) Start(ctx context.Context, opts ...StartOption) error",
@@ -2322,6 +2323,14 @@
       "http": "net/http",
       "strconv": "strconv",
       "url": "net/url"
+    },
+    "customer_proof.go": {
+      "auth": "github.com/open-rails/authkit/auth",
+      "billing": "github.com/open-rails/openrails/billing",
+      "billingauth": "github.com/open-rails/openrails/internal/billingauth",
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt"
     },
     "customer_routes.go": {
       "fmt": "fmt"

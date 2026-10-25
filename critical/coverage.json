@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 151,
+  "scenario_count": 155,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -757,6 +757,26 @@
       "id": "OR-J07-S05",
       "journey": "J07",
       "name": "Merchant customer reads retain billing state without hosted account-link storage"
+    },
+    {
+      "id": "OR-J01-S12",
+      "journey": "J01",
+      "name": "Existing customer proof is read-only and never enrolls or requires recent sign-in"
+    },
+    {
+      "id": "OR-J01-S13",
+      "journey": "J01",
+      "name": "Customer proof preserves credential, issuer, merchant and tenant boundaries"
+    },
+    {
+      "id": "OR-J01-S14",
+      "journey": "J01",
+      "name": "Asserted and sender-constrained resource proofs preserve their original authority"
+    },
+    {
+      "id": "OR-J01-S15",
+      "journey": "J01",
+      "name": "Customer proof refuses expiry, revocation and unavailable authority after storage waits"
     }
   ]
 }

@@ -7,7 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/authkit v1.35.7
+	github.com/open-rails/authkit v1.37.2
 	github.com/open-rails/openrails v0.263.2
 	github.com/open-rails/openrails/server v0.263.2
 	github.com/redis/go-redis/v9 v9.23.0
