@@ -176,6 +176,9 @@ func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Ch
 		return "", err
 	}
 	order.Status, order.PaymentStatus = string(billing.OrderComplete), string(billing.OrderPaymentSucceeded)
+	if err := subscriptions.WithdrawOrderPaymentNotices(ctx, d, order.CustomerID, order.ID); err != nil {
+		return "", err
+	}
 	for _, line := range order.Lines {
 		if err := s.fulfil(ctx, d, order, line, charge, now); err != nil {
 			return "", fmt.Errorf("fulfil order line %s: %w", line.ID, err)

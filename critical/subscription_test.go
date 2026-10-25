@@ -20,10 +20,16 @@ func purchasedMembership(t *testing.T, intervalHours ...int) (*authorityWorld, *
 	if len(intervalHours) > 0 {
 		hours = intervalHours[0]
 	}
+	return purchasedMembershipWith(t, hours)
+}
+
+func purchasedMembershipWith(t *testing.T, hours int, configure ...func(*world)) (*authorityWorld, *providerLedger, *billing.Subscription) {
+	t.Helper()
 	// Keep accelerated business periods in the past: PostgreSQL correctly
 	// refuses payment observations dated in its future. AuthKit sign-in uses
 	// its actual clock and remains independent of these financial periods.
-	a, provider := newPaymentWorld(t, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) })
+	configure = append([]func(*world){func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) }}, configure...)
+	a, provider := newPaymentWorld(t, configure...)
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "membership", DisplayName: "Membership", Entitlements: []string{"membership:paid"}})
 	require.NoError(t, err)
 	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "membership-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(hours), AccessDurationHours: ptr(hours)})

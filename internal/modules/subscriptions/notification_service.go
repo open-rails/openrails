@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -20,35 +21,37 @@ type NotificationService struct {
 func NewNotificationService(d *db.DB) *NotificationService { return &NotificationService{db: d} }
 
 func (r *NotificationService) Create(ctx context.Context, notification *models.NotificationEvent) error {
-	params, err := r.createParams(ctx, notification)
-	if err != nil {
-		return err
-	}
-	rows, err := r.db.Gen(ctx).CreateNotification(ctx, params)
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return errors.New("no rows affected")
-	}
-	return nil
+	return r.create(ctx, notification, false)
 }
 
 // CreateIfAbsent inserts notification once by its caller-supplied ID. An
 // existing ID is success, which lets retrying fan-out jobs converge without
 // duplicating deliveries that already succeeded.
 func (r *NotificationService) CreateIfAbsent(ctx context.Context, notification *models.NotificationEvent) error {
-	params, err := r.createParams(ctx, notification)
-	if err != nil {
-		return err
-	}
-	return r.db.Gen(ctx).CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
-		ID:         params.ID,
-		MerchantID: params.MerchantID,
-		CustomerID: params.CustomerID,
-		EventType:  params.EventType,
-		Data:       params.Data,
-		CreatedAt:  params.CreatedAt,
+	return r.create(ctx, notification, true)
+}
+
+func (r *NotificationService) create(ctx context.Context, notification *models.NotificationEvent, ifAbsent bool) error {
+	return r.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := r.db.NewWithPgxTx(tx)
+		params, err := NewNotificationService(txdb).createParams(ctx, notification)
+		if err != nil {
+			return err
+		}
+		query := `INSERT INTO billing.notification_events (id,merchant_id,customer_id,event_type,data,created_at)
+VALUES($1,$2,$3,$4,$5,COALESCE(NULLIF($6::timestamptz,'0001-01-01 00:00:00+00'::timestamptz),now()))`
+		if ifAbsent {
+			query += ` ON CONFLICT(merchant_id,id) DO NOTHING`
+		}
+		err = tx.QueryRow(ctx, query+` RETURNING created_at`, params.ID, params.MerchantID, params.CustomerID,
+			params.EventType, params.Data, params.CreatedAt).Scan(&notification.CreatedAt)
+		if ifAbsent && errors.Is(err, pgx.ErrNoRows) {
+			return nil // An old fact cannot become a newer notification revision.
+		}
+		if err != nil {
+			return err
+		}
+		return publishInbox(ctx, txdb, tx, notification)
 	})
 }
 

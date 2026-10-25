@@ -36,3 +36,36 @@ Implementation and rollout are tracked in AuthKit #470 and OpenRails #1291 in
 the central tracker. Preserve retained receipt IDs and read/archive state when
 adopting the account inbox, and retire ContentKit's billing-event inbox importer
 only after the producer channel and host wiring have been qualified.
+
+## Explicit cutover
+
+1. Stop old billing writers and the ContentKit billing inbox importer. Retain a
+   database backup of the source ordering metadata and account inbox. Apply the
+   additive Helpers, AuthKit and OpenRails migrations.
+2. Configure the AuthKit producer and issuer-verifying OpenRails notification
+   channel. Call the trusted local merchant's `ExportNotificationAdoption` while
+   writers remain stopped. Save the returned artifact durably. Repeating the
+   export against unchanged source state preserves its revisions.
+3. Pass its exact `Adoptions` to AuthKit's administrative `AdoptNotifications`.
+   Existing receipts are mapped to deterministic issue identities, preserving
+   the chosen receipt ID and read/archive state. Duplicate old issue receipts
+   are hidden; currently resolved issues are withdrawn. Facts never consumed by
+   the old importer must not become newly visible historical notifications.
+   Informational historical receipts keep their existing identities.
+4. Verify the adoption receipts, retire the old importer through its coordinated
+   migration, and start the new producer and account-inbox readers together.
+   Do not run old readers after producer withdrawals begin: old readers do not
+   understand hidden withdrawal tombstones.
+
+The export reads only retained producer facts and authoritative billing state;
+it never enumerates the destination inbox. Facts already removed by retention
+cannot reconstruct a legacy mapping and must be accounted for explicitly in the
+operator's cutover inventory rather than guessed from current customer names.
+
+The `Ordering` portion is separate from the financial archive. Preserve it in
+ordinary database backups and transfer it when moving a merchant to a new
+database. A financial archive restore sets a publication guard. Call
+`RestoreNotificationOrdering` with the matching source snapshot before enabling
+notification delivery; lower or conflicting revisions are refused. An explicitly
+empty snapshot is an administrator's declaration that this producer had no
+notification ordering to transfer, never an automatic reset of a live inbox.

@@ -20,6 +20,10 @@ type (
 	// Deps is everything the engine reaches outside its process: connections,
 	// credentials and the host's hooks.
 	Deps = config.Deps
+	// NotificationChannel is an optional transactional account-inbox publisher.
+	NotificationChannel = config.NotificationChannel
+	// NotificationRecipient carries the billing customer's scoped identity.
+	NotificationRecipient = config.NotificationRecipient
 
 	// Routes is the HTTP surface the adapters mount on the root router.
 	Routes = config.Routes

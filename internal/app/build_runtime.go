@@ -82,6 +82,7 @@ type runtimeOverrides struct {
 	Clock           clockwork.Clock
 	EmailSender     config.EmailSender
 	UserInfo        userinfo.Lookup
+	Notifications   *config.NotificationChannel
 	Migrations      fs.FS
 	Vault           *vaultapi.Client
 }
@@ -170,6 +171,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 			_ = database.Close()
 		}
 		return nil, err
+	}
+	if overrides != nil && overrides.Notifications != nil {
+		if overrides.Notifications.Sink == nil || overrides.Notifications.Recipient == nil {
+			return nil, fmt.Errorf("notification channel requires a transactional sink and recipient mapping")
+		}
+		database.SetNotifications(overrides.Notifications)
 	}
 
 	redisOwned := false

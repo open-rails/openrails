@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/pgidentity"
 	"github.com/riverqueue/river"
@@ -25,9 +26,30 @@ type RiverJobInserter interface {
 // shared by every handle derived from it: the River producer and the
 // merchant configuration.
 type runtimeBinding struct {
-	mu       sync.RWMutex
-	inserter RiverJobInserter
-	config   MerchantConfig
+	mu            sync.RWMutex
+	inserter      RiverJobInserter
+	config        MerchantConfig
+	notifications *config.NotificationChannel
+}
+
+// SetNotifications binds the optional inbox channel before serving. Every
+// transaction-scoped DB inherits the binding without opening another pool.
+func (d *DB) SetNotifications(channel *config.NotificationChannel) {
+	if d.river == nil {
+		d.river = &runtimeBinding{}
+	}
+	d.river.mu.Lock()
+	defer d.river.mu.Unlock()
+	d.river.notifications = channel
+}
+
+func (d *DB) Notifications() *config.NotificationChannel {
+	if d == nil || d.river == nil {
+		return nil
+	}
+	d.river.mu.RLock()
+	defer d.river.mu.RUnlock()
+	return d.river.notifications
 }
 
 // MerchantConfig is the merchants' configuration, which lives in a file or

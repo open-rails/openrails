@@ -61,6 +61,9 @@ func (s *Service) restoreOrderCard(ctx context.Context, d *db.DB, order *Order, 
 		if err := repo.UpdateAt(ctx, sub, now); err != nil {
 			return err
 		}
+		if err := subscriptions.WithdrawMethodNotice(ctx, d, sub.CustomerID, sub.ID); err != nil {
+			return err
+		}
 		if err := s.Memberships.EnsureRenewalGrace(ctx, d, sub); err != nil {
 			return err
 		}

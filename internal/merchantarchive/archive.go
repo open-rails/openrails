@@ -287,6 +287,10 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		if err := landReadonly(ctx, q, id, restoreNow); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `INSERT INTO billing.notification_channel_state(merchant_id,restore_required)
+VALUES($1,true) ON CONFLICT(merchant_id) DO UPDATE SET restore_required=true`, id.UUID()); err != nil {
+			return err
+		}
 		return q.FinishBillingRestore(ctx, gen.FinishBillingRestoreParams{MerchantID: id.UUID(), Digest: info.Digest, Rows: info.Rows})
 	})
 	if err != nil {

@@ -541,6 +541,11 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 			// operation for an operator to repair.
 			return fmt.Errorf("order %s no longer accepts the frozen amount %d; confirmed charge %s needs repair: %w", p.OrderID, p.Amount, transactionID, err)
 		}
+		if usage.Due(paid) == 0 {
+			if err := subscriptions.WithdrawOrderPaymentNotices(ctx, h.DB.NewWithPgxTx(tx), p.CustomerID, p.OrderID); err != nil {
+				return err
+			}
+		}
 		if p.Initiator == charge.InitiatorMerchant {
 			if err := queueUsageReceipt(ctx, q, intent.MerchantID, paid, p.PaymentID, chargedAmount, currency, now); err != nil {
 				return err
