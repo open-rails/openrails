@@ -70,6 +70,28 @@
     "OR-J05-S05": [
       "TestPublicCatalog/OR-J05-S05/accepted-order-terms-survive-price-and-PSP-edits"
     ],
+    "OR-J06-S01": [
+      "TestPSPControls/OR-J06-S01/routing-binds-the-verified-account-and-currency"
+    ],
+    "OR-J06-S02": [
+      "TestPSPControls/OR-J06-S02/invalid-or-unarmed-credentials-cannot-enable-purchases",
+      "TestPSPControls/OR-J06-S02/invalid-or-unarmed-credentials-cannot-enable-purchases/environment",
+      "TestPSPControls/OR-J06-S02/invalid-or-unarmed-credentials-cannot-enable-purchases/credential-environment",
+      "TestPSPControls/OR-J06-S02/invalid-or-unarmed-credentials-cannot-enable-purchases/provider-environment",
+      "TestPSPControls/OR-J06-S02/invalid-or-unarmed-credentials-cannot-enable-purchases/account",
+      "TestPSPControls/OR-J06-S02/invalid-or-unarmed-credentials-cannot-enable-purchases/secret"
+    ],
+    "OR-J06-S03": [
+      "TestPSPControls/OR-J06-S03",
+      "TestPSPControls/OR-J06-S03/readonly",
+      "TestPSPControls/OR-J06-S03/limited"
+    ],
+    "OR-J06-S04": [
+      "TestPSPControls/OR-J06-S04/rotation-and-archive-preserve-identity-without-exposing-secrets"
+    ],
+    "OR-J06-S05": [
+      "TestPSPControls/OR-J06-S05/merchant-urls-and-provider-redirects-cannot-reach-private-peers"
+    ],
     "OR-J08-S01": [
       "TestPublicCart/OR-J08-S01/cart-preview-and-consumption-have-exact-totals"
     ],

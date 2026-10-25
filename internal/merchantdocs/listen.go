@@ -2,6 +2,8 @@ package merchantdocs
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,7 +17,17 @@ import (
 // Channel is the Postgres notification channel an edit to a merchant's
 // configuration is announced on, one per schema; the payload is the
 // merchant id.
-func Channel(schema string) string { return "openrails_merchant_config:" + schema }
+func Channel(schema string) string {
+	const prefix = "openrails_merchant_config:"
+	channel := prefix + schema
+	if len(channel) <= 63 {
+		return channel
+	}
+	// pg_notify rejects identifiers exceeding PostgreSQL's 63-byte limit.
+	// Keep existing short names for replicas spanning a version update.
+	sum := sha256.Sum256([]byte(schema))
+	return prefix + hex.EncodeToString(sum[:16])
+}
 
 // Listen reloads each merchant another replica announces until ctx ends,
 // reconnecting after a failure. It listens on a connection of its own, dialed
