@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 148,
+  "scenario_count": 149,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -192,6 +192,11 @@
       "id": "OR-J07-S04",
       "journey": "J07",
       "name": "Host UserInfo mode exposes no copied SCIM write authority"
+    },
+    {
+      "id": "OR-J07-S05",
+      "journey": "J07",
+      "name": "Merchant customer reads retain billing state without hosted account-link storage"
     },
     {
       "id": "OR-J08-S01",

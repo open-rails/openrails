@@ -479,6 +479,9 @@
       "TestSolanaContracts/OR-J37-S05/foreign-wallet-and-unrelated-instructions",
       "TestSolanaContracts/OR-J37-S05/BlockhashNotFound",
       "TestSolanaContracts/OR-J37-S05/insufficient_funds_for_fee"
+    ],
+    "OR-J07-S05": [
+      "TestCustomerProjectionContracts/OR-J07-S05/merchant-customer-reads-survive-hosted-link-storage-transfer"
     ]
   },
   "suites": {
