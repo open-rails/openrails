@@ -7,7 +7,7 @@
 #
 # prepare pins the server, AuthKit adapter and standalone test fixture to vX.Y.Z
 # (replaces keep in-repository builds on local source) on origin/master, commits
-# that to release/vX.Y.Z and opens its PR. publish fast-forwards master to the
+# that to chore/release-vX.Y.Z and opens its PR. publish fast-forwards master to the
 # green PR head and pushes it with the signed, annotated vX.Y.Z and
 # server/vX.Y.Z and adapters/authkit/vX.Y.Z tags at once. The vX.Y.Z tag runs release.yaml and
 # docker-publish.yaml.
@@ -21,7 +21,8 @@ step="${1:-}"
 version="${2:-}"
 note="${3:-}"
 [[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] || die "$usage"
-branch="release/$version"
+# release/** branches are protected merge targets, not mutable PR heads.
+branch="chore/release-$version"
 cd "$(git rev-parse --show-toplevel)"
 export GOWORK=off
 git fetch --quiet origin master --tags
