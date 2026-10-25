@@ -32,7 +32,7 @@ type nmiJournal struct {
 // NMI's external account and its economic journal stay independent from the
 // application's merchant schema and worker lifecycle. Reads report real
 // provider transactions; they never synthesize an OpenRails renewal result.
-func newNMIWorld(t *testing.T) (*authorityWorld, *nmiJournal) {
+func newNMIWorld(t *testing.T, configure ...func(*world)) (*authorityWorld, *nmiJournal) {
 	t.Helper()
 	var p *nmiJournal
 	a := newAuthorityWorld(t, func(w *world) {
@@ -84,6 +84,9 @@ func newNMIWorld(t *testing.T) (*authorityWorld, *nmiJournal) {
 		merchant.PSPs = openrails.PSPs{"nmi": openrails.NMIPSP{GatewayID: "critical-gateway", Environment: openrails.EnvironmentTest, SecurityKey: "critical-nmi-key", WebhookSigningSecret: "critical-nmi-webhook", TokenizationKey: "critical-collect-key"}.PSPConfig()}
 		merchant.CardVault = "nmi"
 		w.cfg.Merchants["alpha"] = merchant
+		for _, change := range configure {
+			change(w)
+		}
 	})
 	return a, p
 }
