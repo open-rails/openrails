@@ -17,6 +17,7 @@ var mappedCustomerOperations = []struct {
 	{"POST /v1/me/payment-methods", true},
 	{"DELETE /v1/me/payment-methods/{id}", true},
 	{"GET /v1/me/orders/{id}", false},
+	{"GET /v1/me/orders/{id}/payment-attempt", false},
 	{"POST /v1/me/orders/{id}/pay", true},
 	{"POST /v1/me/orders/{id}/confirm", true},
 	{"GET /v1/me/agreements", false},
