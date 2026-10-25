@@ -360,26 +360,27 @@ provider:
 managed with `pnpm dlx shadcn@4.21.0 add <name> --overwrite`, importing `cn`
 from the [`cn`](https://github.com/shadcn-ui/cn) package.
 
-## E2E against real OpenRails
+## Critical client contracts
 
-`e2e/server` is a Go module that builds the OpenRails at this commit (`replace`
-to the repository root) with AuthKit. It serves the
-embedded `/billing/v1` API and `/auth/v1` on a throwaway `postgres:18-alpine`
-container (Docker and Go required), with test-only `POST /__test/users` (user +
-access token) and `POST /__test/users/{id}/billing` (imported subscription,
-sale and saved card on a credential-less NMI PSP).
+`critical/` exercises the built client in Chromium against real AuthKit,
+OpenRails, PostgreSQL, and the actual Stripe adapter. The Go critical suite
+owns isolated schemas, credentials, external provider fixtures, and network
+faults. Set `OPENRAILS_CRITICAL_DSN` to an owned disposable PostgreSQL database;
+no missing service is accepted as a skipped critical case.
 
 ```sh
-pnpm test:e2e        # Playwright against the real server
+pnpm critical:build # build the SDK, browser bundle, and check driver types
+pnpm critical:static # reuse dist: type/lint and packed-artifact checks
+pnpm test:e2e        # local SDK subset, hosted by the real Go fixtures
 pnpm contract        # regenerate OpenRails' contract files, src/client/generated among them
 pnpm contract:check  # fail if a generated contract file is stale
 ```
 
-`e2e/openrails/account.spec.ts` drives the packaged `AccountBilling` (built from
-`dist/`) through list, cancel, resume, the in-use card refusal and history. Set
-`BILLING_UI_SCREENSHOTS=<dir>` to capture light, dark and mobile screenshots.
-Card deletion calls NMI, which the harness has no credentials for; jsdom tests
-cover it.
+Install Chromium with `pnpm exec playwright install chromium`. Required CI
+builds once, then runs the root critical suite, including these browser cases.
+The local SDK command does not establish coverage of the full Go suite.
+The selected methods and executable browser cases have explicit result gates;
+method invocation alone does not establish complete method functionality.
 
 ## License
 

@@ -1,9 +1,10 @@
 name: SDK
 
-# The browser SDKs track the Go API surface they speak, so API changes rerun them.
+# Static artifact checks only. The required critical Go job owns real browser
+# execution and calls critical:build once before starting its real fixtures.
 on:
   workflow_call: {}
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -17,16 +18,16 @@ env:
 
 jobs:
   billing-ui:
-    name: billing-ui
-    # Keep Chromium tests on an OS supported by the pinned Playwright release.
+    name: billing-ui artifact
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: sdk/billing-ui
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
@@ -39,120 +40,10 @@ jobs:
           cache-dependency-path: sdk/billing-ui/pnpm-lock.yaml
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: sdk/billing-ui/e2e/server/go.mod
-          cache-dependency-path: |
-            go.sum
-            sdk/billing-ui/e2e/server/go.sum
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm check
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm critical:build
+      - run: pnpm critical:static
       - name: Generated contract matches this commit
         run: pnpm contract:check
-      - name: E2E against this commit's OpenRails
-        run: pnpm test:e2e
-      - run: npm pack --dry-run
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure()
-        with:
-          name: billing-ui-playwright
-          path: sdk/billing-ui/test-results/
-          retention-days: 7
-
-  # The payment page in Chromium against this commit's standalone
-  # server (server/ci/paymentpage), NMI being nmimock.
-  payment-page:
-    name: payment page
-    # Keep Chromium tests on an OS supported by the pinned Playwright release.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: web/pay
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          package_json_file: web/pay/package.json
-          run_install: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: |
-            sdk/billing-ui/pnpm-lock.yaml
-            web/pay/pnpm-lock.yaml
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: server/go.mod
-          cache-dependency-path: |
-            go.sum
-            server/go.sum
-      # billing-ui is a path dependency: build it before the page installs it.
-      - name: billing-ui
-        working-directory: sdk/billing-ui
-        run: pnpm install --frozen-lockfile --ignore-scripts && pnpm build
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm exec playwright install --with-deps chromium
-      - name: Payment page in a browser
-        run: pnpm test:e2e
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure()
-        with:
-          name: payment-page-playwright
-          path: web/pay/test-results/
-          retention-days: 7
-
-  # The embedded example's gate and buy pages, over HTTP and in Chromium,
-  # against this commit's OpenRails and billing-ui (NMI is nmimock).
-  embedded-example:
-    name: embedded example
-    # Keep Chromium tests on an OS supported by the pinned Playwright release.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-      - name: Start PostgreSQL 18
-        run: bash scripts/ci-services.sh start postgres
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          package_json_file: examples/embedded/web/package.json
-          run_install: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: |
-            sdk/billing-ui/pnpm-lock.yaml
-            examples/embedded/web/pnpm-lock.yaml
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: examples/go.mod
-          cache-dependency-path: |
-            go.sum
-            examples/go.sum
-      - name: billing-ui
-        working-directory: sdk/billing-ui
-        run: pnpm install --frozen-lockfile --ignore-scripts && pnpm build
-      - name: The React app
-        working-directory: examples/embedded/web
-        run: |
-          pnpm install --frozen-lockfile --ignore-scripts
-          pnpm build
-          pnpm exec playwright install --with-deps chromium
-      - name: PostgreSQL is ready
-        run: bash scripts/ci-services.sh ready
-      - name: Gated content and the buy pages
-        working-directory: examples
-        env:
-          OPENRAILS_E2E_DSN: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test -tags integration -count=1 -v ./embedded/
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure()
-        with:
-          name: embedded-example-playwright
-          path: examples/embedded/web/test-results/
-          retention-days: 7

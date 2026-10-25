@@ -1,0 +1,28 @@
+method	executable_case	asserted_contract
+getConfig	OR-UI-01	Public configuration exposes USD scale6 and sends no credential.
+getCustomerConfig	OR-UI-01	Customer configuration identifies the actual merchant Alpha.
+getAccount	OR-UI-01	Actual signed-in customer ID, persisted balance policy and default card are returned.
+setCartLine	OR-UI-01	Quantity3 of9.99USD returns29970000 native units and the selected price identity.
+clearCart	OR-UI-01	Public cart readback has no lines after clearing.
+createOrder	OR-UI-01,OR-UI-02,OR-UI-05	Exact unpaid order, real challenge-required enrollment and one accepted expired-token retry.
+getOrder	OR-UI-01,OR-UI-05	Own order retains ID and frozen amount; other customer gets404.
+payOrder	OR-UI-01	Real provider payment completes the original order at29970000 native units.
+getEntitlements	OR-UI-01	Paid purchase exposes only the selected library key under the requested prefix.
+setLowBalanceLine	OR-UI-01	Currency normalization and literal amount/runway persist into the real account read.
+getUsage	OR-UI-01	One real metered event returns20 native units and the authenticated customer identity.
+addPaymentMethod	OR-UI-02	External bank challenge yields a pending saved card; independent simple card can also be saved.
+listPaymentMethods	OR-UI-02,OR-UI-07	Saved IDs appear; unsupported Stripe deletion preserves them; NMI deletion removes its exact card.
+confirmPaymentMethod	OR-UI-02	Actual external setup authentication transitions the same pending card to active.
+setDefaultPaymentMethod	OR-UI-02	Actual account read returns the selected card for uppercaseUSD.
+confirmOrder	OR-UI-02	Actual external payment authentication settles the original membership order.
+getSubscription	OR-UI-02	Membership and successor upgrade retain actual IDs, selected price and active state.
+setSubscriptionPaymentMethod	OR-UI-02	Returned subscription binds the selected saved card.
+previewSubscriptionChange	OR-UI-02	A fresh $10 to $20 upgrade quotes $10 due now and $20 at renewal in exact USD native units, then settles through the real provider.
+changeSubscription	OR-UI-02	Real upgrade requires the bank challenge instead of declaring success prematurely.
+confirmSubscriptionChange	OR-UI-02	External authentication completes the change and identifies its successor subscription.
+cancelSubscription	OR-UI-02	Native customer cancellation changes live status to canceled.
+resumeSubscription	OR-UI-02	Resumption restores active status and preserves the paid period end.
+removePaymentMethod	OR-UI-02,OR-UI-07	Unsupported Stripe custody returns a typed refusal; actual NMI deletion removes the instrument and external vault record.
+reportPayURLFailure	OR-UI-01,OR-UI-03	Owned order report creates a public merchant finding; unknown order preserves typed404.
+createNetworkLinkChallenge	OR-UI-03,OR-UI-06	Disabled embedded profile refuses; enabled standalone returns a real nonce-bearing challenge.
+createNetworkLink	OR-UI-03,OR-UI-06	Real OAuth consent links the exact merchant customer to the native account; consumed challenge replay is400.
