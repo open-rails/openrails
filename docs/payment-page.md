@@ -219,17 +219,12 @@ POST /v1/me/orders  {"lines": [{"price_id": "…"}], "pay_url": {"embedded": tru
 - On the checkout origin the secret opens that order alone, as a merchant's
   pay URL does.
 
-## Save with the customer network
+## Hosted account checkout
 
-On a server running the customer network ([Customer
-network](customer-network.md)), the page offers before the card to save the
-payment to the shopper's network account. It signs the shopper in at the
-server's issuer with its own client (`openrails-payment-page`: code, PKCE, DPoP,
-`prompt=login`, the link challenge's nonce) and links the order's customer
-with the pay URL. At the top level the page goes to the sign-in and back
-to `/pay/sign-in`; framed, the sign-in opens in a popup, whose return hands the
-code back to the frame. `GET /v1/config`'s `network` names the issuer and
-client.
+Platform sign-in, shared-wallet selection and account linking are composed by
+the hosted application. The generic payment page serves the immutable order's
+payment capability; it does not enroll a platform account or expose historical
+customer data merely because the caller has a pay URL.
 
 ## The page
 

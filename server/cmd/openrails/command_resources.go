@@ -3,21 +3,17 @@ package main
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/email"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/paymentpage"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
-	"github.com/open-rails/openrails/server/internal/network"
 	"github.com/open-rails/openrails/server/internal/operator"
 	"github.com/spf13/cobra"
 )
@@ -28,10 +24,7 @@ type commandControlPlane struct {
 	db        *db.DB
 	cp        *controlplane.ControlPlane
 	directory *merchants.Service
-	network   interface {
-		MerchantLeft(context.Context, billing.MerchantID) error
-	}
-	cleanups []func()
+	cleanups  []func()
 }
 
 func (c *commandControlPlane) close() {
@@ -69,22 +62,6 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 	if err != nil {
 		return nil, err
 	}
-	if network.Enabled(akCfg) {
-		origin := ""
-		if strings.TrimSpace(h.CheckoutOrigin) != "" {
-			forbidden := []string{h.PublicBillingBaseURL, h.Auth.Token.Issuer, h.Auth.Frontend.BaseURL}
-			if h.Auth.HTTP != nil {
-				forbidden = append(forbidden, h.Auth.HTTP.PublicURL)
-			}
-			origin, err = paymentpage.Origin(h.CheckoutOrigin, forbidden...)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if err := network.Configure(&akCfg, origin); err != nil {
-			return nil, err
-		}
-	}
 	// AuthKit requires its HTTP configuration while the merchant persona can
 	// register OAuth clients. Retain that policy, but never mount its handler.
 	key, err := h.SigningKey.Source()
@@ -111,12 +88,6 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 		return nil, err
 	}
 	c.cleanups = append(c.cleanups, func() { _ = ak.Close(context.WithoutCancel(ctx)) })
-	if network.Enabled(akCfg) {
-		c.network, err = network.New(c.db, ak, abusestate.New(nil), nil, akCfg.DefaultTenantID, akCfg.Token.Issuer)
-		if err != nil {
-			return nil, err
-		}
-	}
 	c.cp, err = controlplane.New(ak, h.Config, akCfg, pool, opts)
 	if err != nil {
 		return nil, err
@@ -160,11 +131,7 @@ func (c *commandControlPlane) RenameMerchant(ctx context.Context, id billing.Mer
 }
 
 func (c *commandControlPlane) DeleteMerchant(ctx context.Context, id billing.MerchantID) (*billing.Merchant, error) {
-	m, err := c.directory.SoftDelete(ctx, id)
-	if err != nil || c.network == nil {
-		return m, err
-	}
-	return m, c.network.MerchantLeft(ctx, id)
+	return c.directory.SoftDelete(ctx, id)
 }
 
 func (c *commandControlPlane) RestoreMerchant(ctx context.Context, id billing.MerchantID) (*billing.Merchant, error) {

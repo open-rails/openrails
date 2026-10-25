@@ -295,11 +295,11 @@ const permissionAreas: Record<string, string> = {
     "Read usage, admissions, and running charges through the application API.",
   "usage:manage": "Admit and charge usage through the application API.",
   "events:read":
-    "Read and acknowledge billing events through the application API.",
+    "Read retained billing events through the application API.",
   "orders:manage":
     "Preview, create, and withdraw merchant orders through the application API.",
   "customers:read":
-    "Find customers by their network account through the application API.",
+    "Read merchant customer identity and billing settings.",
 }
 
 /** Descriptions for a host's role editor; permissions are enforced by the API. */

@@ -132,11 +132,7 @@ func HeadersHTTP(policy Policy, framing Framing) func(http.Handler) http.Handler
 			}
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("Referrer-Policy", "no-referrer")
-			// The sign-in return keeps its opener: a framed page's sign-in
-			// popup hands its code back to the frame that opened it.
-			if r.URL.Path != SignInPath {
-				h.Set("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
-			}
+			h.Set("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
 			h.Set("Permissions-Policy", `payment=(self "https://js.stripe.com" "https://*.js.stripe.com"), camera=(), microphone=(), geolocation=()`)
 			h.Set("Server", "")
 			next.ServeHTTP(w, r)
@@ -144,12 +140,8 @@ func HeadersHTTP(policy Policy, framing Framing) func(http.Handler) http.Handler
 	}
 }
 
-// SignInPath is where the page's openrails.dev sign-in returns: the
-// redirect URI of its client, served the page like an order.
-const SignInPath = PagePrefix + "sign-in"
-
 // Page serves the payment page from a build of web/pay: index.html at
-// /pay/{order_id} and SignInPath, its files under /assets/, and nothing else.
+// /pay/{order_id}, its files under /assets/, and nothing else.
 func Page(assets fs.FS) (http.Handler, error) {
 	if assets == nil {
 		return nil, errors.New("paymentpage: no payment page build (web/pay)")
@@ -164,7 +156,7 @@ func Page(assets fs.FS) (http.Handler, error) {
 			return
 		}
 		if rest, ok := strings.CutPrefix(r.URL.Path, PagePrefix); ok {
-			if _, err := billing.ParseOrderID(rest); r.URL.Path != SignInPath && (err != nil || !strings.HasPrefix(rest, billing.OrderIDPrefix)) {
+			if _, err := billing.ParseOrderID(rest); err != nil || !strings.HasPrefix(rest, billing.OrderIDPrefix) {
 				http.NotFound(w, r)
 				return
 			}

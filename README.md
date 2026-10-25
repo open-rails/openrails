@@ -847,7 +847,7 @@ In the above example, OpenRails used Authkit for (1) saying who each request is,
 
 First, tell OpenRails who a request is. You write no middleware: OpenRails checks
 each route's permission itself and answers refusals the same way for every
-host. Admin and operator routes require no step-up; sensitive network
+host. Admin and operator routes require no step-up; sensitive mapped customer
 operations retain their recent-sign-in checks:
 
 ```go
@@ -902,7 +902,7 @@ func (v session) Can(ctx context.Context, scope auth.Scope, permission string) (
 	return v.s.Holds(ctx, scope.ID, permission) // the user's roles there, read live
 }
 
-// CheckRecentSignIn: signed in within 15 minutes, for sensitive network operations.
+// CheckRecentSignIn: signed in within 15 minutes, for sensitive mapped customer operations.
 func (v session) CheckRecentSignIn(context.Context) error {
 	if time.Since(v.s.SignedInAt) > 15*time.Minute {
 		return &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute}
@@ -1966,7 +1966,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses trusted issuers' access tokens.
 - [Products and prices through the Client](docs/catalog-client.md).
 - [Payment page](docs/payment-page.md) — a pay URL on OpenRails' own domain, or embedded on your site.
-- [Customer network](docs/customer-network.md) — openrails.dev accounts linked to each merchant's customers, and the portal's API.
+- [Hosted customer accounts](docs/customer-network.md) — SaaS ownership, generic customer integration and the explicit migration boundary.
 - [PSP import](docs/psp-import.md) — onboarding a merchant's subscribers straight from its PSPs: a read-only pull, rules and mappings that link them to customers, and landing.
 - [Batch import / legacy migration](docs/batch-import.md) — moving an existing subscriber base onto OpenRails: the import surface, the phased playbook, and the limited-mode cutover.
 

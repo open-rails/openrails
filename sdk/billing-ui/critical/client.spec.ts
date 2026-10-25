@@ -380,24 +380,12 @@ test("OR-UI-02: bank challenges, saved cards and subscription changes", async ({
   expect(kept.data.map((item) => item.id)).toContain(saved.id)
 })
 
-test("OR-UI-03: unavailable network and invalid checkout reporting retain typed errors", async ({
+test("OR-UI-03: invalid checkout reporting retains typed errors", async ({
   page,
 }) => {
   const errors = await page.evaluate(async () => {
     const out: { method: string; status: number; code: string }[] = []
     for (const [method, call] of [
-      [
-        "createNetworkLinkChallenge",
-        () => window.billing.createNetworkLinkChallenge(),
-      ],
-      [
-        "createNetworkLink",
-        () =>
-          window.billing.createNetworkLink({
-            challengeId: "00000000-0000-4000-8000-000000000001",
-            idToken: "invalid-proof",
-          }),
-      ],
       [
         "reportPayURLFailure",
         () =>
@@ -420,73 +408,11 @@ test("OR-UI-03: unavailable network and invalid checkout reporting retain typed 
     return out
   })
   expect(errors).toEqual([
-    {
-      method: "createNetworkLinkChallenge",
-      status: 404,
-      code: "unknown_error",
-    },
-    { method: "createNetworkLink", status: 404, code: "unknown_error" },
     { method: "reportPayURLFailure", status: 404, code: "resource_not_found" },
   ])
   expect((await page.evaluate(() => window.billing.getAccount())).id).toBe(
     await page.evaluate(() => window.fixture.alice)
   )
-})
-
-test("OR-UI-06: enabled network linking consumes a real consented OAuth proof", async ({
-  page,
-}) => {
-  const result = await page.evaluate(async () => {
-    const f = window.fixture
-    if (!f.networkToken)
-      throw new Error("real standalone network fixture is required")
-    const client = window.makeBilling(f.networkToken, "", "/__network/v1")
-    const challenge = await client.createNetworkLinkChallenge()
-    const response = await fetch("/__fixture/network-proof", {
-      method: "POST",
-      body: JSON.stringify({ nonce: challenge.nonce }),
-    })
-    const proof = (await response.json()) as {
-      result?: { id_token?: string }
-      error?: string
-    }
-    if (!response.ok || proof.error || !proof.result?.id_token)
-      throw new Error(
-        "real OAuth sign-in and consent did not return the nonce-bound ID token"
-      )
-    const input = { challengeId: challenge.id, idToken: proof.result.id_token }
-    const linked = await client.createNetworkLink(input)
-    let replay: unknown
-    try {
-      await client.createNetworkLink(input)
-    } catch (error) {
-      replay = {
-        status: (error as { status: number }).status,
-        code: (error as { code: string }).code,
-      }
-    }
-    return {
-      linked,
-      replay,
-      challenge,
-      merchant: f.networkMerchant,
-      customer: f.networkCustomer,
-      account: f.networkAccount,
-    }
-  })
-  expect(result.challenge.id).toBeTruthy()
-  expect(result.challenge.nonce).toBeTruthy()
-  expect(result.linked).toMatchObject({
-    merchant_id: result.merchant,
-    customer_id: result.customer,
-    account_id: result.account,
-    method: "connect",
-    status: "active",
-  })
-  expect(result.replay).toEqual({
-    status: 400,
-    code: "network_link_challenge_invalid",
-  })
 })
 
 test("OR-UI-07: supported card deletion removes actual NMI custody", async ({

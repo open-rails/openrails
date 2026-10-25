@@ -25,8 +25,8 @@ for each authorized merchant, including archived merchants. Every merchant has
 its own cursor; there is no global cursor or remote cross-merchant endpoint.
 The ordinary Client/HTTP interface retains the active-merchant policy.
 
-The optional standalone network portal uses `Server.NetworkAccountHandler`
-and checks `Server.NetworkLinks` on every inbox request. Notification URLs come
+The hosted account portal validates its own current account relationships
+on every inbox request, before selecting recipients and paginating. Notification URLs come
 from `MerchantProfile.NotificationURL(event_type)`: `subscribe_url` for
 `premium_ended`, `billing_url` for other events, falling back to `support_url`.
 

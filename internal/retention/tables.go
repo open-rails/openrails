@@ -28,14 +28,13 @@ const permanent = "permanent, never pruned."
 // Tables classifies every table of the baseline. A table without an entry
 // fails TestEveryTableHasARetentionClass.
 var Tables = map[string]Table{
-	"eventlog_migrations":   {Class: State},
-	"eventlog_events":       {Rows, "events expire after the configured event retention, independently of reader progress."},
-	"eventlog_streams":      {Class: State},
-	"network_event_cursors": {Class: State},
-	"eventlog_pending":      {Class: State},
-	"destructive_actions":   {Permanent, permanent},
-	"destructive_holds":     {Permanent, permanent},
-	"notification_events":   {Rows, "rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers."},
+	"eventlog_migrations": {Class: State},
+	"eventlog_events":     {Rows, "events expire after the configured event retention, independently of reader progress."},
+	"eventlog_streams":    {Class: State},
+	"eventlog_pending":    {Class: State},
+	"destructive_actions": {Permanent, permanent},
+	"destructive_holds":   {Permanent, permanent},
+	"notification_events": {Rows, "rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers."},
 	// Money, grants, owed usage and receipts.
 	"ledger_accounts":               {Permanent, permanent},
 	"ledger_transfers":              {Permanent, permanent},
@@ -86,7 +85,6 @@ var Tables = map[string]Table{
 	"failed_usage_windows":            {Rows, "rows are deleted once their window has ended."},
 	"meter_period_quantities":         {Rows, "rows are deleted 100 days after period_starts_at."},
 	"solana_pay_references":           {Rows, "settled references are deleted after their 7-day watch window."},
-	"customer_links":                  {Rows, "revoked links are deleted 24 months (731 days) after revoked_at; an active link is kept while it lasts."},
 
 	"merchants":                         {Class: State},
 	"merchant_slug_aliases":             {Class: State},

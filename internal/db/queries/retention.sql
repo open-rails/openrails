@@ -110,12 +110,6 @@ FROM (
         AND pi.updated_at < sqlc.arg(provider_write_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
-    (SELECT DISTINCT cl.merchant_id AS mid
-       FROM billing.customer_links cl
-      WHERE (sqlc.narg(after)::uuid IS NULL OR cl.merchant_id > sqlc.narg(after)::uuid)
-        AND cl.status = 'revoked' AND cl.revoked_at < sqlc.arg(link_cutoff)::timestamptz
-      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
-    UNION
     (SELECT DISTINCT ml.merchant_id AS mid
        FROM billing.provider_mutation_logs ml
       WHERE (sqlc.narg(after)::uuid IS NULL OR ml.merchant_id > sqlc.narg(after)::uuid)

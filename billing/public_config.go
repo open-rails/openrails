@@ -14,9 +14,6 @@ type PublicConfig struct {
 	// Captcha is the challenge to solve when a request answers 403
 	// captcha_required; null when the deployment challenges nobody.
 	Captcha *CaptchaConfig `json:"captcha"`
-	// Network is how the payment page signs a shopper in to the customer
-	// network; null without the network or a payment page.
-	Network *PublicNetwork `json:"network"`
 }
 
 // CustomerConfig is what a customer's browser needs to know about the
@@ -30,14 +27,6 @@ type CustomerConfig struct {
 	// ClientCountry is the customer's country as a trusted proxy reports it
 	// (CF-IPCountry), or "": the billing country a card form preselects.
 	ClientCountry string `json:"client_country"`
-}
-
-// PublicNetwork is the payment page's sign-in to the customer network: an
-// OpenID Connect authorization (code and PKCE) at Issuer for ClientID,
-// returning to the checkout origin's /pay/sign-in.
-type PublicNetwork struct {
-	Issuer   string `json:"issuer"`
-	ClientID string `json:"client_id"`
 }
 
 // PublicMerchant is the merchant as its customers see it: its name, and its

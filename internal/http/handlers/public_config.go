@@ -88,7 +88,6 @@ func GetCustomerConfig(r *httprequest.Request) {
 func PublicConfigDocument(rt *app.Runtime, capabilities billing.Capabilities) billing.PublicConfig {
 	doc := billing.PublicConfig{Capabilities: capabilities, Currencies: billing.Currencies(), Rails: merchants.RailDefinitions()}
 	if rt != nil {
-		doc.Network = rt.PaymentPageNetwork
 	}
 	if rt != nil && rt.Config != nil && config.CaptchaEnabled(rt.Config.Captcha) {
 		cfg := rt.Config.Captcha

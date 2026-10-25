@@ -1,11 +1,14 @@
 package routes
 
-// linkedCustomerOperations is the existing linked-customer action policy. Both
-// the old network mount and generic host mapping use this one classification.
-var linkedCustomerOperations = []struct {
+// mappedCustomerOperations explicitly classifies the customer operations a
+// host may mount with its authenticated customer mapping.
+var mappedCustomerOperations = []struct {
 	key       string
 	sensitive bool
 }{
+	{"GET /v1/me/config", false},
+	{"GET /v1/me/payments", false},
+	{"GET /v1/me/entitlements", false},
 	{"GET /v1/me/subscriptions/{id}", false},
 	{"POST /v1/me/subscriptions/{id}/cancel", true},
 	{"POST /v1/me/subscriptions/{id}/resume", true},
@@ -24,7 +27,7 @@ func mappedCustomerOperation(key string) (sensitive, allowed bool) {
 	if key == "GET /v1/me/orders" || key == "GET /v1/me/subscriptions" {
 		return false, true
 	}
-	for _, operation := range linkedCustomerOperations {
+	for _, operation := range mappedCustomerOperations {
 		if operation.key == key {
 			return operation.sensitive, true
 		}

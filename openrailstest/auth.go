@@ -61,7 +61,7 @@ func CheckAuth(t testing.TB, routes openrails.Routes, c authtest.Cases) {
 func rootPermissions(g openrails.RouteGroups) []string {
 	var out []string
 	for _, r := range httproutes.Catalog() {
-		if !httproutes.Serves(g, r) || r.When == httproutes.FeatureCustomerNetwork {
+		if !httproutes.Serves(g, r) {
 			continue
 		}
 		if perm := string(r.Needs().Root); perm != "" && !slices.Contains(out, perm) {

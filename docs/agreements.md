@@ -14,8 +14,8 @@ and is not an agreement; deleting the card ends it.
 ## Revoking one
 
 The customer revokes each agreement on its own, unilaterally, where it was
-given: on the merchant's site (`/v1/me`) or in the openrails.dev portal
-(`/v1/network/links/{link_id}`, with a recent sign-in).
+given: on the merchant's site (`/v1/me`) or through a host-authorized
+`Engine.CustomerRoutes` mapping, with its recent-sign-in checks.
 
 | Route | Does |
 |---|---|

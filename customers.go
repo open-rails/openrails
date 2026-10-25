@@ -24,21 +24,6 @@ func (c *Client) ListCustomers(ctx context.Context, params billing.CustomerListP
 	return &out, nil
 }
 
-// ListNetworkCustomers finds the merchant's customer linked to an
-// openrails.dev account: a page of at most one. It needs the customer
-// network (a standalone server running it).
-func (c *Client) ListNetworkCustomers(ctx context.Context, params billing.NetworkCustomerListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Customer], error) {
-	if params.NetworkAccountID.IsZero() {
-		return nil, invalidErr("network_account_id is required")
-	}
-	var out billing.ListPage[billing.Customer]
-	q := url.Values{"network_account_id": {params.NetworkAccountID.String()}}
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/app/customers", q), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // GetCustomer reads one customer: its contact, its settings, and per currency
 // its balance and the card that pays its invoices.
 func (c *Client) GetCustomer(ctx context.Context, id billing.CustomerID, requestOptions ...RequestOption) (*billing.Customer, error) {

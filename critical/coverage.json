@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 156,
+  "scenario_count": 153,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -52,31 +52,6 @@
       "id": "OR-J01-S10",
       "journey": "J01",
       "name": "Mapped customer payment continuation and cancellation retain original step-up and one economic charge"
-    },
-    {
-      "id": "OR-J02-S01",
-      "journey": "J02",
-      "name": "Link challenge binds both verified identities and redeems once"
-    },
-    {
-      "id": "OR-J02-S02",
-      "journey": "J02",
-      "name": "Foreign or expired challenge and changed redemption are refused"
-    },
-    {
-      "id": "OR-J02-S03",
-      "journey": "J02",
-      "name": "Owned network alias inherits only the linked customer authority"
-    },
-    {
-      "id": "OR-J02-S04",
-      "journey": "J02",
-      "name": "Recent sign-in refusal blocks sensitive alias without effect"
-    },
-    {
-      "id": "OR-J02-S05",
-      "journey": "J02",
-      "name": "Unlink refuses a live provider agreement and otherwise removes account access while retaining merchant history"
     },
     {
       "id": "OR-J03-S01",
@@ -777,6 +752,16 @@
       "id": "OR-J01-S15",
       "journey": "J01",
       "name": "Customer proof refuses expiry, revocation and unavailable authority after storage waits"
+    },
+    {
+      "id": "OR-J01-S16",
+      "journey": "J01",
+      "name": "Host customer admission policy preserves original proof and fixed billing scope ceilings"
+    },
+    {
+      "id": "OR-J31-S05",
+      "journey": "J31",
+      "name": "Hosted account removal refuses ambiguous or populated legacy state and preserves transferred reader progress"
     },
     {
       "id": "OR-J22-S05",

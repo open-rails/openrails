@@ -76,16 +76,16 @@ type External struct {
 type Env struct {
 	Options
 	Runtime *app.Runtime
-	// Customers gates customer and network routes.
+	// Customers gates ordinary customer routes.
 	Customers billingauth.Authenticator
 	// resolveCustomer is a host-authorized existing customer mapping. It never
 	// changes the verified source identity or calls native-network admission.
-	resolveCustomer func(*http.Request, billingauth.Verified) (config.CustomerBinding, error)
+	resolveCustomer         func(*http.Request, billingauth.Verified) (config.CustomerBinding, error)
+	customerAdmissionPolicy func(context.Context, auth.Verified, config.CustomerBinding) error
 	// providers is ProviderRoutes resolved.
 	providers routesurface.ProviderRoutes
 	// admit pins a customer to the issuer of its subject (db.AdmitCustomer);
-	// account: the subject is the deployment's own account.
-	admit func(ctx context.Context, mid billing.MerchantID, id billing.CustomerID, issuer string, account bool) error
+	admit func(ctx context.Context, mid billing.MerchantID, id billing.CustomerID, issuer string) error
 	// live reports an active merchant of the directory.
 	live func(context.Context, billing.MerchantID) (bool, error)
 	// scim is the assembly's SCIM server, built once.
@@ -168,8 +168,6 @@ func (e *Env) enabled(f Feature) bool {
 		return rt != nil && rt.CopilotService.Configured()
 	case FeatureCustomerProvisioning:
 		return rt != nil && !rt.HostUserInfo && (e.Groups.Programmatic || !e.SCIMMerchant.IsZero())
-	case FeatureCustomerNetwork:
-		return rt != nil && rt.Network != nil
 	}
 	panic("routes: unknown feature " + string(f))
 }
@@ -225,8 +223,6 @@ func (e *Env) gates(route Route) []router.Middleware {
 		mw = append(append(mw, e.cardAttack(route)...), conn...)
 	case AuthSignedIn:
 		mw = append(e.signedInGates(route), conn...)
-	case AuthNetwork:
-		mw = append(e.networkGates(route), conn...)
 	case AuthMerchant:
 		mw = append(mw, e.staffGates(route)...)
 		// The staff gate stays outermost; the actor-keyed operation limiter
@@ -483,8 +479,9 @@ func payURLScope(route Route) router.Middleware {
 // CustomerMount is one customer surface: the Authenticator that says who
 // its customers are. Each buys from the merchant its credential is bound to.
 type CustomerMount struct {
-	Auth      billingauth.Authenticator
-	Providers routesurface.ProviderRoutes
+	AdmissionPolicy func(context.Context, auth.Verified, config.CustomerBinding) error
+	Auth            billingauth.Authenticator
+	Providers       routesurface.ProviderRoutes
 
 	// live is Options.live.
 	live func(context.Context, billing.MerchantID) (bool, error)
@@ -493,6 +490,7 @@ type CustomerMount struct {
 func customerEnv(rt *app.Runtime, m CustomerMount) *Env {
 	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, live: m.live})
 	env.Customers = m.Auth
+	env.customerAdmissionPolicy = m.AdmissionPolicy
 	return env
 }
 
@@ -503,37 +501,15 @@ func RegisterCustomerRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) 
 	customerEnv(rt, m).mount(rr, "/v1/me", in(Customer))
 }
 
-// NetworkMount is the network portal's surface (/v1/network): the
-// Authenticator that says who the account is, a authkit/auth Root whose
-// authority the deployment's own accounts are of.
-type NetworkMount struct {
-	Auth billingauth.Authenticator
-}
-
-// RegisterNetworkRoutes mounts the openrails.dev account's routes, where the
-// deployment runs the customer network, on a router rooted at /v1/network.
-func RegisterNetworkRoutes(rr router.Router, rt *app.Runtime, m NetworkMount) {
-	env := newEnv(rt, Options{})
-	env.Customers = m.Auth
-	env.mount(rr, "/v1/network", in(Network))
-}
-
-// admitCustomer is the runtime's customers, each its subject's issuer's. The
-// customer network admits the deployment's own accounts.
-func admitCustomer(rt *app.Runtime) func(context.Context, billing.MerchantID, billing.CustomerID, string, bool) error {
-	return func(ctx context.Context, mid billing.MerchantID, id billing.CustomerID, issuer string, account bool) error {
+// admitCustomer pins the customer to its verified issuer without hosted account enrollment.
+func admitCustomer(rt *app.Runtime) func(context.Context, billing.MerchantID, billing.CustomerID, string) error {
+	return func(ctx context.Context, mid billing.MerchantID, id billing.CustomerID, issuer string) error {
 		if rt == nil || rt.DB == nil {
 			return errors.Join(auth.ErrUnavailable, errors.New("no database admits customers"))
 		}
 		if err := requireCustomerTenant(ctx, rt, mid, id); err != nil {
 			return err
 		}
-		admit := func(ctx context.Context) error {
-			return db.AdmitCustomer(ctx, rt.DB.Gen(ctx), mid.UUID(), id.UUID(), issuer)
-		}
-		if account && issuer == "" && rt.Network != nil {
-			return rt.Network.AdmitNative(ctx, mid, id, admit)
-		}
-		return admit(ctx)
+		return db.AdmitCustomer(ctx, rt.DB.Gen(ctx), mid.UUID(), id.UUID(), issuer)
 	}
 }

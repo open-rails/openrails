@@ -11,10 +11,6 @@ export interface Fixture {
   subscriptionPrice: string
   upgradePrice: string
   psp: string
-  networkToken?: string
-  networkMerchant?: string
-  networkCustomer?: string
-  networkAccount?: string
   nmiToken?: string
   nmiPSP?: string
   nmiCardToken?: string
