@@ -235,7 +235,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	// The maintenance kill switch gates convergence/operator destruction. A
 	// canonical authenticated payer delete is their own stored-card decision;
 	// it still passes provider mode and the destructive rate/volume ceilings.
-	if r.Destructive != nil && IsDestructiveIntentType(intent.IntentType) && !isSelfServicePaymentMethodDelete(intent) {
+	if r.Destructive != nil && IsDestructiveIntentType(intent.IntentType) && !requestedPaymentMethodDelete(ctx, intent) {
 		if allowed, reason := r.Destructive.AllowDestructive(ctx, intent.MerchantID); !allowed {
 			r.park(withHistoryHold(ctx, "destructive_guard"), logEntry, stats, intent.ID, now, reason)
 			return

@@ -182,3 +182,18 @@ func (c *Client) ListPaymentMethods(ctx context.Context, customerID billing.Cust
 	}
 	return &out, nil
 }
+
+// DeletePaymentMethod removes an owned unused card only after its holder
+// confirms deletion. Existing subscriptions and accepted payments block removal;
+// retries recover the same operation and financial records remain available.
+func (c *Client) DeletePaymentMethod(ctx context.Context, customerID billing.CustomerID, methodID billing.PaymentMethodID, requestOptions ...RequestOption) error {
+	path, err := customerIDPath(customerID)
+	if err != nil {
+		return err
+	}
+	id, err := requireTypedID("payment_method_id", methodID)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodDelete, path+"/payment-methods/"+id, nil, nil, requestOptions...)
+}

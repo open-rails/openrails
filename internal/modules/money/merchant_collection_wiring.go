@@ -11,18 +11,15 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 )
@@ -156,11 +153,14 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 	switch {
 	case isStripe:
 		adapter, err = b.stripeAdapter(ctx, svc, mid, scope)
-	case method.Custodian == models.CustodianBasisTheory:
+	case models.BasisTheoryCustody(method.Custodian):
 		// The card is held by the custodian, so the charge goes through its
 		// proxy to the same gateway: the instrument decides this, not the rail.
-		scope.CustodianID = method.CustodianID
-		adapter, err = b.custodianProxyAdapter(ctx, svc, mid, scope)
+		proxy, resolveErr := b.ResolveBasisTheoryNMICharge(ctx, method, psp)
+		err = resolveErr
+		if err == nil {
+			adapter = NewCustodianProxyCollectionAdapter(proxy)
+		}
 	case method.Custodian == models.CustodianHyperSwitch:
 		scope.CustodianID = method.CustodianID
 		adapter, err = b.hyperSwitchAdapter(ctx, svc, mid, scope)
@@ -257,40 +257,6 @@ func (b *MerchantCollectionAdapterBuilder) stripeService(ctx context.Context, sv
 		service.SetBaseURLForTest(b.Endpoints.StripeBaseURL)
 	}
 	return service, nil
-}
-
-// custodianProxyAdapter arms the detokenizing-proxy collection adapter: the
-// custodian's private app key and this PSP's own gateway security key. The
-// custodial credential is the custodian's, so PSPs charging one vault share it.
-func (b *MerchantCollectionAdapterBuilder) custodianProxyAdapter(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (CollectionAdapter, error) {
-	if scope.CustodianID == nil {
-		return nil, fmt.Errorf("psp %s/%s: instrument is held by custodian %s but the PSP references none", scope.Rail, scope.AccountID, models.CustodianBasisTheory)
-	}
-	custodian, ok, err := svc.CustodianScopeByID(ctx, mid, *scope.CustodianID)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, fmt.Errorf("psp %s/%s: %w (%s)", scope.Rail, scope.AccountID, merchants.ErrCustodianNotDeclared, *scope.CustodianID)
-	}
-	apiKey, err := b.requireCustodianSecret(ctx, svc, mid, custodian, custodians.SecretAPIKey)
-	if err != nil {
-		return nil, err
-	}
-	posture, err := b.nmiProxyPosture(ctx, svc, mid, scope)
-	if err != nil {
-		return nil, err
-	}
-	bt, err := basistheory.New(basistheory.Config{
-		APIKey:   apiKey,
-		BaseURL:  b.Endpoints.BTBaseURL,
-		ReadOnly: b.Config != nil && config.IsProviderReadOnly(b.Config),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("build store-armed BT client: %w", err)
-	}
-	gw := nmiproxy.GatewayConfig{SecurityKey: posture.SecurityKey, DirectPostURL: posture.DirectPostURL, Posture: posture}
-	return NewCustodianProxyCollectionAdapter(nmiproxy.New(bt, gw)), nil
 }
 
 func (b *MerchantCollectionAdapterBuilder) nmiAdapter(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (CollectionAdapter, error) {

@@ -405,6 +405,16 @@ func DeletePaymentMethod(r *httprequest.Request) {
 	deletePaymentMethodForCustomer(r, user.ID)
 }
 
+// DeleteCustomerPaymentMethod retains the merchant actor and the same provider,
+// in-use and destructive-admission guards as an authenticated customer request.
+func DeleteCustomerPaymentMethod(r *httprequest.Request) {
+	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
+	if !ok {
+		return
+	}
+	deletePaymentMethodForCustomer(r, customer.UUID().String())
+}
+
 func deletePaymentMethodForCustomer(r *httprequest.Request, customerID string) {
 	methodID, err := billing.ParsePaymentMethodID(r.Param("id"))
 	if err != nil || methodID.IsZero() {

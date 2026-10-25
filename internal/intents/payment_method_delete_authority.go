@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/destructive"
 )
 
 func paymentMethodDeleteAuthority(ctx context.Context, payer uuid.UUID) (Origin, string) {
@@ -77,6 +78,35 @@ func isSelfServicePaymentMethodDelete(in gen.BillingProviderIntent) bool {
 		}
 		payer, err := uuid.Parse(p.UserID)
 		return err == nil && payer == actor
+	}
+	return false
+}
+
+// Explicit merchant/host card removal is a scoped billing command, not an
+// autonomous maintenance sweep. Only the request-only executor supplies this
+// context, and the persisted admin action is still checked before the provider
+// effect. It does not grant a worker permission to execute a queued deletion.
+func requestedPaymentMethodDelete(ctx context.Context, in gen.BillingProviderIntent) bool {
+	if isSelfServicePaymentMethodDelete(in) {
+		return true
+	}
+	if !manualDeleteAllowed(ctx, in.ID) || in.Origin != string(OriginAdmin) || in.DestructiveActionID == nil || *in.DestructiveActionID == uuid.Nil || in.Actor == nil || strings.TrimSpace(*in.Actor) == "" {
+		return false
+	}
+	action, ok := destructive.ActionFromContext(ctx)
+	if !ok || action.ID != *in.DestructiveActionID || action.MerchantID != in.MerchantID || action.Kind != destructive.DeletePaymentMethod {
+		return false
+	}
+	switch in.IntentType {
+	case TypePlatformMethodDelete:
+		p, err := DecodePlatformMethodDelete(in)
+		return err == nil && action.Target == p.PaymentMethodID.String()
+	case TypeHyperSwitchMethodDelete:
+		p, err := DecodeHyperSwitchMethodDelete(in)
+		return err == nil && action.Target == p.PaymentMethodID.String()
+	case TypeNMIPaymentMethodDelete:
+		p, err := decodeNMIVaultDeletePayload(in)
+		return err == nil && action.Target == p.PaymentMethodID.String() && in.Rail == "nmi" && in.PspID != nil && *in.PspID != uuid.Nil && in.CustodianID == nil && nativeMethodDeleteKeyMatches(in.IdempotencyKey, p.PaymentMethodID)
 	}
 	return false
 }

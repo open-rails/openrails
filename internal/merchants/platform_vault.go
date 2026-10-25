@@ -118,8 +118,13 @@ func (s *Service) PlatformCustodianConfig(ctx context.Context, id billing.Mercha
 			return nil, errors.New("platform vault collection applications must be merchant-specific")
 		}
 	}
+	base := basistheory.DefaultBaseURL
+	if c.Environment == config.ClassTest {
+		base = "https://api.test.basistheory.com"
+	}
 	return &config.ResolvedCustodian{Key: config.PlatformCustodianKey, Custodian: models.CustodianPlatform,
 		Environment: c.Environment,
+		APIBaseURL:  base,
 		AccountID:   s.platformVault.TenantID, APIKey: keys.APIKey, PublicAPIKey: app.PublicAPIKey,
 		CollectionApplicationID: applicationID.String(), Container: "/merchants/" + id.UUID().String() + "/"}, nil
 }

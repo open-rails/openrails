@@ -7,7 +7,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
@@ -69,25 +68,32 @@ func (b *MerchantCollectionAdapterBuilder) ReadHeldCard(ctx context.Context, m g
 		}
 		card := models.ParseCard(method.Data.Card.Brand, method.Data.Card.Last4, method.MaskedExpiry())
 		return paymentmethods.HeldCard{Card: paymentmethods.Card{Card: card}, Source: paymentmethods.SourceHyperswitchUpdater}, nil
-	case m.Custodian == models.CustodianBasisTheory && m.CustodianID != nil:
-		custodian, ok, err := svc.CustodianScopeByID(ctx, mid, *m.CustodianID)
-		if err != nil || !ok {
-			return paymentmethods.HeldCard{}, fmt.Errorf("read Basis Theory token: custodian unavailable: %v", err)
-		}
-		apiKey, err := b.requireCustodianSecret(ctx, svc, mid, custodian, custodians.SecretAPIKey)
+	case models.BasisTheoryCustody(m.Custodian) && m.CustodianID != nil:
+		custody, err := svc.BasisTheoryCustodianConfig(ctx, mid, *m.CustodianID)
 		if err != nil {
 			return paymentmethods.HeldCard{}, err
 		}
-		bt, err := basistheory.New(basistheory.Config{APIKey: apiKey, BaseURL: b.Endpoints.BTBaseURL, ReadOnly: b.Config != nil && config.IsProviderReadOnly(b.Config)})
+		if custody.Custodian != m.Custodian || b.BasisTheoryTransport != nil && custody.Environment != config.ClassTest {
+			return paymentmethods.HeldCard{}, fmt.Errorf("card custody identity changed")
+		}
+		base := custody.APIBaseURL
+		if b.Endpoints.BTBaseURL != "" {
+			base = b.Endpoints.BTBaseURL
+		}
+		bt, err := basistheory.New(basistheory.Config{APIKey: custody.APIKey, BaseURL: base, ReadOnly: b.Config != nil && config.IsProviderReadOnly(b.Config), Transport: b.BasisTheoryTransport})
 		if err != nil {
 			return paymentmethods.HeldCard{}, err
 		}
+
 		token, err := bt.GetToken(ctx, ref)
 		if basistheory.IsNotFound(err) {
 			return paymentmethods.HeldCard{Gone: true}, nil
 		}
 		if err != nil {
 			return paymentmethods.HeldCard{}, err
+		}
+		if token.ID != ref || token.Type != "card" || token.TenantID != custody.AccountID || custody.Container != "" && (len(token.Containers) != 1 || token.Containers[0] != custody.Container) {
+			return paymentmethods.HeldCard{}, fmt.Errorf("card is outside its accepted custody")
 		}
 		card := models.Card{}
 		if c := token.Card; c != nil {
