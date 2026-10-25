@@ -133,6 +133,39 @@ func TestCustomerBindingContracts(t *testing.T) {
 		otherCustomer := billing.CustomerID(uuid.New())
 		otherOrder, err := a.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: otherCustomer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: "other-customer-order"})
 		require.NoError(t, err)
+		payment, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 10_000_000, TransactionID: "mapped-owned-receipt"})
+		require.NoError(t, err)
+		foreignPayment, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: otherOrder.ID, Amount: 10_000_000, TransactionID: "mapped-foreign-receipt"})
+		require.NoError(t, err)
+		for _, view := range []string{"config", "payments", "entitlements"} {
+			path := "/account/links/" + link + "/me/" + view
+			status, raw = a.request(t, http.MethodGet, path, a.aliceToken, nil)
+			require.Equal(t, http.StatusOK, status, view+": "+string(raw))
+			switch view {
+			case "config":
+				var config billing.CustomerConfig
+				require.NoError(t, json.Unmarshal(raw, &config))
+				require.Len(t, config.Payment.PSPs, 1)
+				require.Equal(t, "stripe", config.Payment.PSPs[0].Rail)
+				require.NotContains(t, string(raw), "sk_test_critical")
+			case "payments":
+				var payments billing.ListPage[billing.Payment]
+				require.NoError(t, json.Unmarshal(raw, &payments))
+				require.Len(t, payments.Items, 1)
+				require.Equal(t, payment.ID, payments.Items[0].ID)
+				require.Equal(t, customer, payments.Items[0].CustomerID)
+				require.NotContains(t, string(raw), foreignPayment.ID.String())
+			case "entitlements":
+				var access billing.ListPage[billing.CustomerEntitlement]
+				require.NoError(t, json.Unmarshal(raw, &access))
+				require.Len(t, access.Items, 1)
+				require.Equal(t, "mapped-customer:owned", access.Items[0].Entitlement)
+				require.Equal(t, customer, access.Items[0].CustomerID)
+			}
+			status, raw = a.request(t, http.MethodGet, path, a.bobToken, nil)
+			require.Equal(t, http.StatusNotFound, status, view+": "+string(raw))
+			require.NotContains(t, string(raw), customer.String())
+		}
 		status, raw = a.request(t, http.MethodGet, "/account/links/"+link+"/me/orders/"+otherOrder.ID.String(), a.aliceToken, nil)
 		require.Equal(t, http.StatusNotFound, status, string(raw))
 		status, raw = a.request(t, http.MethodGet, request.URL.Path, a.aliceToken, nil, map[string]string{"OpenRails-Expected-Merchant": a.beta.MerchantID().String()})
@@ -152,6 +185,10 @@ func TestCustomerBindingContracts(t *testing.T) {
 		active.Store(false)
 		status, raw = a.request(t, http.MethodGet, request.URL.Path, a.aliceToken, nil)
 		require.Equal(t, http.StatusNotFound, status, "revoked host relationship is read live: "+string(raw))
+		for _, view := range []string{"config", "payments", "entitlements"} {
+			status, raw = a.request(t, http.MethodGet, "/account/links/"+link+"/me/"+view, a.aliceToken, nil)
+			require.Equal(t, http.StatusNotFound, status, "revoked mapping: "+string(raw))
+		}
 		active.Store(true)
 		_, err = a.auth.RevokeAccountSessions(t.Context(), iam.UserIdentity(a.alice.ID), a.alice.ID)
 		require.NoError(t, err)
