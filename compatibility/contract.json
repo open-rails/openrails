@@ -238,7 +238,7 @@
     "adapters/authkit": [
       "func BindMerchant(ctx context.Context, pool *pgxpool.Pool, database openrails.DatabaseConfig, client *native.Client, binding billing.MerchantBinding) error",
       "func MerchantGroups(client *native.Client) billing.MerchantGroupReader",
-      "func Notifications(sink notifypg.TxSink, merchant billing.MerchantID, issuers ...string) *openrails.NotificationChannel"
+      "func Notifications(sink notify.Publisher, merchant billing.MerchantID, issuers ...string) *openrails.NotificationChannel"
     ],
     "adapters/fiber": [
       "const RouteNamePrefix = \"openrails.\"",
@@ -1209,7 +1209,7 @@
       "type MerchantDeclaration struct {\n\tSlug string `yaml:\"-\"`\n\n\tBinding *billing.MerchantBinding `yaml:\"-\" json:\"-\"`\n\n\tIssuer      string `yaml:\"-\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tPSPs PSPs `yaml:\"psps,omitempty\"`\n\n\tCustodians Custodians `yaml:\"custodians,omitempty\"`\n\n\tbilling.MerchantSettings `yaml:\",inline\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
       "type MerchantSecrets struct {\n\tSCIMToken string `yaml:\"scim_token,omitempty\"`\n}",
       "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
-      "type NotificationChannel struct {\n\tSink      notifypg.TxSink\n\tRecipient func(context.Context, NotificationRecipient) (accountID string, deliver bool, err error)\n}",
+      "type NotificationChannel struct {\n\tSink      notify.Publisher\n\tRecipient func(context.Context, NotificationRecipient) (accountID string, deliver bool, err error)\n}",
       "type NotificationRecipient struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\tIssuer     string\n}",
       "type PSPConfig struct {\n\tRail billing.Rail `yaml:\"rail\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
       "type PSPs map[string]PSPConfig",
@@ -1979,7 +1979,7 @@
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "fmt": "fmt",
-      "notifypg": "github.com/open-rails/helpers/notify/postgres",
+      "notify": "github.com/open-rails/authkit/notify",
       "openrails": "github.com/open-rails/openrails",
       "slices": "slices"
     },
@@ -2160,7 +2160,7 @@
       "time": "time"
     },
     "billing/notification_adoption.go": {
-      "notify": "github.com/open-rails/helpers/notify",
+      "notify": "github.com/open-rails/authkit/notify",
       "uuid": "github.com/google/uuid"
     },
     "billing/notifications.go": {
@@ -2471,7 +2471,7 @@
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "http": "net/http",
-      "notifypg": "github.com/open-rails/helpers/notify/postgres",
+      "notify": "github.com/open-rails/authkit/notify",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "userinfo": "github.com/open-rails/authkit/userinfo",
       "v9": "github.com/redis/go-redis/v9",

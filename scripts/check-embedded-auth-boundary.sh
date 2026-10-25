@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The embedded library uses AuthKit's standard-library-only contract packages.
+# The embedded library uses AuthKit's authentication/directory contracts and
+# notification publisher contract (which also names the existing pgx transaction).
 # AuthKit's runtime belongs to an opting-in host or the standalone server.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -8,7 +9,7 @@ check_authkit_dependencies() {
   local dep
   while IFS= read -r dep; do
     case "$dep" in
-      github.com/open-rails/authkit/auth|github.com/open-rails/authkit/auth/authtest|github.com/open-rails/authkit/userinfo|github.com/open-rails/authkit/userinfo/userinfotest) ;;
+      github.com/open-rails/authkit/auth|github.com/open-rails/authkit/auth/authtest|github.com/open-rails/authkit/userinfo|github.com/open-rails/authkit/userinfo/userinfotest|github.com/open-rails/authkit/notify) ;;
       github.com/open-rails/authkit|github.com/open-rails/authkit/*)
         printf 'The embedded library links an AuthKit implementation package: %s\n' "$dep" >&2
         return 1
