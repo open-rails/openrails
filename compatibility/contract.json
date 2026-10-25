@@ -133,6 +133,7 @@
       "func (e *Engine) ClearDestructiveHold(ctx context.Context, merchant billing.MerchantID, id billing.DestructiveHoldID, operator billing.DestructiveOperator, reason string) (*billing.DestructiveHold, error)",
       "func (e *Engine) Close(ctx context.Context) error",
       "func (e *Engine) CustomerConfig(selection Routes, r *http.Request) (*billing.CustomerConfig, error)",
+      "func (e *Engine) CustomerRoutes(selection CustomerRoutes) ([]Route, error)",
       "func (e *Engine) ListOpenDestructiveHolds(ctx context.Context, limit int, after billing.DestructiveHoldID) ([]billing.DestructiveHoldReview, error)",
       "func (e *Engine) LocalMerchant(id billing.MerchantID) (*LocalClient, error)",
       "func (e *Engine) Merchant(id billing.MerchantID) (*Client, error)",
@@ -176,6 +177,8 @@
       "type CredentialKind = billingauth.CredentialKind",
       "type CustodianConfig = config.CustodianConfig",
       "type Custodians = config.Custodians",
+      "type CustomerBinding = config.CustomerBinding",
+      "type CustomerRoutes = config.CustomerRoutes",
       "type DBConfig = config.DBConfig",
       "type DatabaseConfig = config.DatabaseConfig",
       "type Deps = config.Deps",
@@ -1155,7 +1158,8 @@
       "type CredentialKind = auth.CredentialKind",
       "type Identity = auth.Identity",
       "type Invoker = auth.Invoker",
-      "type SubjectKind = auth.SubjectKind"
+      "type SubjectKind = auth.SubjectKind",
+      "type Verified = auth.Verified"
     ],
     "internal/cardguard": [
       "func (Card) Format(f fmt.State, _ rune)",
@@ -1180,6 +1184,8 @@
       "type Config struct {\n\tUsageBillingEnabled bool `yaml:\"usage_billing_enabled\" json:\"usage_billing_enabled\"`\n\n\tEventRetention string `yaml:\"event_retention\" json:\"event_retention\"`\n\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\" json:\"user_action_rate_limit\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tCatalogReconciliationInterval string `yaml:\"catalog_reconciliation_interval\" json:\"catalog_reconciliation_interval\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type Custodians map[string]CustodianConfig",
+      "type CustomerBinding struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n}",
+      "type CustomerRoutes struct {\n\tPrefix string\n\n\tAuth billingauth.Authenticator\n\n\tResolve func(*http.Request, billingauth.Verified) (CustomerBinding, error)\n}",
       "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n}",
       "type DatabaseConfig struct {\n\tSkipMigrations bool `yaml:\"skip_migrations\" json:\"skip_migrations\"`\n\n\tSchema string `yaml:\"schema\" json:\"schema\"`\n\n\tRiverSchema string `yaml:\"river_schema\" json:\"river_schema\"`\n}",
       "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tMerchantGroups billing.MerchantGroupReader\n\n\tRedis redis.UniversalClient\n\n\tVault *vaultapi.Client\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tFXTransport     http.RoundTripper\n\tClock           clockwork.Clock\n}",
@@ -2318,6 +2324,9 @@
       "strconv": "strconv",
       "url": "net/url"
     },
+    "customer_routes.go": {
+      "fmt": "fmt"
+    },
     "customer_tokens.go": {
       "asn1": "encoding/asn1",
       "big": "math/big",
@@ -2449,7 +2458,9 @@
       "strings": "strings"
     },
     "internal/config/embedding.go": {
-      "billingauth": "github.com/open-rails/openrails/internal/billingauth"
+      "billing": "github.com/open-rails/openrails/billing",
+      "billingauth": "github.com/open-rails/openrails/internal/billingauth",
+      "http": "net/http"
     },
     "internal/config/hyperswitch.go": {
       "fmt": "fmt",

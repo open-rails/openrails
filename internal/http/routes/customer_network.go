@@ -47,23 +47,7 @@ func networkRoutes() []Route {
 			Responses: []Reply{{204, nil}}, Errors: codes(billing.CodeNetworkLinkInUse, "invalid_param", "service_unavailable"), Handler: h(handlers.UnlinkNetworkLink)},
 	}
 	// The customer routes the account acts by through one link.
-	for _, at := range []struct {
-		key       string
-		sensitive bool
-	}{
-		{"GET /v1/me/subscriptions/{id}", false},
-		{"POST /v1/me/subscriptions/{id}/cancel", true},
-		{"POST /v1/me/subscriptions/{id}/resume", true},
-		{"PUT /v1/me/subscriptions/{id}/payment-method", true},
-		{"GET /v1/me/payment-methods", false},
-		{"POST /v1/me/payment-methods", true},
-		{"DELETE /v1/me/payment-methods/{id}", true},
-		{"GET /v1/me/orders/{id}", false},
-		{"POST /v1/me/orders/{id}/pay", true},
-		{"POST /v1/me/orders/{id}/confirm", true},
-		{"GET /v1/me/agreements", false},
-		{"POST /v1/me/agreements/{id}/revoke", true},
-	} {
+	for _, at := range linkedCustomerOperations {
 		out = append(out, throughLink(at.key, at.sensitive))
 	}
 	return out

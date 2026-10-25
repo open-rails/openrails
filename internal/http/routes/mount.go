@@ -78,6 +78,9 @@ type Env struct {
 	Runtime *app.Runtime
 	// Customers gates customer and network routes.
 	Customers billingauth.Authenticator
+	// resolveCustomer is a host-authorized existing customer mapping. It never
+	// changes the verified source identity or calls native-network admission.
+	resolveCustomer func(*http.Request, billingauth.Verified) (config.CustomerBinding, error)
 	// providers is ProviderRoutes resolved.
 	providers routesurface.ProviderRoutes
 	// admit pins a customer to the issuer of its subject (db.AdmitCustomer);

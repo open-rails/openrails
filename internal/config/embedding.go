@@ -1,6 +1,34 @@
 package config
 
-import "github.com/open-rails/openrails/internal/billingauth"
+import (
+	"net/http"
+
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth"
+)
+
+// CustomerBinding is the existing merchant/customer pair a host authorizes for
+// one request. It is supplied by trusted host code, never decoded from a client.
+type CustomerBinding struct {
+	MerchantID billing.MerchantID
+	CustomerID billing.CustomerID
+}
+
+// CustomerRoutes mounts customer operations with a host-authorized binding.
+// The host owns the live relationship policy; OpenRails keeps the original
+// verified identity, customer views and sensitive-operation checks.
+type CustomerRoutes struct {
+	// Prefix replaces /v1/me, defaulting to /v1/me. Trusted native whole-segment
+	// parameters, such as /account/links/{link_id}, are allowed.
+	Prefix string
+	// Auth verifies the original request once. Only self-acting users may act
+	// through this mount; sensitive operations require their original recent sign-in.
+	Auth billingauth.Authenticator
+	// Resolve proves the live relationship and returns one existing customer.
+	// It runs before a core database connection is pinned. The request carries
+	// its original path values; identity and recent-login proof must not be reminted.
+	Resolve func(*http.Request, billingauth.Verified) (CustomerBinding, error)
+}
 
 // Routes is the HTTP surface the adapters mount on the root router, and the
 // host's auth that says who its requests are. The public, customer (/v1/me)

@@ -351,20 +351,8 @@ func (e *Env) bound(r *httprequest.Request, route Route, a any) (billingauth.Ver
 		return nil, billingauth.Identity{}, billingauth.Target{}, false
 	}
 	pin(r, target)
-	if values, present := r.Request.Header[http.CanonicalHeaderKey(merchant.ExpectedHeader)]; present {
-		var expected billing.MerchantID
-		var parseErr error
-		if len(values) == 1 {
-			expected, parseErr = billing.ParseMerchantID(strings.TrimSpace(values[0]))
-		}
-		if len(values) != 1 || parseErr != nil || expected.IsZero() {
-			r.AbortCode(billing.CodeInvalidParam, merchant.ExpectedHeader+" must contain one nonzero merchant UUID")
-			return nil, billingauth.Identity{}, billingauth.Target{}, false
-		}
-		if expected != target.MerchantID {
-			r.AbortCode(billing.CodeMerchantMismatch, "The credential is bound to a different merchant; the operation was not executed.")
-			return nil, billingauth.Identity{}, billingauth.Target{}, false
-		}
+	if !expectedMerchant(r, target.MerchantID) {
+		return nil, billingauth.Identity{}, billingauth.Target{}, false
 	}
 	return v, c, target, true
 }
@@ -466,6 +454,9 @@ func (e *Env) customerGates(route Route) []router.Middleware {
 	a := e.Customers
 	if IsNilAuth(a) {
 		panic(MountError{Route: route.Key(), Reason: "a customer route needs Routes.Auth"})
+	}
+	if e.resolveCustomer != nil {
+		return []router.Middleware{verify(route, a), e.mappedCustomerCheck(route, a)}
 	}
 	return []router.Middleware{verify(route, a), e.customerCheck(route, a)}
 }

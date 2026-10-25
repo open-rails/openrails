@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 148,
+  "scenario_count": 150,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -42,6 +42,16 @@
       "id": "OR-J01-S08",
       "journey": "J01",
       "name": "Authentication or authorization dependency failure does not admit caller"
+    },
+    {
+      "id": "OR-J01-S09",
+      "journey": "J01",
+      "name": "Host-authorized existing customer mappings preserve source authority, HTTP/SDK views and isolation"
+    },
+    {
+      "id": "OR-J01-S10",
+      "journey": "J01",
+      "name": "Mapped customer payment continuation and cancellation retain original step-up and one economic charge"
     },
     {
       "id": "OR-J02-S01",

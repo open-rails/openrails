@@ -17,10 +17,42 @@ record alone is not authority. Core validates the live merchant and existing
 customer pair. The mapped mount does not provision customers, reassign their
 issuer/tenant, enroll native network accounts or mount network-link routes.
 
-The planned public seam is Engine.CustomerRoutes with Prefix, Auth and a trusted
+The public seam is Engine.CustomerRoutes with Prefix, Auth and a trusted
 Resolve(request, verified) callback returning a CustomerBinding. Its output is
 normal public Route handlers, usable in-process or over HTTP. Prefix names the
 customer root (default /v1/me), including trusted native whole-segment parameters.
+
+The mapped surface explicitly includes these customer-relative operations:
+
+| Method | Path |
+|---|---|
+| GET | `/orders`, `/orders/{id}` |
+| POST | `/orders/{id}/pay`, `/orders/{id}/confirm` |
+| GET | `/subscriptions`, `/subscriptions/{id}` |
+| POST | `/subscriptions/{id}/cancel`, `/subscriptions/{id}/resume` |
+| PUT | `/subscriptions/{id}/payment-method` |
+| GET, POST | `/payment-methods` |
+| DELETE | `/payment-methods/{id}` |
+| GET | `/agreements` |
+| POST | `/agreements/{id}/revoke` |
+
+Every listed mutation requires the original credential's recent sign-in. The
+lists and detail reads do not. Other operations, including order creation and
+all network-link routes, are absent until explicitly classified and qualified.
+Ordinary `/v1/me` mounts retain their existing behavior.
+
+The existing TypeScript client appends `/me/...` to its `baseUrl`. For an unchanged
+`createBillingClient`, mount `Prefix: "/account/links/{link_id}/me"` and use
+`baseUrl: origin + "/account/links/" + linkID`. The mapped-view journey calls the
+actual built client's `getOrder` and `listOrders` over HTTP with this setup.
+Prefixes lacking `/me` need an explicit fetch path adapter; the client does not
+infer or rewrite them. No new browser suite or client implementation is required.
+
+Construct the routes once and reuse the returned handlers. Resolver closures
+are not used as cache keys; different mappings must not share a cached callback.
+The resolver may return AuthKit auth refusals or `billing.ErrNotFound` (hidden
+relationship); unexpected failures remain unavailable errors. It must never
+manufacture an interactive identity or mint a replacement credential.
 
 Initial integration qualification covers customer order detail/next_action,
 subscription detail/cancellation, owned-resource isolation, expiry/revocation,
