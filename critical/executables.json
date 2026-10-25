@@ -1,5 +1,5 @@
 {
-  "meaning": "Reviewed executable paths, frozen independently of runtime reports. All paths for a selected scenario must run and pass once. A passing nested subtest cannot replace its selected parent. This partial map must be completed before the full148 gate can pass.",
+  "meaning": "Reviewed executable paths, frozen independently of runtime reports. All paths for every selected scenario must run and pass once. Nested successes cannot replace a required owner or fixture profile.",
   "scenarios": {
     "OR-J01-S01": [
       "TestAuthorityBoundaries/OR-J01-S01/merchant-and-root-authority-read-owned-state"
@@ -36,6 +36,24 @@
     ],
     "OR-J02-S04": [
       "TestNetworkContracts/OR-J02-S04/stale-real-session-cannot-unlink-until-fresh-sign-in"
+    ],
+    "OR-J02-S05": [
+      "TestNetworkContracts/OR-J02-S05/live-provider-agreement-refuses-unlink-and-terminal-cancel-releases-access"
+    ],
+    "OR-J03-S01": [
+      "TestHostedCheckout/OR-J03-S01/capability-pays-only-its-order"
+    ],
+    "OR-J03-S02": [
+      "TestHostedCheckout/OR-J03-S02/foreign-tampered-and-expired-capability-refused"
+    ],
+    "OR-J03-S03": [
+      "TestHostedCheckout/OR-J03-S03/checkout-and-api-authority-stay-separate"
+    ],
+    "OR-J03-S04": [
+      "TestHostedBrowser/OR-J03-S04/built-iframe-origin-source-order-and-fallback-boundaries"
+    ],
+    "OR-J03-S05": [
+      "TestHostedCheckout/OR-J03-S05/real-assets-and-config-redact-private-state"
     ],
     "OR-J04-S01": [
       "TestPublicSDK/OR-J04-S01/built-client-and-real-HTTP-preserve-domain-outcomes"
@@ -92,6 +110,18 @@
     "OR-J06-S05": [
       "TestPSPControls/OR-J06-S05/merchant-urls-and-provider-redirects-cannot-reach-private-peers"
     ],
+    "OR-J07-S01": [
+      "TestCustomerDirectory/OR-J07-S01/provision-patch-replace-delete-preserves-issuer-subject"
+    ],
+    "OR-J07-S02": [
+      "TestCustomerDirectory/OR-J07-S02/replay-and-other-issuer-stay-distinct"
+    ],
+    "OR-J07-S03": [
+      "TestCustomerDirectory/OR-J07-S03/revocation-and-wrong-authority-stop-directory-writes"
+    ],
+    "OR-J07-S04": [
+      "TestCustomerDirectory/OR-J07-S04/live-host-directory-exposes-no-copied-write-authority"
+    ],
     "OR-J08-S01": [
       "TestPublicCart/OR-J08-S01/cart-preview-and-consumption-have-exact-totals"
     ],
@@ -112,6 +142,9 @@
     ],
     "OR-J09-S03": [
       "TestCheckoutBoundaries/OR-J09-S03/definitive-decline-keeps-order-unpaid"
+    ],
+    "OR-J09-S04": [
+      "TestFinancialFailures/OR-J09-S04/database-abort-rolls-back-money-access-and-event-together"
     ],
     "OR-J10-S01": [
       "TestPaymentReplay/OR-J10-S01/concurrent-identical-purchase-has-one-economic-debit"
@@ -145,6 +178,9 @@
     ],
     "OR-J12-S04": [
       "TestPaymentMethodContracts/OR-J12-S04/provider-detach-after-acceptance-preserves-payment-and-replay"
+    ],
+    "OR-J12-S05": [
+      "TestFinancialFailures/OR-J12-S05/capture-values-and-private-provider-secrets-never-escape"
     ],
     "OR-J13-S01": [
       "TestSubscriptions/OR-J13-S01/paid-enrollment-has-one-charge-and-period"
@@ -208,6 +244,15 @@
     ],
     "OR-J17-S02": [
       "TestCancellationCustody/OR-J17-S02/cancel-cannot-discard-an-accepted-renewal"
+    ],
+    "OR-J17-S03": [
+      "TestCancellationRecoveryContracts/OR-J17-S03/account-removal-retains-held-provider-delete-across-process-death"
+    ],
+    "OR-J17-S04": [
+      "TestCancellationRecoveryContracts/OR-J17-S04/revoked-agreement-and-late-callback-cannot-restart-renewal"
+    ],
+    "OR-J17-S05": [
+      "TestCancellationRecoveryContracts/OR-J17-S05/cancel-after-paid-boundary-has-no-resume-or-new-charge"
     ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
@@ -359,11 +404,89 @@
     "OR-J28-S04": [
       "TestCallbackContracts/OR-J28-S04/duplicate-and-old-observations-cannot-regress-settlement"
     ],
+    "OR-J28-S05": [
+      "TestCallbackContracts/OR-J28-S05/callback-during-fetch-keeps-a-follow-up-until-new-evidence-is-read"
+    ],
     "OR-J29-S01": [
       "TestProcessRecovery/OR-J29-S01"
     ],
+    "OR-J29-S02": [
+      "TestUnresolvedMoneyContracts/OR-J29-S02/checkout-process-death-recovers-accepted-money-once"
+    ],
     "OR-J29-S04": [
       "TestProcessRecovery/OR-J29-S04"
+    ],
+    "OR-J29-S05": [
+      "TestUnresolvedMoneyContracts/OR-J29-S05/catalog-and-account-retirement-preserve-accepted-terms"
+    ],
+    "OR-J29-S06": [
+      "TestUnresolvedMoneyContracts/OR-J29-S06/retention-and-export-cannot-discard-unknown-money"
+    ],
+    "OR-J31-S01": [
+      "TestBillingArchive/OR-J31-S01/empty-target-restore-preserves-ledger-and-resets-destination-stream"
+    ],
+    "OR-J31-S02": [
+      "TestBillingArchive/OR-J31-S02/wrong-merchant-corrupt-and-occupied-target-refuse-atomically"
+    ],
+    "OR-J31-S03": [
+      "TestBillingArchive/OR-J31-S03/restored-custody-cannot-charge-before-explicit-arm"
+    ],
+    "OR-J31-S04": [
+      "TestBillingArchive/OR-J31-S04/unresolved-operation-refuses-export-without-changing-custody"
+    ],
+    "OR-J32-S01": [
+      "TestMerchantHost/OR-J32-S01/provision-find-list-rename-retains-identity"
+    ],
+    "OR-J32-S02": [
+      "TestMerchantHost/OR-J32-S02/concurrent-name-claim-and-cooldown"
+    ],
+    "OR-J32-S03": [
+      "TestMerchantHost/OR-J32-S03/used-retirement-refused-and-deletion-closes-authority"
+    ],
+    "OR-J32-S04": [
+      "TestMerchantHost/OR-J32-S04/retirement-retry-preserves-reclaimed-name-owner"
+    ],
+    "OR-J34-S01": [
+      "TestDestructiveControls/OR-J34-S01/ceiling-persists-original-actor-target-and-denied-effect"
+    ],
+    "OR-J34-S02": [
+      "TestDestructiveControls/OR-J34-S02/noninteractive-and-foreign-authority-cannot-clear-or-forge-actor"
+    ],
+    "OR-J34-S03": [
+      "TestDestructiveControls/OR-J34-S03/reviewed-clear-resumes-action-without-replaying-prior-effects"
+    ],
+    "OR-J34-S04": [
+      "TestDestructiveControls/OR-J34-S04/finding-resolution-cannot-bypass-destructive-hold"
+    ],
+    "OR-J37-S01": [
+      "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order",
+      "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order/foreign-treasury",
+      "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order/wrong-mint",
+      "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order/underpaid"
+    ],
+    "OR-J37-S02": [
+      "TestSolanaContracts/OR-J37-S02/signed-pull-survives-process-death-before-network-submission"
+    ],
+    "OR-J37-S03": [
+      "TestSolanaContracts/OR-J37-S03/unknown-reverted-and-unfinalized-transfers-do-not-create-money"
+    ],
+    "OR-J37-S04": [
+      "TestSolanaContracts/OR-J37-S04/duplicate-confirmations-and-workers-cannot-pull-a-period-twice"
+    ],
+    "OR-J37-S05": [
+      "TestSolanaContracts/OR-J37-S05",
+      "TestSolanaContracts/OR-J37-S05/wrong-chain-identity",
+      "TestSolanaContracts/OR-J37-S05/foreign-wallet-and-unrelated-instructions",
+      "TestSolanaContracts/OR-J37-S05/BlockhashNotFound",
+      "TestSolanaContracts/OR-J37-S05/insufficient_funds_for_fee"
+    ]
+  },
+  "suites": {
+    "browser": [
+      "OR-J03-S04",
+      "OR-J04-S01",
+      "OR-J04-S03",
+      "OR-J04-S04"
     ]
   }
 }

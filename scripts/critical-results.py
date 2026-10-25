@@ -23,7 +23,10 @@ parser.add_argument("manifest", type=Path)
 parser.add_argument("events", type=Path)
 parser.add_argument("--executables", type=Path, default=Path("critical/executables.json"))
 parser.add_argument("--case", action="append", default=[])
+parser.add_argument("--suite", choices=("all", "browser"), default="all")
 args = parser.parse_args()
+if args.case and args.suite != "all":
+    parser.error("a reviewed suite cannot be combined with ad hoc cases")
 if args.case and os.environ.get("CI") == "true":
     parser.error("focused local cases cannot qualify hosted CI")
 manifest = json.loads(args.manifest.read_text(), object_pairs_hook=unique_object)
@@ -31,10 +34,14 @@ rows = manifest["scenarios"]
 all_ids = {row["id"] for row in rows}
 if len(rows) != len(all_ids) or len(all_ids) != manifest["scenario_count"]:
     raise SystemExit("critical manifest has duplicated or missing scenario identities")
-expected = set(args.case) if args.case else all_ids
+executable_map = json.loads(args.executables.read_text(), object_pairs_hook=unique_object)
+suite_ids = executable_map["suites"]["browser"] if args.suite == "browser" else None
+if suite_ids is not None and len(suite_ids) != len(set(suite_ids)):
+    raise SystemExit("reviewed browser suite has duplicate scenario IDs")
+expected = set(suite_ids) if suite_ids is not None else set(args.case) if args.case else all_ids
 if not expected or not expected <= all_ids or len(args.case) != len(set(args.case)):
     parser.error("selection must name unique, known scenario IDs")
-bindings = json.loads(args.executables.read_text(), object_pairs_hook=unique_object)["scenarios"]
+bindings = executable_map["scenarios"]
 if set(bindings) - all_ids:
     raise SystemExit("executable map names unknown scenarios")
 missing_bindings = expected - bindings.keys()
@@ -87,4 +94,4 @@ if failures:
     raise SystemExit(1)
 print(json.dumps({"selected_scenarios": len(expected), "required_executable_cases": len(required),
                   "passed_executable_cases": len(required),
-                  "scope": "focused local only" if args.case else "complete critical-first suite"}))
+                  "scope": "focused local only" if args.case else "reviewed browser suite" if args.suite == "browser" else "complete critical-first suite"}))

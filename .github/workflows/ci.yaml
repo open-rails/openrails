@@ -189,7 +189,7 @@ jobs:
   critical:
     name: Critical public-interface journeys
     needs: scope
-    if: ${{ needs.scope.outputs.runtime == 'true' }}
+    if: ${{ needs.scope.outputs.runtime == 'true' || needs.scope.outputs.browser == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 70
     env:
@@ -233,12 +233,20 @@ jobs:
         working-directory: critical/server-fixture
         run: GOWORK=off go test -race -c -p 2 -o "$OPENRAILS_CRITICAL_SERVER_BINARY" .
       - name: Build the public operator CLI once
+        if: ${{ needs.scope.outputs.runtime == 'true' }}
         working-directory: server
         run: GOWORK=off go build -p 2 -o "$OPENRAILS_CRITICAL_CLI_BINARY" ./cmd/openrails
       - name: Services are ready
         run: bash scripts/ci-services.sh ready
       - name: Require every selected critical scenario
-        run: bash scripts/critical-tests.sh
+        env:
+          FULL_RUNTIME: ${{ needs.scope.outputs.runtime }}
+        run: |
+          if [[ "$FULL_RUNTIME" == true ]]; then
+            bash scripts/critical-tests.sh
+          else
+            bash scripts/critical-tests.sh --suite browser
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
@@ -251,27 +259,6 @@ jobs:
         with:
           family: critical
           save: "true"
-
-  browser:
-    name: Browser artifact contracts
-    needs: scope
-    if: ${{ needs.scope.outputs.browser == 'true' && needs.scope.outputs.runtime != 'true' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: go.mod
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: sdk/billing-ui/package.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      - run: bash scripts/check.sh browser
 
   security:
     name: Required Security
@@ -353,7 +340,7 @@ jobs:
 
   gate:
     name: ${{ (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}
-    needs: [scope, guards, lint, chart, sql, critical, security, browser, artifact-release, artifact-image]
+    needs: [scope, guards, lint, chart, sql, critical, security, artifact-release, artifact-image]
     if: ${{ always() && (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -378,13 +365,13 @@ jobs:
               raise SystemExit('Scope verification failed or did not run')
           plan = result['scope']['outputs']
           required = {'guards': None, 'lint': 'core', 'chart': 'chart',
-                      'sql': 'runtime', 'critical': 'runtime', 'security': 'security',
+                      'sql': 'runtime', 'security': 'security',
                       'artifact-release': 'artifacts', 'artifact-image': 'artifacts'}
           if plan.get('browser') not in ('true', 'false'):
               raise SystemExit('Missing browser selection')
-          browser_expected = 'success' if plan['browser'] == 'true' and plan.get('runtime') != 'true' else 'skipped'
-          if result['browser']['result'] != browser_expected:
-              raise SystemExit(f"browser: {result['browser']['result']}; expected {browser_expected}")
+          critical_expected = 'success' if plan['browser'] == 'true' or plan.get('runtime') == 'true' else 'skipped'
+          if result['critical']['result'] != critical_expected:
+              raise SystemExit(f"critical: {result['critical']['result']}; expected {critical_expected}")
           for job, suite in required.items():
               if suite is not None and plan.get(suite) not in ('true', 'false'):
                   raise SystemExit(f'Missing suite selection: {suite}')
