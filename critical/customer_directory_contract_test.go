@@ -53,7 +53,7 @@ func TestCustomerDirectory(t *testing.T) {
 		require.Contains(t, string(raw), `"totalResults":1`)
 		require.Contains(t, string(raw), remoteID)
 		// A failed multi-operation patch is atomic; an earlier valid change cannot leak.
-		bad := map[string]any{"schemas": []string{"urn:ietf:params:scim:api:messages:2.0:PatchOp"}, "Operations": []any{map[string]any{"op": "replace", "path": "displayName", "value": "Must Roll Back"}, map[string]any{"op": "replace", "path": "externalId", "value": "new-owner"}}}
+		bad := map[string]any{"schemas": []string{"urn:ietf:params:scim:api:messages:2.0:PatchOp"}, "Operations": []any{map[string]any{"op": "replace", "path": "displayName", "value": "Must Roll Back"}, map[string]any{"op": "replace", "path": "id", "value": "new-owner"}}}
 		status, raw = w.request(t, "PATCH", hostDirectoryPath+"/Users/"+remoteID, key, bad)
 		require.Equal(t, http.StatusBadRequest, status, string(raw))
 		status, raw = w.request(t, "GET", hostDirectoryPath+"/Users/"+remoteID, key, nil)
