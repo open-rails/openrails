@@ -32,8 +32,8 @@ original Verified, including its scope, assertion and liveness capabilities;
 reconstructing an identity from claims or stripping its capabilities is not a
 supported integration. The returned `CustomerProof` carries the merchant/customer pair and a copy of
 the validated row's `Issuer`. Nil preserves exactly SQL NULL (the host/merchant
-native namespace); a non-nil value preserves the stored external issuer, including
-an empty stored value. Nil never proves platform account ownership. This is
+native namespace); a non-nil value preserves the stored external issuer.
+The schema forbids an empty issuer. Nil never proves platform account ownership. This is
 request-scoped evidence, not a saved permission or a durable account link. A host remains responsible for its separate
 platform proof, consent and transactional relationship creation.
 
