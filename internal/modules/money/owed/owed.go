@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
@@ -20,7 +21,8 @@ import (
 // claim and its amount. Every leg is an owed_repayment transfer on the lot at
 // the funding's coordinate, so the funding's own once-only deposit makes the
 // repayment once-only too. It returns the amount repaid.
-func Repay(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, lot gen.BillingGrant, funded int64, now time.Time) (int64, error) {
+func Repay(ctx context.Context, d *db.DB, merchantID uuid.UUID, lot gen.BillingGrant, funded int64, now time.Time) (int64, error) {
+	q := d.Gen(ctx)
 	if lot.Currency == nil || funded <= 0 {
 		return 0, nil
 	}
@@ -63,7 +65,7 @@ func Repay(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, lot gen.Bi
 		if _, err := l.RepayOwed(ctx, customer, currency, amount, legCoord, lot.ID, &order); err != nil {
 			return 0, err
 		}
-		if _, err := usage.Pay(ctx, q, merchantID, order, amount, nil, nil, now); err != nil {
+		if _, err := usage.Pay(ctx, d, merchantID, order, amount, nil, nil, now); err != nil {
 			return 0, fmt.Errorf("owed repayment: order %s: %w", order, err)
 		}
 		remaining -= amount

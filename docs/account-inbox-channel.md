@@ -44,6 +44,12 @@ inbox notification is withdrawn.
 Successful payment, accepted card replacement, and restored access withdraw only
 the issues their domain outcomes resolve. Closing dunning alone is insufficient:
 it also occurs on cancellation or when billing waits for the customer.
+Confirmed subscription cancellation or expiration also withdraws its obsolete
+payment requests; access loss while collection remains live does not. The
+separate access-ended notice and original billing facts keep their own lifecycle.
+Order requests are withdrawn when the order completes, is canceled, expires or
+is voided. Full payment by a provider, a recorded remittance or funded credit has
+the same effect. Partial payment and marking debt uncollectible keep its request.
 
 Implementation and rollout are tracked in AuthKit #470 and OpenRails #1291 in
 the central tracker. Preserve retained receipt IDs and read/archive state when

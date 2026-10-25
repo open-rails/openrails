@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/notificationinbox"
 )
 
 // ExportNotificationAdoption selects exact legacy origins from the producer's
@@ -29,7 +30,7 @@ func ExportNotificationAdoption(ctx context.Context, d *db.DB, id billing.Mercha
 	}
 	ctx = merchant.WithID(ctx, id)
 	err := d.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if err := requireNotificationOrdering(ctx, tx, id.UUID()); err != nil {
+		if err := notificationinbox.RequireOrdering(ctx, tx, id.UUID()); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `LOCK TABLE billing.notification_events,billing.notification_issue_revisions,
@@ -80,7 +81,7 @@ WHERE merchant_id=$1 AND event_type=ANY($2) ORDER BY created_at DESC,id DESC`, i
 		slices.Sort(identities)
 		for _, identity := range identities {
 			g := groups[identity]
-			channel, recipient, err := inboxRecipient(ctx, txdb, g.latest.CustomerID)
+			channel, recipient, err := notificationinbox.Recipient(ctx, txdb, g.latest.CustomerID)
 			if err != nil {
 				return err
 			}
@@ -134,10 +135,14 @@ func notificationResolved(ctx context.Context, d *db.DB, n *models.NotificationE
 		if err != nil {
 			return false, err
 		}
+		if sub.Status == models.StatusCanceled {
+			return true, nil
+		}
 		if n.EventType == models.NotificationPaymentMethodUpdateRequired {
 			return sub.Status != models.StatusAwaitingMethod && sub.PaymentMethod != nil && sub.PaymentMethod.Chargeable(), nil
 		}
-		return sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod, nil
+		// Unverified collection is not evidence of successful recovery.
+		return sub.Status == models.StatusActive, nil
 	}
 	if !n.Data.OrderID.IsZero() {
 		var status string

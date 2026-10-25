@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/notificationinbox"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -123,7 +124,8 @@ func StartRenewalAttempt(ctx context.Context, q *gen.Queries, order gen.BillingO
 // renewal recorded, with order.completed. A renewal whose subscription ended
 // meanwhile is void instead, the payment (refunded) on it; payment is nil
 // when a reversal recorded none.
-func RenewalPaid(ctx context.Context, q *gen.Queries, merchantID, orderID, attemptID uuid.UUID, payment *uuid.UUID, transactionID string, now time.Time) error {
+func RenewalPaid(ctx context.Context, d *db.DB, merchantID, orderID, attemptID uuid.UUID, payment *uuid.UUID, transactionID string, now time.Time) error {
+	q := d.Gen(ctx)
 	order, err := q.LockOrder(ctx, gen.LockOrderParams{MerchantID: merchantID, ID: orderID})
 	if err != nil {
 		return err
@@ -148,7 +150,7 @@ func RenewalPaid(ctx context.Context, q *gen.Queries, merchantID, orderID, attem
 		return err
 	}
 	if ended {
-		return voidRenewal(ctx, q, &order, payment, now)
+		return voidRenewal(ctx, d, &order, payment, now)
 	}
 	if payment == nil {
 		return fmt.Errorf("renewal order %s was paid without a payment", orderID)
@@ -161,12 +163,16 @@ func RenewalPaid(ctx context.Context, q *gen.Queries, merchantID, orderID, attem
 		return errors.Join(err, fmt.Errorf("renewal order %s did not complete", orderID))
 	}
 	order.Status, order.PaymentStatus = string(billing.OrderComplete), string(billing.OrderPaymentSucceeded)
-	return orderEvent(ctx, q, &order, "order.completed", now, map[string]any{"number": number, "payment_id": payment.String()})
+	if err := orderEvent(ctx, q, &order, "order.completed", now, map[string]any{"number": number, "payment_id": payment.String()}); err != nil {
+		return err
+	}
+	return notificationinbox.WithdrawOrder(ctx, d, order.CustomerID, order.ID)
 }
 
 // RenewalUnpaid ends a collection attempt that moved no money: the renewal
 // order is open again, with why, or void once its subscription ended.
-func RenewalUnpaid(ctx context.Context, q *gen.Queries, merchantID, orderID, attemptID uuid.UUID, failure billing.PaymentFailure, now time.Time) error {
+func RenewalUnpaid(ctx context.Context, d *db.DB, merchantID, orderID, attemptID uuid.UUID, failure billing.PaymentFailure, now time.Time) error {
+	q := d.Gen(ctx)
 	if _, err := q.SetOrderAttemptStatus(ctx, gen.SetOrderAttemptStatusParams{MerchantID: merchantID, ID: attemptID, Status: "failed", Now: now}); err != nil {
 		return err
 	}
@@ -182,7 +188,7 @@ func RenewalUnpaid(ctx context.Context, q *gen.Queries, merchantID, orderID, att
 		return err
 	}
 	if ended {
-		return voidRenewal(ctx, q, &order, nil, now)
+		return voidRenewal(ctx, d, &order, nil, now)
 	}
 	raw, err := json.Marshal(failure)
 	if err != nil {
@@ -205,7 +211,8 @@ func renewalEnded(ctx context.Context, q *gen.Queries, order gen.BillingOrder) (
 }
 
 // voidRenewal voids a live renewal order, with order.voided.
-func voidRenewal(ctx context.Context, q *gen.Queries, order *gen.BillingOrder, payment *uuid.UUID, now time.Time) error {
+func voidRenewal(ctx context.Context, d *db.DB, order *gen.BillingOrder, payment *uuid.UUID, now time.Time) error {
+	q := d.Gen(ctx)
 	n, err := q.VoidRenewalOrder(ctx, gen.VoidRenewalOrderParams{MerchantID: order.MerchantID, ID: order.ID, PaymentID: payment, Now: now})
 	if err != nil || n == 0 {
 		return err
@@ -216,7 +223,10 @@ func voidRenewal(ctx context.Context, q *gen.Queries, order *gen.BillingOrder, p
 		order.PaymentStatus = string(billing.OrderPaymentSucceeded)
 		extra["payment_id"] = payment.String()
 	}
-	return orderEvent(ctx, q, order, "order.voided", now, extra)
+	if err := orderEvent(ctx, q, order, "order.voided", now, extra); err != nil {
+		return err
+	}
+	return notificationinbox.WithdrawOrder(ctx, d, order.CustomerID, order.ID)
 }
 
 // RenewalAwaitsCustomer marks the renewal order's payment as waiting for the

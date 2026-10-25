@@ -133,6 +133,19 @@ func (r *SubscriptionRepo) ReplaceForTierChange(ctx context.Context, oldSub, new
 }
 
 func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription, now time.Time) error {
+	if s.Status == models.StatusCanceled && r.db.Notifications() != nil {
+		return r.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			txdb := r.db.NewWithPgxTx(tx)
+			if err := NewSubscriptionRepo(txdb).updateAt(ctx, s, now); err != nil {
+				return err
+			}
+			return WithdrawSubscriptionPaymentNotices(ctx, txdb, s.CustomerID, s.ID)
+		})
+	}
+	return r.updateAt(ctx, s, now)
+}
+
+func (r *SubscriptionRepo) updateAt(ctx context.Context, s *models.Subscription, now time.Time) error {
 	// Every column is written, so nil values clear fields (CanceledAt,
 	// EndedAt, ...). A full-row write from an in-memory image: webhook-apply
 	// read-modify-writes must read via GetByPSPSubscriptionIDForUpdate in one

@@ -37,16 +37,17 @@ func runUsageDue(t *testing.T, fleet *river.Client[pgx.Tx]) {
 	}
 }
 
-func usageBillingWorld(t *testing.T, enabled, manual bool) (*authorityWorld, *nmiJournal, billing.CustomerID) {
+func usageBillingWorld(t *testing.T, enabled, manual bool, configure ...func(*world)) (*authorityWorld, *nmiJournal, billing.CustomerID) {
 	t.Helper()
-	a, p := newNMIWorld(t, func(w *world) {
+	changes := append([]func(*world){func(w *world) {
 		w.clock.Advance(time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC).Sub(w.clock.Now()))
 		w.cfg.UsageBillingEnabled = enabled
 		m := w.cfg.Merchants["alpha"]
 		m.UsageBilling = &billing.UsageBillingSettings{BillingDay: 25, Currencies: []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 30_000_000, MinimumInvoiceAmount: 1_000_000}}}
 		m.ArrearsGraceDays, m.ArrearsDelinquencyFloor = ptr(0), ptr(int64(0))
 		w.cfg.Merchants["alpha"] = m
-	})
+	}}, configure...)
+	a, p := newNMIWorld(t, changes...)
 	customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 	psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 	require.NoError(t, err)

@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/orders/orderevent"
+	"github.com/open-rails/openrails/internal/notificationinbox"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -127,7 +128,8 @@ func nonNilMap(m map[string]any) map[string]any {
 // in full: numbered, with payment (nil for a balance repayment) and
 // order.completed. attempt is the live collection that paid it, nil for any
 // other payment, which a live collection's claim refuses.
-func Pay(ctx context.Context, q *gen.Queries, merchantID, orderID uuid.UUID, amount int64, payment, attempt *uuid.UUID, now time.Time) (gen.BillingOrder, error) {
+func Pay(ctx context.Context, d *db.DB, merchantID, orderID uuid.UUID, amount int64, payment, attempt *uuid.UUID, now time.Time) (gen.BillingOrder, error) {
+	q := d.Gen(ctx)
 	order, err := q.PayUsageOrder(ctx, gen.PayUsageOrderParams{MerchantID: merchantID, ID: orderID, Amount: amount, AttemptID: attempt, Now: now})
 	if err != nil {
 		return order, err
@@ -148,7 +150,10 @@ func Pay(ctx context.Context, q *gen.Queries, merchantID, orderID uuid.UUID, amo
 	if payment != nil {
 		extra["payment_id"] = payment.String()
 	}
-	return order, orderevent.Enqueue(ctx, q, &order, "order.completed", now, extra)
+	if err := orderevent.Enqueue(ctx, q, &order, "order.completed", now, extra); err != nil {
+		return order, err
+	}
+	return order, notificationinbox.WithdrawOrder(ctx, d, order.CustomerID, order.ID)
 }
 
 // StartCollection puts one collection operation on an open (or
@@ -223,13 +228,17 @@ func StopCollection(ctx context.Context, q *gen.Queries, merchantID, orderID uui
 
 // VoidOrder voids an unpaid usage order, with order.voided; false when it
 // was not open or uncollectible.
-func VoidOrder(ctx context.Context, q *gen.Queries, order gen.BillingOrder, now time.Time) (bool, error) {
+func VoidOrder(ctx context.Context, d *db.DB, order gen.BillingOrder, now time.Time) (bool, error) {
+	q := d.Gen(ctx)
 	n, err := q.VoidUsageOrder(ctx, gen.VoidUsageOrderParams{MerchantID: order.MerchantID, ID: order.ID, Now: now})
 	if err != nil || n == 0 {
 		return false, err
 	}
 	order.Status, order.PaymentStatus = string(billing.OrderVoid), string(billing.OrderPaymentRequiresPaymentMethod)
-	return true, orderevent.Enqueue(ctx, q, &order, "order.voided", now, nil)
+	if err := orderevent.Enqueue(ctx, q, &order, "order.voided", now, nil); err != nil {
+		return false, err
+	}
+	return true, notificationinbox.WithdrawOrder(ctx, d, order.CustomerID, order.ID)
 }
 
 // MarkUncollectible writes an open usage order off; collecting it

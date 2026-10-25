@@ -351,7 +351,7 @@ func (s *MoneyService) destructiveUsageOrder(ctx context.Context, id uuid.UUID, 
 			return changed, err
 		}
 		due := usage.Due(order)
-		changed, err := usage.VoidOrder(ctx, q, order, s.now())
+		changed, err := usage.VoidOrder(ctx, txDB, order, s.now())
 		if err != nil {
 			return false, err
 		}
@@ -441,7 +441,7 @@ func (s *MoneyService) RecordUsageRemittance(ctx context.Context, in UsageRemitt
 			}
 			return e
 		}
-		if _, e := usage.Pay(ctx, q, mid.UUID(), in.OrderID, in.Amount, &id, nil, now); e != nil {
+		if _, e := usage.Pay(ctx, s.db.NewWithPgxTx(tx), mid.UUID(), in.OrderID, in.Amount, &id, nil, now); e != nil {
 			return e
 		}
 		row, e := q.GetOrderPayment(ctx, gen.GetOrderPaymentParams{MerchantID: mid.UUID(), CustomerID: order.CustomerID, OrderID: in.OrderID, ID: id})

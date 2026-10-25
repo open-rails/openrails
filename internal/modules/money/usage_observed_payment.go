@@ -273,7 +273,7 @@ func (s *MoneyService) RecoverObservedUsagePayment(ctx context.Context, receipt 
 			payer := identity.CustomerID(order.CustomerID)
 			roundingKey := "invoice-observed-rounding:" + key
 			description := "Rounding credit from recovered order " + billing.OrderID(orderID).String()
-			if _, err := s.depositTx(ctx, q, DepositParams{CustomerID: &payer, Currency: order.Currency, Amount: surplus, Source: "invoice_rounding_purchase", SourceID: &roundingKey, Description: &description}); err != nil {
+			if _, err := s.depositTx(ctx, s.db.NewWithPgxTx(tx), DepositParams{CustomerID: &payer, Currency: order.Currency, Amount: surplus, Source: "invoice_rounding_purchase", SourceID: &roundingKey, Description: &description}); err != nil {
 				return err
 			}
 		}
@@ -281,7 +281,7 @@ func (s *MoneyService) RecoverObservedUsagePayment(ctx context.Context, receipt 
 		if err = q.InsertOrderPayment(ctx, gen.InsertOrderPaymentParams{ID: paymentID, MerchantID: mid.UUID(), CustomerID: order.CustomerID, OrderID: orderID, LedgerTransferID: transfer.ID, Currency: order.Currency, Amount: charged, Channel: string(models.ChannelRail), Rail: new("nmi"), TransactionID: facts.Sale.TransactionID, PspID: &receipt.psp, PaidAt: facts.PaidAt, Now: s.now(), TokenType: new(charge.TokenTypePSPToken)}); err != nil {
 			return err
 		}
-		settled, err := usage.Pay(ctx, q, mid.UUID(), orderID, due, &paymentID, nil, facts.PaidAt)
+		settled, err := usage.Pay(ctx, s.db.NewWithPgxTx(tx), mid.UUID(), orderID, due, &paymentID, nil, facts.PaidAt)
 		if err != nil {
 			return fmt.Errorf("%w: order changed under recovery lock: %v", ErrUsageRecoveryHeld, err)
 		}

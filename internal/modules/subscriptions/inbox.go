@@ -3,31 +3,23 @@ package subscriptions
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/helpers/notify"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/notificationinbox"
 )
-
-var paymentIssueKinds = []string{
-	"payment_method_failed", "payment_method_update_required", "payment_authentication_required", "order_collection_stopped",
-}
 
 // inboxKey selects deliberate notices, independently of the retained event log.
 func inboxKey(n *models.NotificationEvent) (string, bool) {
 	kind := string(n.EventType)
 	switch {
-	case slices.Contains(paymentIssueKinds, kind):
+	case notificationinbox.IsPaymentIssue(kind):
 		if n.Data.Source == "customer_checkout" || n.Data.Source == "customer_subscription_change" {
 			return "", false
 		}
@@ -57,48 +49,24 @@ func subscriptionIssue(id uuid.UUID, kind string) string {
 }
 func orderIssue(id uuid.UUID, kind string) string { return "order:" + id.String() + ":" + kind }
 
-func inboxRecipient(ctx context.Context, d *db.DB, customer uuid.UUID) (*config.NotificationChannel, notify.Recipient, error) {
-	channel := d.Notifications()
-	if channel == nil {
-		return nil, notify.Recipient{}, nil
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, notify.Recipient{}, err
-	}
-	row, err := d.Gen(ctx).GetCustomer(ctx, gen.GetCustomerParams{MerchantID: mid.UUID(), ID: customer})
-	if err != nil {
-		return nil, notify.Recipient{}, err
-	}
-	issuer := ""
-	if row.Issuer != nil {
-		issuer = *row.Issuer
-	}
-	id, deliver, err := channel.Recipient(ctx, config.NotificationRecipient{MerchantID: mid, CustomerID: billing.CustomerID(customer), Issuer: issuer})
-	if err != nil || !deliver {
-		return nil, notify.Recipient{}, err
-	}
-	r := notify.Recipient{Audience: notify.AudienceUser, ID: id}
-	if err := notify.ValidateRecipient(r); err != nil {
-		return nil, notify.Recipient{}, err
-	}
-	return channel, r, nil
-}
-
 func publishInbox(ctx context.Context, d *db.DB, tx pgx.Tx, n *models.NotificationEvent) error {
 	if d.Notifications() == nil {
 		return nil
 	}
-	if (n.EventType == models.NotificationPremiumStarted || n.EventType == models.NotificationPremiumRenewed) && !n.Data.SubscriptionID.IsZero() {
-		if err := withdrawRestoredSubscription(ctx, d, n.CustomerID, n.Data.SubscriptionID.UUID(), n.CreatedAt); err != nil {
-			return err
+	if !n.Data.SubscriptionID.IsZero() {
+		switch n.EventType {
+		case models.NotificationPremiumStarted, models.NotificationPremiumRenewed:
+			if err := withdrawRestoredSubscription(ctx, d, n.CustomerID, n.Data.SubscriptionID.UUID(), n.CreatedAt); err != nil {
+				return err
+			}
+
 		}
 	}
 	key, selected := inboxKey(n)
 	if !selected {
 		return nil
 	}
-	channel, recipient, err := inboxRecipient(ctx, d, n.CustomerID)
+	channel, recipient, err := notificationinbox.Recipient(ctx, d, n.CustomerID)
 	if err != nil || channel == nil {
 		return err
 	}
@@ -156,14 +124,14 @@ ORDER BY prior.id`, mid.UUID(), customerID, subscriptionID, at)
 	for _, id := range ids {
 		keys = append(keys, subscriptionIssue(id, "premium_ended"))
 	}
-	return withdrawIssues(ctx, d, customerID, keys)
+	return notificationinbox.Withdraw(ctx, d, customerID, keys)
 }
 
 // issueRevision serializes all producers of one exact issue, even if their
 // domain transitions lock different source rows. Repeated withdrawals reuse the
 // same tombstone; new source facts advance the revision and may reopen it.
 func issueRevision(ctx context.Context, tx pgx.Tx, merchantID, customerID uuid.UUID, key string, withdrawn bool, sourceEvent uuid.UUID) (int64, error) {
-	if err := requireNotificationOrdering(ctx, tx, merchantID); err != nil {
+	if err := notificationinbox.RequireOrdering(ctx, tx, merchantID); err != nil {
 		return 0, err
 	}
 	var event *uuid.UUID
@@ -179,89 +147,27 @@ withdrawn=EXCLUDED.withdrawn,source_event=EXCLUDED.source_event RETURNING revisi
 	return revision, err
 }
 
-func requireNotificationOrdering(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID) error {
-	var pending bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing.notification_channel_state WHERE merchant_id=$1 AND restore_required)`, merchantID).Scan(&pending); err != nil {
-		return err
-	}
-	if pending {
-		return fmt.Errorf("account notifications require explicit ordering-state restoration after the billing archive restore")
-	}
-	return nil
-}
-
-func withdrawIssues(ctx context.Context, d *db.DB, customerID uuid.UUID, keys []string) error {
-	if d.Notifications() == nil || len(keys) == 0 {
-		return nil
-	}
-	keys = slices.Clone(keys)
-	slices.Sort(keys) // All writers take exact issue locks in the same order.
-	keys = slices.Compact(keys)
-	return d.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := d.NewWithPgxTx(tx)
-		channel, recipient, err := inboxRecipient(ctx, txdb, customerID)
-		if err != nil || channel == nil {
-			return err
-		}
-		mid, err := merchant.Require(ctx)
-		if err != nil {
-			return err
-		}
-		if err := requireNotificationOrdering(ctx, tx, mid.UUID()); err != nil {
-			return err
-		}
-		for batch := range slices.Chunk(keys, notify.MaxMutations) {
-			mutations := make([]notify.Mutation, 0, len(batch))
-			for _, key := range batch {
-				// A delivered or queued publication always created this source
-				// row in the same transaction. Ordinary successful payments must
-				// not enqueue withdrawals for notices that never existed.
-				var revision int64
-				err := tx.QueryRow(ctx, `UPDATE billing.notification_issue_revisions
-SET revision=revision+1,withdrawn=true,source_event=NULL
-WHERE merchant_id=$1 AND customer_id=$2 AND issue_key=$3 AND NOT withdrawn RETURNING revision`,
-					mid.UUID(), customerID, key).Scan(&revision)
-				if errors.Is(err, pgx.ErrNoRows) {
-					continue
-				}
-				if err != nil {
-					return fmt.Errorf("withdraw notification %s: %w", key, err)
-				}
-				mutations = append(mutations, notify.Mutation{Input: notify.Input{Recipient: recipient,
-					Origin: notify.Origin{System: "openrails", Scope: mid.String(), ID: key}, Visibility: notify.VisibilityTenant}, Revision: revision, Withdrawn: true})
-			}
-			if len(mutations) == 0 {
-				continue
-			}
-			if err := channel.Sink.ApplyTx(ctx, tx, mutations); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
 // WithdrawSubscriptionPaymentNotices follows confirmed payment or reinstatement.
 // The caller has already updated the subscription in the same transaction.
 func WithdrawSubscriptionPaymentNotices(ctx context.Context, d *db.DB, customerID, subscriptionID uuid.UUID) error {
-	keys := make([]string, 0, len(paymentIssueKinds))
-	for _, kind := range paymentIssueKinds {
+	keys := make([]string, 0, len(notificationinbox.PaymentIssueKinds()))
+	for _, kind := range notificationinbox.PaymentIssueKinds() {
 		keys = append(keys, subscriptionIssue(subscriptionID, kind))
 	}
-	return withdrawIssues(ctx, d, customerID, keys)
+	return notificationinbox.Withdraw(ctx, d, customerID, keys)
 }
 
 // WithdrawMethodNotice follows an accepted replacement, without asserting that
 // any remaining outstanding balance has been paid.
 func WithdrawMethodNotice(ctx context.Context, d *db.DB, customerID, subscriptionID uuid.UUID) error {
-	return withdrawIssues(ctx, d, customerID, []string{subscriptionIssue(subscriptionID, "payment_method_update_required")})
+	return notificationinbox.Withdraw(ctx, d, customerID, []string{subscriptionIssue(subscriptionID, "payment_method_update_required")})
 }
 
 // WithdrawOrderPaymentNotices follows settled payment for this exact order.
 func WithdrawOrderPaymentNotices(ctx context.Context, d *db.DB, customerID, orderID uuid.UUID) error {
-	keys := make([]string, 0, len(paymentIssueKinds))
-	for _, kind := range paymentIssueKinds {
+	keys := make([]string, 0, len(notificationinbox.PaymentIssueKinds()))
+	for _, kind := range notificationinbox.PaymentIssueKinds() {
 		keys = append(keys, orderIssue(orderID, kind))
 	}
-	return withdrawIssues(ctx, d, customerID, keys)
+	return notificationinbox.Withdraw(ctx, d, customerID, keys)
 }
