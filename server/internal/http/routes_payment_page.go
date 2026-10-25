@@ -3,12 +3,9 @@ package server
 import (
 	"io/fs"
 	"net/http"
-	"net/url"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/paymentpagehttp"
 	"github.com/open-rails/openrails/internal/paymentpage"
-	"github.com/open-rails/openrails/server/internal/network"
 )
 
 // buildPaymentPage serves the payment page at origin: the page, and the
@@ -18,14 +15,7 @@ func (s *Server) buildPaymentPage(origin string, assets fs.FS) error {
 	if origin == "" {
 		return nil
 	}
-	var issuers []string
-	if s.runtime.Network != nil {
-		if iss, err := url.Parse(s.controlPlane.Issuer()); err == nil && iss.Host != "" {
-			issuers = append(issuers, iss.Scheme+"://"+iss.Host)
-			s.runtime.PaymentPageNetwork = &billing.PublicNetwork{Issuer: s.controlPlane.Issuer(), ClientID: network.PaymentPageClientID}
-		}
-	}
-	origin, handler, err := paymentpagehttp.New(s.runtime, origin, assets, issuers, s.sharedRateLimit)
+	origin, handler, err := paymentpagehttp.New(s.runtime, origin, assets, nil, s.sharedRateLimit)
 	if err != nil {
 		return err
 	}

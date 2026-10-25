@@ -15,9 +15,7 @@ import {
   accountSchema,
   customerConfigSchema,
   customerEntitlementSchema,
-  customerLinkSchema,
   lowBalanceLineSchema,
-  networkLinkChallengeSchema,
   publicConfigSchema,
   listPageSchema,
   orderSchema,
@@ -32,9 +30,7 @@ import {
   type Account,
   type CustomerConfig,
   type CustomerEntitlement,
-  type CustomerLink,
   type LowBalanceLine,
-  type NetworkLinkChallenge,
   type PublicConfig,
   type CurrencyScales,
   type ListPage,
@@ -814,31 +810,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           cursor: opts.cursor ?? undefined,
         },
         signal: opts.signal,
-      })
-    },
-
-    /**
-     * A challenge to link the customer to an openrails.dev account: its
-     * `nonce` goes in the network sign-in's authorization request.
-     */
-    createNetworkLinkChallenge(): Promise<NetworkLinkChallenge> {
-      return json(networkLinkChallengeSchema, "/me/network-link/challenges", {
-        method: "POST",
-        body: {},
-      })
-    },
-
-    /**
-     * Links the customer to the openrails.dev account whose fresh sign-in
-     * answered the challenge (its ID token).
-     */
-    createNetworkLink(params: {
-      challengeId: string
-      idToken: string
-    }): Promise<CustomerLink> {
-      return json(customerLinkSchema, "/me/network-link", {
-        method: "POST",
-        body: { challenge_id: params.challengeId, id_token: params.idToken },
       })
     },
 

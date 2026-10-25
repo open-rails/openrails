@@ -5,10 +5,10 @@ default payment methods. Platform account links belong to the hosted product and
 are read through its proven-link directory; ordinary customer reads must not
 require that directory or expose a nullable compatibility projection.
 
-This slice removes only the Customer.Network projection and its enrichment read.
-It does not remove the existing core network linking routes, proof service,
-lifecycle jobs or migration history; those remain until their SaaS replacements
-are qualified. The generated public Go/HTTP/TypeScript customer shape changes.
+The generic DTO has no Customer.Network compatibility projection. The later
+hosted-account extraction removes the old core service/routes/storage only as
+part of the coordinated SaaS ownership handoff; migration history remains
+immutable. See [the extraction plan](customer-network-removal-plan.md).
 
 The approved test seam is the real standalone server's public merchant Go client
 and customer HTTP read/list APIs. A real consented legacy link is created first;

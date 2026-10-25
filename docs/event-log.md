@@ -71,30 +71,18 @@ old reader bookkeeping. Deploy all readers with application-owned cursors before
 resuming writes. An older binary that still uses the removed tables cannot run
 on the migrated schema; restoring it also requires restoring the matching backup.
 
-### Standalone customer-network account events
+### Hosted account events
 
-When the optional customer network is enabled, the server polls its configured
-AuthKit account tenant once a minute, at most 100 committed facts per pass.
-`billing.network_event_cursors` belongs to the server. Link changes and that
-cursor commit in one billing transaction, so retries cannot reorder projection
-changes. A replayed revocation predating a newly proved link cannot revoke
-that newer relationship. Account proof times use the same wall-clock domain
-as AuthKit, independently of a simulated billing clock. This is not a source registration or an acknowledgment. Other embedded
-apps do not run this job. The normal credential, consent and deletion checks
-still run on requests; a payment-page proof's displayed network link follows the
-bounded background projection.
+The hosted application owns platform-account relationships, lifecycle readers
+and their cursors. Core no longer polls AuthKit for account-link changes or
+produces `customer.network_linked` / `customer.network_unlinked` facts. Existing
+committed facts remain readable through the retained event log for their normal
+retention; their raw type and data are preserved.
 
-A lost cursor stops this reader with an explicit error. **Do not delete the
-cursor alone:** retained history might no longer contain a revoked independent
-payment-page proof. Restore a matching AuthKit history and server cursor when
-possible. If the history cannot be recovered, take the network offline, revoke
-all its active customer links in a controlled repair transaction (emit the
-usual `customer.network_unlinked` facts), and only then clear this authority's
-cursor. Resume reading from the oldest retained fact and require new proofs to
-link independent payment-page accounts again. Customer records, subscriptions
-and payments remain intact. Apply the same procedure before replacing the
-configured account issuer or tenant; those identities cannot inherit an old
-network projection merely because UUIDs happen to match.
+Moving the account reader requires an explicit offline transfer of both link
+proof and the exact source cursor/filter. New SaaS account facts use a distinct
+source. Do not splice cursor positions, acknowledge source events, or reset
+progress when changing ownership. See [the extraction plan](customer-network-removal-plan.md).
 
 ### Shared implementation adoption
 

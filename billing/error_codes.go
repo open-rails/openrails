@@ -115,13 +115,7 @@ const (
 )
 
 // Customer link codes (openrails.dev).
-const (
-	CodeNetworkLinkChallengeInvalid = "network_link_challenge_invalid"
-	CodeNetworkLinkConflict         = "network_link_conflict"
-	CodeNetworkAccountLinked        = "network_account_linked"
-	CodeNetworkTermsRequired        = "network_terms_required"
-	CodeNetworkLinkInUse            = "network_link_in_use"
-)
+const ()
 
 // Authentication and authorization codes: why a credential was refused.
 const (
@@ -376,11 +370,6 @@ var errorCodes = []ErrorCode{
 	{"billing_archive_integrity", 422, invalid, "The billing archive failed integrity validation."},
 
 	// Customer links (openrails.dev).
-	{CodeNetworkLinkChallengeInvalid, 400, invalid, "The link challenge is unknown, expired or spent, or the ID token does not answer it: another client, nonce or merchant, a sign-in older than the challenge, or no openrails:link consent; ask for a new challenge."},
-	{CodeNetworkLinkConflict, 409, invalid, "The customer is linked to another openrails.dev account; sign in with that one."},
-	{CodeNetworkAccountLinked, 409, invalid, "The openrails.dev account is linked to another customer of this merchant."},
-	{CodeNetworkTermsRequired, 403, authz, "The openrails.dev account has not accepted the network terms."},
-	{CodeNetworkLinkInUse, 409, invalid, "The customer's subscriptions at this merchant still charge its cards; cancel them or move them to another card first."},
 }
 
 var errorCodeIndex = func() map[string]ErrorCode {

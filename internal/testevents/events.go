@@ -51,9 +51,6 @@ func Hosts[Option any](ctx context.Context, c Reader[Option], kind billing.HostE
 			case billing.HostEventOrderCompleted, billing.HostEventOrderRequiresAction, billing.HostEventOrderPaymentFailed, billing.HostEventOrderCanceled, billing.HostEventOrderExpired, billing.HostEventOrderVoided:
 				event.Order = new(billing.OrderHostEvent)
 				payload = event.Order
-			case billing.HostEventCustomerNetworkLinked, billing.HostEventCustomerNetworkUnlinked:
-				event.CustomerNetwork = new(billing.CustomerNetworkHostEvent)
-				payload = event.CustomerNetwork
 			case billing.HostEventMandateRevoked:
 				event.Mandate = new(billing.MandateHostEvent)
 				payload = event.Mandate

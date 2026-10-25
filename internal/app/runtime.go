@@ -10,8 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/open-rails/openrails/internal/customernetwork"
-
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/identity"
@@ -110,9 +108,6 @@ type Runtime struct {
 	// token claims fill.
 	Contacts     identity.Directory
 	HostUserInfo bool
-	// Network is the customer network (openrails.dev): the standalone
-	// server's, written before serving; nil elsewhere.
-	Network customernetwork.Network
 	// RiverProducer inserts jobs: the bound fleet, OpenRails' own or the
 	// host's, else the insert-only client New binds in the same schema.
 	RiverProducer  *river.Client[pgx.Tx]
@@ -156,9 +151,6 @@ type Runtime struct {
 	checkoutOrigin atomic.Pointer[string]
 	// paymentDomains are the (PSP, host) registrations known queued.
 	paymentDomains sync.Map
-	// PaymentPageNetwork is the payment page's sign-in to the customer
-	// network, set by a server running both.
-	PaymentPageNetwork *billing.PublicNetwork
 	// AlertService delivers immediate merchant notifications and manages webhooks.
 	AlertService *alerting.Service
 	// WebhookHealth records inbound-webhook liveness per (merchant, rail) at the
