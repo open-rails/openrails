@@ -15,11 +15,10 @@ import (
 //  1. Conservation: sum(credits_posted - debits_posted) over every account is
 //     0. Cheap (O(accounts)); catches one-sided counter corruption.
 //  2. Counter drift: ledger_accounts counters are a projection kept by the
-//     transfer insert trigger. Bypassing it (COPY, restore, disabled triggers)
-//     silently skews every balance while conservation still holds; recomputing
-//     from ledger_transfers catches it.
+//     transfer insert trigger. Disabling that trigger can skew balances while
+//     conservation still holds; recomputing from ledger_transfers catches it.
 //
-// Both take an explicitly selected merchant; fleet checks call once per merchant.
+// Both take an explicitly selected merchant; ledger-audit calls once per merchant.
 
 // ConservationBreach is one (merchant, currency) ledger whose account balances
 // do not sum to zero.
