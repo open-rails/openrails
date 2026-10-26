@@ -122,6 +122,37 @@ instance and no sticky session. Without Redis, run one instance.
   only); the captcha secret.
 - **Version**, except during a rolling upgrade.
 
+### Ledger diagnostics and worker retirement
+
+Ledger integrity is checked during export and before a restored transaction can
+commit. Ordinary transfers maintain account counters atomically. Run
+`openrails ledger-audit --merchant=id:<uuid>` for an explicit diagnostic; a
+finding makes the command exit non-zero. There is no recurring ledger audit or
+automatic ledger finding producer. Privileged corruption and future defects are
+therefore detected by explicit diagnostics, not a daily scan.
+
+When adopting the version that removes `openrails.ledger_integrity`, stop the old
+worker fleet first. Let any running audit finish, then cancel only its waiting
+reporting jobs in that fleet's configured River schema before starting the new
+fleet. These jobs have no business effects to transfer. With `psql`'s
+`river_schema` variable set to that exact schema:
+
+```sql
+SELECT id, state FROM :"river_schema".river_job
+WHERE kind = 'openrails.ledger_integrity'
+  AND state IN ('available', 'pending', 'retryable', 'scheduled', 'running');
+
+UPDATE :"river_schema".river_job
+SET state = 'cancelled', finalized_at = now()
+WHERE kind = 'openrails.ledger_integrity'
+  AND state IN ('available', 'pending', 'retryable', 'scheduled');
+```
+
+Keep terminal job history and existing findings. Review existing ledger findings
+with `ledger-audit`; removal does not resolve or erase them. Apply the normal
+forward migrations, which preserve the deferred restore constraint and move
+inconsistent-ledger rejection to transaction commit.
+
 ### Background work and leadership
 
 Every instance that calls `Start` (or runs `run-server` without `--no-workers`,

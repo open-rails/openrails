@@ -15,6 +15,13 @@ import (
 
 func hostCLI(t *testing.T, w *world, args ...string) string {
 	t.Helper()
+	output, err := hostCLIResult(t, w, args...)
+	require.NoError(t, err, "trusted operator CLI: %s", output)
+	return output
+}
+
+func hostCLIResult(t *testing.T, w *world, args ...string) (string, error) {
+	t.Helper()
 	binary := os.Getenv("OPENRAILS_CRITICAL_CLI_BINARY")
 	require.NotEmpty(t, binary, "build server/cmd/openrails once and set OPENRAILS_CRITICAL_CLI_BINARY")
 	info, err := os.Stat(binary)
@@ -32,6 +39,5 @@ func hostCLI(t *testing.T, w *world, args ...string) string {
 		command.Env = append(command.Env, item)
 	}
 	output, err := command.CombinedOutput()
-	require.NoError(t, err, "trusted operator CLI: %s", output)
-	return string(output)
+	return string(output), err
 }

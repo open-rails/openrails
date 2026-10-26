@@ -299,7 +299,8 @@
       "TestCreditExpiry/OR-J22-S03/expiry-preserves-spent-value-and-live-funded-reservation"
     ],
     "OR-J22-S04": [
-      "TestCreditAtomicity/OR-J22-S04/batch-conflict-rolls-back-ledger-and-events"
+      "TestCreditAtomicity/OR-J22-S04/batch-conflict-rolls-back-ledger-and-events",
+      "TestLedgerMaintenance/OR-J22-S04/concurrent-credit-replay-and-manual-ledger-diagnostic"
     ],
     "OR-J23-S01": [
       "TestAdmissionBoundaries/OR-J23-S01/batch-results-and-hold-lifecycle"
@@ -411,7 +412,11 @@
       "TestBillingArchive/OR-J31-S01/empty-target-restore-preserves-ledger-and-resets-destination-stream"
     ],
     "OR-J31-S02": [
-      "TestBillingArchive/OR-J31-S02/wrong-merchant-corrupt-and-occupied-target-refuse-atomically"
+      "TestBillingArchive/OR-J31-S02/wrong-merchant-corrupt-and-occupied-target-refuse-atomically",
+      "TestLedgerMaintenance/OR-J31-S02/restore-ledger-is-validated-at-commit/valid",
+      "TestLedgerMaintenance/OR-J31-S02/restore-ledger-is-validated-at-commit/unfinished",
+      "TestLedgerMaintenance/OR-J31-S02/restore-ledger-is-validated-at-commit/malformed",
+      "TestLedgerMaintenance/OR-J31-S02/restore-ledger-is-validated-at-commit/changed-after-finish"
     ],
     "OR-J31-S03": [
       "TestBillingArchive/OR-J31-S03/restored-custody-cannot-charge-before-explicit-arm"

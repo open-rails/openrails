@@ -156,12 +156,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addTrackedWorker(r, workers, &riverjobs.OrderExpiryWorker{DB: r.DB, Orders: r.Orders, Clock: clock}); err != nil {
 		return fmt.Errorf("add order expiry worker: %w", err)
 	}
-	if err := addTrackedWorker(r, workers, &riverjobs.LedgerIntegrityWorker{
-		DB:    r.DB,
-		Clock: clock,
-	}); err != nil {
-		return fmt.Errorf("add ledger integrity worker: %w", err)
-	}
 	// Flushes the Redis admission-denial counters to PG hourly aggregates.
 	// Redis may be nil (no-admission deployments); the worker no-ops then.
 	if err := addTrackedWorker(r, workers, &riverjobs.AdmissionDenialFlushWorker{
@@ -796,21 +790,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 			return riverjobs.ConvergeSweepArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
-			}
-		},
-		nil,
-	))
-
-	// Daily: ledger integrity audit. The account counters are a trigger-
-	// maintained projection, broken only by writes that bypass the trigger
-	// (restore, COPY, triggers off), which leave nothing to react to; daily
-	// bounds how long a wrong balance compounds unnoticed.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		24*time.Hour,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.LedgerIntegrityArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
 			}
 		},
 		nil,
