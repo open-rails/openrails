@@ -413,6 +413,7 @@
     ],
     "OR-J31-S02": [
       "TestBillingArchive/OR-J31-S02/wrong-merchant-corrupt-and-occupied-target-refuse-atomically",
+      "TestLedgerMaintenance/OR-J31-S02/restore-ledger-is-validated-at-commit",
       "TestLedgerMaintenance/OR-J31-S02/restore-ledger-is-validated-at-commit/valid",
       "TestLedgerMaintenance/OR-J31-S02/restore-ledger-is-validated-at-commit/unfinished",
       "TestLedgerMaintenance/OR-J31-S02/restore-ledger-is-validated-at-commit/malformed",
