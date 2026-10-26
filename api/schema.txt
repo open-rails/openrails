@@ -115,6 +115,7 @@ migration 0113_shared_eventlog_contract.up.sql sha256:15e7ef39ceaa6a0553473b8fab
 migration 0114_account_usage_billing.up.sql sha256:1b818744089d9dc86b08b384be8610120c5b30147cce99e2fbf51f3dd9cdc713
 migration 0115_notification_issue_revisions.up.sql sha256:f720b146566426f56c3b85c5051b07ede1283b9e3e06ca5f1395703e2673a3bd
 migration 0116_remove_hosted_account_state.up.sql sha256:8dc46947ff04dd7bd60c6a71fd2b6c059e0d60ec2298577f0fe4237bef303dde
+migration 0117_ledger_audit_at_restore_commit.up.sql sha256:aed275cb883723e3396ff19688e712bd2b3814dcae8c201d9ef2598ab5aadbf2
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3603,7 +3604,6 @@ function billing.finish_billing_restore(uuid,text,bigint)
       IF NOT billing.billing_restore_active(p_merchant) OR p_digest IS NULL OR p_rows IS NULL OR p_digest !~ '^[0-9a-f]{64}$' OR p_rows<0 THEN
           RAISE EXCEPTION 'invalid billing restore finalization' USING ERRCODE='23514';
       END IF;
-      PERFORM billing.check_billing_restore_ledger(p_merchant);
       UPDATE billing.maintenance_runs SET status='completed',finished_at=now(),summary=jsonb_build_object('digest',p_digest,'rows',p_rows)
           WHERE merchant_id=p_merchant AND kind='billing_restore' AND id::text=current_setting('openrails.billing_restore_id',true);
   END;
@@ -3775,7 +3775,6 @@ function billing.guard_billing_restore_receipt()
              OR (NEW.summary->>'rows')::numeric <> trunc((NEW.summary->>'rows')::numeric) THEN
               RAISE EXCEPTION 'invalid billing restore receipts transition' USING ERRCODE='23514';
           END IF;
-          PERFORM billing.check_billing_restore_ledger(NEW.merchant_id);
       END IF;
       RETURN NEW;
   END;
