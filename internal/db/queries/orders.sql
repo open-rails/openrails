@@ -140,9 +140,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND 
 
 -- An attempt starts on an open order: one that takes payment, or awaits the
 -- customer's action on an attempt that has since ended.
+-- Admission is durable before provider execution: a lost process must not make
+-- potentially billable work look like a cart that still needs a payment method.
 -- name: StartOrderAttempt :execrows
 UPDATE billing.orders
-SET payment_status = 'requires_payment_method', attempt_id = sqlc.arg(attempt_id)::uuid, payment_method_id = sqlc.narg(payment_method_id)::uuid,
+SET status = 'processing', payment_status = 'processing', attempt_id = sqlc.arg(attempt_id)::uuid, payment_method_id = sqlc.narg(payment_method_id)::uuid,
     psp_id = sqlc.arg(psp_id)::uuid, last_payment_error = NULL, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'open';
 

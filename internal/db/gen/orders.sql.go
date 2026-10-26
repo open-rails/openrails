@@ -1637,7 +1637,7 @@ func (q *Queries) SetPaymentSubscription(ctx context.Context, arg SetPaymentSubs
 
 const startOrderAttempt = `-- name: StartOrderAttempt :execrows
 UPDATE billing.orders
-SET payment_status = 'requires_payment_method', attempt_id = $1::uuid, payment_method_id = $2::uuid,
+SET status = 'processing', payment_status = 'processing', attempt_id = $1::uuid, payment_method_id = $2::uuid,
     psp_id = $3::uuid, last_payment_error = NULL, updated_at = $4::timestamptz
 WHERE merchant_id = $5::uuid AND id = $6::uuid AND status = 'open'
 `
@@ -1653,6 +1653,8 @@ type StartOrderAttemptParams struct {
 
 // An attempt starts on an open order: one that takes payment, or awaits the
 // customer's action on an attempt that has since ended.
+// Admission is durable before provider execution: a lost process must not make
+// potentially billable work look like a cart that still needs a payment method.
 func (q *Queries) StartOrderAttempt(ctx context.Context, arg StartOrderAttemptParams) (int64, error) {
 	result, err := q.db.Exec(ctx, startOrderAttempt,
 		arg.AttemptID,
