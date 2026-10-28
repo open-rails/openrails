@@ -44,6 +44,7 @@ const trails: [string, { label: string; to?: string }[]][] = [
     [{ label: "Ops", to: "/ops" }, { label: "Provider prices" }],
   ],
   ["/ops/parked", [{ label: "Ops", to: "/ops" }, { label: "Parked" }]],
+  ["/ops/proposals", [{ label: "Ops", to: "/ops" }, { label: "Proposals" }]],
   ["/ops", [{ label: "Ops", to: "/ops" }, { label: "Findings" }]],
   ["/settings", [{ label: "Settings" }]],
 ]

@@ -88,6 +88,7 @@ export const coreNav: AdminNavItem[] = [
     useVisible: useMerchantConfig,
     items: [
       { title: "Findings", path: "/ops" },
+      { title: "Proposals", path: "/ops/proposals" },
       { title: "PSP imports", path: "/ops/imports" },
       { title: "Provider prices", path: "/ops/provider-prices" },
       { title: "Parked", path: "/ops/parked" },

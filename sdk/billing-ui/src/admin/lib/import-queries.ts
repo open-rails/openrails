@@ -10,6 +10,7 @@ import {
 import { collectCursorPages } from "#orck/admin/lib/api/client"
 import type {
   ParkedFilters,
+  ProposalFilters,
   ProviderCatalogFilters,
   PSPImportFilters,
   PSPImportRecordFilters,
@@ -33,6 +34,7 @@ const keysOf = (root: () => readonly string[]) => ({
   import: (id: string) => [...root(), "psp-imports", id] as const,
   providerCatalog: () => [...root(), "provider-catalog"] as const,
   parked: () => [...root(), "parked"] as const,
+  proposals: () => [...root(), "proposals"] as const,
   catalog: () => [...root(), "catalog"] as const,
   ops: () => [...root(), "ops"] as const,
 })
@@ -77,17 +79,26 @@ export function createImportQueries(client: AdminClient, api: AdminAPI) {
           importBusy(query.state.data?.status) ? POLL_MS : false,
         meta: { errorAction: "Load PSP import" },
       }),
+    // version is the import's state: a re-link that finishes reloads them.
     records: (
       id: string,
       filters: PSPImportRecordFilters,
       limit: number,
-      cursor?: string
+      cursor?: string,
+      version?: string
     ) =>
       queryOptions({
-        queryKey: [...importKeys.import(id), "records", filters, limit, cursor],
+        queryKey: [
+          ...importKeys.import(id),
+          "records",
+          filters,
+          limit,
+          cursor,
+          version,
+        ],
         queryFn: ({ signal }) =>
           api.listPSPImportRecords(id, filters, { limit, cursor }, signal),
-        enabled: Boolean(id),
+        enabled: Boolean(id && version),
         placeholderData: keepPreviousData,
         meta: { errorAction: "Load import records" },
       }),
@@ -131,6 +142,22 @@ export function createImportQueries(client: AdminClient, api: AdminAPI) {
           api.listParkedSubscriptions(filters, { limit, cursor }, signal),
         placeholderData: keepPreviousData,
         meta: { errorAction: "Load parked subscriptions" },
+      }),
+    // Every listed proposal: the inbox groups and selects across pages.
+    proposals: (filters: ProposalFilters) =>
+      queryOptions({
+        queryKey: [...importKeys.proposals(), filters],
+        queryFn: ({ signal }) =>
+          collectCursorPages(
+            (cursor) =>
+              api.listProposals(
+                filters,
+                filters.ids ? {} : { limit: 500, cursor },
+                signal
+              ),
+            signal
+          ),
+        meta: { errorAction: "Load proposals" },
       }),
     customers: (ids: string[]) =>
       queryOptions({
@@ -192,6 +219,33 @@ export function createImportQueries(client: AdminClient, api: AdminAPI) {
               keys.catalog(),
               keys.ops(),
             ].map((queryKey) => queryClient.invalidateQueries({ queryKey }))
+          ),
+      })
+    },
+    // One approve or dismiss call; the inbox runs a listed set in batches
+    // and reloads only when asked, so each row keeps its outcome.
+    decide: (queryClient: QueryClient) => {
+      const keys = pinnedKeys()
+      return mutationOptions({
+        mutationFn: ({
+          action,
+          ids,
+          notes,
+          key,
+        }: {
+          action: "approve" | "dismiss"
+          ids: string[]
+          notes: string
+          key: string
+        }) =>
+          action === "approve"
+            ? api.approveProposals(ids, notes, key)
+            : api.dismissProposals(ids, notes),
+        onSettled: () =>
+          Promise.all(
+            [keys.imports(), keys.ops()].map((queryKey) =>
+              queryClient.invalidateQueries({ queryKey })
+            )
           ),
       })
     },

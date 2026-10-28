@@ -4,6 +4,7 @@ import type {
   CreatePSPImportParams,
   CreateProviderPriceParams,
   Customer,
+  Finding,
   LinkPSPImportParams,
   ListPage,
   PSPImport,
@@ -12,6 +13,7 @@ import type {
   PSPImportRecord,
   ParkedSubscription,
   Price,
+  ProposalResults,
   ProviderCatalogObject,
 } from "#orck/client/generated/wire"
 
@@ -40,6 +42,15 @@ export interface ParkedFilters {
   psp?: string
   reason?: ParkedSubscription["reason"]
   released?: boolean
+}
+
+// Open pull.* proposals by default. ids alone names up to 100, whatever
+// their state.
+export interface ProposalFilters {
+  ids?: string
+  psp_id?: string
+  pull_id?: string
+  kind?: string
 }
 
 // PSP imports, the observed provider catalog and parked subscriptions: the
@@ -120,6 +131,31 @@ export function createImportEndpoints(client: AdminClient) {
       signal,
     })
 
+  const listProposals = (
+    filters: ProposalFilters,
+    page: PageRequest,
+    signal?: AbortSignal
+  ) =>
+    api<ListPage<Finding>>("/merchant/proposals", {
+      query: { ...filters, ...page },
+      signal,
+    })
+
+  // approveProposals approves up to 100 proposals. The key replays the first
+  // answer: a retry of the same batch reuses it.
+  const approveProposals = (ids: string[], notes: string, key: string) =>
+    api<ProposalResults>("/merchant/proposals/approve", {
+      method: "POST",
+      headers: { "Idempotency-Key": key },
+      body: { ids, notes },
+    })
+
+  const dismissProposals = (ids: string[], notes: string) =>
+    api<ProposalResults>("/merchant/proposals/dismiss", {
+      method: "POST",
+      body: { ids, notes },
+    })
+
   // customersByIds reads named customers: only those with billing rows exist.
   const customersByIds = (ids: string[], signal?: AbortSignal) =>
     api<ListPage<Customer>>("/admin/customers", {
@@ -139,5 +175,8 @@ export function createImportEndpoints(client: AdminClient) {
     createProviderPrice,
     listParkedSubscriptions,
     customersByIds,
+    listProposals,
+    approveProposals,
+    dismissProposals,
   }
 }

@@ -120,6 +120,12 @@ const routes = [
     ),
   },
   {
+    path: "/ops/proposals",
+    Component: lazy(() =>
+      import("./pages/proposals").then((m) => ({ default: m.ProposalsPage }))
+    ),
+  },
+  {
     path: "/ops/parked",
     Component: lazy(() =>
       import("./pages/parked").then((m) => ({ default: m.ParkedPage }))

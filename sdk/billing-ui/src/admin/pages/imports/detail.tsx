@@ -42,6 +42,7 @@ const STATES = [
   "conflict",
   "linked",
   "blocked",
+  "held",
   "imported",
 ] as const
 
@@ -143,6 +144,7 @@ function ImportDetail() {
           </Link>
         </CardContent>
       </Card>
+      <ProposalCounts imp={imp} />
       {psp && <Plans imp={imp} psp={psp} />}
       <Card>
         <CardHeader>
@@ -185,6 +187,11 @@ function Progress({ imp }: { imp: PSPImport }) {
             .
           </p>
         )}
+        {imp.error_code === "pull_roster_implausible" && (
+          <p className="mt-1">
+            <AdminMessage id="The provider listed far fewer live subscriptions than OpenRails holds, so nothing was proposed. Check the PSP's account and reconcile again." />
+          </p>
+        )}
         {imp.error_code === "psp_not_readable" && (
           <p className="mt-1">
             <AdminMessage id="This PSP cannot be read: it is gone, or a credential the pull needs is not declared." />
@@ -206,6 +213,23 @@ function Progress({ imp }: { imp: PSPImport }) {
         </div>
       )}
     </div>
+  )
+}
+
+// ProposalCounts are the differences the pull found in what OpenRails holds:
+// Apply approves the corrections; the rest wait in the inbox.
+function ProposalCounts({ imp }: { imp: PSPImport }) {
+  const { text } = useAdminUI()
+  const p = imp.proposals
+  if (!p.open && !p.approved && !p.dismissed && !p.superseded) return null
+  return (
+    <p className="text-sm" data-testid="import-proposals">
+      <Link className="underline" to={`/ops/proposals?pull_id=${imp.id}`}>
+        {p.open}
+        {text(" open proposals")}
+      </Link>
+      {` (${p.corrections}${text(" corrections Apply approves")}) · ${p.approved}${text(" approved")} · ${p.dismissed}${text(" dismissed")} · ${p.superseded}${text(" superseded")}`}
+    </p>
   )
 }
 

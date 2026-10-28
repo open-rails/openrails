@@ -47,6 +47,7 @@ const STATES: PSPImportRecord["state"][] = [
   "conflict",
   "blocked",
   "linked",
+  "held",
   "imported",
 ]
 const KINDS: PSPImportRecord["kind"][] = [
@@ -78,7 +79,8 @@ function Records() {
       id,
       { state, kind },
       paging.size,
-      paging.cursor || undefined
+      paging.cursor || undefined,
+      imp && `${imp.status}:${imp.updated_at}`
     )
   )
   const ids = [
@@ -213,14 +215,17 @@ function Records() {
                     {r.reason}
                   </TableCell>
                   <TableCell className="space-x-1 text-right whitespace-nowrap">
-                    {editable && r.state !== "imported" && imp && (
-                      <RecordActions
-                        imp={imp}
-                        record={r}
-                        onLink={() => setLinking(r)}
-                        onPrice={() => setPricing(r)}
-                      />
-                    )}
+                    {editable &&
+                      r.state !== "imported" &&
+                      r.state !== "held" &&
+                      imp && (
+                        <RecordActions
+                          imp={imp}
+                          record={r}
+                          onLink={() => setLinking(r)}
+                          onPrice={() => setPricing(r)}
+                        />
+                      )}
                   </TableCell>
                 </TableRow>
               ))
@@ -311,7 +316,7 @@ function RecordActions({
           onClick={() =>
             void link.send(
               { links: [{ record: record.id, customer: null }] },
-              text("Link removed")
+              text("Link removed: re-linking")
             )
           }
         >
@@ -422,7 +427,7 @@ function LinkDialog({
                     },
                   ],
                 },
-                text("Record linked")
+                text("Link saved: re-linking")
               )
               if (ok) onClose()
             }}
@@ -507,7 +512,7 @@ function PriceDialog({
               onClick={async () => {
                 const ok = await link.send(
                   { prices: [{ record: record.id, price: null }] },
-                  text("Price cleared")
+                  text("Price cleared: re-linking")
                 )
                 if (ok) onClose()
               }}
@@ -520,7 +525,7 @@ function PriceDialog({
             onClick={async () => {
               const ok = await link.send(
                 { prices: [{ record: record.id, price }] },
-                text("Price set")
+                text("Price saved: re-linking")
               )
               if (ok) onClose()
             }}

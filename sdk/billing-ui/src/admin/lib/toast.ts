@@ -32,6 +32,12 @@ export function createToastHandlers(
         })
         return
       }
+      if (err.code === "person_required") {
+        toast.error(`${action}: only a signed-in person can do this`, {
+          description: err.message,
+        })
+        return
+      }
       if (err.isPermissionDenied) {
         toast.error(`${action}: your role lacks permission`, {
           description: err.message,
