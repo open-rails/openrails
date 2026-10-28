@@ -502,9 +502,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		if engines, ok := runtime.CollectionResolver.(intents.StripeEngineServiceResolver); ok {
 			runtime.PurchaseService.StripeEngines = engines
 		}
-		if runtime.PurchaseService.CustodianSaleService != nil {
-			runtime.PurchaseService.CustodianSaleService.Intents = intentRunner
-		}
 	}
 	if runtime.OrderAttemptService != nil {
 		runtime.OrderAttemptService.SetOrders(runtime.Orders)

@@ -18,7 +18,7 @@ import (
 func staffDestructiveIntent(kind string) bool {
 	switch kind {
 	case TypeNMIDeleteSubscription, TypeCCBillCancelSubscription, TypeStripeCancelSubscription,
-		TypeNMIPaymentMethodDelete, TypeHyperSwitchMethodDelete, TypePlatformMethodDelete, TypeNMIRefund, TypeStripeRefund, TypeCCBillRefund:
+		TypeNMIPaymentMethodDelete, TypeHyperSwitchMethodDelete, TypePlatformMethodDelete, TypeNMIRefund, TypeStripeRefund:
 		return true
 	}
 	return false

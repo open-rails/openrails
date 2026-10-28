@@ -37,7 +37,6 @@ import (
 const (
 	TypeNMIRefund    = "nmi_refund"
 	TypeStripeRefund = "stripe_refund"
-	TypeCCBillRefund = "ccbill_refund"
 )
 
 // RefundPayload is the stored payload for refund intents.
@@ -520,32 +519,6 @@ func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.BillingProv
 		return Ambiguous("stripe refund has not succeeded: " + result.Status)
 	}
 	return h.settle(ctx, p, result.ID, map[string]any{"refund_status": result.Status, "verified_existing": true})
-}
-
-// CCBillRefundHandler retains unresolved reservations created by earlier builds.
-// The provider's subscription-level API cannot establish the requested charge,
-// amount, and lifecycle outcome. No execution, resend, or synthetic-receipt
-// finalization is safe until an operator supplies independent provider evidence.
-type CCBillRefundHandler struct {
-	refundReservations
-	Policy BackoffPolicy
-}
-
-func NewCCBillRefundHandler(d *db.DB, clock clockwork.Clock) *CCBillRefundHandler {
-	return &CCBillRefundHandler{refundReservations: refundReservations{DB: d, Clock: clock}, Policy: DefaultBackoff}
-}
-
-func (h *CCBillRefundHandler) Type() string                                  { return TypeCCBillRefund }
-func (h *CCBillRefundHandler) Backoff(attempts int32) time.Duration          { return h.Policy.Delay(attempts) }
-func (h *CCBillRefundHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, true }
-func (h *CCBillRefundHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
-	return h.checkRelevance(ctx, intent)
-}
-func (h *CCBillRefundHandler) Execute(context.Context, gen.BillingProviderIntent) Outcome {
-	return Ambiguous("automatic CCBill refund disabled: retain reservation and receipt; operator must verify the actual transaction, amount, and subscription state")
-}
-func (h *CCBillRefundHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
-	return h.Execute(ctx, intent)
 }
 
 // RefundIntentFor selects the rail while keeping one caller operation identity.

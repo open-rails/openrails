@@ -42,17 +42,5 @@ request fails before its cancellation leg. The admin payment UI does not offer
 automatic CCBill refunds. Cancel-only requests remain available, using status
 verification after ambiguous responses, including `-7`.
 
-Previously queued or unknown CCBill refund operations remain
-`unknown_needs_verify`, with an operator-visible reason. The handler has no
-outbound client. It preserves the reserved balance and stored payload/receipt;
-it neither resends nor finalizes a synthetic `ccbill_refund:...` reference.
-Historical completed rows are not rewritten. Provider-confirmed inbound refund
+OpenRails creates no CCBill refund operation. Provider-confirmed inbound refund
 ingestion and the existing manual accounting service remain available.
-
-For an unresolved operation, retain its merchant/payment/reservation/intent IDs
-and original request evidence. Verify the provider's actual transaction,
-amount, currency, and subscription state before choosing a manual accounting
-resolution. Subscription counters alone cannot link an outcome to that
-operation. Do not release a reservation or resend merely because the response
-was `-7`, a timeout, an internal/database error, or a missing receipt. Escalate
-when the result cannot be attributed.

@@ -297,7 +297,6 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// CollectionResolver, CCBill and Stripe through RailConfigs.
 	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.Config, r.RailConfigs, clock) // an unarmed rail parks
 	ccbillCancel.DataLinkBaseURL = config.SandboxCCBillDataLinkURL(r.Config)
-	ccbillRefund := intents.NewCCBillRefundHandler(r.DB, clock) // retain unresolved pre-qualification refunds
 	rebill := intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock)
 	rebill.DeferDelete = newProviderCancelScheduler(r.DB, r.RateCeiling(), intents.OriginSystem, "terminal recurring recovery")
 	registry := intents.NewRegistry(
@@ -309,7 +308,6 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewStripeRefundHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
 		intents.NewStripeCancelHandler(r.DB, r.Config, r.RailConfigs, r.StripeClients, clock),
 		intents.NewStripePaymentMethodDomainHandler(r.Config, r.RailConfigs, r.StripeClients),
-		ccbillRefund,
 		rebill,
 		// Order collection rides the intent ledger like every other money
 		// mover.
@@ -319,7 +317,6 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		// worker runtime has (validateBillingWorkerRuntime): an accepted
 		// operation of an unregistered kind would never run.
 		payment.NewNMISaleIntentHandler(r.PurchaseService.NMISaleService),
-		payment.NewCustodianSaleIntentHandler(r.PurchaseService.CustodianSaleService),
 		payment.NewInitialMembershipIntentHandler(r.PurchaseService, r.CollectionResolver),
 		payment.NewNMIUpgradeIntentHandler(r.PurchaseService),
 		payment.NewStripeTierChangeIntentHandler(r.PurchaseService),

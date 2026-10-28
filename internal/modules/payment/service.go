@@ -149,10 +149,9 @@ func NewPurchaseService(
 	// SetMerchantSecretStore wires the merchant secret store.
 	service.NMISaleService.ResolveNMIClient = service.resolveNMIClient
 	service.CustodianSaleService = &CustodianSaleService{
-		Fulfillment:          service.Fulfillment,
-		PaymentMethodService: paymentMethodService,
-		Rails:                railSet,
-		Config:               cfg,
+		Fulfillment: service.Fulfillment,
+		Rails:       railSet,
+		Config:      cfg,
 	}
 	if railPMService != nil {
 		service.CustodianSaleService.DB = railPMService.DB

@@ -255,10 +255,10 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "provider_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != intents.TypePlatformMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != intents.TypeOrderCollection && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection && *typ != intents.TypeNMIRecurringConfirmation)) {
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != intents.TypePlatformMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != intents.TypeOrderCollection && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection && *typ != intents.TypeNMIRecurringConfirmation)) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
-		if typ != nil && (*typ == "nmi_refund" || *typ == "stripe_refund" || *typ == "ccbill_refund") {
+		if typ != nil && (*typ == "nmi_refund" || *typ == "stripe_refund") {
 			if payload == nil {
 				return fmt.Errorf("refund operation has no accepted payload")
 			}
