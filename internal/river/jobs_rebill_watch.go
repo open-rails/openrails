@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/attempts"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -35,11 +36,10 @@ const (
 	// EngineRebillDeadline: the due pass admits an engine renewal within
 	// minutes of its boundary.
 	EngineRebillDeadline = time.Hour
-	// SolanaRebillDeadline: a Solana renewal is pulled by the crank, not the
-	// due pass. It starts at the first crank after its boundary, a failed
-	// crank retries at the next, and its confirmation has the engine's
-	// deadline.
-	SolanaRebillDeadline = 2*SolanaCrankInterval + EngineRebillDeadline
+	// SolanaRebillDeadline: a Solana renewal is pulled by its scheduled
+	// operation, PullMargin after its boundary, not by the due pass; its
+	// confirmation has the engine's deadline.
+	SolanaRebillDeadline = solanasubs.PullMargin + EngineRebillDeadline
 	// NMIRebillDeadline: NMI charges once on the schedule day, and its Query
 	// API indexes a charge with some lag.
 	NMIRebillDeadline = 24 * time.Hour

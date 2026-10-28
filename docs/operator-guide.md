@@ -86,7 +86,8 @@ checks. Explicit `readonly` and `limited` modes still apply. See
 Everything below runs by itself under River once the server (or a `run-worker`
 process) is up. Provider-owned schedules bill at the provider and report the
 result. OpenRails-owned NMI/Stripe agreements use the shared-database due
-worker and accepted collection operations; Solana is pulled by its crank.
+worker and accepted collection operations; each Solana period is pulled by the
+operation its renewal scheduled.
 Ownership determines which system may initiate the renewal.
 
 | Worker | Cadence | Job |
@@ -96,7 +97,6 @@ Ownership determines which system may initiate the renewal.
 | Convergence Engine sweep | 15 min (+ on start) | per-merchant internal-drift repair: stalled dunning, lapsed periods, unmaterialized grants ([operations.md](operations.md#the-convergence-engine)) |
 | Provider Refresh | 4 h (+ on start) | watermarked missed-event backfill, unknown-cohort reconcile, CCBill DataLink refresh — reads only, never mutates a provider |
 | Due / dunning | 1 min | admits due engine renewals and retries `past_due` per the derived schedule; parks whole missed periods for verification instead of charging ([operations.md → Dunning](operations.md#dunning)) |
-| Solana crank | 1 h | executes due on-chain subscription pulls |
 | Cleanup | 1 h | expired-data cleanup |
 | Usage orders | 5 min | bills due usage accounts and queues due collections as operations (opt-in) |
 | Arrears delinquency | 1 min | evaluates customers whose usage order fell due or whose grace ran out |

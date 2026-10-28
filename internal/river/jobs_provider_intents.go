@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/intents/wake"
 )
 
 func workerNow(c clockwork.Clock) time.Time {
@@ -29,7 +30,7 @@ func workerNow(c clockwork.Clock) time.Time {
 // financial operation is terminal. River owns waking/retrying; the ledger owns
 // authorization, submission fences, provider evidence, and final accounting.
 type ProviderOperationWorker struct {
-	WorkerDefaults[intents.OperationArgs]
+	WorkerDefaults[wake.Args]
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock
@@ -39,11 +40,11 @@ type ProviderOperationWorker struct {
 	Runner *intents.Runner
 }
 
-func (ProviderOperationWorker) Kind() string { return intents.OperationJobKind }
+func (ProviderOperationWorker) Kind() string { return wake.Kind }
 
 const operationInfrastructureRetry = time.Minute
 
-func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intents.OperationArgs]) (result error) {
+func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[wake.Args]) (result error) {
 	var successorCommitted bool
 	// A handler panic is still unresolved money. River snoozing leaves the job
 	// active without spending its finite infrastructure-crash rescue attempts.

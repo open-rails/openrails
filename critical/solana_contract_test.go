@@ -353,7 +353,8 @@ func TestSolanaContracts(t *testing.T) {
 		s := newSolanaWorld(t, true)
 		_, sub := s.subscribe(t)
 		due := *sub.CurrentPeriodEndsAt
-		s.clock.Advance(due.Sub(s.clock.Now()))
+		// The period's pull is due its margin after the period end.
+		s.clock.Advance(due.Add(time.Minute).Sub(s.clock.Now()))
 		queue := hostFleet(t, s.world)
 		gate := &wireGate{arrived: make(chan struct{}), release: make(chan struct{})}
 		defer gate.unblock()
@@ -362,8 +363,6 @@ func TestSolanaContracts(t *testing.T) {
 		s.wire.mu.Unlock()
 		beforeSends := s.wire.sends()
 		child := startWorkerProcess(t, s.world, nil)
-		_, err := queue.Insert(t.Context(), registeredJob{KindName: "openrails.solana_crank"}, &river.InsertOpts{Queue: openrails.QueueBilling})
-		require.NoError(t, err)
 		select {
 		case <-gate.arrived:
 		case <-time.After(20 * time.Second):
@@ -425,12 +424,19 @@ func TestSolanaContracts(t *testing.T) {
 			s.confirm(t, order, paid.Items[0].TransactionID)
 		}
 		due := *sub.CurrentPeriodEndsAt
-		s.clock.Advance(due.Sub(s.clock.Now()))
+		s.clock.Advance(due.Add(pullMargin).Sub(s.clock.Now()))
 		fleet := startFleet(t, s.world)
-		runRegistered(t, fleet, "openrails.solana_crank", 2)
-		s.renewed(t, sub, due.Add(168*time.Hour))
-		runRegistered(t, fleet, "openrails.solana_crank", 2)
-		s.renewed(t, sub, due.Add(168*time.Hour))
+		// Two wakes of the period's pull run at once.
+		for _, job := range operationJobs(t, fleet) {
+			_, err := fleet.Insert(t.Context(), replayedOperation{Payload: job.EncodedArgs}, &river.InsertOpts{Queue: openrails.QueueBilling})
+			require.NoError(t, err)
+		}
+		wakeOperations(t, fleet)
+		s.renewed(t, sub, due.Add(pullMargin).Add(168*time.Hour))
+		settleOperations(t, fleet)
+		wakeOperations(t, fleet)
+		settleOperations(t, fleet)
+		s.renewed(t, sub, due.Add(pullMargin).Add(168*time.Hour))
 	})
 	t.Run("OR-J37-S05", func(t *testing.T) {
 		t.Run("wrong-chain-identity", func(t *testing.T) {
@@ -472,11 +478,12 @@ func TestSolanaContracts(t *testing.T) {
 				s.wire.mu.Lock()
 				s.wire.failure = fault
 				s.wire.mu.Unlock()
-				s.clock.Advance(sub.CurrentPeriodEndsAt.Sub(s.clock.Now()))
+				s.clock.Advance(sub.CurrentPeriodEndsAt.Add(pullMargin).Sub(s.clock.Now()))
 				before := s.wire.sends()
 				fleet := startFleet(t, s.world)
-				runRegistered(t, fleet, "openrails.solana_crank", 2)
-				require.Greater(t, s.wire.sends(), before, "the explicit external RPC refusal must actually occur")
+				wakeOperations(t, fleet)
+				require.Eventually(t, func() bool { return s.wire.sends() > before }, 20*time.Second, 20*time.Millisecond, "the explicit external RPC refusal must actually occur")
+				settleOperations(t, fleet)
 				current, err := s.alpha.GetSubscription(t.Context(), sub.ID)
 				require.NoError(t, err)
 				require.Equal(t, sub.CurrentPeriodEndsAt, current.CurrentPeriodEndsAt)

@@ -212,7 +212,7 @@ pass your fleet queues has not completed within two periods and its timeout.
 declare the same merchants in `Config.Merchants`: whichever host runs a pass
 covers every merchant in the database with its own credentials. Each host has
 its own River schema, and they share the periodic work: provider refresh,
-renewal and recovery sweeps, Solana pulls, the account updater. A fleet claims
+renewal and recovery sweeps, the account updater. A fleet claims
 a pass's lease in `periodic_leases` (one per pass, held for four fifths of the
 period) before queueing it, and another fleet finds it held and skips that
 pass. A stopped fleet's lease expires, so the others take its passes over at

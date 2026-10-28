@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 236,
+  "scenario_count": 237,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -736,7 +736,7 @@
     {
       "id": "OR-J37-S02",
       "journey": "J37",
-      "name": "Recurring crank persists signed operation before submission and resumes safely"
+      "name": "Recurring pull persists signed operation before submission and resumes safely"
     },
     {
       "id": "OR-J37-S03",
@@ -759,14 +759,9 @@
       "name": "Retried recurring pull keeps its backoff and then renews the period once"
     },
     {
-      "id": "OR-J37-S08",
-      "journey": "J37",
-      "name": "Recurring pulls are scheduled only when a cranker is configured"
-    },
-    {
       "id": "OR-J37-S09",
       "journey": "J37",
-      "name": "A crank pass that signed with a low cranker wallet raises a finding that the next funded pass resolves"
+      "name": "A pull signed with a low cranker wallet raises a finding that the next funded pull resolves"
     },
     {
       "id": "OR-J07-S05",
@@ -846,7 +841,7 @@
     {
       "id": "OR-J37-S06",
       "journey": "J37",
-      "name": "Solana renewal waits for the crank's deadline before a missed rebill"
+      "name": "A Solana renewal whose scheduled pull is still owed is not a missed rebill"
     },
     {
       "id": "OR-J21-S05",
@@ -1182,6 +1177,16 @@
       "id": "OR-J26-S54",
       "journey": "J26",
       "name": "A running charge is billed through the bill date before any daily posting runs"
+    },
+    {
+      "id": "OR-J37-S60",
+      "journey": "J37",
+      "name": "A due Solana pull runs as the operation its period scheduled, a margin after the period end"
+    },
+    {
+      "id": "OR-J37-S61",
+      "journey": "J37",
+      "name": "A pull the chain refuses before its period end is retried, not taken as already paid"
     }
   ]
 }

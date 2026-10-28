@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/intents/wake"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -416,12 +417,7 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 		if OperationTerminal(row.Status) || ManualPaymentMethodDelete(row) {
 			return nil
 		}
-		wake := row.NextAttemptAt
-		if row.Status == StatusPending && row.LeaseExpiresAt != nil && row.LeaseExpiresAt.After(wake) {
-			wake = *row.LeaseExpiresAt
-		}
-		_, err = s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(wake))
-		return err
+		return wake.Queue(ctx, s.db, tx, row)
 	})
 	return row, err
 }

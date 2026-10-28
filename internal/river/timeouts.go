@@ -6,7 +6,7 @@ import (
 
 	"github.com/riverqueue/river"
 
-	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/intents/wake"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -35,7 +35,7 @@ var kinds = map[string]time.Duration{
 	KindSubscriptionConverge:             DefaultTimeout,
 	KindProviderObjectObserve:            DefaultTimeout,
 	DestructiveAlertArgs{}.Kind():        DefaultTimeout,
-	intents.OperationJobKind:             DefaultTimeout,
+	wake.Kind:                            DefaultTimeout,
 	paymentmethods.KindStoredCardRefresh: DefaultTimeout,
 	merchants.SecretCleanupArgs{}.Kind(): DefaultTimeout,
 	KindStoredCardRefreshDue:             time.Hour,
@@ -46,7 +46,6 @@ var kinds = map[string]time.Duration{
 	KindChargeAttributions:               time.Hour,
 	KindNMIHistory:                       time.Hour,
 	KindStripeWebhookReconcile:           time.Hour,
-	KindSolanaCrank:                      time.Hour,
 	KindPSPImport:                        2 * time.Hour,
 }
 

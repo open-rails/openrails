@@ -403,7 +403,7 @@ func TestBackgroundJobs(t *testing.T) {
 		runRegistered(t, fleet, "openrails.converge_sweep", 1)
 		require.True(t, reads(w.alpha))
 	})
-	t.Run("OR-J37-S06/solana-renewal-waits-for-the-crank-before-a-missed-rebill", func(t *testing.T) {
+	t.Run("OR-J37-S06/a-solana-renewal-whose-pull-is-still-owed-is-not-a-missed-rebill", func(t *testing.T) {
 		s := newSolanaWorld(t, true)
 		_, sub := s.subscribe(t)
 		due := *sub.CurrentPeriodEndsAt
@@ -416,13 +416,13 @@ func TestBackgroundJobs(t *testing.T) {
 			require.NoError(t, err)
 			return len(findings.Items)
 		}
-		// Past the due pass's deadline, before the hourly crank's.
+		// Past the due pass's deadline and the Solana one.
 		s.clock.Advance(due.Add(90 * time.Minute).Sub(s.clock.Now()))
 		runRegistered(t, fleet, "openrails.rebill_watch", 1)
-		require.Zero(t, missed(), "a Solana renewal is pulled by the crank, not the due pass")
+		require.Zero(t, missed(), "a Solana renewal is pulled by its scheduled operation, not the due pass")
 		s.clock.Advance(due.Add(3*time.Hour + time.Minute).Sub(s.clock.Now()))
 		runRegistered(t, fleet, "openrails.rebill_watch", 1)
-		require.Equal(t, 1, missed(), "a renewal no crank pulled is a missed rebill")
+		require.Zero(t, missed(), "the period's pull operation, still owed, decides its cycle")
 	})
 	t.Run("OR-J21-S05", func(t *testing.T) {
 		t.Run("attribution-no-pull-reads-becomes-a-finding", func(t *testing.T) {

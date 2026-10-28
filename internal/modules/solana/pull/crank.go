@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -86,6 +87,7 @@ const (
 	crankCanceled                         // delegate revoked → membership canceled (no dunning)
 	crankDunned                           // recoverable decline → FailMembership + rescheduled
 	crankGhostExpired                     // ghost plan → row expired
+	crankNotDue                           // the chain's clock had not reached the period end
 )
 
 // crankOutcome is crankOne's classified result. signature is set on success
@@ -95,6 +97,8 @@ type crankOutcome struct {
 	signature string
 	reason    string
 	evidence  map[string]any
+	// retryAt is when a crankNotDue pull is tried again.
+	retryAt time.Time
 }
 
 // crankOne runs the pull state machine for one row. presubmit
@@ -143,6 +147,7 @@ func (h *Handler) crankOne(ctx context.Context, repo solanaSubStore, row *models
 		// delegate revoked (terminal); token InsufficientFunds (Custom:1) =
 		// recoverable; RPC/gas = operational.
 		cf := recurring.ClassifyCrankError(crankErr)
+		var chainAt *time.Time
 		if cf.Category != recurring.Operational {
 			failed, verdict := checkSolanaSignature(ctx, h.Chain, submitted)
 			if verdict != sigVerdictNotLanded {
@@ -154,6 +159,10 @@ func (h *Handler) crankOne(ctx context.Context, repo solanaSubStore, row *models
 			}
 			crankErr = fmt.Errorf("on-chain pull reverted: %s", raw)
 			cf = recurring.ClassifyCrankError(crankErr)
+			if failed.BlockTime != nil {
+				at := failed.BlockTime.Time().UTC()
+				chainAt = &at
+			}
 		}
 		llog := log.WithContext(ctx).WithError(crankErr).WithFields(log.Fields{
 			"subscription_pda": row.SubscriptionPDA,
@@ -168,6 +177,14 @@ func (h *Handler) crankOne(ctx context.Context, repo solanaSubStore, row *models
 			llog.Warn("Solana cranker: operational pull failure; retry next run (no dunning)")
 			return crankOutcome{}, crankErr
 		case recurring.AlreadyPaid:
+			if chainAt != nil && chainAt.Before(row.NextPullAt) {
+				// The chain's clock had not reached the period end: the paid
+				// period is the one recorded. Pull again once it has.
+				lag := row.NextPullAt.Sub(*chainAt)
+				llog.WithField("chain_lag", lag.String()).Warn("Solana cranker: pull reached the chain before its period end; retrying")
+				return crankOutcome{kind: crankNotDue, reason: fmt.Sprintf("the chain's clock was %s short of the period end", lag),
+					retryAt: h.now().Add(lag + solanasubs.PullMargin)}, nil
+			}
 			// A refused duplicate pull proves no money moved in this attempt.
 			// It proves neither who paid the other transaction nor its accepted
 			// agreement. Preserve uncertainty, expose it, and never invent cash
@@ -298,7 +315,7 @@ func (h *Handler) finalizePull(ctx context.Context, repo solanaSubStore, agreeme
 	}
 	unit := agreement.Amount / int64(subscriptions.SeatCount(agreement.Quantity))
 	bill := &observed.Bill{Execution: execution, PSPID: row.PspID, CustomerID: agreement.CustomerID, SubscriptionID: &row.SubscriptionID,
-		Owner: observed.OwnerEngine, Kind: "renewal", SourceKind: Type, SourceKey: execution.IntentID.String(), ProviderReference: row.SubscriptionPDA,
+		Owner: observed.OwnerEngine, Kind: "renewal", SourceKind: solanasubs.PullType, SourceKey: execution.IntentID.String(), ProviderReference: row.SubscriptionPDA,
 		Currency: agreement.Currency, Total: agreement.Amount, PeriodStart: receipt.PeriodStart, PeriodEnd: receipt.PeriodEnd, DueAt: agreement.EpisodeAt,
 		Payment: payment, Settled: true, SettlementSource: "cash",
 		Lines: []observed.Line{{PriceID: &agreement.PriceID, ProductID: &agreement.ProductID, Description: agreement.Description,
@@ -334,7 +351,7 @@ func (h *Handler) recordPullAttempt(ctx context.Context, row *models.SolanaSubsc
 	}); err != nil {
 		return err
 	}
-	return failpoint.Hit(ctx, failpoint.Site{Point: failpoint.AfterAttempt, Kind: Type, Operation: pullIntent, Subscription: row.SubscriptionID})
+	return failpoint.Hit(ctx, failpoint.Site{Point: failpoint.AfterAttempt, Kind: solanasubs.PullType, Operation: pullIntent, Subscription: row.SubscriptionID})
 }
 
 // resolvePlan loads the on-chain pull amount + period + fingerprint and the fiat

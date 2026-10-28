@@ -237,20 +237,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add delinquency worker: %w", err)
 	}
-	// Solana recurring cranker: only a deployment with a cranker pulls.
-	if r.SolanaCranker != nil {
-		solanaCrankWorker := &riverjobs.SolanaCrankWorker{
-			DB:     r.DB,
-			Config: r.Config,
-			Clock:  clock,
-			// Pulls run as durable solana_pull intents through the shared registry.
-			Intents:  r.intentRunner(intentRegistry, clock),
-			Balances: r.SolanaCrankerBalances,
-		}
-		if err := addWorker(workers, solanaCrankWorker); err != nil {
-			return fmt.Errorf("add solana cranker worker: %w", err)
-		}
-	}
 	return nil
 }
 
@@ -316,6 +302,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	solanaPull := pull.Handler{DB: r.DB, Clock: clock, Lifecycle: r.SubscriptionLifecycleService, Store: intents.NewStore(r.DB)}
 	if r.SolanaCranker != nil {
 		solanaPull.Cranker = r.SolanaCranker
+		solanaPull.Gas = r.checkSolanaCrankerGas
 	}
 	if r.SolanaRPCResolver != nil {
 		solanaPull.Chain = r.SolanaRPCResolver.ChainReader()
@@ -417,8 +404,6 @@ func (r *Runtime) declares(gate riverjobs.Gate) bool {
 	switch gate {
 	case riverjobs.WithUsageBilling:
 		return r.Config != nil && r.Config.UsageBillingEnabled
-	case riverjobs.WithSolanaCranker:
-		return r.SolanaCranker != nil
 	}
 	return true
 }

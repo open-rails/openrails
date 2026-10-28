@@ -76,8 +76,8 @@ solana:
   the key, or create a new Transit key and list it.
 
 Crankers sign on whichever network each Solana PSP names, so each needs SOL
-there for fees. The optional `openrails_solana_crankers` probe and the scheduled
-operator alert warn below 0.05 SOL. They check the publishing cranker before
+there for fees. The optional `openrails_solana_crankers` probe and the operator
+alert raised after a pull a cranker signed warn below 0.05 SOL. They check the publishing cranker before
 its first subscription, and older plan owners while their subscriptions remain
 active, using each obligation's own merchant and configured PSP network (including archived
 PSPs). Unused keys do not need funding merely because they are listed.
@@ -88,8 +88,7 @@ cranker. The threshold is an operational warning, not a guarantee of a number
 of future payments. Successful network and balance checks are reused for up to
 five minutes, with a fresh check after the target or RPC configuration changes.
 A failed check reports an unknown balance, never a zero balance or an expired
-healthy result. The scheduled alert retries failed checks, while a low balance
-alone does not trigger immediate job retries. These warnings never fail the
+healthy result. The next signed pull checks again. These warnings never fail the
 engine's mandatory readiness check or alter customer access. There is no
 automatic top-up.
 
@@ -245,11 +244,15 @@ only, across every merchant and PSP.
 - **Delegate revoked** (the subscriber revokes the SPL token delegation in their
   wallet) → pulls can never succeed again; OpenRails treats it as terminal and
   cancels the subscription. No dunning.
+- **Each period's pull is its own operation**, scheduled by the write that
+  makes it due (enrollment, a renewal, a declined pull's retry, a resume) one
+  minute after the period end: the chain's clock may lag. A pull the chain
+  refuses because its clock has not reached the period end is retried once it
+  has, never taken as a period already paid.
 - **RPC/gas failures** are operational: the pull's operation retries on its own
-  backoff, never held against the subscriber. A crank pass starts only
-  episodes that have no operation yet, merchants taking turns; an episode
-  whose operation ended without advancing the subscription (a period already
-  paid on chain) waits for the operator its finding names.
+  backoff, never held against the subscriber. An episode whose operation ended
+  without advancing the subscription (a period already paid on chain) waits
+  for the operator its finding names.
 - **Cancellation is pending until the paid period ends and needs no wallet.**
   `POST /v1/me/subscriptions/{id}/cancel` records it immediately and stops the
   cranker from pulling another renewal. Paid access continues until the period
@@ -296,10 +299,10 @@ when live pricing is unavailable, so they never require a price feed.
 ### Operational notes
 
 - Recurring pulls are system-initiated provider writes: under
-  `provider_write_mode: limited` or `readonly` the crank skips that merchant.
-  When you return to `full`, each subscription gets exactly one pull
-  (see "missed periods" above) — there is no catch-up billing. Without a
-  cranker no crank is scheduled.
+  `provider_write_mode: limited` or `readonly` a merchant's pulls park and are
+  re-checked every few minutes. When you return to `full`, each subscription
+  gets exactly one pull (see "missed periods" above) — there is no catch-up
+  billing. Without a cranker the pulls park.
 - Keep the crankers topped up with SOL; the gas monitor warns below
   ~0.05 SOL (~10k pulls of runway). A pull that fails for lack of gas is
   retried, not dunned.

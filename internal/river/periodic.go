@@ -17,8 +17,6 @@ const (
 	Always Gate = iota
 	// WithUsageBilling: on hosts that enable usage billing.
 	WithUsageBilling
-	// WithSolanaCranker: on deployments with a Solana cranker.
-	WithSolanaCranker
 )
 
 // Periodic is one recurring pass, queued by its Args' InsertOpts. Its kind is
@@ -51,7 +49,6 @@ var Periodics = []Periodic{
 	{Args: ConvergeSweepArgs{}, Every: ConvergeSweepInterval},
 	{Args: NMIHistoryArgs{}, Every: NMIHistoryInterval},
 	{Args: CleanupExpiredDataArgs{}, Every: CleanupInterval},
-	{Args: SolanaCrankArgs{}, Every: SolanaCrankInterval, Gate: WithSolanaCranker},
 	{Args: StripeWebhookReconcileArgs{}, Every: StripeWebhookReconcileInterval},
 	// Each fleet flushes the closed hours of its own Redis's denial counters.
 	{Args: AdmissionDenialFlushArgs{}, Every: AdmissionDenialFlushInterval, PerFleet: true},

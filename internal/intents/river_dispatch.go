@@ -3,34 +3,14 @@ package intents
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/intents/wake"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/riverqueue/river"
 )
-
-const OperationJobKind = "openrails.provider_operation"
-
-// OperationArgs carries identities only. The ledger decides what is authorized.
-type OperationArgs struct {
-	MerchantID uuid.UUID `json:"merchant_id" river:"unique"`
-	IntentID   uuid.UUID `json:"intent_id" river:"unique"`
-}
-
-func (OperationArgs) Kind() string { return OperationJobKind }
-
-func operationInsertOpts(at time.Time) *river.InsertOpts {
-	return &river.InsertOpts{Queue: "billing", ScheduledAt: at,
-		// Business/infra waiting uses Snooze (which does not consume attempts).
-		// Leave maximal room for River's crash rescue; never use its usual finite
-		// provider-error retry budget to abandon an accepted financial operation.
-		MaxAttempts: math.MaxInt16,
-	}
-}
 
 func OperationTerminal(status string) bool {
 	switch status {
@@ -78,7 +58,7 @@ func (s *Store) WakeOperation(ctx context.Context, id uuid.UUID, now time.Time) 
 		if _, err := s.db.NewWithPgxTx(tx).Gen(ctx).AdvanceProviderIntentVerification(ctx, gen.AdvanceProviderIntentVerificationParams{MerchantID: row.MerchantID, ID: row.ID, Now: now}); err != nil {
 			return err
 		}
-		_, err = s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(now))
+		_, err = s.db.InsertRiverJobTx(ctx, tx, wake.Args{MerchantID: row.MerchantID, IntentID: row.ID}, wake.Opts(now))
 		return err
 	})
 }
@@ -114,7 +94,7 @@ func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, transition 
 		if ManualPaymentMethodDelete(row) {
 			return nil
 		}
-		_, err = s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: mid.UUID(), IntentID: id}, operationInsertOpts(at.UTC()))
+		_, err = s.db.InsertRiverJobTx(ctx, tx, wake.Args{MerchantID: mid.UUID(), IntentID: id}, wake.Opts(at))
 		return err
 	}
 	hook, _ := ctx.Value(successorCommitContextKey{}).(successorCommitHook)

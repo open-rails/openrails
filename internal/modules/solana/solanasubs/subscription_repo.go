@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -47,8 +46,9 @@ func solanaSubscriptionFromGen(s gen.BillingSolanaSubscription) *models.SolanaSu
 }
 
 // Upsert inserts the row or, if one already exists for the subscription PDA,
-// refreshes its mutable identity/state. Idempotent on subscription_pda so the
-// enroll-confirmation poller can run at-least-once safely.
+// refreshes its mutable identity/state, and schedules its due pull. Idempotent
+// on subscription_pda so the enroll-confirmation poller can run at-least-once
+// safely.
 func (r *SolanaSubscriptionRepo) Upsert(ctx context.Context, s *models.SolanaSubscription) error {
 	if s == nil {
 		return errors.New("solana subscription is nil")
@@ -71,9 +71,15 @@ func (r *SolanaSubscriptionRepo) Upsert(ctx context.Context, s *models.SolanaSub
 	if s.Status == "" {
 		s.Status = models.SolanaSubscriptionActive
 	}
-	return r.db.Gen(ctx).UpsertSolanaSubscription(ctx, gen.UpsertSolanaSubscriptionParams{
+	return r.write(ctx, scope.UUID(), s.ID, func(ctx context.Context, q *gen.Queries) error {
+		return r.upsert(ctx, q, scope.UUID(), s)
+	})
+}
+
+func (r *SolanaSubscriptionRepo) upsert(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, s *models.SolanaSubscription) error {
+	if err := q.UpsertSolanaSubscription(ctx, gen.UpsertSolanaSubscriptionParams{
 		ID:                       s.ID,
-		MerchantID:               scope.UUID(),
+		MerchantID:               merchantID,
 		SubscriptionID:           s.SubscriptionID,
 		SubscriberWallet:         s.SubscriberWallet,
 		AuthorityPda:             s.AuthorityPDA,
@@ -89,7 +95,16 @@ func (r *SolanaSubscriptionRepo) Upsert(ctx context.Context, s *models.SolanaSub
 		Status:                   s.Status,
 		CreatedAt:                s.CreatedAt,
 		UpdatedAt:                s.UpdatedAt,
-	})
+	}); err != nil {
+		return err
+	}
+	// A conflict keeps the stored row's id; the episode is scheduled on it.
+	stored, err := q.GetSolanaSubscriptionByPDA(ctx, gen.GetSolanaSubscriptionByPDAParams{MerchantID: merchantID, SubscriptionPda: s.SubscriptionPDA})
+	if err != nil {
+		return err
+	}
+	s.ID = stored.ID
+	return nil
 }
 
 // UpsertTx persists a mirror row through the caller's transaction.
@@ -126,64 +141,42 @@ func (r *SolanaSubscriptionRepo) GetBySubscriptionID(ctx context.Context, subscr
 	return solanaSubscriptionFromGen(row), nil
 }
 
-// ListDuePulls returns the crank's due pull episodes across merchants, the
-// merchants taking turns, leaving out held merchants and episodes another
-// operation owns. `limit` caps the batch.
-func (r *SolanaSubscriptionRepo) ListDuePulls(ctx context.Context, now time.Time, held []uuid.UUID, limit int) ([]*models.SolanaSubscription, error) {
-	limit32, err := safecast.Convert[int32](limit)
-	if err != nil {
-		return nil, err
-	}
-	if held == nil {
-		held = []uuid.UUID{}
-	}
-	rows, err := r.db.GenDirectory().ListDueSolanaPulls(ctx, gen.ListDueSolanaPullsParams{Now: now.UTC(), HeldMerchants: held, PageLimit: limit32})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*models.SolanaSubscription, 0, len(rows))
-	for _, row := range rows {
-		sub := solanaSubscriptionFromGen(row.BillingSolanaSubscription)
-		sub.PspID = row.PspID
-		out = append(out, sub)
-	}
-	return out, nil
-}
-
 // AdvanceAfterPull records a confirmed pull: stamps the signature + period start
-// and moves next_pull_at forward. Source of truth for "paid through" is the
-// confirmed pull, not wall-clock.
+// and moves next_pull_at forward, scheduling the next period's pull. Source of
+// truth for "paid through" is the confirmed pull, not wall-clock.
 func (r *SolanaSubscriptionRepo) AdvanceAfterPull(ctx context.Context, id, subscriptionID uuid.UUID, episodeAt, periodStart time.Time, signature string, nextPullAt time.Time) error {
 	ps := periodStart.UTC()
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return r.db.Gen(ctx).AdvanceSolanaSubscriptionAfterPull(ctx, gen.AdvanceSolanaSubscriptionAfterPullParams{
-		MerchantID:     scopeMerchantID.UUID(),
-		ID:             id,
-		SubscriptionID: subscriptionID, EpisodeAt: episodeAt.UTC(),
-		LastPulledPeriodStartsAt: &ps,
-		LastSignature:            &signature,
-		NextPullAt:               nextPullAt.UTC(),
-		UpdatedAt:                time.Now().UTC(),
+	return r.write(ctx, scopeMerchantID.UUID(), id, func(ctx context.Context, q *gen.Queries) error {
+		return q.AdvanceSolanaSubscriptionAfterPull(ctx, gen.AdvanceSolanaSubscriptionAfterPullParams{
+			MerchantID:     scopeMerchantID.UUID(),
+			ID:             id,
+			SubscriptionID: subscriptionID, EpisodeAt: episodeAt.UTC(),
+			LastPulledPeriodStartsAt: &ps,
+			LastSignature:            &signature,
+			NextPullAt:               nextPullAt.UTC(),
+			UpdatedAt:                time.Now().UTC(),
+		})
 	})
 }
 
-// SetNextPullAt reschedules the next pull without recording a payment — used on
-// a failed crank to align the next attempt with the dunning retry cadence (so
-// the hourly worker doesn't re-attempt + re-fail every hour, collapsing the
-// multi-day dunning window).
+// SetNextPullAt reschedules the next pull without recording a payment: a
+// declined pull's next attempt is the membership's dunning retry.
 func (r *SolanaSubscriptionRepo) SetNextPullAt(ctx context.Context, id uuid.UUID, nextPullAt time.Time) error {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return r.db.Gen(ctx).SetSolanaSubscriptionNextPullAt(ctx, gen.SetSolanaSubscriptionNextPullAtParams{
-		MerchantID: scopeMerchantID.UUID(),
-		ID:         id,
-		NextPullAt: nextPullAt.UTC(),
-		UpdatedAt:  time.Now().UTC(),
+	return r.write(ctx, scopeMerchantID.UUID(), id, func(ctx context.Context, q *gen.Queries) error {
+		return q.SetSolanaSubscriptionNextPullAt(ctx, gen.SetSolanaSubscriptionNextPullAtParams{
+			MerchantID: scopeMerchantID.UUID(),
+			ID:         id,
+			NextPullAt: nextPullAt.UTC(),
+			UpdatedAt:  time.Now().UTC(),
+		})
 	})
 }
 
@@ -240,17 +233,20 @@ func (r *SolanaSubscriptionRepo) listActiveMerchantWalletsScoped(ctx context.Con
 	return out, nil
 }
 
-// SetStatus transitions the on-chain record's lifecycle (canceled/expired).
+// SetStatus transitions the on-chain record's lifecycle: canceled or expired
+// stops its pulls; active (a resume) schedules its due one again.
 func (r *SolanaSubscriptionRepo) SetStatus(ctx context.Context, id uuid.UUID, status string) error {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return r.db.Gen(ctx).SetSolanaSubscriptionStatus(ctx, gen.SetSolanaSubscriptionStatusParams{
-		MerchantID: scopeMerchantID.UUID(),
-		ID:         id,
-		Status:     status,
-		UpdatedAt:  time.Now().UTC(),
+	return r.write(ctx, scopeMerchantID.UUID(), id, func(ctx context.Context, q *gen.Queries) error {
+		return q.SetSolanaSubscriptionStatus(ctx, gen.SetSolanaSubscriptionStatusParams{
+			MerchantID: scopeMerchantID.UUID(),
+			ID:         id,
+			Status:     status,
+			UpdatedAt:  time.Now().UTC(),
+		})
 	})
 }
 

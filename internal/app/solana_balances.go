@@ -8,9 +8,12 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 )
@@ -118,4 +121,29 @@ func (r *Runtime) merchantCrankerBalances(ctx context.Context, mid billing.Merch
 		balances = append(balances, solanamodule.CrankerBalance{MerchantID: mid, PSPID: t.psp, Wallet: t.wallet, Network: network, Lamports: balance})
 	}
 	return balances, errors.Join(errs...)
+}
+
+// checkSolanaCrankerGas raises or resolves the low-gas finding of each cranker
+// wallet that signs mid's pulls, after one signed. A wallet whose balance
+// cannot be read keeps its finding.
+func (r *Runtime) checkSolanaCrankerGas(ctx context.Context, mid billing.MerchantID) {
+	// The chain reads hold no connection; only the findings do.
+	balances, err := r.SolanaCrankerBalances(merchant.WithID(ctx, mid))
+	if len(balances) > 0 {
+		now := time.Now()
+		if r.Clock != nil {
+			now = r.Clock.Now()
+		}
+		err = errors.Join(err, r.DB.RunInMerchantScope(ctx, mid, "solana cranker gas", func(mctx context.Context) error {
+			var errs error
+			for _, b := range balances {
+				errs = errors.Join(errs, alerting.RecordCrankerGas(mctx, r.DB, now, alerting.CrankerGas{
+					PSPID: b.PSPID, Wallet: b.Wallet.String(), Network: b.Network, Lamports: b.Lamports, Threshold: solanamodule.CrankerWarningLamports}))
+			}
+			return errs
+		}))
+	}
+	if err != nil {
+		log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("Solana cranker: gas check failed")
+	}
 }

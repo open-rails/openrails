@@ -49,6 +49,42 @@ func (q *Queries) AdvanceSolanaSubscriptionAfterPull(ctx context.Context, arg Ad
 	return err
 }
 
+const getSolanaPullEpisode = `-- name: GetSolanaPullEpisode :one
+SELECT s.id, s.subscription_id, s.subscription_pda, s.next_pull_at, sub.psp_id
+FROM billing.solana_subscriptions s
+JOIN billing.subscriptions sub ON sub.merchant_id = s.merchant_id AND sub.id = s.subscription_id
+WHERE s.merchant_id = $1::uuid AND s.id = $2::uuid AND s.status = 'active'
+  AND sub.deleted_at IS NULL AND sub.status <> 'canceled'
+`
+
+type GetSolanaPullEpisodeParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+type GetSolanaPullEpisodeRow struct {
+	ID              uuid.UUID
+	SubscriptionID  uuid.UUID
+	SubscriptionPda string
+	NextPullAt      time.Time
+	PspID           uuid.UUID
+}
+
+// The row's due pull episode and the PSP it pulls on: an active row whose
+// subscription is live. None is no pull to schedule.
+func (q *Queries) GetSolanaPullEpisode(ctx context.Context, arg GetSolanaPullEpisodeParams) (GetSolanaPullEpisodeRow, error) {
+	row := q.db.QueryRow(ctx, getSolanaPullEpisode, arg.MerchantID, arg.ID)
+	var i GetSolanaPullEpisodeRow
+	err := row.Scan(
+		&i.ID,
+		&i.SubscriptionID,
+		&i.SubscriptionPda,
+		&i.NextPullAt,
+		&i.PspID,
+	)
+	return i, err
+}
+
 const getSolanaSubscriptionByPDA = `-- name: GetSolanaSubscriptionByPDA :one
 SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature, next_pull_at, status, created_at, updated_at, treasury FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = $2::uuid AND subscription_pda = $1
 `
@@ -161,84 +197,6 @@ func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context, merchantI
 	return items, nil
 }
 
-const listDueSolanaPulls = `-- name: ListDueSolanaPulls :many
-WITH due AS (
-    SELECT s.merchant_id, s.id, sub.psp_id,
-           row_number() OVER (PARTITION BY s.merchant_id ORDER BY s.next_pull_at, s.id) AS turn
-    FROM billing.solana_subscriptions s
-    JOIN billing.subscriptions sub ON sub.merchant_id = s.merchant_id AND sub.id = s.subscription_id
-    WHERE s.status = 'active' AND s.next_pull_at <= $2::timestamptz
-      AND sub.deleted_at IS NULL AND sub.status <> 'canceled'
-      AND s.merchant_id <> ALL($3::uuid[])
-      AND NOT EXISTS (
-          SELECT 1 FROM billing.provider_intents i
-          WHERE i.merchant_id = s.merchant_id
-            AND i.idempotency_key = 'solana_pull:' || s.id::text || ':' || floor(extract(epoch FROM s.next_pull_at))::bigint::text
-            AND i.status NOT IN ('superseded', 'expired'))
-)
-SELECT s.id, s.merchant_id, s.subscription_id, s.subscriber_wallet, s.authority_pda, s.subscription_pda, s.plan_pda, s.merchant_address, s.mint, s.plan_created_at_fingerprint, s.last_pulled_period_starts_at, s.last_signature, s.next_pull_at, s.status, s.created_at, s.updated_at, s.treasury, due.psp_id
-FROM due
-JOIN billing.solana_subscriptions s ON s.merchant_id = due.merchant_id AND s.id = due.id
-ORDER BY due.turn, s.next_pull_at, s.id
-LIMIT $1::int
-`
-
-type ListDueSolanaPullsParams struct {
-	PageLimit     int32
-	Now           time.Time
-	HeldMerchants []uuid.UUID
-}
-
-type ListDueSolanaPullsRow struct {
-	BillingSolanaSubscription BillingSolanaSubscription
-	PspID                     uuid.UUID
-}
-
-// CROSS-MERCHANT: the crank's due pull episodes, merchants taking turns (each
-// one's oldest, then each one's next), so no merchant's backlog holds back
-// another's renewals. An episode that has an operation is owned by it: an open
-// one by its dispatcher, a final one that did not advance the row by the
-// operator its finding names. Superseded and expired operations revive on
-// enqueue. The key is SolanaPullIdempotencyKey.
-func (q *Queries) ListDueSolanaPulls(ctx context.Context, arg ListDueSolanaPullsParams) ([]ListDueSolanaPullsRow, error) {
-	rows, err := q.db.Query(ctx, listDueSolanaPulls, arg.PageLimit, arg.Now, arg.HeldMerchants)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListDueSolanaPullsRow
-	for rows.Next() {
-		var i ListDueSolanaPullsRow
-		if err := rows.Scan(
-			&i.BillingSolanaSubscription.ID,
-			&i.BillingSolanaSubscription.MerchantID,
-			&i.BillingSolanaSubscription.SubscriptionID,
-			&i.BillingSolanaSubscription.SubscriberWallet,
-			&i.BillingSolanaSubscription.AuthorityPda,
-			&i.BillingSolanaSubscription.SubscriptionPda,
-			&i.BillingSolanaSubscription.PlanPda,
-			&i.BillingSolanaSubscription.MerchantAddress,
-			&i.BillingSolanaSubscription.Mint,
-			&i.BillingSolanaSubscription.PlanCreatedAtFingerprint,
-			&i.BillingSolanaSubscription.LastPulledPeriodStartsAt,
-			&i.BillingSolanaSubscription.LastSignature,
-			&i.BillingSolanaSubscription.NextPullAt,
-			&i.BillingSolanaSubscription.Status,
-			&i.BillingSolanaSubscription.CreatedAt,
-			&i.BillingSolanaSubscription.UpdatedAt,
-			&i.BillingSolanaSubscription.Treasury,
-			&i.PspID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listDueSolanaSubscriptions = `-- name: ListDueSolanaSubscriptions :many
 SELECT s.id, s.merchant_id, s.subscription_id, s.subscriber_wallet, s.authority_pda, s.subscription_pda, s.plan_pda, s.merchant_address, s.mint, s.plan_created_at_fingerprint, s.last_pulled_period_starts_at, s.last_signature, s.next_pull_at, s.status, s.created_at, s.updated_at, s.treasury, sub.psp_id
 FROM billing.solana_subscriptions s
@@ -261,8 +219,7 @@ type ListDueSolanaSubscriptionsRow struct {
 	PspID                     uuid.UUID
 }
 
-// The crank's recurring-pull intent names the PSP it executes against; the
-// local subscription carries it.
+// The merchant's subscriptions due a pull, each with the PSP it pulls on.
 // A subscription a prune tombstoned is not due: the join is a live read. The
 // parent terminal guard is defence in depth should a cascade leave its mirror
 // active.

@@ -1,5 +1,5 @@
-// Package pull executes Solana recurring pulls: the solana_pull intent the
-// crank posts for each due subscription.
+// Package pull executes Solana recurring pulls: the solana_pull operation each
+// due subscription period is scheduled as.
 package pull
 
 import (
@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -28,26 +29,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// Type is the recurring on-chain pull: one durable intent per
-// (subscription row, period anchor). The signed tx signature is persisted
-// onto the intent before submission, so a crash between submit and record
-// resolves by reading the chain for that signature and running the renewal
-// repair, never a subscriber who paid on-chain and got nothing.
-const Type = "solana_pull"
-
-// IdempotencyKey addresses one pull episode: the anchor is the
-// row's persisted next_pull_at, which only advances when the period resolves
-// (renewal, dunning reschedule, already-paid advance).
-func IdempotencyKey(rowID uuid.UUID, nextPullAt time.Time) string {
-	return fmt.Sprintf("%s:%s:%d", Type, rowID, nextPullAt.UTC().Unix())
-}
-
-// Payload is the stored payload for Type.
+// Payload is the stored payload of a solana_pull operation: the episode it was scheduled with,
+// and the agreement an attempt froze.
 type Payload struct {
-	Agreement       *Agreement `json:"agreement,omitempty"`
-	SubscriptionPDA string     `json:"subscription_pda"`
-	RowID           uuid.UUID  `json:"row_id"`
-	NextPullAt      time.Time  `json:"next_pull_at"`
+	Agreement *Agreement `json:"agreement,omitempty"`
+	solanasubs.PullEpisode
 }
 
 // ChainReader is the chain-read surface the verify leg needs (satisfied by
@@ -67,6 +53,9 @@ type Handler struct {
 	Store     *intents.Store // pre-submit signature write-ahead
 	Chain     ChainReader    // nil leaves recorded transactions unresolved
 	Policy    intents.BackoffPolicy
+	// Gas checks the merchant's cranker wallets after a pull it signed paid
+	// its fee: a low one raises its finding, a funded one resolves it.
+	Gas func(context.Context, billing.MerchantID)
 }
 
 // NewHandler builds the pull handler with the default backoff.
@@ -82,7 +71,7 @@ func (h *Handler) now() time.Time {
 	return time.Now().UTC()
 }
 
-func (h *Handler) Type() string { return Type }
+func (h *Handler) Type() string { return solanasubs.PullType }
 
 // The accepted financial agreement and signed execution contain no secrets.
 // They remain the immutable replay/repair authority after settlement.
@@ -208,7 +197,7 @@ func (h *Handler) Execute(ctx context.Context, intent gen.BillingProviderIntent)
 		if h.Store == nil {
 			return errors.New("intent store unavailable for signature write-ahead")
 		}
-		site := failpoint.Site{Point: failpoint.BeforeInline, Kind: Type, Operation: intent.ID, Subscription: row.SubscriptionID}
+		site := failpoint.Site{Point: failpoint.BeforeInline, Kind: solanasubs.PullType, Operation: intent.ID, Subscription: row.SubscriptionID}
 		if err := failpoint.Hit(ctx, site); err != nil {
 			return err
 		}
@@ -256,6 +245,9 @@ func (h *Handler) Execute(ctx context.Context, intent gen.BillingProviderIntent)
 	// so the stamped pull is chain-recognizable even if every local send
 	// record is lost.
 	outcome, crankErr := h.crankOne(ctx, repo, &p.Agreement.Row, p.Agreement.plan(), intent.ID, presubmit)
+	if recorded != "" && h.Gas != nil {
+		h.Gas(ctx, billing.MerchantID(intent.MerchantID))
+	}
 	if crankErr != nil {
 		if errors.Is(crankErr, errPullEpisodeOver) {
 			return intents.TerminalWithEvidence(errPullEpisodeOver.Error(), map[string]any{"not_executed": true})
@@ -281,7 +273,7 @@ func (h *Handler) Execute(ctx context.Context, intent gen.BillingProviderIntent)
 	}
 	switch outcome.kind {
 	case crankSucceeded:
-		if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.AfterProvider, Kind: Type, Operation: intent.ID, Subscription: row.SubscriptionID}); err != nil {
+		if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.AfterProvider, Kind: solanasubs.PullType, Operation: intent.ID, Subscription: row.SubscriptionID}); err != nil {
 			return intents.Ambiguous("pull landed before settlement: " + err.Error())
 		}
 		intent.ResultEvidence, _ = json.Marshal(map[string]any{"transaction_id": outcome.signature, "execution": execution})
@@ -290,6 +282,12 @@ func (h *Handler) Execute(ctx context.Context, intent gen.BillingProviderIntent)
 		evidence["transaction_id"] = recorded
 		return intents.TerminalWithEvidence(outcome.reason, evidence)
 
+	case crankNotDue:
+		// crankOne proved the signed pull reverted.
+		if err := h.recordRevertedSignature(ctx, intent.ID, recorded); err != nil {
+			return intents.Parked(err.Error())
+		}
+		return intents.Deferred(outcome.reason, outcome.retryAt)
 	case crankGhostExpired, crankCanceled, crankDunned:
 		if recorded != "" {
 			_, verdict := h.checkSignature(ctx, recorded)

@@ -28,8 +28,7 @@ SELECT * FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_i
 SELECT * FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = $1;
 
 -- name: ListDueSolanaSubscriptions :many
--- The crank's recurring-pull intent names the PSP it executes against; the
--- local subscription carries it.
+-- The merchant's subscriptions due a pull, each with the PSP it pulls on.
 SELECT sqlc.embed(s), sub.psp_id
 FROM billing.solana_subscriptions s
 JOIN billing.subscriptions sub ON sub.id = s.subscription_id
@@ -42,32 +41,14 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.merchant_id = sqlc.arg
 ORDER BY s.merchant_id ASC, s.next_pull_at ASC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0);
 
--- name: ListDueSolanaPulls :many
--- CROSS-MERCHANT: the crank's due pull episodes, merchants taking turns (each
--- one's oldest, then each one's next), so no merchant's backlog holds back
--- another's renewals. An episode that has an operation is owned by it: an open
--- one by its dispatcher, a final one that did not advance the row by the
--- operator its finding names. Superseded and expired operations revive on
--- enqueue. The key is SolanaPullIdempotencyKey.
-WITH due AS (
-    SELECT s.merchant_id, s.id, sub.psp_id,
-           row_number() OVER (PARTITION BY s.merchant_id ORDER BY s.next_pull_at, s.id) AS turn
-    FROM billing.solana_subscriptions s
-    JOIN billing.subscriptions sub ON sub.merchant_id = s.merchant_id AND sub.id = s.subscription_id
-    WHERE s.status = 'active' AND s.next_pull_at <= sqlc.arg(now)::timestamptz
-      AND sub.deleted_at IS NULL AND sub.status <> 'canceled'
-      AND s.merchant_id <> ALL(sqlc.arg(held_merchants)::uuid[])
-      AND NOT EXISTS (
-          SELECT 1 FROM billing.provider_intents i
-          WHERE i.merchant_id = s.merchant_id
-            AND i.idempotency_key = 'solana_pull:' || s.id::text || ':' || floor(extract(epoch FROM s.next_pull_at))::bigint::text
-            AND i.status NOT IN ('superseded', 'expired'))
-)
-SELECT sqlc.embed(s), due.psp_id
-FROM due
-JOIN billing.solana_subscriptions s ON s.merchant_id = due.merchant_id AND s.id = due.id
-ORDER BY due.turn, s.next_pull_at, s.id
-LIMIT sqlc.arg(page_limit)::int;
+-- name: GetSolanaPullEpisode :one
+-- The row's due pull episode and the PSP it pulls on: an active row whose
+-- subscription is live. None is no pull to schedule.
+SELECT s.id, s.subscription_id, s.subscription_pda, s.next_pull_at, sub.psp_id
+FROM billing.solana_subscriptions s
+JOIN billing.subscriptions sub ON sub.merchant_id = s.merchant_id AND sub.id = s.subscription_id
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = sqlc.arg(id)::uuid AND s.status = 'active'
+  AND sub.deleted_at IS NULL AND sub.status <> 'canceled';
 
 -- name: AdvanceSolanaSubscriptionAfterPull :exec
 UPDATE billing.solana_subscriptions SET

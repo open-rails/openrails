@@ -505,15 +505,10 @@
       "TestSolanaContracts/OR-J37-S05/insufficient_funds_for_fee"
     ],
     "OR-J37-S07": [
-      "TestSolanaCrank/OR-J37-S07/retried-pull-keeps-its-backoff-then-renews-once"
-    ],
-    "OR-J37-S08": [
-      "TestSolanaCrank/OR-J37-S08/crank-runs-only-with-a-cranker",
-      "TestSolanaCrank/OR-J37-S08/crank-runs-only-with-a-cranker/without-cranker",
-      "TestSolanaCrank/OR-J37-S08/crank-runs-only-with-a-cranker/with-cranker"
+      "TestSolanaPulls/OR-J37-S07/retried-pull-keeps-its-backoff-then-renews-once"
     ],
     "OR-J37-S09": [
-      "TestSolanaCrank/OR-J37-S09/low-cranker-gas-after-a-signed-pull-is-a-finding-until-funded"
+      "TestSolanaPulls/OR-J37-S09/low-cranker-gas-after-a-signed-pull-is-a-finding-until-funded"
     ],
     "OR-J01-S09": [
       "TestCustomerBindingContracts/OR-J01-S09/host-mapping-preserves-source-and-owned-customer-views",
@@ -569,7 +564,7 @@
       "TestBackgroundJobs/OR-J29-S07/one-merchants-failed-pass-fails-the-job-after-the-others-finish"
     ],
     "OR-J37-S06": [
-      "TestBackgroundJobs/OR-J37-S06/solana-renewal-waits-for-the-crank-before-a-missed-rebill"
+      "TestBackgroundJobs/OR-J37-S06/a-solana-renewal-whose-pull-is-still-owed-is-not-a-missed-rebill"
     ],
     "OR-J21-S05": [
       "TestBackgroundJobs/OR-J21-S05",
@@ -761,6 +756,12 @@
     ],
     "OR-J26-S54": [
       "TestUsageBillingContracts/OR-J26-S54/a-running-charge-is-billed-through-the-bill-date-before-its-daily-posting"
+    ],
+    "OR-J37-S60": [
+      "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"
+    ],
+    "OR-J37-S61": [
+      "TestSolanaPulls/OR-J37-S61/a-pull-the-chain-refuses-before-its-period-end-is-retried-not-taken-as-paid"
     ]
   },
   "suites": {
