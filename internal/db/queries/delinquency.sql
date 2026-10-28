@@ -73,21 +73,39 @@ LIMIT sqlc.arg(row_limit);
 -- name: GetOverdueOrderAggregate :one
 -- One payer's overdue aggregate — the live recompute the admission gate runs
 -- before it agrees with a stored `delinquent`, so a payer who has since settled
--- is never refused on a stale projection.
+-- is never refused on a stale projection. grace_days and amount_floor are the
+-- bound billing policy's overrides, -1 for none, resolved as
+-- ListOverdueOrderAggregates resolves them.
 --
 -- overdue_started_at is COALESCEd to `now` so the row is total: it means nothing when
 -- overdue_orders = 0, and every caller reads the count first.
-SELECT COALESCE(MIN(due_at), sqlc.arg(now)::timestamptz) AS overdue_started_at,
-       COALESCE(SUM(total - amount_paid), 0)::bigint AS overdue_amount,
-       COUNT(*)::bigint AS overdue_orders
-FROM billing.orders
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND customer_id = sqlc.arg(customer_id)
-  AND currency = sqlc.arg(currency)
-  AND origin = 'usage'
-  AND status IN ('open', 'processing')
-  AND amount_paid < total
-  AND due_at < sqlc.arg(now)::timestamptz;
+WITH pol AS (
+    SELECT (bound.body ->> 'delinquency_grace_days')::int AS grace_days,
+           (bound.body ->> 'delinquency_amount_floor')::bigint AS amount_floor
+    FROM billing.customers c
+    LEFT JOIN billing.money_settings ms
+      ON ms.merchant_id = c.merchant_id AND ms.customer_id = c.id AND ms.currency = sqlc.arg(currency)
+    CROSS JOIN LATERAL (
+        SELECT sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
+            CASE WHEN sqlc.arg(policies)::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
+            sqlc.arg(policies)::jsonb -> 'tiers' ->> ms.tier,
+            sqlc.arg(policies)::jsonb ->> 'default') AS body
+    ) bound
+    WHERE c.merchant_id = sqlc.arg(merchant_id) AND c.id = sqlc.arg(customer_id)
+)
+SELECT COALESCE(MIN(o.due_at), sqlc.arg(now)::timestamptz) AS overdue_started_at,
+       COALESCE(SUM(o.total - o.amount_paid), 0)::bigint AS overdue_amount,
+       COUNT(*)::bigint AS overdue_orders,
+       COALESCE((SELECT grace_days FROM pol), -1)::int AS grace_days,
+       COALESCE((SELECT amount_floor FROM pol), -1)::bigint AS amount_floor
+FROM billing.orders o
+WHERE o.merchant_id = sqlc.arg(merchant_id)
+  AND o.customer_id = sqlc.arg(customer_id)
+  AND o.currency = sqlc.arg(currency)
+  AND o.origin = 'usage'
+  AND o.status IN ('open', 'processing')
+  AND o.amount_paid < o.total
+  AND o.due_at < sqlc.arg(now)::timestamptz;
 
 -- name: ListNonCurrentDelinquency :many
 -- The EXIT leg: payers already parked in grace/delinquent. Small by

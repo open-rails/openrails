@@ -46,17 +46,33 @@ func (q *Queries) GetCustomerDelinquency(ctx context.Context, arg GetCustomerDel
 }
 
 const getOverdueOrderAggregate = `-- name: GetOverdueOrderAggregate :one
-SELECT COALESCE(MIN(due_at), $1::timestamptz) AS overdue_started_at,
-       COALESCE(SUM(total - amount_paid), 0)::bigint AS overdue_amount,
-       COUNT(*)::bigint AS overdue_orders
-FROM billing.orders
-WHERE merchant_id = $2
-  AND customer_id = $3
-  AND currency = $4
-  AND origin = 'usage'
-  AND status IN ('open', 'processing')
-  AND amount_paid < total
-  AND due_at < $1::timestamptz
+WITH pol AS (
+    SELECT (bound.body ->> 'delinquency_grace_days')::int AS grace_days,
+           (bound.body ->> 'delinquency_amount_floor')::bigint AS amount_floor
+    FROM billing.customers c
+    LEFT JOIN billing.money_settings ms
+      ON ms.merchant_id = c.merchant_id AND ms.customer_id = c.id AND ms.currency = $4
+    CROSS JOIN LATERAL (
+        SELECT $5::jsonb -> 'policies' -> COALESCE(
+            CASE WHEN $5::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
+            $5::jsonb -> 'tiers' ->> ms.tier,
+            $5::jsonb ->> 'default') AS body
+    ) bound
+    WHERE c.merchant_id = $2 AND c.id = $3
+)
+SELECT COALESCE(MIN(o.due_at), $1::timestamptz) AS overdue_started_at,
+       COALESCE(SUM(o.total - o.amount_paid), 0)::bigint AS overdue_amount,
+       COUNT(*)::bigint AS overdue_orders,
+       COALESCE((SELECT grace_days FROM pol), -1)::int AS grace_days,
+       COALESCE((SELECT amount_floor FROM pol), -1)::bigint AS amount_floor
+FROM billing.orders o
+WHERE o.merchant_id = $2
+  AND o.customer_id = $3
+  AND o.currency = $4
+  AND o.origin = 'usage'
+  AND o.status IN ('open', 'processing')
+  AND o.amount_paid < o.total
+  AND o.due_at < $1::timestamptz
 `
 
 type GetOverdueOrderAggregateParams struct {
@@ -64,17 +80,22 @@ type GetOverdueOrderAggregateParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
+	Policies   []byte
 }
 
 type GetOverdueOrderAggregateRow struct {
 	OverdueStartedAt *time.Time
 	OverdueAmount    int64
 	OverdueOrders    int64
+	GraceDays        int32
+	AmountFloor      int64
 }
 
 // One payer's overdue aggregate — the live recompute the admission gate runs
 // before it agrees with a stored `delinquent`, so a payer who has since settled
-// is never refused on a stale projection.
+// is never refused on a stale projection. grace_days and amount_floor are the
+// bound billing policy's overrides, -1 for none, resolved as
+// ListOverdueOrderAggregates resolves them.
 //
 // overdue_started_at is COALESCEd to `now` so the row is total: it means nothing when
 // overdue_orders = 0, and every caller reads the count first.
@@ -84,9 +105,16 @@ func (q *Queries) GetOverdueOrderAggregate(ctx context.Context, arg GetOverdueOr
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
+		arg.Policies,
 	)
 	var i GetOverdueOrderAggregateRow
-	err := row.Scan(&i.OverdueStartedAt, &i.OverdueAmount, &i.OverdueOrders)
+	err := row.Scan(
+		&i.OverdueStartedAt,
+		&i.OverdueAmount,
+		&i.OverdueOrders,
+		&i.GraceDays,
+		&i.AmountFloor,
+	)
 	return i, err
 }
 

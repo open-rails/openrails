@@ -380,6 +380,9 @@
       "TestUsageBillingContracts/OR-J26-S04/waived",
       "TestUsageBillingContracts/OR-J26-S04"
     ],
+    "OR-J26-S30": [
+      "TestUsageBillingContracts/OR-J26-S30/admission-applies-the-customers-own-delinquency-policy"
+    ],
     "OR-J27-S01": [
       "TestPublicEntitlements/OR-J27-S01/purchase-and-grant-overlap-counts-once"
     ],

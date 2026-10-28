@@ -360,14 +360,23 @@ func (s *Service) IsDelinquent(ctx context.Context, payer identity.CustomerID, c
 			return nil
 		}
 
-		policy, err := s.Policy(ctx)
+		merchantPolicy, err := s.Policy(ctx)
+		if err != nil {
+			return err
+		}
+		settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
 		if err != nil {
 			return err
 		}
 		now := s.now()
 		live, err := q.GetOverdueOrderAggregate(ctx, gen.GetOverdueOrderAggregateParams{
-			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: currency, Now: now,
+			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: currency, Now: now, Policies: settings.PoliciesParam(),
 		})
+		if err != nil {
+			return err
+		}
+		// The payer's effective policy, as the evaluation pass applies it.
+		policy, err := merchantPolicy.withOverrides(int(live.GraceDays), live.AmountFloor)
 		if err != nil {
 			return err
 		}

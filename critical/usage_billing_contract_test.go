@@ -220,4 +220,26 @@ func TestUsageBillingContracts(t *testing.T) {
 			})
 		}
 	})
+	t.Run("OR-J26-S30/admission-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
+		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
+			m := w.cfg.Merchants["alpha"]
+			m.ArrearsGraceDays = ptr(30)
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "strict", Kind: "outstanding_cap", OutstandingCapAmount: 1_000_000_000_000, DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(0))}}
+			w.cfg.Merchants["alpha"] = m
+		})
+		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{BillingPolicy: catalog.Value("strict")})
+		require.NoError(t, err)
+		oneUsage(t, a.alpha, usageInput(customer, "overdue-under-strict-policy", 3))
+		fleet := startFleet(t, a.world)
+		runUsageDue(t, fleet)
+		a.clock.Advance(24 * time.Hour)
+		runRegistered(t, fleet, "openrails.delinquency", 1)
+		require.True(t, oneUsageOrder(t, a, customer).Usage.Delinquent, "the customer's policy has no grace")
+		results, err := a.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(a.world, customer, "after-strict-grace", 500)})
+		require.NoError(t, err)
+		require.False(t, results[0].Allowed())
+		require.NotNil(t, results[0].Admission)
+		require.NotNil(t, results[0].Admission.DenyCode)
+		require.Equal(t, "delinquent_unpaid_order", *results[0].Admission.DenyCode)
+	})
 }
