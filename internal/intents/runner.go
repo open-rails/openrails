@@ -24,6 +24,7 @@ type ledger interface {
 	Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error)
 	Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error)
 	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
+	ClaimDueByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
 	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error)
 	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error)
 	ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
@@ -329,6 +330,17 @@ func (r *Runner) executeInline(ctx context.Context, row gen.BillingProviderInten
 
 // ExecuteByID runs committed work without enqueuing or changing its payload.
 func (r *Runner) ExecuteByID(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error) {
+	return r.executeByID(ctx, id, r.Store.ClaimByID)
+}
+
+// ExecuteDueByID is ExecuteByID for a scheduled wake: it claims only once the
+// next attempt is due, so a second wake of the same operation never runs it
+// before its backoff.
+func (r *Runner) ExecuteDueByID(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error) {
+	return r.executeByID(ctx, id, r.Store.ClaimDueByID)
+}
+
+func (r *Runner) executeByID(ctx context.Context, id uuid.UUID, claim func(context.Context, uuid.UUID, time.Time, time.Time) (gen.BillingProviderIntent, bool, error)) (gen.BillingProviderIntent, error) {
 	row, err := r.Store.Get(ctx, id)
 	if err != nil {
 		return gen.BillingProviderIntent{}, err
@@ -344,13 +356,14 @@ func (r *Runner) ExecuteByID(ctx context.Context, id uuid.UUID) (gen.BillingProv
 	}
 
 	now := r.now()
-	claimed, ok, err := r.Store.ClaimByID(ctx, row.ID, now, now.Add(r.lease()))
+	claimed, ok, err := claim(ctx, row.ID, now, now.Add(r.lease()))
 	if err != nil {
 		return gen.BillingProviderIntent{}, err
 	}
 	if !ok {
 		// Raced into an unclaimable state (another executor's lease, expiry
-		// sweep); the durable row stands and the scheduled pipeline owns it.
+		// sweep, not yet due); the durable row stands and the scheduled
+		// pipeline owns it.
 		return r.Store.Get(ctx, row.ID)
 	}
 

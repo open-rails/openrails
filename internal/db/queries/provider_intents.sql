@@ -111,8 +111,10 @@ WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.id = due.id
 RETURNING pi.*;
 
 -- Claims one intent for the synchronous execute path: a producer leases what it
--- just enqueued. Ignores next_attempt_at but honors the relevance window and
--- live leases; anything not claimable is left to the scheduled executor.
+-- just enqueued, ignoring next_attempt_at. due_only is a scheduled wake's claim:
+-- only once the next attempt and any hold are due, so a duplicate wake never
+-- retries early. Both honor the relevance window and live leases; anything not
+-- claimable is left to the scheduled executor.
 -- name: ClaimProviderIntentByID :one
 UPDATE billing.provider_intents pi
 SET status = 'in_flight',
@@ -125,6 +127,9 @@ WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.id = sqlc.arg(id)
         OR (pi.status = 'in_flight' AND pi.lease_expires_at IS NOT NULL AND pi.lease_expires_at <= sqlc.arg(now)::timestamptz)
       )
   AND (pi.intent_type = 'subscription_collection' OR pi.status = 'in_flight' OR (pi.status = 'pending' AND pi.attempts > 0) OR pi.expires_at IS NULL OR pi.expires_at > sqlc.arg(now)::timestamptz)
+  AND (NOT sqlc.arg(due_only)::boolean OR pi.status = 'in_flight'
+       OR (pi.next_attempt_at <= sqlc.arg(now)::timestamptz
+           AND (pi.lease_expires_at IS NULL OR pi.lease_expires_at <= sqlc.arg(now)::timestamptz)))
 RETURNING pi.*;
 
 -- Claims due unknown_needs_verify intents for the verifier. Status stays

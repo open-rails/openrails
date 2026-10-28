@@ -248,6 +248,9 @@ WHERE pi.merchant_id = $2::uuid AND pi.id = $3
         OR (pi.status = 'in_flight' AND pi.lease_expires_at IS NOT NULL AND pi.lease_expires_at <= $4::timestamptz)
       )
   AND (pi.intent_type = 'subscription_collection' OR pi.status = 'in_flight' OR (pi.status = 'pending' AND pi.attempts > 0) OR pi.expires_at IS NULL OR pi.expires_at > $4::timestamptz)
+  AND (NOT $5::boolean OR pi.status = 'in_flight'
+       OR (pi.next_attempt_at <= $4::timestamptz
+           AND (pi.lease_expires_at IS NULL OR pi.lease_expires_at <= $4::timestamptz)))
 RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.lease_expires_at, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.destructive_run_class, pi.custodian_id, pi.subject, pi.credential, pi.destructive_action_id
 `
 
@@ -256,17 +259,21 @@ type ClaimProviderIntentByIDParams struct {
 	MerchantID     uuid.UUID
 	ID             uuid.UUID
 	Now            time.Time
+	DueOnly        bool
 }
 
 // Claims one intent for the synchronous execute path: a producer leases what it
-// just enqueued. Ignores next_attempt_at but honors the relevance window and
-// live leases; anything not claimable is left to the scheduled executor.
+// just enqueued, ignoring next_attempt_at. due_only is a scheduled wake's claim:
+// only once the next attempt and any hold are due, so a duplicate wake never
+// retries early. Both honor the relevance window and live leases; anything not
+// claimable is left to the scheduled executor.
 func (q *Queries) ClaimProviderIntentByID(ctx context.Context, arg ClaimProviderIntentByIDParams) (BillingProviderIntent, error) {
 	row := q.db.QueryRow(ctx, claimProviderIntentByID,
 		arg.LeaseExpiresAt,
 		arg.MerchantID,
 		arg.ID,
 		arg.Now,
+		arg.DueOnly,
 	)
 	var i BillingProviderIntent
 	err := row.Scan(

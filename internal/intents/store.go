@@ -446,6 +446,16 @@ func (s *Store) SupersedeBySubject(ctx context.Context, intentType string, subsc
 // ok=false means the row is not claimable (terminal, expired, or leased by a
 // live executor) — the caller inspects the canonical row instead.
 func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error) {
+	return s.claimByID(ctx, id, now, leaseUntil, false)
+}
+
+// ClaimDueByID is ClaimByID for a scheduled wake: ok=false also when the next
+// attempt or a producer's hold is not yet due.
+func (s *Store) ClaimDueByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error) {
+	return s.claimByID(ctx, id, now, leaseUntil, true)
+}
+
+func (s *Store) claimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time, dueOnly bool) (gen.BillingProviderIntent, bool, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return gen.BillingProviderIntent{}, false, scopeErr
@@ -455,6 +465,7 @@ func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil tim
 		ID:             id,
 		Now:            now.UTC(),
 		LeaseExpiresAt: leaseUntil.UTC(),
+		DueOnly:        dueOnly,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

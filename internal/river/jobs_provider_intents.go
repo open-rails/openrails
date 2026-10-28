@@ -130,7 +130,7 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 		}
 		switch row.Status {
 		case intents.StatusPending, intents.StatusFailedRetryable:
-			row, err = runner.ExecuteByID(ctx, row.ID)
+			row, err = runner.ExecuteDueByID(ctx, row.ID)
 		case intents.StatusUnknownNeedsVerify:
 			row, err = runner.VerifyByID(ctx, row.ID)
 		case intents.StatusInFlight:
