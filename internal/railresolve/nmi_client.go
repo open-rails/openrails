@@ -89,7 +89,7 @@ func (a *NMIArmer) ResolveScope(ctx context.Context, mid billing.MerchantID, rai
 			return merchants.PSPScope{}, false, fmt.Errorf("load stamped PSP: %w", err)
 		}
 		if !found {
-			return merchants.PSPScope{}, false, fmt.Errorf("stamped provider account is unavailable for this merchant: %w", ErrRailNotArmed)
+			return merchants.PSPScope{}, false, errors.New("stamped provider account is unavailable for this merchant")
 		}
 		if !rails.SameRail(models.Rail(scope.Rail), models.Rail(rail)) {
 			return merchants.PSPScope{}, false, fmt.Errorf("stamped PSP %s is on rail %s, not %s", scope.ID, scope.Rail, rail)

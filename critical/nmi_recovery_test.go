@@ -212,6 +212,17 @@ func TestNMIRecovery(t *testing.T) {
 		nmiRenewalReadback(t, a, p, sub)
 		runRegistered(t, fleet, "openrails.rebill_watch", 2)
 		nmiRenewalReadback(t, a, p, sub)
+		// The renewal's attempt carries the card the provider's report names,
+		// recorded with it: no later pass fills it.
+		attempts, err := a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{SubscriptionID: sub.ID})
+		require.NoError(t, err)
+		require.NotEmpty(t, attempts.Items)
+		for _, attempt := range attempts.Items {
+			require.Equal(t, "411111", attempt.CardBIN)
+			require.NotNil(t, attempt.Card)
+			require.Equal(t, "visa", *attempt.Card.Brand)
+			require.Equal(t, "4242", *attempt.Card.Last4)
+		}
 	})
 	t.Run("OR-J15-S02", func(t *testing.T) {
 		for _, profile := range []string{"unavailable-query", "lagging-index"} {

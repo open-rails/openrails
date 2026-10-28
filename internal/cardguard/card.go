@@ -29,9 +29,9 @@ func (c *Card) secret() *cardSecret {
 }
 
 type cardSecret struct {
-	number, cvc  []byte // ASCII digits
-	month, year  int
-	brand, last4 string
+	number, cvc       []byte // ASCII digits
+	month, year       int
+	brand, bin, last4 string
 }
 
 // CardError names the card field a request got wrong. It never carries the
@@ -104,7 +104,7 @@ func newCard(number, cvc []byte, month, year int) (*Card, error) {
 	}
 	secret := &cardSecret{
 		number: number, cvc: cvc, month: month, year: year,
-		brand: BrandFromLeadingDigits(string(number[:6])), last4: string(number[len(number)-4:]),
+		brand: BrandFromLeadingDigits(string(number[:6])), bin: string(number[:6]), last4: string(number[len(number)-4:]),
 	}
 	return &Card{open: func() *cardSecret { return secret }}, nil
 }
@@ -209,12 +209,20 @@ func (Card) MarshalText() ([]byte, error)   { return []byte(Redacted), nil }
 func (Card) MarshalBinary() ([]byte, error) { return []byte(Redacted), nil }
 func (Card) LogValue() slog.Value           { return slog.StringValue(Redacted) }
 
-// Brand, LastFour and Expiry are the card's display facts: what a saved card
-// is labelled with. They survive Zero.
+// Brand, BIN, LastFour and Expiry are the card's display facts: what a saved
+// card is labelled with. They survive Zero.
 
 func (c *Card) Brand() string {
 	if s := c.secret(); s != nil {
 		return s.brand
+	}
+	return ""
+}
+
+// BIN is the card number's first six digits.
+func (c *Card) BIN() string {
+	if s := c.secret(); s != nil {
+		return s.bin
 	}
 	return ""
 }

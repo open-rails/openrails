@@ -17,7 +17,6 @@ import (
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
@@ -233,50 +232,6 @@ func TestBackgroundJobs(t *testing.T) {
 			runRegistered(t, fleet, "openrails.charge_attributions", 1)
 			require.Empty(t, unverifiedTransactions(t, w))
 		})
-	})
-	t.Run("OR-J15-S05/attempts-of-a-psp-without-credentials-are-given-up", func(t *testing.T) {
-		// NMI skips a cycle and OpenRails charges it: its own NMI attempt.
-		a, p, sub := nmiMembership(t)
-		due := *sub.CurrentPeriodEndsAt
-		p.core.EditSchedule(*sub.RailSubscriptionID, func(s *nmimock.Schedule) { s.NextBilling = due.Add(7 * 24 * time.Hour) })
-		a.clock.Advance(due.Sub(a.clock.Now()) + 25*time.Hour)
-		fleet := hostFleet(t, a.world)
-		fleet.PeriodicJobs().Clear()
-		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
-		require.NoError(t, fleet.Start(t.Context()))
-		runRegistered(t, fleet, "openrails.rebill_watch", 1)
-		runRegistered(t, fleet, "openrails.dunning", 1)
-		nmiRenewalReadback(t, a, p, sub)
-		unenriched := func() []billing.PaymentAttempt {
-			attempts, err := a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{SubscriptionID: sub.ID})
-			require.NoError(t, err)
-			var out []billing.PaymentAttempt
-			for _, attempt := range attempts.Items {
-				if attempt.Rail == "nmi" && attempt.TransactionID != "" && attempt.EnrichedAt == nil {
-					out = append(out, attempt)
-				}
-			}
-			return out
-		}
-		require.NotEmpty(t, unenriched())
-		// The merchant retires the PSP: its credentials leave the declaration.
-		require.NoError(t, fleet.StopAndCancel(t.Context()))
-		require.NoError(t, a.engine.Close(context.Background()))
-		m := a.cfg.Merchants["alpha"]
-		m.PSPs, m.CardVault = nil, ""
-		a.cfg.Merchants["alpha"] = m
-		var err error
-		a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
-		require.NoError(t, err)
-		a.alpha, err = a.engine.MerchantBySlug("alpha")
-		require.NoError(t, err)
-		a.clock.Advance(49 * time.Hour)
-		fleet = hostFleet(t, a.world)
-		fleet.PeriodicJobs().Clear()
-		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
-		require.NoError(t, fleet.Start(t.Context()))
-		runRegistered(t, fleet, "openrails.attempt_enrichment", 1)
-		require.Empty(t, unenriched(), "attempts no client can read are given up, not retried for weeks")
 	})
 	t.Run("OR-J06-S07/psp-import-commits-with-its-job", func(t *testing.T) {
 		a, _ := newNMIWorld(t)

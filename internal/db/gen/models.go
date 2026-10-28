@@ -1087,8 +1087,6 @@ type BillingPaymentAttempt struct {
 	// The issuer's raw answer (NMI processor_response_code); response_code is the gateway's.
 	IssuerCode *string
 	IssuerText *string
-	// When the row was filled from the PSP's transaction read; NULL rows are read by the enrichment pass.
-	EnrichedAt *time.Time
 	// The mandate whose references the attempt sent: a merchant-initiated charge, or a customer-present one on a stored credential.
 	MandateID *uuid.UUID
 	// The initial transaction id the attempt sent the provider, verbatim.

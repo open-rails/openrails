@@ -164,7 +164,7 @@ func applyDecisionSideEffects(ctx context.Context, database *db.DB, sub *models.
 		return 0, false, fmt.Errorf("converge: backfill %s: %w", sub.ID, err)
 	}
 	if !d.Declared {
-		if err := recordScheduleAttempts(ctx, q, sub, d.Backfill, now); err != nil {
+		if err := recordScheduleAttempts(ctx, q, sub, d.Backfill); err != nil {
 			return backfilled, false, fmt.Errorf("converge: record schedule attempts %s: %w", sub.ID, err)
 		}
 		if err := refundChargesAfterCancel(ctx, database, sub, d.Backfill, now); err != nil {

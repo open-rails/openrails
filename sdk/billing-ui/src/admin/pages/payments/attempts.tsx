@@ -216,7 +216,6 @@ export function AttemptDetailPage() {
     ["BIN", a.card_bin],
     ["Transaction", a.transaction_id],
     ["Observed via", `${a.source} · ${a.observed_via}`],
-    ["Enriched", a.enriched_at ? formatDate(a.enriched_at) : ""],
   ] as const
   return (
     <div className="flex flex-col gap-4">

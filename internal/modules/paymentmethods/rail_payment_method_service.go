@@ -343,7 +343,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	}
 	databaseDuration = time.Since(databaseStartedAt)
 	s.recordVerification(ctx, userID, pspID, req, attempts.Attempt{Approved: true, TransactionID: agreementRef, PaymentMethodID: &methodID, Step: "verify",
-		Answer: decline.Evidence{CardBrand: pm.Card.Brand, CardLast4: pm.Card.Last4}, TokenType: charge.TokenTypePSPToken})
+		Answer: decline.Evidence{CardBIN: nmi.BINOf(nmiResponse.Card.CardNumber), CardBrand: pm.Card.Brand, CardLast4: pm.Card.Last4}, TokenType: charge.TokenTypePSPToken})
 
 	outcome = "success"
 	log.WithFields(log.Fields{"user_id": userID, "vault_id": pm.RailCustomerRef}).Info("Successfully created payment method")
@@ -869,6 +869,16 @@ func (s *RailPaymentMethodService) recordVerification(ctx context.Context, userI
 	a.Kind, a.Owner, a.NewCard, a.At, a.Target = attempts.Verify, req.AttemptOwner, true, s.now(), req.AttemptTarget
 	if a.Target == "" {
 		a.Target = attempts.CardSave
+	}
+	// A card the request carried labels its own attempt.
+	if c := req.Card; c != nil {
+		a.Answer.CardBIN = c.BIN()
+		if a.Answer.CardBrand == "" {
+			a.Answer.CardBrand = c.Brand()
+		}
+		if a.Answer.CardLast4 == "" {
+			a.Answer.CardLast4 = c.LastFour()
+		}
 	}
 	if err := attempts.Record(ctx, s.DB.Gen(ctx), a); err != nil {
 		log.WithContext(ctx).WithError(err).WithField("user_id", userID).Error("record card verification attempt")

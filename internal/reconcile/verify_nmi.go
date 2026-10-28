@@ -393,7 +393,7 @@ func (v *Verifier) bulkReadPSP(ctx context.Context, mid billing.MerchantID, psp 
 			if err := refundChargesAfterCancel(ctx, v.DB, sub, txns, now); err != nil {
 				return err
 			}
-			if err := recordScheduleAttempts(attempts.ObservedVia(ctx, "pull"), q, sub, txns, now); err != nil {
+			if err := recordScheduleAttempts(attempts.ObservedVia(ctx, "pull"), q, sub, txns); err != nil {
 				return err
 			}
 		}

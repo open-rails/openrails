@@ -160,7 +160,7 @@ func (t QueryTransaction) Reversed() bool {
 func (t QueryTransaction) Evidence(a QueryAction) decline.Evidence {
 	bin := strings.TrimSpace(t.CCBin)
 	if bin == "" {
-		bin = binOf(t.CCNumber)
+		bin = BINOf(t.CCNumber)
 	}
 	return decline.Evidence{
 		Rail: "nmi", Code: strings.TrimSpace(a.ResponseCode), Text: strings.TrimSpace(a.ResponseText),
@@ -171,7 +171,9 @@ func (t QueryTransaction) Evidence(a QueryAction) decline.Evidence {
 	}
 }
 
-func binOf(masked string) string {
+// BINOf is the leading six digits of a masked card number; empty when the
+// mask hides them.
+func BINOf(masked string) string {
 	digits := ""
 	for _, r := range strings.TrimSpace(masked) {
 		if r < '0' || r > '9' {

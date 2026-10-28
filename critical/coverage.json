@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 214,
+  "scenario_count": 213,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -857,11 +857,6 @@
       "id": "OR-J06-S07",
       "journey": "J06",
       "name": "PSP import and its queued job commit together"
-    },
-    {
-      "id": "OR-J15-S05",
-      "journey": "J15",
-      "name": "NMI attempts no client can read are given up instead of failing passes"
     },
     {
       "id": "OR-J12-S08",

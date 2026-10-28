@@ -1233,7 +1233,7 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 | Convergence sweep | 15 min |
 | Rebill watch; charge-attribution read; arrears delinquency | 15 min |
 | Price-migration re-driver | 1 h |
-| Admission-denial flush (closed hours); attempt enrichment; due daily NMI history read; expired-data cleanup; idempotency cleanup; credit expiry; Solana crank; Solana Pay reference GC; Stripe webhook reconciliation | 1 h |
+| Admission-denial flush (closed hours); due daily NMI history read; expired-data cleanup; idempotency cleanup; credit expiry; Solana crank; Solana Pay reference GC; Stripe webhook reconciliation | 1 h |
 | Provider refresh scheduler (fans out per merchant) | 2 h |
 | Stored card refresh ahead of renewal | 6 h |
 | Ledger integrity audit | 24 h |

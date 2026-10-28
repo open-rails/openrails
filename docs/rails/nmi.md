@@ -212,11 +212,11 @@ closes when the subscription lands by any path. Parks are listed by
 `ListParkedSubscriptions` (`GET /v1/merchant/parked-subscriptions`). Parking
 moves no money and cancels nothing.
 
-Attempt details come from the Query API too. Every hour, NMI attempts at least
-10 minutes old are filled from the transaction report, 50 transaction ids per
-query and each attempt once: card BIN and brand, AVS/CVV the reply lacked, the
-issuer's raw answer (`processor_response_code`) and whether a network token was
-used. Attempts found by a provider read are filled from that read at once.
+An attempt records its card when it is recorded: the stored card's brand and
+last four, the BIN of a card the request carried, and AVS/CVV from the reply.
+Attempts found by a provider read take that read's transaction report: card
+BIN and brand, the issuer's raw answer (`processor_response_code`) and whether
+a network token was used.
 
 A declared charge an import could not record (a real transaction id without an
 amount) is read the same way: every 15 minutes, due attributions are read 50

@@ -83,7 +83,9 @@ type Attempt struct {
 	ObservedVia string
 	Approved    bool
 	// Answer is the PSP's code, AVS/CVV letters, text and card (Rail is set
-	// here). A card brand or last four it lacks comes from the payment method.
+	// here): the card the request carried, or the PSP's transaction report
+	// when a read supplied it. A card brand or last four it lacks comes from the
+	// payment method.
 	Answer        decline.Evidence
 	TransactionID string
 	// Amount is in micros; a verification has 0 and no currency.
@@ -99,9 +101,6 @@ type Attempt struct {
 	// Step keys an operation's attempts that carry no transaction id.
 	Step      string
 	TokenType string
-	// EnrichedAt is when Answer was read from the PSP's transaction report;
-	// zero when it is the PSP's reply to our request.
-	EnrichedAt time.Time
 	// Cycle is the rebill a rebill, dunning or customer retry belongs to.
 	Cycle *Cycle
 	// Sent is the mandate whose lineage the attempt referenced, nil for a
@@ -169,10 +168,6 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 	}
 	c := cardOf(a.Answer)
 	row.CardBin, row.CardBrand, row.CardLast4, row.AvsResult, row.CvvResult, row.IssuerCode, row.IssuerText = c.bin, c.brand, c.last4, c.avs, c.cvv, c.issuerCode, c.issuerText
-	if !a.EnrichedAt.IsZero() {
-		at := a.EnrichedAt.UTC()
-		row.EnrichedAt = &at
-	}
 	if a.Owner != "" {
 		row.Owner = string(a.Owner)
 	}
@@ -255,17 +250,6 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 		}
 	}
 	_, err := q.InsertPaymentAttempt(ctx, row)
-	return err
-}
-
-// Enrich fills an attempt from the PSP's transaction read, once and only where
-// the row is empty. A zero answer marks it read with nothing.
-func Enrich(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUID, answer decline.Evidence, at time.Time) error {
-	c := cardOf(answer)
-	_, err := q.EnrichPaymentAttempt(ctx, gen.EnrichPaymentAttemptParams{
-		MerchantID: merchantID, ID: id, EnrichedAt: at.UTC(), NetworkToken: answer.NetworkToken,
-		CardBin: c.bin, CardBrand: c.brand, CardLast4: c.last4, AvsResult: c.avs, CvvResult: c.cvv, IssuerCode: c.issuerCode, IssuerText: c.issuerText,
-	})
 	return err
 }
 

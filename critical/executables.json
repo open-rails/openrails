@@ -561,9 +561,6 @@
     "OR-J06-S07": [
       "TestBackgroundJobs/OR-J06-S07/psp-import-commits-with-its-job"
     ],
-    "OR-J15-S05": [
-      "TestBackgroundJobs/OR-J15-S05/attempts-of-a-psp-without-credentials-are-given-up"
-    ],
     "OR-J12-S08": [
       "TestStoredCardRefresh/OR-J12-S08/merchant-owned-vault",
       "TestStoredCardRefresh/OR-J12-S08/hosted-isolated-vault",

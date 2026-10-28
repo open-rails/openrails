@@ -74,11 +74,11 @@ func (f *NMIFactory) Settings(ctx context.Context, secrets merchants.MerchantSec
 		return nil, err
 	}
 	if securityKey == "" && !scope.Declared {
-		return nil, fmt.Errorf("merchant %s: %w: %w", mid.String(), scope.ErrUndeclared(), ErrRailNotArmed)
+		return nil, fmt.Errorf("merchant %s: %w", mid.String(), scope.ErrUndeclared())
 	}
 	if securityKey == "" {
 		name, _ := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, "security_key")
-		return nil, fmt.Errorf("merchant %s rail %s: secret %s missing (a declared account never falls back to boot rails): %w", mid.String(), scope.Rail, name, ErrRailNotArmed)
+		return nil, fmt.Errorf("merchant %s rail %s: secret %s missing (a declared account never falls back to boot rails)", mid.String(), scope.Rail, name)
 	}
 	webhookSecret, _ := read("webhook_signing_secret")
 	if _, err := config.CardEntry(scope.Rail, scope.Settings, scope.CustodianID != nil); err != nil {

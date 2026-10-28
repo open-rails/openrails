@@ -118,6 +118,7 @@ sql:
       - "internal/migrate/postgres/0136_manual_reconcile.up.sql"
       - "internal/migrate/postgres/0140_drop_catalog_drift.up.sql"
       - "internal/migrate/postgres/0141_purge_cleanup_job.up.sql"
+      - "internal/migrate/postgres/0142_attempts_recorded_at_insert.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

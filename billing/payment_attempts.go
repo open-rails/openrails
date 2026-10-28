@@ -27,7 +27,8 @@ type PaymentAttempt struct {
 	Action       string        `json:"action"`
 	ResponseCode string        `json:"response_code"`
 	ResponseText string        `json:"response_text"`
-	// IssuerCode and IssuerText are the issuer's raw answer, once enriched.
+	// IssuerCode and IssuerText are the issuer's raw answer, when the PSP's
+	// transaction report supplied them.
 	IssuerCode string `json:"issuer_code"`
 	IssuerText string `json:"issuer_text"`
 	AVSResult  string `json:"avs_result"`
@@ -49,7 +50,6 @@ type PaymentAttempt struct {
 	SubscriptionID  *SubscriptionID  `json:"subscription_id"`
 	PaymentMethodID *PaymentMethodID `json:"payment_method_id"`
 	PaymentID       *PaymentID       `json:"payment_id"`
-	EnrichedAt      *time.Time       `json:"enriched_at"`
 	// MandateID is the mandate whose references the attempt sent, and
 	// SentInitialTransactionID the initial transaction id it sent verbatim
 	// (empty where the provider links its own, as Stripe does).

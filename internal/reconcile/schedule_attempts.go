@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -20,7 +19,7 @@ import (
 // provider-owned one. The first charge at or after the paid period's end is
 // that cycle's rebill, later ones its retries. OpenRails' own retries share
 // these transaction ids and are recorded when they complete.
-func recordScheduleAttempts(ctx context.Context, q *gen.Queries, sub *models.Subscription, txns []RemoteTransaction, now time.Time) error {
+func recordScheduleAttempts(ctx context.Context, q *gen.Queries, sub *models.Subscription, txns []RemoteTransaction) error {
 	owner := attempts.OwnerOf(sub.CollectionPolicy)
 	if (owner != attempts.OwnerNMISchedule && owner != attempts.OwnerProvider) || sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.After(*sub.CurrentPeriodStartsAt) {
 		return nil
@@ -65,9 +64,6 @@ func recordScheduleAttempts(ctx context.Context, q *gen.Queries, sub *models.Sub
 		}
 		if owner == attempts.OwnerNMISchedule {
 			a.TokenType = charge.TokenTypePSPToken
-		}
-		if t.Answer.Rail != "" {
-			a.EnrichedAt = now // the transaction report's full answer
 		}
 		if err := attempts.Record(ctx, q, a); err != nil {
 			return err

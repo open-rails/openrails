@@ -204,12 +204,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add subscription converge worker: %w", err)
 	}
-	// NMI attempts are filled from the Query API's transaction report.
-	if err := addTrackedWorker(r, workers, &riverjobs.AttemptEnrichmentWorker{
-		DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver,
-	}); err != nil {
-		return fmt.Errorf("add attempt enrichment worker: %w", err)
-	}
 	// Each NMI PSP's own history, as monthly aggregates.
 	if err := addTrackedWorker(r, workers, &riverjobs.NMIHistoryWorker{
 		DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver,
@@ -458,15 +452,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 		riverjobs.RebillWatchInterval,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.RebillWatchArgs{}, periodPassOpts(riverjobs.RebillWatchInterval)
-		},
-		nil,
-	))
-
-	// Hourly: NMI attempts are enriched from the transaction report.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		riverjobs.AttemptEnrichmentInterval,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.AttemptEnrichmentArgs{}, periodPassOpts(riverjobs.AttemptEnrichmentInterval)
 		},
 		nil,
 	))
