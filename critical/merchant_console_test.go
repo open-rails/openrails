@@ -335,15 +335,19 @@ func TestMerchantConsole(t *testing.T) {
 		renewed := []string{iw.nmiMember(t, iw.alice.Email, "gold", "20.00", start), iw.nmiMember(t, carol.Email, "gold", "20.00", start)}
 		gone := iw.nmiMember(t, iw.bob.Email, "gold", "20.00", start)
 		since := start.Add(-24 * time.Hour)
-		iw.apply(t, iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since}).ID)
+		first := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since})
+		iw.apply(t, first.ID)
 		// NMI billed two renewals OpenRails has not seen, and deleted a schedule.
 		for _, ref := range renewed {
 			iw.renewEarly(ref)
 		}
 		iw.nmi.DeleteSchedule(gone)
 
-		consoleBrowser(t, iw.authorityWorld, map[string]any{"tokens": map[string]string{"staff": consoleOperator(t, iw.authorityWorld)}},
+		counts := consoleBrowser(t, iw.authorityWorld, map[string]any{"tokens": map[string]string{"staff": consoleOperator(t, iw.authorityWorld)}, "first": first.ID.String()},
 			nil, "console-proposals-group-approve-held-dismiss")
+		for _, step := range []string{"link", "apply"} {
+			require.Zero(t, counts["POST /v1/merchant/psp-imports/"+first.ID.String()+"/"+step], "the console offers no %s of a superseded import", step)
+		}
 
 		imports, err := iw.alpha.ListPSPImports(t.Context(), billing.PSPImportListParams{Origin: billing.PSPImportManual})
 		require.NoError(t, err)

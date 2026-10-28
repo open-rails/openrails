@@ -34,7 +34,14 @@ import {
   MapPriceDialog,
 } from "#orck/admin/pages/provider-prices/map-dialog"
 import { importProgress, recordCount } from "./progress"
-import { ProgressText, ruleText, termsText, usePSPs } from "./shared"
+import {
+  ProgressText,
+  Superseded,
+  ruleText,
+  termsText,
+  usePSPs,
+  useSuccessor,
+} from "./shared"
 
 const KINDS = ["customer", "subscription", "transaction"] as const
 const STATES = [
@@ -56,6 +63,7 @@ function ImportDetail() {
   const { importQueries } = useAdminServices()
   const psps = usePSPs()
   const { data: imp, error } = useQuery(importQueries.detail(id))
+  const newer = useSuccessor(imp)
   if (error)
     return (
       <p role="alert" className="text-destructive">
@@ -90,8 +98,9 @@ function ImportDetail() {
             )}
           </p>
         </div>
-        <ImportActions imp={imp} psp={psp} />
+        <ImportActions imp={imp} psp={psp} superseded={Boolean(newer)} />
       </div>
+      {newer && <Superseded by={newer} />}
       <Progress imp={imp} />
       <Card>
         <CardHeader>
@@ -322,7 +331,15 @@ function Plans({ imp, psp }: { imp: PSPImport; psp: PSP }) {
 
 // ImportActions re-links (after mappings or a mapped plan) and applies. Apply
 // lands only linked records and is refused while the import's job runs.
-function ImportActions({ imp, psp }: { imp: PSPImport; psp?: PSP }) {
+function ImportActions({
+  imp,
+  psp,
+  superseded,
+}: {
+  imp: PSPImport
+  psp?: PSP
+  superseded: boolean
+}) {
   const { text } = useAdminUI()
   const { importMutations, toast, toastApiError } = useAdminServices()
   const queryClient = useQueryClient()
@@ -331,7 +348,8 @@ function ImportActions({ imp, psp }: { imp: PSPImport; psp?: PSP }) {
   const apply = useMutation(importMutations.apply(queryClient))
   const [confirming, setConfirming] = React.useState(false)
   if (!canUpdate) return null
-  const ready = imp.status === "pulled" || imp.status === "applied"
+  const ready =
+    !superseded && (imp.status === "pulled" || imp.status === "applied")
   const again = imp.status === "applied"
   const word = psp?.key ?? imp.psp
   return (

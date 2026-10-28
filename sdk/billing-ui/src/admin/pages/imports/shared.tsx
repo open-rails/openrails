@@ -2,7 +2,7 @@ import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
 import { useAdminServices } from "#orck/admin/context"
 import * as React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "#orck/admin/router"
+import { Link, useNavigate } from "#orck/admin/router"
 
 import { Button } from "#orck/admin/components/ui/button"
 import {
@@ -23,7 +23,7 @@ import type {
   PSPImportRule,
   ProviderCatalogTerms,
 } from "#orck/client/generated/wire"
-import { importProgress } from "./progress"
+import { importProgress, successor } from "./progress"
 
 export const selectClass = "h-8 w-full rounded-md border bg-background px-2"
 
@@ -222,6 +222,34 @@ export function ReconcileDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// useSuccessor is the newer import of imp's PSP that supersedes it, if any.
+export function useSuccessor(imp?: PSPImport) {
+  const { importQueries } = useAdminServices()
+  const { data } = useQuery({
+    ...importQueries.list({ psp: imp?.psp }, 100),
+    enabled: Boolean(imp),
+  })
+  return imp && data ? successor(imp, data.data) : undefined
+}
+
+// Superseded says a newer pull of the PSP replaces this import: only that
+// one is linked and applied.
+export function Superseded({ by }: { by: PSPImport }) {
+  return (
+    <p
+      role="status"
+      data-testid="superseded"
+      className="border-held/40 bg-held-surface text-held rounded-md border p-3 text-sm"
+    >
+      <AdminMessage id="A newer import of this PSP supersedes this one: link and apply " />
+      <Link className="underline" to={`/ops/imports/${by.id}`}>
+        <AdminMessage id="that import" />
+      </Link>
+      .
+    </p>
   )
 }
 

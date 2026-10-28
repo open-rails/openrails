@@ -39,6 +39,19 @@ export function importProgress(imp: PSPImport): ImportProgress {
   return { phase: "history", through: imp.history_through!, percent }
 }
 
+// successor is the import that supersedes imp: the earliest later import
+// of its PSP that pulled. Link and Apply refuse a superseded import.
+export function successor(imp: PSPImport, imports: PSPImport[]) {
+  return imports
+    .filter(
+      (i) =>
+        i.psp === imp.psp &&
+        i.created_at > imp.created_at &&
+        (i.status === "pulled" || i.status === "applied")
+    )
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))[0]
+}
+
 // recordCount is how many staged records are in state, of kind when set.
 export function recordCount(
   imp: PSPImport,

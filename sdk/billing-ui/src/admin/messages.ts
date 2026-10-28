@@ -82,6 +82,8 @@ export const billingAdminMessages = {
   "A collection of this order is in progress. It must finish, or be resolved with ":
     "A collection of this order is in progress. It must finish, or be resolved with ",
   "A manual link wins over every rule.": "A manual link wins over every rule.",
+  "A newer import of this PSP supersedes this one: link and apply ":
+    "A newer import of this PSP supersedes this one: link and apply ",
   "A price going down needs no notice, so today is fine.":
     "A price going down needs no notice, so today is fine.",
   "A product is the thing a customer gets. You set what it costs afterwards, by adding a price to it.":
@@ -951,6 +953,7 @@ export const billingAdminMessages = {
   "subscription corrections": "subscription corrections",
   "subscriptions ended at the provider": "subscriptions ended at the provider",
   "subscriptions to create": "subscriptions to create",
+  "that import": "that import",
   "token.used": "token.used",
   tokens: "tokens",
   transaction: "transaction",

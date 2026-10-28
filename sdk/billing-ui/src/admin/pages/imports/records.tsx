@@ -40,7 +40,13 @@ import type {
   PSPImport,
   PSPImportRecord,
 } from "#orck/client/generated/wire"
-import { pspKey, selectClass, usePSPs } from "./shared"
+import {
+  Superseded,
+  pspKey,
+  selectClass,
+  usePSPs,
+  useSuccessor,
+} from "./shared"
 
 const STATES: PSPImportRecord["state"][] = [
   "unmatched",
@@ -74,6 +80,7 @@ function Records() {
     PSPImportRecord["kind"] | undefined
   const paging = useUrlCursor(50)
   const imp = useQuery(importQueries.detail(id)).data
+  const newer = useSuccessor(imp)
   const { data, isPending, isFetching } = useQuery(
     importQueries.records(
       id,
@@ -102,7 +109,7 @@ function Records() {
     next.delete("cursor")
     setParams(next)
   }
-  const editable = canUpdate && imp && !importBusy(imp.status)
+  const editable = canUpdate && imp && !newer && !importBusy(imp.status)
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -118,6 +125,7 @@ function Records() {
           )}
         </p>
       </div>
+      {newer && <Superseded by={newer} />}
       <div className="flex flex-wrap items-end gap-3">
         <nav className="flex gap-1" aria-label={text("Record state")}>
           {STATES.map((s) => (

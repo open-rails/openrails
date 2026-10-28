@@ -279,7 +279,21 @@ test("console-proposals-group-approve-held-dismiss", async ({
   await expect(pulls.getByRole("link", { name: "Review" })).toHaveCount(5)
   await expect(pulls.getByRole("button", { name: "Resolve" })).toHaveCount(0)
 
-  await page.goto(detail)
+  // The reconcile supersedes the first import: it says so and offers nothing.
+  const fx = await fixture<{ first: string }>(page)
+  await open(page, `/ops/imports/${fx.first}`)
+  await expect(page.getByTestId("superseded")).toContainText(
+    "A newer import of this PSP supersedes this one"
+  )
+  await expect(
+    page.getByRole("button", { name: "Apply again", exact: true })
+  ).toBeDisabled()
+  await expect(
+    page.getByRole("button", { name: "Re-link", exact: true })
+  ).toBeDisabled()
+  await page.getByTestId("superseded").getByRole("link").click()
+  await expect(page).toHaveURL(detail)
+
   await page.getByRole("button", { name: "Apply", exact: true }).click()
   await confirmTyped(page, "nmi", "Apply")
   await expect(counts).toContainText("1 open proposals")
