@@ -197,6 +197,28 @@ func checkAhead(t *testing.T, v *vaultCards, fleet *river.Client[pgx.Tx], calls 
 	}, 20*time.Second, 20*time.Millisecond)
 }
 
+// startVaultFleet starts the host fleet and waits out its startup
+// ahead-of-renewal pass, so only the passes a test runs see its steps.
+func startVaultFleet(t *testing.T, v *vaultCards) *river.Client[pgx.Tx] {
+	t.Helper()
+	fleet := startFleet(t, v.world)
+	require.Eventually(t, func() bool {
+		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.stored_card_refresh_due").States(rivertype.JobStateCompleted).First(1))
+		require.NoError(t, err)
+		return len(jobs.Jobs) == 1
+	}, 20*time.Second, 20*time.Millisecond)
+	return fleet
+}
+
+// operationsIdle reports no provider operation running or about to run: each
+// woken attempt has recorded its outcome.
+func operationsIdle(t *testing.T, fleet *river.Client[pgx.Tx]) bool {
+	t.Helper()
+	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation").States(rivertype.JobStateAvailable, rivertype.JobStateRunning).First(1))
+	require.NoError(t, err)
+	return len(jobs.Jobs) == 0
+}
+
 // driveOperations runs provider operations waiting on their backoff; the
 // caller has advanced the business clock past it.
 func driveOperations(t *testing.T, fleet *river.Client[pgx.Tx]) {
@@ -216,7 +238,7 @@ func expiredRenewal(t *testing.T, v *vaultCards, reissue btReissue) (billing.Pay
 	method := v.saveCard(t, v.aliceToken, "4111111111111111", "visa", "1111")
 	sub := v.subscribe(t, v.aliceToken, "vault-renewal", 24, 23_000_000, method)
 	v.journal.money(t, 1, 2300)
-	fleet := startFleet(t, v.world)
+	fleet := startVaultFleet(t, v)
 	checkAhead(t, v, fleet, 1)
 	require.Zero(t, noticeCount(t, v.authorityWorld, "payment_method_update_required"), "a check ahead of renewal asks nobody")
 	old := v.token(t, "1111")
@@ -313,7 +335,7 @@ func TestStoredCardRefresh(t *testing.T) {
 		waiting := v.saveCard(t, v.bobToken, "4012888888881881", "visa", "1881")
 		declined := v.subscribe(t, v.bobToken, "bob-daily", 24, 17_000_000, waiting)
 		v.journal.money(t, 2, 4000)
-		fleet := startFleet(t, v.world)
+		fleet := startVaultFleet(t, v)
 		runRegistered(t, fleet, "openrails.stored_card_refresh_due", 1)
 		require.Zero(t, refreshJobs(t, fleet), "an unarmed vault's cards are never refreshed")
 
@@ -353,14 +375,17 @@ func TestStoredCardRefresh(t *testing.T) {
 		card := v.saveCard(t, v.aliceToken, "4111111111111111", "visa", "1111")
 		sub := v.subscribe(t, v.aliceToken, "daily", 24, 23_000_000, card)
 		v.vendor.setThrottle(true)
-		fleet := startFleet(t, v.world)
+		fleet := startVaultFleet(t, v)
 		runRegistered(t, fleet, "openrails.stored_card_refresh_due", 1)
-		require.Eventually(t, func() bool { return v.vendor.throttledCalls() == 1 }, 20*time.Second, 20*time.Millisecond)
+		require.Eventually(t, func() bool {
+			return v.vendor.throttledCalls() == 1 && refreshJobs(t, fleet, rivertype.JobStateCompleted) == refreshJobs(t, fleet)
+		}, 20*time.Second, 20*time.Millisecond)
 		// More throttled attempts than any give-up: each waits its backoff.
+		// The clock moves only once an attempt's retry is recorded.
 		for attempt := 2; attempt <= 5; attempt++ {
 			v.clock.Advance(3 * time.Hour)
 			driveOperations(t, fleet)
-			require.Eventually(t, func() bool { return v.vendor.throttledCalls() == attempt }, 20*time.Second, 20*time.Millisecond)
+			require.Eventually(t, func() bool { return v.vendor.throttledCalls() == attempt && operationsIdle(t, fleet) }, 20*time.Second, 20*time.Millisecond)
 		}
 		require.Empty(t, v.vendor.updaterAsked())
 		// Throttling ends. The card was never marked checked, so the next
