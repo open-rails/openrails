@@ -132,6 +132,8 @@ migration 0145_price_migration_push.up.sql sha256:1c3019f43fa69a2948799f2c7e7f4a
 migration 0146_due_pass_recheck.up.sql sha256:9b83533cf2093669bcc01975a2f1b81bb7ad79de4c45873e84891c683bd9afe7
 migration 0147_rebill_probe_backoff.up.sql sha256:350c039b3cda3783c72222709160fcb37d5abc6ec0668762b04435d16c35f695
 migration 0150_job_health_from_river.up.sql sha256:40570212847e3b3ffabd9d0fc22189f80bbc0a040413ba755f031d9bbaa4ccb1
+migration 0160_delinquency_due.up.sql sha256:cbd0dd44ca9a681e0f46bb8c2518f678e568cfdbb7d3571d9a52b2f52128931c
+migration 0161_usage_due.up.sql sha256:5ab44df98f3eaa152b3e9045326ba5fd4bf9f253c4398be8b3b0dbab378a01f1
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -438,6 +440,7 @@ table billing.customer_delinquency
   column evaluated_at timestamp with time zone NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  column next_evaluation_at timestamp with time zone
   constraint customer_delinquency_amount_check CHECK (((overdue_amount >= 0) AND (overdue_orders >= 0)))
   constraint customer_delinquency_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint customer_delinquency_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
@@ -446,6 +449,7 @@ table billing.customer_delinquency
   constraint customer_delinquency_pkey PRIMARY KEY (merchant_id, customer_id, currency)
   constraint customer_delinquency_state_check CHECK ((state = ANY (ARRAY['current'::text, 'grace'::text, 'delinquent'::text])))
   index CREATE INDEX customer_delinquency_customer_id_currency_idx ON billing.customer_delinquency USING btree (merchant_id, customer_id, currency) WHERE (state <> 'current'::text)
+  index CREATE INDEX customer_delinquency_due_idx ON billing.customer_delinquency USING btree (next_evaluation_at, merchant_id, customer_id, currency) WHERE (next_evaluation_at IS NOT NULL)
   index CREATE UNIQUE INDEX customer_delinquency_pkey ON billing.customer_delinquency USING btree (merchant_id, customer_id, currency)
 
 table billing.customer_entitlement_cache
@@ -1122,6 +1126,7 @@ table billing.money_settings
   column usage_next_bill_at timestamp with time zone
   column usage_minimum_invoice_amount bigint
   column usage_collection_due boolean NOT NULL DEFAULT false
+  column usage_due_at timestamp with time zone
   constraint money_settings_billing_mode_check CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text])))
   constraint money_settings_credit_limit_amount_nonneg_check CHECK ((credit_limit_amount >= 0))
   constraint money_settings_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
@@ -1131,7 +1136,7 @@ table billing.money_settings
   constraint money_settings_pkey PRIMARY KEY (merchant_id, customer_id, currency)
   constraint money_settings_usage_minimum_invoice_amount_check CHECK ((usage_minimum_invoice_amount >= 0))
   index CREATE UNIQUE INDEX money_settings_pkey ON billing.money_settings USING btree (merchant_id, customer_id, currency)
-  index CREATE INDEX money_settings_usage_due ON billing.money_settings USING btree (merchant_id, usage_next_bill_at) WHERE ((usage_next_bill_at IS NOT NULL) OR usage_collection_due)
+  index CREATE INDEX money_settings_usage_due_at_idx ON billing.money_settings USING btree (usage_due_at, merchant_id, customer_id, currency) WHERE (usage_due_at IS NOT NULL)
   trigger CREATE TRIGGER money_settings_mark_stored_card_check AFTER INSERT OR UPDATE OF default_payment_method_id ON billing.money_settings FOR EACH ROW EXECUTE FUNCTION billing.default_card_marks_stored_card_check()
   trigger CREATE TRIGGER trg_subscription_history_default AFTER UPDATE OF default_payment_method_id ON billing.money_settings FOR EACH ROW EXECUTE FUNCTION billing.subscription_history_default_card()
 
@@ -1436,7 +1441,7 @@ table billing.orders
   index CREATE UNIQUE INDEX orders_pkey ON billing.orders USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX orders_renewal_key ON billing.orders USING btree (merchant_id, subscription_id, period_starts_at) WHERE ((origin = 'subscription'::text) AND (collection_owner = 'engine'::text) AND (subscription_bill_kind = 'renewal'::text))
   index CREATE INDEX orders_subscription_period_idx ON billing.orders USING btree (merchant_id, subscription_id, period_starts_at) WHERE (origin = 'subscription'::text)
-  index CREATE INDEX orders_usage_collection_idx ON billing.orders USING btree (merchant_id, next_collection_attempt_at, due_at) WHERE ((origin = 'usage'::text) AND (status = 'open'::text) AND (collection_method = 'charge_automatically'::text))
+  index CREATE INDEX orders_usage_collection_due_idx ON billing.orders USING btree (next_collection_attempt_at, merchant_id, id) WHERE ((origin = 'usage'::text) AND (status = 'open'::text) AND (collection_method = 'charge_automatically'::text) AND (next_collection_attempt_at IS NOT NULL))
   index CREATE INDEX orders_usage_open_idx ON billing.orders USING btree (merchant_id, customer_id, currency) WHERE ((origin = 'usage'::text) AND (status = ANY (ARRAY['open'::text, 'processing'::text, 'uncollectible'::text])))
   index CREATE UNIQUE INDEX orders_usage_period_key ON billing.orders USING btree (merchant_id, customer_id, currency, period_starts_at, period_ends_at) WHERE (origin = 'usage'::text)
 
