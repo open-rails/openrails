@@ -107,11 +107,24 @@ func (m *Mock) Canceled(id string) int {
 	return m.cancels[id]
 }
 
-// Calls are every SMS action received, in order.
+// Calls are every SMS action received, in order: status reads and cancels.
 func (m *Mock) Calls() []Call {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]Call(nil), m.calls...)
+}
+
+// Mutations are the SMS actions that change a subscription (cancels).
+func (m *Mock) Mutations() []Call {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Call
+	for _, c := range m.calls {
+		if c.Form.Get("action") != "viewSubscriptionStatus" {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // Unexpected lists requests the mock does not model; tests assert it empty.

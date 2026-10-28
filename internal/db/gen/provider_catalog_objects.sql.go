@@ -80,6 +80,57 @@ func (q *Queries) GetProviderCatalogObject(ctx context.Context, arg GetProviderC
 	return i, err
 }
 
+const listPSPBoundProviderRefs = `-- name: ListPSPBoundProviderRefs :many
+SELECT COALESCE(b.plan_id, b.price_ref)::text AS ref, price.amount, price.currency, price.billing_interval_hours, price.billing_interval_months
+FROM billing.price_psp_bindings b
+JOIN billing.prices price ON price.merchant_id = b.merchant_id AND price.id = b.price_id
+WHERE b.merchant_id = $1::uuid AND b.psp_id = $2::uuid AND price.provider_owned AND price.deleted_at IS NULL
+  AND (b.plan_id IS NOT NULL OR b.price_ref IS NOT NULL)
+ORDER BY 1
+`
+
+type ListPSPBoundProviderRefsParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+type ListPSPBoundProviderRefsRow struct {
+	Ref                   string
+	Amount                int64
+	Currency              string
+	BillingIntervalHours  *int32
+	BillingIntervalMonths *int32
+}
+
+// The NMI plans and Stripe prices that live provider prices of one PSP bind,
+// with the terms stored for each: a pull reads each again, and records a
+// vanished one never observed from these terms.
+func (q *Queries) ListPSPBoundProviderRefs(ctx context.Context, arg ListPSPBoundProviderRefsParams) ([]ListPSPBoundProviderRefsRow, error) {
+	rows, err := q.db.Query(ctx, listPSPBoundProviderRefs, arg.MerchantID, arg.PspID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPSPBoundProviderRefsRow
+	for rows.Next() {
+		var i ListPSPBoundProviderRefsRow
+		if err := rows.Scan(
+			&i.Ref,
+			&i.Amount,
+			&i.Currency,
+			&i.BillingIntervalHours,
+			&i.BillingIntervalMonths,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProviderCatalog = `-- name: ListProviderCatalog :many
 SELECT o.kind, o.ref, o.product_ref, o.name, o.active, o.deleted_at, o.amount, o.currency, o.billing_interval_hours, o.billing_interval_months,
     o.observed_at, o.observed_via,

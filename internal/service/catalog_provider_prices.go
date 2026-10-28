@@ -144,6 +144,9 @@ func observedTerms(account merchants.PSPScope, decl catalogwire.ApplyProviderPri
 	} else if obj.ProductRef != "" {
 		ids[models.RailKeyStripeProductID] = obj.ProductRef
 	}
+	if _, known := moneyutil.LookupCurrency(obj.Currency); obj.Amount == "" && obj.Currency != "" && !known {
+		return terms, nil, apperr.Invalidf("%s %q is priced in %s, which OpenRails does not support", noun, obj.Ref, obj.Currency)
+	}
 	if obj.Amount == "" {
 		return terms, nil, apperr.Invalidf("%s %q has no fixed amount: a provider price needs one", noun, obj.Ref)
 	}
@@ -469,7 +472,7 @@ func (s *Service) currentPriceVersion(ctx context.Context, prices interface {
 
 // verifyProviderPrice reads a provider price's object at its provider again,
 // records it, and reports whether its terms still match the stored ones: an
-// unreachable provider is unknown, a gone object missing.
+// unreachable provider is unknown, a gone object missing and retired.
 func (s *Service) verifyProviderPrice(ctx context.Context, price *models.Price, out *billing.PriceProvider) {
 	if out == nil {
 		return
@@ -495,7 +498,10 @@ func (s *Service) verifyProviderPrice(ctx context.Context, price *models.Price, 
 		out.SyncStatus = billing.SyncStatusUnknown
 		return
 	}
-	obj, err := objects.ObserveByID(ctx, account, providerobjects.Price, ref, nil)
+	// The price's stored terms record a gone object OpenRails never observed
+	// (a price mapped before the catalog was observed), so it retires.
+	stated := providerobjects.Stated(ref, price.Amount, price.Currency, models.Rail(account.Rail) == models.RailStripe, price.ProviderBillingInterval(), price.ProviderBillingMonths())
+	obj, err := objects.ObserveByID(ctx, account, providerobjects.Price, ref, stated)
 	if err != nil {
 		out.SyncStatus = billing.SyncStatusUnknown
 		return

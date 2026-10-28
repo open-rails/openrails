@@ -3466,6 +3466,7 @@
       "fmt": "fmt",
       "http": "net/http",
       "json": "encoding/json",
+      "log": "github.com/sirupsen/logrus",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
       "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
       "reconcile": "github.com/open-rails/openrails/internal/reconcile",
@@ -4584,6 +4585,7 @@
     "internal/reconcile/stripe.go": {
       "booktag": "github.com/open-rails/openrails/internal/booktag",
       "context": "context",
+      "errors": "errors",
       "fmt": "fmt",
       "http": "net/http",
       "io": "io",

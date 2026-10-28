@@ -32,6 +32,10 @@ const (
 // ErrV5NotFound marks a v5 404 — the resource does not exist at NMI.
 var ErrV5NotFound = errors.New("nmi: resource not found")
 
+// ErrV5Missing marks a 404 whose body is NMI's own answer that the resource
+// is missing (E_NOT_FOUND), not a route or proxy 404: evidence of deletion.
+var ErrV5Missing = errors.New("nmi: resource missing")
+
 // ErrV5Refused marks any other v5 4xx: NMI answered and refused the request.
 var ErrV5Refused = errors.New("nmi v5 refused the request")
 
@@ -115,6 +119,12 @@ func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		// Provider envelopes and raw bodies are internal data, never diagnostics.
 		if resp.StatusCode == http.StatusNotFound {
+			var envelope struct {
+				ErrorCode string `json:"error_code"`
+			}
+			if json.Unmarshal(raw, &envelope) == nil && envelope.ErrorCode == "E_NOT_FOUND" {
+				return fmt.Errorf("%w: %w: status %d", ErrV5NotFound, ErrV5Missing, resp.StatusCode)
+			}
 			return fmt.Errorf("%w: status %d", ErrV5NotFound, resp.StatusCode)
 		}
 		if resp.StatusCode >= 500 {

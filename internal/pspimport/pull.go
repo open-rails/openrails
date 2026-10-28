@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -203,11 +204,12 @@ func (im *Importer) observeCatalog(ctx context.Context, scope merchants.PSPScope
 	if err != nil {
 		return nil, Permanent(fmt.Errorf("PSP %s is not readable: %w", scope.Key, err))
 	}
+	at := im.Objects.Now()
 	objects, err := reader.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("provider catalog: %w", err)
 	}
-	if err := im.Objects.Record(ctx, scope, objects, providerobjects.ViaPull); err != nil {
+	if err := im.Objects.Record(ctx, scope, at, objects, providerobjects.ViaPull); err != nil {
 		return nil, err
 	}
 	c := &catalogPull{im: im, scope: scope, reader: reader, listed: map[string]bool{}}
@@ -219,7 +221,10 @@ func (im *Importer) observeCatalog(ctx context.Context, scope merchants.PSPScope
 
 // fill reads by id what the lists lacked: each price a staged subscription
 // names (a Stripe inline price; an NMI plan gone from the gateway, recorded
-// from the subscription's copy) and each stored object of the PSP.
+// from the subscription's copy), each object a provider price of the PSP
+// binds (recorded from its stored terms when gone and never observed) and
+// each stored object of the PSP. One object that cannot be read is logged
+// and left for the next read; it does not fail the pull.
 func (c *catalogPull) fill(ctx context.Context, recs []staged) error {
 	if c == nil {
 		return nil
@@ -233,7 +238,10 @@ func (c *catalogPull) fill(ctx context.Context, recs []staged) error {
 		read[key] = true
 		progress.Mark(ctx, fmt.Sprintf("psp import catalog %s %s", kind, ref))
 		if _, err := c.im.Objects.Observe(ctx, c.reader, c.scope, kind, ref, stated); err != nil {
-			return fmt.Errorf("provider catalog %s %s: %w", kind, ref, err)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{"psp": c.scope.Key, "kind": kind, "ref": ref}).Warn("psp import: provider catalog object not read; left for the next read")
 		}
 		return nil
 	}
@@ -243,6 +251,15 @@ func (c *catalogPull) fill(ctx context.Context, recs []staged) error {
 			continue
 		}
 		if err := observe(providerobjects.Price, data.Plan, r.stated); err != nil {
+			return err
+		}
+	}
+	bound, err := c.im.Objects.Bound(ctx, c.scope)
+	if err != nil {
+		return err
+	}
+	for _, stated := range bound {
+		if err := observe(providerobjects.Price, stated.Ref, stated); err != nil {
 			return err
 		}
 	}

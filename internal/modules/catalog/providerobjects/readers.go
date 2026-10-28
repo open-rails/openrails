@@ -11,13 +11,19 @@ import (
 	"strings"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// decimal is a plain non-negative major-unit amount.
-var decimal = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
+// decimal is a plain non-negative major-unit amount; currencyCode the codes
+// the observed catalog stores.
+var (
+	decimal      = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
+	currencyCode = regexp.MustCompile(`^[A-Z][A-Z0-9]{2,9}$`)
+)
 
 type nmiReader struct{ client *nmi.NMIClient }
 
@@ -78,9 +84,10 @@ func newStripeReader(secretKey string, client *http.Client) stripeReader {
 	return stripeReader{fetcher: fetcher}
 }
 
-// List reads products and prices, active and inactive: Stripe lists only
-// active prices unless asked. Prices created inline on a subscription are
-// never listed; a by-id read observes them.
+// List reads products and prices, active ones first, then inactive ones:
+// Stripe lists only active prices unless asked. Prices created inline on a
+// subscription are never listed; a by-id read observes them. An object it
+// cannot read is skipped, not the catalog.
 func (r stripeReader) List(ctx context.Context) ([]Object, error) {
 	var out []Object
 	for _, path := range []string{"/v1/products", "/v1/prices"} {
@@ -92,7 +99,8 @@ func (r stripeReader) List(ctx context.Context) ([]Object, error) {
 			for _, raw := range raws {
 				obj, ok, err := stripeObject(raw)
 				if err != nil {
-					return nil, err
+					log.WithContext(ctx).WithError(err).Warn("provider catalog: skipped an unreadable Stripe object")
+					continue
 				}
 				if ok {
 					out = append(out, obj)
@@ -148,13 +156,15 @@ func stripeObject(raw json.RawMessage) (Object, bool, error) {
 	case "price":
 		obj.Kind, obj.Name = Price, strings.TrimSpace(s.Nickname)
 		obj.ProductRef = stripeRef(s.Product)
-		obj.Currency = moneyutil.NormalizeCurrency(s.Currency)
+		if code := moneyutil.NormalizeCurrency(s.Currency); currencyCode.MatchString(code) {
+			obj.Currency = code
+		}
+		// A currency OpenRails does not hold leaves no amount: mapping the
+		// price is refused, the rest of the catalog is not.
 		if s.UnitAmount != nil {
-			amount, err := majorUnits(*s.UnitAmount, obj.Currency)
-			if err != nil {
-				return Object{}, false, fmt.Errorf("stripe price %s: %w", s.ID, err)
+			if amount, err := majorUnits(*s.UnitAmount, obj.Currency); err == nil {
+				obj.Amount = amount
 			}
-			obj.Amount = amount
 		}
 		if s.Recurring != nil && s.Recurring.IntervalCount > 0 {
 			switch n := s.Recurring.IntervalCount; s.Recurring.Interval {
@@ -203,4 +213,26 @@ func majorUnits(minor int64, currency string) (string, error) {
 	}
 	cut := len(digits) - cur.MinorDecimals
 	return digits[:cut] + "." + digits[cut:], nil
+}
+
+// Stated is a provider price's last terms as OpenRails stores them (amount
+// in native units): what a read finding its object gone records, when the
+// object was never observed. namesCurrency is false for NMI.
+func Stated(ref string, amount int64, currency string, namesCurrency bool, hours, months *int) *Object {
+	obj := &Object{Kind: Price, Ref: ref, Active: true, Evidence: json.RawMessage(`{"source":"openrails_provider_price"}`)}
+	if minor, err := moneyutil.NativeToRailMinorExact(currency, amount); err == nil {
+		if major, err := majorUnits(int64(minor), currency); err == nil {
+			obj.Amount = major
+		}
+	}
+	if code := moneyutil.NormalizeCurrency(currency); namesCurrency && currencyCode.MatchString(code) {
+		obj.Currency = code
+	}
+	switch {
+	case months != nil && *months > 0:
+		obj.IntervalMonths = *months
+	case hours != nil && *hours > 0:
+		obj.IntervalHours = *hours
+	}
+	return obj
 }

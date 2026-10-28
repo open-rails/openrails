@@ -278,7 +278,7 @@ func (c *NMIClient) GetRecurringPlanByID(ctx context.Context, planID, currency s
 }
 
 // GetRecurringPlan reads one plan via GET /v5/plans/{id}; found is false
-// when NMI answers 404.
+// only when NMI answers that the plan is missing (ErrV5Missing).
 func (c *NMIClient) GetRecurringPlan(ctx context.Context, planID string) (V5Plan, bool, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return V5Plan{}, false, err
@@ -289,7 +289,7 @@ func (c *NMIClient) GetRecurringPlan(ctx context.Context, planID string) (V5Plan
 	}
 	var plan V5Plan
 	err := c.sendV5Request(ctx, http.MethodGet, "/plans/"+url.PathEscape(trimmed), nil, &plan)
-	if errors.Is(err, ErrV5NotFound) {
+	if errors.Is(err, ErrV5Missing) {
 		return V5Plan{}, false, nil
 	}
 	if err != nil {

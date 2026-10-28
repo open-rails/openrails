@@ -42,8 +42,8 @@ func (im *Importer) Link(ctx context.Context, id billing.PSPImportID, p billing.
 }
 
 // pickPrices stores the provider prices picked by hand for subscriptions
-// whose provider names no plan: each a live provider price bound to the
-// import's PSP.
+// whose provider names no plan: each a live recurring provider price bound
+// to the import's PSP.
 func (im *Importer) pickPrices(ctx context.Context, row gen.BillingPspImport, picks []billing.PSPImportPriceLink) error {
 	if len(picks) == 0 {
 		return nil
@@ -57,7 +57,9 @@ func (im *Importer) pickPrices(ctx context.Context, row gen.BillingPspImport, pi
 	}
 	byRef := make(map[billing.PriceID]uuid.UUID, len(live))
 	for _, r := range live {
-		byRef[billing.PriceID(r.PublicID)] = r.ID
+		if termsOf(r.PublicID, r.Amount, r.Currency, r.BillingIntervalHours, r.BillingIntervalMonths).period() > 0 {
+			byRef[billing.PriceID(r.PublicID)] = r.ID
+		}
 	}
 	p := gen.SetPSPImportRecordManualPricesParams{MerchantID: row.MerchantID, ImportID: row.ID}
 	for i, pick := range picks {
@@ -69,7 +71,7 @@ func (im *Importer) pickPrices(ctx context.Context, row gen.BillingPspImport, pi
 		if pick.Price != nil && !pick.Price.IsZero() {
 			id, ok := byRef[*pick.Price]
 			if !ok {
-				return apperr.Invalidf("%s.price %s is not a live provider price of the import's PSP", param, *pick.Price).WithParam(param + ".price")
+				return apperr.Invalidf("%s.price %s is not a live recurring provider price of the import's PSP", param, *pick.Price).WithParam(param + ".price")
 			}
 			price = id
 		}

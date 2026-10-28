@@ -118,7 +118,10 @@ func (im *Importer) providerPrices(ctx context.Context, row gen.BillingPspImport
 		}
 		out := make(map[uuid.UUID]priceTerms, len(rows))
 		for _, r := range rows {
-			out[r.ID] = termsOf(r.PublicID, r.Amount, r.Currency, r.BillingIntervalHours, r.BillingIntervalMonths)
+			// A subscription lands only on a recurring price.
+			if t := termsOf(r.PublicID, r.Amount, r.Currency, r.BillingIntervalHours, r.BillingIntervalMonths); t.period() > 0 {
+				out[r.ID] = t
+			}
 		}
 		return nil, out, nil
 	}
@@ -333,7 +336,7 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 				subs[r.Ref] = r
 			}
 		}
-		rebills := latestRebills(g.records)
+		rebills := rebillsOf(g.records)
 		declared := map[string]*billing.PaymentMethodRef{}
 		priced := map[string]priceTerms{}
 		declareSub := func(r gen.BillingPspImportRecord) (string, string) {
@@ -475,12 +478,12 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 }
 
 // subscription declares one staged subscription; reason says why it cannot.
-func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImportRecord, vaults map[string]customerData, rebill string) (billing.DeclaredSubscription, priceTerms, string, error) {
+func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImportRecord, vaults map[string]customerData, rebill rebills) (billing.DeclaredSubscription, priceTerms, string, error) {
 	var data subscriptionData
 	if err := json.Unmarshal(r.Data, &data); err != nil {
 		return billing.DeclaredSubscription{}, priceTerms{}, "", err
 	}
-	price, reason := l.priceOf(r, data.Plan, rebill)
+	price, reason := l.priceOf(r, data.Plan, rebill, rebill.cadence(data.NextBillingAt))
 	switch {
 	case reason != "":
 		return billing.DeclaredSubscription{}, price, reason, nil
@@ -571,9 +574,16 @@ func denominate(price priceTerms, decimal string) (int64, string) {
 	return native, ""
 }
 
-// latestRebills is each subscription's latest currency-less charge amount.
-func latestRebills(records []gen.BillingPspImportRecord) map[string]string {
-	out, at := map[string]string{}, map[string]time.Time{}
+// rebills are a subscription's latest two currency-less charges: the
+// latest's amount and when each was.
+type rebills struct {
+	decimal        string
+	at, previousAt time.Time
+}
+
+// rebillsOf is each subscription's latest rebills.
+func rebillsOf(records []gen.BillingPspImportRecord) map[string]rebills {
+	out := map[string]rebills{}
 	for _, r := range records {
 		if r.Kind != string(billing.PSPImportTransaction) || r.SubscriptionRef == nil {
 			continue
@@ -582,19 +592,59 @@ func latestRebills(records []gen.BillingPspImportRecord) map[string]string {
 		if json.Unmarshal(r.Data, &data) != nil || data.Decimal == "" || data.Type != "sale" || !data.Success {
 			continue
 		}
-		if ref := *r.SubscriptionRef; data.OccurredAt.After(at[ref]) {
-			out[ref], at[ref] = data.Decimal, data.OccurredAt
+		ref, at := *r.SubscriptionRef, data.OccurredAt
+		switch rb := out[ref]; {
+		case at.After(rb.at):
+			out[ref] = rebills{decimal: data.Decimal, at: at, previousAt: rb.at}
+		case at.Before(rb.at) && at.After(rb.previousAt):
+			rb.previousAt = at
+			out[ref] = rb
 		}
 	}
 	return out
 }
 
+// cadence is how often the subscription rebills, as observed: from its
+// latest rebill to the next the provider schedules (or to the expiry of a
+// canceled one), else between its latest two rebills; 0 when unknown.
+func (rb rebills) cadence(next *time.Time) time.Duration {
+	switch {
+	case rb.at.IsZero():
+		return 0
+	case next != nil && next.After(rb.at):
+		return next.Sub(rb.at)
+	case !rb.previousAt.IsZero():
+		return rb.at.Sub(rb.previousAt)
+	}
+	return 0
+}
+
+// period is a price's billing interval, 0 for a price that does not recur.
+// A calendar month counts its average length.
+func (t priceTerms) period() time.Duration {
+	if t.months > 0 {
+		return time.Duration(t.months) * 730 * time.Hour
+	}
+	return time.Duration(t.hours) * time.Hour
+}
+
+// agrees reports whether an observed cadence is the price's interval, give
+// or take a tenth of it (at least two days): calendar months and date-only
+// provider schedules drift by days.
+func (t priceTerms) agrees(cadence time.Duration) bool {
+	period := t.period()
+	tolerance := max(period/10, 48*time.Hour)
+	diff := cadence - period
+	return -tolerance <= diff && diff <= tolerance
+}
+
 // priceOf is the provider price a subscription lands on, or why it has none.
 // A plan lands on the live provider price mapping it. A plan-less (CCBill)
 // subscription lands on the price picked for it by hand, else on the one
-// provider price of the PSP its latest rebill equals, read in that price's
-// currency.
-func (l *lander) priceOf(r gen.BillingPspImportRecord, plan, rebill string) (priceTerms, string) {
+// recurring provider price of the PSP its latest rebill equals, read in that
+// price's currency, whose interval agrees with the cadence it rebills at
+// when that is known.
+func (l *lander) priceOf(r gen.BillingPspImportRecord, plan string, rebill rebills, cadence time.Duration) (priceTerms, string) {
 	if planned[l.scope.Rail] {
 		if plan == "" {
 			return priceTerms{}, "the provider names no plan for it"
@@ -609,23 +659,27 @@ func (l *lander) priceOf(r gen.BillingPspImportRecord, plan, rebill string) (pri
 		if price, ok := l.pspPrices[*r.ManualPriceID]; ok {
 			return price, ""
 		}
-		return priceTerms{}, "its picked price is no longer a live provider price of this PSP: " + pick
+		return priceTerms{}, "its picked price is no longer a live recurring provider price of this PSP: " + pick
 	}
-	if rebill == "" {
-		return priceTerms{}, "it has no rebill: 0 match among this PSP's provider prices; " + pick
+	if rebill.decimal == "" {
+		return priceTerms{}, "it has no rebill: 0 match among this PSP's recurring provider prices; " + pick
 	}
 	var match []priceTerms
 	for _, t := range l.pspPrices {
-		minor, err := moneyutil.DecimalToRailMinor(t.currency, rebill)
+		minor, err := moneyutil.DecimalToRailMinor(t.currency, rebill.decimal)
 		if err != nil {
 			continue
 		}
-		if native, err := moneyutil.RailMinorToNative(t.currency, minor); err == nil && native == t.amount {
+		if native, err := moneyutil.RailMinorToNative(t.currency, minor); err == nil && native == t.amount && (cadence == 0 || t.agrees(cadence)) {
 			match = append(match, t)
 		}
 	}
 	if len(match) != 1 {
-		return priceTerms{}, fmt.Sprintf("its latest rebill %s: %d match among this PSP's provider prices; %s", rebill, len(match), pick)
+		every := ""
+		if cadence > 0 {
+			every = fmt.Sprintf(" every %.0f days", cadence.Hours()/24)
+		}
+		return priceTerms{}, fmt.Sprintf("its latest rebill %s%s: %d match among this PSP's recurring provider prices; %s", rebill.decimal, every, len(match), pick)
 	}
 	return match[0], ""
 }

@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/open-rails/openrails/internal/booktag"
 	"io"
@@ -250,10 +251,12 @@ func (f *StripeFetcher) get(ctx context.Context, pathAndQuery string) ([]byte, e
 }
 
 // StripeGet reads one object by its path (/v1/prices/price_…); found is
-// false when Stripe answers 404.
+// false only when Stripe answers that the object is missing (404
+// resource_missing). Any other 404 is an error, not evidence of deletion.
 func (f *StripeFetcher) StripeGet(ctx context.Context, path string) (json.RawMessage, bool, error) {
-	body, status, err := f.getStatus(ctx, path)
-	if status == http.StatusNotFound {
+	body, _, err := f.getStatus(ctx, path)
+	var apiErr *StripeAPIError
+	if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound && apiErr.Code == "resource_missing" {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -279,18 +282,29 @@ func (f *StripeFetcher) getStatus(ctx context.Context, pathAndQuery string) ([]b
 		return nil, resp.StatusCode, err
 	}
 	if resp.StatusCode >= 400 {
-		var apiErr struct {
+		var envelope struct {
 			Error struct {
+				Code    string `json:"code"`
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		_ = json.Unmarshal(body, &apiErr)
-		if apiErr.Error.Message != "" {
-			return nil, resp.StatusCode, fmt.Errorf("stripe API error (%d): %s", resp.StatusCode, apiErr.Error.Message)
-		}
-		return nil, resp.StatusCode, fmt.Errorf("stripe API error (%d)", resp.StatusCode)
+		_ = json.Unmarshal(body, &envelope)
+		return nil, resp.StatusCode, &StripeAPIError{Status: resp.StatusCode, Code: envelope.Error.Code, Message: envelope.Error.Message}
 	}
 	return body, resp.StatusCode, nil
+}
+
+// StripeAPIError is a Stripe refusal: its status and error code.
+type StripeAPIError struct {
+	Status        int
+	Code, Message string
+}
+
+func (e *StripeAPIError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("stripe API error (%d): %s", e.Status, e.Message)
+	}
+	return fmt.Sprintf("stripe API error (%d)", e.Status)
 }
 
 type stripeSubscriptionJSON struct {

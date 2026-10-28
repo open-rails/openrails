@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 178,
+  "scenario_count": 179,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -892,6 +892,11 @@
       "id": "OR-J38-S04",
       "journey": "J38",
       "name": "The pull observes the whole provider catalog read-only, deleted and inline objects included"
+    },
+    {
+      "id": "OR-J38-S05",
+      "journey": "J38",
+      "name": "The Stripe catalog read keeps the newest observation, retires prices of archived or deleted products and skips what it cannot read"
     }
   ]
 }

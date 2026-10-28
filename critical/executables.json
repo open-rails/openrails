@@ -584,6 +584,9 @@
     ],
     "OR-J38-S04": [
       "TestPSPImport/OR-J38-S04/pull-observes-the-whole-catalog-read-only"
+    ],
+    "OR-J38-S05": [
+      "TestPSPImport/OR-J38-S05/stripe-catalog-keeps-the-newest-truth-and-skips-what-it-cannot-read"
     ]
   },
   "suites": {

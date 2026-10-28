@@ -79,10 +79,20 @@ no `currency`) and when and how it was observed. Filters: `kind`, `mapped`,
 OpenRails only observes; it never writes a provider's catalog. A pull lists
 the whole catalog and reads by id what the lists lack: a Stripe price created
 inline on a subscription, an NMI plan gone from the gateway (recorded from
-its subscriptions' copy of it, as deleted), and every object stored earlier.
-An object is recorded deleted only when a read by id finds it gone. Mapping
-a plan never observed reads it once by id; verifying a provider price
-(`GetPrice` with `verify`) reads it again.
+its subscriptions' copy of it, as deleted), every object a provider price
+binds and every object stored earlier. An object is recorded deleted only
+when the provider answers that it is missing (Stripe `resource_missing`,
+NMI `E_NOT_FOUND`); any other answer leaves it as it was. A gone object never
+observed is recorded from the terms its provider price stores. Reading a
+Stripe price by id reads its product too. The latest observation wins: what
+a pull listed never replaces a later read. A price in a currency OpenRails
+does not support, or without a fixed amount, is recorded without an amount
+and cannot be mapped; an object the provider does not answer for is logged
+and left for the next read. Mapping a plan never observed reads it once by
+id; verifying a provider price (`GetPrice` with `verify`) reads it again.
+
+An import pulled before OpenRails observed provider catalogs has no
+catalog: create a new import to pull the PSP again.
 
 A provider price whose object the provider retired (inactive, deleted, or
 its Stripe product is) is not for sale: it is no tier-change target and its
@@ -95,10 +105,15 @@ grandfathered subscriptions land.
 CCBill has no catalog to read: its provider prices are declared with their
 amount and interval. A member lands on the price picked for it by hand
 (`LinkPSPImport` `prices: [{record, price}]`, shown as the record's
-`manual_price`; a null price clears it), else on the one provider price of
-the import's PSP, on any product and archived ones included, whose amount
-equals its latest rebill read in that price's currency. No rebill, no match
-or several matches leave it `blocked`, naming the count. Its terms become the
+`manual_price`; a null price clears it), else on the one recurring provider
+price of the import's PSP, on any product and archived ones included, whose
+amount equals its latest rebill read in that price's currency and whose
+interval is the cadence the member rebills at (from its latest rebill to
+its next rebill or expiry date, else between its last two rebills; a tenth
+either way, at least two days). No rebill, no match or several matches
+leave it `blocked`, naming the count. A pick is a live recurring provider
+price of the import's PSP, for a subscription; only plan-less (CCBill)
+imports take picks. Its terms become the
 accepted schedule, and a rebill's amount is read in that price's currency.
 
 ## Facts and rules

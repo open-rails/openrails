@@ -242,7 +242,7 @@ func (m *Mock) v5(method string, seg []string, q url.Values, body []byte) (int, 
 		return http.StatusOK, m.schedule(s)
 	}
 	m.odd = append(m.odd, method+" v5/"+strings.Join(seg, "/"))
-	return v5NotFound()
+	return http.StatusNotFound, obj{"type": "notFound", "error_code": "E_ROUTE_NOT_FOUND", "message": "route not found"}
 }
 
 func (m *Mock) customer(v *Vault) obj {
