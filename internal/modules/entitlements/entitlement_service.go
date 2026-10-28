@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -355,13 +356,10 @@ func (s *EntitlementService) PushAccess(ctx context.Context, p PushAccessParams)
 		var g gen.BillingGrant
 		if p.SourceType == models.AccessSourceGrace {
 			g, err = l.Grant(ctx, input)
-		} else {
-			g, _, err = l.GrantAccessOnce(ctx, input)
+		} else if g, _, err = l.GrantAccessOnce(ctx, input); err == nil {
+			err = l.MaterializeGrant(ctx, g)
 		}
 		if err != nil {
-			return err
-		}
-		if err := l.MaterializeGrant(ctx, g); err != nil {
 			return err
 		}
 		window, err := q.GetProductAccessByGrant(ctx, gen.GetProductAccessByGrantParams{MerchantID: merchantID.UUID(), GrantID: g.ID})
@@ -449,25 +447,11 @@ func (s *EntitlementService) RevokeSourcesForSubscription(ctx context.Context, u
 
 // RevokeSourcesForSubscriptionAsOf revokes a subscription's windows of the
 // given sources as of asOf (the LIFE-plane grace_exhausted repair revokes as of
-// when grace lapsed), and terminates their grants so the ledger agrees.
+// when grace lapsed), and terminates their grants in the same transaction so
+// the ledger agrees.
 func (s *EntitlementService) RevokeSourcesForSubscriptionAsOf(ctx context.Context, userID string, subscriptionID uuid.UUID, asOf time.Time, reason models.AccessRevokeReason, sourceTypes ...models.AccessSourceType) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
-	}
-	at := asOf.UTC()
-	for _, sourceType := range sourceTypes {
-		products, err := s.ListLiveProductsBySource(ctx, sourceType, subscriptionID.String())
-		if err != nil {
-			return fmt.Errorf("list %s access: %w", sourceType, err)
-		}
-		st, sid := sourceType, subscriptionID.String()
-		for _, product := range products {
-			if err := s.RevokeAccess(ctx, RevokeAccessParams{
-				UserID: userID, ProductID: product, SourceType: &st, SourceID: &sid, Reason: reason, AsOf: &at,
-			}); err != nil {
-				return fmt.Errorf("revoke %s access to %s: %w", sourceType, product, err)
-			}
-		}
 	}
 	if len(sourceTypes) == 0 {
 		return nil
@@ -480,6 +464,8 @@ func (s *EntitlementService) RevokeSourcesForSubscriptionAsOf(ctx context.Contex
 	if err != nil {
 		return err
 	}
+	at := asOf.UTC()
+	sid := subscriptionID.String()
 	sources := make([]grants.SourceType, 0, len(sourceTypes))
 	for _, st := range sourceTypes {
 		sources = append(sources, grants.SourceType(st))
@@ -489,7 +475,21 @@ func (s *EntitlementService) RevokeSourcesForSubscriptionAsOf(ctx context.Contex
 		if err := lockOwner(ctx, q, mid.UUID(), customer); err != nil {
 			return err
 		}
-		return s.ledger(q, mid.UUID()).RevokeBySourceAsOf(ctx, customer, grants.Access, sources, subscriptionID.String(), "subscription source revoked", at)
+		for _, sourceType := range sourceTypes {
+			products, err := q.ListLiveProductsBySource(ctx, gen.ListLiveProductsBySourceParams{MerchantID: mid.UUID(), SourceType: string(sourceType), SourceID: sid})
+			if err != nil {
+				return fmt.Errorf("list %s access: %w", sourceType, err)
+			}
+			st := sourceType
+			for _, product := range products {
+				if err := revokeAccessTx(ctx, tx, mid, RevokeAccessParams{
+					UserID: userID, ProductID: product, SourceType: &st, SourceID: &sid, Reason: reason,
+				}, at); err != nil {
+					return fmt.Errorf("revoke %s access to %s: %w", sourceType, product, err)
+				}
+			}
+		}
+		return s.ledger(q, mid.UUID()).RevokeBySourceAsOf(ctx, customer, grants.Access, sources, sid, "subscription source revoked", at)
 	})
 }
 
@@ -530,55 +530,60 @@ func (s *EntitlementService) RevokeAccess(ctx context.Context, p RevokeAccessPar
 		return err
 	}
 	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		if p.AccessID != nil {
-			row, err := q.GetProductAccessByID(ctx, gen.GetProductAccessByIDParams{MerchantID: mid.UUID(), ID: *p.AccessID})
-			if err != nil {
-				return err
-			}
-			if err := LockAccessTimeline(ctx, tx, row.CustomerID.String(), row.ProductID); err != nil {
-				return err
-			}
-			if row.RevokedAt != nil || row.DeletedAt != nil {
-				return nil
-			}
-			if p.SourceType != nil && row.SourceType != string(*p.SourceType) || p.SourceID != nil && row.SourceID != *p.SourceID {
-				return nil
-			}
-			if row.StartsAt.After(now) {
-				return q.SoftDeleteProductAccessByID(ctx, gen.SoftDeleteProductAccessByIDParams{MerchantID: mid.UUID(), ID: row.ID, Now: now})
-			}
-			if row.EndsAt == nil || row.EndsAt.After(now) {
-				_, err := q.RevokeProductAccessByID(ctx, gen.RevokeProductAccessByIDParams{MerchantID: mid.UUID(), ID: row.ID, Now: now, RevokeReason: string(p.Reason)})
-				return err
-			}
-			return nil
-		}
-		if err := LockAccessTimeline(ctx, tx, p.UserID, p.ProductID); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return nil
-			}
-			return err
-		}
-		customer, err := db.ResolveCustomerID(p.UserID)
+		return revokeAccessTx(ctx, tx, mid, p, now)
+	})
+}
+
+// revokeAccessTx is RevokeAccess inside the caller's transaction.
+func revokeAccessTx(ctx context.Context, tx pgx.Tx, mid billing.MerchantID, p RevokeAccessParams, now time.Time) error {
+	q := gen.New(tx)
+	if p.AccessID != nil {
+		row, err := q.GetProductAccessByID(ctx, gen.GetProductAccessByIDParams{MerchantID: mid.UUID(), ID: *p.AccessID})
 		if err != nil {
 			return err
 		}
-		var st *string
-		if p.SourceType != nil {
-			v := string(*p.SourceType)
-			st = &v
-		}
-		if err := q.RevokeActiveProductTimeline(ctx, gen.RevokeActiveProductTimelineParams{
-			MerchantID: mid.UUID(), CustomerID: customer, ProductID: p.ProductID, Now: now,
-			RevokeReason: string(p.Reason), SourceType: st, SourceID: p.SourceID,
-		}); err != nil {
+		if err := LockAccessTimeline(ctx, tx, row.CustomerID.String(), row.ProductID); err != nil {
 			return err
 		}
-		return q.SoftDeleteFutureProductTimeline(ctx, gen.SoftDeleteFutureProductTimelineParams{
-			MerchantID: mid.UUID(), CustomerID: customer, ProductID: p.ProductID, Now: now,
-			SourceType: st, SourceID: p.SourceID,
-		})
+		if row.RevokedAt != nil || row.DeletedAt != nil {
+			return nil
+		}
+		if p.SourceType != nil && row.SourceType != string(*p.SourceType) || p.SourceID != nil && row.SourceID != *p.SourceID {
+			return nil
+		}
+		if row.StartsAt.After(now) {
+			return q.SoftDeleteProductAccessByID(ctx, gen.SoftDeleteProductAccessByIDParams{MerchantID: mid.UUID(), ID: row.ID, Now: now})
+		}
+		if row.EndsAt == nil || row.EndsAt.After(now) {
+			_, err := q.RevokeProductAccessByID(ctx, gen.RevokeProductAccessByIDParams{MerchantID: mid.UUID(), ID: row.ID, Now: now, RevokeReason: string(p.Reason)})
+			return err
+		}
+		return nil
+	}
+	if err := LockAccessTimeline(ctx, tx, p.UserID, p.ProductID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	customer, err := db.ResolveCustomerID(p.UserID)
+	if err != nil {
+		return err
+	}
+	var st *string
+	if p.SourceType != nil {
+		v := string(*p.SourceType)
+		st = &v
+	}
+	if err := q.RevokeActiveProductTimeline(ctx, gen.RevokeActiveProductTimelineParams{
+		MerchantID: mid.UUID(), CustomerID: customer, ProductID: p.ProductID, Now: now,
+		RevokeReason: string(p.Reason), SourceType: st, SourceID: p.SourceID,
+	}); err != nil {
+		return err
+	}
+	return q.SoftDeleteFutureProductTimeline(ctx, gen.SoftDeleteFutureProductTimelineParams{
+		MerchantID: mid.UUID(), CustomerID: customer, ProductID: p.ProductID, Now: now,
+		SourceType: st, SourceID: p.SourceID,
 	})
 }
 

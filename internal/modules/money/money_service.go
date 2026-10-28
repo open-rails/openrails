@@ -611,9 +611,6 @@ func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositPa
 	if err != nil {
 		return nil, err
 	}
-	if err := gl.MaterializeGrant(ctx, g); err != nil {
-		return nil, err
-	}
 	if params.RepayOwed {
 		if _, err := owed.Repay(ctx, d, tenantID, g, params.Amount, now); err != nil {
 			return nil, err

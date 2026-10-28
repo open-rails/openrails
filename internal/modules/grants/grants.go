@@ -139,8 +139,8 @@ func seats(quantity *int) (*int32, error) {
 	return &q, nil
 }
 
-// Grant appends a 'grant' event (derive-1). Call Materialize afterwards (or rely
-// on the convergence sweep) to project it.
+// Grant appends a 'grant' event (derive-1) and projects it (derive-2) on the
+// same queries, so the caller's transaction commits both or neither.
 func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.BillingGrant, error) {
 	var spec []byte
 	if in.Spec != nil {
@@ -166,7 +166,7 @@ func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.BillingGrant, er
 	if err != nil {
 		return gen.BillingGrant{}, err
 	}
-	return l.q.InsertGrant(ctx, gen.InsertGrantParams{
+	g, err := l.q.InsertGrant(ctx, gen.InsertGrantParams{
 		Quantity:   quantity,
 		MerchantID: l.merchant, CustomerID: in.Customer, ProductID: in.Product,
 		Kind: string(in.Kind), SourceType: string(in.Source), SourceID: in.SourceID, PaymentID: in.Payment,
@@ -174,6 +174,10 @@ func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.BillingGrant, er
 		StartsAt: starts, EndsAt: in.EndsAt, Amount: in.Amount, Currency: in.Currency,
 		Reason: in.Reason, Actor: actor, GrantReason: reason,
 	})
+	if err != nil {
+		return g, err
+	}
+	return g, l.MaterializeGrant(ctx, g)
 }
 
 // GrantAccessOnce appends an access grant at its natural key (a purchase, a

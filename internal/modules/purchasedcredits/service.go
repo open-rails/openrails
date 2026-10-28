@@ -114,9 +114,6 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 		if err != nil {
 			return err
 		}
-		if err := gl.MaterializeGrant(ctx, grant); err != nil {
-			return err
-		}
 		// Only the paid part repays debt; promotional value never does.
 		if _, err := owed.Repay(ctx, s.db.NewWithPgxTx(tx), mid.UUID(), grant, min(p.Amount, p.PaidAmount), s.now()); err != nil {
 			return err

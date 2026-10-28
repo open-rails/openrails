@@ -72,24 +72,22 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 			}
 			return true, lc.ApplyLocalUnknown(ctx, database, sub, models.StatusActive)
 		}
-		duns := DunsDecline(sub, d)
-		applied, err := transition(ctx, database, lc, sub, d, now, duns)
-		if err != nil || !applied || !duns {
-			return applied, err
+		if DunsDecline(sub, d) {
+			return applyDunnedDecline(ctx, database, lc, sub, d)
 		}
-		return applyDunnedDecline(ctx, database, lc, sub, d)
+		return transition(ctx, database, lc, sub, d, now)
 
 	case TransitionRenew:
 		if d.NewPeriodEnd == nil {
 			return false, nil
 		}
-		return transition(ctx, database, lc, sub, d, now, false)
+		return transition(ctx, database, lc, sub, d, now)
 
 	case TransitionAdoptPeriodEnd:
 		if sub.Status != models.StatusUnverified {
 			return false, nil
 		}
-		return transition(ctx, database, lc, sub, d, now, false)
+		return transition(ctx, database, lc, sub, d, now)
 
 	case TransitionCancel:
 		if cancelHeld(ctx, database, sub, d) {
@@ -99,7 +97,7 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 			// Parked, the row is read again once the gate allows its cancel.
 			return true, lc.ApplyLocalUnknown(ctx, database, sub)
 		}
-		return transition(ctx, database, lc, sub, d, now, false)
+		return transition(ctx, database, lc, sub, d, now)
 	}
 	return false, fmt.Errorf("apply decision: unknown transition %d", d.Kind)
 }
@@ -146,13 +144,11 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 }
 
 // applyDunnedDecline hands a seen decline of an OpenRails-dunned NMI schedule
-// to FailMembership, the dunning writer, which counts and classifies it,
-// schedules the next attempt (never "now") and tells the customer. A decline
-// already counted is ignored.
+// to FailMembership, the dunning writer: in one transaction it moves the row
+// to dunning, counts and classifies the decline, schedules the next attempt
+// (never "now") and tells the customer. A decline already counted, or a row
+// that moved since the decision, is ignored.
 func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision) (bool, error) {
-	if sub.NextRetryAt != nil || (sub.LastRetryAt != nil && !d.Decline.OccurredAt.After(*sub.LastRetryAt)) {
-		return false, nil
-	}
 	code := normalize.Trim(d.Decline.DeclineCode)
 	action := decline.Classify(string(sub.Rail), code).Action
 	certainty, blocked := "", ""
@@ -163,7 +159,8 @@ func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.
 			blocked = gate.Reason
 		}
 	}
-	return true, lc.FailMembership(ctx, &subscriptions.FailMembershipParams{
+	applied := false
+	err := lc.FailMembership(ctx, &subscriptions.FailMembershipParams{
 		Rail:              sub.Rail,
 		SubscriptionID:    &sub.ID,
 		FailureCode:       normalize.OptionalString(code),
@@ -172,12 +169,19 @@ func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.
 		AttemptRecorded:   true,
 		TerminalCertainty: certainty,
 		TerminalBlocked:   blocked,
+		GraceEndsAt:       d.GraceEndsAt,
+		Expect: func(cur *models.Subscription) bool {
+			applied = (cur.Status == models.StatusActive || cur.Status == models.StatusUnverified) && !d.stale(cur) &&
+				cur.NextRetryAt == nil && (cur.LastRetryAt == nil || d.Decline.OccurredAt.After(*cur.LastRetryAt))
+			return applied
+		},
 	})
+	return applied && err == nil, err
 }
 
 // transition applies one event to the locked row and carries out its
 // effects in the same transaction; notifications go out after commit.
-func transition(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time, quiet bool) (bool, error) {
+func transition(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time) (bool, error) {
 
 	applied := false
 	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -209,7 +213,7 @@ func transition(ctx context.Context, database *db.DB, lc *subscriptions.Subscrip
 				return err
 			}
 		}
-		if _, err = lc.ApplyEffects(ctx, txdb, cur, customerNotices(effects, quiet || d.Declared, d.RemoteGone), now, subscriptions.EffectOptions{}); err != nil {
+		if _, err = lc.ApplyEffects(ctx, txdb, cur, customerNotices(effects, d.Declared, d.RemoteGone), now, subscriptions.EffectOptions{}); err != nil {
 			return err
 		}
 		if cur.Status == models.StatusPastDue && cur.GraceEndsAt == nil && !d.GraceEndsAt.IsZero() {

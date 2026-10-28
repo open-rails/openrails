@@ -1996,6 +1996,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		if subscription.Status == models.StatusCanceled {
 			return nil
 		}
+		if params.Expect != nil && !params.Expect(subscription) {
+			return nil
+		}
 
 		subscriptionID = subscription.ID
 		userID = subscription.CustomerID.String()
@@ -2173,6 +2176,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 			}
 			subscription.GraceEndsAt = &deadline
+		}
+		if subscription.Status == models.StatusPastDue && subscription.GraceEndsAt == nil && !params.GraceEndsAt.IsZero() {
+			grace := params.GraceEndsAt.UTC()
+			subscription.GraceEndsAt = &grace
 		}
 		if subscription.Status == models.StatusCanceled {
 			reason := normalize.FromPtr(params.FailureReason)

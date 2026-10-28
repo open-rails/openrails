@@ -190,6 +190,12 @@ type FailMembershipParams struct {
 	// (destructive.Gate.Check). It overrides any certainty: the row parks and no
 	// provider delete is queued.
 	TerminalBlocked string
+	// Expect, when set, must accept the locked row, or the failure is not
+	// recorded: the row moved since the caller decided.
+	Expect func(*models.Subscription) bool
+	// GraceEndsAt dates the grace of a provider-seen decline: a past_due row
+	// without one takes it.
+	GraceEndsAt time.Time
 }
 
 func NormalizeCancelType(cancelType *models.CancelType) string {

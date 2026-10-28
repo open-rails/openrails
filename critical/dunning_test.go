@@ -6,8 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
@@ -177,4 +180,56 @@ func TestDunning(t *testing.T) {
 		}
 		renewalSettled(t, a, p, sub, due)
 	})
+	t.Run("OR-J16-S30/a-seen-nmi-decline-opens-dunning-in-one-transaction", func(t *testing.T) {
+		a, p, sub := nmiMembership(t)
+		due := *sub.CurrentPeriodEndsAt
+		sale := p.core.AddScheduleSale(*sub.RailSubscriptionID, due)
+		p.core.EditSale(sale.TransactionID, func(s *nmimock.Sale) { s.Declined = "202" })
+		a.clock.Advance(due.Sub(a.clock.Now()) + time.Hour)
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
+		defer unsubscribe()
+		finished := func(id int64) river.EventKind {
+			deadline := time.After(20 * time.Second)
+			for {
+				select {
+				case event := <-events:
+					if event != nil && event.Job.ID == id {
+						return event.Kind
+					}
+				case <-deadline:
+					t.Fatal("the subscription's convergence did not finish")
+				}
+			}
+		}
+		// The decline's notice is read; the dunning writer fails once it is.
+		restore := storageFault(t, a.world, a.schema, "notification_events", "NEW.event_type IN ('payment_method_failed', 'payment_method_update_required')")
+		job, err := fleet.Insert(t.Context(), subscriptionConvergeJob{PSPID: uuid.UUID(sub.PSPID), MerchantID: a.alpha.MerchantID().UUID(), Rail: "nmi", SubscriptionReference: *sub.RailSubscriptionID}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		require.NoError(t, err)
+		require.Equal(t, river.EventKindJobFailed, finished(job.Job.ID))
+		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionActive, current.Status, "a failed dunning write leaves the row as it was")
+		restore()
+		_, err = fleet.JobRetry(t.Context(), job.Job.ID)
+		require.NoError(t, err)
+		require.Equal(t, river.EventKindJobCompleted, finished(job.Job.ID))
+		dunned := subscriptionState(t, a, sub.ID, "past_due")
+		require.NotNil(t, dunned.Dunning)
+		require.NotNil(t, dunned.Dunning.NextRetryAt, "a dunned decline schedules its retry")
+	})
 }
+
+// subscriptionConvergeJob is the convergence a subscription's provider
+// notice queues.
+type subscriptionConvergeJob struct {
+	PSPID                 uuid.UUID `json:"psp_id"`
+	MerchantID            uuid.UUID `json:"merchant_id"`
+	Rail                  string    `json:"rail"`
+	SubscriptionReference string    `json:"subscription_reference"`
+}
+
+func (subscriptionConvergeJob) Kind() string { return "openrails.subscription_converge" }

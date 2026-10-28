@@ -230,6 +230,9 @@
     "OR-J16-S04": [
       "TestDunning/OR-J16-S04/unknown-renewal-is-not-a-decline-or-replacement-obligation"
     ],
+    "OR-J16-S30": [
+      "TestDunning/OR-J16-S30/a-seen-nmi-decline-opens-dunning-in-one-transaction"
+    ],
     "OR-J17-S01": [
       "TestSubscriptions/OR-J17-S01/cancel-resume-keeps-the-purchased-window"
     ],
