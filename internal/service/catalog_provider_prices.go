@@ -114,7 +114,7 @@ func (s *Service) readProviderPriceTerms(ctx context.Context, account merchants.
 		return providerPriceTerms{}, nil, err
 	}
 	if obj == nil {
-		if obj, err = objects.ObserveByID(ctx, account, providerobjects.Price, ref, nil); err != nil {
+		if obj, err = objects.ObserveByID(ctx, account, providerobjects.Price, ref, nil, providerobjects.ViaRead); err != nil {
 			return providerPriceTerms{}, nil, fmt.Errorf("read %s %q at %s: %v: %w", account.Rail, ref, account.Key, err, ErrProviderPriceUnreadable)
 		}
 	}
@@ -501,7 +501,7 @@ func (s *Service) verifyProviderPrice(ctx context.Context, price *models.Price, 
 	// The price's stored terms record a gone object OpenRails never observed
 	// (a price mapped before the catalog was observed), so it retires.
 	stated := providerobjects.Stated(ref, price.Amount, price.Currency, models.Rail(account.Rail) == models.RailStripe, price.ProviderBillingInterval(), price.ProviderBillingMonths())
-	obj, err := objects.ObserveByID(ctx, account, providerobjects.Price, ref, stated)
+	obj, err := objects.ObserveByID(ctx, account, providerobjects.Price, ref, stated, providerobjects.ViaRead)
 	if err != nil {
 		out.SyncStatus = billing.SyncStatusUnknown
 		return

@@ -55,7 +55,9 @@ and via an hourly reconcile job — subscribing exactly to the event types it ha
 (`invoice.paid`, `invoice.payment_failed`, `checkout.session.completed` and the other
 purchase-session events, `customer.subscription.updated/deleted`, `charge.succeeded`,
 `charge.refunded`, `refund.created/updated`, `payment_method.attached` and
-`.automatically_updated`, and dispute open/close). Registration is skipped when the configured `public_billing_base_url` is not a public
+`.automatically_updated`, dispute open/close, and `product.*` and `price.*`
+created/updated/deleted). An existing endpoint gains new types at the next
+hourly reconcile. Registration is skipped when the configured `public_billing_base_url` is not a public
 `https` URL, when the secret key is missing, or when provider writes are disabled.
 
 Signing-secret handling depends on where the configuration lives:
@@ -116,7 +118,9 @@ For supported `v1.*` equivalents of the snapshot events listed above, ingestion
 verifies the original signed bytes, verifies the API key's account, retrieves the
 full v2 event (using the documented `2025-11-17.preview` metadata version), and
 fetches the related resource with OpenRails' regular pinned resource API version.
-Only the canonical resource endpoint for that event type can be fetched. The
+Only the canonical resource endpoint for that event type can be fetched;
+`product.*` and `price.*` notices fetch nothing, since the observe job reads
+the object itself. The
 original context and event metadata survive normalization; `snapshot_event`, when
 present, becomes the same deduplication key used by the snapshot destination.
 Processing remains inline before acknowledgement except subscription convergence
@@ -161,8 +165,15 @@ Applying reads the existing Stripe price's amount, currency and recurring
 interval; access defaults to that interval and can be declared separately.
 OpenRails does not create or edit a maintained Stripe catalog or Entitlement
 Features. Hosted one-time Checkout uses inline price/product data for its
-inactive, nonreusable payment objects; it creates no Stripe subscription. The pull reconciliation job reports drift without mutating Stripe.
+inactive, nonreusable payment objects; it creates no Stripe subscription.
 New subscriptions are sold only on our `prices`, whose terms remain local.
+
+After the PSP's first pull, OpenRails trails Stripe's catalog by webhook. A
+`product.*` or `price.*` event queues one coalesced read of that object by id
+(read-only; a deleted one answers 404 and is recorded deleted) into the observed
+catalog (`ListProviderCatalog`, `observed_via: webhook`). A price an event shows
+for the first time, live and with no provider price mapping it, raises a medium
+`catalog.price.unmapped` finding; prices the pull listed are the import's.
 
 ### Purchase
 
@@ -220,6 +231,18 @@ own cancel and resume; a subscription whose paid period is over is not resumed
 by Stripe's status alone. A price change takes effect only once Stripe's paid
 invoice bills the new price: an upgrade whose invoice is still open grants
 nothing.
+
+A live Stripe subscription OpenRails cannot land parks instead of retrying
+(`ListParkedSubscriptions`): its price maps to no provider price
+(`price_unmapped`), its customer carries no `user_id` and no linked customer
+(`customer_unlinked`), or the customer already holds the product
+(`product_held`). Price is checked first; nothing is attributed by email. A
+held subscription moved onto an unmapped price keeps its paid tier and parks
+too; its bills naming that price wait. Mapping the price or linking the
+customer (a checkout, an import) wakes converge in the same transaction, and
+the park closes when the subscription lands, by any path, exactly once. Before
+the PSP's first pull, or while its latest import stages the subscription,
+nothing parks: the import owns it.
 
 A dispute or a provider refund that revokes access also queues a durable
 `stripe_cancel_subscription` intent in the same transaction. It reads the

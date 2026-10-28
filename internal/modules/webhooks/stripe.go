@@ -58,6 +58,9 @@ type StripeWebhookService struct {
 	// StripePaymentState reads the exact routed Stripe account. Payment-method
 	// events are wake-up signals; fetched provider truth owns the local link.
 	StripePaymentState payments.StripePaymentStateReader
+	// ObserveEnqueuer queues the coalesced read of a catalog object a
+	// product.* or price.* event names.
+	ObserveEnqueuer ProviderObjectObserveEnqueuer
 }
 
 func (s *StripeWebhookService) now() time.Time {
@@ -317,6 +320,12 @@ var HandledStripeEventTypes = []string{
 	"charge.refunded",
 	"charge.dispute.created",
 	"charge.dispute.closed",
+	"product.created",
+	"product.updated",
+	"product.deleted",
+	"price.created",
+	"price.updated",
+	"price.deleted",
 }
 
 func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string, evt stripeEvent) error {
@@ -363,6 +372,12 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 		return s.handleChargeRefunded(ctx, obj)
 	case "charge.dispute.created", "charge.dispute.closed":
 		return s.handleDispute(ctx, eventType, obj)
+	// Catalog events are wake-up signals too: the observe job reads the
+	// object by id, so a deleted one reads as gone.
+	case "product.created", "product.updated", "product.deleted":
+		return s.markCatalogObjectDirty(ctx, eventType, "product", obj)
+	case "price.created", "price.updated", "price.deleted":
+		return s.markCatalogObjectDirty(ctx, eventType, "price", obj)
 	default:
 		log.WithField("event_type", eventType).Info("stripe webhook ignored (not handled)")
 		return nil

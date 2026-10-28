@@ -17,6 +17,8 @@ const (
 // provider price mapping it is not for sale but keeps billing. Price is the
 // live provider price mapping it; null is unmapped. Subscriptions counts the
 // import's staged subscriptions naming it, when the list names an import.
+// Parked counts the live subscriptions parked on an unmapped price, and
+// Finding is its open catalog.price.unmapped finding (prices only).
 type ProviderCatalogObject struct {
 	Kind          ProviderCatalogKind   `json:"kind"`
 	Ref           string                `json:"ref"`
@@ -30,6 +32,8 @@ type ProviderCatalogObject struct {
 	ObservedVia   string                `json:"observed_via"`
 	Price         *PriceID              `json:"price"`
 	Subscriptions *int                  `json:"subscriptions"`
+	Parked        *int                  `json:"parked"`
+	Finding       *FindingID            `json:"finding"`
 }
 
 // ProviderCatalogTerms are a provider price's terms as the provider states

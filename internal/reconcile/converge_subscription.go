@@ -10,7 +10,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -167,15 +166,9 @@ func applyDecisionSideEffects(ctx context.Context, database *db.DB, sub *models.
 
 	railCustomer := false
 	if d.RemoteCustomerID != "" && rails.HasRemoteCustomer(sub.Rail) {
-		if err := q.UpsertPSPCustomer(ctx, gen.UpsertPSPCustomerParams{
-			CustomerID: sub.CustomerID,
-			// The mapping belongs to the account that owns the subscription,
-			// whose remote customer id this is.
-			PspID:             sub.PspID,
-			RemoteCustomerRef: d.RemoteCustomerID,
-			At:                now,
-			MerchantID:        sub.MerchantID,
-		}); err != nil {
+		// The mapping belongs to the account that owns the subscription, whose
+		// remote customer id this is.
+		if err := payments.LinkPSPCustomer(ctx, database, sub.CustomerID, sub.PspID, d.RemoteCustomerID, now); err != nil {
 			return backfilled, false, fmt.Errorf("converge: materialize rail_customer %s: %w", sub.ID, err)
 		}
 		railCustomer = true

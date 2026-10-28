@@ -59,6 +59,7 @@ var ownedTables = []string{
 	"orders",
 	"owed_items",
 	"ownership_claims",
+	"parked_provider_subscriptions",
 	"payment_attempts",
 	"payment_method_versions",
 	"payment_methods",

@@ -103,6 +103,9 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 	}
 	if liveness.Found {
 		sub := RemoteSubscription{RailSubscriptionID: subj.RailSubscriptionID, Status: SubscriptionStatusUnknown}
+		if liveness.Plan != nil {
+			sub.PlanID = strings.TrimSpace(liveness.Plan.ID)
+		}
 		if !liveness.NextChargeDate.IsZero() {
 			next := liveness.NextChargeDate
 			sub.NextBillingAt = &next

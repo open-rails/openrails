@@ -248,6 +248,8 @@ func (c *NMIClient) ReadCycleTransactions(ctx context.Context, scope CycleScope,
 type RecurringLiveness struct {
 	Found          bool
 	NextChargeDate time.Time
+	// Plan is the subscription's copy of its plan, nil when it names none.
+	Plan *V5Plan
 }
 
 // GetRecurringLiveness reads GET /v5/subscriptions/{id} and reports whether
@@ -264,7 +266,7 @@ func (c *NMIClient) GetRecurringLiveness(ctx context.Context, subscriptionID str
 	if !found {
 		return out, nil
 	}
-	out.Found = true
+	out.Found, out.Plan = true, sub.Plan
 	if next, perr := parseV5Date(sub.NextBillingDate); perr == nil {
 		out.NextChargeDate = next
 	}

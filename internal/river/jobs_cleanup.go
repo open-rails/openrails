@@ -145,6 +145,7 @@ type CleanupResult struct {
 	ReconciliationRuns         int64
 	ProviderIntents            int64
 	ProviderMutationLogs       int64
+	ReleasedParks              int64
 	// PartitionsCreated and PartitionsDropped count whole monthly partitions.
 	PartitionsCreated int
 	PartitionsDropped int
@@ -290,6 +291,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			FindingCutoff:          now.Add(-retention.ResolvedFindings),
 			RunCutoff:              now.Add(-retention.ReconciliationRuns),
 			ProviderWriteCutoff:    now.Add(-retention.ProviderWrites),
+			ParkCutoff:             now.Add(-retention.ReleasedParks),
 			After:                  after,
 			MerchantLimit:          limit,
 		})
@@ -366,6 +368,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"reconciliation_runs":          result.ReconciliationRuns,
 		"provider_intents":             result.ProviderIntents,
 		"provider_mutation_logs":       result.ProviderMutationLogs,
+		"released_parks":               result.ReleasedParks,
 		"partitions_created":           result.PartitionsCreated,
 		"partitions_dropped":           result.PartitionsDropped,
 	})
@@ -536,6 +539,13 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	sweep("delete provider mutation logs", &result.ProviderMutationLogs, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteProviderMutationLogsBefore(ctx, gen.DeleteProviderMutationLogsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.ProviderWrites), RowLimit: limit,
+		})
+	})
+
+	// 13. Released parks.
+	sweep("delete released parks", &result.ReleasedParks, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteReleasedParksBefore(ctx, gen.DeleteReleasedParksBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.ReleasedParks), RowLimit: limit,
 		})
 	})
 

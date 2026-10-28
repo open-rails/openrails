@@ -88,6 +88,9 @@ type WebhookDispatcher struct {
 	// ConvergeEnqueuer schedules the coalesced fetch-and-converge job the
 	// Stripe/NMI subscription-state handlers enqueue.
 	ConvergeEnqueuer SubscriptionConvergeEnqueuer
+	// ObserveEnqueuer schedules the read of a catalog object a Stripe
+	// product.* or price.* event names.
+	ObserveEnqueuer ProviderObjectObserveEnqueuer
 	// StripePaymentStateReaderFactory is a test seam for exact-account provider
 	// reads. Production leaves it nil and uses the HTTP reader.
 	StripePaymentStateReaderFactory func(secretKey string) payments.StripePaymentStateReader
@@ -238,6 +241,7 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		OrderAttemptService:  d.OrderAttemptService,
 		Clock:                d.Clock,
 		ConvergeEnqueuer:     d.ConvergeEnqueuer,
+		ObserveEnqueuer:      d.ObserveEnqueuer,
 		StripePaymentState:   paymentState,
 	}
 	return service.HandleStripeWebhook(ctx, event.Payload)

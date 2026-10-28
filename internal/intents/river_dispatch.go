@@ -78,7 +78,8 @@ func (s *Store) WakeOperation(ctx context.Context, id uuid.UUID, now time.Time) 
 		if _, err := s.db.NewWithPgxTx(tx).Gen(ctx).AdvanceProviderIntentVerification(ctx, gen.AdvanceProviderIntentVerificationParams{MerchantID: row.MerchantID, ID: row.ID, Now: now}); err != nil {
 			return err
 		}
-		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(now))
+		_, err = s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(now))
+		return err
 	})
 }
 
@@ -113,7 +114,8 @@ func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, transition 
 		if ManualPaymentMethodDelete(row) {
 			return nil
 		}
-		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: mid.UUID(), IntentID: id}, operationInsertOpts(at.UTC()))
+		_, err = s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: mid.UUID(), IntentID: id}, operationInsertOpts(at.UTC()))
+		return err
 	}
 	hook, _ := ctx.Value(successorCommitContextKey{}).(successorCommitHook)
 	if pool := s.db.DataPool(); hook != nil && pool != nil {
@@ -157,7 +159,7 @@ func (s *Store) resumeRecoveryHeld(ctx context.Context, id *uuid.UUID, now time.
 			return err
 		}
 		for _, id := range ids {
-			if err := s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: mid.UUID(), IntentID: id}, operationInsertOpts(now)); err != nil {
+			if _, err := s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: mid.UUID(), IntentID: id}, operationInsertOpts(now)); err != nil {
 				return err
 			}
 		}

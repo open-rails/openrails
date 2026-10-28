@@ -742,7 +742,7 @@ func (w *ProviderRefreshWorker) completeObservation(ctx context.Context, mid, ps
 		for _, args := range jobs {
 			// Do not deduplicate against a scan sleeping on an earlier outage.
 			// Canonical usage/renewal admission and durable cadence own money.
-			if err := w.DB.InsertRiverJobTx(ctx, tx, args, &river.InsertOpts{Queue: QueueBilling}); err != nil {
+			if _, err := w.DB.InsertRiverJobTx(ctx, tx, args, &river.InsertOpts{Queue: QueueBilling}); err != nil {
 				return err
 			}
 		}

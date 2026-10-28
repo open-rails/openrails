@@ -64,6 +64,8 @@ const (
 	// ResolvedFindings keeps a resolved reconciliation finding 12 months past
 	// its resolution and its last sighting.
 	ResolvedFindings = 366 * Day
+	// ReleasedParks keeps a released park 90 days past its release.
+	ReleasedParks = 90 * Day
 	// ReconciliationRuns keeps a reconciliation run 12 months.
 	ReconciliationRuns = 366 * Day
 	// NotificationsRead and NotificationsUnread keep a notification 90 days

@@ -80,6 +80,7 @@
       "func (c *Client) ListPSPImportRecords(ctx context.Context, id billing.PSPImportID, params billing.PSPImportRecordListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PSPImportRecord], error)",
       "func (c *Client) ListPSPImports(ctx context.Context, params billing.PSPImportListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PSPImport], error)",
       "func (c *Client) ListPSPs(ctx context.Context, params billing.PSPListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PSP], error)",
+      "func (c *Client) ListParkedSubscriptions(ctx context.Context, params billing.ParkedSubscriptionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.ParkedSubscription], error)",
       "func (c *Client) ListPaymentAttempts(ctx context.Context, filter billing.PaymentAttemptListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PaymentAttempt], error)",
       "func (c *Client) ListPaymentMethods(ctx context.Context, customerID billing.CustomerID, params billing.PaymentMethodListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PaymentMethod], error)",
       "func (c *Client) ListPayments(ctx context.Context, params billing.PaymentListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Payment], error)",
@@ -324,6 +325,8 @@
       "const (\n\tPSPImportPulling  PSPImportStatus = \"pulling\"\n\tPSPImportPulled   PSPImportStatus = \"pulled\"\n\tPSPImportApplying PSPImportStatus = \"applying\"\n\tPSPImportApplied  PSPImportStatus = \"applied\"\n\n\tPSPImportFailed PSPImportStatus = \"failed\"\n)",
       "const (\n\tPSPImportUnmatched PSPImportRecordState = \"unmatched\"\n\n\tPSPImportConflict PSPImportRecordState = \"conflict\"\n\tPSPImportLinked   PSPImportRecordState = \"linked\"\n\tPSPImportImported PSPImportRecordState = \"imported\"\n\n\tPSPImportBlocked PSPImportRecordState = \"blocked\"\n)",
       "const (\n\tPSPImportViaDirectory PSPImportRuleVia = \"directory\"\n\n\tPSPImportViaMapping PSPImportRuleVia = \"mapping\"\n\n\tPSPImportViaCustomerID PSPImportRuleVia = \"customer_id\"\n)",
+      "const (\n\tParkLanded ParkRelease = \"landed\"\n\n\tParkConverged ParkRelease = \"converged\"\n\n\tParkGone ParkRelease = \"gone\"\n)",
+      "const (\n\tParkPriceUnmapped ParkReason = \"price_unmapped\"\n\n\tParkCustomerUnlinked ParkReason = \"customer_unlinked\"\n\n\tParkProductHeld ParkReason = \"product_held\"\n)",
       "const (\n\tPaymentCharge          PaymentKind = \"charge\"\n\tPaymentRefund          PaymentKind = \"refund\"\n\tPaymentChargeback      PaymentKind = \"chargeback\"\n\tPaymentDisputeReversal PaymentKind = \"dispute_reversal\"\n)",
       "const (\n\tPaymentMethodRequiresAction PaymentMethodStatus = \"requires_action\"\n\tPaymentMethodActive         PaymentMethodStatus = \"active\"\n\n\tPaymentMethodClosed PaymentMethodStatus = \"closed\"\n\n\tPaymentMethodReplaced PaymentMethodStatus = \"replaced\"\n\tPaymentMethodRemoved  PaymentMethodStatus = \"removed\"\n)",
       "const (\n\tPaymentPending           PaymentStatus = \"pending\"\n\tPaymentSucceeded         PaymentStatus = \"succeeded\"\n\tPaymentFailed            PaymentStatus = \"failed\"\n\tPaymentRefunded          PaymentStatus = \"refunded\"\n\tPaymentPartiallyRefunded PaymentStatus = \"partially_refunded\"\n)",
@@ -364,6 +367,7 @@
       "const MaxRunningChargeRatePerHour = 1_000_000_000_000",
       "const MaxUsageBatchItems = 1000",
       "const PSPTemporarilyUnavailable = \"temporarily_unavailable\"",
+      "const ParkedSubscriptionIDPrefix = \"pks_\"",
       "const PriceMigrationIDPrefix = \"pmig_\"",
       "const ProductAccessIDPrefix = \"pa_\"",
       "const ProvisioningTokenIDPrefix = \"ptk_\"",
@@ -394,6 +398,7 @@
       "func (id *PSPID) UnmarshalText(text []byte) error",
       "func (id *PSPImportID) UnmarshalText(text []byte) error",
       "func (id *PSPImportRecordID) UnmarshalText(text []byte) error",
+      "func (id *ParkedSubscriptionID) UnmarshalText(text []byte) error",
       "func (id *PaymentAttemptID) UnmarshalText(text []byte) error",
       "func (id *PaymentID) UnmarshalText(text []byte) error",
       "func (id *PaymentMethodID) UnmarshalText(text []byte) error",
@@ -471,6 +476,10 @@
       "func (id PSPImportRecordID) MarshalText() ([]byte, error)",
       "func (id PSPImportRecordID) String() string",
       "func (id PSPImportRecordID) UUID() uuid.UUID",
+      "func (id ParkedSubscriptionID) IsZero() bool",
+      "func (id ParkedSubscriptionID) MarshalText() ([]byte, error)",
+      "func (id ParkedSubscriptionID) String() string",
+      "func (id ParkedSubscriptionID) UUID() uuid.UUID",
       "func (id PaymentAttemptID) IsZero() bool",
       "func (id PaymentAttemptID) MarshalText() ([]byte, error)",
       "func (id PaymentAttemptID) String() string",
@@ -570,6 +579,7 @@
       "func ParsePSPID(s string) (PSPID, error)",
       "func ParsePSPImportID(s string) (PSPImportID, error)",
       "func ParsePSPImportRecordID(s string) (PSPImportRecordID, error)",
+      "func ParseParkedSubscriptionID(s string) (ParkedSubscriptionID, error)",
       "func ParsePaymentAttemptID(s string) (PaymentAttemptID, error)",
       "func ParsePaymentID(s string) (PaymentID, error)",
       "func ParsePaymentMethodID(s string) (PaymentMethodID, error)",
@@ -895,6 +905,11 @@
       "type PSPRoutingPreview struct {\n\tPolicy string `json:\"policy\"`\n\n\tRule *int `json:\"rule\"`\n\n\tPSP        *string               `json:\"psp\"`\n\tRail       *Rail                 `json:\"rail\"`\n\tMode       *string               `json:\"mode\"`\n\tCandidates []PSPRoutingCandidate `json:\"candidates\"`\n}",
       "type PSPRoutingRule struct {\n\tMatch PSPRoutingMatch `json:\"match,omitempty\"`\n\n\tPrefer []string `json:\"prefer\"`\n}",
       "type PageRequest struct {\n\tLimit  int\n\tCursor string\n}",
+      "type ParkReason string",
+      "type ParkRelease string",
+      "type ParkedSubscription struct {\n\tID              ParkedSubscriptionID `json:\"id\"`\n\tPSP             PSPID                `json:\"psp\"`\n\tRail            string               `json:\"rail\"`\n\tSubscriptionRef string               `json:\"subscription_ref\"`\n\tReason          ParkReason           `json:\"reason\"`\n\tPriceRef        *string              `json:\"price_ref\"`\n\tCustomerRef     *string              `json:\"customer_ref\"`\n\tEvidence        json.RawMessage      `json:\"evidence\"`\n\tParkedAt        time.Time            `json:\"parked_at\"`\n\tLastSeenAt      time.Time            `json:\"last_seen_at\"`\n\tReleasedAt      *time.Time           `json:\"released_at\"`\n\tReleasedBy      *ParkRelease         `json:\"released_by\"`\n\tSubscription    *SubscriptionID      `json:\"subscription_id\"`\n}",
+      "type ParkedSubscriptionID uuid.UUID",
+      "type ParkedSubscriptionListParams struct {\n\tPageRequest\n\tPSP      string\n\tReason   ParkReason\n\tReleased bool\n}",
       "type PayOrderParams struct {\n\tPayment       OrderPaymentParams `json:\"payment\"`\n\tExpectedTotal int64              `json:\"expected_total,string\"`\n\tReusable      *bool              `json:\"reusable,omitempty\"`\n}",
       "type Payment struct {\n\tID             PaymentID       `json:\"id\"`\n\tKind           PaymentKind     `json:\"kind\"`\n\tStatus         PaymentStatus   `json:\"status\"`\n\tAmount         int64           `json:\"amount,string\"`\n\tAmountRefunded int64           `json:\"amount_refunded,string\"`\n\tCurrency       string          `json:\"currency\"`\n\tCustomerID     CustomerID      `json:\"customer_id\"`\n\tSubscriptionID *SubscriptionID `json:\"subscription_id\"`\n\n\tOrderID *OrderID `json:\"order_id\"`\n\n\tQuantity          *int            `json:\"quantity\"`\n\tChannel           PaymentChannel  `json:\"channel\"`\n\tRail              *string         `json:\"rail\"`\n\tPSPID             *PSPID          `json:\"psp_id\"`\n\tTransactionID     string          `json:\"transaction_id\"`\n\tCard              *CardDetails    `json:\"card\"`\n\tFailure           *PaymentFailure `json:\"failure\"`\n\tRefundedPaymentID *PaymentID      `json:\"refunded_payment_id\"`\n\n\tReason *string `json:\"reason\"`\n\n\tRefunds []Payment `json:\"refunds\"`\n\n\tCreatedAt time.Time `json:\"created_at\"`\n}",
       "type PaymentAttempt struct {\n\tID PaymentAttemptID `json:\"id\"`\n\n\tKind string `json:\"kind\"`\n\n\tOwner string `json:\"owner\"`\n\n\tCardEntry string `json:\"card_entry\"`\n\n\tSource       string        `json:\"source\"`\n\tObservedVia  string        `json:\"observed_via\"`\n\tCategory     string        `json:\"category\"`\n\tReason       DeclineReason `json:\"reason\"`\n\tAction       string        `json:\"action\"`\n\tResponseCode string        `json:\"response_code\"`\n\tResponseText string        `json:\"response_text\"`\n\n\tIssuerCode string `json:\"issuer_code\"`\n\tIssuerText string `json:\"issuer_text\"`\n\tAVSResult  string `json:\"avs_result\"`\n\tCVVResult  string `json:\"cvv_result\"`\n\n\tCard          *CardDetails `json:\"card\"`\n\tCardBIN       string       `json:\"card_bin\"`\n\tTokenType     string       `json:\"token_type\"`\n\tTransactionID string       `json:\"transaction_id\"`\n\tRail          string       `json:\"rail\"`\n\tPSPID         PSPID        `json:\"psp_id\"`\n\tCustomerID    CustomerID   `json:\"customer_id\"`\n\tAmount        int64        `json:\"amount,string\"`\n\tCurrency      string       `json:\"currency\"`\n\tAttemptedAt   time.Time    `json:\"attempted_at\"`\n\n\tOrderID         *OrderID         `json:\"order_id\"`\n\tCycleID         *RenewalID       `json:\"cycle_id\"`\n\tSubscriptionID  *SubscriptionID  `json:\"subscription_id\"`\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id\"`\n\tPaymentID       *PaymentID       `json:\"payment_id\"`\n\tEnrichedAt      *time.Time       `json:\"enriched_at\"`\n\n\tMandateID                *MandateID `json:\"mandate_id\"`\n\tSentInitialTransactionID string     `json:\"sent_initial_transaction_id\"`\n}",
@@ -952,7 +967,7 @@
       "type ProposalSource string",
       "type ProviderCatalogKind string",
       "type ProviderCatalogListParams struct {\n\tPageRequest\n\tPSP     PSPID\n\tKind    ProviderCatalogKind\n\tMapped  *bool\n\tRetired *bool\n\tImport  *PSPImportID\n}",
-      "type ProviderCatalogObject struct {\n\tKind          ProviderCatalogKind   `json:\"kind\"`\n\tRef           string                `json:\"ref\"`\n\tProductRef    *string               `json:\"product_ref\"`\n\tName          *string               `json:\"name\"`\n\tActive        bool                  `json:\"active\"`\n\tDeletedAt     *time.Time            `json:\"deleted_at\"`\n\tRetired       bool                  `json:\"retired\"`\n\tTerms         *ProviderCatalogTerms `json:\"terms\"`\n\tObservedAt    time.Time             `json:\"observed_at\"`\n\tObservedVia   string                `json:\"observed_via\"`\n\tPrice         *PriceID              `json:\"price\"`\n\tSubscriptions *int                  `json:\"subscriptions\"`\n}",
+      "type ProviderCatalogObject struct {\n\tKind          ProviderCatalogKind   `json:\"kind\"`\n\tRef           string                `json:\"ref\"`\n\tProductRef    *string               `json:\"product_ref\"`\n\tName          *string               `json:\"name\"`\n\tActive        bool                  `json:\"active\"`\n\tDeletedAt     *time.Time            `json:\"deleted_at\"`\n\tRetired       bool                  `json:\"retired\"`\n\tTerms         *ProviderCatalogTerms `json:\"terms\"`\n\tObservedAt    time.Time             `json:\"observed_at\"`\n\tObservedVia   string                `json:\"observed_via\"`\n\tPrice         *PriceID              `json:\"price\"`\n\tSubscriptions *int                  `json:\"subscriptions\"`\n\tParked        *int                  `json:\"parked\"`\n\tFinding       *FindingID            `json:\"finding\"`\n}",
       "type ProviderCatalogTerms struct {\n\tStatedAmount          *string `json:\"stated_amount\"`\n\tCurrency              *string `json:\"currency\"`\n\tBillingIntervalHours  *int    `json:\"billing_interval_hours\"`\n\tBillingIntervalMonths *int    `json:\"billing_interval_months\"`\n}",
       "type ProvisionMerchantParams struct {\n\tSlug string\n\n\tDisplayName string\n\n\tOwnerUserID string\n}",
       "type ProvisionMerchantResult struct {\n\tMerchantID MerchantID\n\n\tGroupID string\n\n\tCreated bool\n}",
@@ -1369,6 +1384,7 @@
       "func (id *PSPID) UnmarshalText(text []byte) error {\n\tparsed, err := ParsePSPID(string(text))\n\t*id = parsed\n\treturn err\n}",
       "func (id *PSPImportID) UnmarshalText(text []byte) error {\n\tparsed, err := ParsePSPImportID(string(text))\n\t*id = parsed\n\treturn err\n}",
       "func (id *PSPImportRecordID) UnmarshalText(text []byte) error {\n\tparsed, err := ParsePSPImportRecordID(string(text))\n\t*id = parsed\n\treturn err\n}",
+      "func (id *ParkedSubscriptionID) UnmarshalText(text []byte) error {\n\tparsed, err := ParseParkedSubscriptionID(string(text))\n\t*id = parsed\n\treturn err\n}",
       "func (id *PaymentAttemptID) UnmarshalText(text []byte) error {\n\tparsed, err := ParsePaymentAttemptID(string(text))\n\t*id = parsed\n\treturn err\n}",
       "func (id *PaymentID) UnmarshalText(text []byte) error {\n\tparsed, err := ParsePaymentID(string(text))\n\t*id = parsed\n\treturn err\n}",
       "func (id *PaymentMethodID) UnmarshalText(text []byte) error {\n\tparsed, err := ParsePaymentMethodID(string(text))\n\t*id = parsed\n\treturn err\n}",
@@ -1398,6 +1414,7 @@
       "func (id PSPID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
       "func (id PSPImportID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
       "func (id PSPImportRecordID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
+      "func (id ParkedSubscriptionID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
       "func (id PaymentAttemptID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
       "func (id PaymentID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
       "func (id PaymentMethodID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
@@ -1885,7 +1902,6 @@
       "type ProviderRefreshMerchantArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\n\tRequested bool `json:\"requested,omitempty\" river:\"unique\"`\n}",
       "type SolanaPullAgreement struct {\n\tFingerprint           int64                     `json:\"plan_fingerprint\"`\n\tRow                   models.SolanaSubscription `json:\"row\"`\n\tPriceID               uuid.UUID                 `json:\"price_id\"`\n\tProductID             uuid.UUID                 `json:\"product_id\"`\n\tCustomerID            uuid.UUID                 `json:\"customer_id\"`\n\tDescription           string                    `json:\"description\"`\n\tAmount                int64                     `json:\"amount,string\"`\n\tCurrency              string                    `json:\"currency\"`\n\tNativeDecimals        int                       `json:\"native_decimals\"`\n\tTokenAmount           uint64                    `json:\"token_amount,string\"`\n\tTokenDecimals         int                       `json:\"token_decimals\"`\n\tPeriodHours           uint64                    `json:\"period_hours,string\"`\n\tAccessDurationHours   *int                      `json:\"access_duration_hours\"`\n\tProviderAccessDefault bool                      `json:\"provider_access_default,omitempty\"`\n\tQuantity              *int                      `json:\"quantity\"`\n\tRetryAttempts         int                       `json:\"retry_attempts\"`\n\tEpisodeAt             time.Time                 `json:\"episode_at\"`\n\tPreviousPeriodEnd     *time.Time                `json:\"previous_period_end\"`\n}",
       "type SolanaPullPayload struct {\n\tAgreement       *SolanaPullAgreement `json:\"agreement,omitempty\"`\n\tSubscriptionPDA string               `json:\"subscription_pda\"`\n\tRowID           uuid.UUID            `json:\"row_id\"`\n\tNextPullAt      time.Time            `json:\"next_pull_at\"`\n}",
-      "type SubscriptionConvergeArgs struct {\n\tPSPID                 uuid.UUID `json:\"psp_id\" river:\"unique\"`\n\tMerchantID            uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tRail                  string    `json:\"rail\" river:\"unique\"`\n\tSubscriptionReference string    `json:\"subscription_reference\" river:\"unique\"`\n\n\tAfter        int64  `json:\"after,omitempty\" river:\"unique\"`\n\tEventType    string `json:\"event_type,omitempty\"`\n\tEventCreated int64  `json:\"event_created,omitempty\"`\n}",
       "type UsageOrderArgs struct {\n\tAutomatic             bool                `json:\"automatic,omitempty\"`\n\tMerchantID            *billing.MerchantID `json:\"merchant_id,omitempty\"`\n\tCollect               bool                `json:\"collect,omitempty\"`\n\tUseMonthlyFloor       bool                `json:\"use_monthly_floor,omitempty\"`\n\tFinalizePreviousMonth bool                `json:\"finalize_previous_month,omitempty\"`\n}",
       "type accountUpdaterPayload struct {\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailMethodRef   string    `json:\"rail_method_ref\"`\n}"
     ],
@@ -1907,6 +1923,10 @@
       "type orderKeyResult struct {\n\tOrderID uuid.UUID      `json:\"order_id\"`\n\tDigest  []byte         `json:\"digest\"`\n\tStatus  int            `json:\"status,omitempty\"`\n\tCode    string         `json:\"code,omitempty\"`\n\tOrder   *billing.Order `json:\"order,omitempty\"`\n}",
       "type storedCatalogReceipt struct {\n\tApplicationID   string `json:\"application_id\"`\n\tBaseRevision    int64  `json:\"base_revision\"`\n\tAppliedRevision int64  `json:\"applied_revision\"`\n\tReplayed        bool   `json:\"replayed\"`\n\tProductsChanged int    `json:\"products_changed\"`\n\tPricesChanged   int    `json:\"prices_changed\"`\n}",
       "type usageCursor struct {\n\tAmount   int64                `json:\"a\"`\n\tKey      string               `json:\"k\"`\n\tCurrency string               `json:\"c\"`\n\tGroupBy  billing.UsageGroupBy `json:\"g\"`\n\tFrom     time.Time            `json:\"f\"`\n\tTo       time.Time            `json:\"t\"`\n}"
+    ],
+    "internal/wakejobs": [
+      "type ProviderObjectObserveArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tPSPID      uuid.UUID `json:\"psp_id\" river:\"unique\"`\n\n\tObjectKind string `json:\"kind\" river:\"unique\"`\n\tRef        string `json:\"ref\" river:\"unique\"`\n\tAfter      int64  `json:\"after,omitempty\" river:\"unique\"`\n\tEventType  string `json:\"event_type,omitempty\"`\n}",
+      "type SubscriptionConvergeArgs struct {\n\tPSPID                 uuid.UUID `json:\"psp_id\" river:\"unique\"`\n\tMerchantID            uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tRail                  string    `json:\"rail\" river:\"unique\"`\n\tSubscriptionReference string    `json:\"subscription_reference\" river:\"unique\"`\n\n\tAfter        int64  `json:\"after,omitempty\" river:\"unique\"`\n\tEventType    string `json:\"event_type,omitempty\"`\n\tEventCreated int64  `json:\"event_created,omitempty\"`\n}"
     ],
     "server/cmd/openrails": [
       "type ledgerAuditResult struct {\n\tMerchantID   uuid.UUID              `json:\"merchant_id\"`\n\tMerchantSlug string                 `json:\"merchant_slug\"`\n\tReport       ledger.IntegrityReport `json:\"report\"`\n\tErr          string                 `json:\"error,omitempty\"`\n}"
@@ -2148,6 +2168,11 @@
     "billing/orders.go": {
       "catalog": "github.com/open-rails/openrails/catalog",
       "time": "time"
+    },
+    "billing/parked_subscriptions.go": {
+      "json": "encoding/json",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "billing/payment_attempts.go": {
       "time": "time"
@@ -3466,6 +3491,7 @@
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
+      "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/catalog/providerobjects/readers.go": {
@@ -4777,35 +4803,6 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
-    "internal/river/jobs_subscription_converge.go": {
-      "attempts": "github.com/open-rails/openrails/internal/modules/attempts",
-      "billing": "github.com/open-rails/openrails/billing",
-      "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
-      "clockwork": "github.com/jonboulle/clockwork",
-      "config": "github.com/open-rails/openrails/internal/config",
-      "context": "context",
-      "converge": "github.com/open-rails/openrails/internal/reconcile/converge",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "errors": "errors",
-      "fmt": "fmt",
-      "json": "encoding/json",
-      "log": "github.com/sirupsen/logrus",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "money": "github.com/open-rails/openrails/internal/modules/money",
-      "payments": "github.com/open-rails/openrails/internal/modules/payments",
-      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
-      "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
-      "river": "github.com/riverqueue/river",
-      "rivertype": "github.com/riverqueue/river/rivertype",
-      "strings": "strings",
-      "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
-      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5",
-      "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks"
-    },
     "internal/river/solana_pull_agreement.go": {
       "context": "context",
       "errors": "errors",
@@ -4986,6 +4983,16 @@
       "sync": "sync",
       "time": "time",
       "url": "net/url"
+    },
+    "internal/wakejobs/wakejobs.go": {
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "fmt": "fmt",
+      "river": "github.com/riverqueue/river",
+      "rivertype": "github.com/riverqueue/river/rivertype",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "local_client.go": {
       "billing": "github.com/open-rails/openrails/billing",

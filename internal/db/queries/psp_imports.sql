@@ -197,3 +197,13 @@ UPDATE billing.psp_import_records r
 SET manual_price_id = NULLIF(l.price_id, '00000000-0000-0000-0000-000000000000'::uuid), updated_at = now()
 FROM unnest(sqlc.arg(ids)::uuid[], sqlc.arg(price_ids)::uuid[]) AS l(id, price_id)
 WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.import_id = sqlc.arg(import_id)::uuid AND r.id = l.id AND r.kind = 'subscription';
+
+-- name: ListCustomerVaultMethods :many
+-- A customer's live cards in one NMI vault, newest first: what adopting a
+-- subscription billing that vault bills.
+SELECT rail_method_ref FROM billing.payment_methods
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND custodian_id IS NULL
+  AND rail_customer_ref = sqlc.arg(vault)::text AND customer_id = sqlc.arg(customer_id)::uuid
+  AND status = 'active' AND rail_method_ref IS NOT NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 10;

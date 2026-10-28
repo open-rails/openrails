@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
@@ -81,6 +82,10 @@ func (o *Observer) List(ctx context.Context, p billing.ProviderCatalogListParams
 		}
 		if r.Kind == string(Price) {
 			item.Terms = &billing.ProviderCatalogTerms{StatedAmount: r.Amount, Currency: r.Currency, BillingIntervalHours: intOf(r.BillingIntervalHours), BillingIntervalMonths: intOf(r.BillingIntervalMonths)}
+			item.Parked = new(int(r.Parked))
+			if r.Finding != uuid.Nil {
+				item.Finding = new(billing.FindingID(r.Finding))
+			}
 		}
 		if r.Price != "" {
 			item.Price = new(billing.PriceID(r.Price))

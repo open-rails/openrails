@@ -39,12 +39,17 @@ ORDER BY kind, ref;
 
 -- name: ListProviderCatalog :many
 -- One PSP's observed catalog in (kind, ref) order, with the live provider
--- price mapping each price (empty for none). With import_id, only the prices
--- that import's staged subscriptions name, with how many name each.
+-- price mapping each price (empty for none), the subscriptions parked on it
+-- and its open unmapped finding. With import_id, only the prices that
+-- import's staged subscriptions name, with how many name each.
 SELECT o.kind, o.ref, o.product_ref, o.name, o.active, o.deleted_at, o.amount, o.currency, o.billing_interval_hours, o.billing_interval_months,
     o.observed_at, o.observed_via,
     (NOT o.active OR o.deleted_at IS NOT NULL OR COALESCE(NOT product.active OR product.deleted_at IS NOT NULL, false))::boolean AS retired,
-    COALESCE(mapped.public_id, '')::text AS price, COALESCE(named.subscriptions, 0)::int AS subscriptions
+    COALESCE(mapped.public_id, '')::text AS price, COALESCE(named.subscriptions, 0)::int AS subscriptions,
+    (SELECT count(*) FROM billing.parked_provider_subscriptions pk WHERE pk.merchant_id = o.merchant_id AND pk.psp_id = o.psp_id
+        AND pk.reason = 'price_unmapped' AND pk.price_ref = o.ref AND pk.released_at IS NULL)::int AS parked,
+    COALESCE((SELECT f.id FROM billing.reconciliation_findings f WHERE f.merchant_id = o.merchant_id AND f.finding_type = 'catalog.price.unmapped'
+        AND f.psp_id = o.psp_id AND f.subject_key = o.ref AND f.resolved_at IS NULL), '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS finding
 FROM billing.provider_catalog_objects o
 LEFT JOIN billing.provider_catalog_objects product ON product.merchant_id = o.merchant_id AND product.psp_id = o.psp_id
     AND product.kind = 'product' AND product.ref = o.product_ref

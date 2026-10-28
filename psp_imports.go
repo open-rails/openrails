@@ -173,3 +173,24 @@ func (c *Client) ListProviderCatalog(ctx context.Context, params billing.Provide
 	}
 	return &out, nil
 }
+
+// ListParkedSubscriptions lists the live provider subscriptions OpenRails
+// could not land, newest first: open parks, or closed ones with Released.
+// Mapping a park's price or linking its customer lands it.
+func (c *Client) ListParkedSubscriptions(ctx context.Context, params billing.ParkedSubscriptionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.ParkedSubscription], error) {
+	q := pageValues(nil, params.PageRequest)
+	if params.PSP != "" {
+		q.Set("psp", params.PSP)
+	}
+	if params.Reason != "" {
+		q.Set("reason", string(params.Reason))
+	}
+	if params.Released {
+		q.Set("released", "true")
+	}
+	var out billing.ListPage[billing.ParkedSubscription]
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/parked-subscriptions?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

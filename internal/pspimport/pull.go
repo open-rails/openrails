@@ -289,7 +289,7 @@ func (c *catalogPull) fill(ctx context.Context, recs []staged) error {
 		}
 		read[key] = true
 		progress.Mark(ctx, fmt.Sprintf("psp import catalog %s %s", kind, ref))
-		if _, err := c.im.Objects.Observe(ctx, c.reader, c.scope, kind, ref, stated); err != nil {
+		if _, err := c.im.Objects.Observe(ctx, c.reader, c.scope, kind, ref, stated, providerobjects.ViaRead); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}

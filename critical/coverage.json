@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 187,
+  "scenario_count": 196,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -937,6 +937,51 @@
       "id": "OR-J38-S13",
       "journey": "J38",
       "name": "A provider answer no attempt can read fails the import after five attempts with its error, deletable"
+    },
+    {
+      "id": "OR-J15-S08",
+      "journey": "J15",
+      "name": "A Stripe price event that first shows a live unmapped price raises one medium finding; redeliveries and bursts add nothing, retiring resolves it, pulled prices raise none"
+    },
+    {
+      "id": "OR-J15-S09",
+      "journey": "J15",
+      "name": "A Stripe signup on an unmapped price parks without retries and lands exactly once, with its bill, when the price is mapped"
+    },
+    {
+      "id": "OR-J15-S10",
+      "journey": "J15",
+      "name": "A Stripe subscription whose customer is linked to no one parks with a high finding and lands once when the customer is linked"
+    },
+    {
+      "id": "OR-J15-S11",
+      "journey": "J15",
+      "name": "A held Stripe subscription moved onto an unmapped price keeps its paid tier and parks; mapping the price moves it once"
+    },
+    {
+      "id": "OR-J15-S12",
+      "journey": "J15",
+      "name": "A mapping committed while converge reads the unmapped price strands no park: the park re-reads it under its lock"
+    },
+    {
+      "id": "OR-J15-S13",
+      "journey": "J15",
+      "name": "An NMI subscription OpenRails does not hold is adopted for the vault's one owner on a mapped plan, parks otherwise, waits for the first pull and drops order ids"
+    },
+    {
+      "id": "OR-J15-S14",
+      "journey": "J15",
+      "name": "A parked subscription an import lands closes as landed and its finding resolves"
+    },
+    {
+      "id": "OR-J15-S15",
+      "journey": "J15",
+      "name": "Two hosts on one merchant and schema park once and land one subscription and one payment"
+    },
+    {
+      "id": "OR-J15-S16",
+      "journey": "J15",
+      "name": "Parked subscriptions list newest first by PSP, reason and release, paged, for merchant configuration readers only"
     }
   ]
 }

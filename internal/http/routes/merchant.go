@@ -65,4 +65,8 @@ var merchantRoutes = []Route{
 	// to map, and which provider price maps each.
 	{Method: GET, Path: "/v1/merchant/provider-catalog", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListProviderCatalog",
 		Query: params(queryOf(handlers.ProviderCatalogQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.ProviderCatalogObject]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "psp_not_found", "resource_not_found", "service_unavailable"), Handler: h(handlers.ListProviderCatalog)},
+	// Live provider subscriptions converge could not land (unmapped price,
+	// unlinked customer, product already held), open or closed.
+	{Method: GET, Path: "/v1/merchant/parked-subscriptions", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListParkedSubscriptions",
+		Query: params(queryOf(handlers.ParkedSubscriptionQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.ParkedSubscription]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "psp_not_found", "service_unavailable"), Handler: h(handlers.ListParkedSubscriptions)},
 }

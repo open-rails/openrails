@@ -1696,6 +1696,22 @@ export type PackagePrice = {
   free_units?: number
 }
 
+export type ParkedSubscription = {
+  id: string
+  psp: string
+  rail: string
+  subscription_ref: string
+  reason: "customer_unlinked" | "price_unmapped" | "product_held"
+  price_ref: string | null
+  customer_ref: string | null
+  evidence: unknown | null
+  parked_at: string
+  last_seen_at: string
+  released_at: string | null
+  released_by: "converged" | "gone" | "landed" | null
+  subscription_id: string | null
+}
+
 export type PayOrderParams = {
   payment?: OrderPaymentParams
   expected_total?: string
@@ -2013,6 +2029,8 @@ export type ProviderCatalogObject = {
   observed_via: string
   price: string | null
   subscriptions: number | null
+  parked: number | null
+  finding: string | null
 }
 
 export type ProviderCatalogTerms = {

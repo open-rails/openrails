@@ -56,7 +56,7 @@ func (w *DestructiveAlertWorker) Work(ctx context.Context, job *river.Job[Destru
 		for _, channel := range channels {
 			next := a
 			next.Channel = &channel
-			if err := w.DB.InsertRiverJobTx(ctx, tx, next, DestructiveAlertOptions()); err != nil {
+			if _, err := w.DB.InsertRiverJobTx(ctx, tx, next, DestructiveAlertOptions()); err != nil {
 				return err
 			}
 		}

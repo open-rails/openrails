@@ -70,6 +70,7 @@ var Tables = map[string]Table{
 	"reconciliation_findings":         {Rows, "resolved findings are deleted 12 months (366 days) after they were resolved and last seen."},
 	"maintenance_runs":                {Rows, "reconciliation runs no finding refers to are deleted 12 months (366 days) after they started, by the cleanup job only; every other kind is permanent."},
 	"order_attempts":                  {Rows, "attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent."},
+	"parked_provider_subscriptions":   {Rows, "released parks are deleted 90 days after released_at."},
 	"orders":                          {Rows, "unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent."},
 	"order_lines":                     {Rows, "deleted with their order."},
 	"carts":                           {Rows, "carts are deleted 30 days after last_changed_at."},

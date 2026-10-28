@@ -115,6 +115,12 @@ FROM (
       WHERE (sqlc.narg(after)::uuid IS NULL OR ml.merchant_id > sqlc.narg(after)::uuid)
         AND ml.created_at < sqlc.arg(provider_write_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT pk.merchant_id AS mid
+       FROM billing.parked_provider_subscriptions pk
+      WHERE (sqlc.narg(after)::uuid IS NULL OR pk.merchant_id > sqlc.narg(after)::uuid)
+        AND pk.released_at < sqlc.arg(park_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
 ) q
 ORDER BY q.mid
 LIMIT sqlc.arg(merchant_limit)::int;
@@ -185,6 +191,17 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 
 -- A finding still being seen is kept however long ago it was resolved: an
 -- ignored drift that persists must not come back as new.
+-- name: DeleteReleasedParksBefore :execrows
+DELETE FROM billing.parked_provider_subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id IN (
+    SELECT pk.id FROM billing.parked_provider_subscriptions pk
+    WHERE pk.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND pk.released_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY pk.released_at
+    LIMIT sqlc.arg(row_limit)::int
+);
+
 -- name: DeleteResolvedFindingsBefore :execrows
 DELETE FROM billing.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid

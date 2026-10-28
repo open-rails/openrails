@@ -75,7 +75,8 @@ func (im *Importer) EnsureOnboarding(ctx context.Context, mid billing.MerchantID
 			if len(rows) == 0 {
 				return nil
 			}
-			return d.InsertRiverJob(ctx, JobArgs{MerchantID: mid.UUID(), ImportID: rows[0].ID, Step: StepPull}, nil)
+			_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: mid.UUID(), ImportID: rows[0].ID, Step: StepPull}, nil)
+			return err
 		})
 		if err != nil {
 			return fmt.Errorf("onboarding import of PSP %s: %w", scope.Key, err)

@@ -146,9 +146,10 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 	if err = q.FlagUsageCollectionDue(ctx, gen.FlagUsageCollectionDueParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency}); err != nil {
 		return err
 	}
-	return s.db.InsertRiverJob(ctx, UsageBillingWakeup{MerchantID: &mid, Automatic: true}, &river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true, ByState: []rivertype.JobState{
+	_, err = s.db.InsertRiverJob(ctx, UsageBillingWakeup{MerchantID: &mid, Automatic: true}, &river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true, ByState: []rivertype.JobState{
 		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
 	}}})
+	return err
 }
 
 // FinalizeDueUsage bills one bounded batch. Due rows survive process restarts;

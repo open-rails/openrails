@@ -20,6 +20,7 @@ import (
 // InsertTx makes the financial admission and its wakeup one PostgreSQL commit.
 type RiverJobInserter interface {
 	InsertTx(context.Context, pgx.Tx, river.JobArgs, *river.InsertOpts) (*rivertype.JobInsertResult, error)
+	JobRetryTx(context.Context, pgx.Tx, int64) (*rivertype.JobRow, error)
 }
 
 // runtimeBinding is what the runtime composer binds after the handle exists,
@@ -134,18 +135,36 @@ func (d *DB) SetRiverJobInserter(inserter RiverJobInserter) {
 	d.river.inserter = inserter
 }
 
-func (d *DB) InsertRiverJobTx(ctx context.Context, tx pgx.Tx, args river.JobArgs, opts *river.InsertOpts) error {
+func (d *DB) InsertRiverJobTx(ctx context.Context, tx pgx.Tx, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error) {
+	inserter, tx, err := d.riverTx(tx)
+	if err != nil {
+		return nil, err
+	}
+	return inserter.InsertTx(ctx, tx, args, opts)
+}
+
+// RetryRiverJobTx makes a scheduled job available now, in tx.
+func (d *DB) RetryRiverJobTx(ctx context.Context, tx pgx.Tx, id int64) error {
+	inserter, tx, err := d.riverTx(tx)
+	if err != nil {
+		return err
+	}
+	_, err = inserter.JobRetryTx(ctx, tx, id)
+	return err
+}
+
+func (d *DB) riverTx(tx pgx.Tx) (RiverJobInserter, pgx.Tx, error) {
 	if d == nil || tx == nil {
-		return fmt.Errorf("a job queued with its work requires that work's transaction")
+		return nil, nil, fmt.Errorf("a job queued with its work requires that work's transaction")
 	}
 	if d.river == nil {
-		return ErrNoRiverProducer
+		return nil, nil, ErrNoRiverProducer
 	}
 	d.river.mu.RLock()
 	inserter := d.river.inserter
 	d.river.mu.RUnlock()
 	if inserter == nil {
-		return ErrNoRiverProducer
+		return nil, nil, ErrNoRiverProducer
 	}
 	// River owns its SQL namespace. Unwrap only our schema adapter while
 	// retaining the exact host transaction/savepoint and connection.
@@ -156,15 +175,22 @@ func (d *DB) InsertRiverJobTx(ctx context.Context, tx pgx.Tx, args river.JobArgs
 		}
 		tx = scoped.Tx
 	}
-	_, err := inserter.InsertTx(ctx, tx, args, opts)
-	return err
+	return inserter, tx, nil
 }
 
 // InsertRiverJob enqueues args in d's own transaction, so the job commits or
 // rolls back with the work that queued it.
-func (d *DB) InsertRiverJob(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) error {
+func (d *DB) InsertRiverJob(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error) {
 	if d == nil || d.pgtx == nil {
-		return fmt.Errorf("a job queued with its work requires that work's transaction")
+		return nil, fmt.Errorf("a job queued with its work requires that work's transaction")
 	}
 	return d.InsertRiverJobTx(ctx, d.pgtx, args, opts)
+}
+
+// RetryRiverJob is RetryRiverJobTx in d's own transaction.
+func (d *DB) RetryRiverJob(ctx context.Context, id int64) error {
+	if d == nil || d.pgtx == nil {
+		return fmt.Errorf("a job retried with its work requires that work's transaction")
+	}
+	return d.RetryRiverJobTx(ctx, d.pgtx, id)
 }

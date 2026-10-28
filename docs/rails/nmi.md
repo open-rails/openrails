@@ -186,6 +186,31 @@ Subscription-state events are treated as wake-up signals only: OpenRails marks
 the subscription dirty and converges from freshly *fetched* gateway truth, so a
 lost or reordered webhook cannot corrupt state.
 
+NMI sends no catalog events. Converge records the plan of each subscription it
+reads; a plan not observed before is read once by id (`GET /v5/plans/{id}`).
+
+A reference OpenRails holds nothing for is read with `GET
+/v5/subscriptions/{ref}`. A 404 or deleted record (an order id, a one-off sale)
+is dropped, and so is a schedule carrying an OpenRails book id (its purchase
+owns it). A live schedule from elsewhere (a legacy site still selling):
+
+- plan mapped to no provider price: it parks `price_unmapped` with a high
+  `catalog.price.unmapped` finding;
+- otherwise its vault must belong to exactly one customer (the live cards on
+  this PSP with that vault); if not, it parks `customer_unlinked` with a high
+  `life.subscription.unattributed` finding;
+- otherwise it is adopted: landed through the billing import as a
+  one-subscription book, mapped as an import maps its record, with its
+  transaction history as receipts, then converged as held. A customer already
+  holding the product parks `product_held` instead.
+
+Before the PSP's first pull, or while its latest import stages the subscription
+unlanded, nothing parks or is adopted: the import owns it. Mapping the plan, or
+landing a card in the vault, wakes converge in the same transaction; the park
+closes when the subscription lands by any path. Parks are listed by
+`ListParkedSubscriptions` (`GET /v1/merchant/parked-subscriptions`). Parking
+moves no money and cancels nothing.
+
 Attempt details come from the Query API too. Every hour, NMI attempts at least
 10 minutes old are filled from the transaction report, 50 transaction ids per
 query and each attempt once: card BIN and brand, AVS/CVV the reply lacked, the

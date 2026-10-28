@@ -161,7 +161,8 @@ func (im *Importer) Create(ctx context.Context, p billing.CreatePSPImportParams)
 			HistorySince: since, Rules: rules}); err != nil {
 			return err
 		}
-		return d.InsertRiverJob(ctx, JobArgs{MerchantID: mid.UUID(), ImportID: row.ID, Step: StepPull}, nil)
+		_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: mid.UUID(), ImportID: row.ID, Step: StepPull}, nil)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -443,7 +444,8 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID) (*
 		if out, err = q.SetPSPImportStatus(ctx, gen.SetPSPImportStatusParams{MerchantID: row.MerchantID, ID: row.ID, Status: string(billing.PSPImportApplying)}); err != nil {
 			return err
 		}
-		return d.InsertRiverJob(ctx, JobArgs{MerchantID: row.MerchantID, ImportID: row.ID, Step: StepApply}, nil)
+		_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: row.MerchantID, ImportID: row.ID, Step: StepApply}, nil)
+		return err
 	})
 	if err != nil {
 		return nil, err

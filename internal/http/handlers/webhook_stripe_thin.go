@@ -136,12 +136,16 @@ func hydrateThinStripeEvent(ctx context.Context, secretKey, accountID string, bo
 		previous = snapshot.Data.PreviousAttributes
 		eventID = event.SnapshotEvent // Same dedup key as the snapshot destination.
 	}
-	object, err := fetchThinStripeJSON(ctx, client, secretKey, resourcePath, "")
-	if err != nil {
-		return nil, err
-	}
-	if err := validateThinStripeResource(object, event.RelatedObject.ID, resourceType); err != nil {
-		return nil, err
+	// A catalog notice is only a wake-up: the observe job reads the object
+	// itself, and a deleted one answers 404 there.
+	object, _ := json.Marshal(map[string]string{"id": event.RelatedObject.ID, "object": resourceType})
+	if !thinCatalogResource(resourceType) {
+		if object, err = fetchThinStripeJSON(ctx, client, secretKey, resourcePath, ""); err != nil {
+			return nil, err
+		}
+		if err := validateThinStripeResource(object, event.RelatedObject.ID, resourceType); err != nil {
+			return nil, err
+		}
 	}
 	created, err := thinStripeCreated(event.Created)
 	if err != nil {
@@ -209,6 +213,10 @@ func thinStripeResource(event stripeThinEnvelope, eventType string) (string, str
 		kind, collection, prefix = "payment_method", "payment_methods", "pm_"
 	case eventType == "customer.updated":
 		kind, collection, prefix = "customer", "customers", "cus_"
+	case strings.HasPrefix(eventType, "product."):
+		kind, collection, prefix = "product", "products", "prod_"
+	case strings.HasPrefix(eventType, "price."):
+		kind, collection, prefix = "price", "prices", "price_"
 	default:
 		return "", "", fmt.Errorf("unsupported stripe thin resource")
 	}
@@ -222,6 +230,8 @@ func thinStripeResource(event stripeThinEnvelope, eventType string) (string, str
 	}
 	return path, kind, nil
 }
+
+func thinCatalogResource(kind string) bool { return kind == "product" || kind == "price" }
 
 func validateThinStripeResource(raw []byte, id, kind string) error {
 	var resource struct {

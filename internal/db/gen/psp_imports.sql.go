@@ -224,6 +224,49 @@ func (q *Queries) GetPSPImport(ctx context.Context, arg GetPSPImportParams) (Bil
 	return i, err
 }
 
+const listCustomerVaultMethods = `-- name: ListCustomerVaultMethods :many
+SELECT rail_method_ref FROM billing.payment_methods
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND custodian_id IS NULL
+  AND rail_customer_ref = $3::text AND customer_id = $4::uuid
+  AND status = 'active' AND rail_method_ref IS NOT NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 10
+`
+
+type ListCustomerVaultMethodsParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Vault      string
+	CustomerID uuid.UUID
+}
+
+// A customer's live cards in one NMI vault, newest first: what adopting a
+// subscription billing that vault bills.
+func (q *Queries) ListCustomerVaultMethods(ctx context.Context, arg ListCustomerVaultMethodsParams) ([]*string, error) {
+	rows, err := q.db.Query(ctx, listCustomerVaultMethods,
+		arg.MerchantID,
+		arg.PspID,
+		arg.Vault,
+		arg.CustomerID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*string
+	for rows.Next() {
+		var rail_method_ref *string
+		if err := rows.Scan(&rail_method_ref); err != nil {
+			return nil, err
+		}
+		items = append(items, rail_method_ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPSPImportCustomerRecords = `-- name: ListPSPImportCustomerRecords :many
 SELECT merchant_id, import_id, id, kind, ref, customer_ref, subscription_ref, occurred_at, facts, data, state, customer_id, linked_via, manual_customer_id, reason, created_at, updated_at, manual_price_id FROM billing.psp_import_records
 WHERE merchant_id = $1::uuid AND import_id = $2::uuid

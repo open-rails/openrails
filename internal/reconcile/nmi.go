@@ -91,7 +91,7 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 		snap.Coverage.SubscriptionsExhaustive = true
 	}
 
-	txns, err := f.fetchTransactions(ctx, params)
+	txns, err := f.fetchTransactions(ctx, params, nmi.QueryFilter{})
 	if err != nil {
 		return nil, fmt.Errorf("nmi transaction query: %w", err)
 	}
@@ -220,11 +220,10 @@ func parseNMIV5Date(raw string) (time.Time, error) {
 // fetchTransactions runs a date-ranged transaction search. No condition or
 // action_type filter is sent, so NMI returns transactions in EVERY condition
 // — including failed/declined ones, which the dunning-forensics report needs.
-func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) ([]RemoteTransaction, error) {
+func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams, filter nmi.QueryFilter) ([]RemoteTransaction, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	filter := nmi.QueryFilter{}
 	if !params.Since.IsZero() {
 		filter.StartDate = params.Since.UTC().Format(nmi.QueryTimeFormat)
 	}
@@ -269,7 +268,13 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 // NMITransactions reads the transaction report for [since, until), each
 // charge, decline and refund normalized as the pull reads it.
 func NMITransactions(ctx context.Context, client *nmi.NMIClient, since, until time.Time) ([]RemoteTransaction, error) {
-	return NewNMIFetcher(client).fetchTransactions(ctx, FetchParams{Since: since, Until: until})
+	return NewNMIFetcher(client).fetchTransactions(ctx, FetchParams{Since: since, Until: until}, nmi.QueryFilter{})
+}
+
+// NMISubscriptionTransactions reads one subscription's transactions since
+// since, normalized as the pull reads them.
+func NMISubscriptionTransactions(ctx context.Context, client *nmi.NMIClient, subscriptionID string, since time.Time) ([]RemoteTransaction, error) {
+	return NewNMIFetcher(client).fetchTransactions(ctx, FetchParams{Since: since}, nmi.QueryFilter{SubscriptionID: subscriptionID})
 }
 
 // TransactionsByID reads transactions by id, nmi.MaxQueryIDs per Query API

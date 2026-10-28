@@ -973,6 +973,25 @@ type BillingOwnershipClaim struct {
 	UpdatedAt  time.Time
 }
 
+// Live provider subscriptions converge cannot land: its price is unmapped, its customer is linked to no one, or the customer already holds the product. One open park per (PSP, subscription); it mirrors the latest converge. Fixing the cause wakes converge; the park closes when the subscription lands by any path (released_by landed), when converge no longer needs it (converged) or when the provider ended it unlanded (gone). Retention: released parks are deleted 90 days after released_at.
+type BillingParkedProviderSubscription struct {
+	MerchantID      uuid.UUID
+	ID              uuid.UUID
+	PspID           uuid.UUID
+	Rail            string
+	SubscriptionRef string
+	Reason          string
+	// The provider price or plan the subscription bills; set on every park whose provider names one.
+	PriceRef *string
+	// The provider customer the subscription bills: a Stripe customer, an NMI vault.
+	CustomerRef *string
+	Evidence    []byte
+	ParkedAt    time.Time
+	LastSeenAt  time.Time
+	ReleasedAt  *time.Time
+	ReleasedBy  *string
+}
+
 // Records of all payment transactions. Retention: permanent, never pruned.
 type BillingPayment struct {
 	ID uuid.UUID
@@ -1644,7 +1663,7 @@ type BillingReconciliationFinding struct {
 	MerchantID  uuid.UUID
 	FindingType string
 	Rail        *string
-	// Catalog and pull.* findings: the PSP whose read raised the finding. Part of the identity; absence can be proven only by a complete read of this PSP.
+	// Catalog, pull.* and life.subscription.unattributed findings: the PSP whose read raised the finding. Part of the identity; absence can be proven only by a complete read of this PSP.
 	PspID                 *uuid.UUID
 	OpenrailsResourceType *string
 	OpenrailsResourceID   *string

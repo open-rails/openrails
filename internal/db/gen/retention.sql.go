@@ -154,6 +154,34 @@ func (q *Queries) DeleteReconciliationRunsPastRetention(ctx context.Context, arg
 	return result.RowsAffected(), nil
 }
 
+const deleteReleasedParksBefore = `-- name: DeleteReleasedParksBefore :execrows
+DELETE FROM billing.parked_provider_subscriptions
+WHERE merchant_id = $1::uuid
+  AND id IN (
+    SELECT pk.id FROM billing.parked_provider_subscriptions pk
+    WHERE pk.merchant_id = $1::uuid
+      AND pk.released_at < $2::timestamptz
+    ORDER BY pk.released_at
+    LIMIT $3::int
+)
+`
+
+type DeleteReleasedParksBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+// A finding still being seen is kept however long ago it was resolved: an
+// ignored drift that persists must not come back as new.
+func (q *Queries) DeleteReleasedParksBefore(ctx context.Context, arg DeleteReleasedParksBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteReleasedParksBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteResolvedFindingsBefore = `-- name: DeleteResolvedFindingsBefore :execrows
 DELETE FROM billing.reconciliation_findings
 WHERE merchant_id = $1::uuid
@@ -173,8 +201,6 @@ type DeleteResolvedFindingsBeforeParams struct {
 	RowLimit   int32
 }
 
-// A finding still being seen is kept however long ago it was resolved: an
-// ignored drift that persists must not come back as new.
 func (q *Queries) DeleteResolvedFindingsBefore(ctx context.Context, arg DeleteResolvedFindingsBeforeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteResolvedFindingsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
@@ -429,6 +455,12 @@ FROM (
       WHERE ($1::uuid IS NULL OR ml.merchant_id > $1::uuid)
         AND ml.created_at < $14::timestamptz
       ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT pk.merchant_id AS mid
+       FROM billing.parked_provider_subscriptions pk
+      WHERE ($1::uuid IS NULL OR pk.merchant_id > $1::uuid)
+        AND pk.released_at < $15::timestamptz
+      ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
 LIMIT $3::int
@@ -449,6 +481,7 @@ type ListRetentionWorkMerchantsParams struct {
 	FindingCutoff          time.Time
 	RunCutoff              time.Time
 	ProviderWriteCutoff    time.Time
+	ParkCutoff             time.Time
 }
 
 // Retention sweep: due-work discovery and the durable resume cursor.
@@ -472,6 +505,7 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.FindingCutoff,
 		arg.RunCutoff,
 		arg.ProviderWriteCutoff,
+		arg.ParkCutoff,
 	)
 	if err != nil {
 		return nil, err

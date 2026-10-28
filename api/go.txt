@@ -108,6 +108,7 @@ pkg openrails, method (*Client) ListOrders(context.Context, billing.OrderListPar
 pkg openrails, method (*Client) ListPSPImportRecords(context.Context, billing.PSPImportID, billing.PSPImportRecordListParams, ...RequestOption) (*billing.ListPage[billing.PSPImportRecord], error)
 pkg openrails, method (*Client) ListPSPImports(context.Context, billing.PSPImportListParams, ...RequestOption) (*billing.ListPage[billing.PSPImport], error)
 pkg openrails, method (*Client) ListPSPs(context.Context, billing.PSPListParams, ...RequestOption) (*billing.ListPage[billing.PSP], error)
+pkg openrails, method (*Client) ListParkedSubscriptions(context.Context, billing.ParkedSubscriptionListParams, ...RequestOption) (*billing.ListPage[billing.ParkedSubscription], error)
 pkg openrails, method (*Client) ListPaymentAttempts(context.Context, billing.PaymentAttemptListParams, ...RequestOption) (*billing.ListPage[billing.PaymentAttempt], error)
 pkg openrails, method (*Client) ListPaymentMethods(context.Context, billing.CustomerID, billing.PaymentMethodListParams, ...RequestOption) (*billing.ListPage[billing.PaymentMethod], error)
 pkg openrails, method (*Client) ListPayments(context.Context, billing.PaymentListParams, ...RequestOption) (*billing.ListPage[billing.Payment], error)
@@ -258,6 +259,7 @@ pkg openrails, method (LocalClient) ListOrders(context.Context, billing.OrderLis
 pkg openrails, method (LocalClient) ListPSPImportRecords(context.Context, billing.PSPImportID, billing.PSPImportRecordListParams, ...RequestOption) (*billing.ListPage[billing.PSPImportRecord], error)
 pkg openrails, method (LocalClient) ListPSPImports(context.Context, billing.PSPImportListParams, ...RequestOption) (*billing.ListPage[billing.PSPImport], error)
 pkg openrails, method (LocalClient) ListPSPs(context.Context, billing.PSPListParams, ...RequestOption) (*billing.ListPage[billing.PSP], error)
+pkg openrails, method (LocalClient) ListParkedSubscriptions(context.Context, billing.ParkedSubscriptionListParams, ...RequestOption) (*billing.ListPage[billing.ParkedSubscription], error)
 pkg openrails, method (LocalClient) ListPaymentAttempts(context.Context, billing.PaymentAttemptListParams, ...RequestOption) (*billing.ListPage[billing.PaymentAttempt], error)
 pkg openrails, method (LocalClient) ListPaymentMethods(context.Context, billing.CustomerID, billing.PaymentMethodListParams, ...RequestOption) (*billing.ListPage[billing.PaymentMethod], error)
 pkg openrails, method (LocalClient) ListPayments(context.Context, billing.PaymentListParams, ...RequestOption) (*billing.ListPage[billing.Payment], error)
@@ -992,6 +994,13 @@ pkg openrails/billing, const PSPImportViaCustomerID PSPImportRuleVia = "customer
 pkg openrails/billing, const PSPImportViaDirectory PSPImportRuleVia = "directory"
 pkg openrails/billing, const PSPImportViaMapping PSPImportRuleVia = "mapping"
 pkg openrails/billing, const PSPTemporarilyUnavailable untyped string = "temporarily_unavailable"
+pkg openrails/billing, const ParkConverged ParkRelease = "converged"
+pkg openrails/billing, const ParkCustomerUnlinked ParkReason = "customer_unlinked"
+pkg openrails/billing, const ParkGone ParkRelease = "gone"
+pkg openrails/billing, const ParkLanded ParkRelease = "landed"
+pkg openrails/billing, const ParkPriceUnmapped ParkReason = "price_unmapped"
+pkg openrails/billing, const ParkProductHeld ParkReason = "product_held"
+pkg openrails/billing, const ParkedSubscriptionIDPrefix untyped string = "pks_"
 pkg openrails/billing, const PaymentAttemptIDPrefix untyped string = "att_"
 pkg openrails/billing, const PaymentCharge PaymentKind = "charge"
 pkg openrails/billing, const PaymentChargeback PaymentKind = "chargeback"
@@ -1116,6 +1125,7 @@ pkg openrails/billing, func ParseOrderLineID(string) (OrderLineID, error)
 pkg openrails/billing, func ParsePSPID(string) (PSPID, error)
 pkg openrails/billing, func ParsePSPImportID(string) (PSPImportID, error)
 pkg openrails/billing, func ParsePSPImportRecordID(string) (PSPImportRecordID, error)
+pkg openrails/billing, func ParseParkedSubscriptionID(string) (ParkedSubscriptionID, error)
 pkg openrails/billing, func ParsePaymentAttemptID(string) (PaymentAttemptID, error)
 pkg openrails/billing, func ParsePaymentID(string) (PaymentID, error)
 pkg openrails/billing, func ParsePaymentMethodID(string) (PaymentMethodID, error)
@@ -1160,6 +1170,7 @@ pkg openrails/billing, method (*OrderLineID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PSPID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PSPImportID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PSPImportRecordID) UnmarshalText([]byte) error
+pkg openrails/billing, method (*ParkedSubscriptionID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PaymentAttemptID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PaymentID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PaymentMethodID) UnmarshalText([]byte) error
@@ -1265,6 +1276,10 @@ pkg openrails/billing, method (PSPImportRecordID) UUID() uuid.UUID
 pkg openrails/billing, method (PSPRef) IsZero() bool
 pkg openrails/billing, method (PSPRef) String() string
 pkg openrails/billing, method (PSPRoutingMatch) IsCatchAll() bool
+pkg openrails/billing, method (ParkedSubscriptionID) IsZero() bool
+pkg openrails/billing, method (ParkedSubscriptionID) MarshalText() ([]byte, error)
+pkg openrails/billing, method (ParkedSubscriptionID) String() string
+pkg openrails/billing, method (ParkedSubscriptionID) UUID() uuid.UUID
 pkg openrails/billing, method (PaymentAttemptID) IsZero() bool
 pkg openrails/billing, method (PaymentAttemptID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (PaymentAttemptID) String() string
@@ -2927,6 +2942,28 @@ pkg openrails/billing, type PSPRoutingRule struct, Prefer []string `json:"prefer
 pkg openrails/billing, type PageRequest struct
 pkg openrails/billing, type PageRequest struct, Cursor string
 pkg openrails/billing, type PageRequest struct, Limit int
+pkg openrails/billing, type ParkReason string
+pkg openrails/billing, type ParkRelease string
+pkg openrails/billing, type ParkedSubscription struct
+pkg openrails/billing, type ParkedSubscription struct, CustomerRef *string `json:"customer_ref"`
+pkg openrails/billing, type ParkedSubscription struct, Evidence json.RawMessage `json:"evidence"`
+pkg openrails/billing, type ParkedSubscription struct, ID ParkedSubscriptionID `json:"id"`
+pkg openrails/billing, type ParkedSubscription struct, LastSeenAt time.Time `json:"last_seen_at"`
+pkg openrails/billing, type ParkedSubscription struct, PSP PSPID `json:"psp"`
+pkg openrails/billing, type ParkedSubscription struct, ParkedAt time.Time `json:"parked_at"`
+pkg openrails/billing, type ParkedSubscription struct, PriceRef *string `json:"price_ref"`
+pkg openrails/billing, type ParkedSubscription struct, Rail string `json:"rail"`
+pkg openrails/billing, type ParkedSubscription struct, Reason ParkReason `json:"reason"`
+pkg openrails/billing, type ParkedSubscription struct, ReleasedAt *time.Time `json:"released_at"`
+pkg openrails/billing, type ParkedSubscription struct, ReleasedBy *ParkRelease `json:"released_by"`
+pkg openrails/billing, type ParkedSubscription struct, Subscription *SubscriptionID `json:"subscription_id"`
+pkg openrails/billing, type ParkedSubscription struct, SubscriptionRef string `json:"subscription_ref"`
+pkg openrails/billing, type ParkedSubscriptionID [16]byte
+pkg openrails/billing, type ParkedSubscriptionListParams struct
+pkg openrails/billing, type ParkedSubscriptionListParams struct, PSP string
+pkg openrails/billing, type ParkedSubscriptionListParams struct, Reason ParkReason
+pkg openrails/billing, type ParkedSubscriptionListParams struct, Released bool
+pkg openrails/billing, type ParkedSubscriptionListParams struct, embedded PageRequest
 pkg openrails/billing, type PayOrderParams struct
 pkg openrails/billing, type PayOrderParams struct, ExpectedTotal int64 `json:"expected_total,string"`
 pkg openrails/billing, type PayOrderParams struct, Payment OrderPaymentParams `json:"payment"`
@@ -3287,10 +3324,12 @@ pkg openrails/billing, type ProviderCatalogListParams struct, embedded PageReque
 pkg openrails/billing, type ProviderCatalogObject struct
 pkg openrails/billing, type ProviderCatalogObject struct, Active bool `json:"active"`
 pkg openrails/billing, type ProviderCatalogObject struct, DeletedAt *time.Time `json:"deleted_at"`
+pkg openrails/billing, type ProviderCatalogObject struct, Finding *FindingID `json:"finding"`
 pkg openrails/billing, type ProviderCatalogObject struct, Kind ProviderCatalogKind `json:"kind"`
 pkg openrails/billing, type ProviderCatalogObject struct, Name *string `json:"name"`
 pkg openrails/billing, type ProviderCatalogObject struct, ObservedAt time.Time `json:"observed_at"`
 pkg openrails/billing, type ProviderCatalogObject struct, ObservedVia string `json:"observed_via"`
+pkg openrails/billing, type ProviderCatalogObject struct, Parked *int `json:"parked"`
 pkg openrails/billing, type ProviderCatalogObject struct, Price *PriceID `json:"price"`
 pkg openrails/billing, type ProviderCatalogObject struct, ProductRef *string `json:"product_ref"`
 pkg openrails/billing, type ProviderCatalogObject struct, Ref string `json:"ref"`

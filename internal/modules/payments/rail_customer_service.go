@@ -7,11 +7,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/parking"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
@@ -51,18 +54,44 @@ func (s *RailCustomerService) Upsert(ctx context.Context, userID, rail, customer
 	if err != nil {
 		return err
 	}
-	tid, err := merchant.Require(ctx)
+	return LinkPSPCustomer(ctx, s.DB, customerRowID, pspID, customerID, time.Now().UTC())
+}
+
+// LinkPSPCustomer links a PSP's remote customer to a customer and wakes the
+// subscriptions parked waiting for it, in one transaction (a savepoint within
+// the caller's).
+func LinkPSPCustomer(ctx context.Context, database *db.DB, customerID, pspID uuid.UUID, remoteRef string, at time.Time) error {
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
-	return s.DB.Gen(ctx).UpsertPSPCustomer(ctx, gen.UpsertPSPCustomerParams{
-		MerchantID:        tid.UUID(),
-		CustomerID:        customerRowID,
-		PspID:             pspID,
-		RemoteCustomerRef: customerID,
-		At:                now,
+	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := database.NewWithPgxTx(tx)
+		if err := txdb.Gen(ctx).UpsertPSPCustomer(ctx, gen.UpsertPSPCustomerParams{
+			MerchantID: mid.UUID(), CustomerID: customerID, PspID: pspID, RemoteCustomerRef: remoteRef, At: at,
+		}); err != nil {
+			return err
+		}
+		_, err := parking.Wake(ctx, txdb, pspID, billing.ParkCustomerUnlinked, remoteRef)
+		return err
 	})
+}
+
+// ClaimPSPCustomer is LinkPSPCustomer insert-if-absent: it links nothing when
+// the customer already maps a customer object on the PSP or another customer
+// holds remoteRef, and reports whether it linked. database must be
+// transaction-scoped.
+func ClaimPSPCustomer(ctx context.Context, database *db.DB, customerID, pspID uuid.UUID, remoteRef string, at time.Time) (bool, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	claimed, err := database.Gen(ctx).ClaimPSPCustomer(ctx, gen.ClaimPSPCustomerParams{MerchantID: mid.UUID(), CustomerID: customerID, PspID: pspID, RemoteCustomerRef: remoteRef, At: at})
+	if err != nil || claimed == 0 {
+		return false, err
+	}
+	_, err = parking.Wake(ctx, database, pspID, billing.ParkCustomerUnlinked, remoteRef)
+	return err == nil, err
 }
 
 // railHasRemoteCustomer reports whether a rail has a card-independent remote

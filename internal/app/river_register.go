@@ -197,6 +197,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		MoneyService:                 r.MoneyService,
 		RailCustomerService:          r.RailCustomerService,
 		OrderAttemptService:          r.OrderAttemptService,
+		Objects:                      r.ProviderObjects,
+		Importer:                     r.PSPImporter,
+		Findings:                     r.findingNotifier(),
 	}); err != nil {
 		return fmt.Errorf("add subscription converge worker: %w", err)
 	}
@@ -211,6 +214,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver,
 	}); err != nil {
 		return fmt.Errorf("add nmi history worker: %w", err)
+	}
+	// Catalog objects a Stripe event announced, read by id.
+	if err := addTrackedWorker(r, workers, &riverjobs.ProviderObjectObserveWorker{Objects: r.ProviderObjects}); err != nil {
+		return fmt.Errorf("add provider object observe worker: %w", err)
 	}
 	// PSP imports: a read-only pull of a PSP, then its landing.
 	if err := addTrackedWorker(r, workers, &riverjobs.PSPImportWorker{Importer: r.PSPImporter}); err != nil {
@@ -780,4 +787,12 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 	// (StartRiverProgressMonitor), so a stalled River cannot silence it.
 
 	return jobs, nil
+}
+
+// findingNotifier is the alert service as a finding notifier; nil when none.
+func (r *Runtime) findingNotifier() reconcile.FindingNotifier {
+	if r.AlertService == nil {
+		return nil
+	}
+	return r.AlertService
 }

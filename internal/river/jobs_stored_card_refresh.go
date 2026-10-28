@@ -547,7 +547,7 @@ func (w StoredCardRefreshDueWorker) lookAtMerchant(ctx context.Context, mid uuid
 				args := paymentmethods.StoredCardRefreshFor(m, false, "")
 				opts := args.InsertOpts()
 				opts.ScheduledAt = now.Add(jitter(id))
-				if err := w.DB.InsertRiverJobTx(ctx, tx, args, &opts); err != nil {
+				if _, err := w.DB.InsertRiverJobTx(ctx, tx, args, &opts); err != nil {
 					return err
 				}
 				_, err := gen.New(tx).PlanStoredCardCheck(ctx, gen.PlanStoredCardCheckParams{MerchantID: mid, PaymentMethodID: id, DueAt: now.Add(storedCardReplan)})

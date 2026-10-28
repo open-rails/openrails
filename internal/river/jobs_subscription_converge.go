@@ -15,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -25,12 +24,17 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/parking"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/pspimport"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
+	"github.com/open-rails/openrails/internal/wakejobs"
 )
 
 // Webhooks are wake-up signals. This worker is the coalesced dirty-flag
@@ -40,12 +44,12 @@ import (
 // the job retrying, access intact.
 
 const (
-	KindSubscriptionConverge = "openrails.subscription_converge"
+	KindSubscriptionConverge = wakejobs.KindSubscriptionConverge
 
 	// SubscriptionConvergeDebounce delays the fetch so a burst of events about
 	// one subscription (dunning storms, renewal event fans) coalesces into one
-	// provider read via the unique-job dedup below.
-	SubscriptionConvergeDebounce = 5 * time.Second
+	// provider read.
+	SubscriptionConvergeDebounce = wakejobs.Debounce
 
 	// A pending signup whose charge has not appeared yet is read again after
 	// a minute, the wait doubling to subscriptionConvergeSnoozeMax, until the
@@ -57,34 +61,8 @@ const (
 	subscriptionConvergeMissingClient = "converge: rail client not configured"
 )
 
-// SubscriptionConvergeArgs identifies one dirty subscription. EventType and
-// EventCreated are forensics outside uniqueness, so a burst about one
-// subscription dedupes to one job.
-type SubscriptionConvergeArgs struct {
-	PSPID                 uuid.UUID `json:"psp_id" river:"unique"`
-	MerchantID            uuid.UUID `json:"merchant_id" river:"unique"`
-	Rail                  string    `json:"rail" river:"unique"`
-	SubscriptionReference string    `json:"subscription_reference" river:"unique"`
-	// After is the converge job already running when this event arrived: it
-	// may have fetched before the event, so this job re-fetches once it ends.
-	After        int64  `json:"after,omitempty" river:"unique"`
-	EventType    string `json:"event_type,omitempty"`
-	EventCreated int64  `json:"event_created,omitempty"`
-}
-
-func (SubscriptionConvergeArgs) Kind() string { return KindSubscriptionConverge }
-
-// subscriptionConvergeUniqueStates is the default unique set minus completed,
-// so a finished converge never blocks the next wake-up. River requires
-// running in the set; an event that lands on a running job queues a follow-up
-// (SubscriptionConvergeArgs.After) instead of being dropped.
-var subscriptionConvergeUniqueStates = []rivertype.JobState{
-	rivertype.JobStateAvailable,
-	rivertype.JobStatePending,
-	rivertype.JobStateRetryable,
-	rivertype.JobStateRunning,
-	rivertype.JobStateScheduled,
-}
+// SubscriptionConvergeArgs identifies one dirty subscription.
+type SubscriptionConvergeArgs = wakejobs.SubscriptionConvergeArgs
 
 // SubscriptionConvergeEnqueuer implements webhooks.SubscriptionConvergeEnqueuer
 // on the enqueue-only River client.
@@ -105,49 +83,15 @@ func (e *SubscriptionConvergeEnqueuer) EnqueueSubscriptionConverge(ctx context.C
 	if req.PSPID == uuid.Nil {
 		return db.ErrNoPSPInContext
 	}
-	debounce := e.Debounce
-	if debounce <= 0 {
-		debounce = SubscriptionConvergeDebounce
-	}
-	args := SubscriptionConvergeArgs{
+	return wakejobs.Enqueue(ctx, wakejobs.Client{River: e.Client}, SubscriptionConvergeArgs{
 		MerchantID:            req.MerchantID,
 		PSPID:                 req.PSPID,
 		Rail:                  strings.ToLower(strings.TrimSpace(req.Rail)),
 		SubscriptionReference: strings.TrimSpace(req.SubscriptionReference),
 		EventType:             req.EventType,
 		EventCreated:          req.EventCreated,
-	}
-	opts := &river.InsertOpts{
-		Queue:       QueueBilling,
-		ScheduledAt: time.Now().Add(debounce),
-		UniqueOpts:  river.UniqueOpts{ByArgs: true, ByState: subscriptionConvergeUniqueStates},
-	}
-	// A job that is not running yet will fetch after this event; one snoozed
-	// past the debounce (a pending signup's backoff) is woken now. A running
-	// one may have fetched already, so chain a follow-up behind it.
-	for range subscriptionConvergeMaxChain {
-		res, err := e.Client.Insert(ctx, args, opts)
-		if err != nil {
-			return err
-		}
-		if !res.UniqueSkippedAsDuplicate || res.Job == nil {
-			return nil
-		}
-		if res.Job.State == rivertype.JobStateScheduled && res.Job.ScheduledAt.After(opts.ScheduledAt) {
-			_, err := e.Client.JobRetry(ctx, res.Job.ID)
-			return err
-		}
-		if res.Job.State != rivertype.JobStateRunning {
-			return nil
-		}
-		args.After = res.Job.ID
-	}
-	return fmt.Errorf("subscription converge: follow-up chain for %s exceeds %d running jobs", args.SubscriptionReference, subscriptionConvergeMaxChain)
+	}, e.Debounce)
 }
-
-// subscriptionConvergeMaxChain bounds the follow-up chain. A follow-up waits
-// for its predecessor, so at most two jobs per subscription run at once.
-const subscriptionConvergeMaxChain = 4
 
 // SubscriptionConvergeWorker fetches provider truth for one subscription and
 // converges the local row through the decider plus the rail-specific
@@ -173,6 +117,12 @@ type SubscriptionConvergeWorker struct {
 	MoneyService                 *money.MoneyService
 	RailCustomerService          *payments.RailCustomerService
 	OrderAttemptService          webhooks.OrderAttemptStore
+	// Objects records the provider prices parked subscriptions bill.
+	Objects func() *providerobjects.Observer
+	// Importer adopts live NMI subscriptions OpenRails does not hold.
+	Importer func() *pspimport.Importer
+	// Findings notifies an operator of the finding a park raises.
+	Findings reconcile.FindingNotifier
 }
 
 func (SubscriptionConvergeWorker) Kind() string { return KindSubscriptionConverge }
@@ -189,7 +139,7 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 		return nil
 	}
 
-	if args.After != 0 && w.predecessorRunning(ctx, args.After) {
+	if args.After != 0 && predecessorRunning(ctx, args.After) {
 		// Converge in order: the older fetch must not commit after this one.
 		return river.JobSnooze(SubscriptionConvergeDebounce)
 	}
@@ -199,6 +149,10 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 	err := w.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
 		var cerr error
 		customerID, cerr = w.convergeOne(cctx, args)
+		if errors.Is(cerr, parking.ErrCauseFixed) {
+			// The cause was fixed while this read was in flight: read again.
+			customerID, cerr = w.convergeOne(cctx, args)
+		}
 		if cerr != nil {
 			return cerr
 		}
@@ -230,15 +184,11 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 	return err
 }
 
-// predecessorRunning reports whether the converge job this follow-up chains
-// behind is still running. An unreadable predecessor is treated as finished.
-func (w *SubscriptionConvergeWorker) predecessorRunning(ctx context.Context, id int64) bool {
-	client, err := river.ClientFromContextSafely[pgx.Tx](ctx)
-	if err != nil {
-		return false
+func (w *SubscriptionConvergeWorker) objects() *providerobjects.Observer {
+	if w.Objects == nil {
+		return nil
 	}
-	job, err := client.JobGet(ctx, id)
-	return err == nil && job.State == rivertype.JobStateRunning
+	return w.Objects()
 }
 
 // pendingSnooze is the wait before the next read of a pending signup: a
@@ -283,6 +233,8 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 
 			RailCustomerService: w.RailCustomerService,
 			OrderAttemptService: w.OrderAttemptService,
+			Objects:             w.objects(),
+			Findings:            w.Findings,
 		}
 		return svc.Converge(ctx, args.SubscriptionReference)
 
@@ -307,6 +259,13 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 			SubscriptionLifecycleService: w.SubscriptionLifecycleService,
 			PaymentService:               w.PaymentService,
 			MoneyService:                 w.MoneyService,
+			Objects:                      w.objects(),
+			Findings:                     w.Findings,
+		}
+		if w.Importer != nil {
+			if im := w.Importer(); im != nil {
+				svc.Adopter = im
+			}
 		}
 		return svc.Converge(ctx, args.SubscriptionReference)
 

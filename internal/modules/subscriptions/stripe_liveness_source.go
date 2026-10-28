@@ -25,7 +25,10 @@ import (
 // subscription for liveness classification. Found=false means Stripe no
 // longer knows the subscription (deleted/never existed).
 type StripeLivenessRecord struct {
-	Found              bool
+	Found bool
+	// Missing: Stripe answered that the subscription is missing (404
+	// resource_missing), not another 404.
+	Missing            bool
 	Status             string
 	CancelAtPeriodEnd  bool
 	CanceledAt         time.Time
@@ -257,7 +260,13 @@ func (p *HTTPStripeLivenessProber) ProbeSubscription(ctx context.Context, railSu
 		return StripeLivenessRecord{}, fmt.Errorf("read stripe subscription probe response: %w", readErr)
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return StripeLivenessRecord{Found: false}, nil
+		var envelope struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(body, &envelope)
+		return StripeLivenessRecord{Found: false, Missing: envelope.Error.Code == "resource_missing"}, nil
 	}
 	if resp.StatusCode >= 400 {
 		msg := ParseStripeAPIError(body)

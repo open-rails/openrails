@@ -846,6 +846,20 @@ disappears. Two safety doctrines matter operationally:
   inbox, and its counts are metrics measures (`open_findings`,
   `orphaned_members`, `freeloaders`, `duplicate_coverage`,
   `verification_pressure`).
+- **Live provider subscriptions OpenRails cannot land** park instead of
+  retrying (`GET /v1/merchant/parked-subscriptions`). Both findings name the PSP
+  they were seen on:
+  - `catalog.price.unmapped` (subject: the provider price or plan): high while
+    a parked subscription bills it, its evidence counting them; medium when a
+    Stripe event first shows a live price no provider price maps. It resolves
+    when the price is mapped, or retired with nothing parked on it. Ignoring it
+    means "not ours": it stays ignored and its parks stay listed.
+  - `life.subscription.unattributed` (subject: the provider subscription),
+    high: its provider customer is linked to no customer, or the customer
+    already holds the product. It resolves when the park closes.
+  Mapping the price or linking the customer wakes the park's converge; the
+  park closes once the subscription lands by any path. Released parks are
+  deleted 90 days after release.
 
 ## Dunning
 

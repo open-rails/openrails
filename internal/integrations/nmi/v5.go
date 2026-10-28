@@ -510,6 +510,27 @@ func (c *NMIClient) GetSubscription(ctx context.Context, subscriptionID string) 
 	return sub, true, nil
 }
 
+// ReadSubscription is GetSubscription where found is false only when NMI
+// answers that the subscription is missing (ErrV5Missing) or deleted (a
+// tombstone); any other 404 is an error, not evidence it is gone.
+func (c *NMIClient) ReadSubscription(ctx context.Context, subscriptionID string) (V5Subscription, bool, error) {
+	var sub V5Subscription
+	if err := c.checkConfiguration(); err != nil {
+		return sub, false, err
+	}
+	if strings.TrimSpace(subscriptionID) == "" {
+		return sub, false, errors.New("subscriptionID is required")
+	}
+	err := c.sendV5Request(ctx, http.MethodGet, "/subscriptions/"+url.PathEscape(strings.TrimSpace(subscriptionID)), nil, &sub)
+	if errors.Is(err, ErrV5Missing) {
+		return sub, false, nil
+	}
+	if err != nil {
+		return sub, false, err
+	}
+	return sub, !sub.canceledAtNMI(), nil
+}
+
 // GetPayment fetches one transaction by id (GET /v5/payments/{id}).
 // found=false on 404.
 func (c *NMIClient) GetPayment(ctx context.Context, transactionID string) (v5Transaction, bool, error) {

@@ -121,6 +121,7 @@ migration 0119_periodic_leases_per_kind.up.sql sha256:248bbce419d2fa93e230ef1c27
 migration 0120_stored_card_refresh.up.sql sha256:312d37e5bb10f50013657086f7cd93e6190b0c36294fe6f2d68425ac4bc98826
 migration 0130_provider_catalog_objects.up.sql sha256:215efeb29d8a62df1ea3249c83e9ba76128c9d00377b994432417ed77be4a3b7
 migration 0132_psp_import_onboarding.up.sql sha256:8eccc4463e66a07a990b44d7f2e7be6e2639634fb7745e81d2d3e04de4e3bd2f
+migration 0134_parked_provider_subscriptions.up.sql sha256:bb3ab4f2fadcbebcdc1230652be8ab485cdb1170f470b34e2c9a459ef05e169e
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1476,6 +1477,34 @@ table billing.ownership_claims
   index CREATE INDEX ownership_claims_order_id_idx ON billing.ownership_claims USING btree (merchant_id, customer_id, order_id)
   index CREATE UNIQUE INDEX ownership_claims_pkey ON billing.ownership_claims USING btree (merchant_id, customer_id, claim_key)
 
+table billing.parked_provider_subscriptions
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column psp_id uuid NOT NULL
+  column rail text NOT NULL
+  column subscription_ref text NOT NULL
+  column reason text NOT NULL
+  column price_ref text
+  column customer_ref text
+  column evidence jsonb NOT NULL
+  column parked_at timestamp with time zone NOT NULL
+  column last_seen_at timestamp with time zone NOT NULL
+  column released_at timestamp with time zone
+  column released_by text
+  constraint parked_provider_subscriptions_cause_check CHECK ((((price_ref IS NULL) OR (price_ref <> ''::text)) AND ((customer_ref IS NULL) OR (customer_ref <> ''::text)) AND ((reason <> 'price_unmapped'::text) OR (price_ref IS NOT NULL))))
+  constraint parked_provider_subscriptions_evidence_check CHECK ((jsonb_typeof(evidence) = 'object'::text))
+  constraint parked_provider_subscriptions_pkey PRIMARY KEY (merchant_id, id)
+  constraint parked_provider_subscriptions_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
+  constraint parked_provider_subscriptions_reason_check CHECK ((reason = ANY (ARRAY['price_unmapped'::text, 'customer_unlinked'::text, 'product_held'::text])))
+  constraint parked_provider_subscriptions_ref_check CHECK (((subscription_ref <> ''::text) AND (octet_length(subscription_ref) <= 256)))
+  constraint parked_provider_subscriptions_released_check CHECK ((((released_at IS NULL) = (released_by IS NULL)) AND ((released_by IS NULL) OR (released_by = ANY (ARRAY['landed'::text, 'converged'::text, 'gone'::text])))))
+  index CREATE INDEX parked_provider_subscriptions_customer_ref_idx ON billing.parked_provider_subscriptions USING btree (merchant_id, psp_id, reason, customer_ref) WHERE (released_at IS NULL)
+  index CREATE UNIQUE INDEX parked_provider_subscriptions_open_key ON billing.parked_provider_subscriptions USING btree (merchant_id, psp_id, subscription_ref) WHERE (released_at IS NULL)
+  index CREATE INDEX parked_provider_subscriptions_parked_at_id_idx ON billing.parked_provider_subscriptions USING btree (merchant_id, parked_at DESC, id DESC)
+  index CREATE UNIQUE INDEX parked_provider_subscriptions_pkey ON billing.parked_provider_subscriptions USING btree (merchant_id, id)
+  index CREATE INDEX parked_provider_subscriptions_price_ref_idx ON billing.parked_provider_subscriptions USING btree (merchant_id, psp_id, reason, price_ref) WHERE (released_at IS NULL)
+  index CREATE INDEX parked_provider_subscriptions_released_at_idx ON billing.parked_provider_subscriptions USING btree (merchant_id, released_at) WHERE (released_at IS NOT NULL)
+
 table billing.payment_attempts
   column id uuid NOT NULL DEFAULT uuidv7()
   column merchant_id uuid NOT NULL
@@ -2486,7 +2515,6 @@ table billing.reconciliation_findings
   column approval_run_id uuid
   constraint reconciliation_findings_approval_run_check CHECK (((NOT (resolution IS DISTINCT FROM 'approved'::text)) = (approval_run_id IS NOT NULL)))
   constraint reconciliation_findings_approval_run_id_fkey FOREIGN KEY (merchant_id, approval_run_id) REFERENCES billing.maintenance_runs(merchant_id, id) ON DELETE RESTRICT
-  constraint reconciliation_findings_catalog_check CHECK ((((finding_type = ANY (ARRAY['catalog.orphan_in_stripe'::text, 'catalog.missing_in_stripe'::text, 'catalog.orphan_in_nmi'::text, 'catalog.missing_in_nmi'::text, 'catalog.missing_in_solana'::text, 'catalog.field_drift'::text])) AND (rail = ANY (ARRAY['stripe'::text, 'nmi'::text, 'solana'::text])) AND (psp_id IS NOT NULL) AND (openrails_resource_type = ANY (ARRAY['product'::text, 'price'::text])) AND ((finding_type = 'catalog.field_drift'::text) OR (finding_type ~~ ('catalog.%_in_'::text || rail))) AND (first_seen_run IS NULL) AND (last_seen_run IS NULL) AND (subject_key = (jsonb_build_array((psp_id)::text, openrails_resource_type, COALESCE(openrails_resource_id, ''::text), COALESCE(external_resource_id, ''::text), COALESCE(field, ''::text)))::text)) OR ((finding_type !~~ 'catalog.%'::text) AND (openrails_resource_type IS NULL) AND (openrails_resource_id IS NULL) AND (external_resource_id IS NULL) AND (field IS NULL) AND (openrails_value IS NULL) AND (external_value IS NULL) AND (((rail IS NULL) AND (psp_id IS NULL)) OR ((finding_type ~~ 'pull.%'::text) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL))))))
   constraint reconciliation_findings_change_check CHECK (((change IS NULL) OR ((finding_type ~~ 'pull.%'::text) AND (jsonb_typeof(change) = 'object'::text) AND ((change ->> 'kind'::text) = ANY (ARRAY['create_subscription'::text, 'record_charge'::text, 'record_refund'::text, 'adopt_subscription'::text, 'cancel_subscription'::text, 'update_card'::text, 'revoke_access'::text, 'refund_charge_after_cancel'::text, 'cancel_provider_schedule'::text, 'collect_skipped_renewal'::text])))))
   constraint reconciliation_findings_evidence_digest_check CHECK ((((change IS NULL) = (evidence_digest IS NULL)) AND ((evidence_digest IS NULL) OR (evidence_digest ~ '^[0-9a-f]{64}$'::text))))
   constraint reconciliation_findings_first_seen_run_seen_run_class_fkey FOREIGN KEY (merchant_id, first_seen_run, seen_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
@@ -2497,6 +2525,7 @@ table billing.reconciliation_findings
   constraint reconciliation_findings_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint reconciliation_findings_resolution_check CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text, 'approved'::text, 'dismissed'::text, 'superseded'::text, 'foreign'::text]))))
   constraint reconciliation_findings_resolved_fields_check CHECK ((((status = ANY (ARRAY['auto_fixed'::text, 'fixed'::text, 'ignored'::text])) AND (resolved_at IS NOT NULL) AND (resolution IS NOT NULL)) OR ((status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text])) AND (resolved_at IS NULL) AND (resolution IS NULL))))
+  constraint reconciliation_findings_scope_check CHECK ((((finding_type = ANY (ARRAY['catalog.orphan_in_stripe'::text, 'catalog.missing_in_stripe'::text, 'catalog.orphan_in_nmi'::text, 'catalog.missing_in_nmi'::text, 'catalog.missing_in_solana'::text, 'catalog.field_drift'::text])) AND (rail = ANY (ARRAY['stripe'::text, 'nmi'::text, 'solana'::text])) AND (psp_id IS NOT NULL) AND (openrails_resource_type = ANY (ARRAY['product'::text, 'price'::text])) AND ((finding_type = 'catalog.field_drift'::text) OR (finding_type ~~ ('catalog.%_in_'::text || rail))) AND (first_seen_run IS NULL) AND (last_seen_run IS NULL) AND (subject_key = (jsonb_build_array((psp_id)::text, openrails_resource_type, COALESCE(openrails_resource_id, ''::text), COALESCE(external_resource_id, ''::text), COALESCE(field, ''::text)))::text)) OR ((finding_type = ANY (ARRAY['catalog.price.unmapped'::text, 'life.subscription.unattributed'::text])) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL) AND (openrails_resource_type IS NULL) AND (openrails_resource_id IS NULL) AND (external_resource_id IS NULL) AND (field IS NULL) AND (openrails_value IS NULL) AND (external_value IS NULL)) OR ((finding_type !~~ 'catalog.%'::text) AND (finding_type <> 'life.subscription.unattributed'::text) AND (openrails_resource_type IS NULL) AND (openrails_resource_id IS NULL) AND (external_resource_id IS NULL) AND (field IS NULL) AND (openrails_value IS NULL) AND (external_value IS NULL) AND (((rail IS NULL) AND (psp_id IS NULL)) OR ((finding_type ~~ 'pull.%'::text) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL))))))
   constraint reconciliation_findings_severity_check CHECK ((severity = ANY (ARRAY['critical'::text, 'high'::text, 'medium'::text, 'low'::text])))
   constraint reconciliation_findings_source_check CHECK ((((finding_type ~~ 'pull.%'::text) = (source IS NOT NULL)) AND ((source IS NULL) OR (source = ANY (ARRAY['pull'::text, 'verification'::text])))))
   constraint reconciliation_findings_status_check CHECK ((status = ANY (ARRAY['auto_fixed'::text, 'reconcile_required'::text, 'requires_review'::text, 'fixed'::text, 'ignored'::text])))
@@ -2867,6 +2896,7 @@ table billing.subscriptions
   index CREATE INDEX subscriptions_rail_rail_subscription_id_idx ON billing.subscriptions USING btree (rail, rail_subscription_id)
   index CREATE INDEX subscriptions_started_at_idx ON billing.subscriptions USING btree (merchant_id, started_at)
   index CREATE INDEX subscriptions_status_idx ON billing.subscriptions USING btree (status)
+  trigger CREATE TRIGGER subscriptions_close_landed_park AFTER INSERT ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.close_landed_park()
   trigger CREATE TRIGGER subscriptions_collection_policy_immutable BEFORE UPDATE OF collection_policy ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.preserve_subscription_collection_policy()
   trigger CREATE TRIGGER subscriptions_lifecycle_single_writer BEFORE UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_lifecycle_single_writer()
   trigger CREATE TRIGGER subscriptions_mark_stored_card_check AFTER INSERT OR UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscription_marks_stored_card_check()
@@ -3258,6 +3288,31 @@ function billing.check_billing_restore_ledger(uuid)
                   OR (c.customer_id IS NOT NULL AND c.customer_id IS DISTINCT FROM t.customer_id))) THEN
           RAISE EXCEPTION 'billing restore ledger integrity mismatch' USING ERRCODE='23514';
       END IF;
+  END;
+  $function$
+
+function billing.close_landed_park()
+  CREATE OR REPLACE FUNCTION billing.close_landed_park()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  BEGIN
+      IF NEW.rail_subscription_id IS NULL OR NEW.deleted_at IS NOT NULL THEN
+          RETURN NULL;
+      END IF;
+      WITH closed AS (
+          UPDATE billing.parked_provider_subscriptions p
+          SET released_at = now(), released_by = 'landed'
+          WHERE p.merchant_id = NEW.merchant_id AND p.psp_id = NEW.psp_id AND p.subscription_ref = NEW.rail_subscription_id
+            AND p.released_at IS NULL
+          RETURNING p.subscription_ref
+      )
+      UPDATE billing.reconciliation_findings f
+      SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(), notified_at = NULL, notified_severity = NULL, updated_at = now()
+      FROM closed
+      WHERE f.merchant_id = NEW.merchant_id AND f.psp_id = NEW.psp_id AND f.finding_type = 'life.subscription.unattributed'
+        AND f.subject_key = closed.subscription_ref AND f.status IN ('reconcile_required', 'requires_review');
+      RETURN NULL;
   END;
   $function$
 

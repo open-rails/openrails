@@ -204,22 +204,22 @@ func distinct(objects []Object) []Object {
 	return out
 }
 
-// ObserveByID reads one object at the provider and records it; a Stripe
-// price's product is read with it, so an archived or deleted product retires
-// its prices. A read finding the object gone marks a stored object deleted;
+// ObserveByID reads one object at the provider and records it as observed
+// via (read, or webhook when one announced it); a Stripe price's product is
+// read with it, so an archived or deleted product retires its prices. A read finding the object gone marks a stored object deleted;
 // with no stored object it records stated (the terms a provider subscription
 // or a provider price states for it) as deleted, else nothing. It returns
 // the stored object, nil when none.
-func (o *Observer) ObserveByID(ctx context.Context, psp merchants.PSPScope, kind Kind, ref string, stated *Object) (*Object, error) {
+func (o *Observer) ObserveByID(ctx context.Context, psp merchants.PSPScope, kind Kind, ref string, stated *Object, via Via) (*Object, error) {
 	reader, err := o.Reader(ctx, psp)
 	if err != nil {
 		return nil, err
 	}
-	return o.Observe(ctx, reader, psp, kind, ref, stated)
+	return o.Observe(ctx, reader, psp, kind, ref, stated, via)
 }
 
 // Observe is ObserveByID through a Reader the caller already holds.
-func (o *Observer) Observe(ctx context.Context, reader Reader, psp merchants.PSPScope, kind Kind, ref string, stated *Object) (*Object, error) {
+func (o *Observer) Observe(ctx context.Context, reader Reader, psp merchants.PSPScope, kind Kind, ref string, stated *Object, via Via) (*Object, error) {
 	at := o.Now()
 	obj, found, err := reader.Get(ctx, kind, ref)
 	if err != nil {
@@ -234,11 +234,11 @@ func (o *Observer) Observe(ctx context.Context, reader Reader, psp merchants.PSP
 			}
 			if ok {
 				objects = append(objects, product)
-			} else if err := o.markDeleted(ctx, psp, at, Product, obj.ProductRef); err != nil {
+			} else if err := o.markDeleted(ctx, psp, at, Product, obj.ProductRef, via); err != nil {
 				return nil, err
 			}
 		}
-		if err := o.Record(ctx, psp, at, objects, ViaRead); err != nil {
+		if err := o.Record(ctx, psp, at, objects, via); err != nil {
 			return nil, err
 		}
 		return o.Get(ctx, psp, kind, ref)
@@ -249,13 +249,13 @@ func (o *Observer) Observe(ctx context.Context, reader Reader, psp merchants.PSP
 	}
 	switch {
 	case stored != nil:
-		if err := o.markDeleted(ctx, psp, at, kind, ref); err != nil {
+		if err := o.markDeleted(ctx, psp, at, kind, ref, via); err != nil {
 			return nil, err
 		}
 	case stated != nil:
 		gone := *stated
 		gone.Kind, gone.Ref, gone.DeletedAt = kind, ref, &at
-		if err := o.Record(ctx, psp, at, []Object{gone}, ViaRead); err != nil {
+		if err := o.Record(ctx, psp, at, []Object{gone}, via); err != nil {
 			return nil, err
 		}
 	default:
@@ -265,13 +265,13 @@ func (o *Observer) Observe(ctx context.Context, reader Reader, psp merchants.PSP
 }
 
 // markDeleted records that a read at at found a stored object gone.
-func (o *Observer) markDeleted(ctx context.Context, psp merchants.PSPScope, at time.Time, kind Kind, ref string) error {
+func (o *Observer) markDeleted(ctx context.Context, psp merchants.PSPScope, at time.Time, kind Kind, ref string, via Via) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
 	_, err = o.DB.Gen(ctx).MarkProviderCatalogObjectDeleted(ctx, gen.MarkProviderCatalogObjectDeletedParams{MerchantID: mid.UUID(), PspID: psp.ID,
-		Kind: string(kind), Ref: ref, ObservedAt: at.UTC(), ObservedVia: string(ViaRead)})
+		Kind: string(kind), Ref: ref, ObservedAt: at.UTC(), ObservedVia: string(via)})
 	return err
 }
 

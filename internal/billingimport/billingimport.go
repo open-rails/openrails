@@ -28,7 +28,9 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/parking"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -193,6 +195,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		// declaredAgreements: a card's declared recurring agreement (the storing
 		// transaction of its NMI schedules), which their mandates cite.
 		declaredAgreements := map[uuid.UUID]string{}
+		woken := map[string]bool{}
 		pmKey := func(psp uuid.UUID, rail, custRef, methodRef string) string {
 			return psp.String() + "\x1f" + rail + "\x1f" + custRef + "\x1f" + methodRef
 		}
@@ -247,6 +250,14 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				}); err != nil {
 					return fmt.Errorf("create payment method %s/%s: %w", pm.Rail, pm.RailCustomerRef, err)
 				}
+				// A vault landing links its provider customer: the
+				// subscriptions parked waiting for it converge again.
+				if vault := pmPSP.String() + "\x1f" + pm.RailCustomerRef; !woken[vault] {
+					woken[vault] = true
+					if _, err := parking.Wake(ctx, txdb, pmPSP, billing.ParkCustomerUnlinked, pm.RailCustomerRef); err != nil {
+						return err
+					}
+				}
 			} else if err != nil {
 				return fmt.Errorf("lookup payment method %s/%s: %w", pm.Rail, pm.RailCustomerRef, err)
 			} else if owner != pm.Customer.UUID() {
@@ -260,7 +271,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			pmIDs[pmKey(pmPSP, pm.Rail, pm.RailCustomerRef, pm.RailMethodRef)] = id
 		}
 
-		if err := claimPSPCustomers(ctx, q, merchantID.UUID(), psps, opts.Book.PSPCustomers, asOf, &res); err != nil {
+		if err := claimPSPCustomers(ctx, txdb, merchantID.UUID(), psps, opts.Book.PSPCustomers, asOf, &res); err != nil {
 			return err
 		}
 
@@ -635,7 +646,8 @@ func importRecurringMandate(ctx context.Context, q *gen.Queries, merchantID uuid
 // if absent. A ref another customer holds refuses the book, as a payment
 // method does; a customer already mapping another ref on the PSP keeps it,
 // and the result's reason says so.
-func claimPSPCustomers(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, psps *pspResolver, declared []DeclaredPSPCustomer, asOf time.Time, res *Result) error {
+func claimPSPCustomers(ctx context.Context, txdb *db.DB, merchantID uuid.UUID, psps *pspResolver, declared []DeclaredPSPCustomer, asOf time.Time, res *Result) error {
+	q := txdb.Gen(ctx)
 	for _, pc := range declared {
 		ref := pc.RemoteCustomerRef
 		if pc.Customer.IsZero() || ref == "" || strings.TrimSpace(ref) != ref {
@@ -652,11 +664,12 @@ func claimPSPCustomers(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 		if err := db.EnsureCustomerRowQ(ctx, q, merchantID, customer); err != nil {
 			return fmt.Errorf("ensure customer %s: %w", pc.Customer, err)
 		}
-		claimed, err := q.ClaimPSPCustomer(ctx, gen.ClaimPSPCustomerParams{MerchantID: merchantID, CustomerID: customer, PspID: pspID, RemoteCustomerRef: ref, At: asOf})
+		// A claim wakes the subscriptions parked waiting for this customer.
+		claimed, err := payments.ClaimPSPCustomer(ctx, txdb, customer, pspID, ref, asOf)
 		if err != nil {
 			return fmt.Errorf("record PSP customer %s: %w", ref, err)
 		}
-		if claimed == 1 {
+		if claimed {
 			continue
 		}
 		holder, err := q.GetPSPCustomerByRef(ctx, gen.GetPSPCustomerByRefParams{MerchantID: merchantID, PspID: pspID, RemoteCustomerRef: ref})

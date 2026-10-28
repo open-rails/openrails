@@ -1,15 +1,20 @@
 package catalog
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/parking"
 )
 
 // UpdatePSPLinks resolves input labels once and atomically replaces normalized
@@ -28,6 +33,7 @@ func (s *PriceService) UpdatePSPLinks(ctx context.Context, priceID uuid.UUID, li
 			return err
 		}
 		seen := map[uuid.UUID]bool{}
+		var bound []boundRef
 		for key, values := range links {
 			cfg := make(map[string]string, len(values))
 			for k, value := range values {
@@ -79,7 +85,31 @@ func (s *PriceService) UpdatePSPLinks(ctx context.Context, priceID uuid.UUID, li
 			if err := q.InsertPricePSPBinding(ctx, params); err != nil {
 				return fmt.Errorf("store price binding %q: %w", key, err)
 			}
+			for _, ref := range []*string{params.PriceRef, params.PlanID} {
+				if ref != nil {
+					bound = append(bound, boundRef{account.ID, *ref})
+				}
+			}
+		}
+		// The subscriptions parked on a ref this binds converge again; the
+		// finding resolves with the mapping. Sorted: one lock order.
+		slices.SortFunc(bound, func(a, b boundRef) int {
+			return cmp.Or(bytes.Compare(a.psp[:], b.psp[:]), strings.Compare(a.ref, b.ref))
+		})
+		txdb := s.db.NewWithPgxTx(tx)
+		for _, b := range bound {
+			if _, err := parking.Wake(ctx, txdb, b.psp, billing.ParkPriceUnmapped, b.ref); err != nil {
+				return err
+			}
+			if _, err := parking.SyncPriceFinding(ctx, q, mid.UUID(), b.psp, b.ref, false); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
+}
+
+type boundRef struct {
+	psp uuid.UUID
+	ref string
 }

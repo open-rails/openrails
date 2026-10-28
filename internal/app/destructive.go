@@ -60,7 +60,7 @@ func (r *Runtime) projectDestructiveHold(ctx context.Context, tx pgx.Tx, hold de
 			return fmt.Errorf("project destructive finding: %w", err)
 		}
 		args := riverjobs.DestructiveAlertArgs{MerchantID: hold.MerchantID, HoldID: hold.ID, Scope: string(hold.Scope), OpenedAt: hold.OpenedAt}
-		if err = r.DB.InsertRiverJobTx(ctx, tx, args, riverjobs.DestructiveAlertOptions()); err != nil {
+		if _, err = r.DB.InsertRiverJobTx(ctx, tx, args, riverjobs.DestructiveAlertOptions()); err != nil {
 			return fmt.Errorf("queue destructive incident alert: %w", err)
 		}
 	} else {

@@ -420,7 +420,8 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 		if row.Status == StatusPending && row.LeaseExpiresAt != nil && row.LeaseExpiresAt.After(wake) {
 			wake = *row.LeaseExpiresAt
 		}
-		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(wake))
+		_, err = s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(wake))
+		return err
 	})
 	return row, err
 }

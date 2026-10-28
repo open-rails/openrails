@@ -611,6 +611,33 @@
     ],
     "OR-J38-S13": [
       "TestPSPImport/OR-J38-S13/unreadable-answer-fails-visibly"
+    ],
+    "OR-J15-S08": [
+      "TestProviderTrailing/OR-J15-S08/stripe-price-event-raises-one-finding"
+    ],
+    "OR-J15-S09": [
+      "TestProviderTrailing/OR-J15-S09/stripe-unmapped-signup-parks-then-lands-once"
+    ],
+    "OR-J15-S10": [
+      "TestProviderTrailing/OR-J15-S10/stripe-unattributed-customer-parks-and-lands-on-link"
+    ],
+    "OR-J15-S11": [
+      "TestProviderTrailing/OR-J15-S11/stripe-move-to-unmapped-price-keeps-tier"
+    ],
+    "OR-J15-S12": [
+      "TestProviderTrailing/OR-J15-S12/mapping-during-converge-strands-no-park"
+    ],
+    "OR-J15-S13": [
+      "TestProviderTrailing/OR-J15-S13/nmi-unheld-subscription-adopts-or-parks"
+    ],
+    "OR-J15-S14": [
+      "TestProviderTrailing/OR-J15-S14/park-closes-when-import-lands-it"
+    ],
+    "OR-J15-S15": [
+      "TestProviderTrailing/OR-J15-S15/shared-merchant-two-hosts-land-once"
+    ],
+    "OR-J15-S16": [
+      "TestProviderTrailing/OR-J15-S16/list-parked-subscriptions"
     ]
   },
   "suites": {

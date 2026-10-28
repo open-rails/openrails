@@ -147,11 +147,27 @@ id; verifying a provider price (`GetPrice` with `verify`) reads it again.
 An import pulled before OpenRails observed provider catalogs has no
 catalog: create a new import to pull the PSP again.
 
+Each price row also carries `parked` (the live subscriptions parked on it
+while unmapped) and `finding` (its open `catalog.price.unmapped` finding).
+After the first pull, Stripe `product.*` and `price.*` webhooks and the plans
+NMI subscriptions name keep the catalog current (`observed_via: webhook` or
+`read`).
+
 A provider price whose object the provider retired (inactive, deleted, or
 its Stripe product is) is not for sale: it is no tier-change target and its
 `provider.retired` is true. It still resolves, so its subscriptions keep
 billing and keep their access. A deleted plan still maps, so its
 grandfathered subscriptions land.
+
+## Backlog and webhooks
+
+Until a PSP's first pull, and while its latest pull stages a subscription
+not yet landed, the import owns that subscription: a webhook about it parks
+nothing and adopts nothing. Once pulled and not staged (a subscription that
+began after the pull), converge lands it, adopts it (NMI) or parks it with a
+finding (`ListParkedSubscriptions`). A park closes when its subscription lands,
+by converge or by an import's Apply; the trigger on `subscriptions` closes it
+either way, so nothing lands twice.
 
 ## CCBill prices
 

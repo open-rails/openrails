@@ -482,6 +482,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// whether the producer came from config or an embedded host's external
 	// River client (shared River composition).
 	runtime.WebhookDispatcher.ConvergeEnqueuer = &runtimeConvergeEnqueuer{runtime: runtime}
+	runtime.WebhookDispatcher.ObserveEnqueuer = &runtimeObserveEnqueuer{runtime: runtime}
 
 	// #674: write-through provider intents. Producers post a durable intent and
 	// execute it inline through the SAME registry/runner the scheduled
@@ -833,4 +834,16 @@ func (e *runtimeConvergeEnqueuer) EnqueueSubscriptionConverge(ctx context.Contex
 		return fmt.Errorf("subscription converge enqueuer: river producer unavailable")
 	}
 	return riverjobs.NewSubscriptionConvergeEnqueuer(e.runtime.RiverProducer).EnqueueSubscriptionConverge(ctx, req)
+}
+
+// runtimeObserveEnqueuer is runtimeConvergeEnqueuer for catalog observe jobs.
+type runtimeObserveEnqueuer struct {
+	runtime *Runtime
+}
+
+func (e *runtimeObserveEnqueuer) EnqueueProviderObjectObserve(ctx context.Context, req webhooks.ObserveRequest) error {
+	if e == nil || e.runtime == nil || e.runtime.RiverProducer == nil {
+		return fmt.Errorf("provider object observe enqueuer: river producer unavailable")
+	}
+	return riverjobs.ProviderObjectObserveEnqueuer{Client: e.runtime.RiverProducer}.EnqueueProviderObjectObserve(ctx, req)
 }

@@ -13,12 +13,16 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/parking"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -48,6 +52,10 @@ type StripeConvergeService struct {
 	MoneyService                 *money.MoneyService
 	RailCustomerService          *payments.RailCustomerService
 	OrderAttemptService          webhookOrderAttemptStore
+	// Objects records the Stripe price a parked subscription bills.
+	Objects *providerobjects.Observer
+	// Findings notifies an operator of the finding a park raises.
+	Findings reconcile.FindingNotifier
 }
 
 func (s *StripeConvergeService) now() time.Time {
@@ -89,7 +97,10 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 		if !rec.Found {
 			log.WithContext(ctx).WithField("rail_subscription_id", railSubID).
 				Info("stripe converge: subscription unknown locally and gone at Stripe; nothing to do")
-			return uuid.Nil, nil
+			if !rec.Missing {
+				return uuid.Nil, nil
+			}
+			return uuid.Nil, closePark(ctx, s.DB, railSubID, billing.ParkGone, now)
 		}
 		return s.createFromFetchedRecord(ctx, railSubID, rec, reader, now)
 	}
@@ -125,28 +136,10 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 
 // createFromFetchedRecord is the signup/first-invoice leg: a Stripe checkout
 // subscription has no local row until its first paid invoice. All facts come
-// from the FETCHED record (metadata stamped by purchase, latest invoice).
+// from the FETCHED record (metadata stamped by purchase, latest invoice). A
+// live subscription it cannot land parks: price first (one mapping wakes many
+// parks), then the customer, never guessed and never by email.
 func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, reader subscriptions.StripeBillReader, now time.Time) (uuid.UUID, error) {
-	userID := normalize.FirstNonEmpty(rec.Metadata["user_id"], rec.Metadata["userId"], rec.Metadata["uid"])
-	if userID == "" && s.RailCustomerService != nil && rec.CustomerID != "" {
-		if uid, err := s.RailCustomerService.GetUserIDByCustomerID(ctx, string(models.RailStripe), rec.CustomerID); err == nil {
-			userID = strings.TrimSpace(uid)
-		}
-	}
-	if userID == "" {
-		// Retryable: checkout.session.completed records the rail-customer
-		// mapping; redelivery/retry wins once it lands.
-		return uuid.Nil, fmt.Errorf("stripe converge: cannot attribute subscription %s to a user (no metadata user_id, no rail customer mapping)", railSubID)
-	}
-	if s.RailCustomerService != nil && rec.CustomerID != "" {
-		_ = s.RailCustomerService.Upsert(ctx, userID, string(models.RailStripe), rec.CustomerID)
-	}
-
-	priceID, _, err := s.resolveFetchedPrice(ctx, rec)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("stripe converge: %s: %w", railSubID, err)
-	}
-
 	status := strings.ToLower(strings.TrimSpace(rec.Status))
 	if !rec.LatestInvoicePaid || (status != "active" && status != "trialing") {
 		// Nothing settled yet (incomplete signup, unpaid first invoice) — the
@@ -154,8 +147,48 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 		log.WithContext(ctx).WithFields(log.Fields{
 			"rail_subscription_id": railSubID, "status": rec.Status, "invoice_paid": rec.LatestInvoicePaid,
 		}).Info("stripe converge: fetched subscription has no settled paid invoice; not creating membership")
+		if status == "canceled" || status == "incomplete_expired" {
+			return uuid.Nil, closePark(ctx, s.DB, railSubID, billing.ParkGone, now)
+		}
 		return uuid.Nil, nil
 	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	subject := parking.Subject{PSPID: pspID, Rail: string(models.RailStripe), SubscriptionRef: railSubID, PriceRef: rec.PriceID, CustomerRef: rec.CustomerID,
+		Backlog: true, Evidence: map[string]any{"status": rec.Status, "customer": rec.CustomerID, "price": rec.PriceID, "latest_invoice": rec.LatestInvoiceID}}
+
+	priceID, _, unmapped, err := s.resolveFetchedPrice(ctx, rec)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("stripe converge: %s: %w", railSubID, err)
+	}
+	if unmapped {
+		if err := observePrice(ctx, s.Objects, rec.PriceID, nil); err != nil {
+			return uuid.Nil, fmt.Errorf("stripe converge: observe price %s: %w", rec.PriceID, err)
+		}
+		subject.Reason = billing.ParkPriceUnmapped
+		return uuid.Nil, parkSubscription(ctx, s.DB, s.Findings, subject, now)
+	}
+
+	userID := normalize.FirstNonEmpty(rec.Metadata["user_id"], rec.Metadata["userId"], rec.Metadata["uid"])
+	if userID == "" && s.RailCustomerService != nil && rec.CustomerID != "" {
+		uid, err := s.RailCustomerService.GetUserIDByCustomerID(ctx, string(models.RailStripe), rec.CustomerID)
+		switch {
+		case err == nil:
+			userID = strings.TrimSpace(uid)
+		case !db.IsNotFound(err):
+			return uuid.Nil, fmt.Errorf("stripe converge: attribute %s: %w", railSubID, err)
+		}
+	}
+	if userID == "" {
+		subject.Reason = billing.ParkCustomerUnlinked
+		return uuid.Nil, parkSubscription(ctx, s.DB, s.Findings, subject, now)
+	}
+	if s.RailCustomerService != nil && rec.CustomerID != "" {
+		_ = s.RailCustomerService.Upsert(ctx, userID, string(models.RailStripe), rec.CustomerID)
+	}
+
 	invoice, err := reader.ReadBill(ctx, rec.LatestInvoiceID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("stripe converge: fetch initial invoice: %w", err)
@@ -185,9 +218,23 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 		if err != nil {
 			return err
 		}
+		// The row as stored: its PSP and collection policy are the
+		// database's defaults, not the in-memory shape's.
+		if sub, err = subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, sub.ID); err != nil {
+			return err
+		}
 		_, err = subscriptions.RecordStripeBill(ctx, d, sub, invoice, now)
 		return err
 	})
+	if productHeld(err) {
+		subject.Reason, subject.Evidence["customer_id"] = billing.ParkProductHeld, userID
+		if price, perr := s.PriceService.GetByID(ctx, priceID); perr == nil {
+			if held, herr := s.SubscriptionService.GetActiveOrPendingByUserIDAndProductID(ctx, userID, price.ProductID); herr == nil && held != nil {
+				subject.HeldBy, subject.Evidence["held_by"] = &held.ID, held.ID
+			}
+		}
+		return uuid.Nil, parkSubscription(ctx, s.DB, s.Findings, subject, now)
+	}
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("stripe converge: create membership %s: %w", railSubID, err)
 	}
@@ -203,24 +250,29 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 
 // resolveFetchedPrice maps the fetched record to a local price: metadata
 // internal_price_id (purchase-stamped) first, then the Stripe price id.
-func (s *StripeConvergeService) resolveFetchedPrice(ctx context.Context, rec subscriptions.StripeLivenessRecord) (uuid.UUID, *models.Price, error) {
+// unmapped is a Stripe price no price of ours binds; a lookup failure is an
+// error.
+func (s *StripeConvergeService) resolveFetchedPrice(ctx context.Context, rec subscriptions.StripeLivenessRecord) (uuid.UUID, *models.Price, bool, error) {
 	if idStr := normalize.FirstNonEmpty(rec.Metadata["internal_price_id"], rec.Metadata["price_id"]); idStr != "" {
 		if priceID, err := uuid.Parse(idStr); err == nil {
 			price, err := s.PriceService.GetByID(ctx, priceID)
 			if err != nil {
-				return uuid.Nil, nil, fmt.Errorf("price lookup failed: %w", err)
+				return uuid.Nil, nil, false, fmt.Errorf("price lookup failed: %w", err)
 			}
-			return priceID, price, nil
+			return priceID, price, false, nil
 		}
 	}
 	if rec.PriceID != "" {
 		price, err := s.PriceService.GetByStripePriceID(ctx, rec.PriceID)
-		if err != nil {
-			return uuid.Nil, nil, fmt.Errorf("stripe price %s not mapped", rec.PriceID)
+		if db.IsNotFound(err) {
+			return uuid.Nil, nil, true, nil
 		}
-		return price.ID, price, nil
+		if err != nil {
+			return uuid.Nil, nil, false, fmt.Errorf("stripe price %s lookup: %w", rec.PriceID, err)
+		}
+		return price.ID, price, false, nil
 	}
-	return uuid.Nil, nil, fmt.Errorf("unable to resolve price from fetched subscription")
+	return uuid.Nil, nil, false, fmt.Errorf("unable to resolve price from fetched subscription")
 }
 
 // validateStripeFetchedInvoicePrice checks the fetched invoice against the
@@ -252,11 +304,25 @@ func validateStripeFetchedInvoicePrice(rec subscriptions.StripeLivenessRecord, p
 
 // recordFetchedBills walks the complete subscription history and fetches each
 // specific invoice. Replayed or unordered webhooks cannot replace an earlier
-// bill with latest_invoice. Each callback owns one local transaction.
+// bill with latest_invoice. Each callback owns one local transaction. A bill
+// billing a price no price of ours binds waits: the subscription parks, and
+// mapping the price converges it again.
 func (s *StripeConvergeService) recordFetchedBills(ctx context.Context, sub *models.Subscription, rec subscriptions.StripeLivenessRecord, reader subscriptions.StripeBillReader, now time.Time) error {
 	return reader.VisitSubscriptionBills(ctx, sub.RailSubscriptionID, func(invoice subscriptions.StripeBill) error {
 		if invoice.CustomerID != rec.CustomerID {
 			return fmt.Errorf("Stripe invoice %s belongs to a different customer", invoice.ID)
+		}
+		for _, line := range invoice.Lines {
+			if line.PriceID == "" || line.Amount < 0 {
+				continue
+			}
+			if _, err := s.PriceService.GetByStripePriceID(ctx, line.PriceID); db.IsNotFound(err) {
+				log.WithContext(ctx).WithFields(log.Fields{"invoice": invoice.ID, "stripe_price_id": line.PriceID}).
+					Info("stripe converge: bill names an unmapped price; it is recorded once the price is mapped")
+				return nil
+			} else if err != nil {
+				return err
+			}
 		}
 		if invoice.Reason == "subscription_create" && rec.Metadata["order_id"] != "" {
 			if invoice.Metadata == nil {
@@ -280,11 +346,14 @@ func (s *StripeConvergeService) recordFetchedBills(ctx context.Context, sub *mod
 // vocabulary, under the row lock and through the lifecycle machine:
 //   - a portal cancel at period end is the user's period-end cancel;
 //   - a portal resume undoes only that user cancel, inside the paid period;
-//   - a price move takes effect only with a paid invoice for the new price.
+//   - a price move takes effect only with a paid invoice for the new price;
+//     a move onto an unmapped price keeps the paid tier and parks until the
+//     price is mapped.
 func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, now time.Time) error {
 	var (
 		updatedSub *models.Subscription
 		oldProduct uuid.UUID
+		parkMove   *models.Subscription
 	)
 	status := strings.ToLower(strings.TrimSpace(rec.Status))
 	remoteAlive := status == "active" || status == "trialing"
@@ -313,9 +382,19 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 		}
 
 		if sub.Status == models.StatusCanceled || rec.PriceID == "" {
+			return parking.Close(ctx, gen.New(tx), sub.PspID, railSubID, billing.ParkConverged, now)
+		}
+		price, unmapped, err := s.paidPriceMove(ctx, sub, rec)
+		if err != nil {
+			return err
+		}
+		if unmapped {
+			parkMove = sub
 			return nil
 		}
-		price := s.paidPriceMove(ctx, sub, rec)
+		if err := parking.Close(ctx, gen.New(tx), sub.PspID, railSubID, billing.ParkConverged, now); err != nil {
+			return err
+		}
 		if price == nil {
 			return nil
 		}
@@ -334,6 +413,14 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 		return nil
 	}); err != nil {
 		return err
+	}
+	if parkMove != nil {
+		if err := observePrice(ctx, s.Objects, rec.PriceID, nil); err != nil {
+			return fmt.Errorf("stripe converge: observe price %s: %w", rec.PriceID, err)
+		}
+		return parkSubscription(ctx, s.DB, s.Findings, parking.Subject{PSPID: parkMove.PspID, Rail: string(models.RailStripe), SubscriptionRef: railSubID,
+			Reason: billing.ParkPriceUnmapped, PriceRef: rec.PriceID, CustomerRef: rec.CustomerID,
+			Evidence: map[string]any{"subscription_id": parkMove.ID, "held_price_id": parkMove.PriceID, "price": rec.PriceID, "latest_invoice": rec.LatestInvoiceID}}, now)
 	}
 
 	// A product move ends the old product's grace window.
@@ -380,23 +467,26 @@ func (s *StripeConvergeService) mirrorPortalResume(ctx context.Context, txdb *db
 
 // paidPriceMove returns the new local price when the Stripe price moved and
 // the latest paid invoice bills it. A portal upgrade whose invoice is still
-// open grants nothing.
-func (s *StripeConvergeService) paidPriceMove(ctx context.Context, sub *models.Subscription, rec subscriptions.StripeLivenessRecord) *models.Price {
+// open grants nothing. unmapped is a move onto a price no price of ours binds.
+func (s *StripeConvergeService) paidPriceMove(ctx context.Context, sub *models.Subscription, rec subscriptions.StripeLivenessRecord) (*models.Price, bool, error) {
 	price, err := s.PriceService.GetByStripePriceID(ctx, rec.PriceID)
-	if err != nil {
+	if db.IsNotFound(err) {
 		log.WithContext(ctx).WithFields(log.Fields{"stripe_price_id": rec.PriceID, "subscription_id": sub.ID}).
-			Warn("stripe converge: fetched price not mapped locally")
-		return nil
+			Warn("stripe converge: price moved at Stripe onto an unmapped price; keeping the paid tier")
+		return nil, true, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("stripe converge: price %s lookup: %w", rec.PriceID, err)
 	}
 	if price.ID == sub.PriceID {
-		return nil
+		return nil, false, nil
 	}
 	if !rec.LatestInvoicePaid || !slices.Contains(rec.LatestInvoicePriceIDs, rec.PriceID) {
 		log.WithContext(ctx).WithFields(log.Fields{"stripe_price_id": rec.PriceID, "subscription_id": sub.ID, "invoice": rec.LatestInvoiceID}).
 			Info("stripe converge: price moved at Stripe without a paid invoice for it; keeping the paid tier")
-		return nil
+		return nil, false, nil
 	}
-	return price
+	return price, false, nil
 }
 
 func (s *StripeConvergeService) revokeMovedGrace(ctx context.Context, sub *models.Subscription, product uuid.UUID) error {

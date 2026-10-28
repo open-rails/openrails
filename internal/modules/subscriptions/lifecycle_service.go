@@ -2306,7 +2306,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		}
 		if refresh {
 			opts := args.InsertOpts()
-			if err := s.DB.InsertRiverJobTx(ctx, tx, args, &opts); err != nil {
+			if _, err := s.DB.InsertRiverJobTx(ctx, tx, args, &opts); err != nil {
 				return fmt.Errorf("queue declined card refresh: %w", err)
 			}
 			// The decline is real, but the holder may have a reissued card.
