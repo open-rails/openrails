@@ -637,7 +637,7 @@ ORDER BY s.grace_ends_at, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- LIFE life.subscription.pending_stale: pending subscriptions unconfirmed past
--- the threshold (cutoff = now - pendingStaleAfter).
+-- the threshold (cutoff = now - PendingStaleAfter).
 -- name: ListStalePendingSubscriptions :many
 SELECT s.id FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid

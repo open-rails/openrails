@@ -4732,7 +4732,7 @@
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "models": "github.com/open-rails/openrails/internal/db/models",

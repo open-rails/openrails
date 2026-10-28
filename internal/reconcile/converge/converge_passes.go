@@ -26,10 +26,10 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// pendingStaleAfter is how long a `pending` subscription may sit unconfirmed
+// PendingStaleAfter is how long a `pending` subscription may sit unconfirmed
 // before life.subscription.pending_stale terminates it. Conservative: well beyond
 // any real activation latency, so auto-cancelling can't race a confirming sub.
-const pendingStaleAfter = 72 * time.Hour
+const PendingStaleAfter = 72 * time.Hour
 
 // paidPendingAfter is how long a pending subscription may hold a completed
 // payment before the missing activation is surfaced.
@@ -550,7 +550,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	// on an absence (no confirmation arrived), which is proof only once
 	// provider truth is fully reconciled.
 	stalePending, err := q.ListStalePendingSubscriptions(ctx, gen.ListStalePendingSubscriptionsParams{
-		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Cutoff: now.Add(-pendingStaleAfter),
+		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Cutoff: now.Add(-PendingStaleAfter),
 		RowLimit: convergeScanCap,
 	})
 	if err != nil {

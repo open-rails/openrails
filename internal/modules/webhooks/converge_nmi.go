@@ -2,6 +2,7 @@ package webhooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -88,10 +89,14 @@ func (s *NMIConvergeService) Converge(ctx context.Context, reference string) (uu
 	}
 
 	if sub.Status == models.StatusPending {
-		if handled, err := s.activateAcceptedInitialPayment(ctx, sub, now); handled {
-			return sub.CustomerID, err
+		handled, err := s.activateAcceptedInitialPayment(ctx, sub, now)
+		if !handled {
+			err = s.activatePendingFromProbe(ctx, rail, sub, now)
 		}
-		return sub.CustomerID, s.activatePendingFromProbe(ctx, rail, sub, now)
+		if errors.Is(err, ErrConvergeRetryLater) {
+			err = &PendingError{Since: sub.CreatedAt, Err: err}
+		}
+		return sub.CustomerID, err
 	}
 
 	prober := &reconcile.NMISubscriptionProber{Client: s.NMIClient}

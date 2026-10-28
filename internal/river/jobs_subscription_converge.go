@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -20,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/attempts"
@@ -47,14 +47,13 @@ const (
 	// provider read via the unique-job dedup below.
 	SubscriptionConvergeDebounce = 5 * time.Second
 
-	// subscriptionConvergeSnoozeFor paces the settlement-lag snooze loop
-	// (pending NMI signups whose charge hasn't appeared yet): one provider
-	// read per minute per pending signup. The loop ends on observation, never
-	// a clock: the subscription leaves `pending`, or a refresh pull of the
-	// captured PSP has covered the rail since the job was born
-	// (psp_refresh_watermarks) and re-reads the same evidence on its own
-	// cadence.
+	// A pending signup whose charge has not appeared yet is read again after
+	// a minute, the wait doubling to subscriptionConvergeSnoozeMax, until the
+	// row leaves `pending`. Only the converge job can activate it: no pull
+	// does. Once the row is converge.PendingStaleAfter old, the stale-pending
+	// pass owns it.
 	subscriptionConvergeSnoozeFor     = time.Minute
+	subscriptionConvergeSnoozeMax     = 30 * time.Minute
 	subscriptionConvergeMissingClient = "converge: rail client not configured"
 )
 
@@ -209,16 +208,14 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 	if err == nil {
 		return nil
 	}
+	var pending *webhooks.PendingError
+	if errors.As(err, &pending) && !workerNow(w.Clock).Before(pending.Since.Add(converge.PendingStaleAfter)) {
+		log.WithContext(ctx).WithFields(log.Fields{"rail": args.Rail, "reference": args.SubscriptionReference, "pending_since": pending.Since.UTC().Format(time.RFC3339)}).
+			Warn("subscription converge: the signup stayed pending past the stale threshold; the stale-pending pass owns it")
+		return nil
+	}
 	if errors.Is(err, webhooks.ErrConvergeRetryLater) {
-		if covered, pulledAt := w.pullCoveredSince(mctx, args, job.CreatedAt); covered {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"rail": args.Rail, "reference": args.SubscriptionReference,
-				"job_created_at": job.CreatedAt.UTC().Format(time.RFC3339),
-				"last_pull_at":   pulledAt.UTC().Format(time.RFC3339),
-			}).Info("subscription converge: provider evidence not settled and the refresh pull has covered this rail since; handing off to the pull")
-			return nil
-		}
-		return river.JobSnooze(subscriptionConvergeSnoozeFor)
+		return river.JobSnooze(pendingSnooze(job))
 	}
 	// Retryable: provider API down / transient DB failure — the job IS the
 	// dirty mark; River backoff re-fetches and converges later. Access intact.
@@ -236,31 +233,18 @@ func (w *SubscriptionConvergeWorker) predecessorRunning(ctx context.Context, id 
 	return err == nil && job.State == rivertype.JobStateRunning
 }
 
-// pullCoveredSince reports whether a PSP refresh pull for the rail has
-// completed after `since` — the observed hand-off signal for the snooze loop.
-// A read failure is "not covered": the job keeps snoozing, which costs one
-// provider read a minute, whereas a wrong hand-off could leave a pending
-// signup to a pull that never runs.
-func (w *SubscriptionConvergeWorker) pullCoveredSince(mctx context.Context, args SubscriptionConvergeArgs, since time.Time) (bool, time.Time) {
-	var pulledAt time.Time
-	err := w.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
-		var qerr error
-		pulledAt, qerr = w.DB.Gen(cctx).GetPSPRefreshWatermark(cctx, gen.GetPSPRefreshWatermarkParams{
-			MerchantID: args.MerchantID, PspID: args.PSPID,
-		})
-		if qerr != nil && db.IsNotFound(qerr) {
-			pulledAt, qerr = time.Time{}, nil
-		}
-		return qerr
-	})
-	if err != nil {
-		log.WithContext(mctx).WithError(err).WithField("rail", args.Rail).Warn("subscription converge: pull watermark read failed; keeping the snooze")
-		return false, time.Time{}
+// pendingSnooze is the wait before the next read of a pending signup: a
+// minute, doubling with each snooze up to subscriptionConvergeSnoozeMax.
+func pendingSnooze(job *river.Job[SubscriptionConvergeArgs]) time.Duration {
+	var meta struct {
+		Snoozes int `json:"snoozes"`
 	}
-	if !pulledAt.After(since) {
-		return false, time.Time{}
+	_ = json.Unmarshal(job.Metadata, &meta)
+	wait := subscriptionConvergeSnoozeFor
+	for range min(max(meta.Snoozes, 0), 5) {
+		wait *= 2
 	}
-	return true, pulledAt
+	return min(wait, subscriptionConvergeSnoozeMax)
 }
 
 func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args SubscriptionConvergeArgs) (uuid.UUID, error) {

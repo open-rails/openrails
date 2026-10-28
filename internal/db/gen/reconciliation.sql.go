@@ -1821,7 +1821,7 @@ type ListStalePendingSubscriptionsParams struct {
 }
 
 // LIFE life.subscription.pending_stale: pending subscriptions unconfirmed past
-// the threshold (cutoff = now - pendingStaleAfter).
+// the threshold (cutoff = now - PendingStaleAfter).
 // Oldest first, capped.
 func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListStalePendingSubscriptionsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listStalePendingSubscriptions,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -44,6 +45,16 @@ type SubscriptionConvergeEnqueuer interface {
 // (e.g. an NMI initial charge still pending) — the converge job should snooze
 // and re-fetch, not fail.
 var ErrConvergeRetryLater = errors.New("subscription converge: provider evidence not settled; retry later")
+
+// PendingError is ErrConvergeRetryLater for a `pending` subscription created
+// at Since, so the job knows when the stale-pending pass owns it instead.
+type PendingError struct {
+	Since time.Time
+	Err   error
+}
+
+func (e *PendingError) Error() string { return e.Err.Error() }
+func (e *PendingError) Unwrap() error { return e.Err }
 
 // markSubscriptionDirty is the whole job of a slimmed webhook handler: attach
 // the merchant, enqueue the coalesced fetch. An unavailable enqueuer is a
