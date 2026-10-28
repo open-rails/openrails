@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
@@ -84,31 +85,90 @@ func (RebillWatchWorker) Kind() string { return KindRebillWatch }
 func (w *RebillWatchWorker) Work(ctx context.Context, _ *river.Job[RebillWatchArgs]) error {
 	now := w.Clock.Now().UTC()
 	cutoffs := subscriptions.RebillCutoffs{Engine: now.Add(-EngineRebillDeadline), Solana: now.Add(-SolanaRebillDeadline), NMI: now.Add(-NMIRebillDeadline)}
-	merchantIDs, err := w.DB.GenDirectory().ListOverdueRebillMerchants(ctx, gen.ListOverdueRebillMerchantsParams{
-		EngineCutoff: cutoffs.Engine, SolanaCutoff: cutoffs.Solana, NmiCutoff: cutoffs.NMI, MerchantLimit: rebillWatchMerchantBatch,
-	})
-	if err != nil {
-		return fmt.Errorf("rebill watch: list merchants: %w", err)
-	}
 	var workErr error
-	for _, mid := range merchantIDs {
-		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "rebill watch", func(ctx context.Context) error {
-			subs, err := subscriptions.NewSubscriptionRepo(w.DB).ListOverdueRebills(ctx, cutoffs)
-			if err != nil {
-				return err
-			}
-			for _, sub := range subs {
-				if err := w.watch(ctx, sub, now); err != nil {
-					log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).Warn("rebill watch: subscription left open; retried next pass")
-				}
-			}
-			return nil
+	after := uuid.Nil
+	for {
+		merchantIDs, err := w.DB.GenDirectory().ListOverdueRebillMerchants(ctx, gen.ListOverdueRebillMerchantsParams{
+			EngineCutoff: cutoffs.Engine, SolanaCutoff: cutoffs.Solana, NmiCutoff: cutoffs.NMI, Now: now, AfterMerchantID: after, MerchantLimit: rebillWatchMerchantBatch,
 		})
 		if err != nil {
-			workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
+			return errors.Join(workErr, fmt.Errorf("rebill watch: list merchants: %w", err))
 		}
+		for _, mid := range merchantIDs {
+			if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "rebill watch", func(ctx context.Context) error {
+				return w.watchMerchant(ctx, cutoffs, now)
+			}); err != nil {
+				workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
+			}
+		}
+		if len(merchantIDs) < rebillWatchMerchantBatch {
+			return workErr
+		}
+		after = merchantIDs[len(merchantIDs)-1]
 	}
-	return workErr
+}
+
+// watchMerchant decides each of the merchant's overdue cycles, a page at a
+// time. A cycle whose look fails waits out its backoff, so it never holds up
+// the cycles after it.
+func (w *RebillWatchWorker) watchMerchant(ctx context.Context, cutoffs subscriptions.RebillCutoffs, now time.Time) error {
+	repo := subscriptions.NewSubscriptionRepo(w.DB)
+	var after subscriptions.DueDunningCursor
+	var merchantErr error
+	for {
+		subs, err := repo.ListOverdueRebills(ctx, cutoffs, now, after)
+		if err != nil {
+			return errors.Join(merchantErr, err)
+		}
+		for _, sub := range subs {
+			if err := w.watch(ctx, sub, now); err != nil {
+				next, rerr := w.backOff(ctx, sub, now)
+				log.WithContext(ctx).WithError(errors.Join(err, rerr)).WithFields(log.Fields{"subscription_id": sub.ID, "next_look_at": next}).
+					Warn("rebill watch: subscription left open; looked at again after a backoff")
+				if rerr != nil {
+					merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, rerr))
+				}
+			}
+		}
+		if len(subs) < subscriptions.DueDunningBatch {
+			return merchantErr
+		}
+		last := subs[len(subs)-1]
+		after = subscriptions.DueDunningCursor{DueAt: *last.CurrentPeriodEndsAt, ID: last.ID}
+	}
+}
+
+// backOff records a failed look at sub's overdue cycle and returns when it is
+// looked at again.
+func (w *RebillWatchWorker) backOff(ctx context.Context, sub *models.Subscription, now time.Time) (time.Time, error) {
+	cycle, err := w.cycle(sub)
+	if err != nil {
+		return time.Time{}, err
+	}
+	next, err := w.DB.Gen(ctx).RecordRebillProbeFailure(ctx, gen.RecordRebillProbeFailureParams{
+		ID: cycle.ID, MerchantID: cycle.MerchantID, SubscriptionID: cycle.SubscriptionID, CustomerID: cycle.CustomerID, PspID: cycle.PspID, Rail: cycle.Rail,
+		Owner: cycle.Owner, DueAt: cycle.DueAt, Amount: cycle.Amount, Currency: cycle.Currency, Quantity: cycle.Quantity, FailedAt: now,
+	})
+	if err != nil || next == nil {
+		return time.Time{}, errors.Join(errors.New("record the failed look"), err)
+	}
+	return *next, nil
+}
+
+// cycle is the rebill cycle of sub's current period.
+func (w *RebillWatchWorker) cycle(sub *models.Subscription) (gen.UpsertRebillCycleParams, error) {
+	if sub.Price == nil {
+		return gen.UpsertRebillCycleParams{}, errors.New("subscription price not loaded")
+	}
+	amount, err := subscriptions.SeatAmount(sub.Price.Amount, sub.Quantity)
+	if err != nil {
+		return gen.UpsertRebillCycleParams{}, err
+	}
+	return gen.UpsertRebillCycleParams{
+		ID: uuidutil.NewV7(), MerchantID: sub.MerchantID, SubscriptionID: sub.ID, CustomerID: sub.CustomerID, PspID: sub.PspID, Rail: string(sub.Rail),
+		Owner: string(attempts.OwnerOf(sub.CollectionPolicy)), DueAt: sub.CurrentPeriodEndsAt.UTC(), Amount: amount, Currency: sub.Price.Currency,
+		Quantity: models.IntPtrTo32(sub.Quantity),
+	}, nil
 }
 
 // watch decides one overdue cycle.
@@ -220,23 +280,15 @@ func cycleWindowStart(sub *models.Subscription) time.Time {
 // for it. A period NMI's schedule skipped (NMI holds nothing and its next
 // date moved on) is handed to OpenRails' collection in the same transaction.
 func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, due time.Time, reason string, held []nmi.CycleTransaction, now time.Time) error {
-	if sub.Price == nil {
-		return errors.New("subscription price not loaded")
+	params, err := w.cycle(sub)
+	if err != nil {
+		return err
 	}
 	collect := reason == MissProviderSkipped && !(writeposture.View{Config: w.Config, DB: w.DB}).Posture(ctx, sub.MerchantID).ReadOnly()
 	return w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := w.DB.NewWithPgxTx(tx)
 		q := txdb.Gen(ctx)
-		quantity := sub.Quantity
-		amount, err := subscriptions.SeatAmount(sub.Price.Amount, quantity)
-		if err != nil {
-			return err
-		}
-		cycle, err := q.UpsertRebillCycle(ctx, gen.UpsertRebillCycleParams{
-			ID: uuidutil.NewV7(), MerchantID: sub.MerchantID, SubscriptionID: sub.ID, CustomerID: sub.CustomerID, PspID: sub.PspID, Rail: string(sub.Rail),
-			Owner: string(attempts.OwnerOf(sub.CollectionPolicy)), DueAt: due, Amount: amount, Currency: sub.Price.Currency,
-			Quantity: models.IntPtrTo32(quantity),
-		})
+		cycle, err := q.UpsertRebillCycle(ctx, params)
 		if err != nil {
 			return err
 		}

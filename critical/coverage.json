@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 221,
+  "scenario_count": 222,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1107,6 +1107,11 @@
       "id": "OR-J16-S32",
       "journey": "J16",
       "name": "Due pass queues an NMI retry and never waits on the gateway"
+    },
+    {
+      "id": "OR-J15-S30",
+      "journey": "J15",
+      "name": "Rebill watch backs off a failing provider probe"
     }
   ]
 }

@@ -838,16 +838,18 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rail
 // engine renewals of the due pass, Solana's of the crank, and NMI schedules.
 type RebillCutoffs struct{ Engine, Solana, NMI time.Time }
 
-// ListOverdueRebills returns auto-renewing subscriptions whose period ended
-// before its owner's cutoff with neither an attempt nor a recorded miss for
-// that cycle.
-func (r *SubscriptionRepo) ListOverdueRebills(ctx context.Context, cutoffs RebillCutoffs) ([]*models.Subscription, error) {
+// ListOverdueRebills returns a page, after the (period end, id) cursor, of
+// auto-renewing subscriptions whose period ended before its owner's cutoff
+// with neither an attempt nor a recorded miss for that cycle, and no failed
+// look waiting out its backoff at now.
+func (r *SubscriptionRepo) ListOverdueRebills(ctx context.Context, cutoffs RebillCutoffs, now time.Time, after DueDunningCursor) ([]*models.Subscription, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return nil, scopeErr
 	}
 	rows, err := r.db.Gen(ctx).ListOverdueRebills(ctx, gen.ListOverdueRebillsParams{
-		MerchantID: scopeMerchantID.UUID(), EngineCutoff: cutoffs.Engine, SolanaCutoff: cutoffs.Solana, NmiCutoff: cutoffs.NMI, RowLimit: DueDunningBatch,
+		MerchantID: scopeMerchantID.UUID(), EngineCutoff: cutoffs.Engine, SolanaCutoff: cutoffs.Solana, NmiCutoff: cutoffs.NMI, Now: now,
+		AfterDueAt: after.DueAt, AfterID: after.ID, RowLimit: DueDunningBatch,
 	})
 	if err != nil {
 		return nil, err

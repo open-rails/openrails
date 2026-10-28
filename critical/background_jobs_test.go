@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -327,6 +328,35 @@ func TestBackgroundJobs(t *testing.T) {
 			runRegistered(t, fleet, "openrails.charge_attributions", 1)
 			require.Empty(t, unverifiedTransactions(t, w))
 		})
+	})
+	t.Run("OR-J15-S30/rebill-watch-backs-off-a-failing-probe", func(t *testing.T) {
+		a, p, sub := nmiMembership(t)
+		var down atomic.Bool
+		var probes atomic.Int32
+		p.core.FailRequests(func(r *http.Request) bool {
+			if down.Load() && strings.HasSuffix(r.URL.Path, "/query.php") {
+				probes.Add(1)
+				return true
+			}
+			return false
+		}, http.StatusServiceUnavailable, 1_000_000)
+		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) + 25*time.Hour)
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		down.Store(true)
+		runRegistered(t, fleet, "openrails.rebill_watch", 1)
+		failed := probes.Load()
+		require.NotZero(t, failed)
+		runRegistered(t, fleet, "openrails.rebill_watch", 1)
+		require.Equal(t, failed, probes.Load(), "a failed probe waits out its backoff")
+		down.Store(false)
+		a.clock.Advance(time.Hour)
+		runRegistered(t, fleet, "openrails.rebill_watch", 1)
+		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.rebill.missed"})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 1, "the probe runs again once its backoff has passed")
 	})
 	t.Run("OR-J06-S07/psp-import-commits-with-its-job", func(t *testing.T) {
 		a, _ := newNMIWorld(t)

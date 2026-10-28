@@ -80,40 +80,46 @@ func (q *Queries) DeleteRebillCyclesBefore(ctx context.Context, arg DeleteRebill
 }
 
 const listOverdueRebillMerchants = `-- name: ListOverdueRebillMerchants :many
-SELECT s.merchant_id
+SELECT DISTINCT s.merchant_id
 FROM billing.subscriptions s
 WHERE s.status IN ('active', 'unverified', 'awaiting_method') AND s.deleted_at IS NULL
-  AND ((s.collection_policy = 'engine' AND s.rail <> 'solana' AND s.current_period_ends_at <= $1::timestamptz)
-       OR (s.collection_policy = 'engine' AND s.rail = 'solana' AND s.current_period_ends_at <= $2::timestamptz)
-       OR (s.collection_policy = 'nmi_schedule' AND s.current_period_ends_at <= $3::timestamptz))
+  AND s.merchant_id > $1::uuid
+  AND ((s.collection_policy = 'engine' AND s.rail <> 'solana' AND s.current_period_ends_at <= $2::timestamptz)
+       OR (s.collection_policy = 'engine' AND s.rail = 'solana' AND s.current_period_ends_at <= $3::timestamptz)
+       OR (s.collection_policy = 'nmi_schedule' AND s.current_period_ends_at <= $4::timestamptz))
   AND NOT EXISTS (
       SELECT 1 FROM billing.rebill_cycles c
        WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at
-         AND c.missed_at IS NOT NULL)
+         AND (c.missed_at IS NOT NULL OR c.next_probe_at > $5::timestamptz))
   AND NOT EXISTS (
       SELECT 1 FROM billing.rebill_cycles c
         JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
        WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at)
-GROUP BY s.merchant_id
-ORDER BY MIN(s.current_period_ends_at), s.merchant_id
-LIMIT $4::int
+ORDER BY s.merchant_id
+LIMIT $6::int
 `
 
 type ListOverdueRebillMerchantsParams struct {
-	EngineCutoff  time.Time
-	SolanaCutoff  time.Time
-	NmiCutoff     time.Time
-	MerchantLimit int32
+	AfterMerchantID uuid.UUID
+	EngineCutoff    time.Time
+	SolanaCutoff    time.Time
+	NmiCutoff       time.Time
+	Now             time.Time
+	MerchantLimit   int32
 }
 
 // CROSS-MERCHANT: merchants holding a subscription whose period ended before its
-// owner's deadline with neither an attempt nor a recorded miss for that cycle.
-// Solana engine renewals come from the crank and have their own deadline.
+// owner's deadline with neither an attempt nor a recorded miss for that cycle,
+// and no failed probe waiting out its backoff. Solana engine renewals come
+// from the crank and have their own deadline. Ids in order after a cursor, so
+// a pass reaches every merchant.
 func (q *Queries) ListOverdueRebillMerchants(ctx context.Context, arg ListOverdueRebillMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listOverdueRebillMerchants,
+		arg.AfterMerchantID,
 		arg.EngineCutoff,
 		arg.SolanaCutoff,
 		arg.NmiCutoff,
+		arg.Now,
 		arg.MerchantLimit,
 	)
 	if err != nil {
@@ -141,17 +147,18 @@ WHERE sub.merchant_id = $1::uuid
   AND ((sub.collection_policy = 'engine' AND sub.rail <> 'solana' AND sub.current_period_ends_at <= $2::timestamptz)
        OR (sub.collection_policy = 'engine' AND sub.rail = 'solana' AND sub.current_period_ends_at <= $3::timestamptz)
        OR (sub.collection_policy = 'nmi_schedule' AND sub.current_period_ends_at <= $4::timestamptz))
+  AND (sub.current_period_ends_at, sub.id) > ($5::timestamptz, $6::uuid)
   -- Separate anti-joins: an EXISTS under OR plans as a hash of every merchant's attempts.
   AND NOT EXISTS (
       SELECT 1 FROM billing.rebill_cycles c
        WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at
-         AND c.missed_at IS NOT NULL)
+         AND (c.missed_at IS NOT NULL OR c.next_probe_at > $7::timestamptz))
   AND NOT EXISTS (
       SELECT 1 FROM billing.rebill_cycles c
         JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
        WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at)
 ORDER BY sub.current_period_ends_at, sub.id
-LIMIT $5::int
+LIMIT $8::int
 `
 
 type ListOverdueRebillsParams struct {
@@ -159,17 +166,24 @@ type ListOverdueRebillsParams struct {
 	EngineCutoff time.Time
 	SolanaCutoff time.Time
 	NmiCutoff    time.Time
+	AfterDueAt   time.Time
+	AfterID      uuid.UUID
+	Now          time.Time
 	RowLimit     int32
 }
 
 // Auto-renewing subscriptions whose period ended before its owner's deadline
-// with neither an attempt nor a recorded miss for that cycle.
+// with neither an attempt nor a recorded miss for that cycle, and no failed
+// probe waiting out its backoff: a page after the (period end, id) cursor.
 func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebillsParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listOverdueRebills,
 		arg.MerchantID,
 		arg.EngineCutoff,
 		arg.SolanaCutoff,
 		arg.NmiCutoff,
+		arg.AfterDueAt,
+		arg.AfterID,
+		arg.Now,
 		arg.RowLimit,
 	)
 	if err != nil {
@@ -514,7 +528,8 @@ func (q *Queries) ListRenewalDeclines(ctx context.Context, arg ListRenewalDeclin
 }
 
 const markRebillCycleMissed = `-- name: MarkRebillCycleMissed :execrows
-UPDATE billing.rebill_cycles SET missed_at = $1::timestamptz, miss_reason = $2::text
+UPDATE billing.rebill_cycles SET missed_at = $1::timestamptz, miss_reason = $2::text,
+    probe_failed_at = NULL, next_probe_at = NULL
 WHERE merchant_id = $3::uuid AND id = $4::uuid AND missed_at IS NULL
 `
 
@@ -536,6 +551,56 @@ func (q *Queries) MarkRebillCycleMissed(ctx context.Context, arg MarkRebillCycle
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const recordRebillProbeFailure = `-- name: RecordRebillProbeFailure :one
+INSERT INTO billing.rebill_cycles (id, merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency, quantity, probe_failed_at, next_probe_at)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
+    $5::uuid, $6::text, $7::text, $8::timestamptz,
+    $9::bigint, $10::text, $11::int,
+    $12::timestamptz, $12::timestamptz + interval '15 minutes')
+ON CONFLICT (merchant_id, subscription_id, due_at) DO UPDATE SET
+    probe_failed_at = COALESCE(billing.rebill_cycles.probe_failed_at, EXCLUDED.probe_failed_at),
+    next_probe_at = EXCLUDED.probe_failed_at + LEAST(interval '24 hours', GREATEST(interval '15 minutes',
+        EXCLUDED.probe_failed_at - COALESCE(billing.rebill_cycles.probe_failed_at, EXCLUDED.probe_failed_at)))
+RETURNING next_probe_at
+`
+
+type RecordRebillProbeFailureParams struct {
+	ID             uuid.UUID
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	CustomerID     uuid.UUID
+	PspID          uuid.UUID
+	Rail           string
+	Owner          string
+	DueAt          time.Time
+	Amount         int64
+	Currency       string
+	Quantity       *int32
+	FailedAt       time.Time
+}
+
+// A failed look at an overdue cycle: it is looked at again after a backoff
+// that doubles from 15 minutes, at most a day.
+func (q *Queries) RecordRebillProbeFailure(ctx context.Context, arg RecordRebillProbeFailureParams) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, recordRebillProbeFailure,
+		arg.ID,
+		arg.MerchantID,
+		arg.SubscriptionID,
+		arg.CustomerID,
+		arg.PspID,
+		arg.Rail,
+		arg.Owner,
+		arg.DueAt,
+		arg.Amount,
+		arg.Currency,
+		arg.Quantity,
+		arg.FailedAt,
+	)
+	var next_probe_at *time.Time
+	err := row.Scan(&next_probe_at)
+	return next_probe_at, err
 }
 
 const upsertRebillCycle = `-- name: UpsertRebillCycle :one

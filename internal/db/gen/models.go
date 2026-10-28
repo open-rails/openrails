@@ -1665,6 +1665,10 @@ type BillingRebillCycle struct {
 	MissReason *string
 	// Seats the cycle bills; NULL unless the subscription is per seat.
 	Quantity *int32
+	// First failed look at this overdue cycle since the last success; NULL when none failed.
+	ProbeFailedAt *time.Time
+	// When the rebill watch looks at this overdue cycle again after a failed look.
+	NextProbeAt *time.Time
 }
 
 // Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, psp_id, subject_key): pull.*, catalog.price.unmapped and life.subscription.unattributed findings name the PSP whose read raised them. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored. Retention: resolved findings are deleted 12 months (366 days) after they were resolved and last seen.

@@ -218,6 +218,9 @@
     "OR-J15-S07": [
       "TestVerificationBinding/OR-J15-S07/bulk-read-binds-each-nmi-psp"
     ],
+    "OR-J15-S30": [
+      "TestBackgroundJobs/OR-J15-S30/rebill-watch-backs-off-a-failing-probe"
+    ],
     "OR-J16-S01": [
       "TestDunning/OR-J16-S01/retryable-decline-recovers-on-bounded-weekly-schedule"
     ],

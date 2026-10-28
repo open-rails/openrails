@@ -246,6 +246,9 @@ func TestNMIRecovery(t *testing.T) {
 				p.core.QueryUnavailable(false)
 				p.core.Reveal()
 				p.core.EditSchedule(*sub.RailSubscriptionID, func(s *nmimock.Schedule) { s.NextBilling = due.Add(7 * 24 * time.Hour) })
+				if profile == "unavailable-query" {
+					a.clock.Advance(15 * time.Minute) // a failed look waits out its backoff
+				}
 				runRegistered(t, fleet, "openrails.rebill_watch", 2)
 				nmiRenewalReadback(t, a, p, sub)
 			})

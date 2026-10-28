@@ -957,7 +957,9 @@ reference or the card's vault. A sale NMI voided or refunded in full
 (`provider_reversed`), or any other transaction no attempt records
 (`provider_unrecorded`), is never charged again: the finding lists the
 transactions for review. A stalled or deleted NMI schedule only raises the
-finding: NMI may still bill it.
+finding: NMI may still bill it. A cycle whose look fails (NMI unreachable, a
+transaction no attempt records) is looked at again after 15 minutes, the wait
+doubling to at most a day.
 
 **Payment health alerts.** Each LIFE sweep reads the decline measures per PSP
 account and owner and keeps these findings open while their condition holds

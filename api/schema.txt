@@ -126,6 +126,7 @@ migration 0143_balance_watch_credit_lapse.up.sql sha256:7db2198b0297d99968042a3f
 migration 0144_retention_owner.up.sql sha256:33e9df916390a846b964f3cbeb93fb58ab73beb1b7ec5e51aff65d9edac81f78
 migration 0145_price_migration_push.up.sql sha256:1c3019f43fa69a2948799f2c7e7f4aa8459486387f09a9301e06c3ada2a49595
 migration 0146_due_pass_recheck.up.sql sha256:5f1c6d940fd5e2e8922fb3969206182038919698d396878d4ecbddd7799bb102
+migration 0147_rebill_probe_backoff.up.sql sha256:350c039b3cda3783c72222709160fcb37d5abc6ec0668762b04435d16c35f695
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2397,6 +2398,8 @@ table billing.rebill_cycles
   column missed_at timestamp with time zone
   column miss_reason text
   column quantity integer
+  column probe_failed_at timestamp with time zone
+  column next_probe_at timestamp with time zone
   constraint rebill_cycles_amount_check CHECK ((amount >= 0))
   constraint rebill_cycles_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint rebill_cycles_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
@@ -2405,6 +2408,7 @@ table billing.rebill_cycles
   constraint rebill_cycles_missed_check CHECK (((missed_at IS NULL) = (miss_reason IS NULL)))
   constraint rebill_cycles_owner_check CHECK ((owner = ANY (ARRAY['engine'::text, 'nmi_schedule'::text, 'provider'::text])))
   constraint rebill_cycles_pkey PRIMARY KEY (merchant_id, id)
+  constraint rebill_cycles_probe_check CHECK (((probe_failed_at IS NULL) = (next_probe_at IS NULL)))
   constraint rebill_cycles_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint rebill_cycles_quantity_check CHECK (((quantity IS NULL) OR (quantity >= 1)))
   constraint rebill_cycles_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE CASCADE
