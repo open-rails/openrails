@@ -7,10 +7,15 @@ import (
 )
 
 // SetDecline sets the issuer's answer (see Card.Decline) for every stored
-// card ending in last4.
+// card and card number ending in last4.
 func (m *Mock) SetDecline(last4, code string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	for _, c := range m.numbers {
+		if c.Last4 == last4 {
+			c.Decline = code
+		}
+	}
 	for _, v := range m.vaults {
 		if v.Card.Last4 == last4 {
 			v.Card.Decline = code

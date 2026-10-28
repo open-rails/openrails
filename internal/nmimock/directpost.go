@@ -52,6 +52,11 @@ func (m *Mock) resolveCard(form url.Values) (*Vault, *Card, string) {
 	// an NMI customer vault. Keep the fixture's gateway receipt independent of
 	// OpenRails' saved-method rows and do not synthesize a vault for this path.
 	if pan := form.Get("ccnumber"); pan != "" {
+		if known := m.numbers[pan]; known != nil {
+			card := *known
+			card.Exp = form.Get("ccexp")
+			return &Vault{Card: card}, &card, ""
+		}
 		if pan != "4242424242424242" {
 			return nil, nil, "Unsupported fixture card"
 		}

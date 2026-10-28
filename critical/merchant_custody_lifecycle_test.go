@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,13 +34,27 @@ type merchantBT struct {
 	deletions     int
 	dropSaleReply bool
 	gateway       http.RoundTripper
+	// numbers are the card numbers held behind intents and tokens; absent
+	// is 4242424242424242.
+	numbers map[string]string
+	// reissues answer the Account Updater for a token; absent is NO_UPDATE.
+	reissues map[string]btReissue
+	// updaterCalls are the tokens the Account Updater was asked about, once
+	// per idempotency key; replies replay a repeated key.
+	updaterCalls []string
+	replies      map[string][]byte
+}
+
+type btReissue struct {
+	code, number string
+	card         basistheory.CardDetails
 }
 
 const merchantBTTenant = "00000000-0000-4000-8000-000000000031"
 const merchantBTApplication = "00000000-0000-4000-8000-000000000032"
 
 func newMerchantBT(t *testing.T) *merchantBT {
-	b := &merchantBT{intents: map[string]basistheory.TokenIntent{}, tokens: map[string]basistheory.CardToken{}}
+	b := &merchantBT{intents: map[string]basistheory.TokenIntent{}, tokens: map[string]basistheory.CardToken{}, numbers: map[string]string{}, reissues: map[string]btReissue{}, replies: map[string][]byte{}}
 	b.server = httptest.NewServer(http.HandlerFunc(b.serve))
 	t.Cleanup(b.server.Close)
 	return b
@@ -51,6 +66,66 @@ func (b *merchantBT) collect(tenant string) string {
 	id := uuid.NewString()
 	b.intents[id] = basistheory.TokenIntent{ID: id, TenantID: tenant, Type: "card", CreatedBy: merchantBTApplication, Fingerprint: "card-4242", Card: &basistheory.CardDetails{Last4: "4242", Brand: "visa", ExpirationMonth: 12, ExpirationYear: 2035}}
 	return id
+}
+
+// collectCard collects a card with its own number.
+func (b *merchantBT) collectCard(tenant, number string, card basistheory.CardDetails) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	id := uuid.NewString()
+	b.intents[id] = basistheory.TokenIntent{ID: id, TenantID: tenant, Type: "card", CreatedBy: merchantBTApplication, Fingerprint: "card-" + card.Last4, Card: &card}
+	b.numbers[id] = number
+	return id
+}
+
+func (b *merchantBT) reissue(token string, update btReissue) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.reissues[token] = update
+}
+
+func (b *merchantBT) updaterAsked() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.updaterCalls...)
+}
+
+// accountUpdate is the real-time Account Updater: a reissue mints a token in
+// the same tenant and container; the number never leaves the vault.
+func (b *merchantBT) accountUpdate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TokenID string `json:"token_id"`
+	}
+	key := r.Header.Get("BT-IDEMPOTENCY-KEY")
+	if json.NewDecoder(r.Body).Decode(&body) != nil || key == "" {
+		w.WriteHeader(400)
+		return
+	}
+	if reply, ok := b.replies[key]; ok {
+		_, _ = w.Write(reply)
+		return
+	}
+	old, ok := b.tokens[body.TokenID]
+	if !ok || old.TenantID != merchantBTTenant {
+		w.WriteHeader(404)
+		return
+	}
+	b.updaterCalls = append(b.updaterCalls, body.TokenID)
+	answer := map[string]any{"result_code": "NO_UPDATE"}
+	if update, ok := b.reissues[body.TokenID]; ok {
+		answer["result_code"] = update.code
+		if update.number != "" {
+			card := update.card
+			fresh := basistheory.CardToken{ID: uuid.NewString(), TenantID: old.TenantID, Type: "card", Fingerprint: "card-" + card.Last4, Card: &card, Containers: old.Containers, Metadata: old.Metadata}
+			b.tokens[fresh.ID] = fresh
+			b.numbers[fresh.ID] = update.number
+			answer["new_token"] = map[string]any{"id": fresh.ID, "tenant_id": fresh.TenantID, "type": "card", "fingerprint": fresh.Fingerprint, "containers": fresh.Containers, "card": card,
+				"data": map[string]any{"number": "XXXXXXXXXXXX" + card.Last4, "expiration_month": card.ExpirationMonth, "expiration_year": card.ExpirationYear}}
+		}
+	}
+	reply, _ := json.Marshal(answer)
+	b.replies[key] = reply
+	_, _ = w.Write(reply)
 }
 
 func (b *merchantBT) serve(w http.ResponseWriter, r *http.Request) {
@@ -88,8 +163,17 @@ func (b *merchantBT) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad expression", 400)
 			return
 		}
-		r.Form.Set("ccnumber", "4242424242424242")
-		r.Form.Set("ccexp", "1235")
+		number, expiry := "4242424242424242", "1235"
+		b.mu.Lock()
+		if held := b.numbers[id]; held != "" {
+			number = held
+		}
+		if held := token.Card; hasToken && held != nil {
+			expiry = fmt.Sprintf("%02d%02d", held.ExpirationMonth, held.ExpirationYear%100)
+		}
+		b.mu.Unlock()
+		r.Form.Set("ccnumber", number)
+		r.Form.Set("ccexp", expiry)
 		if r.Form.Get("cvv") != "" {
 			r.Form.Set("cvv", "123")
 		}
@@ -125,6 +209,8 @@ func (b *merchantBT) serve(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	switch {
+	case r.Method == http.MethodPost && r.URL.Path == "/account-updater/real-time":
+		b.accountUpdate(w, r)
 	case r.URL.Path == "/applications/key":
 		_ = json.NewEncoder(w).Encode(map[string]string{"tenant_id": merchantBTTenant})
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/token-intents/"):
@@ -156,6 +242,9 @@ func (b *merchantBT) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		saved := basistheory.CardToken{ID: body.ID, TenantID: intent.TenantID, Type: intent.Type, Fingerprint: intent.Fingerprint, Card: intent.Card, Containers: body.Containers, Metadata: body.Metadata}
 		b.tokens[body.ID] = saved
+		if number, ok := b.numbers[body.Intent]; ok {
+			b.numbers[body.ID] = number
+		}
 		b.conversions++
 		_ = json.NewEncoder(w).Encode(saved)
 	case strings.HasPrefix(r.URL.Path, "/tokens/"):

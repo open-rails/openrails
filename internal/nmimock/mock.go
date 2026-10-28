@@ -44,6 +44,7 @@ type Mock struct {
 	seq         int
 	tokens      map[string]Card
 	issued      map[string]Card
+	numbers     map[string]*Card
 	vaults      map[string]*Vault
 	plans       map[string]*Plan
 	schedules   map[string]*Schedule
@@ -85,7 +86,7 @@ func NewUnstarted(opts Options) *Mock {
 	if opts.Clock == nil {
 		opts.Clock = time.Now
 	}
-	return &Mock{opts: opts, tokens: map[string]Card{}, issued: map[string]Card{}, vaults: map[string]*Vault{}, plans: map[string]*Plan{},
+	return &Mock{opts: opts, tokens: map[string]Card{}, issued: map[string]Card{}, numbers: map[string]*Card{}, vaults: map[string]*Vault{}, plans: map[string]*Plan{},
 		schedules: map[string]*Schedule{}, reads: map[string]int{}, probes: map[string]bool{}}
 }
 

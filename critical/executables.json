@@ -557,6 +557,19 @@
     ],
     "OR-J15-S05": [
       "TestBackgroundJobs/OR-J15-S05/attempts-of-a-psp-without-credentials-are-given-up"
+    ],
+    "OR-J12-S08": [
+      "TestStoredCardRefresh/OR-J12-S08/merchant-owned-vault",
+      "TestStoredCardRefresh/OR-J12-S08/hosted-isolated-vault"
+    ],
+    "OR-J12-S09": [
+      "TestStoredCardRefresh/OR-J12-S09/unchanged-vault-card-asks-the-customer"
+    ],
+    "OR-J12-S10": [
+      "TestStoredCardRefresh/OR-J12-S10/ahead-of-renewal-pass-picks-due-cards-of-armed-vaults"
+    ],
+    "OR-J12-S11": [
+      "TestStoredCardRefresh/OR-J12-S11/psp-held-card-declined-as-expired-asks-the-customer"
     ]
   },
   "suites": {

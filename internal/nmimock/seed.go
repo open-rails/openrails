@@ -262,3 +262,11 @@ func (m *Mock) mustSchedule(id string) *Schedule {
 	}
 	return s
 }
+
+// AddNumber accepts a card number a custodian proxy sends straight to the
+// gateway, beside the fixture's 4242424242424242.
+func (m *Mock) AddNumber(pan string, card Card) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.numbers[pan] = &card
+}
