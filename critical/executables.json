@@ -740,6 +740,15 @@
     ],
     "OR-J29-S40": [
       "TestBackgroundJobs/OR-J29-S40/cleanup-continues-past-a-full-batch-of-merchants"
+    ],
+    "OR-J26-S50": [
+      "TestUsageBillingContracts/OR-J26-S50/paid",
+      "TestUsageBillingContracts/OR-J26-S50/waived",
+      "TestUsageBillingContracts/OR-J26-S50/uncollectible",
+      "TestUsageBillingContracts/OR-J26-S50"
+    ],
+    "OR-J26-S51": [
+      "TestUsageBillingContracts/OR-J26-S51/an-overdue-order-is-told-without-automatic-usage-billing"
     ]
   },
   "suites": {

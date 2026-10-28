@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -15,32 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// Enterprise arrears seams: past-due marking and host-owned usage meters /
-// rate cards.
-
-// NotifyOverdueUsageOrders queues one overdue notice per usage order still
-// owed past its due date. Returns the number of new notices.
-func (s *MoneyService) NotifyOverdueUsageOrders(ctx context.Context, now time.Time) (int, error) {
-	if s == nil || s.db == nil {
-		return 0, fmt.Errorf("money service not initialized")
-	}
-	if now.IsZero() {
-		now = s.now()
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return 0, err
-	}
-	var n int64
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		var e error
-		n, e = s.db.Gen(ctx).NotifyOverdueUsageOrders(ctx, gen.NotifyOverdueUsageOrdersParams{
-			MerchantID: tid.UUID(), Now: now.UTC(),
-		})
-		return e
-	})
-	return int(n), err
-}
+// Host-owned usage meters and rate cards.
 
 // EnsureUsageMeter idempotently upserts a catalog meter.
 func (s *MoneyService) EnsureUsageMeter(ctx context.Context, meter catalogrules.Meter) error {

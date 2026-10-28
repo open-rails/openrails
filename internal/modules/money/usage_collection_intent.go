@@ -546,7 +546,7 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 				return err
 			}
 		}
-		if err := usage.EndCollection(ctx, q, intent.MerchantID, p.OrderID, intent.ID, true, nil, now); err != nil {
+		if err := usage.EndCollection(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.OrderID, intent.ID, true, nil, now); err != nil {
 			return err
 		}
 		return complete()
@@ -602,7 +602,7 @@ func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen
 			return err
 		}
 		failure := billing.DeclineReason(decline.ReasonFor(rail, failureCode)).Failure()
-		if err := usage.DeclineCollection(ctx, q, intent.MerchantID, p.OrderID, intent.ID, failure, action.Terminal, action.NextAttemptAt, now); err != nil {
+		if err := usage.DeclineCollection(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.OrderID, intent.ID, failure, action.Terminal, action.NextAttemptAt, now); err != nil {
 			return err
 		}
 		if err := queueCollectionOutcome(ctx, h.DB.NewWithPgxTx(tx), row, action, failureCode, now); err != nil {
@@ -660,7 +660,7 @@ func (h *OrderCollectionHandler) finalizeNotExecuted(ctx context.Context, intent
 		} else if !owned {
 			return complete()
 		}
-		if err := usage.EndCollection(ctx, q, intent.MerchantID, p.OrderID, intent.ID, false, &now, now); err != nil {
+		if err := usage.EndCollection(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.OrderID, intent.ID, false, &now, now); err != nil {
 			return err
 		}
 		return complete()

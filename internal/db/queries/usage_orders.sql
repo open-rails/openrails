@@ -175,24 +175,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
 ORDER BY created_at, id
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: NotifyOverdueUsageOrders :one
--- Tells each payer once about each open usage order past its due date; the
--- notice id is the order's, so a later pass adds none. Its seed is the one
--- earlier releases gave an invoice's notice, which kept the order's id.
-WITH notices AS (
-    INSERT INTO billing.notification_events (id, merchant_id, customer_id, event_type, data, created_at)
-    SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'order_overdue',
-           jsonb_build_object('order_id', 'ord_' || id::text, 'amount_due', (total - amount_paid)::text, 'currency', currency, 'due_at', due_at),
-           sqlc.arg(now)::timestamptz
-    FROM billing.orders
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-      AND origin = 'usage' AND status IN ('open', 'processing') AND amount_paid < total
-      AND due_at < sqlc.arg(now)::timestamptz
-    ON CONFLICT (merchant_id, id) DO NOTHING
-    RETURNING id
-)
-SELECT count(*) FROM notices;
-
 -- name: PayUsageOrder :one
 -- Applies a payment, remittance or balance repayment to a usage order. A live
 -- collection keeps its claim: only its own settlement pays the order then.

@@ -13,7 +13,7 @@ import (
 )
 
 const getCustomerDelinquency = `-- name: GetCustomerDelinquency :one
-SELECT merchant_id, customer_id, currency, state, overdue_started_at, entered_at, overdue_amount, overdue_orders, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
+SELECT merchant_id, customer_id, currency, state, overdue_started_at, entered_at, overdue_amount, overdue_orders, transition_seq, evaluated_at, created_at, updated_at, next_evaluation_at FROM billing.customer_delinquency
 WHERE merchant_id = $1
   AND customer_id = $2
   AND currency = $3
@@ -41,6 +41,7 @@ func (q *Queries) GetCustomerDelinquency(ctx context.Context, arg GetCustomerDel
 		&i.EvaluatedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NextEvaluationAt,
 	)
 	return i, err
 }
@@ -60,9 +61,11 @@ WITH pol AS (
     ) bound
     WHERE c.merchant_id = $2 AND c.id = $3
 )
-SELECT COALESCE(MIN(o.due_at), $1::timestamptz) AS overdue_started_at,
-       COALESCE(SUM(o.total - o.amount_paid), 0)::bigint AS overdue_amount,
-       COUNT(*)::bigint AS overdue_orders,
+SELECT COALESCE(MIN(o.due_at) FILTER (WHERE o.due_at < $1::timestamptz), $1::timestamptz)::timestamptz AS overdue_started_at,
+       COALESCE(SUM(o.total - o.amount_paid) FILTER (WHERE o.due_at < $1::timestamptz), 0)::bigint AS overdue_amount,
+       (COUNT(*) FILTER (WHERE o.due_at < $1::timestamptz))::bigint AS overdue_orders,
+       COALESCE(MIN(o.due_at) FILTER (WHERE o.due_at >= $1::timestamptz), $1::timestamptz)::timestamptz AS next_due_at,
+       (COUNT(*) FILTER (WHERE o.due_at >= $1::timestamptz))::bigint AS pending_orders,
        COALESCE((SELECT grace_days FROM pol), -1)::int AS grace_days,
        COALESCE((SELECT amount_floor FROM pol), -1)::bigint AS amount_floor
 FROM billing.orders o
@@ -72,7 +75,6 @@ WHERE o.merchant_id = $2
   AND o.origin = 'usage'
   AND o.status IN ('open', 'processing')
   AND o.amount_paid < o.total
-  AND o.due_at < $1::timestamptz
 `
 
 type GetOverdueOrderAggregateParams struct {
@@ -84,21 +86,26 @@ type GetOverdueOrderAggregateParams struct {
 }
 
 type GetOverdueOrderAggregateRow struct {
-	OverdueStartedAt *time.Time
+	OverdueStartedAt time.Time
 	OverdueAmount    int64
 	OverdueOrders    int64
+	NextDueAt        time.Time
+	PendingOrders    int64
 	GraceDays        int32
 	AmountFloor      int64
 }
 
-// One payer's overdue aggregate — the live recompute the admission gate runs
-// before it agrees with a stored `delinquent`, so a payer who has since settled
-// is never refused on a stale projection. grace_days and amount_floor are the
-// bound billing policy's overrides, -1 for none, resolved as
-// ListOverdueOrderAggregates resolves them.
+// One payer's usage orders in a currency against now: how much is overdue and
+// since when, and when the next one falls due. Every evaluation and the
+// admission gate's live recompute read it, so the stored state and the gate
+// agree. grace_days and amount_floor are the bound billing policy's overrides,
+// -1 for none. policies is the merchant's settings, {policies: {name: body},
+// tiers: {tier: name}, default: name}; the payer's policy is its own
+// assignment while the settings still declare it, else its tier's
+// (money_settings.tier), else the default.
 //
-// overdue_started_at is COALESCEd to `now` so the row is total: it means nothing when
-// overdue_orders = 0, and every caller reads the count first.
+// overdue_started_at and next_due_at are COALESCEd to now so the row is total:
+// they mean nothing when their count is 0, and every caller reads it first.
 func (q *Queries) GetOverdueOrderAggregate(ctx context.Context, arg GetOverdueOrderAggregateParams) (GetOverdueOrderAggregateRow, error) {
 	row := q.db.QueryRow(ctx, getOverdueOrderAggregate,
 		arg.Now,
@@ -112,6 +119,8 @@ func (q *Queries) GetOverdueOrderAggregate(ctx context.Context, arg GetOverdueOr
 		&i.OverdueStartedAt,
 		&i.OverdueAmount,
 		&i.OverdueOrders,
+		&i.NextDueAt,
+		&i.PendingOrders,
 		&i.GraceDays,
 		&i.AmountFloor,
 	)
@@ -119,7 +128,7 @@ func (q *Queries) GetOverdueOrderAggregate(ctx context.Context, arg GetOverdueOr
 }
 
 const listCustomersDelinquency = `-- name: ListCustomersDelinquency :many
-SELECT merchant_id, customer_id, currency, state, overdue_started_at, entered_at, overdue_amount, overdue_orders, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
+SELECT merchant_id, customer_id, currency, state, overdue_started_at, entered_at, overdue_amount, overdue_orders, transition_seq, evaluated_at, created_at, updated_at, next_evaluation_at FROM billing.customer_delinquency
 WHERE merchant_id = $1
   AND customer_id = ANY($2::uuid[])
 ORDER BY customer_id, currency
@@ -156,6 +165,7 @@ func (q *Queries) ListCustomersDelinquency(ctx context.Context, arg ListCustomer
 			&i.EvaluatedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.NextEvaluationAt,
 		); err != nil {
 			return nil, err
 		}
@@ -167,193 +177,61 @@ func (q *Queries) ListCustomersDelinquency(ctx context.Context, arg ListCustomer
 	return items, nil
 }
 
-const listDelinquencyWorkMerchants = `-- name: ListDelinquencyWorkMerchants :many
+const listDueDelinquency = `-- name: ListDueDelinquency :many
 
-SELECT q.merchant_id
-FROM (
-    SELECT o.merchant_id
-      FROM billing.orders o
-     WHERE o.origin = 'usage'
-       AND o.status IN ('open', 'processing')
-       AND o.amount_paid < o.total
-       AND o.due_at < $1::timestamptz
-    UNION
-    SELECT d.merchant_id
-      FROM billing.customer_delinquency d
-     WHERE d.state <> 'current'
-) q
-LIMIT $2::int
+SELECT merchant_id, customer_id, currency, next_evaluation_at::timestamptz AS next_evaluation_at
+FROM billing.customer_delinquency
+WHERE next_evaluation_at < $1::timestamptz
+  AND ($2::timestamptz IS NULL
+       OR (next_evaluation_at, merchant_id, customer_id, currency)
+          > ($2::timestamptz, $3::uuid, $4::uuid, $5::text))
+ORDER BY next_evaluation_at, merchant_id, customer_id, currency
+LIMIT $6::int
 `
 
-type ListDelinquencyWorkMerchantsParams struct {
-	Now           time.Time
-	MerchantLimit int32
+type ListDueDelinquencyParams struct {
+	Now             time.Time
+	AfterAt         *time.Time
+	AfterMerchantID *uuid.UUID
+	AfterCustomerID *uuid.UUID
+	AfterCurrency   *string
+	RowLimit        int32
 }
 
-// or#878 arrears delinquency: the state projection, its due-work scans, and the
-// durable host-lifecycle signal feed.
-// CROSS-MERCHANT: merchants with delinquency work, an overdue open receivable
-// (the enter leg) or a payer already non-current (the exit leg). Ids only;
-// states and signals are computed per merchant. Both legs are indexed on the
-// work itself, so a pass costs activity, never the size of the customer table.
-func (q *Queries) ListDelinquencyWorkMerchants(ctx context.Context, arg ListDelinquencyWorkMerchantsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listDelinquencyWorkMerchants, arg.Now, arg.MerchantLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var merchant_id uuid.UUID
-		if err := rows.Scan(&merchant_id); err != nil {
-			return nil, err
-		}
-		items = append(items, merchant_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listNonCurrentDelinquency = `-- name: ListNonCurrentDelinquency :many
-SELECT merchant_id, customer_id, currency, state, overdue_started_at, entered_at, overdue_amount, overdue_orders, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
-WHERE merchant_id = $1
-  AND state <> 'current'
-ORDER BY overdue_started_at, customer_id, currency
-LIMIT $2
-`
-
-type ListNonCurrentDelinquencyParams struct {
-	MerchantID uuid.UUID
-	RowLimit   int64
-}
-
-// The EXIT leg: payers already parked in grace/delinquent. Small by
-// construction, and the only way a cleared debt gets noticed — an order that
-// was paid no longer appears in the enter scan at all.
-func (q *Queries) ListNonCurrentDelinquency(ctx context.Context, arg ListNonCurrentDelinquencyParams) ([]BillingCustomerDelinquency, error) {
-	rows, err := q.db.Query(ctx, listNonCurrentDelinquency, arg.MerchantID, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingCustomerDelinquency
-	for rows.Next() {
-		var i BillingCustomerDelinquency
-		if err := rows.Scan(
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.Currency,
-			&i.State,
-			&i.OverdueStartedAt,
-			&i.EnteredAt,
-			&i.OverdueAmount,
-			&i.OverdueOrders,
-			&i.TransitionSeq,
-			&i.EvaluatedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listOverdueOrderAggregates = `-- name: ListOverdueOrderAggregates :many
-SELECT i.customer_id,
-       i.currency,
-       MIN(i.due_at)::timestamptz AS overdue_started_at,
-       COALESCE(SUM(i.total - i.amount_paid), 0)::bigint AS overdue_amount,
-       COUNT(*)::bigint AS overdue_orders,
-       -- -1 = NO OVERRIDE (fall back to the merchant-wide policy). An explicit
-       -- sentinel, not a guess: both values are validated non-negative, so -1
-       -- cannot collide with a declared one, and a nullable LATERAL column
-       -- would be inferred non-null by sqlc and mis-scan.
-       COALESCE(pol.grace_days, -1)::int AS grace_days,
-       COALESCE(pol.amount_floor, -1)::bigint AS amount_floor
-FROM billing.orders i
-JOIN billing.customers c ON c.merchant_id = i.merchant_id AND c.id = i.customer_id
-LEFT JOIN billing.money_settings ms
-  ON ms.merchant_id = i.merchant_id AND ms.customer_id = i.customer_id AND ms.currency = i.currency
-CROSS JOIN LATERAL (
-    SELECT $1::jsonb -> 'policies' -> COALESCE(
-        CASE WHEN $1::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
-        $1::jsonb -> 'tiers' ->> ms.tier,
-        $1::jsonb ->> 'default') AS body
-) bound
-CROSS JOIN LATERAL (
-    SELECT (bound.body ->> 'delinquency_grace_days')::int AS grace_days,
-           (bound.body ->> 'delinquency_amount_floor')::bigint AS amount_floor
-) pol
-WHERE i.merchant_id = $2
-  AND i.origin = 'usage'
-  AND i.status IN ('open', 'processing')
-  AND i.amount_paid < i.total
-  AND i.due_at < $3::timestamptz
-GROUP BY i.customer_id, i.currency, pol.grace_days, pol.amount_floor
-ORDER BY MIN(i.due_at), i.customer_id, i.currency
-LIMIT $4
-`
-
-type ListOverdueOrderAggregatesParams struct {
-	Policies   []byte
-	MerchantID uuid.UUID
-	Now        time.Time
-	RowLimit   int64
-}
-
-type ListOverdueOrderAggregatesRow struct {
+type ListDueDelinquencyRow struct {
+	MerchantID       uuid.UUID
 	CustomerID       uuid.UUID
 	Currency         string
-	OverdueStartedAt time.Time
-	OverdueAmount    int64
-	OverdueOrders    int64
-	GraceDays        int32
-	AmountFloor      int64
+	NextEvaluationAt time.Time
 }
 
-// The ENTER leg of the evaluation: per (payer, currency), how much is overdue
-// and since when. This is the whole derivation input — delinquency is a reading
-// of usage order truth against the merchant's policy, not a separately
-// maintained fact. Rides orders_usage_open_idx.
-//
-// OLDEST DEBT FIRST, and capped: one pass is bounded work. If a merchant ever
-// has more overdue payers than the cap, the ones who have owed longest are the
-// ones evaluated — truncation with a defensible order beats an unbounded pass.
-//
-// or#897: each row also carries its payer's billing policy's delinquency
-// overrides, so a pass over N payers stays one query. policies is the
-// merchant's settings, {policies: {name: body}, tiers: {tier: name}, default:
-// name}; the payer's policy is its own assignment while the settings still
-// declare it, else its tier's (money_settings.tier), else the default.
-func (q *Queries) ListOverdueOrderAggregates(ctx context.Context, arg ListOverdueOrderAggregatesParams) ([]ListOverdueOrderAggregatesRow, error) {
-	rows, err := q.db.Query(ctx, listOverdueOrderAggregates,
-		arg.Policies,
-		arg.MerchantID,
+// Arrears delinquency: the state projection, its due work, and the durable
+// host-lifecycle signal feed.
+// CROSS-MERCHANT: the payers whose delinquency time alone changes now (a usage
+// order fell due, a grace window ran out), in due order. Strictly before now:
+// an order is overdue only once its due_at has passed. An idle pass reads no
+// row.
+func (q *Queries) ListDueDelinquency(ctx context.Context, arg ListDueDelinquencyParams) ([]ListDueDelinquencyRow, error) {
+	rows, err := q.db.Query(ctx, listDueDelinquency,
 		arg.Now,
+		arg.AfterAt,
+		arg.AfterMerchantID,
+		arg.AfterCustomerID,
+		arg.AfterCurrency,
 		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListOverdueOrderAggregatesRow
+	var items []ListDueDelinquencyRow
 	for rows.Next() {
-		var i ListOverdueOrderAggregatesRow
+		var i ListDueDelinquencyRow
 		if err := rows.Scan(
+			&i.MerchantID,
 			&i.CustomerID,
 			&i.Currency,
-			&i.OverdueStartedAt,
-			&i.OverdueAmount,
-			&i.OverdueOrders,
-			&i.GraceDays,
-			&i.AmountFloor,
+			&i.NextEvaluationAt,
 		); err != nil {
 			return nil, err
 		}
@@ -363,6 +241,81 @@ func (q *Queries) ListOverdueOrderAggregates(ctx context.Context, arg ListOverdu
 		return nil, err
 	}
 	return items, nil
+}
+
+const markDelinquencyDue = `-- name: MarkDelinquencyDue :exec
+UPDATE billing.customer_delinquency
+SET next_evaluation_at = $1::timestamptz
+WHERE merchant_id = $2::uuid AND state <> 'current'
+  AND next_evaluation_at IS DISTINCT FROM $1::timestamptz
+`
+
+type MarkDelinquencyDueParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+}
+
+// The merchant's delinquency policy may have changed: every payer it holds
+// in grace or delinquent is evaluated again on the next pass.
+func (q *Queries) MarkDelinquencyDue(ctx context.Context, arg MarkDelinquencyDueParams) error {
+	_, err := q.db.Exec(ctx, markDelinquencyDue, arg.Now, arg.MerchantID)
+	return err
+}
+
+const notifyOverdueOrders = `-- name: NotifyOverdueOrders :exec
+INSERT INTO billing.notification_events (id, merchant_id, customer_id, event_type, data, created_at)
+SELECT md5('invoice_overdue:' || o.id::text)::uuid, o.merchant_id, o.customer_id, 'order_overdue',
+       jsonb_build_object('order_id', 'ord_' || o.id::text, 'amount_due', (o.total - o.amount_paid)::text, 'currency', o.currency, 'due_at', o.due_at),
+       $1::timestamptz
+FROM billing.orders o
+WHERE o.merchant_id = $2::uuid AND o.customer_id = $3::uuid
+  AND o.currency = $4::text
+  AND o.origin = 'usage' AND o.status = 'open' AND o.amount_paid < o.total
+  AND o.due_at < $1::timestamptz
+ON CONFLICT (merchant_id, id) DO NOTHING
+`
+
+type NotifyOverdueOrdersParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// Tells the payer once about each of its open usage orders in the currency
+// past its due date; the notice id is the order's, so a later evaluation adds
+// none. One with a collection in flight waits for its outcome.
+func (q *Queries) NotifyOverdueOrders(ctx context.Context, arg NotifyOverdueOrdersParams) error {
+	_, err := q.db.Exec(ctx, notifyOverdueOrders,
+		arg.Now,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+	)
+	return err
+}
+
+const rebuildDelinquencyDue = `-- name: RebuildDelinquencyDue :exec
+INSERT INTO billing.customer_delinquency (merchant_id, customer_id, currency, state, overdue_amount, overdue_orders,
+    entered_at, transition_seq, evaluated_at, next_evaluation_at)
+SELECT DISTINCT o.merchant_id, o.customer_id, o.currency, 'current', 0, 0,
+       $1::timestamptz, 0, $1::timestamptz, $1::timestamptz
+FROM billing.orders o
+WHERE o.merchant_id = $2::uuid AND o.origin = 'usage'
+  AND o.status IN ('open', 'processing') AND o.amount_paid < o.total
+ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET next_evaluation_at = EXCLUDED.next_evaluation_at
+`
+
+type RebuildDelinquencyDueParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+}
+
+// A restored merchant's payers with an open usage order are evaluated again
+// at once; MarkDelinquencyDue covers the ones in grace or delinquent.
+func (q *Queries) RebuildDelinquencyDue(ctx context.Context, arg RebuildDelinquencyDueParams) error {
+	_, err := q.db.Exec(ctx, rebuildDelinquencyDue, arg.Now, arg.MerchantID)
+	return err
 }
 
 const upsertCustomerDelinquency = `-- name: UpsertCustomerDelinquency :one
@@ -375,12 +328,13 @@ WITH previous AS (
 ), upserted AS (
     INSERT INTO billing.customer_delinquency AS d (
         merchant_id, customer_id, currency, state, overdue_started_at, overdue_amount,
-        overdue_orders, entered_at, transition_seq, evaluated_at, created_at, updated_at)
+        overdue_orders, entered_at, transition_seq, evaluated_at, next_evaluation_at, created_at, updated_at)
     VALUES (
         $1::uuid, $2::uuid, $3::text, $4::text,
         $5::timestamptz, $6::bigint,
-        $7::bigint, $8::timestamptz, 1,
-        $8::timestamptz, $8::timestamptz, $8::timestamptz)
+        $7::bigint, $8::timestamptz,
+        CASE WHEN $4::text = 'current' THEN 0 ELSE 1 END,
+        $8::timestamptz, $9::timestamptz, $8::timestamptz, $8::timestamptz)
     ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE
     SET state = EXCLUDED.state,
         overdue_started_at = EXCLUDED.overdue_started_at,
@@ -389,6 +343,7 @@ WITH previous AS (
         entered_at = CASE WHEN d.state IS DISTINCT FROM EXCLUDED.state THEN EXCLUDED.entered_at ELSE d.entered_at END,
         transition_seq = d.transition_seq + (CASE WHEN d.state IS DISTINCT FROM EXCLUDED.state THEN 1 ELSE 0 END),
         evaluated_at = EXCLUDED.evaluated_at,
+        next_evaluation_at = EXCLUDED.next_evaluation_at,
         updated_at = EXCLUDED.updated_at
     RETURNING d.state, d.overdue_started_at, d.overdue_amount, d.overdue_orders, d.entered_at, d.transition_seq
 )
@@ -411,6 +366,7 @@ type UpsertCustomerDelinquencyParams struct {
 	OverdueAmount    int64
 	OverdueOrders    int64
 	Now              time.Time
+	NextEvaluationAt *time.Time
 }
 
 type UpsertCustomerDelinquencyRow struct {
@@ -439,6 +395,7 @@ func (q *Queries) UpsertCustomerDelinquency(ctx context.Context, arg UpsertCusto
 		arg.OverdueAmount,
 		arg.OverdueOrders,
 		arg.Now,
+		arg.NextEvaluationAt,
 	)
 	var i UpsertCustomerDelinquencyRow
 	err := row.Scan(

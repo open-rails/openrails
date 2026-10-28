@@ -1,84 +1,32 @@
--- or#878 arrears delinquency: the state projection, its due-work scans, and the
--- durable host-lifecycle signal feed.
+-- Arrears delinquency: the state projection, its due work, and the durable
+-- host-lifecycle signal feed.
 
--- CROSS-MERCHANT: merchants with delinquency work, an overdue open receivable
--- (the enter leg) or a payer already non-current (the exit leg). Ids only;
--- states and signals are computed per merchant. Both legs are indexed on the
--- work itself, so a pass costs activity, never the size of the customer table.
--- name: ListDelinquencyWorkMerchants :many
-SELECT q.merchant_id
-FROM (
-    SELECT o.merchant_id
-      FROM billing.orders o
-     WHERE o.origin = 'usage'
-       AND o.status IN ('open', 'processing')
-       AND o.amount_paid < o.total
-       AND o.due_at < sqlc.arg(now)::timestamptz
-    UNION
-    SELECT d.merchant_id
-      FROM billing.customer_delinquency d
-     WHERE d.state <> 'current'
-) q
-LIMIT sqlc.arg(merchant_limit)::int;
-
--- name: ListOverdueOrderAggregates :many
--- The ENTER leg of the evaluation: per (payer, currency), how much is overdue
--- and since when. This is the whole derivation input — delinquency is a reading
--- of usage order truth against the merchant's policy, not a separately
--- maintained fact. Rides orders_usage_open_idx.
---
--- OLDEST DEBT FIRST, and capped: one pass is bounded work. If a merchant ever
--- has more overdue payers than the cap, the ones who have owed longest are the
--- ones evaluated — truncation with a defensible order beats an unbounded pass.
---
--- or#897: each row also carries its payer's billing policy's delinquency
--- overrides, so a pass over N payers stays one query. policies is the
--- merchant's settings, {policies: {name: body}, tiers: {tier: name}, default:
--- name}; the payer's policy is its own assignment while the settings still
--- declare it, else its tier's (money_settings.tier), else the default.
-SELECT i.customer_id,
-       i.currency,
-       MIN(i.due_at)::timestamptz AS overdue_started_at,
-       COALESCE(SUM(i.total - i.amount_paid), 0)::bigint AS overdue_amount,
-       COUNT(*)::bigint AS overdue_orders,
-       -- -1 = NO OVERRIDE (fall back to the merchant-wide policy). An explicit
-       -- sentinel, not a guess: both values are validated non-negative, so -1
-       -- cannot collide with a declared one, and a nullable LATERAL column
-       -- would be inferred non-null by sqlc and mis-scan.
-       COALESCE(pol.grace_days, -1)::int AS grace_days,
-       COALESCE(pol.amount_floor, -1)::bigint AS amount_floor
-FROM billing.orders i
-JOIN billing.customers c ON c.merchant_id = i.merchant_id AND c.id = i.customer_id
-LEFT JOIN billing.money_settings ms
-  ON ms.merchant_id = i.merchant_id AND ms.customer_id = i.customer_id AND ms.currency = i.currency
-CROSS JOIN LATERAL (
-    SELECT sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
-        CASE WHEN sqlc.arg(policies)::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
-        sqlc.arg(policies)::jsonb -> 'tiers' ->> ms.tier,
-        sqlc.arg(policies)::jsonb ->> 'default') AS body
-) bound
-CROSS JOIN LATERAL (
-    SELECT (bound.body ->> 'delinquency_grace_days')::int AS grace_days,
-           (bound.body ->> 'delinquency_amount_floor')::bigint AS amount_floor
-) pol
-WHERE i.merchant_id = sqlc.arg(merchant_id)
-  AND i.origin = 'usage'
-  AND i.status IN ('open', 'processing')
-  AND i.amount_paid < i.total
-  AND i.due_at < sqlc.arg(now)::timestamptz
-GROUP BY i.customer_id, i.currency, pol.grace_days, pol.amount_floor
-ORDER BY MIN(i.due_at), i.customer_id, i.currency
-LIMIT sqlc.arg(row_limit);
+-- CROSS-MERCHANT: the payers whose delinquency time alone changes now (a usage
+-- order fell due, a grace window ran out), in due order. Strictly before now:
+-- an order is overdue only once its due_at has passed. An idle pass reads no
+-- row.
+-- name: ListDueDelinquency :many
+SELECT merchant_id, customer_id, currency, next_evaluation_at::timestamptz AS next_evaluation_at
+FROM billing.customer_delinquency
+WHERE next_evaluation_at < sqlc.arg(now)::timestamptz
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (next_evaluation_at, merchant_id, customer_id, currency)
+          > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_merchant_id)::uuid, sqlc.narg(after_customer_id)::uuid, sqlc.narg(after_currency)::text))
+ORDER BY next_evaluation_at, merchant_id, customer_id, currency
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetOverdueOrderAggregate :one
--- One payer's overdue aggregate — the live recompute the admission gate runs
--- before it agrees with a stored `delinquent`, so a payer who has since settled
--- is never refused on a stale projection. grace_days and amount_floor are the
--- bound billing policy's overrides, -1 for none, resolved as
--- ListOverdueOrderAggregates resolves them.
+-- One payer's usage orders in a currency against now: how much is overdue and
+-- since when, and when the next one falls due. Every evaluation and the
+-- admission gate's live recompute read it, so the stored state and the gate
+-- agree. grace_days and amount_floor are the bound billing policy's overrides,
+-- -1 for none. policies is the merchant's settings, {policies: {name: body},
+-- tiers: {tier: name}, default: name}; the payer's policy is its own
+-- assignment while the settings still declare it, else its tier's
+-- (money_settings.tier), else the default.
 --
--- overdue_started_at is COALESCEd to `now` so the row is total: it means nothing when
--- overdue_orders = 0, and every caller reads the count first.
+-- overdue_started_at and next_due_at are COALESCEd to now so the row is total:
+-- they mean nothing when their count is 0, and every caller reads it first.
 WITH pol AS (
     SELECT (bound.body ->> 'delinquency_grace_days')::int AS grace_days,
            (bound.body ->> 'delinquency_amount_floor')::bigint AS amount_floor
@@ -93,9 +41,11 @@ WITH pol AS (
     ) bound
     WHERE c.merchant_id = sqlc.arg(merchant_id) AND c.id = sqlc.arg(customer_id)
 )
-SELECT COALESCE(MIN(o.due_at), sqlc.arg(now)::timestamptz) AS overdue_started_at,
-       COALESCE(SUM(o.total - o.amount_paid), 0)::bigint AS overdue_amount,
-       COUNT(*)::bigint AS overdue_orders,
+SELECT COALESCE(MIN(o.due_at) FILTER (WHERE o.due_at < sqlc.arg(now)::timestamptz), sqlc.arg(now)::timestamptz)::timestamptz AS overdue_started_at,
+       COALESCE(SUM(o.total - o.amount_paid) FILTER (WHERE o.due_at < sqlc.arg(now)::timestamptz), 0)::bigint AS overdue_amount,
+       (COUNT(*) FILTER (WHERE o.due_at < sqlc.arg(now)::timestamptz))::bigint AS overdue_orders,
+       COALESCE(MIN(o.due_at) FILTER (WHERE o.due_at >= sqlc.arg(now)::timestamptz), sqlc.arg(now)::timestamptz)::timestamptz AS next_due_at,
+       (COUNT(*) FILTER (WHERE o.due_at >= sqlc.arg(now)::timestamptz))::bigint AS pending_orders,
        COALESCE((SELECT grace_days FROM pol), -1)::int AS grace_days,
        COALESCE((SELECT amount_floor FROM pol), -1)::bigint AS amount_floor
 FROM billing.orders o
@@ -104,18 +54,42 @@ WHERE o.merchant_id = sqlc.arg(merchant_id)
   AND o.currency = sqlc.arg(currency)
   AND o.origin = 'usage'
   AND o.status IN ('open', 'processing')
-  AND o.amount_paid < o.total
-  AND o.due_at < sqlc.arg(now)::timestamptz;
+  AND o.amount_paid < o.total;
 
--- name: ListNonCurrentDelinquency :many
--- The EXIT leg: payers already parked in grace/delinquent. Small by
--- construction, and the only way a cleared debt gets noticed — an order that
--- was paid no longer appears in the enter scan at all.
-SELECT * FROM billing.customer_delinquency
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND state <> 'current'
-ORDER BY overdue_started_at, customer_id, currency
-LIMIT sqlc.arg(row_limit);
+-- name: NotifyOverdueOrders :exec
+-- Tells the payer once about each of its open usage orders in the currency
+-- past its due date; the notice id is the order's, so a later evaluation adds
+-- none. One with a collection in flight waits for its outcome.
+INSERT INTO billing.notification_events (id, merchant_id, customer_id, event_type, data, created_at)
+SELECT md5('invoice_overdue:' || o.id::text)::uuid, o.merchant_id, o.customer_id, 'order_overdue',
+       jsonb_build_object('order_id', 'ord_' || o.id::text, 'amount_due', (o.total - o.amount_paid)::text, 'currency', o.currency, 'due_at', o.due_at),
+       sqlc.arg(now)::timestamptz
+FROM billing.orders o
+WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.customer_id = sqlc.arg(customer_id)::uuid
+  AND o.currency = sqlc.arg(currency)::text
+  AND o.origin = 'usage' AND o.status = 'open' AND o.amount_paid < o.total
+  AND o.due_at < sqlc.arg(now)::timestamptz
+ON CONFLICT (merchant_id, id) DO NOTHING;
+
+-- name: MarkDelinquencyDue :exec
+-- The merchant's delinquency policy may have changed: every payer it holds
+-- in grace or delinquent is evaluated again on the next pass.
+UPDATE billing.customer_delinquency
+SET next_evaluation_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND state <> 'current'
+  AND next_evaluation_at IS DISTINCT FROM sqlc.arg(now)::timestamptz;
+
+-- name: RebuildDelinquencyDue :exec
+-- A restored merchant's payers with an open usage order are evaluated again
+-- at once; MarkDelinquencyDue covers the ones in grace or delinquent.
+INSERT INTO billing.customer_delinquency (merchant_id, customer_id, currency, state, overdue_amount, overdue_orders,
+    entered_at, transition_seq, evaluated_at, next_evaluation_at)
+SELECT DISTINCT o.merchant_id, o.customer_id, o.currency, 'current', 0, 0,
+       sqlc.arg(now)::timestamptz, 0, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
+FROM billing.orders o
+WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.origin = 'usage'
+  AND o.status IN ('open', 'processing') AND o.amount_paid < o.total
+ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET next_evaluation_at = EXCLUDED.next_evaluation_at;
 
 -- name: GetCustomerDelinquency :one
 SELECT * FROM billing.customer_delinquency
@@ -148,12 +122,13 @@ WITH previous AS (
 ), upserted AS (
     INSERT INTO billing.customer_delinquency AS d (
         merchant_id, customer_id, currency, state, overdue_started_at, overdue_amount,
-        overdue_orders, entered_at, transition_seq, evaluated_at, created_at, updated_at)
+        overdue_orders, entered_at, transition_seq, evaluated_at, next_evaluation_at, created_at, updated_at)
     VALUES (
         sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, sqlc.arg(state)::text,
         sqlc.narg(overdue_started_at)::timestamptz, sqlc.arg(overdue_amount)::bigint,
-        sqlc.arg(overdue_orders)::bigint, sqlc.arg(now)::timestamptz, 1,
-        sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz)
+        sqlc.arg(overdue_orders)::bigint, sqlc.arg(now)::timestamptz,
+        CASE WHEN sqlc.arg(state)::text = 'current' THEN 0 ELSE 1 END,
+        sqlc.arg(now)::timestamptz, sqlc.narg(next_evaluation_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz)
     ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE
     SET state = EXCLUDED.state,
         overdue_started_at = EXCLUDED.overdue_started_at,
@@ -162,6 +137,7 @@ WITH previous AS (
         entered_at = CASE WHEN d.state IS DISTINCT FROM EXCLUDED.state THEN EXCLUDED.entered_at ELSE d.entered_at END,
         transition_seq = d.transition_seq + (CASE WHEN d.state IS DISTINCT FROM EXCLUDED.state THEN 1 ELSE 0 END),
         evaluated_at = EXCLUDED.evaluated_at,
+        next_evaluation_at = EXCLUDED.next_evaluation_at,
         updated_at = EXCLUDED.updated_at
     RETURNING d.state, d.overdue_started_at, d.overdue_amount, d.overdue_orders, d.entered_at, d.transition_seq
 )
@@ -174,8 +150,8 @@ SELECT upserted.state,
        COALESCE((SELECT previous.state FROM previous), '')::text AS previous_state
 FROM upserted;
 
--- A row is NEVER deleted once it exists, and one is never created for a payer
--- whose first evaluation is already `current`. Deleting a cleared row would
+-- A row is NEVER deleted once it exists, and one is created `current` only to
+-- hold a payer's next evaluation (transition_seq 0). Deleting a cleared row would
 -- restart transition_seq, and a restarted sequence collides with the dedupe key
 -- of the payer's earlier transition — which would silently swallow the second
 -- shutoff signal for anyone who has been delinquent before.

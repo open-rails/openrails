@@ -65,13 +65,14 @@ func (s *MoneyService) FinalizeUsage(ctx context.Context, payer identity.Custome
 	var out *gen.BillingOrder
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		out, err = s.finalizeUsageTx(ctx, gen.New(tx), payer, cur, from, to)
+		out, err = s.finalizeUsageTx(ctx, s.db.NewWithPgxTx(tx), payer, cur, from, to)
 		return err
 	})
 	return out, err
 }
 
-func (s *MoneyService) finalizeUsageTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, cur string, from, to time.Time) (*gen.BillingOrder, error) {
+func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer identity.CustomerID, cur string, from, to time.Time) (*gen.BillingOrder, error) {
+	q := d.Gen(ctx)
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -140,7 +141,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, q *gen.Queries, paye
 			}
 			u.PONumber, u.Memo, u.Tax, u.BillingContacts = nilIfEmpty(profile.PONumber), nilIfEmpty(profile.Memo), profile.Tax, profile.BillingContacts
 		}
-		order, err := usage.Create(ctx, q, merchantID, u, now)
+		order, err := usage.Create(ctx, d, merchantID, u, now)
 		if err != nil {
 			return err
 		}
@@ -245,7 +246,7 @@ func (s *MoneyService) destructiveUsageOrder(ctx context.Context, id uuid.UUID, 
 			return false, ErrUsageActionNotAllowed
 		}
 		if kind == destructive.MarkUncollectible {
-			changed, err := usage.MarkUncollectible(ctx, q, order, s.now())
+			changed, err := usage.MarkUncollectible(ctx, txDB, order, s.now())
 			if err == nil && !changed {
 				err = ErrUsageActionNotAllowed
 			}

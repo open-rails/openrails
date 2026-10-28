@@ -41,9 +41,8 @@ func forEachActiveMerchant(ctx context.Context, dbi *db.DB, logger *log.Entry, f
 	return errors.Join(errs...)
 }
 
-// UsageOrderWorker bills the usage orders that are due, tells customers of
-// the overdue ones and collects them once an off-session charger is
-// configured. A pass with a merchant is that merchant's threshold wakeup.
+// UsageOrderWorker bills the usage orders that are due and collects them once
+// an off-session charger is configured. A pass with a merchant is that merchant's threshold wakeup.
 type UsageOrderWorker struct {
 	WorkerDefaults[money.UsageOrderArgs]
 	DB    *db.DB
@@ -101,9 +100,6 @@ func (w UsageOrderWorker) workMerchant(ctx context.Context, logger *log.Entry, a
 			return errors.Join(append(failures, err)...)
 		}
 		return errors.Join(append(failures, continuePass(ctx, money.UsageOrderArgs{MerchantID: &mid, After: next}))...)
-	}
-	if _, err := w.Money.NotifyOverdueUsageOrders(ctx, now); err != nil {
-		failures = append(failures, err)
 	}
 	if w.Intents == nil || config.IsLimitedMode(w.Config) {
 		return errors.Join(failures...)

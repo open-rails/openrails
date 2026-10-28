@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/delinquency"
@@ -19,14 +20,30 @@ func (s *Service) delinquencyService() *delinquency.Service {
 	return delinquency.NewService(s.rt.DB, s.rt.Clock)
 }
 
+// evaluateDelinquency evaluates a customer in every currency it has a
+// delinquency state in, in the caller's transaction (d is bound to it).
+func evaluateDelinquency(ctx context.Context, d *db.DB, merchantID, customer uuid.UUID, now time.Time) error {
+	rows, err := d.Gen(ctx).ListCustomersDelinquency(ctx, gen.ListCustomersDelinquencyParams{
+		MerchantID: merchantID, CustomerIds: []uuid.UUID{customer}, RowLimit: int32(len(billing.Currencies())), // #nosec G115 -- the currency registry
+	})
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if _, _, err := delinquency.EvaluateTx(ctx, d, customer, row.Currency, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // overdue is a usage order still owed past its due date.
 func overdue(o *billing.Order, now time.Time) bool {
 	return o.Usage != nil && o.Status == billing.OrderOpen && o.Usage.AmountDue > 0 && o.Usage.DueAt.Before(now)
 }
 
-// markDelinquent marks each overdue usage order whose customer the
-// delinquency pass found delinquent in its currency: grace has run out and
-// new usage is refused.
+// markDelinquent marks each overdue usage order whose customer is delinquent
+// in its currency: grace has run out and new usage is refused.
 func (s *Service) markDelinquent(ctx context.Context, views ...*billing.Order) error {
 	now := s.now()
 	var customers []uuid.UUID

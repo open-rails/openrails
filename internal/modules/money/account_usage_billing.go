@@ -323,7 +323,7 @@ func (s *MoneyService) finalizeUsageAccount(ctx context.Context, customer uuid.U
 		if amount <= 0 || amount < terms.minimum {
 			return nil
 		}
-		order, err := s.finalizeUsageTx(ctx, q, identity.CustomerID(customer), currency, from, cutoff)
+		order, err := s.finalizeUsageTx(ctx, s.db.NewWithPgxTx(tx), identity.CustomerID(customer), currency, from, cutoff)
 		if err != nil {
 			return fmt.Errorf("invoice usage: %w", err)
 		}

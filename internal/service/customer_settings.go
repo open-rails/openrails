@@ -89,6 +89,12 @@ func (s *Service) UpdateCustomer(ctx context.Context, customer identity.Customer
 				}
 			}
 		}
+		if len(change.trustLevels) > 0 || change.setPolicy {
+			// The customer's delinquency policy follows its billing policy.
+			if err := evaluateDelinquency(ctx, s.rt.DB.NewWithPgxTx(tx), mid.UUID(), change.customer, s.rt.Clock.Now().UTC()); err != nil {
+				return err
+			}
+		}
 		settings, err := customerSettings(ctx, q, mid.UUID(), []uuid.UUID{change.customer})
 		if err != nil {
 			return err

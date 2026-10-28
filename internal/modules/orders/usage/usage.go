@@ -23,6 +23,19 @@ import (
 // in part or whole; it is numbered and complete once paid. The money module
 // owns the ledger side of each transition; these are the order's.
 
+// Changed runs in the transaction of every change to what a usage order has
+// due or whether it is open, with the order as it now stands and d bound to
+// that transaction: delinquency evaluates the order's payer there. The
+// delinquency module installs it.
+var Changed func(ctx context.Context, d *db.DB, order gen.BillingOrder, now time.Time) error
+
+func changed(ctx context.Context, d *db.DB, order gen.BillingOrder, now time.Time) error {
+	if Changed == nil {
+		return nil
+	}
+	return Changed(ctx, d, order, now)
+}
+
 // maxLines is the most lines a usage order takes; further sources share
 // the last one.
 const maxLines = 100
@@ -52,7 +65,8 @@ type Order struct {
 
 // Create opens the usage order of u's period; one the balance already
 // paid in full is complete at once.
-func Create(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, u Order, now time.Time) (gen.BillingOrder, error) {
+func Create(ctx context.Context, d *db.DB, merchantID uuid.UUID, u Order, now time.Time) (gen.BillingOrder, error) {
+	q := d.Gen(ctx)
 	var total int64
 	for _, l := range u.Lines {
 		total += l.Amount
@@ -97,8 +111,11 @@ func Create(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, u Order, 
 		}
 	}
 	order, err := q.LockOrder(ctx, gen.LockOrderParams{MerchantID: merchantID, ID: id})
-	if err != nil || number == nil {
+	if err != nil {
 		return order, err
+	}
+	if number == nil {
+		return order, changed(ctx, d, order, now)
 	}
 	return order, orderevent.Enqueue(ctx, q, &order, "order.completed", now, map[string]any{"number": *number})
 }
@@ -135,7 +152,7 @@ func Pay(ctx context.Context, d *db.DB, merchantID, orderID uuid.UUID, amount in
 		return order, err
 	}
 	if order.AmountPaid == nil || *order.AmountPaid != order.Total {
-		return order, nil
+		return order, changed(ctx, d, order, now)
 	}
 	n, err := q.NextOrderNumber(ctx)
 	if err != nil {
@@ -153,12 +170,16 @@ func Pay(ctx context.Context, d *db.DB, merchantID, orderID uuid.UUID, amount in
 	if err := orderevent.Enqueue(ctx, q, &order, "order.completed", now, extra); err != nil {
 		return order, err
 	}
-	return order, notificationinbox.WithdrawOrder(ctx, d, order.CustomerID, order.ID)
+	if err := notificationinbox.WithdrawOrder(ctx, d, order.CustomerID, order.ID); err != nil {
+		return order, err
+	}
+	return order, changed(ctx, d, order, now)
 }
 
 // StartCollection puts one collection operation on an open (or
 // uncollectible) usage order: its attempt, live until the operation ends.
-func StartCollection(ctx context.Context, q *gen.Queries, order gen.BillingOrder, operation, psp uuid.UUID, rail string, method uuid.UUID, amount int64, now time.Time) error {
+func StartCollection(ctx context.Context, d *db.DB, order gen.BillingOrder, operation, psp uuid.UUID, rail string, method uuid.UUID, amount int64, now time.Time) error {
+	q := d.Gen(ctx)
 	state, err := json.Marshal(map[string]any{"operation_id": operation.String()})
 	if err != nil {
 		return err
@@ -171,13 +192,18 @@ func StartCollection(ctx context.Context, q *gen.Queries, order gen.BillingOrder
 	if err != nil || n != 1 {
 		return errors.Join(err, fmt.Errorf("usage order %s took no collection", order.ID))
 	}
-	return nil
+	if order.Status != string(billing.OrderUncollectible) {
+		return nil
+	}
+	// Collecting an uncollectible order reopens it.
+	return changed(ctx, d, order, now)
 }
 
 // EndCollection ends a collection that moved no money (not executed) or
 // whose payment Pay already applied: the attempt is closed, and an
 // order still owed takes payment again, next scheduled at next (nil: none).
-func EndCollection(ctx context.Context, q *gen.Queries, merchantID, orderID, attempt uuid.UUID, succeeded bool, next *time.Time, now time.Time) error {
+func EndCollection(ctx context.Context, d *db.DB, merchantID, orderID, attempt uuid.UUID, succeeded bool, next *time.Time, now time.Time) error {
+	q := d.Gen(ctx)
 	status := "failed"
 	if succeeded {
 		status = "succeeded"
@@ -185,14 +211,22 @@ func EndCollection(ctx context.Context, q *gen.Queries, merchantID, orderID, att
 	if _, err := q.SetOrderAttemptStatus(ctx, gen.SetOrderAttemptStatusParams{MerchantID: merchantID, ID: attempt, Status: status, Now: now}); err != nil {
 		return err
 	}
-	_, err := q.EndUsageCollection(ctx, gen.EndUsageCollectionParams{MerchantID: merchantID, ID: orderID, AttemptID: attempt, NextAttemptAt: next, Now: now})
-	return err
+	n, err := q.EndUsageCollection(ctx, gen.EndUsageCollectionParams{MerchantID: merchantID, ID: orderID, AttemptID: attempt, NextAttemptAt: next, Now: now})
+	if err != nil || n == 0 {
+		return err
+	}
+	order, err := q.LockOrder(ctx, gen.LockOrderParams{MerchantID: merchantID, ID: orderID})
+	if err != nil {
+		return err
+	}
+	return changed(ctx, d, order, now)
 }
 
 // DeclineCollection records a declined collection: the order is open
 // again with why, its next try at next (nil: charging stops until the
 // customer acts), or uncollectible when terminal.
-func DeclineCollection(ctx context.Context, q *gen.Queries, merchantID, orderID, attempt uuid.UUID, failure billing.PaymentFailure, terminal bool, next *time.Time, now time.Time) error {
+func DeclineCollection(ctx context.Context, d *db.DB, merchantID, orderID, attempt uuid.UUID, failure billing.PaymentFailure, terminal bool, next *time.Time, now time.Time) error {
+	q := d.Gen(ctx)
 	if _, err := q.SetOrderAttemptStatus(ctx, gen.SetOrderAttemptStatusParams{MerchantID: merchantID, ID: attempt, Status: "failed", Now: now}); err != nil {
 		return err
 	}
@@ -209,7 +243,10 @@ func DeclineCollection(ctx context.Context, q *gen.Queries, merchantID, orderID,
 	if err != nil {
 		return err
 	}
-	return orderevent.Enqueue(ctx, q, &order, "order.payment_failed", now, map[string]any{"reason": failure.Reason})
+	if err := orderevent.Enqueue(ctx, q, &order, "order.payment_failed", now, map[string]any{"reason": failure.Reason}); err != nil {
+		return err
+	}
+	return changed(ctx, d, order, now)
 }
 
 // StopCollection stops collecting an open usage order until the
@@ -238,14 +275,21 @@ func VoidOrder(ctx context.Context, d *db.DB, order gen.BillingOrder, now time.T
 	if err := orderevent.Enqueue(ctx, q, &order, "order.voided", now, nil); err != nil {
 		return false, err
 	}
-	return true, notificationinbox.WithdrawOrder(ctx, d, order.CustomerID, order.ID)
+	if err := notificationinbox.WithdrawOrder(ctx, d, order.CustomerID, order.ID); err != nil {
+		return false, err
+	}
+	return true, changed(ctx, d, order, now)
 }
 
 // MarkUncollectible writes an open usage order off; collecting it
 // again reopens it.
-func MarkUncollectible(ctx context.Context, q *gen.Queries, order gen.BillingOrder, now time.Time) (bool, error) {
-	n, err := q.MarkUsageOrderUncollectible(ctx, gen.MarkUsageOrderUncollectibleParams{MerchantID: order.MerchantID, ID: order.ID, Now: now})
-	return n == 1, err
+func MarkUncollectible(ctx context.Context, d *db.DB, order gen.BillingOrder, now time.Time) (bool, error) {
+	n, err := d.Gen(ctx).MarkUsageOrderUncollectible(ctx, gen.MarkUsageOrderUncollectibleParams{MerchantID: order.MerchantID, ID: order.ID, Now: now})
+	if err != nil || n != 1 {
+		return false, err
+	}
+	order.Status = string(billing.OrderUncollectible)
+	return true, changed(ctx, d, order, now)
 }
 
 // Due is what is still owed on a usage order.

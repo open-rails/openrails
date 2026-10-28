@@ -57,8 +57,9 @@ saved card, in person.
 Funding the customer's balance repays owed money first: it pays open and
 uncollectible usage orders without a collection in flight, oldest first.
 
-Billing an order queues `order_due`; one still owed past its due date queues
-`order_overdue` once, at the next pass; a decline that ends its collection
+Billing an order queues `order_due`; an open one still owed past its due date
+queues `order_overdue` once, within a minute of it, or when a collection in
+flight at its due date ends without paying it; a decline that ends its collection
 (the retry schedule exhausted, or a decline no retry fixes) queues
 `order_collection_stopped`.
 

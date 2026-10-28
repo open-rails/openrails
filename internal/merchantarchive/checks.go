@@ -143,6 +143,9 @@ var omittedColumns = map[string]string{
 	"price_migrations": "destructive_action_id",
 	// Derived from the lines: a restored open order is not found by it.
 	"orders": "lines_digest",
+	// When time alone next changes a payer's delinquency: restore schedules
+	// every payer again.
+	"customer_delinquency": "next_evaluation_at",
 }
 
 func checkSchema(ctx context.Context, tx pgx.Tx) error {

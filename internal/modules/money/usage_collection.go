@@ -364,7 +364,7 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 			intentID, replayed = intent.ID, true
 			return nil
 		}
-		if err := usage.StartCollection(ctx, q, order, intent.ID, psp, normalizeRail(method.Rail), method.ID, due, now); err != nil {
+		if err := usage.StartCollection(ctx, s.db.NewWithPgxTx(tx), order, intent.ID, psp, normalizeRail(method.Rail), method.ID, due, now); err != nil {
 			return err
 		}
 		intentID = intent.ID

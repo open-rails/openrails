@@ -220,6 +220,69 @@ func TestUsageBillingContracts(t *testing.T) {
 			})
 		}
 	})
+	t.Run("OR-J26-S50", func(t *testing.T) {
+		for _, disposition := range []string{"paid", "waived", "uncollectible"} {
+			t.Run(disposition, func(t *testing.T) {
+				a, p, customer := usageBillingWorld(t, true, true)
+				oneUsage(t, a.alpha, usageInput(customer, "settled-at-once", 3))
+				fleet := startFleet(t, a.world)
+				runUsageDue(t, fleet)
+				a.clock.Advance(24 * time.Hour)
+				runRegistered(t, fleet, "openrails.delinquency", 1)
+				order := oneUsageOrder(t, a, customer)
+				require.True(t, order.Usage.Delinquent)
+				var err error
+				switch disposition {
+				case "paid":
+					_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 30_000_000, TransactionID: "bank-at-once"})
+				case "waived":
+					_, err = a.alpha.WaiveOrderBalance(t.Context(), order.ID)
+				case "uncollectible":
+					_, err = a.alpha.MarkOrderUncollectible(t.Context(), order.ID)
+				}
+				require.NoError(t, err)
+				cleared := func() int {
+					events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"delinquency.cleared"}, Limit: 100})
+					require.NoError(t, err)
+					return len(events.Events)
+				}
+				require.Equal(t, 1, cleared(), "the change itself clears the customer; no pass ran")
+				runRegistered(t, fleet, "openrails.delinquency", 1)
+				require.Equal(t, 1, cleared())
+				p.money(t, 0, 0)
+			})
+		}
+	})
+	t.Run("OR-J26-S51/an-overdue-order-is-told-without-automatic-usage-billing", func(t *testing.T) {
+		a, _, customer := usageBillingWorld(t, false, false)
+		oneUsage(t, a.alpha, usageInput(customer, "billed-on-revocation", 3))
+		status, raw := a.request(t, http.MethodGet, "/v1/me/agreements", a.aliceToken, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var agreements billing.ListPage[billing.Agreement]
+		require.NoError(t, json.Unmarshal(raw, &agreements))
+		var unscheduled *billing.Agreement
+		for i := range agreements.Items {
+			if agreements.Items[i].Subscription == nil && agreements.Items[i].Currency == "USD" {
+				unscheduled = &agreements.Items[i]
+			}
+		}
+		require.NotNil(t, unscheduled)
+		// Revoking the collection agreement bills what is owed so far.
+		status, raw = a.request(t, http.MethodPost, "/v1/me/agreements/"+unscheduled.ID.String()+"/revoke", a.aliceToken, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		order := oneUsageOrder(t, a, customer)
+		require.Equal(t, billing.OrderOpen, order.Status)
+		fleet := startFleet(t, a.world)
+		a.clock.Advance(time.Hour)
+		runRegistered(t, fleet, "openrails.delinquency", 1)
+		notices, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"order_overdue"}, Limit: 100})
+		require.NoError(t, err)
+		require.Len(t, notices.Events, 1, "the overdue order is told although no usage pass runs")
+		runRegistered(t, fleet, "openrails.delinquency", 1)
+		notices, err = a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"order_overdue"}, Limit: 100})
+		require.NoError(t, err)
+		require.Len(t, notices.Events, 1, "told once")
+	})
 	t.Run("OR-J26-S40/usage-pass-bills-past-a-full-page-of-due-accounts", func(t *testing.T) {
 		a, p, customer := usageBillingWorld(t, true, false)
 		// Two hundred accounts due ahead of Alice's fill the pass's first page.

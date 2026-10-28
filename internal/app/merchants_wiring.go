@@ -78,6 +78,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 			r.followPSPImports(id, previous, set)
 			r.followPaymentDomain(id, previous, set)
 			r.followStripeWebhooks(id, previous, set)
+			r.followMoneyPolicy(id, previous, set)
 			r.recordRefusedDocuments(ctx, id, previous, set)
 		}
 		return set, err

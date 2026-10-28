@@ -98,8 +98,7 @@ For usage billing this **is** the meaningful cutoff — refusing new spend is wh
 stops the bill growing. It revokes nothing and cancels nothing.
 
 The gate fails open by construction. It refuses only when the recorded state says
-delinquent **and** a live re-read of the usage orders still agrees, so a customer who has
-just settled is never held out by our evaluation lag.
+delinquent **and** a live re-read of the usage orders still agrees.
 
 ## What you enforce: the signal
 
@@ -160,9 +159,14 @@ The customer gets an in-app notification on the two rungs it can act on:
 `account_delinquent` and `account_delinquency_cleared`. Entering grace is silent —
 the collection ladder has already told them the charge failed.
 
-## Cadence
+## When it is evaluated
 
-The evaluator runs every 15 minutes, driven by indexed due work (customers with an
-overdue receivable, plus customers already parked non-current). It never enumerates
-customers, and it runs in limited/readonly mode and with no charger armed,
-because it moves no money.
+A customer is evaluated in the same transaction as every change to one of its
+usage orders: paying, voiding or writing one off clears it at once. Entering
+grace or delinquency has no event, so each customer stores the next instant
+time alone changes its state (an order falling due, a grace window running
+out), and a pass every minute evaluates the customers whose instant has passed.
+A change to the merchant's policy evaluates its customers in grace or
+delinquent again; a change to a customer's billing policy evaluates that
+customer. The pass never enumerates customers, and it runs in limited/readonly
+mode and with no charger armed, because it moves no money.

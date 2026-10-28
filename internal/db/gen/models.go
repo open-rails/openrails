@@ -248,7 +248,7 @@ type BillingCustomerContact struct {
 	UpdatedAt time.Time
 }
 
-// Per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.
+// Per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open usage orders against the merchant's declared grace window and amount floor. Evaluated when a usage order of the payer changes and at next_evaluation_at; a payer with an open usage order has a row. A projection of order truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement: it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.
 type BillingCustomerDelinquency struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -264,6 +264,8 @@ type BillingCustomerDelinquency struct {
 	EvaluatedAt   time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	// The next instant time alone changes this payer's delinquency in the currency: a usage order falling due or its grace window running out. Null: only a change to its usage orders or policy does.
+	NextEvaluationAt *time.Time
 }
 
 // A heavy buyer's keys as of their stamps row: the keys of the products they hold. Derived; rebuilt on read.

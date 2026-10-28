@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -18,8 +19,18 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/orders/usage"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
+
+// A change to a usage order evaluates its payer in the same transaction:
+// paying, voiding or writing one off clears a payer at once.
+func init() {
+	usage.Changed = func(ctx context.Context, d *db.DB, order gen.BillingOrder, now time.Time) error {
+		_, _, err := EvaluateTx(ctx, d, order.CustomerID, order.Currency, now)
+		return err
+	}
+}
 
 // Host-lifecycle event types emitted on a delinquency transition. One per
 // destination state; `from_state` in the payload carries where it came from, so
@@ -44,11 +55,6 @@ func eventTypeFor(s State) string {
 	}
 }
 
-// PassBatch caps how many (payer, currency) pairs one merchant's pass examines
-// per leg. The enter leg is oldest-debt-first, so the most urgent payers go
-// first and the rest wait for the next pass.
-const PassBatch = 5000
-
 // Transition is one observed state change, already recorded and signalled.
 type Transition struct {
 	CustomerID uuid.UUID
@@ -57,15 +63,8 @@ type Transition struct {
 	To         State
 }
 
-// PassResult reports what one merchant's evaluation pass did.
-type PassResult struct {
-	Evaluated   int
-	Transitions []Transition
-}
-
 // Service evaluates, stores and signals delinquency. Every method expects a
-// merchant-scoped context (MerchantTx / RunInMerchantScope); there is no
-// deployment-wide read of anyone's debt here.
+// merchant-scoped context (MerchantTx / RunInMerchantScope).
 type Service struct {
 	db    *db.DB
 	clock clockwork.Clock
@@ -81,20 +80,6 @@ func (s *Service) now() time.Time {
 		return time.Now().UTC()
 	}
 	return s.clock.Now().UTC()
-}
-
-// Policy resolves the merchant's declared delinquency policy. The amount floor
-// derives from the monthly floor unless arrears_delinquency_floor
-// overrides it.
-func (s *Service) Policy(ctx context.Context) (Policy, error) {
-	if s == nil || s.db == nil {
-		return Policy{}, fmt.Errorf("delinquency service not initialized")
-	}
-	cfg, _, err := merchantconfig.NewStore(s.db).Get(ctx)
-	if err != nil {
-		return Policy{}, err
-	}
-	return PolicyFromConfig(cfg)
 }
 
 // PolicyFromConfig resolves a policy from a merchant configuration document.
@@ -115,188 +100,181 @@ func PolicyFromConfig(cfg models.MerchantConfiguration) (Policy, error) {
 	return p, nil
 }
 
-// Evaluate runs one merchant's delinquency pass: classify every payer with due
-// work, record the transitions, and emit the signal for each. Candidates come
-// from two indexed scans, never a roster: payers with an overdue open
-// receivable (enter), and payers already parked non-current (exit, the only
-// way a settled debt is noticed). Anyone else never gets a row.
-func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, error) {
-	var out PassResult
+// Evaluate evaluates one payer in a currency in its own transaction, on the
+// service's clock: the due pass's step.
+func (s *Service) Evaluate(ctx context.Context, customerID uuid.UUID, currency string) (Transition, bool, error) {
 	if s == nil || s.db == nil {
-		return out, fmt.Errorf("delinquency service not initialized")
+		return Transition{}, false, fmt.Errorf("delinquency service not initialized")
 	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return out, err
-	}
-	if now.IsZero() {
-		now = s.now()
-	}
-	now = now.UTC()
-	policy, err := s.Policy(ctx)
-	if err != nil {
-		return out, err
-	}
-	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
-	if err != nil {
-		return out, err
-	}
-
-	// Pinned explicitly; reentrant, so the worker's outer scope stands.
-	var overdue []gen.ListOverdueOrderAggregatesRow
-	var parked []gen.BillingCustomerDelinquency
-	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		q := s.db.Gen(ctx)
-		var qErr error
-		if overdue, qErr = q.ListOverdueOrderAggregates(ctx, gen.ListOverdueOrderAggregatesParams{
-			MerchantID: tid.UUID(), Now: now, RowLimit: PassBatch, Policies: settings.PoliciesParam(),
-		}); qErr != nil {
-			return fmt.Errorf("list overdue aggregates: %w", qErr)
-		}
-		if parked, qErr = q.ListNonCurrentDelinquency(ctx, gen.ListNonCurrentDelinquencyParams{
-			MerchantID: tid.UUID(), RowLimit: PassBatch,
-		}); qErr != nil {
-			return fmt.Errorf("list parked payers: %w", qErr)
-		}
-		return nil
-	}); err != nil {
-		return out, fmt.Errorf("delinquency: %w", err)
-	}
-
-	var errs []error
-	type key struct {
-		customer uuid.UUID
-		currency string
-	}
-	type candidate struct {
-		exposure Exposure
-		// policy is the payer's effective policy: the merchant's with the bound
-		// billing policy's overrides applied.
-		policy Policy
-	}
-	candidates := make(map[key]candidate, len(overdue)+len(parked))
-	for _, r := range overdue {
-		effective, perr := policy.withOverrides(int(r.GraceDays), r.AmountFloor)
-		if perr != nil {
-			errs = append(errs, fmt.Errorf("payer %s/%s: %w", r.CustomerID, r.Currency, perr))
-			continue
-		}
-		candidates[key{r.CustomerID, r.Currency}] = candidate{
-			exposure: Exposure{
-				OverdueStartedAt: r.OverdueStartedAt.UTC(),
-				OverdueAmount:    r.OverdueAmount,
-				OverdueOrders:    int(r.OverdueOrders),
-			},
-			policy: effective,
-		}
-	}
-	for _, r := range parked {
-		// A parked payer absent from the overdue scan owes nothing: zero
-		// exposure classifies `current` under any policy.
-		if _, ok := candidates[key{r.CustomerID, r.Currency}]; !ok {
-			candidates[key{r.CustomerID, r.Currency}] = candidate{policy: policy}
-		}
-	}
-
-	for k, c := range candidates {
-		exposure := c.exposure
-		transition, changed, err := s.apply(ctx, tid, c.policy, k.customer, k.currency, exposure, now)
-		if err != nil {
-			// One payer's failure must not abort the merchant's pass.
-			errs = append(errs, fmt.Errorf("payer %s/%s: %w", k.customer, k.currency, err))
-			continue
-		}
-		out.Evaluated++
-		if changed {
-			out.Transitions = append(out.Transitions, transition)
-		}
-	}
-	return out, errors.Join(errs...)
+	var t Transition
+	var changed bool
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		t, changed, err = EvaluateTx(ctx, s.db.NewWithPgxTx(tx), customerID, currency, s.now())
+		return err
+	})
+	return t, changed, err
 }
 
-// apply records one payer's evaluation and signals a state change in the same
-// transaction: a stored but unannounced transition is a lost shutoff
-// instruction, and an announcement without stored state repeats forever.
-func (s *Service) apply(ctx context.Context, tid billing.MerchantID, policy Policy, customerID uuid.UUID, currency string, exposure Exposure, now time.Time) (Transition, bool, error) {
+// EvaluateTx evaluates one payer in a currency in the caller's transaction (d
+// is bound to it): it classifies the payer's usage orders against its
+// effective policy, records the state with the next instant time alone changes
+// it, signals a transition, and tells the payer of each open order newly past
+// due. It serializes on the customer, as every change to its usage orders
+// does. A payer that never owed and has nothing falling due gets no row.
+func EvaluateTx(ctx context.Context, d *db.DB, customerID uuid.UUID, currency string, now time.Time) (Transition, bool, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return Transition{}, false, err
+	}
+	now = now.UTC()
+	q := d.Gen(ctx)
+	if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: tid.UUID(), ID: customerID}); err != nil {
+		return Transition{}, false, fmt.Errorf("lock delinquency payer: %w", err)
+	}
+	policy, exposure, live, err := readExposure(ctx, d, q, tid, customerID, currency, now)
+	if err != nil {
+		return Transition{}, false, err
+	}
 	state := Classify(policy, exposure, now)
-
+	next := nextEvaluation(policy, exposure, state, live)
+	if state == StateCurrent && next == nil {
+		_, err := q.GetCustomerDelinquency(ctx, gen.GetCustomerDelinquencyParams{MerchantID: tid.UUID(), CustomerID: customerID, Currency: currency})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Transition{}, false, nil
+		}
+		if err != nil {
+			return Transition{}, false, err
+		}
+	}
 	var since *time.Time
 	if state != StateCurrent {
 		t := exposure.OverdueStartedAt.UTC()
 		since = &t
 	}
-
-	var transition Transition
-	changed := false
-	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		row, err := q.UpsertCustomerDelinquency(ctx, gen.UpsertCustomerDelinquencyParams{
-			MerchantID:       tid.UUID(),
-			CustomerID:       customerID,
-			Currency:         currency,
-			State:            string(state),
-			OverdueStartedAt: since,
-			OverdueAmount:    exposure.OverdueAmount,
-			OverdueOrders:    int64(exposure.OverdueOrders),
-			Now:              now,
-		})
-		if err != nil {
-			return err
-		}
-		// "" = no row before. A first sighting already `current` is not a
-		// transition.
-		previous := StateCurrent
-		if row.PreviousState != "" {
-			previous = ParseState(row.PreviousState)
-		}
-		if previous == ParseState(row.State) {
-			return nil
-		}
-		changed = true
-		transition = Transition{CustomerID: customerID, Currency: currency, From: previous, To: ParseState(row.State)}
-
-		payload := map[string]any{
-			"from_state":     previous.String(),
-			"to_state":       row.State,
-			"currency":       currency,
-			"overdue_amount": row.OverdueAmount,
-			"overdue_orders": row.OverdueOrders,
-			"grace_days":     policy.GraceDays,
-			"amount_floor":   policy.AmountFloor,
-		}
-		if row.OverdueStartedAt != nil {
-			payload["overdue_started_at"] = row.OverdueStartedAt.UTC().Format(time.RFC3339)
-		}
-		data, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("encode delinquency event: %w", err)
-		}
-		// transition_seq makes racing evaluators of one transition collapse
-		// into one instruction to the host.
-		dedupe := fmt.Sprintf("delinquency:%s:%s:%d", customerID, currency, row.TransitionSeq)
-		if _, err := q.EnqueueHostLifecycleEvent(ctx, gen.EnqueueHostLifecycleEventParams{
-			MerchantID:  tid.UUID(),
-			EventType:   eventTypeFor(ParseState(row.State)),
-			SubjectType: subjectCustomer,
-			SubjectID:   customerID,
-			Currency:    currency,
-			OccurredAt:  now,
-			Data:        data,
-			DedupeKey:   dedupe,
-		}); err != nil {
-			return err
-		}
-		return s.notify(ctx, s.db.NewWithPgxTx(tx), transition, exposure, now, uuid.NewSHA1(tid.UUID(), []byte(dedupe+":notification")))
+	row, err := q.UpsertCustomerDelinquency(ctx, gen.UpsertCustomerDelinquencyParams{
+		MerchantID:       tid.UUID(),
+		CustomerID:       customerID,
+		Currency:         currency,
+		State:            string(state),
+		OverdueStartedAt: since,
+		OverdueAmount:    exposure.OverdueAmount,
+		OverdueOrders:    int64(exposure.OverdueOrders),
+		Now:              now,
+		NextEvaluationAt: next,
 	})
 	if err != nil {
 		return Transition{}, false, err
 	}
-	return transition, changed, nil
+	if err := q.NotifyOverdueOrders(ctx, gen.NotifyOverdueOrdersParams{MerchantID: tid.UUID(), CustomerID: customerID, Currency: currency, Now: now}); err != nil {
+		return Transition{}, false, fmt.Errorf("notify overdue orders: %w", err)
+	}
+	// "" = no row before: a first sighting already current is not a transition.
+	previous := StateCurrent
+	if row.PreviousState != "" {
+		previous = ParseState(row.PreviousState)
+	}
+	if previous == ParseState(row.State) {
+		return Transition{}, false, nil
+	}
+	transition := Transition{CustomerID: customerID, Currency: currency, From: previous, To: ParseState(row.State)}
+	// The stored transition and its announcement share the transaction: a
+	// stored but unannounced transition is a lost shutoff instruction, and an
+	// announcement without stored state repeats forever.
+	payload := map[string]any{
+		"from_state":     previous.String(),
+		"to_state":       row.State,
+		"currency":       currency,
+		"overdue_amount": row.OverdueAmount,
+		"overdue_orders": row.OverdueOrders,
+		"grace_days":     policy.GraceDays,
+		"amount_floor":   policy.AmountFloor,
+	}
+	if row.OverdueStartedAt != nil {
+		payload["overdue_started_at"] = row.OverdueStartedAt.UTC().Format(time.RFC3339)
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return Transition{}, false, fmt.Errorf("encode delinquency event: %w", err)
+	}
+	// transition_seq makes racing evaluators of one transition collapse
+	// into one instruction to the host.
+	dedupe := fmt.Sprintf("delinquency:%s:%s:%d", customerID, currency, row.TransitionSeq)
+	if _, err := q.EnqueueHostLifecycleEvent(ctx, gen.EnqueueHostLifecycleEventParams{
+		MerchantID:  tid.UUID(),
+		EventType:   eventTypeFor(ParseState(row.State)),
+		SubjectType: subjectCustomer,
+		SubjectID:   customerID,
+		Currency:    currency,
+		OccurredAt:  now,
+		Data:        data,
+		DedupeKey:   dedupe,
+	}); err != nil {
+		return Transition{}, false, err
+	}
+	if err := notify(ctx, d, transition, exposure, now, uuid.NewSHA1(tid.UUID(), []byte(dedupe+":notification"))); err != nil {
+		return Transition{}, false, err
+	}
+	// One line per transition: the decision an operator is asked to explain.
+	log.WithContext(ctx).WithFields(log.Fields{
+		"merchant_id": tid.String(), "customer_id": customerID.String(), "currency": currency,
+		"from_state": transition.From.String(), "to_state": transition.To.String(),
+	}).Info("Delinquency: state transition recorded and signalled to the host")
+	return transition, true, nil
+}
+
+// liveExposure is when a payer's next usage order falls due; pending is
+// false with none.
+type liveExposure struct {
+	nextDueAt time.Time
+	pending   bool
+}
+
+// readExposure reads a payer's overdue usage orders against now and its
+// effective policy: the merchant's with the bound billing policy's overrides.
+func readExposure(ctx context.Context, d *db.DB, q *gen.Queries, tid billing.MerchantID, customerID uuid.UUID, currency string, now time.Time) (Policy, Exposure, liveExposure, error) {
+	settings, err := merchantconfig.NewStore(d).Settings(ctx)
+	if err != nil {
+		return Policy{}, Exposure{}, liveExposure{}, err
+	}
+	merchantPolicy, err := PolicyFromConfig(settings.Config)
+	if err != nil {
+		return Policy{}, Exposure{}, liveExposure{}, err
+	}
+	row, err := q.GetOverdueOrderAggregate(ctx, gen.GetOverdueOrderAggregateParams{
+		MerchantID: tid.UUID(), CustomerID: customerID, Currency: currency, Now: now, Policies: settings.PoliciesParam(),
+	})
+	if err != nil {
+		return Policy{}, Exposure{}, liveExposure{}, err
+	}
+	policy, err := merchantPolicy.withOverrides(int(row.GraceDays), row.AmountFloor)
+	if err != nil {
+		return Policy{}, Exposure{}, liveExposure{}, err
+	}
+	exposure := Exposure{OverdueStartedAt: row.OverdueStartedAt.UTC(), OverdueAmount: row.OverdueAmount, OverdueOrders: int(row.OverdueOrders)}
+	return policy, exposure, liveExposure{nextDueAt: row.NextDueAt.UTC(), pending: row.PendingOrders > 0}, nil
+}
+
+// nextEvaluation is the next instant time alone changes state's reading: the
+// next usage order falling due, or grace running out on a debt over the
+// floor. Nil: only a change to the payer's orders or policy does.
+func nextEvaluation(p Policy, e Exposure, state State, live liveExposure) *time.Time {
+	var next *time.Time
+	if live.pending {
+		t := live.nextDueAt
+		next = &t
+	}
+	if state == StateGrace && e.OverdueAmount >= p.AmountFloor {
+		if t := e.OverdueStartedAt.Add(p.Grace()); next == nil || t.Before(*next) {
+			next = &t
+		}
+	}
+	return next
 }
 
 // notify tells the payer on entering and leaving delinquent. Entering grace
 // is silent. The customer fact, state and existing host signal share a transaction.
-func (s *Service) notify(ctx context.Context, database *db.DB, t Transition, exposure Exposure, now time.Time, id uuid.UUID) error {
+func notify(ctx context.Context, database *db.DB, t Transition, exposure Exposure, now time.Time, id uuid.UUID) error {
 	var eventType models.NotificationEventType
 	switch {
 	case t.To == StateDelinquent:
@@ -360,31 +338,12 @@ func (s *Service) IsDelinquent(ctx context.Context, payer identity.CustomerID, c
 			return nil
 		}
 
-		merchantPolicy, err := s.Policy(ctx)
-		if err != nil {
-			return err
-		}
-		settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
-		if err != nil {
-			return err
-		}
 		now := s.now()
-		live, err := q.GetOverdueOrderAggregate(ctx, gen.GetOverdueOrderAggregateParams{
-			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: currency, Now: now, Policies: settings.PoliciesParam(),
-		})
+		policy, exposure, _, err := readExposure(ctx, s.db, q, tid, payer.UUID(), currency, now)
 		if err != nil {
 			return err
 		}
-		// The payer's effective policy, as the evaluation pass applies it.
-		policy, err := merchantPolicy.withOverrides(int(live.GraceDays), live.AmountFloor)
-		if err != nil {
-			return err
-		}
-		delinquent = Classify(policy, Exposure{
-			OverdueStartedAt: live.OverdueStartedAt.UTC(),
-			OverdueAmount:    live.OverdueAmount,
-			OverdueOrders:    int(live.OverdueOrders),
-		}, now) == StateDelinquent
+		delinquent = Classify(policy, exposure, now) == StateDelinquent
 		return nil
 	})
 	return delinquent, err

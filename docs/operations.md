@@ -1238,10 +1238,10 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 
 | Worker | Cadence |
 |---|---|
-| Balance watch (due customer watches only, credit lot lapses included); due renewals and retries | 1 min |
+| Balance watch (due customer watches only, credit lot lapses included); due renewals and retries; due arrears delinquency | 1 min |
 | Order expiry | 5 min |
 | Convergence sweep | 15 min |
-| Rebill watch; charge-attribution read; arrears delinquency | 15 min |
+| Rebill watch; charge-attribution read | 15 min |
 | Admission-denial flush (closed hours); due daily NMI history read; retention cleanup; Solana crank; Stripe webhook reconciliation | 1 h |
 | Provider refresh scheduler (fans out per merchant) | 2 h |
 | Stored card refresh ahead of renewal | 6 h |

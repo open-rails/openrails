@@ -962,37 +962,6 @@ func (q *Queries) MarkUsageOrderUncollectible(ctx context.Context, arg MarkUsage
 	return result.RowsAffected(), nil
 }
 
-const notifyOverdueUsageOrders = `-- name: NotifyOverdueUsageOrders :one
-WITH notices AS (
-    INSERT INTO billing.notification_events (id, merchant_id, customer_id, event_type, data, created_at)
-    SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'order_overdue',
-           jsonb_build_object('order_id', 'ord_' || id::text, 'amount_due', (total - amount_paid)::text, 'currency', currency, 'due_at', due_at),
-           $1::timestamptz
-    FROM billing.orders
-    WHERE merchant_id = $2::uuid
-      AND origin = 'usage' AND status IN ('open', 'processing') AND amount_paid < total
-      AND due_at < $1::timestamptz
-    ON CONFLICT (merchant_id, id) DO NOTHING
-    RETURNING id
-)
-SELECT count(*) FROM notices
-`
-
-type NotifyOverdueUsageOrdersParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-}
-
-// Tells each payer once about each open usage order past its due date; the
-// notice id is the order's, so a later pass adds none. Its seed is the one
-// earlier releases gave an invoice's notice, which kept the order's id.
-func (q *Queries) NotifyOverdueUsageOrders(ctx context.Context, arg NotifyOverdueUsageOrdersParams) (int64, error) {
-	row := q.db.QueryRow(ctx, notifyOverdueUsageOrders, arg.Now, arg.MerchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const payUsageOrder = `-- name: PayUsageOrder :one
 UPDATE billing.orders
 SET amount_paid = amount_paid + $1::bigint,

@@ -18,29 +18,29 @@ import (
 
 const (
 	KindDelinquency = "openrails.delinquency"
-	// DelinquencyInterval is tighter than collection: a customer who paid is
-	// told promptly they may spend again.
-	DelinquencyInterval = 15 * time.Minute
+	// DelinquencyInterval bounds how long a payer whose usage order fell due,
+	// or whose grace ran out, waits to be evaluated: entering grace or
+	// delinquency has no event.
+	DelinquencyInterval = time.Minute
 
-	// delinquencyMerchantBatch caps one pass's fan-out. The work queue is
-	// indexed on the work itself (overdue receivables / already-parked payers),
-	// so this bounds a pass by ACTIVITY, never by the merchant directory.
-	delinquencyMerchantBatch = 500
+	// delinquencyBatch is how many due payers one read takes. The read is
+	// indexed on the due instant, so a pass costs what is due.
+	delinquencyBatch = 200
 )
 
-// DelinquencyArgs triggers one arrears delinquency evaluation pass.
+// DelinquencyArgs triggers one pass over the payers whose delinquency is due.
 type DelinquencyArgs struct{}
 
 func (DelinquencyArgs) Kind() string { return KindDelinquency }
 
 func (DelinquencyArgs) InsertOpts() river.InsertOpts { return periodPass(DelinquencyInterval) }
 
-// DelinquencyWorker evaluates arrears delinquency and emits the host signal.
-// It is its own job, not a leg of the usage order pass: it moves no money and
-// calls no provider, so it runs with no charger armed and in limited/readonly
-// mode; and its exit half is latency-sensitive (a cleared debt left unnoticed
-// keeps a customer who paid blocked from spending), so it runs on a tighter
-// cadence than collection.
+// DelinquencyWorker evaluates the payers whose delinquency time alone changed
+// (customer_delinquency.next_evaluation_at): a usage order fell due or a grace
+// window ran out. A change to a usage order evaluates its payer inline. It
+// moves no money and calls no provider, so it runs with no charger armed and
+// in limited or readonly mode. A failed evaluation stays due and fails the
+// pass once the others are done.
 type DelinquencyWorker struct {
 	WorkerDefaults[DelinquencyArgs]
 	DB    *db.DB
@@ -57,57 +57,33 @@ func (w DelinquencyWorker) now() time.Time {
 }
 
 func (w DelinquencyWorker) Work(ctx context.Context, _ *river.Job[DelinquencyArgs]) error {
-	logger := log.WithContext(ctx).WithField("worker", KindDelinquency)
 	if w.DB == nil {
-		logger.Debug("db not configured; skipping delinquency evaluation")
 		return nil
 	}
-	now := w.now()
-
-	// GenDirectory: the work queue is the one cross-merchant read here, and it
-	// returns ids only.
-	merchantIDs, err := w.DB.GenDirectory().ListDelinquencyWorkMerchants(ctx, gen.ListDelinquencyWorkMerchantsParams{
-		Now: now, MerchantLimit: delinquencyMerchantBatch,
-	})
-	if err != nil {
-		return fmt.Errorf("list merchants with delinquency work: %w", err)
-	}
-	if len(merchantIDs) == 0 {
-		logger.Debug("Delinquency: no merchant has overdue or parked receivables")
-		return nil
-	}
-
+	logger := log.WithContext(ctx).WithField("worker", KindDelinquency)
 	svc := delinquency.NewService(w.DB, w.Clock)
-	evaluated, transitions := 0, 0
-	var workErr error
-	for _, mid := range merchantIDs {
-		merchantID := billing.MerchantID(mid)
-		if err := w.DB.RunInMerchantScope(ctx, merchantID, "delinquency evaluation", func(mctx context.Context) error {
-			res, err := svc.Evaluate(mctx, now)
-			evaluated += res.Evaluated
-			transitions += len(res.Transitions)
-			for _, t := range res.Transitions {
-				// One line per transition, because this is the decision an
-				// operator will be asked to explain: why this customer, when,
-				// and in which direction.
-				log.WithContext(mctx).WithFields(log.Fields{
-					"merchant_id": merchantID.String(),
-					"customer_id": t.CustomerID.String(),
-					"currency":    t.Currency,
-					"from_state":  t.From.String(),
-					"to_state":    t.To.String(),
-				}).Info("Delinquency: state transition recorded and signalled to the host")
-			}
-			return err
-		}); err != nil {
-			// One merchant's failure never stops the others; the job reports them all.
-			workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", merchantID, err))
+	args := gen.ListDueDelinquencyParams{Now: w.now(), RowLimit: delinquencyBatch}
+	var failed error
+	for {
+		due, err := w.DB.GenDirectory().ListDueDelinquency(ctx, args)
+		if err != nil {
+			return errors.Join(failed, fmt.Errorf("list due delinquency: %w", err))
 		}
+		for _, row := range due {
+			err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "delinquency evaluation", func(ctx context.Context) error {
+				_, _, err := svc.Evaluate(ctx, row.CustomerID, row.Currency)
+				return err
+			})
+			if err != nil {
+				logger.WithError(err).WithFields(log.Fields{"merchant_id": row.MerchantID, "customer_id": row.CustomerID, "currency": row.Currency}).
+					Error("delinquency: evaluation failed; continuing")
+				failed = errors.Join(failed, fmt.Errorf("delinquency: merchant %s customer %s %s: %w", row.MerchantID, row.CustomerID, row.Currency, err))
+			}
+		}
+		if len(due) < delinquencyBatch {
+			return failed
+		}
+		last := due[len(due)-1]
+		args.AfterAt, args.AfterMerchantID, args.AfterCustomerID, args.AfterCurrency = &last.NextEvaluationAt, &last.MerchantID, &last.CustomerID, &last.Currency
 	}
-	if transitions > 0 {
-		logger.WithFields(log.Fields{
-			"merchants": len(merchantIDs), "evaluated": evaluated, "transitions": transitions,
-		}).Info("Delinquency evaluation pass complete")
-	}
-	return workErr
 }

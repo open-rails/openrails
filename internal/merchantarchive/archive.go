@@ -284,6 +284,14 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		if err := q.RebuildBalanceWatches(ctx, gen.RebuildBalanceWatchesParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err
 		}
+		// Every payer with an open usage order, in grace or delinquent, is
+		// evaluated again at once.
+		if err := q.RebuildDelinquencyDue(ctx, gen.RebuildDelinquencyDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
+			return err
+		}
+		if err := q.MarkDelinquencyDue(ctx, gen.MarkDelinquencyDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
+			return err
+		}
 		if err := landReadonly(ctx, q, id, restoreNow); err != nil {
 			return err
 		}

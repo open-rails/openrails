@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 230,
+  "scenario_count": 232,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1152,6 +1152,16 @@
       "id": "OR-J29-S40",
       "journey": "J29",
       "name": "Retention cleanup continues past a full batch of merchants in a new job and reaches every merchant"
+    },
+    {
+      "id": "OR-J26-S50",
+      "journey": "J26",
+      "name": "Paying, waiving or writing off a usage order clears its customer's delinquency in the same change"
+    },
+    {
+      "id": "OR-J26-S51",
+      "journey": "J26",
+      "name": "An overdue usage order is told once without automatic usage billing"
     }
   ]
 }
