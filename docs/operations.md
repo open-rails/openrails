@@ -1078,7 +1078,7 @@ Row retention:
 | Table | Deleted |
 |---|---|
 | `subscription_status_transitions` | 25 months (761 days) after `occurred_at` |
-| `provider_intents` | finished intents that only instructed a provider (subscription cancel, payment-method and source update, card vault, network token, account-updater batch), 25 months after they last changed |
+| `provider_intents` | finished intents that only instructed a provider (subscription cancel, payment-method and source update, card vault, network token, account-updater request), 25 months after they last changed |
 | `provider_mutation_logs` | 25 months after `created_at` |
 | `reconciliation_findings` | resolved findings, 12 months (366 days) after they were resolved and last seen |
 | `maintenance_runs` | reconciliation runs no finding names, 12 months after they started; every other kind is permanent |
@@ -1206,7 +1206,7 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 | Price-migration re-driver | 1 h |
 | Admission-denial flush (closed hours); attempt enrichment; due daily NMI history read; expired-data cleanup; idempotency cleanup; credit expiry; Solana crank; Solana Pay reference GC; Stripe webhook reconciliation | 1 h |
 | Provider refresh scheduler (fans out per merchant) | 2 h |
-| Account updater batch | 6 h |
+| Stored card refresh ahead of renewal | 6 h |
 | Solana gas alert; Solana ledger reconciliation | 6 h |
 | Catalog reconciliation pull (alert only) | `catalog_reconciliation_interval` (default 1 h; `0` disables) |
 | Ledger integrity audit | 24 h |

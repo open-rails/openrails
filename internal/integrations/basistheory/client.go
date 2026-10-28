@@ -14,8 +14,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
 const (
@@ -38,7 +36,7 @@ const (
 var ErrProviderReadOnly = errors.New("basistheory: provider writes are blocked (mode=readonly)")
 
 // Config builds a Client. APIKey is the PRIVATE application key (permissions:
-// proxy:invoke, token*, token-intent*, network-token*, account-updater:job:*).
+// proxy:invoke, token*, token-intent*, network-token*, account-updater:real-time:invoke).
 // The public application key is payment-page config, never used here; the
 // management key is operator-only and never stored in the engine.
 type Config struct {
@@ -48,10 +46,6 @@ type Config struct {
 	ReadOnly      bool
 	Timeout       time.Duration     // <= 0 = DefaultTimeout
 	Transport     http.RoundTripper // test seam under the guard; nil = default
-	// Outbound governs PROVIDER-SUPPLIED urls (the account-updater job's
-	// upload_url / download_url). The zero value is the strict production
-	// policy; tests pass httpx.Policy{Allow: httpx.AllowLoopback}.
-	Outbound httpx.Policy
 }
 
 type Client struct {
@@ -61,7 +55,6 @@ type Client struct {
 	readOnly      bool
 	httpClient    *http.Client
 	verifier      *WebhookVerifier
-	outbound      httpx.Policy
 }
 
 func New(cfg Config) (*Client, error) {
@@ -91,7 +84,6 @@ func New(cfg Config) (*Client, error) {
 			Transport:     &guardTransport{readOnly: cfg.ReadOnly, base: cfg.Transport},
 		},
 		verifier: NewWebhookVerifier(keyURL),
-		outbound: cfg.Outbound,
 	}, nil
 }
 

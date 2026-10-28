@@ -17,7 +17,7 @@ type Settings struct {
 	ProfileID string
 	// NetworkTokens arms network-token provisioning at instrument creation.
 	NetworkTokens bool
-	// AccountUpdater arms the batch account-updater cycle (or#795).
+	// AccountUpdater arms the real-time Account Updater.
 	AccountUpdater bool
 	// AccountUpdaterLookaheadDays is how far ahead of a renewal an instrument
 	// is refreshed, and (deliberately the same number) how long a refresh

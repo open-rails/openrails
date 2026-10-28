@@ -215,6 +215,8 @@ The operator-managed KV document at the path above has this shape:
 ```json
 {
   "api_key": "<private platform application key>",
+  "account_updater": false,
+  "account_updater_lookahead_days": 14,
   "collection_applications": {
     "<merchant UUID>": {
       "id": "<public collection application UUID>",
@@ -302,7 +304,7 @@ merchants:
         account_id: <BT tenant id>     # the custodian-native tenant identity
         public_api_key: <BT public application key>   # payment-page config
         network_tokens: false
-        account_updater: false                        # batch account updater add-on
+        account_updater: false                        # real-time Account Updater add-on
         account_updater_lookahead_days: 14            # optional; default 14
         secrets:
           api_key: <BT private application key>         # the only custodial secret
@@ -333,18 +335,30 @@ Consequences, all enforced rather than documented:
   `psps/<rail>/<environment>/<account_id>/<key>` already has — and they are read
   through the same rotation version floor (`custodians.credential_versions`), so a
   rotated custodial key cuts over on every node at once.
-* `account_updater` arms the **batch account updater**: a periodic worker that,
-  ahead of each renewal, asks the custodian to refresh the cards backing
-  subscriptions due inside `account_updater_lookahead_days` (default 14, and
-  also how long a refresh stays fresh — a card is looked up once per cycle).
+* `account_updater` arms Basis Theory's **real-time Account Updater** for the
+  Visa and Mastercard cards this vault holds. NMI charges the vault's own card
+  number, so the vault must be asked whether a card was reissued; a PSP or
+  HyperSwitch updates its cards in place. One card is refreshed at a time:
+  * ahead of a renewal: a pass every 6 hours queues each card that pays an
+    `active`, `past_due` or `awaiting_method` subscription renewing inside
+    `account_updater_lookahead_days` (default 14) and was not checked inside
+    that window, so a card is looked up once per cycle;
+  * after a renewal declined as an expired or reissued card. If no new card is
+    found, or the request is refused, the customer is asked for one. A
+    declined card any other holder keeps asks the customer at once.
+
   Results are applied as card versions, through the same writer the
   custodian's webhooks use: a reissue gives the same payment method the new
-  token and card and clears any park; another brand holds its mandates for the
-  customer's consent; a closed account closes it; a "contact cardholder" answer
-  prompts the customer, or closes a Mastercard card. Nothing is ever deleted or
-  canceled.
-  Both settings are off/default until declared — the updater is a priced add-on,
-  and an unarmed custodian is never enumerated by the worker at all.
+  token and card, clears any park and retries the subscriptions waiting on it;
+  another brand holds its mandates for the customer's consent; a closed account
+  closes it; a "contact cardholder" answer prompts the customer, or closes a
+  Mastercard card. Nothing is ever deleted or canceled. Each request is a
+  provider intent whose id is Basis Theory's idempotency key.
+  Both settings are off/default until declared — the updater is a priced
+  add-on, and an unarmed vault's cards are never refreshed. The private
+  application key needs `account-updater:real-time:invoke`. For the platform
+  vault the operator sets `account_updater` and
+  `account_updater_lookahead_days` in its credential document.
 * The retired inline keys (`settings.custodian_account_id`,
   `custodian_public_api_key`, `custodian_network_tokens`, the
   `custodian_api_key` secret) and the retired `vaulted_card` keys

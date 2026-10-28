@@ -44,7 +44,8 @@ func (s *Service) BasisTheoryCustodianConfig(ctx context.Context, id billing.Mer
 	if c.Environment == config.ClassTest {
 		base = "https://api.test.basistheory.com"
 	}
-	return &config.ResolvedCustodian{Key: c.Key, Custodian: c.Kind, Environment: c.Environment, AccountID: c.AccountID, APIKey: c.Secret(custodians.SecretAPIKey), PublicAPIKey: settings.PublicAPIKey, APIBaseURL: base}, nil
+	return &config.ResolvedCustodian{Key: c.Key, Custodian: c.Kind, Environment: c.Environment, AccountID: c.AccountID, APIKey: c.Secret(custodians.SecretAPIKey), PublicAPIKey: settings.PublicAPIKey, APIBaseURL: base,
+		AccountUpdater: settings.AccountUpdater, AccountUpdaterLookaheadDays: settings.LookaheadDays()}, nil
 }
 
 // PlatformCardCustodian is the platform vault holding new cards when the
@@ -95,8 +96,12 @@ func (s *Service) PlatformCustodianConfig(ctx context.Context, id billing.Mercha
 		return nil, ErrPlatformVaultUnavailable
 	}
 	var keys struct {
-		APIKey                 string `json:"api_key"`
-		CollectionApplications map[string]struct {
+		APIKey string `json:"api_key"`
+		// AccountUpdater arms the real-time Account Updater for every
+		// merchant's cards in this vault, as a custodian's own setting does.
+		AccountUpdater              bool `json:"account_updater"`
+		AccountUpdaterLookaheadDays int  `json:"account_updater_lookahead_days"`
+		CollectionApplications      map[string]struct {
 			ID           string `json:"id"`
 			PublicAPIKey string `json:"public_api_key"`
 		} `json:"collection_applications"`
@@ -108,6 +113,10 @@ func (s *Service) PlatformCustodianConfig(ctx context.Context, id billing.Mercha
 	if !ok || strings.TrimSpace(keys.APIKey) == "" || strings.TrimSpace(app.PublicAPIKey) == "" || app.PublicAPIKey == keys.APIKey {
 		return nil, ErrPlatformVaultUnavailable
 	}
+	if keys.AccountUpdaterLookaheadDays < 0 || keys.AccountUpdaterLookaheadDays > custodians.MaxAccountUpdaterLookaheadDays {
+		return nil, errors.New("platform vault account_updater_lookahead_days is out of range")
+	}
+	lookahead := custodians.Settings{AccountUpdaterLookaheadDays: keys.AccountUpdaterLookaheadDays}.LookaheadDays()
 	applicationID, err := uuid.Parse(app.ID)
 	if err != nil || applicationID == uuid.Nil {
 		return nil, errors.New("platform vault collection application id is invalid")
@@ -126,5 +135,6 @@ func (s *Service) PlatformCustodianConfig(ctx context.Context, id billing.Mercha
 		Environment: c.Environment,
 		APIBaseURL:  base,
 		AccountID:   s.platformVault.TenantID, APIKey: keys.APIKey, PublicAPIKey: app.PublicAPIKey,
-		CollectionApplicationID: applicationID.String(), Container: "/merchants/" + id.UUID().String() + "/"}, nil
+		CollectionApplicationID: applicationID.String(), Container: "/merchants/" + id.UUID().String() + "/",
+		AccountUpdater: keys.AccountUpdater, AccountUpdaterLookaheadDays: lookahead}, nil
 }

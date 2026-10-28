@@ -607,8 +607,8 @@ type ResolvedCustodian struct {
 	// NetworkTokens arms NT provisioning on instrument creation (never
 	// load-bearing; charge routing stays pan_proxy on NMI gateways).
 	NetworkTokens bool
-	// AccountUpdater arms the batch account-updater cycle (or#795 — the
-	// contracted add-on that refreshes the FPAN we actually charge).
+	// AccountUpdater arms the real-time Account Updater, the priced add-on
+	// that refreshes the card number charged through NMI.
 	AccountUpdater bool
 	// AccountUpdaterLookaheadDays is how far ahead of a renewal an instrument
 	// is refreshed, and the same window it then stays fresh for.

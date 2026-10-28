@@ -147,5 +147,5 @@ var OutboxIntentTypes = []string{
 	"stripe_archive_price",
 	"stripe_archive_product",
 	"solana_sunset_plan",
-	"bt_account_updater_batch",
+	"account_updater",
 }

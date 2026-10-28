@@ -59,6 +59,10 @@ type SubscriptionLifecycleService struct {
 	// lifecycle ends (QueueProviderCancel). Injected in the composition root;
 	// when nil a terminal outcome cannot stop the provider schedule.
 	providerCancel ProviderCancelScheduler
+
+	// accountUpdaters names the cards whose holder is asked for a new card
+	// after a decline; nil asks every customer at once.
+	accountUpdaters paymentmethods.AccountUpdaters
 }
 
 type lifecycleEntitlementService interface {
@@ -138,6 +142,31 @@ func (s *SubscriptionLifecycleService) Clock() clockwork.Clock {
 // SetConfig sets the config for feature flag access
 func (s *SubscriptionLifecycleService) SetConfig(cfg *config.Config) {
 	s.Config = cfg
+}
+
+// SetAccountUpdaters injects the holders a declined card is refreshed from.
+func (s *SubscriptionLifecycleService) SetAccountUpdaters(u paymentmethods.AccountUpdaters) {
+	s.accountUpdaters = u
+}
+
+// declinedCardRefresh is the refresh a card declined as expired or reissued
+// gets first, when its holder must be asked (an armed vault); every other
+// holder already charged its current card. A holder that cannot be resolved
+// now is refreshed: the job asks if it stays so.
+func (s *SubscriptionLifecycleService) declinedCardRefresh(ctx context.Context, d *db.DB, merchantID, methodID uuid.UUID, chargedRef string) (paymentmethods.StoredCardRefreshArgs, bool) {
+	if s.accountUpdaters == nil {
+		return paymentmethods.StoredCardRefreshArgs{}, false
+	}
+	method, err := d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: merchantID, ID: methodID})
+	if err != nil {
+		return paymentmethods.StoredCardRefreshArgs{}, false
+	}
+	_, ok, err := s.accountUpdaters.AccountUpdater(ctx, method)
+	if err != nil {
+		log.WithContext(ctx).WithError(err).WithField("payment_method_id", methodID).Warn("declined card: holder unresolved; refreshing")
+		ok = models.BasisTheoryCustody(method.Custodian)
+	}
+	return paymentmethods.StoredCardRefreshFor(method, true, chargedRef), ok
 }
 
 // SetProviderCancelScheduler injects the provider-cancel scheduler.
@@ -2276,23 +2305,28 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			eventType = models.NotificationPaymentMethodUpdateRequired
 		}
 
-		// A decline that says the card was reissued also reads the holder:
-		// an updater may already hold the new card.
+		// A decline that says the card was reissued first asks a holder that
+		// must be asked (a vault charged by its own number) for the new card.
+		// Every other holder charged its current card, so its customer is
+		// asked now.
 		charged, err := PaymentMethodOf(ctx, db.Gen(ctx), subscription)
 		if err != nil {
 			return err
 		}
-		readCard := needsPaymentMethodUpdate && charged != nil &&
+		var args paymentmethods.StoredCardRefreshArgs
+		refresh := needsPaymentMethodUpdate && charged != nil &&
 			(decline.HolderMayHoldNewCard(billing.DeclineReason(data.FailureReason)) ||
 				decline.HolderMayHoldNewCard(billing.DeclineReason(decline.ReasonFor(string(subscription.Rail), data.FailureCode))))
-		if readCard {
-			args := paymentmethods.CardRefreshArgs{MerchantID: subscription.MerchantID, PaymentMethodID: *charged}
+		if refresh {
+			args, refresh = s.declinedCardRefresh(ctx, db, subscription.MerchantID, *charged, params.DeclinedMethodRef)
+		}
+		if refresh {
 			opts := args.InsertOpts()
 			if err := s.DB.InsertRiverJobTx(ctx, tx, args, &opts); err != nil {
-				return fmt.Errorf("queue declined card read: %w", err)
+				return fmt.Errorf("queue declined card refresh: %w", err)
 			}
-			// The decline is real, but the updater may already have a repaired
-			// card. Record the failure without declaring a customer fix required.
+			// The decline is real, but the holder may have a reissued card.
+			// Record the failure without declaring a customer fix required.
 			eventType = models.NotificationPaymentMethodFailed
 			data.RetryStatus, data.RecoveryAction = billing.NotificationRetryUnknown, billing.NotificationRecoveryUpdatePaymentMethod
 			data.NextAttemptAt = nil

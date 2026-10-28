@@ -57,7 +57,6 @@ var Tables = map[string]Table{
 	"price_key_movements":           {Permanent, permanent},
 	"price_migrations":              {Permanent, permanent},
 	"scheduled_changes":             {Permanent, permanent},
-	"account_updater_batches":       {Permanent, permanent},
 	"admission_denials_hourly":      {Permanent, permanent},
 	"webhook_health_daily":          {Permanent, permanent},
 

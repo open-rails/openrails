@@ -177,8 +177,10 @@ non-retryable unsupported-event error in webhook health.
   for another card and are never canceled. A contact-customer notice prompts
   the member, except on a Mastercard card, where it means a closed account.
 - A renewal declined as an expired or reissued card (`expired_card`,
-  `update_cardholder_data`) reads the vault once before the member is asked:
-  a newer card there is adopted and the renewal retries.
+  `update_cardholder_data`) asks the member for a new card: the charge already
+  used the vault's current card, and ACU updates arrive as the notices above.
+  A card a Basis Theory vault holds is first refreshed through its Account
+  Updater (see [payment method custody](../payment-method-custody.md)).
 
 Subscription-state events are treated as wake-up signals only: OpenRails marks
 the subscription dirty and converges from freshly *fetched* gateway truth, so a

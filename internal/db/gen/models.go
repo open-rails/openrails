@@ -22,25 +22,6 @@ type BillingAccessCutoverApproval struct {
 	ApprovedAt  time.Time
 }
 
-// One batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim. Retention: permanent, never pruned.
-type BillingAccountUpdaterBatch struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	CustodianID uuid.UUID
-	// The custodian-native job id (Basis Theory account-updater job). NULL until the create call is confirmed.
-	JobRef *string
-	// pending = assembled, not yet confirmed at the custodian | submitted = the custodian owns it, poll for results | completed = results folded | failed = abandoned (the instruments become due again; nothing is parked on our own malfunction).
-	Status        string
-	Instruments   []byte
-	ResultCounts  []byte
-	FailureReason *string
-	SubmittedAt   *time.Time
-	LastPolledAt  *time.Time
-	CompletedAt   *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-}
-
 // Hourly admission-denial aggregates (merchant x payer x reason), flushed periodically from Redis counters — the hot path never writes PG per-request. Retention: permanent, never pruned.
 type BillingAdmissionDenialsHourly struct {
 	MerchantID   uuid.UUID
@@ -1134,7 +1115,7 @@ type BillingPaymentMethod struct {
 	ParkReason *string
 	// When the instrument was parked; NULL when it is not.
 	ParkedAt *time.Time
-	// When the instrument was last submitted to an account-updater batch; NULL when never.
+	// When the card's vault last answered an account-updater request for it; NULL when never.
 	AccountUpdaterCheckedAt *time.Time
 	CreatedAt               time.Time
 	UpdatedAt               time.Time

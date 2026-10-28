@@ -152,11 +152,13 @@ type CancelMembershipParams struct {
 type FailMembershipParams struct {
 	// Prepared preserves the accepted engine charge cadence for retry policy.
 	// Native provider failures leave this nil.
-	Prepared       *RenewalTerms
-	Rail           models.Rail
-	SubscriptionID *uuid.UUID
-	FailureReason  *string
-	FailureCode    *string
+	Prepared *RenewalTerms
+	// DeclinedMethodRef is the stored card handle the declined charge used.
+	DeclinedMethodRef string
+	Rail              models.Rail
+	SubscriptionID    *uuid.UUID
+	FailureReason     *string
+	FailureCode       *string
 	// FailureID is the durable identity of the provider attempt or intent. A
 	// replay keeps the same notification; distinct retries use distinct IDs.
 	FailureID uuid.UUID

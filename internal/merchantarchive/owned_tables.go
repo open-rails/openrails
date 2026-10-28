@@ -9,7 +9,6 @@ var ownedTables = []string{
 	"eventlog_migrations",
 	"user_destructive_reservations",
 	"access_cutover_approvals",
-	"account_updater_batches",
 	"admission_denials_hourly",
 	"admission_operations",
 	"balance_watches",

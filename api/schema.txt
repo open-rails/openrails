@@ -116,8 +116,7 @@ migration 0114_account_usage_billing.up.sql sha256:1b818744089d9dc86b08b384be861
 migration 0115_notification_issue_revisions.up.sql sha256:f720b146566426f56c3b85c5051b07ede1283b9e3e06ca5f1395703e2673a3bd
 migration 0116_remove_hosted_account_state.up.sql sha256:8dc46947ff04dd7bd60c6a71fd2b6c059e0d60ec2298577f0fe4237bef303dde
 migration 0117_ledger_audit_at_restore_commit.up.sql sha256:aed275cb883723e3396ff19688e712bd2b3814dcae8c201d9ef2598ab5aadbf2
-migration 0118_unenriched_attempts_index.up.sql sha256:bb64557d14e0a642a7461232b48eaab4ff28b9512dcb7252bbd6eedb598fd450
-migration 0119_periodic_leases_per_kind.up.sql sha256:248bbce419d2fa93e230ef1c272459b14fe834792dd87359f0a0e28f405c6937
+migration 0118_stored_card_refresh.up.sql sha256:b353eacbebdd5f91567f663d063defd1fdd36f8bc73d45fba2edca2e6f4856ca
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -134,32 +133,6 @@ table billing.access_cutover_approvals
   constraint access_cutover_approvals_pkey PRIMARY KEY (merchant_id, id)
   index CREATE UNIQUE INDEX access_cutover_approvals_key ON billing.access_cutover_approvals USING btree (merchant_id, customer_id, entitlement, change)
   index CREATE UNIQUE INDEX access_cutover_approvals_pkey ON billing.access_cutover_approvals USING btree (merchant_id, id)
-
-table billing.account_updater_batches
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column merchant_id uuid NOT NULL
-  column custodian_id uuid NOT NULL
-  column job_ref text
-  column status text NOT NULL DEFAULT 'pending'::text
-  column instruments jsonb NOT NULL
-  column result_counts jsonb NOT NULL DEFAULT '{}'::jsonb
-  column failure_reason text
-  column submitted_at timestamp with time zone
-  column last_polled_at timestamp with time zone
-  column completed_at timestamp with time zone
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint account_updater_batches_custodian_id_fkey FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT
-  constraint account_updater_batches_failure_reason_check CHECK ((failure_reason <> ''::text))
-  constraint account_updater_batches_job_ref_check CHECK ((btrim(job_ref) <> ''::text))
-  constraint account_updater_batches_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint account_updater_batches_pkey PRIMARY KEY (merchant_id, id)
-  constraint account_updater_batches_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'submitted'::text, 'completed'::text, 'failed'::text])))
-  constraint account_updater_batches_submitted_has_job_check CHECK (((status <> 'submitted'::text) OR (job_ref IS NOT NULL)))
-  index CREATE UNIQUE INDEX account_updater_batches_custodian_id_job_ref_key ON billing.account_updater_batches USING btree (merchant_id, custodian_id, job_ref) WHERE (job_ref IS NOT NULL)
-  index CREATE UNIQUE INDEX account_updater_batches_custodian_id_key ON billing.account_updater_batches USING btree (merchant_id, custodian_id) WHERE (status = ANY (ARRAY['pending'::text, 'submitted'::text]))
-  index CREATE UNIQUE INDEX account_updater_batches_pkey ON billing.account_updater_batches USING btree (merchant_id, id)
-  index CREATE INDEX account_updater_batches_status_created_at_idx ON billing.account_updater_batches USING btree (merchant_id, status, created_at)
 
 table billing.admission_denials_hourly
   column merchant_id uuid NOT NULL
@@ -1567,7 +1540,6 @@ table billing.payment_attempts
   constraint payment_attempts_source_check CHECK ((source = ANY (ARRAY['openrails'::text, 'provider_schedule'::text, 'external'::text])))
   constraint payment_attempts_text_check CHECK ((length(response_text) <= 128))
   constraint payment_attempts_token_type_check CHECK ((token_type = ANY (ARRAY['network_token'::text, 'pan_via_proxy'::text, 'psp_token'::text])))
-  index CREATE INDEX payment_attempts_attempted_at_merchant_id_unenriched_idx ON billing.payment_attempts USING btree (attempted_at, merchant_id) WHERE ((enriched_at IS NULL) AND (rail = 'nmi'::text) AND (transaction_id IS NOT NULL))
   index CREATE INDEX payment_attempts_attempted_at_time_idx ON billing.payment_attempts USING btree (merchant_id, attempted_at)
   index CREATE INDEX payment_attempts_attempted_at_unenriched_idx ON billing.payment_attempts USING btree (merchant_id, attempted_at) WHERE ((enriched_at IS NULL) AND (rail = 'nmi'::text) AND (transaction_id IS NOT NULL))
   index CREATE INDEX payment_attempts_customer_id_purchase_target_attempted_at_idx ON billing.payment_attempts USING btree (merchant_id, customer_id, purchase_target, attempted_at) WHERE (purchase_target IS NOT NULL)
@@ -1689,7 +1661,7 @@ table billing.payment_methods
   constraint payment_methods_replaced_by_id_fkey FOREIGN KEY (merchant_id, customer_id, replaced_by_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id)
   constraint payment_methods_setup_ref_check CHECK ((((status = 'requires_action'::text) = (setup_ref IS NOT NULL)) AND (setup_ref <> ''::text)))
   constraint payment_methods_status_check CHECK ((status = ANY (ARRAY['requires_action'::text, 'active'::text, 'closed'::text, 'replaced'::text, 'removed'::text])))
-  index CREATE INDEX payment_methods_custodian_account_updater_checked_at_idx ON billing.payment_methods USING btree (merchant_id, custodian, account_updater_checked_at NULLS FIRST) WHERE ((custodian <> 'psp'::text) AND (rail_method_ref IS NOT NULL))
+  index CREATE INDEX payment_methods_account_updater_due_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, account_updater_checked_at NULLS FIRST) WHERE ((custodian = ANY (ARRAY['basis_theory'::text, 'platform'::text])) AND (status = 'active'::text) AND (rail_method_ref IS NOT NULL))
   index CREATE INDEX payment_methods_custodian_id_network_token_id_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id IS NOT NULL))
   index CREATE INDEX payment_methods_custodian_id_rail_method_ref_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, rail_method_ref) WHERE (custodian <> 'psp'::text)
   index CREATE INDEX payment_methods_customer_id_created_at_id_idx ON billing.payment_methods USING btree (merchant_id, customer_id, created_at DESC, id DESC)
@@ -1788,13 +1760,15 @@ table billing.payments
 
 table billing.periodic_leases
   column kind text NOT NULL
+  column merchant_set text NOT NULL
   column holder text NOT NULL
   column expires_at timestamp with time zone NOT NULL
   column claimed_at timestamp with time zone NOT NULL DEFAULT now()
   constraint periodic_leases_holder_check CHECK ((holder <> ''::text))
   constraint periodic_leases_kind_check CHECK ((kind <> ''::text))
-  constraint periodic_leases_pkey PRIMARY KEY (kind)
-  index CREATE UNIQUE INDEX periodic_leases_pkey ON billing.periodic_leases USING btree (kind)
+  constraint periodic_leases_merchant_set_check CHECK ((merchant_set <> ''::text))
+  constraint periodic_leases_pkey PRIMARY KEY (kind, merchant_set)
+  index CREATE UNIQUE INDEX periodic_leases_pkey ON billing.periodic_leases USING btree (kind, merchant_set)
 
 table billing.price_key_movements
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2190,7 +2164,7 @@ table billing.provider_intents
   index CREATE INDEX provider_intents_subscription_id_idx ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)
   index CREATE UNIQUE INDEX provider_intents_subscription_id_open_manual_rebill_key ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE ((intent_type = 'manual_rebill'::text) AND (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text])))
   index CREATE UNIQUE INDEX provider_intents_subscription_id_tier_change_subscription_key ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE ((intent_type = ANY (ARRAY['nmi_upgrade'::text, 'stripe_tier_change'::text, 'initial_membership'::text])) AND (subscription_id IS NOT NULL) AND (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text])))
-  index CREATE INDEX provider_intents_updated_at_idx ON billing.provider_intents USING btree (merchant_id, updated_at) WHERE ((status = ANY (ARRAY['succeeded'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text])) AND (destructive_run_id IS NULL) AND (intent_type = ANY (ARRAY['nmi_delete_subscription'::text, 'stripe_cancel_subscription'::text, 'ccbill_cancel_subscription'::text, 'nmi_payment_method_update'::text, 'nmi_payment_source_update'::text, 'nmi_card_vault'::text, 'network_token'::text, 'stripe_archive_price'::text, 'stripe_archive_product'::text, 'solana_sunset_plan'::text, 'bt_account_updater_batch'::text])))
+  index CREATE INDEX provider_intents_updated_at_idx ON billing.provider_intents USING btree (merchant_id, updated_at) WHERE ((status = ANY (ARRAY['succeeded'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text])) AND (destructive_run_id IS NULL) AND (intent_type = ANY (ARRAY['nmi_delete_subscription'::text, 'stripe_cancel_subscription'::text, 'ccbill_cancel_subscription'::text, 'nmi_payment_method_update'::text, 'nmi_payment_source_update'::text, 'nmi_card_vault'::text, 'network_token'::text, 'stripe_archive_price'::text, 'stripe_archive_product'::text, 'solana_sunset_plan'::text, 'account_updater'::text])))
 
 table billing.provider_mutation_logs
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3675,7 +3649,6 @@ function billing.guard_billing_restore_receipt()
                 -- (former names, host claims); a test keeps this list complete.
                 AND c.relname = ANY(ARRAY[
                     'access_cutover_approvals',
-                    'account_updater_batches',
                     'admission_denials_hourly',
                     'admission_operations',
                     'balance_watches',

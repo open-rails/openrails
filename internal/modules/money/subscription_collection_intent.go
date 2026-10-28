@@ -421,6 +421,10 @@ func (h *SubscriptionCollectionHandler) completeEvidence(ctx context.Context, in
 func (h *SubscriptionCollectionHandler) lifecycle(d *db.DB) *subscriptions.SubscriptionLifecycleService {
 	lc := subscriptions.NewSubscriptionLifecycleService(d, nil, nil, nil, nil, payments.NewPaymentService(d, h.Clock), h.Clock)
 	lc.SetConfig(h.Config)
+	// A renewal declined as an expired card a vault holds refreshes it first.
+	if updaters, ok := h.Resolver.(paymentmethods.AccountUpdaters); ok {
+		lc.SetAccountUpdaters(updaters)
+	}
 	return lc
 }
 func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, outcome intents.Outcome, apply func(context.Context, *db.DB, *models.Subscription) error) intents.Outcome {
@@ -557,7 +561,7 @@ func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in 
 			if gate := destructive.New(d).Check(ctx, in.MerchantID); !gate.Allowed {
 				blocked = gate.Reason
 			}
-			return h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Prepared: &p.Renewal, Rail: models.Rail(in.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureID: in.ID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
+			return h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Prepared: &p.Renewal, DeclinedMethodRef: p.Instrument.RailMethodRef, Rail: models.Rail(in.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureID: in.ID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
 		}
 		return nil
 	})

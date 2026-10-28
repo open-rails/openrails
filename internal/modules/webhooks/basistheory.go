@@ -66,7 +66,7 @@ func mapBasisTheoryEventType(t string) WebhookEventType {
 	switch t {
 	case basistheory.EventTokenUpdated, basistheory.EventNetworkTokenUpdated,
 		basistheory.EventTokenDeleted, basistheory.EventTokenExpired,
-		basistheory.EventNetworkTokenDeleted, basistheory.EventAccountUpdaterJobCompleted:
+		basistheory.EventNetworkTokenDeleted:
 		return WebhookEventCustomerUpdated
 	default:
 		return WebhookEventUnknown
@@ -152,8 +152,6 @@ func (s *basisTheoryWebhookService) apply(ctx context.Context, evt basistheory.E
 		return s.foldNetworkTokenStatus(ctx, evt, "")
 	case basistheory.EventNetworkTokenDeleted:
 		return s.foldNetworkTokenStatus(ctx, evt, basistheory.NetworkTokenDeleted)
-	case basistheory.EventAccountUpdaterJobCompleted:
-		return s.foldAccountUpdaterJob(ctx, evt)
 	default:
 		log.WithContext(ctx).Debug("basistheory webhook: unhandled event type")
 		return nil
@@ -295,132 +293,6 @@ func (s *basisTheoryWebhookService) foldNetworkTokenStatus(ctx context.Context, 
 	return nil
 }
 
-// foldAccountUpdaterJob fetches the completed job's result CSV and folds it
-// through FoldAccountUpdaterResults. Work scales with the job's rows, never all
-// instruments.
-func (s *basisTheoryWebhookService) foldAccountUpdaterJob(ctx context.Context, evt basistheory.Event) error {
-	var data basistheory.AccountUpdaterJobEventData
-	if err := json.Unmarshal(evt.Data, &data); err != nil {
-		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory account-updater event unparseable: %w", err))
-	}
-	jobID := strings.TrimSpace(data.Job.ID)
-	if jobID == "" {
-		jobID = strings.TrimSpace(data.ID)
-	}
-	if jobID == "" {
-		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory account-updater.job.completed carries no job id"))
-	}
-	client, err := s.btClient(ctx)
-	if err != nil {
-		return err
-	}
-	job, err := client.GetAccountUpdaterJob(ctx, jobID)
-	if err != nil {
-		return fmt.Errorf("basistheory account updater: fetch job %s: %w", jobID, err)
-	}
-	if strings.TrimSpace(job.DownloadURL) == "" {
-		return fmt.Errorf("basistheory account updater job %s completed without a download_url", jobID)
-	}
-	rows, err := client.DownloadAccountUpdaterResults(ctx, job.DownloadURL)
-	if err != nil {
-		return fmt.Errorf("basistheory account updater: results for job %s: %w", jobID, err)
-	}
-	stats, err := FoldAccountUpdaterResults(ctx, s.d.DB, s.d.SubscriptionLifecycleService, jobID, rows, s.now())
-	if err != nil {
-		return err
-	}
-	// The batch runner may hold a durable row for the same job. Whoever ingests
-	// first closes it; the other finds nothing open and re-submits nothing.
-	return CloseAccountUpdaterBatch(ctx, s.gen(ctx), jobID, stats)
-}
-
-// FoldAccountUpdaterRows applies parsed AU result rows. Exported for the
-// integration test to drive the fold without a live BT job.
-func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, jobRef string, rows []basistheory.AccountUpdaterResultRow) error {
-	_, err := FoldAccountUpdaterResults(ctx, s.d.DB, s.d.SubscriptionLifecycleService, jobRef, rows, s.now())
-	return err
-}
-
-// AccountUpdaterFoldStats reports what one fold did. ResultCounts holds the
-// verbatim wire codes, including unrecognized ones, and is what the durable
-// batch row records.
-type AccountUpdaterFoldStats struct {
-	Rows int
-	// Adopted: instruments the network refreshed (cards recovered before dunning).
-	Adopted int
-	Rotated int
-	// Closed and Contacted: cards the issuer closed, and cards whose issuer
-	// asks for the cardholder; both wait on the customer.
-	Closed, Contacted int
-	ResultCounts      map[string]int
-}
-
-// FoldAccountUpdaterResults applies parsed account-updater result rows, one
-// card version per instrument and row: a reissue adopts the custodian's new
-// token on the same method; a closed account closes the method; a
-// contact-cardholder answer prompts the customer, or closes a Mastercard card.
-// The batch runner and the account-updater.job.completed webhook both land
-// here. Nothing is deleted and nothing is canceled.
-func FoldAccountUpdaterResults(ctx context.Context, database *db.DB, life *subscriptions.SubscriptionLifecycleService, jobRef string, rows []basistheory.AccountUpdaterResultRow, now time.Time) (AccountUpdaterFoldStats, error) {
-	stats := AccountUpdaterFoldStats{Rows: len(rows), ResultCounts: map[string]int{}}
-	mid, cid, err := custodianScopeIDs(ctx)
-	if err != nil {
-		return stats, err
-	}
-	for _, row := range rows {
-		code := strings.TrimSpace(row.ResultCode)
-		stats.ResultCounts[code]++
-		ev := paymentmethods.CardEvent{MerchantID: mid, Source: paymentmethods.SourceBasisTheoryUpdater, EventRef: strings.TrimSpace(jobRef) + ":" + row.Token, At: now}
-		switch basistheory.ClassifyAccountUpdaterResult(code) {
-		case basistheory.AUOutcomeUpdated:
-			ev.Card = paymentmethods.Card{Card: models.ParseCard(row.NewBrand, row.NewLast4, auExpiry(row.NewExpirationMonth, row.NewExpirationYear)),
-				Fingerprint: row.NewFingerprint, RailMethodRef: row.NewToken}
-		case basistheory.AUOutcomeClosed:
-			ev.Advice = paymentmethods.AdviceClosed
-		case basistheory.AUOutcomeContactCardholder:
-			ev.Advice = paymentmethods.AdviceContactCardholder
-		case basistheory.AUOutcomeNoChange:
-			// Recorded verbatim above; no evidence, no action.
-			continue
-		default:
-			log.WithContext(ctx).WithFields(log.Fields{
-				"bt_token_id": row.Token, "result_code": code,
-			}).Warn("basistheory account updater: unrecognized result code recorded verbatim; no fold")
-			continue
-		}
-		methods, err := database.Gen(ctx).ListPaymentMethodsByCustodianRef(ctx, gen.ListPaymentMethodsByCustodianRefParams{MerchantID: mid, CustodianID: cid, Custodian: models.CustodianBasisTheory, RailMethodRef: row.Token})
-		if err != nil {
-			return stats, fmt.Errorf("account updater: find %s: %w", row.Token, err)
-		}
-		for _, id := range methods {
-			ev.PaymentMethodID = id
-			applied, err := applyCardEvent(ctx, database, life, ev)
-			if err != nil {
-				return stats, fmt.Errorf("account updater: %s: %w", row.Token, err)
-			}
-			switch applied.Change {
-			case paymentmethods.CardUpdated, paymentmethods.CardBrandChanged:
-				stats.Adopted++
-				if newRef := strings.TrimSpace(row.NewToken); newRef != "" && newRef != row.Token {
-					stats.Rotated++
-				}
-			case paymentmethods.CardClosed:
-				stats.Closed++
-				log.WithContext(ctx).WithFields(log.Fields{"bt_token_id": row.Token, "result_code": code}).
-					Warn("basistheory account updater: card closed; the customer is asked for another (never auto-canceled)")
-			case paymentmethods.CardContactCardholder:
-				stats.Contacted++
-			}
-		}
-	}
-	if stats.Adopted > 0 || stats.Closed > 0 || stats.Contacted > 0 {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"rows": stats.Rows, "adopted": stats.Adopted, "rotated": stats.Rotated, "closed": stats.Closed, "contacted": stats.Contacted,
-		}).Info("basistheory account updater: fold complete")
-	}
-	return stats, nil
-}
-
 // applyCardEvent applies one card event in its own transaction and delivers
 // the notices it queued once it commits.
 func applyCardEvent(ctx context.Context, database *db.DB, life *subscriptions.SubscriptionLifecycleService, ev paymentmethods.CardEvent) (paymentmethods.CardLifecycle, error) {
@@ -440,34 +312,6 @@ func applyCardEvent(ctx context.Context, database *db.DB, life *subscriptions.Su
 	return applied, nil
 }
 
-// CloseAccountUpdaterBatch marks the durable batch that carried this job as
-// completed with the verbatim result tally. A job with no open batch row (an
-// operator-created job, or one the other ingestion path closed) is a no-op.
-func CloseAccountUpdaterBatch(ctx context.Context, q *gen.Queries, jobRef string, stats AccountUpdaterFoldStats) error {
-	jobRef = strings.TrimSpace(jobRef)
-	if jobRef == "" {
-		return nil
-	}
-	mid, cid, err := custodianScopeIDs(ctx)
-	if err != nil {
-		return err
-	}
-	counts, err := json.Marshal(stats.ResultCounts)
-	if err != nil {
-		return fmt.Errorf("account updater: encode result counts: %w", err)
-	}
-	if _, err := q.CompleteAccountUpdaterBatchByJobRef(ctx, gen.CompleteAccountUpdaterBatchByJobRefParams{
-		MerchantID:   mid,
-		CustodianID:  cid,
-		JobRef:       jobRef,
-		ResultCounts: counts,
-		CompletedAt:  time.Now().UTC(),
-	}); err != nil {
-		return fmt.Errorf("account updater: close batch for job %s: %w", jobRef, err)
-	}
-	return nil
-}
-
 // btCard is a Basis Theory token's card as a stored method's display facts.
 func btCard(c *basistheory.CardDetails) models.Card {
 	if c == nil {
@@ -478,21 +322,6 @@ func btCard(c *basistheory.CardDetails) models.Card {
 		card.ExpMonth, card.ExpYear = c.ExpirationMonth, c.ExpirationYear
 	}
 	return card
-}
-
-// auExpiry renders the AU CSV month/year strings as MM/YY.
-func auExpiry(month, year string) string {
-	month, year = strings.TrimSpace(month), strings.TrimSpace(year)
-	if month == "" || year == "" {
-		return ""
-	}
-	if len(month) == 1 {
-		month = "0" + month
-	}
-	if len(year) == 4 {
-		year = year[2:]
-	}
-	return month + "/" + year
 }
 
 // BasisTheoryWebhookKeyURL selects BT's CDN webhook public key for the

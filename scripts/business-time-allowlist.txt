@@ -5,7 +5,6 @@ internal/http/handlers/solana_recurring.go|return time.Now()|business_time_bound
 internal/http/handlers/webhook.go|ReceivedAt:     time.Now(),|infrastructure_time|Physical webhook receipt timestamp|2
 internal/http/handlers/webhook.go|ReceivedAt: time.Now(),|infrastructure_time|Physical webhook receipt timestamp|1
 internal/http/handlers/webhook_basistheory.go|ReceivedAt:     time.Now(),|infrastructure_time|Physical webhook receipt timestamp|1
-internal/intents/basistheory_account_updater.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
 internal/intents/nmi_delete.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
 internal/intents/nmi_card_vault.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
 internal/intents/nmi_card_vault.go|NextAttemptAt: time.Now().UTC().Add(cardVaultAttendance),|infrastructure_time|Queue eligibility: a worker looks only after the request carrying the card has had its turn|1
@@ -57,7 +56,6 @@ internal/modules/subscriptions/subscription_repo.go|return r.UpdateAt(ctx, s, ti
 internal/modules/subscriptions/user_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/subscriptions/user_service.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhookhealth/recorder.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/modules/webhooks/basistheory.go|CompletedAt:  time.Now().UTC(),|external_protocol_time|Account updater completion receipt timestamp|1
 internal/modules/webhooks/basistheory.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/ccbill.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/converge_nmi.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1

@@ -1,246 +1,89 @@
 package basistheory
 
 import (
-	"bytes"
 	"context"
-	"encoding/csv"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strings"
-	"time"
 )
 
-// Batch Account Updater: FPAN refresh for merchants charging the detokenized
-// PAN (NMI). Create job -> PUT request CSV to upload_url (expires 1h) ->
-// `account-updater.job.completed` webhook -> download result CSV -> UPD_* rows
-// rotate rail_method_ref to new_token. Callers run it ahead of renewals, never
-// as an all-instruments sweep.
+// Real-time Account Updater: one card token per call (Visa and Mastercard).
+// Every NMI charge substitutes the token's own PAN, so this call is what keeps
+// a Basis Theory card chargeable through a reissue.
 
-// Account Updater result codes (result CSV v1.2).
+// Account Updater result codes.
 const (
-	AUUpdatedPAN        = "UPD_PAN"
-	AUUpdatedExpDate    = "UPD_EXP_DATE"
-	AUNoUpdate          = "NO_UPDATE"
-	AUNoMatch           = "NO_MATCH"
-	AUClosedAccount     = "WRN_CLOSED_ACCOUNT"
-	AUContactCardholder = "WRN_CONTACT_CARDHOLDER"
+	AUUpdatedPAN          = "UPD_PAN"
+	AUUpdatedExpDate      = "UPD_EXP_DATE"
+	AUNoUpdate            = "NO_UPDATE"
+	AUNoMatch             = "NO_MATCH"
+	AUClosedAccount       = "WRN_CLOSED_ACCOUNT"
+	AUContactCardholder   = "WRN_CONTACT_CARDHOLDER"
+	AUIssuerNotEnrolled   = "WRN_ISSUER_NOT_ENROLLED"
+	AUIssuerNoData        = "WRN_ISSUER_NO_DATA"
+	AUOptOut              = "WRN_OPT_OUT"
+	AUUnsupportedNetwork  = "WRN_UNSUPPORTED_NETWORK"
+	auUpdatedPrefix       = "UPD_"
+	accountUpdaterRTRoute = "/account-updater/real-time"
 )
 
-// AUOutcome is what OpenRails may do about one result row. The wire code is
-// always recorded verbatim; this only maps it onto existing actions.
+// AUOutcome is what OpenRails may do about one result. The wire code is always
+// recorded verbatim; this only maps it onto existing actions.
 type AUOutcome string
 
 const (
-	// AUOutcomeUpdated: the network reissued the credential. Rotate the method
-	// ref / refresh metadata and clear any park: this row is the newest evidence.
+	// AUOutcomeUpdated: the network reissued the credential; adopt the new token.
 	AUOutcomeUpdated AUOutcome = "updated"
-	// AUOutcomeClosed: the account is closed. Park (bucket 2) — never delete,
-	// never terminal-cancel.
+	// AUOutcomeClosed: the account is closed. Never delete, never cancel.
 	AUOutcomeClosed AUOutcome = "closed"
-	// AUOutcomeContactCardholder: the network says nothing more without the
-	// cardholder. Park and surface, like closed.
+	// AUOutcomeContactCardholder: the network says nothing more without the cardholder.
 	AUOutcomeContactCardholder AUOutcome = "contact_cardholder"
-	// AUOutcomeNoChange: nothing was reported (NO_UPDATE) or the card is not
-	// enrolled/matched (NO_MATCH). No evidence, no action.
+	// AUOutcomeNoChange: nothing was reported. No evidence, no action.
 	AUOutcomeNoChange AUOutcome = "no_change"
-	// AUOutcomeUnrecognized: a code this build does not know. Recorded verbatim,
-	// acted on by nothing: never guess on a money path.
+	// AUOutcomeUnrecognized: an error or a code this build does not know.
+	// Acted on by nothing: never guess on a money path.
 	AUOutcomeUnrecognized AUOutcome = "unrecognized"
 )
 
 // ClassifyAccountUpdaterResult maps a verbatim result code onto its outcome.
-// UPD_ matches by prefix: the row carries the new token/expiry, so a future
-// UPD_* variant must still be applied, not dropped.
+// UPD_ matches by prefix: every update carries the new token.
 func ClassifyAccountUpdaterResult(code string) AUOutcome {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	switch code {
-	case "", AUNoUpdate, AUNoMatch:
+	case "", AUNoUpdate, AUNoMatch, AUIssuerNotEnrolled, AUIssuerNoData, AUOptOut, AUUnsupportedNetwork:
 		return AUOutcomeNoChange
 	case AUClosedAccount:
 		return AUOutcomeClosed
 	case AUContactCardholder:
 		return AUOutcomeContactCardholder
 	}
-	if strings.HasPrefix(code, "UPD_") {
+	if strings.HasPrefix(code, auUpdatedPrefix) {
 		return AUOutcomeUpdated
 	}
 	return AUOutcomeUnrecognized
 }
 
-type AccountUpdaterJob struct {
-	ID          string     `json:"id"`
-	TenantID    string     `json:"tenant_id"`
-	State       string     `json:"state"`
-	UploadURL   string     `json:"upload_url"`
-	DownloadURL string     `json:"download_url"`
-	CreatedAt   time.Time  `json:"created_at"`
-	ExpiresAt   *time.Time `json:"expires_at"`
+// CardUpdate is one real-time Account Updater answer. NewToken is set when an
+// update was found; its id may be new, deduplicated or the original token.
+type CardUpdate struct {
+	NewToken   *CardToken `json:"new_token"`
+	ResultCode string     `json:"result_code"`
 }
 
-// AccountUpdaterRequestRow is one request-CSV line. Token is required;
-// expiration and merchant id are optional per the CSV contract.
-type AccountUpdaterRequestRow struct {
-	Token           string
-	ExpirationYear  string
-	ExpirationMonth string
-	MerchantID      string
-}
-
-// AccountUpdaterResultRow is one result-CSV (v1.2) line, verbatim. NewToken
-// non-empty means BT minted a NEW token id: rotate every rail_method_ref.
-type AccountUpdaterResultRow struct {
-	Token              string
-	ExpirationYear     string
-	ExpirationMonth    string
-	NewToken           string
-	NewExpirationYear  string
-	NewExpirationMonth string
-	ResultCode         string
-	NewFingerprint     string
-	NewBrand           string
-	NewLast4           string
-}
-
-func (c *Client) CreateAccountUpdaterJob(ctx context.Context, idempotencyKey string) (*AccountUpdaterJob, error) {
-	var out AccountUpdaterJob
-	if err := c.doJSON(ctx, http.MethodPost, "/account-updater/jobs", map[string]any{}, idempotencyKey, &out); err != nil {
+// UpdateCard asks the networks for a card token's current card. The call is
+// billed and may mint a token, so it carries an idempotency key: a repeat
+// within 24 hours returns the first answer.
+func (c *Client) UpdateCard(ctx context.Context, tokenID, idempotencyKey string) (*CardUpdate, error) {
+	tokenID, idempotencyKey = strings.TrimSpace(tokenID), strings.TrimSpace(idempotencyKey)
+	if tokenID == "" || idempotencyKey == "" {
+		return nil, errors.New("basistheory: account updater needs a token id and an idempotency key")
+	}
+	var out CardUpdate
+	if err := c.doJSON(ctx, http.MethodPost, accountUpdaterRTRoute, map[string]string{"token_id": tokenID}, idempotencyKey, &out); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(out.UploadURL) == "" {
-		return nil, errors.New("basistheory: account updater job response missing upload_url")
+	if strings.TrimSpace(out.ResultCode) == "" {
+		return nil, errors.New("basistheory: account updater answered without a result code")
 	}
 	return &out, nil
-}
-
-func (c *Client) GetAccountUpdaterJob(ctx context.Context, id string) (*AccountUpdaterJob, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return nil, errors.New("basistheory: account updater job id is required")
-	}
-	var out AccountUpdaterJob
-	if err := c.doJSON(ctx, http.MethodGet, "/account-updater/jobs/"+url.PathEscape(id), nil, "", &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// UploadAccountUpdaterCSV renders and PUTs the request CSV to the job's
-// pre-signed upload_url (a mutation: blocked by the readonly transport).
-func (c *Client) UploadAccountUpdaterCSV(ctx context.Context, uploadURL string, rows []AccountUpdaterRequestRow) error {
-	uploadURL = strings.TrimSpace(uploadURL)
-	if uploadURL == "" {
-		return errors.New("basistheory: upload url is required")
-	}
-	// A provider-supplied pre-signed URL: its host can't be pinned, but it must
-	// be publicly routable, or the job payload could aim card tokens at an
-	// internal service.
-	if err := c.outbound.ValidateURL(uploadURL); err != nil {
-		return fmt.Errorf("basistheory: account updater upload url refused: %w", err)
-	}
-	if len(rows) == 0 {
-		return errors.New("basistheory: account updater upload requires at least one row")
-	}
-	var buf bytes.Buffer
-	w := csv.NewWriter(&buf)
-	_ = w.Write([]string{"token", "expiration_year", "expiration_month", "merchant_id"})
-	for _, r := range rows {
-		if strings.TrimSpace(r.Token) == "" {
-			return errors.New("basistheory: account updater row missing token")
-		}
-		_ = w.Write([]string{r.Token, r.ExpirationYear, r.ExpirationMonth, r.MerchantID})
-	}
-	w.Flush()
-	if err := w.Error(); err != nil {
-		return fmt.Errorf("basistheory: render account updater csv: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, bytes.NewReader(buf.Bytes()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "text/csv")
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("basistheory: account updater csv upload failed (status %d): %s", resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-	return nil
-}
-
-// DownloadAccountUpdaterResults GETs and parses the completed job's result CSV.
-func (c *Client) DownloadAccountUpdaterResults(ctx context.Context, downloadURL string) ([]AccountUpdaterResultRow, error) {
-	downloadURL = strings.TrimSpace(downloadURL)
-	if downloadURL == "" {
-		return nil, errors.New("basistheory: download url is required")
-	}
-	if err := c.outbound.ValidateURL(downloadURL); err != nil {
-		return nil, fmt.Errorf("basistheory: account updater download url refused: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("basistheory: account updater result download failed (status %d): %s", resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-	return ParseAccountUpdaterResults(resp.Body)
-}
-
-// ParseAccountUpdaterResults parses a v1.2 result CSV by header name (column
-// order is not assumed). Rows are recorded verbatim.
-func ParseAccountUpdaterResults(r io.Reader) ([]AccountUpdaterResultRow, error) {
-	cr := csv.NewReader(r)
-	cr.FieldsPerRecord = -1
-	header, err := cr.Read()
-	if err != nil {
-		return nil, fmt.Errorf("basistheory: read result csv header: %w", err)
-	}
-	col := map[string]int{}
-	for i, name := range header {
-		col[strings.ToLower(strings.TrimSpace(name))] = i
-	}
-	if _, ok := col["token"]; !ok {
-		return nil, fmt.Errorf("basistheory: result csv missing required 'token' column (header %v)", header)
-	}
-	field := func(rec []string, name string) string {
-		i, ok := col[name]
-		if !ok || i >= len(rec) {
-			return ""
-		}
-		return strings.TrimSpace(rec[i])
-	}
-	var out []AccountUpdaterResultRow
-	for {
-		rec, err := cr.Read()
-		if errors.Is(err, io.EOF) {
-			return out, nil
-		}
-		if err != nil {
-			return nil, fmt.Errorf("basistheory: read result csv row: %w", err)
-		}
-		out = append(out, AccountUpdaterResultRow{
-			Token:              field(rec, "token"),
-			ExpirationYear:     field(rec, "expiration_year"),
-			ExpirationMonth:    field(rec, "expiration_month"),
-			NewToken:           field(rec, "new_token"),
-			NewExpirationYear:  field(rec, "new_expiration_year"),
-			NewExpirationMonth: field(rec, "new_expiration_month"),
-			ResultCode:         field(rec, "result_code"),
-			NewFingerprint:     field(rec, "new_fingerprint"),
-			NewBrand:           field(rec, "new_brand"),
-			NewLast4:           field(rec, "new_last4"),
-		})
-	}
 }

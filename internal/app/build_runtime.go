@@ -466,6 +466,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	}
 	if runtime.SubscriptionLifecycleService != nil {
 		runtime.SubscriptionLifecycleService.SetProviderCancelScheduler(systemDeferredDeletes)
+		// A declined card a vault must be asked about is refreshed first.
+		runtime.SubscriptionLifecycleService.SetAccountUpdaters(collectionResolver)
 	}
 	// or#896: a merchant-initiated cancel goes through the same durable
 	// intents as the user path — admin-origin (a human asked for it, so it

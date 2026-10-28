@@ -50,7 +50,6 @@ var excludedTables = map[string]string{
 	"carts":                       "a customer's basket, not billing history: priced live, it holds no money and the customer fills it again at the destination",
 	"notifications":               "inbox and notification delivery", "provider_mutation_logs": "operator evidence; raw bodies excluded",
 	"reconciliation_findings":       "operator observations",
-	"account_updater_batches":       "unsupported provider job evidence; any rows refused",
 	"destructive_run_before_images": "unsupported byte-exact undo history; any rows refused",
 	"subscription_verifications":    "derived: re-detected from unverified subscriptions",
 	"nmi_bulk_checkpoints":          "transient read progress",
@@ -112,7 +111,6 @@ var excludedColumns = map[string]string{
 	"solana_pay_references":         "merchant_id reference order_attempt_id kind status expires_at watch_ends_at next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
 	"solana_pay_receipts":           "merchant_id reference signature order_attempt_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
 	"reconciliation_findings":       "id merchant_id finding_type rail psp_id openrails_resource_type openrails_resource_id external_resource_id field openrails_value external_value subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity seen_run_class change source evidence_digest approval_run_id",
-	"account_updater_batches":       "id merchant_id custodian_id job_ref status instruments result_counts failure_reason submitted_at last_polled_at completed_at created_at updated_at",
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
 	"access_cutover_approvals":      "id merchant_id customer_id entitlement change approved_by approved_at",
 
@@ -267,7 +265,7 @@ type rowCheck struct{ table, predicate string }
 
 // preflightChecks are states the archive cannot carry.
 var preflightChecks = []rowCheck{
-	{"destructive_run_before_images", "true"}, {"account_updater_batches", "true"},
+	{"destructive_run_before_images", "true"},
 	{"order_attempts", "status NOT IN ('succeeded','failed','expired','canceled')"},
 	// A request still running under a live claim has an outcome the archive
 	// would miss; settled, failed and lapsed claims are not moved (#1099).

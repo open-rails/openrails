@@ -145,17 +145,15 @@ func verifyPSS(key *rsa.PublicKey, digest, sig []byte) error {
 
 // Event type strings OpenRails consumes (exact, doc-verified).
 const (
-	EventTokenCreated               = "token.created"
-	EventTokenUpdated               = "token.updated"
-	EventTokenExpired               = "token.expired"
-	EventTokenDeleted               = "token.deleted"
-	EventTokenPropertyExpired       = "token.property.expired"
-	EventTokenIntentConverted       = "token-intent.converted"
-	EventNetworkTokenCreated        = "network-token.created"
-	EventNetworkTokenUpdated        = "network-token.updated"
-	EventNetworkTokenDeleted        = "network-token.deleted"
-	EventAccountUpdaterJobCompleted = "account-updater.job.completed"
-	EventAccountUpdaterJobFailed    = "account-updater.job.failed"
+	EventTokenCreated         = "token.created"
+	EventTokenUpdated         = "token.updated"
+	EventTokenExpired         = "token.expired"
+	EventTokenDeleted         = "token.deleted"
+	EventTokenPropertyExpired = "token.property.expired"
+	EventTokenIntentConverted = "token-intent.converted"
+	EventNetworkTokenCreated  = "network-token.created"
+	EventNetworkTokenUpdated  = "network-token.updated"
+	EventNetworkTokenDeleted  = "network-token.deleted"
 )
 
 // Event is the BT webhook envelope. Data is kept raw; per-event bodies decode
@@ -199,14 +197,4 @@ type NetworkTokenEventData struct {
 		TokenID       string `json:"token_id"`
 		TokenIntentID string `json:"token_intent_id"`
 	} `json:"network_token"`
-}
-
-// AccountUpdaterJobEventData covers account-updater.job.* events.
-type AccountUpdaterJobEventData struct {
-	Job struct {
-		ID    string `json:"id"`
-		State string `json:"state"`
-	} `json:"job"`
-	// Some payload generations carry the id at the top data level.
-	ID string `json:"id"`
 }

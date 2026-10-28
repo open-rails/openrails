@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -113,39 +114,87 @@ type CardLifecycle struct {
 	Replayed bool
 }
 
-// HeldCard is a holder's answer about one stored card: the card it holds and
-// who to credit with any change, or Gone when it no longer holds it.
-type HeldCard struct {
-	Card   Card
-	Source CardSource
-	Gone   bool
+// StoredCardRefreshArgs is the River job that asks a stored card's holder for
+// its current card. Only holders that must be asked (a Basis Theory vault)
+// have one; a holder that updates its cards in place never does.
+type StoredCardRefreshArgs struct {
+	MerchantID      uuid.UUID `json:"merchant_id" river:"unique"`
+	PaymentMethodID uuid.UUID `json:"payment_method_id" river:"unique"`
+	// Declined: a charge declined as an expired or reissued card. A refresh
+	// that finds no new card then asks the customer for one.
+	Declined bool `json:"declined" river:"unique"`
+	// MethodRef and CheckedAt are the card as queued: the handle charged (or
+	// found due) and its last check. A card reissued or checked since needs no
+	// second request.
+	MethodRef string     `json:"method_ref,omitempty"`
+	CheckedAt *time.Time `json:"checked_at,omitempty"`
 }
 
-// CardRefreshArgs is the River job that reads one declined card from its
-// holder before its members are asked for another.
-type CardRefreshArgs struct {
-	MerchantID      uuid.UUID `json:"merchant_id"`
-	PaymentMethodID uuid.UUID `json:"payment_method_id"`
+// StoredCardRefreshFor queues a refresh of method as it stands, or of the
+// handle a declined charge used.
+func StoredCardRefreshFor(method gen.BillingPaymentMethod, declined bool, chargedRef string) StoredCardRefreshArgs {
+	ref := models.DerefStr(method.RailMethodRef)
+	if chargedRef != "" {
+		ref = chargedRef
+	}
+	return StoredCardRefreshArgs{MerchantID: method.MerchantID, PaymentMethodID: method.ID, Declined: declined, MethodRef: ref, CheckedAt: method.AccountUpdaterCheckedAt}
 }
 
-// KindCardRefresh is CardRefreshArgs' River kind.
-const KindCardRefresh = "openrails.card_refresh"
-
-// CardRefreshAttempts bounds the holder reads before the members are asked
-// anyway: an unreadable holder never keeps a customer from hearing.
-const CardRefreshAttempts = 4
-
-func (CardRefreshArgs) Kind() string { return KindCardRefresh }
-
-// InsertOpts collapses the reads one card's declines queue within an hour.
-func (CardRefreshArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "billing", MaxAttempts: CardRefreshAttempts, UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: time.Hour}}
+// Moot reports a refresh overtaken since it was queued: the card was
+// reissued (another handle) or checked again.
+func (a StoredCardRefreshArgs) Moot(method gen.BillingPaymentMethod) (reissued, checked bool) {
+	if a.MethodRef != "" && a.MethodRef != models.DerefStr(method.RailMethodRef) {
+		return true, false
+	}
+	now := method.AccountUpdaterCheckedAt
+	return false, now != nil && (a.CheckedAt == nil || now.UnixMicro() != a.CheckedAt.UnixMicro())
 }
 
-// CardHolders reads stored cards from the PSP or custodian holding them.
-type CardHolders interface {
-	ReadHeldCard(ctx context.Context, method gen.BillingPaymentMethod) (HeldCard, error)
+// KindStoredCardRefresh is StoredCardRefreshArgs' River kind.
+const KindStoredCardRefresh = "openrails.stored_card_refresh"
+
+// StoredCardRefreshAttempts bounds the tries before a declined card's customer
+// is asked anyway: an unreachable holder never keeps a customer from hearing.
+const StoredCardRefreshAttempts = 4
+
+func (StoredCardRefreshArgs) Kind() string { return KindStoredCardRefresh }
+
+// InsertOpts collapses one card's queued refreshes; a finished one does not
+// block the next.
+func (StoredCardRefreshArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "billing", MaxAttempts: StoredCardRefreshAttempts, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{
+		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
+	}}}
 }
+
+// ErrAccountUpdateRefused is a holder's definitive refusal of an update
+// request; repeating it changes nothing.
+var ErrAccountUpdateRefused = errors.New("account update refused")
+
+// AccountUpdaters arms the account updater of a stored card's holder. ok is
+// false for a holder that updates its cards in place, an unarmed vault or a
+// card network the updater does not cover.
+type AccountUpdaters interface {
+	AccountUpdater(ctx context.Context, method gen.BillingPaymentMethod) (AccountUpdater, bool, error)
+}
+
+// AccountUpdater asks a holder for one stored card's current card. A repeated
+// key returns the first answer.
+type AccountUpdater interface {
+	Update(ctx context.Context, key string) (AccountUpdate, error)
+}
+
+// AccountUpdate is a holder's answer: its verbatim result code and either the
+// reissued card (RailMethodRef is the holder's new handle) or an advice.
+// Neither means no change.
+type AccountUpdate struct {
+	ResultCode string
+	Card       Card
+	Advice     CardAdvice
+}
+
+// Empty reports an answer that changes nothing.
+func (u AccountUpdate) Empty() bool { return u.Advice == "" && u.Card == (Card{}) }
 
 // ApplyCardLifecycle is the one writer of a stored card's facts and standing
 // for every source. Inside the caller's transaction it locks the method,
@@ -177,7 +226,7 @@ func ApplyCardLifecycle(ctx context.Context, q *gen.Queries, ev CardEvent) (Card
 		out.Change = CardClosed
 	case AdviceContactCardholder:
 		out.Change = CardContactCardholder
-		if cardNetwork(models.DerefStr(m.CardBrand)) == "mastercard" {
+		if CardNetwork(models.DerefStr(m.CardBrand)) == "mastercard" {
 			out.Change = CardClosed
 		}
 	case "":
@@ -269,7 +318,7 @@ func observe(m gen.BillingPaymentMethod, c Card) (gen.BillingPaymentMethod, Card
 		was := models.DerefStr(m.CardBrand)
 		brandChanged = BrandChanged(was, brand)
 		// The same network spelled another way keeps the stored spelling.
-		if brandChanged || cardNetwork(was) == "" || cardNetwork(was) != cardNetwork(brand) {
+		if brandChanged || CardNetwork(was) == "" || CardNetwork(was) != CardNetwork(brand) {
 			set(&next.CardBrand, brand)
 		}
 	}
@@ -309,11 +358,12 @@ func observe(m gen.BillingPaymentMethod, c Card) (gen.BillingPaymentMethod, Card
 // brand either side does not name, or does not recognize, never counts:
 // voiding a card's agreements on a misread spelling would stop its billing.
 func BrandChanged(from, to string) bool {
-	a, b := cardNetwork(from), cardNetwork(to)
+	a, b := CardNetwork(from), CardNetwork(to)
 	return a != "" && b != "" && a != b
 }
 
-func cardNetwork(brand string) string {
+// CardNetwork names a brand's card network; "" when unrecognized.
+func CardNetwork(brand string) string {
 	var key strings.Builder
 	for _, r := range strings.ToLower(brand) {
 		if r >= 'a' && r <= 'z' {

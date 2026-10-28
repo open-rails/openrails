@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -123,23 +124,14 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addTrackedWorker(r, workers, &riverjobs.IdempotencyGCWorker{DB: r.DB}); err != nil {
 		return fmt.Errorf("add idempotency gc worker: %w", err)
 	}
-	// Batch account updater: ingests results for open batches, then opens new
-	// ones for instruments renewing inside the custodian's lookahead window.
-	// Merchants with no armed custodian are never visited.
-	if err := addTrackedWorker(r, workers, &riverjobs.AccountUpdaterBatchWorker{
-		DB:        r.DB,
-		Config:    r.Config,
-		Clock:     clock,
-		Rails:     r.RailConfigs,
-		Intents:   r.intentRunner(intentRegistry, clock),
-		Lifecycle: r.SubscriptionLifecycleService,
-	}); err != nil {
-		return fmt.Errorf("add account updater worker: %w", err)
+	// Stored cards a vault must be asked about: one refresh per card, queued on
+	// an expired or reissued decline and ahead of each renewal.
+	updaters, _ := r.CollectionResolver.(paymentmethods.AccountUpdaters)
+	if err := addTrackedWorker(r, workers, &riverjobs.StoredCardRefreshWorker{DB: r.DB, Clock: clock, Updaters: updaters, Intents: r.intentRunner(intentRegistry, clock), Lifecycle: r.SubscriptionLifecycleService}); err != nil {
+		return fmt.Errorf("add stored card refresh worker: %w", err)
 	}
-	// A decline that says the card was reissued reads its holder once.
-	holders, _ := r.CollectionResolver.(paymentmethods.CardHolders)
-	if err := addTrackedWorker(r, workers, &riverjobs.CardRefreshWorker{DB: r.DB, Clock: clock, Holders: holders, Lifecycle: r.SubscriptionLifecycleService}); err != nil {
-		return fmt.Errorf("add card refresh worker: %w", err)
+	if err := addTrackedWorker(r, workers, &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture()}); err != nil {
+		return fmt.Errorf("add stored card refresh pass worker: %w", err)
 	}
 	if err := addTrackedWorker(r, workers, &riverjobs.SolanaPayGCWorker{DB: r.DB, Clock: clock}); err != nil {
 		return fmt.Errorf("add solana pay gc worker: %w", err)
@@ -338,9 +330,6 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		// mover.
 		money.NewOrderCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, r.Posture(), clock),
 		money.NewSubscriptionCollectionHandler(r.DB, r.CollectionResolver, r.Config, clock),
-		// The account-updater batch submit is a paid provider write, so it
-		// rides the intent ledger too.
-		intents.NewAccountUpdaterBatchHandler(r.DB, r.Config, r.RailConfigs, clock),
 		// Write-through kinds live with their domain services, which every
 		// worker runtime has (validateBillingWorkerRuntime): an accepted
 		// operation of an unregistered kind would never run.
@@ -356,6 +345,10 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewPlatformMethodDeleteHandler(r.DB, r.RailPaymentMethodService, clock),
 		intents.NewNMICardVaultHandler(r.DB, r.RailPaymentMethodService, intents.NewStore(r.DB), r.Posture(), clock),
 	)
+	// An account-updater request is billed and may mint a vault token.
+	if updaters, ok := r.CollectionResolver.(paymentmethods.AccountUpdaters); ok {
+		registry.Register(&riverjobs.AccountUpdaterHandler{DB: r.DB, Clock: clock, Updaters: updaters, Lifecycle: r.SubscriptionLifecycleService, Policy: intents.DefaultBackoff})
+	}
 	// Solana recurring pull: the handler wraps the crank with a pre-submit
 	// signature write-ahead and chain-read verification. Its core worker has no
 	// Intents runner: the handler is the execution path, and a runner would recurse.
@@ -572,14 +565,14 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 		nil,
 	))
 
-	// Every 6 hours: batch account updater. Its window is weeks wide, so 6h
-	// gives an in-flight batch four ingest chances a day. Overdue startup polls
-	// a batch submitted before a crash, never resubmits it (its row holds the
-	// job ref; one open batch per custodian).
+	// Every 6 hours: queue the cards an armed vault must be asked about ahead
+	// of their renewal. The lookahead is at least a day (default 14), so a card
+	// entering it is checked long before the renewal it protects; each pass
+	// is capped per vault, which spreads a large book's requests.
 	jobs = append(jobs, r.healthPeriodic(cfg,
 		6*time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.AccountUpdaterBatchArgs{}, &river.InsertOpts{
+			return riverjobs.StoredCardRefreshDueArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
 			}

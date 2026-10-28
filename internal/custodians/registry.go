@@ -87,25 +87,20 @@ const (
 	SettingPublicAPIKey  = "public_api_key"
 	SettingProfileID     = "profile_id"
 	SettingNetworkTokens = "network_tokens"
-	// SettingAccountUpdater arms the batch account-updater cycle (or#795). It
-	// is a CONTRACT flag, not a preference: the add-on is priced separately and
-	// the API answers 403 without it, so an unarmed custodian is never
-	// enumerated by the runner at all.
+	// SettingAccountUpdater arms the real-time Account Updater for the cards
+	// this vault holds. It is a contract flag, not a preference: the add-on is
+	// priced separately and the API refuses without it, so an unarmed vault's
+	// cards are never refreshed.
 	SettingAccountUpdater = "account_updater"
 	// SettingAccountUpdaterLookaheadDays is how far ahead of a renewal a card
-	// is refreshed. It earns a knob because the right value is the merchant's
-	// billing shape (a monthly book wants ~2 weeks; an annual one wants more)
-	// against the network's multi-day batch turnaround — nothing derivable.
-	// It doubles as the staleness floor, so there is no second knob: an
-	// instrument refreshed inside the window is not refreshed again.
+	// is refreshed, and how long a refresh stays fresh: a card is looked up
+	// once per cycle.
 	SettingAccountUpdaterLookaheadDays = "account_updater_lookahead_days"
 	SecretAPIKey                       = "api_key"
 )
 
-// DefaultAccountUpdaterLookaheadDays is the sane default for
-// SettingAccountUpdaterLookaheadDays: comfortably longer than a batch
-// turnaround, comfortably shorter than a monthly period, so a card is checked
-// once per cycle and the answer is back before the renewal it protects.
+// DefaultAccountUpdaterLookaheadDays: shorter than a monthly period, so a card
+// is checked once per cycle, and long before the renewal it protects.
 const DefaultAccountUpdaterLookaheadDays = 14
 
 // MaxAccountUpdaterLookaheadDays bounds the window, so the cross-merchant
@@ -142,8 +137,8 @@ var registry = map[string]Descriptor{
 			// never load-bearing — a provisioning failure warns and the
 			// instrument stays pan_proxy).
 			{Name: SettingNetworkTokens, Kind: ValueBool},
-			// Batch account updater (or#795): the other $-add-on, and the one
-			// that actually refreshes the FPAN we charge on NMI.
+			// Account Updater: the other priced add-on, and the one that
+			// refreshes the card number NMI is charged with.
 			{Name: SettingAccountUpdater, Kind: ValueBool},
 			{Name: SettingAccountUpdaterLookaheadDays, Kind: ValueInt},
 		},
