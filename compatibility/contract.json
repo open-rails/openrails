@@ -1706,7 +1706,7 @@
       "type stripeTierChangeStep struct {\n\tSubmittedAt   time.Time                              `json:\"submitted_at\"`\n\tSubscription  *subscriptions.StripeSubscriptionState `json:\"subscription,omitempty\"`\n\tSchedule      *subscriptions.StripeScheduleState     `json:\"schedule,omitempty\"`\n\tRefusal       string                                 `json:\"refusal,omitempty\"`\n\tRefusalCode   string                                 `json:\"refusal_code,omitempty\"`\n\tRefusalStatus int                                    `json:\"refusal_status,omitempty\"`\n\tResolution    map[string]any                         `json:\"resolution,omitempty\"`\n}"
     ],
     "internal/modules/paymentmethods": [
-      "type StoredCardRefreshArgs struct {\n\tMerchantID      uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\" river:\"unique\"`\n\n\tDeclined bool `json:\"declined\" river:\"unique\"`\n\n\tMethodRef string     `json:\"method_ref,omitempty\"`\n\tCheckedAt *time.Time `json:\"checked_at,omitempty\"`\n}"
+      "type StoredCardRefreshArgs struct {\n\tMerchantID      uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\" river:\"unique\"`\n\n\tDeclined bool `json:\"declined\" river:\"unique\"`\n\n\tCard      string     `json:\"card,omitempty\"`\n\tCheckedAt *time.Time `json:\"checked_at,omitempty\"`\n}"
     ],
     "internal/modules/payments": [
       "func (p *NMISalePayload) UnmarshalJSON(data []byte) error {\n\ttype plain NMISalePayload\n\tvar decoded plain\n\tif err := json.Unmarshal(data, \u0026decoded); err != nil {\n\t\treturn err\n\t}\n\tif _, _, err := grants.DecodeAcceptedEntitlements(decoded.Entitlements, decoded.LegacyEntitlements); err != nil {\n\t\treturn err\n\t}\n\t*p = NMISalePayload(decoded)\n\treturn nil\n}",
@@ -4698,13 +4698,13 @@
     "internal/river/jobs_stored_card_refresh.go": {
       "basistheory": "github.com/open-rails/openrails/internal/integrations/basistheory",
       "billing": "github.com/open-rails/openrails/billing",
-      "bytes": "bytes",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "custodians": "github.com/open-rails/openrails/internal/custodians",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
+      "fnv": "hash/fnv",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "intents": "github.com/open-rails/openrails/internal/intents",
       "json": "encoding/json",

@@ -123,31 +123,56 @@ type StoredCardRefreshArgs struct {
 	// Declined: a charge declined as an expired or reissued card. A refresh
 	// that finds no new card then asks the customer for one.
 	Declined bool `json:"declined" river:"unique"`
-	// MethodRef and CheckedAt are the card as queued: the handle charged (or
-	// found due) and its last check. A card reissued or checked since needs no
-	// second request.
-	MethodRef string     `json:"method_ref,omitempty"`
+	// Card and CheckedAt are the card as queued (CardVersion of the card
+	// charged, or found due) and its last check. A card reissued or checked
+	// since needs no second request.
+	Card      string     `json:"card,omitempty"`
 	CheckedAt *time.Time `json:"checked_at,omitempty"`
 }
 
 // StoredCardRefreshFor queues a refresh of method as it stands, or of the
 // handle a declined charge used.
 func StoredCardRefreshFor(method gen.BillingPaymentMethod, declined bool, chargedRef string) StoredCardRefreshArgs {
-	ref := models.DerefStr(method.RailMethodRef)
+	charged := method
 	if chargedRef != "" {
-		ref = chargedRef
+		charged.RailMethodRef = &chargedRef
 	}
-	return StoredCardRefreshArgs{MerchantID: method.MerchantID, PaymentMethodID: method.ID, Declined: declined, MethodRef: ref, CheckedAt: method.AccountUpdaterCheckedAt}
+	return StoredCardRefreshArgs{MerchantID: method.MerchantID, PaymentMethodID: method.ID, Declined: declined, Card: CardVersion(charged), CheckedAt: method.AccountUpdaterCheckedAt}
 }
 
 // Moot reports a refresh overtaken since it was queued: the card was
-// reissued (another handle) or checked again.
+// reissued (any of its reissue facts changed) or checked again.
 func (a StoredCardRefreshArgs) Moot(method gen.BillingPaymentMethod) (reissued, checked bool) {
-	if a.MethodRef != "" && a.MethodRef != models.DerefStr(method.RailMethodRef) {
+	if a.Card != "" && a.Card != CardVersion(method) {
 		return true, false
 	}
 	now := method.AccountUpdaterCheckedAt
 	return false, now != nil && (a.CheckedAt == nil || now.UnixMicro() != a.CheckedAt.UnixMicro())
+}
+
+// CardVersion names the facts a reissue changes (observe's reissued): the
+// holder's handles, number, fingerprint and expiry. An expiry-only update
+// keeps the handle but not the version.
+func CardVersion(m gen.BillingPaymentMethod) string {
+	exp := func(v *int16) string {
+		if v == nil {
+			return ""
+		}
+		return fmt.Sprint(*v)
+	}
+	return strings.Join([]string{models.DerefStr(m.RailCustomerRef), models.DerefStr(m.RailMethodRef), models.DerefStr(m.CardLast4),
+		models.DerefStr(m.Fingerprint), exp(m.CardExpMonth), exp(m.CardExpYear)}, "|")
+}
+
+// AsksForUpdates reports a card whose holder must be asked whether it was
+// reissued: a Basis Theory vault charged by the card's own number, for the
+// Visa and Mastercard cards its Account Updater covers. Every other holder
+// updates its cards in place. Whether the vault is armed is configuration,
+// read where the request is made.
+func AsksForUpdates(m gen.BillingPaymentMethod) bool {
+	network := CardNetwork(models.DerefStr(m.CardBrand))
+	return models.BasisTheoryCustody(m.Custodian) && m.CustodianID != nil && models.DerefStr(m.RailMethodRef) != "" &&
+		(network == "visa" || network == "mastercard")
 }
 
 // KindStoredCardRefresh is StoredCardRefreshArgs' River kind.
@@ -167,9 +192,13 @@ func (StoredCardRefreshArgs) InsertOpts() river.InsertOpts {
 	}}}
 }
 
-// ErrAccountUpdateRefused is a holder's definitive refusal of an update
-// request; repeating it changes nothing.
+// ErrAccountUpdateRefused is a holder's definitive refusal of one card's
+// update request; repeating it changes nothing.
 var ErrAccountUpdateRefused = errors.New("account update refused")
+
+// ErrAccountUpdaterUnauthorized is a holder refusing the merchant's
+// credentials: no card of that vault can be checked until an operator fixes them.
+var ErrAccountUpdaterUnauthorized = errors.New("account updater credentials refused")
 
 // AccountUpdaters arms the account updater of a stored card's holder. ok is
 // false for a holder that updates its cards in place, an unarmed vault or a

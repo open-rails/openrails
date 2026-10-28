@@ -59,10 +59,6 @@ type SubscriptionLifecycleService struct {
 	// lifecycle ends (QueueProviderCancel). Injected in the composition root;
 	// when nil a terminal outcome cannot stop the provider schedule.
 	providerCancel ProviderCancelScheduler
-
-	// accountUpdaters names the cards whose holder is asked for a new card
-	// after a decline; nil asks every customer at once.
-	accountUpdaters paymentmethods.AccountUpdaters
 }
 
 type lifecycleEntitlementService interface {
@@ -144,29 +140,17 @@ func (s *SubscriptionLifecycleService) SetConfig(cfg *config.Config) {
 	s.Config = cfg
 }
 
-// SetAccountUpdaters injects the holders a declined card is refreshed from.
-func (s *SubscriptionLifecycleService) SetAccountUpdaters(u paymentmethods.AccountUpdaters) {
-	s.accountUpdaters = u
-}
-
 // declinedCardRefresh is the refresh a card declined as expired or reissued
-// gets first, when its holder must be asked (an armed vault); every other
-// holder already charged its current card. A holder that cannot be resolved
-// now is refreshed: the job asks if it stays so.
-func (s *SubscriptionLifecycleService) declinedCardRefresh(ctx context.Context, d *db.DB, merchantID, methodID uuid.UUID, chargedRef string) (paymentmethods.StoredCardRefreshArgs, bool) {
-	if s.accountUpdaters == nil {
-		return paymentmethods.StoredCardRefreshArgs{}, false
-	}
+// gets first when its holder must be asked (a vault charged by the card's own
+// number), decided from the stored card alone. Every other holder already
+// charged its current card. The job reads the vault's arming and asks the
+// customer when it is not armed.
+func declinedCardRefresh(ctx context.Context, d *db.DB, merchantID, methodID uuid.UUID, chargedRef string) (paymentmethods.StoredCardRefreshArgs, bool) {
 	method, err := d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: merchantID, ID: methodID})
-	if err != nil {
+	if err != nil || !paymentmethods.AsksForUpdates(method) {
 		return paymentmethods.StoredCardRefreshArgs{}, false
 	}
-	_, ok, err := s.accountUpdaters.AccountUpdater(ctx, method)
-	if err != nil {
-		log.WithContext(ctx).WithError(err).WithField("payment_method_id", methodID).Warn("declined card: holder unresolved; refreshing")
-		ok = models.BasisTheoryCustody(method.Custodian)
-	}
-	return paymentmethods.StoredCardRefreshFor(method, true, chargedRef), ok
+	return paymentmethods.StoredCardRefreshFor(method, true, chargedRef), true
 }
 
 // SetProviderCancelScheduler injects the provider-cancel scheduler.
@@ -2318,7 +2302,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			(decline.HolderMayHoldNewCard(billing.DeclineReason(data.FailureReason)) ||
 				decline.HolderMayHoldNewCard(billing.DeclineReason(decline.ReasonFor(string(subscription.Rail), data.FailureCode))))
 		if refresh {
-			args, refresh = s.declinedCardRefresh(ctx, db, subscription.MerchantID, *charged, params.DeclinedMethodRef)
+			args, refresh = declinedCardRefresh(ctx, db, subscription.MerchantID, *charged, params.DeclinedMethodRef)
 		}
 		if refresh {
 			opts := args.InsertOpts()

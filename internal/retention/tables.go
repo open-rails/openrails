@@ -118,6 +118,7 @@ var Tables = map[string]Table{
 	"payment_methods":                   {Class: State},
 	"subscriptions":                     {Class: State},
 	"subscription_verifications":        {Class: State},
+	"stored_card_checks":                {Class: State},
 	"solana_subscriptions":              {Class: State},
 	"product_access":                    {Class: State},
 	"customer_entitlement_cache":        {Class: State},

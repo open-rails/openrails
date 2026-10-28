@@ -1,69 +1,57 @@
--- Ahead-of-renewal refresh of cards held by a vault that must be asked for
--- updates (basis_theory and platform custody). Holders that update their cards
--- in place are never enumerated. Indexed on payment_methods_account_updater_due_idx.
+-- Stored cards a vault must be asked about (basis_theory and platform custody).
+-- The ahead-of-renewal pass reads only billing.stored_card_checks, which
+-- subscription and default-card changes fill; cards whose holder updates them
+-- in place never appear.
 
--- CROSS-MERCHANT: merchants with a vault holding a card that pays a renewal
--- inside the longest lookahead and was not checked inside the shortest. Whether
--- the vault is armed, and its own lookahead, are in the merchant's
--- configuration, which the caller reads per merchant. Capped and cursored.
--- name: ListStoredCardRefreshMerchants :many
-SELECT DISTINCT c.merchant_id
-FROM billing.custodians c
-WHERE c.kind IN ('basis_theory', 'platform')
-  AND (sqlc.narg(after)::uuid IS NULL OR c.merchant_id > sqlc.narg(after)::uuid)
-  AND EXISTS (
-        SELECT 1 FROM billing.payment_methods pm
-         WHERE pm.merchant_id = c.merchant_id AND pm.custodian_id = c.id
-           AND pm.custodian IN ('basis_theory', 'platform') AND pm.status = 'active' AND pm.rail_method_ref IS NOT NULL
-           AND (pm.account_updater_checked_at IS NULL
-                OR pm.account_updater_checked_at < sqlc.arg(now)::timestamptz - make_interval(days => sqlc.arg(min_lookahead_days)::int))
-           AND regexp_replace(lower(pm.card_brand), '[^a-z]', '', 'g') IN ('visa', 'mastercard', 'mc')
-           AND (EXISTS (
-                   SELECT 1 FROM billing.subscriptions s
-                    WHERE s.merchant_id = pm.merchant_id AND s.payment_method_id = pm.id
-                      AND s.deleted_at IS NULL AND s.status IN ('active', 'past_due', 'awaiting_method')
-                      AND s.current_period_ends_at <= sqlc.arg(now)::timestamptz + make_interval(days => sqlc.arg(max_lookahead_days)::int))
-                OR EXISTS (
-                   SELECT 1 FROM billing.money_settings ms
-                     JOIN billing.subscriptions s ON s.merchant_id = ms.merchant_id AND s.customer_id = ms.customer_id
-                    WHERE ms.merchant_id = pm.merchant_id AND ms.customer_id = pm.customer_id AND ms.default_payment_method_id = pm.id
-                      AND s.payment_method_id IS NULL
-                      AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
-                      AND s.deleted_at IS NULL AND s.status IN ('active', 'past_due', 'awaiting_method')
-                      AND s.current_period_ends_at <= sqlc.arg(now)::timestamptz + make_interval(days => sqlc.arg(max_lookahead_days)::int))))
-ORDER BY c.merchant_id
-LIMIT sqlc.arg(merchant_limit)::int;
-
--- One vault's due cards: Visa and Mastercard cards paying a renewal before
--- renewal_before, as a subscription's own card or the default it follows, not
--- checked since stale_before. Parked cards are included:
--- a reissue is what recovers them. Never-checked first, then stalest.
--- name: ListDueStoredCards :many
-SELECT pm.id, pm.rail_method_ref, pm.account_updater_checked_at
-FROM billing.payment_methods pm
-WHERE pm.merchant_id = sqlc.arg(merchant_id)
-  AND pm.custodian_id = sqlc.arg(custodian_id)::uuid
-  AND pm.custodian IN ('basis_theory', 'platform') AND pm.status = 'active' AND pm.rail_method_ref IS NOT NULL
-  AND (pm.account_updater_checked_at IS NULL OR pm.account_updater_checked_at < sqlc.arg(stale_before)::timestamptz)
-  AND regexp_replace(lower(pm.card_brand), '[^a-z]', '', 'g') IN ('visa', 'mastercard', 'mc')
-  AND (EXISTS (
-          SELECT 1 FROM billing.subscriptions s
-           WHERE s.merchant_id = pm.merchant_id AND s.payment_method_id = pm.id
-             AND s.deleted_at IS NULL AND s.status IN ('active', 'past_due', 'awaiting_method')
-             AND s.current_period_ends_at <= sqlc.arg(renewal_before)::timestamptz)
-       OR EXISTS (
-          SELECT 1 FROM billing.money_settings ms
-            JOIN billing.subscriptions s ON s.merchant_id = ms.merchant_id AND s.customer_id = ms.customer_id
-           WHERE ms.merchant_id = pm.merchant_id AND ms.customer_id = pm.customer_id AND ms.default_payment_method_id = pm.id
-             AND s.payment_method_id IS NULL
-             AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
-             AND s.deleted_at IS NULL AND s.status IN ('active', 'past_due', 'awaiting_method')
-             AND s.current_period_ends_at <= sqlc.arg(renewal_before)::timestamptz))
-ORDER BY pm.account_updater_checked_at NULLS FIRST, pm.id
+-- CROSS-MERCHANT: the vault cards due for a look, oldest first. Capped.
+-- name: ListDueStoredCardChecks :many
+SELECT merchant_id, payment_method_id
+FROM billing.stored_card_checks
+WHERE due_at <= sqlc.arg(now)::timestamptz
+ORDER BY due_at, merchant_id, payment_method_id
 LIMIT sqlc.arg(row_limit)::int;
 
--- A card is checked when its holder answered, or refused for good.
+-- name: PlanStoredCardCheck :execrows
+UPDATE billing.stored_card_checks SET due_at = sqlc.arg(due_at)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id) AND payment_method_id = sqlc.arg(payment_method_id);
+
+-- name: DeleteStoredCardCheck :execrows
+DELETE FROM billing.stored_card_checks
+WHERE merchant_id = sqlc.arg(merchant_id) AND payment_method_id = sqlc.arg(payment_method_id);
+
+-- The next renewal a card pays, as a subscription's own card or the default
+-- it follows; none when no live subscription renews on it.
+-- name: StoredCardNextRenewal :many
+SELECT s.current_period_ends_at::timestamptz AS renews_at
+FROM billing.payment_methods pm
+JOIN billing.subscriptions s ON s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = sqlc.arg(payment_method_id)::uuid
+  AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
+  AND s.deleted_at IS NULL AND s.status IN ('active', 'past_due', 'awaiting_method')
+  AND s.current_period_ends_at IS NOT NULL
+ORDER BY s.current_period_ends_at
+LIMIT 1;
+
+-- A card is checked when its holder answered, refused it for good, or could
+-- not take its answer.
 -- name: StampAccountUpdaterChecked :execrows
 UPDATE billing.payment_methods SET account_updater_checked_at = sqlc.arg(checked_at)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id);
 
+-- Whether an open finding holds a vault's checks (its key was refused).
+-- name: StoredCardVaultHeld :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.reconciliation_findings
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text
+      AND psp_id IS NULL AND subject_key = sqlc.arg(subject_key)::text
+      AND status IN ('reconcile_required', 'requires_review')
+)::bool;
+
+-- The vault answered again: its refused-key finding is over.
+-- name: ResolveStoredCardVaultHold :execrows
+UPDATE billing.reconciliation_findings
+SET status = 'auto_fixed', resolution = 'enforced', resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text
+  AND psp_id IS NULL AND subject_key = sqlc.arg(subject_key)::text
+  AND status IN ('reconcile_required', 'requires_review');

@@ -39,12 +39,17 @@ type merchantBT struct {
 	numbers map[string]string
 	// reissues answer the Account Updater for a token; absent is NO_UPDATE.
 	reissues map[string]btReissue
-	// updaterCalls are the tokens the Account Updater was asked about, once
-	// per idempotency key; replies replay a repeated key.
+	// updaterCalls are the tokens the Account Updater answered, once per
+	// idempotency key; replies replay a repeated key.
 	updaterCalls []string
 	replies      map[string][]byte
+	// throttle answers every Account Updater call 429; throttled counts them.
+	throttle  bool
+	throttled int
 }
 
+// btReissue is the network's answer for a token. A number mints a token of
+// its own; without one the token keeps its id and takes the new expiry.
 type btReissue struct {
 	code, number string
 	card         basistheory.CardDetails
@@ -90,15 +95,34 @@ func (b *merchantBT) updaterAsked() []string {
 	return append([]string(nil), b.updaterCalls...)
 }
 
+func (b *merchantBT) setThrottle(on bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.throttle = on
+}
+
+func (b *merchantBT) throttledCalls() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.throttled
+}
+
 // accountUpdate is the real-time Account Updater: a reissue mints a token in
 // the same tenant and container; the number never leaves the vault.
 func (b *merchantBT) accountUpdate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		TokenID string `json:"token_id"`
+		TokenID     string `json:"token_id"`
+		Deduplicate *bool  `json:"deduplicate_token"`
 	}
 	key := r.Header.Get("BT-IDEMPOTENCY-KEY")
-	if json.NewDecoder(r.Body).Decode(&body) != nil || key == "" {
+	if json.NewDecoder(r.Body).Decode(&body) != nil || key == "" || body.Deduplicate == nil || *body.Deduplicate {
 		w.WriteHeader(400)
+		return
+	}
+	if b.throttle {
+		b.throttled++
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte(`{"title":"Too Many Requests"}`))
 		return
 	}
 	if reply, ok := b.replies[key]; ok {
@@ -114,7 +138,12 @@ func (b *merchantBT) accountUpdate(w http.ResponseWriter, r *http.Request) {
 	answer := map[string]any{"result_code": "NO_UPDATE"}
 	if update, ok := b.reissues[body.TokenID]; ok {
 		answer["result_code"] = update.code
-		if update.number != "" {
+		if update.number == "" {
+			card := update.card
+			old.Card = &card
+			b.tokens[old.ID] = old
+			answer["new_token"] = map[string]any{"id": old.ID, "tenant_id": old.TenantID, "type": "card", "fingerprint": old.Fingerprint, "containers": old.Containers, "card": card}
+		} else {
 			card := update.card
 			fresh := basistheory.CardToken{ID: uuid.NewString(), TenantID: old.TenantID, Type: "card", Fingerprint: "card-" + card.Last4, Card: &card, Containers: old.Containers, Metadata: old.Metadata}
 			b.tokens[fresh.ID] = fresh

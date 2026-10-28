@@ -116,7 +116,7 @@ migration 0114_account_usage_billing.up.sql sha256:1b818744089d9dc86b08b384be861
 migration 0115_notification_issue_revisions.up.sql sha256:f720b146566426f56c3b85c5051b07ede1283b9e3e06ca5f1395703e2673a3bd
 migration 0116_remove_hosted_account_state.up.sql sha256:8dc46947ff04dd7bd60c6a71fd2b6c059e0d60ec2298577f0fe4237bef303dde
 migration 0117_ledger_audit_at_restore_commit.up.sql sha256:aed275cb883723e3396ff19688e712bd2b3814dcae8c201d9ef2598ab5aadbf2
-migration 0118_stored_card_refresh.up.sql sha256:b353eacbebdd5f91567f663d063defd1fdd36f8bc73d45fba2edca2e6f4856ca
+migration 0118_stored_card_refresh.up.sql sha256:312d37e5bb10f50013657086f7cd93e6190b0c36294fe6f2d68425ac4bc98826
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1118,6 +1118,7 @@ table billing.money_settings
   constraint money_settings_usage_minimum_invoice_amount_check CHECK ((usage_minimum_invoice_amount >= 0))
   index CREATE UNIQUE INDEX money_settings_pkey ON billing.money_settings USING btree (merchant_id, customer_id, currency)
   index CREATE INDEX money_settings_usage_due ON billing.money_settings USING btree (merchant_id, usage_next_bill_at) WHERE ((usage_next_bill_at IS NOT NULL) OR usage_collection_due)
+  trigger CREATE TRIGGER money_settings_mark_stored_card_check AFTER INSERT OR UPDATE OF default_payment_method_id ON billing.money_settings FOR EACH ROW EXECUTE FUNCTION billing.default_card_marks_stored_card_check()
   trigger CREATE TRIGGER trg_subscription_history_default AFTER UPDATE OF default_payment_method_id ON billing.money_settings FOR EACH ROW EXECUTE FUNCTION billing.subscription_history_default_card()
 
 table billing.nmi_bulk_checkpoints
@@ -1661,7 +1662,6 @@ table billing.payment_methods
   constraint payment_methods_replaced_by_id_fkey FOREIGN KEY (merchant_id, customer_id, replaced_by_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id)
   constraint payment_methods_setup_ref_check CHECK ((((status = 'requires_action'::text) = (setup_ref IS NOT NULL)) AND (setup_ref <> ''::text)))
   constraint payment_methods_status_check CHECK ((status = ANY (ARRAY['requires_action'::text, 'active'::text, 'closed'::text, 'replaced'::text, 'removed'::text])))
-  index CREATE INDEX payment_methods_account_updater_due_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, account_updater_checked_at NULLS FIRST) WHERE ((custodian = ANY (ARRAY['basis_theory'::text, 'platform'::text])) AND (status = 'active'::text) AND (rail_method_ref IS NOT NULL))
   index CREATE INDEX payment_methods_custodian_id_network_token_id_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id IS NOT NULL))
   index CREATE INDEX payment_methods_custodian_id_rail_method_ref_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, rail_method_ref) WHERE (custodian <> 'psp'::text)
   index CREATE INDEX payment_methods_customer_id_created_at_id_idx ON billing.payment_methods USING btree (merchant_id, customer_id, created_at DESC, id DESC)
@@ -2649,6 +2649,15 @@ table billing.solana_subscriptions
   index CREATE INDEX solana_subscriptions_subscription_id_idx ON billing.solana_subscriptions USING btree (merchant_id, subscription_id)
   index CREATE UNIQUE INDEX solana_subscriptions_subscription_pda_key ON billing.solana_subscriptions USING btree (subscription_pda)
 
+table billing.stored_card_checks
+  column merchant_id uuid NOT NULL
+  column payment_method_id uuid NOT NULL
+  column due_at timestamp with time zone NOT NULL
+  constraint stored_card_checks_payment_method_id_fkey FOREIGN KEY (merchant_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, id) ON DELETE CASCADE
+  constraint stored_card_checks_pkey PRIMARY KEY (merchant_id, payment_method_id)
+  index CREATE INDEX stored_card_checks_due_at_idx ON billing.stored_card_checks USING btree (due_at)
+  index CREATE UNIQUE INDEX stored_card_checks_pkey ON billing.stored_card_checks USING btree (merchant_id, payment_method_id)
+
 table billing.subscription_billing_changes
   column merchant_id uuid NOT NULL
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2819,6 +2828,7 @@ table billing.subscriptions
   index CREATE INDEX subscriptions_status_idx ON billing.subscriptions USING btree (status)
   trigger CREATE TRIGGER subscriptions_collection_policy_immutable BEFORE UPDATE OF collection_policy ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.preserve_subscription_collection_policy()
   trigger CREATE TRIGGER subscriptions_lifecycle_single_writer BEFORE UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_lifecycle_single_writer()
+  trigger CREATE TRIGGER subscriptions_mark_stored_card_check AFTER INSERT OR UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscription_marks_stored_card_check()
   trigger CREATE TRIGGER subscriptions_release_ownership_claims AFTER UPDATE OF status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.release_ended_ownership_claims()
   trigger CREATE TRIGGER subscriptions_row_version BEFORE UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_row_version()
   trigger CREATE TRIGGER subscriptions_void_renewal_orders AFTER UPDATE OF status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.void_ended_renewal_orders()
@@ -3354,6 +3364,20 @@ function billing.current_merchant_id()
       SELECT NULLIF(current_setting('openrails.merchant_id', true), '')::uuid
   $function$
 
+function billing.default_card_marks_stored_card_check()
+  CREATE OR REPLACE FUNCTION billing.default_card_marks_stored_card_check()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF NEW.default_payment_method_id IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.default_payment_method_id IS DISTINCT FROM NEW.default_payment_method_id) THEN
+          PERFORM billing.mark_stored_card_check(NEW.merchant_id, NEW.default_payment_method_id);
+      END IF;
+      RETURN NULL;
+  END;
+  $function$
+
 function billing.discard_deleted_merchant_eventlog()
   CREATE OR REPLACE FUNCTION billing.discard_deleted_merchant_eventlog()
    RETURNS trigger
@@ -3721,6 +3745,7 @@ function billing.guard_billing_restore_receipt()
                     'solana_pay_receipts',
                     'solana_pay_references',
                     'solana_subscriptions',
+                    'stored_card_checks',
                     'subscription_status_transitions',
                     'subscription_billing_changes',
                     'subscription_verifications',
@@ -4152,6 +4177,19 @@ function billing.ledger_transfers_apply_counters()
   END;
   $function$
 
+function billing.mark_stored_card_check(uuid,uuid)
+  CREATE OR REPLACE FUNCTION billing.mark_stored_card_check(p_merchant uuid, p_method uuid)
+   RETURNS void
+   LANGUAGE sql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  INSERT INTO billing.stored_card_checks (merchant_id, payment_method_id, due_at)
+  SELECT pm.merchant_id, pm.id, '-infinity' FROM billing.payment_methods pm
+   WHERE pm.merchant_id = p_merchant AND pm.id = p_method
+     AND pm.custodian IN ('basis_theory', 'platform') AND pm.status = 'active'
+  ON CONFLICT (merchant_id, payment_method_id) DO UPDATE SET due_at = '-infinity';
+  $function$
+
 function billing.month_partitions(name)
   CREATE OR REPLACE FUNCTION billing.month_partitions(p_table name)
    RETURNS TABLE(partition name, range_from timestamp with time zone, range_to timestamp with time zone)
@@ -4531,6 +4569,26 @@ function billing.subscription_history_default_card()
         AND s.payment_method_id IS NULL AND s.rail IN ('stripe','nmi') AND s.collection_policy IN ('engine','nmi_schedule')
         AND s.deleted_at IS NULL AND s.status IN ('active','past_due','awaiting_method','unverified');
       RETURN NEW;
+  END;
+  $function$
+
+function billing.subscription_marks_stored_card_check()
+  CREATE OR REPLACE FUNCTION billing.subscription_marks_stored_card_check()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF NEW.deleted_at IS NOT NULL OR NEW.current_period_ends_at IS NULL OR NEW.status NOT IN ('active', 'past_due', 'awaiting_method') THEN
+          RETURN NULL;
+      END IF;
+      IF TG_OP = 'UPDATE' AND OLD.current_period_ends_at IS NOT DISTINCT FROM NEW.current_period_ends_at AND OLD.status IS NOT DISTINCT FROM NEW.status
+         AND OLD.payment_method_id IS NOT DISTINCT FROM NEW.payment_method_id AND OLD.deleted_at IS NOT DISTINCT FROM NEW.deleted_at THEN
+          RETURN NULL;
+      END IF;
+      PERFORM billing.mark_stored_card_check(NEW.merchant_id,
+          billing.subscription_payment_method_id(NEW.merchant_id, NEW.customer_id, NEW.payment_method_id, NEW.price_id, NEW.rail, NEW.collection_policy));
+      RETURN NULL;
   END;
   $function$
 

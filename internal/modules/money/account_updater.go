@@ -22,19 +22,16 @@ var _ paymentmethods.AccountUpdaters = (*MerchantCollectionAdapterBuilder)(nil)
 // vault holds (merchant-owned or platform), when its vault arms it and the card
 // is Visa or Mastercard. Every other holder updates its cards in place.
 func (b *MerchantCollectionAdapterBuilder) AccountUpdater(ctx context.Context, m gen.BillingPaymentMethod) (paymentmethods.AccountUpdater, bool, error) {
+	if !paymentmethods.AsksForUpdates(m) {
+		return nil, false, nil
+	}
 	ref := models.DerefStr(m.RailMethodRef)
-	if !models.BasisTheoryCustody(m.Custodian) || m.CustodianID == nil || ref == "" {
-		return nil, false, nil
-	}
-	if network := paymentmethods.CardNetwork(models.DerefStr(m.CardBrand)); network != "visa" && network != "mastercard" {
-		return nil, false, nil
-	}
 	svc := b.merchants()
 	if b == nil || svc == nil {
 		return nil, false, errors.New("account updater: card vaults are not armed")
 	}
 	custody, err := svc.BasisTheoryCustodianConfig(ctx, billing.MerchantID(m.MerchantID), *m.CustodianID)
-	if errors.Is(err, merchants.ErrCustodianNotDeclared) {
+	if errors.Is(err, merchants.ErrCustodianNotDeclared) || errors.Is(err, merchants.ErrPlatformVaultUnavailable) {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -65,8 +62,15 @@ type basisTheoryUpdater struct {
 func (u basisTheoryUpdater) Update(ctx context.Context, key string) (paymentmethods.AccountUpdate, error) {
 	res, err := u.client.UpdateCard(ctx, u.token, key)
 	var apiErr *basistheory.APIError
-	if errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 && apiErr.Status != http.StatusConflict && apiErr.Status != http.StatusTooManyRequests {
-		return paymentmethods.AccountUpdate{}, fmt.Errorf("%w: %w", paymentmethods.ErrAccountUpdateRefused, err)
+	if errors.As(err, &apiErr) {
+		switch status := apiErr.Status; {
+		case status == http.StatusUnauthorized || status == http.StatusForbidden:
+			return paymentmethods.AccountUpdate{}, fmt.Errorf("%w: %w", paymentmethods.ErrAccountUpdaterUnauthorized, err)
+		case status == http.StatusRequestTimeout || status == http.StatusConflict || status == http.StatusTooManyRequests || status >= 500:
+			// Retryable under the same key.
+		case status >= 400:
+			return paymentmethods.AccountUpdate{}, fmt.Errorf("%w: %w", paymentmethods.ErrAccountUpdateRefused, err)
+		}
 	}
 	if err != nil {
 		return paymentmethods.AccountUpdate{}, err

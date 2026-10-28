@@ -96,6 +96,7 @@ var ownedTables = []string{
 	"subscription_billing_changes",
 	"subscription_status_transitions",
 	"subscription_verifications",
+	"stored_card_checks",
 	"subscriptions",
 	"usage_collection_cadence",
 	"usage_events",

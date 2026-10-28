@@ -856,7 +856,7 @@
     {
       "id": "OR-J12-S08",
       "journey": "J12",
-      "name": "Expired vault card is refreshed at its Account Updater and its renewal retries on the reissued card"
+      "name": "Expired vault card is updated at its Account Updater, as a new token or a new expiry, and its renewal retries on it"
     },
     {
       "id": "OR-J12-S09",
@@ -866,7 +866,7 @@
     {
       "id": "OR-J12-S10",
       "journey": "J12",
-      "name": "Ahead-of-renewal refresh asks armed vaults about due cards only, including cards awaiting a method"
+      "name": "Ahead-of-renewal refresh asks armed vaults about due cards only, including cards awaiting a method, and retries a throttled vault without marking cards checked"
     },
     {
       "id": "OR-J12-S11",

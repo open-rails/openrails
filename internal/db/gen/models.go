@@ -1785,6 +1785,13 @@ type BillingSolanaSubscription struct {
 	Treasury string
 }
 
+// When the ahead-of-renewal pass next looks at a card a vault must be asked about; -infinity after its renewals changed. Derived from subscriptions; deleted when nothing is due.
+type BillingStoredCardCheck struct {
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+	DueAt           time.Time
+}
+
 // Core subscription records tracking user billing relationships
 type BillingSubscription struct {
 	ID      uuid.UUID

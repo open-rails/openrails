@@ -72,14 +72,15 @@ type CardUpdate struct {
 
 // UpdateCard asks the networks for a card token's current card. The call is
 // billed and may mint a token, so it carries an idempotency key: a repeat
-// within 24 hours returns the first answer.
+// within 24 hours returns the first answer. Deduplication is off: a reissue
+// gets a token of its own, never another stored card's.
 func (c *Client) UpdateCard(ctx context.Context, tokenID, idempotencyKey string) (*CardUpdate, error) {
 	tokenID, idempotencyKey = strings.TrimSpace(tokenID), strings.TrimSpace(idempotencyKey)
 	if tokenID == "" || idempotencyKey == "" {
 		return nil, errors.New("basistheory: account updater needs a token id and an idempotency key")
 	}
 	var out CardUpdate
-	if err := c.doJSON(ctx, http.MethodPost, accountUpdaterRTRoute, map[string]string{"token_id": tokenID}, idempotencyKey, &out); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, accountUpdaterRTRoute, map[string]any{"token_id": tokenID, "deduplicate_token": false}, idempotencyKey, &out); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(out.ResultCode) == "" {

@@ -1,12 +1,68 @@
 -- Cards a vault must be asked about are refreshed one at a time
 -- (account-updater real-time), queued on a decline or ahead of a renewal. The
--- batch account updater and its job table are gone.
+-- batch account updater, its job table and its intents are gone.
+DELETE FROM billing.provider_intents WHERE intent_type = 'bt_account_updater_batch';
 DROP TABLE billing.account_updater_batches;
 
 DROP INDEX billing.payment_methods_custodian_account_updater_checked_at_idx;
-CREATE INDEX payment_methods_account_updater_due_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, account_updater_checked_at NULLS FIRST)
-    WHERE custodian IN ('basis_theory', 'platform') AND status = 'active' AND rail_method_ref IS NOT NULL;
 COMMENT ON COLUMN billing.payment_methods.account_updater_checked_at IS 'When the card''s vault last answered an account-updater request for it; NULL when never.';
+
+-- Due work for the ahead-of-renewal pass: one row per vault card whose
+-- renewals may need a check. A subscription period, status or card change
+-- (and a default card change) marks its card -infinity; the pass plans it to
+-- its next check or deletes the row.
+CREATE TABLE billing.stored_card_checks (
+    merchant_id uuid NOT NULL,
+    payment_method_id uuid NOT NULL,
+    due_at timestamp with time zone NOT NULL,
+    CONSTRAINT stored_card_checks_pkey PRIMARY KEY (merchant_id, payment_method_id),
+    CONSTRAINT stored_card_checks_payment_method_id_fkey FOREIGN KEY (merchant_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, id) ON DELETE CASCADE
+);
+CREATE INDEX stored_card_checks_due_at_idx ON billing.stored_card_checks USING btree (due_at);
+COMMENT ON TABLE billing.stored_card_checks IS 'When the ahead-of-renewal pass next looks at a card a vault must be asked about; -infinity after its renewals changed. Derived from subscriptions; deleted when nothing is due.';
+
+CREATE FUNCTION billing.mark_stored_card_check(p_merchant uuid, p_method uuid) RETURNS void
+    LANGUAGE sql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+INSERT INTO billing.stored_card_checks (merchant_id, payment_method_id, due_at)
+SELECT pm.merchant_id, pm.id, '-infinity' FROM billing.payment_methods pm
+ WHERE pm.merchant_id = p_merchant AND pm.id = p_method
+   AND pm.custodian IN ('basis_theory', 'platform') AND pm.status = 'active'
+ON CONFLICT (merchant_id, payment_method_id) DO UPDATE SET due_at = '-infinity';
+$$;
+
+CREATE FUNCTION billing.subscription_marks_stored_card_check() RETURNS trigger
+    LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+BEGIN
+    IF NEW.deleted_at IS NOT NULL OR NEW.current_period_ends_at IS NULL OR NEW.status NOT IN ('active', 'past_due', 'awaiting_method') THEN
+        RETURN NULL;
+    END IF;
+    IF TG_OP = 'UPDATE' AND OLD.current_period_ends_at IS NOT DISTINCT FROM NEW.current_period_ends_at AND OLD.status IS NOT DISTINCT FROM NEW.status
+       AND OLD.payment_method_id IS NOT DISTINCT FROM NEW.payment_method_id AND OLD.deleted_at IS NOT DISTINCT FROM NEW.deleted_at THEN
+        RETURN NULL;
+    END IF;
+    PERFORM billing.mark_stored_card_check(NEW.merchant_id,
+        billing.subscription_payment_method_id(NEW.merchant_id, NEW.customer_id, NEW.payment_method_id, NEW.price_id, NEW.rail, NEW.collection_policy));
+    RETURN NULL;
+END;
+$$;
+CREATE TRIGGER subscriptions_mark_stored_card_check AFTER INSERT OR UPDATE ON billing.subscriptions
+    FOR EACH ROW EXECUTE FUNCTION billing.subscription_marks_stored_card_check();
+
+CREATE FUNCTION billing.default_card_marks_stored_card_check() RETURNS trigger
+    LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+BEGIN
+    IF NEW.default_payment_method_id IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.default_payment_method_id IS DISTINCT FROM NEW.default_payment_method_id) THEN
+        PERFORM billing.mark_stored_card_check(NEW.merchant_id, NEW.default_payment_method_id);
+    END IF;
+    RETURN NULL;
+END;
+$$;
+CREATE TRIGGER money_settings_mark_stored_card_check AFTER INSERT OR UPDATE OF default_payment_method_id ON billing.money_settings
+    FOR EACH ROW EXECUTE FUNCTION billing.default_card_marks_stored_card_check();
+
+INSERT INTO billing.stored_card_checks (merchant_id, payment_method_id, due_at)
+SELECT merchant_id, id, '-infinity' FROM billing.payment_methods
+ WHERE custodian IN ('basis_theory', 'platform') AND status = 'active';
 
 DROP INDEX billing.provider_intents_updated_at_idx;
 CREATE INDEX provider_intents_updated_at_idx ON billing.provider_intents USING btree (merchant_id, updated_at)
@@ -118,6 +174,7 @@ BEGIN
                   'solana_pay_receipts',
                   'solana_pay_references',
                   'solana_subscriptions',
+                  'stored_card_checks',
                   'subscription_status_transitions',
                   'subscription_billing_changes',
                   'subscription_verifications',

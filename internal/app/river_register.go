@@ -566,15 +566,18 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 	))
 
 	// Every 6 hours: queue the cards an armed vault must be asked about ahead
-	// of their renewal. The lookahead is at least a day (default 14), so a card
-	// entering it is checked long before the renewal it protects; each pass
-	// is capped per vault, which spreads a large book's requests.
+	// of their renewal, from the due checks subscription changes leave. The
+	// lookahead is at least a day (default 14), so a card entering it is
+	// checked long before the renewal it protects; requests spread over the
+	// hour after the pass.
 	jobs = append(jobs, r.healthPeriodic(cfg,
 		6*time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.StoredCardRefreshDueArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
+				Queue: riverjobs.QueueBilling,
+				// The next pass is the retry: a failed one never piles up.
+				MaxAttempts: 1,
+				UniqueOpts:  river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
 			}
 		},
 		nil,

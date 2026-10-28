@@ -339,26 +339,35 @@ Consequences, all enforced rather than documented:
   Visa and Mastercard cards this vault holds. NMI charges the vault's own card
   number, so the vault must be asked whether a card was reissued; a PSP or
   HyperSwitch updates its cards in place. One card is refreshed at a time:
-  * ahead of a renewal: a pass every 6 hours queues each card that pays an
-    `active`, `past_due` or `awaiting_method` subscription renewing inside
-    `account_updater_lookahead_days` (default 14) and was not checked inside
-    that window, so a card is looked up once per cycle;
-  * after a renewal declined as an expired or reissued card. If no new card is
-    found, or the request is refused, the customer is asked for one. A
-    declined card any other holder keeps asks the customer at once.
+  * ahead of a renewal: a change to a subscription's period, status or card
+    marks its card, and a pass every 6 hours queues each marked card whose
+    next renewal (`active`, `past_due` or `awaiting_method`) is inside
+    `account_updater_lookahead_days` (default 14) and that was not checked for
+    it, spreading the requests over the following hour. A vault armed later is
+    first asked about a card ahead of that card's next renewal;
+  * after a renewal declined as an expired or reissued card. If the vault is
+    not armed, finds no new card or refuses the request, the customer is asked
+    for one. A declined card any other holder keeps asks the customer at once.
 
   Results are applied as card versions, through the same writer the
-  custodian's webhooks use: a reissue gives the same payment method the new
-  token and card, clears any park and retries the subscriptions waiting on it;
-  another brand holds its mandates for the customer's consent; a closed account
-  closes it; a "contact cardholder" answer prompts the customer, or closes a
-  Mastercard card. Nothing is ever deleted or canceled. Each request is a
-  provider intent whose id is Basis Theory's idempotency key.
+  custodian's webhooks use: a reissue (a new token, or a new expiry on the
+  same token) updates the same payment method, clears any park and retries the
+  subscriptions waiting on it; another brand holds its mandates for the
+  customer's consent; a closed account closes it; a "contact cardholder" answer
+  prompts the customer, or closes a Mastercard card. Nothing is ever deleted or
+  canceled. Each request is a provider intent whose id is Basis Theory's
+  idempotency key, and asks with token deduplication off, so a reissue never
+  takes another stored card's token. Throttling, timeouts and server errors are
+  retried on the intent's backoff and never mark a card checked. A refused key
+  raises one `card.account_updater.unauthorized` finding and holds the vault's
+  checks until it answers again or the finding is resolved; an answer that
+  cannot be applied raises `card.account_updater.unapplied`.
   Both settings are off/default until declared — the updater is a priced
   add-on, and an unarmed vault's cards are never refreshed. The private
   application key needs `account-updater:real-time:invoke`. For the platform
   vault the operator sets `account_updater` and
-  `account_updater_lookahead_days` in its credential document.
+  `account_updater_lookahead_days` in its credential document; a malformed
+  value there leaves the updater unarmed and the vault otherwise working.
 * The retired inline keys (`settings.custodian_account_id`,
   `custodian_public_api_key`, `custodian_network_tokens`, the
   `custodian_api_key` secret) and the retired `vaulted_card` keys

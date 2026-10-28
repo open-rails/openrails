@@ -31,7 +31,7 @@ func TestUpdateCardWire(t *testing.T) {
 			t.Errorf("headers %v", r.Header)
 		}
 		body, _ := io.ReadAll(r.Body)
-		if string(body) != `{"token_id":"b4b89606-794a-4652-b375-f4e1d717a5db"}` {
+		if string(body) != `{"deduplicate_token":false,"token_id":"b4b89606-794a-4652-b375-f4e1d717a5db"}` {
 			t.Errorf("body %s", body)
 		}
 		w.Header().Set("Content-Type", "application/json")

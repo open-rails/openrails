@@ -12,65 +12,58 @@ import (
 	"github.com/google/uuid"
 )
 
-const listDueStoredCards = `-- name: ListDueStoredCards :many
-SELECT pm.id, pm.rail_method_ref, pm.account_updater_checked_at
-FROM billing.payment_methods pm
-WHERE pm.merchant_id = $1
-  AND pm.custodian_id = $2::uuid
-  AND pm.custodian IN ('basis_theory', 'platform') AND pm.status = 'active' AND pm.rail_method_ref IS NOT NULL
-  AND (pm.account_updater_checked_at IS NULL OR pm.account_updater_checked_at < $3::timestamptz)
-  AND regexp_replace(lower(pm.card_brand), '[^a-z]', '', 'g') IN ('visa', 'mastercard', 'mc')
-  AND (EXISTS (
-          SELECT 1 FROM billing.subscriptions s
-           WHERE s.merchant_id = pm.merchant_id AND s.payment_method_id = pm.id
-             AND s.deleted_at IS NULL AND s.status IN ('active', 'past_due', 'awaiting_method')
-             AND s.current_period_ends_at <= $4::timestamptz)
-       OR EXISTS (
-          SELECT 1 FROM billing.money_settings ms
-            JOIN billing.subscriptions s ON s.merchant_id = ms.merchant_id AND s.customer_id = ms.customer_id
-           WHERE ms.merchant_id = pm.merchant_id AND ms.customer_id = pm.customer_id AND ms.default_payment_method_id = pm.id
-             AND s.payment_method_id IS NULL
-             AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
-             AND s.deleted_at IS NULL AND s.status IN ('active', 'past_due', 'awaiting_method')
-             AND s.current_period_ends_at <= $4::timestamptz))
-ORDER BY pm.account_updater_checked_at NULLS FIRST, pm.id
-LIMIT $5::int
+const deleteStoredCardCheck = `-- name: DeleteStoredCardCheck :execrows
+DELETE FROM billing.stored_card_checks
+WHERE merchant_id = $1 AND payment_method_id = $2
 `
 
-type ListDueStoredCardsParams struct {
-	MerchantID    uuid.UUID
-	CustodianID   uuid.UUID
-	StaleBefore   time.Time
-	RenewalBefore time.Time
-	RowLimit      int32
+type DeleteStoredCardCheckParams struct {
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
 }
 
-type ListDueStoredCardsRow struct {
-	ID                      uuid.UUID
-	RailMethodRef           *string
-	AccountUpdaterCheckedAt *time.Time
+func (q *Queries) DeleteStoredCardCheck(ctx context.Context, arg DeleteStoredCardCheckParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteStoredCardCheck, arg.MerchantID, arg.PaymentMethodID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-// One vault's due cards: Visa and Mastercard cards paying a renewal before
-// renewal_before, as a subscription's own card or the default it follows, not
-// checked since stale_before. Parked cards are included:
-// a reissue is what recovers them. Never-checked first, then stalest.
-func (q *Queries) ListDueStoredCards(ctx context.Context, arg ListDueStoredCardsParams) ([]ListDueStoredCardsRow, error) {
-	rows, err := q.db.Query(ctx, listDueStoredCards,
-		arg.MerchantID,
-		arg.CustodianID,
-		arg.StaleBefore,
-		arg.RenewalBefore,
-		arg.RowLimit,
-	)
+const listDueStoredCardChecks = `-- name: ListDueStoredCardChecks :many
+
+SELECT merchant_id, payment_method_id
+FROM billing.stored_card_checks
+WHERE due_at <= $1::timestamptz
+ORDER BY due_at, merchant_id, payment_method_id
+LIMIT $2::int
+`
+
+type ListDueStoredCardChecksParams struct {
+	Now      time.Time
+	RowLimit int32
+}
+
+type ListDueStoredCardChecksRow struct {
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+}
+
+// Stored cards a vault must be asked about (basis_theory and platform custody).
+// The ahead-of-renewal pass reads only billing.stored_card_checks, which
+// subscription and default-card changes fill; cards whose holder updates them
+// in place never appear.
+// CROSS-MERCHANT: the vault cards due for a look, oldest first. Capped.
+func (q *Queries) ListDueStoredCardChecks(ctx context.Context, arg ListDueStoredCardChecksParams) ([]ListDueStoredCardChecksRow, error) {
+	rows, err := q.db.Query(ctx, listDueStoredCardChecks, arg.Now, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListDueStoredCardsRow
+	var items []ListDueStoredCardChecksRow
 	for rows.Next() {
-		var i ListDueStoredCardsRow
-		if err := rows.Scan(&i.ID, &i.RailMethodRef, &i.AccountUpdaterCheckedAt); err != nil {
+		var i ListDueStoredCardChecksRow
+		if err := rows.Scan(&i.MerchantID, &i.PaymentMethodID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -81,75 +74,47 @@ func (q *Queries) ListDueStoredCards(ctx context.Context, arg ListDueStoredCards
 	return items, nil
 }
 
-const listStoredCardRefreshMerchants = `-- name: ListStoredCardRefreshMerchants :many
-
-SELECT DISTINCT c.merchant_id
-FROM billing.custodians c
-WHERE c.kind IN ('basis_theory', 'platform')
-  AND ($1::uuid IS NULL OR c.merchant_id > $1::uuid)
-  AND EXISTS (
-        SELECT 1 FROM billing.payment_methods pm
-         WHERE pm.merchant_id = c.merchant_id AND pm.custodian_id = c.id
-           AND pm.custodian IN ('basis_theory', 'platform') AND pm.status = 'active' AND pm.rail_method_ref IS NOT NULL
-           AND (pm.account_updater_checked_at IS NULL
-                OR pm.account_updater_checked_at < $2::timestamptz - make_interval(days => $3::int))
-           AND regexp_replace(lower(pm.card_brand), '[^a-z]', '', 'g') IN ('visa', 'mastercard', 'mc')
-           AND (EXISTS (
-                   SELECT 1 FROM billing.subscriptions s
-                    WHERE s.merchant_id = pm.merchant_id AND s.payment_method_id = pm.id
-                      AND s.deleted_at IS NULL AND s.status IN ('active', 'past_due', 'awaiting_method')
-                      AND s.current_period_ends_at <= $2::timestamptz + make_interval(days => $4::int))
-                OR EXISTS (
-                   SELECT 1 FROM billing.money_settings ms
-                     JOIN billing.subscriptions s ON s.merchant_id = ms.merchant_id AND s.customer_id = ms.customer_id
-                    WHERE ms.merchant_id = pm.merchant_id AND ms.customer_id = pm.customer_id AND ms.default_payment_method_id = pm.id
-                      AND s.payment_method_id IS NULL
-                      AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
-                      AND s.deleted_at IS NULL AND s.status IN ('active', 'past_due', 'awaiting_method')
-                      AND s.current_period_ends_at <= $2::timestamptz + make_interval(days => $4::int))))
-ORDER BY c.merchant_id
-LIMIT $5::int
+const planStoredCardCheck = `-- name: PlanStoredCardCheck :execrows
+UPDATE billing.stored_card_checks SET due_at = $1::timestamptz
+WHERE merchant_id = $2 AND payment_method_id = $3
 `
 
-type ListStoredCardRefreshMerchantsParams struct {
-	After            *uuid.UUID
-	Now              time.Time
-	MinLookaheadDays int32
-	MaxLookaheadDays int32
-	MerchantLimit    int32
+type PlanStoredCardCheckParams struct {
+	DueAt           time.Time
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
 }
 
-// Ahead-of-renewal refresh of cards held by a vault that must be asked for
-// updates (basis_theory and platform custody). Holders that update their cards
-// in place are never enumerated. Indexed on payment_methods_account_updater_due_idx.
-// CROSS-MERCHANT: merchants with a vault holding a card that pays a renewal
-// inside the longest lookahead and was not checked inside the shortest. Whether
-// the vault is armed, and its own lookahead, are in the merchant's
-// configuration, which the caller reads per merchant. Capped and cursored.
-func (q *Queries) ListStoredCardRefreshMerchants(ctx context.Context, arg ListStoredCardRefreshMerchantsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listStoredCardRefreshMerchants,
-		arg.After,
-		arg.Now,
-		arg.MinLookaheadDays,
-		arg.MaxLookaheadDays,
-		arg.MerchantLimit,
-	)
+func (q *Queries) PlanStoredCardCheck(ctx context.Context, arg PlanStoredCardCheckParams) (int64, error) {
+	result, err := q.db.Exec(ctx, planStoredCardCheck, arg.DueAt, arg.MerchantID, arg.PaymentMethodID)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var merchant_id uuid.UUID
-		if err := rows.Scan(&merchant_id); err != nil {
-			return nil, err
-		}
-		items = append(items, merchant_id)
+	return result.RowsAffected(), nil
+}
+
+const resolveStoredCardVaultHold = `-- name: ResolveStoredCardVaultHold :execrows
+UPDATE billing.reconciliation_findings
+SET status = 'auto_fixed', resolution = 'enforced', resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, updated_at = now()
+WHERE merchant_id = $1::uuid AND finding_type = $2::text
+  AND psp_id IS NULL AND subject_key = $3::text
+  AND status IN ('reconcile_required', 'requires_review')
+`
+
+type ResolveStoredCardVaultHoldParams struct {
+	MerchantID  uuid.UUID
+	FindingType string
+	SubjectKey  string
+}
+
+// The vault answered again: its refused-key finding is over.
+func (q *Queries) ResolveStoredCardVaultHold(ctx context.Context, arg ResolveStoredCardVaultHoldParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveStoredCardVaultHold, arg.MerchantID, arg.FindingType, arg.SubjectKey)
+	if err != nil {
+		return 0, err
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return result.RowsAffected(), nil
 }
 
 const stampAccountUpdaterChecked = `-- name: StampAccountUpdaterChecked :execrows
@@ -163,11 +128,74 @@ type StampAccountUpdaterCheckedParams struct {
 	ID         uuid.UUID
 }
 
-// A card is checked when its holder answered, or refused for good.
+// A card is checked when its holder answered, refused it for good, or could
+// not take its answer.
 func (q *Queries) StampAccountUpdaterChecked(ctx context.Context, arg StampAccountUpdaterCheckedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, stampAccountUpdaterChecked, arg.CheckedAt, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const storedCardNextRenewal = `-- name: StoredCardNextRenewal :many
+SELECT s.current_period_ends_at::timestamptz AS renews_at
+FROM billing.payment_methods pm
+JOIN billing.subscriptions s ON s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
+WHERE pm.merchant_id = $1::uuid AND pm.id = $2::uuid
+  AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
+  AND s.deleted_at IS NULL AND s.status IN ('active', 'past_due', 'awaiting_method')
+  AND s.current_period_ends_at IS NOT NULL
+ORDER BY s.current_period_ends_at
+LIMIT 1
+`
+
+type StoredCardNextRenewalParams struct {
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+}
+
+// The next renewal a card pays, as a subscription's own card or the default
+// it follows; none when no live subscription renews on it.
+func (q *Queries) StoredCardNextRenewal(ctx context.Context, arg StoredCardNextRenewalParams) ([]time.Time, error) {
+	rows, err := q.db.Query(ctx, storedCardNextRenewal, arg.MerchantID, arg.PaymentMethodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []time.Time
+	for rows.Next() {
+		var renews_at time.Time
+		if err := rows.Scan(&renews_at); err != nil {
+			return nil, err
+		}
+		items = append(items, renews_at)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const storedCardVaultHeld = `-- name: StoredCardVaultHeld :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.reconciliation_findings
+    WHERE merchant_id = $1::uuid AND finding_type = $2::text
+      AND psp_id IS NULL AND subject_key = $3::text
+      AND status IN ('reconcile_required', 'requires_review')
+)::bool
+`
+
+type StoredCardVaultHeldParams struct {
+	MerchantID  uuid.UUID
+	FindingType string
+	SubjectKey  string
+}
+
+// Whether an open finding holds a vault's checks (its key was refused).
+func (q *Queries) StoredCardVaultHeld(ctx context.Context, arg StoredCardVaultHeldParams) (bool, error) {
+	row := q.db.QueryRow(ctx, storedCardVaultHeld, arg.MerchantID, arg.FindingType, arg.SubjectKey)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }

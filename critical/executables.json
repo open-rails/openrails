@@ -560,13 +560,15 @@
     ],
     "OR-J12-S08": [
       "TestStoredCardRefresh/OR-J12-S08/merchant-owned-vault",
-      "TestStoredCardRefresh/OR-J12-S08/hosted-isolated-vault"
+      "TestStoredCardRefresh/OR-J12-S08/hosted-isolated-vault",
+      "TestStoredCardRefresh/OR-J12-S08/expiry-only-update"
     ],
     "OR-J12-S09": [
       "TestStoredCardRefresh/OR-J12-S09/unchanged-vault-card-asks-the-customer"
     ],
     "OR-J12-S10": [
-      "TestStoredCardRefresh/OR-J12-S10/ahead-of-renewal-pass-picks-due-cards-of-armed-vaults"
+      "TestStoredCardRefresh/OR-J12-S10/ahead-of-renewal-pass-picks-due-cards-of-armed-vaults",
+      "TestStoredCardRefresh/OR-J12-S10/throttled-vault-is-retried-without-checking-the-card"
     ],
     "OR-J12-S11": [
       "TestStoredCardRefresh/OR-J12-S11/psp-held-card-declined-as-expired-asks-the-customer"
