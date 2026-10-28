@@ -1241,11 +1241,11 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 | Balance watch (due customer watches only, credit lot lapses included); due renewals and retries; due arrears delinquency | 1 min |
 | Order expiry | 5 min |
 | Convergence sweep | 15 min |
-| Rebill watch; charge-attribution read | 15 min |
-| Admission-denial flush (closed hours); due daily NMI history read; retention cleanup; Solana crank; Stripe webhook reconciliation | 1 h |
+| Rebill watch; lost provider-operation wakes | 15 min |
+| Admission-denial flush (closed hours); due daily NMI history read; retention cleanup; undeclared-account re-alerts | 1 h |
 | Provider refresh scheduler (fans out per merchant) | 2 h |
 | Stored card refresh ahead of renewal | 6 h |
-| Ledger integrity audit | 24 h |
+| Ledger integrity audit; Stripe webhook endpoint backstop | 24 h |
 | Automatic usage billing (opt-in): due accounts billed, due collections queued | 5 min, plus threshold wakeups |
 
 Automatic usage billing is enabled by the host's `usage_billing_enabled` option.
@@ -1266,8 +1266,8 @@ each job stays short and the pass still reaches all of its work.
 Each OpenRails job runs under its kind's timeout: 10 minutes, an hour for
 the passes that read every merchant's providers (`cleanup_expired_data`,
 `provider_refresh_merchant`, `converge_sweep`, `rebill_watch`,
-`charge_attributions`, `nmi_history`, `stripe_webhook_reconcile`,
-`solana_crank`) and for `stored_card_refresh_due` (which stops opening pages
+`nmi_history`) and an import's `charge_attributions` read, and for
+`stored_card_refresh_due` (which stops opening pages
 after 10 minutes), two for `psp_import`. River cancels a job past it. River's
 rescuer returns a job whose process died to work once it has run past both
 its timeout and `RescueStuckJobsAfter` (10 minutes unless the host sets it).
