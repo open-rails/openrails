@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -27,7 +28,7 @@ func (ConvergeSweepArgs) Kind() string { return KindConvergeSweep }
 
 // ConvergeSweepWorker runs the converge engine for every active merchant on a
 // schedule, catching drift no request path touched. One merchant's failure
-// never aborts the sweep.
+// never stops the others; the job reports them all.
 type ConvergeSweepWorker struct {
 	river.WorkerDefaults[ConvergeSweepArgs]
 	DB     *db.DB
@@ -71,6 +72,7 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 	postures := writeposture.View{Config: w.Config, DB: w.DB}
 
 	var swept, findings, autoFixed, reconcileRequired, adminRequired, held, readOnly int
+	var workErr error
 	for _, mid := range merchantIDs {
 		progress.Mark(ctx, "converge sweep merchant "+mid.String())
 		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
@@ -85,9 +87,9 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 			res, e = engine.Converge(ctx, converge.Scope{Merchant: billing.MerchantID(mid)})
 			return e
 		}); err != nil {
-			// One merchant's failure must not abort the rest of the sweep.
 			logger.WithError(err).WithField("merchant_id", mid).
 				Error("converge sweep: merchant failed; continuing")
+			workErr = errors.Join(workErr, fmt.Errorf("converge sweep: merchant %s: %w", mid, err))
 			continue
 		}
 		if blocked != "" {
@@ -111,5 +113,5 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 			"reconcile_required": reconcileRequired, "admin_required": adminRequired, "held": held,
 		}).Info("converge sweep completed")
 	}
-	return nil
+	return workErr
 }

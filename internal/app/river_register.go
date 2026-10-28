@@ -614,10 +614,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 	jobs = append(jobs, r.healthPeriodic(cfg,
 		15*time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.ConvergeSweepArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
-			}
+			return riverjobs.ConvergeSweepArgs{}, periodPassOpts(15 * time.Minute)
 		},
 		nil,
 	))

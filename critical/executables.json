@@ -699,6 +699,9 @@
     "OR-J29-S08": [
       "TestBackgroundJobs/OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-counters-and-orphan-state"
     ],
+    "OR-J29-S30": [
+      "TestBackgroundJobs/OR-J29-S30/converge-sweep-fails-its-job-after-the-other-merchants-converge"
+    ],
     "OR-J19-S05": [
       "TestPriceMigrationContracts/OR-J19-S05/move-that-no-longer-applies-is-skipped-and-settles-its-migration"
     ]

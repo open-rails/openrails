@@ -244,6 +244,37 @@ func TestBackgroundJobs(t *testing.T) {
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		require.Zero(t, deniedAdmissions(t, w, hour))
 	})
+	t.Run("OR-J29-S30/converge-sweep-fails-its-job-after-the-other-merchants-converge", func(t *testing.T) {
+		w := newWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
+		customer := billing.CustomerID(uuid.New())
+		for _, client := range []*openrails.Client{w.alpha, w.beta} {
+			product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sweep-reader", DisplayName: "Sweep reader", Entitlements: []string{"sweep:reader"}})
+			require.NoError(t, err)
+			_, err = client.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: "sweep-reader",
+				Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(720), Reason: billing.GrantReasonComp}}})
+			require.NoError(t, err)
+		}
+		// Both grants lost their projection: drift the sweep repairs.
+		_, err := w.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{w.schema, "product_access"}.Sanitize()+" SET deleted_at=now()")
+		require.NoError(t, err)
+		reads := func(client *openrails.Client) bool {
+			access, err := client.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"sweep:reader"}})
+			require.NoError(t, err)
+			return access.Entitlements["sweep:reader"]
+		}
+		require.False(t, reads(w.alpha))
+		restore := storageFault(t, w, w.schema, "product_access", fmt.Sprintf("NEW.merchant_id = '%s'::uuid", w.alpha.MerchantID().UUID()))
+		fleet := hostFleet(t, w)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		runRegisteredFails(t, fleet, "openrails.converge_sweep")
+		require.True(t, reads(w.beta), "the other merchant converges")
+		require.False(t, reads(w.alpha))
+		restore()
+		runRegistered(t, fleet, "openrails.converge_sweep", 1)
+		require.True(t, reads(w.alpha))
+	})
 	t.Run("OR-J37-S06/solana-renewal-waits-for-the-crank-before-a-missed-rebill", func(t *testing.T) {
 		s := newSolanaWorld(t, true)
 		_, sub := s.subscribe(t)
