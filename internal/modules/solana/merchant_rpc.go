@@ -147,7 +147,7 @@ func (b *MerchantRPCBuilder) Treasury(ctx context.Context, mid billing.MerchantI
 
 // ChainReader adapts the builder to the intent verify leg's chain reads: the
 // merchant comes off the intent runner's merchant-scoped ctx. Satisfies
-// riverjobs.SolanaTxReader.
+// pull.ChainReader.
 func (b *MerchantRPCBuilder) ChainReader() *MerchantChainReader {
 	return &MerchantChainReader{builder: b}
 }

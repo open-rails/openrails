@@ -1,4 +1,6 @@
-package riverjobs
+// Package pull executes Solana recurring pulls: the solana_pull intent the
+// crank posts for each due subscription.
+package pull
 
 import (
 	"context"
@@ -11,6 +13,7 @@ import (
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -25,59 +28,71 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// TypeSolanaPull is the recurring on-chain pull: one durable intent per
+// Type is the recurring on-chain pull: one durable intent per
 // (subscription row, period anchor). The signed tx signature is persisted
 // onto the intent before submission, so a crash between submit and record
 // resolves by reading the chain for that signature and running the renewal
 // repair, never a subscriber who paid on-chain and got nothing.
-const TypeSolanaPull = "solana_pull"
+const Type = "solana_pull"
 
-// SolanaPullIdempotencyKey addresses one pull episode: the anchor is the
+// IdempotencyKey addresses one pull episode: the anchor is the
 // row's persisted next_pull_at, which only advances when the period resolves
 // (renewal, dunning reschedule, already-paid advance).
-func SolanaPullIdempotencyKey(rowID uuid.UUID, nextPullAt time.Time) string {
-	return fmt.Sprintf("%s:%s:%d", TypeSolanaPull, rowID, nextPullAt.UTC().Unix())
+func IdempotencyKey(rowID uuid.UUID, nextPullAt time.Time) string {
+	return fmt.Sprintf("%s:%s:%d", Type, rowID, nextPullAt.UTC().Unix())
 }
 
-// SolanaPullPayload is the stored payload for TypeSolanaPull.
-type SolanaPullPayload struct {
-	Agreement       *SolanaPullAgreement `json:"agreement,omitempty"`
-	SubscriptionPDA string               `json:"subscription_pda"`
-	RowID           uuid.UUID            `json:"row_id"`
-	NextPullAt      time.Time            `json:"next_pull_at"`
+// Payload is the stored payload for Type.
+type Payload struct {
+	Agreement       *Agreement `json:"agreement,omitempty"`
+	SubscriptionPDA string     `json:"subscription_pda"`
+	RowID           uuid.UUID  `json:"row_id"`
+	NextPullAt      time.Time  `json:"next_pull_at"`
 }
 
-// SolanaTxReader is the chain-read surface the verify leg needs (satisfied by
+// ChainReader is the chain-read surface the verify leg needs (satisfied by
 // *solana.RPCClient).
-type SolanaTxReader interface {
+type ChainReader interface {
 	GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error)
 }
 
-// SolanaPullIntentHandler drives the crank state machine through the intent
-// ledger. It records the signature before sending, repairs landed pulls, and
+// Handler executes the recurring pull intent: it freezes the accepted
+// agreement, records the signature before sending, repairs landed pulls, and
 // only retries a recorded transaction after confirming that it reverted.
-type SolanaPullIntentHandler struct {
-	Core   *SolanaCrankWorker // DB/Config/Clock/Cranker/Lifecycle (no Intents)
-	Store  *intents.Store     // pre-submit signature write-ahead
-	Chain  SolanaTxReader     // nil leaves recorded transactions unresolved
-	Policy intents.BackoffPolicy
+type Handler struct {
+	DB        *db.DB
+	Clock     clockwork.Clock
+	Cranker   Cranker        // nil parks every pull
+	Lifecycle Lifecycle      // nil parks every pull
+	Store     *intents.Store // pre-submit signature write-ahead
+	Chain     ChainReader    // nil leaves recorded transactions unresolved
+	Policy    intents.BackoffPolicy
 }
 
-func NewSolanaPullIntentHandler(core *SolanaCrankWorker, store *intents.Store, chain SolanaTxReader) *SolanaPullIntentHandler {
-	return &SolanaPullIntentHandler{Core: core, Store: store, Chain: chain, Policy: intents.DefaultBackoff}
+// NewHandler builds the pull handler with the default backoff.
+func NewHandler(h Handler) *Handler {
+	h.Policy = intents.DefaultBackoff
+	return &h
 }
 
-func (h *SolanaPullIntentHandler) Type() string { return TypeSolanaPull }
+func (h *Handler) now() time.Time {
+	if h.Clock != nil {
+		return h.Clock.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func (h *Handler) Type() string { return Type }
 
 // The accepted financial agreement and signed execution contain no secrets.
 // They remain the immutable replay/repair authority after settlement.
-func (h *SolanaPullIntentHandler) PrunePolicy() (bool, bool) { return true, true }
-func (h *SolanaPullIntentHandler) Backoff(attempts int32) time.Duration {
+func (h *Handler) PrunePolicy() (bool, bool) { return true, true }
+func (h *Handler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
 
-func decodeSolanaPullPayload(intent gen.BillingProviderIntent) (SolanaPullPayload, error) {
-	var p SolanaPullPayload
+func decodePayload(intent gen.BillingProviderIntent) (Payload, error) {
+	var p Payload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("solana pull intent has no payload")
 	}
@@ -103,15 +118,15 @@ func recordedSignature(intent gen.BillingProviderIntent) (string, error) {
 	return evidence.TransactionID, nil
 }
 
-func (h *SolanaPullIntentHandler) loadRow(ctx context.Context, p SolanaPullPayload) (*models.SolanaSubscription, error) {
-	return solanasubs.NewSolanaSubscriptionRepo(h.Core.DB).GetBySubscriptionPDA(ctx, p.SubscriptionPDA)
+func (h *Handler) loadRow(ctx context.Context, p Payload) (*models.SolanaSubscription, error) {
+	return solanasubs.NewSolanaSubscriptionRepo(h.DB).GetBySubscriptionPDA(ctx, p.SubscriptionPDA)
 }
 
 // CheckRelevance: the pull applies while the row is still active ON the same
 // period anchor. A cancel/expiry or an advanced next_pull_at (renewal applied,
 // dunning rescheduled, already-paid advanced) supersedes the intent.
-func (h *SolanaPullIntentHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (intents.Relevance, error) {
-	p, err := decodeSolanaPullPayload(intent)
+func (h *Handler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (intents.Relevance, error) {
+	p, err := decodePayload(intent)
 	if err != nil {
 		return intents.SupersededBy("unusable solana pull intent: " + err.Error()), nil
 	}
@@ -134,11 +149,11 @@ func (h *SolanaPullIntentHandler) CheckRelevance(ctx context.Context, intent gen
 	return intents.StillRelevant(), nil
 }
 
-func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
-	if h.Core == nil || h.Core.Cranker == nil || h.Core.Lifecycle == nil {
+func (h *Handler) Execute(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
+	if h.Cranker == nil || h.Lifecycle == nil {
 		return intents.Parked("solana cranker not fully wired (no cranker/lifecycle)")
 	}
-	p, err := decodeSolanaPullPayload(intent)
+	p, err := decodePayload(intent)
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
@@ -146,7 +161,7 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 	if err != nil {
 		return intents.Retryable("load solana subscription: " + err.Error())
 	}
-	repo := solanasubs.NewSolanaSubscriptionRepo(h.Core.DB)
+	repo := solanasubs.NewSolanaSubscriptionRepo(h.DB)
 
 	// A previously-recorded signature means a tx WAS signed (and possibly
 	// landed). Resolve it via the chain BEFORE any re-pull: landed ⇒ renewal
@@ -193,15 +208,15 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 		if h.Store == nil {
 			return errors.New("intent store unavailable for signature write-ahead")
 		}
-		site := failpoint.Site{Point: failpoint.BeforeInline, Kind: TypeSolanaPull, Operation: intent.ID, Subscription: row.SubscriptionID}
+		site := failpoint.Site{Point: failpoint.BeforeInline, Kind: Type, Operation: intent.ID, Subscription: row.SubscriptionID}
 		if err := failpoint.Hit(ctx, site); err != nil {
 			return err
 		}
 		// Cancellation and admission take the same subscription row lock. The
 		// winning cancellation prevents the send; a winning signed pull makes
 		// cancellation wait for its outcome rather than discard paid access.
-		err := h.Core.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			d := h.Core.DB.NewWithPgxTx(tx)
+		err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			d := h.DB.NewWithPgxTx(tx)
 			sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, row.SubscriptionID)
 			if err != nil {
 				return err
@@ -213,7 +228,7 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 			if err := pullEpisodeState(sub, current, p.NextPullAt, p.Agreement); err != nil {
 				return err
 			}
-			execution = &observed.Execution{IntentID: intent.ID, AttemptID: uuidutil.NewV7(), ClaimAttempt: intent.Attempts, Signature: sig, SubmittedAt: h.Core.now().Truncate(time.Microsecond)}
+			execution = &observed.Execution{IntentID: intent.ID, AttemptID: uuidutil.NewV7(), ClaimAttempt: intent.Attempts, Signature: sig, SubmittedAt: h.now().Truncate(time.Microsecond)}
 			encoded, err := json.Marshal(execution)
 			if err != nil {
 				return err
@@ -240,7 +255,7 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 	// The intent id is the memo local-id: it exists durably before the send,
 	// so the stamped pull is chain-recognizable even if every local send
 	// record is lost.
-	outcome, crankErr := h.Core.crankOne(ctx, repo, &p.Agreement.Row, p.Agreement.plan(), intent.ID, presubmit)
+	outcome, crankErr := h.crankOne(ctx, repo, &p.Agreement.Row, p.Agreement.plan(), intent.ID, presubmit)
 	if crankErr != nil {
 		if errors.Is(crankErr, errPullEpisodeOver) {
 			return intents.TerminalWithEvidence(errPullEpisodeOver.Error(), map[string]any{"not_executed": true})
@@ -266,7 +281,7 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 	}
 	switch outcome.kind {
 	case crankSucceeded:
-		if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.AfterProvider, Kind: TypeSolanaPull, Operation: intent.ID, Subscription: row.SubscriptionID}); err != nil {
+		if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.AfterProvider, Kind: Type, Operation: intent.ID, Subscription: row.SubscriptionID}); err != nil {
 			return intents.Ambiguous("pull landed before settlement: " + err.Error())
 		}
 		intent.ResultEvidence, _ = json.Marshal(map[string]any{"transaction_id": outcome.signature, "execution": execution})
@@ -295,8 +310,8 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 // Verify repairs successful pulls and retries reverted transactions. Missing
 // transactions stay unresolved: even after expiry, a missing historical read
 // does not prove that the payment never landed.
-func (h *SolanaPullIntentHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
-	p, err := decodeSolanaPullPayload(intent)
+func (h *Handler) Verify(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
+	p, err := decodePayload(intent)
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
@@ -323,12 +338,12 @@ func (h *SolanaPullIntentHandler) Verify(ctx context.Context, intent gen.Billing
 	if err := p.Agreement.validate(intent, p); err != nil {
 		return intents.Parked("landed pull has no qualified accepted agreement: " + err.Error())
 	}
-	return h.repairFromSignature(ctx, solanasubs.NewSolanaSubscriptionRepo(h.Core.DB), p.Agreement, intent, sig)
+	return h.repairFromSignature(ctx, solanasubs.NewSolanaSubscriptionRepo(h.DB), p.Agreement, intent, sig)
 }
 
 // The proof names its exact signature. A subsequent signed pull has a new
 // transaction_id and is unresolved again, regardless of the old proof.
-func (h *SolanaPullIntentHandler) recordRevertedSignature(ctx context.Context, id uuid.UUID, sig string) error {
+func (h *Handler) recordRevertedSignature(ctx context.Context, id uuid.UUID, sig string) error {
 	if h.Store == nil {
 		return errors.New("intent store unavailable")
 	}
@@ -337,7 +352,7 @@ func (h *SolanaPullIntentHandler) recordRevertedSignature(ctx context.Context, i
 
 // repairFromSignature runs the renewal repair for a pull CONFIRMED on-chain:
 // RenewMembership (idempotent on the signature) + AdvanceAfterPull.
-func (h *SolanaPullIntentHandler) repairFromSignature(ctx context.Context, repo solanaSubStore, agreement *SolanaPullAgreement, intent gen.BillingProviderIntent, sig string) intents.Outcome {
+func (h *Handler) repairFromSignature(ctx context.Context, repo solanaSubStore, agreement *Agreement, intent gen.BillingProviderIntent, sig string) intents.Outcome {
 	receipt, err := recurring.VerifyPullReceipt(ctx, h.Chain, &agreement.Row, sig, agreement.TokenAmount, agreement.PeriodHours, agreement.TokenDecimals, intent.ID)
 	if err != nil {
 		return intents.Ambiguous("pull receipt does not qualify its accepted agreement: " + err.Error())
@@ -348,7 +363,7 @@ func (h *SolanaPullIntentHandler) repairFromSignature(ctx context.Context, repo 
 	if json.Unmarshal(intent.ResultEvidence, &evidence) != nil || evidence.Execution == nil || evidence.Execution.IntentID != intent.ID || evidence.Execution.Signature != sig {
 		return intents.Parked("recorded pull has no matching submitted execution identity")
 	}
-	if err := h.Core.finalizePull(ctx, repo, agreement, receipt, evidence.Execution); err != nil {
+	if err := h.finalizePull(ctx, repo, agreement, receipt, evidence.Execution); err != nil {
 		return intents.Ambiguous("pull landed on-chain, but settlement failed: " + err.Error())
 	}
 	return intents.Succeeded(map[string]any{"transaction_id": sig, "verified_existing": true, "execution": evidence.Execution,
@@ -367,11 +382,11 @@ const (
 // checkSignature reads the chain for the recorded signature. sigVerdictLanded
 // reports a confirmed, on-chain-successful transaction. Reverted receipts
 // also return their validated envelope for authoritative decline classification.
-func (h *SolanaPullIntentHandler) checkSignature(ctx context.Context, signature string) (*rpc.GetTransactionResult, sigVerdict) {
+func (h *Handler) checkSignature(ctx context.Context, signature string) (*rpc.GetTransactionResult, sigVerdict) {
 	return checkSolanaSignature(ctx, h.Chain, signature)
 }
 
-func checkSolanaSignature(ctx context.Context, chain SolanaTxReader, signature string) (*rpc.GetTransactionResult, sigVerdict) {
+func checkSolanaSignature(ctx context.Context, chain ChainReader, signature string) (*rpc.GetTransactionResult, sigVerdict) {
 	if chain == nil {
 		return nil, sigVerdictUnknown
 	}

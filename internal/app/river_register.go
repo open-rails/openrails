@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/solana/pull"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/reconcile"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -267,17 +268,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// Solana recurring cranker: only a deployment with a cranker pulls.
 	if r.SolanaCranker != nil {
 		solanaCrankWorker := &riverjobs.SolanaCrankWorker{
-			DB:        r.DB,
-			Config:    r.Config,
-			Clock:     clock,
-			Cranker:   r.SolanaCranker,
-			Lifecycle: r.SubscriptionLifecycleService,
+			DB:     r.DB,
+			Config: r.Config,
+			Clock:  clock,
 			// Pulls run as durable solana_pull intents through the shared registry.
 			Intents:  r.intentRunner(intentRegistry, clock),
 			Balances: r.SolanaCrankerBalances,
-		}
-		if r.SolanaRPCResolver != nil {
-			solanaCrankWorker.Chain = r.SolanaRPCResolver.ChainReader()
 		}
 		if err := addTrackedWorker(r, workers, solanaCrankWorker); err != nil {
 			return fmt.Errorf("add solana cranker worker: %w", err)
@@ -331,25 +327,17 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	if updaters, ok := r.CollectionResolver.(paymentmethods.AccountUpdaters); ok {
 		registry.Register(&riverjobs.AccountUpdaterHandler{DB: r.DB, Clock: clock, Updaters: updaters, Lifecycle: r.SubscriptionLifecycleService, Policy: intents.DefaultBackoff})
 	}
-	// Solana recurring pull: the handler wraps the crank with a pre-submit
-	// signature write-ahead and chain-read verification. Its core worker has no
-	// Intents runner: the handler is the execution path, and a runner would recurse.
-	solanaPullCore := &riverjobs.SolanaCrankWorker{
-		DB:        r.DB,
-		Config:    r.Config,
-		Clock:     clock,
-		Lifecycle: r.SubscriptionLifecycleService,
-	}
+	// Solana recurring pull: signature write-ahead before the send, chain-read
+	// verification after it. The verify leg reads the chain with the intent's
+	// merchant-armed client.
+	solanaPull := pull.Handler{DB: r.DB, Clock: clock, Lifecycle: r.SubscriptionLifecycleService, Store: intents.NewStore(r.DB)}
 	if r.SolanaCranker != nil {
-		solanaPullCore.Cranker = r.SolanaCranker
+		solanaPull.Cranker = r.SolanaCranker
 	}
-	var solanaChain riverjobs.SolanaTxReader
 	if r.SolanaRPCResolver != nil {
-		// The verify leg reads the chain with the intent's merchant-armed client.
-		solanaChain = r.SolanaRPCResolver.ChainReader()
+		solanaPull.Chain = r.SolanaRPCResolver.ChainReader()
 	}
-	solanaPullCore.Chain = solanaChain
-	registry.Register(riverjobs.NewSolanaPullIntentHandler(solanaPullCore, intents.NewStore(r.DB), solanaChain))
+	registry.Register(pull.NewHandler(solanaPull))
 	return registry
 }
 
