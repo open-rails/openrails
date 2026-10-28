@@ -210,11 +210,14 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add rebill watch worker: %w", err)
 	}
+	// Each Stripe PSP's webhook endpoint, queued when the PSP or the boot's
+	// configuration changes, at a superseded endpoint's retirement, and daily.
 	if err := addWorker(workers, &riverjobs.StripeWebhookReconcileWorker{
 		StripeClients: r.StripeClients,
 		DB:            r.DB,
 		Config:        r.Config,
 		Merchants:     r.Merchants,
+		Clock:         clock,
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}

@@ -168,3 +168,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 UPDATE billing.psps SET credential_duplicate_at = NULL
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND credential_duplicate_at IS NOT NULL;
 
+
+-- name: SetPSPWebhookDigest :exec
+-- The configuration digest the PSP's managed webhook endpoint was settled at.
+UPDATE billing.psps SET webhook_digest = sqlc.arg(digest)::text, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: ListPSPWebhookDigests :many
+-- The merchant's current PSPs on the rail, each with the configuration digest
+-- its webhook endpoint was last settled at.
+SELECT account_id, webhook_digest FROM billing.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = sqlc.arg(rail)::text AND superseded_at IS NULL;

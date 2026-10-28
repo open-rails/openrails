@@ -51,7 +51,9 @@ are verified against the `Stripe-Signature` header using the account's
 `webhook_signing_secret`.
 
 OpenRails registers the endpoint on Stripe **automatically** — when a Stripe PSP is
-declared or changed, and via an hourly reconcile job — subscribing exactly to the event types it handles
+declared or changed, when a deployment starts with a different pinned `api_version`,
+handled events or webhook URL than the endpoint was settled at, and in a daily
+backstop that re-enables an endpoint Stripe disabled — subscribing exactly to the event types it handles
 (`invoice.paid`, `invoice.payment_failed`, `checkout.session.completed` and the other
 purchase-session events, `customer.subscription.updated/deleted`, `charge.succeeded`,
 `charge.refunded`, `refund.created/updated`, `payment_method.attached` and

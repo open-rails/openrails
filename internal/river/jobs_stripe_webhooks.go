@@ -2,12 +2,18 @@ package riverjobs
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
 
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -28,11 +34,13 @@ import (
 
 const KindStripeWebhookReconcile = "openrails.stripe_webhook_reconcile"
 
-// StripeWebhookReconcileInterval is the deployment-wide pass's cadence.
-const StripeWebhookReconcileInterval = time.Hour
+// StripeWebhookReconcileInterval is the backstop's cadence: Stripe disables
+// or deletes an endpoint without telling OpenRails.
+const StripeWebhookReconcileInterval = 24 * time.Hour
 
-// stripeWebhookMerchantBatch bounds each page of the pass. The work queue is the
-// armed-PSP set, so a pass scales with merchants ON STRIPE, not the directory.
+// stripeWebhookMerchantBatch bounds each page of the backstop. The work queue
+// is the armed-PSP set, so it scales with merchants ON STRIPE, not the
+// directory.
 const stripeWebhookMerchantBatch = 1000
 
 // FindingStripeWebhookEndpoint is the operator-facing record of a managed
@@ -40,9 +48,8 @@ const stripeWebhookMerchantBatch = 1000
 // superseded endpoints still live, or an exhausted endpoint budget.
 const FindingStripeWebhookEndpoint = "consistency.stripe_webhook_endpoint"
 
-// StripeWebhookReconcileArgs is one pass. A set MerchantID scopes it to that
-// merchant, and a set AccountID to that Stripe account: the pass a declared or
-// changed PSP queues.
+// StripeWebhookReconcileArgs is one Stripe PSP's endpoint pass, or with
+// neither set the backstop that queues every armed PSP's.
 type StripeWebhookReconcileArgs struct {
 	MerchantID uuid.UUID `json:"merchant_id,omitempty"`
 	AccountID  string    `json:"account_id,omitempty"`
@@ -50,12 +57,32 @@ type StripeWebhookReconcileArgs struct {
 
 func (StripeWebhookReconcileArgs) Kind() string { return KindStripeWebhookReconcile }
 
-// InsertOpts coalesces a PSP's passes until one has run; a failed one
-// retries a few times, and the hourly pass covers it after that.
+// InsertOpts keeps one pass of a PSP at a time: a pass queued while one waits
+// coalesces with it. A failed one retries a few times; the daily backstop
+// covers it after that.
 func (a StripeWebhookReconcileArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: QueueBilling, MaxAttempts: 5, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{
 		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateScheduled, rivertype.JobStateRetryable,
 	}}}
+}
+
+// QueueStripeWebhook queues the PSP's endpoint pass now, in tx. Its pass
+// waiting for a superseded endpoint's retirement is brought forward; it waits
+// again after.
+func QueueStripeWebhook(ctx context.Context, d *db.DB, tx pgx.Tx, mid billing.MerchantID, accountID string) error {
+	args := StripeWebhookReconcileArgs{MerchantID: mid.UUID(), AccountID: accountID}
+	opts := args.InsertOpts()
+	return d.QueueRiverJobNowTx(ctx, tx, args, &opts)
+}
+
+// StripeWebhookDigest is what a PSP's managed endpoint is settled at: the
+// pinned API version, the handled events and its URL. A boot whose digest
+// differs from the one a PSP was settled at reconciles it.
+func StripeWebhookDigest(cfg *config.Config, accountID string) string {
+	url, _, _ := catalog.PublicStripeWebhookURL(cfg, accountID)
+	events := slices.Sorted(slices.Values(webhooks.HandledStripeEventTypes))
+	sum := sha256.Sum256([]byte(stripeapi.APIVersion + "\n" + strings.Join(events, ",") + "\n" + url))
+	return hex.EncodeToString(sum[:])
 }
 
 type StripeWebhookReconcileWorker struct {
@@ -64,10 +91,7 @@ type StripeWebhookReconcileWorker struct {
 	DB        *db.DB
 	Config    *config.Config
 	Merchants *merchants.Service
-	// Now overrides the rollover clock (tests).
-	Now func() time.Time
-	// RetireOverlap overrides catalog.WebhookRolloverOverlap (tests).
-	RetireOverlap time.Duration
+	Clock     clockwork.Clock
 }
 
 func (StripeWebhookReconcileWorker) Kind() string { return KindStripeWebhookReconcile }
@@ -80,141 +104,135 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 		return fmt.Errorf("stripe webhook reconcile: config not configured")
 	}
 	if w.Merchants == nil || w.Merchants.Secrets() == nil {
-		// #788: managed webhook registration resolves ONLY from the armed
-		// rail state (psps + secret store); without an
-		// armed merchants service there is nothing to reconcile.
+		// Managed webhook registration resolves only from the armed rail state
+		// (psps + secret store): without it there is nothing to reconcile.
 		log.WithContext(ctx).Info("StripeWebhookReconcile: merchants service not armed; skipping")
 		return nil
 	}
-
-	// Register managed endpoints for Stripe accounts that are still eligible for
-	// new work. Archived accounts keep their existing webhook secrets/routes for
-	// draining, but this worker does not mutate retired Stripe accounts.
-	//
-	// or#877 B6: this list used to be one base-pool query joining
-	// billing.merchants to billing.psps. Under the since-removed RLS the psps
-	// side matched nothing, so `targets` was always empty and this
-	// worker returned success having listed, created, patched and retired
-	// nothing — the ONE worker whose entire purpose is that Stripe can always
-	// reach us never registered an endpoint, and #856's zero-gap rollover was
-	// unreachable from the scheduled path. Merchant ids now come from the
-	// armed-merchant work queue and each merchant's PSP rows are read (and
-	// reconciled) inside that merchant's own scope.
-
-	// #836/#856: the operator kill switch. Registering and patching an endpoint
-	// is ADDITIVE and must run regardless — the whole point of this worker is
-	// that Stripe can always reach us. What the gate governs is the one
-	// destructive act left: deleting an endpoint a successor has already
-	// replaced. Fail-closed default means retirement waits for a human.
-	gate := destructive.New(w.DB)
-	now := time.Now
-	if w.Now != nil {
-		now = w.Now
+	if job.Args.MerchantID == uuid.Nil {
+		return w.backstop(ctx)
 	}
+	if job.Args.AccountID == "" {
+		return river.JobCancel(errors.New("stripe webhook reconcile: a merchant's pass names its Stripe account"))
+	}
+	return w.reconcile(ctx, billing.MerchantID(job.Args.MerchantID), job.Args.AccountID)
+}
 
-	count, skipped, failed, retired, gated, needsOperator := 0, 0, 0, 0, 0, 0
+// backstop queues the endpoint pass of each active Stripe PSP of each armed
+// merchant.
+func (w StripeWebhookReconcileWorker) backstop(ctx context.Context) error {
 	var after *uuid.UUID
-	var sweepErr error
+	var errs error
 	for {
-		merchantIDs := []uuid.UUID{job.Args.MerchantID}
-		if job.Args.MerchantID == uuid.Nil {
-			var err error
-			merchantIDs, err = w.DB.GenDirectory().ListRailArmedMerchants(ctx, gen.ListRailArmedMerchantsParams{
-				Rails: []string{string(models.RailStripe)}, MerchantLimit: stripeWebhookMerchantBatch, AfterMerchantID: after,
-			})
+		merchantIDs, err := w.DB.GenDirectory().ListRailArmedMerchants(ctx, gen.ListRailArmedMerchantsParams{
+			Rails: []string{string(models.RailStripe)}, MerchantLimit: stripeWebhookMerchantBatch, AfterMerchantID: after,
+		})
+		if err != nil {
+			return errors.Join(errs, fmt.Errorf("stripe webhook backstop: list armed merchants: %w", err))
+		}
+		for _, id := range merchantIDs {
+			after = &id
+			mid := billing.MerchantID(id)
+			psps, err := w.Merchants.ActivePSPScopesForRail(merchant.WithID(ctx, mid), mid, string(models.RailStripe))
+			if err == nil && len(psps) > 0 {
+				err = w.DB.MerchantTx(merchant.WithID(ctx, mid), func(ctx context.Context, tx pgx.Tx) error {
+					for _, psp := range psps {
+						if err := QueueStripeWebhook(ctx, w.DB, tx, mid, psp.AccountID); err != nil {
+							return err
+						}
+					}
+					return nil
+				})
+			}
 			if err != nil {
-				return errors.Join(sweepErr, fmt.Errorf("stripe webhook reconcile: list armed merchants: %w", err))
+				errs = errors.Join(errs, fmt.Errorf("stripe webhook backstop: merchant %s: %w", mid, err))
 			}
 		}
-		for _, mid := range merchantIDs {
-			after = &mid
-			merchantID := billing.MerchantID(mid)
-			// The directory carries the slug (billing.merchants is global);
-			// the PSP rows are the merchant's own and are read in its scope.
-			row, err := w.DB.GenDirectory().GetPlatformMerchant(ctx, merchantID.UUID())
-			if err != nil {
-				sweepErr = errors.Join(sweepErr, fmt.Errorf("stripe webhook merchant %s directory: %w", merchantID, err))
-				failed++
-				log.WithContext(ctx).WithError(err).WithField("merchant_id", merchantID.String()).
-					Warn("StripeWebhookReconcile: merchant directory lookup failed")
-				continue
-			}
-			if err := w.DB.RunInMerchantScope(ctx, merchantID, "stripe webhook reconcile", func(mctx context.Context) error {
-				psps, err := w.Merchants.ActivePSPScopesForRail(mctx, merchantID, string(models.RailStripe))
-				if err != nil {
-					return fmt.Errorf("list stripe psps: %w", err)
-				}
-				for _, psp := range psps {
-					if job.Args.AccountID != "" && psp.AccountID != job.Args.AccountID {
-						continue
-					}
-					verdict := gate.CheckMerchant(mctx, merchantID.UUID())
-					fields := log.Fields{"merchant": row.Slug, "stripe_account_id": psp.AccountID}
-					res, err := catalog.ReconcileManagedStripeWebhook(mctx, catalog.ManagedStripeWebhookParams{
-						Publication:         w.Merchants.StripeWebhookPublication(merchantID, psp.AccountID),
-						StripeClients:       w.StripeClients,
-						Config:              w.Config,
-						SecretStore:         w.Merchants.Secrets(),
-						MerchantID:          merchantID,
-						ProviderEnvironment: psp.Environment,
-						PspID:               psp.AccountID,
-						EnabledEvents:       webhooks.HandledStripeEventTypes,
-						Now:                 now(),
-						AllowRetire:         verdict.Allowed,
-						RetireOverlap:       w.RetireOverlap,
-					})
-					if err != nil {
-						sweepErr = errors.Join(sweepErr, fmt.Errorf("stripe webhook merchant %s account %s: %w", merchantID, psp.AccountID, err))
-						failed++
-						log.WithContext(mctx).WithError(err).WithFields(fields).Warn("StripeWebhookReconcile: merchant reconcile failed")
-						continue
-					}
-					if res.Skipped {
-						skipped++
-						fields["reason"] = res.SkipReason
-						log.WithContext(mctx).WithFields(fields).Info("StripeWebhookReconcile: merchant skipped")
-						continue
-					}
-					count++
-					if !verdict.Allowed && len(res.RetirePending) > 0 {
-						gated++
-						fields["gated_reason"] = verdict.Reason
-					}
-					retired += len(res.Retired)
-					fields["action"] = res.Result.Action
-					fields["endpoint_id"] = res.Result.EndpointID
-					if len(res.Retired) > 0 {
-						fields["retired"] = res.Retired
-					}
-					log.WithContext(mctx).WithFields(fields).Info("StripeWebhookReconcile: merchant reconciled")
-
-					if res.OperatorAction != "" {
-						needsOperator++
-						log.WithContext(mctx).WithFields(fields).Warn("StripeWebhookReconcile: " + res.OperatorAction)
-					}
-					w.recordEndpointFinding(mctx, merchantID, psp.AccountID, res, verdict)
-				}
-				return nil
-			}); err != nil {
-				sweepErr = errors.Join(sweepErr, fmt.Errorf("stripe webhook merchant %s scope: %w", merchantID, err))
-				failed++
-				log.WithContext(ctx).WithError(err).WithField("merchant_id", merchantID.String()).
-					Warn("StripeWebhookReconcile: merchant pass failed; continuing")
-			}
-		}
-		if job.Args.MerchantID != uuid.Nil || len(merchantIDs) < stripeWebhookMerchantBatch {
-			break
+		if len(merchantIDs) < stripeWebhookMerchantBatch {
+			return errs
 		}
 	}
-	log.WithContext(ctx).WithFields(log.Fields{
-		"reconciled":     count,
-		"skipped":        skipped,
-		"failed":         failed,
-		"retired":        retired,
-		"gated":          gated,
-		"needs_operator": needsOperator,
-	}).Info("StripeWebhookReconcile: pass finished")
-	return sweepErr
+}
+
+// reconcile registers, patches or rolls over one PSP's managed endpoint and
+// retires the superseded ones whose overlap ended. Settled at the current
+// configuration, it records its digest; with a retirement still ahead, the
+// pass waits for it.
+func (w StripeWebhookReconcileWorker) reconcile(ctx context.Context, mid billing.MerchantID, accountID string) error {
+	// The operator kill switch governs the one destructive act: deleting an
+	// endpoint a successor replaced. Registering and patching is additive and
+	// always runs, so Stripe can always reach us.
+	gate := destructive.New(w.DB)
+	now := w.Clock.Now().UTC()
+	var wait time.Duration
+	err := w.DB.RunInMerchantScope(ctx, mid, "stripe webhook reconcile", func(ctx context.Context) error {
+		psps, err := w.Merchants.ActivePSPScopesForRail(ctx, mid, string(models.RailStripe))
+		if err != nil {
+			return fmt.Errorf("list stripe psps: %w", err)
+		}
+		i := slices.IndexFunc(psps, func(p merchants.PSPScope) bool { return p.AccountID == accountID })
+		fields := log.Fields{"merchant_id": mid.String(), "stripe_account_id": accountID}
+		if i < 0 {
+			// Archived or no longer declared: its endpoint drains untouched.
+			log.WithContext(ctx).WithFields(fields).Info("StripeWebhookReconcile: no active PSP for the account; skipped")
+			return nil
+		}
+		psp := psps[i]
+		verdict := gate.CheckMerchant(ctx, mid.UUID())
+		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
+			Publication:         w.Merchants.StripeWebhookPublication(mid, psp.AccountID),
+			StripeClients:       w.StripeClients,
+			Config:              w.Config,
+			SecretStore:         w.Merchants.Secrets(),
+			MerchantID:          mid,
+			ProviderEnvironment: psp.Environment,
+			PspID:               psp.AccountID,
+			EnabledEvents:       webhooks.HandledStripeEventTypes,
+			Now:                 now,
+			AllowRetire:         verdict.Allowed,
+		})
+		if err != nil {
+			return err
+		}
+		if res.Skipped {
+			fields["reason"] = res.SkipReason
+			log.WithContext(ctx).WithFields(fields).Info("StripeWebhookReconcile: skipped")
+			return nil
+		}
+		fields["action"], fields["endpoint_id"] = res.Result.Action, res.Result.EndpointID
+		if len(res.Retired) > 0 {
+			fields["retired"] = res.Retired
+		}
+		if !verdict.Allowed && len(res.RetirePending) > 0 {
+			fields["gated_reason"] = verdict.Reason
+		}
+		log.WithContext(ctx).WithFields(fields).Info("StripeWebhookReconcile: reconciled")
+		if res.OperatorAction != "" {
+			log.WithContext(ctx).WithFields(fields).Warn("StripeWebhookReconcile: " + res.OperatorAction)
+		}
+		w.recordEndpointFinding(ctx, mid, psp.AccountID, res, verdict)
+		if res.OperatorAction == "" {
+			if err := w.DB.Gen(ctx).SetPSPWebhookDigest(ctx, gen.SetPSPWebhookDigestParams{MerchantID: mid.UUID(), ID: psp.ID, Digest: StripeWebhookDigest(w.Config, psp.AccountID)}); err != nil {
+				return fmt.Errorf("record webhook digest: %w", err)
+			}
+		}
+		if verdict.Allowed {
+			for _, pending := range res.RetirePending {
+				if d := pending.RetireAfter.Sub(now); d > 0 && (wait == 0 || d < wait) {
+					wait = d
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("stripe webhook merchant %s account %s: %w", mid, accountID, err)
+	}
+	if wait > 0 {
+		// The superseded endpoint's retirement is this pass's next run.
+		return river.JobSnooze(wait)
+	}
+	return nil
 }
 
 // recordEndpointFinding opens (or closes) the operator finding for one PSP's

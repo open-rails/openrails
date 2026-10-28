@@ -765,6 +765,12 @@
     ],
     "OR-J21-S60": [
       "TestBackgroundJobs/OR-J21-S60/an-import-queues-the-read-of-the-charges-it-attributed"
+    ],
+    "OR-J06-S60": [
+      "TestStripeWebhookDueWork/OR-J06-S60/a-boot-reconciles-a-stripe-endpoint-only-when-its-configuration-changed"
+    ],
+    "OR-J06-S61": [
+      "TestStripeWebhookDueWork/OR-J06-S61/a-superseded-endpoint-is-retired-by-the-pass-scheduled-at-its-deadline"
     ]
   },
   "suites": {

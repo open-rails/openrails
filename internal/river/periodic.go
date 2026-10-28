@@ -48,6 +48,8 @@ var Periodics = []Periodic{
 	{Args: ConvergeSweepArgs{}, Every: ConvergeSweepInterval},
 	{Args: NMIHistoryArgs{}, Every: NMIHistoryInterval},
 	{Args: CleanupExpiredDataArgs{}, Every: CleanupInterval},
+	// Queues every Stripe PSP's endpoint pass: Stripe disables or deletes an
+	// endpoint without telling us.
 	{Args: StripeWebhookReconcileArgs{}, Every: StripeWebhookReconcileInterval},
 	// Each fleet flushes the closed hours of its own Redis's denial counters.
 	{Args: AdmissionDenialFlushArgs{}, Every: AdmissionDenialFlushInterval, PerFleet: true},

@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -23,6 +25,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/internal/vaulttest"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -375,6 +379,11 @@ func TestPSPControls(t *testing.T) {
 		require.NoError(t, err)
 		require.Eventually(t, func() bool { return len(p.provider.core.WebhookEndpoints("acct_e2e")) == 1 }, 20*time.Second, 20*time.Millisecond,
 			"a new Stripe PSP's endpoint is registered when it is declared, not at the next hourly pass")
+		require.Eventually(t, func() bool {
+			return len(stripeWebhookPasses(t, fleet, rivertype.JobStateCompleted)) > 0 &&
+				len(stripeWebhookPasses(t, fleet, rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStateRetryable)) == 0
+		}, 20*time.Second, 20*time.Millisecond, "the pass keeps the minted signing secret and ends")
+		require.Len(t, p.provider.core.WebhookEndpoints("acct_e2e"), 1, "a kept secret needs no second endpoint")
 		endpoint := p.provider.core.WebhookEndpoints("acct_e2e")[0]
 		require.Equal(t, stripeWebhookBase+"/v1/webhooks/stripe/acct_e2e", endpoint["url"])
 		require.Equal(t, stripeapi.APIVersion, endpoint["api_version"])
@@ -388,12 +397,132 @@ func TestPSPControls(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
+		// The daily backstop queues the PSP's pass.
 		runRegistered(t, fleet, "openrails.stripe_webhook_reconcile", 1)
+		require.Eventually(t, func() bool {
+			endpoints := p.core.WebhookEndpoints("acct_e2e")
+			return len(endpoints) == 1 && endpoints[0]["metadata"].(map[string]string)["openrails_managed"] == "true"
+		}, 20*time.Second, 20*time.Millisecond)
 		endpoints := p.core.WebhookEndpoints("acct_e2e")
 		require.Len(t, endpoints, 1, "a file-declared PSP never mints an endpoint it cannot keep the secret of")
 		require.Equal(t, id, endpoints[0]["id"])
 		require.Equal(t, "true", endpoints[0]["metadata"].(map[string]string)["openrails_managed"])
 		require.Equal(t, strings.Join(webhooks.HandledStripeEventTypes, ","), endpoints[0]["enabled_events"])
+	})
+}
+
+// stripeWebhookPasses are the River jobs of one Stripe PSP's endpoint pass.
+func stripeWebhookPasses(t *testing.T, fleet *river.Client[pgx.Tx], states ...rivertype.JobState) []*rivertype.JobRow {
+	t.Helper()
+	params := river.NewJobListParams().Kinds("openrails.stripe_webhook_reconcile")
+	if len(states) > 0 {
+		params = params.States(states...)
+	}
+	jobs, err := fleet.JobList(t.Context(), params)
+	require.NoError(t, err)
+	var out []*rivertype.JobRow
+	for _, job := range jobs.Jobs {
+		if strings.Contains(string(job.EncodedArgs), `"acct_e2e"`) {
+			out = append(out, job)
+		}
+	}
+	return out
+}
+
+// engineFleet is a host fleet composed with engine's jobs in w's River schema.
+func engineFleet(t *testing.T, w *world, engine *openrails.Engine) *river.Client[pgx.Tx] {
+	t.Helper()
+	fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}}}, engine.RiverJobs())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		require.NoError(t, fleet.StopAndCancel(ctx))
+	})
+	fleet.PeriodicJobs().Clear()
+	require.NoError(t, engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+	require.NoError(t, fleet.Start(t.Context()))
+	return fleet
+}
+
+func TestStripeWebhookDueWork(t *testing.T) {
+	t.Run("OR-J06-S60/a-boot-reconciles-a-stripe-endpoint-only-when-its-configuration-changed", func(t *testing.T) {
+		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicBillingBaseURL = stripeWebhookBase })
+		fleet := engineFleet(t, a.world, a.engine)
+		_, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			return len(p.provider.core.WebhookEndpoints("acct_e2e")) == 1 && len(stripeWebhookPasses(t, fleet, rivertype.JobStateCompleted)) > 0 &&
+				len(stripeWebhookPasses(t, fleet, rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled)) == 0
+		}, 20*time.Second, 20*time.Millisecond)
+		require.NoError(t, fleet.Stop(t.Context()))
+		settled := len(stripeWebhookPasses(t, fleet))
+
+		restarted, err := openrails.New(t.Context(), a.cfg, a.deps)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, restarted.Close(context.Background())) })
+		other, err := restarted.Merchant(a.alpha.MerchantID())
+		require.NoError(t, err)
+		_, err = other.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Never(t, func() bool { return len(stripeWebhookPasses(t, fleet)) > settled }, 2*time.Second, 50*time.Millisecond,
+			"a restart at the configuration the endpoint was settled at reads nothing from Stripe")
+
+		cfg := a.cfg
+		cfg.PublicBillingBaseURL = "https://billing-moved.example.test"
+		moved, err := openrails.New(t.Context(), cfg, a.deps)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, moved.Close(context.Background())) })
+		engineFleet(t, a.world, moved)
+		require.Eventually(t, func() bool {
+			endpoints := p.provider.core.WebhookEndpoints("acct_e2e")
+			return len(endpoints) == 1 && endpoints[0]["url"] == "https://billing-moved.example.test/v1/webhooks/stripe/acct_e2e"
+		}, 20*time.Second, 20*time.Millisecond, "a restart whose webhook URL moved reconciles the endpoint")
+	})
+	t.Run("OR-J06-S61/a-superseded-endpoint-is-retired-by-the-pass-scheduled-at-its-deadline", func(t *testing.T) {
+		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicBillingBaseURL = stripeWebhookBase })
+		armDestructive(t, a, true)
+		url := stripeWebhookBase + "/v1/webhooks/stripe/acct_e2e"
+		old := p.provider.core.SeedManagedWebhookEndpoint("acct_e2e", url, "2020-08-27", webhooks.HandledStripeEventTypes)
+		fleet := engineFleet(t, a.world, a.engine)
+		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		require.NoError(t, err)
+		superseded := func() bool {
+			for _, endpoint := range p.provider.core.WebhookEndpoints("acct_e2e") {
+				if endpoint["id"] == old {
+					return endpoint["metadata"].(map[string]string)["openrails_superseded_at"] != ""
+				}
+			}
+			return false
+		}
+		waiting := func() *rivertype.JobRow {
+			if passes := stripeWebhookPasses(t, fleet, rivertype.JobStateScheduled); len(passes) == 1 && len(stripeWebhookPasses(t, fleet, rivertype.JobStateAvailable, rivertype.JobStateRunning)) == 0 {
+				return passes[0]
+			}
+			return nil
+		}
+		require.Eventually(t, func() bool {
+			return len(p.provider.core.WebhookEndpoints("acct_e2e")) == 2 && superseded() && waiting() != nil
+		}, 20*time.Second, 20*time.Millisecond, "the rollover's pass waits for the predecessor's retirement")
+
+		// A change while the retirement waits runs the pass now; it waits again.
+		ran := *waiting().AttemptedAt
+		current, err := a.alphaRemote.GetPSP(t.Context(), psp.ID)
+		require.NoError(t, err)
+		_, err = a.alphaRemote.UpdatePSP(t.Context(), psp.ID, billing.UpdatePSPParams{ExpectedRevision: &current.Revision, Credentials: map[string]string{"secret_key": "sk_test_rotated"}})
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			job := waiting()
+			return job != nil && job.AttemptedAt.After(ran)
+		}, 20*time.Second, 20*time.Millisecond)
+		require.Len(t, p.provider.core.WebhookEndpoints("acct_e2e"), 2, "the predecessor keeps delivering through its overlap")
+
+		a.clock.Advance(7*24*time.Hour + time.Minute)
+		wakeJobs(t, fleet, "openrails.stripe_webhook_reconcile")
+		require.Eventually(t, func() bool {
+			endpoints := p.provider.core.WebhookEndpoints("acct_e2e")
+			return len(endpoints) == 1 && endpoints[0]["id"] != old
+		}, 20*time.Second, 20*time.Millisecond, "the pass retires the predecessor at its deadline")
 	})
 }
 

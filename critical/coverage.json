@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 238,
+  "scenario_count": 240,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1192,6 +1192,16 @@
       "id": "OR-J21-S60",
       "journey": "J21",
       "name": "An import queues, with its own commit, the one read of the charges it attributed"
+    },
+    {
+      "id": "OR-J06-S60",
+      "journey": "J06",
+      "name": "A boot reconciles a Stripe webhook endpoint only when its configuration changed"
+    },
+    {
+      "id": "OR-J06-S61",
+      "journey": "J06",
+      "name": "A superseded Stripe webhook endpoint is retired by the pass scheduled at its deadline"
     }
   ]
 }

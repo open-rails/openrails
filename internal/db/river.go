@@ -143,6 +143,21 @@ func (d *DB) InsertRiverJobTx(ctx context.Context, tx pgx.Tx, args river.JobArgs
 	return inserter.InsertTx(ctx, tx, args, opts)
 }
 
+// QueueRiverJobNowTx inserts args to run now, in tx. A unique job of the same
+// args already waiting for later (scheduled, or retrying) is brought forward
+// instead; a running one is left to finish.
+func (d *DB) QueueRiverJobNowTx(ctx context.Context, tx pgx.Tx, args river.JobArgs, opts *river.InsertOpts) error {
+	result, err := d.InsertRiverJobTx(ctx, tx, args, opts)
+	if err != nil || result == nil || !result.UniqueSkippedAsDuplicate || result.Job == nil {
+		return err
+	}
+	switch result.Job.State {
+	case rivertype.JobStateScheduled, rivertype.JobStateRetryable:
+		return d.RetryRiverJobTx(ctx, tx, result.Job.ID)
+	}
+	return nil
+}
+
 // RetryRiverJobTx makes a scheduled job available now, in tx.
 func (d *DB) RetryRiverJobTx(ctx context.Context, tx pgx.Tx, id int64) error {
 	inserter, tx, err := d.riverTx(tx)

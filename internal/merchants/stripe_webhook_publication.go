@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 )
 
 // StripeWebhookCredentialState is private operator state, never a public DTO.
@@ -84,6 +85,9 @@ func (p *StripeWebhookPublication) write(ctx context.Context, endpoint string, c
 	if !s.config.Writable() {
 		return ErrConfigReadOnly
 	}
+	// OpenRails' own reconciliation writes the secret, admitted as such: no
+	// person or credential asked for it.
+	ctx = merchantdocs.WithAutonomousWrites(ctx, "reconciliation")
 	set, err := s.config.Get(ctx, p.merchant)
 	if err != nil {
 		return err

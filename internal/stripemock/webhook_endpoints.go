@@ -78,6 +78,14 @@ func (m *Mock) SeedWebhookEndpoint(account, endpointURL, apiVersion string, even
 	return m.newWebhookEndpointLocked(account, endpointURL, apiVersion, events, map[string]string{})["id"].(string)
 }
 
+// SeedManagedWebhookEndpoint registers an endpoint OpenRails manages, as an
+// earlier build pinned to apiVersion did. It returns the endpoint's id.
+func (m *Mock) SeedManagedWebhookEndpoint(account, endpointURL, apiVersion string, events []string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.newWebhookEndpointLocked(account, endpointURL, apiVersion, events, map[string]string{"openrails_managed": "true"})["id"].(string)
+}
+
 // WebhookEndpoints is a copy of the account's webhook endpoints.
 func (m *Mock) WebhookEndpoints(account string) []Object {
 	m.mu.Lock()

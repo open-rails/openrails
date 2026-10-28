@@ -132,7 +132,7 @@ var omittedColumns = map[string]string{
 	// Credential evidence belongs to the source deployment's configuration;
 	// the destination validates and fingerprints its own.
 	// live is generated from environment.
-	"psps":             "credentials_validated_at webhook_endpoint_id credential_fingerprint credential_duplicate_at live",
+	"psps":             "credentials_validated_at webhook_endpoint_id webhook_digest credential_fingerprint credential_duplicate_at live",
 	"subscriptions":    "destructive_run_class lifecycle_rev row_version due_recheck_at",
 	"customers":        "access_version",
 	"payments":         "destructive_run_class",

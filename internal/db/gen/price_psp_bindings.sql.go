@@ -213,7 +213,7 @@ func (q *Queries) LockPriceForBindingUpdate(ctx context.Context, arg LockPriceFo
 }
 
 const resolvePriceBindingPSP = `-- name: ResolvePriceBindingPSP :many
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest FROM billing.psps
 WHERE merchant_id = $1::uuid AND rail = $2::text
   AND (($3::uuid IS NOT NULL AND id = $3::uuid)
        OR ($3::uuid IS NULL AND key = $4::text AND superseded_at IS NULL))
@@ -257,6 +257,7 @@ func (q *Queries) ResolvePriceBindingPSP(ctx context.Context, arg ResolvePriceBi
 			&i.CredentialDuplicateAt,
 			&i.SupersededAt,
 			&i.Live,
+			&i.WebhookDigest,
 		); err != nil {
 			return nil, err
 		}

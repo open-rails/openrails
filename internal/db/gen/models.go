@@ -1561,6 +1561,8 @@ type BillingPsp struct {
 	SupersededAt *time.Time
 	// The PSP's money class: whether its environment moves real money (live, mainnet). A PSP's identity is (rail, live, account_id); a sandbox merchant's PSPs are non-live, a live merchant's live.
 	Live bool
+	// SHA-256 of the pinned Stripe API version, the handled event types and the webhook URL the PSP's managed endpoint was last settled at; NULL until one is.
+	WebhookDigest *string
 }
 
 // A customer's customer object at one PSP. Two PSPs on one rail hold independent mappings.
