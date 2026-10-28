@@ -57,6 +57,8 @@ func TestPriceMigrationContracts(t *testing.T) {
 			wakeOperations(t, fleet)
 			return len(p.core.ScheduleUpdates(*sub.RailSubscriptionID)) > 0
 		}, 20*time.Second, 50*time.Millisecond)
+		// The clock moves only once the failed push has recorded its retry.
+		require.Eventually(t, func() bool { return operationsIdle(t, fleet) }, 20*time.Second, 50*time.Millisecond)
 		a.clock.Advance(time.Hour)
 		require.Eventually(t, func() bool {
 			wakeOperations(t, fleet)
