@@ -11,30 +11,24 @@ import (
 
 const claimPeriodicLease = `-- name: ClaimPeriodicLease :execrows
 
-INSERT INTO billing.periodic_leases (kind, merchant_set, holder, expires_at)
-VALUES ($1::text, $2::text, $3::text, now() + make_interval(secs => $4::float8))
-ON CONFLICT (kind, merchant_set) DO UPDATE
+INSERT INTO billing.periodic_leases (kind, holder, expires_at)
+VALUES ($1::text, $2::text, now() + make_interval(secs => $3::float8))
+ON CONFLICT (kind) DO UPDATE
 SET holder = EXCLUDED.holder, expires_at = EXCLUDED.expires_at, claimed_at = now()
 WHERE billing.periodic_leases.holder = EXCLUDED.holder OR billing.periodic_leases.expires_at <= now()
 `
 
 type ClaimPeriodicLeaseParams struct {
-	Kind        string
-	MerchantSet string
-	Holder      string
-	TtlSeconds  float64
+	Kind       string
+	Holder     string
+	TtlSeconds float64
 }
 
 // billing.periodic_leases: deployment-global, no merchant scope.
-// Takes the lease on the kind for the merchant set for the holder when it is free, expired or the
+// Takes the lease on the kind for the holder when it is free, expired or the
 // holder's own; zero rows means another fleet holds it.
 func (q *Queries) ClaimPeriodicLease(ctx context.Context, arg ClaimPeriodicLeaseParams) (int64, error) {
-	result, err := q.db.Exec(ctx, claimPeriodicLease,
-		arg.Kind,
-		arg.MerchantSet,
-		arg.Holder,
-		arg.TtlSeconds,
-	)
+	result, err := q.db.Exec(ctx, claimPeriodicLease, arg.Kind, arg.Holder, arg.TtlSeconds)
 	if err != nil {
 		return 0, err
 	}

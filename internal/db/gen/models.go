@@ -1185,12 +1185,10 @@ type BillingPaymentMethodVersion struct {
 	CreatedAt   time.Time
 }
 
-// Global by design: which fleet (River schema) queues a periodic kind's pass for the database; one row per kind and merchant set, taken over once expired.
+// Global by design: which fleet (River schema) queues a periodic kind's pass for the database; one row per kind, taken over once expired.
 type BillingPeriodicLease struct {
 	// The periodic job's id: its job kind, or the name its schedule gave.
 	Kind string
-	// A hash of the merchant ids the holding fleet declares (undeclared: a fleet serving every merchant). Fleets serving different sets never share a lease, so none is left unserved.
-	MerchantSet string
 	// The holding fleet's River schema; a fleet renews its own lease.
 	Holder string
 	// When another fleet may take the kind over: a fraction of the period after the claim.

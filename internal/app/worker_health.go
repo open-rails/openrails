@@ -2,10 +2,7 @@ package app
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -146,31 +143,12 @@ func (r *Runtime) periodic(cfg *river.Config, leased bool, interval time.Duratio
 	return riverhelpers.NewPeriodicJob(cfg, interval, ctor, &own)
 }
 
-// merchantSetKey identifies the merchants this fleet declares: a hash of their
-// sorted ids, or "undeclared" for a fleet serving every merchant. Fleets share
-// a lease only when they serve the same set, so a merchant whose credentials
-// only one fleet holds is never left to another's lease; overlapping sets
-// both run, a safe duplicate.
-func (r *Runtime) merchantSetKey() string {
-	ids := r.DeclaredMerchants()
-	if len(ids) == 0 {
-		return "undeclared"
-	}
-	strs := make([]string, len(ids))
-	for i, id := range ids {
-		strs[i] = id.String()
-	}
-	slices.Sort(strs)
-	sum := sha256.Sum256([]byte(strings.Join(strs, ",")))
-	return hex.EncodeToString(sum[:8])
-}
-
-// claimPeriodic takes the periodic's lease for most of its period. Several
-// hosts embedding one merchant on one database each schedule the same passes;
-// the first to claim queues it and the others skip, so provider reads and
-// operator alerts happen once. The lease expires, so a stopped fleet's passes
-// are taken over by the next tick. A lease that cannot be read runs the pass:
-// duplicate passes are safe, missed ones are not.
+// claimPeriodic takes the periodic's lease for most of its period. Hosts
+// sharing a database declare the same merchants and each schedule the same
+// passes; the first to claim queues it and the others skip, so provider reads
+// and operator alerts happen once. The lease expires, so a stopped fleet's
+// passes are taken over by the next tick. A lease that cannot be read runs the
+// pass: duplicate passes are safe, missed ones are not.
 func (r *Runtime) claimPeriodic(id string, interval time.Duration) bool {
 	if r.DB == nil {
 		return true
@@ -179,7 +157,7 @@ func (r *Runtime) claimPeriodic(id string, interval time.Duration) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	n, err := r.DB.GenDirectory().ClaimPeriodicLease(ctx, gen.ClaimPeriodicLeaseParams{
-		Kind: id, MerchantSet: r.merchantSetKey(), Holder: holder, TtlSeconds: (interval * 4 / 5).Seconds(),
+		Kind: id, Holder: holder, TtlSeconds: (interval * 4 / 5).Seconds(),
 	})
 	if err != nil {
 		log.WithError(err).WithField("periodic", id).Warn("periodic lease unreadable; running the pass")
