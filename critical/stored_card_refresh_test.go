@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -396,6 +397,25 @@ func TestStoredCardRefresh(t *testing.T) {
 		require.Eventually(t, func() bool { return len(v.vendor.updaterAsked()) == 1 }, 20*time.Second, 20*time.Millisecond)
 		require.Equal(t, 5, v.vendor.throttledCalls())
 		require.Zero(t, noticeCount(t, v.authorityWorld, "payment_method_update_required"))
+	})
+
+	t.Run("OR-J12-S30/marked-cards-never-starve-a-planned-check", func(t *testing.T) {
+		v := newVaultCards(t, false, true)
+		card := v.saveCard(t, v.aliceToken, "5555555555554444", "mastercard", "4444")
+		sub := v.subscribe(t, v.aliceToken, "monthly", 30*24, 31_000_000, card)
+		fleet := startVaultFleet(t, v)
+		require.Zero(t, refreshJobs(t, fleet), "the check is planned ahead of the renewal")
+		// A thousand other cards' renewals changed: each is marked for a look.
+		pm, checks := pgx.Identifier{v.schema, "payment_methods"}.Sanitize(), pgx.Identifier{v.schema, "stored_card_checks"}.Sanitize()
+		_, err := v.pool.Exec(t.Context(), `INSERT INTO `+pm+` SELECT (jsonb_populate_record(pm, jsonb_build_object('id', uuidv7(),
+			'rail_method_ref', CASE WHEN pm.rail_method_ref IS NULL THEN NULL ELSE pm.rail_method_ref || '-' || g END))).*
+			FROM `+pm+` pm, generate_series(1, 1000) g WHERE pm.id = $1`, uuid.UUID(card.ID))
+		require.NoError(t, err)
+		_, err = v.pool.Exec(t.Context(), `INSERT INTO `+checks+` (merchant_id, payment_method_id, due_at)
+			SELECT merchant_id, id, '-infinity' FROM `+pm+` WHERE id <> $1`, uuid.UUID(card.ID))
+		require.NoError(t, err)
+		v.clock.Advance(sub.CurrentPeriodEndsAt.Add(-13 * 24 * time.Hour).Sub(v.clock.Now()))
+		checkAhead(t, v, fleet, 1)
 	})
 
 	t.Run("OR-J12-S11/psp-held-card-declined-as-expired-asks-the-customer", func(t *testing.T) {

@@ -371,9 +371,13 @@ func (h *AccountUpdaterHandler) Verify(context.Context, gen.BillingProviderInten
 const KindStoredCardRefreshDue = "openrails.stored_card_refresh_due"
 
 const (
-	// storedCardBatch caps one pass. Checks are due work, oldest first, so
-	// those beyond it are the next pass's head and still inside their window.
-	storedCardBatch = 1000
+	// storedCardBatch is one page of each kind of due check: cards marked for
+	// a look and planned checks are read side by side, so neither starves the
+	// other.
+	storedCardBatch = 500
+	// storedCardPassBudget bounds one pass: it opens no page past it, and the
+	// next pass reads what is left.
+	storedCardPassBudget = 10 * time.Minute
 	// storedCardJitter spreads one pass's requests over the hour after it.
 	storedCardJitter = time.Hour
 	// storedCardReplan is when a card queued for a refresh is looked at again:
@@ -412,23 +416,77 @@ func (w StoredCardRefreshDueWorker) Work(ctx context.Context, _ *river.Job[Store
 }
 
 // RunPass looks at the due checks and returns how many refreshes it queued.
+// Each round reads a page of marked cards and a page of planned checks, so
+// neither starves the other, until both run short or the budget is spent.
 func (w StoredCardRefreshDueWorker) RunPass(ctx context.Context) (int, error) {
 	if w.DB == nil || w.Merchants == nil || w.Merchants() == nil {
 		return 0, errors.New("stored card refresh pass: DB and merchant configuration are required")
 	}
 	logger := log.WithContext(ctx).WithField("worker", KindStoredCardRefreshDue)
 	now := workerNow(w.Clock)
-	due, err := w.DB.GenDirectory().ListDueStoredCardChecks(ctx, gen.ListDueStoredCardChecksParams{Now: now, RowLimit: storedCardBatch})
-	if err != nil {
-		return 0, fmt.Errorf("stored card refresh pass: list due checks: %w", err)
+	q := w.DB.GenDirectory()
+	failed := map[uuid.UUID]bool{}
+	var after gen.ListPlannedStoredCardChecksParams
+	queued, looked := 0, 0
+	markedDone, plannedDone := false, false
+	var passErr error
+	for !(markedDone && plannedDone) && workerNow(w.Clock).Sub(now) < storedCardPassBudget {
+		var page []dueCheck
+		if !markedDone {
+			skip := make([]uuid.UUID, 0, len(failed))
+			for id := range failed {
+				skip = append(skip, id)
+			}
+			rows, err := q.ListMarkedStoredCardChecks(ctx, gen.ListMarkedStoredCardChecksParams{SkipMerchantIds: skip, RowLimit: storedCardBatch})
+			if err != nil {
+				return queued, errors.Join(passErr, fmt.Errorf("stored card refresh pass: list marked cards: %w", err))
+			}
+			markedDone = len(rows) < storedCardBatch
+			for _, row := range rows {
+				page = append(page, dueCheck{row.MerchantID, row.PaymentMethodID})
+			}
+		}
+		if !plannedDone {
+			params := after
+			params.Now, params.RowLimit = now, storedCardBatch
+			rows, err := q.ListPlannedStoredCardChecks(ctx, params)
+			if err != nil {
+				return queued, errors.Join(passErr, fmt.Errorf("stored card refresh pass: list planned checks: %w", err))
+			}
+			plannedDone = len(rows) < storedCardBatch
+			for _, row := range rows {
+				page = append(page, dueCheck{row.MerchantID, row.PaymentMethodID})
+				after.AfterDueAt, after.AfterMerchantID, after.AfterPaymentMethodID = row.DueAt, row.MerchantID, row.PaymentMethodID
+			}
+		}
+		looked += len(page)
+		n, err := w.lookAt(ctx, page, now, failed)
+		queued += n
+		passErr = errors.Join(passErr, err)
 	}
+	if queued > 0 {
+		logger.WithFields(log.Fields{"checks": looked, "queued": queued}).Info("stored card refresh pass: refreshes queued")
+	}
+	return queued, passErr
+}
+
+// dueCheck is one card due for a look.
+type dueCheck struct{ merchant, card uuid.UUID }
+
+// lookAt looks at one page of due checks, merchant by merchant. A merchant
+// that fails is recorded in failed and skipped for the rest of the pass.
+func (w StoredCardRefreshDueWorker) lookAt(ctx context.Context, due []dueCheck, now time.Time, failed map[uuid.UUID]bool) (int, error) {
+	logger := log.WithContext(ctx).WithField("worker", KindStoredCardRefreshDue)
 	var order []uuid.UUID
 	cards := map[uuid.UUID][]uuid.UUID{}
-	for _, row := range due {
-		if _, seen := cards[row.MerchantID]; !seen {
-			order = append(order, row.MerchantID)
+	for _, check := range due {
+		if failed[check.merchant] {
+			continue
 		}
-		cards[row.MerchantID] = append(cards[row.MerchantID], row.PaymentMethodID)
+		if _, seen := cards[check.merchant]; !seen {
+			order = append(order, check.merchant)
+		}
+		cards[check.merchant] = append(cards[check.merchant], check.card)
 	}
 	queued := 0
 	var passErr error
@@ -440,12 +498,10 @@ func (w StoredCardRefreshDueWorker) RunPass(ctx context.Context) (int, error) {
 			return err
 		})
 		if err != nil {
+			failed[mid] = true
 			logger.WithError(err).WithField("merchant_id", mid).Error("stored card refresh pass: merchant failed; continuing")
 			passErr = errors.Join(passErr, err)
 		}
-	}
-	if queued > 0 {
-		logger.WithFields(log.Fields{"checks": len(due), "queued": queued}).Info("stored card refresh pass: refreshes queued")
 	}
 	return queued, passErr
 }

@@ -3,11 +3,22 @@
 -- subscription and default-card changes fill; cards whose holder updates them
 -- in place never appear.
 
--- CROSS-MERCHANT: the vault cards due for a look, oldest first. Capped.
--- name: ListDueStoredCardChecks :many
+-- CROSS-MERCHANT: a page of the cards marked for a look (due at -infinity),
+-- leaving out merchants this pass already failed. A look moves every card it
+-- reads, so the next page is new cards.
+-- name: ListMarkedStoredCardChecks :many
 SELECT merchant_id, payment_method_id
 FROM billing.stored_card_checks
-WHERE due_at <= sqlc.arg(now)::timestamptz
+WHERE due_at = '-infinity' AND merchant_id <> ALL(sqlc.arg(skip_merchant_ids)::uuid[])
+LIMIT sqlc.arg(row_limit)::int;
+
+-- CROSS-MERCHANT: a page of the planned checks due by now, oldest first,
+-- after the (due_at, merchant, card) cursor.
+-- name: ListPlannedStoredCardChecks :many
+SELECT merchant_id, payment_method_id, due_at
+FROM billing.stored_card_checks
+WHERE due_at > '-infinity' AND due_at <= sqlc.arg(now)::timestamptz
+  AND (due_at, merchant_id, payment_method_id) > (sqlc.arg(after_due_at)::timestamptz, sqlc.arg(after_merchant_id)::uuid, sqlc.arg(after_payment_method_id)::uuid)
 ORDER BY due_at, merchant_id, payment_method_id
 LIMIT sqlc.arg(row_limit)::int;
 

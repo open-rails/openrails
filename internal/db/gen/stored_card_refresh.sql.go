@@ -30,21 +30,20 @@ func (q *Queries) DeleteStoredCardCheck(ctx context.Context, arg DeleteStoredCar
 	return result.RowsAffected(), nil
 }
 
-const listDueStoredCardChecks = `-- name: ListDueStoredCardChecks :many
+const listMarkedStoredCardChecks = `-- name: ListMarkedStoredCardChecks :many
 
 SELECT merchant_id, payment_method_id
 FROM billing.stored_card_checks
-WHERE due_at <= $1::timestamptz
-ORDER BY due_at, merchant_id, payment_method_id
+WHERE due_at = '-infinity' AND merchant_id <> ALL($1::uuid[])
 LIMIT $2::int
 `
 
-type ListDueStoredCardChecksParams struct {
-	Now      time.Time
-	RowLimit int32
+type ListMarkedStoredCardChecksParams struct {
+	SkipMerchantIds []uuid.UUID
+	RowLimit        int32
 }
 
-type ListDueStoredCardChecksRow struct {
+type ListMarkedStoredCardChecksRow struct {
 	MerchantID      uuid.UUID
 	PaymentMethodID uuid.UUID
 }
@@ -53,17 +52,64 @@ type ListDueStoredCardChecksRow struct {
 // The ahead-of-renewal pass reads only billing.stored_card_checks, which
 // subscription and default-card changes fill; cards whose holder updates them
 // in place never appear.
-// CROSS-MERCHANT: the vault cards due for a look, oldest first. Capped.
-func (q *Queries) ListDueStoredCardChecks(ctx context.Context, arg ListDueStoredCardChecksParams) ([]ListDueStoredCardChecksRow, error) {
-	rows, err := q.db.Query(ctx, listDueStoredCardChecks, arg.Now, arg.RowLimit)
+// CROSS-MERCHANT: a page of the cards marked for a look (due at -infinity),
+// leaving out merchants this pass already failed. A look moves every card it
+// reads, so the next page is new cards.
+func (q *Queries) ListMarkedStoredCardChecks(ctx context.Context, arg ListMarkedStoredCardChecksParams) ([]ListMarkedStoredCardChecksRow, error) {
+	rows, err := q.db.Query(ctx, listMarkedStoredCardChecks, arg.SkipMerchantIds, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListDueStoredCardChecksRow
+	var items []ListMarkedStoredCardChecksRow
 	for rows.Next() {
-		var i ListDueStoredCardChecksRow
+		var i ListMarkedStoredCardChecksRow
 		if err := rows.Scan(&i.MerchantID, &i.PaymentMethodID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPlannedStoredCardChecks = `-- name: ListPlannedStoredCardChecks :many
+SELECT merchant_id, payment_method_id, due_at
+FROM billing.stored_card_checks
+WHERE due_at > '-infinity' AND due_at <= $1::timestamptz
+  AND (due_at, merchant_id, payment_method_id) > ($2::timestamptz, $3::uuid, $4::uuid)
+ORDER BY due_at, merchant_id, payment_method_id
+LIMIT $5::int
+`
+
+type ListPlannedStoredCardChecksParams struct {
+	Now                  time.Time
+	AfterDueAt           time.Time
+	AfterMerchantID      uuid.UUID
+	AfterPaymentMethodID uuid.UUID
+	RowLimit             int32
+}
+
+// CROSS-MERCHANT: a page of the planned checks due by now, oldest first,
+// after the (due_at, merchant, card) cursor.
+func (q *Queries) ListPlannedStoredCardChecks(ctx context.Context, arg ListPlannedStoredCardChecksParams) ([]BillingStoredCardCheck, error) {
+	rows, err := q.db.Query(ctx, listPlannedStoredCardChecks,
+		arg.Now,
+		arg.AfterDueAt,
+		arg.AfterMerchantID,
+		arg.AfterPaymentMethodID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingStoredCardCheck
+	for rows.Next() {
+		var i BillingStoredCardCheck
+		if err := rows.Scan(&i.MerchantID, &i.PaymentMethodID, &i.DueAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
