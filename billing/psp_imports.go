@@ -110,30 +110,18 @@ type PSPImportRule struct {
 	Mapping string           `json:"mapping,omitempty"`
 }
 
-// PSPImportProduct names the product a provider plan grants. Plan "" is
-// every plan no other entry names. Price, for a rail whose subscriptions name
-// no plan (CCBill), is the key of the product's provider price on the PSP
-// they bill; omitted, the product must hold exactly one.
-type PSPImportProduct struct {
-	Plan    string `json:"plan,omitempty"`
-	Product string `json:"product"`
-	Price   string `json:"price,omitempty"`
-}
-
 // CreatePSPImportParams starts pulling one PSP. HistorySince bounds the
 // transaction history read; nil reads from the earliest subscription's start.
 // Rules nil links by the directory's email.
 type CreatePSPImportParams struct {
-	PSP          PSPRef             `json:"psp"`
-	HistorySince *time.Time         `json:"history_since,omitempty"`
-	Rules        []PSPImportRule    `json:"rules,omitempty"`
-	Products     []PSPImportProduct `json:"products,omitempty"`
+	PSP          PSPRef          `json:"psp"`
+	HistorySince *time.Time      `json:"history_since,omitempty"`
+	Rules        []PSPImportRule `json:"rules,omitempty"`
 }
 
-// UpdatePSPImportParams replaces an import's rules or products; nil keeps them.
+// UpdatePSPImportParams replaces an import's rules; nil keeps them.
 type UpdatePSPImportParams struct {
-	Rules    *[]PSPImportRule    `json:"rules,omitempty"`
-	Products *[]PSPImportProduct `json:"products,omitempty"`
+	Rules *[]PSPImportRule `json:"rules,omitempty"`
 }
 
 // PSPImportCount is how many staged objects of a kind are in a state.
@@ -144,22 +132,23 @@ type PSPImportCount struct {
 }
 
 // PSPImport is one PSP's pull and landing. HistoryThrough is how far its
-// transaction history has been read.
+// transaction history has been read. Its subscriptions land on the provider
+// prices mapping their plans: ListProviderCatalog with Import lists the
+// plans to map.
 type PSPImport struct {
-	ID             PSPImportID        `json:"id"`
-	PSP            PSPID              `json:"psp"`
-	Rail           string             `json:"rail"`
-	Status         PSPImportStatus    `json:"status"`
-	HistorySince   *time.Time         `json:"history_since"`
-	HistoryThrough *time.Time         `json:"history_through"`
-	PulledAt       *time.Time         `json:"pulled_at"`
-	AppliedAt      *time.Time         `json:"applied_at"`
-	Error          *string            `json:"error"`
-	Rules          []PSPImportRule    `json:"rules"`
-	Products       []PSPImportProduct `json:"products"`
-	Counts         []PSPImportCount   `json:"counts"`
-	CreatedAt      time.Time          `json:"created_at"`
-	UpdatedAt      time.Time          `json:"updated_at"`
+	ID             PSPImportID      `json:"id"`
+	PSP            PSPID            `json:"psp"`
+	Rail           string           `json:"rail"`
+	Status         PSPImportStatus  `json:"status"`
+	HistorySince   *time.Time       `json:"history_since"`
+	HistoryThrough *time.Time       `json:"history_through"`
+	PulledAt       *time.Time       `json:"pulled_at"`
+	AppliedAt      *time.Time       `json:"applied_at"`
+	Error          *string          `json:"error"`
+	Rules          []PSPImportRule  `json:"rules"`
+	Counts         []PSPImportCount `json:"counts"`
+	CreatedAt      time.Time        `json:"created_at"`
+	UpdatedAt      time.Time        `json:"updated_at"`
 }
 
 // PSPImportFact is one identity fact a provider holds for an object.
@@ -183,9 +172,12 @@ type PSPImportRecord struct {
 	Customer        *CustomerID          `json:"customer"`
 	// LinkedVia is how the customer was found: rule:<n>, manual, or the
 	// customer or subscription record it belongs to.
-	LinkedVia *string   `json:"linked_via"`
-	Reason    *string   `json:"reason"`
-	UpdatedAt time.Time `json:"updated_at"`
+	LinkedVia *string `json:"linked_via"`
+	// ManualPrice is the provider price picked by hand for a subscription
+	// whose provider names no plan (CCBill).
+	ManualPrice *PriceID  `json:"manual_price"`
+	Reason      *string   `json:"reason"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // PSPImportListParams lists the merchant's imports, newest first.
@@ -211,9 +203,19 @@ type PSPImportLink struct {
 	Customer *CustomerID       `json:"customer"`
 }
 
-// LinkPSPImportParams applies the import's rules again, with these links.
+// PSPImportPriceLink picks the provider price a subscription of a CCBill
+// import lands on, instead of matching its rebill: a live provider price
+// bound to the import's PSP. A null price clears the pick.
+type PSPImportPriceLink struct {
+	Record PSPImportRecordID `json:"record"`
+	Price  *PriceID          `json:"price"`
+}
+
+// LinkPSPImportParams applies the import's rules again, with these links and
+// price picks. Every record not yet imported is decided again.
 type LinkPSPImportParams struct {
-	Links []PSPImportLink `json:"links,omitempty"`
+	Links  []PSPImportLink      `json:"links,omitempty"`
+	Prices []PSPImportPriceLink `json:"prices,omitempty"`
 }
 
 // PSPImportMapping maps one of the merchant's own identifiers to a customer;

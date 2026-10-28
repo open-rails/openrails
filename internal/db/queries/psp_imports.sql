@@ -1,7 +1,7 @@
 -- name: CreatePSPImport :one
-INSERT INTO billing.psp_imports (merchant_id, psp_id, rail, status, history_since, rules, products)
+INSERT INTO billing.psp_imports (merchant_id, psp_id, rail, status, history_since, rules)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(rail)::text, 'pulling', sqlc.narg(history_since)::timestamptz,
-    sqlc.arg(rules)::jsonb, sqlc.arg(products)::jsonb)
+    sqlc.arg(rules)::jsonb)
 RETURNING *;
 
 -- name: GetPSPImport :one
@@ -18,8 +18,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: UpdatePSPImportConfig :one
-UPDATE billing.psp_imports SET rules = sqlc.arg(rules)::jsonb, products = sqlc.arg(products)::jsonb, updated_at = now()
+-- name: UpdatePSPImportRules :one
+UPDATE billing.psp_imports SET rules = sqlc.arg(rules)::jsonb, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 RETURNING *;
 
@@ -162,13 +162,18 @@ SELECT * FROM billing.psp_import_records
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND import_id = sqlc.arg(import_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
 ORDER BY id;
 
--- name: ListProductProviderPrices :many
--- A product's provider prices on one PSP, for rails whose subscriptions name
--- no provider object.
-SELECT price.key, price.public_id, price.amount, price.currency, price.billing_interval_hours, price.billing_interval_months
+-- name: ListPSPProviderPricesOfPSP :many
+-- Every live provider price bound to one PSP, archived ones included, for
+-- rails whose subscriptions name no provider object (CCBill).
+SELECT price.id, price.public_id, price.amount, price.currency, price.billing_interval_hours, price.billing_interval_months
 FROM billing.price_psp_bindings b
 JOIN billing.prices price ON price.merchant_id = b.merchant_id AND price.id = b.price_id
-JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id
-WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.psp_id = sqlc.arg(psp_id)::uuid AND prod.key = sqlc.arg(product_key)::text
-  AND price.provider_owned AND price.deleted_at IS NULL
+WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.psp_id = sqlc.arg(psp_id)::uuid AND price.provider_owned AND price.deleted_at IS NULL
 ORDER BY price.public_id;
+
+-- name: SetPSPImportRecordManualPrices :execrows
+-- The prices the merchant picked by hand for subscriptions; the nil uuid clears one.
+UPDATE billing.psp_import_records r
+SET manual_price_id = NULLIF(l.price_id, '00000000-0000-0000-0000-000000000000'::uuid), updated_at = now()
+FROM unnest(sqlc.arg(ids)::uuid[], sqlc.arg(price_ids)::uuid[]) AS l(id, price_id)
+WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.import_id = sqlc.arg(import_id)::uuid AND r.id = l.id AND r.kind = 'subscription';

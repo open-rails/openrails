@@ -63,9 +63,14 @@ func (q *Queries) InsertPricePSPBinding(ctx context.Context, arg InsertPricePSPB
 }
 
 const listPricePSPBindings = `-- name: ListPricePSPBindings :many
-SELECT b.merchant_id, b.price_id, b.psp_id, b.plan_id, b.price_ref, b.recurring_billing_option_id, b.plan_pda, b.flex_id, b.configuration, p.rail, p.key AS psp_key, (p.superseded_at IS NOT NULL)::boolean AS superseded
+SELECT b.merchant_id, b.price_id, b.psp_id, b.plan_id, b.price_ref, b.recurring_billing_option_id, b.plan_pda, b.flex_id, b.configuration, p.rail, p.key AS psp_key, (p.superseded_at IS NOT NULL)::boolean AS superseded,
+    COALESCE(NOT o.active OR o.deleted_at IS NOT NULL OR COALESCE(NOT product.active OR product.deleted_at IS NOT NULL, false), false)::boolean AS provider_retired
 FROM billing.price_psp_bindings b
 JOIN billing.psps p ON p.id = b.psp_id AND p.merchant_id = b.merchant_id
+LEFT JOIN billing.provider_catalog_objects o ON o.merchant_id = b.merchant_id AND o.psp_id = b.psp_id AND o.kind = 'price'
+    AND o.ref = COALESCE(b.plan_id, b.price_ref)
+LEFT JOIN billing.provider_catalog_objects product ON product.merchant_id = o.merchant_id AND product.psp_id = o.psp_id
+    AND product.kind = 'product' AND product.ref = o.product_ref
 WHERE b.merchant_id = $1::uuid AND (cardinality($2::uuid[]) = 0 OR b.price_id = ANY($2::uuid[]))
   AND ($3::uuid IS NULL OR b.psp_id = $3::uuid)
 ORDER BY b.price_id, b.psp_id
@@ -90,8 +95,11 @@ type ListPricePSPBindingsRow struct {
 	Rail                     string
 	PspKey                   string
 	Superseded               bool
+	ProviderRetired          bool
 }
 
+// provider_retired: the provider's catalog, as last observed, no longer sells
+// the bound plan or price (inactive, deleted, or its product is).
 func (q *Queries) ListPricePSPBindings(ctx context.Context, arg ListPricePSPBindingsParams) ([]ListPricePSPBindingsRow, error) {
 	rows, err := q.db.Query(ctx, listPricePSPBindings, arg.MerchantID, arg.PriceIds, arg.PspID)
 	if err != nil {
@@ -114,6 +122,7 @@ func (q *Queries) ListPricePSPBindings(ctx context.Context, arg ListPricePSPBind
 			&i.Rail,
 			&i.PspKey,
 			&i.Superseded,
+			&i.ProviderRetired,
 		); err != nil {
 			return nil, err
 		}

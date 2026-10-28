@@ -99,6 +99,7 @@ var Tables = map[string]Table{
 	"psp_imports":                       {Class: State},
 	"psp_import_records":                {Class: State},
 	"psp_import_mappings":               {Class: State},
+	"provider_catalog_objects":          {Class: State},
 	"provisioning_tokens":               {Class: State},
 	"customers":                         {Class: State},
 	"customer_invoice_profiles":         {Class: State},

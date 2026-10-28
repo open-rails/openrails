@@ -1,7 +1,14 @@
 -- name: ListPricePSPBindings :many
-SELECT b.*, p.rail, p.key AS psp_key, (p.superseded_at IS NOT NULL)::boolean AS superseded
+-- provider_retired: the provider's catalog, as last observed, no longer sells
+-- the bound plan or price (inactive, deleted, or its product is).
+SELECT b.*, p.rail, p.key AS psp_key, (p.superseded_at IS NOT NULL)::boolean AS superseded,
+    COALESCE(NOT o.active OR o.deleted_at IS NOT NULL OR COALESCE(NOT product.active OR product.deleted_at IS NOT NULL, false), false)::boolean AS provider_retired
 FROM billing.price_psp_bindings b
 JOIN billing.psps p ON p.id = b.psp_id AND p.merchant_id = b.merchant_id
+LEFT JOIN billing.provider_catalog_objects o ON o.merchant_id = b.merchant_id AND o.psp_id = b.psp_id AND o.kind = 'price'
+    AND o.ref = COALESCE(b.plan_id, b.price_ref)
+LEFT JOIN billing.provider_catalog_objects product ON product.merchant_id = o.merchant_id AND product.psp_id = o.psp_id
+    AND product.kind = 'product' AND product.ref = o.product_ref
 WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND (cardinality(sqlc.arg(price_ids)::uuid[]) = 0 OR b.price_id = ANY(sqlc.arg(price_ids)::uuid[]))
   AND (sqlc.narg(psp_id)::uuid IS NULL OR b.psp_id = sqlc.narg(psp_id)::uuid)
 ORDER BY b.price_id, b.psp_id;

@@ -67,6 +67,7 @@ var excludedTables = map[string]string{
 	"psp_imports":                       "import working state: the destination pulls its PSPs again",
 	"psp_import_records":                "import working state: copies of provider objects, pulled again",
 	"psp_import_mappings":               "the merchant's own identifiers; it maps them again for an import",
+	"provider_catalog_objects":          "provider observations; the destination observes again",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is

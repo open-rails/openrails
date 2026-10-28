@@ -1356,6 +1356,27 @@ type BillingProviderBill struct {
 	CreatedAt         time.Time
 }
 
+// What a PSP's catalog says, as OpenRails last observed it: Stripe products and prices (active or not) and NMI plans (prices). Provider truth only, never written by a person: pulls, webhooks and by-id reads upsert it, the latest observation winning. amount is the decimal major-unit amount the provider states; currency is NULL where the provider names none (NMI). deleted_at is set only when a by-id read finds the object gone. A provider price is mapped by a provider price bound to it.
+type BillingProviderCatalogObject struct {
+	MerchantID            uuid.UUID
+	PspID                 uuid.UUID
+	Kind                  string
+	Ref                   string
+	ProductRef            *string
+	Name                  *string
+	Active                bool
+	DeletedAt             *time.Time
+	Amount                *string
+	Currency              *string
+	BillingIntervalHours  *int32
+	BillingIntervalMonths *int32
+	Evidence              []byte
+	ObservedAt            time.Time
+	ObservedVia           string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+}
+
 // A declared provider charge without an amount: its provider transaction id names the subscription it belongs to. pending until OpenRails reads the transaction from the provider; resolved names the payment it recorded; unresolvable names why no payment was recorded. Retention: permanent, never pruned.
 type BillingProviderChargeAttribution struct {
 	MerchantID     uuid.UUID
@@ -1531,7 +1552,7 @@ type BillingPspCustomer struct {
 	UpdatedAt         time.Time
 }
 
-// One read-only pull of a PSP's customers, subscriptions and transaction history, the merchant's rules for linking them to customers, and the products its plans grant. history_through is how far the transaction history has been read. Deleting the import deletes its records.
+// One read-only pull of a PSP's catalog, customers, subscriptions and transaction history, and the merchant's rules for linking them to customers. history_through is how far the transaction history has been read. Deleting the import deletes its records.
 type BillingPspImport struct {
 	MerchantID     uuid.UUID
 	ID             uuid.UUID
@@ -1544,7 +1565,6 @@ type BillingPspImport struct {
 	AppliedAt      *time.Time
 	Error          *string
 	Rules          []byte
-	Products       []byte
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -1579,6 +1599,8 @@ type BillingPspImportRecord struct {
 	Reason           *string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	// The provider price the merchant picked by hand for a subscription whose provider names no plan (CCBill); it wins over matching its rebill.
+	ManualPriceID *uuid.UUID
 }
 
 // PSP refresh cursors: the exclusive lower bound of the next bounded event window, per (merchant, PSP, domain). A failed or partial provider read never advances watermark_at.

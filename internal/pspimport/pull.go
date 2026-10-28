@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
@@ -90,9 +91,9 @@ const historyWindow = 30 * 24 * time.Hour
 // stageBatch bounds one staging write.
 const stageBatch = 500
 
-// Pull reads the import's PSP: its roster once, then its transaction history
-// window by window, each committed with how far it reached, so a retried job
-// resumes. It then links what it staged.
+// Pull reads the import's PSP: its catalog and roster once, then its
+// transaction history window by window, each committed with how far it
+// reached, so a retried job resumes. It then links what it staged.
 func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID) error {
 	row, err := im.row(ctx, id)
 	if err != nil || row.Status != string(billing.PSPImportPulling) {
@@ -117,11 +118,18 @@ func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID) error {
 	q := im.DB.Gen(ctx)
 	if row.PulledAt == nil {
 		observed := im.now()
+		cat, err := im.observeCatalog(ctx, scope)
+		if err != nil {
+			return err
+		}
 		recs, err := src.roster(ctx)
 		if err != nil {
 			return err
 		}
 		if err := im.stage(ctx, row, recs); err != nil {
+			return err
+		}
+		if err := cat.fill(ctx, recs); err != nil {
 			return err
 		}
 		since := row.HistorySince
@@ -169,6 +177,87 @@ func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID) error {
 	}
 	_, err = q.SetPSPImportStatus(ctx, gen.SetPSPImportStatusParams{MerchantID: row.MerchantID, ID: row.ID, Status: string(billing.PSPImportPulled)})
 	return err
+}
+
+// catalogPull is a pull's read of the PSP's catalog: what its lists held.
+type catalogPull struct {
+	im     *Importer
+	scope  merchants.PSPScope
+	reader providerobjects.Reader
+	listed map[string]bool
+}
+
+func catalogKey(kind providerobjects.Kind, ref string) string { return string(kind) + "\x1f" + ref }
+
+// observeCatalog lists the PSP's whole catalog (Stripe products and prices,
+// active and not; NMI plans) and records it. A rail without a catalog
+// (CCBill) gives nil.
+func (im *Importer) observeCatalog(ctx context.Context, scope merchants.PSPScope) (*catalogPull, error) {
+	if im.Objects == nil {
+		return nil, Permanent(errors.New("the provider catalog observer is not wired"))
+	}
+	reader, err := im.Objects.Reader(ctx, scope)
+	if errors.Is(err, providerobjects.ErrNoCatalog) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, Permanent(fmt.Errorf("PSP %s is not readable: %w", scope.Key, err))
+	}
+	objects, err := reader.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("provider catalog: %w", err)
+	}
+	if err := im.Objects.Record(ctx, scope, objects, providerobjects.ViaPull); err != nil {
+		return nil, err
+	}
+	c := &catalogPull{im: im, scope: scope, reader: reader, listed: map[string]bool{}}
+	for _, obj := range objects {
+		c.listed[catalogKey(obj.Kind, obj.Ref)] = true
+	}
+	return c, nil
+}
+
+// fill reads by id what the lists lacked: each price a staged subscription
+// names (a Stripe inline price; an NMI plan gone from the gateway, recorded
+// from the subscription's copy) and each stored object of the PSP.
+func (c *catalogPull) fill(ctx context.Context, recs []staged) error {
+	if c == nil {
+		return nil
+	}
+	read := map[string]bool{}
+	observe := func(kind providerobjects.Kind, ref string, stated *providerobjects.Object) error {
+		key := catalogKey(kind, ref)
+		if ref == "" || c.listed[key] || read[key] {
+			return nil
+		}
+		read[key] = true
+		progress.Mark(ctx, fmt.Sprintf("psp import catalog %s %s", kind, ref))
+		if _, err := c.im.Objects.Observe(ctx, c.reader, c.scope, kind, ref, stated); err != nil {
+			return fmt.Errorf("provider catalog %s %s: %w", kind, ref, err)
+		}
+		return nil
+	}
+	for _, r := range recs {
+		data, ok := r.data.(subscriptionData)
+		if r.kind != billing.PSPImportSubscription || !ok {
+			continue
+		}
+		if err := observe(providerobjects.Price, data.Plan, r.stated); err != nil {
+			return err
+		}
+	}
+	stored, err := c.im.Objects.Refs(ctx, c.scope)
+	if err != nil {
+		return err
+	}
+	for _, kind := range []providerobjects.Kind{providerobjects.Product, providerobjects.Price} {
+		for _, ref := range stored[kind] {
+			if err := observe(kind, ref, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // attribution indexes the import's staged subscriptions.

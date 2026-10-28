@@ -119,6 +119,7 @@ migration 0117_ledger_audit_at_restore_commit.up.sql sha256:aed275cb883723e3396f
 migration 0118_unenriched_attempts_index.up.sql sha256:bb64557d14e0a642a7461232b48eaab4ff28b9512dcb7252bbd6eedb598fd450
 migration 0119_periodic_leases_per_kind.up.sql sha256:248bbce419d2fa93e230ef1c272459b14fe834792dd87359f0a0e28f405c6937
 migration 0120_stored_card_refresh.up.sql sha256:312d37e5bb10f50013657086f7cd93e6190b0c36294fe6f2d68425ac4bc98826
+migration 0130_provider_catalog_objects.up.sql sha256:215efeb29d8a62df1ea3249c83e9ba76128c9d00377b994432417ed77be4a3b7
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2057,6 +2058,38 @@ table billing.provider_bills
   index CREATE INDEX provider_bills_order_id_idx ON billing.provider_bills USING btree (merchant_id, order_id)
   index CREATE UNIQUE INDEX provider_bills_pkey ON billing.provider_bills USING btree (merchant_id, psp_id, source_kind, source_key)
 
+table billing.provider_catalog_objects
+  column merchant_id uuid NOT NULL
+  column psp_id uuid NOT NULL
+  column kind text NOT NULL
+  column ref text NOT NULL
+  column product_ref text
+  column name text
+  column active boolean NOT NULL
+  column deleted_at timestamp with time zone
+  column amount text
+  column currency text
+  column billing_interval_hours integer
+  column billing_interval_months integer
+  column evidence jsonb NOT NULL
+  column observed_at timestamp with time zone NOT NULL
+  column observed_via text NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint provider_catalog_objects_amount_check CHECK (((amount IS NULL) OR (amount ~ '^[0-9]+(\.[0-9]+)?$'::text)))
+  constraint provider_catalog_objects_currency_check CHECK (((currency IS NULL) OR (currency ~ '^[A-Z][A-Z0-9]{2,9}$'::text)))
+  constraint provider_catalog_objects_evidence_check CHECK ((jsonb_typeof(evidence) = 'object'::text))
+  constraint provider_catalog_objects_interval_check CHECK (((billing_interval_hours IS NULL) OR (billing_interval_months IS NULL)))
+  constraint provider_catalog_objects_interval_positive_check CHECK ((((billing_interval_hours IS NULL) OR (billing_interval_hours > 0)) AND ((billing_interval_months IS NULL) OR (billing_interval_months > 0))))
+  constraint provider_catalog_objects_kind_check CHECK ((kind = ANY (ARRAY['product'::text, 'price'::text])))
+  constraint provider_catalog_objects_observed_via_check CHECK ((observed_via = ANY (ARRAY['pull'::text, 'webhook'::text, 'read'::text])))
+  constraint provider_catalog_objects_pkey PRIMARY KEY (merchant_id, psp_id, kind, ref)
+  constraint provider_catalog_objects_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
+  constraint provider_catalog_objects_ref_check CHECK (((ref <> ''::text) AND (octet_length(ref) <= 256)))
+  constraint provider_catalog_objects_terms_check CHECK (((kind = 'price'::text) OR ((product_ref IS NULL) AND (amount IS NULL) AND (currency IS NULL) AND (billing_interval_hours IS NULL) AND (billing_interval_months IS NULL))))
+  constraint provider_catalog_objects_text_check CHECK ((((product_ref IS NULL) OR (product_ref <> ''::text)) AND ((name IS NULL) OR (name <> ''::text))))
+  index CREATE UNIQUE INDEX provider_catalog_objects_pkey ON billing.provider_catalog_objects USING btree (merchant_id, psp_id, kind, ref)
+
 table billing.provider_charge_attributions
   column merchant_id uuid NOT NULL
   column psp_id uuid NOT NULL
@@ -2298,10 +2331,13 @@ table billing.psp_import_records
   column reason text
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  column manual_price_id uuid
   constraint psp_import_records_data_check CHECK ((jsonb_typeof(data) = 'object'::text))
   constraint psp_import_records_facts_check CHECK ((jsonb_typeof(facts) = 'object'::text))
   constraint psp_import_records_import_id_fkey FOREIGN KEY (merchant_id, import_id) REFERENCES billing.psp_imports(merchant_id, id) ON DELETE CASCADE
   constraint psp_import_records_kind_check CHECK ((kind = ANY (ARRAY['customer'::text, 'subscription'::text, 'transaction'::text])))
+  constraint psp_import_records_manual_price_check CHECK (((manual_price_id IS NULL) OR (kind = 'subscription'::text)))
+  constraint psp_import_records_manual_price_id_fkey FOREIGN KEY (merchant_id, manual_price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
   constraint psp_import_records_pkey PRIMARY KEY (merchant_id, id)
   constraint psp_import_records_reason_check CHECK ((((reason IS NULL) OR (reason <> ''::text)) AND ((state <> ALL (ARRAY['conflict'::text, 'blocked'::text])) OR (reason IS NOT NULL))))
   constraint psp_import_records_ref_check CHECK (((ref <> ''::text) AND (octet_length(ref) <= 256)))
@@ -2325,12 +2361,10 @@ table billing.psp_imports
   column applied_at timestamp with time zone
   column error text
   column rules jsonb NOT NULL
-  column products jsonb NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   constraint psp_imports_error_check CHECK ((((status = 'failed'::text) = (error IS NOT NULL)) AND ((error IS NULL) OR (error <> ''::text))))
   constraint psp_imports_pkey PRIMARY KEY (merchant_id, id)
-  constraint psp_imports_products_check CHECK ((jsonb_typeof(products) = 'array'::text))
   constraint psp_imports_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint psp_imports_rules_check CHECK ((jsonb_typeof(rules) = 'array'::text))
   constraint psp_imports_status_check CHECK ((status = ANY (ARRAY['pulling'::text, 'pulled'::text, 'applying'::text, 'applied'::text, 'failed'::text])))

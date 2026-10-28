@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 )
 
 // staged is one provider object as a source read it.
@@ -17,6 +18,9 @@ type staged struct {
 	occurredAt      time.Time
 	facts           facts
 	data            any
+	// stated is the plan a subscription carries a copy of (NMI): what the
+	// pull records when the provider no longer has the plan itself.
+	stated *providerobjects.Object
 }
 
 // source reads one PSP. Implementations only read: list, report and get

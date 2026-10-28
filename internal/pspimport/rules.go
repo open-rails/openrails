@@ -101,40 +101,6 @@ func compileRules(in []billing.PSPImportRule) ([]rule, error) {
 	return out, nil
 }
 
-// checkProducts refuses a plan named twice.
-func checkProducts(in []billing.PSPImportProduct) error {
-	seen := map[string]bool{}
-	for i, p := range in {
-		if strings.TrimSpace(p.Product) == "" {
-			return apperr.Invalidf("products[%d].product is required", i).WithParam(fmt.Sprintf("products[%d].product", i))
-		}
-		if seen[p.Plan] {
-			return apperr.Invalidf("products: plan %q is named twice", p.Plan).WithParam(fmt.Sprintf("products[%d].plan", i))
-		}
-		seen[p.Plan] = true
-	}
-	return nil
-}
-
-// productFor is the product key a plan grants, "" for none.
-func productFor(products []billing.PSPImportProduct, plan string) string {
-	return productEntry(products, plan).Product
-}
-
-// productEntry is the entry naming plan, else the one naming every plan.
-func productEntry(products []billing.PSPImportProduct, plan string) billing.PSPImportProduct {
-	var fallback billing.PSPImportProduct
-	for _, p := range products {
-		if p.Plan == plan {
-			return p
-		}
-		if p.Plan == "" {
-			fallback = p
-		}
-	}
-	return fallback
-}
-
 // facts are a staged object's identity facts: each name's distinct values.
 type facts map[string][]string
 

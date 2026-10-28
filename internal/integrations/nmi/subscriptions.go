@@ -277,23 +277,32 @@ func (c *NMIClient) GetRecurringPlanByID(ctx context.Context, planID, currency s
 	return detail.Found, detail.Name, detail.AmountCents, nil
 }
 
-// GetRecurringPlanDetailByID reads one plan via GET /v5/plans/{id}: the terms
-// a provider price takes from NMI.
-func (c *NMIClient) GetRecurringPlanDetailByID(ctx context.Context, planID, currency string) (RecurringPlanDetail, error) {
+// GetRecurringPlan reads one plan via GET /v5/plans/{id}; found is false
+// when NMI answers 404.
+func (c *NMIClient) GetRecurringPlan(ctx context.Context, planID string) (V5Plan, bool, error) {
 	if err := c.checkConfiguration(); err != nil {
-		return RecurringPlanDetail{}, err
+		return V5Plan{}, false, err
 	}
 	trimmed := strings.TrimSpace(planID)
 	if trimmed == "" {
-		return RecurringPlanDetail{}, errors.New("planID is required")
+		return V5Plan{}, false, errors.New("planID is required")
 	}
-
 	var plan V5Plan
 	err := c.sendV5Request(ctx, http.MethodGet, "/plans/"+url.PathEscape(trimmed), nil, &plan)
 	if errors.Is(err, ErrV5NotFound) {
-		return RecurringPlanDetail{}, nil
+		return V5Plan{}, false, nil
 	}
 	if err != nil {
+		return V5Plan{}, false, err
+	}
+	return plan, true, nil
+}
+
+// GetRecurringPlanDetailByID reads one plan's terms (GetRecurringPlan) in
+// currency's minor units.
+func (c *NMIClient) GetRecurringPlanDetailByID(ctx context.Context, planID, currency string) (RecurringPlanDetail, error) {
+	plan, found, err := c.GetRecurringPlan(ctx, planID)
+	if err != nil || !found {
 		return RecurringPlanDetail{}, err
 	}
 

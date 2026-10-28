@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -120,7 +121,12 @@ func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReport
 	f.add(FactEmail, row.Email)
 	f.add(FactName, fullName(row.FirstName, row.LastName))
 	data := subscriptionData{Currency: s.currency, StartedAt: nmiTime(sub.StartDate), Paused: nmiFlag(sub.PausedSubscription)}
+	var stated *providerobjects.Object
 	if sub.Plan != nil {
+		if plan := providerobjects.NMIPlan(*sub.Plan); plan.Ref != "" {
+			plan.Evidence, _ = json.Marshal(map[string]any{"source": "nmi_subscription_plan", "subscription": ref, "plan": sub.Plan})
+			stated = &plan
+		}
 		data.Plan = strings.TrimSpace(sub.Plan.ID)
 		days, _ := strconv.Atoi(strings.TrimSpace(sub.Plan.DayFrequency))
 		data.IntervalHours = days * 24
@@ -138,7 +144,7 @@ func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReport
 		return staged{}, err
 	}
 	data.Evidence, _ = json.Marshal(map[string]any{"source": "nmi_psp_import", "subscription": sub, "recurring": row})
-	return staged{kind: billing.PSPImportSubscription, ref: ref, customerRef: vault, occurredAt: data.StartedAt, facts: f, data: data}, nil
+	return staged{kind: billing.PSPImportSubscription, ref: ref, customerRef: vault, occurredAt: data.StartedAt, facts: f, data: data, stated: stated}, nil
 }
 
 func (s *nmiSource) history(ctx context.Context, since, until time.Time) ([]staged, error) {

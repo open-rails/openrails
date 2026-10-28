@@ -75,6 +75,7 @@ var ownedTables = []string{
 	"provider_charge_attributions",
 	"provider_cycle_receipts",
 	"provider_intents",
+	"provider_catalog_objects",
 	"provider_mutation_logs",
 	"provider_schedules",
 	"psp_customers",

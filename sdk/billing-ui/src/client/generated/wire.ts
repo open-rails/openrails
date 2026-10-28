@@ -538,7 +538,6 @@ export type CreatePSPImportParams = {
   psp?: PSPRef
   history_since?: string
   rules?: PSPImportRule[]
-  products?: PSPImportProduct[]
 }
 
 export type CreatePSPParams = {
@@ -1161,6 +1160,7 @@ export type InvoiceProfile = {
 
 export type LinkPSPImportParams = {
   links?: PSPImportLink[]
+  prices?: PSPImportPriceLink[]
 }
 
 export type LowBalanceLine = {
@@ -1567,7 +1567,6 @@ export type PSPImport = {
   applied_at: string | null
   error: string | null
   rules: PSPImportRule[]
-  products: PSPImportProduct[]
   counts: PSPImportCount[]
   created_at: string
   updated_at: string
@@ -1600,10 +1599,9 @@ export type PSPImportMappingsResult = {
   deleted: number
 }
 
-export type PSPImportProduct = {
-  plan?: string
-  product: string
-  price?: string
+export type PSPImportPriceLink = {
+  record?: string
+  price?: string | null
 }
 
 export type PSPImportRecord = {
@@ -1618,6 +1616,7 @@ export type PSPImportRecord = {
   state: "blocked" | "conflict" | "imported" | "linked" | "unmatched"
   customer: string | null
   linked_via: string | null
+  manual_price: string | null
   reason: string | null
   updated_at: string
 }
@@ -1935,6 +1934,7 @@ export type PriceProvider = {
   psp_id: string
   rail: string
   ids: Record<string, string> | null
+  retired: boolean
   sync_status: "drifted" | "in_sync" | "missing" | "sync_disabled" | "unknown"
   drift: DriftField[]
 }
@@ -1987,6 +1987,28 @@ export type ProductSummary = {
   tier_group: string | null
   tier_rank: number
   archived: boolean
+}
+
+export type ProviderCatalogObject = {
+  kind: "price" | "product"
+  ref: string
+  product_ref: string | null
+  name: string | null
+  active: boolean
+  deleted_at: string | null
+  retired: boolean
+  terms: ProviderCatalogTerms | null
+  observed_at: string
+  observed_via: string
+  price: string | null
+  subscriptions: number | null
+}
+
+export type ProviderCatalogTerms = {
+  stated_amount: string | null
+  currency: string | null
+  billing_interval_hours: number | null
+  billing_interval_months: number | null
 }
 
 export type ProvisioningToken = {
@@ -2490,7 +2512,6 @@ export type UpdateMerchantConfigurationParams = {
 
 export type UpdatePSPImportParams = {
   rules?: PSPImportRule[]
-  products?: PSPImportProduct[]
 }
 
 export type UpdatePSPParams = {

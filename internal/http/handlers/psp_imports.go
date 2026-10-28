@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
-	"sort"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -181,9 +179,9 @@ func LinkPSPImport(r *httprequest.Request) {
 	r.SuccessJSON(out)
 }
 
-// ApplyPSPImport handles POST /v1/merchant/psp-imports/{id}/apply: each plan
-// the linked subscriptions name becomes an archived provider price of the
-// product the import names for it, then the landing is queued.
+// ApplyPSPImport handles POST /v1/merchant/psp-imports/{id}/apply: it queues
+// the landing of the linked records. A subscription whose plan no provider
+// price maps stays blocked until a person maps it, links and applies again.
 func ApplyPSPImport(r *httprequest.Request) {
 	id, ok := pathID(r, billing.ParsePSPImportID)
 	if !ok {
@@ -193,44 +191,7 @@ func ApplyPSPImport(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	ctx := r.Request.Context()
-	scope, plans, err := im.Planned(ctx, id)
-	if err != nil {
-		writeRefusal(r, err, "PSP import apply failed")
-		return
-	}
-	keys := make([]string, 0, len(plans))
-	for plan := range plans {
-		keys = append(keys, plan)
-	}
-	sort.Strings(keys)
-	missing, err := im.MissingProviderPrices(ctx, id, keys)
-	if err != nil {
-		writeRefusal(r, err, "PSP import apply failed")
-		return
-	}
-	for _, plan := range missing {
-		product := plans[plan]
-		if product == "" {
-			continue // its subscriptions stay blocked, naming the plan
-		}
-		create := billing.CreateProviderPriceParams{ProductKey: product, Key: scope.Key + "-" + plan, PSP: scope.Key, Archived: true}
-		switch scope.Rail {
-		case "nmi":
-			create.PlanID = plan
-		case "stripe":
-			create.PriceID = plan
-		}
-		if _, err := svc.CreateProviderPrice(ctx, create); err != nil {
-			writeRefusal(r, fmt.Errorf("plan %q: %w", plan, err), "PSP import apply failed")
-			return
-		}
-	}
-	out, err := im.RequestApply(ctx, id)
+	out, err := im.RequestApply(r.Request.Context(), id)
 	if err != nil {
 		writePSPImportRefusal(r, err, "PSP import apply failed")
 		return
@@ -250,6 +211,40 @@ func SetPSPImportMappings(r *httprequest.Request) {
 	out, err := im.SetMappings(r.Request.Context(), params)
 	if err != nil {
 		writeRefusal(r, err, "PSP import mappings failed")
+		return
+	}
+	r.SuccessJSON(out)
+}
+
+// ProviderCatalogQuery filters ListProviderCatalog.
+type ProviderCatalogQuery struct {
+	PSP     billing.PSPID               `form:"psp"`
+	Kind    billing.ProviderCatalogKind `form:"kind"`
+	Mapped  *bool                       `form:"mapped"`
+	Retired *bool                       `form:"retired"`
+	Import  *billing.PSPImportID        `form:"import"`
+}
+
+// ListProviderCatalog handles GET /v1/merchant/provider-catalog: one PSP's
+// catalog as OpenRails last observed it, each price with the provider price
+// mapping it.
+func ListProviderCatalog(r *httprequest.Request) {
+	var query ProviderCatalogQuery
+	if !r.BindQuery(&query) {
+		return
+	}
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
+	objects := r.State.ProviderObjects()
+	if objects == nil || objects.Merchants == nil {
+		r.ErrorCode(billing.CodeServiceUnavailable, "provider catalog unavailable")
+		return
+	}
+	out, err := objects.List(r.Request.Context(), billing.ProviderCatalogListParams{PageRequest: page, PSP: query.PSP, Kind: query.Kind, Mapped: query.Mapped, Retired: query.Retired, Import: query.Import})
+	if err != nil {
+		writeRefusal(r, err, "provider catalog list failed")
 		return
 	}
 	r.SuccessJSON(out)

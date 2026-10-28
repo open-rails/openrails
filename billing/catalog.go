@@ -158,12 +158,16 @@ const (
 // recurring_billing_option_id (CCBill). A buyer's view (BuyerPrices) keeps
 // the PSP and rail only. After a verifying read, SyncStatus says whether the
 // provider's terms still match the price's and Drift how they differ.
+// Retired: the provider's catalog, as last observed, no longer sells the
+// object (inactive or deleted); the price is not for sale but keeps billing
+// its subscriptions.
 type PriceProvider struct {
 	AccessDurationDefault bool              `json:"access_duration_default"`
 	PSP                   string            `json:"psp"`
 	PSPID                 PSPID             `json:"psp_id"`
 	Rail                  string            `json:"rail"`
 	IDs                   map[string]string `json:"ids"`
+	Retired               bool              `json:"retired"`
 	SyncStatus            SyncStatus        `json:"sync_status"`
 	Drift                 []DriftField      `json:"drift"`
 }

@@ -10561,8 +10561,6 @@
         },
         "x-openrails-errors": [
           "invalid_param",
-          "product_not_found",
-          "provider_price_unreadable",
           "resource_conflict",
           "resource_not_found",
           "service_unavailable"
@@ -10624,6 +10622,128 @@
         },
         "x-openrails-errors": [
           "invalid_param",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/provider-catalog": {
+      "get": {
+        "tags": [
+          "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "mapped",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "psp",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "retired",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ProviderCatalogObject"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
+        },
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_param",
+          "invalid_query",
+          "psp_not_found",
+          "resource_not_found",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -14164,12 +14284,6 @@
             "items": {
               "$ref": "#/components/schemas/PSPImportRule"
             }
-          },
-          "products": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PSPImportProduct"
-            }
           }
         }
       },
@@ -16660,6 +16774,12 @@
             "items": {
               "$ref": "#/components/schemas/PSPImportLink"
             }
+          },
+          "prices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PSPImportPriceLink"
+            }
           }
         }
       },
@@ -18723,12 +18843,6 @@
               "$ref": "#/components/schemas/PSPImportRule"
             }
           },
-          "products": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PSPImportProduct"
-            }
-          },
           "counts": {
             "type": "array",
             "items": {
@@ -18755,7 +18869,6 @@
           "applied_at",
           "error",
           "rules",
-          "products",
           "counts",
           "created_at",
           "updated_at"
@@ -18861,22 +18974,23 @@
           "deleted"
         ]
       },
-      "PSPImportProduct": {
+      "PSPImportPriceLink": {
         "type": "object",
         "properties": {
-          "plan": {
-            "type": "string"
-          },
-          "product": {
+          "record": {
             "type": "string"
           },
           "price": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
-        },
-        "required": [
-          "product"
-        ]
+        }
       },
       "PSPImportRecord": {
         "type": "object",
@@ -18965,6 +19079,16 @@
               }
             ]
           },
+          "manual_price": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reason": {
             "oneOf": [
               {
@@ -18992,6 +19116,7 @@
           "state",
           "customer",
           "linked_via",
+          "manual_price",
           "reason",
           "updated_at"
         ]
@@ -20555,6 +20680,9 @@
               }
             ]
           },
+          "retired": {
+            "type": "boolean"
+          },
           "sync_status": {
             "type": "string",
             "enum": [
@@ -20578,6 +20706,7 @@
           "psp_id",
           "rail",
           "ids",
+          "retired",
           "sync_status",
           "drift"
         ]
@@ -20874,6 +21003,160 @@
           "tier_group",
           "tier_rank",
           "archived"
+        ]
+      },
+      "ProviderCatalogObject": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "price",
+              "product"
+            ]
+          },
+          "ref": {
+            "type": "string"
+          },
+          "product_ref": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "deleted_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retired": {
+            "type": "boolean"
+          },
+          "terms": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProviderCatalogTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "observed_via": {
+            "type": "string"
+          },
+          "price": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subscriptions": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "ref",
+          "product_ref",
+          "name",
+          "active",
+          "deleted_at",
+          "retired",
+          "terms",
+          "observed_at",
+          "observed_via",
+          "price",
+          "subscriptions"
+        ]
+      },
+      "ProviderCatalogTerms": {
+        "type": "object",
+        "properties": {
+          "stated_amount": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "billing_interval_hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "billing_interval_months": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "stated_amount",
+          "currency",
+          "billing_interval_hours",
+          "billing_interval_months"
         ]
       },
       "ProvisioningToken": {
@@ -23006,12 +23289,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/PSPImportRule"
-            }
-          },
-          "products": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PSPImportProduct"
             }
           }
         }

@@ -16,11 +16,14 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// Link stores the merchant's manual links and links every staged record
-// again by the import's rules.
+// Link stores the merchant's manual links and price picks and links every
+// staged record not yet imported again by the import's rules.
 func (im *Importer) Link(ctx context.Context, id billing.PSPImportID, p billing.LinkPSPImportParams) (*billing.PSPImport, error) {
 	if len(p.Links) > billing.MaxBatchItems {
 		return nil, apperr.Invalidf("links holds at most %d items", billing.MaxBatchItems).WithParam("links")
+	}
+	if len(p.Prices) > billing.MaxBatchItems {
+		return nil, apperr.Invalidf("prices holds at most %d items", billing.MaxBatchItems).WithParam("prices")
 	}
 	row, err := im.row(ctx, id)
 	if err != nil {
@@ -29,10 +32,68 @@ func (im *Importer) Link(ctx context.Context, id billing.PSPImportID, p billing.
 	if busy(row.Status) {
 		return nil, apperr.Conflictf("the import is %s; link it when its job finishes", row.Status)
 	}
+	if err := im.pickPrices(ctx, row, p.Prices); err != nil {
+		return nil, err
+	}
 	if err := im.link(ctx, row, p.Links); err != nil {
 		return nil, err
 	}
 	return im.view(ctx, row)
+}
+
+// pickPrices stores the provider prices picked by hand for subscriptions
+// whose provider names no plan: each a live provider price bound to the
+// import's PSP.
+func (im *Importer) pickPrices(ctx context.Context, row gen.BillingPspImport, picks []billing.PSPImportPriceLink) error {
+	if len(picks) == 0 {
+		return nil
+	}
+	if planned[row.Rail] {
+		return apperr.Invalidf("prices: a %s subscription lands on the provider price mapping its plan; a price is picked only on a rail whose subscriptions name none (CCBill)", row.Rail).WithParam("prices")
+	}
+	live, err := im.DB.Gen(ctx).ListPSPProviderPricesOfPSP(ctx, gen.ListPSPProviderPricesOfPSPParams{MerchantID: row.MerchantID, PspID: row.PspID})
+	if err != nil {
+		return err
+	}
+	byRef := make(map[billing.PriceID]uuid.UUID, len(live))
+	for _, r := range live {
+		byRef[billing.PriceID(r.PublicID)] = r.ID
+	}
+	p := gen.SetPSPImportRecordManualPricesParams{MerchantID: row.MerchantID, ImportID: row.ID}
+	for i, pick := range picks {
+		param := fmt.Sprintf("prices[%d]", i)
+		if pick.Record.IsZero() {
+			return apperr.Invalidf("%s.record is required", param).WithParam(param + ".record")
+		}
+		price := uuid.Nil
+		if pick.Price != nil && !pick.Price.IsZero() {
+			id, ok := byRef[*pick.Price]
+			if !ok {
+				return apperr.Invalidf("%s.price %s is not a live provider price of the import's PSP", param, *pick.Price).WithParam(param + ".price")
+			}
+			price = id
+		}
+		p.Ids, p.PriceIds = append(p.Ids, pick.Record.UUID()), append(p.PriceIds, price)
+	}
+	records, err := im.DB.Gen(ctx).ListPSPImportRecordsByIDs(ctx, gen.ListPSPImportRecordsByIDsParams{MerchantID: row.MerchantID, ImportID: row.ID, Ids: p.Ids})
+	if err != nil {
+		return err
+	}
+	kinds := make(map[uuid.UUID]string, len(records))
+	for _, r := range records {
+		kinds[r.ID] = r.Kind
+	}
+	for i, id := range p.Ids {
+		param := fmt.Sprintf("prices[%d].record", i)
+		switch kind, ok := kinds[id]; {
+		case !ok:
+			return apperr.New(404, billing.CodeResourceNotFound, "a priced record is not one of the import's").WithParam(param)
+		case kind != string(billing.PSPImportSubscription):
+			return apperr.Invalidf("%s is a %s: a price is picked for a subscription", param, kind).WithParam(param)
+		}
+	}
+	_, err = im.DB.Gen(ctx).SetPSPImportRecordManualPrices(ctx, p)
+	return err
 }
 
 // candidate is one customer a rule, a link or a parent object names.

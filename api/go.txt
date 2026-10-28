@@ -115,6 +115,7 @@ pkg openrails, method (*Client) ListPriceMigrations(context.Context, billing.Pri
 pkg openrails, method (*Client) ListPrices(context.Context, billing.PriceListParams, ...RequestOption) (*billing.ListPage[billing.Price], error)
 pkg openrails, method (*Client) ListProductAccess(context.Context, billing.ProductAccessListParams, ...RequestOption) (*billing.ListPage[billing.ProductAccessGrant], error)
 pkg openrails, method (*Client) ListProducts(context.Context, billing.ProductListParams, ...RequestOption) (*billing.ListPage[billing.Product], error)
+pkg openrails, method (*Client) ListProviderCatalog(context.Context, billing.ProviderCatalogListParams, ...RequestOption) (*billing.ListPage[billing.ProviderCatalogObject], error)
 pkg openrails, method (*Client) ListProvisioningTokens(context.Context, billing.ProvisioningTokenListParams, ...RequestOption) (*billing.ListPage[billing.ProvisioningToken], error)
 pkg openrails, method (*Client) ListRenewals(context.Context, billing.RenewalListParams, ...RequestOption) (*billing.ListPage[billing.Renewal], error)
 pkg openrails, method (*Client) ListRunningCharges(context.Context, billing.RunningChargeListParams, ...RequestOption) (*billing.ListPage[billing.RunningCharge], error)
@@ -263,6 +264,7 @@ pkg openrails, method (LocalClient) ListPriceMigrations(context.Context, billing
 pkg openrails, method (LocalClient) ListPrices(context.Context, billing.PriceListParams, ...RequestOption) (*billing.ListPage[billing.Price], error)
 pkg openrails, method (LocalClient) ListProductAccess(context.Context, billing.ProductAccessListParams, ...RequestOption) (*billing.ListPage[billing.ProductAccessGrant], error)
 pkg openrails, method (LocalClient) ListProducts(context.Context, billing.ProductListParams, ...RequestOption) (*billing.ListPage[billing.Product], error)
+pkg openrails, method (LocalClient) ListProviderCatalog(context.Context, billing.ProviderCatalogListParams, ...RequestOption) (*billing.ListPage[billing.ProviderCatalogObject], error)
 pkg openrails, method (LocalClient) ListProvisioningTokens(context.Context, billing.ProvisioningTokenListParams, ...RequestOption) (*billing.ListPage[billing.ProvisioningToken], error)
 pkg openrails, method (LocalClient) ListRenewals(context.Context, billing.RenewalListParams, ...RequestOption) (*billing.ListPage[billing.Renewal], error)
 pkg openrails, method (LocalClient) ListRunningCharges(context.Context, billing.RunningChargeListParams, ...RequestOption) (*billing.ListPage[billing.RunningCharge], error)
@@ -1017,6 +1019,8 @@ pkg openrails/billing, const ProposalHeld ProposalOutcome = "held"
 pkg openrails/billing, const ProposalSourcePull ProposalSource = "pull"
 pkg openrails/billing, const ProposalSourceVerification ProposalSource = "verification"
 pkg openrails/billing, const ProposalSuperseded ProposalOutcome = "superseded"
+pkg openrails/billing, const ProviderCatalogPrice ProviderCatalogKind = "price"
+pkg openrails/billing, const ProviderCatalogProduct ProviderCatalogKind = "product"
 pkg openrails/billing, const ProviderRefundKeep untyped string = "keep"
 pkg openrails/billing, const ProviderRefundRevokeOnAny untyped string = "revoke_on_any"
 pkg openrails/billing, const ProviderRefundRevokeOnFull untyped string = "revoke_on_full"
@@ -1714,7 +1718,6 @@ pkg openrails/billing, type CreateOrderParams struct, PayURL *OrderPayURLParams 
 pkg openrails/billing, type CreatePSPImportParams struct
 pkg openrails/billing, type CreatePSPImportParams struct, HistorySince *time.Time `json:"history_since,omitempty"`
 pkg openrails/billing, type CreatePSPImportParams struct, PSP PSPRef `json:"psp"`
-pkg openrails/billing, type CreatePSPImportParams struct, Products []PSPImportProduct `json:"products,omitempty"`
 pkg openrails/billing, type CreatePSPImportParams struct, Rules []PSPImportRule `json:"rules,omitempty"`
 pkg openrails/billing, type CreatePSPParams struct
 pkg openrails/billing, type CreatePSPParams struct, Credentials map[string]string `json:"credentials"`
@@ -2302,6 +2305,7 @@ pkg openrails/billing, type InvoiceProfile struct, Tax map[string]any `json:"tax
 pkg openrails/billing, type InvokerType string
 pkg openrails/billing, type LinkPSPImportParams struct
 pkg openrails/billing, type LinkPSPImportParams struct, Links []PSPImportLink `json:"links,omitempty"`
+pkg openrails/billing, type LinkPSPImportParams struct, Prices []PSPImportPriceLink `json:"prices,omitempty"`
 pkg openrails/billing, type ListPage struct, Items []T
 pkg openrails/billing, type ListPage struct, Next string
 pkg openrails/billing, type ListPage[T any] struct
@@ -2800,7 +2804,6 @@ pkg openrails/billing, type PSPImport struct, HistorySince *time.Time `json:"his
 pkg openrails/billing, type PSPImport struct, HistoryThrough *time.Time `json:"history_through"`
 pkg openrails/billing, type PSPImport struct, ID PSPImportID `json:"id"`
 pkg openrails/billing, type PSPImport struct, PSP PSPID `json:"psp"`
-pkg openrails/billing, type PSPImport struct, Products []PSPImportProduct `json:"products"`
 pkg openrails/billing, type PSPImport struct, PulledAt *time.Time `json:"pulled_at"`
 pkg openrails/billing, type PSPImport struct, Rail string `json:"rail"`
 pkg openrails/billing, type PSPImport struct, Rules []PSPImportRule `json:"rules"`
@@ -2827,10 +2830,9 @@ pkg openrails/billing, type PSPImportMapping struct, Mapping string `json:"mappi
 pkg openrails/billing, type PSPImportMappingsResult struct
 pkg openrails/billing, type PSPImportMappingsResult struct, Deleted int `json:"deleted"`
 pkg openrails/billing, type PSPImportMappingsResult struct, Set int `json:"set"`
-pkg openrails/billing, type PSPImportProduct struct
-pkg openrails/billing, type PSPImportProduct struct, Plan string `json:"plan,omitempty"`
-pkg openrails/billing, type PSPImportProduct struct, Price string `json:"price,omitempty"`
-pkg openrails/billing, type PSPImportProduct struct, Product string `json:"product"`
+pkg openrails/billing, type PSPImportPriceLink struct
+pkg openrails/billing, type PSPImportPriceLink struct, Price *PriceID `json:"price"`
+pkg openrails/billing, type PSPImportPriceLink struct, Record PSPImportRecordID `json:"record"`
 pkg openrails/billing, type PSPImportRecord struct
 pkg openrails/billing, type PSPImportRecord struct, Customer *CustomerID `json:"customer"`
 pkg openrails/billing, type PSPImportRecord struct, CustomerRef *string `json:"customer_ref"`
@@ -2839,6 +2841,7 @@ pkg openrails/billing, type PSPImportRecord struct, ID PSPImportRecordID `json:"
 pkg openrails/billing, type PSPImportRecord struct, Import PSPImportID `json:"import"`
 pkg openrails/billing, type PSPImportRecord struct, Kind PSPImportRecordKind `json:"kind"`
 pkg openrails/billing, type PSPImportRecord struct, LinkedVia *string `json:"linked_via"`
+pkg openrails/billing, type PSPImportRecord struct, ManualPrice *PriceID `json:"manual_price"`
 pkg openrails/billing, type PSPImportRecord struct, OccurredAt *time.Time `json:"occurred_at"`
 pkg openrails/billing, type PSPImportRecord struct, Reason *string `json:"reason"`
 pkg openrails/billing, type PSPImportRecord struct, Ref string `json:"ref"`
@@ -3164,6 +3167,7 @@ pkg openrails/billing, type PriceProvider struct, IDs map[string]string `json:"i
 pkg openrails/billing, type PriceProvider struct, PSP string `json:"psp"`
 pkg openrails/billing, type PriceProvider struct, PSPID PSPID `json:"psp_id"`
 pkg openrails/billing, type PriceProvider struct, Rail string `json:"rail"`
+pkg openrails/billing, type PriceProvider struct, Retired bool `json:"retired"`
 pkg openrails/billing, type PriceProvider struct, SyncStatus SyncStatus `json:"sync_status"`
 pkg openrails/billing, type Product struct
 pkg openrails/billing, type Product struct, Archived bool `json:"archived"`
@@ -3253,6 +3257,32 @@ pkg openrails/billing, type ProposalResults struct
 pkg openrails/billing, type ProposalResults struct, Data []ProposalResult `json:"data"`
 pkg openrails/billing, type ProposalResults struct, RunID *RunID `json:"run_id"`
 pkg openrails/billing, type ProposalSource string
+pkg openrails/billing, type ProviderCatalogKind string
+pkg openrails/billing, type ProviderCatalogListParams struct
+pkg openrails/billing, type ProviderCatalogListParams struct, Import *PSPImportID
+pkg openrails/billing, type ProviderCatalogListParams struct, Kind ProviderCatalogKind
+pkg openrails/billing, type ProviderCatalogListParams struct, Mapped *bool
+pkg openrails/billing, type ProviderCatalogListParams struct, PSP PSPID
+pkg openrails/billing, type ProviderCatalogListParams struct, Retired *bool
+pkg openrails/billing, type ProviderCatalogListParams struct, embedded PageRequest
+pkg openrails/billing, type ProviderCatalogObject struct
+pkg openrails/billing, type ProviderCatalogObject struct, Active bool `json:"active"`
+pkg openrails/billing, type ProviderCatalogObject struct, DeletedAt *time.Time `json:"deleted_at"`
+pkg openrails/billing, type ProviderCatalogObject struct, Kind ProviderCatalogKind `json:"kind"`
+pkg openrails/billing, type ProviderCatalogObject struct, Name *string `json:"name"`
+pkg openrails/billing, type ProviderCatalogObject struct, ObservedAt time.Time `json:"observed_at"`
+pkg openrails/billing, type ProviderCatalogObject struct, ObservedVia string `json:"observed_via"`
+pkg openrails/billing, type ProviderCatalogObject struct, Price *PriceID `json:"price"`
+pkg openrails/billing, type ProviderCatalogObject struct, ProductRef *string `json:"product_ref"`
+pkg openrails/billing, type ProviderCatalogObject struct, Ref string `json:"ref"`
+pkg openrails/billing, type ProviderCatalogObject struct, Retired bool `json:"retired"`
+pkg openrails/billing, type ProviderCatalogObject struct, Subscriptions *int `json:"subscriptions"`
+pkg openrails/billing, type ProviderCatalogObject struct, Terms *ProviderCatalogTerms `json:"terms"`
+pkg openrails/billing, type ProviderCatalogTerms struct
+pkg openrails/billing, type ProviderCatalogTerms struct, BillingIntervalHours *int `json:"billing_interval_hours"`
+pkg openrails/billing, type ProviderCatalogTerms struct, BillingIntervalMonths *int `json:"billing_interval_months"`
+pkg openrails/billing, type ProviderCatalogTerms struct, Currency *string `json:"currency"`
+pkg openrails/billing, type ProviderCatalogTerms struct, StatedAmount *string `json:"stated_amount"`
 pkg openrails/billing, type ProvisionMerchantParams struct
 pkg openrails/billing, type ProvisionMerchantParams struct, DisplayName string
 pkg openrails/billing, type ProvisionMerchantParams struct, OwnerUserID string
@@ -3643,7 +3673,6 @@ pkg openrails/billing, type UpdateMerchantConfigurationParams struct, DisplayNam
 pkg openrails/billing, type UpdateMerchantConfigurationParams struct, ExpectedRevision *int64 `json:"expected_revision"`
 pkg openrails/billing, type UpdateMerchantConfigurationParams struct, embedded *MerchantSettings
 pkg openrails/billing, type UpdatePSPImportParams struct
-pkg openrails/billing, type UpdatePSPImportParams struct, Products *[]PSPImportProduct `json:"products,omitempty"`
 pkg openrails/billing, type UpdatePSPImportParams struct, Rules *[]PSPImportRule `json:"rules,omitempty"`
 pkg openrails/billing, type UpdatePSPParams struct
 pkg openrails/billing, type UpdatePSPParams struct, AllowLast bool `json:"allow_last"`

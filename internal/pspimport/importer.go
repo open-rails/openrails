@@ -1,8 +1,10 @@
 // Package pspimport imports a merchant's subscribers straight from its PSPs:
-// it pulls each provider object read-only, stages it with the identity facts
-// the provider holds, links it to a customer by the merchant's rules and
-// mappings, and lands the linked ones through billingimport. Objects no rule
-// links stay staged and listed; nothing is guessed.
+// it observes the PSP's catalog, pulls each provider object read-only, stages
+// it with the identity facts the provider holds, links it to a customer by
+// the merchant's rules and mappings, and lands the linked ones through
+// billingimport on the provider prices mapping their plans. Objects no rule
+// links, and subscriptions whose plan no one mapped, stay staged and listed;
+// nothing is guessed.
 package pspimport
 
 import (
@@ -26,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -41,6 +44,8 @@ type Importer struct {
 	NMI *railresolve.NMIFactory
 	// Stripe builds the import's write-blocked Stripe clients.
 	Stripe *stripeapi.Factory
+	// Objects records the PSP's catalog the pull observes.
+	Objects *providerobjects.Observer
 	// CCBillDataLinkURL points DataLink at a loopback fake (sandbox runs).
 	CCBillDataLinkURL string
 	Directory         identity.Directory
@@ -90,9 +95,6 @@ func (im *Importer) Create(ctx context.Context, p billing.CreatePSPImportParams)
 	if _, err := compileRules(p.Rules); err != nil {
 		return nil, err
 	}
-	if err := checkProducts(p.Products); err != nil {
-		return nil, err
-	}
 	scope, err := im.psp(ctx, mid, p.PSP)
 	if err != nil {
 		return nil, err
@@ -100,7 +102,7 @@ func (im *Importer) Create(ctx context.Context, p billing.CreatePSPImportParams)
 	if _, ok := sources[scope.Rail]; !ok {
 		return nil, apperr.Invalidf("PSP %q is on %s, which has no import yet", scope.Key, scope.Rail).WithParam("psp")
 	}
-	rules, products, err := encodeConfig(p.Rules, p.Products)
+	rules, err := encodeRules(p.Rules)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +116,7 @@ func (im *Importer) Create(ctx context.Context, p billing.CreatePSPImportParams)
 		d := im.DB.NewWithPgxTx(tx)
 		var err error
 		if row, err = d.Gen(ctx).CreatePSPImport(ctx, gen.CreatePSPImportParams{MerchantID: mid.UUID(), PspID: scope.ID, Rail: scope.Rail,
-			HistorySince: since, Rules: rules, Products: products}); err != nil {
+			HistorySince: since, Rules: rules}); err != nil {
 			return err
 		}
 		return d.InsertRiverJob(ctx, JobArgs{MerchantID: mid.UUID(), ImportID: row.ID, Step: StepPull}, nil)
@@ -147,19 +149,11 @@ func (im *Importer) psp(ctx context.Context, mid billing.MerchantID, ref billing
 	return scope, nil
 }
 
-func encodeConfig(rules []billing.PSPImportRule, products []billing.PSPImportProduct) ([]byte, []byte, error) {
+func encodeRules(rules []billing.PSPImportRule) ([]byte, error) {
 	if rules == nil {
 		rules = DefaultRules
 	}
-	if products == nil {
-		products = []billing.PSPImportProduct{}
-	}
-	r, err := json.Marshal(rules)
-	if err != nil {
-		return nil, nil, err
-	}
-	p, err := json.Marshal(products)
-	return r, p, err
+	return json.Marshal(rules)
 }
 
 // Get reads one import with its records counted.
@@ -230,37 +224,23 @@ func (im *Importer) List(ctx context.Context, p billing.PSPImportListParams) (bi
 	}), nil
 }
 
-// Update replaces the import's rules or products.
+// Update replaces the import's rules.
 func (im *Importer) Update(ctx context.Context, id billing.PSPImportID, p billing.UpdatePSPImportParams) (*billing.PSPImport, error) {
 	row, err := im.row(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	var rules []billing.PSPImportRule
-	var products []billing.PSPImportProduct
-	if err := json.Unmarshal(row.Rules, &rules); err != nil {
+	if p.Rules == nil {
+		return im.view(ctx, row)
+	}
+	if _, err := compileRules(*p.Rules); err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(row.Products, &products); err != nil {
-		return nil, err
-	}
-	if p.Rules != nil {
-		if _, err := compileRules(*p.Rules); err != nil {
-			return nil, err
-		}
-		rules = *p.Rules
-	}
-	if p.Products != nil {
-		if err := checkProducts(*p.Products); err != nil {
-			return nil, err
-		}
-		products = *p.Products
-	}
-	r, pr, err := encodeConfig(rules, products)
+	r, err := encodeRules(*p.Rules)
 	if err != nil {
 		return nil, err
 	}
-	row, err = im.DB.Gen(ctx).UpdatePSPImportConfig(ctx, gen.UpdatePSPImportConfigParams{MerchantID: row.MerchantID, ID: row.ID, Rules: r, Products: pr})
+	row, err = im.DB.Gen(ctx).UpdatePSPImportRules(ctx, gen.UpdatePSPImportRulesParams{MerchantID: row.MerchantID, ID: row.ID, Rules: r})
 	if err != nil {
 		return nil, err
 	}
@@ -296,10 +276,8 @@ func (im *Importer) ListRecords(ctx context.Context, id billing.PSPImportID, p b
 		if err != nil {
 			return out, err
 		}
-		for _, r := range rows {
-			out.Items = append(out.Items, recordView(r))
-		}
-		return out, nil
+		out.Items, err = im.recordViews(ctx, rows)
+		return out, err
 	}
 	limit, err := pagination.Limit(p.PageRequest)
 	if err != nil {
@@ -320,9 +298,9 @@ func (im *Importer) ListRecords(ctx context.Context, id billing.PSPImportID, p b
 	if err != nil {
 		return out, err
 	}
-	items := make([]billing.PSPImportRecord, 0, len(rows))
-	for _, r := range rows {
-		items = append(items, recordView(r))
+	items, err := im.recordViews(ctx, rows)
+	if err != nil {
+		return out, err
 	}
 	return pagination.Cut(items, limit, func(v billing.PSPImportRecord) any { return recordPosition{ID: v.ID.UUID()} }), nil
 }
@@ -430,42 +408,11 @@ func (im *Importer) Fail(ctx context.Context, id billing.PSPImportID, cause erro
 	return err
 }
 
-// Planned is the provider plans the import's linked subscriptions name and
-// the product each grants ("" for none).
-func (im *Importer) Planned(ctx context.Context, id billing.PSPImportID) (merchants.PSPScope, map[string]string, error) {
-	row, err := im.row(ctx, id)
-	if err != nil {
-		return merchants.PSPScope{}, nil, err
-	}
-	scope, found, err := im.Merchants.PSPScopeByID(ctx, billing.MerchantID(row.MerchantID), row.PspID)
-	if err != nil || !found {
-		return scope, nil, errors.Join(err, errors.New("the import's PSP is gone"))
-	}
-	var products []billing.PSPImportProduct
-	if err := json.Unmarshal(row.Products, &products); err != nil {
-		return scope, nil, err
-	}
-	plans, err := im.DB.Gen(ctx).ListPSPImportPlans(ctx, gen.ListPSPImportPlansParams{MerchantID: row.MerchantID, ImportID: row.ID})
-	if err != nil {
-		return scope, nil, err
-	}
-	out := make(map[string]string, len(plans))
-	for _, p := range plans {
-		if p != nil {
-			out[*p] = productFor(products, *p)
-		}
-	}
-	return scope, out, nil
-}
-
 func (im *Importer) view(ctx context.Context, row gen.BillingPspImport) (*billing.PSPImport, error) {
 	out := &billing.PSPImport{ID: billing.PSPImportID(row.ID), PSP: billing.PSPID(row.PspID), Rail: row.Rail, Status: billing.PSPImportStatus(row.Status),
 		HistorySince: row.HistorySince, HistoryThrough: row.HistoryThrough, PulledAt: row.PulledAt, AppliedAt: row.AppliedAt, Error: row.Error,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, Counts: []billing.PSPImportCount{}}
 	if err := json.Unmarshal(row.Rules, &out.Rules); err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(row.Products, &out.Products); err != nil {
 		return nil, err
 	}
 	counts, err := im.DB.Gen(ctx).CountPSPImportRecords(ctx, gen.CountPSPImportRecordsParams{MerchantID: row.MerchantID, ImportID: row.ID})
@@ -474,6 +421,31 @@ func (im *Importer) view(ctx context.Context, row gen.BillingPspImport) (*billin
 	}
 	for _, c := range counts {
 		out.Counts = append(out.Counts, billing.PSPImportCount{Kind: billing.PSPImportRecordKind(c.Kind), State: billing.PSPImportRecordState(c.State), Records: int(c.Records)})
+	}
+	return out, nil
+}
+
+// recordViews are records as the API shows them, manual prices by their ids.
+func (im *Importer) recordViews(ctx context.Context, rows []gen.BillingPspImportRecord) ([]billing.PSPImportRecord, error) {
+	var priced []uuid.UUID
+	for _, r := range rows {
+		if r.ManualPriceID != nil {
+			priced = append(priced, *r.ManualPriceID)
+		}
+	}
+	refs, err := db.PriceReferences(ctx, im.DB.Gen(ctx), priced)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]billing.PSPImportRecord, 0, len(rows))
+	for _, r := range rows {
+		v := recordView(r)
+		if r.ManualPriceID != nil {
+			if ref, ok := refs[*r.ManualPriceID]; ok {
+				v.ManualPrice = &ref
+			}
+		}
+		out = append(out, v)
 	}
 	return out, nil
 }

@@ -41,7 +41,7 @@ func (d *DB) LoadPricePSPBindings(ctx context.Context, prices []*models.Price, p
 		if price.MerchantID != mid.UUID() {
 			return fmt.Errorf("price %s does not belong to scoped merchant", price.ID)
 		}
-		price.PSPLinks = nil
+		price.PSPLinks, price.ProviderRetired = nil, false
 		ids = append(ids, price.ID)
 		byID[price.ID] = price
 	}
@@ -77,6 +77,9 @@ func (d *DB) LoadPricePSPBindings(ctx context.Context, prices []*models.Price, p
 			}
 		}
 		price := byID[row.PriceID]
+		if row.ProviderRetired && price.ProviderOwned {
+			price.ProviderRetired = true
+		}
 		if price.PSPLinks == nil {
 			price.PSPLinks = map[string]map[string]string{}
 		}

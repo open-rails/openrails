@@ -245,20 +245,38 @@ func (f *StripeFetcher) listSubscriptions(ctx context.Context, params FetchParam
 }
 
 func (f *StripeFetcher) get(ctx context.Context, pathAndQuery string) ([]byte, error) {
+	body, _, err := f.getStatus(ctx, pathAndQuery)
+	return body, err
+}
+
+// StripeGet reads one object by its path (/v1/prices/price_…); found is
+// false when Stripe answers 404.
+func (f *StripeFetcher) StripeGet(ctx context.Context, path string) (json.RawMessage, bool, error) {
+	body, status, err := f.getStatus(ctx, path)
+	if status == http.StatusNotFound {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return body, true, nil
+}
+
+func (f *StripeFetcher) getStatus(ctx context.Context, pathAndQuery string) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.baseURL()+pathAndQuery, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+f.SecretKey)
 
 	resp, err := f.client().Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, resp.StatusCode, err
 	}
 	if resp.StatusCode >= 400 {
 		var apiErr struct {
@@ -268,11 +286,11 @@ func (f *StripeFetcher) get(ctx context.Context, pathAndQuery string) ([]byte, e
 		}
 		_ = json.Unmarshal(body, &apiErr)
 		if apiErr.Error.Message != "" {
-			return nil, fmt.Errorf("stripe API error (%d): %s", resp.StatusCode, apiErr.Error.Message)
+			return nil, resp.StatusCode, fmt.Errorf("stripe API error (%d): %s", resp.StatusCode, apiErr.Error.Message)
 		}
-		return nil, fmt.Errorf("stripe API error (%d)", resp.StatusCode)
+		return nil, resp.StatusCode, fmt.Errorf("stripe API error (%d)", resp.StatusCode)
 	}
-	return body, nil
+	return body, resp.StatusCode, nil
 }
 
 type stripeSubscriptionJSON struct {

@@ -173,8 +173,10 @@ the deployment's first listed `solana.crankers`, paying the merchant's treasury)
 `sell_via` restricts a price to some of those methods.
 
 A price under `provider_prices` is a provider's: it mirrors what the provider still
-runs (legacy NMI-run subscriptions, imported) or sells (CCBill FlexForms). OpenRails
-reads its terms and caches them on the price; it never creates or edits it.
+runs (legacy NMI-run subscriptions, imported) or sells (CCBill FlexForms). Its terms
+come from the provider's catalog as OpenRails observed it (a read by id when never
+observed; see [PSP import](psp-import.md#observed-catalog)) and are cached on the
+price; OpenRails never creates or edits the provider's object.
 
 ```yaml
 products:
@@ -202,10 +204,13 @@ products:
 | `one_off` | a price that does not renew: its billing interval is the access it sells |
 | `archived` | as for prices |
 
-An NMI plan or Stripe price that does not exist is refused: a provider price names an
-existing object. A provider that does not answer keeps the cached terms of a provider
-price already applied (with a warning), and leaves a new one out. When the provider's
-terms change, the next apply takes them as a new version. Legacy NMI and Stripe
+An NMI plan or Stripe price the provider never had is refused, as is a Stripe price
+with no fixed amount; one the provider deleted after OpenRails observed it still maps.
+A provider that does not answer keeps the cached terms of a provider price already
+applied (with a warning), and leaves a new one out. When the provider's terms change
+and OpenRails observes them (a pull, or verifying the price), the next apply takes them
+as a new version. A provider price the provider retired (inactive or deleted) is not
+for sale, whatever `archived` says. Legacy NMI and Stripe
 provider prices sell nothing new; they bill the subscriptions imported on them
 ([batch import](batch-import.md)), whose renewals OpenRails records from provider
 events and reads, and whose declines its dunning retries against the subscription's

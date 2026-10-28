@@ -97,6 +97,10 @@ type Price struct {
 	ProviderSnapshot      map[string]string `json:"provider_snapshot,omitempty"`
 	BillingIntervalMonths *int              `json:"billing_interval_months,omitempty"`
 	ProviderAccessDefault bool              `json:"provider_access_default"`
+	// ProviderRetired: the provider's catalog, as last observed, no longer
+	// sells the bound object (LoadPricePSPBindings). Not for sale; it still
+	// resolves and bills.
+	ProviderRetired bool `json:"-"`
 	// SellVia are the methods one of ours sells through (SellViaCard,
 	// SellViaSolana); nil is every method the merchant has.
 	SellVia []string `json:"sell_via,omitempty"`
@@ -119,8 +123,9 @@ type Price struct {
 // IsPurchasable reports whether the price can be bought by a new customer
 // (shown in the public catalog): ours, or a provider's that still sells new
 // (CCBill). A legacy NMI or Stripe provider price only bills what it has.
+// Not for sale is archived (ours) or retired (the provider's).
 func (p *Price) IsPurchasable() bool {
-	if p.Archived {
+	if p.Archived || p.ProviderRetired {
 		return false
 	}
 	if !p.ProviderOwned {
@@ -427,7 +432,7 @@ func (p *Price) View() billing.Price {
 	if p.ProviderOwned {
 		// Earlier versions resolve their original provider object from the
 		// immutable snapshot after the current lookup binding moves.
-		provider := &billing.PriceProvider{AccessDurationDefault: p.ProviderAccessDefault, IDs: map[string]string{}, SyncStatus: billing.SyncStatusUnknown, Drift: []billing.DriftField{}}
+		provider := &billing.PriceProvider{AccessDurationDefault: p.ProviderAccessDefault, IDs: map[string]string{}, Retired: p.ProviderRetired, SyncStatus: billing.SyncStatusUnknown, Drift: []billing.DriftField{}}
 		if key, link, ok := p.ProviderLink(); ok {
 			provider.PSP, provider.Rail = key, link[RailKeyRail]
 			if id, err := uuid.Parse(link[RailKeyPSPID]); err == nil {

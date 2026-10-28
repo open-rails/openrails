@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -86,94 +87,89 @@ func checkProviderPriceRail(pspKey, rail string, decl catalogwire.ApplyProviderP
 	return nil
 }
 
-// readProviderPriceTerms reads the terms at the provider: the NMI plan, the
-// Stripe price, or CCBill's declared terms. ids are the provider identifiers
-// the price binds.
+// readProviderPriceTerms reads a provider price's terms from the observed
+// catalog (the NMI plan, the Stripe price), reading the object by id when none
+// is stored, or CCBill's declared terms. ids are the provider identifiers the
+// price binds.
 func (s *Service) readProviderPriceTerms(ctx context.Context, account merchants.PSPScope, decl catalogwire.ApplyProviderPrice) (providerPriceTerms, map[string]string, error) {
-	var terms providerPriceTerms
+	var ref string
 	switch models.Rail(account.Rail) {
-	case models.RailNMI:
-		client, _, ok := s.nmiCatalogClient(ctx, account.AccountID)
-		if !ok {
-			return terms, nil, fmt.Errorf("NMI account %s is not armed: %w", account.Key, ErrProviderPriceUnreadable)
-		}
-		terms.currency = moneyutil.NormalizeCurrency(cmp.Or(decl.Currency, "USD"))
-		detail, err := client.GetRecurringPlanDetailByID(ctx, decl.PlanID, terms.currency)
-		if err != nil {
-			return terms, nil, fmt.Errorf("read NMI plan %q: %v: %w", decl.PlanID, err, ErrProviderPriceUnreadable)
-		}
-		if !detail.Found {
-			return terms, nil, apperr.Invalidf("NMI plan %q does not exist at %s: a provider price names an existing plan", decl.PlanID, account.Key)
-		}
-		if terms.unitAmount, err = moneyutil.RailMinorToNative(terms.currency, moneyutil.Cents(detail.AmountCents)); err != nil {
-			return terms, nil, err
-		}
-		switch {
-		case detail.DayFrequency > 0 && detail.MonthFrequency > 0:
-			return terms, nil, apperr.Invalidf("NMI plan %q states two billing frequencies", decl.PlanID)
-		case detail.MonthFrequency > 0:
-			terms.billingIntervalMonths = new(detail.MonthFrequency)
-		case detail.DayFrequency > 0:
-			terms.billingIntervalHours = new(detail.DayFrequency * 24)
-		default:
-			return terms, nil, apperr.Invalidf("NMI plan %q states no billing frequency", decl.PlanID)
-		}
-		return terms, map[string]string{models.RailKeyPlanID: decl.PlanID}, nil
-	case models.RailStripe:
-		reader, ok := s.stripeCatalogReader(ctx, account.AccountID)
-		if !ok {
-			return terms, nil, fmt.Errorf("Stripe account %s is not armed: %w", account.Key, ErrProviderPriceUnreadable)
-		}
-		remote, found, err := reader.FindPrice(ctx, decl.PriceID)
-		if err != nil {
-			return terms, nil, fmt.Errorf("read Stripe price %q: %v: %w", decl.PriceID, err, ErrProviderPriceUnreadable)
-		}
-		if !found || remote.ID != decl.PriceID {
-			return terms, nil, apperr.Invalidf("Stripe price %q does not exist at %s: a provider price names an existing price", decl.PriceID, account.Key)
-		}
-		terms.currency = moneyutil.NormalizeCurrency(remote.Currency)
-		if terms.unitAmount, err = moneyutil.RailMinorToNative(terms.currency, moneyutil.Cents(remote.UnitAmount)); err != nil {
-			return terms, nil, err
-		}
-		if remote.Recurring != nil {
-			var err error
-			terms.billingIntervalHours, terms.billingIntervalMonths, err = providerCadence(remote.Recurring.Interval, remote.Recurring.Count)
-			if err != nil {
-				return terms, nil, apperr.Invalidf("Stripe price %q: %v", decl.PriceID, err)
-			}
-		}
-		ids := map[string]string{models.RailKeyStripePriceID: decl.PriceID}
-		if remote.Product != "" {
-			ids[models.RailKeyStripeProductID] = remote.Product
-		}
-		return terms, ids, nil
 	case models.RailCCBill:
-		terms.currency = moneyutil.NormalizeCurrency(decl.Currency)
-		terms.unitAmount = *decl.UnitAmount
-		terms.billingIntervalHours = decl.BillingIntervalHours
-		terms.trialUnitAmount, terms.trialDurationHours = decl.TrialUnitAmount, decl.TrialDurationHours
+		terms := providerPriceTerms{currency: moneyutil.NormalizeCurrency(decl.Currency), unitAmount: *decl.UnitAmount, billingIntervalHours: decl.BillingIntervalHours,
+			trialUnitAmount: decl.TrialUnitAmount, trialDurationHours: decl.TrialDurationHours}
 		return terms, decl.References(), nil
+	case models.RailNMI:
+		ref = decl.PlanID
+	case models.RailStripe:
+		ref = decl.PriceID
+	default:
+		return providerPriceTerms{}, nil, apperr.Invalidf("PSP %q runs no provider prices", account.Key)
 	}
-	return terms, nil, apperr.Invalidf("PSP %q runs no provider prices", account.Key)
+	objects := s.providerObjects()
+	if objects == nil {
+		return providerPriceTerms{}, nil, fmt.Errorf("the provider catalog is not wired: %w", ErrProviderPriceUnreadable)
+	}
+	obj, err := objects.Get(ctx, account, providerobjects.Price, ref)
+	if err != nil {
+		return providerPriceTerms{}, nil, err
+	}
+	if obj == nil {
+		if obj, err = objects.ObserveByID(ctx, account, providerobjects.Price, ref, nil); err != nil {
+			return providerPriceTerms{}, nil, fmt.Errorf("read %s %q at %s: %v: %w", account.Rail, ref, account.Key, err, ErrProviderPriceUnreadable)
+		}
+	}
+	if obj == nil {
+		return providerPriceTerms{}, nil, apperr.Invalidf("%s %q does not exist at %s: a provider price names an existing one", providerObjectNoun(account.Rail), ref, account.Key)
+	}
+	return observedTerms(account, decl, obj)
 }
 
-// providerCadence preserves native calendar intervals rather than estimating
-// their hours. A Stripe year is twelve calendar months.
-func providerCadence(unit string, count int) (*int, *int, error) {
-	if count <= 0 {
-		return nil, nil, fmt.Errorf("billing interval count must be positive")
+func providerObjectNoun(rail string) string {
+	if rail == string(models.RailNMI) {
+		return "NMI plan"
 	}
-	switch unit {
-	case "day":
-		return new(count * 24), nil, nil
-	case "week":
-		return new(count * 7 * 24), nil, nil
-	case "month":
-		return nil, new(count), nil
-	case "year":
-		return nil, new(count * 12), nil
+	return "Stripe price"
+}
+
+// observedTerms are the terms an observed NMI plan or Stripe price states.
+// NMI names no currency: the declaration's, else USD, prices it. A deleted
+// object's last stated terms still map: its grandfathered subscriptions land.
+func observedTerms(account merchants.PSPScope, decl catalogwire.ApplyProviderPrice, obj *providerobjects.Object) (providerPriceTerms, map[string]string, error) {
+	noun := providerObjectNoun(account.Rail)
+	terms := providerPriceTerms{currency: obj.Currency}
+	ids := map[string]string{models.RailKeyStripePriceID: obj.Ref}
+	if models.Rail(account.Rail) == models.RailNMI {
+		terms.currency = moneyutil.NormalizeCurrency(cmp.Or(decl.Currency, "USD"))
+		ids = map[string]string{models.RailKeyPlanID: obj.Ref}
+	} else if obj.ProductRef != "" {
+		ids[models.RailKeyStripeProductID] = obj.ProductRef
 	}
-	return nil, nil, fmt.Errorf("unsupported provider billing interval %q", unit)
+	if obj.Amount == "" {
+		return terms, nil, apperr.Invalidf("%s %q has no fixed amount: a provider price needs one", noun, obj.Ref)
+	}
+	minor, err := moneyutil.DecimalToRailMinor(terms.currency, obj.Amount)
+	if err != nil {
+		return terms, nil, apperr.Invalidf("%s %q: %v", noun, obj.Ref, err)
+	}
+	if terms.unitAmount, err = moneyutil.RailMinorToNative(terms.currency, minor); err != nil {
+		return terms, nil, err
+	}
+	switch {
+	case obj.IntervalMonths > 0:
+		terms.billingIntervalMonths = new(obj.IntervalMonths)
+	case obj.IntervalHours > 0:
+		terms.billingIntervalHours = new(obj.IntervalHours)
+	case models.Rail(account.Rail) == models.RailNMI:
+		return terms, nil, apperr.Invalidf("NMI plan %q states no single billing frequency", obj.Ref)
+	}
+	return terms, ids, nil
+}
+
+func (s *Service) providerObjects() *providerobjects.Observer {
+	if s == nil || s.rt == nil {
+		return nil
+	}
+	return s.rt.ProviderObjects()
 }
 
 // providerPriceRequest is the price a provider price is stored as: the
@@ -471,8 +467,9 @@ func (s *Service) currentPriceVersion(ctx context.Context, prices interface {
 	return chain[len(chain)-1], nil
 }
 
-// verifyProviderPrice reads a provider price's provider again and reports
-// whether its terms still match the stored ones.
+// verifyProviderPrice reads a provider price's object at its provider again,
+// records it, and reports whether its terms still match the stored ones: an
+// unreachable provider is unknown, a gone object missing.
 func (s *Service) verifyProviderPrice(ctx context.Context, price *models.Price, out *billing.PriceProvider) {
 	if out == nil {
 		return
@@ -487,24 +484,29 @@ func (s *Service) verifyProviderPrice(ctx context.Context, price *models.Price, 
 		return
 	}
 	account, found, err := merchants.Of(s.catalogDatabase()).PSPScopeByID(ctx, mid, pspID)
-	if err != nil || !found {
-		out.SyncStatus = billing.SyncStatusSyncDisabled
-		return
-	}
-	if models.Rail(account.Rail) == models.RailCCBill {
+	if err != nil || !found || models.Rail(account.Rail) == models.RailCCBill {
 		out.SyncStatus = billing.SyncStatusSyncDisabled
 		return
 	}
 	decl := catalogwire.ApplyProviderPrice{PSP: key, PlanID: link[models.RailKeyPlanID], PriceID: link[models.RailKeyStripePriceID], Currency: price.Currency}
-	if account.Rail == string(models.RailStripe) {
-		decl.Currency = ""
-	}
-	terms, _, err := s.readProviderPriceTerms(ctx, account, decl)
-	switch {
-	case errors.Is(err, ErrProviderPriceUnreadable):
+	ref := cmp.Or(decl.PlanID, decl.PriceID)
+	objects := s.providerObjects()
+	if objects == nil {
 		out.SyncStatus = billing.SyncStatusUnknown
 		return
-	case err != nil:
+	}
+	obj, err := objects.ObserveByID(ctx, account, providerobjects.Price, ref, nil)
+	if err != nil {
+		out.SyncStatus = billing.SyncStatusUnknown
+		return
+	}
+	if obj == nil || obj.DeletedAt != nil {
+		out.SyncStatus, out.Retired = billing.SyncStatusMissing, true
+		return
+	}
+	out.Retired = obj.Retired
+	terms, _, err := observedTerms(account, decl, obj)
+	if err != nil {
 		out.SyncStatus = billing.SyncStatusMissing
 		return
 	}

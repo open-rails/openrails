@@ -112,6 +112,7 @@ sql:
       - "internal/migrate/postgres/0118_unenriched_attempts_index.up.sql"
       - "internal/migrate/postgres/0119_periodic_leases_per_kind.up.sql"
       - "internal/migrate/postgres/0120_stored_card_refresh.up.sql"
+      - "internal/migrate/postgres/0130_provider_catalog_objects.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

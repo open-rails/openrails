@@ -7,10 +7,11 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// CreatePSPImport starts importing a PSP's subscribers: OpenRails pulls its
-// customers, saved cards, live subscriptions and transaction history (reads
-// only) and links each to a customer by the import's rules. The pull runs in
-// the background; GetPSPImport reports it.
+// CreatePSPImport starts importing a PSP's subscribers: OpenRails observes
+// its catalog, pulls its customers, saved cards, live subscriptions and
+// transaction history (reads only) and links each to a customer by the
+// import's rules. The pull runs in the background; GetPSPImport reports it.
+// ListProviderCatalog with Import then lists the plans to map.
 func (c *Client) CreatePSPImport(ctx context.Context, params billing.CreatePSPImportParams, requestOptions ...RequestOption) (*billing.PSPImport, error) {
 	if params.PSP.IsZero() {
 		return nil, invalidErr("psp is required")
@@ -48,8 +49,7 @@ func (c *Client) GetPSPImport(ctx context.Context, id billing.PSPImportID, reque
 	return &out, nil
 }
 
-// UpdatePSPImport replaces the import's rules or products; LinkPSPImport
-// applies new rules.
+// UpdatePSPImport replaces the import's rules; LinkPSPImport applies them.
 func (c *Client) UpdatePSPImport(ctx context.Context, id billing.PSPImportID, params billing.UpdatePSPImportParams, requestOptions ...RequestOption) (*billing.PSPImport, error) {
 	path, err := requireTypedID("psp_import_id", id)
 	if err != nil {
@@ -96,8 +96,9 @@ func (c *Client) ListPSPImportRecords(ctx context.Context, id billing.PSPImportI
 	return &out, nil
 }
 
-// LinkPSPImport stores manual links and links every staged record again by
-// the import's rules and the merchant's mappings.
+// LinkPSPImport stores manual links and price picks and links every staged
+// record not yet imported again by the import's rules and the merchant's
+// mappings.
 func (c *Client) LinkPSPImport(ctx context.Context, id billing.PSPImportID, params billing.LinkPSPImportParams, requestOptions ...RequestOption) (*billing.PSPImport, error) {
 	path, err := requireTypedID("psp_import_id", id)
 	if err != nil {
@@ -111,7 +112,10 @@ func (c *Client) LinkPSPImport(ctx context.Context, id billing.PSPImportID, para
 }
 
 // ApplyPSPImport lands the import's linked records as customers, payment
-// methods, subscriptions and payments. It runs in the background.
+// methods, subscriptions and payments. It runs in the background. A
+// subscription lands on the provider price mapping its plan; one whose plan
+// is unmapped stays blocked until it is mapped (CreateProviderPrice), linked
+// and applied again.
 func (c *Client) ApplyPSPImport(ctx context.Context, id billing.PSPImportID, requestOptions ...RequestOption) (*billing.PSPImport, error) {
 	path, err := requireTypedID("psp_import_id", id)
 	if err != nil {
@@ -132,6 +136,31 @@ func (c *Client) SetPSPImportMappings(ctx context.Context, params billing.SetPSP
 	}
 	var out billing.PSPImportMappingsResult
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psp-import-mappings", params, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListProviderCatalog lists one PSP's own catalog (Stripe products and
+// prices, NMI plans) as OpenRails last observed it, each price with the
+// provider price mapping it. With Import it lists the plans that import's
+// subscriptions name: map each by creating a provider price.
+func (c *Client) ListProviderCatalog(ctx context.Context, params billing.ProviderCatalogListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.ProviderCatalogObject], error) {
+	if params.PSP.IsZero() {
+		return nil, invalidErr("psp is required")
+	}
+	q := pageValues(nil, params.PageRequest)
+	q.Set("psp", params.PSP.String())
+	if params.Kind != "" {
+		q.Set("kind", string(params.Kind))
+	}
+	setBool(q, "mapped", params.Mapped)
+	setBool(q, "retired", params.Retired)
+	if params.Import != nil && !params.Import.IsZero() {
+		q.Set("import", params.Import.String())
+	}
+	var out billing.ListPage[billing.ProviderCatalogObject]
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/provider-catalog?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

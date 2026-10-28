@@ -102,90 +102,6 @@ type StripeProduct struct {
 	Metadata    map[string]string `json:"metadata"`
 }
 
-// RetrieveProduct fetches a Stripe Product by ID; a 404 is a "not found"
-// error. FindProduct reports absence without an error.
-func (s *StripeCatalogService) RetrieveProduct(ctx context.Context, stripeProductID string) (*StripeProduct, error) {
-	stripeProc := s.stripeRail(ctx)
-	if stripeProc == nil || stripeProc.SecretKey == "" {
-		return nil, fmt.Errorf("stripe is not configured")
-	}
-	id := strings.TrimSpace(stripeProductID)
-	if id == "" {
-		return nil, fmt.Errorf("stripe_product_id required")
-	}
-	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/products/"+url.PathEscape(id))
-	if err != nil {
-		return nil, err
-	}
-	if status == http.StatusNotFound {
-		return nil, fmt.Errorf("stripe product %s not found", id)
-	}
-	if status >= 300 {
-		return nil, fmt.Errorf("stripe product retrieve failed: %s", parseStripeError(body))
-	}
-	var out StripeProduct
-	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// FindProduct fetches a Stripe Product by ID. A 404 returns (nil, false, nil),
-// so verify-then-execute callers tell "gone" from "read failed".
-func (s *StripeCatalogService) FindProduct(ctx context.Context, stripeProductID string) (*StripeProduct, bool, error) {
-	stripeProc := s.stripeRail(ctx)
-	if stripeProc == nil || stripeProc.SecretKey == "" {
-		return nil, false, fmt.Errorf("stripe is not configured")
-	}
-	id := strings.TrimSpace(stripeProductID)
-	if id == "" {
-		return nil, false, fmt.Errorf("stripe_product_id required")
-	}
-	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/products/"+url.PathEscape(id))
-	if err != nil {
-		return nil, false, err
-	}
-	if status == http.StatusNotFound {
-		return nil, false, nil
-	}
-	if status >= 300 {
-		return nil, false, fmt.Errorf("stripe product retrieve failed: %s", parseStripeError(body))
-	}
-	var out StripeProduct
-	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, false, err
-	}
-	return &out, true, nil
-}
-
-// FindPrice fetches a Stripe Price by ID; 404 returns (nil, false, nil). See
-// FindProduct.
-func (s *StripeCatalogService) FindPrice(ctx context.Context, stripePriceID string) (*StripePrice, bool, error) {
-	stripeProc := s.stripeRail(ctx)
-	if stripeProc == nil || stripeProc.SecretKey == "" {
-		return nil, false, fmt.Errorf("stripe is not configured")
-	}
-	id := strings.TrimSpace(stripePriceID)
-	if id == "" {
-		return nil, false, fmt.Errorf("stripe_price_id required")
-	}
-	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/prices/"+url.PathEscape(id))
-	if err != nil {
-		return nil, false, err
-	}
-	if status == http.StatusNotFound {
-		return nil, false, nil
-	}
-	if status >= 300 {
-		return nil, false, fmt.Errorf("stripe price retrieve failed: %s", parseStripeError(body))
-	}
-	var out StripePrice
-	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, false, err
-	}
-	return &out, true, nil
-}
-
 // StripePrice is the subset of Stripe's Price resource OpenRails reads.
 type StripePrice struct {
 	ID         string            `json:"id"`
@@ -200,70 +116,6 @@ type StripePrice struct {
 		Interval string `json:"interval"`
 		Count    int    `json:"interval_count"`
 	} `json:"recurring,omitempty"`
-}
-
-// SearchProductsByMetadata returns up to 10 Stripe Products whose metadata key
-// equals value. Stripe Search is eventually consistent (~30-60s lag).
-func (s *StripeCatalogService) SearchProductsByMetadata(ctx context.Context, key, value string) ([]StripeProduct, error) {
-	stripeProc := s.stripeRail(ctx)
-	if stripeProc == nil || stripeProc.SecretKey == "" {
-		return nil, fmt.Errorf("stripe is not configured")
-	}
-	key = strings.TrimSpace(key)
-	value = strings.TrimSpace(value)
-	if key == "" || value == "" {
-		return nil, fmt.Errorf("metadata key and value required")
-	}
-	// Stripe search query syntax: metadata['key']:'value'
-	query := fmt.Sprintf("metadata['%s']:'%s'", escapeStripeQueryValue(key), escapeStripeQueryValue(value))
-	endpoint := s.baseURL() + "/v1/products/search?limit=10&query=" + url.QueryEscape(query)
-	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, endpoint)
-	if err != nil {
-		return nil, err
-	}
-	if status >= 300 {
-		return nil, fmt.Errorf("stripe product search failed: %s", parseStripeError(body))
-	}
-	var resp struct {
-		Data []StripeProduct `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Data, nil
-}
-
-// ListPricesByLookupKey returns the Stripe Prices with lookupKey through the
-// strongly consistent List API. More than one means duplicate creation.
-func (s *StripeCatalogService) ListPricesByLookupKey(ctx context.Context, lookupKey string) ([]StripePrice, error) {
-	stripeProc := s.stripeRail(ctx)
-	if stripeProc == nil || stripeProc.SecretKey == "" {
-		return nil, fmt.Errorf("stripe is not configured")
-	}
-	lookupKey = strings.TrimSpace(lookupKey)
-	if lookupKey == "" {
-		return nil, fmt.Errorf("lookup_key required")
-	}
-	endpoint := s.baseURL() + "/v1/prices?limit=10&lookup_keys[]=" + url.QueryEscape(lookupKey)
-	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, endpoint)
-	if err != nil {
-		return nil, err
-	}
-	if status >= 300 {
-		return nil, fmt.Errorf("stripe price list failed: %s", parseStripeError(body))
-	}
-	var resp struct {
-		Data []StripePrice `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Data, nil
-}
-
-func escapeStripeQueryValue(s string) string {
-	// Stripe search syntax requires escaping single quotes in literal values.
-	return strings.ReplaceAll(s, "'", "\\'")
 }
 
 // stripeListPageLimit is Stripe's List page maximum.
@@ -328,33 +180,6 @@ func (s *StripeCatalogService) ListPrices(ctx context.Context, startingAfter str
 		nextCursor = resp.Data[len(resp.Data)-1].ID
 	}
 	return resp.Data, nextCursor, nil
-}
-
-// RetrievePrice fetches a Stripe Price by ID.
-func (s *StripeCatalogService) RetrievePrice(ctx context.Context, stripePriceID string) (*StripePrice, error) {
-	stripeProc := s.stripeRail(ctx)
-	if stripeProc == nil || stripeProc.SecretKey == "" {
-		return nil, fmt.Errorf("stripe is not configured")
-	}
-	id := strings.TrimSpace(stripePriceID)
-	if id == "" {
-		return nil, fmt.Errorf("stripe_price_id required")
-	}
-	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/prices/"+url.PathEscape(id))
-	if err != nil {
-		return nil, err
-	}
-	if status == http.StatusNotFound {
-		return nil, fmt.Errorf("stripe price %s not found", id)
-	}
-	if status >= 300 {
-		return nil, fmt.Errorf("stripe price retrieve failed: %s", parseStripeError(body))
-	}
-	var out StripePrice
-	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }
 
 // StripeIntervalForDays exposes the OpenRails-billing-cycle -> Stripe recurrence
