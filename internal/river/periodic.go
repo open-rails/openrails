@@ -53,6 +53,8 @@ var Periodics = []Periodic{
 	{Args: StripeWebhookReconcileArgs{}, Every: StripeWebhookReconcileInterval},
 	// Undeclared accounts still unresolved a day after their last alert.
 	{Args: ConfigRealertArgs{}, Every: ConfigRealertInterval},
+	// Live provider operations whose River wake was lost.
+	{Args: OperationWakesArgs{}, Every: OperationWakesInterval},
 	// Each fleet flushes the closed hours of its own Redis's denial counters.
 	{Args: AdmissionDenialFlushArgs{}, Every: AdmissionDenialFlushInterval, PerFleet: true},
 	// Fans out one refresh job per merchant with a PSP.

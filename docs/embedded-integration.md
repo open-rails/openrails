@@ -220,8 +220,9 @@ their next tick. A fleet's own River jobs and Redis counters are still tended
 by that fleet: give the hosts one Redis and clocks within five minutes of each
 other, since each writes the admission-denial counts of an hour closed five
 minutes earlier as its Redis holds them. Work a request starts (a provider
-call, an enqueued intent) runs on the engine that received it. Give each host
-its own `RiverSchema`.
+call, an enqueued intent) runs on the engine that received it; a provider
+operation whose host stopped is queued again on a running one once it is
+overdue. Give each host its own `RiverSchema`.
 
 **Job timeouts and rescue.** Each OpenRails worker declares its own timeout:
 10 minutes, an hour for passes that read every merchant's providers, two for

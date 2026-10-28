@@ -860,3 +860,15 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND lease_expires_at > sqlc.arg(now)::timestamptz
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'transaction_id')
        OR result_evidence->>'transaction_id' = result_evidence->>'reverted_transaction_id');
+
+-- name: ListOverdueProviderOperations :many
+-- CROSS-MERCHANT: live operations due before before, oldest first: each one's
+-- River wake should have run it by then. A manual payment-method delete has
+-- no wake; its operator runs it.
+SELECT merchant_id, id FROM billing.provider_intents
+WHERE status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+  AND next_attempt_at < sqlc.arg(before)::timestamptz
+  AND (lease_expires_at IS NULL OR lease_expires_at < sqlc.arg(before)::timestamptz)
+  AND intent_type NOT IN ('nmi_vault_delete', 'platform_method_delete', 'hyperswitch_method_delete')
+ORDER BY next_attempt_at
+LIMIT sqlc.arg(row_limit)::int;

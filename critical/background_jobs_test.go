@@ -240,6 +240,33 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, progress(t.Context()), "a fresh leader and no overrunning job")
 	})
+	t.Run("OR-J04-S60/a-live-operation-whose-wake-was-lost-is-queued-again", func(t *testing.T) {
+		s := newSolanaWorld(t, true)
+		_, sub := s.subscribe(t)
+		due := *sub.CurrentPeriodEndsAt
+		fleet := hostFleet(t, s.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, s.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		settleOperations(t, fleet)
+		// The period's pull loses its wake: its River job is deleted.
+		jobs := operationJobs(t, fleet)
+		require.NotEmpty(t, jobs)
+		for _, job := range jobs {
+			_, err := fleet.JobDelete(t.Context(), job.ID)
+			require.NoError(t, err)
+		}
+		s.clock.Advance(due.Add(pullMargin + 5*time.Minute).Sub(s.clock.Now()))
+		runRegistered(t, fleet, "openrails.operation_wakes", 1)
+		require.Empty(t, operationJobs(t, fleet), "a wake only a few minutes late is not lost")
+		s.clock.Advance(10 * time.Minute)
+		landedAt := s.clock.Now()
+		runRegistered(t, fleet, "openrails.operation_wakes", 1)
+		s.renewed(t, sub, landedAt.Add(168*time.Hour))
+		settleOperations(t, fleet)
+		runRegistered(t, fleet, "openrails.operation_wakes", 1)
+		require.Len(t, operationJobs(t, fleet, rivertype.JobStateScheduled), 1, "a live operation with its wake is left alone")
+	})
 	t.Run("OR-J23-S06/denials-count-each-closed-hour-once", func(t *testing.T) {
 		w := newWorld(t, func(w *world) { w.deps.Redis = criticalRedis(t) })
 		customer := billing.CustomerID(uuid.New())

@@ -221,6 +221,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}
+	// Live provider operations whose wake was lost.
+	if err := addWorker(workers, &riverjobs.OperationWakesWorker{DB: r.DB, Clock: clock, Pool: r.DB.Pool()}); err != nil {
+		return fmt.Errorf("add operation wakes worker: %w", err)
+	}
 	// Undeclared accounts alert their operator again while unresolved.
 	if err := addWorker(workers, &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}); err != nil {
 		return fmt.Errorf("add config re-alert worker: %w", err)

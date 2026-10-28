@@ -1505,6 +1505,49 @@ func (q *Queries) ListCompletedManualRebillPaymentCoverage(ctx context.Context, 
 	return items, nil
 }
 
+const listOverdueProviderOperations = `-- name: ListOverdueProviderOperations :many
+SELECT merchant_id, id FROM billing.provider_intents
+WHERE status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+  AND next_attempt_at < $1::timestamptz
+  AND (lease_expires_at IS NULL OR lease_expires_at < $1::timestamptz)
+  AND intent_type NOT IN ('nmi_vault_delete', 'platform_method_delete', 'hyperswitch_method_delete')
+ORDER BY next_attempt_at
+LIMIT $2::int
+`
+
+type ListOverdueProviderOperationsParams struct {
+	Before   time.Time
+	RowLimit int32
+}
+
+type ListOverdueProviderOperationsRow struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// CROSS-MERCHANT: live operations due before before, oldest first: each one's
+// River wake should have run it by then. A manual payment-method delete has
+// no wake; its operator runs it.
+func (q *Queries) ListOverdueProviderOperations(ctx context.Context, arg ListOverdueProviderOperationsParams) ([]ListOverdueProviderOperationsRow, error) {
+	rows, err := q.db.Query(ctx, listOverdueProviderOperations, arg.Before, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOverdueProviderOperationsRow
+	for rows.Next() {
+		var i ListOverdueProviderOperationsRow
+		if err := rows.Scan(&i.MerchantID, &i.ID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPaidEngineAgreementsAtBoundary = `-- name: ListPaidEngineAgreementsAtBoundary :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id=$1::uuid AND status='succeeded'

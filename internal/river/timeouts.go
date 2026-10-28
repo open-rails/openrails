@@ -48,6 +48,7 @@ var kinds = map[string]time.Duration{
 	KindNMIHistory:                       time.Hour,
 	KindStripeWebhookReconcile:           DefaultTimeout,
 	KindConfigRealerts:                   DefaultTimeout,
+	KindOperationWakes:                   DefaultTimeout,
 	KindPSPImport:                        2 * time.Hour,
 }
 
