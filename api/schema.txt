@@ -123,6 +123,9 @@ migration 0130_provider_catalog_objects.up.sql sha256:215efeb29d8a62df1ea3249c83
 migration 0132_psp_import_onboarding.up.sql sha256:8eccc4463e66a07a990b44d7f2e7be6e2639634fb7745e81d2d3e04de4e3bd2f
 migration 0134_parked_provider_subscriptions.up.sql sha256:26b9a4f87224948ef5a7e0bbfd999e0081c072c76d443d4f3b1a8339a0287d90
 migration 0136_manual_reconcile.up.sql sha256:049503b51eb6f222cd522dd2acb4ccc5a28b10ec7ee23bc837fd4a93387b3302
+migration 0140_drop_catalog_drift.up.sql sha256:d4bff3f625fb27abdb97fc2b0f3947733ffaa2a249bb1ece5b52b83a47812590
+migration 0141_purge_cleanup_job.up.sql sha256:0ff3c2b780e4506c4f011b0c746f96a2f659aba6283f9c20da7717fd9c1e6c1b
+migration 0142_attempts_recorded_at_insert.up.sql sha256:0c5a16f8e1ca1a549ddd4635fed4bdb746e1149a86ae16ac212de0c8426ba57d
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -956,7 +959,6 @@ table billing.maintenance_runs
   constraint maintenance_runs_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
   constraint maintenance_runs_status_check CHECK ((status = ANY (ARRAY['running'::text, 'completed'::text, 'failed'::text, 'reversed'::text])))
   constraint require_finished_billing_restore TRIGGER DEFERRABLE INITIALLY DEFERRED
-  index CREATE INDEX maintenance_runs_id_idx ON billing.maintenance_runs USING btree (id) WHERE ((kind = 'merchant_purge'::text) AND (status = ANY (ARRAY['running'::text, 'failed'::text])) AND ((affected ->> 'database_purged'::text) = 'true'::text) AND (coverage ? 'secret_cleanup'::text))
   index CREATE UNIQUE INDEX maintenance_runs_id_run_class_key ON billing.maintenance_runs USING btree (merchant_id, id, run_class)
   index CREATE INDEX maintenance_runs_kind_started_at_idx ON billing.maintenance_runs USING btree (merchant_id, kind, started_at DESC)
   index CREATE UNIQUE INDEX maintenance_runs_merchant_id_key ON billing.maintenance_runs USING btree (merchant_id) WHERE (kind = 'billing_restore'::text)
@@ -1544,7 +1546,6 @@ table billing.payment_attempts
   column card_bin text
   column issuer_code text
   column issuer_text text
-  column enriched_at timestamp with time zone
   column mandate_id uuid
   column sent_initial_transaction_id text
   column order_id uuid
@@ -1576,9 +1577,7 @@ table billing.payment_attempts
   constraint payment_attempts_source_check CHECK ((source = ANY (ARRAY['openrails'::text, 'provider_schedule'::text, 'external'::text])))
   constraint payment_attempts_text_check CHECK ((length(response_text) <= 128))
   constraint payment_attempts_token_type_check CHECK ((token_type = ANY (ARRAY['network_token'::text, 'pan_via_proxy'::text, 'psp_token'::text])))
-  index CREATE INDEX payment_attempts_attempted_at_merchant_id_unenriched_idx ON billing.payment_attempts USING btree (attempted_at, merchant_id) WHERE ((enriched_at IS NULL) AND (rail = 'nmi'::text) AND (transaction_id IS NOT NULL))
   index CREATE INDEX payment_attempts_attempted_at_time_idx ON billing.payment_attempts USING btree (merchant_id, attempted_at)
-  index CREATE INDEX payment_attempts_attempted_at_unenriched_idx ON billing.payment_attempts USING btree (merchant_id, attempted_at) WHERE ((enriched_at IS NULL) AND (rail = 'nmi'::text) AND (transaction_id IS NOT NULL))
   index CREATE INDEX payment_attempts_customer_id_purchase_target_attempted_at_idx ON billing.payment_attempts USING btree (merchant_id, customer_id, purchase_target, attempted_at) WHERE (purchase_target IS NOT NULL)
   index CREATE INDEX payment_attempts_cycle_id_idx ON billing.payment_attempts USING btree (merchant_id, cycle_id) WHERE (cycle_id IS NOT NULL)
   index CREATE INDEX payment_attempts_order_id_attempted_at_idx ON billing.payment_attempts USING btree (merchant_id, order_id, attempted_at) WHERE (order_id IS NOT NULL)
@@ -2502,12 +2501,6 @@ table billing.reconciliation_findings
   column finding_type text NOT NULL
   column rail text
   column psp_id uuid
-  column openrails_resource_type text
-  column openrails_resource_id text
-  column external_resource_id text
-  column field text
-  column openrails_value text
-  column external_value text
   column subject_key text NOT NULL
   column severity text NOT NULL
   column status text NOT NULL
@@ -2545,7 +2538,7 @@ table billing.reconciliation_findings
   constraint reconciliation_findings_pull_id_fkey FOREIGN KEY (merchant_id, pull_id) REFERENCES billing.psp_imports(merchant_id, id) ON DELETE SET NULL (pull_id)
   constraint reconciliation_findings_resolution_check CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text, 'approved'::text, 'dismissed'::text, 'superseded'::text, 'foreign'::text]))))
   constraint reconciliation_findings_resolved_fields_check CHECK ((((status = ANY (ARRAY['auto_fixed'::text, 'fixed'::text, 'ignored'::text])) AND (resolved_at IS NOT NULL) AND (resolution IS NOT NULL)) OR ((status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text])) AND (resolved_at IS NULL) AND (resolution IS NULL))))
-  constraint reconciliation_findings_scope_check CHECK ((((finding_type = ANY (ARRAY['catalog.orphan_in_stripe'::text, 'catalog.missing_in_stripe'::text, 'catalog.orphan_in_nmi'::text, 'catalog.missing_in_nmi'::text, 'catalog.missing_in_solana'::text, 'catalog.field_drift'::text])) AND (rail = ANY (ARRAY['stripe'::text, 'nmi'::text, 'solana'::text])) AND (psp_id IS NOT NULL) AND (openrails_resource_type = ANY (ARRAY['product'::text, 'price'::text])) AND ((finding_type = 'catalog.field_drift'::text) OR (finding_type ~~ ('catalog.%_in_'::text || rail))) AND (first_seen_run IS NULL) AND (last_seen_run IS NULL) AND (subject_key = (jsonb_build_array((psp_id)::text, openrails_resource_type, COALESCE(openrails_resource_id, ''::text), COALESCE(external_resource_id, ''::text), COALESCE(field, ''::text)))::text)) OR ((finding_type = ANY (ARRAY['catalog.price.unmapped'::text, 'life.subscription.unattributed'::text])) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL) AND (openrails_resource_type IS NULL) AND (openrails_resource_id IS NULL) AND (external_resource_id IS NULL) AND (field IS NULL) AND (openrails_value IS NULL) AND (external_value IS NULL)) OR ((finding_type !~~ 'catalog.%'::text) AND (finding_type <> 'life.subscription.unattributed'::text) AND (openrails_resource_type IS NULL) AND (openrails_resource_id IS NULL) AND (external_resource_id IS NULL) AND (field IS NULL) AND (openrails_value IS NULL) AND (external_value IS NULL) AND (((rail IS NULL) AND (psp_id IS NULL)) OR ((finding_type ~~ 'pull.%'::text) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL))))))
+  constraint reconciliation_findings_scope_check CHECK ((((finding_type = ANY (ARRAY['catalog.price.unmapped'::text, 'life.subscription.unattributed'::text])) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL)) OR ((finding_type !~~ 'catalog.%'::text) AND (finding_type <> 'life.subscription.unattributed'::text) AND (((rail IS NULL) AND (psp_id IS NULL)) OR ((finding_type ~~ 'pull.%'::text) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL))))))
   constraint reconciliation_findings_severity_check CHECK ((severity = ANY (ARRAY['critical'::text, 'high'::text, 'medium'::text, 'low'::text])))
   constraint reconciliation_findings_source_check CHECK ((((finding_type ~~ 'pull.%'::text) = (source IS NOT NULL)) AND ((source IS NULL) OR (source = ANY (ARRAY['pull'::text, 'verification'::text])))))
   constraint reconciliation_findings_status_check CHECK ((status = ANY (ARRAY['auto_fixed'::text, 'reconcile_required'::text, 'requires_review'::text, 'fixed'::text, 'ignored'::text])))
@@ -2555,7 +2548,6 @@ table billing.reconciliation_findings
   index CREATE UNIQUE INDEX reconciliation_findings_finding_type_psp_id_subject_key_key ON billing.reconciliation_findings USING btree (merchant_id, finding_type, psp_id, subject_key) NULLS NOT DISTINCT
   index CREATE INDEX reconciliation_findings_first_seen_run_idx ON billing.reconciliation_findings USING btree (merchant_id, first_seen_run) WHERE (first_seen_run IS NOT NULL)
   index CREATE INDEX reconciliation_findings_last_seen_run_idx ON billing.reconciliation_findings USING btree (merchant_id, last_seen_run) WHERE (last_seen_run IS NOT NULL)
-  index CREATE INDEX reconciliation_findings_open_catalog_idx ON billing.reconciliation_findings USING btree (merchant_id, psp_id, openrails_resource_type, openrails_resource_id, rail) WHERE ((resolved_at IS NULL) AND (finding_type ~~ 'catalog.%'::text))
   index CREATE UNIQUE INDEX reconciliation_findings_pkey ON billing.reconciliation_findings USING btree (merchant_id, id)
   index CREATE INDEX reconciliation_findings_proposals_idx ON billing.reconciliation_findings USING btree (merchant_id, status, source, psp_id) WHERE (finding_type ~~ 'pull.%'::text)
   index CREATE INDEX reconciliation_findings_pull_id_idx ON billing.reconciliation_findings USING btree (merchant_id, pull_id) WHERE (pull_id IS NOT NULL)

@@ -16715,66 +16715,6 @@
               }
             ]
           },
-          "resource_type": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "resource_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "external_resource_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "field": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "openrails_value": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "external_value": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "subject_key": {
             "type": "string"
           },
@@ -16918,12 +16858,6 @@
           "finding_type",
           "provider",
           "psp_id",
-          "resource_type",
-          "resource_id",
-          "external_resource_id",
-          "field",
-          "openrails_value",
-          "external_value",
           "subject_key",
           "severity",
           "status",
@@ -20307,17 +20241,6 @@
               }
             ]
           },
-          "enriched_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "mandate_id": {
             "oneOf": [
               {
@@ -20363,7 +20286,6 @@
           "subscription_id",
           "payment_method_id",
           "payment_id",
-          "enriched_at",
           "mandate_id",
           "sent_initial_transaction_id"
         ]

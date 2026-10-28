@@ -360,7 +360,6 @@ pkg openrails, type Config struct
 pkg openrails, type Config struct, CCBillWebhookIPAllowlist []string `yaml:"ccbill_webhook_ip_allowlist" json:"ccbill_webhook_ip_allowlist"`
 pkg openrails, type Config struct, Captcha *config.CaptchaConfig `yaml:"captcha" json:"captcha"`
 pkg openrails, type Config struct, CardVault *config.CardVaultConfig `yaml:"card_vault" json:"card_vault"`
-pkg openrails, type Config struct, CatalogReconciliationInterval string `yaml:"catalog_reconciliation_interval" json:"catalog_reconciliation_interval"`
 pkg openrails, type Config struct, CloudflareProxies []string `yaml:"cloudflare_proxies" json:"cloudflare_proxies"`
 pkg openrails, type Config struct, DB *config.DBConfig `yaml:"db" json:"db"`
 pkg openrails, type Config struct, DashboardBaseURL string `yaml:"dashboard_base_url" json:"dashboard_base_url"`
@@ -1157,6 +1156,7 @@ pkg openrails/billing, func ValidateMerchantSlug(string) error
 pkg openrails/billing, method (*Admission) Active() bool
 pkg openrails/billing, method (*AlertWebhookID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*BalanceTransactionID) UnmarshalText([]byte) error
+pkg openrails/billing, method (*Card) BIN() string
 pkg openrails/billing, method (*Card) Brand() string
 pkg openrails/billing, method (*Card) Expiry() string
 pkg openrails/billing, method (*Card) ExpiryMonthYear() (int, int)
@@ -2217,13 +2217,9 @@ pkg openrails/billing, type Finding struct, ApprovalRunID *RunID `json:"approval
 pkg openrails/billing, type Finding struct, Change *FindingChange `json:"change"`
 pkg openrails/billing, type Finding struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type Finding struct, Evidence map[string]any `json:"evidence"`
-pkg openrails/billing, type Finding struct, ExternalResourceID *string `json:"external_resource_id"`
-pkg openrails/billing, type Finding struct, ExternalValue *string `json:"external_value"`
-pkg openrails/billing, type Finding struct, Field *string `json:"field"`
 pkg openrails/billing, type Finding struct, ID FindingID `json:"id"`
 pkg openrails/billing, type Finding struct, LastSeenAt time.Time `json:"last_seen_at"`
 pkg openrails/billing, type Finding struct, Notes *string `json:"operator_notes"`
-pkg openrails/billing, type Finding struct, OpenRailsValue *string `json:"openrails_value"`
 pkg openrails/billing, type Finding struct, PSPID *PSPID `json:"psp_id"`
 pkg openrails/billing, type Finding struct, Provider *string `json:"provider"`
 pkg openrails/billing, type Finding struct, Pull *PSPImportID `json:"pull_id"`
@@ -2232,8 +2228,6 @@ pkg openrails/billing, type Finding struct, RecommendedAction *string `json:"rec
 pkg openrails/billing, type Finding struct, Resolution *string `json:"resolution"`
 pkg openrails/billing, type Finding struct, ResolvedAt *time.Time `json:"resolved_at"`
 pkg openrails/billing, type Finding struct, ResolvedBy *string `json:"resolved_by"`
-pkg openrails/billing, type Finding struct, ResourceID *string `json:"resource_id"`
-pkg openrails/billing, type Finding struct, ResourceType *string `json:"resource_type"`
 pkg openrails/billing, type Finding struct, Severity string `json:"severity"`
 pkg openrails/billing, type Finding struct, Source *ProposalSource `json:"source"`
 pkg openrails/billing, type Finding struct, Status FindingStatus `json:"status"`
@@ -2426,6 +2420,19 @@ pkg openrails/billing, type MerchantProfile struct, StatementDescriptor string `
 pkg openrails/billing, type MerchantProfile struct, SubscribeURL string `json:"subscribe_url,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, SupportURL string `json:"support_url,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, TermsURL string `json:"terms_url,omitempty"`
+pkg openrails/billing, type MerchantPurge struct
+pkg openrails/billing, type MerchantPurge struct, CleanupQueued bool `json:"cleanup_queued"`
+pkg openrails/billing, type MerchantPurge struct, Rows int `json:"rows"`
+pkg openrails/billing, type MerchantPurge struct, RunID RunID `json:"run_id"`
+pkg openrails/billing, type MerchantPurgeInventory struct
+pkg openrails/billing, type MerchantPurgeInventory struct, ConfirmPhrase string `json:"confirm_phrase"`
+pkg openrails/billing, type MerchantPurgeInventory struct, Documents []string `json:"documents"`
+pkg openrails/billing, type MerchantPurgeInventory struct, ID RunID `json:"id"`
+pkg openrails/billing, type MerchantPurgeInventory struct, MerchantID MerchantID `json:"merchant_id"`
+pkg openrails/billing, type MerchantPurgeInventory struct, Name string `json:"name"`
+pkg openrails/billing, type MerchantPurgeInventory struct, NotCaptured []string `json:"not_captured"`
+pkg openrails/billing, type MerchantPurgeInventory struct, RowCounts map[string]int `json:"row_counts"`
+pkg openrails/billing, type MerchantPurgeInventory struct, TotalRows int `json:"total_rows"`
 pkg openrails/billing, type MerchantRef struct
 pkg openrails/billing, type MerchantRef struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type MerchantRef struct, ID MerchantID `json:"id"`
@@ -3018,7 +3025,6 @@ pkg openrails/billing, type PaymentAttempt struct, Category string `json:"catego
 pkg openrails/billing, type PaymentAttempt struct, Currency string `json:"currency"`
 pkg openrails/billing, type PaymentAttempt struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type PaymentAttempt struct, CycleID *RenewalID `json:"cycle_id"`
-pkg openrails/billing, type PaymentAttempt struct, EnrichedAt *time.Time `json:"enriched_at"`
 pkg openrails/billing, type PaymentAttempt struct, ID PaymentAttemptID `json:"id"`
 pkg openrails/billing, type PaymentAttempt struct, IssuerCode string `json:"issuer_code"`
 pkg openrails/billing, type PaymentAttempt struct, IssuerText string `json:"issuer_text"`
@@ -3388,6 +3394,11 @@ pkg openrails/billing, type PublicMerchant struct, PrivacyURL *string `json:"pri
 pkg openrails/billing, type PublicMerchant struct, StatementDescriptor *string `json:"statement_descriptor"`
 pkg openrails/billing, type PublicMerchant struct, SupportURL *string `json:"support_url"`
 pkg openrails/billing, type PublicMerchant struct, TermsURL *string `json:"terms_url"`
+pkg openrails/billing, type PurgeMerchantParams struct
+pkg openrails/billing, type PurgeMerchantParams struct, Actor string
+pkg openrails/billing, type PurgeMerchantParams struct, ConfirmPhrase string
+pkg openrails/billing, type PurgeMerchantParams struct, ExpectRows int
+pkg openrails/billing, type PurgeMerchantParams struct, InventoryID RunID
 pkg openrails/billing, type PutCustodianParams struct
 pkg openrails/billing, type PutCustodianParams struct, AccountID string `json:"account_id"`
 pkg openrails/billing, type PutCustodianParams struct, Credentials map[string]string `json:"credentials,omitempty"`
@@ -4246,9 +4257,11 @@ pkg openrails/server, method (*Server) ListOpenDestructiveHolds(context.Context,
 pkg openrails/server, method (*Server) ListUserMerchants(context.Context, string) ([]billing.UserMerchant, error)
 pkg openrails/server, method (*Server) ListWorkerHealth(context.Context) ([]billing.WorkerHealth, error)
 pkg openrails/server, method (*Server) MerchantByName(context.Context, string) (billing.MerchantID, string, error)
+pkg openrails/server, method (*Server) MerchantPurgeInventory(context.Context, billing.MerchantID) (*billing.MerchantPurgeInventory, error)
 pkg openrails/server, method (*Server) MerchantScope(context.Context, billing.MerchantID) (auth.Scope, error)
 pkg openrails/server, method (*Server) PrivateHandler() http.Handler
 pkg openrails/server, method (*Server) ProvisionMerchant(context.Context, billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)
+pkg openrails/server, method (*Server) PurgeMerchant(context.Context, billing.MerchantID, billing.PurgeMerchantParams) (*billing.MerchantPurge, error)
 pkg openrails/server, method (*Server) RenameMerchant(context.Context, billing.MerchantID, billing.RenameMerchantParams) (*billing.MerchantName, error)
 pkg openrails/server, method (*Server) RestoreMerchant(context.Context, billing.MerchantID) (*billing.Merchant, error)
 pkg openrails/server, method (*Server) RetireUnusedMerchant(context.Context, billing.MerchantID, string) (billing.MerchantRetirement, error)

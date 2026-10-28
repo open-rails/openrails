@@ -1103,12 +1103,6 @@ export type Finding = {
   finding_type: string
   provider: string | null
   psp_id: string | null
-  resource_type: string | null
-  resource_id: string | null
-  external_resource_id: string | null
-  field: string | null
-  openrails_value: string | null
-  external_value: string | null
   subject_key: string
   severity: string
   status: string
@@ -1788,7 +1782,6 @@ export type PaymentAttempt = {
   subscription_id: string | null
   payment_method_id: string | null
   payment_id: string | null
-  enriched_at: string | null
   mandate_id: string | null
   sent_initial_transaction_id: string
 }
