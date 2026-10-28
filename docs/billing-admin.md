@@ -51,6 +51,21 @@ draft remains a separate action requiring catalog manage authority.
 
 The customer entry (`@openrails/billing-ui`) imports no admin modules or admin stylesheet. TanStack Query 5 is an optional peer used by the admin entry.
 
+## Ops pages
+
+Ops needs merchant configuration read (`merchant:config:read`); its actions need `merchant:config:manage`. Every action is a route with its own server-side guard: the pages hold no state.
+
+| Page | Shows | Actions |
+| --- | --- | --- |
+| Findings | Open findings | Resolve. A `pull.*` finding opens the proposals inbox instead; a `catalog.price.unmapped` finding opens Provider prices |
+| PSP imports | Each PSP pull, newest first, with its progress (polled while it runs) and record counts | Reconcile (a manual import, `CreatePSPImport`); Upload mappings (CSV `mapping,key,customer`, sent 100 rows a request) |
+| Import | Progress or failure, counts by kind and state, the plans its subscriptions name, its rules | Re-link; Apply and Apply again (type the PSP key) |
+| Records | Staged records by state and kind, with facts, reason and how each linked | Link to customer, Unlink; Set price on a CCBill subscription (`LinkPSPImport`) |
+| Provider prices | A PSP's observed prices, unmapped by default, with parks and findings | Map to product (`CreateProviderPrice`, not a tier-change target unless chosen; also needs `merchant:catalog:manage`); Dismiss (ignores the price's finding) |
+| Parked | Open parks, or released ones | Map the price (`price_unmapped`); Reconcile the PSP (`customer_unlinked`) |
+
+With customer support read (`merchant:customer:read`), Records shows linked customers' emails and searches customers to link.
+
 ## Standalone server console
 
 The standalone browser entry is `/admin`. For a server at `https://billing.doujins.com`, open `https://billing.doujins.com/admin`; its JSON APIs remain under `/v1`. An embedded host chooses the component's `basePath` itself.

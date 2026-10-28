@@ -131,6 +131,10 @@ start, a CCBill signup), unless a manual import names `history_since`.
 Creating a provider price needs `merchant:catalog:manage`; the import routes
 need `merchant:config:manage`.
 
+The billing console (`BillingAdmin`, Ops) runs the same flow: PSP imports
+(Reconcile, mappings upload), an import's records, Provider prices (Map to
+product) and Apply; see [billing administration](billing-admin.md#ops-pages).
+
 ## Reconcile
 
 Every import, the first one and any later one, compares what it read with
