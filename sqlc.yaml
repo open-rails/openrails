@@ -122,6 +122,7 @@ sql:
       - "internal/migrate/postgres/0143_balance_watch_credit_lapse.up.sql"
       - "internal/migrate/postgres/0144_retention_owner.up.sql"
       - "internal/migrate/postgres/0145_price_migration_push.up.sql"
+      - "internal/migrate/postgres/0146_due_pass_recheck.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

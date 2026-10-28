@@ -1896,6 +1896,8 @@ type BillingSubscription struct {
 	ProviderAccessDefaultSnapshot bool
 	// host: a host's legacy book landed the row and may still converge it; provider: provider evidence owns it, and a host book skips it. Moves only from host to provider.
 	FactsAuthority string
+	// The due pass left the row unchanged; it is not due again before this instant.
+	DueRecheckAt *time.Time
 }
 
 // Append-only observed subscription card and retry changes. References and before/after values are snapshots, not charging instructions. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

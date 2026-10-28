@@ -3,6 +3,8 @@
 package critical_test
 
 import (
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -220,6 +222,56 @@ func TestDunning(t *testing.T) {
 		dunned := subscriptionState(t, a, sub.ID, "past_due")
 		require.NotNil(t, dunned.Dunning)
 		require.NotNil(t, dunned.Dunning.NextRetryAt, "a dunned decline schedules its retry")
+	})
+	t.Run("OR-J16-S31/held-awaiting-method-expiry-waits-for-its-recheck", func(t *testing.T) {
+		a, p, sub := purchasedMembership(t, 7*24)
+		due := *sub.CurrentPeriodEndsAt
+		p.core.SetDecline("4242", "lost_card")
+		a.clock.Advance(due.Sub(a.clock.Now()))
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		runRegistered(t, fleet, "openrails.dunning", 1)
+		waiting := subscriptionState(t, a, sub.ID, "awaiting_method")
+		a.clock.Advance(waiting.Dunning.FinalRetryAt.Sub(a.clock.Now()))
+		held := func() billing.Finding {
+			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.terminal_outcome.held"})
+			require.NoError(t, err)
+			require.Len(t, findings.Items, 1)
+			return findings.Items[0]
+		}
+		// The kill switch is off: the expiry is held, and not retried every pass.
+		runRegistered(t, fleet, "openrails.dunning", 1)
+		seen := held().LastSeenAt
+		runRegistered(t, fleet, "openrails.dunning", 1)
+		require.Equal(t, seen, held().LastSeenAt, "a held expiry leaves the due pass until its recheck")
+		subscriptionState(t, a, sub.ID, "awaiting_method")
+		enableLifecycleMaintenance(t, a)
+		a.clock.Advance(time.Hour)
+		runRegistered(t, fleet, "openrails.dunning", 1)
+		subscriptionState(t, a, sub.ID, "canceled")
+	})
+	t.Run("OR-J16-S32/due-pass-queues-an-nmi-retry-without-waiting-on-the-gateway", func(t *testing.T) {
+		a, p, sub := nmiMembership(t)
+		due := *sub.CurrentPeriodEndsAt
+		p.core.EditSchedule(*sub.RailSubscriptionID, func(s *nmimock.Schedule) { s.NextBilling = due.Add(7 * 24 * time.Hour) })
+		a.clock.Advance(due.Sub(a.clock.Now()) + 25*time.Hour)
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		runRegistered(t, fleet, "openrails.rebill_watch", 1)
+		hold := p.core.Hold(func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/transact.php") }, nmimock.HoldRequest)
+		defer hold.Release()
+		runRegistered(t, fleet, "openrails.dunning", 1)
+		select {
+		case <-hold.Arrived():
+		case <-time.After(20 * time.Second):
+			t.Fatal("the queued retry never charged")
+		}
+		hold.Release()
+		nmiRenewalReadback(t, a, p, sub)
 	})
 }
 

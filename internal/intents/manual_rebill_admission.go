@@ -21,8 +21,9 @@ import (
 )
 
 // EnqueueScheduled accepts one immutable dunning attempt while holding the
-// subscription lock. The same operation owns preparation, submission, recovery
-// and lifecycle effects; there is no second dunning lease to infer ownership.
+// subscription lock, for its operation's own job to run. The same operation
+// owns preparation, submission, recovery and lifecycle effects; there is no
+// second dunning lease to infer ownership.
 func (h *ManualRebillHandler) EnqueueScheduled(ctx context.Context, subscriptionID uuid.UUID) (gen.BillingProviderIntent, error) {
 	row, _, err := h.enqueueRebill(ctx, subscriptionID, uuid.Nil, "", nil)
 	return row, err
@@ -182,7 +183,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if !windowEnd.After(now) {
 			return ErrRebillNotRetryable
 		}
-		accepted, err = store.Enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: p.Rail, IntentType: subscriptions.TypeManualRebill, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: sub.PspID, Payload: p, IdempotencyKey: key, NextAttemptAt: now, Origin: origin, OriginReason: reason, Actor: actor, ExpiresAt: &windowEnd, Inline: true})
+		accepted, err = store.Enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: p.Rail, IntentType: subscriptions.TypeManualRebill, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: sub.PspID, Payload: p, IdempotencyKey: key, NextAttemptAt: now, Origin: origin, OriginReason: reason, Actor: actor, ExpiresAt: &windowEnd, Inline: customer})
 		if err != nil {
 			return err
 		}

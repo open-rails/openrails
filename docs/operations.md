@@ -927,9 +927,14 @@ than Stripe's 8-retry default because each NMI decline costs a per-transaction
 fee.
 
 **The due pass** runs every minute and on start: it admits engine renewals at
-their paid-period boundary and runs retries whose `next_retry_at` has passed.
-A subscription it cannot process raises a standing `life.due_pass.refused`
-finding (resolved automatically once it processes) and never fails the pass.
+their paid-period boundary and queues retries whose `next_retry_at` has passed,
+each charged by its own provider operation. A subscription it cannot process
+raises a standing `life.due_pass.refused` finding (resolved automatically once
+it processes) and never fails the pass. One it leaves unchanged (refused, held
+by the kill switch or a limited posture, an unarmed PSP, an unknown cycle) is
+looked at again after half the time it has been due: at least a minute, at
+most an hour, so enabling the switch or fixing the cause takes effect within
+the hour.
 
 **Reading a case.** `GET /v1/admin/subscriptions?dunning=true` lists the open
 cases, `past_due` and `awaiting_method`, each with its `dunning`: `attempts`

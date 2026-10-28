@@ -52,7 +52,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add destructive alert worker: %w", err)
 	}
 	intentRegistry := r.buildIntentRegistry(clock)
-	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
+	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	// Provider refresh: the periodic kind is a scheduler that fans out one

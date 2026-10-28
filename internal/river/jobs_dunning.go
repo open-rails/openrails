@@ -46,6 +46,11 @@ const (
 	// work queue is indexed on the due-dunning predicate, so a pass costs its
 	// ACTIVITY, never the size of the merchant directory.
 	dunningMerchantBatch = 500
+
+	// dueRecheckMax bounds how long a row the pass left unchanged waits before
+	// it is looked at again: an operator's switch or a fixed configuration
+	// takes effect within it.
+	dueRecheckMax = time.Hour
 )
 
 // dunningOutcome classifies what a dunning pass did with one subscription.
@@ -57,12 +62,15 @@ const (
 	// dunningOutcomeWindowExpired: the dunning window passed. A past_due
 	// subscription parks as unknown uncharged; one awaiting a card expires.
 	dunningOutcomeWindowExpired
-	// dunningOutcomeMaterialized: the charge decision was recorded as an
-	// intent (parked under mode=limited) instead of executed inline.
+	// dunningOutcomeMaterialized: the charge was queued as a provider
+	// operation, which its own job runs (parked under mode=limited).
 	dunningOutcomeMaterialized
 	// dunningOutcomeSettled: another replica's pass or a concurrent command
 	// resolved the obligation between this pass's scan and its admission.
 	dunningOutcomeSettled
+	// dunningOutcomeRefused: the row was left as it was (held, refused,
+	// unarmed); it waits for its recheck.
+	dunningOutcomeRefused
 )
 
 // DunningArgs triggers one due pass; a set MerchantID scopes it to that merchant.
@@ -72,10 +80,10 @@ type DunningArgs struct {
 
 func (DunningArgs) Kind() string { return KindDunning }
 
-// DunningWorker is the due pass: per merchant with due work it retries past_due
-// NMI subscriptions through manual_rebill intents, admits due engine renewals
-// to collection, and ends memberships whose wait for a card outlived the
-// dunning window.
+// DunningWorker is the due pass: per merchant with due work it queues past_due
+// NMI retries as manual_rebill operations, admits due engine renewals to
+// collection, and ends memberships whose wait for a card outlived the dunning
+// window. It never waits on a provider: each operation's own job charges.
 type DunningWorker struct {
 	river.WorkerDefaults[DunningArgs]
 	DB     *db.DB
@@ -84,37 +92,9 @@ type DunningWorker struct {
 	// NMIResolver arms store-scoped NMI clients per merchant. Consulted at the
 	// charge gate; the rebill handler re-resolves at charge time.
 	NMIResolver money.NMIClientResolver
-	// DeferDelete schedules the provider-side delete for terminal
-	// cancellations through the self-assembled rebill handler. nil leaves the
-	// remote subscription for reconciliation.
-	DeferDelete subscriptions.ProviderCancelScheduler
-	// Intents executes the provider-side charge through the intent ledger: the
-	// worker enqueues a manual_rebill intent and runs it synchronously. nil
-	// builds a Runner over the worker's own dependencies.
-	Intents *intents.Runner
 	// EngineCollections admits stored engine obligations; the existing
 	// provider-intent fleet performs the accepted charge and receipt recovery.
 	EngineCollections *money.MoneyService
-}
-
-// intentRunner returns the configured Runner or assembles one (tests). Config
-// is attached only when set: a nil ModeView fails closed, so every rebill
-// would park silently.
-func (w *DunningWorker) intentRunner() *intents.Runner {
-	if w.Intents != nil {
-		return w.Intents
-	}
-	handler := intents.NewManualRebillHandler(w.DB, w.Config, w.NMIResolver, w.Clock)
-	handler.DeferDelete = w.DeferDelete
-	runner := &intents.Runner{
-		Store:    intents.NewStore(w.DB),
-		Registry: intents.NewRegistry(handler),
-		Clock:    w.Clock,
-	}
-	if w.Config != nil {
-		runner.Config = writeposture.View{Config: w.Config, DB: w.DB}
-	}
-	return runner
 }
 
 // storeArmsNMI reports whether the merchant-secrets store can arm an NMI
@@ -243,10 +223,16 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 					progress.Mark(mctx, "dunning subscription "+sub.ID.String())
 					outcome, processErr := w.processSubscription(mctx, &sub, lifecycle, priceSvc, materialize)
 					// One subscription's refusal never fails the pass: it becomes a
-					// standing operator finding, and the pass (every minute) tries
-					// it again with everything else.
+					// standing operator finding, and the row waits for its recheck.
 					if err := w.recordSubscriptionOutcome(mctx, &sub, processErr); err != nil {
 						merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, err))
+					}
+					if outcome == dunningOutcomeRefused || processErr != nil {
+						if err := w.deferDue(mctx, &sub, now); err != nil {
+							merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, err))
+						}
+						failCount++
+						continue
 					}
 					// Re-converge this customer after the dunning transition.
 					// Best-effort: a convergence error must not fail the run.
@@ -319,7 +305,19 @@ func (w *DunningWorker) recordSubscriptionOutcome(ctx context.Context, sub *mode
 	return err
 }
 
-// processSubscription attempts a dunning rebill for a single subscription.
+// deferDue takes a row the pass left unchanged out of the due set until its
+// recheck: half the time it has been due, at least one pass interval and at
+// most dueRecheckMax.
+func (w *DunningWorker) deferDue(ctx context.Context, sub *models.Subscription, now time.Time) error {
+	due := subscriptions.DueDunningCursorOf(sub).DueAt
+	if due.IsZero() {
+		due = now
+	}
+	wait := min(max(now.Sub(due)/2, DuePassInterval), dueRecheckMax)
+	return w.DB.Gen(ctx).DeferDueSubscription(ctx, gen.DeferDueSubscriptionParams{MerchantID: sub.MerchantID, ID: sub.ID, RecheckAt: now.Add(wait)})
+}
+
+// processSubscription takes one due subscription's next step.
 func (w *DunningWorker) processSubscription(
 	ctx context.Context,
 	sub *models.Subscription,
@@ -339,16 +337,19 @@ func (w *DunningWorker) processSubscription(
 		if _, err := lifecycle.ExpireAwaitingMethod(ctx, w.DB, sub, blocked); err != nil {
 			return dunningOutcomeFailed, err
 		}
+		if blocked != "" {
+			return dunningOutcomeRefused, nil
+		}
 		return dunningOutcomeWindowExpired, nil
 	}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
 		// The due query selects no engine renewal while admissions are held.
 		if w.EngineCollections == nil {
-			return dunningOutcomeFailed, nil
+			return dunningOutcomeRefused, nil
 		}
 		_, err := w.EngineCollections.AdmitDueSubscriptionCollection(ctx, sub.ID, w.now())
 		if errors.Is(err, subscriptions.ErrRenewalHeldByUpgrade) {
-			return dunningOutcomeFailed, nil
+			return dunningOutcomeRefused, nil
 		}
 		if errors.Is(err, money.ErrEngineMethodUnusable) {
 			// Only the member can fix this: their renewal is an open order
@@ -382,7 +383,7 @@ func (w *DunningWorker) processSubscription(
 
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
 		logEntry.Warn("Dunning: past_due subscription has no current period end; skipping rebill")
-		return dunningOutcomeFailed, nil
+		return dunningOutcomeRefused, nil
 	}
 
 	periodEnd := sub.CurrentPeriodEndsAt.UTC()
@@ -403,16 +404,16 @@ func (w *DunningWorker) processSubscription(
 	}
 	policy, err := subscriptions.CasePolicy(ctx, w.DB, sub)
 	if err != nil {
-		return dunningOutcomeFailed, err
+		return dunningOutcomeRefused, err
 	}
 	window, err := policy.Window(cycleHours)
 	if err != nil {
 		// Fail closed: no charge on a guessed cadence; the operator decides.
 		logEntry.WithError(err).WithField("price_id", sub.PriceID).Error("Dunning: subscription has no billing cycle; refusing to rebill")
 		if ferr := collection.RecordUnknownCycle(ctx, w.DB.Gen(ctx), sub.MerchantID, sub.ID.String(), "subscription", err); ferr != nil {
-			return dunningOutcomeFailed, errors.Join(err, ferr)
+			return dunningOutcomeRefused, errors.Join(err, ferr)
 		}
-		return dunningOutcomeFailed, nil
+		return dunningOutcomeRefused, nil
 	}
 	if w.now().UTC().After(periodEnd.Add(window)) {
 		return w.parkStaleSubscription(ctx, logEntry, sub, lifecycle, periodEnd, window), nil
@@ -422,13 +423,13 @@ func (w *DunningWorker) processSubscription(
 	// manual-rebill it.
 	if providerAutoBilled {
 		logEntry.WithField("rail", railName).
-			Info("Dunning: provider-auto-billed (vault-less) subscription; skipping rebill, awaiting provider-pull reconciliation (#632/#633)")
-		return dunningOutcomeFailed, nil
+			Info("Dunning: provider-auto-billed (vault-less) subscription; skipping rebill, awaiting provider-pull reconciliation")
+		return dunningOutcomeRefused, nil
 	}
 
 	if !w.storeArmsNMI(ctx, sub) {
 		logEntry.WithFields(log.Fields{"rail": railName, "provider": providerKey}).Warn("NMI rail is not armed for this merchant; skipping")
-		return dunningOutcomeFailed, nil
+		return dunningOutcomeRefused, nil
 	}
 
 	if !materialize {
@@ -458,49 +459,12 @@ func (w *DunningWorker) processSubscription(
 	}
 	if err != nil {
 		logEntry.WithError(err).Warn("Dunning: subscription has no admissible recurring attempt")
-		return dunningOutcomeFailed, nil
+		return dunningOutcomeRefused, nil
 	}
 	if materialize {
 		logEntry.WithField("intent_id", intent.ID).Info("Dunning: accepted intent is parked until provider writes are enabled")
-		return dunningOutcomeMaterialized, nil
 	}
-	intent, err = w.intentRunner().ExecuteFirstByID(ctx, intent.ID)
-	if err != nil {
-		return dunningOutcomeFailed, err
-	}
-	logEntry = logEntry.WithField("intent_id", intent.ID)
-
-	switch intent.Status {
-	case intents.StatusSucceeded:
-		// The handler's finalize owns the renewal: a succeeded intent has its
-		// payment, period and access effects committed exactly once.
-		logEntry.Info("Dunning: rebill successful")
-		return dunningOutcomeSucceeded, nil
-
-	case intents.StatusFailedTerminal:
-		// Refusal and dunning policy committed with this terminal operation.
-		return dunningOutcomeFailed, nil
-
-	case intents.StatusUnknownNeedsVerify:
-		// No lifecycle change and no next retry for this attempt: the intent
-		// verifier resolves it via the NMI Query API, and a late-confirmed
-		// success repairs the lifecycle in the handler's finalize.
-		logEntry.Warn("Dunning: manual rebill status unknown; verifier will resolve via provider reads (no further automatic charge for this attempt)")
-		return dunningOutcomeFailed, nil
-
-	case intents.StatusPending, intents.StatusInFlight, intents.StatusFailedRetryable:
-		// Parked (mode gate, unconfigured client) or owned by another
-		// executor; the scheduled executor drains it — or the relevance
-		// window expires it if the blocker outlasts the dunning window.
-		logEntry.WithField("reason", normalize.FromPtr(intent.LastFailureReason)).
-			Info("Dunning: rebill intent not executed this pass; ledger executor will drain it")
-		return dunningOutcomeFailed, nil
-
-	default: // superseded, expired
-		logEntry.WithField("intent_status", intent.Status).
-			Info("Dunning: rebill intent no longer applicable")
-		return dunningOutcomeFailed, nil
-	}
+	return dunningOutcomeMaterialized, nil
 }
 
 // parkStaleSubscription skips the charge of a past_due subscription whose

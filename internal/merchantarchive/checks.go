@@ -135,7 +135,7 @@ var omittedColumns = map[string]string{
 	// the destination validates and fingerprints its own.
 	// live is generated from environment.
 	"psps":             "credentials_validated_at webhook_endpoint_id credential_fingerprint credential_duplicate_at live",
-	"subscriptions":    "destructive_run_class lifecycle_rev row_version",
+	"subscriptions":    "destructive_run_class lifecycle_rev row_version due_recheck_at",
 	"customers":        "access_version",
 	"payments":         "destructive_run_class",
 	"order_attempts":   "destructive_run_class",

@@ -347,10 +347,11 @@ FOR UPDATE OF s;
 
 -- CROSS-MERCHANT: merchants with due dunning work on the named rails. Three
 -- legs, each served by its own partial index so a pass reads only due rows:
--- provider-billed NMI retries, expired awaiting_method grace, and engine
--- collections due (admit_engine false while admissions are held). Ids only, in
--- id order after a cursor, so a pass reaches every merchant; due rows and
--- charges run per merchant.
+-- provider-billed NMI retries with no retry already queued, expired
+-- awaiting_method grace, and engine collections due (admit_engine false while
+-- admissions are held). A row the pass left unchanged waits for its
+-- due_recheck_at. Ids only, in id order after a cursor, so a pass reaches
+-- every merchant; due rows run per merchant.
 -- name: ListDueDunningMerchants :many
 SELECT d.merchant_id
 FROM (
@@ -361,6 +362,12 @@ FROM (
        AND s.rail = 'nmi' AND s.rail = ANY(sqlc.arg(rails)::text[])
        AND s.collection_policy <> 'engine'
        AND s.deleted_at IS NULL
+       AND (s.due_recheck_at IS NULL OR s.due_recheck_at <= sqlc.arg(now)::timestamptz)
+       AND NOT EXISTS (
+             SELECT 1 FROM billing.provider_intents i
+              WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
+                AND i.intent_type = 'manual_rebill'
+                AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))
     UNION ALL
     SELECT s.merchant_id
       FROM billing.subscriptions s
@@ -371,6 +378,7 @@ FROM (
        AND ((sqlc.arg(include_engine)::boolean AND s.collection_policy = 'engine')
             OR (s.collection_policy = 'nmi_schedule' AND s.rail = 'nmi'))
        AND s.deleted_at IS NULL
+       AND (s.due_recheck_at IS NULL OR s.due_recheck_at <= sqlc.arg(now)::timestamptz)
     UNION ALL
     SELECT s.merchant_id
       FROM billing.subscriptions s
@@ -379,6 +387,7 @@ FROM (
        AND s.current_period_ends_at <= sqlc.arg(now)::timestamptz
        AND (s.status = 'active' OR s.next_retry_at <= sqlc.arg(now)::timestamptz)
        AND s.rail = ANY(sqlc.arg(rails)::text[])
+       AND (s.due_recheck_at IS NULL OR s.due_recheck_at <= sqlc.arg(now)::timestamptz)
        AND NOT EXISTS (
              SELECT 1 FROM billing.provider_intents i
               WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
@@ -392,14 +401,16 @@ LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListDueDunningSubscriptions :many
 -- Dunning work due in one merchant (see ListDueDunningMerchants): NMI retries
--- due, awaiting_method past grace (due to end), and engine collections due,
--- including one whose stored method is unusable, which admission routes to
--- awaiting_method (never the default card). Most overdue first, a page after
--- the (due instant, id) cursor: a row the pass left due is behind the cursor,
--- so it never hides later due work.
+-- due with none queued, awaiting_method past grace (due to end), and engine
+-- collections due, including one whose stored method is unusable, which
+-- admission routes to awaiting_method (never the default card). Most overdue
+-- first, a page after the (due instant, id) cursor: a row the pass left due is
+-- behind the cursor, so it never hides later due work.
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.rail = ANY(sqlc.arg(rails)::text[])
-  AND ((sub.collection_policy <> 'engine' AND sub.rail='nmi' AND sub.status='past_due' AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz)
+  AND (sub.due_recheck_at IS NULL OR sub.due_recheck_at <= sqlc.arg(now)::timestamptz)
+  AND ((sub.collection_policy <> 'engine' AND sub.rail='nmi' AND sub.status='past_due' AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz
+        AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='manual_rebill' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')))
        OR (sub.status='awaiting_method' AND sub.grace_ends_at <= sqlc.arg(now)::timestamptz
            AND ((sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine') OR (sub.collection_policy='nmi_schedule' AND sub.rail='nmi')))
        OR (sqlc.arg(admit_engine)::boolean AND sub.collection_policy='engine' AND sub.current_period_ends_at <= sqlc.arg(now)::timestamptz
@@ -411,6 +422,11 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.rail = ANY(sqlc.arg(
           > (sqlc.narg(after_due_at)::timestamptz, sqlc.arg(after_id)::uuid))
 ORDER BY CASE WHEN sub.status='awaiting_method' THEN sub.grace_ends_at WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id
 LIMIT sqlc.arg(row_limit)::int;
+
+-- name: DeferDueSubscription :exec
+-- The due pass left the row unchanged: it is not due again before recheck_at.
+UPDATE billing.subscriptions SET due_recheck_at = sqlc.arg(recheck_at)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: GetLatestResumableCanceledSubscription :one
 SELECT * FROM billing.subscriptions sub

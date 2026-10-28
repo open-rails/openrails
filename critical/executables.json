@@ -233,6 +233,12 @@
     "OR-J16-S30": [
       "TestDunning/OR-J16-S30/a-seen-nmi-decline-opens-dunning-in-one-transaction"
     ],
+    "OR-J16-S31": [
+      "TestDunning/OR-J16-S31/held-awaiting-method-expiry-waits-for-its-recheck"
+    ],
+    "OR-J16-S32": [
+      "TestDunning/OR-J16-S32/due-pass-queues-an-nmi-retry-without-waiting-on-the-gateway"
+    ],
     "OR-J17-S01": [
       "TestSubscriptions/OR-J17-S01/cancel-resume-keeps-the-purchased-window"
     ],

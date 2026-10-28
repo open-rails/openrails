@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 219,
+  "scenario_count": 221,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1097,6 +1097,16 @@
       "id": "OR-J16-S30",
       "journey": "J16",
       "name": "A provider-seen NMI decline opens dunning and schedules its retry in one transaction"
+    },
+    {
+      "id": "OR-J16-S31",
+      "journey": "J16",
+      "name": "Held awaiting-method expiry leaves the due pass until its recheck"
+    },
+    {
+      "id": "OR-J16-S32",
+      "journey": "J16",
+      "name": "Due pass queues an NMI retry and never waits on the gateway"
     }
   ]
 }
