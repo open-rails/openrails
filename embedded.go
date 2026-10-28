@@ -281,7 +281,9 @@ func (e *Engine) RiverJobs() riverhelpers.Contribution {
 // EnsurePSPOnboarding gives each live PSP of merchant its onboarding import
 // now, restarting a failed one, as the engine's first load of the
 // configuration does in the background. A tool calls it after New to read the
-// onboarding import's latest state, or its restart, right away.
+// onboarding import's latest state, or its restart, right away. A PSP another
+// import is pulling or applying is passed over and named in an error
+// matching billing.ErrPSPImportInProgress: call again once it finishes.
 func (e *Engine) EnsurePSPOnboarding(ctx context.Context, merchant billing.MerchantID) error {
 	return e.engine.App.Runtime.EnsurePSPOnboarding(ctx, merchant)
 }

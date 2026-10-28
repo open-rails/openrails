@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 205,
+  "scenario_count": 207,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1026,7 +1026,17 @@
     {
       "id": "OR-J38-S27",
       "journey": "J38",
-      "name": "Only a person or the in-process host approves, dismisses or applies; approve is idempotent per key; one import per PSP in flight"
+      "name": "Only a person or the in-process host approves, dismisses or applies; approve is idempotent per key; one import per PSP in flight; a superseded import is not linked or applied"
+    },
+    {
+      "id": "OR-J38-S28",
+      "journey": "J38",
+      "name": "A dismissed correction stays dismissed while the provider only moves its period, and an Apply never approves it"
+    },
+    {
+      "id": "OR-J38-S29",
+      "journey": "J38",
+      "name": "The legacy provider refresh between a pull and its Apply leaves the pull's proposals untouched"
     }
   ]
 }

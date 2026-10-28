@@ -41,7 +41,9 @@ reviews, maps, links and applies it as any import. Find it with
 `ListPSPImports{PSP, Origin: onboarding}`. A tool that just started an engine
 calls `Engine.EnsurePSPOnboarding` first: it does the same step at once (and
 restarts a failed import), so the list shows the import's latest state or its
-restart. An import a person creates is
+restart. A PSP another import is pulling or applying is passed over and named
+in an error matching `billing.ErrPSPImportInProgress`; call again once that
+import finishes. An import a person creates is
 `manual` and never stands in for it; deleting the onboarding import makes it
 again at the PSP's next load.
 
@@ -103,8 +105,10 @@ start, a CCBill signup), unless a manual import names `history_since`.
 5. **Link.** `LinkPSPImport` stores manual links (`{record, customer}`; a
    manual link wins over every rule) and CCBill price picks (`prices`), then
    relinks in the background: every record not yet imported is linked again
-   by the rules and the current mappings. The import is `pulling` until it
-   has; wait for `pulled` before applying.
+   by the rules and the current mappings, and proposed again from what the
+   pull read. The import is `pulling` until it has; wait for `pulled` before
+   applying. Once a later import of the PSP has pulled, an earlier one is
+   neither linked nor applied (`409`): use the later one.
 6. **Apply.** `ApplyPSPImport` lands the linked records through the billing
    import as the provider's book, a few customers per book, at the pull's
    horizon, then approves the import's [corrections](#reconcile). Only a
@@ -151,17 +155,24 @@ schedule.
   (`adopt_subscription` and `record_charge`), a schedule gone at the
   provider (`cancel_subscription`), a changed card (`update_card`), and a
   provider's other price, schedule terms or start (`correct_subscription`).
-  A Stripe price counts once an invoice for it is paid. Unmapped plans,
-  vault moves and pauses are review-only (`pull.subscription.drift`). An
-  NMI roster under a tenth of the PSP's live book fails the import with
-  `pull_roster_implausible` and proposes nothing. `PSPImport.proposals`
-  counts them; `ListProposals` with `pull_id` lists them.
+  A Stripe price counts once an invoice for it is paid; no price moves while
+  a tier change is scheduled. Unmapped plans, vault moves and pauses are
+  review-only (`pull.subscription.drift`). An NMI roster under a tenth of the
+  PSP's live book fails the import with `pull_roster_implausible` before it
+  records anything. `PSPImport.proposals` counts them; `ListProposals` with
+  `pull_id` lists them. A later pull resolves the proposals it no longer
+  raises; a relink resolves none. The legacy provider refresh leaves a
+  pull's proposals alone.
 - **Corrections.** Apply approves, in its requester's name and under one
-  approval run (`openrails undo-run` reverses it), the import's open
-  `record_charge`, `update_card`, renewal and period-end `adopt_subscription`
-  proposals, and `correct_subscription` ones that keep access. Everything
+  approval run, the import's open `record_charge`, `update_card`, renewal
+  and period-end `adopt_subscription` proposals, and `correct_subscription`
+  ones that keep access, unless a person once dismissed them. Everything
   else waits for a person: cancels, past due, refunds, revokes, a move to
-  another product's price.
+  another product's price. A dismissed correction opens again only when the
+  facts it adopts change, not when the provider bills another period.
+  `openrails undo-run` reverses the run's corrections of price, product and
+  start; a provider schedule it accepted stays, as accepted schedule versions
+  are immutable, and recorded charges stay.
 - **Apply re-reads what changed since the pull.** A record OpenRails came to
   hold after the pull (a webhook landed it, or a host's book) is held at
   Apply, not landed twice. One a host's book landed is diffed then, its basis
@@ -169,7 +180,8 @@ schedule.
 
 The catalog list is a deletion source too: a complete, non-empty list that
 lacks an object an earlier list held marks it deleted, and seeing it again
-clears that.
+clears that. Only a pull whose roster lists a subscription (and passes the
+NMI breaker) marks anything: wrong credentials list another account.
 
 An onboarding import applied days after it pulled reads what was true then.
 Apply holds what landed meanwhile; to propose what changed meanwhile, create

@@ -497,15 +497,15 @@ type diffOptions struct {
 	EvidenceFloor time.Time
 	// changes builds the proposals this diff raises.
 	changes *changeBuilder
-	// AwaitUnverified reads an unverified row as awaiting the provider, never
-	// as ended: a PSP import's proposals. The enforcing engine keeps reading
-	// it as not live.
-	AwaitUnverified bool
+	// Pull is a PSP import's diff: it reads an unverified row as awaiting the
+	// provider, never as ended, and proposes corrections of the facts it
+	// holds. The engine does neither until #1204 deletes it.
+	Pull bool
 }
 
 // live is whether the diff reads s as a billing relationship.
 func (o diffOptions) live(s *LocalSubscription) bool {
-	if o.AwaitUnverified {
+	if o.Pull {
 		return s.awaitsProvider()
 	}
 	return s.IsLive()

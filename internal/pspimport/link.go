@@ -19,7 +19,8 @@ import (
 // Link stores the merchant's manual links and price picks, then relinks the
 // import in the background: its job links every staged record not yet
 // imported by the import's rules, marks the ones OpenRails holds held and
-// proposes again. The import is pulling until it has.
+// proposes again. The import is pulling until it has. An import a later
+// pull of its PSP superseded is not linked again.
 func (im *Importer) Link(ctx context.Context, id billing.PSPImportID, p billing.LinkPSPImportParams) (*billing.PSPImport, error) {
 	if len(p.Links) > billing.MaxBatchItems {
 		return nil, apperr.Invalidf("links holds at most %d items", billing.MaxBatchItems).WithParam("links")
@@ -31,29 +32,30 @@ func (im *Importer) Link(ctx context.Context, id billing.PSPImportID, p billing.
 	if err != nil {
 		return nil, err
 	}
-	if row.Status != string(billing.PSPImportPulled) && row.Status != string(billing.PSPImportApplied) {
-		return nil, apperr.Conflictf("the import is %s; link it once it is pulled", row.Status)
-	}
-	if err := im.pickPrices(ctx, row, p.Prices); err != nil {
-		return nil, err
-	}
-	if err := im.setManualLinks(ctx, row, p.Links); err != nil {
-		return nil, err
-	}
 	var out gen.BillingPspImport
 	err = im.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := im.DB.NewWithPgxTx(tx)
-		locked, err := d.Gen(ctx).LockPSPImport(ctx, gen.LockPSPImportParams{MerchantID: row.MerchantID, ID: row.ID})
+		q := d.Gen(ctx)
+		locked, err := q.LockPSPImport(ctx, gen.LockPSPImportParams{MerchantID: row.MerchantID, ID: row.ID})
 		if err != nil {
 			return err
 		}
-		if locked.Status != row.Status {
+		if locked.Status != string(billing.PSPImportPulled) && locked.Status != string(billing.PSPImportApplied) {
 			return apperr.Conflictf("the import is %s; link it once it is pulled", locked.Status)
 		}
-		if out, err = d.Gen(ctx).SetPSPImportStatus(ctx, gen.SetPSPImportStatusParams{MerchantID: row.MerchantID, ID: row.ID, Status: string(billing.PSPImportPulling)}); err != nil {
+		if err := superseded(ctx, q, locked); err != nil {
+			return err
+		}
+		if err := im.pickPrices(ctx, q, locked, p.Prices); err != nil {
+			return err
+		}
+		if err := setManualLinks(ctx, q, locked, p.Links); err != nil {
+			return err
+		}
+		if out, err = q.SetPSPImportStatus(ctx, gen.SetPSPImportStatusParams{MerchantID: row.MerchantID, ID: row.ID, Status: string(billing.PSPImportPulling)}); err != nil {
 			return inFlight(err)
 		}
-		_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: row.MerchantID, ImportID: row.ID, Step: StepPull}, nil)
+		_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: row.MerchantID, ImportID: row.ID, Step: StepRelink}, nil)
 		return err
 	})
 	if err != nil {
@@ -62,17 +64,28 @@ func (im *Importer) Link(ctx context.Context, id billing.PSPImportID, p billing.
 	return im.view(ctx, out)
 }
 
+// superseded refuses to link or apply an import once a later import of its
+// PSP pulled: that one read the provider since, and its proposals are the
+// current ones.
+func superseded(ctx context.Context, q *gen.Queries, row gen.BillingPspImport) error {
+	later, err := q.GetPSPImportSuccessor(ctx, gen.GetPSPImportSuccessorParams{MerchantID: row.MerchantID, PspID: row.PspID, CreatedAt: row.CreatedAt})
+	if err != nil || len(later) == 0 {
+		return err
+	}
+	return apperr.Conflictf("import %s of the PSP pulled after this one; link or apply that one", billing.PSPImportID(later[0]))
+}
+
 // pickPrices stores the provider prices picked by hand for subscriptions
 // whose provider names no plan: each a live recurring provider price bound
 // to the import's PSP.
-func (im *Importer) pickPrices(ctx context.Context, row gen.BillingPspImport, picks []billing.PSPImportPriceLink) error {
+func (im *Importer) pickPrices(ctx context.Context, q *gen.Queries, row gen.BillingPspImport, picks []billing.PSPImportPriceLink) error {
 	if len(picks) == 0 {
 		return nil
 	}
 	if planned[row.Rail] {
 		return apperr.Invalidf("prices: a %s subscription lands on the provider price mapping its plan; a price is picked only on a rail whose subscriptions name none (CCBill)", row.Rail).WithParam("prices")
 	}
-	live, err := im.DB.Gen(ctx).ListPSPProviderPricesOfPSP(ctx, gen.ListPSPProviderPricesOfPSPParams{MerchantID: row.MerchantID, PspID: row.PspID})
+	live, err := q.ListPSPProviderPricesOfPSP(ctx, gen.ListPSPProviderPricesOfPSPParams{MerchantID: row.MerchantID, PspID: row.PspID})
 	if err != nil {
 		return err
 	}
@@ -98,7 +111,7 @@ func (im *Importer) pickPrices(ctx context.Context, row gen.BillingPspImport, pi
 		}
 		p.Ids, p.PriceIds = append(p.Ids, pick.Record.UUID()), append(p.PriceIds, price)
 	}
-	records, err := im.DB.Gen(ctx).ListPSPImportRecordsByIDs(ctx, gen.ListPSPImportRecordsByIDsParams{MerchantID: row.MerchantID, ImportID: row.ID, Ids: p.Ids})
+	records, err := q.ListPSPImportRecordsByIDs(ctx, gen.ListPSPImportRecordsByIDsParams{MerchantID: row.MerchantID, ImportID: row.ID, Ids: p.Ids})
 	if err != nil {
 		return err
 	}
@@ -115,7 +128,7 @@ func (im *Importer) pickPrices(ctx context.Context, row gen.BillingPspImport, pi
 			return apperr.Invalidf("%s is a %s: a price is picked for a subscription", param, kind).WithParam(param)
 		}
 	}
-	_, err = im.DB.Gen(ctx).SetPSPImportRecordManualPrices(ctx, p)
+	_, err = q.SetPSPImportRecordManualPrices(ctx, p)
 	return err
 }
 
@@ -143,7 +156,7 @@ type linker struct {
 }
 
 // setManualLinks stores the records a person linked by hand.
-func (im *Importer) setManualLinks(ctx context.Context, row gen.BillingPspImport, links []billing.PSPImportLink) error {
+func setManualLinks(ctx context.Context, q *gen.Queries, row gen.BillingPspImport, links []billing.PSPImportLink) error {
 	if len(links) > 0 {
 		p := gen.SetPSPImportRecordManualLinksParams{MerchantID: row.MerchantID, ImportID: row.ID}
 		for i, l := range links {
@@ -156,7 +169,7 @@ func (im *Importer) setManualLinks(ctx context.Context, row gen.BillingPspImport
 			}
 			p.Ids, p.CustomerIds = append(p.Ids, l.Record.UUID()), append(p.CustomerIds, customer)
 		}
-		n, err := im.DB.Gen(ctx).SetPSPImportRecordManualLinks(ctx, p)
+		n, err := q.SetPSPImportRecordManualLinks(ctx, p)
 		if err != nil {
 			return err
 		}
@@ -168,16 +181,17 @@ func (im *Importer) setManualLinks(ctx context.Context, row gen.BillingPspImport
 }
 
 // link links every staged record not yet imported by the import's rules and
-// manual links, then marks the ones OpenRails holds held.
-func (im *Importer) link(ctx context.Context, row gen.BillingPspImport) error {
+// manual links, then marks the ones OpenRails holds held. It returns the held
+// subscriptions.
+func (im *Importer) link(ctx context.Context, row gen.BillingPspImport) ([]heldSubscription, error) {
 	mid := billing.MerchantID(row.MerchantID)
 	var declared []billing.PSPImportRule
 	if err := json.Unmarshal(row.Rules, &declared); err != nil {
-		return err
+		return nil, err
 	}
 	rules, err := compileRules(declared)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	l := &linker{im: im, mid: mid, rules: rules, mapped: map[string]map[string]uuid.UUID{}, dir: map[string][]uuid.UUID{}}
 	custOf := map[string]uuid.UUID{}
@@ -199,7 +213,7 @@ func (im *Importer) link(ctx context.Context, row gen.BillingPspImport) error {
 				conflicted["customer:"+r.Ref] = true
 			}
 		}); err != nil {
-		return err
+		return nil, err
 	}
 	if err := l.pass(ctx, row, billing.PSPImportSubscription, func(r gen.BillingPspImportRecord) ([]candidate, string) {
 		vault := "customer:" + deref(r.CustomerRef)
@@ -221,7 +235,7 @@ func (im *Importer) link(ctx context.Context, row gen.BillingPspImport) error {
 			conflicted["subscription:"+r.Ref] = true
 		}
 	}); err != nil {
-		return err
+		return nil, err
 	}
 	// A vault no rule linked belongs to the customer all its subscriptions name.
 	var adopted []linkUpdate
@@ -234,7 +248,7 @@ func (im *Importer) link(ctx context.Context, row gen.BillingPspImport) error {
 		adopted = append(adopted, linkUpdate{id: r.ID, state: billing.PSPImportLinked, customer: subs[0].customer, via: subs[0].via})
 	}
 	if err := im.writeLinks(ctx, row, adopted); err != nil {
-		return err
+		return nil, err
 	}
 	if err := l.pass(ctx, row, billing.PSPImportTransaction, func(r gen.BillingPspImportRecord) ([]candidate, string) {
 		sub, vault := "subscription:"+deref(r.SubscriptionRef), "customer:"+deref(r.CustomerRef)
@@ -252,10 +266,9 @@ func (im *Importer) link(ctx context.Context, row gen.BillingPspImport) error {
 		}
 		return out, ""
 	}, func(gen.BillingPspImportRecord, linkUpdate) {}); err != nil {
-		return err
+		return nil, err
 	}
-	_, err = im.classify(ctx, row)
-	return err
+	return im.classify(ctx, row)
 }
 
 // pass links one kind of record, page by page.

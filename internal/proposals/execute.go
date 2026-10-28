@@ -281,6 +281,13 @@ func (x *execution) correct(ctx context.Context, c *reconcile.CorrectSubscriptio
 		}
 		out := map[string]any{"subscription_id": billing.SubscriptionID(sub.ID).String()}
 		if c.PriceID != nil && *c.PriceID != sub.PriceID {
+			// A change scheduled since the pull is its renewal's or a person's.
+			if pending, err := subscriptions.PendingChange(ctx, x.d, sub.ID); err != nil || pending != nil {
+				if err != nil {
+					return nil, err
+				}
+				return nil, superseded{"scheduled_change_pending"}
+			}
 			row, err := x.q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: x.mid, ID: *c.PriceID})
 			if err != nil {
 				return nil, err

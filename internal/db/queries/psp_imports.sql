@@ -238,6 +238,21 @@ SELECT s.merchant_id, sqlc.arg(import_id)::uuid, s.id, s.row_version FROM billin
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = ANY(sqlc.arg(subscription_ids)::uuid[])
 ON CONFLICT (merchant_id, import_id, subscription_id) DO UPDATE SET row_version = EXCLUDED.row_version;
 
+-- name: AddPSPImportBasis :exec
+-- Subscriptions a relink first finds held that the pull's basis lacks, at
+-- their current row version.
+INSERT INTO billing.psp_import_basis (merchant_id, import_id, subscription_id, row_version)
+SELECT s.merchant_id, sqlc.arg(import_id)::uuid, s.id, s.row_version FROM billing.subscriptions s
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = ANY(sqlc.arg(subscription_ids)::uuid[])
+ON CONFLICT DO NOTHING;
+
+-- name: GetPSPImportSuccessor :many
+-- A later import of the same PSP that pulled: it supersedes this one.
+SELECT n.id FROM billing.psp_imports n
+WHERE n.merchant_id = sqlc.arg(merchant_id)::uuid AND n.psp_id = sqlc.arg(psp_id)::uuid
+  AND n.created_at > sqlc.arg(created_at)::timestamptz AND n.status IN ('pulled', 'applied')
+ORDER BY n.created_at LIMIT 1;
+
 -- name: ListPSPImportBasis :many
 SELECT subscription_id, row_version FROM billing.psp_import_basis
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND import_id = sqlc.arg(import_id)::uuid;
@@ -282,16 +297,21 @@ ORDER BY customer_id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListPSPImportHeldRecords :many
--- The held records of these customers, and every conflicting record.
-SELECT * FROM billing.psp_import_records
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND import_id = sqlc.arg(import_id)::uuid
-  AND (state = 'held' AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[]) OR state = 'conflict' AND kind = 'subscription')
-ORDER BY kind, id;
+-- The held records of these customers, and the conflicting records of
+-- subscriptions OpenRails holds for them.
+SELECT r.* FROM billing.psp_import_records r
+WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.import_id = sqlc.arg(import_id)::uuid
+  AND (r.state = 'held' AND r.customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+       OR r.state = 'conflict' AND r.kind = 'subscription' AND EXISTS (
+           SELECT 1 FROM billing.subscriptions s JOIN billing.psp_imports i ON i.merchant_id = s.merchant_id AND i.psp_id = s.psp_id
+           WHERE i.merchant_id = r.merchant_id AND i.id = r.import_id AND s.rail_subscription_id = r.ref
+             AND s.customer_id = ANY(sqlc.arg(customer_ids)::uuid[]) AND s.deleted_at IS NULL))
+ORDER BY r.kind, r.id;
 
 -- name: CountPSPImportProposals :one
 -- An import's proposals by outcome; corrections are the open ones its Apply approves.
 SELECT count(*) FILTER (WHERE status IN ('reconcile_required', 'requires_review'))::int AS open,
-    count(*) FILTER (WHERE status IN ('reconcile_required', 'requires_review') AND (
+    count(*) FILTER (WHERE status IN ('reconcile_required', 'requires_review') AND dismissed_at IS NULL AND (
         change->>'kind' IN ('record_charge', 'update_card')
         OR change->>'kind' = 'adopt_subscription' AND change->'to'->>'transition' IN ('renew', 'adopt_period_end')
         OR change->>'kind' = 'correct_subscription' AND NOT COALESCE((change->'effects'->>'ends_access')::boolean, false)))::int AS corrections,
@@ -307,13 +327,3 @@ SELECT count(*)::int FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND deleted_at IS NULL
   AND rail_subscription_id IS NOT NULL AND status IN ('active', 'past_due', 'pending');
 
--- name: ListPSPImportFlips :many
--- The held subscriptions a host book landed whose row the import read is
--- unchanged since: Apply hands them to the provider's evidence.
-SELECT s.id FROM billing.psp_import_basis b
-JOIN billing.subscriptions s ON s.merchant_id = b.merchant_id AND s.id = b.subscription_id
-JOIN billing.psp_import_records r ON r.merchant_id = b.merchant_id AND r.import_id = b.import_id AND r.kind = 'subscription'
-    AND r.state = 'held' AND r.ref = s.rail_subscription_id
-WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.import_id = sqlc.arg(import_id)::uuid
-  AND s.row_version = b.row_version AND s.facts_authority = 'host' AND s.deleted_at IS NULL
-ORDER BY s.id;

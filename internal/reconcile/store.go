@@ -3,11 +3,13 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -258,7 +260,13 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 		Source:            proposal.source,
 		EvidenceDigest:    proposal.digest,
 		PullID:            pullID,
+		// A run naming no pull (the engine) leaves a pull's proposal alone.
+		DeferToPull: pullID == nil,
 	})
+	if errors.Is(err, pgx.ErrNoRows) && pullID == nil {
+		row, err = s.DB.Gen(ctx).GetPSPFindingByIdentity(ctx, gen.GetPSPFindingByIdentityParams{
+			MerchantID: tid.UUID(), FindingType: string(f.Type), PspID: pspID, SubjectKey: f.SubjectKey})
+	}
 	if err != nil {
 		return FindingRecord{}, err
 	}
@@ -317,7 +325,19 @@ func (s *PGStore) ListActionablePullFindings(ctx context.Context, pspID uuid.UUI
 // findings table for its length.
 const autoResolveBatch = 1000
 
+// AutoResolveVanished resolves the PSP's open findings of types this run did
+// not raise; a proposal a pull raised waits for the next pull.
 func (s *PGStore) AutoResolveVanished(ctx context.Context, pspID uuid.UUID, runID uuid.UUID, types []FindingType) (int64, error) {
+	return s.autoResolveVanished(ctx, pspID, runID, types, false)
+}
+
+// AutoResolveVanishedPull is AutoResolveVanished for a pull, whose read of
+// the whole roster also resolves what earlier pulls proposed.
+func (s *PGStore) AutoResolveVanishedPull(ctx context.Context, pspID uuid.UUID, runID uuid.UUID, types []FindingType) (int64, error) {
+	return s.autoResolveVanished(ctx, pspID, runID, types, true)
+}
+
+func (s *PGStore) autoResolveVanished(ctx context.Context, pspID uuid.UUID, runID uuid.UUID, types []FindingType, pulled bool) (int64, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
@@ -329,11 +349,12 @@ func (s *PGStore) AutoResolveVanished(ctx context.Context, pspID uuid.UUID, runI
 	var total int64
 	for {
 		n, err := s.DB.Gen(ctx).AutoResolveVanishedReconciliationFindings(ctx, gen.AutoResolveVanishedReconciliationFindingsParams{
-			MerchantID:   tid.UUID(),
-			PspID:        pspID,
-			RunID:        &runID,
-			FindingTypes: names,
-			RowLimit:     autoResolveBatch,
+			MerchantID:    tid.UUID(),
+			PspID:         pspID,
+			RunID:         &runID,
+			FindingTypes:  names,
+			IncludePulled: pulled,
+			RowLimit:      autoResolveBatch,
 		})
 		total += n
 		if err != nil {

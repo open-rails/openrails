@@ -70,8 +70,11 @@ var ErrNotFound = apperr.New(404, billing.CodeResourceNotFound, "PSP import not 
 type Step string
 
 const (
-	StepPull  Step = "pull"
-	StepApply Step = "apply"
+	StepPull Step = "pull"
+	// StepRelink links a pulled import again and proposes from what its pull
+	// read; it reads the provider no more.
+	StepRelink Step = "relink"
+	StepApply  Step = "apply"
 )
 
 // JobKind is the River job that runs one step of an import.
@@ -464,6 +467,9 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, re
 		}
 		if busy(row.Status) || row.PulledAt == nil || row.HistoryThrough == nil || row.HistoryThrough.Before(*row.PulledAt) {
 			return apperr.Conflictf("the import is %s; it lands once its pull finished", row.Status)
+		}
+		if err := superseded(ctx, q, row); err != nil {
+			return err
 		}
 		if out, err = q.RequestPSPImportApply(ctx, gen.RequestPSPImportApplyParams{MerchantID: row.MerchantID, ID: row.ID, RequestedBy: requestedBy}); err != nil {
 			return inFlight(err)

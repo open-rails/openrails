@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -16,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // CredentialsFindingType is the finding a pull the provider refused the
@@ -47,7 +49,9 @@ func importable(scope merchants.PSPScope) bool {
 // place when it failed and the PSP is in rearm. A concurrent replica or host
 // creating or restarting the same one does nothing. A manual import never
 // stands in for it. The credentials finding of a PSP no longer importable is
-// resolved.
+// resolved. A PSP another import is pulling or applying is passed over; the
+// others proceed and the error then names it (billing.ErrPSPImportInProgress),
+// for the caller to retry once that import finishes.
 func (im *Importer) EnsureOnboarding(ctx context.Context, mid billing.MerchantID, psps []merchants.PSPScope, rearm map[uuid.UUID]bool) error {
 	ctx = merchant.WithID(ctx, mid)
 	rules, err := encodeRules(nil)
@@ -55,6 +59,7 @@ func (im *Importer) EnsureOnboarding(ctx context.Context, mid billing.MerchantID
 		return err
 	}
 	live := map[string]bool{}
+	var busy []string
 	for _, scope := range psps {
 		if !importable(scope) {
 			continue
@@ -78,11 +83,15 @@ func (im *Importer) EnsureOnboarding(ctx context.Context, mid billing.MerchantID
 			_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: mid.UUID(), ImportID: rows[0].ID, Step: StepPull}, nil)
 			return err
 		})
+		if errors.Is(inFlight(err), errInFlight) {
+			busy = append(busy, scope.Key)
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("onboarding import of PSP %s: %w", scope.Key, err)
 		}
 	}
-	return im.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+	err = im.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := im.DB.Gen(ctx)
 		findingType, open := CredentialsFindingType, "requires_review"
 		listed, err := q.ListReconciliationFindings(ctx, gen.ListReconciliationFindingsParams{MerchantID: mid.UUID(), FindingType: &findingType, Status: &open, PageLimit: 1000})
@@ -99,6 +108,10 @@ func (im *Importer) EnsureOnboarding(ctx context.Context, mid billing.MerchantID
 		}
 		return nil
 	})
+	if err != nil || len(busy) == 0 {
+		return err
+	}
+	return apperr.New(409, billing.CodePSPImportInProgress, fmt.Sprintf("another import of PSP %s is pulling or applying; its onboarding import starts once it finishes", strings.Join(busy, ", ")))
 }
 
 // openCredentialsFinding records that the provider refused the import's PSP's

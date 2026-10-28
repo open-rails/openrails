@@ -12,9 +12,29 @@ import (
 	"github.com/google/uuid"
 )
 
+const addPSPImportBasis = `-- name: AddPSPImportBasis :exec
+INSERT INTO billing.psp_import_basis (merchant_id, import_id, subscription_id, row_version)
+SELECT s.merchant_id, $1::uuid, s.id, s.row_version FROM billing.subscriptions s
+WHERE s.merchant_id = $2::uuid AND s.id = ANY($3::uuid[])
+ON CONFLICT DO NOTHING
+`
+
+type AddPSPImportBasisParams struct {
+	ImportID        uuid.UUID
+	MerchantID      uuid.UUID
+	SubscriptionIds []uuid.UUID
+}
+
+// Subscriptions a relink first finds held that the pull's basis lacks, at
+// their current row version.
+func (q *Queries) AddPSPImportBasis(ctx context.Context, arg AddPSPImportBasisParams) error {
+	_, err := q.db.Exec(ctx, addPSPImportBasis, arg.ImportID, arg.MerchantID, arg.SubscriptionIds)
+	return err
+}
+
 const countPSPImportProposals = `-- name: CountPSPImportProposals :one
 SELECT count(*) FILTER (WHERE status IN ('reconcile_required', 'requires_review'))::int AS open,
-    count(*) FILTER (WHERE status IN ('reconcile_required', 'requires_review') AND (
+    count(*) FILTER (WHERE status IN ('reconcile_required', 'requires_review') AND dismissed_at IS NULL AND (
         change->>'kind' IN ('record_charge', 'update_card')
         OR change->>'kind' = 'adopt_subscription' AND change->'to'->>'transition' IN ('renew', 'adopt_period_end')
         OR change->>'kind' = 'correct_subscription' AND NOT COALESCE((change->'effects'->>'ends_access')::boolean, false)))::int AS corrections,
@@ -306,6 +326,40 @@ func (q *Queries) GetPSPImport(ctx context.Context, arg GetPSPImportParams) (Bil
 	return i, err
 }
 
+const getPSPImportSuccessor = `-- name: GetPSPImportSuccessor :many
+SELECT n.id FROM billing.psp_imports n
+WHERE n.merchant_id = $1::uuid AND n.psp_id = $2::uuid
+  AND n.created_at > $3::timestamptz AND n.status IN ('pulled', 'applied')
+ORDER BY n.created_at LIMIT 1
+`
+
+type GetPSPImportSuccessorParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	CreatedAt  time.Time
+}
+
+// A later import of the same PSP that pulled: it supersedes this one.
+func (q *Queries) GetPSPImportSuccessor(ctx context.Context, arg GetPSPImportSuccessorParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, getPSPImportSuccessor, arg.MerchantID, arg.PspID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCustomerVaultMethods = `-- name: ListCustomerVaultMethods :many
 SELECT rail_method_ref FROM billing.payment_methods
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND custodian_id IS NULL
@@ -568,48 +622,15 @@ func (q *Queries) ListPSPImportCustomerRecords(ctx context.Context, arg ListPSPI
 	return items, nil
 }
 
-const listPSPImportFlips = `-- name: ListPSPImportFlips :many
-SELECT s.id FROM billing.psp_import_basis b
-JOIN billing.subscriptions s ON s.merchant_id = b.merchant_id AND s.id = b.subscription_id
-JOIN billing.psp_import_records r ON r.merchant_id = b.merchant_id AND r.import_id = b.import_id AND r.kind = 'subscription'
-    AND r.state = 'held' AND r.ref = s.rail_subscription_id
-WHERE b.merchant_id = $1::uuid AND b.import_id = $2::uuid
-  AND s.row_version = b.row_version AND s.facts_authority = 'host' AND s.deleted_at IS NULL
-ORDER BY s.id
-`
-
-type ListPSPImportFlipsParams struct {
-	MerchantID uuid.UUID
-	ImportID   uuid.UUID
-}
-
-// The held subscriptions a host book landed whose row the import read is
-// unchanged since: Apply hands them to the provider's evidence.
-func (q *Queries) ListPSPImportFlips(ctx context.Context, arg ListPSPImportFlipsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listPSPImportFlips, arg.MerchantID, arg.ImportID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPSPImportHeldRecords = `-- name: ListPSPImportHeldRecords :many
-SELECT merchant_id, import_id, id, kind, ref, customer_ref, subscription_ref, occurred_at, facts, data, state, customer_id, linked_via, manual_customer_id, reason, created_at, updated_at, manual_price_id FROM billing.psp_import_records
-WHERE merchant_id = $1::uuid AND import_id = $2::uuid
-  AND (state = 'held' AND customer_id = ANY($3::uuid[]) OR state = 'conflict' AND kind = 'subscription')
-ORDER BY kind, id
+SELECT r.merchant_id, r.import_id, r.id, r.kind, r.ref, r.customer_ref, r.subscription_ref, r.occurred_at, r.facts, r.data, r.state, r.customer_id, r.linked_via, r.manual_customer_id, r.reason, r.created_at, r.updated_at, r.manual_price_id FROM billing.psp_import_records r
+WHERE r.merchant_id = $1::uuid AND r.import_id = $2::uuid
+  AND (r.state = 'held' AND r.customer_id = ANY($3::uuid[])
+       OR r.state = 'conflict' AND r.kind = 'subscription' AND EXISTS (
+           SELECT 1 FROM billing.subscriptions s JOIN billing.psp_imports i ON i.merchant_id = s.merchant_id AND i.psp_id = s.psp_id
+           WHERE i.merchant_id = r.merchant_id AND i.id = r.import_id AND s.rail_subscription_id = r.ref
+             AND s.customer_id = ANY($3::uuid[]) AND s.deleted_at IS NULL))
+ORDER BY r.kind, r.id
 `
 
 type ListPSPImportHeldRecordsParams struct {
@@ -618,7 +639,8 @@ type ListPSPImportHeldRecordsParams struct {
 	CustomerIds []uuid.UUID
 }
 
-// The held records of these customers, and every conflicting record.
+// The held records of these customers, and the conflicting records of
+// subscriptions OpenRails holds for them.
 func (q *Queries) ListPSPImportHeldRecords(ctx context.Context, arg ListPSPImportHeldRecordsParams) ([]BillingPspImportRecord, error) {
 	rows, err := q.db.Query(ctx, listPSPImportHeldRecords, arg.MerchantID, arg.ImportID, arg.CustomerIds)
 	if err != nil {

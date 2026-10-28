@@ -122,6 +122,9 @@ ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     last_seen_run = COALESCE(EXCLUDED.last_seen_run, billing.reconciliation_findings.last_seen_run),
     last_seen_at = now(),
     updated_at = now()
+-- A finding a pull raised is the import's: a writer naming no pull leaves it
+-- (defer_to_pull), and gets no row back.
+WHERE NOT (sqlc.arg(defer_to_pull)::boolean AND billing.reconciliation_findings.pull_id IS NOT NULL)
 RETURNING *;
 
 -- name: ClaimReconciliationFindingNotification :execrows
@@ -159,6 +162,11 @@ WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND (sql
 ORDER BY last_seen_at DESC, id
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
+-- name: GetPSPFindingByIdentity :one
+SELECT * FROM billing.reconciliation_findings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text
+  AND psp_id IS NOT DISTINCT FROM sqlc.narg(psp_id)::uuid AND subject_key = sqlc.arg(subject_key)::text;
+
 -- name: ListActionablePullFindingsForPSP :many
 SELECT * FROM billing.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
@@ -181,6 +189,8 @@ WHERE ctid IN (
       AND f.status IN ('reconcile_required', 'requires_review', 'ignored')
       AND f.last_seen_run IS DISTINCT FROM sqlc.arg(run_id)
       AND f.finding_type = ANY (sqlc.arg(finding_types)::text[])
+      -- A proposal a pull raised vanishes only on a later pull.
+      AND (sqlc.arg(include_pulled)::boolean OR f.pull_id IS NULL)
     LIMIT sqlc.arg(row_limit)::int
 );
 
@@ -382,6 +392,7 @@ WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(psp_id)::uuid;
 UPDATE billing.reconciliation_findings
 SET status = CASE WHEN sqlc.arg(resolution)::text IN ('dismissed', 'foreign') THEN 'ignored' ELSE 'fixed' END,
     resolution = sqlc.arg(resolution)::text,
+    dismissed_at = CASE WHEN sqlc.arg(resolution)::text = 'dismissed' THEN sqlc.arg(now)::timestamptz ELSE dismissed_at END,
     operator_notes = sqlc.narg(operator_notes),
     resolved_by = sqlc.narg(resolved_by),
     approval_run_id = sqlc.narg(approval_run_id)::uuid,
@@ -1084,15 +1095,29 @@ LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListPullCorrections :many
 -- The import's open proposals its Apply approves: recorded charges and cards,
--- renewals and period ends, and corrections that keep access. Corrections go
--- first: a charge is placed on the schedule a correction accepts.
+-- renewals and period ends, and corrections that keep access, none a person
+-- ever dismissed. Corrections go first: a charge is placed on the schedule a
+-- correction accepts.
 SELECT id FROM billing.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND pull_id = sqlc.arg(pull_id)::uuid
-  AND status IN ('reconcile_required', 'requires_review') AND (
+  AND status IN ('reconcile_required', 'requires_review') AND dismissed_at IS NULL AND (
     change->>'kind' IN ('record_charge', 'update_card')
     OR change->>'kind' = 'adopt_subscription' AND change->'to'->>'transition' IN ('renew', 'adopt_period_end')
     OR change->>'kind' = 'correct_subscription' AND NOT COALESCE((change->'effects'->>'ends_access')::boolean, false))
 ORDER BY change->>'kind' = 'correct_subscription' DESC, created_at, id;
+
+-- name: FlipPSPImportBasis :execrows
+-- Apply hands to the provider's evidence the held subscriptions a host book
+-- landed, at the row version the import read: one statement, so a row moved
+-- meanwhile is left.
+UPDATE billing.subscriptions s SET facts_authority = 'provider'
+FROM billing.psp_import_basis b
+WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.import_id = sqlc.arg(import_id)::uuid
+  AND s.merchant_id = b.merchant_id AND s.id = b.subscription_id
+  AND s.row_version = b.row_version AND s.facts_authority = 'host' AND s.deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM billing.psp_import_records r
+      WHERE r.merchant_id = b.merchant_id AND r.import_id = b.import_id AND r.kind = 'subscription'
+        AND r.state = 'held' AND r.ref = s.rail_subscription_id);
 
 -- name: TakeProviderFacts :execrows
 -- The provider's evidence now owns these subscriptions: a host book skips them.

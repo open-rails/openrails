@@ -1079,6 +1079,7 @@
       "var ErrMerchantSlugReserved = errors.New(\"controlplane: merchant slug is reserved\")",
       "var ErrMerchantUnresolved = errors.New(\"merchant identity unresolved\")",
       "var ErrNotFound = errors.New(\"openrails: not found\")",
+      "var ErrPSPImportInProgress error = newCodedError(CodePSPImportInProgress, ErrConflict)",
       "var ErrPaymentMethodPSPMismatch error = newCodedError(CodePaymentMethodPSPMismatch, ErrConflict)",
       "var ErrPaymentMethodRequired error = newCodedError(CodePaymentMethodRequired, ErrInvalid)",
       "var ErrPaymentMethodStale error = newCodedError(CodePaymentMethodStale, ErrPaymentRefused)",
@@ -4648,6 +4649,7 @@
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
@@ -4656,7 +4658,8 @@
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "strings": "strings",
       "time": "time",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/reconcile/stripe.go": {
       "booktag": "github.com/open-rails/openrails/internal/booktag",

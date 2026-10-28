@@ -87,7 +87,7 @@ func Propose(ctx context.Context, d *db.DB, p ProposeParams) (ProposeResult, err
 		}
 	}
 	now := p.Now.UTC()
-	findings := diffProvider(provider, snap, local, payments, now, diffOptions{EvidenceFloor: EvidenceFloorFor(ctx, d, mid.UUID()), AwaitUnverified: true})
+	findings := diffProvider(provider, snap, local, payments, now, diffOptions{EvidenceFloor: EvidenceFloorFor(ctx, d, mid.UUID()), Pull: true})
 	bindApplyActions(findings, p.Binding.ID, p.RunID)
 
 	subs := make(map[uuid.UUID]*LocalSubscription, len(local.Subscriptions))
@@ -155,6 +155,20 @@ type CorrectSubscriptionAction struct {
 	Schedule *RemoteSubscription `json:"schedule,omitempty"`
 }
 
+// adopted is what a correction makes OpenRails record: the price, start and
+// schedule terms, without the schedule's next due date.
+func (c *CorrectSubscriptionAction) adopted() any {
+	out := struct {
+		PriceID   *uuid.UUID `json:"price_id,omitempty"`
+		StartedAt *time.Time `json:"started_at,omitempty"`
+		Schedule  any        `json:"schedule,omitempty"`
+	}{PriceID: c.PriceID, StartedAt: c.StartedAt}
+	if r := c.Schedule; r != nil {
+		out.Schedule = []any{r.RailSubscriptionID, r.PlanID, r.Amount, r.IntervalDays, r.IntervalMonths}
+	}
+	return out
+}
+
 // mappedPrice is the one local price a provider plan maps to, nil when none
 // or several do.
 func mappedPrice(planIdx map[string][]planLink, plan string) *LocalPrice {
@@ -171,7 +185,7 @@ func mappedPrice(planIdx map[string][]planLink, plan string) *LocalPrice {
 // date. A price of another product ends the old product's access. Unmapped
 // plans, vault moves and pauses stay compareScheduleTerms' drift.
 func compareFacts(provider Provider, snap *RemoteSnapshot, idx *localIndex, planIdx map[string][]planLink, s *LocalSubscription, r *RemoteSubscription, opts diffOptions) *Finding {
-	if opts.changes == nil || s.PriceID == nil || s.CollectionPolicy == models.CollectionPolicyEngine || s.TierChangePending || r.Paused {
+	if !opts.Pull || opts.changes == nil || s.PriceID == nil || s.CollectionPolicy == models.CollectionPolicyEngine || s.TierChangePending || r.Paused {
 		return nil
 	}
 	live := (s.IsLive() || s.Status == string(models.StatusUnverified)) && remoteLive(r.Status)
@@ -179,8 +193,9 @@ func compareFacts(provider Provider, snap *RemoteSnapshot, idx *localIndex, plan
 	from, to := map[string]any{}, map[string]any{}
 	billed := localPrice(idx, *s.PriceID)
 	endsAccess := false
-	if target := mappedPrice(planIdx, r.PlanID); live && target != nil && target.ID != *s.PriceID &&
-		(s.ScheduledPriceID == nil || *s.ScheduledPriceID != target.ID) &&
+	// A scheduled change is settled by its renewal or by a person: a
+	// correction never moves the price under it.
+	if target := mappedPrice(planIdx, r.PlanID); live && target != nil && target.ID != *s.PriceID && s.ScheduledPriceID == nil &&
 		(provider != ProviderStripe || paidStripeInvoice(snap, r.RailSubscriptionID, r.PlanID)) {
 		id := target.ID
 		act.PriceID, billed = &id, target

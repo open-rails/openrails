@@ -1717,6 +1717,8 @@ type BillingReconciliationFinding struct {
 	ApprovalRunID *uuid.UUID
 	// The PSP import whose pull last raised this pull.* proposal; NULL when none did or the import was deleted.
 	PullID *uuid.UUID
+	// When a person last dismissed this proposal, kept when it reopens: an import's Apply never approves a proposal once dismissed.
+	DismissedAt *time.Time
 }
 
 // Per-(merchant, source_domain) reconciliation watermark. fully_reconciled gates the confirmed-absence rule: a destructive EXCESS repair is HELD until its source domain (subscriptions|payments|grants) is proven fully reconciled.

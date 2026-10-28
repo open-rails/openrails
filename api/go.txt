@@ -3888,6 +3888,7 @@ pkg openrails/billing, var ErrMerchantNameTaken error
 pkg openrails/billing, var ErrMerchantSlugReserved error
 pkg openrails/billing, var ErrMerchantUnresolved error
 pkg openrails/billing, var ErrNotFound error
+pkg openrails/billing, var ErrPSPImportInProgress error
 pkg openrails/billing, var ErrPaymentMethodPSPMismatch error
 pkg openrails/billing, var ErrPaymentMethodRequired error
 pkg openrails/billing, var ErrPaymentMethodStale error

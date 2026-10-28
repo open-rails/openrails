@@ -122,7 +122,7 @@ migration 0120_stored_card_refresh.up.sql sha256:312d37e5bb10f50013657086f7cd93e
 migration 0130_provider_catalog_objects.up.sql sha256:215efeb29d8a62df1ea3249c83e9ba76128c9d00377b994432417ed77be4a3b7
 migration 0132_psp_import_onboarding.up.sql sha256:8eccc4463e66a07a990b44d7f2e7be6e2639634fb7745e81d2d3e04de4e3bd2f
 migration 0134_parked_provider_subscriptions.up.sql sha256:26b9a4f87224948ef5a7e0bbfd999e0081c072c76d443d4f3b1a8339a0287d90
-migration 0136_manual_reconcile.up.sql sha256:68c4168b0f4687b3599edf137c575121d7bb355c1f458f20ccdc91285679f063
+migration 0136_manual_reconcile.up.sql sha256:049503b51eb6f222cd522dd2acb4ccc5a28b10ec7ee23bc837fd4a93387b3302
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2530,6 +2530,7 @@ table billing.reconciliation_findings
   column evidence_digest text
   column approval_run_id uuid
   column pull_id uuid
+  column dismissed_at timestamp with time zone
   constraint reconciliation_findings_approval_run_check CHECK (((NOT (resolution IS DISTINCT FROM 'approved'::text)) = (approval_run_id IS NOT NULL)))
   constraint reconciliation_findings_approval_run_id_fkey FOREIGN KEY (merchant_id, approval_run_id) REFERENCES billing.maintenance_runs(merchant_id, id) ON DELETE RESTRICT
   constraint reconciliation_findings_change_check CHECK (((change IS NULL) OR ((finding_type ~~ 'pull.%'::text) AND (jsonb_typeof(change) = 'object'::text) AND ((change ->> 'kind'::text) = ANY (ARRAY['create_subscription'::text, 'record_charge'::text, 'record_refund'::text, 'adopt_subscription'::text, 'cancel_subscription'::text, 'update_card'::text, 'revoke_access'::text, 'refund_charge_after_cancel'::text, 'cancel_provider_schedule'::text, 'collect_skipped_renewal'::text, 'correct_subscription'::text])))))

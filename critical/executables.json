@@ -665,6 +665,12 @@
     ],
     "OR-J38-S27": [
       "TestPSPReconcile/OR-J38-S27/proposal-routes-admit-a-person"
+    ],
+    "OR-J38-S28": [
+      "TestPSPReconcile/OR-J38-S28/a-dismissed-correction-is-never-applied"
+    ],
+    "OR-J38-S29": [
+      "TestPSPReconcile/OR-J38-S29/provider-refresh-leaves-a-pulls-proposals"
     ]
   },
   "suites": {

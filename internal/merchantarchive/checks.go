@@ -115,7 +115,7 @@ var excludedColumns = map[string]string{
 	"nmi_history_reads":             "merchant_id psp_id read_at",
 	"solana_pay_references":         "merchant_id reference order_attempt_id kind status expires_at watch_ends_at next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
 	"solana_pay_receipts":           "merchant_id reference signature order_attempt_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
-	"reconciliation_findings":       "id merchant_id finding_type rail psp_id openrails_resource_type openrails_resource_id external_resource_id field openrails_value external_value subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity seen_run_class change source evidence_digest approval_run_id pull_id",
+	"reconciliation_findings":       "id merchant_id finding_type rail psp_id openrails_resource_type openrails_resource_id external_resource_id field openrails_value external_value subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity seen_run_class change source evidence_digest approval_run_id pull_id dismissed_at",
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
 	"access_cutover_approvals":      "id merchant_id customer_id entitlement change approved_by approved_at",
 
@@ -134,9 +134,8 @@ var omittedColumns = map[string]string{
 	// Credential evidence belongs to the source deployment's configuration;
 	// the destination validates and fingerprints its own.
 	// live is generated from environment.
-	"psps": "credentials_validated_at webhook_endpoint_id credential_fingerprint credential_duplicate_at live",
-	// A restored row reads provider facts: a host book skips it, the safe way.
-	"subscriptions":    "destructive_run_class lifecycle_rev row_version facts_authority",
+	"psps":             "credentials_validated_at webhook_endpoint_id credential_fingerprint credential_duplicate_at live",
+	"subscriptions":    "destructive_run_class lifecycle_rev row_version",
 	"customers":        "access_version",
 	"payments":         "destructive_run_class",
 	"order_attempts":   "destructive_run_class",

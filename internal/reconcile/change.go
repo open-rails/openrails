@@ -79,12 +79,18 @@ const (
 const EvidenceStaleAfter = 7 * 24 * time.Hour
 
 // Digest is sha256 over the change's kind and provider evidence: a dismissed
-// proposal is raised again only when a read yields another digest.
+// proposal is raised again only when a read yields another digest. A
+// correction's digest is over the facts it adopts, not the provider's moving
+// period.
 func (c *Change) Digest() string {
+	var facts any = c.Evidence.Provider
+	if c.Kind == billing.ChangeCorrectSubscription && c.Apply.Correct != nil {
+		facts = c.Apply.Correct.adopted()
+	}
 	b, err := json.Marshal(struct {
 		Kind     billing.ChangeKind `json:"kind"`
-		Provider map[string]any     `json:"provider"`
-	}{c.Kind, c.Evidence.Provider})
+		Provider any                `json:"provider"`
+	}{c.Kind, facts})
 	if err != nil {
 		b = []byte(string(c.Kind))
 	}

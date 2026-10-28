@@ -112,10 +112,11 @@ const stageBatch = 500
 // catalog and roster once, then its transaction history window by window,
 // each committed with how far it reached, so a retried job resumes. It then
 // links what it staged, marks what OpenRails holds held and proposes every
-// difference in that; it lands nothing. A provider refusing the credentials
-// is permanent, ErrCredentialsRejected; so is a PSP or credential the
+// difference in that; it lands nothing. A relink reads nothing: it links and
+// proposes from what the pull read. A provider refusing the credentials is
+// permanent, ErrCredentialsRejected; so is a PSP or credential the
 // configuration no longer declares.
-func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID) error {
+func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID, relink bool) error {
 	row, err := im.row(ctx, id)
 	if err != nil || row.Status != string(billing.PSPImportPulling) {
 		return err
@@ -128,7 +129,7 @@ func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID) error {
 	if !found {
 		return notReadable(errors.New("the import's PSP is no longer declared"))
 	}
-	err = im.pull(ctx, row, scope)
+	err = im.pull(ctx, row, scope, relink)
 	if err == nil || !rejected(err) {
 		return err
 	}
@@ -143,7 +144,7 @@ func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID) error {
 // errConfigChanged is a pull whose PSP's configuration changed under it.
 var errConfigChanged = errors.New("the PSP's configuration changed during the pull")
 
-func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope merchants.PSPScope) error {
+func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope merchants.PSPScope, relink bool) error {
 	id := billing.PSPImportID(row.ID)
 	mid := billing.MerchantID(row.MerchantID)
 	var src source
@@ -176,7 +177,7 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 			return err
 		}
 		observed := im.now()
-		cat, err := im.observeCatalog(ctx, scope)
+		cat, err := im.listCatalog(ctx, scope)
 		if err != nil {
 			return err
 		}
@@ -185,6 +186,15 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 			return err
 		}
 		if err := read(); err != nil {
+			return err
+		}
+		// A roster the breaker refuses records nothing, the catalog's
+		// absences included: wrong credentials list another account.
+		plausible, err := im.plausibleRoster(ctx, row, scope, recs)
+		if err != nil {
+			return err
+		}
+		if err := cat.record(ctx, plausible); err != nil {
 			return err
 		}
 		if err := im.stage(ctx, row, recs); err != nil {
@@ -236,10 +246,19 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 		}
 		through = until
 	}
-	if err := im.link(ctx, row); err != nil {
+	newly, err := im.link(ctx, row)
+	if err != nil {
 		return err
 	}
-	if err := im.propose(ctx, row, scope, nil); err != nil {
+	// A host book's row first held at a relink is diffed at its current
+	// version; the pull's basis stands for the rest.
+	if relink {
+		if err := im.basisAdded(ctx, row, newly); err != nil {
+			return err
+		}
+	}
+	// Only a read of the roster resolves what it no longer raises.
+	if err := im.propose(ctx, row, scope, nil, !relink); err != nil {
 		return err
 	}
 	_, err = q.SetPSPImportStatus(ctx, gen.SetPSPImportStatusParams{MerchantID: row.MerchantID, ID: row.ID, Status: string(billing.PSPImportPulled)})
@@ -252,15 +271,17 @@ type catalogPull struct {
 	im             *Importer
 	scope          merchants.PSPScope
 	reader         providerobjects.Reader
+	at             time.Time
+	objects        []providerobjects.Object
 	listed, absent map[string]bool
 }
 
 func catalogKey(kind providerobjects.Kind, ref string) string { return providerobjects.Key(kind, ref) }
 
-// observeCatalog lists the PSP's whole catalog (Stripe products and prices,
-// active and not; NMI plans) and records it, marking gone what an earlier
-// list held and this one lacks. A rail without a catalog (CCBill) gives nil.
-func (im *Importer) observeCatalog(ctx context.Context, scope merchants.PSPScope) (*catalogPull, error) {
+// listCatalog lists the PSP's whole catalog (Stripe products and prices,
+// active and not; NMI plans); record records it. A rail without a catalog
+// (CCBill) gives nil.
+func (im *Importer) listCatalog(ctx context.Context, scope merchants.PSPScope) (*catalogPull, error) {
 	if im.Objects == nil {
 		return nil, Permanent(errors.New("the provider catalog observer is not wired"))
 	}
@@ -276,15 +297,28 @@ func (im *Importer) observeCatalog(ctx context.Context, scope merchants.PSPScope
 	if err != nil {
 		return nil, fmt.Errorf("provider catalog: %w", err)
 	}
-	absent, err := im.Objects.RecordList(ctx, scope, at, objects)
-	if err != nil {
-		return nil, err
-	}
-	c := &catalogPull{im: im, scope: scope, reader: reader, listed: map[string]bool{}, absent: absent}
+	c := &catalogPull{im: im, scope: scope, reader: reader, at: at, objects: objects, listed: map[string]bool{}, absent: map[string]bool{}}
 	for _, obj := range objects {
 		c.listed[catalogKey(obj.Kind, obj.Ref)] = true
 	}
 	return c, nil
+}
+
+// record records what the list read. With absences, a complete list also
+// marks gone what an earlier list held and this one lacks.
+func (c *catalogPull) record(ctx context.Context, absences bool) error {
+	if c == nil {
+		return nil
+	}
+	if !absences {
+		return c.im.Objects.Record(ctx, c.scope, c.at, c.objects, providerobjects.ViaPull)
+	}
+	absent, err := c.im.Objects.RecordList(ctx, c.scope, c.at, c.objects)
+	if err != nil {
+		return err
+	}
+	c.absent = absent
+	return nil
 }
 
 // fill reads by id what the lists lacked: each price a staged subscription
@@ -444,7 +478,9 @@ func (im *Importer) Run(ctx context.Context, mid billing.MerchantID, id billing.
 		}
 		switch step {
 		case StepPull:
-			return im.Pull(ctx, id)
+			return im.Pull(ctx, id, false)
+		case StepRelink:
+			return im.Pull(ctx, id, true)
 		case StepApply:
 			return im.Apply(ctx, id)
 		}

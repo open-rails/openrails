@@ -38,6 +38,7 @@ $$;
 -- The import whose pull last raised a proposal.
 ALTER TABLE billing.reconciliation_findings
     ADD COLUMN pull_id uuid,
+    ADD COLUMN dismissed_at timestamptz,
     ADD CONSTRAINT reconciliation_findings_pull_id_fkey FOREIGN KEY (merchant_id, pull_id)
         REFERENCES billing.psp_imports(merchant_id, id) ON DELETE SET NULL (pull_id),
     ADD CONSTRAINT reconciliation_findings_pull_id_check CHECK (pull_id IS NULL OR source = 'pull'),
@@ -50,6 +51,7 @@ ALTER TABLE billing.reconciliation_findings
 CREATE INDEX reconciliation_findings_pull_id_idx ON billing.reconciliation_findings (merchant_id, pull_id)
     WHERE pull_id IS NOT NULL;
 COMMENT ON COLUMN billing.reconciliation_findings.pull_id IS 'The PSP import whose pull last raised this pull.* proposal; NULL when none did or the import was deleted.';
+COMMENT ON COLUMN billing.reconciliation_findings.dismissed_at IS 'When a person last dismissed this proposal, kept when it reopens: an import''s Apply never approves a proposal once dismissed.';
 
 -- A record OpenRails already holds: its holder is the customer.
 ALTER TABLE billing.psp_import_records

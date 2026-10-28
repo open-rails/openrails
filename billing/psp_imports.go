@@ -52,6 +52,11 @@ func (id *PSPImportRecordID) UnmarshalText(text []byte) error {
 // CodePSPImportInProgress: one import per PSP pulls or applies at a time.
 const CodePSPImportInProgress = "psp_import_in_progress"
 
+// ErrPSPImportInProgress matches the in-progress refusal, from the API or an
+// embedded call such as Engine.EnsurePSPOnboarding: retry once the PSP's
+// import finishes.
+var ErrPSPImportInProgress error = newCodedError(CodePSPImportInProgress, ErrConflict)
+
 // PSPImportStatus is where an import is: its pull, then its landing.
 type PSPImportStatus string
 

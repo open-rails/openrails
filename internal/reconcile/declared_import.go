@@ -324,6 +324,12 @@ func ImportDeclaredSubscriptions(
 
 		var subID uuid.UUID
 		outcome := DeclaredAlreadyPresent
+		if exists && existing.CustomerID != f.Customer {
+			// The rail key belongs to someone else locally — never silently
+			// adopt or converge another customer's row.
+			block("rail subscription id already belongs to a different customer")
+			continue
+		}
 		// A held row is the provider's diff to correct, and a provider row
 		// no host book rewrites: either is skipped untouched.
 		if skip := heldSkip(exists, authority, existing.FactsAuthority); skip != "" {
@@ -334,12 +340,6 @@ func ImportDeclaredSubscriptions(
 			continue
 		}
 		if exists {
-			if existing.CustomerID != f.Customer {
-				// The rail key belongs to someone else locally — never silently
-				// adopt or converge another customer's row.
-				block("rail subscription id already belongs to a different customer")
-				continue
-			}
 			if existing.CollectionPolicy != string(f.CollectionPolicy) {
 				block("existing agreement has a different immutable collection policy")
 				continue

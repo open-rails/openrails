@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -47,21 +48,23 @@ func (iw *importWorld) held(t *testing.T, ref string) heldRow {
 	return r
 }
 
-// book is what an import could land: subscriptions, payments, cards, paid
-// access and accepted schedules, byte for byte.
+// book is what an import could land: subscriptions with their state and row
+// version, payments, cards, access windows and accepted schedules, byte for
+// byte.
 func (iw *importWorld) book(t *testing.T) string {
 	t.Helper()
 	var out string
 	agg := func(table, order string) string {
 		return fmt.Sprintf("(SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY %s), '[]') FROM %s x WHERE x.merchant_id = $1)", order, iw.table(table))
 	}
-	// A subscription's lifecycle columns are the background lifecycle's, as
-	// the clock passes its period; everything an import lands is compared.
 	subs := fmt.Sprintf(`(SELECT COALESCE(jsonb_agg(jsonb_build_object('id', x.id, 'customer_id', x.customer_id, 'price_id', x.price_id, 'product_id', x.product_id,
-		'rail_subscription_id', x.rail_subscription_id, 'payment_method_id', x.payment_method_id, 'started_at', x.started_at, 'facts_authority', x.facts_authority) ORDER BY x.id), '[]')
+		'rail_subscription_id', x.rail_subscription_id, 'payment_method_id', x.payment_method_id, 'started_at', x.started_at, 'facts_authority', x.facts_authority,
+		'status', x.status, 'current_period_starts_at', x.current_period_starts_at, 'current_period_ends_at', x.current_period_ends_at, 'ended_at', x.ended_at,
+		'canceled_at', x.canceled_at, 'cancel_type', x.cancel_type, 'row_version', x.row_version) ORDER BY x.id), '[]')
 		FROM %s x WHERE x.merchant_id = $1)`, iw.table("subscriptions"))
-	access := fmt.Sprintf(`(SELECT COALESCE(jsonb_agg(jsonb_build_object('id', x.id, 'product_id', x.product_id, 'source_type', x.source_type, 'payment_id', x.payment_id) ORDER BY x.id), '[]')
-		FROM %s x WHERE x.merchant_id = $1 AND x.source_type <> 'grace')`, iw.table("product_access"))
+	access := fmt.Sprintf(`(SELECT COALESCE(jsonb_agg(jsonb_build_object('id', x.id, 'product_id', x.product_id, 'source_type', x.source_type, 'payment_id', x.payment_id,
+		'starts_at', x.starts_at, 'ends_at', x.ends_at, 'revoked_at', x.revoked_at, 'deleted_at', x.deleted_at) ORDER BY x.id), '[]')
+		FROM %s x WHERE x.merchant_id = $1)`, iw.table("product_access"))
 	require.NoError(t, iw.pool.QueryRow(t.Context(), "SELECT jsonb_build_object('subscriptions', "+subs+
 		", 'payments', "+agg("payments", "x.id")+", 'payment_methods', "+agg("payment_methods", "x.id")+
 		", 'product_access', "+access+", 'schedules', "+agg("provider_schedules", "x.subscription_id, x.accepted_version")+")::text",
@@ -278,6 +281,14 @@ func TestPSPReconcile(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, billing.PSPImportProposals{Open: 1, Approved: 3, Superseded: 2}, view.Proposals, "renewals wait for their settled bill")
 		require.Len(t, iw.nmi.Calls(), writes, "the pull, Apply and its corrections write nothing to NMI")
+
+		// Applying again, as a retried Apply does, lands and approves nothing more.
+		again := iw.book(t)
+		iw.apply(t, manual.ID)
+		require.Empty(t, bookDiff(t, again, iw.book(t)), "Apply again lands nothing")
+		view, err = iw.alpha.GetPSPImport(t.Context(), manual.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.PSPImportProposals{Open: 1, Approved: 3, Superseded: 2}, view.Proposals, "Apply again approves nothing")
 	})
 
 	t.Run("OR-J38-S21/legacy-book-then-pull-provider-wins", func(t *testing.T) {
@@ -338,6 +349,21 @@ func TestPSPReconcile(t *testing.T) {
 			FROM %s WHERE merchant_id = $1 AND customer_id = $2 AND deleted_at IS NULL AND revoked_at IS NULL`, iw.table("product_access")),
 			iw.alpha.MerchantID().UUID(), customerOf(iw.bob).UUID(), live).Scan(&grace, &beyond))
 		require.Zero(t, grace+beyond, "approving the cancel ends access at the paid-through date: %s", iw.accessDump(t, customerOf(iw.bob)))
+
+		// Undoing Apply's approval run restores the corrected row's price and
+		// start. The provider schedule it accepted stays: accepted schedule
+		// versions are immutable.
+		undo := func(args ...string) string {
+			return hostCLI(t, iw.world, append([]string{"undo-run", "--merchant", "id:" + iw.alpha.MerchantID().String(), "--run", applied.ApprovalRunID.String()}, args...)...)
+		}
+		rows := regexp.MustCompile(`--expect-rows (\d+)`).FindStringSubmatch(undo())
+		require.Len(t, rows, 2)
+		undo("--apply", "--expect-rows", rows[1])
+		row = iw.held(t, schedule)
+		require.Equal(t, prices["legacy23"].ID.String(), row.Price, "undo restores the price")
+		require.True(t, row.Started.Equal(start.Add(5*24*time.Hour)), "undo restores the start: %s", row.Started)
+		require.Equal(t, "nmi_subscription:"+schedule, row.Schedule, "the accepted provider schedule stays")
+		require.True(t, iw.entitled(t, customerOf(iw.alice), "member:premium"))
 	})
 
 	t.Run("OR-J38-S22/pull-then-legacy-book-is-skipped", func(t *testing.T) {
@@ -516,14 +542,22 @@ func TestPSPReconcile(t *testing.T) {
 		since := start.Add(-24 * time.Hour)
 		first := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since})
 		iw.apply(t, first.ID)
+		// Wrong credentials read another account: few schedules, another
+		// plan list.
 		for _, s := range schedules[1:] {
 			iw.nmi.DeleteSchedule(s)
 		}
+		iw.nmi.AddPlan(nmimock.Plan{ID: "foreign", Name: "Foreign", Amount: "5.00", Days: 30})
+		iw.nmi.RemovePlan("gold")
+		iw.clock.Advance(time.Minute)
 		imp, err := iw.alphaRemote.CreatePSPImport(t.Context(), billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}})
 		require.NoError(t, err)
 		got := iw.awaitFailed(t, imp.ID)
 		require.Equal(t, billing.PSPImportRosterImplausible, *got.ErrorCode, "%v", got.Error)
 		require.Empty(t, iw.proposals(t, imp.ID), "an implausible roster raises nothing")
+		objects := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{Key: "nmi"}})
+		require.Nil(t, objects["price:gold"].DeletedAt, "an implausible roster marks no plan gone")
+		require.NotContains(t, objects, "price:foreign", "nor records the other account's")
 		page, err := iw.alpha.ListProposals(t.Context(), billing.ProposalListParams{PageRequest: billing.PageRequest{Limit: 100}})
 		require.NoError(t, err)
 		require.Empty(t, page.Items)
@@ -542,6 +576,15 @@ func TestPSPReconcile(t *testing.T) {
 		iw.renewEarly(renewed)
 		iw.nmi.DeleteSchedule(gone)
 		imp := iw.manual(t, "nmi")
+
+		// A later pull supersedes the first import: it is linked and applied
+		// no more, and the later import keeps its proposals.
+		raised := iw.proposals(t, imp.ID)
+		_, err := iw.api.LinkPSPImport(t.Context(), first.ID, billing.LinkPSPImportParams{})
+		require.ErrorIs(t, err, billing.ErrConflict, "relinking a superseded import")
+		_, err = iw.alpha.ApplyPSPImport(t.Context(), first.ID)
+		require.ErrorIs(t, err, billing.ErrConflict, "applying a superseded import")
+		require.Equal(t, raised, iw.proposals(t, imp.ID))
 
 		key := iw.alphaKey.Secret
 		status, raw := iw.request(t, http.MethodGet, "/v1/merchant/proposals?pull_id="+imp.ID.String(), key, nil)
@@ -593,6 +636,9 @@ func TestPSPReconcile(t *testing.T) {
 		status, code := refusalCode(t, err)
 		require.Equal(t, http.StatusConflict, status)
 		require.Equal(t, billing.CodePSPImportInProgress, code)
+		require.ErrorIs(t, err, billing.ErrPSPImportInProgress)
+		_, err = iw.alpha.CreatePSPImport(t.Context(), billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}})
+		require.ErrorIs(t, err, billing.ErrPSPImportInProgress, "in-process too")
 		require.Equal(t, billing.PSPImportPulling, busy.Status)
 		iw.nmi.QueryUnavailable(false)
 		iw.await(t, busy.ID, billing.PSPImportPulled)
@@ -610,6 +656,114 @@ func TestPSPReconcile(t *testing.T) {
 		}
 		require.Positive(t, held, "what OpenRails holds stays held")
 	})
+
+	t.Run("OR-J38-S28/a-dismissed-correction-is-never-applied", func(t *testing.T) {
+		iw := reconcileWorld(t, "nmi")
+		start := openPeriod(iw)
+		for _, p := range []nmimock.Plan{{ID: "legacy23", Name: "Legacy", Amount: "23.00", Days: 30}, {ID: "current19", Name: "Current", Amount: "19.00", Days: 30},
+			{ID: "current17", Name: "Promo", Amount: "17.00", Days: 30}} {
+			iw.nmi.AddPlan(p)
+		}
+		prices := iw.premium(t, "legacy23", "current19", "current17")
+		schedule := iw.nmiMember(t, iw.alice.Email, "current19", "19.00", start)
+		paid := start.AddDate(0, 0, 30)
+		res := iw.hostBook(t, start.Add(24*time.Hour), billing.DeclaredSubscription{SourceID: "legacy-alice", Customer: customerOf(iw.alice), Price: prices["legacy23"].ID,
+			Rail: "nmi", RailSubscriptionID: schedule, StartedAt: start, PaidThrough: &paid})
+		require.Equal(t, []string{"legacy-alice"}, res.Imported, "%v", res.Reasons)
+		imp := iw.manual(t, "nmi")
+		alice := subscriptionOf(t, iw, customerOf(iw.alice), schedule)
+		correct := proposalOf(t, iw.proposals(t, imp.ID), billing.ChangeCorrectSubscription, alice.ID.String())
+		out, err := iw.alpha.DismissProposals(t.Context(), billing.DismissProposalsParams{IDs: []billing.FindingID{correct.ID}, Notes: "the legacy price stands"})
+		require.NoError(t, err)
+		require.Equal(t, billing.ProposalDismissed, out.Data[0].Outcome)
+
+		// NMI bills the next period: its record moves, the facts do not.
+		iw.renewEarly(schedule)
+		again := iw.manual(t, "nmi")
+		iw.apply(t, again.ID)
+		got, err := iw.alpha.GetFinding(t.Context(), correct.ID)
+		require.NoError(t, err)
+		require.Equal(t, "dismissed", deref(got.Resolution), "the same facts stay dismissed")
+		require.Equal(t, prices["legacy23"].ID.String(), iw.held(t, schedule).Price)
+
+		// NMI moves to another plan: the correction opens again, for a person.
+		iw.nmi.EditSchedule(schedule, func(s *nmimock.Schedule) { s.Plan, s.Amount = "current17", "17.00" })
+		third := iw.manual(t, "nmi")
+		got, err = iw.alpha.GetFinding(t.Context(), correct.ID)
+		require.NoError(t, err)
+		require.Nil(t, got.Resolution, "other facts open it again")
+		require.Equal(t, prices["current17"].ID.String(), got.Change.To["price_id"])
+		iw.apply(t, third.ID)
+		got, err = iw.alpha.GetFinding(t.Context(), correct.ID)
+		require.NoError(t, err)
+		require.Nil(t, got.Resolution, "Apply never approves a proposal a person dismissed")
+		require.Equal(t, prices["legacy23"].ID.String(), iw.held(t, schedule).Price)
+	})
+
+	t.Run("OR-J38-S29/provider-refresh-leaves-a-pulls-proposals", func(t *testing.T) {
+		iw := reconcileWorld(t, "nmi")
+		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
+		iw.nmi.AddPlan(nmimock.Plan{ID: "legacy23", Name: "Legacy", Amount: "23.00", Days: 30})
+		iw.nmi.AddPlan(nmimock.Plan{ID: "current19", Name: "Current", Amount: "19.00", Days: 30})
+		prices := iw.premium(t, "legacy23", "current19")
+		schedule := iw.nmiMember(t, iw.alice.Email, "current19", "19.00", start)
+		stale := iw.clock.Now().Add(5 * 24 * time.Hour)
+		res := iw.hostBook(t, start.Add(24*time.Hour), billing.DeclaredSubscription{SourceID: "legacy-alice", Customer: customerOf(iw.alice), Price: prices["legacy23"].ID,
+			Rail: "nmi", RailSubscriptionID: schedule, StartedAt: start.Add(5 * 24 * time.Hour), PaidThrough: &stale})
+		require.Equal(t, []string{"legacy-alice"}, res.Imported, "%v", res.Reasons)
+		imp := iw.manual(t, "nmi")
+		before := iw.pulled(t, imp.ID)
+		require.Contains(t, before, string(billing.ChangeCorrectSubscription))
+
+		// The legacy refresh reads the same PSP between the pull and Apply.
+		refreshMerchant(t, iw.fleet, iw.alpha.MerchantID().UUID())
+		require.Equal(t, before, iw.pulled(t, imp.ID), "the refresh leaves the pull's proposals")
+		var engine int
+		require.NoError(t, iw.pool.QueryRow(t.Context(), fmt.Sprintf(`SELECT count(*) FROM %s WHERE merchant_id = $1 AND finding_type = 'pull.subscription.facts' AND pull_id IS NULL`,
+			iw.table("reconciliation_findings")), iw.alpha.MerchantID().UUID()).Scan(&engine))
+		require.Zero(t, engine, "the refresh proposes no fact corrections")
+
+		iw.apply(t, imp.ID)
+		changes := func(rows string) map[string]string {
+			var list []struct {
+				ID     string          `json:"id"`
+				Change json.RawMessage `json:"change"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(rows), &list))
+			out := map[string]string{}
+			for _, r := range list {
+				out[r.ID] = string(r.Change)
+			}
+			return out
+		}
+		require.Equal(t, changes(before), changes(iw.pulled(t, imp.ID)), "Apply approves the changes the pull proposed")
+		correct := proposalOf(t, iw.proposalsAll(t, imp.ID), billing.ChangeCorrectSubscription, subscriptionOf(t, iw, customerOf(iw.alice), schedule).ID.String())
+		require.NotNil(t, correct.Resolution)
+		require.Equal(t, "approved", *correct.Resolution, "notes %v", correct.Notes)
+		require.Equal(t, prices["current19"].ID.String(), iw.held(t, schedule).Price)
+	})
+}
+
+// pulled is what one import's pull proposed, as stored.
+func (iw *importWorld) pulled(t *testing.T, pull billing.PSPImportID) string {
+	t.Helper()
+	var out string
+	require.NoError(t, iw.pool.QueryRow(t.Context(), fmt.Sprintf(`SELECT COALESCE(jsonb_agg(jsonb_build_object('id', id, 'status', status, 'change', change,
+		'digest', evidence_digest, 'updated_at', updated_at) ORDER BY id), '[]')::text FROM %s WHERE merchant_id = $1 AND pull_id = $2`, iw.table("reconciliation_findings")),
+		iw.alpha.MerchantID().UUID(), pull.UUID()).Scan(&out))
+	return out
+}
+
+// proposalsAll are one import's proposals in any status.
+func (iw *importWorld) proposalsAll(t *testing.T, pull billing.PSPImportID) []billing.Finding {
+	t.Helper()
+	var out []billing.Finding
+	for _, status := range []billing.FindingStatus{"reconcile_required", "requires_review", "fixed", "ignored"} {
+		page, err := iw.alpha.ListProposals(t.Context(), billing.ProposalListParams{Pull: pull, Status: status, PageRequest: billing.PageRequest{Limit: 100}})
+		require.NoError(t, err)
+		out = append(out, page.Items...)
+	}
+	return out
 }
 
 // reconcileWorld is an import world without the legacy provider refresh,

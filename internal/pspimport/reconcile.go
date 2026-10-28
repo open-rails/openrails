@@ -203,10 +203,9 @@ func uuidOf(id *uuid.UUID) uuid.UUID {
 // propose raises the differences between what the pull read of the objects
 // OpenRails holds and what OpenRails records as the import's proposals, one
 // page of customers at a time. customers bounds it to their book; nil runs
-// over the PSP's whole book and its held records, and resolves the earlier
-// proposals no read raises any more. An NMI roster implausibly small against
-// the local live book fails the import and raises nothing.
-func (im *Importer) propose(ctx context.Context, row gen.BillingPspImport, scope merchants.PSPScope, customers []uuid.UUID) error {
+// over the PSP's whole book and its held records and, with resolve, resolves
+// the earlier proposals the roster no longer raises.
+func (im *Importer) propose(ctx context.Context, row gen.BillingPspImport, scope merchants.PSPScope, customers []uuid.UUID, resolve bool) error {
 	q := im.DB.Gen(ctx)
 	provider := reconcile.Provider(scope.Rail)
 	counts, err := q.CountPSPImportRecords(ctx, gen.CountPSPImportRecordsParams{MerchantID: row.MerchantID, ImportID: row.ID})
@@ -222,15 +221,6 @@ func (im *Importer) propose(ctx context.Context, row gen.BillingPspImport, scope
 	// An empty roster is indistinguishable from the wrong account: it proves
 	// no absence. CCBill's roster lists active members only.
 	exhaustive := roster > 0 && provider != reconcile.ProviderCCBill
-	if provider == reconcile.ProviderNMI && exhaustive && customers == nil {
-		live, err := q.CountPSPLiveSubscriptions(ctx, gen.CountPSPLiveSubscriptionsParams{MerchantID: row.MerchantID, PspID: row.PspID})
-		if err != nil {
-			return err
-		}
-		if tripped, reason := (reconcile.RosterBreaker{}).Implausible(provider, roster, int(live)); tripped {
-			return PermanentError{Err: errors.New(reason), Code: billing.PSPImportRosterImplausible}
-		}
-	}
 	basisRows, err := q.ListPSPImportBasis(ctx, gen.ListPSPImportBasisParams{MerchantID: row.MerchantID, ImportID: row.ID})
 	if err != nil {
 		return err
@@ -294,12 +284,35 @@ func (im *Importer) propose(ctx context.Context, row gen.BillingPspImport, scope
 		}
 		after = ids[len(ids)-1]
 	}
-	if exhaustive {
-		if _, err := store.AutoResolveVanished(ctx, scope.ID, run, reconcile.StateRosterFindingTypes()); err != nil {
+	if exhaustive && resolve {
+		if _, err := store.AutoResolveVanishedPull(ctx, scope.ID, run, reconcile.StateRosterFindingTypes()); err != nil {
 			return finish(err)
 		}
 	}
 	return finish(nil)
+}
+
+// plausibleRoster is whether a pull's roster may prove absence: it lists a
+// subscription and, from NMI, is not implausibly small against the local live
+// book. One the breaker refuses fails the import before anything is recorded.
+func (im *Importer) plausibleRoster(ctx context.Context, row gen.BillingPspImport, scope merchants.PSPScope, recs []staged) (bool, error) {
+	roster := 0
+	for _, r := range recs {
+		if r.kind == billing.PSPImportSubscription {
+			roster++
+		}
+	}
+	if roster == 0 || reconcile.Provider(scope.Rail) != reconcile.ProviderNMI {
+		return roster > 0, nil
+	}
+	live, err := im.DB.Gen(ctx).CountPSPLiveSubscriptions(ctx, gen.CountPSPLiveSubscriptionsParams{MerchantID: row.MerchantID, PspID: row.PspID})
+	if err != nil {
+		return false, err
+	}
+	if tripped, reason := (reconcile.RosterBreaker{}).Implausible(reconcile.ProviderNMI, roster, int(live)); tripped {
+		return false, PermanentError{Err: errors.New(reason), Code: billing.PSPImportRosterImplausible}
+	}
+	return true, nil
 }
 
 // snapshotOf is what the pull read of held records, as the reconcile diff
@@ -389,10 +402,6 @@ func (im *Importer) noteMoved(ctx context.Context, row gen.BillingPspImport, ref
 // provider's evidence.
 func (im *Importer) approveCorrections(ctx context.Context, row gen.BillingPspImport) error {
 	q := im.DB.Gen(ctx)
-	flips, err := q.ListPSPImportFlips(ctx, gen.ListPSPImportFlipsParams{MerchantID: row.MerchantID, ImportID: row.ID})
-	if err != nil {
-		return err
-	}
 	if im.Proposals != nil && row.ApplyRequestedBy != nil {
 		ids, err := q.ListPullCorrections(ctx, gen.ListPullCorrectionsParams{MerchantID: row.MerchantID, PullID: row.ID})
 		if err != nil {
@@ -405,11 +414,23 @@ func (im *Importer) approveCorrections(ctx context.Context, row gen.BillingPspIm
 			}
 		}
 	}
-	if len(flips) == 0 {
+	_, err := q.FlipPSPImportBasis(ctx, gen.FlipPSPImportBasisParams{MerchantID: row.MerchantID, ImportID: row.ID})
+	return err
+}
+
+// basisAdded records the host book's held subscriptions the import's basis
+// lacks at their current row version: rows a relink first finds held.
+func (im *Importer) basisAdded(ctx context.Context, row gen.BillingPspImport, subs []heldSubscription) error {
+	var ids []uuid.UUID
+	for _, s := range subs {
+		if s.host {
+			ids = append(ids, s.id)
+		}
+	}
+	if len(ids) == 0 {
 		return nil
 	}
-	_, err = q.TakeProviderFacts(ctx, gen.TakeProviderFactsParams{MerchantID: row.MerchantID, Ids: flips})
-	return err
+	return im.DB.Gen(ctx).AddPSPImportBasis(ctx, gen.AddPSPImportBasisParams{MerchantID: row.MerchantID, ImportID: row.ID, SubscriptionIds: ids})
 }
 
 // basisNow records held subscriptions at their current row version: rows an
