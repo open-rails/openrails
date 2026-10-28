@@ -64,7 +64,7 @@ test("console-pull-link-map-apply-lands-once", async ({ page }) => {
   const link = page.getByRole("dialog")
   await link.getByLabel("Customer id").fill(fx.carol)
   await link.getByRole("button", { name: "Link", exact: true }).click()
-  await expect(page.getByText("Record linked")).toBeVisible()
+  await expect(page.getByText("Link saved: re-linking")).toBeVisible()
   await expect(page.getByText("No records in this state.")).toBeVisible()
   await page.getByRole("button", { name: "linked", exact: true }).click()
   await expect(page.locator(`tr[data-ref="${fx.vault}"]`)).toContainText(
@@ -144,12 +144,13 @@ test("console-mapping-upload-and-ccbill-price", async ({ page }) => {
   const pick = page.getByRole("dialog")
   await pick.getByLabel("Provider price").selectOption(fx.picked)
   await pick.getByRole("button", { name: "Set price", exact: true }).click()
-  await expect(page.getByText("Price set")).toBeVisible()
+  await expect(page.getByText("Price saved: re-linking")).toBeVisible()
   await expect(blocked).toHaveCount(0)
 
+  // A re-link returns the import to pulled: it applies again as Apply.
   await page.goto(detail)
-  await page.getByRole("button", { name: "Apply again" }).click()
-  await confirmTyped(page, "ccbill", "Apply again")
+  await page.getByRole("button", { name: "Apply", exact: true }).click()
+  await confirmTyped(page, "ccbill", "Apply")
   await expect(cell(page, "subscription", "imported")).toHaveText("2")
   await expect(cell(page, "subscription", "unmatched")).toHaveText("1")
 })
@@ -247,4 +248,89 @@ test("console-failed-pull-and-read-only-access", async ({ page }) => {
   await expect(map).toHaveAttribute("title", "Needs merchant:catalog:manage")
   await open(page, "/ops/imports", "config")
   await expect(page.getByRole("button", { name: "Reconcile" })).toBeVisible()
+})
+
+test("console-proposals-group-approve-held-dismiss", async ({
+  page,
+  context,
+}) => {
+  await open(page, "/ops/imports")
+  await page.getByRole("button", { name: "Reconcile" }).click()
+  const reconcile = page.getByRole("dialog")
+  await reconcile
+    .getByLabel("History since")
+    .selectOption({ label: "Full history" })
+  await reconcile
+    .getByRole("button", { name: "Reconcile", exact: true })
+    .click()
+  await expect(page.getByTestId("import-progress")).toContainText(
+    "Pulled: ready to apply"
+  )
+  const counts = page.getByTestId("import-proposals")
+  await expect(counts).toContainText(
+    "5 open proposals (4 corrections Apply approves)"
+  )
+  const detail = page.url()
+
+  // A pull's proposals are reviewed in the inbox, never resolved as findings.
+  await open(page, "/ops")
+  const pulls = page.locator("tr", { hasText: "pull." })
+  await expect(pulls).toHaveCount(5)
+  await expect(pulls.getByRole("link", { name: "Review" })).toHaveCount(5)
+  await expect(pulls.getByRole("button", { name: "Resolve" })).toHaveCount(0)
+
+  await page.goto(detail)
+  await page.getByRole("button", { name: "Apply", exact: true }).click()
+  await confirmTyped(page, "nmi", "Apply")
+  await expect(counts).toContainText("1 open proposals")
+  await expect(counts).toContainText("· 2 approved")
+  await counts.getByRole("link").click()
+  const group = page.locator("section[data-group]")
+  await expect(group).toHaveCount(1)
+  await expect(group).toContainText(
+    "nmi · 1 subscriptions ended at the provider"
+  )
+  await expect(group).toContainText("ends access")
+  const inbox = page.url()
+  // Another person's view, loaded before this one decides.
+  const stale = await context.newPage()
+  await stale.goto(inbox)
+  await expect(stale.locator("tr[data-proposal]")).toHaveCount(1)
+
+  const row = page.locator("tr[data-proposal]")
+  await row.getByRole("checkbox").check()
+  await page.getByRole("button", { name: "Approve 1" }).click()
+  const approve = page.getByRole("dialog")
+  const confirm = approve.getByRole("button", { name: "Approve", exact: true })
+  await expect(confirm).toBeDisabled()
+  await approve.getByLabel("Type 1 to confirm").fill("1")
+  await confirm.click()
+  await expect(row.getByTestId("outcome")).toContainText("held")
+  await expect(row.getByTestId("outcome")).toContainText(
+    "destructive_actions_held"
+  )
+
+  await page.getByRole("button", { name: "Reload" }).click()
+  await row.getByRole("checkbox").check()
+  await page.getByRole("button", { name: "Dismiss 1" }).click()
+  const dismiss = page.getByRole("dialog")
+  const confirmDismiss = dismiss.getByRole("button", {
+    name: "Dismiss",
+    exact: true,
+  })
+  await expect(confirmDismiss).toBeDisabled()
+  await dismiss.getByLabel("Notes (required)").fill("kept: the member paid us")
+  await confirmDismiss.click()
+  await expect(row.getByTestId("outcome")).toContainText("dismissed")
+
+  const late = stale.locator("tr[data-proposal]")
+  await late.getByRole("checkbox").check()
+  await stale.getByRole("button", { name: "Approve 1" }).click()
+  await stale.getByRole("dialog").getByLabel("Type 1 to confirm").fill("1")
+  await stale
+    .getByRole("dialog")
+    .getByRole("button", { name: "Approve", exact: true })
+    .click()
+  await expect(late.getByTestId("outcome")).toContainText("already_resolved")
+  await stale.close()
 })

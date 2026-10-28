@@ -618,6 +618,9 @@
     "OR-J38-S31": [
       "TestMerchantConsole/OR-J38-S31/console-mapping-upload-and-ccbill-price"
     ],
+    "OR-J38-S32": [
+      "TestMerchantConsole/OR-J38-S32/console-proposals-group-approve-held-dismiss"
+    ],
     "OR-J38-S33": [
       "TestMerchantConsole/OR-J38-S33/console-parked-signup-lands-after-mapping"
     ],
@@ -694,6 +697,7 @@
       "OR-J01-S09",
       "OR-J38-S30",
       "OR-J38-S31",
+      "OR-J38-S32",
       "OR-J38-S33",
       "OR-J38-S34"
     ]

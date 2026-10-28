@@ -326,6 +326,56 @@ func TestMerchantConsole(t *testing.T) {
 		require.Empty(t, iw.subscriptions(t, billing.CustomerID(uuid.MustParse(dave.ID))))
 	})
 
+	t.Run("OR-J38-S32/console-proposals-group-approve-held-dismiss", func(t *testing.T) {
+		iw := reconcileWorld(t, "nmi")
+		start := openPeriod(iw)
+		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
+		iw.premium(t, "gold")
+		carol := authtest.NewUser(t, iw.auth)
+		renewed := []string{iw.nmiMember(t, iw.alice.Email, "gold", "20.00", start), iw.nmiMember(t, carol.Email, "gold", "20.00", start)}
+		gone := iw.nmiMember(t, iw.bob.Email, "gold", "20.00", start)
+		since := start.Add(-24 * time.Hour)
+		iw.apply(t, iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since}).ID)
+		// NMI billed two renewals OpenRails has not seen, and deleted a schedule.
+		for _, ref := range renewed {
+			iw.renewEarly(ref)
+		}
+		iw.nmi.DeleteSchedule(gone)
+
+		consoleBrowser(t, iw.authorityWorld, map[string]any{"tokens": map[string]string{"staff": consoleOperator(t, iw.authorityWorld)}},
+			nil, "console-proposals-group-approve-held-dismiss")
+
+		imports, err := iw.alpha.ListPSPImports(t.Context(), billing.PSPImportListParams{Origin: billing.PSPImportManual})
+		require.NoError(t, err)
+		reconciled := imports.Items[0]
+		require.Equal(t, billing.PSPImportApplied, reconciled.Status)
+		require.Equal(t, billing.PSPImportProposals{Approved: 2, Dismissed: 1, Superseded: 2}, reconciled.Proposals)
+		page, err := iw.alpha.ListProposals(t.Context(), billing.ProposalListParams{Pull: reconciled.ID, Status: "fixed", PageRequest: billing.PageRequest{Limit: 100}})
+		require.NoError(t, err)
+		var run *billing.RunID
+		approved := 0
+		for _, f := range page.Items {
+			if f.Resolution == nil || *f.Resolution != "approved" {
+				continue
+			}
+			approved++
+			require.Equal(t, billing.ChangeRecordCharge, f.Change.Kind)
+			if run == nil {
+				run = f.ApprovalRunID
+			}
+			require.Equal(t, *run, *f.ApprovalRunID, "Apply approved its corrections under one run")
+		}
+		require.Equal(t, 2, approved)
+		for _, customer := range []billing.CustomerID{customerOf(iw.alice), billing.CustomerID(uuid.MustParse(carol.ID))} {
+			require.Equal(t, []int64{20_000_000, 20_000_000}, paidAmounts(t, &trailWorld{iw}, customer), "the missed renewal is recorded once, exactly")
+		}
+		bob := iw.subscriptions(t, customerOf(iw.bob))
+		require.Len(t, bob, 1)
+		require.Equal(t, billing.SubscriptionActive, bob[0].Status, "held, then dismissed: access stays")
+		require.True(t, iw.entitled(t, customerOf(iw.bob), "member:premium"))
+		require.Empty(t, iw.nmi.Calls())
+	})
+
 	t.Run("OR-J38-S33/console-parked-signup-lands-after-mapping", func(t *testing.T) {
 		tw := newTrailWorld(t, "stripe")
 		tw.stripe.AddProduct("prod_gold", "Gold")
