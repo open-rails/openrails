@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -284,7 +285,8 @@ func TestBackgroundJobs(t *testing.T) {
 		restore := storageFault(t, a.world, a.world.schema, "river_job", "NEW.kind = 'openrails.psp_import'")
 		_, err := a.alpha.CreatePSPImport(t.Context(), billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}})
 		require.Error(t, err)
-		imports, err := a.alpha.ListPSPImports(t.Context(), billing.PSPImportListParams{})
+		// The PSP's onboarding import may hold the other psp_import job.
+		imports, err := a.alpha.ListPSPImports(t.Context(), billing.PSPImportListParams{Origin: billing.PSPImportManual})
 		require.NoError(t, err)
 		require.Empty(t, imports.Items, "an import whose job was not queued is not kept")
 		restore()
@@ -293,8 +295,13 @@ func TestBackgroundJobs(t *testing.T) {
 		require.Equal(t, billing.PSPImportPulling, created.Status)
 		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.psp_import"))
 		require.NoError(t, err)
-		require.Len(t, jobs.Jobs, 1)
-		require.Contains(t, string(jobs.Jobs[0].EncodedArgs), uuid.UUID(created.ID).String())
+		var queued int
+		for _, job := range jobs.Jobs {
+			if strings.Contains(string(job.EncodedArgs), uuid.UUID(created.ID).String()) {
+				queued++
+			}
+		}
+		require.Equal(t, 1, queued, "the import commits with its one job")
 	})
 }
 

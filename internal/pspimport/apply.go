@@ -13,7 +13,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/progress"
@@ -193,8 +195,12 @@ type outcome struct {
 // declaration is a book and how its results map back to records.
 type declaration struct {
 	book billing.DeclaredBilling
-	// customers are the vault records whose cards the book declares.
+	// customers are the vault records whose cards the book declares, and
+	// reasons why one is not the customer's link at the PSP.
 	customers []uuid.UUID
+	reasons   map[uuid.UUID]string
+	// pspCustomers maps a declared PSP customer's source id to its record.
+	pspCustomers map[string]uuid.UUID
 	// subscriptions maps a source id to its record, txns to its transactions.
 	subscriptions map[string]uuid.UUID
 	txns          map[string][]uuid.UUID
@@ -266,7 +272,12 @@ func (im *Importer) importBook(ctx context.Context, row gen.BillingPspImport, bo
 // record maps subscription and receipt results onto their staged records.
 func (d *declaration) record(res billing.BillingImportResult) {
 	for _, id := range d.customers {
-		d.outcomes[id] = outcome{state: billing.PSPImportImported}
+		d.outcomes[id] = outcome{state: billing.PSPImportImported, reason: d.reasons[id]}
+	}
+	for src, id := range d.pspCustomers {
+		if reason := res.Reasons[src]; reason != "" {
+			d.outcomes[id] = outcome{state: billing.PSPImportImported, reason: reason}
+		}
 	}
 	landed := map[string]bool{}
 	for _, src := range append(append([]string{}, res.Imported...), res.Skipped...) {
@@ -307,10 +318,13 @@ func (d *declaration) record(res billing.BillingImportResult) {
 func (l *lander) declare(groups []customerGroup, known map[string]bool) (declaration, error) {
 	pspID := billing.PSPID(l.scope.ID)
 	d := declaration{receipts: map[string][]uuid.UUID{}, subscriptions: map[string]uuid.UUID{}, txns: map[string][]uuid.UUID{}, outcomes: map[uuid.UUID]outcome{},
-		book: billing.DeclaredBilling{AsOf: l.asOf, DefaultPSP: billing.PSPRef{ID: &pspID}}}
+		reasons: map[uuid.UUID]string{}, pspCustomers: map[string]uuid.UUID{}, book: billing.DeclaredBilling{AsOf: l.asOf, DefaultPSP: billing.PSPRef{ID: &pspID}}}
 	for _, g := range groups {
 		customer := billing.CustomerID(g.customer)
 		d.book.Customers = append(d.book.Customers, billing.DeclaredCustomer{Customer: customer})
+		if err := l.declarePSPCustomer(&d, customer, g.records); err != nil {
+			return d, err
+		}
 		vaults := map[string]customerData{}
 		subs := map[string]gen.BillingPspImportRecord{}
 		for _, r := range g.records {
@@ -475,6 +489,69 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 		}
 	}
 	return d, nil
+}
+
+// declarePSPCustomer links the customer to its customer object at a PSP whose
+// rail has one (a Stripe cus_), so later provider events on it attribute to
+// the customer. Of several, it picks the one a live subscription bills, else
+// the newest; the others say why they are not linked.
+func (l *lander) declarePSPCustomer(d *declaration, customer billing.CustomerID, records []gen.BillingPspImportRecord) error {
+	if !rails.HasRemoteCustomer(models.Rail(l.scope.Rail)) {
+		return nil
+	}
+	billed := map[string]bool{}
+	var linked []gen.BillingPspImportRecord
+	for _, r := range records {
+		switch billing.PSPImportRecordKind(r.Kind) {
+		case billing.PSPImportCustomer:
+			if r.State == string(billing.PSPImportLinked) {
+				linked = append(linked, r)
+			}
+		case billing.PSPImportSubscription:
+			var data subscriptionData
+			if err := json.Unmarshal(r.Data, &data); err != nil {
+				return err
+			}
+			if !data.Ended && r.CustomerRef != nil {
+				billed[*r.CustomerRef] = true
+			}
+		}
+	}
+	if len(linked) == 0 {
+		return nil
+	}
+	created := func(r gen.BillingPspImportRecord) time.Time {
+		if r.OccurredAt == nil {
+			return time.Time{}
+		}
+		return *r.OccurredAt
+	}
+	newer := func(a, b gen.BillingPspImportRecord) bool {
+		return created(a).After(created(b)) || created(a).Equal(created(b)) && a.Ref > b.Ref
+	}
+	pick := linked[0]
+	for _, r := range linked[1:] {
+		if billed[r.Ref] != billed[pick.Ref] {
+			if billed[r.Ref] {
+				pick = r
+			}
+			continue
+		}
+		if newer(r, pick) {
+			pick = r
+		}
+	}
+	pspID := billing.PSPID(l.scope.ID)
+	src := "pspimport:" + l.scope.Rail + ":customer:" + pick.Ref
+	d.book.PSPCustomers = append(d.book.PSPCustomers, billing.DeclaredPSPCustomer{SourceID: src, Customer: customer, Rail: l.scope.Rail,
+		PSP: billing.PSPRef{ID: &pspID}, RemoteCustomerRef: pick.Ref})
+	d.pspCustomers[src] = pick.ID
+	for _, r := range linked {
+		if r.ID != pick.ID {
+			d.reasons[r.ID] = fmt.Sprintf("the customer's link at this PSP is %s; %s was not linked", pick.Ref, r.Ref)
+		}
+	}
+	return nil
 }
 
 // subscription declares one staged subscription; reason says why it cannot.

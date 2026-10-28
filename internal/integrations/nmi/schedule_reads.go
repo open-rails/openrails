@@ -62,7 +62,7 @@ func (c *NMIClient) ReadSchedules(ctx context.Context, ids []string) (map[string
 		return nil, fmt.Errorf("parse recurring report: %w", err)
 	}
 	if msg := strings.TrimSpace(report.ErrorResponse); msg != "" {
-		return nil, fmt.Errorf("recurring report error_response: %s", msg)
+		return nil, queryError("recurring report", msg)
 	}
 	out := make(map[string]ScheduleRecord, len(report.Subscriptions))
 	for _, s := range report.Subscriptions {

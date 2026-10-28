@@ -44,7 +44,7 @@ func ParseRecurringReport(raw string) ([]RecurringReportRow, error) {
 		return nil, fmt.Errorf("parse recurring report: %w", err)
 	}
 	if msg := strings.TrimSpace(report.ErrorResponse); msg != "" {
-		return nil, fmt.Errorf("recurring report error_response: %s", msg)
+		return nil, queryError("recurring report", msg)
 	}
 	return report.Subscriptions, nil
 }

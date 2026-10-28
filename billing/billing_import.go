@@ -26,8 +26,11 @@ type DeclaredBilling struct {
 	DefaultPSP     PSPRef                  `json:"default_psp,omitzero"`
 	Customers      []DeclaredCustomer      `json:"customers,omitempty"`
 	PaymentMethods []DeclaredPaymentMethod `json:"payment_methods,omitempty"`
-	Subscriptions  []DeclaredSubscription  `json:"subscriptions,omitempty"`
-	Transactions   []DeclaredTransaction   `json:"transactions,omitempty"`
+	// PSPCustomers link customers to their customer objects at a PSP, so
+	// later provider events on them attribute to the customer.
+	PSPCustomers  []DeclaredPSPCustomer  `json:"psp_customers,omitempty"`
+	Subscriptions []DeclaredSubscription `json:"subscriptions,omitempty"`
+	Transactions  []DeclaredTransaction  `json:"transactions,omitempty"`
 	// AdminGrants are comped access windows with no payment behind them.
 	AdminGrants []DeclaredAdminGrant `json:"admin_grants,omitempty"`
 	// Purchases are settled one-off sales, each an order with its payment.
@@ -146,6 +149,19 @@ type DeclaredPaymentMethod struct {
 	// Card is the stored card's display facts, as the provider reported them.
 	Card      *CardDetails `json:"card,omitempty"`
 	CreatedAt time.Time    `json:"created_at,omitempty"`
+}
+
+// DeclaredPSPCustomer is a customer's customer object at one PSP (a Stripe
+// cus_), on a rail that has one. It is recorded unless the customer already
+// maps another one there: that one is kept and Reasons[SourceID] says so. A
+// ref another customer holds refuses the import.
+type DeclaredPSPCustomer struct {
+	SourceID string     `json:"source_id,omitempty"`
+	Customer CustomerID `json:"customer"`
+	Rail     string     `json:"rail"`
+	// PSP is the account holding the customer; falls back to DefaultPSP.
+	PSP               PSPRef `json:"psp,omitzero"`
+	RemoteCustomerRef string `json:"remote_customer_ref"`
 }
 
 // PaymentMethodRef links a DeclaredSubscription to a DeclaredPaymentMethod.

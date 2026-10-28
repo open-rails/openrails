@@ -51,12 +51,13 @@ mounted with `RouteGroups.MerchantConfig` and checked like the merchant's
 other configuration. The HTTP body cap (1 MiB) forces large books to
 batch.
 
-The book (`DeclaredBilling`) carries five record kinds, plus admin grants:
+The book (`DeclaredBilling`) carries six record kinds, plus admin grants:
 
 | Kind | Idempotency key | Notes |
 |---|---|---|
 | `customers` | customer UUID (upsert) | the host's stable subject id = `customers.id`; an optional `email` |
 | `payment_methods` | (rail, rail_customer_ref, rail_method_ref) | vault refs + the `card` (`brand`, `last4`, `exp_month`, `exp_year`); `psp` attributes the vault entry |
+| `psp_customers` | (psp, remote_customer_ref) | a customer's customer object at a PSP whose rail has one (Stripe `cus_`), so later provider events on it attribute; insert if absent: a customer already linked keeps its link (`reasons[source_id]` says so), a ref another customer holds refuses the book |
 | `subscriptions` | (rail, rail_subscription_id) | `source_id` (host's stable id) keys per-row results; `psp` binds the row to the PSP that owns it at the provider; optional `payment_method` ref, `cancel` / `dunning` evidence, raw `evidence` JSON stored verbatim on `gateway_response` |
 | `transactions` | (rail, transaction_id) | successes **and** declines — the true attempt history; `amount` is a decimal string in the currency's native units (micros for USD) |
 | `purchases` | `source_id` and (psp, transaction_id) | settled one-off sales: frozen lines, the rail payment, the access bought |

@@ -130,6 +130,9 @@ func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body
 		if resp.StatusCode >= 500 {
 			return classify(fmt.Errorf("nmi v5 request failed: status %d", resp.StatusCode))
 		}
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return fmt.Errorf("%w: %w: status %d", ErrV5Refused, ErrCredentialsRejected, resp.StatusCode)
+		}
 		return fmt.Errorf("%w: status %d", ErrV5Refused, resp.StatusCode)
 	}
 

@@ -86,6 +86,7 @@ internal/river/jobs_maintenance.go|return time.Now().UTC()|business_time_boundar
 internal/river/jobs_provider_intents.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_provider_refresh.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_provider_refresh.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|2
+internal/river/jobs_psp_import.go|return time.Now().Add(pspimport.RetryDelay(job.Attempt))|infrastructure_time|River schedules a retry on its own wall clock|1
 internal/river/jobs_solana_crank.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_solana_reconcile.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_subscription_converge.go|ScheduledAt: time.Now().Add(debounce),|infrastructure_time|Queue scheduling and provider retry backoff use physical time|1

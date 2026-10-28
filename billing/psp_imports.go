@@ -57,8 +57,36 @@ const (
 	PSPImportPulled   PSPImportStatus = "pulled"
 	PSPImportApplying PSPImportStatus = "applying"
 	PSPImportApplied  PSPImportStatus = "applied"
-	// PSPImportFailed names its error; creating the import again retries.
+	// PSPImportFailed names its error. A failed onboarding import restarts
+	// when its PSP's configuration is next loaded or changes; a manual one is
+	// created again.
 	PSPImportFailed PSPImportStatus = "failed"
+)
+
+// PSPImportOrigin is who started an import.
+type PSPImportOrigin string
+
+const (
+	// PSPImportOnboarding is the one pull OpenRails starts by itself when a
+	// PSP's configuration is first loaded: one per PSP, whichever replica or
+	// host loads it first.
+	PSPImportOnboarding PSPImportOrigin = "onboarding"
+	// PSPImportManual is an import a person created.
+	PSPImportManual PSPImportOrigin = "manual"
+)
+
+// PSPImportErrorCode is why a failed import stopped when only a change to
+// the PSP's configuration lets it pull.
+type PSPImportErrorCode string
+
+const (
+	// PSPImportCredentialsRejected: the provider refused the PSP's
+	// credentials. A consistency.psp_import.credentials_rejected finding is
+	// open until a pull of the PSP reads it.
+	PSPImportCredentialsRejected PSPImportErrorCode = "psp_credentials_rejected"
+	// PSPImportNotReadable: the PSP is gone, its rail has no import, or a
+	// credential the pull needs is not declared.
+	PSPImportNotReadable PSPImportErrorCode = "psp_not_readable"
 )
 
 // PSPImportRecordKind is what a staged provider object is.
@@ -111,8 +139,8 @@ type PSPImportRule struct {
 }
 
 // CreatePSPImportParams starts pulling one PSP. HistorySince bounds the
-// transaction history read; nil reads from the earliest subscription's start.
-// Rules nil links by the directory's email.
+// transaction history read; nil reads from the earliest customer or
+// subscription the provider lists. Rules nil links by the directory's email.
 type CreatePSPImportParams struct {
 	PSP          PSPRef          `json:"psp"`
 	HistorySince *time.Time      `json:"history_since,omitempty"`
@@ -134,21 +162,24 @@ type PSPImportCount struct {
 // PSPImport is one PSP's pull and landing. HistoryThrough is how far its
 // transaction history has been read. Its subscriptions land on the provider
 // prices mapping their plans: ListProviderCatalog with Import lists the
-// plans to map.
+// plans to map. ErrorCode, when set on a failed import, names a cause only a
+// configuration change fixes.
 type PSPImport struct {
-	ID             PSPImportID      `json:"id"`
-	PSP            PSPID            `json:"psp"`
-	Rail           string           `json:"rail"`
-	Status         PSPImportStatus  `json:"status"`
-	HistorySince   *time.Time       `json:"history_since"`
-	HistoryThrough *time.Time       `json:"history_through"`
-	PulledAt       *time.Time       `json:"pulled_at"`
-	AppliedAt      *time.Time       `json:"applied_at"`
-	Error          *string          `json:"error"`
-	Rules          []PSPImportRule  `json:"rules"`
-	Counts         []PSPImportCount `json:"counts"`
-	CreatedAt      time.Time        `json:"created_at"`
-	UpdatedAt      time.Time        `json:"updated_at"`
+	ID             PSPImportID         `json:"id"`
+	PSP            PSPID               `json:"psp"`
+	Rail           string              `json:"rail"`
+	Origin         PSPImportOrigin     `json:"origin"`
+	Status         PSPImportStatus     `json:"status"`
+	HistorySince   *time.Time          `json:"history_since"`
+	HistoryThrough *time.Time          `json:"history_through"`
+	PulledAt       *time.Time          `json:"pulled_at"`
+	AppliedAt      *time.Time          `json:"applied_at"`
+	Error          *string             `json:"error"`
+	ErrorCode      *PSPImportErrorCode `json:"error_code"`
+	Rules          []PSPImportRule     `json:"rules"`
+	Counts         []PSPImportCount    `json:"counts"`
+	CreatedAt      time.Time           `json:"created_at"`
+	UpdatedAt      time.Time           `json:"updated_at"`
 }
 
 // PSPImportFact is one identity fact a provider holds for an object.
@@ -180,11 +211,14 @@ type PSPImportRecord struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// PSPImportListParams lists the merchant's imports, newest first.
+// PSPImportListParams lists the merchant's imports, newest first: one PSP's
+// (by id or key) and of one origin when set.
 type PSPImportListParams struct {
 	PageRequest
 	// IDs instead reads 1 to MaxBatchItems named imports in one page.
-	IDs []PSPImportID
+	IDs    []PSPImportID
+	PSP    PSPRef
+	Origin PSPImportOrigin
 }
 
 // PSPImportRecordListParams filters an import's records, in id order.

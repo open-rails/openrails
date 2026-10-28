@@ -1,7 +1,25 @@
 -- name: CreatePSPImport :one
-INSERT INTO billing.psp_imports (merchant_id, psp_id, rail, status, history_since, rules)
-VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(rail)::text, 'pulling', sqlc.narg(history_since)::timestamptz,
+INSERT INTO billing.psp_imports (merchant_id, psp_id, rail, origin, status, history_since, rules)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(rail)::text, 'manual', 'pulling', sqlc.narg(history_since)::timestamptz,
     sqlc.arg(rules)::jsonb)
+RETURNING *;
+
+-- name: CreateOnboardingPSPImport :many
+-- A PSP's onboarding import, unless it has one in any status. A replica or
+-- host inserting it concurrently wins on psp_imports_onboarding_key: this
+-- then returns no row.
+INSERT INTO billing.psp_imports (merchant_id, psp_id, rail, origin, status, rules)
+SELECT sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(rail)::text, 'onboarding', 'pulling', sqlc.arg(rules)::jsonb
+WHERE NOT EXISTS (SELECT 1 FROM billing.psp_imports
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND origin = 'onboarding')
+ON CONFLICT (merchant_id, psp_id) WHERE origin = 'onboarding' AND status <> 'failed' DO NOTHING
+RETURNING *;
+
+-- name: RearmOnboardingPSPImport :many
+-- Restarts a failed onboarding import in place; a concurrent re-arm or a
+-- live import matches nothing.
+UPDATE billing.psp_imports SET status = 'pulling', error = NULL, error_code = NULL, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND origin = 'onboarding' AND status = 'failed'
 RETURNING *;
 
 -- name: GetPSPImport :one
@@ -14,6 +32,8 @@ SELECT * FROM billing.psp_imports WHERE merchant_id = sqlc.arg(merchant_id)::uui
 -- The merchant's imports, newest first.
 SELECT * FROM billing.psp_imports
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(psp_id)::uuid IS NULL OR psp_id = sqlc.narg(psp_id)::uuid)
+  AND (sqlc.narg(origin)::text IS NULL OR origin = sqlc.narg(origin)::text)
   AND (sqlc.narg(after_at)::timestamptz IS NULL OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;
@@ -24,8 +44,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 RETURNING *;
 
 -- name: SetPSPImportStatus :one
--- error is set exactly when the status is failed.
-UPDATE billing.psp_imports SET status = sqlc.arg(status)::text, error = sqlc.narg(error)::text, updated_at = now()
+-- error is set exactly when the status is failed; error_code only then.
+UPDATE billing.psp_imports SET status = sqlc.arg(status)::text, error = sqlc.narg(error)::text, error_code = sqlc.narg(error_code)::text, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 RETURNING *;
 
@@ -40,7 +60,7 @@ UPDATE billing.psp_imports SET history_through = sqlc.arg(history_through)::time
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: SetPSPImportApplied :exec
-UPDATE billing.psp_imports SET status = 'applied', error = NULL, applied_at = sqlc.arg(applied_at)::timestamptz, updated_at = now()
+UPDATE billing.psp_imports SET status = 'applied', error = NULL, error_code = NULL, applied_at = sqlc.arg(applied_at)::timestamptz, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: DeletePSPImport :execrows

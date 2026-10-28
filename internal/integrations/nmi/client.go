@@ -415,6 +415,9 @@ func (c *NMIClient) sendQueryRequest(ctx context.Context, data url.Values) (_ st
 		}
 	}()
 
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return "", fmt.Errorf("unexpected status code: %d: %w", resp.StatusCode, ErrCredentialsRejected)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}

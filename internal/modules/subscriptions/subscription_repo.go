@@ -109,6 +109,12 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
+	// The model is the row: its PSP and the provider's collection when none
+	// was named.
+	s.PspID = params.PspID
+	if s.CollectionPolicy == "" {
+		s.CollectionPolicy = models.CollectionPolicyProvider
+	}
 	s.LifecycleRev, s.RowVersion = 0, 0
 	s.RememberLifecycle()
 	return nil

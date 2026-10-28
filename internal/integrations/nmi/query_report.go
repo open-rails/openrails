@@ -95,7 +95,7 @@ func ParseTransactionReport(raw string) (TransactionReport, error) {
 		return report, fmt.Errorf("parse transaction query response: %w", err)
 	}
 	if msg := strings.TrimSpace(report.ErrorResponse); msg != "" {
-		return report, fmt.Errorf("transaction query error_response: %s", msg)
+		return report, queryError("transaction query", msg)
 	}
 	return report, nil
 }

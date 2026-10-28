@@ -70,6 +70,9 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 	if err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(content) == "" {
+		return nil, nil // no active members
+	}
 
 	if !strings.HasPrefix(content, `"ACTIVEMEMBERS"`) {
 		log.WithContext(ctx).WithField("response_length", len(content)).Error("Invalid response format from CCBill")
@@ -142,13 +145,9 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 			break
 		}
 
-		if resp.StatusCode == http.StatusUnauthorized {
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			resp.Body.Close()
-			return "", fmt.Errorf("authentication failed: invalid credentials")
-		}
-		if resp.StatusCode == http.StatusForbidden {
-			resp.Body.Close()
-			return "", fmt.Errorf("access forbidden: check client account permissions")
+			return "", fmt.Errorf("%w: status %d", ErrDataLinkAuth, resp.StatusCode)
 		}
 
 		log.WithContext(ctx).WithFields(log.Fields{
@@ -178,13 +177,14 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 	content := string(body)
 
 	// CCBill errors arrive as plain text; CSV data starts with a quote.
-	if !strings.HasPrefix(content, `"`) &&
-		(strings.HasPrefix(strings.ToLower(content), "error") ||
-			strings.HasPrefix(strings.ToLower(content), "invalid") ||
-			strings.Contains(strings.ToLower(content), "authentication failed") ||
-			strings.Contains(strings.ToLower(content), "access denied")) {
-		log.WithContext(ctx).WithField("response_length", len(content)).Error("Error response from CCBill")
-		return "", fmt.Errorf("ccbill api returned an error payload")
+	if lower := strings.ToLower(content); !strings.HasPrefix(content, `"`) {
+		if strings.Contains(lower, "authentication failed") || strings.Contains(lower, "access denied") {
+			return "", fmt.Errorf("%w: it answered an authentication error", ErrDataLinkAuth)
+		}
+		if strings.HasPrefix(lower, "error") || strings.HasPrefix(lower, "invalid") {
+			log.WithContext(ctx).WithField("response_length", len(content)).Error("Error response from CCBill")
+			return "", fmt.Errorf("ccbill api returned an error payload")
+		}
 	}
 
 	return content, nil

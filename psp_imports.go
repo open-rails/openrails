@@ -23,11 +23,19 @@ func (c *Client) CreatePSPImport(ctx context.Context, params billing.CreatePSPIm
 	return &out, nil
 }
 
-// ListPSPImports lists the merchant's PSP imports, newest first.
+// ListPSPImports lists the merchant's PSP imports, newest first: one PSP's
+// and of one origin when set. ListPSPImports{PSP, Origin: onboarding} finds
+// the PSP's onboarding import.
 func (c *Client) ListPSPImports(ctx context.Context, params billing.PSPImportListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PSPImport], error) {
 	q := pageValues(nil, params.PageRequest)
 	if err := setIDs(q, params.IDs); err != nil {
 		return nil, err
+	}
+	if !params.PSP.IsZero() {
+		q.Set("psp", params.PSP.String())
+	}
+	if params.Origin != "" {
+		q.Set("origin", string(params.Origin))
 	}
 	var out billing.ListPage[billing.PSPImport]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/psp-imports?"+q.Encode(), nil, &out, requestOptions...); err != nil {

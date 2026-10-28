@@ -3,8 +3,10 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/pspimport"
@@ -48,7 +50,17 @@ func writePSPImportRefusal(r *httprequest.Request, err error, internalMessage st
 	writeRefusal(r, err, internalMessage)
 }
 
+// PSPImportQuery filters ListPSPImports: psp names one PSP by id or key.
+type PSPImportQuery struct {
+	PSP    string                  `form:"psp"`
+	Origin billing.PSPImportOrigin `form:"origin"`
+}
+
 func ListPSPImports(r *httprequest.Request) {
+	var query PSPImportQuery
+	if !r.BindQuery(&query) {
+		return
+	}
 	page, ok := r.Page()
 	if !ok {
 		return
@@ -61,7 +73,18 @@ func ListPSPImports(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := im.List(r.Request.Context(), billing.PSPImportListParams{PageRequest: page, IDs: ids})
+	params := billing.PSPImportListParams{PageRequest: page, IDs: ids, Origin: query.Origin}
+	if psp := strings.TrimSpace(query.PSP); strings.HasPrefix(psp, billing.PSPIDPrefix) {
+		id, err := billing.ParsePSPID(psp)
+		if err != nil {
+			r.APIError(api.Coded(billing.CodeInvalidQuery, "psp names a PSP by id or key").WithParam("psp"))
+			return
+		}
+		params.PSP.ID = &id
+	} else {
+		params.PSP.Key = psp
+	}
+	out, err := im.List(r.Request.Context(), params)
 	if err != nil {
 		writeRefusal(r, err, "PSP import list failed")
 		return

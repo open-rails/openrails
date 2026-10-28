@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type obj = map[string]any
@@ -106,7 +107,7 @@ func (m *Mock) v5(method string, seg []string, q url.Values, body []byte) (int, 
 			m.refusedSaves++
 			return v5Invalid("card refused")
 		}
-		v := &Vault{ID: m.next("vault"), BillingID: m.next("bill"), Card: c}
+		v := &Vault{ID: m.next("vault"), BillingID: m.next("bill"), Card: c, Created: m.now()}
 		m.vaults[v.ID] = v
 		return http.StatusOK, m.customer(v)
 	case seg[0] == "customers" && len(seg) == 1 && method == http.MethodGet:
@@ -265,7 +266,7 @@ func (m *Mock) customer(v *Vault) obj {
 	if shipping == "" {
 		shipping = "ship-" + v.ID
 	}
-	out := obj{"object": "customer", "id": v.ID, "created": "2026-01-01T00:00:00Z", "billing": billing,
+	out := obj{"object": "customer", "id": v.ID, "created": v.Created.UTC().Format(time.RFC3339), "billing": billing,
 		"shipping": []obj{{"object": "shipping", "id": shipping, "priority": 1}}}
 	if v.Book != "" {
 		out["merchant_defined_fields"] = obj{"field_20": v.Book}

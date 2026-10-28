@@ -75,6 +75,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 		set, err := r.syncMerchantConfig(ctx, id, previous, loaded)
 		if err == nil {
 			r.followPSPPosture(id, previous, set)
+			r.followPSPImports(id, previous, set)
 			r.followPaymentDomain(id, previous, set)
 			r.recordRefusedDocuments(ctx, id, previous, set)
 		}

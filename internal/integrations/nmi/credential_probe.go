@@ -9,8 +9,19 @@ import (
 	"strings"
 )
 
-// ErrCredentialsRejected: the gateway answered and refused the security key.
+// ErrCredentialsRejected: the gateway answered and refused the security key
+// (a v5 401 or 403, or a Query API authentication error_response).
 var ErrCredentialsRejected = errors.New("provider rejected credentials")
+
+// queryError is a Query API error_response as an error: one naming
+// authentication is the gateway refusing the security key.
+func queryError(report, msg string) error {
+	lower := strings.ToLower(msg)
+	if strings.Contains(lower, "authentic") || strings.Contains(lower, "security key") {
+		return fmt.Errorf("%s error_response: %s: %w", report, msg, ErrCredentialsRejected)
+	}
+	return fmt.Errorf("%s error_response: %s", report, msg)
+}
 
 // ProbeCredentials verifies the security key through a bounded, read-only
 // transaction query. It never creates or changes provider state.

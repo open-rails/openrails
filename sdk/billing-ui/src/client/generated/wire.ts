@@ -822,6 +822,7 @@ export type DeclaredBilling = {
   default_psp?: PSPRef
   customers?: DeclaredCustomer[]
   payment_methods?: DeclaredPaymentMethod[]
+  psp_customers?: DeclaredPSPCustomer[]
   subscriptions?: DeclaredSubscription[]
   transactions?: DeclaredTransaction[]
   admin_grants?: DeclaredAdminGrant[]
@@ -857,6 +858,14 @@ export type DeclaredOrderLine = {
   unit_amount?: string
   description?: string
   access_ends_at?: string
+}
+
+export type DeclaredPSPCustomer = {
+  source_id?: string
+  customer?: string
+  rail?: string
+  psp?: PSPRef
+  remote_customer_ref?: string
 }
 
 export type DeclaredPaymentMethod = {
@@ -1560,12 +1569,14 @@ export type PSPImport = {
   id: string
   psp: string
   rail: string
+  origin: "manual" | "onboarding"
   status: "applied" | "applying" | "failed" | "pulled" | "pulling"
   history_since: string | null
   history_through: string | null
   pulled_at: string | null
   applied_at: string | null
   error: string | null
+  error_code: "psp_credentials_rejected" | "psp_not_readable" | null
   rules: PSPImportRule[]
   counts: PSPImportCount[]
   created_at: string

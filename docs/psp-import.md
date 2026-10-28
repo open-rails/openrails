@@ -28,19 +28,57 @@ The pull only reads: list, report and get calls on a read-only client. It
 never refunds, voids, cancels or edits anything at the provider. A landed
 subscription stays provider-run, exactly as an imported one does.
 
+## Onboarding import
+
+The first time a process loads a PSP's configuration (an NMI, Stripe or CCBill
+account that is declared, live and not a duplicate), OpenRails creates the
+PSP's **onboarding import** (`origin: onboarding`) and queues its pull, in one
+transaction. A PSP has at most one: whichever replica or host (Doujins and
+Hentai0 share one merchant) loads it first creates it, and the others find it.
+Existing PSPs get theirs on the first boot after upgrading. It runs in the
+background, also with provider writes `readonly`, and lands nothing: a person
+reviews, maps, links and applies it as any import. Find it with
+`ListPSPImports{PSP, Origin: onboarding}`. An import a person creates is
+`manual` and never stands in for it; deleting the onboarding import makes it
+again at the PSP's next load.
+
+**Retries.** A provider that does not answer (network, timeout, 5xx, 429), an
+unreachable secret store or database is retried without failing the import:
+attempt⁴ seconds apart, at most an hour, up to 10 000 attempts (about 14
+months), each resuming from the last committed history window. Two causes
+fail it at once, with `error_code`:
+
+- `psp_credentials_rejected`: the provider refused the credentials (NMI v5
+  401/403 or a Query API authentication error, Stripe 401/403, DataLink
+  401/403 or "Authentication failed"). It also opens one
+  `consistency.psp_import.credentials_rejected` finding per PSP (high,
+  review queue) and alerts the operator. The finding closes when a pull of
+  the PSP is answered again, or the PSP is no longer importable.
+- `psp_not_readable`: the PSP is gone, its rail has no import, or a
+  credential the pull needs is not declared.
+
+A failed onboarding import restarts in place (same import, same staged
+records) when a process first loads the PSP's configuration or sees it change:
+fix the credentials and it pulls. While they stay rejected, each boot costs
+one provider read.
+
+**History** reads from the earliest object the provider lists, customers
+included (an NMI vault's or Stripe customer's creation, a subscription's
+start, a CCBill signup), unless a manual import names `history_since`.
+
 ## Flow
 
 1. **Customer mappings** (optional). `Client.SetPSPImportMappings`
    (`POST /v1/merchant/psp-import-mappings`) maps the merchant's own
    identifiers to customers, up to 100 per call: `{mapping: "legacy_user",
    key: "1002", customer: "<uuid>"}`. A null customer deletes one.
-2. **Create.** `Client.CreatePSPImport` (`POST /v1/merchant/psp-imports`)
-   names the PSP, the rules and optionally `history_since` (default: the
-   earliest live subscription's start). The pull runs as a job;
-   `GetPSPImport` reports `pulling`, then `pulled`. It observes the PSP's
-   catalog, reads the roster once, then the transaction history in 30-day
-   windows, committing each (`history_through`), so a retried job resumes. An
-   unreachable provider fails the job, which retries.
+2. **Create**, or take the onboarding import. `Client.CreatePSPImport`
+   (`POST /v1/merchant/psp-imports`) names the PSP, the rules and optionally
+   `history_since` (default: the earliest object the provider lists). The
+   pull runs as a job; `GetPSPImport` reports `pulling`, then `pulled`. It
+   observes the PSP's catalog, reads the roster once, then the transaction
+   history in 30-day windows, committing each (`history_through`), so a
+   retried job resumes. `UpdatePSPImport` replaces the rules of either kind.
 3. **Review.** `ListPSPImportRecords` lists the staged objects
    (`customer`, `subscription`, `transaction`) with their facts, filtered by
    `state`: `unmatched`, `conflict`, `linked`, `imported`, `blocked`.
@@ -60,7 +98,14 @@ subscription stays provider-run, exactly as an imported one does.
    stays `blocked` ("plan X is unmapped"): map it, link and apply again. A
    customer the billing import refuses blocks only its own records. Applying
    again lands what was linked since; landed records stay `imported`, so
-   nothing lands twice.
+   nothing lands twice, and a later import of the same PSP finds them
+   present. A linked NMI vault lands as the customer's payment method.
+   A linked Stripe customer also lands as the customer's link at the PSP
+   (`psp_customers`), so a later subscription Stripe bills on it attributes
+   to the customer. A customer with several picks the one a live subscription
+   bills, else the newest; a customer already linked to another keeps it;
+   either way the record's reason says so. One another customer holds blocks
+   its customer.
 7. `DeletePSPImport` removes the import and its staged copies; what it
    landed stays. The observed catalog stays.
 

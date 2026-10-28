@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
@@ -47,7 +48,7 @@ var sources = map[string]func(ctx context.Context, im *Importer, mid billing.Mer
 	"ccbill": func(ctx context.Context, im *Importer, mid billing.MerchantID, scope merchants.PSPScope) (source, error) {
 		acc, sub, ok := strings.Cut(strings.TrimSpace(scope.AccountID), "-")
 		if !ok || acc == "" || sub == "" {
-			return nil, fmt.Errorf("CCBill account %q is not clientAccnum-clientSubacc", scope.AccountID)
+			return nil, notReadable(fmt.Errorf("CCBill account %q is not clientAccnum-clientSubacc", scope.AccountID))
 		}
 		username, err := im.secret(ctx, mid, scope, "datalink_username")
 		if err != nil {
@@ -67,7 +68,8 @@ var sources = map[string]func(ctx context.Context, im *Importer, mid billing.Mer
 	},
 }
 
-// secret reads one of the PSP's credentials.
+// secret reads one of the PSP's credentials. One the configuration does not
+// declare, or declares empty, is merchants.ErrSecretNotFound.
 func (im *Importer) secret(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, name string) (string, error) {
 	if im.Merchants == nil {
 		return "", errors.New("merchant configuration is not wired")
@@ -81,9 +83,23 @@ func (im *Importer) secret(ctx context.Context, mid billing.MerchantID, scope me
 		return "", fmt.Errorf("secret %s: %w", name, err)
 	}
 	if strings.TrimSpace(sec.Value) == "" {
-		return "", fmt.Errorf("secret %s is empty", name)
+		return "", fmt.Errorf("secret %s is empty: %w", name, merchants.ErrSecretNotFound)
 	}
 	return strings.TrimSpace(sec.Value), nil
+}
+
+// clientError classifies a failure to build a PSP's read client: a credential
+// the configuration does not hold cannot be read by retrying; anything else
+// (the secret store unreachable) can.
+func clientError(scope merchants.PSPScope, err error) error {
+	var permanent PermanentError
+	switch {
+	case errors.As(err, &permanent):
+		return err
+	case errors.Is(err, merchants.ErrSecretNotFound) || errors.Is(err, railresolve.ErrRailNotArmed):
+		return notReadable(fmt.Errorf("PSP %s is not readable: %w", scope.Key, err))
+	}
+	return fmt.Errorf("PSP %s credentials: %w", scope.Key, err)
 }
 
 // historyWindow bounds one transaction read and its commit.
@@ -94,27 +110,48 @@ const stageBatch = 500
 
 // Pull reads the import's PSP: its catalog and roster once, then its
 // transaction history window by window, each committed with how far it
-// reached, so a retried job resumes. It then links what it staged.
+// reached, so a retried job resumes. It then links what it staged. A provider
+// refusing the credentials is permanent, ErrCredentialsRejected; so is a PSP
+// or credential the configuration no longer declares.
 func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID) error {
 	row, err := im.row(ctx, id)
 	if err != nil || row.Status != string(billing.PSPImportPulling) {
 		return err
 	}
+	err = im.pull(ctx, row)
+	if err != nil && rejected(err) {
+		return PermanentError{Err: fmt.Errorf("%w: %w", ErrCredentialsRejected, err), Code: billing.PSPImportCredentialsRejected}
+	}
+	return err
+}
+
+func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport) error {
+	id := billing.PSPImportID(row.ID)
 	mid := billing.MerchantID(row.MerchantID)
 	scope, found, err := im.Merchants.PSPScopeByID(ctx, mid, row.PspID)
 	if err != nil {
 		return err
 	}
 	if !found {
-		return Permanent(errors.New("the import's PSP is no longer declared"))
+		return notReadable(errors.New("the import's PSP is no longer declared"))
 	}
 	build, ok := sources[scope.Rail]
 	if !ok {
-		return Permanent(fmt.Errorf("%s has no import", scope.Rail))
+		return notReadable(fmt.Errorf("%s has no import", scope.Rail))
 	}
 	src, err := build(ctx, im, mid, scope)
 	if err != nil {
-		return Permanent(fmt.Errorf("PSP %s is not readable: %w", scope.Key, err))
+		return clientError(scope, err)
+	}
+	// The first answer the provider gives closes the PSP's credentials
+	// finding.
+	answered := false
+	read := func() error {
+		if answered {
+			return nil
+		}
+		answered = true
+		return im.resolveCredentialsFinding(ctx, row)
 	}
 	q := im.DB.Gen(ctx)
 	if row.PulledAt == nil {
@@ -127,6 +164,9 @@ func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID) error {
 		if err != nil {
 			return err
 		}
+		if err := read(); err != nil {
+			return err
+		}
 		if err := im.stage(ctx, row, recs); err != nil {
 			return err
 		}
@@ -137,7 +177,7 @@ func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID) error {
 		if since == nil {
 			since = &observed
 			for _, r := range recs {
-				if r.kind == billing.PSPImportSubscription && !r.occurredAt.IsZero() && r.occurredAt.Before(*since) {
+				if !r.occurredAt.IsZero() && r.occurredAt.Before(*since) {
 					t := r.occurredAt
 					since = &t
 				}
@@ -160,6 +200,9 @@ func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID) error {
 		progress.Mark(ctx, fmt.Sprintf("psp import %s history %s", id, through.Format(time.DateOnly)))
 		recs, err := src.history(ctx, through, until)
 		if err != nil {
+			return err
+		}
+		if err := read(); err != nil {
 			return err
 		}
 		for i := range recs {
@@ -202,7 +245,7 @@ func (im *Importer) observeCatalog(ctx context.Context, scope merchants.PSPScope
 		return nil, nil
 	}
 	if err != nil {
-		return nil, Permanent(fmt.Errorf("PSP %s is not readable: %w", scope.Key, err))
+		return nil, clientError(scope, err)
 	}
 	at := im.Objects.Now()
 	objects, err := reader.List(ctx)
@@ -349,14 +392,24 @@ func (im *Importer) stage(ctx context.Context, row gen.BillingPspImport, recs []
 	return nil
 }
 
-// PermanentError is a job failure retrying cannot fix.
-type PermanentError struct{ Err error }
+// PermanentError is a job failure retrying cannot fix. Code names one only a
+// change to the PSP's configuration fixes.
+type PermanentError struct {
+	Err  error
+	Code billing.PSPImportErrorCode
+}
 
 func (e PermanentError) Error() string { return e.Err.Error() }
 func (e PermanentError) Unwrap() error { return e.Err }
 
 // Permanent marks err as one a retry cannot fix.
 func Permanent(err error) error { return PermanentError{Err: err} }
+
+// notReadable is a PSP the configuration gives no way to read: gone, on a
+// rail without an import, or missing a credential.
+func notReadable(err error) error {
+	return PermanentError{Err: err, Code: billing.PSPImportNotReadable}
+}
 
 // Run runs one step of the import in ctx's merchant scope.
 func (im *Importer) Run(ctx context.Context, mid billing.MerchantID, id billing.PSPImportID, step Step) error {

@@ -44,6 +44,8 @@ type Vault struct {
 	// Email and the names are the billing entry's; ShippingID names the
 	// shipping entry (NMI generates one when empty).
 	Email, FirstName, LastName, ShippingID string
+	// Created is when the vault was stored.
+	Created time.Time
 }
 
 // Billing is a further billing entry (card) in a vault.

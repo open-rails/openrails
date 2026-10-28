@@ -3,7 +3,13 @@
 package critical_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/authtest"
@@ -22,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,9 +42,35 @@ type importWorld struct {
 	stripe *stripemock.Mock
 	ccbill *ccbillmock.Mock
 	fleet  *river.Client[pgx.Tx]
+	// api is the merchant's client; a restart replaces it with the new
+	// engine's own.
+	api *openrails.Client
+	// importable are the declared PSPs an onboarding import pulls.
+	importable []string
 }
 
-func newImportWorld(t *testing.T, psps ...string) *importWorld {
+func importNMIPSP(gateway, securityKey string, archived bool) openrails.PSPConfig {
+	return openrails.NMIPSP{GatewayID: gateway, Environment: openrails.EnvironmentTest, SecurityKey: securityKey, WebhookSigningSecret: "critical-import-webhook",
+		TokenizationKey: "critical-import-collect", Archived: archived}.PSPConfig()
+}
+
+func importStripePSP(secretKey string) openrails.PSPConfig {
+	return openrails.StripePSP{AccountID: "acct_import", Environment: openrails.EnvironmentTest, SecretKey: secretKey, WebhookSigningSecret: "whsec_import",
+		PublishableKey: "pk_test_import"}.PSPConfig()
+}
+
+func importCCBillPSP(subacc, password string) openrails.PSPConfig {
+	return openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: subacc, Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt",
+		DatalinkUsername: "critical-datalink", DatalinkPassword: password}.PSPConfig()
+}
+
+// deadRPC is a loopback Solana RPC nothing answers.
+const deadRPC = "http://127.0.0.1:1"
+
+// bootImportWorld boots the merchant with psps declared. Its configuration
+// load queues each importable PSP's onboarding import; no fleet runs them
+// until start.
+func bootImportWorld(t *testing.T, psps ...string) *importWorld {
 	t.Helper()
 	iw := &importWorld{}
 	serve := func(handler http.Handler) loopbackWire {
@@ -51,35 +85,42 @@ func newImportWorld(t *testing.T, psps ...string) *importWorld {
 	iw.authorityWorld = newAuthorityWorld(t, func(w *world) {
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		declared := openrails.PSPs{}
-		ccbill := func(subacc string) openrails.PSPConfig {
-			return openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: subacc, Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt",
-				DatalinkUsername: "critical-datalink", DatalinkPassword: "critical-datalink-password"}.PSPConfig()
-		}
+		sandbox := openrails.ProviderSandboxConfig{}
 		for _, key := range psps {
 			switch key {
 			case "nmi":
 				iw.nmi = nmimock.NewUnstarted(nmimock.Options{Clock: w.clock.Now})
 				w.deps.NMITransport = serve(iw.nmi)
-				declared[key] = openrails.NMIPSP{GatewayID: "critical-import-gateway", Environment: openrails.EnvironmentTest, SecurityKey: "critical-import-key",
-					WebhookSigningSecret: "critical-import-webhook", TokenizationKey: "critical-import-collect"}.PSPConfig()
+				declared[key] = importNMIPSP("critical-import-gateway", "critical-import-key", false)
+			case "nmi-archived":
+				declared[key] = importNMIPSP("critical-archived-gateway", "critical-archived-key", true)
+				continue
 			case "stripe":
 				iw.stripe = stripemock.NewUnstarted(stripemock.Options{Clock: w.clock.Now})
 				w.deps.StripeTransport = serve(iw.stripe)
-				declared[key] = openrails.StripePSP{AccountID: "acct_import", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_import",
-					WebhookSigningSecret: "whsec_import", PublishableKey: "pk_test_import"}.PSPConfig()
+				declared[key] = importStripePSP("sk_test_import")
 			case "ccbill":
 				iw.ccbill = ccbillmock.New()
 				t.Cleanup(iw.ccbill.Close)
-				w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: iw.ccbill.URL()}
-				declared[key] = ccbill("0000")
+				sandbox.CCBillDataLinkURL = iw.ccbill.URL()
+				declared[key] = importCCBillPSP("0000", "critical-datalink-password")
 			case "ccbill-two":
-				declared[key] = ccbill("0001")
+				declared[key] = importCCBillPSP("0001", "critical-datalink-password")
+			case "solana":
+				sandbox.SolanaRPCURL = deadRPC
+				declared[key] = openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: solanago.NewWallet().PublicKey().String(), RPCURL: deadRPC}.PSPConfig()
+				continue
 			}
+			iw.importable = append(iw.importable, key)
+		}
+		if sandbox != (openrails.ProviderSandboxConfig{}) {
+			w.cfg.ProviderSandbox = &sandbox
 		}
 		merchant := w.cfg.Merchants["alpha"]
 		merchant.PSPs = declared
 		w.cfg.Merchants["alpha"] = merchant
 	})
+	iw.api = iw.alphaRemote
 	t.Cleanup(func() {
 		if iw.nmi != nil {
 			require.Empty(t, iw.nmi.Calls(), "a PSP import never writes to NMI")
@@ -93,8 +134,97 @@ func newImportWorld(t *testing.T, psps ...string) *importWorld {
 			require.Empty(t, iw.ccbill.Unexpected())
 		}
 	})
-	iw.fleet = startFleet(t, iw.world)
+	iw.fleet = hostFleet(t, iw.world, 2)
 	return iw
+}
+
+// newImportWorld is a booted import world whose fleet ran every onboarding
+// pull: of PSPs that hold nothing yet.
+func newImportWorld(t *testing.T, psps ...string) *importWorld {
+	t.Helper()
+	iw := bootImportWorld(t, psps...)
+	iw.start(t)
+	for _, key := range iw.importable {
+		iw.await(t, iw.onboarding(t, key).ID, billing.PSPImportPulled)
+	}
+	return iw
+}
+
+// start runs the world's fleet.
+func (iw *importWorld) start(t *testing.T) {
+	t.Helper()
+	require.NoError(t, iw.engine.Start(t.Context(), openrails.WithRiverClient(iw.fleet)))
+	require.NoError(t, iw.fleet.Start(t.Context()))
+}
+
+// restart stops the fleet and the engine, lets change redeclare PSPs, and
+// boots a new engine and fleet on the same database: a new process loading
+// the configuration first.
+func (iw *importWorld) restart(t *testing.T, change func(openrails.PSPs)) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, iw.fleet.StopAndCancel(ctx))
+	require.NoError(t, iw.engine.Close(ctx))
+	if change != nil {
+		change(iw.cfg.Merchants["alpha"].PSPs)
+	}
+	var err error
+	iw.engine, err = openrails.New(t.Context(), iw.cfg, iw.deps)
+	require.NoError(t, err)
+	iw.alpha, err = iw.engine.MerchantBySlug("alpha")
+	require.NoError(t, err)
+	iw.api = iw.alpha
+	iw.fleet = hostFleet(t, iw.world, 2)
+	iw.start(t)
+}
+
+// onboarding is the PSP's one onboarding import, once its configuration load
+// created it.
+func (iw *importWorld) onboarding(t *testing.T, key string) *billing.PSPImport {
+	t.Helper()
+	var got []billing.PSPImport
+	require.Eventually(t, func() bool {
+		page, err := iw.api.ListPSPImports(t.Context(), billing.PSPImportListParams{PSP: billing.PSPRef{Key: key}, Origin: billing.PSPImportOnboarding})
+		if err != nil {
+			return false
+		}
+		got = page.Items
+		return len(got) > 0
+	}, 20*time.Second, 20*time.Millisecond, "%s has no onboarding import", key)
+	require.Len(t, got, 1, "one onboarding import per PSP")
+	require.Equal(t, billing.PSPImportOnboarding, got[0].Origin)
+	return &got[0]
+}
+
+// onboardings are the merchant's onboarding imports by PSP id.
+func (iw *importWorld) onboardings(t *testing.T) map[billing.PSPID][]billing.PSPImport {
+	t.Helper()
+	page, err := iw.api.ListPSPImports(t.Context(), billing.PSPImportListParams{Origin: billing.PSPImportOnboarding, PageRequest: billing.PageRequest{Limit: 100}})
+	require.NoError(t, err)
+	out := map[billing.PSPID][]billing.PSPImport{}
+	for _, imp := range page.Items {
+		out[imp.PSP] = append(out[imp.PSP], imp)
+	}
+	return out
+}
+
+// jobs are the River jobs that ran or will run steps of the import.
+func (iw *importWorld) jobs(t *testing.T, id billing.PSPImportID) []*rivertype.JobRow {
+	t.Helper()
+	all, err := iw.fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.psp_import").First(1000))
+	require.NoError(t, err)
+	var out []*rivertype.JobRow
+	for _, job := range all.Jobs {
+		var args struct {
+			ImportID uuid.UUID `json:"import_id"`
+		}
+		require.NoError(t, json.Unmarshal(job.EncodedArgs, &args))
+		if args.ImportID == id.UUID() {
+			out = append(out, job)
+		}
+	}
+	return out
 }
 
 // await is the import once its job reached status.
@@ -102,27 +232,35 @@ func (iw *importWorld) await(t *testing.T, id billing.PSPImportID, status billin
 	t.Helper()
 	var got *billing.PSPImport
 	require.Eventually(t, func() bool {
-		imp, err := iw.alphaRemote.GetPSPImport(t.Context(), id)
+		imp, err := iw.api.GetPSPImport(t.Context(), id)
 		if err != nil {
 			return false
 		}
 		got = imp
 		return imp.Status == status || imp.Status == billing.PSPImportFailed
 	}, 60*time.Second, 50*time.Millisecond)
-	require.Equal(t, status, got.Status, "import error: %v", got.Error)
+	var why, code string
+	if got.Error != nil {
+		why = *got.Error
+	}
+	if got.ErrorCode != nil {
+		code = string(*got.ErrorCode)
+	}
+	require.Equal(t, status, got.Status, "import error %s: %s", code, why)
 	return got
 }
 
 func (iw *importWorld) pull(t *testing.T, params billing.CreatePSPImportParams) *billing.PSPImport {
 	t.Helper()
-	imp, err := iw.alphaRemote.CreatePSPImport(t.Context(), params)
+	imp, err := iw.api.CreatePSPImport(t.Context(), params)
 	require.NoError(t, err)
+	require.Equal(t, billing.PSPImportManual, imp.Origin)
 	return iw.await(t, imp.ID, billing.PSPImportPulled)
 }
 
 func (iw *importWorld) apply(t *testing.T, id billing.PSPImportID) map[string]billing.PSPImportRecord {
 	t.Helper()
-	_, err := iw.alphaRemote.ApplyPSPImport(t.Context(), id)
+	_, err := iw.api.ApplyPSPImport(t.Context(), id)
 	require.NoError(t, err)
 	iw.await(t, id, billing.PSPImportApplied)
 	return iw.records(t, id)
@@ -134,7 +272,7 @@ func (iw *importWorld) records(t *testing.T, id billing.PSPImportID) map[string]
 	out := map[string]billing.PSPImportRecord{}
 	page := billing.PSPImportRecordListParams{PageRequest: billing.PageRequest{Limit: 100}}
 	for {
-		got, err := iw.alphaRemote.ListPSPImportRecords(t.Context(), id, page)
+		got, err := iw.api.ListPSPImportRecords(t.Context(), id, page)
 		require.NoError(t, err)
 		for _, r := range got.Items {
 			out[r.Ref] = r
@@ -149,7 +287,7 @@ func (iw *importWorld) records(t *testing.T, id billing.PSPImportID) map[string]
 func (iw *importWorld) catalog(t *testing.T, params billing.ProviderCatalogListParams) map[string]billing.ProviderCatalogObject {
 	t.Helper()
 	params.Limit = 100
-	got, err := iw.alphaRemote.ListProviderCatalog(t.Context(), params)
+	got, err := iw.api.ListProviderCatalog(t.Context(), params)
 	require.NoError(t, err)
 	require.Empty(t, got.Next)
 	out := map[string]billing.ProviderCatalogObject{}
@@ -196,6 +334,51 @@ func (iw *importWorld) nmiMember(t *testing.T, email, plan, amount string, start
 	schedule := iw.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: plan, Amount: amount, Days: 30, Created: start, NextBilling: start.AddDate(0, 0, 30), Order: "order-" + plan + "-" + vault})
 	iw.nmi.AddScheduleSale(schedule, start)
 	return schedule
+}
+
+// cancelOnboarding cancels the queued onboarding pulls, once the
+// configuration load queued them, for a scenario whose provider reads they
+// would disturb.
+func cancelOnboarding(t *testing.T, fleet *river.Client[pgx.Tx]) {
+	t.Helper()
+	var jobs []*rivertype.JobRow
+	require.Eventually(t, func() bool {
+		list, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.psp_import"))
+		if err != nil {
+			return false
+		}
+		jobs = list.Jobs
+		return len(jobs) > 0
+	}, 20*time.Second, 20*time.Millisecond, "the configuration load queues the onboarding pull")
+	for _, job := range jobs {
+		_, err := fleet.JobCancel(t.Context(), job.ID)
+		require.NoError(t, err)
+	}
+}
+
+// answer is a provider's reply to r.
+func answer(r *http.Request, status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body)), Request: r}
+}
+
+// refuseNMI makes the gateway refuse key as NMI does: v5 answers 401, the
+// Query API an authentication error.
+func refuseNMI(m *nmimock.Mock, key string) {
+	keyOf := func(r *http.Request) (string, bool) {
+		if header := r.Header.Get("Authorization"); header != "" {
+			return header, true
+		}
+		body, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		form, _ := url.ParseQuery(string(body))
+		return form.Get("security_key"), false
+	}
+	m.Intercept(func(r *http.Request) bool { k, _ := keyOf(r); return k == key }, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+		if _, v5 := keyOf(r); v5 {
+			return answer(r, http.StatusUnauthorized, `{"type":"error","error_code":"unauthorized","message":"Authentication failed"}`), nil
+		}
+		return answer(r, http.StatusOK, `<?xml version="1.0" encoding="UTF-8"?><nm_response><error_response>Authentication Failed</error_response></nm_response>`), nil
+	})
 }
 
 func refusalCode(t *testing.T, err error) (int, string) {
@@ -688,5 +871,454 @@ func TestPSPImport(t *testing.T) {
 		require.True(t, d.Active, "the older list observation lost to the newer read")
 		require.Equal(t, "read", d.ObservedVia)
 		require.Contains(t, iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP}), "price:price_unread", "read once Stripe answers")
+	})
+
+	t.Run("OR-J38-S06/onboarding-pull-per-rail", func(t *testing.T) {
+		iw := bootImportWorld(t, "nmi", "nmi-archived", "stripe", "ccbill", "solana")
+		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
+		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
+		nmiSub := iw.nmiMember(t, iw.alice.Email, "gold", "20.00", start)
+		// Bob's Stripe customer is older than his subscription: history reads
+		// from it.
+		created := iw.clock.Now().Truncate(time.Second)
+		cus := iw.stripe.AddCustomer(iw.bob.Email, "Bob", nil)
+		iw.clock.Advance(2 * time.Hour)
+		iw.stripe.AddProduct("prod_basic", "Basic")
+		iw.stripe.AddPrice(stripemock.Price{ID: "price_basic", Product: "prod_basic", Amount: 999, Interval: "month"})
+		stripeSub := iw.stripe.AddSubscription(cus, "pm_bob", "price_basic", 999, created.Add(time.Hour), created.Add(time.Hour).AddDate(0, 1, 0))
+		carol := authtest.NewUser(t, iw.auth)
+		next := iw.clock.Now().Add(20 * 24 * time.Hour)
+		member := iw.ccbill.AddMember(ccbillmock.Member{Username: carol.Username, Email: carol.Email, Signup: start, Rebill: &next})
+		rebill := iw.ccbill.AddRebill(ccbillmock.Rebill{SubscriptionID: member, At: start.Add(time.Hour), Amount: "23.00"})
+		iw.clock.Advance(time.Minute)
+		iw.start(t)
+
+		imports := map[string]*billing.PSPImport{}
+		for _, key := range []string{"nmi", "stripe", "ccbill"} {
+			imports[key] = iw.await(t, iw.onboarding(t, key).ID, billing.PSPImportPulled)
+			require.Nil(t, imports[key].ErrorCode)
+		}
+		all := iw.onboardings(t)
+		require.ElementsMatch(t, []billing.PSPID{imports["nmi"].PSP, imports["stripe"].PSP, imports["ccbill"].PSP}, slices.Collect(maps.Keys(all)),
+			"one onboarding import per live importable PSP; none for Solana or the archived NMI account")
+		require.Equal(t, start, imports["nmi"].HistorySince.UTC())
+		require.Equal(t, created, imports["stripe"].HistorySince.UTC(), "history starts at the earliest object listed, a customer included")
+		require.Equal(t, start, imports["ccbill"].HistorySince.UTC())
+
+		linked := func(recs map[string]billing.PSPImportRecord, ref string, who billing.CustomerID) {
+			t.Helper()
+			r, ok := recs[ref]
+			require.True(t, ok, "%s is staged", ref)
+			require.Equal(t, billing.PSPImportLinked, r.State, "%s: %v", ref, r.Reason)
+			require.Equal(t, who, *r.Customer)
+		}
+		nmiRecs := iw.records(t, imports["nmi"].ID)
+		linked(nmiRecs, nmiSub, customerOf(iw.alice))
+		var sales int
+		for _, r := range nmiRecs {
+			if r.Kind == billing.PSPImportTransaction {
+				sales++
+				require.Equal(t, customerOf(iw.alice), *r.Customer)
+			}
+		}
+		require.Equal(t, 1, sales, "the schedule's sale is in the history read")
+		stripeRecs := iw.records(t, imports["stripe"].ID)
+		linked(stripeRecs, cus, customerOf(iw.bob))
+		linked(stripeRecs, stripeSub, customerOf(iw.bob))
+		ccbillRecs := iw.records(t, imports["ccbill"].ID)
+		linked(ccbillRecs, member, customerOf(carol))
+		linked(ccbillRecs, rebill, customerOf(carol))
+
+		for _, who := range []billing.CustomerID{customerOf(iw.alice), customerOf(iw.bob), customerOf(carol)} {
+			require.Empty(t, iw.subscriptions(t, who), "the pull lands nothing")
+			payments, err := iw.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: who})
+			require.NoError(t, err)
+			require.Empty(t, payments.Items)
+			methods, err := iw.alpha.ListPaymentMethods(t.Context(), who, billing.PaymentMethodListParams{})
+			require.NoError(t, err)
+			require.Empty(t, methods.Items)
+		}
+
+		// A person deletes the Stripe onboarding import and imports by hand: the
+		// next process to load the configuration makes the onboarding import
+		// again, and the manual one does not stand in for it.
+		require.NoError(t, iw.api.DeletePSPImport(t.Context(), imports["stripe"].ID))
+		manual := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "stripe"}})
+		replica, err := openrails.New(t.Context(), iw.cfg, iw.deps)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, replica.Close(context.Background())) })
+		again := iw.await(t, iw.onboarding(t, "stripe").ID, billing.PSPImportPulled)
+		require.NotEqual(t, imports["stripe"].ID, again.ID)
+		require.NotEqual(t, manual.ID, again.ID)
+		for _, key := range []string{"nmi", "ccbill"} {
+			require.Equal(t, imports[key].ID, iw.onboarding(t, key).ID, "a live onboarding import is never made twice")
+		}
+	})
+
+	t.Run("OR-J38-S07/two-runtimes-one-database", func(t *testing.T) {
+		iw := bootImportWorld(t, "nmi", "stripe", "ccbill")
+		// state is one onboarding import and one pull job per PSP, or why not.
+		state := func() error {
+			page, err := iw.api.ListPSPImports(t.Context(), billing.PSPImportListParams{Origin: billing.PSPImportOnboarding, PageRequest: billing.PageRequest{Limit: 100}})
+			if err != nil {
+				return err
+			}
+			byPSP := map[billing.PSPID]int{}
+			jobs, err := iw.fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.psp_import").First(1000))
+			if err != nil {
+				return err
+			}
+			for _, imp := range page.Items {
+				byPSP[imp.PSP]++
+				n := 0
+				for _, job := range jobs.Jobs {
+					if strings.Contains(string(job.EncodedArgs), imp.ID.UUID().String()) {
+						n++
+					}
+				}
+				if n != 1 {
+					return fmt.Errorf("import %s has %d jobs", imp.ID, n)
+				}
+			}
+			if len(byPSP) != 3 || len(page.Items) != 3 {
+				return fmt.Errorf("%d onboarding imports of %d PSPs", len(page.Items), len(byPSP))
+			}
+			return nil
+		}
+		// boot starts n more processes at once on the database, as Doujins and
+		// Hentai0 serve one merchant, and stops them once each loaded it.
+		boot := func(n int) {
+			engines := make([]*openrails.Engine, n)
+			errs := make([]error, n)
+			var wg sync.WaitGroup
+			for i := range n {
+				wg.Go(func() {
+					engines[i], errs[i] = openrails.New(t.Context(), iw.cfg, iw.deps)
+					if errs[i] == nil {
+						client, err := engines[i].MerchantBySlug("alpha")
+						if err == nil {
+							_, err = client.ListPSPs(t.Context(), billing.PSPListParams{})
+						}
+						errs[i] = err
+					}
+				})
+			}
+			wg.Wait()
+			require.NoError(t, errors.Join(errs...))
+			require.Eventually(t, func() bool { return state() == nil }, 20*time.Second, 20*time.Millisecond, "%v", state())
+			require.Never(t, func() bool { return state() != nil }, 2*time.Second, 100*time.Millisecond)
+			for _, e := range engines {
+				require.NoError(t, e.Close(context.Background()))
+			}
+		}
+		boot(2)
+		boot(2)
+		require.NoError(t, state(), "restarting creates nothing more")
+		iw.start(t)
+		for _, key := range []string{"nmi", "stripe", "ccbill"} {
+			iw.await(t, iw.onboarding(t, key).ID, billing.PSPImportPulled)
+		}
+		require.NoError(t, state())
+	})
+
+	t.Run("OR-J38-S08/credentials-rejected-rearms", func(t *testing.T) {
+		iw := bootImportWorld(t, "nmi", "stripe", "ccbill")
+		refuseNMI(iw.nmi, "critical-import-key")
+		iw.stripe.Intercept(func(r *http.Request) bool { return r.Header.Get("Authorization") == "Bearer sk_test_import" },
+			func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+				return answer(r, http.StatusUnauthorized, `{"error":{"type":"invalid_request_error","message":"Invalid API Key provided"}}`), nil
+			})
+		iw.ccbill.RequireCredentials("critical-datalink", "rotated-datalink-password", false)
+		iw.start(t)
+
+		keys := []string{"nmi", "stripe", "ccbill"}
+		failed := map[string]*billing.PSPImport{}
+		for _, key := range keys {
+			failed[key] = iw.await(t, iw.onboarding(t, key).ID, billing.PSPImportFailed)
+			require.Equal(t, billing.PSPImportCredentialsRejected, *failed[key].ErrorCode, "%s: %v", key, failed[key].Error)
+		}
+		findings := func(status billing.FindingStatus) map[billing.PSPID]billing.Finding {
+			t.Helper()
+			page, err := iw.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.psp_import.credentials_rejected", Status: status, PageRequest: billing.PageRequest{Limit: 100}})
+			require.NoError(t, err)
+			out := map[billing.PSPID]billing.Finding{}
+			for _, f := range page.Items {
+				psp, err := billing.ParsePSPID(f.SubjectKey)
+				require.NoError(t, err)
+				require.NotContains(t, out, psp, "one finding per PSP")
+				out[psp] = f
+			}
+			return out
+		}
+		open := findings("")
+		require.Len(t, open, 3)
+		for _, key := range keys {
+			f := open[failed[key].PSP]
+			require.Equal(t, billing.FindingStatus("requires_review"), f.Status, key)
+			require.Equal(t, "high", f.Severity)
+		}
+
+		// The same credentials, loaded by a new process: each import restarts in
+		// place and fails again.
+		iw.restart(t, nil)
+		for _, key := range keys {
+			id := failed[key].ID
+			require.Eventually(t, func() bool {
+				jobs, err := iw.fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.psp_import").States(rivertype.JobStateCancelled).First(1000))
+				if err != nil {
+					return false
+				}
+				n := 0
+				for _, job := range jobs.Jobs {
+					if strings.Contains(string(job.EncodedArgs), id.UUID().String()) {
+						n++
+					}
+				}
+				return n == 2
+			}, 30*time.Second, 50*time.Millisecond, "%s re-armed and failed again", key)
+			again := iw.await(t, id, billing.PSPImportFailed)
+			require.Equal(t, billing.PSPImportCredentialsRejected, *again.ErrorCode)
+			require.Equal(t, id, iw.onboarding(t, key).ID, "re-arming reuses the import")
+		}
+		open = findings("")
+		require.Len(t, open, 3)
+		for _, f := range open {
+			require.Equal(t, billing.FindingStatus("requires_review"), f.Status)
+		}
+
+		// Replaced credentials pull, and the findings close.
+		iw.restart(t, func(psps openrails.PSPs) {
+			psps["nmi"] = importNMIPSP("critical-import-gateway", "critical-import-key-rotated", false)
+			psps["stripe"] = importStripePSP("sk_test_import_rotated")
+			psps["ccbill"] = importCCBillPSP("0000", "rotated-datalink-password")
+		})
+		for _, key := range keys {
+			id := failed[key].ID
+			require.Eventually(t, func() bool {
+				imp, err := iw.api.GetPSPImport(t.Context(), id)
+				return err == nil && imp.Status == billing.PSPImportPulled
+			}, 30*time.Second, 50*time.Millisecond, "%s restarts and pulls", key)
+			pulled := iw.await(t, id, billing.PSPImportPulled)
+			require.Nil(t, pulled.ErrorCode)
+			require.Nil(t, pulled.Error)
+		}
+		require.Empty(t, findings(""))
+		closed := findings("fixed")
+		require.Len(t, closed, 3)
+		for _, f := range closed {
+			require.Equal(t, billing.FindingStatus("fixed"), f.Status)
+			require.NotNil(t, f.ResolvedAt)
+		}
+		require.Len(t, iw.onboardings(t), 3)
+	})
+
+	t.Run("OR-J38-S09/provider-unreachable-retries", func(t *testing.T) {
+		iw := bootImportWorld(t, "nmi", "stripe")
+		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
+		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
+		iw.nmiMember(t, iw.alice.Email, "gold", "20.00", start)
+		iw.stripe.AddProduct("prod_basic", "Basic")
+		iw.stripe.AddPrice(stripemock.Price{ID: "price_basic", Product: "prod_basic", Amount: 999, Interval: "month"})
+		iw.stripe.AddSubscription(iw.stripe.AddCustomer(iw.bob.Email, "Bob", nil), "pm_bob", "price_basic", 999, start, start.AddDate(0, 1, 0))
+		iw.clock.Advance(time.Minute)
+		iw.nmi.QueryUnavailable(true)
+		iw.stripe.ChargeListUnavailable(true)
+		iw.start(t)
+
+		imports := map[string]billing.PSPImportID{"nmi": iw.onboarding(t, "nmi").ID, "stripe": iw.onboarding(t, "stripe").ID}
+		// failing is the import's job once an attempt numbered at least from
+		// has failed and waits to retry.
+		failing := func(id billing.PSPImportID, from int) *rivertype.JobRow {
+			t.Helper()
+			var job *rivertype.JobRow
+			require.Eventually(t, func() bool {
+				jobs, err := iw.fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.psp_import").First(1000))
+				if err != nil {
+					return false
+				}
+				for _, j := range jobs.Jobs {
+					if strings.Contains(string(j.EncodedArgs), id.UUID().String()) && j.State == rivertype.JobStateRetryable && j.Attempt >= from {
+						job = j
+					}
+				}
+				return job != nil
+			}, 30*time.Second, 20*time.Millisecond, "attempt %d of %s failed and waits to retry", from, id)
+			return job
+		}
+		// Past the five attempts that used to end an import: each retry is
+		// driven at once instead of waiting attempt⁴ seconds.
+		const attempts = 8
+		for key, id := range imports {
+			for from := 1; ; {
+				job := failing(id, from)
+				require.Equal(t, 10_000, job.MaxAttempts)
+				imp, err := iw.api.GetPSPImport(t.Context(), id)
+				require.NoError(t, err)
+				require.Equal(t, billing.PSPImportPulling, imp.Status, "%s attempt %d: an unreachable provider never fails the import", key, job.Attempt)
+				require.Nil(t, imp.Error)
+				if job.Attempt >= attempts {
+					require.WithinDuration(t, time.Now().Add(time.Hour), job.ScheduledAt, 5*time.Minute, "%d⁴ s waits at most an hour", job.Attempt)
+					break
+				}
+				_, err = iw.fleet.JobRetry(t.Context(), job.ID)
+				require.NoError(t, err)
+				from = job.Attempt + 1
+			}
+		}
+		rosters, customers := iw.nmi.Reads()["v5:customers"], iw.stripe.Reads("/v1/customers")
+		require.Equal(t, 1, rosters)
+		iw.nmi.QueryUnavailable(false)
+		iw.stripe.ChargeListUnavailable(false)
+		for key, id := range imports {
+			_, err := iw.fleet.JobRetry(t.Context(), failing(id, attempts).ID)
+			require.NoError(t, err)
+			imp := iw.await(t, id, billing.PSPImportPulled)
+			require.Equal(t, imp.PulledAt, imp.HistoryThrough, key)
+			var sales int
+			for _, r := range iw.records(t, id) {
+				if r.Kind == billing.PSPImportTransaction {
+					sales++
+				}
+			}
+			require.Equal(t, 1, sales, "%s: the history read once the provider answers", key)
+		}
+		require.Equal(t, rosters, iw.nmi.Reads()["v5:customers"], "the roster is not read again")
+		require.Equal(t, customers, iw.stripe.Reads("/v1/customers"))
+	})
+
+	t.Run("OR-J38-S10/apply-lands-once-per-rail", func(t *testing.T) {
+		iw := bootImportWorld(t, "nmi", "stripe", "ccbill")
+		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
+		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
+		iw.nmiMember(t, iw.alice.Email, "gold", "20.00", start)
+		iw.stripe.AddProduct("prod_basic", "Basic")
+		iw.stripe.AddPrice(stripemock.Price{ID: "price_basic", Product: "prod_basic", Amount: 999, Interval: "month"})
+		iw.stripe.AddSubscription(iw.stripe.AddCustomer(iw.bob.Email, "Bob", nil), "pm_bob", "price_basic", 999, start, start.AddDate(0, 1, 0))
+		carol := authtest.NewUser(t, iw.auth)
+		next := iw.clock.Now().Add(20 * 24 * time.Hour)
+		member := iw.ccbill.AddMember(ccbillmock.Member{Username: carol.Username, Email: carol.Email, Signup: start, Rebill: &next})
+		iw.ccbill.AddRebill(ccbillmock.Rebill{SubscriptionID: member, At: start.Add(time.Hour), Amount: "23.00"})
+		iw.clock.Advance(time.Minute)
+		iw.start(t)
+		keys := []string{"nmi", "stripe", "ccbill"}
+		imports := map[string]billing.PSPImportID{}
+		for _, key := range keys {
+			imports[key] = iw.await(t, iw.onboarding(t, key).ID, billing.PSPImportPulled).ID
+		}
+
+		for _, key := range []string{"gold", "basic", "premium"} {
+			_, err := iw.api.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, Entitlements: []string{"member:" + key}})
+			require.NoError(t, err)
+		}
+		for _, p := range []billing.CreateProviderPriceParams{
+			{ProductKey: "gold", Key: "nmi-gold", PSP: "nmi", PlanID: "gold", Archived: true},
+			{ProductKey: "basic", Key: "stripe-basic", PSP: "stripe", PriceID: "price_basic", Archived: true},
+			{ProductKey: "premium", Key: "ccbill-23", PSP: "ccbill", FlexID: "681cb38f-afb9-4665-931f-2b896072178a", RecurringBillingOptionID: "0000000023",
+				UnitAmount: ptr(int64(23_000_000)), Currency: "USD", BillingIntervalHours: ptr(720), Archived: true},
+		} {
+			_, err := iw.api.CreateProviderPrice(t.Context(), p)
+			require.NoError(t, err)
+		}
+		type landed struct{ subscriptions, payments, methods int }
+		members := map[string]billing.CustomerID{"nmi": customerOf(iw.alice), "stripe": customerOf(iw.bob), "ccbill": customerOf(carol)}
+		book := func() map[string]landed {
+			t.Helper()
+			out := map[string]landed{}
+			for key, who := range members {
+				payments, err := iw.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: who})
+				require.NoError(t, err)
+				methods, err := iw.alpha.ListPaymentMethods(t.Context(), who, billing.PaymentMethodListParams{})
+				require.NoError(t, err)
+				out[key] = landed{len(iw.subscriptions(t, who)), len(payments.Items), len(methods.Items)}
+			}
+			return out
+		}
+		applyAll := func(ids map[string]billing.PSPImportID) {
+			t.Helper()
+			for key, id := range ids {
+				_, err := iw.api.LinkPSPImport(t.Context(), id, billing.LinkPSPImportParams{})
+				require.NoError(t, err)
+				for ref, r := range iw.apply(t, id) {
+					require.Equal(t, billing.PSPImportImported, r.State, "%s %s %s: %v", key, r.Kind, ref, r.Reason)
+				}
+			}
+		}
+		applyAll(imports)
+		want := map[string]landed{"nmi": {1, 1, 1}, "stripe": {1, 1, 1}, "ccbill": {1, 1, 0}}
+		require.Equal(t, want, book())
+		methods, err := iw.alpha.ListPaymentMethods(t.Context(), customerOf(iw.alice), billing.PaymentMethodListParams{})
+		require.NoError(t, err)
+		require.Equal(t, "nmi", methods.Items[0].Rail, "the NMI vault lands as the customer's card")
+		require.Equal(t, "4242", *methods.Items[0].Card.Last4)
+		for key, entitlement := range map[string]string{"nmi": "member:gold", "stripe": "member:basic", "ccbill": "member:premium"} {
+			require.True(t, iw.entitled(t, members[key], entitlement), key)
+		}
+
+		applyAll(imports)
+		require.Equal(t, want, book(), "relinking and applying again lands nothing twice")
+		manual := map[string]billing.PSPImportID{}
+		for _, key := range keys {
+			manual[key] = iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: key}}).ID
+		}
+		applyAll(manual)
+		require.Equal(t, want, book(), "a later manual import of the same PSP finds everything landed")
+	})
+
+	t.Run("OR-J38-S11/stripe-customer-attribution", func(t *testing.T) {
+		iw := bootImportWorld(t, "stripe")
+		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(time.Second)
+		for _, p := range []stripemock.Price{{ID: "price_basic", Product: "prod_basic", Amount: 999, Interval: "month"}, {ID: "price_extra", Product: "prod_extra", Amount: 500, Interval: "month"}} {
+			iw.stripe.AddProduct(p.Product, p.Product)
+			iw.stripe.AddPrice(p)
+		}
+		carol, dave := authtest.NewUser(t, iw.auth), authtest.NewUser(t, iw.auth)
+		customers := map[string]string{}
+		for name, u := range map[string]authtest.User{"alice": iw.alice, "bob": iw.bob, "carol": carol} {
+			customers[name] = iw.stripe.AddCustomer(u.Email, name, nil)
+			iw.stripe.AddSubscription(customers[name], "pm_"+name, "price_basic", 999, start, start.AddDate(0, 1, 0))
+		}
+		// Bob already maps another Stripe customer (made by a checkout); Carol's
+		// belongs to Dave.
+		pspID := iw.psp(t, "stripe")
+		held, err := iw.api.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: iw.clock.Now(), DefaultPSP: billing.PSPRef{ID: &pspID},
+			Customers: []billing.DeclaredCustomer{{Customer: customerOf(iw.bob)}, {Customer: customerOf(dave)}},
+			PSPCustomers: []billing.DeclaredPSPCustomer{{SourceID: "bob", Customer: customerOf(iw.bob), Rail: "stripe", RemoteCustomerRef: "cus_from_checkout"},
+				{SourceID: "dave", Customer: customerOf(dave), Rail: "stripe", RemoteCustomerRef: customers["carol"]}}})
+		require.NoError(t, err)
+		require.Empty(t, held.Reasons)
+		iw.clock.Advance(time.Minute)
+		iw.start(t)
+		imp := iw.await(t, iw.onboarding(t, "stripe").ID, billing.PSPImportPulled)
+		for _, p := range []billing.CreateProviderPriceParams{{Key: "basic", PSP: "stripe", PriceID: "price_basic"}, {Key: "extra", PSP: "stripe", PriceID: "price_extra"}} {
+			_, err := iw.api.CreateProduct(t.Context(), billing.CreateProductParams{Key: p.Key, DisplayName: p.Key, Entitlements: []string{"member:" + p.Key}})
+			require.NoError(t, err)
+			p.ProductKey, p.Key = p.Key, "stripe-"+p.Key
+			_, err = iw.api.CreateProviderPrice(t.Context(), p)
+			require.NoError(t, err)
+		}
+		_, err = iw.api.LinkPSPImport(t.Context(), imp.ID, billing.LinkPSPImportParams{})
+		require.NoError(t, err)
+		recs := iw.apply(t, imp.ID)
+		require.Equal(t, billing.PSPImportImported, recs[customers["alice"]].State)
+		require.Nil(t, recs[customers["alice"]].Reason)
+		require.Equal(t, billing.PSPImportImported, recs[customers["bob"]].State, "a customer already mapping another keeps it")
+		require.Contains(t, *recs[customers["bob"]].Reason, "cus_from_checkout")
+		require.Equal(t, billing.PSPImportBlocked, recs[customers["carol"]].State, "a customer object another customer holds blocks only its customer")
+		require.Contains(t, *recs[customers["carol"]].Reason, "already belongs")
+		require.Len(t, iw.subscriptions(t, customerOf(iw.alice)), 1)
+		require.Len(t, iw.subscriptions(t, customerOf(iw.bob)), 1)
+		require.Empty(t, iw.subscriptions(t, customerOf(carol)))
+
+		// Stripe bills Alice's customer for a subscription OpenRails never
+		// sold: no user id names her; the landed link does.
+		oob := iw.stripe.AddSubscription(customers["alice"], "pm_alice_extra", "price_extra", 500, iw.clock.Now().Add(-time.Hour), iw.clock.Now().AddDate(0, 1, 0))
+		body := stripeNotice(t, "evt_out_of_band", "customer.subscription.updated", stripemock.Object{"id": oob, "object": "subscription"})
+		status, raw := callback(t, iw.authorityWorld, "acct_import", body, stripeSignature(body, "whsec_import"))
+		require.Equal(t, http.StatusOK, status, raw)
+		require.Eventually(t, func() bool {
+			subs, err := iw.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: customerOf(iw.alice)})
+			return err == nil && len(subs.Items) == 2
+		}, 30*time.Second, 50*time.Millisecond, "the out-of-band subscription is Alice's")
+		require.True(t, iw.entitled(t, customerOf(iw.alice), "member:extra"))
 	})
 }

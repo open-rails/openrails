@@ -13,6 +13,18 @@ ON CONFLICT (merchant_id, customer_id, psp_id) DO UPDATE SET
     remote_customer_ref = EXCLUDED.remote_customer_ref,
     updated_at = EXCLUDED.updated_at;
 
+-- name: ClaimPSPCustomer :execrows
+-- Records a customer's customer object at one PSP unless the customer already
+-- maps one there or another customer holds the ref: 0 rows then, and
+-- GetPSPCustomerByRef and GetPSPCustomerRef say which.
+INSERT INTO billing.psp_customers (
+    merchant_id, customer_id, psp_id, remote_customer_ref, created_at, updated_at
+) VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
+    sqlc.arg(remote_customer_ref)::text, sqlc.arg(at)::timestamptz, sqlc.arg(at)::timestamptz
+)
+ON CONFLICT DO NOTHING;
+
 -- name: GetPSPCustomerRef :one
 SELECT remote_customer_ref FROM billing.psp_customers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid

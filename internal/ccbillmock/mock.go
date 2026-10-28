@@ -4,9 +4,10 @@
 // Config.ProviderSandbox.CCBillDataLinkURL at URL. Only tests and sandbox
 // commands may import it.
 //
-// Known differences from real CCBill: credentials are not checked; members
-// carry no amount (DataLink's roster names none); exports honor startTime
-// and endTime (CCBill's MST clock) and list only rebills.
+// Known differences from real CCBill: credentials are checked only after
+// RequireCredentials; members carry no amount (DataLink's roster names none);
+// exports honor startTime and endTime (CCBill's MST clock) and list only
+// rebills.
 package ccbillmock
 
 import (
@@ -53,6 +54,14 @@ type Mock struct {
 	cancels map[string]int
 	calls   []Call
 	odd     []string
+	auth    *credentials
+}
+
+// credentials are the only DataLink login answered; refused says how others
+// are turned away.
+type credentials struct {
+	username, password string
+	status             bool
 }
 
 // mst is the clock DataLink's startTime and endTime are read in.
@@ -100,6 +109,15 @@ func (m *Mock) AddRebill(r Rebill) string {
 	return r.TransactionID
 }
 
+// RequireCredentials makes DataLink answer only username and password. Any
+// other login is refused as CCBill refuses one: with a 401 when status is
+// set, else with an "Authentication failed" answer.
+func (m *Mock) RequireCredentials(username, password string, status bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.auth = &credentials{username: username, password: password, status: status}
+}
+
 // Canceled counts the cancelSubscription calls CCBill received for id.
 func (m *Mock) Canceled(id string) int {
 	m.mu.Lock()
@@ -140,6 +158,14 @@ func (m *Mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if a := m.auth; a != nil && r.URL.Path == "/data/main.cgi" && (r.Form.Get("username") != a.username || r.Form.Get("password") != a.password) {
+		if a.status {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = io.WriteString(w, "Error: Authentication failed.")
+		return
+	}
 	switch {
 	case r.URL.Path == "/utils/subscriptionManagement.cgi":
 		m.calls = append(m.calls, Call{Path: r.URL.Path, Form: r.Form})

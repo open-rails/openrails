@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 179,
+  "scenario_count": 185,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -897,6 +897,36 @@
       "id": "OR-J38-S05",
       "journey": "J38",
       "name": "The Stripe catalog read keeps the newest observation, retires prices of archived or deleted products and skips what it cannot read"
+    },
+    {
+      "id": "OR-J38-S06",
+      "journey": "J38",
+      "name": "Loading a PSP's configuration starts one read-only onboarding pull per live NMI, Stripe and CCBill PSP; a deleted one is made again; a manual import never stands in"
+    },
+    {
+      "id": "OR-J38-S07",
+      "journey": "J38",
+      "name": "Several processes loading one merchant at once on one database make one onboarding import and one pull job per PSP, and restarts make nothing more"
+    },
+    {
+      "id": "OR-J38-S08",
+      "journey": "J38",
+      "name": "A provider refusing a PSP's credentials fails its onboarding import with one finding; each later load re-arms it in place; replaced credentials pull and close the finding"
+    },
+    {
+      "id": "OR-J38-S09",
+      "journey": "J38",
+      "name": "A provider that does not answer is retried past five attempts with a capped backoff; the import stays pulling and resumes without reading the roster again"
+    },
+    {
+      "id": "OR-J38-S10",
+      "journey": "J38",
+      "name": "Applying an onboarding import lands each rail's subscriptions, payments and NMI vault once; re-apply and a later manual import duplicate nothing"
+    },
+    {
+      "id": "OR-J38-S11",
+      "journey": "J38",
+      "name": "A landed Stripe customer attributes a later out-of-band subscription; a customer mapping another keeps it; one another customer holds blocks only its customer"
     }
   ]
 }

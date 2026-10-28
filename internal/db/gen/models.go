@@ -1567,6 +1567,10 @@ type BillingPspImport struct {
 	Rules          []byte
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// onboarding: the one pull OpenRails starts by itself when a PSP is first loaded (re-armed in place when it failed and the PSP is loaded again); manual: created by a person.
+	Origin string
+	// Why a failed import stopped, when the cause is a configuration one: psp_credentials_rejected (the provider refused the credentials) or psp_not_readable (the PSP, its rail's import or a credential is not declared).
+	ErrorCode *string
 }
 
 // A merchant's own identifiers mapped to its customers (a legacy user id, a legacy order id), named by mapping. PSP import rules read a provider fact through one.

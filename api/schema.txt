@@ -120,6 +120,7 @@ migration 0118_unenriched_attempts_index.up.sql sha256:bb64557d14e0a642a7461232b
 migration 0119_periodic_leases_per_kind.up.sql sha256:248bbce419d2fa93e230ef1c272459b14fe834792dd87359f0a0e28f405c6937
 migration 0120_stored_card_refresh.up.sql sha256:312d37e5bb10f50013657086f7cd93e6190b0c36294fe6f2d68425ac4bc98826
 migration 0130_provider_catalog_objects.up.sql sha256:215efeb29d8a62df1ea3249c83e9ba76128c9d00377b994432417ed77be4a3b7
+migration 0132_psp_import_onboarding.up.sql sha256:8eccc4463e66a07a990b44d7f2e7be6e2639634fb7745e81d2d3e04de4e3bd2f
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2363,12 +2364,17 @@ table billing.psp_imports
   column rules jsonb NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  column origin text NOT NULL
+  column error_code text
   constraint psp_imports_error_check CHECK ((((status = 'failed'::text) = (error IS NOT NULL)) AND ((error IS NULL) OR (error <> ''::text))))
+  constraint psp_imports_error_code_check CHECK (((error_code IS NULL) OR ((status = 'failed'::text) AND (error_code = ANY (ARRAY['psp_credentials_rejected'::text, 'psp_not_readable'::text])))))
+  constraint psp_imports_origin_check CHECK ((origin = ANY (ARRAY['onboarding'::text, 'manual'::text])))
   constraint psp_imports_pkey PRIMARY KEY (merchant_id, id)
   constraint psp_imports_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint psp_imports_rules_check CHECK ((jsonb_typeof(rules) = 'array'::text))
   constraint psp_imports_status_check CHECK ((status = ANY (ARRAY['pulling'::text, 'pulled'::text, 'applying'::text, 'applied'::text, 'failed'::text])))
   index CREATE INDEX psp_imports_created_at_id_idx ON billing.psp_imports USING btree (merchant_id, created_at DESC, id DESC)
+  index CREATE UNIQUE INDEX psp_imports_onboarding_key ON billing.psp_imports USING btree (merchant_id, psp_id) WHERE ((origin = 'onboarding'::text) AND (status <> 'failed'::text))
   index CREATE UNIQUE INDEX psp_imports_pkey ON billing.psp_imports USING btree (merchant_id, id)
 
 table billing.psp_refresh_watermarks

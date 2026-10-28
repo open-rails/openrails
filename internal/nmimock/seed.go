@@ -27,7 +27,7 @@ func (m *Mock) Issue(number string, c Card) {
 func (m *Mock) AddVault(c Card) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	v := &Vault{ID: m.next("vault"), BillingID: m.next("bill"), Card: c}
+	v := &Vault{ID: m.next("vault"), BillingID: m.next("bill"), Card: c, Created: m.now()}
 	m.vaults[v.ID] = v
 	return v.ID
 }
@@ -37,6 +37,9 @@ func (m *Mock) PutVault(v Vault) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	c := v.clone()
+	if c.Created.IsZero() {
+		c.Created = m.now()
+	}
 	m.vaults[v.ID] = &c
 }
 

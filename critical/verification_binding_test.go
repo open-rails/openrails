@@ -242,7 +242,12 @@ func TestVerificationBinding(t *testing.T) {
 		require.NoError(t, err)
 		a.alpha, err = a.engine.MerchantBySlug("alpha")
 		require.NoError(t, err)
-		startFleet(t, a.world)
+		// The first boot queued the old account's onboarding pull; it would
+		// read the 201 members below beside the verifier under test.
+		fleet := hostFleet(t, a.world, 2)
+		cancelOnboarding(t, fleet)
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
 
 		// A lapsed book on the archived account: every row is imported with no
 		// evidence of the renewal the account has since charged, so all of

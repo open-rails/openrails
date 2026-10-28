@@ -12,6 +12,41 @@ import (
 	"github.com/google/uuid"
 )
 
+const claimPSPCustomer = `-- name: ClaimPSPCustomer :execrows
+INSERT INTO billing.psp_customers (
+    merchant_id, customer_id, psp_id, remote_customer_ref, created_at, updated_at
+) VALUES (
+    $1::uuid, $2::uuid, $3::uuid,
+    $4::text, $5::timestamptz, $5::timestamptz
+)
+ON CONFLICT DO NOTHING
+`
+
+type ClaimPSPCustomerParams struct {
+	MerchantID        uuid.UUID
+	CustomerID        uuid.UUID
+	PspID             uuid.UUID
+	RemoteCustomerRef string
+	At                time.Time
+}
+
+// Records a customer's customer object at one PSP unless the customer already
+// maps one there or another customer holds the ref: 0 rows then, and
+// GetPSPCustomerByRef and GetPSPCustomerRef say which.
+func (q *Queries) ClaimPSPCustomer(ctx context.Context, arg ClaimPSPCustomerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimPSPCustomer,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.PspID,
+		arg.RemoteCustomerRef,
+		arg.At,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getPSPCustomerByRef = `-- name: GetPSPCustomerByRef :one
 SELECT customer_id::text FROM billing.psp_customers
 WHERE merchant_id = $1::uuid

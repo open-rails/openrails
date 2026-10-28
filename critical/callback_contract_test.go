@@ -140,6 +140,9 @@ func TestCallbackContracts(t *testing.T) {
 		due := *sub.CurrentPeriodEndsAt
 		a.clock.Advance(due.Sub(a.clock.Now()) + time.Hour)
 		queue := hostFleet(t, a.world)
+		// The PSP's onboarding pull also reads the transaction report: it is
+		// not under test, so its queued job is cancelled before the hold.
+		cancelOnboarding(t, queue)
 		gate := p.core.Hold(func(r *http.Request) bool {
 			if !strings.HasSuffix(r.URL.Path, "/query.php") {
 				return false

@@ -10078,6 +10078,20 @@
             }
           },
           {
+            "name": "origin",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "psp",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "OpenRails-Expected-Merchant",
             "in": "header",
             "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
@@ -10132,7 +10146,9 @@
         },
         "x-openrails-errors": [
           "invalid_cursor",
+          "invalid_param",
           "invalid_query",
+          "psp_not_found",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -15430,6 +15446,12 @@
               "$ref": "#/components/schemas/DeclaredPaymentMethod"
             }
           },
+          "psp_customers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeclaredPSPCustomer"
+            }
+          },
           "subscriptions": {
             "type": "array",
             "items": {
@@ -15542,6 +15564,26 @@
           "access_ends_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "DeclaredPSPCustomer": {
+        "type": "object",
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "customer": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "psp": {
+            "$ref": "#/components/schemas/PSPRef"
+          },
+          "remote_customer_ref": {
+            "type": "string"
           }
         }
       },
@@ -18773,6 +18815,13 @@
           "rail": {
             "type": "string"
           },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "onboarding"
+            ]
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -18837,6 +18886,20 @@
               }
             ]
           },
+          "error_code": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "psp_credentials_rejected",
+                  "psp_not_readable"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "rules": {
             "type": "array",
             "items": {
@@ -18862,12 +18925,14 @@
           "id",
           "psp",
           "rail",
+          "origin",
           "status",
           "history_since",
           "history_through",
           "pulled_at",
           "applied_at",
           "error",
+          "error_code",
           "rules",
           "counts",
           "created_at",

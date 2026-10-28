@@ -149,7 +149,7 @@ func (m *Mock) tokenSale(form url.Values) string {
 		fields := []string{"response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", s.TransactionID, "avsresponse", c.AVS, "cvvresponse", c.CVV,
 			"orderid", order, "type", "sale", "response_code", c.Decline}
 		if form.Get("customer_vault") == "add_customer" && c.VaultsDeclined {
-			v := &Vault{Book: book(form), ID: m.next("vault"), BillingID: m.next("bill"), Card: c}
+			v := &Vault{Book: book(form), ID: m.next("vault"), BillingID: m.next("bill"), Card: c, Created: m.now()}
 			m.vaults[v.ID] = v
 			fields = append(fields, "customer_vault_id", v.ID)
 		}
@@ -169,7 +169,7 @@ func (m *Mock) tokenSale(form url.Values) string {
 			m.refusedSaves++
 			return rejected("Card refused REFID:3187654326")
 		}
-		v := &Vault{Book: book(form), ID: m.next("vault"), BillingID: m.next("bill"), Card: c}
+		v := &Vault{Book: book(form), ID: m.next("vault"), BillingID: m.next("bill"), Card: c, Created: m.now()}
 		m.vaults[v.ID] = v
 		s.Vault, s.BillingID = v.ID, v.BillingID
 		fields = append(fields, "customer_vault_id", v.ID)
@@ -408,7 +408,7 @@ func (m *Mock) vaultCard(form url.Values) string {
 	if m.vaults[id] != nil {
 		return rejected("Duplicate Customer Vault Id REFID:3187654329")
 	}
-	m.vaults[id] = &Vault{Book: book(form), ID: id, BillingID: billing, Card: c}
+	m.vaults[id] = &Vault{Book: book(form), ID: id, BillingID: billing, Card: c, Created: m.now()}
 	return answer("response", "1", "responsetext", "Customer Added", "authcode", "", "transactionid", "", "avsresponse", "", "cvvresponse", "",
 		"orderid", "", "type", "", "response_code", "100", "customer_vault_id", id)
 }

@@ -50,11 +50,71 @@ func (q *Queries) CountPSPImportRecords(ctx context.Context, arg CountPSPImportR
 	return items, nil
 }
 
+const createOnboardingPSPImport = `-- name: CreateOnboardingPSPImport :many
+INSERT INTO billing.psp_imports (merchant_id, psp_id, rail, origin, status, rules)
+SELECT $1::uuid, $2::uuid, $3::text, 'onboarding', 'pulling', $4::jsonb
+WHERE NOT EXISTS (SELECT 1 FROM billing.psp_imports
+    WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND origin = 'onboarding')
+ON CONFLICT (merchant_id, psp_id) WHERE origin = 'onboarding' AND status <> 'failed' DO NOTHING
+RETURNING merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at, origin, error_code
+`
+
+type CreateOnboardingPSPImportParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Rail       string
+	Rules      []byte
+}
+
+// A PSP's onboarding import, unless it has one in any status. A replica or
+// host inserting it concurrently wins on psp_imports_onboarding_key: this
+// then returns no row.
+func (q *Queries) CreateOnboardingPSPImport(ctx context.Context, arg CreateOnboardingPSPImportParams) ([]BillingPspImport, error) {
+	rows, err := q.db.Query(ctx, createOnboardingPSPImport,
+		arg.MerchantID,
+		arg.PspID,
+		arg.Rail,
+		arg.Rules,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingPspImport
+	for rows.Next() {
+		var i BillingPspImport
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.ID,
+			&i.PspID,
+			&i.Rail,
+			&i.Status,
+			&i.HistorySince,
+			&i.HistoryThrough,
+			&i.PulledAt,
+			&i.AppliedAt,
+			&i.Error,
+			&i.Rules,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Origin,
+			&i.ErrorCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createPSPImport = `-- name: CreatePSPImport :one
-INSERT INTO billing.psp_imports (merchant_id, psp_id, rail, status, history_since, rules)
-VALUES ($1::uuid, $2::uuid, $3::text, 'pulling', $4::timestamptz,
+INSERT INTO billing.psp_imports (merchant_id, psp_id, rail, origin, status, history_since, rules)
+VALUES ($1::uuid, $2::uuid, $3::text, 'manual', 'pulling', $4::timestamptz,
     $5::jsonb)
-RETURNING merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at
+RETURNING merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at, origin, error_code
 `
 
 type CreatePSPImportParams struct {
@@ -88,6 +148,8 @@ func (q *Queries) CreatePSPImport(ctx context.Context, arg CreatePSPImportParams
 		&i.Rules,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Origin,
+		&i.ErrorCode,
 	)
 	return i, err
 }
@@ -131,7 +193,7 @@ func (q *Queries) DeletePSPImportMappings(ctx context.Context, arg DeletePSPImpo
 }
 
 const getPSPImport = `-- name: GetPSPImport :one
-SELECT merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at FROM billing.psp_imports WHERE merchant_id = $1::uuid AND id = $2::uuid
+SELECT merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at, origin, error_code FROM billing.psp_imports WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
 type GetPSPImportParams struct {
@@ -156,6 +218,8 @@ func (q *Queries) GetPSPImport(ctx context.Context, arg GetPSPImportParams) (Bil
 		&i.Rules,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Origin,
+		&i.ErrorCode,
 	)
 	return i, err
 }
@@ -523,7 +587,7 @@ func (q *Queries) ListPSPImportRecordsPage(ctx context.Context, arg ListPSPImpor
 }
 
 const listPSPImportsByIDs = `-- name: ListPSPImportsByIDs :many
-SELECT merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at FROM billing.psp_imports WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+SELECT merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at, origin, error_code FROM billing.psp_imports WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
 ORDER BY created_at DESC, id DESC
 `
 
@@ -555,6 +619,8 @@ func (q *Queries) ListPSPImportsByIDs(ctx context.Context, arg ListPSPImportsByI
 			&i.Rules,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Origin,
+			&i.ErrorCode,
 		); err != nil {
 			return nil, err
 		}
@@ -567,15 +633,19 @@ func (q *Queries) ListPSPImportsByIDs(ctx context.Context, arg ListPSPImportsByI
 }
 
 const listPSPImportsPage = `-- name: ListPSPImportsPage :many
-SELECT merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at FROM billing.psp_imports
+SELECT merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at, origin, error_code FROM billing.psp_imports
 WHERE merchant_id = $1::uuid
-  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
+  AND ($2::uuid IS NULL OR psp_id = $2::uuid)
+  AND ($3::text IS NULL OR origin = $3::text)
+  AND ($4::timestamptz IS NULL OR (created_at, id) < ($4::timestamptz, $5::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT $4::int
+LIMIT $6::int
 `
 
 type ListPSPImportsPageParams struct {
 	MerchantID uuid.UUID
+	PspID      *uuid.UUID
+	Origin     *string
 	AfterAt    *time.Time
 	AfterID    *uuid.UUID
 	RowLimit   int32
@@ -585,6 +655,8 @@ type ListPSPImportsPageParams struct {
 func (q *Queries) ListPSPImportsPage(ctx context.Context, arg ListPSPImportsPageParams) ([]BillingPspImport, error) {
 	rows, err := q.db.Query(ctx, listPSPImportsPage,
 		arg.MerchantID,
+		arg.PspID,
+		arg.Origin,
 		arg.AfterAt,
 		arg.AfterID,
 		arg.RowLimit,
@@ -610,6 +682,8 @@ func (q *Queries) ListPSPImportsPage(ctx context.Context, arg ListPSPImportsPage
 			&i.Rules,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Origin,
+			&i.ErrorCode,
 		); err != nil {
 			return nil, err
 		}
@@ -725,7 +799,7 @@ func (q *Queries) ListPSPProviderPricesOfPSP(ctx context.Context, arg ListPSPPro
 }
 
 const lockPSPImport = `-- name: LockPSPImport :one
-SELECT merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at FROM billing.psp_imports WHERE merchant_id = $1::uuid AND id = $2::uuid FOR UPDATE
+SELECT merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at, origin, error_code FROM billing.psp_imports WHERE merchant_id = $1::uuid AND id = $2::uuid FOR UPDATE
 `
 
 type LockPSPImportParams struct {
@@ -750,6 +824,8 @@ func (q *Queries) LockPSPImport(ctx context.Context, arg LockPSPImportParams) (B
 		&i.Rules,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Origin,
+		&i.ErrorCode,
 	)
 	return i, err
 }
@@ -790,8 +866,57 @@ func (q *Queries) LookupPSPImportMappings(ctx context.Context, arg LookupPSPImpo
 	return items, nil
 }
 
+const rearmOnboardingPSPImport = `-- name: RearmOnboardingPSPImport :many
+UPDATE billing.psp_imports SET status = 'pulling', error = NULL, error_code = NULL, updated_at = now()
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND origin = 'onboarding' AND status = 'failed'
+RETURNING merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at, origin, error_code
+`
+
+type RearmOnboardingPSPImportParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+// Restarts a failed onboarding import in place; a concurrent re-arm or a
+// live import matches nothing.
+func (q *Queries) RearmOnboardingPSPImport(ctx context.Context, arg RearmOnboardingPSPImportParams) ([]BillingPspImport, error) {
+	rows, err := q.db.Query(ctx, rearmOnboardingPSPImport, arg.MerchantID, arg.PspID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingPspImport
+	for rows.Next() {
+		var i BillingPspImport
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.ID,
+			&i.PspID,
+			&i.Rail,
+			&i.Status,
+			&i.HistorySince,
+			&i.HistoryThrough,
+			&i.PulledAt,
+			&i.AppliedAt,
+			&i.Error,
+			&i.Rules,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Origin,
+			&i.ErrorCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setPSPImportApplied = `-- name: SetPSPImportApplied :exec
-UPDATE billing.psp_imports SET status = 'applied', error = NULL, applied_at = $1::timestamptz, updated_at = now()
+UPDATE billing.psp_imports SET status = 'applied', error = NULL, error_code = NULL, applied_at = $1::timestamptz, updated_at = now()
 WHERE merchant_id = $2::uuid AND id = $3::uuid
 `
 
@@ -960,23 +1085,25 @@ func (q *Queries) SetPSPImportRoster(ctx context.Context, arg SetPSPImportRoster
 }
 
 const setPSPImportStatus = `-- name: SetPSPImportStatus :one
-UPDATE billing.psp_imports SET status = $1::text, error = $2::text, updated_at = now()
-WHERE merchant_id = $3::uuid AND id = $4::uuid
-RETURNING merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at
+UPDATE billing.psp_imports SET status = $1::text, error = $2::text, error_code = $3::text, updated_at = now()
+WHERE merchant_id = $4::uuid AND id = $5::uuid
+RETURNING merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at, origin, error_code
 `
 
 type SetPSPImportStatusParams struct {
 	Status     string
 	Error      *string
+	ErrorCode  *string
 	MerchantID uuid.UUID
 	ID         uuid.UUID
 }
 
-// error is set exactly when the status is failed.
+// error is set exactly when the status is failed; error_code only then.
 func (q *Queries) SetPSPImportStatus(ctx context.Context, arg SetPSPImportStatusParams) (BillingPspImport, error) {
 	row := q.db.QueryRow(ctx, setPSPImportStatus,
 		arg.Status,
 		arg.Error,
+		arg.ErrorCode,
 		arg.MerchantID,
 		arg.ID,
 	)
@@ -995,6 +1122,8 @@ func (q *Queries) SetPSPImportStatus(ctx context.Context, arg SetPSPImportStatus
 		&i.Rules,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Origin,
+		&i.ErrorCode,
 	)
 	return i, err
 }
@@ -1002,7 +1131,7 @@ func (q *Queries) SetPSPImportStatus(ctx context.Context, arg SetPSPImportStatus
 const updatePSPImportRules = `-- name: UpdatePSPImportRules :one
 UPDATE billing.psp_imports SET rules = $1::jsonb, updated_at = now()
 WHERE merchant_id = $2::uuid AND id = $3::uuid
-RETURNING merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at
+RETURNING merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at, origin, error_code
 `
 
 type UpdatePSPImportRulesParams struct {
@@ -1028,6 +1157,8 @@ func (q *Queries) UpdatePSPImportRules(ctx context.Context, arg UpdatePSPImportR
 		&i.Rules,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Origin,
+		&i.ErrorCode,
 	)
 	return i, err
 }

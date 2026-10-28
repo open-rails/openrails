@@ -46,7 +46,7 @@ var merchantRoutes = []Route{
 	{Method: POST, Path: "/v1/merchant/psp-imports", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "CreatePSPImport",
 		Request: billing.CreatePSPImportParams{}, Responses: []Reply{{202, billing.PSPImport{}}}, Errors: codes("invalid_param", "psp_not_found", "service_unavailable"), Handler: h(handlers.CreatePSPImport)},
 	{Method: GET, Path: "/v1/merchant/psp-imports", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListPSPImports",
-		Query: params(idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.PSPImport]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListPSPImports)},
+		Query: params(queryOf(handlers.PSPImportQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.PSPImport]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "psp_not_found", "service_unavailable"), Handler: h(handlers.ListPSPImports)},
 	{Method: GET, Path: "/v1/merchant/psp-imports/{id}", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "GetPSPImport",
 		Responses: []Reply{{200, billing.PSPImport{}}}, Errors: codes("invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.GetPSPImport)},
 	{Method: PATCH, Path: "/v1/merchant/psp-imports/{id}", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "UpdatePSPImport",

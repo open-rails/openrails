@@ -971,11 +971,15 @@ pkg openrails/billing, const PSPImportApplied PSPImportStatus = "applied"
 pkg openrails/billing, const PSPImportApplying PSPImportStatus = "applying"
 pkg openrails/billing, const PSPImportBlocked PSPImportRecordState = "blocked"
 pkg openrails/billing, const PSPImportConflict PSPImportRecordState = "conflict"
+pkg openrails/billing, const PSPImportCredentialsRejected PSPImportErrorCode = "psp_credentials_rejected"
 pkg openrails/billing, const PSPImportCustomer PSPImportRecordKind = "customer"
 pkg openrails/billing, const PSPImportFailed PSPImportStatus = "failed"
 pkg openrails/billing, const PSPImportIDPrefix untyped string = "pim_"
 pkg openrails/billing, const PSPImportImported PSPImportRecordState = "imported"
 pkg openrails/billing, const PSPImportLinked PSPImportRecordState = "linked"
+pkg openrails/billing, const PSPImportManual PSPImportOrigin = "manual"
+pkg openrails/billing, const PSPImportNotReadable PSPImportErrorCode = "psp_not_readable"
+pkg openrails/billing, const PSPImportOnboarding PSPImportOrigin = "onboarding"
 pkg openrails/billing, const PSPImportPulled PSPImportStatus = "pulled"
 pkg openrails/billing, const PSPImportPulling PSPImportStatus = "pulling"
 pkg openrails/billing, const PSPImportRecordIDPrefix untyped string = "pir_"
@@ -1935,6 +1939,7 @@ pkg openrails/billing, type DeclaredBilling struct, Customers []DeclaredCustomer
 pkg openrails/billing, type DeclaredBilling struct, DefaultPSP PSPRef `json:"default_psp,omitzero"`
 pkg openrails/billing, type DeclaredBilling struct, ExpectedSubscriptions *int `json:"expected_subscriptions,omitempty"`
 pkg openrails/billing, type DeclaredBilling struct, HistoricalPayments []DeclaredHistoricalPayment `json:"historical_payments,omitempty"`
+pkg openrails/billing, type DeclaredBilling struct, PSPCustomers []DeclaredPSPCustomer `json:"psp_customers,omitempty"`
 pkg openrails/billing, type DeclaredBilling struct, PaymentMethods []DeclaredPaymentMethod `json:"payment_methods,omitempty"`
 pkg openrails/billing, type DeclaredBilling struct, Purchases []DeclaredPurchase `json:"purchases,omitempty"`
 pkg openrails/billing, type DeclaredBilling struct, Subscriptions []DeclaredSubscription `json:"subscriptions,omitempty"`
@@ -1962,6 +1967,12 @@ pkg openrails/billing, type DeclaredOrderLine struct, Description string `json:"
 pkg openrails/billing, type DeclaredOrderLine struct, Price PriceID `json:"price"`
 pkg openrails/billing, type DeclaredOrderLine struct, Quantity *int `json:"quantity,omitempty"`
 pkg openrails/billing, type DeclaredOrderLine struct, UnitAmount int64 `json:"unit_amount,string"`
+pkg openrails/billing, type DeclaredPSPCustomer struct
+pkg openrails/billing, type DeclaredPSPCustomer struct, Customer CustomerID `json:"customer"`
+pkg openrails/billing, type DeclaredPSPCustomer struct, PSP PSPRef `json:"psp,omitzero"`
+pkg openrails/billing, type DeclaredPSPCustomer struct, Rail string `json:"rail"`
+pkg openrails/billing, type DeclaredPSPCustomer struct, RemoteCustomerRef string `json:"remote_customer_ref"`
+pkg openrails/billing, type DeclaredPSPCustomer struct, SourceID string `json:"source_id,omitempty"`
 pkg openrails/billing, type DeclaredPaymentMethod struct
 pkg openrails/billing, type DeclaredPaymentMethod struct, Card *CardDetails `json:"card,omitempty"`
 pkg openrails/billing, type DeclaredPaymentMethod struct, CreatedAt time.Time `json:"created_at,omitempty"`
@@ -2800,9 +2811,11 @@ pkg openrails/billing, type PSPImport struct, AppliedAt *time.Time `json:"applie
 pkg openrails/billing, type PSPImport struct, Counts []PSPImportCount `json:"counts"`
 pkg openrails/billing, type PSPImport struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type PSPImport struct, Error *string `json:"error"`
+pkg openrails/billing, type PSPImport struct, ErrorCode *PSPImportErrorCode `json:"error_code"`
 pkg openrails/billing, type PSPImport struct, HistorySince *time.Time `json:"history_since"`
 pkg openrails/billing, type PSPImport struct, HistoryThrough *time.Time `json:"history_through"`
 pkg openrails/billing, type PSPImport struct, ID PSPImportID `json:"id"`
+pkg openrails/billing, type PSPImport struct, Origin PSPImportOrigin `json:"origin"`
 pkg openrails/billing, type PSPImport struct, PSP PSPID `json:"psp"`
 pkg openrails/billing, type PSPImport struct, PulledAt *time.Time `json:"pulled_at"`
 pkg openrails/billing, type PSPImport struct, Rail string `json:"rail"`
@@ -2813,6 +2826,7 @@ pkg openrails/billing, type PSPImportCount struct
 pkg openrails/billing, type PSPImportCount struct, Kind PSPImportRecordKind `json:"kind"`
 pkg openrails/billing, type PSPImportCount struct, Records int `json:"records"`
 pkg openrails/billing, type PSPImportCount struct, State PSPImportRecordState `json:"state"`
+pkg openrails/billing, type PSPImportErrorCode string
 pkg openrails/billing, type PSPImportFact struct
 pkg openrails/billing, type PSPImportFact struct, Name string `json:"name"`
 pkg openrails/billing, type PSPImportFact struct, Value string `json:"value"`
@@ -2822,6 +2836,8 @@ pkg openrails/billing, type PSPImportLink struct, Customer *CustomerID `json:"cu
 pkg openrails/billing, type PSPImportLink struct, Record PSPImportRecordID `json:"record"`
 pkg openrails/billing, type PSPImportListParams struct
 pkg openrails/billing, type PSPImportListParams struct, IDs []PSPImportID
+pkg openrails/billing, type PSPImportListParams struct, Origin PSPImportOrigin
+pkg openrails/billing, type PSPImportListParams struct, PSP PSPRef
 pkg openrails/billing, type PSPImportListParams struct, embedded PageRequest
 pkg openrails/billing, type PSPImportMapping struct
 pkg openrails/billing, type PSPImportMapping struct, Customer *CustomerID `json:"customer"`
@@ -2830,6 +2846,7 @@ pkg openrails/billing, type PSPImportMapping struct, Mapping string `json:"mappi
 pkg openrails/billing, type PSPImportMappingsResult struct
 pkg openrails/billing, type PSPImportMappingsResult struct, Deleted int `json:"deleted"`
 pkg openrails/billing, type PSPImportMappingsResult struct, Set int `json:"set"`
+pkg openrails/billing, type PSPImportOrigin string
 pkg openrails/billing, type PSPImportPriceLink struct
 pkg openrails/billing, type PSPImportPriceLink struct, Price *PriceID `json:"price"`
 pkg openrails/billing, type PSPImportPriceLink struct, Record PSPImportRecordID `json:"record"`
@@ -4092,6 +4109,7 @@ pkg openrails/openrailstest/nmimock, type Vault struct
 pkg openrails/openrailstest/nmimock, type Vault struct, BillingID string
 pkg openrails/openrailstest/nmimock, type Vault struct, Book string
 pkg openrails/openrailstest/nmimock, type Vault struct, Card nmimock.Card
+pkg openrails/openrailstest/nmimock, type Vault struct, Created time.Time
 pkg openrails/openrailstest/nmimock, type Vault struct, Email string
 pkg openrails/openrailstest/nmimock, type Vault struct, Extra []nmimock.Billing
 pkg openrails/openrailstest/nmimock, type Vault struct, FirstName string

@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -31,6 +32,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -49,7 +51,10 @@ type Importer struct {
 	// CCBillDataLinkURL points DataLink at a loopback fake (sandbox runs).
 	CCBillDataLinkURL string
 	Directory         identity.Directory
-	Clock             clockwork.Clock
+	// Alerts tells the merchant's operator when a provider refuses a PSP's
+	// credentials.
+	Alerts reconcile.FindingNotifier
+	Clock  clockwork.Clock
 }
 
 // ErrNotFound is an import or record the merchant does not have.
@@ -66,9 +71,22 @@ const (
 // JobKind is the River job that runs one step of an import.
 const JobKind = "openrails.psp_import"
 
-// JobAttempts bounds retries of a failing pull or landing; each resumes where
-// the last stopped.
-const JobAttempts = 5
+// JobAttempts bounds retries of a failing pull or landing, each resuming
+// where the last stopped: NextRetry waits attempt⁴ seconds, at most an hour,
+// so a provider that does not answer is retried for about 14 months.
+const JobAttempts = 10_000
+
+// RetryCap is the longest wait between two attempts of a step.
+const RetryCap = time.Hour
+
+// RetryDelay is how long a step waits after its attempt-th failed attempt:
+// attempt⁴ seconds, at most RetryCap.
+func RetryDelay(attempt int) time.Duration {
+	if attempt > 7 { // 8⁴ s is past the hour
+		return RetryCap
+	}
+	return min(time.Duration(attempt*attempt*attempt*attempt)*time.Second, RetryCap)
+}
 
 // JobArgs runs one step of an import: its pull or its landing. It is queued in
 // the transaction that admits the step, so a committed step always has its job.
@@ -207,7 +225,22 @@ func (im *Importer) List(ctx context.Context, p billing.PSPImportListParams) (bi
 	if err != nil {
 		return out, err
 	}
-	rows, err := im.DB.Gen(ctx).ListPSPImportsPage(ctx, gen.ListPSPImportsPageParams{MerchantID: mid.UUID(), AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit)})
+	params := gen.ListPSPImportsPageParams{MerchantID: mid.UUID(), AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit)}
+	if !p.PSP.IsZero() {
+		scope, err := im.psp(ctx, mid, p.PSP)
+		if err != nil {
+			return out, err
+		}
+		params.PspID = &scope.ID
+	}
+	switch p.Origin {
+	case "":
+	case billing.PSPImportOnboarding, billing.PSPImportManual:
+		params.Origin = new(string(p.Origin))
+	default:
+		return out, apperr.Invalidf("origin is onboarding or manual").WithParam("origin")
+	}
+	rows, err := im.DB.Gen(ctx).ListPSPImportsPage(ctx, params)
 	if err != nil {
 		return out, err
 	}
@@ -394,9 +427,11 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID) (*
 	return im.view(ctx, out)
 }
 
-// Fail records why an import's job gave up.
+// Fail records why an import's job gave up, with the PermanentError's code
+// when cause has one. A provider refusing the credentials also opens the
+// PSP's credentials finding and alerts the merchant's operator.
 func (im *Importer) Fail(ctx context.Context, id billing.PSPImportID, cause error) error {
-	mid, err := merchant.Require(ctx)
+	row, err := im.row(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -404,14 +439,44 @@ func (im *Importer) Fail(ctx context.Context, id billing.PSPImportID, cause erro
 	if msg == "" {
 		msg = "failed"
 	}
-	_, err = im.DB.Gen(ctx).SetPSPImportStatus(ctx, gen.SetPSPImportStatusParams{MerchantID: mid.UUID(), ID: id.UUID(), Status: string(billing.PSPImportFailed), Error: &msg})
-	return err
+	params := gen.SetPSPImportStatusParams{MerchantID: row.MerchantID, ID: row.ID, Status: string(billing.PSPImportFailed), Error: &msg}
+	var permanent PermanentError
+	if errors.As(cause, &permanent) && permanent.Code != "" {
+		params.ErrorCode = new(string(permanent.Code))
+	}
+	pspKey := billing.PSPID(row.PspID).String()
+	if scope, found, err := im.Merchants.PSPScopeByID(ctx, billing.MerchantID(row.MerchantID), row.PspID); err == nil && found {
+		pspKey = scope.Key
+	}
+	var opened *gen.BillingReconciliationFinding
+	err = im.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := im.DB.NewWithPgxTx(tx).Gen(ctx)
+		if _, err := q.SetPSPImportStatus(ctx, params); err != nil {
+			return err
+		}
+		if permanent.Code != billing.PSPImportCredentialsRejected {
+			return nil
+		}
+		f, err := openCredentialsFinding(ctx, q, row, pspKey, msg)
+		opened = &f
+		return err
+	})
+	if err != nil || opened == nil || im.Alerts == nil {
+		return err
+	}
+	if err := im.Alerts.NotifyFinding(ctx, reconcile.FindingRecordFromRow(*opened)); err != nil && ctx.Err() == nil {
+		log.WithContext(ctx).WithError(err).WithField("finding_id", opened.ID.String()).Warn("psp import: alerting the operator failed; the finding stays in the console")
+	}
+	return nil
 }
 
 func (im *Importer) view(ctx context.Context, row gen.BillingPspImport) (*billing.PSPImport, error) {
-	out := &billing.PSPImport{ID: billing.PSPImportID(row.ID), PSP: billing.PSPID(row.PspID), Rail: row.Rail, Status: billing.PSPImportStatus(row.Status),
-		HistorySince: row.HistorySince, HistoryThrough: row.HistoryThrough, PulledAt: row.PulledAt, AppliedAt: row.AppliedAt, Error: row.Error,
-		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, Counts: []billing.PSPImportCount{}}
+	out := &billing.PSPImport{ID: billing.PSPImportID(row.ID), PSP: billing.PSPID(row.PspID), Rail: row.Rail, Origin: billing.PSPImportOrigin(row.Origin),
+		Status: billing.PSPImportStatus(row.Status), HistorySince: row.HistorySince, HistoryThrough: row.HistoryThrough, PulledAt: row.PulledAt, AppliedAt: row.AppliedAt,
+		Error: row.Error, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, Counts: []billing.PSPImportCount{}}
+	if row.ErrorCode != nil {
+		out.ErrorCode = new(billing.PSPImportErrorCode(*row.ErrorCode))
+	}
 	if err := json.Unmarshal(row.Rules, &out.Rules); err != nil {
 		return nil, err
 	}

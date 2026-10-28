@@ -587,6 +587,24 @@
     ],
     "OR-J38-S05": [
       "TestPSPImport/OR-J38-S05/stripe-catalog-keeps-the-newest-truth-and-skips-what-it-cannot-read"
+    ],
+    "OR-J38-S06": [
+      "TestPSPImport/OR-J38-S06/onboarding-pull-per-rail"
+    ],
+    "OR-J38-S07": [
+      "TestPSPImport/OR-J38-S07/two-runtimes-one-database"
+    ],
+    "OR-J38-S08": [
+      "TestPSPImport/OR-J38-S08/credentials-rejected-rearms"
+    ],
+    "OR-J38-S09": [
+      "TestPSPImport/OR-J38-S09/provider-unreachable-retries"
+    ],
+    "OR-J38-S10": [
+      "TestPSPImport/OR-J38-S10/apply-lands-once-per-rail"
+    ],
+    "OR-J38-S11": [
+      "TestPSPImport/OR-J38-S11/stripe-customer-attribution"
     ]
   },
   "suites": {

@@ -35,8 +35,9 @@ const (
 // before any bytes hit the wire.
 var ErrProviderReadOnly = errors.New("ccbill: provider writes are blocked (mode=readonly)")
 
-// ErrDataLinkAuth identifies explicit HTTP/authentication rejections. A numeric
-// -7 response is deliberately excluded: it also covers internal/database errors.
+// ErrDataLinkAuth identifies explicit HTTP/authentication rejections, of an
+// SMS action or a DataLink export. A numeric -7 response is deliberately
+// excluded: it also covers internal/database errors.
 var ErrDataLinkAuth = errors.New("ccbill datalink: authentication or access rejected")
 
 // ErrDataLinkIndeterminate does not establish whether a mutation executed.
