@@ -134,6 +134,28 @@ func callbackSettlesSale(t *testing.T, a *authorityWorld, p *providerLedger, que
 	return settledSale(t, a, p, order.ID)
 }
 
+// nmiScheduleNotice delivers NMI's signed recurring.subscription.update notice
+// for a schedule.
+func nmiScheduleNotice(t *testing.T, a *authorityWorld, id, schedule string) {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"event_id": id, "event_type": "recurring.subscription.update", "event_body": map[string]any{"subscription_id": schedule, "merchant": map[string]string{"id": "critical-gateway"}}})
+	require.NoError(t, err)
+	at := fmt.Sprint(time.Now().Unix())
+	h := hmac.New(sha256.New, []byte("critical-nmi-webhook"))
+	_, _ = h.Write([]byte(at + "."))
+	_, _ = h.Write(body)
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, a.server.URL+"/v1/webhooks/nmi/critical-gateway", bytes.NewReader(body))
+	require.NoError(t, err)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Webhook-Signature", "t="+at+",s="+hex.EncodeToString(h.Sum(nil)))
+	response, err := a.server.Client().Do(r)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+}
+
 func TestCallbackContracts(t *testing.T) {
 	t.Run("OR-J28-S05/callback-during-fetch-keeps-a-follow-up-until-new-evidence-is-read", func(t *testing.T) {
 		a, p, sub := nmiMembership(t)
@@ -151,24 +173,7 @@ func TestCallbackContracts(t *testing.T) {
 			return r.Form.Get("report_type") == "transaction"
 		}, nmimock.HoldResponse)
 		defer gate.Release()
-		notice := func(id string) {
-			body, err := json.Marshal(map[string]any{"event_id": id, "event_type": "recurring.subscription.update", "event_body": map[string]any{"subscription_id": *sub.RailSubscriptionID, "merchant": map[string]string{"id": "critical-gateway"}}})
-			require.NoError(t, err)
-			at := fmt.Sprint(time.Now().Unix())
-			h := hmac.New(sha256.New, []byte("critical-nmi-webhook"))
-			_, _ = h.Write([]byte(at + "."))
-			_, _ = h.Write(body)
-			r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, a.server.URL+"/v1/webhooks/nmi/critical-gateway", bytes.NewReader(body))
-			require.NoError(t, err)
-			r.Header.Set("Content-Type", "application/json")
-			r.Header.Set("Webhook-Signature", "t="+at+",s="+hex.EncodeToString(h.Sum(nil)))
-			response, err := a.server.Client().Do(r)
-			require.NoError(t, err)
-			defer response.Body.Close()
-			raw, err := io.ReadAll(response.Body)
-			require.NoError(t, err)
-			require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
-		}
+		notice := func(id string) { nmiScheduleNotice(t, a, id, *sub.RailSubscriptionID) }
 		notice("evt_before_fetch")
 		jobs, err := queue.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.subscription_converge"))
 		require.NoError(t, err)

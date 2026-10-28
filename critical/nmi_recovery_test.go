@@ -237,7 +237,12 @@ func TestNMIRecovery(t *testing.T) {
 					p.core.EditSale(sale.TransactionID, func(s *nmimock.Sale) { s.Hidden = true })
 				}
 				a.clock.Advance(due.Sub(a.clock.Now()) + 25*time.Hour)
-				fleet := startFleet(t, a.world)
+				// Only the watch's passes run: a provider pull on start would record
+				// the revealed charge itself.
+				fleet := hostFleet(t, a.world)
+				fleet.PeriodicJobs().Clear()
+				require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+				require.NoError(t, fleet.Start(t.Context()))
 				runRegistered(t, fleet, "openrails.rebill_watch", 2)
 				p.money(t, 2, 2000)
 				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
@@ -247,9 +252,14 @@ func TestNMIRecovery(t *testing.T) {
 				p.core.Reveal()
 				p.core.EditSchedule(*sub.RailSubscriptionID, func(s *nmimock.Schedule) { s.NextBilling = due.Add(7 * 24 * time.Hour) })
 				if profile == "unavailable-query" {
-					a.clock.Advance(15 * time.Minute) // a failed look waits out its backoff
+					// A failed look waits out its backoff, then reads the charge.
+					a.clock.Advance(15 * time.Minute)
+					runRegistered(t, fleet, "openrails.rebill_watch", 2)
+				} else {
+					// The look found nothing and parked the row for verification; NMI's
+					// notice of the moved schedule is what reads the charge again.
+					nmiScheduleNotice(t, a, "evt_lagging_index", *sub.RailSubscriptionID)
 				}
-				runRegistered(t, fleet, "openrails.rebill_watch", 2)
 				nmiRenewalReadback(t, a, p, sub)
 			})
 		}
