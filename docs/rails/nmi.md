@@ -204,8 +204,9 @@ owns it). A live schedule from elsewhere (a legacy site still selling):
   transaction history as receipts, then converged as held. A customer already
   holding the product parks `product_held` instead.
 
-Before the PSP's first pull, or while its latest import stages the subscription
-unlanded, nothing parks or is adopted: the import owns it. Mapping the plan, or
+Before the PSP's first pull, while one is pending, or while its latest import
+stages the subscription unlanded, nothing is adopted and a park is
+`import_owned` (no finding): the import owns it. Mapping the plan, or
 landing a card in the vault, wakes converge in the same transaction; the park
 closes when the subscription lands by any path. Parks are listed by
 `ListParkedSubscriptions` (`GET /v1/merchant/parked-subscriptions`). Parking

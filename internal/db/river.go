@@ -194,3 +194,14 @@ func (d *DB) RetryRiverJob(ctx context.Context, id int64) error {
 	}
 	return d.RetryRiverJobTx(ctx, d.pgtx, id)
 }
+
+// RiverProducerBound reports whether a River producer is bound: a host tool
+// without one queues no jobs.
+func (d *DB) RiverProducerBound() bool {
+	if d == nil || d.river == nil {
+		return false
+	}
+	d.river.mu.RLock()
+	defer d.river.mu.RUnlock()
+	return d.river.inserter != nil
+}

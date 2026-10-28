@@ -326,6 +326,7 @@ func PullProviderReport(ctx context.Context, opts PullProviderReportOptions) err
 	defer func() {
 		_ = database.Close()
 	}()
+	bindParkWakes(ctx, opts.Config, database)
 
 	merchantID := opts.MerchantID
 	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
@@ -388,6 +389,7 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 		return nil, nil, err
 	}
 	cleanup := func() { _ = database.Close() }
+	bindParkWakes(ctx, cfg, database)
 	if err := database.RequireMerchantID(ctx, opts.MerchantID); err != nil {
 		cleanup()
 		return nil, nil, err

@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -26,10 +27,10 @@ var ErrProductHeld = errors.New("the customer already holds this product")
 
 // AdoptNMISubscription lands one live NMI subscription OpenRails does not
 // hold, arriving by webhook, as a one-subscription book: its v5 record mapped
-// as an import maps it, on the provider price mapping its plan, billing the
-// vault's card. The caller proved the plan mapped and customer the vault's one
-// owner. Its payments land when converge reads it as held.
-func (im *Importer) AdoptNMISubscription(ctx context.Context, pspID uuid.UUID, sub nmi.V5Subscription, customer uuid.UUID) error {
+// as an import maps it, on price (the price converge resolved its plan to),
+// billing the vault's card, with its transaction history as receipts. The
+// caller proved customer the vault's one owner.
+func (im *Importer) AdoptNMISubscription(ctx context.Context, pspID uuid.UUID, sub nmi.V5Subscription, customer uuid.UUID, price *models.Price) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -46,16 +47,17 @@ func (im *Importer) AdoptNMISubscription(ctx context.Context, pspID uuid.UUID, s
 		return err
 	}
 	data := st.data.(subscriptionData)
-	prices := map[string]priceTerms{}
-	if data.Plan != "" {
-		rows, err := im.DB.Gen(ctx).ListPSPProviderPrices(ctx, gen.ListPSPProviderPricesParams{MerchantID: mid.UUID(), PspID: pspID, Refs: []string{data.Plan}})
-		if err != nil {
-			return err
-		}
-		for _, r := range rows {
-			prices[r.Ref] = termsOf(r.PublicID, r.Amount, r.Currency, r.BillingIntervalHours, r.BillingIntervalMonths)
-		}
+	if price == nil || data.Plan == "" {
+		return fmt.Errorf("adopt NMI subscription %s: no price for its plan", st.ref)
 	}
+	terms := priceTerms{id: price.PublicID, amount: price.Amount, currency: price.Currency}
+	if price.BillingIntervalHours != nil {
+		terms.hours = *price.BillingIntervalHours
+	}
+	if price.BillingIntervalMonths != nil {
+		terms.months = *price.BillingIntervalMonths
+	}
+	prices := map[string]priceTerms{data.Plan: terms}
 	methods, err := im.DB.Gen(ctx).ListCustomerVaultMethods(ctx, gen.ListCustomerVaultMethodsParams{MerchantID: mid.UUID(), PspID: pspID, Vault: st.customerRef, CustomerID: customer})
 	if err != nil {
 		return err

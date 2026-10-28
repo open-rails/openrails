@@ -66,7 +66,7 @@ type NMIConvergeService struct {
 // NMIAdopter lands one live NMI subscription OpenRails does not hold, on its
 // plan's provider price, for the vault's one owner.
 type NMIAdopter interface {
-	AdoptNMISubscription(ctx context.Context, pspID uuid.UUID, sub nmi.V5Subscription, customer uuid.UUID) error
+	AdoptNMISubscription(ctx context.Context, pspID uuid.UUID, sub nmi.V5Subscription, customer uuid.UUID, price *models.Price) error
 }
 
 func (s *NMIConvergeService) now() time.Time {
@@ -150,7 +150,8 @@ func (s *NMIConvergeService) convergeHeld(ctx context.Context, rail string, sub 
 		"fetched_transactions": fetched,
 	}).Info("nmi converge: decided from fetched truth")
 
-	return sub.CustomerID, nil
+	// Held now: a park left from before it landed is done.
+	return sub.CustomerID, closePark(ctx, s.DB, sub.RailSubscriptionID, billing.ParkConverged, now)
 }
 
 // convergeUnheld converges a reference that resolves to nothing local: a
@@ -190,7 +191,7 @@ func (s *NMIConvergeService) convergeUnheld(ctx context.Context, rail, reference
 		}
 	}
 	vault := strings.TrimSpace(remote.CustomerVaultID)
-	subject := parking.Subject{PSPID: pspID, Rail: rail, SubscriptionRef: reference, PriceRef: plan, CustomerRef: vault, Backlog: true,
+	subject := parking.Subject{PSPID: pspID, Rail: rail, SubscriptionRef: reference, PriceRef: plan, CustomerRef: vault, Unheld: true,
 		Evidence: map[string]any{"plan": plan, "vault": vault, "amount": remote.Amount, "next_billing_date": remote.NextBillingDate}}
 	if plan == "" {
 		log.WithContext(ctx).WithFields(log.Fields{"rail": rail, "subscription_reference": reference}).
@@ -238,7 +239,9 @@ func (s *NMIConvergeService) convergeUnheld(ctx context.Context, rail, reference
 	if s.Adopter == nil {
 		return uuid.Nil, fmt.Errorf("nmi converge: adoption is not wired")
 	}
-	if err := s.Adopter.AdoptNMISubscription(ctx, pspID, remote, owners[0]); errors.Is(err, pspimport.ErrProductHeld) {
+	// It lands on the price converge resolved its plan to: one meaning of
+	// mapped for parking and adoption.
+	if err := s.Adopter.AdoptNMISubscription(ctx, pspID, remote, owners[0], price); errors.Is(err, pspimport.ErrProductHeld) {
 		subject.Reason, subject.Evidence["customer_id"] = billing.ParkProductHeld, owners[0]
 		return uuid.Nil, parkSubscription(ctx, s.DB, s.Findings, subject, now)
 	} else if err != nil {

@@ -13,6 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/modules/parking"
@@ -86,8 +87,10 @@ func (w *ProviderObjectObserveWorker) Work(ctx context.Context, job *river.Job[w
 		// A price an event first shows us, live and unmapped, is new since
 		// onboarding: raise it. A pulled one is the import's to list.
 		raise := before == nil && obj != nil && !obj.Retired
-		_, err = parking.SyncPriceFinding(ctx, objects.DB.Gen(ctx), args.MerchantID, args.PSPID, args.Ref, raise)
-		return err
+		return objects.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			_, err := parking.SyncPriceFinding(ctx, gen.New(tx), args.MerchantID, args.PSPID, args.Ref, raise)
+			return err
+		})
 	})
 }
 

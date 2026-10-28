@@ -238,11 +238,12 @@ A live Stripe subscription OpenRails cannot land parks instead of retrying
 (`customer_unlinked`), or the customer already holds the product
 (`product_held`). Price is checked first; nothing is attributed by email. A
 held subscription moved onto an unmapped price keeps its paid tier and parks
-too; its bills naming that price wait. Mapping the price or linking the
-customer (a checkout, an import) wakes converge in the same transaction, and
-the park closes when the subscription lands, by any path, exactly once. Before
-the PSP's first pull, or while its latest import stages the subscription,
-nothing parks: the import owns it.
+too, and so does one with a bill on an unmapped price; those bills wait.
+Mapping the price or linking the customer (a checkout, an import) wakes
+converge in the same transaction, and the park closes when the subscription
+lands, by any path, exactly once. Before the PSP's first pull, while one is
+pending, or while its latest import stages the subscription, the park is
+`import_owned`: it raises no finding, and the import lands it.
 
 A dispute or a provider refund that revokes access also queues a durable
 `stripe_cancel_subscription` intent in the same transaction. It reads the

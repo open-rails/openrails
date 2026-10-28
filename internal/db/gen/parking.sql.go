@@ -47,7 +47,7 @@ const closeOpenPark = `-- name: CloseOpenPark :one
 UPDATE billing.parked_provider_subscriptions SET released_at = $1::timestamptz, released_by = $2::text
 WHERE merchant_id = $3::uuid AND psp_id = $4::uuid
   AND subscription_ref = $5::text AND released_at IS NULL
-RETURNING merchant_id, id, psp_id, rail, subscription_ref, reason, price_ref, customer_ref, evidence, parked_at, last_seen_at, released_at, released_by
+RETURNING merchant_id, id, psp_id, rail, subscription_ref, reason, price_ref, customer_ref, import_owned, evidence, parked_at, last_seen_at, released_at, released_by
 `
 
 type CloseOpenParkParams struct {
@@ -76,6 +76,7 @@ func (q *Queries) CloseOpenPark(ctx context.Context, arg CloseOpenParkParams) (B
 		&i.Reason,
 		&i.PriceRef,
 		&i.CustomerRef,
+		&i.ImportOwned,
 		&i.Evidence,
 		&i.ParkedAt,
 		&i.LastSeenAt,
@@ -88,7 +89,7 @@ func (q *Queries) CloseOpenPark(ctx context.Context, arg CloseOpenParkParams) (B
 const countOpenParksByPrice = `-- name: CountOpenParksByPrice :one
 SELECT count(*) FROM billing.parked_provider_subscriptions
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND reason = 'price_unmapped'
-  AND price_ref = $3::text AND released_at IS NULL
+  AND price_ref = $3::text AND released_at IS NULL AND NOT import_owned
 `
 
 type CountOpenParksByPriceParams struct {
@@ -97,6 +98,7 @@ type CountOpenParksByPriceParams struct {
 	PriceRef   string
 }
 
+// The parks a price's finding counts: not those the import owns.
 func (q *Queries) CountOpenParksByPrice(ctx context.Context, arg CountOpenParksByPriceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countOpenParksByPrice, arg.MerchantID, arg.PspID, arg.PriceRef)
 	var count int64
@@ -105,7 +107,7 @@ func (q *Queries) CountOpenParksByPrice(ctx context.Context, arg CountOpenParksB
 }
 
 const getOpenPark = `-- name: GetOpenPark :one
-SELECT merchant_id, id, psp_id, rail, subscription_ref, reason, price_ref, customer_ref, evidence, parked_at, last_seen_at, released_at, released_by FROM billing.parked_provider_subscriptions
+SELECT merchant_id, id, psp_id, rail, subscription_ref, reason, price_ref, customer_ref, import_owned, evidence, parked_at, last_seen_at, released_at, released_by FROM billing.parked_provider_subscriptions
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
   AND subscription_ref = $3::text AND released_at IS NULL
 `
@@ -128,6 +130,7 @@ func (q *Queries) GetOpenPark(ctx context.Context, arg GetOpenParkParams) (Billi
 		&i.Reason,
 		&i.PriceRef,
 		&i.CustomerRef,
+		&i.ImportOwned,
 		&i.Evidence,
 		&i.ParkedAt,
 		&i.LastSeenAt,
@@ -326,7 +329,7 @@ func (q *Queries) ListOpenParksByPrice(ctx context.Context, arg ListOpenParksByP
 }
 
 const listParkedSubscriptions = `-- name: ListParkedSubscriptions :many
-SELECT p.id, p.psp_id, p.rail, p.subscription_ref, p.reason, p.price_ref, p.customer_ref, p.evidence, p.parked_at, p.last_seen_at,
+SELECT p.id, p.psp_id, p.rail, p.subscription_ref, p.reason, p.price_ref, p.customer_ref, p.import_owned, p.evidence, p.parked_at, p.last_seen_at,
     p.released_at, p.released_by, s.id AS subscription_id
 FROM billing.parked_provider_subscriptions p
 LEFT JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.psp_id = p.psp_id
@@ -358,6 +361,7 @@ type ListParkedSubscriptionsRow struct {
 	Reason          string
 	PriceRef        *string
 	CustomerRef     *string
+	ImportOwned     bool
 	Evidence        []byte
 	ParkedAt        time.Time
 	LastSeenAt      time.Time
@@ -392,6 +396,7 @@ func (q *Queries) ListParkedSubscriptions(ctx context.Context, arg ListParkedSub
 			&i.Reason,
 			&i.PriceRef,
 			&i.CustomerRef,
+			&i.ImportOwned,
 			&i.Evidence,
 			&i.ParkedAt,
 			&i.LastSeenAt,
@@ -446,39 +451,43 @@ func (q *Queries) ListVaultOwners(ctx context.Context, arg ListVaultOwnersParams
 
 const lockParkCause = `-- name: LockParkCause :exec
 
-SELECT pg_advisory_xact_lock(hashtextextended('openrails.park:' || $1::uuid::text || ':' || $2::uuid::text
-    || ':' || $3::text || ':' || $4::text, 0))
+SELECT pg_advisory_xact_lock(hashtextextended('openrails.park:' || m.id::text || ':' || $1::uuid::text
+    || ':' || $2::text || ':' || $3::text, 0))
+FROM (SELECT id FROM billing.merchants WHERE id = $4::uuid FOR KEY SHARE) m
 `
 
 type LockParkCauseParams struct {
-	MerchantID uuid.UUID
 	PspID      uuid.UUID
 	Reason     string
 	Ref        string
+	MerchantID uuid.UUID
 }
 
 // Parked provider subscriptions: live provider subscriptions converge cannot
 // land yet, and the PSP-scoped findings they raise.
 // Park and Wake serialize on one cause: whichever commits first, the other
-// sees it.
+// sees it. The merchant row's key share is taken first: a catalog write
+// holds that row for update and then wakes, so a park must wait for it
+// before holding a cause, never after (its finding's key check would
+// deadlock).
 func (q *Queries) LockParkCause(ctx context.Context, arg LockParkCauseParams) error {
 	_, err := q.db.Exec(ctx, lockParkCause,
-		arg.MerchantID,
 		arg.PspID,
 		arg.Reason,
 		arg.Ref,
+		arg.MerchantID,
 	)
 	return err
 }
 
 const openPark = `-- name: OpenPark :one
-INSERT INTO billing.parked_provider_subscriptions (merchant_id, psp_id, rail, subscription_ref, reason, price_ref, customer_ref, evidence, parked_at, last_seen_at)
+INSERT INTO billing.parked_provider_subscriptions (merchant_id, psp_id, rail, subscription_ref, reason, price_ref, customer_ref, import_owned, evidence, parked_at, last_seen_at)
 VALUES ($1::uuid, $2::uuid, $3::text, $4::text, $5::text,
-    $6::text, $7::text, $8::jsonb, $9::timestamptz, $9::timestamptz)
+    $6::text, $7::text, $8::boolean, $9::jsonb, $10::timestamptz, $10::timestamptz)
 ON CONFLICT (merchant_id, psp_id, subscription_ref) WHERE released_at IS NULL DO UPDATE SET
     reason = EXCLUDED.reason, price_ref = EXCLUDED.price_ref, customer_ref = EXCLUDED.customer_ref,
-    evidence = EXCLUDED.evidence, last_seen_at = EXCLUDED.last_seen_at
-RETURNING merchant_id, id, psp_id, rail, subscription_ref, reason, price_ref, customer_ref, evidence, parked_at, last_seen_at, released_at, released_by
+    import_owned = EXCLUDED.import_owned, evidence = EXCLUDED.evidence, last_seen_at = EXCLUDED.last_seen_at
+RETURNING merchant_id, id, psp_id, rail, subscription_ref, reason, price_ref, customer_ref, import_owned, evidence, parked_at, last_seen_at, released_at, released_by
 `
 
 type OpenParkParams struct {
@@ -489,6 +498,7 @@ type OpenParkParams struct {
 	Reason          string
 	PriceRef        *string
 	CustomerRef     *string
+	ImportOwned     bool
 	Evidence        []byte
 	At              time.Time
 }
@@ -504,6 +514,7 @@ func (q *Queries) OpenPark(ctx context.Context, arg OpenParkParams) (BillingPark
 		arg.Reason,
 		arg.PriceRef,
 		arg.CustomerRef,
+		arg.ImportOwned,
 		arg.Evidence,
 		arg.At,
 	)
@@ -517,6 +528,7 @@ func (q *Queries) OpenPark(ctx context.Context, arg OpenParkParams) (BillingPark
 		&i.Reason,
 		&i.PriceRef,
 		&i.CustomerRef,
+		&i.ImportOwned,
 		&i.Evidence,
 		&i.ParkedAt,
 		&i.LastSeenAt,
@@ -547,28 +559,22 @@ func (q *Queries) ProviderRefMapped(ctx context.Context, arg ProviderRefMappedPa
 	return mapped, err
 }
 
-const touchOpenPark = `-- name: TouchOpenPark :execrows
-UPDATE billing.parked_provider_subscriptions SET last_seen_at = $1::timestamptz
-WHERE merchant_id = $2::uuid AND psp_id = $3::uuid
-  AND subscription_ref = $4::text AND released_at IS NULL
+const subscriptionLanded = `-- name: SubscriptionLanded :one
+SELECT EXISTS (SELECT 1 FROM billing.subscriptions
+    WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
+      AND rail_subscription_id = $3::text AND deleted_at IS NULL)::boolean AS landed
 `
 
-type TouchOpenParkParams struct {
-	At              time.Time
+type SubscriptionLandedParams struct {
 	MerchantID      uuid.UUID
 	PspID           uuid.UUID
 	SubscriptionRef string
 }
 
-func (q *Queries) TouchOpenPark(ctx context.Context, arg TouchOpenParkParams) (int64, error) {
-	result, err := q.db.Exec(ctx, touchOpenPark,
-		arg.At,
-		arg.MerchantID,
-		arg.PspID,
-		arg.SubscriptionRef,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+// Whether a live subscription row holds the provider subscription.
+func (q *Queries) SubscriptionLanded(ctx context.Context, arg SubscriptionLandedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, subscriptionLanded, arg.MerchantID, arg.PspID, arg.SubscriptionRef)
+	var landed bool
+	err := row.Scan(&landed)
+	return landed, err
 }

@@ -62,7 +62,7 @@ func List(ctx context.Context, d *db.DB, psps *merchants.Service, p billing.Park
 	items := make([]billing.ParkedSubscription, 0, len(rows))
 	for _, r := range rows {
 		item := billing.ParkedSubscription{ID: billing.ParkedSubscriptionID(r.ID), PSP: billing.PSPID(r.PspID), Rail: r.Rail, SubscriptionRef: r.SubscriptionRef,
-			Reason: billing.ParkReason(r.Reason), PriceRef: r.PriceRef, CustomerRef: r.CustomerRef, Evidence: r.Evidence,
+			Reason: billing.ParkReason(r.Reason), PriceRef: r.PriceRef, CustomerRef: r.CustomerRef, ImportOwned: r.ImportOwned, Evidence: r.Evidence,
 			ParkedAt: r.ParkedAt.UTC(), LastSeenAt: r.LastSeenAt.UTC()}
 		if r.ReleasedAt != nil {
 			item.ReleasedAt = new(r.ReleasedAt.UTC())

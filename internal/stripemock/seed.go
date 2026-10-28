@@ -223,6 +223,20 @@ func (m *Mock) RenewSubscription(sub string, paid bool) Object {
 	return clone(m.invoiceLocked(sub, amount, paid))
 }
 
+// ChargeInvoiceItem is Stripe invoicing a one-off item on price to the
+// subscription's customer, paid at once; it returns the invoice.
+func (m *Mock) ChargeInvoiceItem(sub, price string, amount int64) Object {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inv := m.newInvoiceLocked(sub, amount)
+	line := inv["lines"].(Object)["data"].([]Object)[0]
+	line["description"], line["pricing"] = "Invoice item "+price, Object{"type": "price_details", "price_details": Object{"price": price}}
+	inv["billing_reason"], inv["status"], inv["attempt_count"] = "manual", "open", int64(1)
+	inv["status_transitions"].(Object)["finalized_at"] = m.now().Unix()
+	m.payInvoiceLocked(inv)
+	return clone(inv)
+}
+
 // DraftRenewal is Stripe rolling the subscription into its next period with
 // a draft invoice it has not finalized or tried to collect; it returns the
 // subscription.

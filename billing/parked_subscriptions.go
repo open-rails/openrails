@@ -56,7 +56,9 @@ const (
 // ParkedSubscription is a live provider subscription OpenRails could not land.
 // The customer keeps paying the provider; nothing is canceled or refunded.
 // Fixing the cause (mapping the price, linking the customer) converges it
-// again; Subscription is set once it landed.
+// again; Subscription is set once it landed. ImportOwned: the PSP's import
+// owns it (no pull yet, a pull pending, or staged unlanded), so it raises no
+// finding and the import lands it.
 type ParkedSubscription struct {
 	ID              ParkedSubscriptionID `json:"id"`
 	PSP             PSPID                `json:"psp"`
@@ -65,6 +67,7 @@ type ParkedSubscription struct {
 	Reason          ParkReason           `json:"reason"`
 	PriceRef        *string              `json:"price_ref"`
 	CustomerRef     *string              `json:"customer_ref"`
+	ImportOwned     bool                 `json:"import_owned"`
 	Evidence        json.RawMessage      `json:"evidence"`
 	ParkedAt        time.Time            `json:"parked_at"`
 	LastSeenAt      time.Time            `json:"last_seen_at"`

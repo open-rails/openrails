@@ -19588,6 +19588,9 @@
               }
             ]
           },
+          "import_owned": {
+            "type": "boolean"
+          },
           "evidence": {
             "oneOf": [
               {},
@@ -19649,6 +19652,7 @@
           "reason",
           "price_ref",
           "customer_ref",
+          "import_owned",
           "evidence",
           "parked_at",
           "last_seen_at",

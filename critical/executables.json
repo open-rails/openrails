@@ -638,6 +638,9 @@
     ],
     "OR-J15-S16": [
       "TestProviderTrailing/OR-J15-S16/list-parked-subscriptions"
+    ],
+    "OR-J15-S17": [
+      "TestProviderTrailing/OR-J15-S17/stripe-link-before-the-first-pull-lands-at-once"
     ]
   },
   "suites": {

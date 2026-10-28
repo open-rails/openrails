@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -105,11 +106,17 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 		return s.createFromFetchedRecord(ctx, railSubID, rec, reader, now)
 	}
 
-	if rec.Found {
-		if err := s.recordFetchedBills(ctx, sub, rec, reader, now); err != nil {
+	if !rec.Found && rec.Missing {
+		if err := closePark(ctx, s.DB, railSubID, billing.ParkGone, now); err != nil {
 			return sub.CustomerID, err
 		}
-		if err := s.applyFetchedMirrorFacts(ctx, railSubID, rec, now); err != nil {
+	}
+	if rec.Found {
+		deferred, err := s.recordFetchedBills(ctx, sub, rec, reader, now)
+		if err != nil {
+			return sub.CustomerID, err
+		}
+		if err := s.applyFetchedMirrorFacts(ctx, railSubID, rec, deferred, now); err != nil {
 			return sub.CustomerID, err
 		}
 		// Reload: the mirror facts may have moved price/cancel marks.
@@ -157,7 +164,7 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 		return uuid.Nil, err
 	}
 	subject := parking.Subject{PSPID: pspID, Rail: string(models.RailStripe), SubscriptionRef: railSubID, PriceRef: rec.PriceID, CustomerRef: rec.CustomerID,
-		Backlog: true, Evidence: map[string]any{"status": rec.Status, "customer": rec.CustomerID, "price": rec.PriceID, "latest_invoice": rec.LatestInvoiceID}}
+		Unheld: true, Evidence: map[string]any{"status": rec.Status, "customer": rec.CustomerID, "price": rec.PriceID, "latest_invoice": rec.LatestInvoiceID}}
 
 	priceID, _, unmapped, err := s.resolveFetchedPrice(ctx, rec)
 	if err != nil {
@@ -238,12 +245,16 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("stripe converge: create membership %s: %w", railSubID, err)
 	}
-	if err := s.recordFetchedBills(ctx, sub, rec, reader, now); err != nil {
+	deferred, err := s.recordFetchedBills(ctx, sub, rec, reader, now)
+	if err != nil {
 		return sub.CustomerID, err
 	}
 	log.WithContext(ctx).WithFields(log.Fields{
 		"rail_subscription_id": railSubID, "subscription_id": sub.ID, "user_id": userID,
 	}).Info("stripe converge: membership created from fetched record")
+	if price := firstDeferred(deferred); price != "" {
+		return sub.CustomerID, s.parkDeferred(ctx, sub, rec, price, deferred[price], now)
+	}
 
 	return sub.CustomerID, nil
 }
@@ -305,10 +316,11 @@ func validateStripeFetchedInvoicePrice(rec subscriptions.StripeLivenessRecord, p
 // recordFetchedBills walks the complete subscription history and fetches each
 // specific invoice. Replayed or unordered webhooks cannot replace an earlier
 // bill with latest_invoice. Each callback owns one local transaction. A bill
-// billing a price no price of ours binds waits: the subscription parks, and
-// mapping the price converges it again.
-func (s *StripeConvergeService) recordFetchedBills(ctx context.Context, sub *models.Subscription, rec subscriptions.StripeLivenessRecord, reader subscriptions.StripeBillReader, now time.Time) error {
-	return reader.VisitSubscriptionBills(ctx, sub.RailSubscriptionID, func(invoice subscriptions.StripeBill) error {
+// with a line on a price no price of ours binds is deferred, and returned by
+// that price: the subscription parks on it until it is mapped.
+func (s *StripeConvergeService) recordFetchedBills(ctx context.Context, sub *models.Subscription, rec subscriptions.StripeLivenessRecord, reader subscriptions.StripeBillReader, now time.Time) (map[string][]string, error) {
+	deferred := map[string][]string{}
+	err := reader.VisitSubscriptionBills(ctx, sub.RailSubscriptionID, func(invoice subscriptions.StripeBill) error {
 		if invoice.CustomerID != rec.CustomerID {
 			return fmt.Errorf("Stripe invoice %s belongs to a different customer", invoice.ID)
 		}
@@ -317,8 +329,7 @@ func (s *StripeConvergeService) recordFetchedBills(ctx context.Context, sub *mod
 				continue
 			}
 			if _, err := s.PriceService.GetByStripePriceID(ctx, line.PriceID); db.IsNotFound(err) {
-				log.WithContext(ctx).WithFields(log.Fields{"invoice": invoice.ID, "stripe_price_id": line.PriceID}).
-					Info("stripe converge: bill names an unmapped price; it is recorded once the price is mapped")
+				deferred[line.PriceID] = append(deferred[line.PriceID], invoice.ID)
 				return nil
 			} else if err != nil {
 				return err
@@ -340,6 +351,26 @@ func (s *StripeConvergeService) recordFetchedBills(ctx context.Context, sub *mod
 			return err
 		})
 	})
+	return deferred, err
+}
+
+// firstDeferred is the price a subscription with deferred bills parks on.
+func firstDeferred(deferred map[string][]string) string {
+	if len(deferred) == 0 {
+		return ""
+	}
+	return slices.Sorted(maps.Keys(deferred))[0]
+}
+
+// parkDeferred parks a held subscription on the unmapped price its deferred
+// bills name.
+func (s *StripeConvergeService) parkDeferred(ctx context.Context, sub *models.Subscription, rec subscriptions.StripeLivenessRecord, price string, invoices []string, now time.Time) error {
+	if err := observePrice(ctx, s.Objects, price, nil); err != nil {
+		return fmt.Errorf("stripe converge: observe price %s: %w", price, err)
+	}
+	return parkSubscription(ctx, s.DB, s.Findings, parking.Subject{PSPID: sub.PspID, Rail: string(models.RailStripe), SubscriptionRef: sub.RailSubscriptionID,
+		Reason: billing.ParkPriceUnmapped, PriceRef: price, CustomerRef: rec.CustomerID,
+		Evidence: map[string]any{"subscription_id": sub.ID, "held_price_id": sub.PriceID, "price": price, "deferred_invoices": invoices}}, now)
 }
 
 // applyFetchedMirrorFacts mirrors the Stripe facts outside the decider's
@@ -349,14 +380,19 @@ func (s *StripeConvergeService) recordFetchedBills(ctx context.Context, sub *mod
 //   - a price move takes effect only with a paid invoice for the new price;
 //     a move onto an unmapped price keeps the paid tier and parks until the
 //     price is mapped.
-func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, now time.Time) error {
+//
+// A park closes only once no bill waits on an unmapped price: as gone when
+// Stripe ended the subscription, else as converged.
+func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, deferred map[string][]string, now time.Time) error {
 	var (
 		updatedSub *models.Subscription
 		oldProduct uuid.UUID
-		parkMove   *models.Subscription
+		parked     *models.Subscription
+		parkOn     string
 	)
 	status := strings.ToLower(strings.TrimSpace(rec.Status))
 	remoteAlive := status == "active" || status == "trialing"
+	ended := status == "canceled" || status == "incomplete_expired"
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
@@ -381,19 +417,26 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 			}
 		}
 
-		if sub.Status == models.StatusCanceled || rec.PriceID == "" {
-			return parking.Close(ctx, gen.New(tx), sub.PspID, railSubID, billing.ParkConverged, now)
+		var price *models.Price
+		unmapped := false
+		if sub.Status != models.StatusCanceled && !ended && rec.PriceID != "" {
+			if price, unmapped, err = s.paidPriceMove(ctx, sub, rec); err != nil {
+				return err
+			}
 		}
-		price, unmapped, err := s.paidPriceMove(ctx, sub, rec)
-		if err != nil {
-			return err
-		}
-		if unmapped {
-			parkMove = sub
-			return nil
-		}
-		if err := parking.Close(ctx, gen.New(tx), sub.PspID, railSubID, billing.ParkConverged, now); err != nil {
-			return err
+		switch {
+		case len(deferred) > 0:
+			parked, parkOn = sub, firstDeferred(deferred)
+		case unmapped:
+			parked, parkOn = sub, rec.PriceID
+		case ended:
+			if err := parking.Close(ctx, gen.New(tx), sub.PspID, railSubID, billing.ParkGone, now); err != nil {
+				return err
+			}
+		default:
+			if err := parking.Close(ctx, gen.New(tx), sub.PspID, railSubID, billing.ParkConverged, now); err != nil {
+				return err
+			}
 		}
 		if price == nil {
 			return nil
@@ -414,13 +457,8 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 	}); err != nil {
 		return err
 	}
-	if parkMove != nil {
-		if err := observePrice(ctx, s.Objects, rec.PriceID, nil); err != nil {
-			return fmt.Errorf("stripe converge: observe price %s: %w", rec.PriceID, err)
-		}
-		return parkSubscription(ctx, s.DB, s.Findings, parking.Subject{PSPID: parkMove.PspID, Rail: string(models.RailStripe), SubscriptionRef: railSubID,
-			Reason: billing.ParkPriceUnmapped, PriceRef: rec.PriceID, CustomerRef: rec.CustomerID,
-			Evidence: map[string]any{"subscription_id": parkMove.ID, "held_price_id": parkMove.PriceID, "price": rec.PriceID, "latest_invoice": rec.LatestInvoiceID}}, now)
+	if parked != nil {
+		return s.parkDeferred(ctx, parked, rec, parkOn, deferred[parkOn], now)
 	}
 
 	// A product move ends the old product's grace window.

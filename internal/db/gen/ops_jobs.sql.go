@@ -15,7 +15,7 @@ import (
 const countOpenCatalogDriftByKind = `-- name: CountOpenCatalogDriftByKind :many
 SELECT rail, substr(finding_type, 9)::text AS kind, count(*)::bigint AS n
 FROM billing.reconciliation_findings
-WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND openrails_resource_type IS NOT NULL AND resolved_at IS NULL
 GROUP BY rail, finding_type
 `
 
@@ -47,7 +47,7 @@ func (q *Queries) CountOpenCatalogDriftByKind(ctx context.Context) ([]CountOpenC
 
 const countOpenCatalogDriftFiltered = `-- name: CountOpenCatalogDriftFiltered :one
 SELECT count(*) FROM billing.reconciliation_findings
-WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND openrails_resource_type IS NOT NULL AND resolved_at IS NULL
   AND ($1::text IS NULL OR rail = $1::text)
   AND ($2::text IS NULL OR finding_type = 'catalog.' || $2::text)
   AND ($3::text IS NULL OR openrails_resource_type = $3::text)
@@ -69,12 +69,15 @@ func (q *Queries) CountOpenCatalogDriftFiltered(ctx context.Context, arg CountOp
 const listOpenCatalogDriftEvents = `-- name: ListOpenCatalogDriftEvents :many
 
 SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id FROM billing.reconciliation_findings
-WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND openrails_resource_type IS NOT NULL AND resolved_at IS NULL
 `
 
 // Operational job state: catalog drift events (reconciliation).
-// Catalog drift events are the catalog.* reconciliation findings; kind is the
-// finding type without its "catalog." prefix.
+// Catalog drift events are the drift kinds of the catalog.* findings; kind is
+// the finding type without its "catalog." prefix. Every drift row names the
+// OpenRails resource it compares (openrails_resource_type), which the
+// provider-price findings (catalog.price.unmapped) never do, so a drift pass
+// never resolves or counts them.
 func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]BillingReconciliationFinding, error) {
 	rows, err := q.db.Query(ctx, listOpenCatalogDriftEvents)
 	if err != nil {
@@ -132,7 +135,7 @@ const resolveCatalogDriftFinding = `-- name: ResolveCatalogDriftFinding :execrow
 UPDATE billing.reconciliation_findings
 SET resolved_at = $1::timestamptz, status = 'fixed', resolution = 'auto_vanished',
     updated_at = $1::timestamptz, notified_at = NULL, notified_severity = NULL
-WHERE merchant_id = billing.current_merchant_id() AND finding_type LIKE 'catalog.%'
+WHERE merchant_id = billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND openrails_resource_type IS NOT NULL
   AND id = $2::uuid AND psp_id = $3::uuid AND resolved_at IS NULL
   AND last_seen_at <= $1::timestamptz
 `
@@ -157,7 +160,7 @@ const resolveCatalogDriftForResource = `-- name: ResolveCatalogDriftForResource 
 UPDATE billing.reconciliation_findings
 SET resolved_at = $1::timestamptz, status = 'fixed', resolution = 'enforced',
     updated_at = $1::timestamptz, notified_at = NULL, notified_severity = NULL
-WHERE finding_type LIKE 'catalog.%' AND merchant_id = billing.current_merchant_id() AND resolved_at IS NULL
+WHERE finding_type LIKE 'catalog.%' AND openrails_resource_type IS NOT NULL AND merchant_id = billing.current_merchant_id() AND resolved_at IS NULL
   AND psp_id = $2::uuid
   AND openrails_resource_type = $3::text
   AND openrails_resource_id = $4::text

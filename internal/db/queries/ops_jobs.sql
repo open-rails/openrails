@@ -1,10 +1,13 @@
 -- Operational job state: catalog drift events (reconciliation).
 
--- Catalog drift events are the catalog.* reconciliation findings; kind is the
--- finding type without its "catalog." prefix.
+-- Catalog drift events are the drift kinds of the catalog.* findings; kind is
+-- the finding type without its "catalog." prefix. Every drift row names the
+-- OpenRails resource it compares (openrails_resource_type), which the
+-- provider-price findings (catalog.price.unmapped) never do, so a drift pass
+-- never resolves or counts them.
 -- name: ListOpenCatalogDriftEvents :many
 SELECT * FROM billing.reconciliation_findings
-WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL;
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND openrails_resource_type IS NOT NULL AND resolved_at IS NULL;
 
 -- name: UpsertCatalogDriftFinding :one
 -- One standing finding per (PSP account, resource, external id, field). An
@@ -51,13 +54,13 @@ RETURNING status;
 UPDATE billing.reconciliation_findings
 SET resolved_at = sqlc.arg(resolved_at)::timestamptz, status = 'fixed', resolution = 'auto_vanished',
     updated_at = sqlc.arg(resolved_at)::timestamptz, notified_at = NULL, notified_severity = NULL
-WHERE merchant_id = billing.current_merchant_id() AND finding_type LIKE 'catalog.%'
+WHERE merchant_id = billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND openrails_resource_type IS NOT NULL
   AND id = sqlc.arg(id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND resolved_at IS NULL
   AND last_seen_at <= sqlc.arg(resolved_at)::timestamptz;
 
 -- name: CountOpenCatalogDriftFiltered :one
 SELECT count(*) FROM billing.reconciliation_findings
-WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND openrails_resource_type IS NOT NULL AND resolved_at IS NULL
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(kind)::text IS NULL OR finding_type = 'catalog.' || sqlc.narg(kind)::text)
   AND (sqlc.narg(resource_type)::text IS NULL OR openrails_resource_type = sqlc.narg(resource_type)::text);
@@ -67,7 +70,7 @@ WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%
 UPDATE billing.reconciliation_findings
 SET resolved_at = sqlc.arg(resolved_at)::timestamptz, status = 'fixed', resolution = 'enforced',
     updated_at = sqlc.arg(resolved_at)::timestamptz, notified_at = NULL, notified_severity = NULL
-WHERE finding_type LIKE 'catalog.%' AND merchant_id = billing.current_merchant_id() AND resolved_at IS NULL
+WHERE finding_type LIKE 'catalog.%' AND openrails_resource_type IS NOT NULL AND merchant_id = billing.current_merchant_id() AND resolved_at IS NULL
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND openrails_resource_type = sqlc.arg(openrails_resource_type)::text
   AND openrails_resource_id = sqlc.arg(openrails_resource_id)::text
@@ -76,5 +79,5 @@ WHERE finding_type LIKE 'catalog.%' AND merchant_id = billing.current_merchant_i
 -- name: CountOpenCatalogDriftByKind :many
 SELECT rail, substr(finding_type, 9)::text AS kind, count(*)::bigint AS n
 FROM billing.reconciliation_findings
-WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND openrails_resource_type IS NOT NULL AND resolved_at IS NULL
 GROUP BY rail, finding_type;

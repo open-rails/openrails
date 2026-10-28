@@ -3,9 +3,13 @@
 
 -- name: LockParkCause :exec
 -- Park and Wake serialize on one cause: whichever commits first, the other
--- sees it.
-SELECT pg_advisory_xact_lock(hashtextextended('openrails.park:' || sqlc.arg(merchant_id)::uuid::text || ':' || sqlc.arg(psp_id)::uuid::text
-    || ':' || sqlc.arg(reason)::text || ':' || sqlc.arg(ref)::text, 0));
+-- sees it. The merchant row's key share is taken first: a catalog write
+-- holds that row for update and then wakes, so a park must wait for it
+-- before holding a cause, never after (its finding's key check would
+-- deadlock).
+SELECT pg_advisory_xact_lock(hashtextextended('openrails.park:' || m.id::text || ':' || sqlc.arg(psp_id)::uuid::text
+    || ':' || sqlc.arg(reason)::text || ':' || sqlc.arg(ref)::text, 0))
+FROM (SELECT id FROM billing.merchants WHERE id = sqlc.arg(merchant_id)::uuid FOR KEY SHARE) m;
 
 -- name: GetOpenPark :one
 SELECT * FROM billing.parked_provider_subscriptions
@@ -15,18 +19,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
 -- name: OpenPark :one
 -- One open park per subscription: a park for another reason updates it in
 -- place, so it mirrors the latest converge.
-INSERT INTO billing.parked_provider_subscriptions (merchant_id, psp_id, rail, subscription_ref, reason, price_ref, customer_ref, evidence, parked_at, last_seen_at)
+INSERT INTO billing.parked_provider_subscriptions (merchant_id, psp_id, rail, subscription_ref, reason, price_ref, customer_ref, import_owned, evidence, parked_at, last_seen_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(subscription_ref)::text, sqlc.arg(reason)::text,
-    sqlc.narg(price_ref)::text, sqlc.narg(customer_ref)::text, sqlc.arg(evidence)::jsonb, sqlc.arg(at)::timestamptz, sqlc.arg(at)::timestamptz)
+    sqlc.narg(price_ref)::text, sqlc.narg(customer_ref)::text, sqlc.arg(import_owned)::boolean, sqlc.arg(evidence)::jsonb, sqlc.arg(at)::timestamptz, sqlc.arg(at)::timestamptz)
 ON CONFLICT (merchant_id, psp_id, subscription_ref) WHERE released_at IS NULL DO UPDATE SET
     reason = EXCLUDED.reason, price_ref = EXCLUDED.price_ref, customer_ref = EXCLUDED.customer_ref,
-    evidence = EXCLUDED.evidence, last_seen_at = EXCLUDED.last_seen_at
+    import_owned = EXCLUDED.import_owned, evidence = EXCLUDED.evidence, last_seen_at = EXCLUDED.last_seen_at
 RETURNING *;
-
--- name: TouchOpenPark :execrows
-UPDATE billing.parked_provider_subscriptions SET last_seen_at = sqlc.arg(at)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
-  AND subscription_ref = sqlc.arg(subscription_ref)::text AND released_at IS NULL;
 
 -- name: CloseOpenPark :one
 UPDATE billing.parked_provider_subscriptions SET released_at = sqlc.arg(at)::timestamptz, released_by = sqlc.arg(released_by)::text
@@ -51,9 +50,16 @@ ORDER BY subscription_ref
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: CountOpenParksByPrice :one
+-- The parks a price's finding counts: not those the import owns.
 SELECT count(*) FROM billing.parked_provider_subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND reason = 'price_unmapped'
-  AND price_ref = sqlc.arg(price_ref)::text AND released_at IS NULL;
+  AND price_ref = sqlc.arg(price_ref)::text AND released_at IS NULL AND NOT import_owned;
+
+-- name: SubscriptionLanded :one
+-- Whether a live subscription row holds the provider subscription.
+SELECT EXISTS (SELECT 1 FROM billing.subscriptions
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
+      AND rail_subscription_id = sqlc.arg(subscription_ref)::text AND deleted_at IS NULL)::boolean AS landed;
 
 -- name: ProviderRefMapped :one
 -- Whether a provider price or plan binds to a price of ours on this PSP.
@@ -101,7 +107,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(find
 
 -- name: ListParkedSubscriptions :many
 -- Newest first, with the subscription a park's landing created.
-SELECT p.id, p.psp_id, p.rail, p.subscription_ref, p.reason, p.price_ref, p.customer_ref, p.evidence, p.parked_at, p.last_seen_at,
+SELECT p.id, p.psp_id, p.rail, p.subscription_ref, p.reason, p.price_ref, p.customer_ref, p.import_owned, p.evidence, p.parked_at, p.last_seen_at,
     p.released_at, p.released_by, s.id AS subscription_id
 FROM billing.parked_provider_subscriptions p
 LEFT JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.psp_id = p.psp_id

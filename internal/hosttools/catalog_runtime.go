@@ -48,6 +48,8 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 		cancel()
 		return nil, nil, nil, err
 	}
+	// Mapping a provider price wakes the subscriptions parked on it.
+	bindParkWakes(ctx, cfg, database)
 	rt := &app.Runtime{DB: database, Config: cfg, ProductService: catalogmodule.NewProductService(database), PriceService: catalogmodule.NewPriceService(database), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database)}
 	rt.StripeClients = stripeapi.NewFactory(nil)
 	if api := config.SandboxStripeAPIURL(cfg); api != "" {

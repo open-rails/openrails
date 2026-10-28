@@ -161,9 +161,10 @@ grandfathered subscriptions land.
 
 ## Backlog and webhooks
 
-Until a PSP's first pull, and while its latest pull stages a subscription
-not yet landed, the import owns that subscription: a webhook about it parks
-nothing and adopts nothing. Once pulled and not staged (a subscription that
+Until a PSP's first pull, while one is pending, and while its latest pull
+stages a subscription not yet landed, the import owns that subscription: a
+webhook about it adopts nothing, and a park it needs is `import_owned`, with no
+finding, so a fix still wakes it. A failed pull is no pull. Once pulled and not staged (a subscription that
 began after the pull), converge lands it, adopts it (NMI) or parks it with a
 finding (`ListParkedSubscriptions`). A park closes when its subscription lands,
 by converge or by an import's Apply; the trigger on `subscriptions` closes it

@@ -985,6 +985,8 @@ type BillingParkedProviderSubscription struct {
 	PriceRef *string
 	// The provider customer the subscription bills: a Stripe customer, an NMI vault.
 	CustomerRef *string
+	// The PSP's import owns the subscription (no pull yet, a pull pending, or staged unlanded): the park raises no finding, and the import lands it on Apply.
+	ImportOwned bool
 	Evidence    []byte
 	ParkedAt    time.Time
 	LastSeenAt  time.Time

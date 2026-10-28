@@ -777,6 +777,12 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 			_ = s.RailCustomerService.Upsert(ctx, userID, string(models.RailStripe), customerID)
 		}
 	}
+	// Its subscription may have converged before the customer was linked.
+	if subscription := strings.TrimSpace(sess.Subscription); subscription != "" {
+		if err := markSubscriptionDirty(ctx, s.ConvergeEnqueuer, string(models.RailStripe), subscription, "checkout.session.completed", 0); err != nil {
+			return err
+		}
+	}
 	if sess.Mode != "payment" {
 		return nil
 	}

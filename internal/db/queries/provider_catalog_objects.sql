@@ -47,7 +47,7 @@ SELECT o.kind, o.ref, o.product_ref, o.name, o.active, o.deleted_at, o.amount, o
     (NOT o.active OR o.deleted_at IS NOT NULL OR COALESCE(NOT product.active OR product.deleted_at IS NOT NULL, false))::boolean AS retired,
     COALESCE(mapped.public_id, '')::text AS price, COALESCE(named.subscriptions, 0)::int AS subscriptions,
     (SELECT count(*) FROM billing.parked_provider_subscriptions pk WHERE pk.merchant_id = o.merchant_id AND pk.psp_id = o.psp_id
-        AND pk.reason = 'price_unmapped' AND pk.price_ref = o.ref AND pk.released_at IS NULL)::int AS parked,
+        AND pk.reason = 'price_unmapped' AND pk.price_ref = o.ref AND pk.released_at IS NULL AND NOT pk.import_owned)::int AS parked,
     COALESCE((SELECT f.id FROM billing.reconciliation_findings f WHERE f.merchant_id = o.merchant_id AND f.finding_type = 'catalog.price.unmapped'
         AND f.psp_id = o.psp_id AND f.subject_key = o.ref AND f.resolved_at IS NULL), '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS finding
 FROM billing.provider_catalog_objects o

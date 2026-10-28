@@ -121,7 +121,7 @@ migration 0119_periodic_leases_per_kind.up.sql sha256:248bbce419d2fa93e230ef1c27
 migration 0120_stored_card_refresh.up.sql sha256:312d37e5bb10f50013657086f7cd93e6190b0c36294fe6f2d68425ac4bc98826
 migration 0130_provider_catalog_objects.up.sql sha256:215efeb29d8a62df1ea3249c83e9ba76128c9d00377b994432417ed77be4a3b7
 migration 0132_psp_import_onboarding.up.sql sha256:8eccc4463e66a07a990b44d7f2e7be6e2639634fb7745e81d2d3e04de4e3bd2f
-migration 0134_parked_provider_subscriptions.up.sql sha256:bb3ab4f2fadcbebcdc1230652be8ab485cdb1170f470b34e2c9a459ef05e169e
+migration 0134_parked_provider_subscriptions.up.sql sha256:26b9a4f87224948ef5a7e0bbfd999e0081c072c76d443d4f3b1a8339a0287d90
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1486,6 +1486,7 @@ table billing.parked_provider_subscriptions
   column reason text NOT NULL
   column price_ref text
   column customer_ref text
+  column import_owned boolean NOT NULL
   column evidence jsonb NOT NULL
   column parked_at timestamp with time zone NOT NULL
   column last_seen_at timestamp with time zone NOT NULL

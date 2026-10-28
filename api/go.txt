@@ -2948,6 +2948,7 @@ pkg openrails/billing, type ParkedSubscription struct
 pkg openrails/billing, type ParkedSubscription struct, CustomerRef *string `json:"customer_ref"`
 pkg openrails/billing, type ParkedSubscription struct, Evidence json.RawMessage `json:"evidence"`
 pkg openrails/billing, type ParkedSubscription struct, ID ParkedSubscriptionID `json:"id"`
+pkg openrails/billing, type ParkedSubscription struct, ImportOwned bool `json:"import_owned"`
 pkg openrails/billing, type ParkedSubscription struct, LastSeenAt time.Time `json:"last_seen_at"`
 pkg openrails/billing, type ParkedSubscription struct, PSP PSPID `json:"psp"`
 pkg openrails/billing, type ParkedSubscription struct, ParkedAt time.Time `json:"parked_at"`

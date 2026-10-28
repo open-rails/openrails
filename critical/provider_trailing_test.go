@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -197,6 +198,19 @@ func (tw *trailWorld) nmiSchedule(t *testing.T, vault, plan, amount string) stri
 	return id
 }
 
+// paidAmounts are the customer's payment amounts in micros, ascending.
+func paidAmounts(t *testing.T, tw *trailWorld, customer billing.CustomerID) []int64 {
+	t.Helper()
+	page, err := tw.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
+	require.NoError(t, err)
+	out := make([]int64, 0, len(page.Items))
+	for _, p := range page.Items {
+		out = append(out, p.Amount)
+	}
+	slices.Sort(out)
+	return out
+}
+
 func openPark(t *testing.T, parks []billing.ParkedSubscription, ref string) billing.ParkedSubscription {
 	t.Helper()
 	for _, p := range parks {
@@ -234,10 +248,16 @@ func TestProviderTrailing(t *testing.T) {
 			tw.send(t, "price.updated", stripemock.Object{"id": "price_new", "object": "price"})
 		}
 		jobs := completedOnce(t, tw.fleet, kindObserve)
-		require.LessOrEqual(t, len(jobs), 4, "a burst coalesces")
+		require.Len(t, jobs, 2, "the redelivery is deduplicated and the burst coalesces into one read")
 		unmapped = tw.findings(t, "catalog.price.unmapped")
 		require.Len(t, unmapped, 1, "a redelivery and a burst add nothing")
 		require.Equal(t, finding.ID, unmapped["price_new"].ID)
+
+		// A catalog drift pass over the fully read PSP leaves it open.
+		runRegistered(t, tw.fleet, "openrails.catalog_reconciliation_pull", 1)
+		after := tw.findings(t, "catalog.price.unmapped")["price_new"]
+		require.Equal(t, finding.ID, after.ID)
+		require.Nil(t, after.ResolvedAt, "drift never resolves a provider price finding")
 
 		tw.stripe.SetPriceActive("price_new", false)
 		tw.send(t, "price.updated", stripemock.Object{"id": "price_new", "object": "price"})
@@ -302,6 +322,17 @@ func TestProviderTrailing(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, payments.Items, 1)
 		require.Len(t, tw.parks(t, billing.ParkedSubscriptionListParams{Released: true}), 1)
+
+		// A second subscription for the product she holds parks as held.
+		second := tw.stripe.AddSubscription(customer, "pm_alice", "price_gold", 1500, start, start.AddDate(0, 1, 0))
+		tw.stripe.TagSubscription(second, "user_id", tw.alice.ID, start)
+		tw.invoicePaid(t, second)
+		completedOnce(t, tw.fleet, kindConverge)
+		held := openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), second)
+		require.Equal(t, billing.ParkProductHeld, held.Reason)
+		require.Contains(t, string(held.Evidence), subs[0].ID.UUID().String(), "it names the subscription held")
+		require.Equal(t, "high", tw.findings(t, "life.subscription.unattributed")[second].Severity)
+		require.Len(t, tw.subscriptions(t, customerOf(tw.alice)), 1)
 	})
 
 	t.Run("OR-J15-S10/stripe-unattributed-customer-parks-and-lands-on-link", func(t *testing.T) {
@@ -378,6 +409,26 @@ func TestProviderTrailing(t *testing.T) {
 		require.True(t, tw.entitled(t, customerOf(tw.alice), "member:pro"))
 		require.Equal(t, billing.ParkConverged, *openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{Released: true}), sub).ReleasedBy)
 		require.NotNil(t, tw.findings(t, "catalog.price.unmapped")["price_pro"].ResolvedAt)
+		require.Equal(t, []int64{9_000_000, 10_000_000}, paidAmounts(t, tw, customerOf(tw.alice)), "the deferred proration bill lands once its price is mapped")
+
+		// A one-off item on an unmapped price defers its bill and parks the
+		// held subscription on that price; mapping it lands the bill.
+		tw.stripe.AddProduct("prod_addon", "Add-on")
+		tw.stripe.AddPrice(stripemock.Price{ID: "price_addon", Product: "prod_addon", Amount: 500, Interval: "month"})
+		tw.send(t, "invoice.paid", tw.stripe.ChargeInvoiceItem(sub, "price_addon", 500))
+		completedOnce(t, tw.fleet, kindConverge)
+		addon := openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), sub)
+		require.Equal(t, billing.ParkPriceUnmapped, addon.Reason)
+		require.Equal(t, "price_addon", *addon.PriceRef)
+		require.Equal(t, "high", tw.findings(t, "catalog.price.unmapped")["price_addon"].Severity)
+		require.Equal(t, []int64{9_000_000, 10_000_000}, paidAmounts(t, tw, customerOf(tw.alice)), "the add-on bill waits")
+		tw.mapStripe(t, tw.stripeProduct(t, "addon", "member:addon"), "stripe-addon", "price_addon")
+		completedOnce(t, tw.fleet, kindConverge)
+		require.Equal(t, []int64{5_000_000, 9_000_000, 10_000_000}, paidAmounts(t, tw, customerOf(tw.alice)))
+		require.Empty(t, tw.parks(t, billing.ParkedSubscriptionListParams{}))
+		moved, err = tw.alpha.GetSubscription(t.Context(), held[0].ID)
+		require.NoError(t, err)
+		require.Equal(t, pro.ID, moved.PriceID, "an add-on never moves the tier")
 	})
 
 	t.Run("OR-J15-S12/mapping-during-converge-strands-no-park", func(t *testing.T) {
@@ -413,6 +464,51 @@ func TestProviderTrailing(t *testing.T) {
 		require.Equal(t, price.ID, subs[0].PriceID)
 		require.Empty(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), "no park is stranded")
 		require.Empty(t, tw.parks(t, billing.ParkedSubscriptionListParams{Released: true}), "the park re-read the mapping under its lock")
+
+		// Park waits on the cause's lock (held here as a mapping in flight
+		// would) and the mapping waits behind it: whichever goes first, the
+		// subscription lands once and no park stays open.
+		tw.stripe.AddProduct("prod_silver", "Silver")
+		tw.stripe.AddPrice(stripemock.Price{ID: "price_silver", Product: "prod_silver", Amount: 900, Interval: "month"})
+		silver := tw.stripeProduct(t, "silver", "member:silver")
+		lock, err := tw.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = lock.Rollback(context.Background()) }()
+		cause := "openrails.park:" + tw.alpha.MerchantID().UUID().String() + ":" + tw.psp(t, "stripe").UUID().String() + ":price_unmapped:price_silver"
+		_, err = lock.Exec(t.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", cause)
+		require.NoError(t, err)
+		waiting := func(n int) {
+			require.Eventually(t, func() bool {
+				var got int
+				err := tw.pool.QueryRow(t.Context(), "SELECT count(DISTINCT l.pid) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE NOT l.granted AND a.datname = current_database()").Scan(&got)
+				return err == nil && got >= n
+			}, 30*time.Second, 20*time.Millisecond)
+		}
+		bobSub := tw.stripe.AddSubscription(tw.stripe.AddCustomer(tw.bob.Email, "Bob", nil), "pm_bob", "price_silver", 900, start, start.AddDate(0, 1, 0))
+		tw.stripe.TagSubscription(bobSub, "user_id", tw.bob.ID, start)
+		tw.invoicePaid(t, bobSub)
+		queued, err := tw.fleet.JobList(t.Context(), river.NewJobListParams().Kinds(kindConverge).States(rivertype.JobStateScheduled))
+		require.NoError(t, err)
+		require.Len(t, queued.Jobs, 1)
+		_, err = tw.fleet.JobRetry(t.Context(), queued.Jobs[0].ID)
+		require.NoError(t, err)
+		waiting(1)
+		mapped := make(chan error, 1)
+		go func() {
+			_, err := tw.alphaRemote.CreateProviderPrice(context.Background(), billing.CreateProviderPriceParams{ProductID: silver, Key: "stripe-silver", PSP: "stripe", PriceID: "price_silver"})
+			mapped <- err
+		}()
+		waiting(2)
+		require.NoError(t, lock.Rollback(t.Context()))
+		select {
+		case err := <-mapped:
+			require.NoError(t, err)
+		case <-time.After(30 * time.Second):
+			t.Fatal("the mapping never committed")
+		}
+		completedOnce(t, tw.fleet, kindConverge)
+		require.Len(t, tw.subscriptions(t, customerOf(tw.bob)), 1)
+		require.Empty(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), "no park is stranded")
 	})
 
 	t.Run("OR-J15-S13/nmi-unheld-subscription-adopts-or-parks", func(t *testing.T) {
@@ -434,8 +530,9 @@ func TestProviderTrailing(t *testing.T) {
 		completedOnce(t, tw.fleet, kindConverge)
 		onboarding := tw.onboarding(t, "nmi")
 		require.Equal(t, billing.PSPImportPulling, onboarding.Status)
-		require.Empty(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), "nothing parks while the onboarding pull is pending")
-		require.Empty(t, tw.findings(t, "catalog.price.unmapped"))
+		early1 := openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), earlySub)
+		require.True(t, early1.ImportOwned, "the pending onboarding pull owns it")
+		require.Empty(t, tw.findings(t, "catalog.price.unmapped"), "an import-owned park raises no finding")
 		pending, err := tw.fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.psp_import"))
 		require.NoError(t, err)
 		for _, job := range pending.Jobs {
@@ -446,7 +543,8 @@ func TestProviderTrailing(t *testing.T) {
 		require.Equal(t, billing.PSPImportUnmatched, tw.records(t, imp.ID)[earlySub].State)
 		nmiNotice(t, tw.server.URL, "evt_early_again", "recurring.subscription.update", map[string]any{"subscription_id": earlySub})
 		completedOnce(t, tw.fleet, kindConverge)
-		require.Empty(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), "nothing parks while the import stages it")
+		require.True(t, openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), earlySub).ImportOwned, "the import stages it unlanded")
+		require.Empty(t, tw.findings(t, "catalog.price.unmapped"))
 
 		// (a) One owner, mapped plan: adopted once.
 		aliceVault := tw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
@@ -466,7 +564,7 @@ func TestProviderTrailing(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, payments.Items, 1, "the provider's sale lands once")
 		require.Equal(t, reads, tw.nmi.Reads()["v5:plans/{id}"], "a plan the pull observed is not read again")
-		require.Empty(t, tw.parks(t, billing.ParkedSubscriptionListParams{}))
+		require.Len(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), 1, "only the import-owned park")
 
 		// A second schedule for a product the owner already holds parks.
 		twice := tw.nmiSchedule(t, aliceVault, "gold", "20.00")
@@ -513,7 +611,7 @@ func TestProviderTrailing(t *testing.T) {
 		// (e) An order id is no subscription: dropped.
 		nmiNotice(t, tw.server.URL, "evt_order", "transaction.sale.success", map[string]any{"transaction_id": "t9", "order_id": "one-off-order-9"})
 		completedOnce(t, tw.fleet, kindConverge)
-		require.Len(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), 2, "only the unowned vault and the held product stay parked")
+		require.Len(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), 3, "the import-owned, the unowned vault and the held product stay parked")
 	})
 
 	t.Run("OR-J15-S14/park-closes-when-import-lands-it", func(t *testing.T) {
@@ -638,5 +736,33 @@ func TestProviderTrailing(t *testing.T) {
 		status, raw := tw.request(t, http.MethodGet, "/v1/merchant/parked-subscriptions", tw.bobToken, nil)
 		require.Contains(t, []int{http.StatusForbidden, http.StatusUnauthorized, http.StatusNotFound}, status, string(raw))
 		require.False(t, strings.Contains(string(raw), refs[0]), "a customer token reads no park")
+	})
+
+	t.Run("OR-J15-S17/stripe-link-before-the-first-pull-lands-at-once", func(t *testing.T) {
+		tw := bootTrailWorld(t, "stripe")
+		tw.stripe.AddProduct("prod_gold", "Gold")
+		tw.stripe.AddPrice(stripemock.Price{ID: "price_gold", Product: "prod_gold", Amount: 1500, Interval: "month"})
+		tw.mapStripe(t, tw.stripeProduct(t, "gold", "member:gold"), "stripe-gold", "price_gold")
+		cancelOnboarding(t, tw.fleet, 1)
+		tw.start(t)
+		start := tw.clock.Now().Add(-time.Hour)
+		customer := tw.stripe.AddCustomer(tw.bob.Email, "Bob", nil)
+		sub := tw.stripe.AddSubscription(customer, "pm_bob", "price_gold", 1500, start, start.AddDate(0, 1, 0))
+		tw.invoicePaid(t, sub)
+		completedOnce(t, tw.fleet, kindConverge)
+		park := openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), sub)
+		require.Equal(t, billing.ParkCustomerUnlinked, park.Reason)
+		require.True(t, park.ImportOwned, "no pull has run yet")
+		require.Empty(t, tw.findings(t, "life.subscription.unattributed"), "an import-owned park raises no finding")
+
+		tw.send(t, "checkout.session.completed", stripemock.Object{"id": "cs_link_bob", "object": "checkout.session", "mode": "subscription", "status": "complete",
+			"customer": customer, "subscription": sub, "metadata": map[string]string{"user_id": tw.bob.ID}})
+		completedOnce(t, tw.fleet, kindConverge)
+		subs := tw.subscriptions(t, customerOf(tw.bob))
+		require.Len(t, subs, 1, "the link lands it at once")
+		require.True(t, tw.entitled(t, customerOf(tw.bob), "member:gold"))
+		closed := openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{Released: true}), sub)
+		require.Equal(t, billing.ParkLanded, *closed.ReleasedBy)
+		require.Equal(t, subs[0].ID, *closed.Subscription)
 	})
 }

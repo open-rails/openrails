@@ -14,6 +14,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -89,6 +90,15 @@ func bindRiverProducer(ctx context.Context, cfg *config.Config, database *db.DB)
 	}
 	database.SetRiverJobInserter(producer)
 	return nil
+}
+
+// bindParkWakes binds a River producer so a fix this tool makes (a mapping,
+// a customer link) wakes the subscriptions parked on it; without one, they
+// wake on their next provider event.
+func bindParkWakes(ctx context.Context, cfg *config.Config, database *db.DB) {
+	if err := bindRiverProducer(ctx, cfg, database); err != nil {
+		log.WithContext(ctx).WithError(err).Warn("no River producer: parked subscriptions wake on their next provider event")
+	}
 }
 
 // ProposalsList prints the open proposals a set's filter selects (ids are

@@ -2,6 +2,7 @@ package webhooks
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/modules/parking"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
@@ -21,8 +23,11 @@ import (
 var heldProductIndexes = map[string]bool{"subscriptions_customer_id_product_id_key": true, "subscriptions_customer_id_tier_group_key": true}
 
 // productHeld reports whether a landing failed because the customer already
-// holds the product.
+// holds the product: the membership pre-check, or the index behind it.
 func productHeld(err error) bool {
+	if errors.Is(err, subscriptions.ErrMembershipSlotTaken) {
+		return true
+	}
 	constraint, ok := db.UniqueViolation(err)
 	return ok && heldProductIndexes[constraint]
 }
@@ -35,8 +40,8 @@ func parkSubscription(ctx context.Context, database *db.DB, findings reconcile.F
 		return err
 	}
 	fields := log.Fields{"rail": s.Rail, "subscription_reference": s.SubscriptionRef, "reason": s.Reason, "price_ref": s.PriceRef, "customer_ref": s.CustomerRef}
-	if res.Deferred {
-		log.WithContext(ctx).WithFields(fields).Info("converge: subscription not landable; the PSP's import owns it until it is pulled and not staged")
+	if res.ImportOwned {
+		log.WithContext(ctx).WithFields(fields).Info("converge: parked a subscription the PSP's import owns; no finding until it is pulled and not staged")
 		return nil
 	}
 	log.WithContext(ctx).WithFields(fields).Warn("converge: parked a live provider subscription it cannot land")

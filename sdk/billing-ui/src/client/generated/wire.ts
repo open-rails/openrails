@@ -1704,6 +1704,7 @@ export type ParkedSubscription = {
   reason: "customer_unlinked" | "price_unmapped" | "product_held"
   price_ref: string | null
   customer_ref: string | null
+  import_owned: boolean
   evidence: unknown | null
   parked_at: string
   last_seen_at: string

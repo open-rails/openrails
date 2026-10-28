@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -44,10 +45,11 @@ type Subject struct {
 	CustomerRef     string
 	// HeldBy is the subscription a product_held customer already has.
 	HeldBy *uuid.UUID
-	// Backlog applies the backlog rule to a subscription OpenRails never
-	// held: it parks only once a pull of the PSP listed its backlog without
-	// staging it unlanded. Until then the import owns it.
-	Backlog  bool
+	// Unheld is a subscription no row holds: it parks only while none does,
+	// and the backlog rule applies. While the PSP's import owns it (no pull
+	// yet, a pull pending, or staged unlanded) it parks without a finding,
+	// so a fix still wakes it.
+	Unheld   bool
 	Evidence map[string]any
 }
 
@@ -61,16 +63,15 @@ func (s Subject) cause() string {
 	return s.SubscriptionRef
 }
 
-// Result is what Park did. Finding is the finding it opened or raised, for
-// the caller to notify.
+// Result is what Park did. ImportOwned parks raise no finding. Finding is
+// the finding it opened or raised, for the caller to notify.
 type Result struct {
-	Parked   bool
-	Deferred bool
-	Finding  *gen.BillingReconciliationFinding
+	ImportOwned bool
+	Finding     *gen.BillingReconciliationFinding
 }
 
-// Park records s under its cause's lock. A cause fixed meanwhile is
-// ErrCauseFixed; a backlog subject the import owns is only refreshed.
+// Park records s under its cause's lock. A cause fixed meanwhile, or an
+// unheld subscription a row now holds, is ErrCauseFixed.
 func Park(ctx context.Context, d *db.DB, s Subject, now time.Time) (Result, error) {
 	var res Result
 	mid, err := merchant.Require(ctx)
@@ -99,44 +100,46 @@ func Park(ctx context.Context, d *db.DB, s Subject, now time.Time) (Result, erro
 		} else if fixed {
 			return ErrCauseFixed
 		}
+		if s.Unheld {
+			// An import's Apply landed it meanwhile: converge it as held.
+			if landed, err := q.SubscriptionLanded(ctx, gen.SubscriptionLandedParams{MerchantID: mid.UUID(), PspID: s.PSPID, SubscriptionRef: s.SubscriptionRef}); err != nil {
+				return err
+			} else if landed {
+				return ErrCauseFixed
+			}
+			owned, err := importOwns(ctx, q, mid.UUID(), s)
+			if err != nil {
+				return err
+			}
+			res.ImportOwned = owned
+		}
 		prev, err := q.GetOpenPark(ctx, gen.GetOpenParkParams{MerchantID: mid.UUID(), PspID: s.PSPID, SubscriptionRef: s.SubscriptionRef})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		open := err == nil
-		if s.Backlog {
-			owned, err := importOwns(ctx, q, mid.UUID(), s)
-			if err != nil {
-				return err
-			}
-			if owned {
-				res.Deferred = true
-				if open {
-					_, err = q.TouchOpenPark(ctx, gen.TouchOpenParkParams{MerchantID: mid.UUID(), PspID: s.PSPID, SubscriptionRef: s.SubscriptionRef, At: now})
-				}
-				return err
-			}
-		}
 		if _, err := q.OpenPark(ctx, gen.OpenParkParams{MerchantID: mid.UUID(), PspID: s.PSPID, Rail: s.Rail, SubscriptionRef: s.SubscriptionRef,
-			Reason: string(s.Reason), PriceRef: nonEmpty(s.PriceRef), CustomerRef: nonEmpty(s.CustomerRef), Evidence: evidence, At: now}); err != nil {
+			Reason: string(s.Reason), PriceRef: nonEmpty(s.PriceRef), CustomerRef: nonEmpty(s.CustomerRef), ImportOwned: res.ImportOwned, Evidence: evidence, At: now}); err != nil {
 			return err
 		}
-		res.Parked = true
 		if open && prev.Reason == string(billing.ParkPriceUnmapped) && (s.Reason != billing.ParkPriceUnmapped || deref(prev.PriceRef) != s.PriceRef) {
 			if _, err := SyncPriceFinding(ctx, q, mid.UUID(), s.PSPID, deref(prev.PriceRef), false); err != nil {
 				return err
 			}
 		}
-		if s.Reason == billing.ParkPriceUnmapped {
-			if open && prev.Reason != string(billing.ParkPriceUnmapped) {
-				if err := resolve(ctx, q, mid.UUID(), s.PSPID, FindingUnattributed, s.SubscriptionRef); err != nil {
-					return err
-				}
+		if open && prev.Reason != string(billing.ParkPriceUnmapped) && (s.Reason == billing.ParkPriceUnmapped || res.ImportOwned) {
+			if err := resolve(ctx, q, mid.UUID(), s.PSPID, FindingUnattributed, s.SubscriptionRef); err != nil {
+				return err
 			}
-			res.Finding, err = SyncPriceFinding(ctx, q, mid.UUID(), s.PSPID, s.PriceRef, false)
-			return err
 		}
-		res.Finding, err = openUnattributed(ctx, q, mid.UUID(), s, evidence)
+		switch {
+		case res.ImportOwned:
+			return nil
+		case s.Reason == billing.ParkPriceUnmapped:
+			res.Finding, err = SyncPriceFinding(ctx, q, mid.UUID(), s.PSPID, s.PriceRef, false)
+		default:
+			res.Finding, err = openUnattributed(ctx, q, mid.UUID(), s, evidence)
+		}
 		return err
 	})
 	return res, err
@@ -176,6 +179,11 @@ func Wake(ctx context.Context, d *db.DB, pspID uuid.UUID, reason billing.ParkRea
 		return 0, err
 	}
 	if ref == "" {
+		return 0, nil
+	}
+	if !d.RiverProducerBound() {
+		// A host tool without a job queue: the next provider event wakes it.
+		log.WithContext(ctx).WithFields(log.Fields{"psp_id": pspID, "reason": reason, "ref": ref}).Warn("park wake skipped: no River producer is bound")
 		return 0, nil
 	}
 	q := d.Gen(ctx)
@@ -269,12 +277,17 @@ func ImportOwns(ctx context.Context, q *gen.Queries, pspID uuid.UUID, subscripti
 }
 
 // SyncPriceFinding keeps catalog.price.unmapped true to one provider price:
-// high while parks name it; medium when raise (a webhook first observed it
-// active and unmapped) or when it is already open; resolved once the price is
-// mapped, or retired with no parks. It returns the finding it wrote.
+// high while parks the import does not own name it; medium when raise (a
+// webhook first observed it active and unmapped) or when it is already open;
+// resolved once the price is mapped, or retired with no parks. It takes the
+// price's park lock, so q must be a transaction's. It returns the finding it
+// wrote.
 func SyncPriceFinding(ctx context.Context, q *gen.Queries, mid, pspID uuid.UUID, ref string, raise bool) (*gen.BillingReconciliationFinding, error) {
 	if ref == "" {
 		return nil, nil
+	}
+	if err := q.LockParkCause(ctx, gen.LockParkCauseParams{MerchantID: mid, PspID: pspID, Reason: string(billing.ParkPriceUnmapped), Ref: ref}); err != nil {
+		return nil, err
 	}
 	mapped, err := q.ProviderRefMapped(ctx, gen.ProviderRefMappedParams{MerchantID: mid, PspID: pspID, Ref: ref})
 	if err != nil {

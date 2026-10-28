@@ -47,6 +47,7 @@ func ConvergeMerchant(ctx context.Context, opts ConvergeMerchantOptions) (Conver
 		return res, err
 	}
 	defer database.Close()
+	bindParkWakes(ctx, opts.Config, database)
 
 	merchantID := opts.MerchantID
 	if err := database.RequireMerchantID(ctx, merchantID); err != nil {

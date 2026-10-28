@@ -9,6 +9,7 @@ CREATE TABLE billing.parked_provider_subscriptions (
     reason text NOT NULL,
     price_ref text,
     customer_ref text,
+    import_owned boolean NOT NULL,
     evidence jsonb NOT NULL,
     parked_at timestamptz NOT NULL,
     last_seen_at timestamptz NOT NULL,
@@ -32,6 +33,7 @@ CREATE INDEX parked_provider_subscriptions_released_at_idx ON billing.parked_pro
 COMMENT ON TABLE billing.parked_provider_subscriptions IS 'Live provider subscriptions converge cannot land: its price is unmapped, its customer is linked to no one, or the customer already holds the product. One open park per (PSP, subscription); it mirrors the latest converge. Fixing the cause wakes converge; the park closes when the subscription lands by any path (released_by landed), when converge no longer needs it (converged) or when the provider ended it unlanded (gone). Retention: released parks are deleted 90 days after released_at.';
 COMMENT ON COLUMN billing.parked_provider_subscriptions.price_ref IS 'The provider price or plan the subscription bills; set on every park whose provider names one.';
 COMMENT ON COLUMN billing.parked_provider_subscriptions.customer_ref IS 'The provider customer the subscription bills: a Stripe customer, an NMI vault.';
+COMMENT ON COLUMN billing.parked_provider_subscriptions.import_owned IS 'The PSP''s import owns the subscription (no pull yet, a pull pending, or staged unlanded): the park raises no finding, and the import lands it on Apply.';
 
 -- Landing by any path (converge, adoption, an import's Apply) closes the open
 -- park and resolves the finding it raised. Idempotent: only an open park closes.

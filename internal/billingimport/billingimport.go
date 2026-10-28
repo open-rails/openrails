@@ -6,10 +6,13 @@
 package billingimport
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -195,7 +198,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		// declaredAgreements: a card's declared recurring agreement (the storing
 		// transaction of its NMI schedules), which their mandates cite.
 		declaredAgreements := map[uuid.UUID]string{}
-		woken := map[string]bool{}
+		landed := map[landedVault]bool{}
 		pmKey := func(psp uuid.UUID, rail, custRef, methodRef string) string {
 			return psp.String() + "\x1f" + rail + "\x1f" + custRef + "\x1f" + methodRef
 		}
@@ -252,12 +255,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				}
 				// A vault landing links its provider customer: the
 				// subscriptions parked waiting for it converge again.
-				if vault := pmPSP.String() + "\x1f" + pm.RailCustomerRef; !woken[vault] {
-					woken[vault] = true
-					if _, err := parking.Wake(ctx, txdb, pmPSP, billing.ParkCustomerUnlinked, pm.RailCustomerRef); err != nil {
-						return err
-					}
-				}
+				landed[landedVault{pmPSP, pm.RailCustomerRef}] = true
 			} else if err != nil {
 				return fmt.Errorf("lookup payment method %s/%s: %w", pm.Rail, pm.RailCustomerRef, err)
 			} else if owner != pm.Customer.UUID() {
@@ -271,6 +269,14 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			pmIDs[pmKey(pmPSP, pm.Rail, pm.RailCustomerRef, pm.RailMethodRef)] = id
 		}
 
+		// Wake in one lock order.
+		for _, v := range slices.SortedFunc(maps.Keys(landed), func(a, b landedVault) int {
+			return cmp.Or(bytes.Compare(a.psp[:], b.psp[:]), strings.Compare(a.vault, b.vault))
+		}) {
+			if _, err := parking.Wake(ctx, txdb, v.psp, billing.ParkCustomerUnlinked, v.vault); err != nil {
+				return err
+			}
+		}
 		if err := claimPSPCustomers(ctx, txdb, merchantID.UUID(), psps, opts.Book.PSPCustomers, asOf, &res); err != nil {
 			return err
 		}
@@ -640,6 +646,11 @@ func importRecurringMandate(ctx context.Context, q *gen.Queries, merchantID uuid
 	_, err = mandates.Create(ctx, q, mandates.Agreement{MerchantID: merchantID, CustomerID: sub.CustomerID, PaymentMethodID: *sub.PaymentMethodID, PSPID: sub.PspID, Rail: sub.Rail,
 		Kind: charge.AgreementRecurring, SubscriptionID: &sub.ID, Lineage: &charge.Mandate{InitialTransactionID: anchor}, AcceptedAt: at})
 	return err
+}
+
+type landedVault struct {
+	psp   uuid.UUID
+	vault string
 }
 
 // claimPSPCustomers records each declared customer object at its PSP, insert
