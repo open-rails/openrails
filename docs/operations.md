@@ -1262,16 +1262,18 @@ monotonically: job completions of one kind reach the row in any order, so a
 late write can only add what is newer (timestamps never move back, the error
 text is the newest failure's, a success resets the failure streak only when no
 newer failure is recorded, and a failure counts only when no newer success is
-recorded — the streak can over-count after reordering, never under-count). The
-fair-sweep cursor is a ring position, saved by compare-and-swap on an opaque
-per-save version (a counter, not a timestamp, so tokens never collide), so a
-pass finishing after a newer one keeps the newer position.
+recorded — the streak can over-count after reordering, never under-count).
+
+A pass bounded per job (retention cleanup's 200 merchants, a merchant's 200
+due usage accounts) continues in a new job after the last one it handled, so
+each job stays short and the pass still reaches all of its work.
 
 Each OpenRails job runs under its kind's timeout: 10 minutes, an hour for
 the passes that read every merchant's providers (`cleanup_expired_data`,
 `provider_refresh_merchant`, `converge_sweep`, `rebill_watch`,
 `charge_attributions`, `nmi_history`, `stripe_webhook_reconcile`,
-`solana_crank`), two for `psp_import`. River cancels a job past it. River's
+`solana_crank`) and for `stored_card_refresh_due` (which stops opening pages
+after 10 minutes), two for `psp_import`. River cancels a job past it. River's
 rescuer returns a job whose process died to work once it has run past both
 its timeout and `RescueStuckJobsAfter` (10 minutes unless the host sets it).
 

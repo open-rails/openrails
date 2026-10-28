@@ -67,22 +67,24 @@ func (w UsageOrderWorker) Work(ctx context.Context, job *river.Job[money.UsageOr
 			return errors.New("a usage-order pass requires a nonzero merchant ID")
 		}
 		ctx = merchant.WithID(ctx, *job.Args.MerchantID)
-		return w.DB.RunInMerchantConn(ctx, func(ctx context.Context) error { return w.workMerchant(ctx, logger) })
+		return w.DB.RunInMerchantConn(ctx, func(ctx context.Context) error { return w.workMerchant(ctx, logger, job.Args.After) })
 	}
 	// Every money path below (finalize, notify, collect) requires a merchant
 	// in context: fan out per merchant.
 	return forEachActiveMerchant(ctx, w.DB, logger, func(ctx context.Context) error {
-		return w.workMerchant(ctx, logger)
+		return w.workMerchant(ctx, logger, nil)
 	})
 }
 
-// workMerchant runs one merchant's pass on a merchant-scoped context.
-func (w UsageOrderWorker) workMerchant(ctx context.Context, logger *log.Entry) error {
+// workMerchant runs one merchant's pass on a merchant-scoped context: a page
+// of due accounts after after. A full page continues in a new job, which
+// notifies and collects once the merchant's due accounts are billed.
+func (w UsageOrderWorker) workMerchant(ctx context.Context, logger *log.Entry, after *money.UsageAccount) error {
 	now := time.Now().UTC()
 	if w.Clock != nil {
 		now = w.Clock.Now().UTC()
 	}
-	finalized, finalizeErr := w.Money.FinalizeDueUsage(ctx, now)
+	finalized, next, finalizeErr := w.Money.FinalizeDueUsage(ctx, now, after)
 	var failures []error
 	if finalizeErr != nil {
 		failures = append(failures, finalizeErr)
@@ -92,6 +94,13 @@ func (w UsageOrderWorker) workMerchant(ctx context.Context, logger *log.Entry) e
 	}
 	if ctx.Err() != nil {
 		return errors.Join(append(failures, ctx.Err())...)
+	}
+	if next != nil {
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		return errors.Join(append(failures, continuePass(ctx, money.UsageOrderArgs{MerchantID: &mid, After: next}))...)
 	}
 	if _, err := w.Money.NotifyOverdueUsageOrders(ctx, now); err != nil {
 		failures = append(failures, err)

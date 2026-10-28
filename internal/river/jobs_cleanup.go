@@ -1,7 +1,6 @@
 package riverjobs
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -32,8 +31,8 @@ const KindCleanupExpiredData = "openrails.cleanup_expired_data"
 const CleanupInterval = time.Hour
 
 const (
-	// cleanupMerchantBatch caps one pass's fan-out; the durable cursor makes
-	// the merchants beyond the cap the next pass's head.
+	// cleanupMerchantBatch caps one job's merchants; a full batch continues
+	// in a new job after the last merchant handled.
 	cleanupMerchantBatch = 200
 
 	// cleanupDeleteBatch bounds ONE delete statement, and so one transaction.
@@ -105,12 +104,17 @@ func (c CleanupConfig) validate() error {
 	return nil
 }
 
-type CleanupExpiredDataArgs struct{}
+// CleanupExpiredDataArgs is one job of a retention pass. After continues the
+// pass past the merchants a full batch handled.
+type CleanupExpiredDataArgs struct {
+	After *uuid.UUID `json:"after,omitempty"`
+}
 
 func (CleanupExpiredDataArgs) Kind() string { return KindCleanupExpiredData }
 
+// InsertOpts runs each job of a pass once per period.
 func (CleanupExpiredDataArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByPeriod: CleanupInterval}}
+	return river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: CleanupInterval}}
 }
 
 type CleanupExpiredDataWorker struct {
@@ -118,10 +122,6 @@ type CleanupExpiredDataWorker struct {
 	DB     *db.DB
 	Clock  clockwork.Clock
 	Config CleanupConfig
-	// MerchantBatch overrides cleanupMerchantBatch (0 = the default). It exists
-	// so a test can force the capped-pass path without seeding hundreds of
-	// merchants; registration never sets it.
-	MerchantBatch int
 	// RowBudget overrides cleanupMerchantRowBudget (0 = the default), so a test
 	// can show a backlog draining over several bounded passes without seeding
 	// tens of thousands of rows; registration never sets it.
@@ -170,33 +170,30 @@ type CleanupResult struct {
 	MerchantsBudgetCapped int
 }
 
-// Work is the one retention owner. It runs the deployment-wide sweeps (event
-// log, notification journal, reservations, partitions, carts, idempotency
-// keys, Solana Pay references, orphan leases and worker state), then every
-// retention sweep once per merchant with due work, inside that merchant's
-// scope and with the merchant predicate in the SQL:
+// Work is the one retention owner. A pass's first job runs the
+// deployment-wide sweeps (event log, notification journal, reservations,
+// partitions, carts, idempotency keys, Solana Pay references, orphan leases
+// and worker state); every job then runs each retention sweep once per
+// merchant with due work, inside that merchant's scope and with the merchant
+// predicate in the SQL:
 //
 //   - merchants come from an indexed work queue (only those holding a row
-//     past one of this config's cutoffs), capped at cleanupMerchantBatch;
-//   - a durable cursor (worker_state) resumes the next pass after the last
-//     merchant handled, so a capped pass cannot starve the tail; draining the
-//     queue clears it;
+//     past one of this config's cutoffs), cleanupMerchantBatch per job;
+//   - a full batch continues in a new job after the last merchant handled,
+//     so the pass reaches every merchant with due work;
 //   - each sweep deletes in bounded batches, so a huge backlog is many short
 //     transactions rather than one long one.
 func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[CleanupExpiredDataArgs]) error {
-	_, _, err := w.sweepPass(ctx)
+	next, err := w.sweep(ctx, job.Args.After)
+	if next != nil {
+		err = errors.Join(err, continuePass(ctx, CleanupExpiredDataArgs{After: next}))
+	}
 	return err
 }
 
-// Sweep runs one pass and reports what it deleted.
-func (w CleanupExpiredDataWorker) Sweep(ctx context.Context) (CleanupResult, error) {
-	_, result, err := w.sweepPass(ctx)
-	return result, err
-}
-
-// sweepPass runs one pass and returns the merchants it visited, in order, and
-// the row counts; tests assert that only merchants with due work were touched.
-func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, CleanupResult, error) {
+// sweep runs one job of a pass and returns where the next continues, if a
+// full batch left merchants behind.
+func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (*uuid.UUID, error) {
 	clock := w.Clock
 	if clock == nil {
 		clock = clockwork.NewRealClock()
@@ -204,7 +201,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 
 	config := w.Config
 	if err := config.validate(); err != nil {
-		return nil, CleanupResult{}, err
+		return nil, err
 	}
 
 	now := clock.Now()
@@ -212,107 +209,12 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	result := CleanupResult{}
 	var cleanupErr error
 
-	batch := w.MerchantBatch
-	if batch <= 0 {
-		batch = cleanupMerchantBatch
-	}
-
 	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
 
-	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
-		n, err := eventlog.Prune(ctx, w.DB, now, config.EventRetention, cleanupDeleteBatch)
-		if err != nil {
-			cleanupErr = errors.Join(cleanupErr, err)
-			break
-		}
-		result.EventLog += int64(n)
-		if n < cleanupDeleteBatch {
-			break
-		}
-	}
-
-	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
-		n, err := w.DB.GenDirectory().PruneNotificationJournal(ctx, gen.PruneNotificationJournalParams{Cutoff: now.Add(-max(retention.EventLog, config.EventRetention)), RowLimit: cleanupDeleteBatch})
-		if err != nil {
-			cleanupErr = errors.Join(cleanupErr, err)
-			break
-		}
-		result.NotificationEvents += n
-		if n < cleanupDeleteBatch {
-			break
-		}
-		if batch == cleanupIndexedMaxBatches-1 {
-			logger.Warn("Cleanup: notification event retention reached its pass budget")
-		}
-	}
-
-	for range cleanupIndexedMaxBatches {
-		n, err := destructive.PruneUserActionReservations(ctx, w.DB, cleanupDeleteBatch)
-		if err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("prune user action reservations: %w", err))
-			break
-		}
-		result.UserActionReservations += n
-		if n < cleanupDeleteBatch {
-			break
-		}
-	}
-
 	directory := w.DB.GenDirectory()
-
-	// Partitioned tables are pruned by the calendar: whole months are created
-	// ahead and dropped behind, and no row is read.
-	if n, err := retention.EnsurePartitions(ctx, directory, now); err != nil {
-		logger.WithError(err).Error("Cleanup: ensure partitions failed")
-		cleanupErr = errors.Join(cleanupErr, err)
-	} else {
-		result.PartitionsCreated = n
+	if after == nil {
+		w.sweepDeployment(ctx, now, config, &result, &cleanupErr)
 	}
-	if n, err := retention.DropExpiredPartitions(ctx, directory, now); err != nil {
-		logger.WithError(err).Error("Cleanup: drop expired partitions failed")
-		cleanupErr = errors.Join(cleanupErr, err)
-	} else {
-		result.PartitionsDropped = n
-	}
-
-	// Indexed, bounded deletes across merchants.
-	global := func(name string, total *int64, fn func(limit int32) (int64, error)) {
-		for range cleanupIndexedMaxBatches {
-			n, err := fn(cleanupDeleteBatch)
-			if err != nil {
-				logger.WithError(err).Error("Cleanup: " + name + " failed")
-				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("%s: %w", name, err))
-				return
-			}
-			*total += n
-			if n < cleanupDeleteBatch {
-				return
-			}
-		}
-	}
-	global("delete carts", &result.Carts, func(limit int32) (int64, error) {
-		return orders.DeleteExpiredCarts(ctx, w.DB, now, limit)
-	})
-	// Expiry is checked when a key is claimed; this only reclaims storage.
-	global("delete expired idempotency keys", &result.IdempotencyKeys, func(limit int32) (int64, error) {
-		return idempotency.DeleteExpired(ctx, w.DB, limit)
-	})
-	// Pending references and credited or review receipts are never selected.
-	global("delete settled Solana Pay references", &result.SolanaPayReferences, func(limit int32) (int64, error) {
-		return solanamodule.DeleteSettled(ctx, w.DB, now, limit)
-	})
-	global("delete orphan periodic leases", &result.PeriodicLeases, func(limit int32) (int64, error) {
-		return directory.DeleteOrphanPeriodicLeases(ctx, gen.DeleteOrphanPeriodicLeasesParams{RetentionDays: retention.Days(retention.OrphanState), RowLimit: limit})
-	})
-	global("delete orphan worker state", &result.WorkerStates, func(limit int32) (int64, error) {
-		return directory.DeleteOrphanWorkerState(ctx, gen.DeleteOrphanWorkerStateParams{RetentionDays: retention.Days(retention.OrphanState), RowLimit: limit})
-	})
-
-	cursorRow, err := loadSweepCursor(ctx, directory, KindCleanupExpiredData)
-	if err != nil {
-		return nil, result, fmt.Errorf("cleanup expired data: %w", err)
-	}
-	cursor := cursorRow.CursorMerchantID
 
 	dueWork := func(after *uuid.UUID, limit int32) ([]uuid.UUID, error) {
 		return directory.ListRetentionWorkMerchants(ctx, gen.ListRetentionWorkMerchantsParams{
@@ -336,38 +238,17 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		})
 	}
 
-	merchantIDs, err := dueWork(cursor, int32(batch))
+	merchantIDs, err := dueWork(after, cleanupMerchantBatch)
 	if err != nil {
-		return nil, result, fmt.Errorf("cleanup expired data: list merchants with retention work: %w", err)
+		return nil, fmt.Errorf("cleanup expired data: list merchants with retention work: %w", err)
 	}
 
-	// The ring wraps inside the pass: after a short list, the remaining
-	// capacity goes to the merchants at or below the cursor (which the first
-	// query could not return) instead of costing a whole empty tick.
-	if cursor != nil && len(merchantIDs) < batch {
-		head, herr := dueWork(nil, clampInt32(batch-len(merchantIDs)))
-		if herr != nil {
-			return nil, result, fmt.Errorf("cleanup expired data: list merchants with retention work (ring wrap): %w", herr)
-		}
-		for _, mid := range head {
-			if bytes.Compare(mid[:], cursor[:]) <= 0 {
-				merchantIDs = append(merchantIDs, mid)
-			}
-		}
+	var next *uuid.UUID
+	if len(merchantIDs) == cleanupMerchantBatch {
+		next = &merchantIDs[len(merchantIDs)-1]
 	}
 
-	// A full batch means work was left behind: resume after the last merchant
-	// handled. A short one means the whole ring is drained — clear the cursor so
-	// the next pass starts fresh.
-	var nextCursor *uuid.UUID
-	if len(merchantIDs) == batch {
-		last := merchantIDs[len(merchantIDs)-1]
-		nextCursor = &last
-	}
-
-	visited := make([]uuid.UUID, 0, len(merchantIDs))
 	for _, merchantID := range merchantIDs {
-		visited = append(visited, merchantID)
 		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(merchantID), "cleanup expired data", func(mctx context.Context) error {
 			w.sweepMerchant(mctx, merchantID, now, config, &result, &cleanupErr)
 			return nil
@@ -378,14 +259,12 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		}
 	}
 
-	saveSweepCursor(ctx, directory, KindCleanupExpiredData, cursorRow, nextCursor, logger)
-
 	opsmetric.Emit(ctx, opsmetric.MetricRetentionSweep, log.Fields{
 		"worker":                       KindCleanupExpiredData,
 		"merchants_with_work":          len(merchantIDs),
 		"merchants_budget_capped":      result.MerchantsBudgetCapped,
-		"resumed_from_cursor":          cursor != nil,
-		"more_work_queued":             nextCursor != nil,
+		"continued":                    after != nil,
+		"more_work_queued":             next != nil,
 		"duration_ms":                  clock.Now().Sub(started).Milliseconds(),
 		"carts":                        result.Carts,
 		"idempotency_keys":             result.IdempotencyKeys,
@@ -419,9 +298,101 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	})
 
 	if cleanupErr != nil {
-		return visited, result, fmt.Errorf("cleanup expired data: %w", cleanupErr)
+		return next, fmt.Errorf("cleanup expired data: %w", cleanupErr)
 	}
-	return visited, result, nil
+	return next, nil
+}
+
+// sweepDeployment runs the deployment-wide sweeps, once per pass.
+func (w CleanupExpiredDataWorker) sweepDeployment(ctx context.Context, now time.Time, config CleanupConfig, result *CleanupResult, cleanupErr *error) {
+	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
+	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
+		n, err := eventlog.Prune(ctx, w.DB, now, config.EventRetention, cleanupDeleteBatch)
+		if err != nil {
+			*cleanupErr = errors.Join(*cleanupErr, err)
+			break
+		}
+		result.EventLog += int64(n)
+		if n < cleanupDeleteBatch {
+			break
+		}
+	}
+
+	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
+		n, err := w.DB.GenDirectory().PruneNotificationJournal(ctx, gen.PruneNotificationJournalParams{Cutoff: now.Add(-max(retention.EventLog, config.EventRetention)), RowLimit: cleanupDeleteBatch})
+		if err != nil {
+			*cleanupErr = errors.Join(*cleanupErr, err)
+			break
+		}
+		result.NotificationEvents += n
+		if n < cleanupDeleteBatch {
+			break
+		}
+		if batch == cleanupIndexedMaxBatches-1 {
+			logger.Warn("Cleanup: notification event retention reached its pass budget")
+		}
+	}
+
+	for range cleanupIndexedMaxBatches {
+		n, err := destructive.PruneUserActionReservations(ctx, w.DB, cleanupDeleteBatch)
+		if err != nil {
+			*cleanupErr = errors.Join(*cleanupErr, fmt.Errorf("prune user action reservations: %w", err))
+			break
+		}
+		result.UserActionReservations += n
+		if n < cleanupDeleteBatch {
+			break
+		}
+	}
+
+	directory := w.DB.GenDirectory()
+	// Partitioned tables are pruned by the calendar: whole months are created
+	// ahead and dropped behind, and no row is read.
+	if n, err := retention.EnsurePartitions(ctx, directory, now); err != nil {
+		logger.WithError(err).Error("Cleanup: ensure partitions failed")
+		*cleanupErr = errors.Join(*cleanupErr, err)
+	} else {
+		result.PartitionsCreated = n
+	}
+	if n, err := retention.DropExpiredPartitions(ctx, directory, now); err != nil {
+		logger.WithError(err).Error("Cleanup: drop expired partitions failed")
+		*cleanupErr = errors.Join(*cleanupErr, err)
+	} else {
+		result.PartitionsDropped = n
+	}
+
+	// Indexed, bounded deletes across merchants.
+	global := func(name string, total *int64, fn func(limit int32) (int64, error)) {
+		for range cleanupIndexedMaxBatches {
+			n, err := fn(cleanupDeleteBatch)
+			if err != nil {
+				logger.WithError(err).Error("Cleanup: " + name + " failed")
+				*cleanupErr = errors.Join(*cleanupErr, fmt.Errorf("%s: %w", name, err))
+				return
+			}
+			*total += n
+			if n < cleanupDeleteBatch {
+				return
+			}
+		}
+	}
+	global("delete carts", &result.Carts, func(limit int32) (int64, error) {
+		return orders.DeleteExpiredCarts(ctx, w.DB, now, limit)
+	})
+	// Expiry is checked when a key is claimed; this only reclaims storage.
+	global("delete expired idempotency keys", &result.IdempotencyKeys, func(limit int32) (int64, error) {
+		return idempotency.DeleteExpired(ctx, w.DB, limit)
+	})
+	// Pending references and credited or review receipts are never selected.
+	global("delete settled Solana Pay references", &result.SolanaPayReferences, func(limit int32) (int64, error) {
+		return solanamodule.DeleteSettled(ctx, w.DB, now, limit)
+	})
+	global("delete orphan periodic leases", &result.PeriodicLeases, func(limit int32) (int64, error) {
+		return directory.DeleteOrphanPeriodicLeases(ctx, gen.DeleteOrphanPeriodicLeasesParams{RetentionDays: retention.Days(retention.OrphanState), RowLimit: limit})
+	})
+	global("delete orphan worker state", &result.WorkerStates, func(limit int32) (int64, error) {
+		return directory.DeleteOrphanWorkerState(ctx, gen.DeleteOrphanWorkerStateParams{RetentionDays: retention.Days(retention.OrphanState), RowLimit: limit})
+	})
 }
 
 // sweepMerchant runs the retention sweeps for one merchant, already inside

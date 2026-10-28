@@ -1,9 +1,8 @@
--- Retention sweep: due-work discovery and the durable resume cursor.
+-- Retention sweep: due-work discovery.
 
 -- CROSS-MERCHANT: merchants holding at least one row past a retention cutoff.
--- Ids only; every delete runs per merchant in bounded batches. Capped and
--- cursored: one pass is bounded work and the next resumes after the last
--- merchant handled.
+-- Ids only; every delete runs per merchant in bounded batches. Capped: a job
+-- is bounded work and the next continues after the last merchant handled.
 -- name: ListRetentionWorkMerchants :many
 SELECT q.mid AS merchant_id
 FROM (
@@ -139,24 +138,6 @@ FROM (
 ) q
 ORDER BY q.mid
 LIMIT sqlc.arg(merchant_limit)::int;
-
--- name: GetSweepCursor :one
-SELECT cursor_merchant_id, cursor_version FROM billing.worker_state
-WHERE worker_kind = sqlc.arg(worker_kind)::text;
-
--- NULL parks the cursor at the start of the ring: the pass drained its queue.
--- The ring wraps inside a pass, so the next cursor is not ordered against the
--- previous one; monotonicity is a compare-and-swap on the opaque cursor_version
--- the pass read, bumped by every applied save. A pass finishing after a newer
--- pass already moved the cursor affects 0 rows and keeps the newer position.
--- name: SaveSweepCursor :execrows
-INSERT INTO billing.worker_state (worker_kind, cursor_merchant_id, cursor_version)
-VALUES (sqlc.arg(worker_kind)::text, sqlc.narg(cursor_merchant_id)::uuid, 1)
-ON CONFLICT (worker_kind) DO UPDATE
-    SET cursor_merchant_id = EXCLUDED.cursor_merchant_id,
-        cursor_version = billing.worker_state.cursor_version + 1
-    WHERE billing.worker_state.cursor_version
-          = sqlc.arg(expected_cursor_version)::bigint;
 
 -- Calendar-driven partition maintenance: neither statement reads a row.
 -- name: EnsureMonthPartitions :one

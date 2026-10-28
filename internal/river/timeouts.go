@@ -16,8 +16,9 @@ const DefaultTimeout = 10 * time.Minute
 const RescueAfter = 10 * time.Minute
 
 // longTimeouts are the passes that read every merchant's providers, or a
-// whole PSP.
+// whole PSP, and the stored-card pass, whose own budget is 10 minutes.
 var longTimeouts = map[string]time.Duration{
+	KindStoredCardRefreshDue:    time.Hour,
 	KindCleanupExpiredData:      time.Hour,
 	KindProviderRefreshMerchant: time.Hour,
 	KindConvergeSweep:           time.Hour,

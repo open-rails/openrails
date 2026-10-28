@@ -472,23 +472,6 @@ func (q *Queries) EnsureMonthPartitions(ctx context.Context, arg EnsureMonthPart
 	return created, err
 }
 
-const getSweepCursor = `-- name: GetSweepCursor :one
-SELECT cursor_merchant_id, cursor_version FROM billing.worker_state
-WHERE worker_kind = $1::text
-`
-
-type GetSweepCursorRow struct {
-	CursorMerchantID *uuid.UUID
-	CursorVersion    int64
-}
-
-func (q *Queries) GetSweepCursor(ctx context.Context, workerKind string) (GetSweepCursorRow, error) {
-	row := q.db.QueryRow(ctx, getSweepCursor, workerKind)
-	var i GetSweepCursorRow
-	err := row.Scan(&i.CursorMerchantID, &i.CursorVersion)
-	return i, err
-}
-
 const listMonthPartitions = `-- name: ListMonthPartitions :many
 SELECT m.partition::text AS partition, m.range_from::timestamptz AS range_from, m.range_to::timestamptz AS range_to
 FROM billing.month_partitions($1::name) m
@@ -678,11 +661,10 @@ type ListRetentionWorkMerchantsParams struct {
 	ParkCutoff             time.Time
 }
 
-// Retention sweep: due-work discovery and the durable resume cursor.
+// Retention sweep: due-work discovery.
 // CROSS-MERCHANT: merchants holding at least one row past a retention cutoff.
-// Ids only; every delete runs per merchant in bounded batches. Capped and
-// cursored: one pass is bounded work and the next resumes after the last
-// merchant handled.
+// Ids only; every delete runs per merchant in bounded batches. Capped: a job
+// is bounded work and the next continues after the last merchant handled.
 func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetentionWorkMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listRetentionWorkMerchants,
 		arg.After,
@@ -719,33 +701,4 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		return nil, err
 	}
 	return items, nil
-}
-
-const saveSweepCursor = `-- name: SaveSweepCursor :execrows
-INSERT INTO billing.worker_state (worker_kind, cursor_merchant_id, cursor_version)
-VALUES ($1::text, $2::uuid, 1)
-ON CONFLICT (worker_kind) DO UPDATE
-    SET cursor_merchant_id = EXCLUDED.cursor_merchant_id,
-        cursor_version = billing.worker_state.cursor_version + 1
-    WHERE billing.worker_state.cursor_version
-          = $3::bigint
-`
-
-type SaveSweepCursorParams struct {
-	WorkerKind            string
-	CursorMerchantID      *uuid.UUID
-	ExpectedCursorVersion int64
-}
-
-// NULL parks the cursor at the start of the ring: the pass drained its queue.
-// The ring wraps inside a pass, so the next cursor is not ordered against the
-// previous one; monotonicity is a compare-and-swap on the opaque cursor_version
-// the pass read, bumped by every applied save. A pass finishing after a newer
-// pass already moved the cursor affects 0 rows and keeps the newer position.
-func (q *Queries) SaveSweepCursor(ctx context.Context, arg SaveSweepCursorParams) (int64, error) {
-	result, err := q.db.Exec(ctx, saveSweepCursor, arg.WorkerKind, arg.CursorMerchantID, arg.ExpectedCursorVersion)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }

@@ -32,17 +32,26 @@ var usageOutstanding = []rivertype.JobState{
 
 // UsageOrderArgs is one usage-order pass: every merchant's due accounts, or
 // one merchant's after a threshold crossing. A merchant has at most one
-// outstanding wakeup, rather than a timer or job for every customer.
+// outstanding wakeup, rather than a timer or job for every customer. After
+// continues a merchant's pass past a full page of due accounts.
 type UsageOrderArgs struct {
 	MerchantID *billing.MerchantID `json:"merchant_id,omitempty"`
+	After      *UsageAccount       `json:"after,omitempty"`
+}
+
+// UsageAccount is a customer's usage account in one currency.
+type UsageAccount struct {
+	CustomerID uuid.UUID `json:"customer_id"`
+	Currency   string    `json:"currency"`
 }
 
 func (UsageOrderArgs) Kind() string { return KindUsageOrders }
 
-// InsertOpts coalesces the deployment-wide passes. A merchant's wake coalesces
-// only where its producer asks (a threshold crossing).
+// InsertOpts coalesces the deployment-wide passes and a merchant's
+// continuations. A merchant's wake coalesces only where its producer asks (a
+// threshold crossing).
 func (a UsageOrderArgs) InsertOpts() river.InsertOpts {
-	if a.MerchantID != nil {
+	if a.MerchantID != nil && a.After == nil {
 		return river.InsertOpts{Queue: "billing"}
 	}
 	return river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: usageOutstanding}}
@@ -170,22 +179,28 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 	return err
 }
 
-// FinalizeDueUsage bills one bounded batch. Due rows survive process restarts;
-// all decisions and attachments serialize with usage writes on the customer.
-func (s *MoneyService) FinalizeDueUsage(ctx context.Context, now time.Time) (int, error) {
+// usageDuePage bounds one job's due accounts; a full page continues in a new
+// job.
+const usageDuePage = 200
+
+// FinalizeDueUsage bills one page of due accounts after after, and returns
+// where the next page starts when this one was full. Due rows survive process
+// restarts; all decisions and attachments serialize with usage writes on the
+// customer.
+func (s *MoneyService) FinalizeDueUsage(ctx context.Context, now time.Time, after *UsageAccount) (int, *UsageAccount, error) {
 	if !s.UsageBillingEnabled {
-		return 0, nil
+		return 0, nil, nil
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if settings.Config.UsageBilling == nil {
-		return 0, nil
+		return 0, nil, nil
 	}
 	limits := map[string]int64{}
 	minimums := map[string]int64{}
@@ -195,43 +210,41 @@ func (s *MoneyService) FinalizeDueUsage(ctx context.Context, now time.Time) (int
 	}
 	encoded, err := json.Marshal(limits)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	encodedMinimums, err := json.Marshal(minimums)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
+	}
+	params := gen.ListUsageBillingDueAccountsParams{MerchantID: mid.UUID(), Now: now, RowLimit: usageDuePage, Limits: encoded, Minimums: encodedMinimums, Policies: settings.PoliciesParam()}
+	if after != nil {
+		params.AfterCustomer, params.AfterCurrency = after.CustomerID, after.Currency
+	}
+	rows, err := s.db.Gen(ctx).ListUsageBillingDueAccounts(ctx, params)
+	if err != nil {
+		return 0, nil, err
 	}
 	count := 0
 	var failures []error
-	deadline := time.Now().Add(30 * time.Second)
-	afterCustomer, afterCurrency := uuid.Nil, ""
-	for {
-		rows, err := s.db.Gen(ctx).ListUsageBillingDueAccounts(ctx, gen.ListUsageBillingDueAccountsParams{MerchantID: mid.UUID(), Now: now, RowLimit: 200, Limits: encoded, Minimums: encodedMinimums, Policies: settings.PoliciesParam(), AfterCustomer: afterCustomer, AfterCurrency: afterCurrency})
+	for _, row := range rows {
+		billed, err := s.finalizeUsageAccount(ctx, row.CustomerID, row.Currency, now)
 		if err != nil {
-			return count, errors.Join(append(failures, err)...)
-		}
-		for _, row := range rows {
-			afterCustomer, afterCurrency = row.CustomerID, row.Currency
-			billed, err := s.finalizeUsageAccount(ctx, row.CustomerID, row.Currency, now)
-			if err != nil {
-				failures = append(failures, fmt.Errorf("usage account %s/%s: %w", row.CustomerID, row.Currency, err))
-				if ctx.Err() != nil {
-					return count, errors.Join(failures...)
-				}
-				continue
+			failures = append(failures, fmt.Errorf("usage account %s/%s: %w", row.CustomerID, row.Currency, err))
+			if ctx.Err() != nil {
+				return count, nil, errors.Join(failures...)
 			}
-			if billed {
-				count++
-			}
+			continue
 		}
-		if len(rows) < 200 {
-			break
-		}
-		if time.Now().After(deadline) {
-			break
+		if billed {
+			count++
 		}
 	}
-	return count, errors.Join(failures...)
+	var next *UsageAccount
+	if len(rows) == usageDuePage {
+		last := rows[len(rows)-1]
+		next = &UsageAccount{CustomerID: last.CustomerID, Currency: last.Currency}
+	}
+	return count, next, errors.Join(failures...)
 }
 
 func (s *MoneyService) finalizeUsageAccount(ctx context.Context, customer uuid.UUID, currency string, now time.Time) (bool, error) {
