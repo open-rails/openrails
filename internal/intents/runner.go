@@ -35,7 +35,6 @@ type ledger interface {
 	MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, evidence map[string]any) error
 	MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error
 	Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
-	WakeRecoveryHeld(ctx context.Context, id uuid.UUID, now time.Time) error
 	MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error
 }
 
@@ -147,7 +146,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	var actionErr error
 	ctx, actionErr = r.bindIntentAction(ctx, intent)
 	if actionErr != nil {
-		r.park(withHistoryHold(ctx, "admission_unavailable"), logEntry, stats, intent.ID, now, actionErr.Error())
+		r.park(withHistoryHold(ctx, "admission_unavailable"), logEntry, stats, intent.ID, now, Parked(actionErr.Error()))
 		return
 	}
 
@@ -155,7 +154,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	if handler == nil {
 		// Likely deploy skew (an intent type from a newer/older build). Keep
 		// it pending — a build that knows the type will drain it.
-		r.park(withHistoryHold(ctx, "handler_unavailable"), logEntry, stats, intent.ID, now, "no handler registered for intent type "+intent.IntentType)
+		r.park(withHistoryHold(ctx, "handler_unavailable"), logEntry, stats, intent.ID, now, Parked("no handler registered for intent type "+intent.IntentType))
 		return
 	}
 
@@ -163,7 +162,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	if err != nil {
 		// Local read failed; not an attempt — re-check soon without burning
 		// backoff.
-		r.park(withHistoryHold(ctx, "relevance_unavailable"), logEntry, stats, intent.ID, now, "relevance check failed: "+err.Error())
+		r.park(withHistoryHold(ctx, "relevance_unavailable"), logEntry, stats, intent.ID, now, Parked("relevance check failed: "+err.Error()))
 		return
 	}
 	if !rel.Applicable {
@@ -181,7 +180,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	// it still passes provider mode and the destructive rate/volume ceilings.
 	if r.Destructive != nil && IsDestructiveIntentType(intent.IntentType) && !requestedPaymentMethodDelete(ctx, intent) {
 		if allowed, reason := r.Destructive.AllowDestructive(ctx, intent.MerchantID); !allowed {
-			r.park(withHistoryHold(ctx, "destructive_guard"), logEntry, stats, intent.ID, now, reason)
+			r.park(withHistoryHold(ctx, "destructive_guard"), logEntry, stats, intent.ID, now, Parked(reason))
 			return
 		}
 	}
@@ -196,18 +195,18 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 			return NewStore(d).LogExternalMutation(ctx, r.mutationLogParams(intent, MutationLogPhaseAttempting, "", nil))
 		})
 		if err != nil {
-			r.park(withHistoryHold(ctx, "breaker_unavailable"), logEntry, stats, intent.ID, now, "destructive-volume breaker check failed: "+err.Error())
+			r.park(withHistoryHold(ctx, "breaker_unavailable"), logEntry, stats, intent.ID, now, Parked("destructive-volume breaker check failed: "+err.Error()))
 			return
 		}
 		if held {
-			r.park(withHistoryHold(ctx, "destructive_guard"), logEntry, stats, intent.ID, now, reason)
+			r.park(withHistoryHold(ctx, "destructive_guard"), logEntry, stats, intent.ID, now, Parked(reason))
 			return
 		}
 	}
 
 	if !attemptLogged {
 		if err := r.logExternalMutation(ctx, intent, MutationLogPhaseAttempting, "", nil); err != nil {
-			r.park(ctx, logEntry, stats, intent.ID, now, "mutation log unavailable: "+err.Error())
+			r.park(ctx, logEntry, stats, intent.ID, now, Parked("mutation log unavailable: "+err.Error()))
 			return
 		}
 	}
@@ -409,7 +408,6 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 	}
 	var err error
 	applied := outcome.Class
-	recoveryHeld, _ := outcome.Evidence["recovery_held"].(bool)
 	switch outcome.Class {
 	case OutcomeSucceeded:
 		if !terminalOwned {
@@ -456,7 +454,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 					return
 				}
 			}
-			r.park(ctx, logEntry, stats, intent.ID, now, outcome.Reason)
+			r.park(ctx, logEntry, stats, intent.ID, now, outcome)
 			return
 		}
 	default:
@@ -466,9 +464,6 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 	if err != nil {
 		logEntry.WithError(err).Error("intent ledger: outcome transition failed; lease expiry will re-surface the intent")
 		return
-	}
-	if recoveryHeld {
-		r.wakeLegacyHeldIfAllowed(ctx, logEntry, intent, now)
 	}
 	// Reporting follows a confirmed write/read. A failed transition is never a
 	// successful payment or terminal refusal in worker statistics.
@@ -530,16 +525,20 @@ func pruneTerminalPayloadFor(handler Handler) bool {
 }
 
 // park and supersede are ledger transitions like apply and detach the same way.
-func (r *Runner) park(ctx context.Context, logEntry *log.Entry, stats *Stats, id uuid.UUID, now time.Time, reason string) {
+func (r *Runner) park(ctx context.Context, logEntry *log.Entry, stats *Stats, id uuid.UUID, now time.Time, outcome Outcome) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	ctx = r.transitionContext(ctx)
-	if err := r.Store.Park(ctx, id, now.Add(ParkRetryInterval), reason); err != nil {
+	until := outcome.Until
+	if until.IsZero() {
+		until = now.Add(ParkRetryInterval)
+	}
+	if err := r.Store.Park(ctx, id, until, outcome.Reason); err != nil {
 		logEntry.WithError(err).Error("intent ledger: park failed; lease expiry will re-surface the intent")
 		return
 	}
 	stats.Parked++
-	logEntry.WithField("reason", reason).Warn("intent parked (stays pending)")
+	logEntry.WithFields(log.Fields{"reason": outcome.Reason, "until": until}).Warn("intent parked (stays pending)")
 }
 
 func (r *Runner) supersede(ctx context.Context, logEntry *log.Entry, stats *Stats, id uuid.UUID, reason string) {
@@ -695,16 +694,5 @@ func (r *Runner) holdForWritePosture(ctx context.Context, logger *log.Entry, sta
 		stats.Parked++
 		return
 	}
-	r.park(ctx, logger, stats, in.ID, now, reason)
-}
-
-// Legacy recovery markers may still exist after upgrade. Normal write posture
-// is the only global policy checked before their ordinary retry is scheduled.
-func (r *Runner) wakeLegacyHeldIfAllowed(ctx context.Context, logger *log.Entry, in gen.BillingProviderIntent, now time.Time) {
-	if blocked, _ := GateExecution(ctx, r.Config, in.MerchantID, Origin(in.Origin)); blocked {
-		return
-	}
-	if err := r.Store.WakeRecoveryHeld(ctx, in.ID, now); err != nil {
-		logger.WithError(err).Warn("provider recovery wake failed; durable retry remains")
-	}
+	r.park(ctx, logger, stats, in.ID, now, Parked(reason))
 }

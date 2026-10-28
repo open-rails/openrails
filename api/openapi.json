@@ -21034,7 +21034,6 @@
           "disposition": {
             "type": "string",
             "enum": [
-              "applied",
               "blocked",
               "scheduled",
               "skipped"

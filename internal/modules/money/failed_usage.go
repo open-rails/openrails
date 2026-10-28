@@ -74,8 +74,8 @@ func (k failedUsageKey) graceLeft(ctx context.Context, q *gen.Queries, periods [
 	return left, nil
 }
 
-// count adds amount to every window and drops windows that ended.
-func (k failedUsageKey) count(ctx context.Context, q *gen.Queries, periods []failedUsagePeriod, amount int64, now time.Time) error {
+// count adds amount to every window; retention drops the windows that ended.
+func (k failedUsageKey) count(ctx context.Context, q *gen.Queries, periods []failedUsagePeriod, amount int64) error {
 	if amount <= 0 {
 		return nil
 	}
@@ -87,8 +87,7 @@ func (k failedUsageKey) count(ctx context.Context, q *gen.Queries, periods []fai
 			return err
 		}
 	}
-	_, err := q.PruneFailedUsageWindows(ctx, gen.PruneFailedUsageWindowsParams{MerchantID: k.merchant, Now: now})
-	return err
+	return nil
 }
 
 // FailedUsageCutoffReached reports whether a delegated invoker's failed usage

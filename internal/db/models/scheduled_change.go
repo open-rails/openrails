@@ -18,6 +18,8 @@ const (
 	ScheduledChangeCanceled  ScheduledChangeStatus = "canceled"
 	// ScheduledChangeBlocked is a migration's move its provider could not take.
 	ScheduledChangeBlocked ScheduledChangeStatus = "blocked"
+	// ScheduledChangeSkipped is a migration's move that no longer applied.
+	ScheduledChangeSkipped ScheduledChangeStatus = "skipped"
 )
 
 // ScheduledChange is one subscription's change waiting for its renewal. At

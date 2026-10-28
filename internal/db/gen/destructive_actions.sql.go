@@ -318,7 +318,7 @@ func (q *Queries) CreateDestructiveHold(ctx context.Context, arg CreateDestructi
 
 const destructiveActionProviderState = `-- name: DestructiveActionProviderState :one
 SELECT EXISTS(SELECT 1 WHERE EXISTS(SELECT 1 FROM billing.provider_intents WHERE merchant_id=$1::uuid AND destructive_action_id=$2::uuid AND status NOT IN ('succeeded','failed_terminal','superseded','expired'))
- OR EXISTS(SELECT 1 FROM billing.price_migrations m JOIN billing.scheduled_changes s ON s.merchant_id=m.merchant_id AND s.price_migration_id=m.id WHERE m.merchant_id=$1::uuid AND m.destructive_action_id=$2::uuid AND s.status IN ('scheduled','blocked')))::boolean AS pending,
+ OR EXISTS(SELECT 1 FROM billing.price_migrations m JOIN billing.scheduled_changes s ON s.merchant_id=m.merchant_id AND s.price_migration_id=m.id WHERE m.merchant_id=$1::uuid AND m.destructive_action_id=$2::uuid AND s.status = 'scheduled'))::boolean AS pending,
  EXISTS(SELECT 1 FROM billing.provider_intents WHERE merchant_id=$1::uuid AND destructive_action_id=$2::uuid AND status='succeeded')::boolean AS succeeded
 `
 

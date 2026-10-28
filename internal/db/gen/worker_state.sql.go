@@ -140,7 +140,8 @@ const seedWorkerHealth = `-- name: SeedWorkerHealth :exec
 INSERT INTO billing.worker_state (worker_kind, expected_period_seconds)
 VALUES ($1, $2)
 ON CONFLICT (worker_kind) DO UPDATE
-SET expected_period_seconds = EXCLUDED.expected_period_seconds
+SET expected_period_seconds = EXCLUDED.expected_period_seconds,
+    updated_at = GREATEST(billing.worker_state.updated_at, now())
 `
 
 type SeedWorkerHealthParams struct {
@@ -153,6 +154,8 @@ type SeedWorkerHealthParams struct {
 // back, last_error is the newest failure's, and a success resets (or a failure
 // bumps) the streak only when nothing newer is recorded. Under reordering the
 // streak can over-count but never under-counts, so no alert is suppressed.
+// A seed marks the kind registered: a row no fleet seeds or runs goes with
+// retention.
 func (q *Queries) SeedWorkerHealth(ctx context.Context, arg SeedWorkerHealthParams) error {
 	_, err := q.db.Exec(ctx, seedWorkerHealth, arg.WorkerKind, arg.ExpectedPeriodSeconds)
 	return err

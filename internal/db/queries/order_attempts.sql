@@ -58,6 +58,8 @@ WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.reference = $1
 LIMIT 1;
 
 -- name: ExpireOrderAttempts :execrows
+-- The order expiry's: attempts still waiting on their customer past their
+-- expiry, a bounded batch.
 UPDATE billing.order_attempts
 SET status = 'expired', updated_at = sqlc.arg(now)
 WHERE deleted_at IS NULL
@@ -69,25 +71,6 @@ WHERE deleted_at IS NULL
       AND cs.deleted_at IS NULL
     LIMIT sqlc.arg(row_limit)::int
 );
-
--- #511 LIFE plane (life.order_attempt.stale): expired-but-not-terminal
--- order attempts for a scope. Detection (read-only) for the Convergence Engine.
--- name: ListStaleOrderAttempts :many
-SELECT id FROM billing.order_attempts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
-  AND expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
-  AND status IN ('created', 'requires_action')
-  AND deleted_at IS NULL
-ORDER BY expires_at;
-
--- name: ExpireOrderAttemptByID :execrows
--- Repair for life.order_attempt.stale: mark one stale session expired.
-UPDATE billing.order_attempts
-SET status = 'expired', updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND status IN ('created', 'requires_action')
-  AND deleted_at IS NULL;
 
 -- name: GetCardCaptureAccountsForShare :one
 -- Recheck the PSP and custodian identities after vendor metadata readback,

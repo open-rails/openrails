@@ -4,11 +4,14 @@
 -- bumps) the streak only when nothing newer is recorded. Under reordering the
 -- streak can over-count but never under-counts, so no alert is suppressed.
 
+-- A seed marks the kind registered: a row no fleet seeds or runs goes with
+-- retention.
 -- name: SeedWorkerHealth :exec
 INSERT INTO billing.worker_state (worker_kind, expected_period_seconds)
 VALUES ($1, sqlc.narg(expected_period_seconds))
 ON CONFLICT (worker_kind) DO UPDATE
-SET expected_period_seconds = EXCLUDED.expected_period_seconds;
+SET expected_period_seconds = EXCLUDED.expected_period_seconds,
+    updated_at = GREATEST(billing.worker_state.updated_at, now());
 
 -- name: RecordWorkerSuccess :exec
 INSERT INTO billing.worker_state (worker_kind, last_success_at, consecutive_failures, updated_at)

@@ -42,11 +42,7 @@ func initialBill(ctx context.Context, d *db.DB, params *CreateMembershipParams, 
 		if t.RecurringIntervalHours == nil {
 			return recorded, errors.New("accepted provider enrollment has no recurring cadence")
 		}
-		firstDue := t.PeriodEnd
-		if t.Pending {
-			firstDue = t.PeriodStart
-		}
-		if err := observed.SeedSchedule(ctx, d, recorded.Order.ID, sub.ID, firstDue, *t.RecurringIntervalHours, t.RecurringAmount, now); err != nil {
+		if err := observed.SeedSchedule(ctx, d, recorded.Order.ID, sub.ID, t.PeriodEnd, *t.RecurringIntervalHours, t.RecurringAmount, now); err != nil {
 			return recorded, err
 		}
 	}

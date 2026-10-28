@@ -38,17 +38,6 @@ SELECT COALESCE((
       AND cell = sqlc.arg(cell)::text AND period_starts_at = sqlc.arg(period_starts_at)::timestamptz
 ), 0)::bigint AS quantity;
 
--- Periods past the ingest window go a bounded batch at a time, on the next
--- write; a row another writer holds waits for a later one.
--- name: PruneMeterPeriodQuantities :execrows
-DELETE FROM billing.meter_period_quantities q
-WHERE (q.merchant_id, q.customer_id, q.currency, q.meter_key, q.cell, q.period_starts_at) IN (
-    SELECT e.merchant_id, e.customer_id, e.currency, e.meter_key, e.cell, e.period_starts_at
-    FROM billing.meter_period_quantities e
-    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.period_starts_at < sqlc.arg(before)::timestamptz
-    LIMIT 100
-    FOR UPDATE SKIP LOCKED);
-
 -- A customer's first recorded activity in a currency: its first transfer or
 -- the opening of its balance account. Anniversary periods are anchored on it.
 -- name: GetCustomerPeriodAnchor :one

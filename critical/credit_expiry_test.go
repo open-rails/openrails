@@ -46,7 +46,7 @@ func TestCreditExpiry(t *testing.T) {
 		done, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
 		defer unsubscribe()
 		w.clock.Advance(time.Hour)
-		job, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.credit_expiry"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		job, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.balance_watch"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
@@ -62,7 +62,7 @@ func TestCreditExpiry(t *testing.T) {
 				require.Equal(t, river.EventKindJobCompleted, event.Kind)
 				finished = true
 			case <-timer.C:
-				t.Fatal("registered credit expiry worker did not finish")
+				t.Fatal("registered balance watch worker did not finish")
 			}
 		}
 		grant, err := w.alpha.GetCreditGrant(t.Context(), expiring[0].ID)
@@ -88,5 +88,34 @@ func TestCreditExpiry(t *testing.T) {
 			}
 		}
 		require.Equal(t, 1, expiredEntries)
+	})
+	t.Run("OR-J22-S06/lapsed-credit-leaves-available-at-its-lapse-and-its-watch-expires-it", func(t *testing.T) {
+		w := newWorld(t)
+		customer := billing.CustomerID(uuid.New())
+		// An arrears customer: its balance is watched only while it holds a lot that lapses.
+		_, err := w.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 5000}}})
+		require.NoError(t, err)
+		_, err = w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 500, Source: "critical", SourceID: "lasting"}})
+		require.NoError(t, err)
+		endsAt := w.clock.Now().Add(time.Hour)
+		lapsing, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "lapsing", ExpiresAt: &endsAt}})
+		require.NoError(t, err)
+		balance(t, w.alpha, customer, 1500, 0, 1500)
+		fleet := hostFleet(t, w)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		runRegistered(t, fleet, "openrails.balance_watch", 1)
+		w.clock.Advance(endsAt.Add(-time.Second).Sub(w.clock.Now()))
+		runRegistered(t, fleet, "openrails.balance_watch", 1)
+		balance(t, w.alpha, customer, 1500, 0, 1500)
+		w.clock.Advance(time.Second)
+		balance(t, w.alpha, customer, 500, 0, 1500)
+		runRegistered(t, fleet, "openrails.balance_watch", 1)
+		grant, err := w.alpha.GetCreditGrant(t.Context(), lapsing[0].ID)
+		require.NoError(t, err)
+		require.EqualValues(t, 1000, grant.ExpiredAmount)
+		require.Zero(t, grant.RemainingAmount)
+		balance(t, w.alpha, customer, 500, 0, 500)
 	})
 }

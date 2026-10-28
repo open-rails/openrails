@@ -376,7 +376,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime.AdminSubscriptionService.SetRequestedCancellationLimiter(func(ctx context.Context, sub *models.Subscription) error {
 		return destructive.NewUserActionLimiter(runtime.DB, runtime.Config.UserActionRateLimit).Reserve(ctx, destructive.CancelSubscription, fmt.Sprintf("cancel:%s:%d", sub.ID, sub.LifecycleRev), sub.CustomerID)
 	})
-	runtime.PriceMigrationService.WithDestructiveAdmissions(runtime.DestructiveAdmissions)
+	runtime.PriceMigrationService.WithDestructiveAdmissions(runtime.DestructiveAdmissions).WithPushes(intents.PriceMigrationPushes{})
 	runtime.MoneyService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.ProductAccessService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtimeRef = runtime

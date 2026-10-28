@@ -12,17 +12,6 @@ VALUES (
     sqlc.arg(data)::jsonb, sqlc.arg(dedupe_key)::text)
 ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
 
--- Batched: row_limit bounds one statement, the caller loops.
--- name: DeleteHostLifecycleEventsBefore :execrows
-DELETE FROM billing.host_outbox
-WHERE ctid IN (
-    SELECT hle.ctid FROM billing.host_outbox hle
-    WHERE hle.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND hle.event_type <> 'payment.settled'
-      AND hle.recorded_at < sqlc.arg(cutoff)::timestamptz
-    LIMIT sqlc.arg(row_limit)::int
-);
-
 -- name: EnqueueProductEntitlementsChanged :exec
 -- One key edit of a product, keyed by the revision it produced: announcing it
 -- again collapses.

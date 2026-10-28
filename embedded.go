@@ -295,27 +295,3 @@ const (
 	QueueBilling   = riverjobs.QueueBilling
 	QueuePSPImport = riverjobs.QueuePSPImport
 )
-
-// UsageSweepArgs requests one usage-billing pass. Automatic selects the configured
-// account policy; otherwise its phase flags retain the manual billing API.
-// OpenRails does not schedule separate monthly phases.
-type UsageSweepArgs struct {
-	// Automatic applies the configured account policy instead of manual phase flags.
-	Automatic bool `json:"automatic,omitempty"`
-	// MerchantID limits this run to one merchant; nil visits active merchants.
-	MerchantID *billing.MerchantID `json:"merchant_id,omitempty"`
-	// Collect runs the collection pass over unpaid usage orders.
-	Collect bool `json:"collect,omitempty"`
-	// UseMonthlyFloor collects down to the merchant's monthly floor instead of
-	// its collection threshold.
-	UseMonthlyFloor bool `json:"use_monthly_floor,omitempty"`
-	// FinalizePreviousMonth bills each customer's previous billing period,
-	// rating reported usage.
-	FinalizePreviousMonth bool `json:"finalize_previous_month,omitempty"`
-}
-
-// Kind is the engine's usage-order job kind.
-func (UsageSweepArgs) Kind() string { return riverjobs.KindUsageOrders }
-
-// InsertOpts targets QueueBilling.
-func (UsageSweepArgs) InsertOpts() river.InsertOpts { return river.InsertOpts{Queue: QueueBilling} }

@@ -129,7 +129,7 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 		a.clock.Advance(400 * 24 * time.Hour)
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(queue)))
 		require.NoError(t, queue.Start(t.Context()))
-		for _, kind := range []string{"openrails.order_expiry", "openrails.cleanup_expired_data", "openrails.idempotency_gc"} {
+		for _, kind := range []string{"openrails.order_expiry", "openrails.cleanup_expired_data"} {
 			runRegistered(t, queue, kind, 2)
 		}
 		retained, err := a.alpha.GetOrder(t.Context(), order.ID)

@@ -48,7 +48,6 @@ type InitialMembershipTerms struct {
 	AcceptedAt      time.Time `json:"accepted_at"`
 	PeriodStart     time.Time `json:"period_start"`
 	PeriodEnd       time.Time `json:"period_end"`
-	Pending         bool      `json:"pending"`
 	// Entitlements is the keys an enrollment admitted before product access,
 	// kept only to reproduce its quote fingerprint. Access follows ProductID.
 	Entitlements json.RawMessage `json:"entitlements,omitempty"`
@@ -93,7 +92,7 @@ func (t InitialMembershipTerms) Validate() error {
 		return errors.New("accepted provider enrollment requires its recurring cadence")
 	}
 	if t.Rail == models.RailSolana {
-		if t.CollectionPolicy != models.CollectionPolicyEngine || t.PaymentMethodID != uuid.Nil || t.AwaitingMethod || t.Pending || t.Replaces != nil || t.Adds != nil || t.RecurringIntervalHours == nil || t.RecurringAmount <= 0 {
+		if t.CollectionPolicy != models.CollectionPolicyEngine || t.PaymentMethodID != uuid.Nil || t.AwaitingMethod || t.Replaces != nil || t.Adds != nil || t.RecurringIntervalHours == nil || t.RecurringAmount <= 0 {
 			return errors.New("Solana enrollment requires its paid wallet authorization")
 		}
 		if err := moneyutil.ValidateCurrency(t.Currency); err != nil {
@@ -108,7 +107,7 @@ func (t InitialMembershipTerms) Validate() error {
 	if err := validateAccessChoice(t.AccessDurationHours, t.ProviderAccessDefault); err != nil {
 		return err
 	}
-	if t.AwaitingMethod && (t.CollectionPolicy != models.CollectionPolicyEngine || t.PaymentMethodID != uuid.Nil || t.Pending || t.Replaces != nil || t.Adds != nil) {
+	if t.AwaitingMethod && (t.CollectionPolicy != models.CollectionPolicyEngine || t.PaymentMethodID != uuid.Nil || t.Replaces != nil || t.Adds != nil) {
 		return errors.New("awaiting method requires a paid engine order without a saved card")
 	}
 	if !t.CollectionPolicy.Valid() || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.PSPID == uuid.Nil || t.ProductID == uuid.Nil || t.PriceID == uuid.Nil || t.PaymentMethodID == uuid.Nil && t.CollectionPolicy == models.CollectionPolicyEngine && !t.AwaitingMethod && t.Rail != models.RailSolana || t.AcceptedAt.IsZero() || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) || t.Amount < 0 || t.RecurringAmount < 0 {
@@ -122,7 +121,7 @@ func (t InitialMembershipTerms) Validate() error {
 	if t.Quantity != nil && (*t.Quantity < 1 || t.CollectionPolicy != models.CollectionPolicyEngine) || t.RecurringAmount%int64(SeatCount(t.Quantity)) != 0 {
 		return errors.New("initial membership quantity contradicts its recurring amount")
 	}
-	if t.Currency != strings.ToUpper(strings.TrimSpace(t.Currency)) || (t.Amount > 0) != (t.PaymentID != uuid.Nil) || (t.Pending && (t.Amount != 0 || !t.PeriodStart.After(t.AcceptedAt))) {
+	if t.Currency != strings.ToUpper(strings.TrimSpace(t.Currency)) || (t.Amount > 0) != (t.PaymentID != uuid.Nil) {
 		return errors.New("initial membership phase contradicts its accepted payment")
 	}
 	if t.Rail != models.RailSolana {
@@ -135,12 +134,12 @@ func (t InitialMembershipTerms) Validate() error {
 			return errors.New("seat increase terms name no seats")
 		}
 		added, err := Seats(t.UnitAmount(), *t.Quantity-a.FromQuantity)
-		if t.Replaces != nil || t.CollectionPolicy != models.CollectionPolicyEngine || t.Pending || t.CancelAfterInitial || a.FromQuantity < 1 || a.FromQuantity >= *t.Quantity || err != nil || t.Amount <= 0 || t.Amount > added {
+		if t.Replaces != nil || t.CollectionPolicy != models.CollectionPolicyEngine || t.CancelAfterInitial || a.FromQuantity < 1 || a.FromQuantity >= *t.Quantity || err != nil || t.Amount <= 0 || t.Amount > added {
 			return errors.New("seat increase terms contradict the membership they change")
 		}
 	}
 	if r := t.Replaces; r != nil {
-		if t.CollectionPolicy != models.CollectionPolicyEngine || t.Pending || r.SubscriptionID == uuid.Nil || r.SubscriptionID == t.SubscriptionID || r.PriceID == uuid.Nil || r.PriceID == t.PriceID || !r.PeriodEnd.After(t.AcceptedAt) || !r.PeriodEnd.Equal(r.PeriodEnd.Truncate(time.Microsecond)) || t.Amount <= 0 || r.Credit < 0 || t.Amount+r.Credit != t.RecurringAmount {
+		if t.CollectionPolicy != models.CollectionPolicyEngine || r.SubscriptionID == uuid.Nil || r.SubscriptionID == t.SubscriptionID || r.PriceID == uuid.Nil || r.PriceID == t.PriceID || !r.PeriodEnd.After(t.AcceptedAt) || !r.PeriodEnd.Equal(r.PeriodEnd.Truncate(time.Microsecond)) || t.Amount <= 0 || r.Credit < 0 || t.Amount+r.Credit != t.RecurringAmount {
 			return errors.New("engine upgrade terms contradict the membership they replace")
 		}
 	}

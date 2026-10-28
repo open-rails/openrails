@@ -34,7 +34,7 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid AND stat
 
 -- name: DestructiveActionProviderState :one
 SELECT EXISTS(SELECT 1 WHERE EXISTS(SELECT 1 FROM billing.provider_intents WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND destructive_action_id=sqlc.arg(id)::uuid AND status NOT IN ('succeeded','failed_terminal','superseded','expired'))
- OR EXISTS(SELECT 1 FROM billing.price_migrations m JOIN billing.scheduled_changes s ON s.merchant_id=m.merchant_id AND s.price_migration_id=m.id WHERE m.merchant_id=sqlc.arg(merchant_id)::uuid AND m.destructive_action_id=sqlc.arg(id)::uuid AND s.status IN ('scheduled','blocked')))::boolean AS pending,
+ OR EXISTS(SELECT 1 FROM billing.price_migrations m JOIN billing.scheduled_changes s ON s.merchant_id=m.merchant_id AND s.price_migration_id=m.id WHERE m.merchant_id=sqlc.arg(merchant_id)::uuid AND m.destructive_action_id=sqlc.arg(id)::uuid AND s.status = 'scheduled'))::boolean AS pending,
  EXISTS(SELECT 1 FROM billing.provider_intents WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND destructive_action_id=sqlc.arg(id)::uuid AND status='succeeded')::boolean AS succeeded;
 
 -- Directory scope is deliberate: an actor and a deployment cross merchants.

@@ -403,13 +403,6 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 	if err != nil {
 		return paymentmethods.PaymentMethodDeleteOutcome{}, err
 	}
-	if found && prior.Origin == string(OriginUser) && !strings.HasPrefix(prior.IdempotencyKey, "manual:") && prior.Status == StatusPending && prior.Attempts == 0 {
-		if err := t.Runner.Store.(*Store).RetireUnattemptedUserMethodDelete(ctx, prior.ID, pm, t.Runner.now()); err != nil {
-			return paymentmethods.PaymentMethodDeleteOutcome{}, err
-		}
-		pm.ParkReason, pm.ParkedAt = "", nil
-		found = false
-	}
 	if found {
 		row, err := t.executeManual(ctx, prior)
 		return methodDeleteOutcome(row), err

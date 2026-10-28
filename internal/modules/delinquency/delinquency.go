@@ -57,9 +57,8 @@ func ParseState(v string) State {
 const DefaultGraceDays = 14
 
 // DefaultAmountFloor is the smallest overdue balance (micros) that can make a
-// payer delinquent when the merchant declared neither a delinquency nor an
-// monthly floor. It equals money.DefaultMonthlyFloorAmount
-// (pinned by a test): too small to collect is too small to cut anyone off for.
+// payer delinquent when the merchant declared neither a delinquency nor a
+// monthly floor: one currency unit.
 const DefaultAmountFloor int64 = 1_000_000
 
 // Policy is the merchant's declared delinquency policy.

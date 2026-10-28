@@ -752,11 +752,7 @@ func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt tim
 		if err == nil && rows > 0 && historyHold(ctx) != "" {
 			err = txs.recordHistoryHold(ctx, id)
 		}
-		wake := nextAttemptAt
-		if held, _ := evidence["recovery_held"].(bool); held {
-			wake = time.Time{} // durable immediate readiness check; the held retry date remains
-		}
-		return rows, wake, err
+		return rows, nextAttemptAt, err
 	}))
 }
 
@@ -803,9 +799,6 @@ func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 	}
 	return one(s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
 		wake := nextAttemptAt
-		if strings.Contains(string(recovery), `"recovery_held":true`) {
-			wake = time.Time{}
-		}
 		rows, err := txs.db.Gen(ctx).ParkProviderIntent(ctx, gen.ParkProviderIntentParams{
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 			RecoveryEvidence: recovery,

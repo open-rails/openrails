@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/destructive"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/destructive"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -18,10 +19,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
-	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -167,104 +166,6 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, q *gen.Queries, paye
 		return nil
 	}()
 	return out, err
-}
-
-// FinalizeDueUsageForBoundary closes the previous period of every payer
-// active in it under the merchant's billing_period_boundary; anniversary
-// periods are anchored on the payer's first recorded activity.
-func (s *MoneyService) FinalizeDueUsageForBoundary(ctx context.Context, boundary string, now time.Time) (int, error) {
-	if s == nil || s.db == nil {
-		return 0, fmt.Errorf("money service not initialized")
-	}
-	if now.IsZero() {
-		now = s.now()
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return 0, err
-	}
-	// The previous period starts at most two periods back, so three months of
-	// activity names every payer it could still have to bill.
-	activeSince := retention.MonthStart(now).AddDate(0, -3, 0)
-	payers, err := s.db.Gen(ctx).ListUsagePayers(ctx, gen.ListUsagePayersParams{MerchantID: mid.UUID(), ActiveSince: activeSince.UTC()})
-	if err != nil {
-		return 0, err
-	}
-	count := 0
-	for _, p := range payers {
-		// Balances in an unregistered currency are never billed.
-		if RequireBillingCurrency(normalizeCurrency(p.Currency)) != nil {
-			continue
-		}
-		from, to, err := PreviousBillingPeriod(now, p.PeriodAnchor, boundary)
-		if err != nil {
-			return count, err
-		}
-		order, err := s.FinalizeUsage(ctx, identity.CustomerID(p.CustomerID), p.Currency, from, to)
-		if err != nil {
-			return count, err
-		}
-		if order != nil {
-			count++
-		}
-	}
-	return count, nil
-}
-
-// UsageThresholdOptions are the merchant's threshold pass settings.
-type UsageThresholdOptions struct {
-	CollectionThresholdAmount int64
-	BillingPeriodBoundary     string
-}
-
-// FinalizeThresholdUsage bills the period so far of every arrears payer
-// whose pending charges plus unpaid usage orders reached their trigger.
-// Collection is left to ChargeOutstanding, so provider calls stay out of the
-// billing transaction.
-func (s *MoneyService) FinalizeThresholdUsage(ctx context.Context, cutoff time.Time, opt UsageThresholdOptions) (int, error) {
-	if s == nil || s.db == nil {
-		return 0, fmt.Errorf("money service not initialized")
-	}
-	if cutoff.IsZero() {
-		cutoff = s.now()
-	}
-	cutoff = cutoff.UTC()
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return 0, err
-	}
-	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
-	if err != nil {
-		return 0, err
-	}
-	rows, err := s.db.Gen(ctx).ListUsageThresholdCandidates(ctx, gen.ListUsageThresholdCandidatesParams{
-		MerchantID: mid.UUID(), Cutoff: cutoff, MinThreshold: opt.CollectionThresholdAmount, Policies: settings.PoliciesParam(),
-	})
-	if err != nil {
-		return 0, err
-	}
-	count := 0
-	for _, r := range rows {
-		from := r.PeriodStartsAt
-		if opt.BillingPeriodBoundary != "" {
-			start, err := CurrentBillingPeriodStart(cutoff, r.PeriodAnchor, opt.BillingPeriodBoundary)
-			if err != nil {
-				return count, err
-			}
-			from = start
-		}
-		if !cutoff.After(from) {
-			continue
-		}
-		order, err := s.FinalizeUsage(ctx, identity.CustomerID(r.CustomerID), r.Currency, from, cutoff)
-		if err != nil {
-			return count, err
-		}
-		if order != nil {
-			count++
-		}
-	}
-	return count, nil
 }
 
 // lockUsageOrder locks a usage order under its payer, in the caller's

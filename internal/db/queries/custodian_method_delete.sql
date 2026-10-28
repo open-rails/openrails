@@ -107,25 +107,3 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND status IN ('active','closed','replaced','removed')
   AND park_reason = 'delete:' || sqlc.arg(operation_id)::uuid::text;
 
--- name: RetireUnattemptedUserMethodDelete :execrows
--- Explicit compatibility cleanup only: never abandon an attempted/ambiguous
--- provider operation, and never erase the original audit record.
-WITH retired AS (
-  UPDATE billing.provider_intents
-  SET status='superseded', lease_expires_at=NULL,
-      result_evidence=COALESCE(result_evidence,'{}'::jsonb) || jsonb_build_object(
-        'retired_for_manual_delete',true,'retired_prior_reason',last_failure_reason),
-      last_failure_reason='queued card deletion retired; explicit manual retry required',
-      updated_at=sqlc.arg(now)::timestamptz
-  WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(operation_id)::uuid
-    AND origin='user' AND status='pending' AND attempts=0
-    AND intent_type IN ('nmi_vault_delete','platform_method_delete','hyperswitch_method_delete')
-    AND idempotency_key NOT LIKE 'manual:%'
-    AND (lease_expires_at IS NULL OR lease_expires_at<=sqlc.arg(now)::timestamptz)
-  RETURNING id
-)
-UPDATE billing.payment_methods
-SET park_reason=NULL,parked_at=NULL,updated_at=sqlc.arg(now)::timestamptz
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(payment_method_id)::uuid
-  AND park_reason='delete:' || sqlc.arg(operation_id)::uuid::text
-  AND EXISTS(SELECT 1 FROM retired);

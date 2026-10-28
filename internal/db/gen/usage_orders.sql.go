@@ -310,6 +310,7 @@ func (q *Queries) GetOrderPayment(ctx context.Context, arg GetOrderPaymentParams
 }
 
 const getUsageOrderByPeriod = `-- name: GetUsageOrderByPeriod :one
+
 SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded FROM billing.orders
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND origin = 'usage'
   AND currency = $3::text
@@ -324,6 +325,8 @@ type GetUsageOrderByPeriodParams struct {
 	PeriodEndsAt   time.Time
 }
 
+// Usage orders (orders.origin = 'usage'): owed charges billed in arrears for
+// a period. Pending charges wait in owed_items until an order bills them.
 // One usage order per (payer, currency, period).
 func (q *Queries) GetUsageOrderByPeriod(ctx context.Context, arg GetUsageOrderByPeriodParams) (BillingOrder, error) {
 	row := q.db.QueryRow(ctx, getUsageOrderByPeriod,
@@ -600,14 +603,12 @@ WHERE o.merchant_id = $1::uuid
   AND o.due_at <= $2::timestamptz
   AND ((o.collection_failure_count = 0 AND o.next_collection_attempt_at IS NULL)
        OR o.next_collection_attempt_at <= $2::timestamptz)
-  AND ($3::bigint <= 0 OR o.total - o.amount_paid >= $3::bigint)
 ORDER BY o.due_at, o.created_at
 `
 
 type ListChargeableUsageOrdersParams struct {
-	MerchantID   uuid.UUID
-	Now          time.Time
-	MinThreshold int64
+	MerchantID uuid.UUID
+	Now        time.Time
 }
 
 type ListChargeableUsageOrdersRow struct {
@@ -619,7 +620,7 @@ type ListChargeableUsageOrdersRow struct {
 // Open usage orders the scheduled collection charges now: charge_automatically,
 // due, on their first try or a retry that came due.
 func (q *Queries) ListChargeableUsageOrders(ctx context.Context, arg ListChargeableUsageOrdersParams) ([]ListChargeableUsageOrdersRow, error) {
-	rows, err := q.db.Query(ctx, listChargeableUsageOrders, arg.MerchantID, arg.Now, arg.MinThreshold)
+	rows, err := q.db.Query(ctx, listChargeableUsageOrders, arg.MerchantID, arg.Now)
 	if err != nil {
 		return nil, err
 	}
@@ -863,147 +864,6 @@ func (q *Queries) ListOwedOrderClaims(ctx context.Context, arg ListOwedOrderClai
 	for rows.Next() {
 		var i ListOwedOrderClaimsRow
 		if err := rows.Scan(&i.ID, &i.AmountDue, &i.Status); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUsagePayers = `-- name: ListUsagePayers :many
-
-WITH active AS (
-    SELECT DISTINCT lt.customer_id, lt.currency
-    FROM billing.ledger_transfers lt
-    WHERE lt.merchant_id = $1::uuid AND lt.customer_id IS NOT NULL
-      AND lt.created_at >= $2::timestamptz
-)
-SELECT p.customer_id::uuid AS customer_id, p.currency,
-       LEAST(
-           (SELECT MIN(lt.created_at) FROM billing.ledger_transfers lt
-            WHERE lt.merchant_id = $1::uuid AND lt.customer_id = p.customer_id AND lt.currency = p.currency),
-           (SELECT a.created_at FROM billing.ledger_accounts a
-            WHERE a.merchant_id = $1::uuid AND a.customer_id = p.customer_id
-              AND a.currency = p.currency AND a.account_type = 'customer_balance'))::timestamptz AS period_anchor
-FROM active p
-ORDER BY p.customer_id, p.currency
-`
-
-type ListUsagePayersParams struct {
-	MerchantID  uuid.UUID
-	ActiveSince time.Time
-}
-
-type ListUsagePayersRow struct {
-	CustomerID   uuid.UUID
-	Currency     string
-	PeriodAnchor time.Time
-}
-
-// Usage orders (orders.origin = 'usage'): owed charges billed in arrears for
-// a period. Pending charges wait in owed_items until an order bills them.
-// Every (payer, currency) with ledger money movement since active_since: usage
-// is posted when it is recorded, so a payer with no movement has nothing to
-// bill and the sweep scales with activity, not with every payer on file.
-// period_anchor is the payer's first recorded activity (GetCustomerPeriodAnchor):
-// its first transfer or the opening of its balance account. Both are
-// permanent, so anniversary windows never move.
-func (q *Queries) ListUsagePayers(ctx context.Context, arg ListUsagePayersParams) ([]ListUsagePayersRow, error) {
-	rows, err := q.db.Query(ctx, listUsagePayers, arg.MerchantID, arg.ActiveSince)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListUsagePayersRow
-	for rows.Next() {
-		var i ListUsagePayersRow
-		if err := rows.Scan(&i.CustomerID, &i.Currency, &i.PeriodAnchor); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUsageThresholdCandidates = `-- name: ListUsageThresholdCandidates :many
-SELECT s.customer_id, s.currency, MIN(oi.accrued_at)::timestamptz AS period_starts_at, MIN(s.created_at)::timestamptz AS period_anchor
-FROM billing.money_settings s
-JOIN billing.owed_items oi
-  ON oi.merchant_id = s.merchant_id
- AND oi.customer_id = s.customer_id
- AND oi.currency = s.currency
- AND oi.order_id IS NULL
- AND oi.status = 'pending'
- AND oi.accrued_at < $1::timestamptz
-JOIN billing.customers c ON c.merchant_id = s.merchant_id AND c.id = s.customer_id
-CROSS JOIN LATERAL (
-    SELECT ($2::jsonb -> 'policies' -> COALESCE(
-        CASE WHEN $2::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
-        $2::jsonb -> 'tiers' ->> s.tier,
-        $2::jsonb ->> 'default') ->> 'collection_threshold_amount')::bigint AS threshold
-) pol
-WHERE s.merchant_id = $3::uuid
-  AND s.billing_mode = 'arrears'
-  AND s.credit_limit_amount > 0
-GROUP BY s.merchant_id, s.customer_id, s.currency, s.credit_limit_amount, pol.threshold
-HAVING COALESCE(SUM(oi.amount), 0)::bigint + (
-    SELECT COALESCE(SUM(o.total - o.amount_paid), 0)::bigint
-    FROM billing.orders o
-    WHERE o.merchant_id = s.merchant_id AND o.customer_id = s.customer_id AND o.currency = s.currency
-      AND o.origin = 'usage' AND o.status IN ('open', 'processing')
-) >= COALESCE(
-    pol.threshold,
-    CASE WHEN $4::bigint > 0 THEN $4::bigint ELSE s.credit_limit_amount END)
-ORDER BY period_starts_at ASC
-`
-
-type ListUsageThresholdCandidatesParams struct {
-	Cutoff       time.Time
-	Policies     []byte
-	MerchantID   uuid.UUID
-	MinThreshold int64
-}
-
-type ListUsageThresholdCandidatesRow struct {
-	CustomerID     uuid.UUID
-	Currency       string
-	PeriodStartsAt time.Time
-	PeriodAnchor   time.Time
-}
-
-// Arrears payers whose pending charges plus open usage orders reached their
-// trigger: the payer's billing policy's collection_threshold_amount when it
-// has one, else the merchant-wide threshold, else the payer's own credit
-// line. policies is the merchant's settings, {policies: {name: body}, tiers:
-// {tier: name}, default: name}; the payer's policy is its own assignment while
-// the settings still declare it, else its tier's (money_settings.tier), else
-// the default.
-func (q *Queries) ListUsageThresholdCandidates(ctx context.Context, arg ListUsageThresholdCandidatesParams) ([]ListUsageThresholdCandidatesRow, error) {
-	rows, err := q.db.Query(ctx, listUsageThresholdCandidates,
-		arg.Cutoff,
-		arg.Policies,
-		arg.MerchantID,
-		arg.MinThreshold,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListUsageThresholdCandidatesRow
-	for rows.Next() {
-		var i ListUsageThresholdCandidatesRow
-		if err := rows.Scan(
-			&i.CustomerID,
-			&i.Currency,
-			&i.PeriodStartsAt,
-			&i.PeriodAnchor,
-		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

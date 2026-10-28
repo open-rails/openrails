@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
@@ -40,32 +42,29 @@ func migrationPrice(t *testing.T, a *authorityWorld, sub *billing.Subscription, 
 }
 
 func TestPriceMigrationContracts(t *testing.T) {
-	t.Run("OR-J19-S02/failed-provider-push-is-redriven-by-a-replacement-worker", func(t *testing.T) {
+	t.Run("OR-J19-S02/failed-provider-push-is-retried-by-its-operation", func(t *testing.T) {
 		a, p, sub := nmiMembership(t, func(s *nmimock.Schedule) { s.Plan, s.Custom = "", true })
 		target, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: sub.ProductID, Key: "replacement-weekly", UnitAmount: 20_000_000, Currency: "USD", BillingIntervalHours: ptr(168), AccessDurationHours: ptr(168)})
 		require.NoError(t, err)
-		queue := hostFleet(t, a.world)
-		first := startWorkerProcess(t, a.world, nil)
 		p.core.FailScheduleUpdates(1)
 		migration, err := a.alpha.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: target.ID, AcknowledgeShortNotice: true})
 		require.NoError(t, err)
-		require.Equal(t, 1, migration.Blocked)
-		require.Zero(t, migration.Applied)
-		require.Equal(t, "10.00", p.core.Schedule(*sub.RailSubscriptionID).Amount)
-		require.Len(t, p.core.ScheduleUpdates(*sub.RailSubscriptionID), 1)
-		first.kill(t)
-		replacement := startWorkerProcess(t, a.world, nil)
-		for range 2 {
-			job, err := queue.Insert(t.Context(), registeredJob{KindName: "openrails.price_migration_redrive"}, &river.InsertOpts{Queue: openrails.QueueBilling})
-			require.NoError(t, err)
-			require.Eventually(t, func() bool {
-				row, err := queue.JobGet(t.Context(), job.Job.ID)
-				return err == nil && row.State == rivertype.JobStateCompleted
-			}, 20*time.Second, 20*time.Millisecond)
-		}
+		require.Equal(t, 1, migration.Scheduled, "the push is recorded with the move")
+		require.Zero(t, migration.Blocked)
+		require.False(t, migrationSettled(t, a.world, migration.ID))
+		fleet := manualFleet(t, a.world)
+		require.Eventually(t, func() bool {
+			wakeOperations(t, fleet)
+			return len(p.core.ScheduleUpdates(*sub.RailSubscriptionID)) > 0
+		}, 20*time.Second, 50*time.Millisecond)
+		a.clock.Advance(time.Hour)
+		require.Eventually(t, func() bool {
+			wakeOperations(t, fleet)
+			result, err := a.alpha.GetPriceMigration(t.Context(), migration.ID)
+			return err == nil && result.Applied == 1
+		}, 20*time.Second, 50*time.Millisecond)
 		result, err := a.alpha.GetPriceMigration(t.Context(), migration.ID)
 		require.NoError(t, err)
-		require.Equal(t, 1, result.Applied)
 		require.Zero(t, result.Blocked)
 		require.Zero(t, result.Scheduled)
 		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
@@ -73,9 +72,9 @@ func TestPriceMigrationContracts(t *testing.T) {
 		require.Equal(t, target.ID, current.PriceID)
 		require.Equal(t, sub.CurrentPeriodEndsAt, current.CurrentPeriodEndsAt)
 		require.Equal(t, "20.00", p.core.Schedule(*sub.RailSubscriptionID).Amount)
-		require.Len(t, p.core.ScheduleUpdates(*sub.RailSubscriptionID), 2, "failed push and one successful retry; the second worker pass does not repeat it")
+		require.Len(t, p.core.ScheduleUpdates(*sub.RailSubscriptionID), 2, "one failed push and one retry")
+		require.True(t, migrationSettled(t, a.world, migration.ID), "the command settles with its last move")
 		p.money(t, 1, 1000)
-		replacement.kill(t)
 	})
 	t.Run("OR-J19-S03", func(t *testing.T) {
 		for _, profile := range []string{"pending", "already-applied"} {
@@ -218,4 +217,63 @@ func TestPriceMigrationContracts(t *testing.T) {
 		runRegistered(t, fleet, "openrails.dunning", 2)
 		require.Len(t, p.effects(t), 4)
 	})
+	t.Run("OR-J19-S05/move-that-no-longer-applies-is-skipped-and-settles-its-migration", func(t *testing.T) {
+		a, p, sub := nmiMembership(t, func(s *nmimock.Schedule) { s.Plan, s.Custom = "", true })
+		target, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: sub.ProductID, Key: "withdrawn-weekly", UnitAmount: 20_000_000, Currency: "USD", BillingIntervalHours: ptr(168), AccessDurationHours: ptr(168)})
+		require.NoError(t, err)
+		migration, err := a.alpha.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: target.ID, AcknowledgeShortNotice: true})
+		require.NoError(t, err)
+		require.Equal(t, 1, migration.Scheduled)
+		require.False(t, migrationSettled(t, a.world, migration.ID))
+		_, err = a.alpha.UpdatePrice(t.Context(), target.ID, billing.UpdatePriceParams{Archived: catalog.Value(true)})
+		require.NoError(t, err)
+		fleet := manualFleet(t, a.world)
+		require.Eventually(t, func() bool {
+			wakeOperations(t, fleet)
+			result, err := a.alpha.GetPriceMigration(t.Context(), migration.ID)
+			return err == nil && result.Skipped == 1
+		}, 20*time.Second, 50*time.Millisecond)
+		result, err := a.alpha.GetPriceMigration(t.Context(), migration.ID)
+		require.NoError(t, err)
+		require.Zero(t, result.Scheduled)
+		require.Zero(t, result.Blocked)
+		require.Zero(t, result.Applied)
+		require.True(t, migrationSettled(t, a.world, migration.ID), "a skipped move is terminal and settles its migration")
+		require.Empty(t, p.core.ScheduleUpdates(*sub.RailSubscriptionID))
+		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, sub.PriceID, current.PriceID)
+		require.Nil(t, current.ScheduledChange)
+	})
+}
+
+// manualFleet runs registered workers with no periodic pass.
+func manualFleet(t *testing.T, w *world) *river.Client[pgx.Tx] {
+	t.Helper()
+	fleet := hostFleet(t, w)
+	fleet.PeriodicJobs().Clear()
+	require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+	require.NoError(t, fleet.Start(t.Context()))
+	return fleet
+}
+
+// wakeOperations makes provider operations River scheduled on business time
+// available now; each still checks its own due time.
+func wakeOperations(t *testing.T, fleet *river.Client[pgx.Tx]) {
+	t.Helper()
+	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation").States(rivertype.JobStateScheduled, rivertype.JobStateRetryable))
+	require.NoError(t, err)
+	for _, job := range jobs.Jobs {
+		_, err = fleet.JobRetry(t.Context(), job.ID)
+		require.NoError(t, err)
+	}
+}
+
+// migrationSettled reports whether the migration's command finished.
+func migrationSettled(t *testing.T, w *world, id billing.PriceMigrationID) bool {
+	t.Helper()
+	var state string
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT a.state FROM "+pgx.Identifier{w.schema, "destructive_actions"}.Sanitize()+" a JOIN "+
+		pgx.Identifier{w.schema, "price_migrations"}.Sanitize()+" m ON m.merchant_id = a.merchant_id AND m.destructive_action_id = a.id WHERE m.id = $1", id.UUID()).Scan(&state))
+	return state == "succeeded"
 }

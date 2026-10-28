@@ -358,6 +358,12 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 		} else if _, err := l.money.Deposit(ctx, g.CustomerID, *g.Currency, *g.Amount, coord, g.ID); err != nil {
 			return fmt.Errorf("grants: materialize credit deposit: %w", err)
 		}
+		// A lot that lapses is expired by its balance's watch.
+		if g.EndsAt != nil {
+			if err := l.q.WatchLapsingCredit(ctx, gen.WatchLapsingCreditParams{MerchantID: l.merchant, CustomerID: g.CustomerID, Currency: *g.Currency, Now: l.now()}); err != nil {
+				return fmt.Errorf("grants: watch the lapsing lot: %w", err)
+			}
+		}
 		return nil
 
 	case Entitlement, Ownership:

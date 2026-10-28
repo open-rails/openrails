@@ -75,12 +75,6 @@ const InitialMembershipGrantLimit = 10002
 // initial period grants its product once; per-key grants from before product
 // access are superseded history.
 func ValidateInitialMembershipHistory(merchant uuid.UUID, t InitialMembershipTerms, rows []gen.BillingGrant) error {
-	if t.Pending {
-		if len(rows) != 0 {
-			return errors.New("pending enrollment granted access before its accepted start")
-		}
-		return nil
-	}
 	acceptedEnd := accessEnd(t.PeriodStart, t.AccessDurationHours)
 	if t.ProviderAccessDefault {
 		acceptedEnd = &t.PeriodEnd

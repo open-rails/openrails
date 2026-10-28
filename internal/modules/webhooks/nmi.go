@@ -162,18 +162,6 @@ func transactionSubscriptionID(body *NMITransactionEventBody) string {
 	return ""
 }
 
-func nmiAmountMatchesExpected(currency string, amountCents moneyutil.Cents, expectedAmountMicros moneyutil.Micros) bool {
-	if expectedAmountMicros <= 0 {
-		return true
-	}
-	expectedAmountCents, err := moneyutil.NativeToRailMinorExact(currency, int64(expectedAmountMicros))
-	if err != nil {
-		return false
-	}
-	tolerance := expectedAmountCents * 2 / 100 // 2% tolerance, integer-only
-	return amountCents >= expectedAmountCents-tolerance && amountCents <= expectedAmountCents+tolerance
-}
-
 func transactionAmountCandidates(body *NMITransactionEventBody) []string {
 	if body == nil {
 		return nil
@@ -189,17 +177,6 @@ func transactionAmountCandidates(body *NMITransactionEventBody) []string {
 		candidates = append(candidates, body.TransactionDetail.Action.Amount.Trimmed())
 	}
 	return candidates
-}
-
-func normalizeNMICurrencyValue(primary string, fallbacks ...string) string {
-	allValues := append([]string{primary}, fallbacks...)
-	for _, value := range allValues {
-		normalized := strings.ToLower(strings.TrimSpace(value))
-		if normalized != "" {
-			return normalized
-		}
-	}
-	return ""
 }
 
 func getOriginalTransactionID(body *NMITransactionEventBody) string {
@@ -447,37 +424,6 @@ func parseNMIDate(raw string) (time.Time, bool) {
 		return ts.UTC(), true
 	}
 	return time.Time{}, false
-}
-
-func nmiDelayedStartFromSubscriptionMetadata(raw json.RawMessage) *time.Time {
-	if len(raw) == 0 {
-		return nil
-	}
-	metadata := map[string]any{}
-	if err := json.Unmarshal(raw, &metadata); err != nil {
-		return nil
-	}
-	rawDelayedStart, ok := metadata["delayed_start"].(string)
-	if !ok || strings.TrimSpace(rawDelayedStart) == "" {
-		return nil
-	}
-	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(rawDelayedStart))
-	if err != nil {
-		return nil
-	}
-	parsed = parsed.UTC()
-	return &parsed
-}
-
-func nmiFutureDelayedStart(raw json.RawMessage, now time.Time) *time.Time {
-	delayedStart := nmiDelayedStartFromSubscriptionMetadata(raw)
-	if delayedStart == nil {
-		return nil
-	}
-	if delayedStart.UTC().After(now.UTC()) {
-		return delayedStart
-	}
-	return nil
 }
 
 func splitNMIChargebackReason(rawReason, rawReasonCode string) (string, string) {

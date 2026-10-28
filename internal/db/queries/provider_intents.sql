@@ -173,7 +173,6 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.a
 -- name: MarkProviderIntentFailedRetryable :execrows
 UPDATE billing.provider_intents
 SET status = 'failed_retryable',
-	result_evidence = result_evidence - 'recovery_held',
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
     lease_expires_at = NULL,
@@ -189,7 +188,7 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.a
 -- name: MarkProviderIntentUnknown :execrows
 UPDATE billing.provider_intents
 SET status = 'unknown_needs_verify',
-    result_evidence = (COALESCE(result_evidence, '{}'::jsonb) - 'recovery_held') || COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb)
+    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb)
       || CASE WHEN result_evidence ? 'initial_submitted' THEN jsonb_build_object('initial_submitted',result_evidence->'initial_submitted') ELSE '{}'::jsonb END,
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
@@ -224,8 +223,8 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.a
 -- name: ParkProviderIntent :execrows
 UPDATE billing.provider_intents
 SET status = 'pending',
-	result_evidence = CASE WHEN sqlc.narg(recovery_evidence)::jsonb IS NULL THEN result_evidence - 'recovery_held'
-	  ELSE (COALESCE(result_evidence, '{}'::jsonb) - 'recovery_held') || sqlc.narg(recovery_evidence)::jsonb END,
+	result_evidence = CASE WHEN sqlc.narg(recovery_evidence)::jsonb IS NULL THEN result_evidence
+	  ELSE COALESCE(result_evidence, '{}'::jsonb) || sqlc.narg(recovery_evidence)::jsonb END,
     attempts = GREATEST(attempts - 1, 0),
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
@@ -265,9 +264,12 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type
 -- Non-terminal intents older than the converge engine's stuck thresholds:
 -- pending/failed_retryable before action_cutoff, in_flight/unknown_needs_verify
 -- before verify_cutoff (a healthy verifier resolves unknowns in minutes).
+-- A price migration's push waits for its subscription's last period before
+-- the move: pending and not yet due, it is scheduled, not stuck.
 -- name: ListStuckProviderIntents :many
 SELECT * FROM billing.provider_intents
-WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(action_cutoff)::timestamptz)
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(action_cutoff)::timestamptz
+       AND NOT (intent_type = 'price_migration_push' AND status = 'pending' AND next_attempt_at > sqlc.arg(now)::timestamptz))
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= sqlc.arg(verify_cutoff)::timestamptz)
 ) ORDER BY created_at, id;
 
@@ -650,12 +652,6 @@ SELECT * FROM billing.provider_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='initial_membership'
   AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid)
 ORDER BY id LIMIT sqlc.arg(page_size)::int;
-
--- name: ListInitialEnrollmentsForMembership :many
-SELECT * FROM billing.provider_intents
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='initial_membership'
-  AND payload->'terms'->>'subscription_id'=sqlc.arg(subscription_id)::uuid::text
-ORDER BY id LIMIT 2;
 
 -- name: ListRetainedSubscriptionCollectionsForArchive :many
 SELECT * FROM billing.provider_intents

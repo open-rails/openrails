@@ -3,7 +3,6 @@ package subscriptions
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -94,73 +93,4 @@ func (s *PriceMigrationService) admitMigration(ctx context.Context, request bill
 		return nil, nil, err
 	}
 	return &action, nil, nil
-}
-
-func (s *PriceMigrationService) finishSettledMigration(ctx context.Context, id billing.PriceMigrationID) error {
-	if s.admissions == nil {
-		return nil
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	row, err := s.db.Gen(ctx).GetPriceMigration(ctx, gen.GetPriceMigrationParams{MerchantID: mid.UUID(), ID: id.UUID()})
-	if err != nil {
-		return err
-	}
-	actionID := row.BillingPriceMigration.DestructiveActionID
-	if actionID == nil {
-		return nil
-	}
-	action, err := s.admissions.GetAction(ctx, mid.UUID(), *actionID)
-	if err != nil {
-		return err
-	}
-	if action.State == destructive.StateSucceeded || action.State == destructive.StateNoEffect {
-		return nil
-	}
-	if action.Result != fmt.Sprintf("migration:%s:prepared", id.UUID()) {
-		return nil
-	}
-	if row.Scheduled > 0 || row.Blocked > 0 {
-		return nil
-	}
-	return s.finishMigrationAdmission(ctx, action, destructive.OutcomeSucceeded, id.String())
-}
-
-// finishSettledMigrations releases completed cohorts through the existing
-// re-driver. The lookup materializes IDs before any admission transaction, so
-// no domain lock or open rows are held while the receipt is finalized.
-func (s *PriceMigrationService) finishSettledMigrations(ctx context.Context, limit int) error {
-	if s.admissions == nil {
-		return nil
-	}
-	bound := int32(min(max(limit, 1), 1000))
-	merchants, err := s.db.GenDirectory().ListSettledPriceMigrationMerchants(ctx, bound)
-	if err != nil {
-		return err
-	}
-	remaining := bound
-	for _, id := range merchants {
-		if remaining == 0 {
-			break
-		}
-		err = s.db.RunInMerchantScope(ctx, billing.MerchantID(id), "settle price migration admission", func(ctx context.Context) error {
-			actions, err := s.db.Gen(ctx).ListSettledPriceMigrationActions(ctx, gen.ListSettledPriceMigrationActionsParams{MerchantID: id, RowLimit: remaining})
-			if err != nil {
-				return err
-			}
-			for _, actionID := range actions {
-				if err := s.admissions.Finish(ctx, id, actionID, destructive.OutcomeSucceeded, ""); err != nil {
-					return err
-				}
-				remaining--
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }

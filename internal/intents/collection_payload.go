@@ -19,10 +19,6 @@ import (
 // merchant's retry or the customer's payment.
 const TypeOrderCollection = "order_collection"
 
-// legacyCollectionKind is the kind earlier collections' keys were made under;
-// the ledger keeps them, so their operations keep them too.
-const legacyCollectionKind = "invoice_collection"
-
 // OrderCollectionPayload freezes the charge before submission. The amount is
 // what the usage order had due at enqueue, in native precision and rail minor
 // units; replays never recalculate it. Instrument freezes the method's
@@ -57,19 +53,13 @@ func DecodeOrderCollectionPayload(intent gen.BillingProviderIntent) (OrderCollec
 	if err := json.Unmarshal(intent.Payload, &p); err != nil {
 		return p, fmt.Errorf("decode order collection payload: %w", err)
 	}
-	if legacy, ok := legacyOrderID(intent.Payload); ok {
-		if p.OrderID != uuid.Nil {
-			return p, errors.New("order collection payload names its order twice")
-		}
-		p.OrderID = legacy
-	}
 	if p.OrderID == uuid.Nil || p.CustomerID == uuid.Nil || p.PaymentID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Rail == "" || p.Amount <= 0 || p.AmountMinor <= 0 || p.Currency == "" {
 		return p, errors.New("order collection payload is incomplete")
 	}
 	if p.Initiator != charge.InitiatorMerchant && p.Initiator != charge.InitiatorCustomer {
 		return p, errors.New("collection initiation is not established")
 	}
-	if p.Initiator == charge.InitiatorCustomer && (intent.Origin != string(OriginUser) || intent.Actor == nil || *intent.Actor != p.CustomerID.String() || p.Rail != "nmi" || (p.Instrument.Custodian != models.CustodianPSP && p.Instrument.Custodian != models.CustodianHyperSwitch) || !(charge.CustomerPaymentKeyValid(TypeOrderCollection, p.CustomerID, intent.IdempotencyKey) || charge.CustomerPaymentKeyValid(legacyCollectionKind, p.CustomerID, intent.IdempotencyKey))) {
+	if p.Initiator == charge.InitiatorCustomer && (intent.Origin != string(OriginUser) || intent.Actor == nil || *intent.Actor != p.CustomerID.String() || p.Rail != "nmi" || (p.Instrument.Custodian != models.CustodianPSP && p.Instrument.Custodian != models.CustodianHyperSwitch) || !charge.CustomerPaymentKeyValid(TypeOrderCollection, p.CustomerID, intent.IdempotencyKey)) {
 		return p, errors.New("customer collection has an unsupported authority or rail")
 	}
 	if err := p.Instrument.Validate(); err != nil {
@@ -107,18 +97,6 @@ func DecodeOrderCollectionPayload(intent gen.BillingProviderIntent) (OrderCollec
 	return p, nil
 }
 
-// legacyOrderID is the order a collection accepted before usage orders names
-// as invoice_id; its receipts are bound to that payload as it was.
-func legacyOrderID(payload []byte) (uuid.UUID, bool) {
-	var legacy struct {
-		InvoiceID *uuid.UUID `json:"invoice_id"`
-	}
-	if json.Unmarshal(payload, &legacy) != nil || legacy.InvoiceID == nil {
-		return uuid.Nil, false
-	}
-	return *legacy.InvoiceID, true
-}
-
 // OrderCollectionRetryKey scopes a merchant retry's opaque key to its order.
 func OrderCollectionRetryKey(orderID uuid.UUID, clientKey string) string {
 	digest := sha256.Sum256([]byte(orderID.String() + "\x00" + clientKey))
@@ -129,13 +107,9 @@ func OrderCollectionRetryKeyValid(orderID uuid.UUID, key string) bool {
 	if orderID == uuid.Nil {
 		return false
 	}
-	var encoded string
-	for _, kind := range []string{TypeOrderCollection, legacyCollectionKind} {
-		if prefix := fmt.Sprintf("%s:%s:retry:", kind, orderID); strings.HasPrefix(key, prefix) {
-			encoded = strings.TrimPrefix(key, prefix)
-		}
-	}
-	if encoded == "" {
+	prefix := fmt.Sprintf("%s:%s:retry:", TypeOrderCollection, orderID)
+	encoded, ok := strings.CutPrefix(key, prefix)
+	if !ok || encoded == "" {
 		return false
 	}
 	decoded, err := hex.DecodeString(encoded)
@@ -144,11 +118,11 @@ func OrderCollectionRetryKeyValid(orderID uuid.UUID, key string) bool {
 
 // IsOrderCollectionKey reports whether key was made for an order collection.
 func IsOrderCollectionKey(key string) bool {
-	return strings.HasPrefix(key, TypeOrderCollection+":") || strings.HasPrefix(key, legacyCollectionKind+":")
+	return strings.HasPrefix(key, TypeOrderCollection+":")
 }
 
 // OrderCollectionKeyValid reports whether key is a collection key of the
 // payer's order: the customer's own payment or a merchant retry.
 func OrderCollectionKeyValid(payer, order uuid.UUID, key string) bool {
-	return payer != uuid.Nil && (charge.CustomerPaymentKeyValid(TypeOrderCollection, payer, key) || charge.CustomerPaymentKeyValid(legacyCollectionKind, payer, key) || OrderCollectionRetryKeyValid(order, key))
+	return payer != uuid.Nil && (charge.CustomerPaymentKeyValid(TypeOrderCollection, payer, key) || OrderCollectionRetryKeyValid(order, key))
 }

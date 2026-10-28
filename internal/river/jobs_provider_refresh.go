@@ -22,10 +22,10 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -679,18 +679,13 @@ func (w *ProviderRefreshWorker) completeObservation(ctx context.Context, mid, ps
 		if (writeposture.View{Config: w.Config, DB: d}).Posture(ctx, mid).Limited() {
 			return nil
 		}
-		resumed, err := intents.NewStore(d).ResumeRecoveryHeld(ctx, w.now(), batch)
-		if err != nil {
-			return err
-		}
-		more = resumed == batch
-		if changed == 0 && resumed == 0 {
+		if changed == 0 {
 			return nil
 		}
 		merchantID := billing.MerchantID(mid)
 		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}}
 		if w.Config != nil && w.Config.UsageBillingEnabled {
-			jobs = append(jobs, UsageOrderArgs{MerchantID: &merchantID, Automatic: true})
+			jobs = append(jobs, money.UsageOrderArgs{MerchantID: &merchantID})
 		}
 		for _, args := range jobs {
 			// Do not deduplicate against a scan sleeping on an earlier outage.

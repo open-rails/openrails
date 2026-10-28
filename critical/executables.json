@@ -261,7 +261,7 @@
       "TestPriceMigrationContracts/OR-J19-S01/only-eligible-subscription-moves-at-the-paid-boundary"
     ],
     "OR-J19-S02": [
-      "TestPriceMigrationContracts/OR-J19-S02/failed-provider-push-is-redriven-by-a-replacement-worker"
+      "TestPriceMigrationContracts/OR-J19-S02/failed-provider-push-is-retried-by-its-operation"
     ],
     "OR-J19-S03": [
       "TestPriceMigrationContracts/OR-J19-S03/pending",
@@ -689,6 +689,15 @@
     ],
     "OR-J38-S29": [
       "TestPSPReconcile/OR-J38-S29/provider-refresh-leaves-a-pulls-proposals"
+    ],
+    "OR-J22-S06": [
+      "TestCreditExpiry/OR-J22-S06/lapsed-credit-leaves-available-at-its-lapse-and-its-watch-expires-it"
+    ],
+    "OR-J29-S08": [
+      "TestBackgroundJobs/OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-counters-and-orphan-state"
+    ],
+    "OR-J19-S05": [
+      "TestPriceMigrationContracts/OR-J19-S05/move-that-no-longer-applies-is-skipped-and-settles-its-migration"
     ]
   },
   "suites": {

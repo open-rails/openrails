@@ -119,6 +119,9 @@ sql:
       - "internal/migrate/postgres/0140_drop_catalog_drift.up.sql"
       - "internal/migrate/postgres/0141_purge_cleanup_job.up.sql"
       - "internal/migrate/postgres/0142_attempts_recorded_at_insert.up.sql"
+      - "internal/migrate/postgres/0143_balance_watch_credit_lapse.up.sql"
+      - "internal/migrate/postgres/0144_retention_owner.up.sql"
+      - "internal/migrate/postgres/0145_price_migration_push.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

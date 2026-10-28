@@ -345,21 +345,6 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.customer_id = sqlc.arg(c
 ORDER BY s.id
 FOR UPDATE OF s;
 
--- name: MarkCanceledSubscriptionsSuperseded :execrows
--- Preserve canceled subscriptions for refund/chargeback correlation while
--- stamping them superseded by the new activation (gateway_response patch).
-UPDATE billing.subscriptions
-SET gateway_response = CASE WHEN jsonb_typeof(gateway_response) = 'object'
-        THEN gateway_response || jsonb_build_object('superseded_at', current_timestamp, 'superseded_by_subscription_id', sqlc.narg(superseded_by)::text)
-        ELSE jsonb_build_object('previous_gateway_response', gateway_response, 'superseded_at', current_timestamp, 'superseded_by_subscription_id', sqlc.narg(superseded_by)::text)
-    END,
-    updated_at = current_timestamp
-WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = $1
-  AND product_id = $2
-  AND status = 'canceled'
-  AND (sqlc.narg(exclude_id)::uuid IS NULL OR id != sqlc.narg(exclude_id)::uuid)
-  AND deleted_at IS NULL;
-
 -- CROSS-MERCHANT: merchants with due dunning work on the named rails. Three
 -- legs, each served by its own partial index so a pass reads only due rows:
 -- provider-billed NMI retries, expired awaiting_method grace, and engine

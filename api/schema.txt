@@ -126,6 +126,9 @@ migration 0136_manual_reconcile.up.sql sha256:049503b51eb6f222cd522dd2acb4ccc5a2
 migration 0140_drop_catalog_drift.up.sql sha256:d4bff3f625fb27abdb97fc2b0f3947733ffaa2a249bb1ece5b52b83a47812590
 migration 0141_purge_cleanup_job.up.sql sha256:0ff3c2b780e4506c4f011b0c746f96a2f659aba6283f9c20da7717fd9c1e6c1b
 migration 0142_attempts_recorded_at_insert.up.sql sha256:0c5a16f8e1ca1a549ddd4635fed4bdb746e1149a86ae16ac212de0c8426ba57d
+migration 0143_balance_watch_credit_lapse.up.sql sha256:7db2198b0297d99968042a3ffeb13f3b93ffab5dbfedaabd48e6d426255dcc6a
+migration 0144_retention_owner.up.sql sha256:33e9df916390a846b964f3cbeb93fb58ab73beb1b7ec5e51aff65d9edac81f78
+migration 0145_price_migration_push.up.sql sha256:1c3019f43fa69a2948799f2c7e7f4aa8459486387f09a9301e06c3ada2a49595
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2613,7 +2616,7 @@ table billing.scheduled_changes
   column invoker text
   column reason text
   constraint scheduled_changes_applied_check CHECK (((status = 'applied'::text) = (applied_at IS NOT NULL)))
-  constraint scheduled_changes_blocked_check CHECK ((((status = 'blocked'::text) = (blocked_reason IS NOT NULL)) AND ((status <> 'blocked'::text) OR (source = 'migration'::text)) AND (blocked_reason <> ''::text)))
+  constraint scheduled_changes_blocked_check CHECK ((((status = ANY (ARRAY['blocked'::text, 'skipped'::text])) = (blocked_reason IS NOT NULL)) AND ((status <> ALL (ARRAY['blocked'::text, 'skipped'::text])) OR (source = 'migration'::text)) AND (blocked_reason <> ''::text)))
   constraint scheduled_changes_canceled_check CHECK (((status = 'canceled'::text) = (canceled_at IS NOT NULL)))
   constraint scheduled_changes_from_price_id_fkey FOREIGN KEY (merchant_id, from_price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
   constraint scheduled_changes_invoker_check CHECK ((invoker <> ''::text))
@@ -2625,13 +2628,12 @@ table billing.scheduled_changes
   constraint scheduled_changes_reason_check CHECK ((reason <> ''::text))
   constraint scheduled_changes_source_check CHECK (((source = ANY (ARRAY['change'::text, 'migration'::text])) AND ((source = 'migration'::text) = (price_migration_id IS NOT NULL))))
   constraint scheduled_changes_staff_check CHECK ((((invoker IS NULL) = (reason IS NULL)) AND ((invoker IS NULL) OR (source = 'change'::text))))
-  constraint scheduled_changes_status_check CHECK ((status = ANY (ARRAY['scheduled'::text, 'applied'::text, 'canceled'::text, 'blocked'::text])))
+  constraint scheduled_changes_status_check CHECK ((status = ANY (ARRAY['scheduled'::text, 'applied'::text, 'canceled'::text, 'blocked'::text, 'skipped'::text])))
   constraint scheduled_changes_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE RESTRICT
   index CREATE INDEX scheduled_changes_from_price_id_idx ON billing.scheduled_changes USING btree (merchant_id, from_price_id)
   index CREATE UNIQUE INDEX scheduled_changes_pkey ON billing.scheduled_changes USING btree (merchant_id, id)
   index CREATE INDEX scheduled_changes_price_id_idx ON billing.scheduled_changes USING btree (merchant_id, price_id)
   index CREATE INDEX scheduled_changes_price_migration_id_idx ON billing.scheduled_changes USING btree (merchant_id, price_migration_id) WHERE (price_migration_id IS NOT NULL)
-  index CREATE INDEX scheduled_changes_redrive_idx ON billing.scheduled_changes USING btree (merchant_id, created_at) WHERE ((status = 'blocked'::text) AND (blocked_reason ~~ 'rail_push_failed:%'::text))
   index CREATE INDEX scheduled_changes_subscription_id_idx ON billing.scheduled_changes USING btree (merchant_id, subscription_id)
   index CREATE UNIQUE INDEX scheduled_changes_subscription_id_key ON billing.scheduled_changes USING btree (merchant_id, subscription_id) WHERE (status = 'scheduled'::text)
 
@@ -3031,6 +3033,7 @@ table billing.webhook_health_daily
   constraint webhook_health_daily_psp_id_custodian_id_day_at_key UNIQUE NULLS NOT DISTINCT (merchant_id, psp_id, custodian_id, day_at)
   constraint webhook_health_daily_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
   constraint webhook_health_daily_source_check CHECK (((psp_id IS NULL) <> (custodian_id IS NULL)))
+  index CREATE INDEX webhook_health_daily_day_at_idx ON billing.webhook_health_daily USING btree (merchant_id, day_at)
   index CREATE UNIQUE INDEX webhook_health_daily_psp_id_custodian_id_day_at_key ON billing.webhook_health_daily USING btree (merchant_id, psp_id, custodian_id, day_at) NULLS NOT DISTINCT
 
 table billing.worker_state

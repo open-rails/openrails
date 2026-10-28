@@ -2,16 +2,12 @@ package intents
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 )
 
@@ -28,57 +24,6 @@ func manualDeleteAllowed(ctx context.Context, id uuid.UUID) bool {
 // supplies locks and retry evidence, never permission for a worker to run them.
 func ManualPaymentMethodDelete(in gen.BillingProviderIntent) bool {
 	return manualMethodDeleteType(in.IntentType)
-}
-
-// RetireUnattemptedUserMethodDelete retires only an old queued, unattempted
-// request. Callers explicitly name its owned method; uncertain work must instead
-// be verified by an explicit manual retry.
-func (s *Store) RetireUnattemptedUserMethodDelete(ctx context.Context, id uuid.UUID, pm *models.PaymentMethod, now time.Time) error {
-	if pm == nil {
-		return paymentmethods.ErrPaymentMethodDeleteUnsafe
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := s.db.NewWithPgxTx(tx)
-		q := d.Gen(ctx)
-		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: pm.CustomerID}); err != nil {
-			return err
-		}
-		if pm.Custodian == models.CustodianPSP {
-			if err := paymentmethods.LockNativeVault(ctx, q, mid.UUID(), pm.HoldingPSP(), pm.RailCustomerRef); err != nil {
-				return err
-			}
-		}
-		current, err := q.LockPaymentMethodForCustodyRemap(ctx, gen.LockPaymentMethodForCustodyRemapParams{MerchantID: mid.UUID(), ID: pm.ID})
-		if err != nil {
-			return err
-		}
-		row, err := s.withTxDB(d).Get(ctx, id)
-		if err != nil {
-			return err
-		}
-		var retired struct {
-			Retired bool `json:"retired_for_manual_delete"`
-		}
-		_ = json.Unmarshal(row.ResultEvidence, &retired)
-		if row.Status == StatusSuperseded && retired.Retired && deleteRecordMatches(row, pm) {
-			return nil
-		}
-		if !deleteRecordMatches(row, pm) || row.Origin != string(OriginUser) || strings.HasPrefix(row.IdempotencyKey, "manual:") || current.CustomerID != pm.CustomerID || models.DerefStr(current.ParkReason) != "delete:"+id.String() {
-			return paymentmethods.ErrPaymentMethodDeleteUnsafe
-		}
-		n, err := q.RetireUnattemptedUserMethodDelete(ctx, gen.RetireUnattemptedUserMethodDeleteParams{MerchantID: mid.UUID(), OperationID: id, PaymentMethodID: pm.ID, Now: now})
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return paymentmethods.ErrPaymentMethodDeleteUnsafe
-		}
-		return nil
-	})
 }
 
 func manualMethodDeleteType(kind string) bool {

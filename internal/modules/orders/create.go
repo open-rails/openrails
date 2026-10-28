@@ -530,7 +530,7 @@ func orderEvent(ctx context.Context, q *gen.Queries, order *gen.BillingOrder, ki
 }
 
 // ExpireDue expires the merchant's live orders past their expiry, at most
-// limit, and purges unpaid closed orders past retention.
+// limit.
 func (s *Service) ExpireDue(ctx context.Context, limit int32) (int, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -546,16 +546,13 @@ func (s *Service) ExpireDue(ctx context.Context, limit int32) (int, error) {
 			return 0, fmt.Errorf("expire order %s: %w", id, err)
 		}
 	}
-	if _, err := s.DB.Gen(ctx).DeleteClosedUnpaidOrders(ctx, gen.DeleteClosedUnpaidOrdersParams{MerchantID: mid.UUID(), Before: now.Add(-PurgeAfter), RowLimit: limit}); err != nil {
-		return 0, err
-	}
 	return len(ids), nil
 }
 
-// SweepMerchants lists merchants with a live order past its expiry or an
-// unpaid closed order past retention.
-func SweepMerchants(ctx context.Context, database *db.DB, now time.Time, limit int32) ([]uuid.UUID, error) {
-	return database.GenDirectory().ListOrderSweepMerchants(ctx, gen.ListOrderSweepMerchantsParams{Now: now, PurgeBefore: now.Add(-PurgeAfter), MerchantLimit: limit})
+// ExpiryMerchants lists merchants with a live order or an order attempt
+// waiting on its customer past its expiry.
+func ExpiryMerchants(ctx context.Context, database *db.DB, now time.Time, limit int32) ([]uuid.UUID, error) {
+	return database.GenDirectory().ListOrderExpiryMerchants(ctx, gen.ListOrderExpiryMerchantsParams{Now: now, MerchantLimit: limit})
 }
 
 func orderPriceReferences(ctx context.Context, q *gen.Queries, lines []gen.BillingOrderLine) (map[uuid.UUID]billing.PriceID, error) {

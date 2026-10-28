@@ -22,7 +22,7 @@ type BillingAccessCutoverApproval struct {
 	ApprovedAt  time.Time
 }
 
-// Hourly admission-denial aggregates (merchant x payer x reason), flushed periodically from Redis counters — the hot path never writes PG per-request. Retention: permanent, never pruned.
+// Hourly admission-denial aggregates (merchant x payer x reason), flushed from Redis counters once each hour closes; the hot path never writes PG per-request. Retention: rows are deleted 13 months (397 days) after hour_at.
 type BillingAdmissionDenialsHourly struct {
 	MerchantID   uuid.UUID
 	CustomerID   uuid.UUID
@@ -57,7 +57,7 @@ type BillingAdmissionOperation struct {
 	RateCards []byte
 }
 
-// One row per prepaid customer balance and per customer and currency with a running charge: when its balance is next looked at (a low line, the run-out, a credit lot lapse or the next 00:00 UTC, whichever is first; null until a change marks it due) and what the last look found. Derived from the balance, the running charges and the billing mode; an arrears customer with no running charge has none.
+// One row per prepaid customer balance, per customer and currency with a running charge and per balance holding a credit lot that lapses: when its balance is next looked at (a low line, the run-out, a credit lot's lapse or the next 00:00 UTC, whichever is first; null until a change marks it due) and what the last look found. The look at a lapse expires the lot. Derived from the balance, the running charges, the credit lots and the billing mode; an arrears customer with neither a running charge nor a lot that lapses has none.
 type BillingBalanceWatch struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -1185,7 +1185,7 @@ type BillingPaymentMethodVersion struct {
 	CreatedAt   time.Time
 }
 
-// Global by design: which fleet (River schema) queues a periodic kind's pass for the database; one row per kind, taken over once expired.
+// Global by design: which fleet (River schema) queues a periodic kind's pass for the database; one row per kind, taken over once expired, deleted 30 days after it expired.
 type BillingPeriodicLease struct {
 	// The periodic job's id: its job kind, or the name its schedule gave.
 	Kind string
@@ -1260,7 +1260,7 @@ type BillingPriceKeyMovement struct {
 	Archived    bool
 }
 
-// One move of subscribers from a price (from_price_id), or from every version of a price key but the target (from_product_id, from_price_key), to to_price_id at each subscription's first renewal on or after effective_at. Matched and skipped are facts of creation (a skipped subscription gets no scheduled change); progress is counted from the scheduled_changes that carry price_migration_id. Retention: permanent, never pruned.
+// One move of subscribers from a price (from_price_id), or from every version of a price key but the target (from_product_id, from_price_key), to to_price_id at each subscription's first renewal on or after effective_at. Matched and skipped are facts of creation (a skipped subscription gets no scheduled change); progress is counted from the scheduled_changes that carry price_migration_id. Its command settles when its last move resolves. Retention: permanent, never pruned.
 type BillingPriceMigration struct {
 	MerchantID    uuid.UUID
 	ID            uuid.UUID
@@ -1742,7 +1742,7 @@ type BillingRunningCharge struct {
 	UpdatedAt    time.Time
 }
 
-// A subscription's change waiting for its renewal: the price (price_id) and, for a per-seat price, the seats (quantity; NULL keeps the subscription's) it bills from its first renewal on or after effective_at. At most one is scheduled per subscription. source is change (a tier or seat change) or migration (price_migration_id). blocked is a migration's move its provider could not take; blocked_reason says why, and a push failure (rail_push_failed:) is re-driven. Retention: permanent, never pruned.
+// A subscription's change waiting for its renewal: the price (price_id) and, for a per-seat price, the seats (quantity; NULL keeps the subscription's) it bills from its first renewal on or after effective_at. At most one is scheduled per subscription. source is change (a tier or seat change) or migration (price_migration_id). A migration's move its provider cannot take is blocked, one that no longer applies is skipped; both are terminal and blocked_reason says why. Retention: permanent, never pruned.
 type BillingScheduledChange struct {
 	MerchantID     uuid.UUID
 	ID             uuid.UUID
@@ -1755,7 +1755,8 @@ type BillingScheduledChange struct {
 	Source           string
 	PriceMigrationID *uuid.UUID
 	Status           string
-	BlockedReason    *string
+	// Why a blocked or skipped move did not happen; NULL otherwise.
+	BlockedReason *string
 	// A price increase scheduled inside the merchant's notice window under the request's acknowledge_short_notice.
 	AcknowledgedShortNotice bool
 	CreatedAt               time.Time
@@ -2024,7 +2025,7 @@ type BillingWebhookHealth struct {
 	UpdatedAt      time.Time
 }
 
-// UTC-day webhook counter buckets per event source, backing the #733 webhook_rejects / webhook_drift_events windowed metrics. Retention: permanent, never pruned.
+// UTC-day webhook counter buckets per event source, backing the webhook_rejects and webhook_drift_events windowed metrics. Retention: rows are deleted 13 months (397 days) after day_at.
 type BillingWebhookHealthDaily struct {
 	MerchantID  uuid.UUID
 	PspID       *uuid.UUID
@@ -2034,7 +2035,7 @@ type BillingWebhookHealthDaily struct {
 	Drift       int64
 }
 
-// Global by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.
+// Global by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields; every fleet's registration touches updated_at, and a kind none has touched for 30 days is deleted. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.
 type BillingWorkerState struct {
 	WorkerKind       string
 	CursorMerchantID *uuid.UUID

@@ -210,11 +210,18 @@ func (q *Queries) MarkBalanceWatchDue(ctx context.Context, arg MarkBalanceWatchD
 const rebuildBalanceWatches = `-- name: RebuildBalanceWatches :exec
 INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, updated_at)
 SELECT w.merchant_id, w.customer_id, w.currency,
-       CASE WHEN bool_or(w.running) THEN $1::timestamptz END, 0, $1::timestamptz
+       CASE WHEN bool_or(w.due) THEN $1::timestamptz END, 0, $1::timestamptz
 FROM (
-    SELECT rc.merchant_id, rc.customer_id, rc.currency, true AS running
+    SELECT rc.merchant_id, rc.customer_id, rc.currency, true AS due
     FROM billing.running_charges rc
     WHERE rc.merchant_id = $2::uuid AND rc.stopped_at IS NULL
+    UNION ALL
+    SELECT g.merchant_id, g.customer_id, g.currency::text, true
+    FROM billing.grants g
+    WHERE g.merchant_id = $2::uuid AND g.kind = 'credit' AND g.event = 'grant'
+      AND g.ends_at IS NOT NULL AND g.currency IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM billing.grants t WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede'))
+      AND NOT EXISTS (SELECT 1 FROM billing.ledger_transfers lt WHERE lt.merchant_id = g.merchant_id AND lt.grant_id = g.id AND lt.transfer_type = 'credit_expire')
     UNION ALL
     SELECT a.merchant_id, a.customer_id::uuid, a.currency, false
     FROM billing.ledger_accounts a
@@ -232,8 +239,9 @@ type RebuildBalanceWatchesParams struct {
 	MerchantID uuid.UUID
 }
 
-// A restored merchant's balances are watched again: a running charge's due at
-// once, a prepaid balance's when a change marks it due.
+// A restored merchant's balances are watched again: one with a running charge
+// or a credit lot not yet expired that lapses is due at once, a prepaid one
+// when a change marks it due.
 func (q *Queries) RebuildBalanceWatches(ctx context.Context, arg RebuildBalanceWatchesParams) error {
 	_, err := q.db.Exec(ctx, rebuildBalanceWatches, arg.Now, arg.MerchantID)
 	return err
@@ -302,9 +310,10 @@ type UpsertBalanceWatchParams struct {
 	Now         time.Time
 }
 
-// billing.balance_watches: when each watched balance (every prepaid one, and
-// every one with a running charge) is next looked at, and what the last look
-// found. Every instant is the caller's clock.
+// billing.balance_watches: when each watched balance (every prepaid one, every
+// one with a running charge and every one holding a credit lot that lapses)
+// is next looked at, and what the last look found. Every instant is the
+// caller's clock.
 // A running charge started or stopped: when to look next. A watch already due
 // stays due; the notices of a crossing and the usage rate stay.
 func (q *Queries) UpsertBalanceWatch(ctx context.Context, arg UpsertBalanceWatchParams) error {
@@ -354,6 +363,32 @@ func (q *Queries) WatchCustomerBalance(ctx context.Context, arg WatchCustomerBal
 		arg.CustomerID,
 		arg.RearmLow,
 		arg.Funded,
+	)
+	return err
+}
+
+const watchLapsingCredit = `-- name: WatchLapsingCredit :exec
+INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, updated_at)
+VALUES ($1::uuid, $2::uuid, $3::text, to_timestamp(0), 0, $4::timestamptz)
+ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING
+`
+
+type WatchLapsingCreditParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Now        time.Time
+}
+
+// A credit lot that lapses was deposited: its balance is watched, an arrears
+// one too, and looked at on the next pass, which schedules the lapse. A
+// watched balance was marked due by the deposit.
+func (q *Queries) WatchLapsingCredit(ctx context.Context, arg WatchLapsingCreditParams) error {
+	_, err := q.db.Exec(ctx, watchLapsingCredit,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.Now,
 	)
 	return err
 }

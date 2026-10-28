@@ -2067,44 +2067,6 @@ func (q *Queries) ListSubscriptionsToWake(ctx context.Context, arg ListSubscript
 	return items, nil
 }
 
-const markCanceledSubscriptionsSuperseded = `-- name: MarkCanceledSubscriptionsSuperseded :execrows
-UPDATE billing.subscriptions
-SET gateway_response = CASE WHEN jsonb_typeof(gateway_response) = 'object'
-        THEN gateway_response || jsonb_build_object('superseded_at', current_timestamp, 'superseded_by_subscription_id', $3::text)
-        ELSE jsonb_build_object('previous_gateway_response', gateway_response, 'superseded_at', current_timestamp, 'superseded_by_subscription_id', $3::text)
-    END,
-    updated_at = current_timestamp
-WHERE subscriptions.merchant_id = $4::uuid AND customer_id = $1
-  AND product_id = $2
-  AND status = 'canceled'
-  AND ($5::uuid IS NULL OR id != $5::uuid)
-  AND deleted_at IS NULL
-`
-
-type MarkCanceledSubscriptionsSupersededParams struct {
-	CustomerID   uuid.UUID
-	ProductID    uuid.UUID
-	SupersededBy *string
-	MerchantID   uuid.UUID
-	ExcludeID    *uuid.UUID
-}
-
-// Preserve canceled subscriptions for refund/chargeback correlation while
-// stamping them superseded by the new activation (gateway_response patch).
-func (q *Queries) MarkCanceledSubscriptionsSuperseded(ctx context.Context, arg MarkCanceledSubscriptionsSupersededParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markCanceledSubscriptionsSuperseded,
-		arg.CustomerID,
-		arg.ProductID,
-		arg.SupersededBy,
-		arg.MerchantID,
-		arg.ExcludeID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const markProviderStopPending = `-- name: MarkProviderStopPending :exec
 UPDATE billing.subscriptions
 SET deletion_scheduled_at = $1::timestamptz, updated_at = $1::timestamptz

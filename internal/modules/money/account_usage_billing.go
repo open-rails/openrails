@@ -19,14 +19,17 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
-// UsageBillingWakeup uses the existing usage-order worker. A merchant has at most
-// one outstanding wakeup, rather than a timer or job for every customer.
-type UsageBillingWakeup struct {
-	Automatic  bool                `json:"automatic"`
+// KindUsageOrders bills, notifies and collects usage orders.
+const KindUsageOrders = "openrails.usage_orders"
+
+// UsageOrderArgs is one usage-order pass: every merchant's due accounts, or
+// one merchant's after a threshold crossing. A merchant has at most one
+// outstanding wakeup, rather than a timer or job for every customer.
+type UsageOrderArgs struct {
 	MerchantID *billing.MerchantID `json:"merchant_id,omitempty"`
 }
 
-func (UsageBillingWakeup) Kind() string { return "openrails.invoice" }
+func (UsageOrderArgs) Kind() string { return KindUsageOrders }
 
 func (s *MoneyService) usageBillingConfig(ctx context.Context, currency string) (*billing.UsageBillingSettings, *billing.UsageBillingCurrency, error) {
 	if !s.UsageBillingEnabled {
@@ -146,7 +149,7 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 	if err = q.FlagUsageCollectionDue(ctx, gen.FlagUsageCollectionDueParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency}); err != nil {
 		return err
 	}
-	_, err = s.db.InsertRiverJob(ctx, UsageBillingWakeup{MerchantID: &mid, Automatic: true}, &river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true, ByState: []rivertype.JobState{
+	_, err = s.db.InsertRiverJob(ctx, UsageOrderArgs{MerchantID: &mid}, &river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true, ByState: []rivertype.JobState{
 		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
 	}}})
 	return err

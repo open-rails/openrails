@@ -222,11 +222,6 @@ minutes earlier as its Redis holds them. Work a request starts (a provider
 call, an enqueued intent) runs on the engine that received it. Give each host
 its own `RiverSchema`.
 
-**Inserting an engine job.** The one job a host inserts itself is the usage
-sweep: `workers.Insert(ctx, openrails.UsageSweepArgs{FinalizePreviousMonth: true}, nil)`
-bills the previous period of every customer active in it now; `Collect: true` runs the
-collection pass. Runs are idempotent.
-
 **No job clock.** `river.Config.JobTimeout` does not apply to OpenRails'
 workers: each declares `Timeout() = -1` and ends on observed lack of progress
 (3x its cadence, floored at 30 min). A running job beats

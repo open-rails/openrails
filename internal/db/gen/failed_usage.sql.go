@@ -79,26 +79,3 @@ func (q *Queries) GetFailedUsageWindowAmount(ctx context.Context, arg GetFailedU
 	err := row.Scan(&amount)
 	return amount, err
 }
-
-const pruneFailedUsageWindows = `-- name: PruneFailedUsageWindows :execrows
-DELETE FROM billing.failed_usage_windows w
-WHERE (w.merchant_id, w.customer_id, w.currency, w.invoker, w.window_key, w.window_start) IN (
-    SELECT e.merchant_id, e.customer_id, e.currency, e.invoker, e.window_key, e.window_start
-    FROM billing.failed_usage_windows e
-    WHERE e.merchant_id = $1::uuid AND e.window_end <= $2::timestamptz
-    LIMIT 100)
-`
-
-type PruneFailedUsageWindowsParams struct {
-	MerchantID uuid.UUID
-	Now        time.Time
-}
-
-// Ended windows go a bounded batch at a time, on the next write.
-func (q *Queries) PruneFailedUsageWindows(ctx context.Context, arg PruneFailedUsageWindowsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, pruneFailedUsageWindows, arg.MerchantID, arg.Now)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}

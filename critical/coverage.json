@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 213,
+  "scenario_count": 216,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -426,7 +426,7 @@
     {
       "id": "OR-J19-S02",
       "journey": "J19",
-      "name": "Failed push is redriven after restart without duplicate migration"
+      "name": "Failed push is retried by its operation without a duplicate migration or push"
     },
     {
       "id": "OR-J19-S03",
@@ -1067,6 +1067,21 @@
       "id": "OR-J38-S29",
       "journey": "J38",
       "name": "The legacy provider refresh between a pull and its Apply leaves the pull's proposals untouched"
+    },
+    {
+      "id": "OR-J22-S06",
+      "journey": "J22",
+      "name": "Lapsed credit stops being available at its lapse and its balance watch, arrears included, expires it"
+    },
+    {
+      "id": "OR-J29-S08",
+      "journey": "J29",
+      "name": "Retention cleanup alone ages out unpaid orders, metric counters and orphan state; order expiry alone expires abandoned attempts"
+    },
+    {
+      "id": "OR-J19-S05",
+      "journey": "J19",
+      "name": "A migration move that no longer applies is skipped, terminally, and its migration settles"
     }
   ]
 }

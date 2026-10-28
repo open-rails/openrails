@@ -1505,68 +1505,6 @@ func (q *Queries) ListCompletedManualRebillPaymentCoverage(ctx context.Context, 
 	return items, nil
 }
 
-const listInitialEnrollmentsForMembership = `-- name: ListInitialEnrollmentsForMembership :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
-WHERE merchant_id=$1::uuid AND intent_type='initial_membership'
-  AND payload->'terms'->>'subscription_id'=$2::uuid::text
-ORDER BY id LIMIT 2
-`
-
-type ListInitialEnrollmentsForMembershipParams struct {
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
-}
-
-func (q *Queries) ListInitialEnrollmentsForMembership(ctx context.Context, arg ListInitialEnrollmentsForMembershipParams) ([]BillingProviderIntent, error) {
-	rows, err := q.db.Query(ctx, listInitialEnrollmentsForMembership, arg.MerchantID, arg.SubscriptionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingProviderIntent
-	for rows.Next() {
-		var i BillingProviderIntent
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Rail,
-			&i.IntentType,
-			&i.SubscriptionID,
-			&i.PaymentID,
-			&i.PriceID,
-			&i.Payload,
-			&i.IdempotencyKey,
-			&i.Status,
-			&i.Attempts,
-			&i.NextAttemptAt,
-			&i.LeaseExpiresAt,
-			&i.Origin,
-			&i.OriginReason,
-			&i.Actor,
-			&i.LastFailureReason,
-			&i.ExpiresAt,
-			&i.ResultEvidence,
-			&i.CreatedAt,
-			&i.ExecutedAt,
-			&i.UpdatedAt,
-			&i.PspID,
-			&i.DestructiveRunID,
-			&i.DestructiveRunClass,
-			&i.CustodianID,
-			&i.Subject,
-			&i.Credential,
-			&i.DestructiveActionID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPaidEngineAgreementsAtBoundary = `-- name: ListPaidEngineAgreementsAtBoundary :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id=$1::uuid AND status='succeeded'
@@ -1993,22 +1931,31 @@ func (q *Queries) ListRetainedSubscriptionCollectionsForArchive(ctx context.Cont
 
 const listStuckProviderIntents = `-- name: ListStuckProviderIntents :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
-WHERE provider_intents.merchant_id = $1::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= $2::timestamptz)
-   OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $3::timestamptz)
+WHERE provider_intents.merchant_id = $1::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= $2::timestamptz
+       AND NOT (intent_type = 'price_migration_push' AND status = 'pending' AND next_attempt_at > $3::timestamptz))
+   OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $4::timestamptz)
 ) ORDER BY created_at, id
 `
 
 type ListStuckProviderIntentsParams struct {
 	MerchantID   uuid.UUID
 	ActionCutoff time.Time
+	Now          time.Time
 	VerifyCutoff time.Time
 }
 
 // Non-terminal intents older than the converge engine's stuck thresholds:
 // pending/failed_retryable before action_cutoff, in_flight/unknown_needs_verify
 // before verify_cutoff (a healthy verifier resolves unknowns in minutes).
+// A price migration's push waits for its subscription's last period before
+// the move: pending and not yet due, it is scheduled, not stuck.
 func (q *Queries) ListStuckProviderIntents(ctx context.Context, arg ListStuckProviderIntentsParams) ([]BillingProviderIntent, error) {
-	rows, err := q.db.Query(ctx, listStuckProviderIntents, arg.MerchantID, arg.ActionCutoff, arg.VerifyCutoff)
+	rows, err := q.db.Query(ctx, listStuckProviderIntents,
+		arg.MerchantID,
+		arg.ActionCutoff,
+		arg.Now,
+		arg.VerifyCutoff,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -2268,7 +2215,6 @@ func (q *Queries) LockProviderIntentForTierCompletion(ctx context.Context, arg L
 const markProviderIntentFailedRetryable = `-- name: MarkProviderIntentFailedRetryable :execrows
 UPDATE billing.provider_intents
 SET status = 'failed_retryable',
-	result_evidence = result_evidence - 'recovery_held',
     next_attempt_at = $1::timestamptz,
     last_failure_reason = $2,
     lease_expires_at = NULL,
@@ -2412,7 +2358,7 @@ func (q *Queries) MarkProviderIntentSuperseded(ctx context.Context, arg MarkProv
 const markProviderIntentUnknown = `-- name: MarkProviderIntentUnknown :execrows
 UPDATE billing.provider_intents
 SET status = 'unknown_needs_verify',
-    result_evidence = (COALESCE(result_evidence, '{}'::jsonb) - 'recovery_held') || COALESCE($1::jsonb, '{}'::jsonb)
+    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || COALESCE($1::jsonb, '{}'::jsonb)
       || CASE WHEN result_evidence ? 'initial_submitted' THEN jsonb_build_object('initial_submitted',result_evidence->'initial_submitted') ELSE '{}'::jsonb END,
     next_attempt_at = $2::timestamptz,
     last_failure_reason = $3,
@@ -2448,8 +2394,8 @@ func (q *Queries) MarkProviderIntentUnknown(ctx context.Context, arg MarkProvide
 const parkProviderIntent = `-- name: ParkProviderIntent :execrows
 UPDATE billing.provider_intents
 SET status = 'pending',
-	result_evidence = CASE WHEN $1::jsonb IS NULL THEN result_evidence - 'recovery_held'
-	  ELSE (COALESCE(result_evidence, '{}'::jsonb) - 'recovery_held') || $1::jsonb END,
+	result_evidence = CASE WHEN $1::jsonb IS NULL THEN result_evidence
+	  ELSE COALESCE(result_evidence, '{}'::jsonb) || $1::jsonb END,
     attempts = GREATEST(attempts - 1, 0),
     next_attempt_at = $2::timestamptz,
     last_failure_reason = $3,

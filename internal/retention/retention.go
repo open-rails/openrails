@@ -53,9 +53,18 @@ const (
 	// PaymentAttempts keeps payment attempts, rebill cycles and NMI history
 	// months 25 months.
 	PaymentAttempts = 761 * Day
-	// ExpiredOrderAttempts keeps a order attempt that expired without
+	// ExpiredOrderAttempts keeps an order attempt that expired without
 	// reaching a provider 90 days past its expiry.
 	ExpiredOrderAttempts = 90 * Day
+	// UnpaidOrders keeps an unpaid closed order that never started a payment
+	// attempt 90 days past its close.
+	UnpaidOrders = 90 * Day
+	// MetricCounters keeps an hourly admission-denial count and a daily
+	// webhook-health count 13 months: a month is compared with a year before.
+	MetricCounters = 397 * Day
+	// OrphanState keeps the deployment-global lease and worker state of a
+	// kind no fleet has scheduled, registered or run for 30 days.
+	OrphanState = 30 * Day
 	// MeterPeriodQuantities keeps a customer's meter quantity for a billing
 	// period 100 days past the period's start: a month plus the ingest window.
 	MeterPeriodQuantities = 100 * Day

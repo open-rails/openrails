@@ -394,43 +394,13 @@ type lifePass struct{ e *ConvergeEngine }
 
 func (*lifePass) Plane() string { return "LIFE" }
 func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, error) {
-	// life.order_attempt.stale — an expired, non-terminal order attempt
-	// is cleaned up. EXCESS but time-driven (not confirmed-absence gated), so
-	// AUTO.
 	q := p.e.DB.Gen(ctx)
 	now := p.e.Now()
 	// Repairs retain this pass's detection clock without mutating the lifecycle
 	// shared by overlapping runs. Its dependencies are fixed during wiring.
 	lc := *p.e.lifecycle
 	lc.SetClock(clockwork.NewFakeClockAt(now.UTC()))
-	stale, err := q.ListStaleOrderAttempts(ctx, gen.ListStaleOrderAttemptsParams{
-		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Now: now,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("life: scan stale order attempts: %w", err)
-	}
-	out := make([]ConvergeFinding, 0, len(stale))
-	for i := range stale {
-		id := stale[i]
-		out = append(out, ConvergeFinding{
-			Type:  "life.order_attempt.stale",
-			Shape: ShapeExcess,
-			Class: ClassAuto,
-			// Ungated: expiring an abandoned order attempt retracts no
-			// access, no money and no provider object.
-			Ungated:    true,
-			Severity:   "low",
-			SubjectKey: "order_attempt:" + id.String(),
-			Provider:   "self",
-			Evidence:   map[string]any{"order_attempt_id": billing.OrderAttemptID(id).String()},
-			Repair: func(ctx context.Context) error {
-				_, e := q.ExpireOrderAttemptByID(ctx, gen.ExpireOrderAttemptByIDParams{
-					MerchantID: scope.Merchant.UUID(), ID: id, Now: p.e.Now(),
-				})
-				return e
-			},
-		})
-	}
+	var out []ConvergeFinding
 
 	// A clock reading is not evidence: an overdue renewal or a dunning window
 	// that closed with nothing scheduled only asks the provider. The repair is
@@ -665,7 +635,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		}
 		stuck, err := q.ListStuckProviderIntents(ctx, gen.ListStuckProviderIntentsParams{
 			MerchantID:   scopeMerchantID.UUID(),
-			ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff,
+			ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff, Now: now,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("life: scan stuck rail intents: %w", err)
@@ -677,7 +647,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		// vanish sweep): open stuck findings whose intent no longer meets the
 		// stuck criteria auto-resolve.
 		if _, err := q.AutoResolveRecoveredStuckIntentFindings(ctx, gen.AutoResolveRecoveredStuckIntentFindingsParams{
-			MerchantID: scope.Merchant.UUID(), ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff,
+			MerchantID: scope.Merchant.UUID(), ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff, Now: now,
 		}); err != nil {
 			return nil, fmt.Errorf("life: resolve recovered stuck-intent findings: %w", err)
 		}
@@ -1157,7 +1127,7 @@ func (*derivePass) Standing() []string {
 // Standing leaves out life.provider_intent.stuck, which resolves by its own
 // criteria (AutoResolveRecoveredStuckIntentFindings).
 func (*lifePass) Standing() []string {
-	return []string{"life.order_attempt.stale", findingRenewalOverdue, findingGraceExhausted, "life.subscription.paid_pending",
+	return []string{findingRenewalOverdue, findingGraceExhausted, "life.subscription.paid_pending",
 		"life.subscription.pending_stale", "life.subscription.dunning_without_decline", "life.subscription.dunning_overdue",
 		"life.provider_intent.abandoned", findingUnverifiedBacklog, findingUnverifiedUnresolved, findingDunningFunnel, findingRenewalHeld,
 		findingNewCardDeclineSpike, findingRebillFailureSpike, findingSystemErrors, findingDeclineUnmapped, findingWebhookSilence}

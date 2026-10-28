@@ -54,11 +54,7 @@ func ValidateInitialMembershipTerminal(in gen.BillingProviderIntent) error {
 		if paid && evidence.TransactionID != receipt.TransactionID() || !paid && evidence.TransactionID != "" {
 			return errors.New("initial terminal result has another payment")
 		}
-		if p.Terms.Pending {
-			if evidence.Status != "pending" || evidence.DelayedStart != p.DelayedStart().UTC().Format("2006-01-02T15:04:05.999999999Z07:00") {
-				return errors.New("initial delayed result contradicts accepted schedule")
-			}
-		} else if evidence.Status != "success" || evidence.DelayedStart != "" {
+		if evidence.Status != "success" || evidence.DelayedStart != "" {
 			return errors.New("initial immediate result has another phase")
 		}
 	case StatusFailedTerminal:

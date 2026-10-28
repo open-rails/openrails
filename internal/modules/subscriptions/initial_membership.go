@@ -90,14 +90,6 @@ func (p InitialMembershipPayload) Upgrade() bool { return p.Terms.Replaces != ni
 // tier upgrade or a seat increase.
 func (p InitialMembershipPayload) Change() bool { _, ok := p.Terms.Changed(); return ok }
 
-func (p InitialMembershipPayload) DelayedStart() *time.Time {
-	if p.Terms.Pending {
-		value := p.Terms.PeriodStart
-		return &value
-	}
-	return nil
-}
-
 func DecodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMembershipPayload, error) {
 	var p InitialMembershipPayload
 	decoder := json.NewDecoder(bytes.NewReader(in.Payload))
@@ -140,7 +132,7 @@ func DecodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMember
 		return p, errors.New("staff change requires its staff member, reason and the card's recurring agreement")
 	}
 	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
-		if p.NativeSchedule != nil || in.CustodianID != nil || p.Terms.Pending || p.Terms.Amount <= 0 || (p.Terms.Amount != p.Terms.RecurringAmount && !change) || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt) {
+		if p.NativeSchedule != nil || in.CustodianID != nil || p.Terms.Amount <= 0 || (p.Terms.Amount != p.Terms.RecurringAmount && !change) || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt) {
 			return p, errors.New("engine initial membership requires its positive customer charge and permanent custody, without a native schedule")
 		}
 		return p, charge.ValidateEngineInstrument(in.Rail, p.Instrument, p.HyperSwitch)
@@ -149,18 +141,14 @@ func DecodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMember
 	if in.Rail != "nmi" || schedule == nil || p.HyperSwitch != nil || in.CustodianID != nil || p.Instrument.CustodianHeld() || p.Instrument.RailCustomerRef == "" || strings.TrimSpace(schedule.PlanID) == "" || schedule.DayFrequency <= 0 || schedule.PlanPayments < 0 {
 		return p, errors.New("native initial membership requires its accepted provider schedule and instrument")
 	}
-	if int64(schedule.DayFrequency) > math.MaxInt64/int64(24*time.Hour) || p.Terms.PeriodEnd.Sub(p.Terms.PeriodStart) != time.Duration(schedule.DayFrequency)*24*time.Hour || (!p.Terms.Pending && (p.Terms.Amount != p.Terms.RecurringAmount || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt))) {
+	if int64(schedule.DayFrequency) > math.MaxInt64/int64(24*time.Hour) || p.Terms.PeriodEnd.Sub(p.Terms.PeriodStart) != time.Duration(schedule.DayFrequency)*24*time.Hour || p.Terms.Amount != p.Terms.RecurringAmount || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt) {
 		return p, errors.New("initial period or amount contradicts accepted recurring schedule")
 	}
 	start, err := time.Parse("20060102", schedule.StartDate)
 	if err != nil || !start.After(p.Terms.AcceptedAt) {
 		return p, errors.New("native initial membership has no exact future recurring date")
 	}
-	if p.Terms.Pending {
-		if !start.Equal(p.Terms.PeriodStart) {
-			return p, errors.New("native schedule contradicts accepted coverage")
-		}
-	} else if start.Format("20060102") != p.Terms.PeriodEnd.UTC().Format("20060102") {
+	if start.Format("20060102") != p.Terms.PeriodEnd.UTC().Format("20060102") {
 		return p, errors.New("native first recurring date contradicts accepted initial period")
 	}
 	return p, nil

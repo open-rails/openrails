@@ -520,9 +520,6 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 			if reversal := receipt.ReversalKind(); reversal != "" {
 				metadata["initial_payment_reversal"] = reversal
 			}
-			if p.DelayedStart() != nil {
-				metadata["delayed_start"] = p.DelayedStart().UTC().Format(time.RFC3339Nano)
-			}
 			var canonicalPriceID *uuid.UUID
 			if p.NativeSchedule != nil {
 				id, err := nativeEnrollmentCanonicalPrice(ctx, d, p)
@@ -557,13 +554,6 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 			}
 			if receipt.ReversalKind() != "" {
 				evidence["message"] = "Payment recorded; enrollment canceled after provider reversal"
-			}
-			if p.Terms.Pending {
-				evidence["status"] = "pending"
-				evidence["message"] = "Subscription scheduled for its accepted start date"
-			}
-			if p.DelayedStart() != nil {
-				evidence["delayed_start"] = p.DelayedStart().UTC().Format(time.RFC3339Nano)
 			}
 		} else {
 			if answer, transaction, declined := refusal.Declined(); declined && p.Terms.Amount > 0 {

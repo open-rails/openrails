@@ -16,7 +16,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/eventlog"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/orders"
+	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
@@ -36,8 +38,8 @@ const (
 	cleanupDeleteBatch = 1000
 
 	// cleanupIndexedMaxBatches bounds one pass's deletes of one indexed
-	// table across merchants (checkout sessions, carts); a larger backlog
-	// drains over the following passes.
+	// table across merchants (event log, carts, idempotency keys, Solana Pay
+	// references); a larger backlog drains over the following passes.
 	cleanupIndexedMaxBatches = 50
 
 	// cleanupMerchantRowBudget bounds one merchant's share of one pass across
@@ -128,19 +130,26 @@ type CleanupResult struct {
 
 	UserActionReservations     int64
 	NotificationEvents         int64
-	OrderAttemptsExpired       int64
 	Carts                      int64
+	IdempotencyKeys            int64
+	SolanaPayReferences        int64
+	PeriodicLeases             int64
+	WorkerStates               int64
 	NotificationsSeen          int64
 	NotificationsAll           int64
 	WebhookEvents              int64
-	PaymentSettlements         int64
-	HostLifecycleEvents        int64
+	HostOutbox                 int64
 	PaymentAttempts            int64
 	RebillCycles               int64
 	NMIHistoryMonths           int64
 	SubscriptionTransitions    int64
 	SubscriptionBillingChanges int64
 	OrderAttempts              int64
+	UnpaidOrders               int64
+	FailedUsageWindows         int64
+	MeterPeriodQuantities      int64
+	AdmissionDenials           int64
+	WebhookHealthDays          int64
 	ReconciliationFindings     int64
 	ReconciliationRuns         int64
 	ProviderIntents            int64
@@ -155,8 +164,11 @@ type CleanupResult struct {
 	MerchantsBudgetCapped int
 }
 
-// Work runs every retention sweep once per merchant with due work, inside that
-// merchant's scope and with the merchant predicate in the SQL:
+// Work is the one retention owner. It runs the deployment-wide sweeps (event
+// log, notification journal, reservations, partitions, carts, idempotency
+// keys, Solana Pay references, orphan leases and worker state), then every
+// retention sweep once per merchant with due work, inside that merchant's
+// scope and with the merchant predicate in the SQL:
 //
 //   - merchants come from an indexed work queue (only those holding a row
 //     past one of this config's cutoffs), capped at cleanupMerchantBatch;
@@ -257,19 +269,38 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		result.PartitionsDropped = n
 	}
 
-	// Carts unchanged for their retention: the same indexed, bounded delete.
-	for range cleanupIndexedMaxBatches {
-		n, err := orders.DeleteExpiredCarts(ctx, w.DB, now, cleanupDeleteBatch)
-		if err != nil {
-			logger.WithError(err).Error("Cleanup: delete carts failed")
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete carts: %w", err))
-			break
-		}
-		result.Carts += n
-		if n < cleanupDeleteBatch {
-			break
+	// Indexed, bounded deletes across merchants.
+	global := func(name string, total *int64, fn func(limit int32) (int64, error)) {
+		for range cleanupIndexedMaxBatches {
+			n, err := fn(cleanupDeleteBatch)
+			if err != nil {
+				logger.WithError(err).Error("Cleanup: " + name + " failed")
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("%s: %w", name, err))
+				return
+			}
+			*total += n
+			if n < cleanupDeleteBatch {
+				return
+			}
 		}
 	}
+	global("delete carts", &result.Carts, func(limit int32) (int64, error) {
+		return orders.DeleteExpiredCarts(ctx, w.DB, now, limit)
+	})
+	// Expiry is checked when a key is claimed; this only reclaims storage.
+	global("delete expired idempotency keys", &result.IdempotencyKeys, func(limit int32) (int64, error) {
+		return idempotency.DeleteExpired(ctx, w.DB, limit)
+	})
+	// Pending references and credited or review receipts are never selected.
+	global("delete settled Solana Pay references", &result.SolanaPayReferences, func(limit int32) (int64, error) {
+		return solanamodule.DeleteSettled(ctx, w.DB, now, limit)
+	})
+	global("delete orphan periodic leases", &result.PeriodicLeases, func(limit int32) (int64, error) {
+		return directory.DeleteOrphanPeriodicLeases(ctx, gen.DeleteOrphanPeriodicLeasesParams{RetentionDays: retention.Days(retention.OrphanState), RowLimit: limit})
+	})
+	global("delete orphan worker state", &result.WorkerStates, func(limit int32) (int64, error) {
+		return directory.DeleteOrphanWorkerState(ctx, gen.DeleteOrphanWorkerStateParams{RetentionDays: retention.Days(retention.OrphanState), RowLimit: limit})
+	})
 
 	cursorRow, err := loadSweepCursor(ctx, directory, KindCleanupExpiredData)
 	if err != nil {
@@ -283,11 +314,13 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			NotificationCutoff:     now.Add(-config.NotificationUnseenRetention),
 			NotificationSeenCutoff: now.Add(-config.NotificationSeenRetention),
 			WebhookCutoff:          now.Add(-config.WebhookEventRetention),
-			SettlementCutoff:       now.Add(-max(retention.EventLog, config.EventRetention)),
-			LifecycleCutoff:        now.Add(-max(retention.EventLog, config.EventRetention)),
+			OutboxCutoff:           now.Add(-max(retention.EventLog, config.EventRetention)),
 			AttemptCutoff:          now.Add(-config.PaymentAttemptRetention),
 			TransitionCutoff:       now.Add(-retention.SubscriptionTransitions),
 			OrderAttemptCutoff:     now.Add(-retention.ExpiredOrderAttempts),
+			UnpaidOrderCutoff:      now.Add(-retention.UnpaidOrders),
+			MeterCutoff:            now.Add(-retention.MeterPeriodQuantities),
+			CounterCutoff:          now.Add(-retention.MetricCounters),
 			FindingCutoff:          now.Add(-retention.ResolvedFindings),
 			RunCutoff:              now.Add(-retention.ReconciliationRuns),
 			ProviderWriteCutoff:    now.Add(-retention.ProviderWrites),
@@ -349,21 +382,28 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"resumed_from_cursor":          cursor != nil,
 		"more_work_queued":             nextCursor != nil,
 		"duration_ms":                  clock.Now().Sub(started).Milliseconds(),
-		"order_attempts_expired":       result.OrderAttemptsExpired,
 		"carts":                        result.Carts,
+		"idempotency_keys":             result.IdempotencyKeys,
+		"solana_pay_references":        result.SolanaPayReferences,
+		"periodic_leases":              result.PeriodicLeases,
+		"worker_states":                result.WorkerStates,
 		"notification_events":          result.NotificationEvents,
 		"event_log":                    result.EventLog,
 		"notifications_seen":           result.NotificationsSeen,
 		"notifications_unseen":         result.NotificationsAll,
 		"webhook_events":               result.WebhookEvents,
-		"payment_settlements":          result.PaymentSettlements,
-		"lifecycle_events":             result.HostLifecycleEvents,
+		"host_outbox":                  result.HostOutbox,
 		"payment_attempts":             result.PaymentAttempts,
 		"rebill_cycles":                result.RebillCycles,
 		"nmi_history_months":           result.NMIHistoryMonths,
 		"subscription_transitions":     result.SubscriptionTransitions,
 		"subscription_billing_changes": result.SubscriptionBillingChanges,
 		"order_attempts":               result.OrderAttempts,
+		"unpaid_orders":                result.UnpaidOrders,
+		"failed_usage_windows":         result.FailedUsageWindows,
+		"meter_period_quantities":      result.MeterPeriodQuantities,
+		"admission_denials":            result.AdmissionDenials,
+		"webhook_health_days":          result.WebhookHealthDays,
 		"reconciliation_findings":      result.ReconciliationFindings,
 		"reconciliation_runs":          result.ReconciliationRuns,
 		"provider_intents":             result.ProviderIntents,
@@ -427,12 +467,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		capped = true
 	}
 
-	// 1. Expire order attempts that have passed their TTL
-	sweep("expire order attempts", &result.OrderAttemptsExpired, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.ExpireOrderAttempts(ctx, gen.ExpireOrderAttemptsParams{MerchantID: mid, Now: now, RowLimit: limit})
-	})
-
-	// 2. Old notifications — seen ones first, with the shorter retention
+	// Old notifications: seen ones first, with the shorter retention.
 	sweep("delete seen notifications", &result.NotificationsSeen, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteSeenNotificationsBefore(ctx, gen.DeleteSeenNotificationsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-config.NotificationSeenRetention), RowLimit: limit,
@@ -444,28 +479,21 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		})
 	})
 
-	// 3. Webhook dedup marks.
+	// Webhook dedup marks.
 	sweep("delete webhook events", &result.WebhookEvents, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteCompletedWebhookEventsBefore(ctx, gen.DeleteCompletedWebhookEventsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-config.WebhookEventRetention), RowLimit: limit,
 		})
 	})
 
-	// 4. Private payment dedupe journal, retained from ingestion.
-	sweep("delete payment settlements", &result.PaymentSettlements, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.DeletePaymentSettlementsBefore(ctx, gen.DeletePaymentSettlementsBeforeParams{
+	// The host outbox dedupe journal, retained from ingestion.
+	sweep("delete host outbox", &result.HostOutbox, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteHostOutboxBefore(ctx, gen.DeleteHostOutboxBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-max(retention.EventLog, config.EventRetention)), RowLimit: limit,
 		})
 	})
 
-	// 5. Private lifecycle dedupe journal, retained from ingestion.
-	sweep("delete host lifecycle events", &result.HostLifecycleEvents, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.DeleteHostLifecycleEventsBefore(ctx, gen.DeleteHostLifecycleEventsBeforeParams{
-			MerchantID: mid, Cutoff: now.Add(-max(retention.EventLog, config.EventRetention)), RowLimit: limit,
-		})
-	})
-
-	// 6. Payment attempts and then the rebill cycles they leave empty.
+	// Payment attempts and then the rebill cycles they leave empty.
 	sweep("delete payment attempts", &result.PaymentAttempts, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeletePaymentAttemptsBefore(ctx, gen.DeletePaymentAttemptsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-config.PaymentAttemptRetention), RowLimit: limit,
@@ -476,7 +504,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 			MerchantID: mid, Cutoff: now.Add(-config.PaymentAttemptRetention), RowLimit: limit,
 		})
 	})
-	// 7. NMI history months, kept as long as attempts.
+	// NMI history months, kept as long as attempts.
 	sweep("delete nmi history months", &result.NMIHistoryMonths, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteNMIHistoryMonthsBefore(ctx, gen.DeleteNMIHistoryMonthsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-config.PaymentAttemptRetention), RowLimit: limit,
@@ -494,7 +522,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		}
 	}
 
-	// 8. Subscription status history.
+	// Subscription status history.
 	sweep("delete subscription transitions", &result.SubscriptionTransitions, guarded("subscription_status_transitions",
 		func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 			return q.DeleteSubscriptionTransitionsPastRetention(ctx, gen.DeleteSubscriptionTransitionsPastRetentionParams{
@@ -509,14 +537,42 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 			})
 		}))
 
-	// 9. Order attempts that expired without reaching a provider.
+	// Order attempts that expired without reaching a provider, then the
+	// unpaid closed orders that never started one.
 	sweep("delete abandoned order attempts", &result.OrderAttempts, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteAbandonedOrderAttemptsBefore(ctx, gen.DeleteAbandonedOrderAttemptsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.ExpiredOrderAttempts), RowLimit: limit,
 		})
 	})
+	sweep("delete unpaid orders", &result.UnpaidOrders, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteClosedUnpaidOrders(ctx, gen.DeleteClosedUnpaidOrdersParams{
+			MerchantID: mid, Before: now.Add(-retention.UnpaidOrders), RowLimit: limit,
+		})
+	})
 
-	// 10. Resolved findings, then the reconciliation runs nothing names any more.
+	// Usage counters past the windows and periods that read them.
+	sweep("delete ended failed usage windows", &result.FailedUsageWindows, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteEndedFailedUsageWindows(ctx, gen.DeleteEndedFailedUsageWindowsParams{MerchantID: mid, Now: now, RowLimit: limit})
+	})
+	sweep("delete meter period quantities", &result.MeterPeriodQuantities, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteMeterPeriodQuantitiesBefore(ctx, gen.DeleteMeterPeriodQuantitiesBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.MeterPeriodQuantities), RowLimit: limit,
+		})
+	})
+
+	// Metric counters.
+	sweep("delete admission denials", &result.AdmissionDenials, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteAdmissionDenialsBefore(ctx, gen.DeleteAdmissionDenialsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.MetricCounters), RowLimit: limit,
+		})
+	})
+	sweep("delete webhook health days", &result.WebhookHealthDays, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteWebhookHealthDaysBefore(ctx, gen.DeleteWebhookHealthDaysBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.MetricCounters), RowLimit: limit,
+		})
+	})
+
+	// Resolved findings, then the reconciliation runs nothing names any more.
 	sweep("delete resolved findings", &result.ReconciliationFindings, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteResolvedFindingsBefore(ctx, gen.DeleteResolvedFindingsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.ResolvedFindings), RowLimit: limit,
@@ -529,7 +585,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 			})
 		}))
 
-	// 12. Finished outbox intents and the mutation log. Intents that are the
+	// Finished outbox intents and the mutation log. Intents that are the
 	// record of money, a membership or an erasure are not outbox types.
 	sweep("delete finished outbox intents", &result.ProviderIntents, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteFinishedOutboxIntentsBefore(ctx, gen.DeleteFinishedOutboxIntentsBeforeParams{

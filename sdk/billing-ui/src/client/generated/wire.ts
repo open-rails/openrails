@@ -1943,7 +1943,7 @@ export type PriceMigrationCancel = {
 export type PriceMigrationOutcome = {
   subscription_id: string
   rail: string
-  disposition: "applied" | "blocked" | "scheduled" | "skipped"
+  disposition: "blocked" | "scheduled" | "skipped"
   reason: string | null
 }
 

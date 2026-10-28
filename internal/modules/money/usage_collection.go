@@ -83,9 +83,8 @@ func (s *MoneyService) DefaultPaymentMethodCurrencies(ctx context.Context, payer
 
 // ChargeOutstanding collects the usage orders due for automatic collection by
 // enqueuing and executing one durable order_collection operation per order.
-// minThreshold > 0 charges only orders with at least that much due. Returns
-// the number of settled collections.
-func (s *MoneyService) ChargeOutstanding(ctx context.Context, runner *intents.Runner, minThreshold int64) (int, error) {
+// Returns the number of settled collections.
+func (s *MoneyService) ChargeOutstanding(ctx context.Context, runner *intents.Runner) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
 	}
@@ -96,7 +95,7 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, runner *intents.Ru
 	if err != nil {
 		return 0, err
 	}
-	rows, err := s.db.Gen(ctx).ListChargeableUsageOrders(ctx, gen.ListChargeableUsageOrdersParams{MerchantID: tid.UUID(), Now: s.now(), MinThreshold: minThreshold})
+	rows, err := s.db.Gen(ctx).ListChargeableUsageOrders(ctx, gen.ListChargeableUsageOrdersParams{MerchantID: tid.UUID(), Now: s.now()})
 	if err != nil {
 		return 0, err
 	}
@@ -104,7 +103,7 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, runner *intents.Ru
 	count := 0
 	var errs []error
 	for _, r := range rows {
-		intentID, _, err := s.enqueueUsageCollection(ctx, identity.CustomerID(r.CustomerID), r.ID, usageCollectionEnqueue{minThreshold: minThreshold, origin: intents.OriginSystem, originReason: "scheduled usage collection"})
+		intentID, _, err := s.enqueueUsageCollection(ctx, identity.CustomerID(r.CustomerID), r.ID, usageCollectionEnqueue{origin: intents.OriginSystem, originReason: "scheduled usage collection"})
 		if err != nil {
 			errs = append(errs, fmt.Errorf("claim order %s: %w", r.ID, err))
 			continue
@@ -178,10 +177,9 @@ func scheduledUsageCollectionKey(orderID uuid.UUID, ordinal int64) string {
 	return fmt.Sprintf("%s:%s:attempt:%d", TypeOrderCollection, orderID, ordinal)
 }
 
-func scheduledUsageCollectionEligible(order gen.BillingOrder, minThreshold int64, now time.Time) bool {
-	due := usage.Due(order)
+func scheduledUsageCollectionEligible(order gen.BillingOrder, now time.Time) bool {
 	if order.CollectionOwner != string(billing.OrderCollectionEngine) || order.Status != string(billing.OrderOpen) || order.CollectionMethod == nil || *order.CollectionMethod != CollectionChargeAutomatically ||
-		due <= 0 || (minThreshold > 0 && due < minThreshold) {
+		usage.Due(order) <= 0 {
 		return false
 	}
 	if order.DueAt != nil && order.DueAt.After(now) {
@@ -193,7 +191,6 @@ func scheduledUsageCollectionEligible(order gen.BillingOrder, minThreshold int64
 
 type usageCollectionEnqueue struct {
 	initiator       charge.Initiator
-	minThreshold    int64
 	manual          bool
 	paymentMethodID *uuid.UUID
 	operationKey    string
@@ -263,7 +260,7 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 			}
 			return ErrCollectionInProgress
 		}
-		eligible := scheduledUsageCollectionEligible(order, opts.minThreshold, now)
+		eligible := scheduledUsageCollectionEligible(order, now)
 		if opts.manual {
 			eligible = opts.initiator == charge.InitiatorCustomer && usage.Due(order) > 0 &&
 				(order.Status == string(billing.OrderOpen) || order.Status == string(billing.OrderUncollectible))

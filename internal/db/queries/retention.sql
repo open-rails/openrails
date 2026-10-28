@@ -7,14 +7,6 @@
 -- name: ListRetentionWorkMerchants :many
 SELECT q.mid AS merchant_id
 FROM (
-    (SELECT DISTINCT cs.merchant_id AS mid
-       FROM billing.order_attempts cs
-      WHERE (sqlc.narg(after)::uuid IS NULL OR cs.merchant_id > sqlc.narg(after)::uuid)
-        AND cs.expires_at IS NOT NULL AND cs.expires_at < sqlc.arg(now)::timestamptz
-        AND cs.deleted_at IS NULL
-        AND cs.status IN ('created', 'requires_action')
-      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
-    UNION
     (SELECT DISTINCT nq.merchant_id AS mid
        FROM billing.notifications nq
       WHERE (sqlc.narg(after)::uuid IS NULL OR nq.merchant_id > sqlc.narg(after)::uuid)
@@ -30,18 +22,10 @@ FROM (
         AND we.completed_at < sqlc.arg(webhook_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
-    (SELECT DISTINCT pse.merchant_id AS mid
-       FROM billing.host_outbox pse
-      WHERE (sqlc.narg(after)::uuid IS NULL OR pse.merchant_id > sqlc.narg(after)::uuid)
-        AND pse.event_type = 'payment.settled'
-        AND pse.recorded_at < sqlc.arg(settlement_cutoff)::timestamptz
-      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
-    UNION
-    (SELECT DISTINCT hle.merchant_id AS mid
-       FROM billing.host_outbox hle
-      WHERE (sqlc.narg(after)::uuid IS NULL OR hle.merchant_id > sqlc.narg(after)::uuid)
-        AND hle.event_type <> 'payment.settled'
-        AND hle.recorded_at < sqlc.arg(lifecycle_cutoff)::timestamptz
+    (SELECT DISTINCT ho.merchant_id AS mid
+       FROM billing.host_outbox ho
+      WHERE (sqlc.narg(after)::uuid IS NULL OR ho.merchant_id > sqlc.narg(after)::uuid)
+        AND ho.recorded_at < sqlc.arg(outbox_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT pa.merchant_id AS mid
@@ -82,6 +66,37 @@ FROM (
         AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.order_attempt_id = ca.id)
         AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.order_attempt_id = ca.id)
         AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'order_attempt_id' AND pi.payload->>'order_attempt_id' = ca.id::text)
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT o.merchant_id AS mid
+       FROM billing.orders o
+      WHERE (sqlc.narg(after)::uuid IS NULL OR o.merchant_id > sqlc.narg(after)::uuid)
+        AND o.collection_owner = 'engine' AND o.status IN ('canceled', 'expired') AND o.payment_id IS NULL AND o.attempt_id IS NULL
+        AND COALESCE(o.canceled_at, o.expired_at) < sqlc.arg(unpaid_order_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT fw.merchant_id AS mid
+       FROM billing.failed_usage_windows fw
+      WHERE (sqlc.narg(after)::uuid IS NULL OR fw.merchant_id > sqlc.narg(after)::uuid)
+        AND fw.window_end <= sqlc.arg(now)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT mq.merchant_id AS mid
+       FROM billing.meter_period_quantities mq
+      WHERE (sqlc.narg(after)::uuid IS NULL OR mq.merchant_id > sqlc.narg(after)::uuid)
+        AND mq.period_starts_at < sqlc.arg(meter_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT ad.merchant_id AS mid
+       FROM billing.admission_denials_hourly ad
+      WHERE (sqlc.narg(after)::uuid IS NULL OR ad.merchant_id > sqlc.narg(after)::uuid)
+        AND ad.hour_at < sqlc.arg(counter_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT wh.merchant_id AS mid
+       FROM billing.webhook_health_daily wh
+      WHERE (sqlc.narg(after)::uuid IS NULL OR wh.merchant_id > sqlc.narg(after)::uuid)
+        AND wh.day_at < sqlc.arg(counter_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT rf.merchant_id AS mid
@@ -279,3 +294,76 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
     LIMIT sqlc.arg(row_limit)::int
 );
 
+-- The host outbox is a dedupe journal with no delivery state: every event
+-- goes at one cutoff.
+-- name: DeleteHostOutboxBefore :execrows
+DELETE FROM billing.host_outbox
+WHERE ctid IN (
+    SELECT ho.ctid FROM billing.host_outbox ho
+    WHERE ho.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND ho.recorded_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY ho.recorded_at
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- name: DeleteEndedFailedUsageWindows :execrows
+DELETE FROM billing.failed_usage_windows w
+WHERE (w.merchant_id, w.customer_id, w.currency, w.invoker, w.window_key, w.window_start) IN (
+    SELECT e.merchant_id, e.customer_id, e.currency, e.invoker, e.window_key, e.window_start
+    FROM billing.failed_usage_windows e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.window_end <= sqlc.arg(now)::timestamptz
+    ORDER BY e.window_end
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- A row another writer holds waits for a later pass.
+-- name: DeleteMeterPeriodQuantitiesBefore :execrows
+DELETE FROM billing.meter_period_quantities q
+WHERE (q.merchant_id, q.customer_id, q.currency, q.meter_key, q.cell, q.period_starts_at) IN (
+    SELECT e.merchant_id, e.customer_id, e.currency, e.meter_key, e.cell, e.period_starts_at
+    FROM billing.meter_period_quantities e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.period_starts_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.period_starts_at
+    LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
+);
+
+-- name: DeleteAdmissionDenialsBefore :execrows
+DELETE FROM billing.admission_denials_hourly d
+WHERE (d.merchant_id, d.customer_id, d.denial_reason, d.hour_at) IN (
+    SELECT e.merchant_id, e.customer_id, e.denial_reason, e.hour_at
+    FROM billing.admission_denials_hourly e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.hour_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.hour_at
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- name: DeleteWebhookHealthDaysBefore :execrows
+DELETE FROM billing.webhook_health_daily
+WHERE ctid IN (
+    SELECT e.ctid FROM billing.webhook_health_daily e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.day_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.day_at
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- Deployment-global state of a periodic or worker kind no fleet has
+-- scheduled, registered or run for the period: a kind since removed. A lease
+-- that expired is free either way, so deleting one never races a claim.
+-- name: DeleteOrphanPeriodicLeases :execrows
+DELETE FROM billing.periodic_leases
+WHERE kind IN (
+    SELECT l.kind FROM billing.periodic_leases l
+    WHERE l.expires_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
+    ORDER BY l.kind
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- name: DeleteOrphanWorkerState :execrows
+DELETE FROM billing.worker_state
+WHERE worker_kind IN (
+    SELECT s.worker_kind FROM billing.worker_state s
+    WHERE s.updated_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
+    ORDER BY s.worker_kind
+    LIMIT sqlc.arg(row_limit)::int
+);

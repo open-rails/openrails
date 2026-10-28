@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
-	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -317,11 +316,10 @@ func (s *MoneyService) usagePeriodStart(ctx context.Context, q *gen.Queries, mer
 		}
 		return CurrentBillingPeriodStart(occurred, *row.UsageBillingAnchor, BillingBoundaryAnniversary)
 	}
-	settings, err := s.UsageSettings(ctx)
+	boundary, err := s.billingPeriodBoundary(ctx)
 	if err != nil && !errors.Is(err, merchantconfig.ErrNoSettings) {
 		return time.Time{}, err
 	}
-	boundary := merchantconfig.NormalizeBillingBoundary(settings.BillingPeriodBoundary)
 	var anchor time.Time
 	if boundary == BillingBoundaryAnniversary {
 		if anchor, err = q.GetCustomerPeriodAnchor(ctx, gen.GetCustomerPeriodAnchorParams{MerchantID: merchantID, CustomerID: customerID, Currency: currency}); err != nil {
@@ -378,9 +376,6 @@ func (s *MoneyService) priceUsageTx(ctx context.Context, q *gen.Queries, payer i
 		}
 		totalAmount += amount
 		charges = append(charges, models.UsageCharge{MeterKey: u.card.MeterKey, Model: u.card.Price.Model, Cell: u.cell, Quantity: u.quantity, Amount: amount})
-	}
-	if _, err := q.PruneMeterPeriodQuantities(ctx, gen.PruneMeterPeriodQuantitiesParams{MerchantID: merchantID, Before: now.Add(-retention.MeterPeriodQuantities)}); err != nil {
-		return nil, err
 	}
 	return charges, nil
 }

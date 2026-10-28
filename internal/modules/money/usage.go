@@ -234,7 +234,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 				charge = max(stated-left, 0)
 			}
 			forgiven = stated - charge
-			if err := key.count(ctx, q, periods, stated, now); err != nil {
+			if err := key.count(ctx, q, periods, stated); err != nil {
 				return err
 			}
 		}

@@ -19,16 +19,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type usageDueJob struct {
-	Automatic bool `json:"automatic"`
-}
+type usageDueJob struct{}
 
-func (usageDueJob) Kind() string { return "openrails.invoice" }
+func (usageDueJob) Kind() string { return "openrails.usage_orders" }
 
 func runUsageDue(t *testing.T, fleet *river.Client[pgx.Tx]) {
 	t.Helper()
 	for range 2 {
-		job, err := fleet.Insert(t.Context(), usageDueJob{Automatic: true}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		job, err := fleet.Insert(t.Context(), usageDueJob{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		require.Eventually(t, func() bool {
 			row, err := fleet.JobGet(t.Context(), job.Job.ID)

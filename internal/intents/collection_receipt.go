@@ -116,11 +116,7 @@ func collectionBinding(in gen.BillingProviderIntent) (receiptBinding, error) {
 		return receiptBinding{}, err
 	}
 	digest := sha256.Sum256(raw)
-	kind := in.IntentType
-	if _, legacy := legacyOrderID(in.Payload); legacy && kind == TypeOrderCollection {
-		kind = legacyCollectionKind
-	}
-	return receiptBinding{in.ID, in.MerchantID, *in.PspID, kind, hex.EncodeToString(digest[:])}, nil
+	return receiptBinding{in.ID, in.MerchantID, *in.PspID, in.IntentType, hex.EncodeToString(digest[:])}, nil
 }
 
 // ReadNMICollectionReceipt resolves the accepted PSP and reads the actual order

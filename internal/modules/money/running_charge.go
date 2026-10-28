@@ -431,10 +431,16 @@ func (s *MoneyService) capacityFloor(ctx context.Context, q *gen.Queries, mercha
 	return floor, owed, nil
 }
 
-// lapsedUnspent is what lapsed lots the expiry sweep has not reached will
+// lapsedUnspent is what bal's lots that lapsed and were not yet expired will
 // expire with: each first funds what the running charges accrued until it
-// lapsed, as the sweep posts it (grants.ExpireLapsedBy).
-func lapsedUnspent(charges []gen.BillingRunningCharge, lapsed []gen.ListLapsedCreditLotsRow) (int64, error) {
+// lapsed, as its expiry posts it (grants.ExpireLapsedBy).
+func lapsedUnspent(ctx context.Context, q *gen.Queries, bal *models.MoneyBalance, charges []gen.BillingRunningCharge) (int64, error) {
+	lapsed, err := q.ListLapsedCreditLots(ctx, gen.ListLapsedCreditLotsParams{
+		MerchantID: bal.MerchantID, CustomerID: bal.CustomerID, Currency: bal.Currency, AsOf: bal.AsOf,
+	})
+	if err != nil {
+		return 0, err
+	}
 	posted := make([]int64, len(charges))
 	for i, c := range charges {
 		posted[i] = c.PostedAmount
@@ -462,7 +468,8 @@ func lapsedUnspent(charges []gen.BillingRunningCharge, lapsed []gen.ListLapsedCr
 
 // PublicBalance is bal as a customer's money in one currency: what its
 // running charges have accrued apart from its other holds, the rate they draw
-// it at and when its capacity reaches zero. It reads through s's own
+// it at and when its capacity reaches zero. A lot stops being available at
+// its lapse, before its expiry is posted. It reads through s's own
 // connection.
 func (s *MoneyService) PublicBalance(ctx context.Context, bal *models.MoneyBalance, mode billing.BillingMode, owed int64) (*billing.Balance, error) {
 	if s == nil || s.db == nil {
@@ -474,15 +481,21 @@ func (s *MoneyService) PublicBalance(ctx context.Context, bal *models.MoneyBalan
 		AvailableAmount: bal.Balance - bal.HeldBalance, OwedAmount: owed, AsOf: bal.AsOf,
 	}
 	q := s.db.Gen(ctx)
-	// With no running charge there is nothing to project.
 	charges, err := runningCharges(ctx, q, bal)
-	if err != nil || len(charges) == 0 {
+	if err != nil {
+		return out, err
+	}
+	// With no running charge there is nothing to project.
+	if len(charges) == 0 {
+		lapsed, err := lapsedUnspent(ctx, q, bal, nil)
+		out.AvailableAmount = satSub(out.AvailableAmount, lapsed)
 		return out, err
 	}
 	view, err := s.viewBalance(ctx, q, bal, charges)
 	if err != nil {
 		return out, err
 	}
+	out.AvailableAmount = view.available
 	out.AccrualRatePerHour, out.DepletesAt = view.accrualRate, view.project(lowBalanceLine{}, 0).depletesAt
 	return out, nil
 }

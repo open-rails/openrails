@@ -37,8 +37,6 @@ const (
 	MaxMerchantTTL = 120 * 24 * time.Hour
 	// MaxQuantity bounds one line.
 	MaxQuantity = 10_000
-	// PurgeAfter is how long an unpaid closed order without attempts is kept.
-	PurgeAfter = 90 * 24 * time.Hour
 )
 
 var (

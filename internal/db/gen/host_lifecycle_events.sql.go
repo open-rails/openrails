@@ -12,32 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const deleteHostLifecycleEventsBefore = `-- name: DeleteHostLifecycleEventsBefore :execrows
-DELETE FROM billing.host_outbox
-WHERE ctid IN (
-    SELECT hle.ctid FROM billing.host_outbox hle
-    WHERE hle.merchant_id = $1::uuid
-      AND hle.event_type <> 'payment.settled'
-      AND hle.recorded_at < $2::timestamptz
-    LIMIT $3::int
-)
-`
-
-type DeleteHostLifecycleEventsBeforeParams struct {
-	MerchantID uuid.UUID
-	Cutoff     time.Time
-	RowLimit   int32
-}
-
-// Batched: row_limit bounds one statement, the caller loops.
-func (q *Queries) DeleteHostLifecycleEventsBefore(ctx context.Context, arg DeleteHostLifecycleEventsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteHostLifecycleEventsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const enqueueHostLifecycleEvent = `-- name: EnqueueHostLifecycleEvent :execrows
 
 INSERT INTO billing.host_outbox

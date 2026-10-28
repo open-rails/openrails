@@ -132,39 +132,3 @@ func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, transition 
 	}
 	return rows, err
 }
-
-// ResumeRecoveryHeld releases obsolete blanket-hold markers through the normal
-// dispatcher. Every operation still rechecks its own guards. Manual card deletions
-// are excluded, including legacy requests.
-func (s *Store) ResumeRecoveryHeld(ctx context.Context, now time.Time, limit int32) (int, error) {
-	return s.resumeRecoveryHeld(ctx, nil, now, limit)
-}
-
-// WakeRecoveryHeld closes the race with completion that skipped a live verifier.
-// The caller invokes it only after its hold transition has committed.
-func (s *Store) WakeRecoveryHeld(ctx context.Context, id uuid.UUID, now time.Time) error {
-	_, err := s.resumeRecoveryHeld(ctx, &id, now, 1)
-	return err
-}
-
-func (s *Store) resumeRecoveryHeld(ctx context.Context, id *uuid.UUID, now time.Time, limit int32) (int, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return 0, err
-	}
-	count := 0
-	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		ids, err := s.db.NewWithPgxTx(tx).Gen(ctx).ResumeProviderRecoveryHeldOperations(ctx, gen.ResumeProviderRecoveryHeldOperationsParams{MerchantID: mid.UUID(), IntentID: id, Now: now, BatchSize: limit})
-		if err != nil {
-			return err
-		}
-		for _, id := range ids {
-			if _, err := s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: mid.UUID(), IntentID: id}, operationInsertOpts(now)); err != nil {
-				return err
-			}
-		}
-		count = len(ids)
-		return nil
-	})
-	return count, err
-}

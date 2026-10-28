@@ -57,21 +57,3 @@ SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings f
    AND f.resolution IS DISTINCT FROM 'foreign'
    AND NOT COALESCE(f.evidence @> '{"quiet_foreign":true}', false))::boolean;
 
--- name: ResumeProviderRecoveryHeldOperations :many
--- Upgrade compatibility: release obsolete blanket-hold delays through normal dispatch.
--- Manual card deletions are excluded; issuer retry dates and live leases stand.
-UPDATE billing.provider_intents
-SET next_attempt_at=sqlc.arg(now)::timestamptz,
-    result_evidence=result_evidence-'recovery_held', updated_at=now()
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id IN (
- SELECT id FROM billing.provider_intents
- WHERE merchant_id=sqlc.arg(merchant_id)::uuid
-   AND (sqlc.narg(intent_id)::uuid IS NULL OR id=sqlc.narg(intent_id)::uuid)
-   AND intent_type NOT IN ('nmi_vault_delete','platform_method_delete','hyperswitch_method_delete')
-   AND status IN ('pending','failed_retryable','unknown_needs_verify')
-   AND result_evidence @> '{"recovery_held":true}'::jsonb
-   AND (lease_expires_at IS NULL OR lease_expires_at<=sqlc.arg(now)::timestamptz)
- ORDER BY id LIMIT sqlc.arg(batch_size)::int
- FOR UPDATE SKIP LOCKED
-)
-RETURNING id;

@@ -2,7 +2,6 @@ package riverjobs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -51,13 +50,6 @@ const (
 	// provider read.
 	SubscriptionConvergeDebounce = wakejobs.Debounce
 
-	// A pending signup whose charge has not appeared yet is read again after
-	// a minute, the wait doubling to subscriptionConvergeSnoozeMax, until the
-	// row leaves `pending`. Only the converge job can activate it: no pull
-	// does. Once the row is converge.PendingStaleAfter old, the stale-pending
-	// pass owns it.
-	subscriptionConvergeSnoozeFor     = time.Minute
-	subscriptionConvergeSnoozeMax     = 30 * time.Minute
 	subscriptionConvergeMissingClient = "converge: rail client not configured"
 )
 
@@ -170,15 +162,6 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 	if err == nil {
 		return nil
 	}
-	var pending *webhooks.PendingError
-	if errors.As(err, &pending) && !workerNow(w.Clock).Before(pending.Since.Add(converge.PendingStaleAfter)) {
-		log.WithContext(ctx).WithFields(log.Fields{"rail": args.Rail, "reference": args.SubscriptionReference, "pending_since": pending.Since.UTC().Format(time.RFC3339)}).
-			Warn("subscription converge: the signup stayed pending past the stale threshold; the stale-pending pass owns it")
-		return nil
-	}
-	if errors.Is(err, webhooks.ErrConvergeRetryLater) {
-		return river.JobSnooze(pendingSnooze(job))
-	}
 	// Retryable: provider API down / transient DB failure — the job IS the
 	// dirty mark; River backoff re-fetches and converges later. Access intact.
 	return err
@@ -189,20 +172,6 @@ func (w *SubscriptionConvergeWorker) objects() *providerobjects.Observer {
 		return nil
 	}
 	return w.Objects()
-}
-
-// pendingSnooze is the wait before the next read of a pending signup: a
-// minute, doubling with each snooze up to subscriptionConvergeSnoozeMax.
-func pendingSnooze(job *river.Job[SubscriptionConvergeArgs]) time.Duration {
-	var meta struct {
-		Snoozes int `json:"snoozes"`
-	}
-	_ = json.Unmarshal(job.Metadata, &meta)
-	wait := subscriptionConvergeSnoozeFor
-	for range min(max(meta.Snoozes, 0), 5) {
-		wait *= 2
-	}
-	return min(wait, subscriptionConvergeSnoozeMax)
 }
 
 func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args SubscriptionConvergeArgs) (uuid.UUID, error) {

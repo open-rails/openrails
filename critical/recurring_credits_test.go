@@ -124,7 +124,7 @@ func recurringCredits(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, string(raw))
 	balance(t, a.alpha, customer, 25_000_000, 0, 25_000_000)
 	a.clock.Advance(first.ExpiresAt.Sub(a.clock.Now()))
-	runRegistered(t, fleet, "openrails.credit_expiry", 1)
+	runRegistered(t, fleet, "openrails.balance_watch", 1)
 	balance(t, a.alpha, customer, 0, 0, 0)
 	runRegistered(t, fleet, "openrails.dunning", 2)
 	require.Len(t, provider.effects(t), 3, "cancellation stops future payments without taking away paid credits")

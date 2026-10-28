@@ -140,4 +140,4 @@ funding repays it.
 
 `running_charges` rows are permanent. A merchant archive carries them, running
 ones included; `balance_watches` is derived, and a restore watches every
-running charge again.
+running charge and every credit lot that lapses again.

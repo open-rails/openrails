@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 func workerNow(c clockwork.Clock) time.Time {
@@ -77,22 +76,9 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 	terminal := false
 	err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(args.MerchantID), "provider operation", func(ctx context.Context) error {
 		now := workerNow(w.Clock)
-		prior, err := store.Get(ctx, args.IntentID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			terminal = true
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if intents.ManualPaymentMethodDelete(prior) {
-			terminal = true // Retire only this obsolete job; never execute the request.
-			return nil
-		}
 		row, err := store.PrepareDispatch(ctx, args.IntentID, now)
 		if errors.Is(err, pgx.ErrNoRows) {
-			// The scoped ledger is authoritative. An old JSON-addressed wake
-			// can outlive an authorized purge; there is no operation to run.
+			// A purged operation leaves its wake nothing to run.
 			terminal = true
 			return nil
 		}
@@ -105,20 +91,6 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 			}
 			terminal = true
 			return nil
-		}
-		// A recovery hold commits an immediate successor as well as retaining
-		// its ordinary retry date. This check survives either actor crashing
-		// between completion and the optional inline wakeup.
-		if intents.IsRecoveryHeld(row) && (row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.After(now)) {
-			if blocked, _ := intents.GateExecution(ctx, writeposture.View{Config: w.Config, DB: w.DB}, row.MerchantID, intents.Origin(row.Origin)); !blocked {
-				if err := store.WakeRecoveryHeld(ctx, row.ID, now); err != nil {
-					return err
-				}
-				row, err = store.Get(ctx, row.ID)
-				if err != nil {
-					return err
-				}
-			}
 		}
 		wake := row.NextAttemptAt
 		if row.LeaseExpiresAt != nil && (row.Status == intents.StatusInFlight || row.LeaseExpiresAt.After(wake)) {

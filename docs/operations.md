@@ -1113,15 +1113,18 @@ Row retention:
 | `reconciliation_findings` | resolved findings, 12 months (366 days) after they were resolved and last seen |
 | `maintenance_runs` | reconciliation runs no finding names, 12 months after they started; every other kind is permanent |
 | `order_attempts` | attempts that expired without reaching a provider, 90 days after `expires_at` |
-| `checkout_sessions` | at `purge_at`, 24 hours after the session expired |
+| `orders`, `order_lines` | unpaid canceled and expired orders that never started a payment attempt, 90 days after they closed |
 | `carts` | 30 days after `last_changed_at` |
 | `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `notifications` (customers') | 90 days once read, 180 days if never read |
 | `webhook_events` | 90 days after completion |
-| `host_outbox` | 30 days after delivery; an undelivered event is never deleted |
+| `host_outbox` | 90 days after `recorded_at`, and never before the configured event retention |
 | `idempotency_keys`, `solana_pay_references` | at expiry, and after the 7-day watch window |
 | `user_destructive_reservations` | 24 hours after `reserved_at`; the card, subscription and operation history stay intact |
-| `failed_usage_windows` | once the window has ended, on the merchant's next failed usage |
+| `failed_usage_windows` | once the window has ended |
+| `meter_period_quantities` | 100 days after `period_starts_at` |
+| `admission_denials_hourly`, `webhook_health_daily` | 13 months (397 days) after the hour or day |
+| `periodic_leases`, `worker_state` | a kind no fleet has scheduled, registered or run for 30 days |
 
 What is kept on purpose:
 
@@ -1144,9 +1147,10 @@ What is kept on purpose:
 
 How it runs:
 
-- The cleanup job (hourly) creates the partitions rows can be written into plus
-  two months ahead, drops the months past retention, then deletes rows for the
-  merchants that have any due, 1,000 rows per statement and at most 50,000 rows
+- The cleanup job (hourly) is the one owner of row retention. It creates the
+  partitions rows can be written into plus two months ahead, drops the months
+  past retention, deletes the deployment-wide rows due, then deletes rows for
+  the merchants that have any due, 1,000 rows per statement and at most 50,000 rows
   per merchant per pass. A backlog drains over the following passes. Partitions
   are also ensured at migration and by the first write a process makes in a new
   month, so writes never wait for the job.
@@ -1228,12 +1232,11 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 
 | Worker | Cadence |
 |---|---|
-| Balance watch (due customer watches only); due renewals and retries; job rescue | 1 min |
+| Balance watch (due customer watches only, credit lot lapses included); due renewals and retries; job rescue | 1 min |
 | Order expiry | 5 min |
 | Convergence sweep | 15 min |
 | Rebill watch; charge-attribution read; arrears delinquency | 15 min |
-| Price-migration re-driver | 1 h |
-| Admission-denial flush (closed hours); due daily NMI history read; expired-data cleanup; idempotency cleanup; credit expiry; Solana crank; Solana Pay reference GC; Stripe webhook reconciliation | 1 h |
+| Admission-denial flush (closed hours); due daily NMI history read; retention cleanup; Solana crank; Stripe webhook reconciliation | 1 h |
 | Provider refresh scheduler (fans out per merchant) | 2 h |
 | Stored card refresh ahead of renewal | 6 h |
 | Ledger integrity audit | 24 h |

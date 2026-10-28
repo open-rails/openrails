@@ -78,8 +78,8 @@ func TestSolanaCrank(t *testing.T) {
 					}
 					return len(jobs.Jobs)
 				}
-				// Periodic work runs once on start; Solana Pay GC is always there.
-				require.Eventually(t, func() bool { return kinds("openrails.solana_pay_gc") > 0 }, 20*time.Second, 50*time.Millisecond)
+				// Periodic work runs once on start; retention cleanup is always there.
+				require.Eventually(t, func() bool { return kinds("openrails.cleanup_expired_data") > 0 }, 20*time.Second, 50*time.Millisecond)
 				if recurring {
 					require.Eventually(t, func() bool { return kinds("openrails.solana_crank") > 0 }, 20*time.Second, 50*time.Millisecond)
 					return

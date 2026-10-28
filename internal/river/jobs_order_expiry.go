@@ -23,9 +23,10 @@ type OrderExpiryArgs struct{}
 func (OrderExpiryArgs) Kind() string { return KindOrderExpiry }
 
 // OrderExpiryWorker expires orders past their expiry, releasing their claims,
-// and purges unpaid closed orders past retention. It never touches an order
-// whose payment is processing: only the provider's answer ends that. It also
-// removes card saves left waiting for the bank's authentication.
+// and the order attempts still waiting on their customer past theirs: it is
+// their one expiry writer. It never touches an order whose payment is
+// processing: only the provider's answer ends that. It also removes card
+// saves left waiting for the bank's authentication.
 type OrderExpiryWorker struct {
 	river.WorkerDefaults[OrderExpiryArgs]
 	DB     *db.DB
@@ -41,7 +42,8 @@ func (w OrderExpiryWorker) Work(ctx context.Context, _ *river.Job[OrderExpiryArg
 	if w.Orders == nil {
 		return nil
 	}
-	merchants, err := orders.SweepMerchants(ctx, w.DB, workerNow(w.Clock), orderExpiryBatch)
+	now := workerNow(w.Clock)
+	merchants, err := orders.ExpiryMerchants(ctx, w.DB, now, orderExpiryBatch)
 	if err != nil {
 		return fmt.Errorf("order expiry: list merchants: %w", err)
 	}
@@ -50,13 +52,15 @@ func (w OrderExpiryWorker) Work(ctx context.Context, _ *river.Job[OrderExpiryArg
 	for _, id := range merchants {
 		progress.Mark(ctx, "order expiry merchant "+id.String())
 		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(id), "order expiry sweep", func(ctx context.Context) error {
-			_, err := w.Orders.ExpireDue(ctx, orderExpiryBatch)
+			if _, err := w.Orders.ExpireDue(ctx, orderExpiryBatch); err != nil {
+				return err
+			}
+			_, err := w.DB.Gen(ctx).ExpireOrderAttempts(ctx, gen.ExpireOrderAttemptsParams{MerchantID: id, Now: now, RowLimit: orderExpiryBatch})
 			return err
 		}); err != nil {
 			workErr = errors.Join(workErr, fmt.Errorf("order expiry: merchant %s: %w", id, err))
 		}
 	}
-	now := workerNow(w.Clock)
 	before := now.Add(-payment.SetupAbandonAfter)
 	stale, err := w.DB.GenDirectory().ListStaleSetupMerchants(ctx, gen.ListStaleSetupMerchantsParams{Before: before, Now: now, MerchantLimit: orderExpiryBatch})
 	if err != nil {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,21 +18,16 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/parking"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/pspimport"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 // NMIConvergeService fetch-and-converges one NMI subscription: it probes
@@ -105,17 +99,6 @@ func (s *NMIConvergeService) Converge(ctx context.Context, reference string) (uu
 
 // convergeHeld converges a subscription OpenRails holds to fetched truth.
 func (s *NMIConvergeService) convergeHeld(ctx context.Context, rail string, sub *models.Subscription, now time.Time) (uuid.UUID, error) {
-	if sub.Status == models.StatusPending {
-		handled, err := s.activateAcceptedInitialPayment(ctx, sub, now)
-		if !handled {
-			err = s.activatePendingFromProbe(ctx, rail, sub, now)
-		}
-		if errors.Is(err, ErrConvergeRetryLater) {
-			err = &PendingError{Since: sub.CreatedAt, Err: err}
-		}
-		return sub.CustomerID, err
-	}
-
 	prober := &reconcile.NMISubscriptionProber{Client: s.NMIClient}
 	snap, err := prober.ProbeSubscription(ctx, reconcile.ProbeSubject{
 		LocalID:            sub.ID,
@@ -254,180 +237,6 @@ func (s *NMIConvergeService) convergeUnheld(ctx context.Context, rail, reference
 		return uuid.Nil, fmt.Errorf("nmi converge: load adopted %s: %w", reference, err)
 	}
 	return s.convergeHeld(ctx, rail, sub, now)
-}
-
-// activatePendingFromProbe is the signup leg: a pending NMI subscription
-// activates ONLY off a fetched settled charge for its order reference (the
-// local id, stamped as orderid/ponumber at signup). A fetched decline fails
-// the membership; nothing fetched yet snoozes the job (ErrConvergeRetryLater).
-func (s *NMIConvergeService) activatePendingFromProbe(ctx context.Context, rail string, sub *models.Subscription, now time.Time) error {
-	if delayedStart := nmiFutureDelayedStart(sub.Metadata, now); delayedStart != nil {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id": sub.ID, "delayed_start": delayedStart.UTC().Format(time.RFC3339),
-		}).Info("nmi converge: purchase delayed_start is in the future; keeping pending")
-		return nil
-	}
-
-	since := sub.CreatedAt.UTC().Add(-24 * time.Hour)
-	probe, err := s.NMIClient.ProbeSalesByOrderID(ctx, sub.ID.String(), since)
-	if err != nil {
-		return fmt.Errorf("nmi converge: probe signup charge for %s: %w", sub.ID, err)
-	}
-
-	switch {
-	case probe.SuccessFound && probe.SuccessTransactionID != "":
-		return s.activateFromSettledCharge(ctx, rail, sub, probe)
-	case probe.DeclineFound:
-		return s.failPendingFromDecline(ctx, rail, sub, probe)
-	default:
-		// No charge attempt visible yet — settlement lag. Snooze and re-fetch.
-		return fmt.Errorf("%w: pending nmi subscription %s has no fetched charge attempt yet", ErrConvergeRetryLater, sub.ID)
-	}
-}
-
-func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail string, sub *models.Subscription, probe nmi.SaleProbeResult) error {
-	price, err := s.PriceService.GetByID(ctx, sub.PriceID)
-	if err != nil {
-		return fmt.Errorf("nmi converge: load price for activation: %w", err)
-	}
-
-	// Fetched amount and currency, verbatim; the subscription's price is the
-	// declared fallback when the report omitted them (never fabricated).
-	currency := normalizeNMICurrencyValue(probe.SuccessCurrency, price.Currency)
-	if moneyutil.NormalizeCurrency(currency) != moneyutil.NormalizeCurrency(price.Currency) {
-		return fmt.Errorf("nmi converge: fetched charge currency %s does not match price currency %s", currency, price.Currency)
-	}
-	amount := price.Amount
-	if raw := strings.TrimSpace(probe.SuccessAmount); raw != "" {
-		minor, perr := moneyutil.DecimalToRailMinor(currency, raw)
-		if perr != nil {
-			return fmt.Errorf("nmi converge: unparseable fetched charge amount %q: %w", raw, perr)
-		}
-		if !nmiAmountMatchesExpected(price.Currency, minor, moneyutil.Micros(price.Amount)) {
-			return fmt.Errorf("nmi converge: fetched charge amount %s does not match expected price %s", raw, moneyutil.FormatAmount(price.Amount, price.Currency))
-		}
-		if amount, perr = moneyutil.RailMinorToNative(currency, minor); perr != nil {
-			return fmt.Errorf("nmi converge: fetched charge amount %q: %w", raw, perr)
-		}
-	}
-
-	if s.DB != nil {
-		removed, err := subscriptions.RemoveCanceledSubscriptionsForActivation(ctx, s.DB, sub.CustomerID.String(), sub.ProductID, sub.ID)
-		if err != nil {
-			return fmt.Errorf("nmi converge: cleanup canceled subscriptions before activation: %w", err)
-		}
-		if removed > 0 {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"user_id": sub.CustomerID.String(), "removed": removed,
-			}).Info("nmi converge: removed canceled subscriptions before activation")
-		}
-	}
-
-	var purchasedAt *time.Time
-	if !probe.SuccessAt.IsZero() {
-		t := probe.SuccessAt
-		purchasedAt = &t
-	}
-	if _, err := s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
-		PriceID:            sub.PriceID,
-		UserID:             sub.CustomerID.String(),
-		Rail:               models.Rail(rail),
-		RailSubscriptionID: &sub.RailSubscriptionID,
-		TransactionID:      probe.SuccessTransactionID,
-		Amount:             amount,
-		AmountProvided:     true,
-		Currency:           currency,
-		PurchasedAt:        purchasedAt,
-	}); err != nil {
-		return fmt.Errorf("nmi converge: activate pending subscription: %w", err)
-	}
-	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id":      sub.ID,
-		"rail_subscription_id": sub.RailSubscriptionID,
-		"transaction_id":       probe.SuccessTransactionID,
-	}).Info("nmi converge: pending subscription activated from fetched settled charge")
-
-	return nil
-}
-
-// failPendingFromDecline records the fetched decline and fails the pending
-// membership (FailMembership owns the retry/terminal decision inline).
-func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail string, sub *models.Subscription, probe nmi.SaleProbeResult) error {
-	if probe.DeclineTransactionID != "" {
-		if err := s.recordInitialDecline(ctx, rail, sub, probe); err != nil {
-			return fmt.Errorf("nmi converge: record fetched decline: %w", err)
-		}
-	}
-
-	var failureReason, failureCode *string
-	if r := strings.TrimSpace(probe.DeclineReason); r != "" {
-		failureReason = &r
-	}
-	if probe.DeclineResponseCode != 0 {
-		code := strconv.Itoa(probe.DeclineResponseCode)
-		failureCode = &code
-	}
-	var failureID uuid.UUID
-	if probe.DeclineTransactionID != "" {
-		failureID = uuid.NewSHA1(sub.PspID, []byte("decline:"+probe.DeclineTransactionID))
-	}
-	if err := s.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Rail:           models.Rail(rail),
-		SubscriptionID: &sub.ID,
-		FailureReason:  failureReason,
-		FailureCode:    failureCode,
-		FailureID:      failureID,
-		// The dunning worker's classifier, so a decline arriving over the
-		// webhook plane gets the same three-way answer.
-		Decline: decline.Classify(rail, normalize.FromPtr(failureCode)).Action,
-		// The attempt was recorded above: a real provider attempt underlies
-		// this failure.
-		AttemptRecorded: true,
-	}); err != nil {
-		return fmt.Errorf("nmi converge: fail pending membership: %w", err)
-	}
-	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id": sub.ID, "decline_transaction_id": probe.DeclineTransactionID,
-	}).Info("nmi converge: pending subscription failed from fetched decline")
-	return nil
-}
-
-// recordInitialDecline records the fetched decline of a pending
-// subscription's first charge as its initial attempt.
-func (s *NMIConvergeService) recordInitialDecline(ctx context.Context, rail string, sub *models.Subscription, probe nmi.SaleProbeResult) error {
-	currency := normalizeNMICurrencyValue(probe.DeclineCurrency)
-	if currency == "" && sub.Price != nil {
-		currency = strings.ToLower(strings.TrimSpace(sub.Price.Currency))
-	}
-	amount := int64(0)
-	if minor, err := moneyutil.DecimalToRailMinor(currency, probe.DeclineAmount); err == nil {
-		if native, err := moneyutil.RailMinorToNative(currency, minor); err == nil {
-			amount = native
-		}
-	}
-	// The price is the declared fallback only for an amount in its currency.
-	if amount == 0 && sub.Price != nil && moneyutil.NormalizeCurrency(currency) == moneyutil.NormalizeCurrency(sub.Price.Currency) {
-		amount = sub.Price.Amount
-	}
-	at := s.now()
-	if !probe.DeclineAt.IsZero() {
-		at = probe.DeclineAt
-	}
-	code := ""
-	if probe.DeclineResponseCode != 0 {
-		code = strconv.Itoa(probe.DeclineResponseCode)
-	}
-	charged, err := subscriptions.PaymentMethodOf(ctx, s.DB.Gen(ctx), sub)
-	if err != nil {
-		return err
-	}
-	return attempts.Record(ctx, s.DB.Gen(ctx), attempts.Attempt{
-		MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, PSPID: sub.PspID, Rail: rail,
-		Kind: attempts.Initial, Owner: attempts.OwnerOf(sub.CollectionPolicy), ObservedVia: attempts.ObservedFrom(ctx, "pull"),
-		Answer: decline.Evidence{Code: code, Text: strings.TrimSpace(probe.DeclineReason)}, TransactionID: probe.DeclineTransactionID,
-		Amount: amount, Currency: currency, At: at, Target: sub.PriceID.String(),
-		SubscriptionID: &sub.ID, PaymentMethodID: charged, TokenType: charge.TokenTypePSPToken,
-	})
 }
 
 // resolveNMISubscriptionByReference resolves an NMI event reference to the

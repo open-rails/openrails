@@ -111,58 +111,6 @@ func (q *Queries) PSPRecoveryHistoryFloor(ctx context.Context, arg PSPRecoveryHi
 	return oldest_at, err
 }
 
-const resumeProviderRecoveryHeldOperations = `-- name: ResumeProviderRecoveryHeldOperations :many
-UPDATE billing.provider_intents
-SET next_attempt_at=$1::timestamptz,
-    result_evidence=result_evidence-'recovery_held', updated_at=now()
-WHERE merchant_id=$2::uuid AND id IN (
- SELECT id FROM billing.provider_intents
- WHERE merchant_id=$2::uuid
-   AND ($3::uuid IS NULL OR id=$3::uuid)
-   AND intent_type NOT IN ('nmi_vault_delete','platform_method_delete','hyperswitch_method_delete')
-   AND status IN ('pending','failed_retryable','unknown_needs_verify')
-   AND result_evidence @> '{"recovery_held":true}'::jsonb
-   AND (lease_expires_at IS NULL OR lease_expires_at<=$1::timestamptz)
- ORDER BY id LIMIT $4::int
- FOR UPDATE SKIP LOCKED
-)
-RETURNING id
-`
-
-type ResumeProviderRecoveryHeldOperationsParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-	IntentID   *uuid.UUID
-	BatchSize  int32
-}
-
-// Upgrade compatibility: release obsolete blanket-hold delays through normal dispatch.
-// Manual card deletions are excluded; issuer retry dates and live leases stand.
-func (q *Queries) ResumeProviderRecoveryHeldOperations(ctx context.Context, arg ResumeProviderRecoveryHeldOperationsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, resumeProviderRecoveryHeldOperations,
-		arg.Now,
-		arg.MerchantID,
-		arg.IntentID,
-		arg.BatchSize,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const upsertPSPAppliedRefreshWatermark = `-- name: UpsertPSPAppliedRefreshWatermark :exec
 INSERT INTO billing.psp_refresh_watermarks (merchant_id, psp_id, event_domain, watermark_at)
 VALUES ($1::uuid, $2::uuid, 'applied_events', $3::timestamptz)

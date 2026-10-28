@@ -113,29 +113,6 @@ func (q *Queries) CountOrderFailedAttemptsByPSP(ctx context.Context, arg CountOr
 	return items, nil
 }
 
-const expireOrderAttemptByID = `-- name: ExpireOrderAttemptByID :execrows
-UPDATE billing.order_attempts
-SET status = 'expired', updated_at = $1::timestamptz
-WHERE merchant_id = $2::uuid AND id = $3::uuid
-  AND status IN ('created', 'requires_action')
-  AND deleted_at IS NULL
-`
-
-type ExpireOrderAttemptByIDParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-// Repair for life.order_attempt.stale: mark one stale session expired.
-func (q *Queries) ExpireOrderAttemptByID(ctx context.Context, arg ExpireOrderAttemptByIDParams) (int64, error) {
-	result, err := q.db.Exec(ctx, expireOrderAttemptByID, arg.Now, arg.MerchantID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const expireOrderAttempts = `-- name: ExpireOrderAttempts :execrows
 UPDATE billing.order_attempts
 SET status = 'expired', updated_at = $1
@@ -156,6 +133,8 @@ type ExpireOrderAttemptsParams struct {
 	RowLimit   int32
 }
 
+// The order expiry's: attempts still waiting on their customer past their
+// expiry, a bounded batch.
 func (q *Queries) ExpireOrderAttempts(ctx context.Context, arg ExpireOrderAttemptsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, expireOrderAttempts, arg.Now, arg.MerchantID, arg.RowLimit)
 	if err != nil {
@@ -298,44 +277,6 @@ func (q *Queries) GetOrderAttemptByReference(ctx context.Context, arg GetOrderAt
 		&i.OrderID,
 	)
 	return i, err
-}
-
-const listStaleOrderAttempts = `-- name: ListStaleOrderAttempts :many
-SELECT id FROM billing.order_attempts
-WHERE merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR customer_id = $2::uuid)
-  AND expires_at IS NOT NULL AND expires_at < $3::timestamptz
-  AND status IN ('created', 'requires_action')
-  AND deleted_at IS NULL
-ORDER BY expires_at
-`
-
-type ListStaleOrderAttemptsParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Now        time.Time
-}
-
-// #511 LIFE plane (life.order_attempt.stale): expired-but-not-terminal
-// order attempts for a scope. Detection (read-only) for the Convergence Engine.
-func (q *Queries) ListStaleOrderAttempts(ctx context.Context, arg ListStaleOrderAttemptsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listStaleOrderAttempts, arg.MerchantID, arg.CustomerID, arg.Now)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const updateOrderAttempt = `-- name: UpdateOrderAttempt :execrows

@@ -13,16 +13,19 @@ runs out: once per crossing, re-armed only by a funding.
 
 ## Who is watched
 
-Every prepaid balance (customer and currency), and every balance with a
-[running charge](running-charges.md). An arrears customer with no running
-charge is not watched: its limit is the credit line, refused at admission and
-covered by the [delinquency notices](arrears-delinquency.md).
+Every prepaid balance (customer and currency), every balance with a
+[running charge](running-charges.md) and every balance holding a credit lot
+that lapses. An arrears customer with neither is not watched: its limit is the
+credit line, refused at admission and covered by the
+[delinquency notices](arrears-delinquency.md).
 
 A watch costs nothing while nothing changes. A deposit, a credit grant, a
 spend, a capture, a hold, an expiry or a refund marks it due, and every
 minute one job looks at the due watches. A burst of spends is one look.
 Time alone moves a balance in two ways, and each look schedules both: a
-running charge's accrual, and a credit lot whose lapse crosses a line.
+running charge's accrual, and a credit lot's lapse. The look at a lapse
+expires the lot; a balance read leaves it out of `available_amount` from its
+lapse on.
 
 ## The lines
 

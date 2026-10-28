@@ -267,7 +267,7 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 			if err := terms.ValidateSubscriptionIdentity(sub, params.Rail, provider); err != nil {
 				return nil, nil, err
 			}
-			if sub.Status != models.StatusPending || terms.Pending {
+			if sub.Status != models.StatusPending {
 				if terms.Amount > 0 {
 					payment, err := payments.NewPaymentRepo(txDB).GetByID(ctx, terms.PaymentID)
 					if err != nil {
@@ -280,11 +280,7 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 						return nil, nil, err
 					}
 				}
-				before := terms.PeriodEnd
-				if terms.Pending {
-					before = terms.PeriodStart
-				}
-				rows, err := txDB.Gen(ctx).ListInitialMembershipGrants(ctx, gen.ListInitialMembershipGrantsParams{MerchantID: mid.UUID(), SubscriptionID: terms.SubscriptionID, Before: before, RowLimit: InitialMembershipGrantLimit})
+				rows, err := txDB.Gen(ctx).ListInitialMembershipGrants(ctx, gen.ListInitialMembershipGrantsParams{MerchantID: mid.UUID(), SubscriptionID: terms.SubscriptionID, Before: terms.PeriodEnd, RowLimit: InitialMembershipGrantLimit})
 				if err != nil {
 					return nil, nil, err
 				}
@@ -555,11 +551,6 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				return nil, nil, fmt.Errorf("accepted membership metadata: %w", err)
 			}
 			subscription.Metadata = metadata
-			if terms.Pending {
-				subscription.Status = models.StatusPending
-				subscription.StartedAt = terms.AcceptedAt
-				subscription.CurrentPeriodStartsAt, subscription.CurrentPeriodEndsAt = nil, nil
-			}
 			if terms.AwaitingMethod {
 				subscription.Status = models.StatusAwaitingMethod
 				deadline, err := awaitMethodDeadline(ctx, dbb, priceService, subscription)
@@ -613,10 +604,6 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		if _, err := initialBill(ctx, dbb, params, subscription, nil, now); err != nil {
 			return nil, nil, err
 		}
-	}
-
-	if params.Prepared != nil && params.Prepared.Pending {
-		return subscription, nil, nil
 	}
 
 	notifications := make([]*models.NotificationEvent, 0, 1)

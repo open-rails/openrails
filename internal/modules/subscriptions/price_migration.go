@@ -12,10 +12,14 @@ package subscriptions
 //   - an NMI gateway schedule: the amount is pushed (update_subscription) once
 //     the subscription is in its last period before effective_at, and the
 //     subscription moves at once, since NMI bills the new amount from its next
-//     rebill; a push before then would flip a period early, so the move
-//     blocks and the re-driver pushes it in time.
+//     rebill; a push before then would flip a period early.
 //   - CCBill, Solana, an NMI schedule no declared account reaches: blocked
 //     (rail_requires_user_action); the fallback policy records intent.
+//
+// A provider push is a price_migration_push operation recorded with the move:
+// it waits for the subscription's last period before the move, retries on
+// its backoff, and resolves the move (applied, skipped or blocked). A
+// migration's command settles when its last move resolves.
 
 import (
 	"context"
@@ -88,8 +92,14 @@ type StripePusher interface {
 	ScheduleSubscriptionPriceChange(ctx context.Context, subscriptionID, currentPriceID, newPriceID string, currentPeriodStart, currentPeriodEnd time.Time, billingCycleDays *int) (string, error)
 }
 
+// MigrationPushes records a move's provider push as a durable operation in
+// the caller's transaction, first tried at notBefore.
+type MigrationPushes interface {
+	QueuePush(ctx context.Context, d *db.DB, sub *models.Subscription, change *models.ScheduledChange, notBefore time.Time) error
+}
+
 // PriceMigrationService creates, previews, reads and cancels price
-// migrations, and re-drives their failed pushes.
+// migrations, and pushes their moves.
 type PriceMigrationService struct {
 	db            *db.DB
 	prices        *catalog.PriceService
@@ -97,6 +107,7 @@ type PriceMigrationService struct {
 	config        *merchantconfig.Store
 	stripe        StripePusher
 	nmi           NMIPusher
+	pushes        MigrationPushes
 	clock         clockwork.Clock
 	admissions    *destructive.Admissions
 }
@@ -108,9 +119,15 @@ func NewPriceMigrationService(d *db.DB, prices *catalog.PriceService, subscripti
 func (s *PriceMigrationService) now() time.Time { return s.clock.Now() }
 
 // WithDestructiveAdmissions binds the same command budget used by all staff
-// changes. Pending migration pushes retain their original reservation.
+// changes. A migration keeps its reservation until its last move resolves.
 func (s *PriceMigrationService) WithDestructiveAdmissions(a *destructive.Admissions) *PriceMigrationService {
 	s.admissions = a
+	return s
+}
+
+// WithPushes binds where a move's provider push is recorded.
+func (s *PriceMigrationService) WithPushes(p MigrationPushes) *PriceMigrationService {
+	s.pushes = p
 	return s
 }
 
@@ -339,6 +356,8 @@ func (s *PriceMigrationService) classify(ctx context.Context, plan *migrationPla
 			block(migrationBlockedNMIIntervalMismatch)
 		case c.capability == capabilityAutoNMI && !railMinorRepresentable(plan.target.Currency, plan.target.Amount):
 			block(migrationBlockedNMISubCentAmount)
+		case c.capability == capabilityAutoStripe && (!stripeMapped(c.from) || !stripeMapped(plan.target)):
+			block(migrationBlockedMissingRailPrice)
 		default:
 			violated, err := s.noticeViolated(ctx, c.from, plan.target, plan.effectiveAt)
 			if err != nil {
@@ -392,9 +411,8 @@ func (s *PriceMigrationService) Preview(ctx context.Context, p billing.CreatePri
 	return out, nil
 }
 
-// Create records the migration and moves each classified subscription. A
-// failed provider push blocks that subscription's move and the rest go on;
-// the re-driver retries it.
+// Create records the migration and moves each classified subscription, each
+// provider push recorded with its move.
 func (s *PriceMigrationService) Create(ctx context.Context, p billing.CreatePriceMigrationParams) (*billing.PriceMigration, error) {
 	plan, err := s.resolve(ctx, p, false)
 	if err != nil {
@@ -488,15 +506,23 @@ func (s *PriceMigrationService) Create(ctx context.Context, p billing.CreatePric
 		if err := s.finishMigrationAdmission(ctx, *action, destructive.OutcomeUncertain, "migration:"+migration.String()+":prepared"); err != nil {
 			return nil, err
 		}
+		// Every move may already have resolved.
+		if err := s.db.Gen(ctx).SettlePriceMigration(ctx, gen.SettlePriceMigrationParams{MerchantID: mid.UUID(), PriceMigrationID: migration, Now: s.now().UTC()}); err != nil {
+			return nil, err
+		}
 	}
 	prepared = true
 	return s.Get(ctx, billing.PriceMigrationID(migration))
 }
 
-// move schedules one subscription's change and pushes it to its provider.
-// It answers false when the subscription changed since classification.
+// move schedules one subscription's change and records its provider push,
+// due at once or in the subscription's last period before the move. It
+// answers false when the subscription changed since classification.
 func (s *PriceMigrationService) move(ctx context.Context, c *classified, target *models.Price, targetProduct *models.Product, effectiveAt time.Time, migration uuid.UUID) (bool, error) {
-	var change *models.ScheduledChange
+	pushed := c.capability == capabilityAutoStripe || c.capability == capabilityAutoNMI
+	if pushed && s.pushes == nil {
+		return false, errors.New("price migration: provider pushes are not wired")
+	}
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.db.NewWithPgxTx(tx)
 		sub, err := NewSubscriptionRepo(d).GetByIDForUpdate(ctx, c.sub.ID)
@@ -506,12 +532,22 @@ func (s *PriceMigrationService) move(ctx context.Context, c *classified, target 
 		if sub.PriceID != c.from.ID {
 			return errChangeNotScheduled
 		}
-		change, err = ScheduleChange(ctx, d, sub, NewScheduledChange{PriceID: target.ID, EffectiveAt: effectiveAt, Source: billing.ScheduledChangeMigration, PriceMigrationID: &migration, AcknowledgedShortNotice: c.acknowledged}, s.now())
+		change, err := ScheduleChange(ctx, d, sub, NewScheduledChange{PriceID: target.ID, EffectiveAt: effectiveAt, Source: billing.ScheduledChangeMigration, PriceMigrationID: &migration, AcknowledgedShortNotice: c.acknowledged}, s.now())
 		c.sub = sub
 		if err != nil {
 			return err
 		}
-		return s.notify(ctx, d, change, sub, c.from, target, targetProduct, effectiveAt)
+		if err := s.notify(ctx, d, change, sub, c.from, target, targetProduct, effectiveAt); err != nil {
+			return err
+		}
+		if !pushed {
+			return nil
+		}
+		notBefore := s.now()
+		if deferredPushRequired(effectiveAt, sub) {
+			notBefore = *sub.CurrentPeriodEndsAt
+		}
+		return s.pushes.QueuePush(ctx, d, sub, change, notBefore)
 	})
 	if errors.Is(err, errChangeNotScheduled) || errors.Is(err, ErrChangeAlreadyScheduled) || errors.Is(err, ErrRebillTermsCommitted) {
 		reason := err.Error()
@@ -521,27 +557,13 @@ func (s *PriceMigrationService) move(ctx context.Context, c *classified, target 
 	if err != nil {
 		return false, fmt.Errorf("price migration: schedule %s: %w", c.sub.ID, err)
 	}
-	if err := s.push(ctx, c.capability, c.sub, c.from, target, targetProduct, change); err != nil {
-		reason := migrationBlockedRailPushFailed + ": " + err.Error()
-		if berr := s.block(ctx, change.ID, reason); berr != nil {
-			return false, fmt.Errorf("price migration: block failed push for %s: %w", c.sub.ID, berr)
-		}
-		c.outcome.Disposition, c.outcome.Reason = billing.MigrationBlocked, &reason
-		return true, nil
-	}
-	if c.capability == capabilityAutoNMI {
-		c.outcome.Disposition = billing.MigrationApplied
-	}
 	return true, nil
 }
 
-func (s *PriceMigrationService) block(ctx context.Context, id uuid.UUID, reason string) error {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Gen(ctx).BlockScheduledChange(ctx, gen.BlockScheduledChangeParams{MerchantID: mid.UUID(), ID: id, BlockedReason: reason})
-	return err
+// stripeMapped reports whether a price names its Stripe price.
+func stripeMapped(p *models.Price) bool {
+	id, ok := p.GetStripeConfig()
+	return ok && strings.TrimSpace(id) != ""
 }
 
 // push performs the rail's part of one scheduled move.
@@ -572,10 +594,10 @@ func (s *PriceMigrationService) pushNMI(ctx context.Context, sub *models.Subscri
 		return fmt.Errorf("nmi pusher not configured")
 	}
 	if strings.TrimSpace(sub.RailSubscriptionID) == "" {
-		return fmt.Errorf("subscription missing nmi reference")
+		return fmt.Errorf("%w: subscription missing nmi reference", errPushRefused)
 	}
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
-		return fmt.Errorf("subscription missing current period end")
+		return fmt.Errorf("%w: subscription missing current period end", errPushRefused)
 	}
 	if deferredPushRequired(change.EffectiveAt, sub) {
 		return fmt.Errorf("nmi_deferred_push_required: effective_at %s is beyond the current period end %s", change.EffectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
@@ -595,18 +617,18 @@ func (s *PriceMigrationService) pushStripe(ctx context.Context, sub *models.Subs
 	}
 	targetStripeID, ok := target.GetStripeConfig()
 	if !ok || strings.TrimSpace(targetStripeID) == "" {
-		return fmt.Errorf("%s", migrationBlockedMissingRailPrice)
+		return fmt.Errorf("%w: %s", errPushRefused, migrationBlockedMissingRailPrice)
 	}
 	sourceStripeID, ok := source.GetStripeConfig()
 	if !ok || strings.TrimSpace(sourceStripeID) == "" {
-		return fmt.Errorf("%s", migrationBlockedMissingRailPrice)
+		return fmt.Errorf("%w: %s", errPushRefused, migrationBlockedMissingRailPrice)
 	}
 	railSubID := strings.TrimSpace(sub.RailSubscriptionID)
 	if railSubID == "" {
-		return fmt.Errorf("subscription missing stripe reference")
+		return fmt.Errorf("%w: subscription missing stripe reference", errPushRefused)
 	}
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
-		return fmt.Errorf("subscription missing current period end")
+		return fmt.Errorf("%w: subscription missing current period end", errPushRefused)
 	}
 	if deferredPushRequired(effectiveAt, sub) {
 		return fmt.Errorf("stripe_deferred_push_required: effective_at %s is beyond the current period end %s", effectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
@@ -673,12 +695,7 @@ func (s *PriceMigrationService) Get(ctx context.Context, id billing.PriceMigrati
 	if err != nil {
 		return nil, err
 	}
-	out := priceMigrationView(row.BillingPriceMigration, row.FromPricePublicID, row.ToPricePublicID, row.ProductKey, row.Scheduled, row.Applied, row.Canceled, row.Blocked)
-	if row.Scheduled == 0 && row.Blocked == 0 {
-		if err := s.finishSettledMigration(ctx, id); err != nil {
-			return nil, err
-		}
-	}
+	out := priceMigrationView(row.BillingPriceMigration, row.FromPricePublicID, row.ToPricePublicID, row.ProductKey, row.Scheduled, row.Applied, row.Canceled, row.Blocked, row.Skipped)
 	return &out, nil
 }
 
@@ -695,7 +712,7 @@ func (s *PriceMigrationService) List(ctx context.Context, p billing.PriceMigrati
 			return page, err
 		}
 		for _, r := range rows {
-			page.Items = append(page.Items, priceMigrationView(r.BillingPriceMigration, r.FromPricePublicID, r.ToPricePublicID, r.ProductKey, r.Scheduled, r.Applied, r.Canceled, r.Blocked))
+			page.Items = append(page.Items, priceMigrationView(r.BillingPriceMigration, r.FromPricePublicID, r.ToPricePublicID, r.ProductKey, r.Scheduled, r.Applied, r.Canceled, r.Blocked, r.Skipped))
 		}
 		return page, nil
 	}
@@ -727,18 +744,20 @@ func (s *PriceMigrationService) List(ctx context.Context, p billing.PriceMigrati
 	}
 	items := make([]billing.PriceMigration, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, priceMigrationView(r.BillingPriceMigration, r.FromPricePublicID, r.ToPricePublicID, r.ProductKey, r.Scheduled, r.Applied, r.Canceled, r.Blocked))
+		items = append(items, priceMigrationView(r.BillingPriceMigration, r.FromPricePublicID, r.ToPricePublicID, r.ProductKey, r.Scheduled, r.Applied, r.Canceled, r.Blocked, r.Skipped))
 	}
 	return pagination.Cut(items, limit, func(m billing.PriceMigration) any {
 		return pagination.TimeID{At: m.CreatedAt, ID: m.ID.UUID()}
 	}), nil
 }
 
-func priceMigrationView(m gen.BillingPriceMigration, fromID *string, toID string, productKey *string, scheduled, applied, canceled, blocked int64) billing.PriceMigration {
+// priceMigrationView counts a move skipped after creation with the
+// subscriptions skipped at it.
+func priceMigrationView(m gen.BillingPriceMigration, fromID *string, toID string, productKey *string, scheduled, applied, canceled, blocked, skipped int64) billing.PriceMigration {
 	out := billing.PriceMigration{
 		ID: billing.PriceMigrationID(m.ID), FromPriceID: (*billing.PriceID)(fromID), PriceKey: m.FromPriceKey,
 		ToPriceID: billing.PriceID(toID), EffectiveAt: m.EffectiveAt.UTC(), FallbackPolicy: billing.MigrationFallback(m.FallbackPolicy),
-		Matched: int(m.SubscriptionsMatched), Skipped: int(m.SubscriptionsSkipped),
+		Matched: int(m.SubscriptionsMatched), Skipped: int(m.SubscriptionsSkipped) + int(skipped),
 		Scheduled: int(scheduled), Applied: int(applied), Canceled: int(canceled), Blocked: int(blocked),
 		CreatedAt: m.CreatedAt.UTC(), CanceledAt: m.CanceledAt,
 	}
@@ -748,12 +767,12 @@ func priceMigrationView(m gen.BillingPriceMigration, fromID *string, toID string
 	return out
 }
 
-// Cancel cancels the migration's still-scheduled moves; applied and blocked
-// ones stay, and an archived source stays archived. A Stripe subscription
-// already carrying the move as a Stripe schedule is listed in
+// Cancel cancels the migration's still-scheduled moves and their pushes;
+// resolved ones stay, and an archived source stays archived. A Stripe
+// subscription already carrying the move as a Stripe schedule is listed in
 // RailReleaseRequired: that schedule is not released here. Canceling keeps
 // subscriptions where they are, so it spends no destructive unit and no hold
-// refuses it. The migration's own admission settles once no move is pending.
+// refuses it. The migration's own admission settles with its last move.
 func (s *PriceMigrationService) Cancel(ctx context.Context, id billing.PriceMigrationID) (*billing.PriceMigrationCancel, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {

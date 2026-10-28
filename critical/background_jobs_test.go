@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -167,7 +168,7 @@ func TestBackgroundJobs(t *testing.T) {
 		restore := storageFault(t, w, w.schema, "ledger_transfers", fmt.Sprintf("NEW.merchant_id = '%s'::uuid", w.alpha.MerchantID().UUID()))
 		w.clock.Advance(time.Hour)
 		fleet := startFleet(t, w)
-		runRegisteredFails(t, fleet, "openrails.credit_expiry")
+		runRegisteredFails(t, fleet, "openrails.balance_watch")
 		beta, err := w.beta.GetCreditGrant(t.Context(), lots[w.beta])
 		require.NoError(t, err)
 		require.EqualValues(t, 1000, beta.ExpiredAmount, "the other merchant's pass finishes")
@@ -175,10 +176,73 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, alpha.ExpiredAmount)
 		restore()
-		runRegistered(t, fleet, "openrails.credit_expiry", 1)
+		runRegistered(t, fleet, "openrails.balance_watch", 1)
 		alpha, err = w.alpha.GetCreditGrant(t.Context(), lots[w.alpha])
 		require.NoError(t, err)
 		require.EqualValues(t, 1000, alpha.ExpiredAmount)
+	})
+	t.Run("OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-counters-and-orphan-state", func(t *testing.T) {
+		a, p := newPaymentWorld(t, func(w *world) { w.deps.Redis = criticalRedis(t) })
+		w := a.world
+		fleet := hostFleet(t, w)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		_, price := publicSale(t, a, "retained-order", 9_990_000, nil)
+		unpaid, err := a.alphaRemote.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: "closed-unpaid"})
+		require.NoError(t, err)
+		_, err = a.alphaRemote.CancelOrder(t.Context(), unpaid.ID)
+		require.NoError(t, err)
+		challenged := saleInput(t, a, p)
+		p.core.SetDecline("4242", "auth")
+		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, challenged, map[string]string{"Idempotency-Key": "abandoned-challenge"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var waiting billing.Order
+		require.NoError(t, json.Unmarshal(raw, &waiting))
+		require.Equal(t, billing.OrderPaymentRequiresAction, waiting.Payment.Status)
+		attempt := func() string {
+			var state string
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT status FROM "+pgx.Identifier{w.schema, "order_attempts"}.Sanitize()+" WHERE order_id = $1", waiting.ID.UUID()).Scan(&state))
+			return state
+		}
+		require.Contains(t, []string{"created", "requires_action"}, attempt())
+		hour := w.clock.Now().UTC().Truncate(time.Hour)
+		denied, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, billing.CustomerID(uuid.New()), "denied", 500)})
+		require.NoError(t, err)
+		require.False(t, denied[0].Allowed())
+		// The deployment-global state of a kind no fleet runs any more.
+		orphans := func() int {
+			var n int
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM "+pgx.Identifier{w.schema, "periodic_leases"}.Sanitize()+" WHERE kind = 'openrails.retired') + (SELECT count(*) FROM "+pgx.Identifier{w.schema, "worker_state"}.Sanitize()+" WHERE worker_kind = 'openrails.retired')").Scan(&n))
+			return n
+		}
+		_, err = w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "periodic_leases"}.Sanitize()+" (kind, holder, expires_at) VALUES ('openrails.retired', 'gone', now() - interval '31 days')")
+		require.NoError(t, err)
+		_, err = w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "worker_state"}.Sanitize()+" (worker_kind, updated_at) VALUES ('openrails.retired', now() - interval '31 days')")
+		require.NoError(t, err)
+		require.Equal(t, 2, orphans())
+
+		w.clock.Advance(25 * time.Hour)
+		runRegistered(t, fleet, "openrails.admission_denial_flush", 1)
+		require.EqualValues(t, 1, deniedAdmissions(t, w, hour))
+		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
+		require.Contains(t, []string{"created", "requires_action"}, attempt(), "only the order expiry expires an attempt")
+		require.Zero(t, orphans())
+		runRegistered(t, fleet, "openrails.order_expiry", 1)
+		require.Equal(t, "expired", attempt())
+
+		w.clock.Advance(91 * 24 * time.Hour)
+		runRegistered(t, fleet, "openrails.order_expiry", 1)
+		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
+		require.NoError(t, err, "the order expiry deletes nothing")
+		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
+		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
+		require.ErrorIs(t, err, billing.ErrNotFound)
+		require.EqualValues(t, 1, deniedAdmissions(t, w, hour))
+		w.clock.Advance(397 * 24 * time.Hour)
+		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
+		require.Zero(t, deniedAdmissions(t, w, hour))
 	})
 	t.Run("OR-J37-S06/solana-renewal-waits-for-the-crank-before-a-missed-rebill", func(t *testing.T) {
 		s := newSolanaWorld(t, true)

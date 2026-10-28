@@ -212,7 +212,8 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
       SELECT 1 FROM billing.provider_intents pi
       WHERE pi.merchant_id = f.merchant_id
         AND pi.id::text = f.subject_key
-        AND ((pi.status IN ('pending', 'failed_retryable') AND pi.created_at <= sqlc.arg(action_cutoff)::timestamptz)
+        AND ((pi.status IN ('pending', 'failed_retryable') AND pi.created_at <= sqlc.arg(action_cutoff)::timestamptz
+              AND NOT (pi.intent_type = 'price_migration_push' AND pi.status = 'pending' AND pi.next_attempt_at > sqlc.arg(now)::timestamptz))
           OR (pi.status IN ('in_flight', 'unknown_needs_verify') AND pi.created_at <= sqlc.arg(verify_cutoff)::timestamptz))
   );
 

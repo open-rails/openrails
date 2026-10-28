@@ -263,14 +263,16 @@ WHERE f.merchant_id = $1::uuid
       SELECT 1 FROM billing.provider_intents pi
       WHERE pi.merchant_id = f.merchant_id
         AND pi.id::text = f.subject_key
-        AND ((pi.status IN ('pending', 'failed_retryable') AND pi.created_at <= $2::timestamptz)
-          OR (pi.status IN ('in_flight', 'unknown_needs_verify') AND pi.created_at <= $3::timestamptz))
+        AND ((pi.status IN ('pending', 'failed_retryable') AND pi.created_at <= $2::timestamptz
+              AND NOT (pi.intent_type = 'price_migration_push' AND pi.status = 'pending' AND pi.next_attempt_at > $3::timestamptz))
+          OR (pi.status IN ('in_flight', 'unknown_needs_verify') AND pi.created_at <= $4::timestamptz))
   )
 `
 
 type AutoResolveRecoveredStuckIntentFindingsParams struct {
 	MerchantID   uuid.UUID
 	ActionCutoff time.Time
+	Now          time.Time
 	VerifyCutoff time.Time
 }
 
@@ -279,7 +281,12 @@ type AutoResolveRecoveredStuckIntentFindingsParams struct {
 // re-scheduled) auto-resolves on the next LIFE pass. Cutoffs mirror the
 // detection (ListStuckProviderIntents) exactly — edit together.
 func (q *Queries) AutoResolveRecoveredStuckIntentFindings(ctx context.Context, arg AutoResolveRecoveredStuckIntentFindingsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, autoResolveRecoveredStuckIntentFindings, arg.MerchantID, arg.ActionCutoff, arg.VerifyCutoff)
+	result, err := q.db.Exec(ctx, autoResolveRecoveredStuckIntentFindings,
+		arg.MerchantID,
+		arg.ActionCutoff,
+		arg.Now,
+		arg.VerifyCutoff,
+	)
 	if err != nil {
 		return 0, err
 	}

@@ -57,8 +57,6 @@ var Tables = map[string]Table{
 	"price_key_movements":           {Permanent, permanent},
 	"price_migrations":              {Permanent, permanent},
 	"scheduled_changes":             {Permanent, permanent},
-	"admission_denials_hourly":      {Permanent, permanent},
-	"webhook_health_daily":          {Permanent, permanent},
 
 	"usage_events":         {PartitionedMonthly, "monthly partitions on occurred_at, dropped 24 months after the month's usage was billed."},
 	"admission_operations": {PartitionedMonthly, "monthly partitions on admitted_at, dropped once older than the longest spend window plus 30 days."},
@@ -85,6 +83,8 @@ var Tables = map[string]Table{
 	"failed_usage_windows":            {Rows, "rows are deleted once their window has ended."},
 	"meter_period_quantities":         {Rows, "rows are deleted 100 days after period_starts_at."},
 	"solana_pay_references":           {Rows, "settled references are deleted after their 7-day watch window."},
+	"admission_denials_hourly":        {Rows, "rows are deleted 13 months (397 days) after hour_at."},
+	"webhook_health_daily":            {Rows, "rows are deleted 13 months (397 days) after day_at."},
 
 	"merchants":                         {Class: State},
 	"merchant_slug_aliases":             {Class: State},

@@ -312,8 +312,6 @@ pkg openrails, method (LocalClient) WaiveOrderBalance(context.Context, billing.O
 pkg openrails, method (NMIPSP) PSPConfig() PSPConfig
 pkg openrails, method (SolanaPSP) PSPConfig() PSPConfig
 pkg openrails, method (StripePSP) PSPConfig() PSPConfig
-pkg openrails, method (UsageSweepArgs) InsertOpts() river.InsertOpts
-pkg openrails, method (UsageSweepArgs) Kind() string
 pkg openrails, type AlertWebhookConfig = config.AlertWebhookConfig
 pkg openrails, type AlertWebhookConfig struct
 pkg openrails, type AlertWebhookConfig struct, Enabled *bool `yaml:"enabled,omitempty"`
@@ -616,12 +614,6 @@ pkg openrails, type StripePSP struct, WebhookSigningSecret string `psp:"secrets.
 pkg openrails, type StripePSP struct, WebhookSigningSecretPrevious string `psp:"secrets.webhook_signing_secret_previous"`
 pkg openrails, type StripePSP struct, WebhookSigningSecretThin string `psp:"secrets.webhook_signing_secret_thin"`
 pkg openrails, type SubjectKind = billingauth.SubjectKind
-pkg openrails, type UsageSweepArgs struct
-pkg openrails, type UsageSweepArgs struct, Automatic bool `json:"automatic,omitempty"`
-pkg openrails, type UsageSweepArgs struct, Collect bool `json:"collect,omitempty"`
-pkg openrails, type UsageSweepArgs struct, FinalizePreviousMonth bool `json:"finalize_previous_month,omitempty"`
-pkg openrails, type UsageSweepArgs struct, MerchantID *billing.MerchantID `json:"merchant_id,omitempty"`
-pkg openrails, type UsageSweepArgs struct, UseMonthlyFloor bool `json:"use_monthly_floor,omitempty"`
 pkg openrails, type UserActionRateLimitConfig = config.UserActionRateLimitConfig
 pkg openrails, type UserActionRateLimitConfig struct
 pkg openrails, type UserActionRateLimitConfig struct, MinimumCustomersPerDay int64 `yaml:"minimum_customers_per_day" json:"minimum_customers_per_day"`
@@ -940,7 +932,6 @@ pkg openrails/billing, const MerchantRetirementRefusedNotLive MerchantRetirement
 pkg openrails/billing, const MerchantRetirementRefusedReserved MerchantRetirementRefusal = "reserved"
 pkg openrails/billing, const MerchantUsageManage Permission = "merchant:usage:manage"
 pkg openrails/billing, const MerchantUsageRead Permission = "merchant:usage:read"
-pkg openrails/billing, const MigrationApplied PriceMigrationDisposition = "applied"
 pkg openrails/billing, const MigrationBlocked PriceMigrationDisposition = "blocked"
 pkg openrails/billing, const MigrationCancelAtPeriodEnd MigrationFallback = "cancel_at_period_end"
 pkg openrails/billing, const MigrationKeepGrandfathered MigrationFallback = "keep_grandfathered"

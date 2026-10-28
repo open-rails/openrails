@@ -172,28 +172,3 @@ func (q *Queries) ListUsageRatingCards(ctx context.Context, arg ListUsageRatingC
 	}
 	return items, nil
 }
-
-const pruneMeterPeriodQuantities = `-- name: PruneMeterPeriodQuantities :execrows
-DELETE FROM billing.meter_period_quantities q
-WHERE (q.merchant_id, q.customer_id, q.currency, q.meter_key, q.cell, q.period_starts_at) IN (
-    SELECT e.merchant_id, e.customer_id, e.currency, e.meter_key, e.cell, e.period_starts_at
-    FROM billing.meter_period_quantities e
-    WHERE e.merchant_id = $1::uuid AND e.period_starts_at < $2::timestamptz
-    LIMIT 100
-    FOR UPDATE SKIP LOCKED)
-`
-
-type PruneMeterPeriodQuantitiesParams struct {
-	MerchantID uuid.UUID
-	Before     time.Time
-}
-
-// Periods past the ingest window go a bounded batch at a time, on the next
-// write; a row another writer holds waits for a later one.
-func (q *Queries) PruneMeterPeriodQuantities(ctx context.Context, arg PruneMeterPeriodQuantitiesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, pruneMeterPeriodQuantities, arg.MerchantID, arg.Before)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}

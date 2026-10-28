@@ -40,9 +40,10 @@ func (q *Queries) ApplyPendingScheduledChangeAtPrice(ctx context.Context, arg Ap
 	return result.RowsAffected(), nil
 }
 
-const applyScheduledChange = `-- name: ApplyScheduledChange :execrows
+const applyScheduledChange = `-- name: ApplyScheduledChange :one
 UPDATE billing.scheduled_changes SET status = 'applied', applied_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND id = $3::uuid AND status = 'scheduled'
+RETURNING merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason
 `
 
 type ApplyScheduledChangeParams struct {
@@ -51,37 +52,75 @@ type ApplyScheduledChangeParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) ApplyScheduledChange(ctx context.Context, arg ApplyScheduledChangeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, applyScheduledChange, arg.Now, arg.MerchantID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+func (q *Queries) ApplyScheduledChange(ctx context.Context, arg ApplyScheduledChangeParams) (BillingScheduledChange, error) {
+	row := q.db.QueryRow(ctx, applyScheduledChange, arg.Now, arg.MerchantID, arg.ID)
+	var i BillingScheduledChange
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.SubscriptionID,
+		&i.FromPriceID,
+		&i.PriceID,
+		&i.Quantity,
+		&i.EffectiveAt,
+		&i.Source,
+		&i.PriceMigrationID,
+		&i.Status,
+		&i.BlockedReason,
+		&i.AcknowledgedShortNotice,
+		&i.CreatedAt,
+		&i.AppliedAt,
+		&i.CanceledAt,
+		&i.Invoker,
+		&i.Reason,
+	)
+	return i, err
 }
 
-const blockScheduledChange = `-- name: BlockScheduledChange :execrows
+const blockScheduledChange = `-- name: BlockScheduledChange :one
 UPDATE billing.scheduled_changes SET status = 'blocked', blocked_reason = $1::text
 WHERE merchant_id = $2::uuid AND id = $3::uuid AND status = 'scheduled'
   AND source = 'migration'
+RETURNING merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason
 `
 
 type BlockScheduledChangeParams struct {
-	BlockedReason string
-	MerchantID    uuid.UUID
-	ID            uuid.UUID
+	Reason     string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
 }
 
-func (q *Queries) BlockScheduledChange(ctx context.Context, arg BlockScheduledChangeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, blockScheduledChange, arg.BlockedReason, arg.MerchantID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+// A migration's move its provider refused: terminal.
+func (q *Queries) BlockScheduledChange(ctx context.Context, arg BlockScheduledChangeParams) (BillingScheduledChange, error) {
+	row := q.db.QueryRow(ctx, blockScheduledChange, arg.Reason, arg.MerchantID, arg.ID)
+	var i BillingScheduledChange
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.SubscriptionID,
+		&i.FromPriceID,
+		&i.PriceID,
+		&i.Quantity,
+		&i.EffectiveAt,
+		&i.Source,
+		&i.PriceMigrationID,
+		&i.Status,
+		&i.BlockedReason,
+		&i.AcknowledgedShortNotice,
+		&i.CreatedAt,
+		&i.AppliedAt,
+		&i.CanceledAt,
+		&i.Invoker,
+		&i.Reason,
+	)
+	return i, err
 }
 
-const cancelScheduledChange = `-- name: CancelScheduledChange :execrows
+const cancelScheduledChange = `-- name: CancelScheduledChange :one
+
 UPDATE billing.scheduled_changes SET status = 'canceled', canceled_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND id = $3::uuid AND status = 'scheduled'
+RETURNING merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason
 `
 
 type CancelScheduledChangeParams struct {
@@ -90,12 +129,31 @@ type CancelScheduledChangeParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) CancelScheduledChange(ctx context.Context, arg CancelScheduledChangeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, cancelScheduledChange, arg.Now, arg.MerchantID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+// Each transition out of scheduled answers the change, so a migration's move
+// can settle its migration in the same transaction.
+func (q *Queries) CancelScheduledChange(ctx context.Context, arg CancelScheduledChangeParams) (BillingScheduledChange, error) {
+	row := q.db.QueryRow(ctx, cancelScheduledChange, arg.Now, arg.MerchantID, arg.ID)
+	var i BillingScheduledChange
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.SubscriptionID,
+		&i.FromPriceID,
+		&i.PriceID,
+		&i.Quantity,
+		&i.EffectiveAt,
+		&i.Source,
+		&i.PriceMigrationID,
+		&i.Status,
+		&i.BlockedReason,
+		&i.AcknowledgedShortNotice,
+		&i.CreatedAt,
+		&i.AppliedAt,
+		&i.CanceledAt,
+		&i.Invoker,
+		&i.Reason,
+	)
+	return i, err
 }
 
 const createBlockedScheduledChange = `-- name: CreateBlockedScheduledChange :one
@@ -120,8 +178,7 @@ type CreateBlockedScheduledChangeParams struct {
 	BlockedReason    string
 }
 
-// A migration's move its provider cannot take. Terminal unless the reason is
-// a push failure, which the re-driver retries.
+// A migration's move its provider cannot take: terminal.
 func (q *Queries) CreateBlockedScheduledChange(ctx context.Context, arg CreateBlockedScheduledChangeParams) (BillingScheduledChange, error) {
 	row := q.db.QueryRow(ctx, createBlockedScheduledChange,
 		arg.MerchantID,
@@ -343,89 +400,6 @@ func (q *Queries) ListPendingScheduledChanges(ctx context.Context, arg ListPendi
 	return items, nil
 }
 
-const listRedrivableScheduledChangeMerchants = `-- name: ListRedrivableScheduledChangeMerchants :many
-SELECT DISTINCT c.merchant_id
-FROM billing.scheduled_changes c
-WHERE c.status = 'blocked' AND c.blocked_reason LIKE 'rail_push_failed:%'
-LIMIT $1::int
-`
-
-// CROSS-MERCHANT: merchants holding a push-failed move. Ids only; the
-// re-driver reads the rows per merchant.
-func (q *Queries) ListRedrivableScheduledChangeMerchants(ctx context.Context, merchantLimit int32) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listRedrivableScheduledChangeMerchants, merchantLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var merchant_id uuid.UUID
-		if err := rows.Scan(&merchant_id); err != nil {
-			return nil, err
-		}
-		items = append(items, merchant_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listRedrivableScheduledChanges = `-- name: ListRedrivableScheduledChanges :many
-SELECT c.merchant_id, c.id, c.subscription_id, c.from_price_id, c.price_id, c.quantity, c.effective_at, c.source, c.price_migration_id, c.status, c.blocked_reason, c.acknowledged_short_notice, c.created_at, c.applied_at, c.canceled_at, c.invoker, c.reason FROM billing.scheduled_changes c
-JOIN billing.price_migrations m ON m.merchant_id = c.merchant_id AND m.id = c.price_migration_id
-WHERE c.merchant_id = $1::uuid
-  AND c.status = 'blocked' AND c.blocked_reason LIKE 'rail_push_failed:%'
-  AND m.canceled_at IS NULL
-ORDER BY c.created_at
-LIMIT $2::int
-`
-
-type ListRedrivableScheduledChangesParams struct {
-	MerchantID uuid.UUID
-	BatchSize  int32
-}
-
-// Push-failed moves of migrations still running.
-func (q *Queries) ListRedrivableScheduledChanges(ctx context.Context, arg ListRedrivableScheduledChangesParams) ([]BillingScheduledChange, error) {
-	rows, err := q.db.Query(ctx, listRedrivableScheduledChanges, arg.MerchantID, arg.BatchSize)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingScheduledChange
-	for rows.Next() {
-		var i BillingScheduledChange
-		if err := rows.Scan(
-			&i.MerchantID,
-			&i.ID,
-			&i.SubscriptionID,
-			&i.FromPriceID,
-			&i.PriceID,
-			&i.Quantity,
-			&i.EffectiveAt,
-			&i.Source,
-			&i.PriceMigrationID,
-			&i.Status,
-			&i.BlockedReason,
-			&i.AcknowledgedShortNotice,
-			&i.CreatedAt,
-			&i.AppliedAt,
-			&i.CanceledAt,
-			&i.Invoker,
-			&i.Reason,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listScheduledMigrationChanges = `-- name: ListScheduledMigrationChanges :many
 SELECT merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason FROM billing.scheduled_changes
 WHERE merchant_id = $1::uuid AND price_migration_id = $2::uuid
@@ -476,22 +450,88 @@ func (q *Queries) ListScheduledMigrationChanges(ctx context.Context, arg ListSch
 	return items, nil
 }
 
-const unblockScheduledChange = `-- name: UnblockScheduledChange :execrows
-UPDATE billing.scheduled_changes SET status = 'scheduled', blocked_reason = NULL
-WHERE merchant_id = $1::uuid AND id = $2::uuid AND status = 'blocked'
+const settlePriceMigration = `-- name: SettlePriceMigration :exec
+UPDATE billing.destructive_actions a
+SET state = 'succeeded', finished_at = $1::timestamptz,
+    completion_sequence = coalesce(a.completion_sequence, nextval('billing.destructive_actions_admission_sequence_seq'::regclass))
+FROM billing.price_migrations m
+WHERE m.merchant_id = $2::uuid AND m.id = $3::uuid
+  AND a.merchant_id = m.merchant_id AND a.id = m.destructive_action_id
+  AND a.state IN ('started', 'uncertain') AND a.result = 'migration:' || m.id::text || ':prepared'
+  AND NOT EXISTS (SELECT 1 FROM billing.scheduled_changes s
+                  WHERE s.merchant_id = m.merchant_id AND s.price_migration_id = m.id AND s.status = 'scheduled')
 `
 
-type UnblockScheduledChangeParams struct {
+type SettlePriceMigrationParams struct {
+	Now              time.Time
+	MerchantID       uuid.UUID
+	PriceMigrationID uuid.UUID
+}
+
+// A migration's command succeeds once Create recorded its every move and the
+// last of them resolved. A failed command, or one already finished, is left.
+func (q *Queries) SettlePriceMigration(ctx context.Context, arg SettlePriceMigrationParams) error {
+	_, err := q.db.Exec(ctx, settlePriceMigration, arg.Now, arg.MerchantID, arg.PriceMigrationID)
+	return err
+}
+
+const skipScheduledChange = `-- name: SkipScheduledChange :one
+UPDATE billing.scheduled_changes SET status = 'skipped', blocked_reason = $1::text
+WHERE merchant_id = $2::uuid AND id = $3::uuid AND status = 'scheduled'
+  AND source = 'migration'
+RETURNING merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason
+`
+
+type SkipScheduledChangeParams struct {
+	Reason     string
 	MerchantID uuid.UUID
 	ID         uuid.UUID
 }
 
-// The re-driver takes a push-failed move back; the unique index refuses it
-// when the subscription scheduled another change meanwhile.
-func (q *Queries) UnblockScheduledChange(ctx context.Context, arg UnblockScheduledChangeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, unblockScheduledChange, arg.MerchantID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+// A migration's move that no longer applies (the subscription ended or left
+// the source price, or the target is gone): terminal.
+func (q *Queries) SkipScheduledChange(ctx context.Context, arg SkipScheduledChangeParams) (BillingScheduledChange, error) {
+	row := q.db.QueryRow(ctx, skipScheduledChange, arg.Reason, arg.MerchantID, arg.ID)
+	var i BillingScheduledChange
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.SubscriptionID,
+		&i.FromPriceID,
+		&i.PriceID,
+		&i.Quantity,
+		&i.EffectiveAt,
+		&i.Source,
+		&i.PriceMigrationID,
+		&i.Status,
+		&i.BlockedReason,
+		&i.AcknowledgedShortNotice,
+		&i.CreatedAt,
+		&i.AppliedAt,
+		&i.CanceledAt,
+		&i.Invoker,
+		&i.Reason,
+	)
+	return i, err
+}
+
+const supersedeMovePushes = `-- name: SupersedeMovePushes :exec
+UPDATE billing.provider_intents
+SET status = 'superseded', last_failure_reason = 'the move resolved', lease_expires_at = NULL, updated_at = now()
+WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
+  AND intent_type = 'price_migration_push' AND payload->>'scheduled_change_id' = $3::uuid::text
+  AND status IN ('pending', 'failed_retryable')
+`
+
+type SupersedeMovePushesParams struct {
+	MerchantID        uuid.UUID
+	SubscriptionID    uuid.UUID
+	ScheduledChangeID uuid.UUID
+}
+
+// A resolved move's push still waiting is no longer needed; one in flight
+// finds its move resolved.
+func (q *Queries) SupersedeMovePushes(ctx context.Context, arg SupersedeMovePushesParams) error {
+	_, err := q.db.Exec(ctx, supersedeMovePushes, arg.MerchantID, arg.SubscriptionID, arg.ScheduledChangeID)
+	return err
 }

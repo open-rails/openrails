@@ -1,29 +1,6 @@
 -- Usage orders (orders.origin = 'usage'): owed charges billed in arrears for
 -- a period. Pending charges wait in owed_items until an order bills them.
 
--- name: ListUsagePayers :many
--- Every (payer, currency) with ledger money movement since active_since: usage
--- is posted when it is recorded, so a payer with no movement has nothing to
--- bill and the sweep scales with activity, not with every payer on file.
--- period_anchor is the payer's first recorded activity (GetCustomerPeriodAnchor):
--- its first transfer or the opening of its balance account. Both are
--- permanent, so anniversary windows never move.
-WITH active AS (
-    SELECT DISTINCT lt.customer_id, lt.currency
-    FROM billing.ledger_transfers lt
-    WHERE lt.merchant_id = sqlc.arg(merchant_id)::uuid AND lt.customer_id IS NOT NULL
-      AND lt.created_at >= sqlc.arg(active_since)::timestamptz
-)
-SELECT p.customer_id::uuid AS customer_id, p.currency,
-       LEAST(
-           (SELECT MIN(lt.created_at) FROM billing.ledger_transfers lt
-            WHERE lt.merchant_id = sqlc.arg(merchant_id)::uuid AND lt.customer_id = p.customer_id AND lt.currency = p.currency),
-           (SELECT a.created_at FROM billing.ledger_accounts a
-            WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = p.customer_id
-              AND a.currency = p.currency AND a.account_type = 'customer_balance'))::timestamptz AS period_anchor
-FROM active p
-ORDER BY p.customer_id, p.currency;
-
 -- name: GetUsageOrderByPeriod :one
 -- One usage order per (payer, currency, period).
 SELECT * FROM billing.orders
@@ -97,44 +74,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
 GROUP BY 1
 ORDER BY 1 ASC;
 
--- name: ListUsageThresholdCandidates :many
--- Arrears payers whose pending charges plus open usage orders reached their
--- trigger: the payer's billing policy's collection_threshold_amount when it
--- has one, else the merchant-wide threshold, else the payer's own credit
--- line. policies is the merchant's settings, {policies: {name: body}, tiers:
--- {tier: name}, default: name}; the payer's policy is its own assignment while
--- the settings still declare it, else its tier's (money_settings.tier), else
--- the default.
-SELECT s.customer_id, s.currency, MIN(oi.accrued_at)::timestamptz AS period_starts_at, MIN(s.created_at)::timestamptz AS period_anchor
-FROM billing.money_settings s
-JOIN billing.owed_items oi
-  ON oi.merchant_id = s.merchant_id
- AND oi.customer_id = s.customer_id
- AND oi.currency = s.currency
- AND oi.order_id IS NULL
- AND oi.status = 'pending'
- AND oi.accrued_at < sqlc.arg(cutoff)::timestamptz
-JOIN billing.customers c ON c.merchant_id = s.merchant_id AND c.id = s.customer_id
-CROSS JOIN LATERAL (
-    SELECT (sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
-        CASE WHEN sqlc.arg(policies)::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
-        sqlc.arg(policies)::jsonb -> 'tiers' ->> s.tier,
-        sqlc.arg(policies)::jsonb ->> 'default') ->> 'collection_threshold_amount')::bigint AS threshold
-) pol
-WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND s.billing_mode = 'arrears'
-  AND s.credit_limit_amount > 0
-GROUP BY s.merchant_id, s.customer_id, s.currency, s.credit_limit_amount, pol.threshold
-HAVING COALESCE(SUM(oi.amount), 0)::bigint + (
-    SELECT COALESCE(SUM(o.total - o.amount_paid), 0)::bigint
-    FROM billing.orders o
-    WHERE o.merchant_id = s.merchant_id AND o.customer_id = s.customer_id AND o.currency = s.currency
-      AND o.origin = 'usage' AND o.status IN ('open', 'processing')
-) >= COALESCE(
-    pol.threshold,
-    CASE WHEN sqlc.arg(min_threshold)::bigint > 0 THEN sqlc.arg(min_threshold)::bigint ELSE s.credit_limit_amount END)
-ORDER BY period_starts_at ASC;
-
 -- name: ListChargeableUsageOrders :many
 -- Open usage orders the scheduled collection charges now: charge_automatically,
 -- due, on their first try or a retry that came due.
@@ -150,7 +89,6 @@ WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid
   AND o.due_at <= sqlc.arg(now)::timestamptz
   AND ((o.collection_failure_count = 0 AND o.next_collection_attempt_at IS NULL)
        OR o.next_collection_attempt_at <= sqlc.arg(now)::timestamptz)
-  AND (sqlc.arg(min_threshold)::bigint <= 0 OR o.total - o.amount_paid >= sqlc.arg(min_threshold)::bigint)
 ORDER BY o.due_at, o.created_at;
 
 -- name: LockUsageOrder :one

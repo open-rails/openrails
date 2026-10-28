@@ -91,7 +91,7 @@ func (q *Queries) CreatePriceMigration(ctx context.Context, arg CreatePriceMigra
 }
 
 const getPriceMigration = `-- name: GetPriceMigration :one
-SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, m.destructive_action_id, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
+SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, m.destructive_action_id, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped
 FROM billing.price_migrations m
 LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
 JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
@@ -100,7 +100,8 @@ CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
            count(*) FILTER (WHERE sc.status = 'applied') AS applied,
            count(*) FILTER (WHERE sc.status = 'canceled') AS canceled,
-           count(*) FILTER (WHERE sc.status = 'blocked') AS blocked
+           count(*) FILTER (WHERE sc.status = 'blocked') AS blocked,
+           count(*) FILTER (WHERE sc.status = 'skipped') AS skipped
     FROM billing.scheduled_changes sc
     WHERE sc.merchant_id = m.merchant_id AND sc.price_migration_id = m.id
 ) c
@@ -121,6 +122,7 @@ type GetPriceMigrationRow struct {
 	Applied               int64
 	Canceled              int64
 	Blocked               int64
+	Skipped               int64
 }
 
 func (q *Queries) GetPriceMigration(ctx context.Context, arg GetPriceMigrationParams) (GetPriceMigrationRow, error) {
@@ -147,6 +149,7 @@ func (q *Queries) GetPriceMigration(ctx context.Context, arg GetPriceMigrationPa
 		&i.Applied,
 		&i.Canceled,
 		&i.Blocked,
+		&i.Skipped,
 	)
 	return i, err
 }
@@ -182,7 +185,7 @@ func (q *Queries) GetPriceMigrationByDestructiveAction(ctx context.Context, arg 
 }
 
 const listPriceMigrationsByIDs = `-- name: ListPriceMigrationsByIDs :many
-SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, m.destructive_action_id, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
+SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, m.destructive_action_id, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped
 FROM billing.price_migrations m
 LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
 JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
@@ -191,7 +194,8 @@ CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
            count(*) FILTER (WHERE sc.status = 'applied') AS applied,
            count(*) FILTER (WHERE sc.status = 'canceled') AS canceled,
-           count(*) FILTER (WHERE sc.status = 'blocked') AS blocked
+           count(*) FILTER (WHERE sc.status = 'blocked') AS blocked,
+           count(*) FILTER (WHERE sc.status = 'skipped') AS skipped
     FROM billing.scheduled_changes sc
     WHERE sc.merchant_id = m.merchant_id AND sc.price_migration_id = m.id
 ) c
@@ -213,6 +217,7 @@ type ListPriceMigrationsByIDsRow struct {
 	Applied               int64
 	Canceled              int64
 	Blocked               int64
+	Skipped               int64
 }
 
 func (q *Queries) ListPriceMigrationsByIDs(ctx context.Context, arg ListPriceMigrationsByIDsParams) ([]ListPriceMigrationsByIDsRow, error) {
@@ -245,6 +250,7 @@ func (q *Queries) ListPriceMigrationsByIDs(ctx context.Context, arg ListPriceMig
 			&i.Applied,
 			&i.Canceled,
 			&i.Blocked,
+			&i.Skipped,
 		); err != nil {
 			return nil, err
 		}
@@ -257,7 +263,7 @@ func (q *Queries) ListPriceMigrationsByIDs(ctx context.Context, arg ListPriceMig
 }
 
 const listPriceMigrationsPage = `-- name: ListPriceMigrationsPage :many
-SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, m.destructive_action_id, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked
+SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, m.destructive_action_id, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped
 FROM billing.price_migrations m
 LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
 JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
@@ -266,7 +272,8 @@ CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
            count(*) FILTER (WHERE sc.status = 'applied') AS applied,
            count(*) FILTER (WHERE sc.status = 'canceled') AS canceled,
-           count(*) FILTER (WHERE sc.status = 'blocked') AS blocked
+           count(*) FILTER (WHERE sc.status = 'blocked') AS blocked,
+           count(*) FILTER (WHERE sc.status = 'skipped') AS skipped
     FROM billing.scheduled_changes sc
     WHERE sc.merchant_id = m.merchant_id AND sc.price_migration_id = m.id
 ) c
@@ -295,6 +302,7 @@ type ListPriceMigrationsPageRow struct {
 	Applied               int64
 	Canceled              int64
 	Blocked               int64
+	Skipped               int64
 }
 
 func (q *Queries) ListPriceMigrationsPage(ctx context.Context, arg ListPriceMigrationsPageParams) ([]ListPriceMigrationsPageRow, error) {
@@ -334,78 +342,11 @@ func (q *Queries) ListPriceMigrationsPage(ctx context.Context, arg ListPriceMigr
 			&i.Applied,
 			&i.Canceled,
 			&i.Blocked,
+			&i.Skipped,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listSettledPriceMigrationActions = `-- name: ListSettledPriceMigrationActions :many
-SELECT a.id FROM billing.destructive_actions a JOIN billing.price_migrations m
- ON m.merchant_id=a.merchant_id AND m.destructive_action_id=a.id
-WHERE a.merchant_id=$1::uuid AND a.state IN ('started','uncertain')
- AND a.result='migration:'||m.id::text||':prepared'
- AND NOT EXISTS(SELECT 1 FROM billing.scheduled_changes sc WHERE sc.merchant_id=m.merchant_id AND sc.price_migration_id=m.id AND sc.status IN ('scheduled','blocked'))
- AND NOT EXISTS(SELECT 1 FROM billing.provider_intents p WHERE p.merchant_id=a.merchant_id AND p.destructive_action_id=a.id AND p.status NOT IN ('succeeded','failed_terminal','superseded','expired'))
-ORDER BY a.id LIMIT $2::int
-`
-
-type ListSettledPriceMigrationActionsParams struct {
-	MerchantID uuid.UUID
-	RowLimit   int32
-}
-
-// Prepared means the complete cohort was scheduled by its originating command.
-// The finalizer runs after domain locks have been released.
-func (q *Queries) ListSettledPriceMigrationActions(ctx context.Context, arg ListSettledPriceMigrationActionsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listSettledPriceMigrationActions, arg.MerchantID, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listSettledPriceMigrationMerchants = `-- name: ListSettledPriceMigrationMerchants :many
-SELECT DISTINCT a.merchant_id FROM billing.destructive_actions a JOIN billing.price_migrations m
- ON m.merchant_id=a.merchant_id AND m.destructive_action_id=a.id
-WHERE a.state IN ('started','uncertain')
- AND a.result='migration:'||m.id::text||':prepared'
- AND NOT EXISTS(SELECT 1 FROM billing.scheduled_changes sc WHERE sc.merchant_id=m.merchant_id AND sc.price_migration_id=m.id AND sc.status IN ('scheduled','blocked'))
- AND NOT EXISTS(SELECT 1 FROM billing.provider_intents p WHERE p.merchant_id=a.merchant_id AND p.destructive_action_id=a.id AND p.status NOT IN ('succeeded','failed_terminal','superseded','expired'))
-ORDER BY a.merchant_id LIMIT $1::int
-`
-
-// Directory addresses only; each finalization remains merchant scoped.
-func (q *Queries) ListSettledPriceMigrationMerchants(ctx context.Context, rowLimit int32) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listSettledPriceMigrationMerchants, rowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var merchant_id uuid.UUID
-		if err := rows.Scan(&merchant_id); err != nil {
-			return nil, err
-		}
-		items = append(items, merchant_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

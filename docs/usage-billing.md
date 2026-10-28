@@ -61,6 +61,5 @@ records and invoice creation serialize with spending; there are no per-account
 River timers and no once-per-thirty-day collection guard.
 
 Deployment order: deploy this code to every worker before enabling the feature.
-The retained `openrails.invoice` job kind allows old queued work to drain, but an
-older worker cannot enforce this new policy. Legacy periodic jobs are recognized
-by River metadata and follow the new enabled policy, rather than the old flags.
+The usage pass is the `openrails.usage_orders` job kind; OpenRails schedules
+it, and a host never inserts it.

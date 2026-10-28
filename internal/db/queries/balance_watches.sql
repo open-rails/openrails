@@ -1,6 +1,7 @@
--- billing.balance_watches: when each watched balance (every prepaid one, and
--- every one with a running charge) is next looked at, and what the last look
--- found. Every instant is the caller's clock.
+-- billing.balance_watches: when each watched balance (every prepaid one, every
+-- one with a running charge and every one holding a credit lot that lapses)
+-- is next looked at, and what the last look found. Every instant is the
+-- caller's clock.
 
 -- name: UpsertBalanceWatch :exec
 -- A running charge started or stopped: when to look next. A watch already due
@@ -22,6 +23,14 @@ WHERE NOT EXISTS (
     SELECT 1 FROM billing.money_settings s
     WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.customer_id = sqlc.arg(customer_id)::uuid
       AND s.currency = sqlc.arg(currency)::text AND s.billing_mode = 'arrears' AND s.collection_revoked_at IS NULL)
+ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
+
+-- name: WatchLapsingCredit :exec
+-- A credit lot that lapses was deposited: its balance is watched, an arrears
+-- one too, and looked at on the next pass, which schedules the lapse. A
+-- watched balance was marked due by the deposit.
+INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, updated_at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, to_timestamp(0), 0, sqlc.arg(now)::timestamptz)
 ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
 
 -- name: WatchCustomerBalance :exec
@@ -52,15 +61,23 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
   AND currency = sqlc.arg(currency)::text;
 
 -- name: RebuildBalanceWatches :exec
--- A restored merchant's balances are watched again: a running charge's due at
--- once, a prepaid balance's when a change marks it due.
+-- A restored merchant's balances are watched again: one with a running charge
+-- or a credit lot not yet expired that lapses is due at once, a prepaid one
+-- when a change marks it due.
 INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, updated_at)
 SELECT w.merchant_id, w.customer_id, w.currency,
-       CASE WHEN bool_or(w.running) THEN sqlc.arg(now)::timestamptz END, 0, sqlc.arg(now)::timestamptz
+       CASE WHEN bool_or(w.due) THEN sqlc.arg(now)::timestamptz END, 0, sqlc.arg(now)::timestamptz
 FROM (
-    SELECT rc.merchant_id, rc.customer_id, rc.currency, true AS running
+    SELECT rc.merchant_id, rc.customer_id, rc.currency, true AS due
     FROM billing.running_charges rc
     WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.stopped_at IS NULL
+    UNION ALL
+    SELECT g.merchant_id, g.customer_id, g.currency::text, true
+    FROM billing.grants g
+    WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'credit' AND g.event = 'grant'
+      AND g.ends_at IS NOT NULL AND g.currency IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM billing.grants t WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede'))
+      AND NOT EXISTS (SELECT 1 FROM billing.ledger_transfers lt WHERE lt.merchant_id = g.merchant_id AND lt.grant_id = g.id AND lt.transfer_type = 'credit_expire')
     UNION ALL
     SELECT a.merchant_id, a.customer_id::uuid, a.currency, false
     FROM billing.ledger_accounts a

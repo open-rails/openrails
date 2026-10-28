@@ -133,52 +133,7 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 		}
 		return nil
 	}
-	if p.Terms.Pending && sub.Status != models.StatusPending {
-		anyGrant, err := q.HasInitialMembershipGrant(ctx, gen.HasInitialMembershipGrantParams{MerchantID: op.MerchantID, SubscriptionID: sub.ID})
-		if err != nil {
-			return err
-		}
-		observed, err := q.ListObservedInitialMembershipPayments(ctx, gen.ListObservedInitialMembershipPaymentsParams{MerchantID: op.MerchantID, SubscriptionID: sub.ID, OrderReference: intents.NMIEnrollmentOrder(op)})
-		if err != nil {
-			return err
-		}
-		if len(observed) > 1 {
-			return errors.New("delayed initial membership has ambiguous first-payment history")
-		}
-		if p.Terms.RecurringAmount > 0 {
-			if len(observed) == 0 {
-				if anyGrant || sub.Status == models.StatusActive {
-					return errors.New("delayed membership activated without its first payment")
-				}
-			} else {
-				payment, err := models.PaymentFromGen(observed[0])
-				if err != nil {
-					return err
-				}
-				historyTerms.Pending = false
-				historyTerms.Amount = historyTerms.RecurringAmount
-				historyTerms.PaymentID = payment.ID
-				if payment.TransactionID == "" || payment.PurchasedAt.Before(p.Terms.PeriodStart) {
-					return errors.New("first scheduled payment precedes its accepted start")
-				}
-				if err := subscriptions.ValidateInitialMembershipPayment(historyTerms, payment, models.Rail(op.Rail), payment.TransactionID); err != nil {
-					return err
-				}
-			}
-		} else {
-			if len(observed) != 0 {
-				return errors.New("free initial phase carries an unexpected payment")
-			}
-			if anyGrant || sub.Status == models.StatusActive {
-				historyTerms.Pending = false
-			}
-		}
-	}
-	before := historyTerms.PeriodEnd
-	if historyTerms.Pending {
-		before = historyTerms.PeriodStart
-	}
-	history, err := q.ListInitialMembershipGrants(ctx, gen.ListInitialMembershipGrantsParams{MerchantID: op.MerchantID, SubscriptionID: p.Terms.SubscriptionID, Before: before, RowLimit: subscriptions.InitialMembershipGrantLimit})
+	history, err := q.ListInitialMembershipGrants(ctx, gen.ListInitialMembershipGrantsParams{MerchantID: op.MerchantID, SubscriptionID: p.Terms.SubscriptionID, Before: historyTerms.PeriodEnd, RowLimit: subscriptions.InitialMembershipGrantLimit})
 	if err != nil {
 		return err
 	}

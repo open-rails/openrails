@@ -168,24 +168,6 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   )
 ORDER BY g.ends_at ASC;
 
--- ListCustomersWithLapsedCreditLots: distinct (merchant, customer, currency) that
--- have at least one past-expiry credit lot with an unspent remainder — the work
--- list for the credit-expiry job's per-customer ExpireLapsed sweep. Bounded batch.
--- name: ListCustomersWithLapsedCreditLots :many
-SELECT DISTINCT g.merchant_id, g.customer_id, g.currency
-FROM billing.grants g
-WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'credit' AND g.event = 'grant'
-  AND g.ends_at IS NOT NULL AND g.ends_at <= sqlc.arg(as_of)::timestamptz
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.grants tt WHERE tt.merchant_id = sqlc.arg(merchant_id)::uuid AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
-  )
-  AND (g.amount - COALESCE((
-        SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
-        WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.merchant_id = g.merchant_id AND t.grant_id = g.id
-          AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_refund', 'credit_refund_restore')
-    ), 0)) > 0
-LIMIT sqlc.arg(batch_size)::int;
-
 -- derive.grant.missing: succeeded, positive, non-subscription payments that
 -- produced no grant (every purchase grants its product or a credit lot). A
 -- refunded purchase keeps its grant event, so it is not flagged. Surface-only:
@@ -354,20 +336,6 @@ SELECT EXISTS (
       AND g.starts_at = sqlc.arg(starts_at)::timestamptz
       AND g.ends_at IS NOT DISTINCT FROM sqlc.narg(ends_at)::timestamptz
 ) AS exists;
-
--- CROSS-MERCHANT: merchants holding a past-expiry credit lot that was not
--- revoked or superseded. Ids only; the per-customer work list and the ledger
--- transfers run per merchant.
--- name: ListLapsedCreditLotMerchants :many
-SELECT DISTINCT g.merchant_id
-FROM billing.grants g
-WHERE g.kind = 'credit' AND g.event = 'grant'
-  AND g.ends_at IS NOT NULL AND g.ends_at <= sqlc.arg(as_of)::timestamptz
-  AND NOT EXISTS (
-        SELECT 1 FROM billing.grants tt
-         WHERE tt.merchant_id = g.merchant_id AND tt.supersedes_id = g.id
-           AND tt.event IN ('revoke', 'supersede'))
-LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListOriginalPurchaseGrants :many
 -- Original immutable events, including later-revoked sources. Accepted purchase

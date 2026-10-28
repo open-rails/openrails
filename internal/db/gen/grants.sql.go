@@ -558,57 +558,6 @@ func (q *Queries) ListAccessGrantsAt(ctx context.Context, arg ListAccessGrantsAt
 	return items, nil
 }
 
-const listCustomersWithLapsedCreditLots = `-- name: ListCustomersWithLapsedCreditLots :many
-SELECT DISTINCT g.merchant_id, g.customer_id, g.currency
-FROM billing.grants g
-WHERE g.merchant_id = $1::uuid AND g.kind = 'credit' AND g.event = 'grant'
-  AND g.ends_at IS NOT NULL AND g.ends_at <= $2::timestamptz
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.grants tt WHERE tt.merchant_id = $1::uuid AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
-  )
-  AND (g.amount - COALESCE((
-        SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
-        WHERE t.merchant_id = $1::uuid AND t.merchant_id = g.merchant_id AND t.grant_id = g.id
-          AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_refund', 'credit_refund_restore')
-    ), 0)) > 0
-LIMIT $3::int
-`
-
-type ListCustomersWithLapsedCreditLotsParams struct {
-	MerchantID uuid.UUID
-	AsOf       time.Time
-	BatchSize  int32
-}
-
-type ListCustomersWithLapsedCreditLotsRow struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   *string
-}
-
-// ListCustomersWithLapsedCreditLots: distinct (merchant, customer, currency) that
-// have at least one past-expiry credit lot with an unspent remainder — the work
-// list for the credit-expiry job's per-customer ExpireLapsed sweep. Bounded batch.
-func (q *Queries) ListCustomersWithLapsedCreditLots(ctx context.Context, arg ListCustomersWithLapsedCreditLotsParams) ([]ListCustomersWithLapsedCreditLotsRow, error) {
-	rows, err := q.db.Query(ctx, listCustomersWithLapsedCreditLots, arg.MerchantID, arg.AsOf, arg.BatchSize)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListCustomersWithLapsedCreditLotsRow
-	for rows.Next() {
-		var i ListCustomersWithLapsedCreditLotsRow
-		if err := rows.Scan(&i.MerchantID, &i.CustomerID, &i.Currency); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listGrantsByCustomer = `-- name: ListGrantsByCustomer :many
 SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity FROM billing.grants
 WHERE merchant_id = $1::uuid
@@ -721,46 +670,6 @@ func (q *Queries) ListInitialMembershipGrants(ctx context.Context, arg ListIniti
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listLapsedCreditLotMerchants = `-- name: ListLapsedCreditLotMerchants :many
-SELECT DISTINCT g.merchant_id
-FROM billing.grants g
-WHERE g.kind = 'credit' AND g.event = 'grant'
-  AND g.ends_at IS NOT NULL AND g.ends_at <= $1::timestamptz
-  AND NOT EXISTS (
-        SELECT 1 FROM billing.grants tt
-         WHERE tt.merchant_id = g.merchant_id AND tt.supersedes_id = g.id
-           AND tt.event IN ('revoke', 'supersede'))
-LIMIT $2::int
-`
-
-type ListLapsedCreditLotMerchantsParams struct {
-	AsOf          time.Time
-	MerchantLimit int32
-}
-
-// CROSS-MERCHANT: merchants holding a past-expiry credit lot that was not
-// revoked or superseded. Ids only; the per-customer work list and the ledger
-// transfers run per merchant.
-func (q *Queries) ListLapsedCreditLotMerchants(ctx context.Context, arg ListLapsedCreditLotMerchantsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listLapsedCreditLotMerchants, arg.AsOf, arg.MerchantLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var merchant_id uuid.UUID
-		if err := rows.Scan(&merchant_id); err != nil {
-			return nil, err
-		}
-		items = append(items, merchant_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

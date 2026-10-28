@@ -85,8 +85,9 @@ type PriceMigration struct {
 	ToPriceID      PriceID           `json:"to_price_id"`
 	EffectiveAt    time.Time         `json:"effective_at"`
 	FallbackPolicy MigrationFallback `json:"fallback_policy"`
-	// Matched and Skipped are counted at creation (a skipped subscription is
-	// not moved); Scheduled, Applied, Canceled and Blocked count the moves now.
+	// Matched is counted at creation. Skipped counts the subscriptions skipped
+	// at creation and the moves that no longer applied when pushed; Scheduled,
+	// Applied, Canceled and Blocked count the moves now.
 	Matched    int        `json:"matched"`
 	Skipped    int        `json:"skipped"`
 	Scheduled  int        `json:"scheduled"`
@@ -123,11 +124,9 @@ type CreatePriceMigrationParams struct {
 type PriceMigrationDisposition string
 
 const (
-	// MigrationScheduled moves it at its renewal.
+	// MigrationScheduled moves it at its renewal; a provider push, recorded
+	// with the move, carries it to a Stripe or NMI schedule.
 	MigrationScheduled PriceMigrationDisposition = "scheduled"
-	// MigrationApplied already moved it: an NMI schedule bills the new amount
-	// from its next rebill once pushed.
-	MigrationApplied PriceMigrationDisposition = "applied"
 	// MigrationSkipped leaves it; Reason says why.
 	MigrationSkipped PriceMigrationDisposition = "skipped"
 	// MigrationBlocked leaves it because its provider cannot be moved from

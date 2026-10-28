@@ -195,17 +195,18 @@ SET status = sqlc.arg(status)::text, payment_status = 'requires_payment_method',
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND collection_owner = 'engine' AND status = 'open' AND sqlc.arg(status)::text IN ('canceled', 'expired');
 
--- name: ListOrderSweepMerchants :many
--- The sweep's work queue: merchants with a live order past its expiry, or an
--- unpaid closed order past retention.
+-- name: ListOrderExpiryMerchants :many
+-- The expiry's work queue: merchants with a live order or an order attempt
+-- waiting on its customer past its expiry.
 SELECT merchant_id FROM (
     SELECT merchant_id FROM billing.orders
     WHERE collection_owner = 'engine' AND status = 'open' AND expires_at <= sqlc.arg(now)::timestamptz
     UNION
-    SELECT merchant_id FROM billing.orders
-    WHERE collection_owner = 'engine' AND status IN ('canceled', 'expired') AND payment_id IS NULL AND attempt_id IS NULL
-      AND COALESCE(canceled_at, expired_at) < sqlc.arg(purge_before)::timestamptz
+    SELECT merchant_id FROM billing.order_attempts
+    WHERE expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
+      AND deleted_at IS NULL AND status IN ('created', 'requires_action')
 ) due
+ORDER BY merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListExpiredOrders :many

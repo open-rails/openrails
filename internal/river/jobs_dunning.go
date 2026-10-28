@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -148,20 +147,6 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	// Each merchant's write posture can lower the process's mode (an exported
 	// or restored merchant, a copied book).
 	postures := writeposture.View{Config: w.Config, DB: w.DB}
-	// The completion transaction inserts this scoped normal job as its durable
-	// recovery handoff. It must wake eligible held work even if a verifier's
-	// hold committed after that transaction skipped its live lease.
-	if job.Args.MerchantID != uuid.Nil && !postures.Posture(ctx, job.Args.MerchantID).Limited() {
-		mctx := merchant.WithID(ctx, billing.MerchantID(job.Args.MerchantID))
-		resumed, err := intents.NewStore(w.DB).ResumeRecoveryHeld(mctx, w.now(), 100)
-		if err != nil {
-			return fmt.Errorf("resume recovered merchant work: %w", err)
-		}
-		if resumed == 100 {
-			return river.JobSnooze(time.Second)
-		}
-	}
-
 	if w.NMIResolver == nil && w.EngineCollections == nil {
 		log.WithContext(ctx).Warn("NMI client resolver not configured; skipping dunning run")
 		return nil

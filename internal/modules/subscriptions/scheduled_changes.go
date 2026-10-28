@@ -241,7 +241,7 @@ func ApplyChange(ctx context.Context, d *db.DB, id uuid.UUID, now time.Time) err
 	if err != nil {
 		return err
 	}
-	return changed(d.Gen(ctx).ApplyScheduledChange(ctx, gen.ApplyScheduledChangeParams{MerchantID: mid.UUID(), ID: id, Now: now.UTC()}))
+	return resolved(ctx, d.Gen(ctx), now)(d.Gen(ctx).ApplyScheduledChange(ctx, gen.ApplyScheduledChangeParams{MerchantID: mid.UUID(), ID: id, Now: now.UTC()}))
 }
 
 // ProviderMovedPrice settles the pending change when the provider (Stripe)
@@ -279,18 +279,25 @@ func cancelChange(ctx context.Context, d *db.DB, id uuid.UUID, now time.Time) er
 	if err != nil {
 		return err
 	}
-	return changed(d.Gen(ctx).CancelScheduledChange(ctx, gen.CancelScheduledChangeParams{MerchantID: mid.UUID(), ID: id, Now: now.UTC()}))
+	return resolved(ctx, d.Gen(ctx), now)(d.Gen(ctx).CancelScheduledChange(ctx, gen.CancelScheduledChangeParams{MerchantID: mid.UUID(), ID: id, Now: now.UTC()}))
 }
 
-// changed maps a status-predicated transition that matched no row.
-func changed(rows int64, err error) error {
-	if err != nil {
-		return err
+// resolved follows a status-predicated transition out of scheduled. A
+// transition that matched no row lost to another. A migration's move drops
+// its push still waiting, and settles its migration when it was the last.
+func resolved(ctx context.Context, q *gen.Queries, now time.Time) func(gen.BillingScheduledChange, error) error {
+	return func(row gen.BillingScheduledChange, err error) error {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errChangeNotScheduled
+		}
+		if err != nil || row.PriceMigrationID == nil {
+			return err
+		}
+		if err := q.SupersedeMovePushes(ctx, gen.SupersedeMovePushesParams{MerchantID: row.MerchantID, SubscriptionID: row.SubscriptionID, ScheduledChangeID: row.ID}); err != nil {
+			return err
+		}
+		return q.SettlePriceMigration(ctx, gen.SettlePriceMigrationParams{MerchantID: row.MerchantID, PriceMigrationID: *row.PriceMigrationID, Now: now.UTC()})
 	}
-	if rows < 1 {
-		return errChangeNotScheduled
-	}
-	return nil
 }
 
 // ScheduleChange locks the subscription, checks it still bills expectedPrice

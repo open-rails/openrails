@@ -23,11 +23,12 @@ import (
 )
 
 // A balance watch is the one stored instant per watched balance (every
-// prepaid one, and every one with a running charge): when it is next looked
-// at. A change in what the customer may spend marks it due (the ledger's
-// ApplyIdempotent, an admission's hold), and the watcher job looks at the due
-// ones. Time alone moves a balance only through a running charge's accrual and
-// a credit lot's lapse, and a look schedules both.
+// prepaid one, every one with a running charge and every one holding a credit
+// lot that lapses): when it is next looked at. A change in what the customer
+// may spend marks it due (the ledger's ApplyIdempotent, an admission's hold),
+// and the watcher job looks at the due ones. Time alone moves a balance only
+// through a running charge's accrual and a credit lot's lapse, and a look
+// schedules both: the lapse is expired at the look its ends_at wakes.
 
 const (
 	// defaultRunwayHours is the built-in runway line: it scales with the
@@ -135,10 +136,12 @@ type balanceView struct {
 	// floor is the available balance at which capacity is zero; spendFloor
 	// the one at which what the customer may spend before any overdraft is.
 	floor, spendFloor int64
-	// available is the balance less what is held, less what lapsed lots the
-	// expiry sweep has not reached will expire with.
+	// available is the balance less what is held, less lapsed.
 	available int64
-	lots      []creditLot
+	// lapsed is what lots that lapsed and were not yet expired will expire
+	// with: still in the ledger balance, not there to spend.
+	lapsed int64
+	lots   []creditLot
 	// checkpointDue: a charge is not yet posted through the last 00:00 UTC.
 	checkpointDue bool
 }
@@ -198,19 +201,10 @@ func (s *MoneyService) viewBalance(ctx context.Context, q *gen.Queries, bal *mod
 	for i, row := range rows {
 		v.lots[i] = creditLot{remaining: row.Remaining, endsAt: row.EndsAt}
 	}
-	// A lapsed lot the expiry sweep has not reached is still in the balance:
-	// what it will expire with is not there to draw.
-	lapsed, err := q.ListLapsedCreditLots(ctx, gen.ListLapsedCreditLotsParams{
-		MerchantID: bal.MerchantID, CustomerID: bal.CustomerID, Currency: bal.Currency, AsOf: bal.AsOf,
-	})
-	if err != nil {
+	if v.lapsed, err = lapsedUnspent(ctx, q, bal, charges); err != nil {
 		return v, err
 	}
-	unspent, err := lapsedUnspent(charges, lapsed)
-	if err != nil {
-		return v, err
-	}
-	v.available = satSub(satSub(bal.Balance, bal.HeldBalance), unspent)
+	v.available = satSub(satSub(bal.Balance, bal.HeldBalance), v.lapsed)
 	return v, nil
 }
 
@@ -258,14 +252,23 @@ func (v balanceView) project(line lowBalanceLine, usageRate int64) balanceProjec
 	return p
 }
 
-// next is when to look again: the next 00:00 UTC while a charge runs, and
-// each armed crossing an exact cause moves the balance to. Nil: only a mark.
+// next is when to look again: now while a lapsed lot is not expired, the
+// next lot's lapse, the next 00:00 UTC while a charge runs, and each armed
+// crossing an exact cause moves the balance to. Nil: only a mark.
 func (v balanceView) next(p balanceProjection, lowArmed, depletedArmed bool) *time.Time {
 	var next *time.Time
 	consider := func(at *time.Time) {
 		if at != nil && (next == nil || at.Before(*next)) {
 			t := *at
 			next = &t
+		}
+	}
+	if v.lapsed > 0 {
+		consider(&v.asOf)
+	}
+	for _, lot := range v.lots {
+		if lot.remaining > 0 {
+			consider(lot.endsAt)
 		}
 	}
 	if len(v.charges) > 0 {
@@ -281,9 +284,19 @@ func (v balanceView) next(p balanceProjection, lowArmed, depletedArmed bool) *ti
 	return next
 }
 
-// watched reports whether the balance keeps a watch: every prepaid one, and
-// every one with a running charge.
-func (v balanceView) watched() bool { return !v.arrears || len(v.charges) > 0 }
+// watched reports whether the balance keeps a watch: every prepaid one, every
+// one with a running charge and every one holding a lot that lapses.
+func (v balanceView) watched() bool {
+	if !v.arrears || len(v.charges) > 0 || v.lapsed > 0 {
+		return true
+	}
+	for _, lot := range v.lots {
+		if lot.remaining > 0 && lot.endsAt != nil {
+			return true
+		}
+	}
+	return false
+}
 
 // sampleUsageRate adds the usage dated since the last sample to the decayed
 // rate. Each event is read by one look; events dated before the last sample,
@@ -319,12 +332,12 @@ func later(a, b time.Time) time.Time {
 	return a
 }
 
-// WatchBalanceInTx looks at one customer's balance under its lock: it settles
+// WatchBalanceInTx looks at one customer's balance under its lock: it expires
 // lapsed credit lots, posts each running charge through the last 00:00 UTC,
 // samples the usage rate, tells the host and the customer of a low or
 // depleted balance once per crossing, and writes when to look next. A
 // customer with no watch is left alone; an arrears one with no running charge
-// loses its watch.
+// and no lot that lapses loses its watch.
 func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, customer identity.CustomerID, currency string) error {
 	if s == nil || txDB == nil {
 		return fmt.Errorf("balance watch requires a bound transaction")

@@ -979,6 +979,46 @@ func (q *Queries) ListLiveOwnership(ctx context.Context, arg ListLiveOwnershipPa
 	return items, nil
 }
 
+const listOrderExpiryMerchants = `-- name: ListOrderExpiryMerchants :many
+SELECT merchant_id FROM (
+    SELECT merchant_id FROM billing.orders
+    WHERE collection_owner = 'engine' AND status = 'open' AND expires_at <= $1::timestamptz
+    UNION
+    SELECT merchant_id FROM billing.order_attempts
+    WHERE expires_at IS NOT NULL AND expires_at < $1::timestamptz
+      AND deleted_at IS NULL AND status IN ('created', 'requires_action')
+) due
+ORDER BY merchant_id
+LIMIT $2::int
+`
+
+type ListOrderExpiryMerchantsParams struct {
+	Now           time.Time
+	MerchantLimit int32
+}
+
+// The expiry's work queue: merchants with a live order or an order attempt
+// waiting on its customer past its expiry.
+func (q *Queries) ListOrderExpiryMerchants(ctx context.Context, arg ListOrderExpiryMerchantsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrderExpiryMerchants, arg.Now, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var merchant_id uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrderLines = `-- name: ListOrderLines :many
 SELECT merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, credit_grant, subscription_id, product_access_id, created_at, source, provider_amount, provider_access_default FROM billing.order_lines
 WHERE merchant_id = $1::uuid AND order_id = ANY($2::uuid[])
@@ -1026,46 +1066,6 @@ func (q *Queries) ListOrderLines(ctx context.Context, arg ListOrderLinesParams) 
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listOrderSweepMerchants = `-- name: ListOrderSweepMerchants :many
-SELECT merchant_id FROM (
-    SELECT merchant_id FROM billing.orders
-    WHERE collection_owner = 'engine' AND status = 'open' AND expires_at <= $1::timestamptz
-    UNION
-    SELECT merchant_id FROM billing.orders
-    WHERE collection_owner = 'engine' AND status IN ('canceled', 'expired') AND payment_id IS NULL AND attempt_id IS NULL
-      AND COALESCE(canceled_at, expired_at) < $2::timestamptz
-) due
-LIMIT $3::int
-`
-
-type ListOrderSweepMerchantsParams struct {
-	Now           time.Time
-	PurgeBefore   time.Time
-	MerchantLimit int32
-}
-
-// The sweep's work queue: merchants with a live order past its expiry, or an
-// unpaid closed order past retention.
-func (q *Queries) ListOrderSweepMerchants(ctx context.Context, arg ListOrderSweepMerchantsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listOrderSweepMerchants, arg.Now, arg.PurgeBefore, arg.MerchantLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var merchant_id uuid.UUID
-		if err := rows.Scan(&merchant_id); err != nil {
-			return nil, err
-		}
-		items = append(items, merchant_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
