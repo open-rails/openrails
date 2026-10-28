@@ -9,7 +9,7 @@ import (
 
 // ListFindings pages the findings queue: open findings unless req.Status
 // names another, most severe first, then oldest. req.Type is one finding type
-// or a prefix ending in ".*" ("catalog.*" lists catalog drift).
+// or a prefix ending in ".*" ("pull.*" lists the pull's proposals).
 func (c *Client) ListFindings(ctx context.Context, req billing.FindingListParams, options ...RequestOption) (*billing.ListPage[billing.Finding], error) {
 	q := cursorQuery(req.PageRequest)
 	for key, value := range map[string]string{"status": string(req.Status), "severity": req.Severity, "type": req.Type} {

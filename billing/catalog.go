@@ -191,8 +191,8 @@ func BuyerPrices(prices []Price) []Price {
 }
 
 // SyncStatus is whether a provider's copy of a provider price matches
-// OpenRails. Only a verifying read (GetPriceParams.Verify) or reconciliation
-// knows; otherwise it is unknown.
+// OpenRails. Only a verifying read (GetPriceParams.Verify) knows; otherwise it
+// is unknown.
 type SyncStatus string
 
 const (

@@ -388,7 +388,7 @@ Every route needs `merchant:config:manage` (or `root:config:manage`). These oper
 | `PATCH /v1/merchant/psps/{id}` | change a PSP's settings or credentials, or retire it |
 | `POST /v1/merchant/psps/routing-preview` | which PSP an order for a price would use |
 | `POST /v1/merchant/psp-imports` | re-read a PSP: the differences become proposals ([PSP import](docs/psp-import.md)) |
-| `GET /v1/merchant/findings` | problems OpenRails found that need an operator, catalog drift included (`?type=`) |
+| `GET /v1/merchant/findings` | problems OpenRails found that need an operator (`?type=`) |
 | `GET /v1/merchant/findings/{id}` | one finding |
 | `POST /v1/merchant/findings/{id}/resolve` | resolve one |
 | `GET /v1/merchant/configuration` | your name, settings, their revision and your API host |
@@ -1653,7 +1653,7 @@ merchants:
 - **Orders** — one purchase model across every rail: tokenized card entry
   (NMI Collect.js, Stripe Elements), a provider-hosted redirect, and Solana Pay.
 - **Catalog as source of truth** — declare your products, prices, rate cards, and tiers
-  once; OpenRails pushes them to providers (find-or-create) and watches for drift.
+  once; OpenRails pushes them to providers (find-or-create).
 - **Entitlements & product ownership** — your webserver asks one question ("does user X
   have Y right now?") against your own database, never a provider API.
 - **Tiered plans with proration** — users upgrade/downgrade between tiers; preview the

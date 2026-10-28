@@ -289,7 +289,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | Creator-owned catalogs: `EnsureOwnCatalog`, `EnsureCatalogForOwner`, `GetCatalogForOwner`, `WithOwnCatalog()`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs`; `billing.Catalog`, `billing.CatalogID`, `billing.EnsureCatalogParams`, `billing.CatalogListParams` | Removed: a merchant has one catalog |
 | `CatalogID` on `billing.Product`, `CreateProductParams`, `CreatePriceProduct`, `ProductListParams`, `PriceListParams` and `CatalogApplicationReceipt`; `catalog.Application.CatalogID` | Removed with the catalogs |
 | Product and price activate and deactivate; price `providers` | `archived` in the update; `psps` |
-| `CheckCatalogDrift` | `client.GetPrice(` with `Verify`; a manual PSP import (`client.CreatePSPImport(`) observes a PSP's whole catalog again |
+| `CheckCatalogDrift` | Removed: OpenRails owns the catalog; `client.GetPrice(` with `Verify` reads a price's PSP copies, and a manual PSP import (`client.CreatePSPImport(`) observes a PSP's whole catalog again |
 | `ListPurchaseReviews`, `ResolvePurchaseReview`; `ArchiveProductParams` with `Action` and `Window` | Removed: archiving a product (`client.UpdateProduct(` with `Archived`) stops its sales and refunds nobody; refund a purchase with `client.RefundPayment(` |
 
 ### Checkout

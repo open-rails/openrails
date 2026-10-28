@@ -235,15 +235,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add rebill watch worker: %w", err)
 	}
-	if err := addTrackedWorker(r, workers, &riverjobs.CatalogReconciliationPullWorker{
-		StripeClients: r.StripeClients,
-		DB:            r.DB,
-		Config:        r.Config,
-		Rails:         r.RailConfigs,
-		NMIResolver:   r.CollectionResolver,
-	}); err != nil {
-		return fmt.Errorf("add catalog reconciliation worker: %w", err)
-	}
 	if err := addTrackedWorker(r, workers, &riverjobs.StripeWebhookReconcileWorker{
 		StripeClients: r.StripeClients,
 		DB:            r.DB,
@@ -714,25 +705,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 		nil,
 	))
 
-	// Catalog reconciliation: pull the Stripe and NMI catalogs and record drift
-	// against the DB. Alert-only, never mutates providers or catalog rows.
-	// Cadence is catalog_reconciliation_interval (0 disables, malformed fails here).
-	interval, reconcileEnabled, err := config.CatalogReconciliationSchedule(r.Config)
-	if err != nil {
-		return nil, err
-	}
-	if reconcileEnabled {
-		jobs = append(jobs, r.healthPeriodic(cfg,
-			interval,
-			func() (river.JobArgs, *river.InsertOpts) {
-				return riverjobs.CatalogReconciliationPullArgs{}, &river.InsertOpts{
-					Queue:      riverjobs.QueueBilling,
-					UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: interval},
-				}
-			},
-			nil,
-		))
-	}
 	jobs = append(jobs, r.healthPeriodic(cfg,
 		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {

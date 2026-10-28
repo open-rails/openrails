@@ -36,7 +36,7 @@ SET notified_at = NULL, notified_severity = NULL, updated_at = now()
 WHERE merchant_id = $1::uuid AND finding_type = $2::text
   AND psp_id IS NULL AND resolved_at IS NULL AND status = 'requires_review'
   AND notified_at < $3::timestamptz
-RETURNING id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id, pull_id, dismissed_at
+RETURNING id, merchant_id, finding_type, rail, psp_id, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id, pull_id, dismissed_at
 `
 
 type RearmConfigFindingNotificationsParams struct {
@@ -63,12 +63,6 @@ func (q *Queries) RearmConfigFindingNotifications(ctx context.Context, arg Rearm
 			&i.FindingType,
 			&i.Rail,
 			&i.PspID,
-			&i.OpenrailsResourceType,
-			&i.OpenrailsResourceID,
-			&i.ExternalResourceID,
-			&i.Field,
-			&i.OpenrailsValue,
-			&i.ExternalValue,
 			&i.SubjectKey,
 			&i.Severity,
 			&i.Status,

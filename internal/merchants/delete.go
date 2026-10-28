@@ -35,7 +35,7 @@ const DestructiveRunKindMerchantPurge = "merchant_purge"
 // SQL assembly). existingMerchantTables preserves this order.
 var merchantOwnedTables = []string{
 	"notification_events",
-	"customer_entitlement_cache", "customer_entitlement_cache_stamps", "notifications", "catalog_drift_events", "payment_attempts", "rebill_cycles", "payment_method_versions", "mandates", "nmi_history_months",
+	"customer_entitlement_cache", "customer_entitlement_cache_stamps", "notifications", "payment_attempts", "rebill_cycles", "payment_method_versions", "mandates", "nmi_history_months",
 	"solana_pay_receipts", "solana_pay_references",
 	"provider_mutation_logs", "provider_intents",
 	"order_attempts", "product_access", "payments", "subscriptions",
@@ -57,8 +57,6 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsEntitlementCache(ctx, id)
 	case "customer_entitlement_cache_stamps":
 		return q.CountMerchantRowsEntitlementCacheStamps(ctx, id)
-	case "catalog_drift_events":
-		return q.CountMerchantRowsCatalogDriftEvents(ctx, id)
 	case "payment_methods":
 		return q.CountMerchantRowsPaymentMethods(ctx, id)
 	case "subscriptions":
@@ -107,8 +105,6 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsEntitlementCache(ctx, id)
 	case "customer_entitlement_cache_stamps":
 		return q.PurgeMerchantRowsEntitlementCacheStamps(ctx, id)
-	case "catalog_drift_events":
-		return q.PurgeMerchantRowsCatalogDriftEvents(ctx, id)
 	case "payment_methods":
 		return q.PurgeMerchantRowsPaymentMethods(ctx, id)
 	case "subscriptions":

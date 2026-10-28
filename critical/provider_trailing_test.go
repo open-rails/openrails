@@ -253,12 +253,6 @@ func TestProviderTrailing(t *testing.T) {
 		require.Len(t, unmapped, 1, "a redelivery and a burst add nothing")
 		require.Equal(t, finding.ID, unmapped["price_new"].ID)
 
-		// A catalog drift pass over the fully read PSP leaves it open.
-		runRegistered(t, tw.fleet, "openrails.catalog_reconciliation_pull", 1)
-		after := tw.findings(t, "catalog.price.unmapped")["price_new"]
-		require.Equal(t, finding.ID, after.ID)
-		require.Nil(t, after.ResolvedAt, "drift never resolves a provider price finding")
-
 		tw.stripe.SetPriceActive("price_new", false)
 		tw.send(t, "price.updated", stripemock.Object{"id": "price_new", "object": "price"})
 		completedOnce(t, tw.fleet, kindObserve)

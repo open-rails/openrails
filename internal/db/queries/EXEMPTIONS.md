@@ -180,13 +180,8 @@ correction. PostgreSQL does not permit `EXPLAIN LOCK TABLE`; execution and the
 surrounding concurrency test are the applicable proofs.
 
 **PERMANENT — aggregates over a closed vocabulary or time bucket.** The fleet
-dashboard reads (`Fleet*`) and `CountOpenCatalogDriftByKind` group by currency,
-rail, drift kind or week: the result has one row per bucket, never one per
-record. The fleet reads are on-demand operator analytics, never a merchant list.
-
-**PERMANENT — catalog-bounded diff.** `ListOpenCatalogDriftEvents` returns every
-open `catalog.*` finding so the drift pass can resolve what it no longer
-observes; the set is bounded by the merchant's catalog and PSPs.
+dashboard reads (`Fleet*`) group by currency, rail or week: the result has
+one row per bucket, never one per record. The fleet reads are on-demand operator analytics, never a merchant list.
 
 **DEBT (or#837).** Everything else in the DEBT section. These are real:
 

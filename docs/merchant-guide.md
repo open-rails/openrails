@@ -319,7 +319,7 @@ reference: [api/routes.md](api/routes.md).
 | Customer settings: credit limits, trust levels, billing policy, invoice profile | `GET` / `PATCH /v1/admin/customers/{customer_id}` | Customers → profile |
 | Catalog over HTTP | `POST /v1/catalog/products`, `PATCH /v1/catalog/products/{id}`, and the same for prices (archive with `{"archived": true}`) | Catalog |
 | Metrics | `POST /v1/metrics/query`, `GET /v1/metrics/schema` | Dashboard |
-| Findings: problems that need a merchant-config operator, catalog drift and operational alerts included | `GET /v1/merchant/findings` (`?type=`), counted by `open_findings` in `POST /v1/metrics/query` | Ops, header bell |
+| Findings: problems that need a merchant-config operator, operational alerts included | `GET /v1/merchant/findings` (`?type=`), counted by `open_findings` in `POST /v1/metrics/query` | Ops, header bell |
 
 Staff sessions and API keys pass on their permissions without a recent
 sign-in. A manual grant's `hours` is at most 2562047; with neither `hours` nor `ends_at` it has no
@@ -401,8 +401,7 @@ the embedded Go engine serves no console. Build and mounting details are in
 Pages: **Customers** (search → profile with grant/revoke),
 **Subscriptions** (status filters, cancel with typed confirmation, resume, payment-
 method change), **Payments** (filters, detail, rail-aware refund), **Catalog**
-(products/prices CRUD, archive/restore, durable catalog batch application, drift
-view), **Ops** (findings queue, the merchant inbox), **Settings** (profile,
+(products/prices CRUD, archive/restore, durable catalog batch application), **Ops** (findings queue, the merchant inbox), **Settings** (profile,
 PSPs, credit limit, trust level), **Dashboard**. Hosts may extend BillingAdmin with their own pages and panels. Each billing area
 shows only to staff holding its
 route group's permission (`GET /v1/admin/access`).

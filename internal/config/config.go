@@ -91,10 +91,6 @@ type Config struct {
 	// Without an API key those features are off.
 	LLM *LLMConfig `yaml:"llm" json:"llm"`
 
-	// CatalogReconciliationInterval schedules the alert-only catalog
-	// reconciliation: a Go duration ("30m"). Empty is 1h; "0" disables it.
-	CatalogReconciliationInterval string `yaml:"catalog_reconciliation_interval" json:"catalog_reconciliation_interval"`
-
 	// WebhookSecretOverlap is how long a rotated-out webhook signing secret
 	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
 	WebhookSecretOverlap string `yaml:"webhook_secret_overlap" json:"webhook_secret_overlap"`
@@ -209,27 +205,6 @@ func ValidateLoopbackGatewayURL(raw string) error {
 		return fmt.Errorf("%w: host %q is not a loopback address", ErrProviderSandboxGateway, u.Hostname())
 	}
 	return nil
-}
-
-// CatalogReconciliationSchedule resolves the catalog reconciliation loop
-// schedule: empty → 1h default, <=0 → disabled. A malformed value is an error
-// — a typo must never silently pick a schedule (#712).
-func CatalogReconciliationSchedule(cfg *Config) (interval time.Duration, enabled bool, err error) {
-	raw := ""
-	if cfg != nil {
-		raw = strings.TrimSpace(cfg.CatalogReconciliationInterval)
-	}
-	if raw == "" {
-		return time.Hour, true, nil
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		return 0, false, fmt.Errorf("catalog_reconciliation_interval %q is not a Go duration (e.g. 30m, 2h; 0 disables): %w", raw, err)
-	}
-	if d <= 0 {
-		return 0, false, nil
-	}
-	return d, true, nil
 }
 
 // MerchantConfigKVMount is the KV v2 mount that holds merchant

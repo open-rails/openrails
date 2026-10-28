@@ -105,8 +105,7 @@ type fileConfig struct {
 
 	MerchantManifestOverlays []string `koanf:"merchant_manifest_overlays"`
 
-	CatalogReconciliationInterval string `koanf:"catalog_reconciliation_interval"`
-	WebhookSecretOverlap          string `koanf:"webhook_secret_overlap"`
+	WebhookSecretOverlap string `koanf:"webhook_secret_overlap"`
 
 	ReturnOrigins            []string `koanf:"return_origins"`
 	TrustedProxies           []string `koanf:"trusted_proxies"`
@@ -224,33 +223,32 @@ func (f *fileConfig) config() (*Config, error) {
 	}
 	return &Config{
 		Config: &billing.Config{
-			ProviderWriteMode:             f.ProviderWriteMode,
-			UsageBillingEnabled:           f.UsageBillingEnabled,
-			EventRetention:                f.EventRetention,
-			Database:                      f.Database,
-			PublicBillingBaseURL:          f.PublicBillingBaseURL,
-			DashboardBaseURL:              f.DashboardBaseURL,
-			DB:                            f.DB,
-			Redis:                         redisSection(f.Redis),
-			Logger:                        f.Logger,
-			SMTP:                          smtp,
-			RateLimits:                    f.RateLimits,
-			RateLimitsDisabled:            f.RateLimitsDisabled,
-			UserActionRateLimit:           f.UserActionRateLimit,
-			Captcha:                       f.Captcha,
-			Vault:                         f.Vault,
-			LLM:                           f.LLM,
-			CatalogReconciliationInterval: f.CatalogReconciliationInterval,
-			WebhookSecretOverlap:          f.WebhookSecretOverlap,
-			ReturnOrigins:                 f.ReturnOrigins,
-			TrustedProxies:                f.TrustedProxies,
-			CloudflareProxies:             f.CloudflareProxies,
-			CCBillWebhookIPAllowlist:      f.CCBillWebhookIPAllowlist,
-			ProviderSandbox:               f.ProviderSandbox,
-			Solana:                        f.Solana,
-			HyperSwitch:                   f.HyperSwitch,
-			CardVault:                     f.CardVault,
-			EngineAdmissionHold:           f.EngineAdmissionHold,
+			ProviderWriteMode:        f.ProviderWriteMode,
+			UsageBillingEnabled:      f.UsageBillingEnabled,
+			EventRetention:           f.EventRetention,
+			Database:                 f.Database,
+			PublicBillingBaseURL:     f.PublicBillingBaseURL,
+			DashboardBaseURL:         f.DashboardBaseURL,
+			DB:                       f.DB,
+			Redis:                    redisSection(f.Redis),
+			Logger:                   f.Logger,
+			SMTP:                     smtp,
+			RateLimits:               f.RateLimits,
+			RateLimitsDisabled:       f.RateLimitsDisabled,
+			UserActionRateLimit:      f.UserActionRateLimit,
+			Captcha:                  f.Captcha,
+			Vault:                    f.Vault,
+			LLM:                      f.LLM,
+			WebhookSecretOverlap:     f.WebhookSecretOverlap,
+			ReturnOrigins:            f.ReturnOrigins,
+			TrustedProxies:           f.TrustedProxies,
+			CloudflareProxies:        f.CloudflareProxies,
+			CCBillWebhookIPAllowlist: f.CCBillWebhookIPAllowlist,
+			ProviderSandbox:          f.ProviderSandbox,
+			Solana:                   f.Solana,
+			HyperSwitch:              f.HyperSwitch,
+			CardVault:                f.CardVault,
+			EngineAdmissionHold:      f.EngineAdmissionHold,
 		},
 		Auth:                     auth,
 		SigningKey:               f.SigningKey,

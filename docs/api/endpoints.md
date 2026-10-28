@@ -381,8 +381,7 @@ and archives the old one. Price keys are product-local and immutable; each has
 financial versions starting at one, identified as `product-key:price-key:v1`.
 The separate `revision` tracks edits to the price key. `PATCH` archives or restores a price and
 merges `psps` (a PSP set to null is unlinked). `GET …/prices/{id}?verify=true` reads each linked PSP's
-copy and reports drift; `GET /v1/merchant/findings?type=catalog.*` lists the open
-drift findings, each with the `psp_id` that was compared.
+copy and reports drift.
 
 ## PSPs
 

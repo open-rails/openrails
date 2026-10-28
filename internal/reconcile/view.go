@@ -13,8 +13,6 @@ func (rec FindingRecord) View() billing.Finding {
 		Status: billing.FindingStatus(rec.Status), Evidence: rec.Evidence, LastSeenAt: rec.LastSeenAt, ResolvedAt: rec.ResolvedAt,
 		Provider: optionalString(string(rec.Provider)), RecommendedAction: optionalString(rec.RecommendedAction), Resolution: optionalString(rec.Resolution),
 		ResolvedBy: optionalString(rec.ResolvedBy), Notes: optionalString(rec.Notes), CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
-		ResourceType: rec.ResourceType, ResourceID: rec.ResourceID, ExternalResourceID: rec.ExternalResourceID,
-		Field: rec.Field, OpenRailsValue: rec.OpenRailsValue, ExternalValue: rec.ExternalValue,
 	}
 	if rec.PSPID != nil {
 		psp := billing.PSPID(*rec.PSPID)

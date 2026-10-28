@@ -71,18 +71,13 @@ unbounded-many ListLedgerConservationBreaches # operator audit: every breached l
 unbounded-many ListLedgerCounterDrifts         # operator audit: every drifted account
 
 # Aggregates grouped by a closed vocabulary or a time bucket: one row per
-# currency, rail, drift kind or week, never one per record.
-unbounded-many CountOpenCatalogDriftByKind      # GROUP BY rail, finding_type: one row per drift kind
+# currency, rail or week, never one per record.
 unbounded-many FleetMRRByCurrency               # operator fleet dashboard: one row per currency
 unbounded-many FleetRailHealth                  # operator fleet dashboard: one row per rail
 unbounded-many FleetRevenueByCurrency           # operator fleet dashboard: one row per currency
 unbounded-many FleetWeeklyActiveMerchants       # operator fleet dashboard: one row per week
 unbounded-many FleetWeeklyCanceledSubscriptions # operator fleet dashboard: one row per week
 unbounded-many FleetWeeklyVolume                # operator fleet dashboard: one row per (week, currency)
-
-# The drift pass diffs every open catalog finding against what it observed;
-# the set is bounded by the merchant's catalog and PSPs.
-unbounded-many ListOpenCatalogDriftEvents       # open catalog.* findings: catalog x PSP bounded
 
 # A merchant archive is the merchant's whole retained history: its export, count
 # and in-flight refusal read every partition by definition. An operator action,

@@ -59,10 +59,6 @@ func Degrade(cfg *Config) []Degradation {
 		cfg.LLM = nil
 		off("llm", fmt.Errorf("%w; the catalog copilot is off", err))
 	}
-	if _, _, err := CatalogReconciliationSchedule(cfg); err != nil {
-		cfg.CatalogReconciliationInterval = ""
-		off("catalog_reconciliation_interval", fmt.Errorf("%w; the default 1h applies", err))
-	}
 	if _, err := WebhookSecretOverlapDuration(cfg); err != nil {
 		cfg.WebhookSecretOverlap = ""
 		off("webhook_secret_overlap", fmt.Errorf("%w; the default %s applies", err, DefaultWebhookSecretOverlap))

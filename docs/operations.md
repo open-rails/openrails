@@ -17,7 +17,7 @@ exactly four ways the system diverges, each with its own mechanism:
 
 | # | Divergence | Direction | Mechanism |
 |---|---|---|---|
-| 1 | Catalog wrong at the provider | separate provider workflow | `catalog apply` commits local catalog changes and read-verifies existing provider bindings. Its one provider write publishes the on-chain plan of a recurring Solana price declared without one, before the local commit ([Solana](rails/solana.md)); it updates no provider object and queues no provider work. Other changes requiring provider writes fail before local mutation. Scheduled drift watching is alert-only (`catalog_reconciliation_interval`, default 1h, `0` disables); catalog prune never deletes provider extras |
+| 1 | Catalog wrong at the provider | separate provider workflow | `catalog apply` commits local catalog changes and read-verifies existing provider bindings. Its one provider write publishes the on-chain plan of a recurring Solana price declared without one, before the local commit ([Solana](rails/solana.md)); it updates no provider object and queues no provider work. Other changes requiring provider writes fail before local mutation. OpenRails owns the catalog: nothing watches provider catalogs for drift, and catalog prune never deletes provider extras |
 | 2 | Money state wrong locally | pull (provider → OpenRails) | webhooks in real time; **Provider Refresh** as the always-on scheduled read; a manual PSP import (`POST /v1/merchant/psp-imports`) re-reads a PSP on demand, its differences becoming proposals |
 | 3 | Outbound action never executed | (intent, not sync) | **durable intent + replay** — see "Durability model"; the Convergence Engine's stuck-intent check is its detector |
 | 4 | Entitlements inconsistent | derived | the **Convergence Engine** re-derives them once 1–3 are true |
@@ -1235,7 +1235,6 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 | Provider refresh scheduler (fans out per merchant) | 2 h |
 | Stored card refresh ahead of renewal | 6 h |
 | Solana gas alert; Solana ledger reconciliation | 6 h |
-| Catalog reconciliation pull (alert only) | `catalog_reconciliation_interval` (default 1 h; `0` disables) |
 | Ledger integrity audit | 24 h |
 | Automatic usage billing (opt-in) | 5 min, plus threshold wakeups |
 

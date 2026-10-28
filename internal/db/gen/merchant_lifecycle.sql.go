@@ -11,20 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countMerchantRowsCatalogDriftEvents = `-- name: CountMerchantRowsCatalogDriftEvents :one
-
-SELECT count(*) FROM billing.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%'
-`
-
-// Merchant lifecycle: per-table count/purge queries for merchant export and
-// gated delete, one static query per merchant-owned table.
-func (q *Queries) CountMerchantRowsCatalogDriftEvents(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsCatalogDriftEvents, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countMerchantRowsEntitlementCache = `-- name: CountMerchantRowsEntitlementCache :one
 SELECT count(*) FROM billing.customer_entitlement_cache WHERE merchant_id = $1
 `
@@ -59,9 +45,12 @@ func (q *Queries) CountMerchantRowsExternalProviderMutationLogs(ctx context.Cont
 }
 
 const countMerchantRowsMandates = `-- name: CountMerchantRowsMandates :one
+
 SELECT count(*) FROM billing.mandates WHERE merchant_id = $1
 `
 
+// Merchant lifecycle: per-table count/purge queries for merchant export and
+// gated delete, one static query per merchant-owned table.
 func (q *Queries) CountMerchantRowsMandates(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMerchantRowsMandates, merchantID)
 	var count int64
@@ -232,15 +221,6 @@ func (q *Queries) CountMerchantRowsSubscriptions(ctx context.Context, merchantID
 	var count int64
 	err := row.Scan(&count)
 	return count, err
-}
-
-const purgeMerchantRowsCatalogDriftEvents = `-- name: PurgeMerchantRowsCatalogDriftEvents :exec
-DELETE FROM billing.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%'
-`
-
-func (q *Queries) PurgeMerchantRowsCatalogDriftEvents(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsCatalogDriftEvents, merchantID)
-	return err
 }
 
 const purgeMerchantRowsEntitlementCache = `-- name: PurgeMerchantRowsEntitlementCache :exec

@@ -391,9 +391,6 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("mode was removed (#710): set provider_write_mode (env PROVIDER_WRITE_MODE, flag --provider-write-mode) to full|limited|readonly")
 	}
 	// #712: ad-hoc library env knobs moved into config; the old names fail loudly.
-	if os.Getenv("OPENRAILS_CATALOG_RECONCILIATION_INTERVAL") != "" {
-		return nil, fmt.Errorf("OPENRAILS_CATALOG_RECONCILIATION_INTERVAL was renamed (#712): set catalog_reconciliation_interval (env CATALOG_RECONCILIATION_INTERVAL)")
-	}
 	if os.Getenv("OPENRAILS_SQL_TRACE") != "" {
 		return nil, fmt.Errorf("OPENRAILS_SQL_TRACE was renamed (#712): set db.sql_trace (env DB_SQL_TRACE)")
 	}

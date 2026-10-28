@@ -51,14 +51,8 @@ type FindingRecord struct {
 	// from re-observation. Cleared on every resolution.
 	NotifiedAt       *time.Time `json:"notified_at,omitempty"`
 	NotifiedSeverity string     `json:"notified_severity,omitempty"`
-	// PSPID and the resource columns are set on catalog and pull.* findings.
-	PSPID              *uuid.UUID `json:"-"`
-	ResourceType       *string    `json:"-"`
-	ResourceID         *string    `json:"-"`
-	ExternalResourceID *string    `json:"-"`
-	Field              *string    `json:"-"`
-	OpenRailsValue     *string    `json:"-"`
-	ExternalValue      *string    `json:"-"`
+	// PSPID is set on pull.* findings.
+	PSPID *uuid.UUID `json:"-"`
 	// Change, Source and ApprovalRunID are a pull.* finding's proposal: what
 	// approving it applies, what raised it, and the approval run that did.
 	Change         *Change    `json:"-"`
@@ -686,13 +680,7 @@ func FindingRecordFromRow(row gen.BillingReconciliationFinding) FindingRecord {
 		ApprovalRunID:  row.ApprovalRunID,
 		PullID:         row.PullID,
 
-		PSPID:              row.PspID,
-		ResourceType:       row.OpenrailsResourceType,
-		ResourceID:         row.OpenrailsResourceID,
-		ExternalResourceID: row.ExternalResourceID,
-		Field:              row.Field,
-		OpenRailsValue:     row.OpenrailsValue,
-		ExternalValue:      row.ExternalValue,
+		PSPID: row.PspID,
 	}
 	if row.RecommendedAction != nil {
 		rec.RecommendedAction = *row.RecommendedAction

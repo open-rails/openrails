@@ -116,6 +116,7 @@ sql:
       - "internal/migrate/postgres/0132_psp_import_onboarding.up.sql"
       - "internal/migrate/postgres/0134_parked_provider_subscriptions.up.sql"
       - "internal/migrate/postgres/0136_manual_reconcile.up.sql"
+      - "internal/migrate/postgres/0140_drop_catalog_drift.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

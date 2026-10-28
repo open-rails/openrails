@@ -45,7 +45,7 @@ func optional(s string) *string {
 }
 
 // FindingsQuery is the findings list's filters. Type is one finding type or a
-// prefix ending in ".*" (catalog.*: catalog drift).
+// prefix ending in ".*" (pull.*: the pull's proposals).
 type FindingsQuery struct {
 	Status   string `form:"status"`
 	Severity string `form:"severity"`

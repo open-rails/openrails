@@ -1669,20 +1669,14 @@ type BillingRebillCycle struct {
 	Quantity *int32
 }
 
-// Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, psp_id, subject_key): catalog and pull.* findings name the PSP whose read raised them. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored. Retention: resolved findings are deleted 12 months (366 days) after they were resolved and last seen.
+// Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, psp_id, subject_key): pull.*, catalog.price.unmapped and life.subscription.unattributed findings name the PSP whose read raised them. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored. Retention: resolved findings are deleted 12 months (366 days) after they were resolved and last seen.
 type BillingReconciliationFinding struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	FindingType string
 	Rail        *string
-	// Catalog, pull.* and life.subscription.unattributed findings: the PSP whose read raised the finding. Part of the identity; absence can be proven only by a complete read of this PSP.
-	PspID                 *uuid.UUID
-	OpenrailsResourceType *string
-	OpenrailsResourceID   *string
-	ExternalResourceID    *string
-	Field                 *string
-	OpenrailsValue        *string
-	ExternalValue         *string
+	// pull.*, catalog.price.unmapped and life.subscription.unattributed findings: the PSP whose read raised the finding. Part of the identity; absence can be proven only by a complete read of this PSP.
+	PspID *uuid.UUID
 	// Stable identity of the drifted subject within (provider, finding_type): rail subscription id, transaction id, local subscription/payment-method uuid, or customer uuid depending on the check.
 	SubjectKey        string
 	Severity          string

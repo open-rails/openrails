@@ -1,12 +1,6 @@
 -- Merchant lifecycle: per-table count/purge queries for merchant export and
 -- gated delete, one static query per merchant-owned table.
 
--- name: CountMerchantRowsCatalogDriftEvents :one
-SELECT count(*) FROM billing.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%';
-
--- name: PurgeMerchantRowsCatalogDriftEvents :exec
-DELETE FROM billing.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%';
-
 -- name: CountMerchantRowsMandates :one
 SELECT count(*) FROM billing.mandates WHERE merchant_id = $1;
 

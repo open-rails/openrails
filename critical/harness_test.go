@@ -55,10 +55,9 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 		pool.Close()
 	})
 	w.cfg = openrails.Config{
-		Database:                      openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
-		ProviderWriteMode:             openrails.ProviderWritesReadOnly,
-		CatalogReconciliationInterval: "0",
-		ReturnOrigins:                 []string{"https://critical.invalid"},
+		Database:          openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
+		ProviderWriteMode: openrails.ProviderWritesReadOnly,
+		ReturnOrigins:     []string{"https://critical.invalid"},
 		Merchants: map[string]openrails.MerchantDeclaration{
 			"alpha": {DisplayName: "Alpha"},
 			"beta":  {DisplayName: "Beta"},

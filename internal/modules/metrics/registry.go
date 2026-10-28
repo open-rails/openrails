@@ -174,7 +174,7 @@ var Dimensions = []Dimension{
 	{Name: "recovery_attempt", Description: "the attempt that collected a failed cycle, counting the first: 1 (a missed cycle's first attempt) | 2 | 3 | 4 | 5+ (empty otherwise)", Values: []string{"", "1", "2", "3", "4", "5+"}},
 	{Name: "days_to_recover", Description: "whole days from a cycle's first failure to its collection (empty otherwise)"},
 	// Findings: problems OpenRails found.
-	{Name: "finding_type", Description: "finding type, e.g. life.provider_intent.stuck or catalog.price.missing"},
+	{Name: "finding_type", Description: "finding type, e.g. life.provider_intent.stuck or pull.subscription.mismatch"},
 	{Name: "severity", Description: "finding severity", Values: []string{"critical", "high", "medium", "low"}},
 	{Name: "finding_status", Description: "requires_review (needs a person; the console's bell counts these) | reconcile_required (OpenRails is repairing it)", Values: []string{"requires_review", "reconcile_required"}},
 	// #1120 NMI history.

@@ -400,7 +400,6 @@ export const billingAdminMessages = {
   Expires: "Expires",
   "Expires (optional)": "Expires (optional)",
   Failure: "Failure",
-  Field: "Field",
   Filter: "Filter",
   "Filter meters on this page": "Filter meters on this page",
   "Filter this page…": "Filter this page…",

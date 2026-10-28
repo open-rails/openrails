@@ -121,67 +121,6 @@ type StripePrice struct {
 // stripeListPageLimit is Stripe's List page maximum.
 const stripeListPageLimit = 100
 
-// ListProducts returns one page of Stripe Products. Pass "" for the first page,
-// then the returned nextCursor; it is "" when no pages remain.
-func (s *StripeCatalogService) ListProducts(ctx context.Context, startingAfter string) (products []StripeProduct, nextCursor string, err error) {
-	stripeProc := s.stripeRail(ctx)
-	if stripeProc == nil || stripeProc.SecretKey == "" {
-		return nil, "", fmt.Errorf("stripe is not configured")
-	}
-	endpoint := fmt.Sprintf(s.baseURL()+"/v1/products?limit=%d", stripeListPageLimit)
-	if sa := strings.TrimSpace(startingAfter); sa != "" {
-		endpoint += "&starting_after=" + url.QueryEscape(sa)
-	}
-	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, endpoint)
-	if err != nil {
-		return nil, "", err
-	}
-	if status >= 300 {
-		return nil, "", fmt.Errorf("stripe product list failed: %s", parseStripeError(body))
-	}
-	var resp struct {
-		Data    []StripeProduct `json:"data"`
-		HasMore bool            `json:"has_more"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, "", err
-	}
-	if resp.HasMore && len(resp.Data) > 0 {
-		nextCursor = resp.Data[len(resp.Data)-1].ID
-	}
-	return resp.Data, nextCursor, nil
-}
-
-// ListPrices returns one page of Stripe Prices, paged like ListProducts.
-func (s *StripeCatalogService) ListPrices(ctx context.Context, startingAfter string) (prices []StripePrice, nextCursor string, err error) {
-	stripeProc := s.stripeRail(ctx)
-	if stripeProc == nil || stripeProc.SecretKey == "" {
-		return nil, "", fmt.Errorf("stripe is not configured")
-	}
-	endpoint := fmt.Sprintf(s.baseURL()+"/v1/prices?limit=%d", stripeListPageLimit)
-	if sa := strings.TrimSpace(startingAfter); sa != "" {
-		endpoint += "&starting_after=" + url.QueryEscape(sa)
-	}
-	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, endpoint)
-	if err != nil {
-		return nil, "", err
-	}
-	if status >= 300 {
-		return nil, "", fmt.Errorf("stripe price list failed: %s", parseStripeError(body))
-	}
-	var resp struct {
-		Data    []StripePrice `json:"data"`
-		HasMore bool          `json:"has_more"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, "", err
-	}
-	if resp.HasMore && len(resp.Data) > 0 {
-		nextCursor = resp.Data[len(resp.Data)-1].ID
-	}
-	return resp.Data, nextCursor, nil
-}
-
 // StripeIntervalForDays exposes the OpenRails-billing-cycle -> Stripe recurrence
 // mapping so callers outside this package can validate linked Stripe Prices.
 func StripeIntervalForDays(days int) (interval string, intervalCount int) {

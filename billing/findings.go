@@ -43,28 +43,20 @@ const (
 )
 
 // Finding is a problem OpenRails found that needs a person, or that it is
-// repairing: a discrepancy between OpenRails and a provider (catalog drift
-// included), within OpenRails' own books, or in its operation (a provider
-// operation refused, a provider event unbooked, stalled background work), and
-// what to do about it. A catalog or pull.* finding names the PSP whose read
-// raised it; a catalog finding also names the resource, the field and both
-// values.
+// repairing: a discrepancy between OpenRails and a provider, within OpenRails'
+// own books, or in its operation (a provider operation refused, a provider
+// event unbooked, stalled background work), and what to do about it. A pull.*
+// finding names the PSP whose read raised it.
 type Finding struct {
-	ID                 FindingID      `json:"id"`
-	Type               string         `json:"finding_type"`
-	Provider           *string        `json:"provider"`
-	PSPID              *PSPID         `json:"psp_id"`
-	ResourceType       *string        `json:"resource_type"`
-	ResourceID         *string        `json:"resource_id"`
-	ExternalResourceID *string        `json:"external_resource_id"`
-	Field              *string        `json:"field"`
-	OpenRailsValue     *string        `json:"openrails_value"`
-	ExternalValue      *string        `json:"external_value"`
-	SubjectKey         string         `json:"subject_key"`
-	Severity           string         `json:"severity"`
-	Status             FindingStatus  `json:"status"`
-	RecommendedAction  *string        `json:"recommended_action"`
-	Evidence           map[string]any `json:"evidence"`
+	ID                FindingID      `json:"id"`
+	Type              string         `json:"finding_type"`
+	Provider          *string        `json:"provider"`
+	PSPID             *PSPID         `json:"psp_id"`
+	SubjectKey        string         `json:"subject_key"`
+	Severity          string         `json:"severity"`
+	Status            FindingStatus  `json:"status"`
+	RecommendedAction *string        `json:"recommended_action"`
+	Evidence          map[string]any `json:"evidence"`
 	// Recommendation is the mechanical fix approving runs; nil when the
 	// finding has none and only ignoring resolves it.
 	Recommendation *FindingRecommendation `json:"recommendation"`
@@ -95,7 +87,7 @@ type FindingRecommendation struct {
 
 // FindingListParams pages the findings queue: most severe first, then
 // oldest. Status empty lists the open findings. Type is one finding type or a
-// prefix ending in ".*" ("catalog.*" lists catalog drift).
+// prefix ending in ".*" ("pull.*" lists the pull's proposals).
 //
 // IDs instead reads 1 to MaxBatchItems named findings in one page, open or
 // resolved; unknown ones are absent.

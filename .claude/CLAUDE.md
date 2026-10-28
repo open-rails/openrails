@@ -142,8 +142,6 @@ through `host-four`; these are placeholders, not customer or repository names.
   mutates a catalog; don't add a boot-time apply. Files and console edits share
   fields by ownership: a field an edit changed last is not overwritten by the
   file, and the conflict is reported.
-- The **pull** reconciliation job (`internal/river/jobs_catalog_reconciliation.go`) is
-  ALERT-ONLY: it never mutates providers.
 - `prices` are OpenRails-owned terms; new card subscriptions always use its billing
   cycle. `provider_prices` mirror existing NMI/Stripe objects and declare CCBill
   FlexForms, read-only. NMI and Stripe catalog objects are never created or edited.
