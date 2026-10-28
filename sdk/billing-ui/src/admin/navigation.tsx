@@ -78,7 +78,6 @@ export const coreNav: AdminNavItem[] = [
       { title: "Products", path: "/catalog" },
       { title: "Prices", path: "/catalog/prices" },
       { title: "Metering", path: "/catalog/metering" },
-      { title: "Drift", path: "/catalog/drift", useVisible: useMerchantConfig },
     ],
   },
   {

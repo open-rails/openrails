@@ -47,7 +47,6 @@ import { DIALOG_FORM } from "#orck/admin/lib/dialog-width"
 import type { Price, Product } from "#orck/client/generated/wire"
 import {
   currencyScale,
-  formatDate,
   nativeAmountFromInput,
   shortId,
   supportedCurrencies,
@@ -64,7 +63,6 @@ import { PriceChangeWizard } from "#orck/admin/pages/catalog/price-wizard"
 import {
   useAccess,
   useCatalogWrites,
-  useMerchantConfig,
 } from "#orck/admin/lib/capabilities"
 
 // Each part of the catalog is its own page, reached from the sub-items the
@@ -123,20 +121,6 @@ export function CatalogPricesPage() {
     <CatalogSection title={adminText("Prices")}>
       <PricesTab />
     </CatalogSection>
-  )
-}
-
-export function CatalogDriftPage() {
-  const { text: adminText } = useAdminUI()
-  const merchantConfig = useMerchantConfig()
-  if (!merchantConfig) return null
-  return (
-    <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold tracking-tight">
-        {adminText("Drift")}
-      </h1>
-      <DriftTab />
-    </div>
   )
 }
 
@@ -1032,82 +1016,6 @@ function PriceDialog({ products }: { products: Product[] }) {
         </form>
       </DialogContent>
     </Dialog>
-  )
-}
-
-function DriftTab() {
-  const { adminQueries } = useAdminServices()
-  const canRead = useMerchantConfig()
-  const { data, isPending: loading } = useQuery(
-    adminQueries.catalogDrift(canRead)
-  )
-
-  return (
-    <div className="flex flex-col gap-3">
-      {loading ? (
-        <div className="flex flex-col gap-3 py-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-6 w-full" />
-          ))}
-        </div>
-      ) : !data?.data?.length ? (
-        <p className="text-sm text-muted-foreground">
-          <AdminMessage id={"No open drift events. Catalog is in sync."} />
-        </p>
-      ) : (
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="text-muted-foreground">
-                  <AdminMessage id={"Provider"} />
-                </TableHead>
-                <TableHead className="text-muted-foreground">
-                  <AdminMessage id={"Kind"} />
-                </TableHead>
-                <TableHead className="text-muted-foreground">
-                  <AdminMessage id={"Resource"} />
-                </TableHead>
-                <TableHead className="text-muted-foreground">
-                  <AdminMessage id={"Field"} />
-                </TableHead>
-                <TableHead className="text-muted-foreground">
-                  <AdminMessage id={"OpenRails"} />
-                </TableHead>
-                <TableHead className="text-muted-foreground">
-                  <AdminMessage id={"Remote"} />
-                </TableHead>
-                <TableHead className="text-muted-foreground">
-                  <AdminMessage id={"Detected"} />
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.data.map((e) => (
-                <TableRow key={e.id}>
-                  <TableCell>{e.provider ?? "—"}</TableCell>
-                  <TableCell>
-                    {e.finding_type.replace(/^catalog\./, "")}
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {e.resource_type}{" "}
-                    {shortId(e.resource_id || e.external_resource_id || "", 13)}
-                  </TableCell>
-                  <TableCell>{e.field || "—"}</TableCell>
-                  <TableCell className="max-w-40 truncate">
-                    {e.openrails_value || "—"}
-                  </TableCell>
-                  <TableCell className="max-w-40 truncate">
-                    {e.external_value || "—"}
-                  </TableCell>
-                  <TableCell>{formatDate(e.created_at)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-    </div>
   )
 }
 

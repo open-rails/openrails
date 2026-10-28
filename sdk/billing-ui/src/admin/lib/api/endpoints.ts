@@ -563,7 +563,7 @@ export function createEndpoints(client: AdminClient) {
   // --- Ops ---
 
   // listFindings reads the findings queue; type is one finding type or a prefix
-  // ending in ".*" (catalog.*: catalog drift).
+  // ending in ".*" (pull.*).
   const listFindings = (
     filters: { status?: string; severity?: string; type?: string },
     limit: number,

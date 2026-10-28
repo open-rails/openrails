@@ -58,7 +58,6 @@ const buildQueryKeys = (root: () => MerchantRoot) => ({
   attempts: () => [...root(), "payment-attempts"] as const,
   cycles: () => [...root(), "renewals"] as const,
   catalog: () => [...root(), "catalog"] as const,
-  catalogDrift: () => [...root(), "catalog", "drift"] as const,
   usageMeters: () => [...root(), "catalog", "meters"] as const,
   usageMeter: (key: string) => [...root(), "catalog", "meters", key] as const,
   settings: () => [...root(), "settings"] as const,
@@ -400,14 +399,6 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
         queryFn: ({ signal }) =>
           listPriceMigrations(productKey!, priceKey!, limit, signal),
         enabled: Boolean(productKey && priceKey),
-      }),
-    catalogDrift: (enabled = true, limit = 200, cursor?: string) =>
-      queryOptions({
-        queryKey: [...queryKeys.catalogDrift(), { limit, cursor }],
-        queryFn: ({ signal }) =>
-          listFindings({ type: "catalog.*" }, limit, signal),
-        enabled,
-        meta: { errorAction: "Load drift" },
       }),
     pspRouting: (priceId: string) =>
       queryOptions({

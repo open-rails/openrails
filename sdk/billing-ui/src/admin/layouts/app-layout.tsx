@@ -31,10 +31,6 @@ const trails: [string, { label: string; to?: string }[]][] = [
     "/catalog/prices",
     [{ label: "Catalog", to: "/catalog" }, { label: "Prices" }],
   ],
-  [
-    "/catalog/drift",
-    [{ label: "Catalog", to: "/catalog" }, { label: "Drift" }],
-  ],
   ["/catalog", [{ label: "Catalog", to: "/catalog" }, { label: "Products" }]],
   [
     "/ops/imports",
@@ -67,7 +63,7 @@ function areaOf(
       name: "customer support",
       allowed: access.admin === "read" || access.admin === "update",
     }
-  if (under("/ops") || under("/catalog/drift"))
+  if (under("/ops"))
     return {
       name: "merchant configuration",
       allowed:

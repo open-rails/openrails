@@ -50,12 +50,6 @@ const routes = [
     ),
   },
   {
-    path: "/catalog/drift",
-    Component: lazy(() =>
-      import("./pages/catalog").then((m) => ({ default: m.CatalogDriftPage }))
-    ),
-  },
-  {
     path: "/customers",
     Component: lazy(() =>
       import("./pages/customers").then((m) => ({ default: m.CustomersPage }))
