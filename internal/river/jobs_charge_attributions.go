@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
@@ -34,12 +35,14 @@ func (ChargeAttributionArgs) Kind() string { return KindChargeAttributions }
 
 // ChargeAttributionWorker reads each due declared charge attribution from its
 // provider once, up to nmi.MaxQueryIDs per read, and records the charge on its
-// declared subscription. Only due rows are read; a failed read backs off.
+// declared subscription. Only due rows are read; a failed read backs off. A
+// CCBill attribution is left to the provider pull while DataLink reads it.
 type ChargeAttributionWorker struct {
 	river.WorkerDefaults[ChargeAttributionArgs]
 	DB          *db.DB
 	Clock       clockwork.Clock
 	NMIResolver railresolve.NMIClientResolver
+	Rails       railresolve.Source
 }
 
 func (ChargeAttributionWorker) Kind() string { return KindChargeAttributions }
@@ -62,7 +65,7 @@ func (w *ChargeAttributionWorker) Work(ctx context.Context, _ *river.Job[ChargeA
 					return nil, fmt.Errorf("psp %s: nmi client unavailable: %v", psp, err)
 				}
 				return client, nil
-			}, now, chargeAttributionLimit)
+			}, w.pulled, now, chargeAttributionLimit)
 			return err
 		})
 		if err != nil {
@@ -70,4 +73,20 @@ func (w *ChargeAttributionWorker) Work(ctx context.Context, _ *river.Job[ChargeA
 		}
 	}
 	return workErr
+}
+
+// pulled reports whether the provider refresh reads the PSP's charges: CCBill
+// through DataLink, when its credentials are declared.
+func (w *ChargeAttributionWorker) pulled(ctx context.Context, psp uuid.UUID, rail string) (bool, error) {
+	if rail != string(models.RailCCBill) || w.Rails == nil {
+		return false, nil
+	}
+	resolved, err := w.Rails.RailConfig(db.WithPSPID(ctx, psp), rail, "")
+	if errors.Is(err, railresolve.ErrRailNotArmed) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return resolved.CCBill != nil && resolved.CCBill.DataLinkUsername != "", nil
 }

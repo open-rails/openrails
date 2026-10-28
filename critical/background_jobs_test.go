@@ -5,6 +5,8 @@ package critical_test
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -143,9 +145,13 @@ func TestBackgroundJobs(t *testing.T) {
 		fleet := startFleet(t, w)
 		runRegistered(t, fleet, "openrails.admission_denial_flush", 1)
 		require.Zero(t, deniedAdmissions(t, w, hour), "an open hour is not flushed")
+		// A count whose customer no longer exists is dropped alone.
+		key := fmt.Sprintf("or:mdeny:%s:%d", w.alpha.MerchantID().UUID(), hour.Unix())
+		require.NoError(t, w.deps.Redis.HIncrBy(t.Context(), key, uuid.NewString()+"|insufficient_balance", 2).Err())
 		w.clock.Advance(hour.Add(time.Hour + 10*time.Minute).Sub(w.clock.Now()))
 		runRegistered(t, fleet, "openrails.admission_denial_flush", 2)
 		require.EqualValues(t, 3, deniedAdmissions(t, w, hour))
+		require.Zero(t, w.deps.Redis.Exists(t.Context(), key).Val(), "a flushed hour leaves Redis")
 		runRegistered(t, fleet, "openrails.admission_denial_flush", 1)
 		require.EqualValues(t, 3, deniedAdmissions(t, w, hour), "a flushed hour is counted once")
 	})
@@ -195,35 +201,37 @@ func TestBackgroundJobs(t *testing.T) {
 		runRegistered(t, fleet, "openrails.rebill_watch", 1)
 		require.Equal(t, 1, missed(), "a renewal no crank pulled is a missed rebill")
 	})
-	t.Run("OR-J21-S05/unreadable-rail-charge-attribution-becomes-a-finding", func(t *testing.T) {
-		w := newWorld(t, func(w *world) {
-			m := w.cfg.Merchants["alpha"]
-			m.PSPs = openrails.PSPs{"ccbill": openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: "0001", Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()}
-			w.cfg.Merchants["alpha"] = m
+	t.Run("OR-J21-S05", func(t *testing.T) {
+		t.Run("attribution-no-pull-reads-becomes-a-finding", func(t *testing.T) {
+			w := newWorld(t, func(w *world) { declareCCBill(w, nil) })
+			customer := importCCBillAttribution(t, w)
+			fleet := startFleet(t, w)
+			runRegistered(t, fleet, "openrails.charge_attributions", 1)
+			findings := unverifiedTransactions(t, w)
+			require.Len(t, findings, 1, "a charge nothing reads is evidence for review, not a perpetual wait")
+			require.Equal(t, "0112233446", findings[0].Evidence["transaction_id"])
+			require.Len(t, ccbillPayments(t, w, customer), 1, "only the declared initial sale is a payment")
 		})
-		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "ccbill-member", DisplayName: "CCBill member", Entitlements: []string{"ccbill:member"}})
-		require.NoError(t, err)
-		price, err := w.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "ccbill-monthly", PSP: "ccbill", FlexID: "critical-flex",
-			Currency: "USD", UnitAmount: ptr(int64(10_000_000)), BillingIntervalHours: ptr(720)})
-		require.NoError(t, err)
-		customer := billing.CustomerID(uuid.New())
-		start, end := w.clock.Now().Add(-24*time.Hour), w.clock.Now().Add(29*24*time.Hour)
-		book := billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "ccbill"}, Customers: []billing.DeclaredCustomer{{Customer: customer}},
-			Subscriptions: []billing.DeclaredSubscription{{SourceID: "ccbill-member", Customer: customer, Price: price.ID, Rail: "ccbill", RailSubscriptionID: "0112233445", StartedAt: start, PaidThrough: &end,
-				AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: "0112233445", Amount: 10_000_000, Currency: "USD", IntervalHours: 720, FirstDueAt: end}}},
-			Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: "0112233445", TransactionID: "0112233446", Type: "sale", Success: true, Currency: "USD", OccurredAt: start}}}
-		result, err := w.alpha.ImportBilling(t.Context(), book)
-		require.NoError(t, err)
-		require.Empty(t, result.Blocked, "%+v", result.Reasons)
-		fleet := startFleet(t, w)
-		runRegistered(t, fleet, "openrails.charge_attributions", 1)
-		findings, err := w.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.import.transaction_unverified"})
-		require.NoError(t, err)
-		require.Len(t, findings.Items, 1, "a charge OpenRails cannot read is evidence for review, not a perpetual wait")
-		require.Equal(t, "0112233446", findings.Items[0].Evidence["transaction_id"])
-		payments, err := w.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
-		require.NoError(t, err)
-		require.Empty(t, payments.Items)
+		t.Run("attribution-the-pull-records-raises-no-finding", func(t *testing.T) {
+			var feed *httptest.Server
+			w := newWorld(t, func(w *world) {
+				feed = dataLinkFeed(t, w.clock.Now().Truncate(time.Second).Add(-24*time.Hour))
+				declareCCBill(w, feed)
+			})
+			customer := importCCBillAttribution(t, w)
+			fleet := hostFleet(t, w)
+			fleet.PeriodicJobs().Clear()
+			require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+			require.NoError(t, fleet.Start(t.Context()))
+			runRegistered(t, fleet, "openrails.charge_attributions", 1)
+			require.Empty(t, unverifiedTransactions(t, w), "the DataLink pull has not read the charge yet")
+			refreshMerchant(t, fleet, w.alpha.MerchantID().UUID())
+			payments := ccbillPayments(t, w, customer)
+			require.Contains(t, payments, "0112233446", "the pull records the attributed rebill")
+			require.EqualValues(t, 10_000_000, payments["0112233446"])
+			runRegistered(t, fleet, "openrails.charge_attributions", 1)
+			require.Empty(t, unverifiedTransactions(t, w))
+		})
 	})
 	t.Run("OR-J15-S05/attempts-of-a-psp-without-credentials-are-given-up", func(t *testing.T) {
 		// NMI skips a cycle and OpenRails charges it: its own NMI attempt.
@@ -288,4 +296,125 @@ func TestBackgroundJobs(t *testing.T) {
 		require.Len(t, jobs.Jobs, 1)
 		require.Contains(t, string(jobs.Jobs[0].EncodedArgs), uuid.UUID(created.ID).String())
 	})
+}
+
+// declareCCBill gives alpha a CCBill PSP, read by a DataLink pull when feed
+// is set.
+func declareCCBill(w *world, feed *httptest.Server) {
+	m := w.cfg.Merchants["alpha"]
+	psp := openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: "0001", Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}
+	if feed != nil {
+		psp.DatalinkUsername, psp.DatalinkPassword = "critical-datalink", "critical-datalink-password"
+		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: feed.URL}
+	}
+	m.PSPs = openrails.PSPs{"ccbill": psp.PSPConfig()}
+	w.cfg.Merchants["alpha"] = m
+}
+
+// importCCBillAttribution imports a CCBill membership whose initial sale has
+// an amount and whose rebill a day ago is declared without one.
+func importCCBillAttribution(t *testing.T, w *world) billing.CustomerID {
+	t.Helper()
+	product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "ccbill-member", DisplayName: "CCBill member", Entitlements: []string{"ccbill:member"}})
+	require.NoError(t, err)
+	price, err := w.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "ccbill-monthly", PSP: "ccbill", FlexID: "critical-flex",
+		Currency: "USD", UnitAmount: ptr(int64(10_000_000)), BillingIntervalHours: ptr(720)})
+	require.NoError(t, err)
+	customer := billing.CustomerID(uuid.New())
+	rebill := w.clock.Now().Truncate(time.Second).Add(-24 * time.Hour)
+	start := rebill.Add(-720 * time.Hour)
+	book := billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "ccbill"}, Customers: []billing.DeclaredCustomer{{Customer: customer}},
+		Subscriptions: []billing.DeclaredSubscription{{SourceID: "ccbill-member", Customer: customer, Price: price.ID, Rail: "ccbill", RailSubscriptionID: "0112233445", StartedAt: start, PaidThrough: &rebill,
+			AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: "0112233445", Amount: 10_000_000, Currency: "USD", IntervalHours: 720, FirstDueAt: rebill}}},
+		Transactions: []billing.DeclaredTransaction{
+			{RailSubscriptionID: "0112233445", TransactionID: "0112233440", Type: "sale", Success: true, Amount: 10_000_000, Currency: "USD", OccurredAt: start},
+			{RailSubscriptionID: "0112233445", TransactionID: "0112233446", Type: "sale", Success: true, Currency: "USD", OccurredAt: rebill},
+		}}
+	result, err := w.alpha.ImportBilling(t.Context(), book)
+	require.NoError(t, err)
+	require.Empty(t, result.Blocked, "%+v", result.Reasons)
+	return customer
+}
+
+// dataLinkFeed is CCBill's DataLink as the pull reads it: the membership is
+// active, and its rebill is in the export of any window holding it.
+func dataLinkFeed(t *testing.T, rebill time.Time) *httptest.Server {
+	t.Helper()
+	mst := time.FixedZone("MST", -7*60*60)
+	server := httptest.NewServer(http.HandlerFunc(func(out http.ResponseWriter, r *http.Request) {
+		if r.ParseForm() != nil || r.URL.Path != "/data/main.cgi" {
+			http.Error(out, "unexpected DataLink request", http.StatusBadRequest)
+			return
+		}
+		if r.Form.Get("transactionTypes") == "ACTIVEMEMBERS" {
+			fmt.Fprintf(out, "\"ACTIVEMEMBERS\",\"945280\",\"critical-flex\",\"0112233445\",\"%s\",\"member\",\"member@critical.invalid\",\"1\",\"%s\",\"\"\n",
+				rebill.Add(-720*time.Hour).Format("2006-01-02"), rebill.Add(720*time.Hour).Format("2006-01-02"))
+			return
+		}
+		from, errFrom := time.ParseInLocation("20060102150405", r.Form.Get("startTime"), mst)
+		until, errUntil := time.ParseInLocation("20060102150405", r.Form.Get("endTime"), mst)
+		if errFrom != nil || errUntil != nil {
+			http.Error(out, "unbounded DataLink export", http.StatusBadRequest)
+			return
+		}
+		if !rebill.Before(from) && rebill.Before(until) {
+			fmt.Fprintf(out, "REBILL,945280,0001,0112233445,%s,0112233446,10.00\n", rebill.UTC().Format("2006-01-02 15:04:05"))
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+type refreshMerchantJob struct {
+	MerchantID uuid.UUID `json:"merchant_id"`
+}
+
+func (refreshMerchantJob) Kind() string { return "openrails.provider_refresh_merchant" }
+
+// refreshMerchant runs the merchant's provider refresh through every window
+// it has to read.
+func refreshMerchant(t *testing.T, fleet *river.Client[pgx.Tx], merchant uuid.UUID) {
+	t.Helper()
+	events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
+	defer unsubscribe()
+	job, err := fleet.Insert(t.Context(), refreshMerchantJob{MerchantID: merchant}, &river.InsertOpts{Queue: openrails.QueueBilling})
+	require.NoError(t, err)
+	deadline := time.NewTimer(3 * time.Minute)
+	defer deadline.Stop()
+	for {
+		select {
+		case event := <-events:
+			if event == nil || event.Job.ID != job.Job.ID {
+				continue
+			}
+			require.Equal(t, river.EventKindJobCompleted, event.Kind, "%+v", event.Job.Errors)
+			return
+		case <-deadline.C:
+			t.Fatal("provider refresh did not finish its windows")
+		}
+	}
+}
+
+func unverifiedTransactions(t *testing.T, w *world) []billing.Finding {
+	t.Helper()
+	findings, err := w.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.import.transaction_unverified"})
+	require.NoError(t, err)
+	var open []billing.Finding
+	for _, finding := range findings.Items {
+		if finding.Status == "requires_review" || finding.Status == "reconcile_required" {
+			open = append(open, finding)
+		}
+	}
+	return open
+}
+
+func ccbillPayments(t *testing.T, w *world, customer billing.CustomerID) map[string]int64 {
+	t.Helper()
+	payments, err := w.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
+	require.NoError(t, err)
+	out := map[string]int64{}
+	for _, payment := range payments.Items {
+		out[payment.TransactionID] = payment.Amount
+	}
+	return out
 }

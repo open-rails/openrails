@@ -214,10 +214,11 @@ a pass's lease in `periodic_leases` (one per pass, held for four fifths of the
 period) before queueing it, and another fleet finds it held and skips that
 pass. A stopped fleet's lease expires, so the others take its passes over at
 their next tick. A fleet's own River jobs and Redis counters are still tended
-by that fleet: give the hosts one Redis, since each writes the admission-denial
-counts of a closed hour as its Redis holds them. Work a request starts (a
-provider call, an enqueued intent) runs on the engine that received it. Give
-each host its own `RiverSchema`.
+by that fleet: give the hosts one Redis and clocks within five minutes of each
+other, since each writes the admission-denial counts of an hour closed five
+minutes earlier as its Redis holds them. Work a request starts (a provider
+call, an enqueued intent) runs on the engine that received it. Give each host
+its own `RiverSchema`.
 
 **Inserting an engine job.** The one job a host inserts itself is the usage
 sweep: `workers.Insert(ctx, openrails.UsageSweepArgs{FinalizePreviousMonth: true}, nil)`

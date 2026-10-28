@@ -811,7 +811,7 @@
     {
       "id": "OR-J21-S05",
       "journey": "J21",
-      "name": "Declared charge on a rail OpenRails cannot read becomes a finding without a payment"
+      "name": "Declared CCBill charge is recorded by the pull that reads it, otherwise kept as a finding without a payment"
     },
     {
       "id": "OR-J06-S07",

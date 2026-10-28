@@ -648,21 +648,20 @@ const listUnenrichedAttemptMerchants = `-- name: ListUnenrichedAttemptMerchants 
 SELECT a.merchant_id
 FROM billing.payment_attempts a
 WHERE a.enriched_at IS NULL AND a.rail = 'nmi' AND a.transaction_id IS NOT NULL
-  AND a.attempted_at >= $1::timestamptz AND a.attempted_at < $2::timestamptz
+  AND a.attempted_at < $1::timestamptz
 GROUP BY a.merchant_id
 ORDER BY MIN(a.attempted_at), a.merchant_id
-LIMIT $3::int
+LIMIT $2::int
 `
 
 type ListUnenrichedAttemptMerchantsParams struct {
-	Since         time.Time
 	Before        time.Time
 	MerchantLimit int32
 }
 
-// CROSS-MERCHANT: merchants holding NMI attempts in [since, before) not yet enriched.
+// CROSS-MERCHANT: merchants holding NMI attempts before `before` not yet enriched.
 func (q *Queries) ListUnenrichedAttemptMerchants(ctx context.Context, arg ListUnenrichedAttemptMerchantsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listUnenrichedAttemptMerchants, arg.Since, arg.Before, arg.MerchantLimit)
+	rows, err := q.db.Query(ctx, listUnenrichedAttemptMerchants, arg.Before, arg.MerchantLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -686,14 +685,13 @@ SELECT id, psp_id, transaction_id::text AS transaction_id, attempted_at
 FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid
   AND enriched_at IS NULL AND rail = 'nmi' AND transaction_id IS NOT NULL
-  AND attempted_at >= $2::timestamptz AND attempted_at < $3::timestamptz
+  AND attempted_at < $2::timestamptz
 ORDER BY attempted_at, id
-LIMIT $4::int
+LIMIT $3::int
 `
 
 type ListUnenrichedNMIAttemptsParams struct {
 	MerchantID uuid.UUID
-	Since      time.Time
 	Before     time.Time
 	RowLimit   int32
 }
@@ -705,14 +703,9 @@ type ListUnenrichedNMIAttemptsRow struct {
 	AttemptedAt   time.Time
 }
 
-// NMI attempts in [since, before) the enrichment pass has not read.
+// NMI attempts before `before` the enrichment pass has not read, oldest first.
 func (q *Queries) ListUnenrichedNMIAttempts(ctx context.Context, arg ListUnenrichedNMIAttemptsParams) ([]ListUnenrichedNMIAttemptsRow, error) {
-	rows, err := q.db.Query(ctx, listUnenrichedNMIAttempts,
-		arg.MerchantID,
-		arg.Since,
-		arg.Before,
-		arg.RowLimit,
-	)
+	rows, err := q.db.Query(ctx, listUnenrichedNMIAttempts, arg.MerchantID, arg.Before, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

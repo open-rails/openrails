@@ -32,8 +32,8 @@ const (
 	// PSP has no client, is marked read with nothing, so it is not asked for
 	// again.
 	enrichGiveUp = 48 * time.Hour
-	// enrichWindow: a day of passes past the give-up; older attempts are left
-	// as they are.
+	// enrichWindow: a day of passes past the give-up; an older attempt is
+	// marked read with nothing, unread.
 	enrichWindow = enrichGiveUp + 24*time.Hour
 
 	enrichMerchantBatch = 200
@@ -63,9 +63,9 @@ func (w *AttemptEnrichmentWorker) Work(ctx context.Context, _ *river.Job[Attempt
 		return errors.New("attempt enrichment: nmi resolver not wired")
 	}
 	now := w.Clock.Now().UTC()
-	since, before := now.Add(-enrichWindow), now.Add(-enrichAfter)
+	before := now.Add(-enrichAfter)
 	merchantIDs, err := w.DB.GenDirectory().ListUnenrichedAttemptMerchants(ctx, gen.ListUnenrichedAttemptMerchantsParams{
-		Since: since, Before: before, MerchantLimit: enrichMerchantBatch,
+		Before: before, MerchantLimit: enrichMerchantBatch,
 	})
 	if err != nil {
 		return fmt.Errorf("attempt enrichment: list merchants: %w", err)
@@ -73,7 +73,7 @@ func (w *AttemptEnrichmentWorker) Work(ctx context.Context, _ *river.Job[Attempt
 	var workErr error
 	for _, mid := range merchantIDs {
 		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "attempt enrichment", func(ctx context.Context) error {
-			return w.enrich(ctx, mid, since, before, now)
+			return w.enrich(ctx, mid, before, now)
 		})
 		if err != nil {
 			workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
@@ -82,24 +82,34 @@ func (w *AttemptEnrichmentWorker) Work(ctx context.Context, _ *river.Job[Attempt
 	return workErr
 }
 
-func (w *AttemptEnrichmentWorker) enrich(ctx context.Context, mid uuid.UUID, since, before, now time.Time) error {
+func (w *AttemptEnrichmentWorker) enrich(ctx context.Context, mid uuid.UUID, before, now time.Time) error {
 	rows, err := w.DB.Gen(ctx).ListUnenrichedNMIAttempts(ctx, gen.ListUnenrichedNMIAttemptsParams{
-		MerchantID: mid, Since: since, Before: before, RowLimit: enrichRowBatch,
+		MerchantID: mid, Before: before, RowLimit: enrichRowBatch,
 	})
 	if err != nil {
 		return err
 	}
+	// Attempts past the window are not read: they are marked read with
+	// nothing, so none stays unenriched for good.
 	byPSP := map[uuid.UUID][]gen.ListUnenrichedNMIAttemptsRow{}
+	var errs error
 	for _, r := range rows {
+		if now.Sub(r.AttemptedAt) >= enrichWindow {
+			errs = errors.Join(errs, attempts.Enrich(ctx, w.DB.Gen(ctx), mid, r.ID, decline.Evidence{}, now))
+			continue
+		}
 		byPSP[r.PspID] = append(byPSP[r.PspID], r)
 	}
-	var errs error
 	for psp, rows := range byPSP {
 		client, ok, err := w.NMIResolver.ResolveNMIClient(ctx, mid, &psp)
+		if err != nil && !errors.Is(err, railresolve.ErrRailNotArmed) {
+			errs = errors.Join(errs, fmt.Errorf("psp %s: nmi client: %w", psp, err))
+			continue
+		}
 		if err != nil || !ok || client == nil {
-			// Enrichment is best effort: an unarmed PSP's attempts wait out
-			// the give-up, then are marked read with nothing.
-			log.WithContext(ctx).WithError(err).WithField("psp_id", psp).Warn("attempt enrichment: nmi client unavailable; attempts past the give-up are marked read")
+			// The PSP has no credentials: its attempts wait out the give-up,
+			// then are marked read with nothing.
+			log.WithContext(ctx).WithError(err).WithField("psp_id", psp).Warn("attempt enrichment: PSP has no NMI credentials; attempts past the give-up are marked read")
 			errs = errors.Join(errs, w.giveUp(ctx, mid, rows, now))
 			continue
 		}

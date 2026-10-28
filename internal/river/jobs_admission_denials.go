@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
 	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
@@ -146,9 +147,9 @@ func (w AdmissionDenialFlushWorker) flushKey(ctx context.Context, key string, no
 		rows = append(rows, row{customer: customerID, reason: reason, count: count})
 	}
 
-	if len(rows) > 0 {
-		mctx := merchant.WithID(ctx, billing.MerchantID(merchantID))
-		if err := w.DB.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
+	mctx := merchant.WithID(ctx, billing.MerchantID(merchantID))
+	write := func(rows []row) error {
+		return w.DB.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
 			q := gen.New(tx)
 			for _, r := range rows {
 				if err := q.UpsertAdmissionDenials(ctx, gen.UpsertAdmissionDenialsParams{
@@ -162,12 +163,38 @@ func (w AdmissionDenialFlushWorker) flushKey(ctx context.Context, key string, no
 				}
 			}
 			return nil
-		}); err != nil {
+		})
+	}
+	written, err := len(rows), error(nil)
+	if written > 0 {
+		err = write(rows)
+	}
+	if err != nil {
+		if !foreignKeyViolation(err) {
 			return 0, err
+		}
+		// A customer or merchant erased since never gets a row: write the
+		// others one by one and drop its count.
+		written = 0
+		for _, r := range rows {
+			if err := write([]row{r}); err != nil {
+				if !foreignKeyViolation(err) {
+					return written, err
+				}
+				log.WithContext(ctx).WithFields(log.Fields{"merchant_id": merchantID, "customer_id": r.customer, "hour_at": hour}).
+					Warn("admission denial count dropped: its customer no longer exists")
+				continue
+			}
+			written++
 		}
 	}
 	if err := w.Redis.Del(ctx, key).Err(); err != nil {
-		return len(rows), err
+		return written, err
 	}
-	return len(rows), nil
+	return written, nil
+}
+
+func foreignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
 }

@@ -47,22 +47,22 @@ SELECT EXISTS (
 )::boolean AS verified;
 
 -- name: ListUnenrichedAttemptMerchants :many
--- CROSS-MERCHANT: merchants holding NMI attempts in [since, before) not yet enriched.
+-- CROSS-MERCHANT: merchants holding NMI attempts before `before` not yet enriched.
 SELECT a.merchant_id
 FROM billing.payment_attempts a
 WHERE a.enriched_at IS NULL AND a.rail = 'nmi' AND a.transaction_id IS NOT NULL
-  AND a.attempted_at >= sqlc.arg(since)::timestamptz AND a.attempted_at < sqlc.arg(before)::timestamptz
+  AND a.attempted_at < sqlc.arg(before)::timestamptz
 GROUP BY a.merchant_id
 ORDER BY MIN(a.attempted_at), a.merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListUnenrichedNMIAttempts :many
--- NMI attempts in [since, before) the enrichment pass has not read.
+-- NMI attempts before `before` the enrichment pass has not read, oldest first.
 SELECT id, psp_id, transaction_id::text AS transaction_id, attempted_at
 FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND enriched_at IS NULL AND rail = 'nmi' AND transaction_id IS NOT NULL
-  AND attempted_at >= sqlc.arg(since)::timestamptz AND attempted_at < sqlc.arg(before)::timestamptz
+  AND attempted_at < sqlc.arg(before)::timestamptz
 ORDER BY attempted_at, id
 LIMIT sqlc.arg(row_limit)::int;
 

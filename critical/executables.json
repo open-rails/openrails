@@ -528,7 +528,8 @@
       "TestBackgroundJobs/OR-J37-S06/solana-renewal-waits-for-the-crank-before-a-missed-rebill"
     ],
     "OR-J21-S05": [
-      "TestBackgroundJobs/OR-J21-S05/unreadable-rail-charge-attribution-becomes-a-finding"
+      "TestBackgroundJobs/OR-J21-S05/attribution-no-pull-reads-becomes-a-finding",
+      "TestBackgroundJobs/OR-J21-S05/attribution-the-pull-records-raises-no-finding"
     ],
     "OR-J06-S07": [
       "TestBackgroundJobs/OR-J06-S07/psp-import-commits-with-its-job"

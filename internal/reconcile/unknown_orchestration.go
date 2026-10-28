@@ -417,8 +417,15 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 				t.ObservedBill = &bill
 			}
 			if result.Payment != nil {
-				_, err = d.Gen(ctx).ResolveChargeAttribution(ctx, gen.ResolveChargeAttributionParams{MerchantID: sub.MerchantID, PspID: sub.PspID,
+				n, err := d.Gen(ctx).ResolveChargeAttribution(ctx, gen.ResolveChargeAttributionParams{MerchantID: sub.MerchantID, PspID: sub.PspID,
 					TransactionID: t.TransactionID, PaymentID: result.Payment.ID, Now: now})
+				if err != nil || n == 0 {
+					return err
+				}
+				// The charge is recorded: no "declared charge without a payment" stands.
+				_, err = d.Gen(ctx).ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: sub.MerchantID,
+					FindingType: FindingTransactionUnverified, SubjectKey: unverifiedTransactionSubject(t.TransactionID)})
+				return err
 			}
 			return err
 		})

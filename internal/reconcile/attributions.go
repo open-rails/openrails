@@ -33,6 +33,8 @@ const (
 	attributionBatch    = 1000
 )
 
+func unverifiedTransactionSubject(transactionID string) string { return "transaction:" + transactionID }
+
 // RecordUnverifiedTransaction keeps a declared charge as evidence: a finding,
 // no payment.
 func RecordUnverifiedTransaction(ctx context.Context, q *gen.Queries, merchantID, psp uuid.UUID, transactionID string, subscription *uuid.UUID, reason string) error {
@@ -43,7 +45,7 @@ func RecordUnverifiedTransaction(ctx context.Context, q *gen.Queries, merchantID
 	raw, _ := json.Marshal(evidence)
 	action := "No payment was recorded for this declared charge (" + reason + "). Declare the provider's own transaction, or leave it as evidence."
 	_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: merchantID,
-		FindingType: FindingTransactionUnverified, SubjectKey: "transaction:" + transactionID, Severity: "medium",
+		FindingType: FindingTransactionUnverified, SubjectKey: unverifiedTransactionSubject(transactionID), Severity: "medium",
 		Status: "requires_review", RecommendedAction: &action, Evidence: raw})
 	return err
 }
@@ -82,14 +84,21 @@ type AttributionReader interface {
 // AttributionResult counts one merchant's pass.
 type AttributionResult struct{ Resolved, Unresolvable, Deferred int }
 
+// AttributionPull reports whether a provider pull reads the PSP's charges.
+// Such a PSP's attributions wait for the pull, which records and resolves
+// them, until its watermark passes them.
+type AttributionPull func(ctx context.Context, psp uuid.UUID, rail string) (bool, error)
+
 // ResolveChargeAttributions reads one merchant's due attributions from their
 // provider, nmi.MaxQueryIDs per read, and records each approved charge on its
 // declared subscription through the same writer a pull uses: settled history
 // before the accepted schedule, or the cycle it settles. A missing, declined
-// or unplaceable charge records no payment and becomes a finding, as does one
-// on a rail OpenRails cannot read by id. A failed read defers the PSP's rows
-// with backoff. Only due rows are read, each once, up to limit rows a pass.
-func ResolveChargeAttributions(ctx context.Context, database *db.DB, merchantID uuid.UUID, reader func(context.Context, uuid.UUID) (AttributionReader, error), now time.Time, limit int) (AttributionResult, error) {
+// or unplaceable charge records no payment and becomes a finding. Another
+// rail's charge is left to a provider pull that reads it, and becomes a
+// finding once that pull has read past it, or at once when none does. A failed
+// read defers the PSP's rows with backoff. Only due rows are read, each once,
+// up to limit rows a pass.
+func ResolveChargeAttributions(ctx context.Context, database *db.DB, merchantID uuid.UUID, reader func(context.Context, uuid.UUID) (AttributionReader, error), pulled AttributionPull, now time.Time, limit int) (AttributionResult, error) {
 	var res AttributionResult
 	q := database.Gen(ctx)
 	psps, err := q.ListPSPsForMerchant(ctx, merchantID)
@@ -117,11 +126,8 @@ func ResolveChargeAttributions(ctx context.Context, database *db.DB, merchantID 
 		for _, psp := range order {
 			pending := byPSP[psp]
 			if rail := rails[psp]; rail != string(models.RailNMI) {
-				// Only NMI is read by id: another rail's charge stays evidence.
-				for _, r := range pending {
-					if err := unresolvableAttribution(ctx, q, r, "OpenRails cannot read "+cmp.Or(rail, "this PSP's")+" charges by id", now, &res); err != nil {
-						return res, err
-					}
+				if err := awaitPull(ctx, q, merchantID, psp, rail, pending, pulled, now, &res); err != nil {
+					return res, err
 				}
 				continue
 			}
@@ -160,6 +166,53 @@ func ResolveChargeAttributions(ctx context.Context, database *db.DB, merchantID 
 func attributionBackoff(attempts int32) time.Duration {
 	wait := 15 * time.Minute << min(attempts, 6)
 	return min(wait, 24*time.Hour)
+}
+
+// awaitPull settles attributions on a PSP OpenRails does not read by id. Its
+// provider pull records the charges it reads, resolving their attributions;
+// one the pull has read past without recording, or one no pull reads, is a
+// finding. A pull that cannot be told defers the rows.
+func awaitPull(ctx context.Context, q *gen.Queries, merchantID, psp uuid.UUID, rail string, rows []gen.BillingProviderChargeAttribution, pulled AttributionPull, now time.Time, res *AttributionResult) error {
+	read, err := false, error(nil)
+	if pulled != nil {
+		read, err = pulled(ctx, psp, rail)
+	}
+	if err != nil {
+		return deferAttributions(ctx, q, rows, now.Add(attributionBackoff(rows[0].Attempts)), now, res)
+	}
+	var through *time.Time
+	if read {
+		at, err := q.GetPSPRefreshWatermark(ctx, gen.GetPSPRefreshWatermarkParams{MerchantID: merchantID, PspID: psp})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return err
+		default:
+			through = &at
+		}
+	}
+	var waiting []gen.BillingProviderChargeAttribution
+	for _, r := range rows {
+		occurred := r.CreatedAt
+		if r.DeclaredAt != nil {
+			occurred = *r.DeclaredAt
+		}
+		reason := "no provider pull reads " + cmp.Or(rail, "this PSP's") + " charges"
+		if read {
+			if through == nil || !through.After(occurred) {
+				waiting = append(waiting, r)
+				continue
+			}
+			reason = "the provider pull read past it without recording it"
+		}
+		if err := unresolvableAttribution(ctx, q, r, reason, now, res); err != nil {
+			return err
+		}
+	}
+	if len(waiting) == 0 {
+		return nil
+	}
+	return deferAttributions(ctx, q, waiting, now.Add(attributionBackoff(waiting[0].Attempts)), now, res)
 }
 
 // unresolvableAttribution closes an attribution that records no payment and

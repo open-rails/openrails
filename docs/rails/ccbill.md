@@ -221,7 +221,10 @@ PSP alone accepts nothing extra.
   unqualified. See [CCBill refunds](ccbill-refund-qualification.md).
 - An imported CCBill charge names CCBill's transaction id, which is digits.
   One declared without an amount is kept as an attribution to its
-  subscription; no reader resolves CCBill attributions yet (DataLink is the
-  planned source), so it records no payment until one does.
+  subscription. With DataLink credentials, the provider pull records it when it
+  reads that rebill. One the pull has read past without recording, or any
+  without DataLink credentials, records no payment and becomes a
+  `life.import.transaction_unverified` finding; a pull that records it later
+  closes the finding.
 - CCBill subscriptions cannot be reassigned to another payment method;
   payment-method changes go through a new purchase.

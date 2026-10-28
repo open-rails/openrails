@@ -288,7 +288,7 @@ UPDATE billing.provider_charge_attributions
 SET status = 'resolved', payment_id = $1::uuid, next_attempt_at = NULL, resolved_at = $2::timestamptz,
     updated_at = $2::timestamptz
 WHERE merchant_id = $3::uuid AND psp_id = $4::uuid AND transaction_id = $5::text
-  AND status = 'pending'
+  AND status IN ('pending', 'unresolvable')
 `
 
 type ResolveChargeAttributionParams struct {
@@ -299,7 +299,8 @@ type ResolveChargeAttributionParams struct {
 	TransactionID string
 }
 
-// The attributed charge is recorded as this payment.
+// The attributed charge is recorded as this payment, even one already given up
+// as unresolvable (a provider pull read it after all).
 func (q *Queries) ResolveChargeAttribution(ctx context.Context, arg ResolveChargeAttributionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, resolveChargeAttribution,
 		arg.PaymentID,

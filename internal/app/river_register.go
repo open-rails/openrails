@@ -226,7 +226,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// Declared charges without an amount, read from their provider once.
 	if err := addTrackedWorker(r, workers, &riverjobs.ChargeAttributionWorker{
-		DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver,
+		DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver, Rails: r.RailConfigs,
 	}); err != nil {
 		return fmt.Errorf("add charge attribution worker: %w", err)
 	}
@@ -456,6 +456,13 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 	return nil
 }
 
+// periodPassOpts queues a pass whose retry is the next period's pass: one
+// attempt, unique per period, so a pass that keeps failing never stacks
+// copies.
+func periodPassOpts(period time.Duration) *river.InsertOpts {
+	return &river.InsertOpts{Queue: riverjobs.QueueBilling, MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: period}}
+}
+
 // buildRiverPeriodicJobs defines recurring schedules for workers using River periodic jobs.
 func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config) ([]*river.PeriodicJob, error) {
 	var jobs []*river.PeriodicJob
@@ -488,10 +495,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 	jobs = append(jobs, r.healthPeriodic(cfg,
 		riverjobs.RebillWatchInterval,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.RebillWatchArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.RebillWatchInterval},
-			}
+			return riverjobs.RebillWatchArgs{}, periodPassOpts(riverjobs.RebillWatchInterval)
 		},
 		nil,
 	))
@@ -500,10 +504,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 	jobs = append(jobs, r.healthPeriodic(cfg,
 		riverjobs.AttemptEnrichmentInterval,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.AttemptEnrichmentArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.AttemptEnrichmentInterval},
-			}
+			return riverjobs.AttemptEnrichmentArgs{}, periodPassOpts(riverjobs.AttemptEnrichmentInterval)
 		},
 		nil,
 	))
@@ -524,10 +525,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 	jobs = append(jobs, r.healthPeriodic(cfg,
 		riverjobs.ChargeAttributionInterval,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.ChargeAttributionArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.ChargeAttributionInterval},
-			}
+			return riverjobs.ChargeAttributionArgs{}, periodPassOpts(riverjobs.ChargeAttributionInterval)
 		},
 		nil,
 	))
@@ -570,10 +568,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 	jobs = append(jobs, r.healthPeriodic(cfg,
 		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.PriceMigrationRedriveArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
-			}
+			return riverjobs.PriceMigrationRedriveArgs{}, periodPassOpts(time.Hour)
 		},
 		nil,
 	))
@@ -672,10 +667,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 	jobs = append(jobs, r.healthPeriodic(cfg,
 		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.CreditExpiryArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
-			}
+			return riverjobs.CreditExpiryArgs{}, periodPassOpts(time.Hour)
 		},
 		nil,
 	))
@@ -702,10 +694,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 	jobs = append(jobs, r.healthPeriodic(cfg,
 		5*time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.OrderExpiryArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
-			}
+			return riverjobs.OrderExpiryArgs{}, periodPassOpts(5 * time.Minute)
 		},
 		nil,
 	))
@@ -716,10 +705,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 	jobs = append(jobs, r.fleetPeriodic(cfg,
 		riverjobs.AdmissionDenialFlushInterval,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.AdmissionDenialFlushArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.AdmissionDenialFlushInterval},
-			}
+			return riverjobs.AdmissionDenialFlushArgs{}, periodPassOpts(riverjobs.AdmissionDenialFlushInterval)
 		},
 		nil,
 	))
@@ -774,10 +760,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 	jobs = append(jobs, r.healthPeriodic(cfg,
 		15*time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.DelinquencyArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
-			}
+			return riverjobs.DelinquencyArgs{}, periodPassOpts(15 * time.Minute)
 		},
 		nil,
 	))

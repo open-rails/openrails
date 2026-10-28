@@ -37,12 +37,13 @@ ORDER BY next_attempt_at, psp_id, transaction_id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ResolveChargeAttribution :execrows
--- The attributed charge is recorded as this payment.
+-- The attributed charge is recorded as this payment, even one already given up
+-- as unresolvable (a provider pull read it after all).
 UPDATE billing.provider_charge_attributions
 SET status = 'resolved', payment_id = sqlc.arg(payment_id)::uuid, next_attempt_at = NULL, resolved_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND transaction_id = sqlc.arg(transaction_id)::text
-  AND status = 'pending';
+  AND status IN ('pending', 'unresolvable');
 
 -- name: MarkChargeAttributionUnresolvable :execrows
 -- The provider's record cannot be the declared charge; no payment is recorded.
