@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 240,
+  "scenario_count": 241,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1202,6 +1202,11 @@
       "id": "OR-J06-S61",
       "journey": "J06",
       "name": "A superseded Stripe webhook endpoint is retired by the pass scheduled at its deadline"
+    },
+    {
+      "id": "OR-J06-S62",
+      "journey": "J06",
+      "name": "An unresolved undeclared account alerts its operator again once a day"
     }
   ]
 }

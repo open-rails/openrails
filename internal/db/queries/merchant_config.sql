@@ -5,12 +5,21 @@
 -- Tells every replica to reload one merchant's configuration.
 SELECT pg_notify(sqlc.arg(channel)::text, sqlc.arg(payload)::text);
 
--- name: RearmConfigFindingNotifications :many
+-- name: ListConfigRealertMerchants :many
+-- CROSS-MERCHANT: merchants holding an open configuration finding of the type
+-- last notified before notified_before.
+SELECT DISTINCT merchant_id FROM billing.reconciliation_findings
+WHERE finding_type = sqlc.arg(finding_type)::text AND status = 'requires_review' AND resolved_at IS NULL
+  AND psp_id IS NULL AND notified_at < sqlc.arg(notified_before)::timestamptz
+ORDER BY merchant_id
+LIMIT sqlc.arg(merchant_limit)::int;
+
+-- name: ClaimConfigFindingRealerts :many
 -- Open configuration findings of the type last notified before
--- notified_before: their notification re-arms, so they alert again while
--- unresolved.
+-- notified_before alert again: their notification is re-armed and claimed at
+-- now in one statement, so each re-alert is sent once.
 UPDATE billing.reconciliation_findings
-SET notified_at = NULL, notified_severity = NULL, updated_at = now()
+SET notified_at = sqlc.arg(now)::timestamptz, notified_severity = severity, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text
   AND psp_id IS NULL AND resolved_at IS NULL AND status = 'requires_review'
   AND notified_at < sqlc.arg(notified_before)::timestamptz

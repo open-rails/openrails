@@ -84,7 +84,6 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 		return set, err
 	})
 	cache.SetAnnounce(r.announceMerchantConfig)
-	r.startConfigRealerts()
 	r.DB.SetMerchantConfig(svc)
 	r.ArmMerchantsService(svc)
 	r.ArmSolanaRecurringServices(conn.SolanaTransit)
@@ -240,22 +239,13 @@ func (r *Runtime) syncMerchantConfig(ctx context.Context, id billing.MerchantID,
 	return set, nil
 }
 
-// RefusedDocumentFindingType is the finding a merchant document the merchant
-// does not serve opens (the console's review queue), until it serves again.
-const RefusedDocumentFindingType = "consistency.merchant_config.not_served"
-
-// UndeclaredAccountFindingType is the finding an account no document
-// declares opens while it still holds cards in its vault or subscriptions
-// renewing on it.
-const UndeclaredAccountFindingType = "consistency.merchant_config.undeclared_account"
-
 // configFindings are the configuration problems a merchant's operator is
 // alerted to: each document the merchant does not serve, and each undeclared
 // account still holding billing.
 func configFindings(set merchantdocs.Set) []configFinding {
 	return []configFinding{
-		{RefusedDocumentFindingType, "The merchant does not serve its %s document: %s. Correct it; it serves once it checks.", set.Rejected},
-		{UndeclaredAccountFindingType, "%s: %s.", set.Undeclared},
+		{merchantdocs.RefusedDocumentFindingType, "The merchant does not serve its %s document: %s. Correct it; it serves once it checks.", set.Rejected},
+		{merchantdocs.UndeclaredAccountFindingType, "%s: %s.", set.Undeclared},
 	}
 }
 
@@ -335,45 +325,14 @@ func (r *Runtime) alertConfigFindings(ctx context.Context, findings []gen.Billin
 	}
 }
 
-// configRealert is how often an unresolved undeclared account alerts again.
-const configRealert = 24 * time.Hour
-
-// RealertConfiguration re-evaluates each loaded merchant's undeclared
-// accounts (a declaration or an ended subscription resolves one) and alerts
-// again for those still unresolved since configRealert.
-func (r *Runtime) RealertConfiguration(ctx context.Context) {
-	if r == nil || r.MerchantConfig == nil || r.DB == nil {
-		return
+// reloadMerchantConfig re-evaluates mid's configuration: a declaration or an
+// ended subscription resolves an undeclared account's finding.
+func (r *Runtime) reloadMerchantConfig(ctx context.Context, mid billing.MerchantID) error {
+	if r.MerchantConfig == nil {
+		return nil
 	}
-	for id := range r.MerchantConfig.Undeclared() {
-		if _, err := r.MerchantConfig.Reload(ctx, id); err != nil {
-			continue
-		}
-		mctx := merchant.WithID(ctx, id)
-		var due []gen.BillingReconciliationFinding
-		err := r.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
-			var err error
-			due, err = r.DB.Gen(ctx).RearmConfigFindingNotifications(ctx, gen.RearmConfigFindingNotificationsParams{
-				MerchantID: id.UUID(), FindingType: UndeclaredAccountFindingType, NotifiedBefore: r.Clock.Now().Add(-configRealert)})
-			return err
-		})
-		if err != nil {
-			if ctx.Err() == nil {
-				log.WithError(err).WithField("merchant_id", id.String()).Warn("merchant config: re-alerting undeclared accounts failed")
-			}
-			continue
-		}
-		r.alertConfigFindings(mctx, due)
-	}
-}
-
-// startConfigRealerts re-alerts unresolved undeclared accounts hourly.
-func (r *Runtime) startConfigRealerts() {
-	r.Go("configuration re-alerts", func(ctx context.Context) {
-		for retry.Sleep(ctx, time.Hour) {
-			r.RealertConfiguration(ctx)
-		}
-	})
+	_, err := r.MerchantConfig.Reload(ctx, mid)
+	return err
 }
 
 // DanglingPolicyFindingType is the finding a customer assignment to a billing

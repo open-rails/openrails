@@ -221,6 +221,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}
+	// Undeclared accounts alert their operator again while unresolved.
+	if err := addWorker(workers, &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}); err != nil {
+		return fmt.Errorf("add config re-alert worker: %w", err)
+	}
 	// A merchant purge's Vault cleanup, queued with the purge.
 	if err := addWorker(workers, &riverjobs.MerchantSecretCleanupWorker{Merchants: r.Merchants}); err != nil {
 		return fmt.Errorf("add merchant secret cleanup worker: %w", err)

@@ -47,6 +47,7 @@ var kinds = map[string]time.Duration{
 	reconcile.KindChargeAttributions:     time.Hour,
 	KindNMIHistory:                       time.Hour,
 	KindStripeWebhookReconcile:           DefaultTimeout,
+	KindConfigRealerts:                   DefaultTimeout,
 	KindPSPImport:                        2 * time.Hour,
 }
 

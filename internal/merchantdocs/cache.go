@@ -98,23 +98,6 @@ func (c *Cache) held() error {
 	return fmt.Errorf("%w: %w", ErrUnavailable, c.hold)
 }
 
-// Undeclared names, for each loaded merchant, its undeclared accounts that
-// still hold billing.
-func (c *Cache) Undeclared() map[billing.MerchantID]map[string]string {
-	c.mu.Lock()
-	entries := maps.Clone(c.entries)
-	c.mu.Unlock()
-	out := map[billing.MerchantID]map[string]string{}
-	for id, e := range entries {
-		e.mu.RLock()
-		if len(e.set.Undeclared) > 0 {
-			out[id] = maps.Clone(e.set.Undeclared)
-		}
-		e.mu.RUnlock()
-	}
-	return out
-}
-
 // Rejected names, for each loaded merchant, the documents it does not serve
 // and why, and its undeclared accounts that still hold billing.
 func (c *Cache) Rejected() map[billing.MerchantID]map[string]string {

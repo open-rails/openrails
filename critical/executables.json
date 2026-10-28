@@ -771,6 +771,9 @@
     ],
     "OR-J06-S61": [
       "TestStripeWebhookDueWork/OR-J06-S61/a-superseded-endpoint-is-retired-by-the-pass-scheduled-at-its-deadline"
+    ],
+    "OR-J06-S62": [
+      "TestStripeWebhookDueWork/OR-J06-S62/an-unresolved-undeclared-account-alerts-again-once-a-day"
     ]
   },
   "suites": {

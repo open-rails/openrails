@@ -524,6 +524,67 @@ func TestStripeWebhookDueWork(t *testing.T) {
 			return len(endpoints) == 1 && endpoints[0]["id"] != old
 		}, 20*time.Second, 20*time.Millisecond, "the pass retires the predecessor at its deadline")
 	})
+	t.Run("OR-J06-S62/an-unresolved-undeclared-account-alerts-again-once-a-day", func(t *testing.T) {
+		mail := &alertMailbox{}
+		w := newWorld(t, func(w *world) {
+			declareCCBill(w, nil)
+			m := w.cfg.Merchants["alpha"]
+			m.AlertEmail = ptr("ops@alpha.example")
+			w.cfg.Merchants["alpha"] = m
+			w.deps.Email = mail
+		})
+		importCCBillAttribution(t, w)
+		// The operator removes the account from the declaration while the
+		// provider still bills a membership on it.
+		require.NoError(t, w.engine.Close(t.Context()))
+		m := w.cfg.Merchants["alpha"]
+		m.PSPs = nil
+		w.cfg.Merchants["alpha"] = m
+		var err error
+		w.engine, err = openrails.New(t.Context(), w.cfg, w.deps)
+		require.NoError(t, err)
+		w.alpha, err = w.engine.MerchantBySlug("alpha")
+		require.NoError(t, err)
+		require.Eventually(t, func() bool { return mail.count("undeclared_account") == 1 }, 20*time.Second, 20*time.Millisecond,
+			"the configuration load that finds the account alerts its operator")
+		fleet := hostFleet(t, w)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		runRegistered(t, fleet, "openrails.config_realerts", 1)
+		require.Equal(t, 1, mail.count("undeclared_account"), "not again within a day")
+		w.clock.Advance(24*time.Hour + time.Minute)
+		runRegistered(t, fleet, "openrails.config_realerts", 2)
+		require.Equal(t, 2, mail.count("undeclared_account"), "a day later it alerts again, once however many passes run")
+	})
+}
+
+// alertMailbox records the email OpenRails sends.
+type alertMailbox struct {
+	mu   sync.Mutex
+	sent []openrails.Email
+}
+
+func (m *alertMailbox) Send(_ context.Context, email openrails.Email) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = append(m.sent, email)
+	return nil
+}
+
+func (m *alertMailbox) CheckHealth(context.Context) error { return nil }
+
+// count is how many messages mention text.
+func (m *alertMailbox) count(text string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, email := range m.sent {
+		if strings.Contains(email.Subject+email.Text, text) {
+			n++
+		}
+	}
+	return n
 }
 
 // stripeWebhookBase is a public https billing mount Stripe could reach.

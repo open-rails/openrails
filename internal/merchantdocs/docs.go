@@ -139,6 +139,15 @@ type Set struct {
 	Undeclared map[string]string
 }
 
+// RefusedDocumentFindingType is the finding a merchant document the merchant
+// does not serve opens (the console's review queue), until it serves again.
+const RefusedDocumentFindingType = "consistency.merchant_config.not_served"
+
+// UndeclaredAccountFindingType is the finding an account no document
+// declares opens while it still holds cards in its vault or subscriptions
+// renewing on it. It alerts again daily while unresolved.
+const UndeclaredAccountFindingType = "consistency.merchant_config.undeclared_account"
+
 // UndeclaredAccount names an undeclared account within a merchant's set.
 func UndeclaredAccount(rail, accountID string) string { return "accounts/" + rail + "/" + accountID }
 

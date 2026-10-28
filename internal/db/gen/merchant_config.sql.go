@@ -12,44 +12,32 @@ import (
 	"github.com/google/uuid"
 )
 
-const notifyMerchantConfig = `-- name: NotifyMerchantConfig :exec
-
-SELECT pg_notify($1::text, $2::text)
-`
-
-type NotifyMerchantConfigParams struct {
-	Channel string
-	Payload string
-}
-
-// Merchant configuration lives in a file or Vault; these are the Postgres
-// side effects of serving it.
-// Tells every replica to reload one merchant's configuration.
-func (q *Queries) NotifyMerchantConfig(ctx context.Context, arg NotifyMerchantConfigParams) error {
-	_, err := q.db.Exec(ctx, notifyMerchantConfig, arg.Channel, arg.Payload)
-	return err
-}
-
-const rearmConfigFindingNotifications = `-- name: RearmConfigFindingNotifications :many
+const claimConfigFindingRealerts = `-- name: ClaimConfigFindingRealerts :many
 UPDATE billing.reconciliation_findings
-SET notified_at = NULL, notified_severity = NULL, updated_at = now()
-WHERE merchant_id = $1::uuid AND finding_type = $2::text
+SET notified_at = $1::timestamptz, notified_severity = severity, updated_at = now()
+WHERE merchant_id = $2::uuid AND finding_type = $3::text
   AND psp_id IS NULL AND resolved_at IS NULL AND status = 'requires_review'
-  AND notified_at < $3::timestamptz
+  AND notified_at < $4::timestamptz
 RETURNING id, merchant_id, finding_type, rail, psp_id, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id, pull_id, dismissed_at
 `
 
-type RearmConfigFindingNotificationsParams struct {
+type ClaimConfigFindingRealertsParams struct {
+	Now            time.Time
 	MerchantID     uuid.UUID
 	FindingType    string
 	NotifiedBefore time.Time
 }
 
 // Open configuration findings of the type last notified before
-// notified_before: their notification re-arms, so they alert again while
-// unresolved.
-func (q *Queries) RearmConfigFindingNotifications(ctx context.Context, arg RearmConfigFindingNotificationsParams) ([]BillingReconciliationFinding, error) {
-	rows, err := q.db.Query(ctx, rearmConfigFindingNotifications, arg.MerchantID, arg.FindingType, arg.NotifiedBefore)
+// notified_before alert again: their notification is re-armed and claimed at
+// now in one statement, so each re-alert is sent once.
+func (q *Queries) ClaimConfigFindingRealerts(ctx context.Context, arg ClaimConfigFindingRealertsParams) ([]BillingReconciliationFinding, error) {
+	rows, err := q.db.Query(ctx, claimConfigFindingRealerts,
+		arg.Now,
+		arg.MerchantID,
+		arg.FindingType,
+		arg.NotifiedBefore,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +83,60 @@ func (q *Queries) RearmConfigFindingNotifications(ctx context.Context, arg Rearm
 		return nil, err
 	}
 	return items, nil
+}
+
+const listConfigRealertMerchants = `-- name: ListConfigRealertMerchants :many
+SELECT DISTINCT merchant_id FROM billing.reconciliation_findings
+WHERE finding_type = $1::text AND status = 'requires_review' AND resolved_at IS NULL
+  AND psp_id IS NULL AND notified_at < $2::timestamptz
+ORDER BY merchant_id
+LIMIT $3::int
+`
+
+type ListConfigRealertMerchantsParams struct {
+	FindingType    string
+	NotifiedBefore time.Time
+	MerchantLimit  int32
+}
+
+// CROSS-MERCHANT: merchants holding an open configuration finding of the type
+// last notified before notified_before.
+func (q *Queries) ListConfigRealertMerchants(ctx context.Context, arg ListConfigRealertMerchantsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listConfigRealertMerchants, arg.FindingType, arg.NotifiedBefore, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var merchant_id uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const notifyMerchantConfig = `-- name: NotifyMerchantConfig :exec
+
+SELECT pg_notify($1::text, $2::text)
+`
+
+type NotifyMerchantConfigParams struct {
+	Channel string
+	Payload string
+}
+
+// Merchant configuration lives in a file or Vault; these are the Postgres
+// side effects of serving it.
+// Tells every replica to reload one merchant's configuration.
+func (q *Queries) NotifyMerchantConfig(ctx context.Context, arg NotifyMerchantConfigParams) error {
+	_, err := q.db.Exec(ctx, notifyMerchantConfig, arg.Channel, arg.Payload)
+	return err
 }
 
 const resolveConfigFinding = `-- name: ResolveConfigFinding :execrows

@@ -51,6 +51,8 @@ var Periodics = []Periodic{
 	// Queues every Stripe PSP's endpoint pass: Stripe disables or deletes an
 	// endpoint without telling us.
 	{Args: StripeWebhookReconcileArgs{}, Every: StripeWebhookReconcileInterval},
+	// Undeclared accounts still unresolved a day after their last alert.
+	{Args: ConfigRealertArgs{}, Every: ConfigRealertInterval},
 	// Each fleet flushes the closed hours of its own Redis's denial counters.
 	{Args: AdmissionDenialFlushArgs{}, Every: AdmissionDenialFlushInterval, PerFleet: true},
 	// Fans out one refresh job per merchant with a PSP.
