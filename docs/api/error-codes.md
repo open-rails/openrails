@@ -121,6 +121,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_option_unavailable` | 422 | `invalid_request_error` | No PSP that can take the order's lines accepts this payment. |
 | `payment_provider_rejected` | 502 | `api_error` | The provider refused to process the charge for a gateway or account reason. |
 | `permission_required` | 403 | `authorization_error` | The credential lacks the permission the route requires. |
+| `person_required` | 403 | `authorization_error` | Only a person signed in, or the embedding host in process, may take this action; an API key or service token may not. |
 | `platform_vault_mixed_class` | 409 | `invalid_request_error` | The platform vault's charge PSPs mix live and test; one platform identity holds one money class. |
 | `platform_vault_unavailable` | 409 | `invalid_request_error` | The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; save cards at a PSP's vault. |
 | `platform_vault_unreachable` | 409 | `invalid_request_error` | A charge PSP cannot charge cards from the platform vault (Stripe, or card_entry server); leave it out of charge_psps or save cards at a PSP's vault. |
@@ -145,6 +146,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `psp_credentials_rejected` | 400 | `invalid_request_error` | The provider rejected the credentials, or answered that they are not in the PSP's declared environment. |
 | `psp_environment_refused` | 409 | `invalid_request_error` | A live PSP is refused where the deployment wires fake providers. |
 | `psp_exists` | 409 | `invalid_request_error` | The account is already a PSP, of this merchant or another; update it instead. |
+| `psp_import_in_progress` | 409 | `invalid_request_error` | Another import of the PSP is pulling or applying; wait for it to finish. |
 | `psp_key_taken` | 409 | `invalid_request_error` | Another live PSP holds the key. |
 | `psp_last_active` | 409 | `invalid_request_error` | The PSP is the last active one on its rail; pass allow_last to archive it. |
 | `psp_not_found` | 404 | `invalid_request_error` | The PSP does not exist. |

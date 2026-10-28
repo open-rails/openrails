@@ -122,6 +122,7 @@ migration 0120_stored_card_refresh.up.sql sha256:312d37e5bb10f50013657086f7cd93e
 migration 0130_provider_catalog_objects.up.sql sha256:215efeb29d8a62df1ea3249c83e9ba76128c9d00377b994432417ed77be4a3b7
 migration 0132_psp_import_onboarding.up.sql sha256:8eccc4463e66a07a990b44d7f2e7be6e2639634fb7745e81d2d3e04de4e3bd2f
 migration 0134_parked_provider_subscriptions.up.sql sha256:26b9a4f87224948ef5a7e0bbfd999e0081c072c76d443d4f3b1a8339a0287d90
+migration 0136_manual_reconcile.up.sql sha256:68c4168b0f4687b3599edf137c575121d7bb355c1f458f20ccdc91285679f063
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2330,6 +2331,17 @@ table billing.psp_customers
   index CREATE UNIQUE INDEX psp_customers_pkey ON billing.psp_customers USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX psp_customers_psp_id_remote_customer_ref_key ON billing.psp_customers USING btree (merchant_id, psp_id, remote_customer_ref)
 
+table billing.psp_import_basis
+  column merchant_id uuid NOT NULL
+  column import_id uuid NOT NULL
+  column subscription_id uuid NOT NULL
+  column row_version bigint NOT NULL
+  constraint psp_import_basis_import_id_fkey FOREIGN KEY (merchant_id, import_id) REFERENCES billing.psp_imports(merchant_id, id) ON DELETE CASCADE
+  constraint psp_import_basis_pkey PRIMARY KEY (merchant_id, import_id, subscription_id)
+  constraint psp_import_basis_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE CASCADE
+  index CREATE UNIQUE INDEX psp_import_basis_pkey ON billing.psp_import_basis USING btree (merchant_id, import_id, subscription_id)
+  index CREATE INDEX psp_import_basis_subscription_id_idx ON billing.psp_import_basis USING btree (merchant_id, subscription_id)
+
 table billing.psp_import_mappings
   column merchant_id uuid NOT NULL
   column mapping text NOT NULL
@@ -2374,7 +2386,7 @@ table billing.psp_import_records
   constraint psp_import_records_ref_check CHECK (((ref <> ''::text) AND (octet_length(ref) <= 256)))
   constraint psp_import_records_ref_key UNIQUE (merchant_id, import_id, kind, ref)
   constraint psp_import_records_refs_check CHECK ((((customer_ref IS NULL) OR (customer_ref <> ''::text)) AND ((subscription_ref IS NULL) OR (subscription_ref <> ''::text))))
-  constraint psp_import_records_state_check CHECK ((((state = ANY (ARRAY['unmatched'::text, 'conflict'::text])) AND (customer_id IS NULL) AND (linked_via IS NULL)) OR ((state = ANY (ARRAY['linked'::text, 'imported'::text, 'blocked'::text])) AND (customer_id IS NOT NULL) AND (linked_via IS NOT NULL) AND (linked_via <> ''::text))))
+  constraint psp_import_records_state_check CHECK ((((state = ANY (ARRAY['unmatched'::text, 'conflict'::text])) AND (customer_id IS NULL) AND (linked_via IS NULL)) OR ((state = ANY (ARRAY['linked'::text, 'imported'::text, 'blocked'::text])) AND (customer_id IS NOT NULL) AND (linked_via IS NOT NULL) AND (linked_via <> ''::text)) OR ((state = 'held'::text) AND (customer_id IS NOT NULL) AND (linked_via = 'held'::text))))
   index CREATE INDEX psp_import_records_kind_idx ON billing.psp_import_records USING btree (merchant_id, import_id, kind, id)
   index CREATE UNIQUE INDEX psp_import_records_pkey ON billing.psp_import_records USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX psp_import_records_ref_key ON billing.psp_import_records USING btree (merchant_id, import_id, kind, ref)
@@ -2396,14 +2408,17 @@ table billing.psp_imports
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   column origin text NOT NULL
   column error_code text
+  column apply_requested_by text
+  constraint psp_imports_apply_requested_by_check CHECK (((apply_requested_by IS NULL) OR (apply_requested_by <> ''::text)))
   constraint psp_imports_error_check CHECK ((((status = 'failed'::text) = (error IS NOT NULL)) AND ((error IS NULL) OR (error <> ''::text))))
-  constraint psp_imports_error_code_check CHECK (((error_code IS NULL) OR ((status = 'failed'::text) AND (error_code = ANY (ARRAY['psp_credentials_rejected'::text, 'psp_not_readable'::text])))))
+  constraint psp_imports_error_code_check CHECK (((error_code IS NULL) OR ((status = 'failed'::text) AND (error_code = ANY (ARRAY['psp_credentials_rejected'::text, 'psp_not_readable'::text, 'pull_roster_implausible'::text])))))
   constraint psp_imports_origin_check CHECK ((origin = ANY (ARRAY['onboarding'::text, 'manual'::text])))
   constraint psp_imports_pkey PRIMARY KEY (merchant_id, id)
   constraint psp_imports_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint psp_imports_rules_check CHECK ((jsonb_typeof(rules) = 'array'::text))
   constraint psp_imports_status_check CHECK ((status = ANY (ARRAY['pulling'::text, 'pulled'::text, 'applying'::text, 'applied'::text, 'failed'::text])))
   index CREATE INDEX psp_imports_created_at_id_idx ON billing.psp_imports USING btree (merchant_id, created_at DESC, id DESC)
+  index CREATE UNIQUE INDEX psp_imports_in_flight_key ON billing.psp_imports USING btree (merchant_id, psp_id) WHERE (status = ANY (ARRAY['pulling'::text, 'applying'::text]))
   index CREATE UNIQUE INDEX psp_imports_onboarding_key ON billing.psp_imports USING btree (merchant_id, psp_id) WHERE ((origin = 'onboarding'::text) AND (status <> 'failed'::text))
   index CREATE UNIQUE INDEX psp_imports_pkey ON billing.psp_imports USING btree (merchant_id, id)
 
@@ -2514,9 +2529,10 @@ table billing.reconciliation_findings
   column source text
   column evidence_digest text
   column approval_run_id uuid
+  column pull_id uuid
   constraint reconciliation_findings_approval_run_check CHECK (((NOT (resolution IS DISTINCT FROM 'approved'::text)) = (approval_run_id IS NOT NULL)))
   constraint reconciliation_findings_approval_run_id_fkey FOREIGN KEY (merchant_id, approval_run_id) REFERENCES billing.maintenance_runs(merchant_id, id) ON DELETE RESTRICT
-  constraint reconciliation_findings_change_check CHECK (((change IS NULL) OR ((finding_type ~~ 'pull.%'::text) AND (jsonb_typeof(change) = 'object'::text) AND ((change ->> 'kind'::text) = ANY (ARRAY['create_subscription'::text, 'record_charge'::text, 'record_refund'::text, 'adopt_subscription'::text, 'cancel_subscription'::text, 'update_card'::text, 'revoke_access'::text, 'refund_charge_after_cancel'::text, 'cancel_provider_schedule'::text, 'collect_skipped_renewal'::text])))))
+  constraint reconciliation_findings_change_check CHECK (((change IS NULL) OR ((finding_type ~~ 'pull.%'::text) AND (jsonb_typeof(change) = 'object'::text) AND ((change ->> 'kind'::text) = ANY (ARRAY['create_subscription'::text, 'record_charge'::text, 'record_refund'::text, 'adopt_subscription'::text, 'cancel_subscription'::text, 'update_card'::text, 'revoke_access'::text, 'refund_charge_after_cancel'::text, 'cancel_provider_schedule'::text, 'collect_skipped_renewal'::text, 'correct_subscription'::text])))))
   constraint reconciliation_findings_evidence_digest_check CHECK ((((change IS NULL) = (evidence_digest IS NULL)) AND ((evidence_digest IS NULL) OR (evidence_digest ~ '^[0-9a-f]{64}$'::text))))
   constraint reconciliation_findings_first_seen_run_seen_run_class_fkey FOREIGN KEY (merchant_id, first_seen_run, seen_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint reconciliation_findings_last_seen_run_seen_run_class_fkey FOREIGN KEY (merchant_id, last_seen_run, seen_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
@@ -2524,6 +2540,8 @@ table billing.reconciliation_findings
   constraint reconciliation_findings_pkey PRIMARY KEY (merchant_id, id)
   constraint reconciliation_findings_proposal_resolution_check CHECK (((resolution IS NULL) OR (resolution <> ALL (ARRAY['approved'::text, 'dismissed'::text, 'superseded'::text, 'foreign'::text])) OR (finding_type ~~ 'pull.%'::text)))
   constraint reconciliation_findings_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
+  constraint reconciliation_findings_pull_id_check CHECK (((pull_id IS NULL) OR (source = 'pull'::text)))
+  constraint reconciliation_findings_pull_id_fkey FOREIGN KEY (merchant_id, pull_id) REFERENCES billing.psp_imports(merchant_id, id) ON DELETE SET NULL (pull_id)
   constraint reconciliation_findings_resolution_check CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text, 'approved'::text, 'dismissed'::text, 'superseded'::text, 'foreign'::text]))))
   constraint reconciliation_findings_resolved_fields_check CHECK ((((status = ANY (ARRAY['auto_fixed'::text, 'fixed'::text, 'ignored'::text])) AND (resolved_at IS NOT NULL) AND (resolution IS NOT NULL)) OR ((status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text])) AND (resolved_at IS NULL) AND (resolution IS NULL))))
   constraint reconciliation_findings_scope_check CHECK ((((finding_type = ANY (ARRAY['catalog.orphan_in_stripe'::text, 'catalog.missing_in_stripe'::text, 'catalog.orphan_in_nmi'::text, 'catalog.missing_in_nmi'::text, 'catalog.missing_in_solana'::text, 'catalog.field_drift'::text])) AND (rail = ANY (ARRAY['stripe'::text, 'nmi'::text, 'solana'::text])) AND (psp_id IS NOT NULL) AND (openrails_resource_type = ANY (ARRAY['product'::text, 'price'::text])) AND ((finding_type = 'catalog.field_drift'::text) OR (finding_type ~~ ('catalog.%_in_'::text || rail))) AND (first_seen_run IS NULL) AND (last_seen_run IS NULL) AND (subject_key = (jsonb_build_array((psp_id)::text, openrails_resource_type, COALESCE(openrails_resource_id, ''::text), COALESCE(external_resource_id, ''::text), COALESCE(field, ''::text)))::text)) OR ((finding_type = ANY (ARRAY['catalog.price.unmapped'::text, 'life.subscription.unattributed'::text])) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL) AND (openrails_resource_type IS NULL) AND (openrails_resource_id IS NULL) AND (external_resource_id IS NULL) AND (field IS NULL) AND (openrails_value IS NULL) AND (external_value IS NULL)) OR ((finding_type !~~ 'catalog.%'::text) AND (finding_type <> 'life.subscription.unattributed'::text) AND (openrails_resource_type IS NULL) AND (openrails_resource_id IS NULL) AND (external_resource_id IS NULL) AND (field IS NULL) AND (openrails_value IS NULL) AND (external_value IS NULL) AND (((rail IS NULL) AND (psp_id IS NULL)) OR ((finding_type ~~ 'pull.%'::text) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL))))))
@@ -2539,6 +2557,7 @@ table billing.reconciliation_findings
   index CREATE INDEX reconciliation_findings_open_catalog_idx ON billing.reconciliation_findings USING btree (merchant_id, psp_id, openrails_resource_type, openrails_resource_id, rail) WHERE ((resolved_at IS NULL) AND (finding_type ~~ 'catalog.%'::text))
   index CREATE UNIQUE INDEX reconciliation_findings_pkey ON billing.reconciliation_findings USING btree (merchant_id, id)
   index CREATE INDEX reconciliation_findings_proposals_idx ON billing.reconciliation_findings USING btree (merchant_id, status, source, psp_id) WHERE (finding_type ~~ 'pull.%'::text)
+  index CREATE INDEX reconciliation_findings_pull_id_idx ON billing.reconciliation_findings USING btree (merchant_id, pull_id) WHERE (pull_id IS NOT NULL)
   index CREATE INDEX reconciliation_findings_resolved_idx ON billing.reconciliation_findings USING btree (merchant_id, GREATEST(resolved_at, last_seen_at)) WHERE (resolved_at IS NOT NULL)
 
 table billing.reconciliation_state
@@ -2841,6 +2860,7 @@ table billing.subscriptions
   column access_duration_hours_snapshot integer
   column quantity integer
   column provider_access_default_snapshot boolean NOT NULL DEFAULT false
+  column facts_authority text NOT NULL DEFAULT 'provider'::text
   constraint subscriptions_access_duration_hours_snapshot_check CHECK (((access_duration_hours_snapshot IS NULL) OR (access_duration_hours_snapshot > 0)))
   constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text])))
   constraint subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
@@ -2853,6 +2873,7 @@ table billing.subscriptions
   constraint subscriptions_destructive_run_id_destructive_run_class_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint subscriptions_ended_not_before_canceled_check CHECK (((ended_at IS NULL) OR (canceled_at IS NULL) OR (ended_at >= canceled_at)))
   constraint subscriptions_engine_binding_check CHECK (((collection_policy <> 'engine'::text) OR (((rail = ANY (ARRAY['nmi'::text, 'stripe'::text])) AND (rail_subscription_id IS NULL)) OR (rail = 'solana'::text))))
+  constraint subscriptions_facts_authority_check CHECK ((facts_authority = ANY (ARRAY['host'::text, 'provider'::text])))
   constraint subscriptions_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint subscriptions_nmi_schedule_rail_check CHECK (((collection_policy = 'nmi_schedule'::text) = ((rail = 'nmi'::text) AND (collection_policy <> 'engine'::text))))
   constraint subscriptions_past_due_has_period_end_check CHECK (((status <> 'past_due'::text) OR (current_period_ends_at IS NOT NULL)))
@@ -2899,6 +2920,7 @@ table billing.subscriptions
   index CREATE INDEX subscriptions_status_idx ON billing.subscriptions USING btree (status)
   trigger CREATE TRIGGER subscriptions_close_landed_park AFTER INSERT ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.close_landed_park()
   trigger CREATE TRIGGER subscriptions_collection_policy_immutable BEFORE UPDATE OF collection_policy ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.preserve_subscription_collection_policy()
+  trigger CREATE TRIGGER subscriptions_facts_authority_one_way BEFORE UPDATE OF facts_authority ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_facts_authority_one_way()
   trigger CREATE TRIGGER subscriptions_lifecycle_single_writer BEFORE UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_lifecycle_single_writer()
   trigger CREATE TRIGGER subscriptions_mark_stored_card_check AFTER INSERT OR UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscription_marks_stored_card_check()
   trigger CREATE TRIGGER subscriptions_release_ownership_claims AFTER UPDATE OF status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.release_ended_ownership_claims()
@@ -4703,6 +4725,20 @@ function billing.subscription_payment_method_id(uuid,uuid,uuid,uuid,text,text)
         AND p_rail IN ('nmi', 'stripe') AND p_policy IN ('engine', 'nmi_schedule')))
   $function$
 
+function billing.subscriptions_facts_authority_one_way()
+  CREATE OR REPLACE FUNCTION billing.subscriptions_facts_authority_one_way()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  BEGIN
+      IF OLD.facts_authority = 'provider' AND NEW.facts_authority = 'host' THEN
+          RAISE EXCEPTION 'subscription % facts authority moves only from host to provider', OLD.id
+              USING ERRCODE = '23514', CONSTRAINT = 'subscriptions_facts_authority_one_way';
+      END IF;
+      RETURN NEW;
+  END;
+  $function$
+
 function billing.subscriptions_lifecycle_single_writer()
   CREATE OR REPLACE FUNCTION billing.subscriptions_lifecycle_single_writer()
    RETURNS trigger
@@ -4785,6 +4821,10 @@ function billing.subscriptions_row_version()
    LANGUAGE plpgsql
   AS $function$
   BEGIN
+      IF NEW.facts_authority IS DISTINCT FROM OLD.facts_authority
+         AND to_jsonb(NEW) - 'facts_authority' = to_jsonb(OLD) - 'facts_authority' THEN
+          RETURN NEW;
+      END IF;
       NEW.row_version := OLD.row_version + 1;
       RETURN NEW;
   END;

@@ -2,13 +2,13 @@
 
 # Routes
 
-Every route of the HTTP API (174), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (176), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
 **Permission** is, for a staff or programmatic route, what its caller holds (`billing.Permissions`): the `merchant:` name in the scope of the merchant the request acts on, or the `root:` name in the Auth's root scope.
 
-**Notes**: `when` is the configuration that mounts the route; `sensitive` a customer operation that also needs a recent sign-in; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header; `console only` optional assistance outside the merchant Go client.
+**Notes**: `when` is the configuration that mounts the route; `sensitive` a customer operation that also needs a recent sign-in; `person` a merchant operation only a person signed in, or the in-process host, may take; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header; `console only` optional assistance outside the merchant Go client.
 
 ## Process
 
@@ -159,7 +159,6 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 | GET | `/v1/merchant/psps/{id}` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `PSP` |  |
 | PATCH | `/v1/merchant/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdatePSPParams` | 200 `PSP` | when `merchant_config_edits` |
 | POST | `/v1/merchant/psps/routing-preview` | merchant | `merchant:config:read`<br>`root:config:read` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
-| POST | `/v1/merchant/psps/refresh` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 202 `PSPRefresh` |  |
 | GET | `/v1/merchant/configuration` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `MerchantConfigurationState` |  |
 | PATCH | `/v1/merchant/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationState` | when `merchant_config_edits` |
 | GET | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<AlertWebhook>` |  |
@@ -175,8 +174,8 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 | PATCH | `/v1/merchant/psp-imports/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdatePSPImportParams` | 200 `PSPImport` |  |
 | DELETE | `/v1/merchant/psp-imports/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — |  |
 | GET | `/v1/merchant/psp-imports/{id}/records` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<PSPImportRecord>` |  |
-| POST | `/v1/merchant/psp-imports/{id}/link` | merchant | `merchant:config:manage`<br>`root:config:manage` | `LinkPSPImportParams` | 200 `PSPImport` |  |
-| POST | `/v1/merchant/psp-imports/{id}/apply` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 202 `PSPImport` |  |
+| POST | `/v1/merchant/psp-imports/{id}/link` | merchant | `merchant:config:manage`<br>`root:config:manage` | `LinkPSPImportParams` | 202 `PSPImport` |  |
+| POST | `/v1/merchant/psp-imports/{id}/apply` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 202 `PSPImport` | person |
 | POST | `/v1/merchant/psp-import-mappings` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetPSPImportMappingsParams` | 200 `PSPImportMappingsResult` |  |
 | GET | `/v1/merchant/provider-catalog` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<ProviderCatalogObject>` |  |
 | GET | `/v1/merchant/parked-subscriptions` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<ParkedSubscription>` |  |
@@ -185,6 +184,9 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 | PUT | `/v1/merchant/dashboard` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetDashboardParams` | 200 `Dashboard` |  |
 | GET | `/v1/merchant/findings` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<Finding>` |  |
 | GET | `/v1/merchant/findings/{id}` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `Finding` |  |
+| GET | `/v1/merchant/proposals` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<Finding>` |  |
+| POST | `/v1/merchant/proposals/approve` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ApproveProposalsParams` | 200 `ProposalResults` | person; `Idempotency-Key` |
+| POST | `/v1/merchant/proposals/dismiss` | merchant | `merchant:config:manage`<br>`root:config:manage` | `DismissProposalsParams` | 200 `ProposalResults` | person |
 | POST | `/v1/merchant/findings/{id}/resolve` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ResolveFindingParams` | 200 `FindingResolution` |  |
 | GET | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<ProvisioningToken>` | when `customer_provisioning` |
 | POST | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | when `customer_provisioning` |

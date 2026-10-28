@@ -9312,55 +9312,6 @@
         ]
       }
     },
-    "/v1/merchant/psps/refresh": {
-      "post": {
-        "tags": [
-          "merchant_config"
-        ],
-        "parameters": [
-          {
-            "name": "OpenRails-Expected-Merchant",
-            "in": "header",
-            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PSPRefresh"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
-        },
-        "x-openrails-errors": [
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
     "/v1/webhooks/{rail}/{account_id}": {
       "post": {
         "tags": [
@@ -10036,6 +9987,7 @@
         },
         "x-openrails-errors": [
           "invalid_param",
+          "psp_import_in_progress",
           "psp_not_found",
           "service_unavailable"
         ],
@@ -10490,8 +10442,8 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "OK",
+          "202": {
+            "description": "Accepted",
             "content": {
               "application/json": {
                 "schema": {
@@ -10516,6 +10468,7 @@
         },
         "x-openrails-errors": [
           "invalid_param",
+          "psp_import_in_progress",
           "resource_conflict",
           "resource_not_found",
           "service_unavailable"
@@ -10575,8 +10528,11 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
+        "x-openrails-person": true,
         "x-openrails-errors": [
           "invalid_param",
+          "person_required",
+          "psp_import_in_progress",
           "resource_conflict",
           "resource_not_found",
           "service_unavailable"
@@ -11550,6 +11506,274 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
+        ]
+      }
+    },
+    "/v1/merchant/proposals": {
+      "get": {
+        "tags": [
+          "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "psp_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pull_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Finding"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
+        },
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_param",
+          "invalid_query",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/proposals/approve": {
+      "post": {
+        "tags": [
+          "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveProposalsParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalResults"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
+        "x-openrails-person": true,
+        "x-openrails-errors": [
+          "idempotency_key_in_use",
+          "idempotency_key_required",
+          "idempotency_key_reused",
+          "invalid_param",
+          "person_required",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/proposals/dismiss": {
+      "post": {
+        "tags": [
+          "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissProposalsParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalResults"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
+        "x-openrails-person": true,
+        "x-openrails-errors": [
+          "invalid_param",
+          "person_required",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
         ]
       }
     },
@@ -12918,6 +13142,20 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "ApproveProposalsParams": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "string"
           }
         }
       },
@@ -16081,6 +16319,20 @@
           "cleared_at"
         ]
       },
+      "DismissProposalsParams": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      },
       "DriftField": {
         "type": "object",
         "properties": {
@@ -16622,6 +16874,16 @@
               }
             ]
           },
+          "pull_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "change": {
             "oneOf": [
               {
@@ -16674,6 +16936,7 @@
           "resolved_by",
           "operator_notes",
           "source",
+          "pull_id",
           "change",
           "approval_run_id",
           "created_at",
@@ -16690,6 +16953,7 @@
               "cancel_provider_schedule",
               "cancel_subscription",
               "collect_skipped_renewal",
+              "correct_subscription",
               "create_subscription",
               "record_charge",
               "record_refund",
@@ -18999,7 +19263,8 @@
                 "type": "string",
                 "enum": [
                   "psp_credentials_rejected",
-                  "psp_not_readable"
+                  "psp_not_readable",
+                  "pull_roster_implausible"
                 ]
               },
               {
@@ -19018,6 +19283,9 @@
             "items": {
               "$ref": "#/components/schemas/PSPImportCount"
             }
+          },
+          "proposals": {
+            "$ref": "#/components/schemas/PSPImportProposals"
           },
           "created_at": {
             "type": "string",
@@ -19042,6 +19310,7 @@
           "error_code",
           "rules",
           "counts",
+          "proposals",
           "created_at",
           "updated_at"
         ]
@@ -19062,6 +19331,7 @@
             "enum": [
               "blocked",
               "conflict",
+              "held",
               "imported",
               "linked",
               "unmatched"
@@ -19164,6 +19434,33 @@
           }
         }
       },
+      "PSPImportProposals": {
+        "type": "object",
+        "properties": {
+          "open": {
+            "type": "integer"
+          },
+          "corrections": {
+            "type": "integer"
+          },
+          "approved": {
+            "type": "integer"
+          },
+          "dismissed": {
+            "type": "integer"
+          },
+          "superseded": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "open",
+          "corrections",
+          "approved",
+          "dismissed",
+          "superseded"
+        ]
+      },
       "PSPImportRecord": {
         "type": "object",
         "properties": {
@@ -19226,6 +19523,7 @@
             "enum": [
               "blocked",
               "conflict",
+              "held",
               "imported",
               "linked",
               "unmatched"
@@ -19376,22 +19674,6 @@
             "type": "string"
           }
         }
-      },
-      "PSPRefresh": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "string"
-          },
-          "job_id": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          }
-        },
-        "required": [
-          "status",
-          "job_id"
-        ]
       },
       "PSPRoutingCandidate": {
         "type": "object",
@@ -21291,6 +21573,104 @@
           "tier_group",
           "tier_rank",
           "archived"
+        ]
+      },
+      "ProposalError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "ProposalResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "already_resolved",
+              "approved",
+              "dismissed",
+              "failed",
+              "foreign",
+              "held",
+              "superseded"
+            ]
+          },
+          "finding": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Finding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "execution": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProposalError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "outcome",
+          "finding",
+          "execution",
+          "error"
+        ]
+      },
+      "ProposalResults": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProposalResult"
+            }
+          }
+        },
+        "required": [
+          "run_id",
+          "data"
         ]
       },
       "ProviderCatalogObject": {
@@ -24993,6 +25373,11 @@
       "type": "authorization_error",
       "meaning": "The credential lacks the permission the route requires."
     },
+    "person_required": {
+      "status": 403,
+      "type": "authorization_error",
+      "meaning": "Only a person signed in, or the embedding host in process, may take this action; an API key or service token may not."
+    },
     "platform_vault_mixed_class": {
       "status": 409,
       "type": "invalid_request_error",
@@ -25112,6 +25497,11 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The account is already a PSP, of this merchant or another; update it instead."
+    },
+    "psp_import_in_progress": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "Another import of the PSP is pulling or applying; wait for it to finish."
     },
     "psp_key_taken": {
       "status": 409,

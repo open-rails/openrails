@@ -187,6 +187,11 @@ export type ApplyProviderPrice = {
   archived?: boolean | null
 }
 
+export type ApproveProposalsParams = {
+  ids?: string[]
+  notes?: string
+}
+
 export type AskCatalogParams = {
   question?: string
 }
@@ -994,6 +999,11 @@ export type DestructiveHold = {
   cleared_at: string | null
 }
 
+export type DismissProposalsParams = {
+  ids?: string[]
+  notes?: string
+}
+
 export type DriftField = {
   field: string
   openrails_value: string
@@ -1111,6 +1121,7 @@ export type Finding = {
   resolved_by: string | null
   operator_notes: string | null
   source: "pull" | "verification" | null
+  pull_id: string | null
   change: FindingChange | null
   approval_run_id: string | null
   created_at: string
@@ -1118,7 +1129,7 @@ export type Finding = {
 }
 
 export type FindingChange = {
-  kind: "adopt_subscription" | "cancel_provider_schedule" | "cancel_subscription" | "collect_skipped_renewal" | "create_subscription" | "record_charge" | "record_refund" | "refund_charge_after_cancel" | "revoke_access" | "update_card"
+  kind: "adopt_subscription" | "cancel_provider_schedule" | "cancel_subscription" | "collect_skipped_renewal" | "correct_subscription" | "create_subscription" | "record_charge" | "record_refund" | "refund_charge_after_cancel" | "revoke_access" | "update_card"
   subject: ChangeSubject
   customer_id: string | null
   from: Record<string, unknown> | null
@@ -1576,16 +1587,17 @@ export type PSPImport = {
   pulled_at: string | null
   applied_at: string | null
   error: string | null
-  error_code: "psp_credentials_rejected" | "psp_not_readable" | null
+  error_code: "psp_credentials_rejected" | "psp_not_readable" | "pull_roster_implausible" | null
   rules: PSPImportRule[]
   counts: PSPImportCount[]
+  proposals: PSPImportProposals
   created_at: string
   updated_at: string
 }
 
 export type PSPImportCount = {
   kind: "customer" | "subscription" | "transaction"
-  state: "blocked" | "conflict" | "imported" | "linked" | "unmatched"
+  state: "blocked" | "conflict" | "held" | "imported" | "linked" | "unmatched"
   records: number
 }
 
@@ -1615,6 +1627,14 @@ export type PSPImportPriceLink = {
   price?: string | null
 }
 
+export type PSPImportProposals = {
+  open: number
+  corrections: number
+  approved: number
+  dismissed: number
+  superseded: number
+}
+
 export type PSPImportRecord = {
   id: string
   import: string
@@ -1624,7 +1644,7 @@ export type PSPImportRecord = {
   subscription_ref: string | null
   occurred_at: string | null
   facts: PSPImportFact[]
-  state: "blocked" | "conflict" | "imported" | "linked" | "unmatched"
+  state: "blocked" | "conflict" | "held" | "imported" | "linked" | "unmatched"
   customer: string | null
   linked_via: string | null
   manual_price: string | null
@@ -1655,11 +1675,6 @@ export type PSPPaymentConfig = {
 export type PSPRef = {
   id?: string
   key?: string
-}
-
-export type PSPRefresh = {
-  status: string
-  job_id: string
 }
 
 export type PSPRoutingCandidate = {
@@ -2015,6 +2030,24 @@ export type ProductSummary = {
   tier_group: string | null
   tier_rank: number
   archived: boolean
+}
+
+export type ProposalError = {
+  code: string
+  message: string
+}
+
+export type ProposalResult = {
+  id: string
+  outcome: "already_resolved" | "approved" | "dismissed" | "failed" | "foreign" | "held" | "superseded"
+  finding: Finding | null
+  execution: Record<string, unknown> | null
+  error: ProposalError | null
+}
+
+export type ProposalResults = {
+  run_id: string | null
+  data: ProposalResult[]
 }
 
 export type ProviderCatalogObject = {
