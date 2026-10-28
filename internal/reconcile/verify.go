@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -330,7 +329,8 @@ func (v *Verifier) lifecycle() *subscriptions.SubscriptionLifecycleService {
 	return lc
 }
 
-// verifyBatch reads and resolves one batch of one merchant's rows.
+// verifyBatch reads and resolves one batch of one merchant's rows, each with
+// the PSP that owns it.
 func (v *Verifier) verifyBatch(ctx context.Context, mid billing.MerchantID, ids []uuid.UUID) error {
 	return v.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(ctx context.Context) error {
 		now := v.Clock.Now().UTC()
@@ -338,35 +338,60 @@ func (v *Verifier) verifyBatch(ctx context.Context, mid billing.MerchantID, ids 
 		if err != nil || len(subs) == 0 {
 			return err
 		}
-		armed := v.Builder.Build(ctx, mid)
 		lc := v.lifecycle()
-		var nmiSubs []*models.Subscription
 		var readErr error
-		for _, sub := range subs {
-			if rails.IsNMI(sub.Rail) {
-				nmiSubs = append(nmiSubs, sub)
-				continue
-			}
-			prober := armed.Probers[Provider(sub.Rail)]
-			if prober == nil {
-				continue
-			}
-			snap, err := prober.ProbeSubscription(ctx, ProbeSubject{LocalID: sub.ID, RailSubscriptionID: sub.RailSubscriptionID,
-				PeriodStart: sub.CurrentPeriodStartsAt, PeriodEnd: sub.CurrentPeriodEndsAt, ObservedAt: now})
-			if err == nil {
-				_, err = ConvergeSubscriptionFromSnapshot(ctx, v.DB, lc, sub, snap, now, 0)
-			}
-			readErr = errors.Join(readErr, err)
-		}
-		if len(nmiSubs) > 0 {
-			reader, psp := NMIReader(armed)
-			if reader != nil {
-				readErr = errors.Join(readErr, resolveNMIBatch(ctx, v.DB, lc, reader, forPSP(nmiSubs, psp), now))
-			}
+		for _, group := range byPSP(subs) {
+			readErr = errors.Join(readErr, v.verifyPSP(ctx, mid, lc, group, now))
 		}
 		recordReads(ctx, v.DB, mid, subs, now, readErr)
 		return readErr
 	})
+}
+
+// verifyPSP reads one PSP's rows with that PSP's own credentials, archived or
+// not. A PSP that cannot arm reads nothing, so nothing is decided.
+func (v *Verifier) verifyPSP(ctx context.Context, mid billing.MerchantID, lc *subscriptions.SubscriptionLifecycleService, subs []*models.Subscription, now time.Time) error {
+	psp := subs[0].PspID
+	armed, provider, ok := v.Builder.BuildPSP(ctx, mid, psp)
+	if !ok {
+		return fmt.Errorf("verify: PSP %s is not armed; its rows stay unverified", psp)
+	}
+	if provider == ProviderNMI {
+		reader, _ := NMIReader(armed)
+		return resolveNMIBatch(ctx, v.DB, lc, reader, psp, subs, now)
+	}
+	prober := armed.Probers[provider]
+	if prober == nil {
+		return fmt.Errorf("verify: PSP %s has no %s prober; its rows stay unverified", psp, provider)
+	}
+	var readErr error
+	snaps := make(map[uuid.UUID]*RemoteSnapshot, len(subs))
+	for _, sub := range subs {
+		snap, err := prober.ProbeSubscription(ctx, ProbeSubject{LocalID: sub.ID, RailSubscriptionID: sub.RailSubscriptionID,
+			PeriodStart: sub.CurrentPeriodStartsAt, PeriodEnd: sub.CurrentPeriodEndsAt, ObservedAt: now})
+		if err != nil {
+			readErr = errors.Join(readErr, err)
+			continue
+		}
+		snaps[sub.ID] = snap
+	}
+	return errors.Join(readErr, applyVerified(ctx, v.DB, lc, provider, psp, subs, snaps, now))
+}
+
+// byPSP groups rows by the PSP that owns them, in first-seen order.
+func byPSP(subs []*models.Subscription) [][]*models.Subscription {
+	index := map[uuid.UUID]int{}
+	var out [][]*models.Subscription
+	for _, s := range subs {
+		i, ok := index[s.PspID]
+		if !ok {
+			i = len(out)
+			index[s.PspID] = i
+			out = append(out, nil)
+		}
+		out[i] = append(out[i], s)
+	}
+	return out
 }
 
 // loadUnverified loads the rows of ids that are still unverified and read
@@ -404,16 +429,6 @@ func recordReads(ctx context.Context, database *db.DB, mid billing.MerchantID, s
 	}); err != nil {
 		log.WithContext(ctx).WithError(err).Warn("verify: could not record the reads")
 	}
-}
-
-func forPSP(subs []*models.Subscription, psp uuid.UUID) []*models.Subscription {
-	out := subs[:0:0]
-	for _, s := range subs {
-		if s.PspID == psp {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 // Pass is the refresh pass's verification of the merchant's unverified NMI

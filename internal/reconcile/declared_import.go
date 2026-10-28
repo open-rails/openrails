@@ -140,6 +140,9 @@ func ImportDeclaredSubscriptions(
 	if history != nil {
 		ctx = context.WithValue(ctx, declaredHistoryKey{}, history)
 	}
+	// The operator's declared book is an admitted command: its cancels carry
+	// its own authority.
+	ctx = WithAdmittedCancels(ctx)
 	if database == nil || lc == nil {
 		return nil, fmt.Errorf("declared import: db and lifecycle are required")
 	}

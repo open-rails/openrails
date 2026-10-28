@@ -458,9 +458,9 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: scoped convergence failed")
 			}
 		}
-		// Reconcile the `unknown` cohort against the provider. A rail without
-		// a working fetcher leaves its subscriptions `unknown` for the next pass.
-		if err := w.runUnknownReconcile(tctx, mid, armed.Fetchers, armed.Probers); err != nil {
+		// Reconcile the `unknown` cohort against the provider, each row with
+		// its own PSP. A PSP that cannot arm leaves its rows `unknown`.
+		if err := w.runUnknownReconcile(tctx, mid, builder); err != nil {
 			stats.LaneErrors++
 			logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: unknown-cohort reconcile failed")
 		}
@@ -482,12 +482,12 @@ func (w *ProviderRefreshWorker) runCCBillDataLinkLane(ctx context.Context, dataL
 }
 
 // runUnknownReconcile resolves the merchant's `unknown` subscriptions against
-// the provider (one windowed bulk pull per rail, probes as fallback),
+// the provider (one windowed bulk pull per PSP, probes as fallback),
 // backfilling missing charges; with a Verifier, NMI rows go to it instead. The
 // lifecycle service needs only local writes, so it is built with nil deps.
-// Best-effort: a rail whose pull fails leaves its subscriptions `unknown` for
+// Best-effort: a PSP whose pull fails leaves its subscriptions `unknown` for
 // the next pass.
-func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uuid.UUID, fetchers map[reconcile.Provider]reconcile.RailFetcher, probers map[reconcile.Provider]reconcile.SubscriptionProber) error {
+func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uuid.UUID, builder reconcile.MerchantFetcherBuilder) error {
 	clock := w.Clock
 	if clock == nil {
 		clock = clockwork.NewRealClock()
@@ -505,7 +505,7 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 		opts.SkipRails = []string{string(reconcile.ProviderNMI)}
 		verifyErr = w.Verifier.Pass(ctx, billing.MerchantID(mid))
 	}
-	res, err := reconcile.ReconcileUnknownCohort(ctx, w.DB, lc, fetchers, probers, billing.MerchantID(mid), w.now(), opts)
+	res, err := reconcile.ReconcileUnknownCohort(ctx, w.DB, lc, builder, billing.MerchantID(mid), w.now(), opts)
 	err = errors.Join(verifyErr, err)
 	if res.Held > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "held": res.Held}).

@@ -212,6 +212,9 @@
       "TestNMIRecovery/OR-J15-S04/provider_reversed",
       "TestNMIRecovery/OR-J15-S04/provider_unrecorded"
     ],
+    "OR-J15-S05": [
+      "TestVerificationBinding/OR-J15-S05/draining-account-is-read-with-its-own-credentials"
+    ],
     "OR-J16-S01": [
       "TestDunning/OR-J16-S01/retryable-decline-recovers-on-bounded-weekly-schedule"
     ],
@@ -448,6 +451,9 @@
     ],
     "OR-J34-S04": [
       "TestDestructiveControls/OR-J34-S04/finding-resolution-cannot-bypass-destructive-hold"
+    ],
+    "OR-J34-S05": [
+      "TestVerificationBinding/OR-J34-S05/provider-confirmed-cancel-waits-for-the-kill-switch"
     ],
     "OR-J37-S01": [
       "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order",

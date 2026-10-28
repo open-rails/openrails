@@ -23,7 +23,8 @@ import (
 // the lifecycle state machine: the row is locked, re-checked against the row
 // the decision was made on, and the event applied with Transition and
 // ApplyEffects in one transaction. Only a payment fact renews and only a
-// decline fact opens dunning. Returns whether a transition was attempted.
+// decline fact opens dunning, and every cancel passes the cancel gate.
+// Returns whether a transition was attempted.
 func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time) (bool, error) {
 	if database == nil || lc == nil || sub == nil {
 		return false, fmt.Errorf("apply decision: db, lifecycle and subscription are required")
@@ -91,6 +92,9 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		return transition(ctx, database, lc, sub, d, now, false)
 
 	case TransitionCancel:
+		if cancelHeld(ctx, database, sub, d) {
+			return false, nil
+		}
 		return transition(ctx, database, lc, sub, d, now, false)
 	}
 	return false, fmt.Errorf("apply decision: unknown transition %d", d.Kind)

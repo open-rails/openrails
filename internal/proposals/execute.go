@@ -162,7 +162,8 @@ func (x *execution) decide(ctx context.Context, d *reconcile.DecideAction) (map[
 		if err != nil {
 			return nil, err
 		}
-		applied, err := reconcile.ApplyDecision(ctx, x.d, x.lifecycle(), sub, d.Decision, x.now)
+		// holdFor admitted this approved change against the kill switch.
+		applied, err := reconcile.ApplyDecision(reconcile.WithAdmittedCancels(ctx), x.d, x.lifecycle(), sub, d.Decision, x.now)
 		if err != nil {
 			return nil, err
 		}

@@ -364,7 +364,9 @@ names `openrails intents resolve --intent <id> --step proration --receipt
 
 A schedule whose renewal OpenRails has not seen (its period lapsed with no
 charge or decline recorded) becomes `unverified`, with access kept. It is read
-from NMI as soon as that commits:
+from NMI as soon as that commits, with the credentials of the PSP that owns
+it, archived or not; a PSP that cannot be armed reads nothing and decides
+nothing:
 
 - Up to 50 schedules per request: one Query API recurring report and one
   transaction query (`subscription_id` takes a comma-separated list), plus a
@@ -375,7 +377,9 @@ from NMI as soon as that commits:
   from its last page after a crash.
 
 A payment renews exactly the periods it paid, a decline enters dunning, and a
-schedule NMI ended is canceled. A row with no evidence stays `unverified`. The
+schedule NMI ended is canceled, subject to the
+[cancel gate](../operations.md#cancellation-caps). A row with no evidence stays
+`unverified`. The
 `life.unverified.backlog` finding reports each account's count and oldest age;
 a row still unverified after three days raises `life.unverified.unresolved` for
 the operator.

@@ -691,7 +691,7 @@ ORDER BY created_at;
 -- without a local period (legacy imports) resolve only here and must not starve
 -- behind the dated cohort.
 -- name: ListUnknownSubscriptions :many
-SELECT id, rail, current_period_starts_at, current_period_ends_at, rail_subscription_id FROM billing.subscriptions
+SELECT id, rail, psp_id, current_period_starts_at, current_period_ends_at, rail_subscription_id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND deleted_at IS NULL

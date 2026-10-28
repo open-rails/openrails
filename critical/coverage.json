@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 164,
+  "scenario_count": 166,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -342,6 +342,11 @@
       "id": "OR-J15-S04",
       "journey": "J15",
       "name": "Reversed or unrecorded existing charge is never recollected"
+    },
+    {
+      "id": "OR-J15-S05",
+      "journey": "J15",
+      "name": "Unverified subscription is read with its own PSP and a sibling account's absence cancels nothing"
     },
     {
       "id": "OR-J16-S01",
@@ -702,6 +707,11 @@
       "id": "OR-J34-S04",
       "journey": "J34",
       "name": "Finding resolution cannot bypass destructive incident authority"
+    },
+    {
+      "id": "OR-J34-S05",
+      "journey": "J34",
+      "name": "Provider-confirmed convergence cancel waits for the destructive switch on every rail"
     },
     {
       "id": "OR-J37-S01",

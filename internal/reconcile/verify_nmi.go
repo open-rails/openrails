@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/attempts"
@@ -35,17 +34,17 @@ func NMIReader(armed MerchantPullClients) (*nmi.NMIClient, uuid.UUID) {
 // one recurring report and one transaction query per batch, plus a v5 read
 // only for a schedule the report no longer lists. Each row is then decided
 // and applied from its own evidence.
-func resolveNMIBatch(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, client *nmi.NMIClient, subs []*models.Subscription, now time.Time) error {
+func resolveNMIBatch(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, client *nmi.NMIClient, psp uuid.UUID, subs []*models.Subscription, now time.Time) error {
 	var errs error
 	for len(subs) > 0 {
 		n := min(len(subs), nmi.MaxQueryIDs)
-		errs = errors.Join(errs, resolveNMIChunk(ctx, database, lc, client, subs[:n], now))
+		errs = errors.Join(errs, resolveNMIChunk(ctx, database, lc, client, psp, subs[:n], now))
 		subs = subs[n:]
 	}
 	return errs
 }
 
-func resolveNMIChunk(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, client *nmi.NMIClient, subs []*models.Subscription, now time.Time) error {
+func resolveNMIChunk(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, client *nmi.NMIClient, psp uuid.UUID, subs []*models.Subscription, now time.Time) error {
 	ids := make([]string, 0, len(subs))
 	var since time.Time
 	for _, s := range subs {
@@ -118,12 +117,12 @@ func resolveNMIChunk(ctx context.Context, database *db.DB, lc *subscriptions.Sub
 		}
 		snaps[sub.ID] = snap
 	}
-	return errors.Join(errs, applyVerified(ctx, database, lc, subs, snaps, now))
+	return errors.Join(errs, applyVerified(ctx, database, lc, ProviderNMI, psp, subs, snaps, now))
 }
 
-// applyVerified decides every read row, holds all of the batch's
-// cancellations when they exceed the pass budget, and applies the rest.
-func applyVerified(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, subs []*models.Subscription, snaps map[uuid.UUID]*RemoteSnapshot, now time.Time) error {
+// applyVerified decides every read row of one PSP, passes the batch's
+// cancellations through the cancel gate once, and applies them.
+func applyVerified(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, provider Provider, psp uuid.UUID, subs []*models.Subscription, snaps map[uuid.UUID]*RemoteSnapshot, now time.Time) error {
 	if len(snaps) == 0 {
 		return nil
 	}
@@ -132,41 +131,19 @@ func applyVerified(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		return err
 	}
 	floor := EvidenceFloorFor(ctx, database, mid.UUID())
-	q := database.Gen(ctx)
 	cancels := 0
 	for _, sub := range subs {
 		if snap := snaps[sub.ID]; snap != nil {
-			d := Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, 0)
-			if d.Kind == TransitionCancel {
+			if Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, 0).Kind == TransitionCancel {
 				cancels++
 			}
 		}
 	}
-	holdCancels := false
-	if cancels > 0 {
-		// The kill switch and first-enforce gate hold every destructive
-		// outcome of a read, as they do the refresh pass's.
-		if verdict := destructive.New(database).Check(ctx, mid.UUID()); !verdict.Allowed || !verdict.EnforceArmed {
-			holdCancels = true
-		}
-	}
-	if cancels > 0 && !holdCancels {
-		live, err := q.CountLiveLinkedSubscriptionsForRail(ctx, gen.CountLiveLinkedSubscriptionsForRailParams{MerchantID: mid.UUID(), Rail: string(models.RailNMI)})
-		if err != nil {
-			return fmt.Errorf("verify: count live nmi book: %w", err)
-		}
-		if exceeded, reason := (CancelBudget{}).Exceeded(cancels, int(live)); exceeded {
-			holdCancels = true
-			recordGuardFinding(ctx, q, mid, ProviderNMI, "cancellation_cap", reason)
-		}
-	}
+	ctx = GateCancelPass(ctx, database, mid, provider, psp, cancels)
 	var errs error
 	for _, sub := range subs {
 		snap := snaps[sub.ID]
 		if snap == nil {
-			continue
-		}
-		if holdCancels && Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, 0).Kind == TransitionCancel {
 			continue
 		}
 		res, err := ConvergeSubscriptionFromSnapshot(ctx, database, lc, sub, snap, now, 0)
@@ -422,7 +399,7 @@ func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 			rosterByID[s.ID] = s
 		}
 		cov := armed.Coverage[ProviderNMI]
-		localLive, err := q.CountLiveLinkedSubscriptionsForRail(ctx, gen.CountLiveLinkedSubscriptionsForRailParams{MerchantID: mid.UUID(), Rail: string(models.RailNMI)})
+		localLive, err := q.CountLiveLinkedSubscriptionsForPSP(ctx, gen.CountLiveLinkedSubscriptionsForPSPParams{MerchantID: mid.UUID(), PspID: psp})
 		if err != nil {
 			return err
 		}
@@ -450,8 +427,8 @@ func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 			snaps[sub.ID] = snap
 		}
 		lc := v.lifecycle()
-		errs := applyVerified(ctx, v.DB, lc, subs, snaps, now)
-		errs = errors.Join(errs, resolveNMIBatch(ctx, v.DB, lc, client, fallback, now))
+		errs := applyVerified(ctx, v.DB, lc, ProviderNMI, psp, subs, snaps, now)
+		errs = errors.Join(errs, resolveNMIBatch(ctx, v.DB, lc, client, psp, fallback, now))
 		recordReads(ctx, v.DB, mid, subs, now, errs)
 		if errs != nil {
 			return errs

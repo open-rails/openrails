@@ -977,7 +977,7 @@ queue, skipping merchants with no declared PSPs. Three lanes:
 | Lane | Purpose |
 |---|---|
 | Provider Event Refresh | bounded missed-event backfill for NMI, Stripe, CCBill using durable per-merchant/rail/account/domain watermarks (`billing.psp_refresh_watermarks`) |
-| Unknown-cohort Reconcile | resolves `unverified` subscriptions against provider truth: one windowed bulk pull per rail + targeted per-subscription probes for rows the bulk pull can't decide |
+| Unknown-cohort Reconcile | resolves `unverified` subscriptions against provider truth, each with the PSP that owns it (archived ones included): one windowed bulk pull per PSP + targeted per-subscription probes for rows the bulk pull can't decide |
 | CCBill DataLink Refresh | scheduled active-member bulk refresh (CCBill has no cheap per-subscription liveness API) |
 
 A watermark advances only after its provider/window completes successfully;
@@ -1479,13 +1479,17 @@ gates one merchant. Disabling either stops that merchant.
 
 ### Cancellation caps
 
-Independently of the switch, one pass may cancel at most
-`min(25, max(3, 5% of the merchant's live linked book))` subscriptions, or the
+Every convergence cancel, whatever its rail or what read it (a pull, a
+verification read, a webhook or rebill read), waits for the switch. A
+pull-plane pass (the pull, verification, the unknown cohort) also needs the
+merchant armed, and is capped per PSP: one pass may cancel at most
+`min(25, max(3, 5% of the PSP's live linked book))` subscriptions, or the
 whole book when it holds at most 5 live subscriptions (a tiny book whose
 schedules the provider ended must converge; no larger book is ever canceled
 entirely by one pass). Over
-that, **none** are applied, the merchant's pass halts, and a
-`pull.cancellation.capped` finding lands in the review queue. It is all-or-
+that, **none** of its cancellations are applied (a pull also halts the
+merchant's pass), and a `pull.cancellation.capped` finding lands in the review
+queue. It is all-or-
 nothing on purpose: a pass that wants to cancel 850 customers is not a pass that
 should cancel the first 25 of them.
 

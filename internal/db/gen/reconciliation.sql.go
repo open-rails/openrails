@@ -2008,7 +2008,7 @@ func (q *Queries) ListUnjustifiedAccessWindows(ctx context.Context, arg ListUnju
 }
 
 const listUnknownSubscriptions = `-- name: ListUnknownSubscriptions :many
-SELECT id, rail, current_period_starts_at, current_period_ends_at, rail_subscription_id FROM billing.subscriptions
+SELECT id, rail, psp_id, current_period_starts_at, current_period_ends_at, rail_subscription_id FROM billing.subscriptions
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND deleted_at IS NULL
@@ -2029,6 +2029,7 @@ type ListUnknownSubscriptionsParams struct {
 type ListUnknownSubscriptionsRow struct {
 	ID                    uuid.UUID
 	Rail                  string
+	PspID                 uuid.UUID
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time
 	RailSubscriptionID    *string
@@ -2055,6 +2056,7 @@ func (q *Queries) ListUnknownSubscriptions(ctx context.Context, arg ListUnknownS
 		if err := rows.Scan(
 			&i.ID,
 			&i.Rail,
+			&i.PspID,
 			&i.CurrentPeriodStartsAt,
 			&i.CurrentPeriodEndsAt,
 			&i.RailSubscriptionID,

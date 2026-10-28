@@ -42,25 +42,25 @@ func (q *Queries) ArmMerchantEnforcement(ctx context.Context, arg ArmMerchantEnf
 	return err
 }
 
-const countLiveLinkedSubscriptionsForRail = `-- name: CountLiveLinkedSubscriptionsForRail :one
+const countLiveLinkedSubscriptionsForPSP = `-- name: CountLiveLinkedSubscriptionsForPSP :one
 SELECT count(*) FROM billing.subscriptions
 WHERE merchant_id = $1::uuid
-  AND rail = $2::text
+  AND psp_id = $2::uuid
   AND status IN ('active', 'past_due', 'awaiting_method', 'unverified')
   AND rail_subscription_id IS NOT NULL
   AND deleted_at IS NULL
 `
 
-type CountLiveLinkedSubscriptionsForRailParams struct {
+type CountLiveLinkedSubscriptionsForPSPParams struct {
 	MerchantID uuid.UUID
-	Rail       string
+	PspID      uuid.UUID
 }
 
-// The merchant's live linked book on one rail: statuses that still bill or grant
-// access, with a rail handle. The cancellation cap and roster ratio breaker are
-// measured against it.
-func (q *Queries) CountLiveLinkedSubscriptionsForRail(ctx context.Context, arg CountLiveLinkedSubscriptionsForRailParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countLiveLinkedSubscriptionsForRail, arg.MerchantID, arg.Rail)
+// One PSP's live linked book: statuses that still bill or grant access, with a
+// rail handle. The cancellation cap and roster ratio breaker are measured
+// against it.
+func (q *Queries) CountLiveLinkedSubscriptionsForPSP(ctx context.Context, arg CountLiveLinkedSubscriptionsForPSPParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countLiveLinkedSubscriptionsForPSP, arg.MerchantID, arg.PspID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
