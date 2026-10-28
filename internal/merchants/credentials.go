@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -284,6 +285,21 @@ func (s *Service) LivePSPScopes(ctx context.Context, id billing.MerchantID) ([]P
 		return nil, nil
 	}
 	j, err := s.load(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("list PSPs: %w", err)
+	}
+	live := j.live("")
+	sort.SliceStable(live, func(a, b int) bool { return live[a].Rail < live[b].Rail })
+	return live, nil
+}
+
+// LivePSPScopesIn is LivePSPScopes over set, a configuration being loaded
+// and not yet published.
+func (s *Service) LivePSPScopesIn(ctx context.Context, id billing.MerchantID, set merchantdocs.Set) ([]PSPScope, error) {
+	if s == nil || s.pool == nil || s.database == nil || id.IsZero() {
+		return nil, errors.New("merchants: merchant configuration unavailable")
+	}
+	j, err := s.join(ctx, id, set)
 	if err != nil {
 		return nil, fmt.Errorf("list PSPs: %w", err)
 	}

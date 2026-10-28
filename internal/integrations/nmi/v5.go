@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/transient"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -128,7 +129,10 @@ func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body
 			return fmt.Errorf("%w: status %d", ErrV5NotFound, resp.StatusCode)
 		}
 		if resp.StatusCode >= 500 {
-			return classify(fmt.Errorf("nmi v5 request failed: status %d", resp.StatusCode))
+			return classify(fmt.Errorf("nmi v5 request failed: status %d: %w", resp.StatusCode, transient.ErrUnavailable))
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("%w: %w: status %d", ErrV5Refused, transient.ErrUnavailable, resp.StatusCode)
 		}
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			return fmt.Errorf("%w: %w: status %d", ErrV5Refused, ErrCredentialsRejected, resp.StatusCode)

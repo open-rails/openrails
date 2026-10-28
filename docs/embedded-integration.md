@@ -196,6 +196,8 @@ defer workers.StopAndCancel(context.WithoutCancel(ctx))
 if err := bill.Start(ctx, openrails.WithRiverClient(workers)); err != nil { return err }
 ```
 
+`RiverJobs` adds `openrails.QueueBilling` and `openrails.QueuePSPImport` (PSP
+import pulls, 2 workers) to the config when the host leaves them out.
 OpenRails enqueues through the host's fleet and never starts or stops it.
 Composing `RiverJobs` into a fleet in another schema is refused. Once
 `RiverJobs` went to a fleet, `Start` without `WithRiverClient` is refused, and

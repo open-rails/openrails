@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/pagination"
@@ -35,6 +36,7 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/shared/transient"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -71,10 +73,29 @@ const (
 // JobKind is the River job that runs one step of an import.
 const JobKind = "openrails.psp_import"
 
-// JobAttempts bounds retries of a failing pull or landing, each resuming
-// where the last stopped: NextRetry waits attempt⁴ seconds, at most an hour,
-// so a provider that does not answer is retried for about 14 months.
+// JobAttempts bounds a pull's attempts, each resuming where the last stopped:
+// NextRetry waits attempt⁴ seconds, at most an hour, so a provider that does
+// not answer is retried for about 14 months.
 const JobAttempts = 10_000
+
+// ApplyAttempts bounds a landing's attempts; a person applies again.
+const ApplyAttempts = 10
+
+// RetryBudget is how many attempts a step makes at a failure that is not
+// Transient (an answer it cannot read, a row the database refuses) before the
+// import fails with it.
+const RetryBudget = 5
+
+// JobQueue is the River queue import steps run on, apart from renewals and
+// dunning.
+const JobQueue = "psp_import"
+
+// Transient reports whether a later attempt of a step can outlive err: a
+// provider, Vault or the database that did not answer, or a configuration
+// that changed under the step.
+func Transient(err error) bool {
+	return transient.Is(err) || errors.Is(err, merchantdocs.ErrUnavailable) || errors.Is(err, errConfigChanged)
+}
 
 // RetryCap is the longest wait between two attempts of a step.
 const RetryCap = time.Hour
@@ -98,8 +119,11 @@ type JobArgs struct {
 
 func (JobArgs) Kind() string { return JobKind }
 
-func (JobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "billing", MaxAttempts: JobAttempts}
+func (a JobArgs) InsertOpts() river.InsertOpts {
+	if a.Step == StepApply {
+		return river.InsertOpts{Queue: JobQueue, MaxAttempts: ApplyAttempts}
+	}
+	return river.InsertOpts{Queue: JobQueue, MaxAttempts: JobAttempts}
 }
 
 func (im *Importer) now() time.Time { return timeutil.FirstClock(im.Clock).Now().UTC() }

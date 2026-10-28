@@ -38,6 +38,11 @@ func (s *Service) load(ctx context.Context, id billing.MerchantID) (joined, erro
 	if err != nil {
 		return joined{}, err
 	}
+	return s.join(ctx, id, set)
+}
+
+// join joins the merchant's PSP and custodian identities with set.
+func (s *Service) join(ctx context.Context, id billing.MerchantID, set merchantdocs.Set) (joined, error) {
 	// Read once here, with the connection the load already holds, so a provider
 	// write never waits on the pool for the book id.
 	booktag.Ensure(id.UUID(), s.database.GenDirectory()).Tag(ctx)

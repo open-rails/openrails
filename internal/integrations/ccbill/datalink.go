@@ -13,6 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/shared/transient"
 )
 
 type DataLinkClient struct {
@@ -133,7 +134,7 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 			}).Warn("Request failed")
 
 			if tries == maxRetries {
-				return "", fmt.Errorf("failed after %d retries: %w", maxRetries, err)
+				return "", fmt.Errorf("failed after %d retries: %w: %w", maxRetries, transient.ErrUnavailable, err)
 			}
 			if err := sleepWithContext(ctx, time.Duration(tries)*time.Second); err != nil {
 				return "", err
@@ -157,6 +158,9 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 
 		if tries == maxRetries {
 			resp.Body.Close()
+			if transient.Status(resp.StatusCode) {
+				return "", fmt.Errorf("failed after %d retries, last status: %d: %w", maxRetries, resp.StatusCode, transient.ErrUnavailable)
+			}
 			return "", fmt.Errorf("failed after %d retries, last status: %d", maxRetries, resp.StatusCode)
 		}
 		resp.Body.Close()

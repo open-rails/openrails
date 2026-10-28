@@ -271,16 +271,20 @@ func (e *Engine) CustomerConfig(selection Routes, r *http.Request) (*billing.Cus
 }
 
 // RiverJobs is OpenRails' contribution to the host's River fleet (workers,
-// periodic jobs and QueueBilling), for riverhelpers.New in
+// periodic jobs, QueueBilling and QueuePSPImport), for riverhelpers.New in
 // Config.Database.RiverSchema alongside the host's and AuthKit's; then pass the fleet to Start with
 // WithRiverClient. Requesting it rules out OpenRails' own River.
 func (e *Engine) RiverJobs() riverhelpers.Contribution {
 	return e.engine.App.Runtime.RiverJobs()
 }
 
-// QueueBilling is the queue RiverJobs contributes. Hosts may set its
-// concurrency in the shared River config; it needs at least one worker.
-const QueueBilling = riverjobs.QueueBilling
+// QueueBilling and QueuePSPImport are the queues RiverJobs contributes, the
+// latter for PSP import pulls and landings. Hosts may set their concurrency
+// in the shared River config; each needs at least one worker.
+const (
+	QueueBilling   = riverjobs.QueueBilling
+	QueuePSPImport = riverjobs.QueuePSPImport
+)
 
 // UsageSweepArgs requests one usage-billing pass. Automatic selects the configured
 // account policy; otherwise its phase flags retain the manual billing API.

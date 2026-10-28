@@ -118,15 +118,6 @@ func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID) error {
 	if err != nil || row.Status != string(billing.PSPImportPulling) {
 		return err
 	}
-	err = im.pull(ctx, row)
-	if err != nil && rejected(err) {
-		return PermanentError{Err: fmt.Errorf("%w: %w", ErrCredentialsRejected, err), Code: billing.PSPImportCredentialsRejected}
-	}
-	return err
-}
-
-func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport) error {
-	id := billing.PSPImportID(row.ID)
 	mid := billing.MerchantID(row.MerchantID)
 	scope, found, err := im.Merchants.PSPScopeByID(ctx, mid, row.PspID)
 	if err != nil {
@@ -135,6 +126,24 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport) error {
 	if !found {
 		return notReadable(errors.New("the import's PSP is no longer declared"))
 	}
+	err = im.pull(ctx, row, scope)
+	if err == nil || !rejected(err) {
+		return err
+	}
+	// Credentials replaced while this pull read the old ones: the change's
+	// re-arm found the import still pulling, so retry with the new ones.
+	if now, found, rerr := im.Merchants.PSPScopeByID(ctx, mid, row.PspID); rerr == nil && found && now.Revision != scope.Revision {
+		return fmt.Errorf("%w: %w", errConfigChanged, err)
+	}
+	return PermanentError{Err: fmt.Errorf("%w: %w", ErrCredentialsRejected, err), Code: billing.PSPImportCredentialsRejected}
+}
+
+// errConfigChanged is a pull whose PSP's configuration changed under it.
+var errConfigChanged = errors.New("the PSP's configuration changed during the pull")
+
+func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope merchants.PSPScope) error {
+	id := billing.PSPImportID(row.ID)
+	mid := billing.MerchantID(row.MerchantID)
 	build, ok := sources[scope.Rail]
 	if !ok {
 		return notReadable(fmt.Errorf("%s has no import", scope.Rail))

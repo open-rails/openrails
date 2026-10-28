@@ -42,11 +42,15 @@ reviews, maps, links and applies it as any import. Find it with
 `manual` and never stands in for it; deleting the onboarding import makes it
 again at the PSP's next load.
 
-**Retries.** A provider that does not answer (network, timeout, 5xx, 429), an
-unreachable secret store or database is retried without failing the import:
-attempt⁴ seconds apart, at most an hour, up to 10 000 attempts (about 14
-months), each resuming from the last committed history window. Two causes
-fail it at once, with `error_code`:
+**Retries.** Import steps run on their own River queue (`psp_import`, two
+workers per fleet), apart from renewals and dunning. A provider that does not
+answer (network, timeout, 5xx, 429), an unreachable secret store or database
+is retried without failing a pull: attempt⁴ seconds apart, at most an hour,
+up to 10 000 attempts (about 14 months), each resuming from the last committed
+history window. Any other failure (an answer OpenRails cannot read, a row the
+database refuses) is retried 5 times, then fails the import with its `error`,
+so it can be read and deleted. A landing makes at most 10 attempts; a failed
+one is applied again. Two causes fail a pull at once, with `error_code`:
 
 - `psp_credentials_rejected`: the provider refused the credentials (NMI v5
   401/403 or a Query API authentication error, Stripe 401/403, DataLink
@@ -59,8 +63,9 @@ fail it at once, with `error_code`:
 
 A failed onboarding import restarts in place (same import, same staged
 records) when a process first loads the PSP's configuration or sees it change:
-fix the credentials and it pulls. While they stay rejected, each boot costs
-one provider read.
+fix the credentials and it pulls. A pull refused with credentials replaced
+while it ran retries with the new ones. While they stay rejected, each boot
+costs one provider read.
 
 **History** reads from the earliest object the provider lists, customers
 included (an NMI vault's or Stripe customer's creation, a subscription's

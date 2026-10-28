@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/shared/transient"
 )
 
 // StripeBill is one finalized provider invoice, separate from the monetary
@@ -380,6 +381,9 @@ func (p *HTTPStripeLivenessProber) billGet(ctx context.Context, path string, que
 	}
 	if len(body) > limit {
 		return nil, fmt.Errorf("Stripe billing response exceeds %d bytes", limit)
+	}
+	if transient.Status(resp.StatusCode) {
+		return nil, fmt.Errorf("read Stripe billing evidence: HTTP %d: %w", resp.StatusCode, transient.ErrUnavailable)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("read Stripe billing evidence: HTTP %d", resp.StatusCode)

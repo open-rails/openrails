@@ -2,7 +2,7 @@
   "go_api": {
     ".": [
       "const (\n\tEnvironmentLive = config.EnvironmentLive\n\n\tEnvironmentTest = config.EnvironmentTest\n\n\tEnvironmentSandbox = config.EnvironmentSandbox\n\n\tEnvironmentMainnet = config.EnvironmentMainnet\n\n\tEnvironmentDevnet = config.EnvironmentDevnet\n\n\tEnvironmentTestnet = config.EnvironmentTestnet\n\n\tProviderWritesFull = config.ProviderWriteModeFull\n\n\tProviderWritesLimited = config.ProviderWriteModeLimited\n\n\tProviderWritesReadOnly = config.ProviderWriteModeReadOnly\n\n\tSubjectUser = billingauth.SubjectUser\n\n\tSubjectApplication = billingauth.SubjectApplication\n\n\tCredentialSession = billingauth.CredentialSession\n\n\tCredentialDeviceKey = billingauth.CredentialDeviceKey\n\n\tCredentialAPIKey = billingauth.CredentialAPIKey\n\n\tCredentialSignedToken = billingauth.CredentialSignedToken\n\n\tCredentialAccessToken = billingauth.CredentialAccessToken\n\n\tReadCatalog = config.ReadCatalog\n\n\tReadMeters = config.ReadMeters\n\n\tReadPublicConfig = config.ReadPublicConfig\n\n\tReadMerchantConfiguration = config.ReadMerchantConfiguration\n)",
-      "const QueueBilling = riverjobs.QueueBilling",
+      "const (\n\tQueueBilling   = riverjobs.QueueBilling\n\tQueuePSPImport = riverjobs.QueuePSPImport\n)",
       "func (UsageSweepArgs) InsertOpts() river.InsertOpts",
       "func (UsageSweepArgs) Kind() string",
       "func (c *Client) Admit(ctx context.Context, requests []billing.AdmitParams, requestOptions ...RequestOption) ([]billing.AdmissionVerdict, error)",
@@ -2984,6 +2984,7 @@
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
       "strconv": "strconv",
       "strings": "strings",
+      "transient": "github.com/open-rails/openrails/internal/shared/transient",
       "url": "net/url"
     },
     "internal/integrations/nmi/verification_evidence.go": {
@@ -4095,6 +4096,7 @@
       "strings": "strings",
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
       "time": "time",
+      "transient": "github.com/open-rails/openrails/internal/shared/transient",
       "url": "net/url"
     },
     "internal/modules/subscriptions/stripe_engine_payment.go": {
@@ -4389,6 +4391,7 @@
       "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "merchantdocs": "github.com/open-rails/openrails/internal/merchantdocs",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "providerobjects": "github.com/open-rails/openrails/internal/modules/catalog/providerobjects",
@@ -4400,6 +4403,7 @@
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
+      "transient": "github.com/open-rails/openrails/internal/shared/transient",
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
@@ -4603,6 +4607,7 @@
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
+      "transient": "github.com/open-rails/openrails/internal/shared/transient",
       "url": "net/url"
     },
     "internal/river/jobs_catalog_reconciliation.go": {

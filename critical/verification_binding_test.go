@@ -245,7 +245,7 @@ func TestVerificationBinding(t *testing.T) {
 		// The first boot queued the old account's onboarding pull; it would
 		// read the 201 members below beside the verifier under test.
 		fleet := hostFleet(t, a.world, 2)
-		cancelOnboarding(t, fleet)
+		cancelOnboarding(t, fleet, 2)
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
 

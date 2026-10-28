@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/shared/transient"
 )
 
 const (
@@ -417,6 +418,9 @@ func (c *NMIClient) sendQueryRequest(ctx context.Context, data url.Values) (_ st
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return "", fmt.Errorf("unexpected status code: %d: %w", resp.StatusCode, ErrCredentialsRejected)
+	}
+	if transient.Status(resp.StatusCode) {
+		return "", fmt.Errorf("unexpected status code: %d: %w", resp.StatusCode, transient.ErrUnavailable)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)

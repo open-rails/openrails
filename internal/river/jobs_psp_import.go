@@ -11,13 +11,17 @@ import (
 	"github.com/open-rails/openrails/internal/pspimport"
 )
 
-const KindPSPImport = pspimport.JobKind
+const (
+	KindPSPImport  = pspimport.JobKind
+	QueuePSPImport = pspimport.JobQueue
+)
 
-// PSPImportWorker runs PSP import steps. A failing step retries, waiting
-// attempt⁴ seconds and at most an hour, so a provider that does not answer is
-// retried in the background. A step that cannot succeed (the provider refused
-// the credentials, the PSP or a credential is not declared), or that fails
-// its last attempt, marks the import failed with why.
+// PSPImportWorker runs PSP import steps on their own queue. A failing step
+// retries, waiting attempt⁴ seconds and at most an hour: one a provider, Vault
+// or the database did not answer for, up to the step's attempts; any other
+// failure RetryBudget times. A step that cannot succeed (the provider refused
+// the credentials, the PSP or a credential is not declared), or is out of
+// attempts, marks the import failed with why.
 type PSPImportWorker struct {
 	river.WorkerDefaults[pspimport.JobArgs]
 	Importer func() *pspimport.Importer
@@ -38,7 +42,7 @@ func (w *PSPImportWorker) Work(ctx context.Context, job *river.Job[pspimport.Job
 	mid, id := billing.MerchantID(job.Args.MerchantID), billing.PSPImportID(job.Args.ImportID)
 	err := im.Run(ctx, mid, id, job.Args.Step)
 	var permanent pspimport.PermanentError
-	if err == nil || (!errors.As(err, &permanent) && job.Attempt < job.MaxAttempts) {
+	if err == nil || !errors.As(err, &permanent) && job.Attempt < job.MaxAttempts && (pspimport.Transient(err) || job.Attempt < pspimport.RetryBudget) {
 		return err
 	}
 	if ferr := im.DB.RunInMerchantScope(ctx, mid, "psp import failure", func(ctx context.Context) error { return im.Fail(ctx, id, err) }); ferr != nil {

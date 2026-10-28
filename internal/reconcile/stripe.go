@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/transient"
 )
 
 // StripeFetcher pulls Stripe state with raw GETs, always through the stripeapi
@@ -305,6 +306,11 @@ func (e *StripeAPIError) Error() string {
 		return fmt.Sprintf("stripe API error (%d): %s", e.Status, e.Message)
 	}
 	return fmt.Sprintf("stripe API error (%d)", e.Status)
+}
+
+// Is makes a busy or failing Stripe (429, 5xx) transient.ErrUnavailable.
+func (e *StripeAPIError) Is(target error) bool {
+	return target == transient.ErrUnavailable && transient.Status(e.Status)
 }
 
 type stripeSubscriptionJSON struct {

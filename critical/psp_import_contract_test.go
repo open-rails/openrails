@@ -47,6 +47,8 @@ type importWorld struct {
 	api *openrails.Client
 	// importable are the declared PSPs an onboarding import pulls.
 	importable []string
+	// declared are the PSPs the world's fakes serve.
+	declared openrails.PSPs
 }
 
 func importNMIPSP(gateway, securityKey string, archived bool) openrails.PSPConfig {
@@ -71,6 +73,13 @@ const deadRPC = "http://127.0.0.1:1"
 // load queues each importable PSP's onboarding import; no fleet runs them
 // until start.
 func bootImportWorld(t *testing.T, psps ...string) *importWorld {
+	t.Helper()
+	return bootImportWorldDeclaring(t, true, psps...)
+}
+
+// bootImportWorldDeclaring is bootImportWorld whose engine declares the PSPs
+// (in declared either way) only when declare is set.
+func bootImportWorldDeclaring(t *testing.T, declare bool, psps ...string) *importWorld {
 	t.Helper()
 	iw := &importWorld{}
 	serve := func(handler http.Handler) loopbackWire {
@@ -116,9 +125,12 @@ func bootImportWorld(t *testing.T, psps ...string) *importWorld {
 		if sandbox != (openrails.ProviderSandboxConfig{}) {
 			w.cfg.ProviderSandbox = &sandbox
 		}
-		merchant := w.cfg.Merchants["alpha"]
-		merchant.PSPs = declared
-		w.cfg.Merchants["alpha"] = merchant
+		iw.declared = declared
+		if declare {
+			merchant := w.cfg.Merchants["alpha"]
+			merchant.PSPs = declared
+			w.cfg.Merchants["alpha"] = merchant
+		}
 	})
 	iw.api = iw.alphaRemote
 	t.Cleanup(func() {
@@ -337,9 +349,9 @@ func (iw *importWorld) nmiMember(t *testing.T, email, plan, amount string, start
 }
 
 // cancelOnboarding cancels the queued onboarding pulls, once the
-// configuration load queued them, for a scenario whose provider reads they
+// configuration loads queued all n, for a scenario whose provider reads they
 // would disturb.
-func cancelOnboarding(t *testing.T, fleet *river.Client[pgx.Tx]) {
+func cancelOnboarding(t *testing.T, fleet *river.Client[pgx.Tx], n int) {
 	t.Helper()
 	var jobs []*rivertype.JobRow
 	require.Eventually(t, func() bool {
@@ -348,8 +360,8 @@ func cancelOnboarding(t *testing.T, fleet *river.Client[pgx.Tx]) {
 			return false
 		}
 		jobs = list.Jobs
-		return len(jobs) > 0
-	}, 20*time.Second, 20*time.Millisecond, "the configuration load queues the onboarding pull")
+		return len(jobs) >= n
+	}, 20*time.Second, 20*time.Millisecond, "the configuration loads queue %d onboarding pulls", n)
 	for _, job := range jobs {
 		_, err := fleet.JobCancel(t.Context(), job.ID)
 		require.NoError(t, err)
@@ -956,7 +968,12 @@ func TestPSPImport(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S07/two-runtimes-one-database", func(t *testing.T) {
-		iw := bootImportWorld(t, "nmi", "stripe", "ccbill")
+		// The first process declares none of the PSPs: each of the processes
+		// below loads them first, and they race to create the imports.
+		iw := bootImportWorldDeclaring(t, false, "nmi", "stripe", "ccbill")
+		merchant := iw.cfg.Merchants["alpha"]
+		merchant.PSPs = iw.declared
+		iw.cfg.Merchants["alpha"] = merchant
 		// state is one onboarding import and one pull job per PSP, or why not.
 		state := func() error {
 			page, err := iw.api.ListPSPImports(t.Context(), billing.PSPImportListParams{Origin: billing.PSPImportOnboarding, PageRequest: billing.PageRequest{Limit: 100}})
@@ -1011,10 +1028,10 @@ func TestPSPImport(t *testing.T) {
 				require.NoError(t, e.Close(context.Background()))
 			}
 		}
-		boot(2)
+		boot(3)
 		boot(2)
 		require.NoError(t, state(), "restarting creates nothing more")
-		iw.start(t)
+		iw.restart(t, nil)
 		for _, key := range []string{"nmi", "stripe", "ccbill"} {
 			iw.await(t, iw.onboarding(t, key).ID, billing.PSPImportPulled)
 		}
@@ -1320,5 +1337,86 @@ func TestPSPImport(t *testing.T) {
 			return err == nil && len(subs.Items) == 2
 		}, 30*time.Second, 50*time.Millisecond, "the out-of-band subscription is Alice's")
 		require.True(t, iw.entitled(t, customerOf(iw.alice), "member:extra"))
+	})
+
+	t.Run("OR-J38-S12/psp-added-and-rotated-at-runtime", func(t *testing.T) {
+		a, p := newPSPWorld(t)
+		iw := &importWorld{authorityWorld: a, api: a.alphaRemote, fleet: startFleet(t, a.world)}
+		// A restricted key the provider lets probe its account but not read
+		// the catalog.
+		p.provider.core.Intercept(func(r *http.Request) bool { return r.URL.Path == "/v1/products" }, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+			return answer(r, http.StatusForbidden, `{"error":{"type":"invalid_request_error","message":"The provided key does not have the required permissions"}}`), nil
+		})
+		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		require.NoError(t, err)
+		imp := iw.await(t, iw.onboarding(t, "stripe").ID, billing.PSPImportFailed)
+		require.Equal(t, billing.PSPImportCredentialsRejected, *imp.ErrorCode, "a PSP added to a running process gets its pull")
+		findings := func(status billing.FindingStatus) []billing.Finding {
+			t.Helper()
+			page, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.psp_import.credentials_rejected", Status: status})
+			require.NoError(t, err)
+			return page.Items
+		}
+		require.Len(t, findings(""), 1)
+
+		// The merchant rotates to a key that reads the catalog: the running
+		// process restarts the import in place.
+		p.provider.core.ClearIntercepts()
+		_, err = a.alphaRemote.UpdatePSP(t.Context(), psp.ID, billing.UpdatePSPParams{ExpectedRevision: &psp.Revision, Credentials: map[string]string{"secret_key": "sk_test_rotated"}})
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			got, err := a.alphaRemote.GetPSPImport(t.Context(), imp.ID)
+			return err == nil && got.Status == billing.PSPImportPulled
+		}, 30*time.Second, 50*time.Millisecond, "the rotated credentials pull")
+		require.Equal(t, imp.ID, iw.onboarding(t, "stripe").ID)
+		require.Empty(t, findings(""))
+		require.Len(t, findings("fixed"), 1)
+		require.Empty(t, p.provider.effects(t), "the pull moves no money")
+	})
+
+	t.Run("OR-J38-S13/unreadable-answer-fails-visibly", func(t *testing.T) {
+		iw := bootImportWorld(t, "stripe")
+		// Stripe answers a customer list OpenRails cannot read: no later
+		// attempt reads it either.
+		iw.stripe.Intercept(func(r *http.Request) bool { return r.Method == http.MethodGet && r.URL.Path == "/v1/customers" },
+			func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+				return answer(r, http.StatusOK, `{"object":"list","url":"/v1/customers","has_more":false,"data":[{"object":"customer","email":"nobody@example.com"}]}`), nil
+			})
+		iw.start(t)
+		id := iw.onboarding(t, "stripe").ID
+		var last *rivertype.JobRow
+		require.Eventually(t, func() bool {
+			imp, err := iw.api.GetPSPImport(t.Context(), id)
+			if err != nil {
+				return false
+			}
+			if imp.Status == billing.PSPImportFailed {
+				return true
+			}
+			jobs, err := iw.fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.psp_import").First(1000))
+			if err != nil {
+				return false
+			}
+			for _, j := range jobs.Jobs {
+				if strings.Contains(string(j.EncodedArgs), id.UUID().String()) && j.State == rivertype.JobStateRetryable {
+					last = j
+					_, _ = iw.fleet.JobRetry(t.Context(), j.ID)
+				}
+			}
+			return false
+		}, 60*time.Second, 50*time.Millisecond, "the import fails")
+		require.NotNil(t, last)
+		imp := iw.await(t, id, billing.PSPImportFailed)
+		require.Contains(t, *imp.Error, "stripe customer is unreadable")
+		require.Nil(t, imp.ErrorCode, "no configuration change fixes it")
+		var job *rivertype.JobRow
+		require.Eventually(t, func() bool {
+			got, err := iw.fleet.JobGet(t.Context(), last.ID)
+			job = got
+			return err == nil && got.State == rivertype.JobStateCancelled
+		}, 20*time.Second, 20*time.Millisecond, "the job ends with the import")
+		require.Equal(t, 5, job.Attempt, "a failure no attempt outlives is tried 5 times")
+		require.Len(t, iw.jobs(t, id), 1)
+		require.NoError(t, iw.api.DeletePSPImport(t.Context(), id), "a failed import can be deleted")
 	})
 }

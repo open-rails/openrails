@@ -43,10 +43,11 @@ func (r *Runtime) PSPImporter() *pspimport.Importer {
 }
 
 // followPSPImports gives the merchant's PSPs their onboarding imports when a
-// PSP document is new to this process or changed: in the background, since
-// the loaded set is published only once this load returns, and retried until
-// the database answers. A failed onboarding import of such a PSP restarts.
-// The pull only reads, so read-only provider writes do not hold it.
+// PSP document is new to this process or changed, in the background and
+// retried until the database answers. It reads the PSPs from current, the set
+// being loaded: the cache publishes it only once this load returns. A failed
+// onboarding import of such a PSP restarts. The pull only reads, so read-only
+// provider writes do not hold it.
 func (r *Runtime) followPSPImports(mid billing.MerchantID, previous, current merchantdocs.Set) {
 	if r == nil || r.DB == nil || r.Merchants == nil {
 		return
@@ -68,7 +69,7 @@ func (r *Runtime) followPSPImports(mid billing.MerchantID, previous, current mer
 	r.Go("psp onboarding imports", func(ctx context.Context) {
 		ctx = merchant.WithID(ctx, mid)
 		_ = retry.Forever(ctx, func(ctx context.Context) error {
-			scopes, err := r.Merchants.LivePSPScopes(ctx, mid)
+			scopes, err := r.Merchants.LivePSPScopesIn(ctx, mid, current)
 			if err != nil {
 				return err
 			}

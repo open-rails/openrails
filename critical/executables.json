@@ -605,6 +605,12 @@
     ],
     "OR-J38-S11": [
       "TestPSPImport/OR-J38-S11/stripe-customer-attribution"
+    ],
+    "OR-J38-S12": [
+      "TestPSPImport/OR-J38-S12/psp-added-and-rotated-at-runtime"
+    ],
+    "OR-J38-S13": [
+      "TestPSPImport/OR-J38-S13/unreadable-answer-fails-visibly"
     ]
   },
   "suites": {

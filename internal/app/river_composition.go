@@ -62,7 +62,9 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 		if want := r.riverSchemaOrDefault(); cfg.Schema != want {
 			return fmt.Errorf("openrails: River fleet schema %q differs from Config.Database.RiverSchema %q", cfg.Schema, want)
 		}
-		queues := map[string]int{riverjobs.QueueBilling: standaloneRiverBillingQueueMaxWorkers}
+		// The PSP import queue is added to every fleet, the host's too: a job
+		// on a queue no fleet serves never runs.
+		queues := map[string]int{riverjobs.QueueBilling: standaloneRiverBillingQueueMaxWorkers, riverjobs.QueuePSPImport: riverPSPImportQueueMaxWorkers}
 		refreshQueue := riverjobs.QueueBilling
 		if !host {
 			queues[river.QueueDefault] = standaloneRiverDefaultQueueMaxWorkers
