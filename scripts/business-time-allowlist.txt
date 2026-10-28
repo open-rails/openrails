@@ -17,7 +17,6 @@ internal/intents/store.go|}, time.Now().UTC()); err != nil {|infrastructure_time
 internal/modules/admission/accrual_rate.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/alerting/service.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/catalog/stripe_webhooks.go|now = time.Now()|business_time_boundary|Provider rollover default only when explicit Now is unset|2
-internal/modules/payment/custodian_sale.go|now := time.Now().UTC()|db_audit_timestamp|New saved payment method creation and update audit timestamp|1
 internal/modules/payment/purchase_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/payment/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/payment/attempt_repo.go|now = time.Now()|db_audit_timestamp|Default updated_at timestamp; expiry lookup requires caller time|1
@@ -42,6 +41,7 @@ internal/modules/payments/stripe_card.go|now := time.Now().UTC()|business_time_b
 internal/modules/payments/stripe_payment_reconcile.go|now := time.Now().UTC()|business_time_boundary|Default immediately overridden by the supplied business clock|1
 internal/modules/productaccess/product_access_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/solana/pay.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/solana/pull/pull.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/solana/solanasubs/subscription_repo.go|UpdatedAt:                time.Now().UTC(),|db_audit_timestamp|On-chain mirror creation and update audit timestamp|1
 internal/modules/solana/solanasubs/subscription_repo.go|UpdatedAt:  time.Now().UTC(),|db_audit_timestamp|On-chain mirror creation and update audit timestamp|2
 internal/modules/solana/solanasubs/subscription_repo.go|now := time.Now().UTC()|db_audit_timestamp|On-chain mirror creation and update audit timestamp|1
@@ -81,7 +81,6 @@ internal/river/jobs_credit_expiry.go|clock = clockwork.NewRealClock()|business_t
 internal/river/jobs_credit_money_in.go|now := time.Now().UTC()|business_time_boundary|Default immediately overridden by the supplied business clock|1
 internal/river/jobs_delinquency.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_dunning.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/river/jobs_maintenance.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_provider_intents.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_provider_refresh.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_provider_refresh.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|2
