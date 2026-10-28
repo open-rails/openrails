@@ -493,24 +493,6 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderInten
 	return s.db.Gen(ctx).GetProviderIntent(ctx, gen.GetProviderIntentParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 }
 
-// ClaimDue leases up to batch due executable intents (SKIP LOCKED). It must
-// run on a merchant-pinned connection and claims only that merchant's intents.
-func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error) {
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	if err := s.db.AssertMerchantScope(ctx, "intent executor claim"); err != nil {
-		return nil, err
-	}
-	return s.db.Gen(ctx).ClaimDueProviderIntents(ctx, gen.ClaimDueProviderIntentsParams{
-		MerchantID:     scopeMerchantID.UUID(),
-		Now:            now.UTC(),
-		LeaseExpiresAt: leaseUntil.UTC(),
-		BatchSize:      batch,
-	})
-}
-
 // RenewClaim extends a live lease the caller still owns: the row must still
 // carry the claim's status and attempts. false means the lease lapsed or
 // another executor claimed the row; this one must send nothing more.
@@ -532,24 +514,6 @@ func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, status string, att
 		return false, err
 	}
 	return n > 0, nil
-}
-
-// ClaimDueVerify leases up to batch due unknown_needs_verify intents. Same
-// merchant-pin requirement as ClaimDue.
-func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error) {
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	if err := s.db.AssertMerchantScope(ctx, "intent verifier claim"); err != nil {
-		return nil, err
-	}
-	return s.db.Gen(ctx).ClaimDueVerifyProviderIntents(ctx, gen.ClaimDueVerifyProviderIntentsParams{
-		MerchantID:     scopeMerchantID.UUID(),
-		Now:            now.UTC(),
-		LeaseExpiresAt: leaseUntil.UTC(),
-		BatchSize:      batch,
-	})
 }
 
 // ClaimUnknownByID leases one unknown operation for operator resolution.
@@ -590,24 +554,6 @@ func (s *Store) ReleaseUnknownClaim(ctx context.Context, id uuid.UUID) (bool, er
 		return 1, next, nil
 	})
 	return rows == 1 && err == nil, err
-}
-
-// ExpireOverdue expires every live intent whose relevance window elapsed,
-// except destructive intents whose merchant has an open held_bulk finding:
-// breaker-held intents never expire out from under the operator.
-func (s *Store) ExpireOverdue(ctx context.Context, now time.Time) (int64, error) {
-	if err := s.db.AssertMerchantScope(ctx, "intent expiry sweep"); err != nil {
-		return 0, err
-	}
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return 0, scopeErr
-	}
-	return s.db.Gen(ctx).ExpireOverdueProviderIntents(ctx, gen.ExpireOverdueProviderIntentsParams{
-		MerchantID:       scopeMerchantID.UUID(),
-		Now:              now.UTC(),
-		BreakerHeldTypes: DestructiveIntentTypes(),
-	})
 }
 
 func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error {

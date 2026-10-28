@@ -84,32 +84,6 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     updated_at = now()
 RETURNING *;
 
--- Claims due executable intents (SKIP LOCKED): pending/failed_retryable past
--- next_attempt_at, plus in_flight rows whose lease elapsed (crashed executor).
--- Never past the relevance window (ExpireOverdueProviderIntents sweeps those),
--- except abandoned attempts, claimed so possible submissions reconcile.
--- name: ClaimDueProviderIntents :many
-WITH due AS (
-    SELECT id FROM billing.provider_intents
-    WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (
-            (status IN ('pending', 'failed_retryable') AND next_attempt_at <= sqlc.arg(now)::timestamptz)
-            OR (status = 'in_flight' AND lease_expires_at IS NOT NULL AND lease_expires_at <= sqlc.arg(now)::timestamptz)
-          )
-      AND intent_type NOT IN ('nmi_vault_delete','platform_method_delete','hyperswitch_method_delete')
-      AND (intent_type = 'subscription_collection' OR status = 'in_flight' OR (status = 'pending' AND attempts > 0) OR expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz)
-    ORDER BY next_attempt_at
-    LIMIT sqlc.arg(batch_size)
-    FOR UPDATE SKIP LOCKED
-)
-UPDATE billing.provider_intents pi
-SET status = 'in_flight',
-    lease_expires_at = sqlc.arg(lease_expires_at)::timestamptz,
-    attempts = pi.attempts + 1,
-    updated_at = now()
-FROM due
-WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.id = due.id
-RETURNING pi.*;
-
 -- Claims one intent by id. claim names who asks: 'first' is the producer that
 -- just enqueued it and takes only its first attempt; 'due' is its scheduled
 -- wake, once the next attempt and any producer hold are due, so a second wake
@@ -136,27 +110,6 @@ WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.id = sqlc.arg(id)
         WHEN 'now' THEN true
         ELSE false
       END
-RETURNING pi.*;
-
--- Claims due unknown_needs_verify intents for the verifier. Status stays
--- unknown_needs_verify (verification is a read, not an attempt — attempts is
--- not bumped); the lease alone prevents double-verification.
--- name: ClaimDueVerifyProviderIntents :many
-WITH due AS (
-    SELECT id FROM billing.provider_intents
-    WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'unknown_needs_verify'
-      AND intent_type NOT IN ('nmi_vault_delete','platform_method_delete','hyperswitch_method_delete')
-      AND next_attempt_at <= sqlc.arg(now)::timestamptz
-      AND (lease_expires_at IS NULL OR lease_expires_at <= sqlc.arg(now)::timestamptz)
-    ORDER BY next_attempt_at
-    LIMIT sqlc.arg(batch_size)
-    FOR UPDATE SKIP LOCKED
-)
-UPDATE billing.provider_intents pi
-SET lease_expires_at = sqlc.arg(lease_expires_at)::timestamptz,
-    updated_at = now()
-FROM due
-WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.id = due.id
 RETURNING pi.*;
 
 -- Claims ONE unknown operation for operator resolution. Like the verifier
@@ -308,32 +261,6 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type
   AND (status = 'failed_retryable' OR (status = 'pending' AND attempts = 0))
   AND NOT (intent_type='initial_membership' AND coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted')
   AND intent_type <> 'subscription_collection';
-
--- Destructive intents held by the volume breaker (an open
--- life.provider_intent.held_bulk finding) never expire while held: the
--- operator's resolution decides.
--- name: ExpireOverdueProviderIntents :execrows
-UPDATE billing.provider_intents pi
-SET status = 'expired',
-    last_failure_reason = 'relevance window elapsed before execution',
-    lease_expires_at = NULL,
-    updated_at = now()
-WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
-  AND NOT (pi.intent_type IN ('order_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
-  AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
-  AND NOT (pi.intent_type='initial_membership' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'initial_submitted')
-  AND pi.expires_at IS NOT NULL
-  AND pi.expires_at <= sqlc.arg(now)::timestamptz
-  AND NOT (
-        pi.intent_type = ANY (sqlc.arg(breaker_held_types)::text[])
-        AND EXISTS (
-            SELECT 1 FROM billing.reconciliation_findings f
-            WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.merchant_id = pi.merchant_id
-              AND f.finding_type = 'life.provider_intent.held_bulk'
-              AND f.status IN ('reconcile_required', 'requires_review')
-        )
-      )
-  AND pi.intent_type <> 'subscription_collection';
 
 -- Non-terminal intents older than the converge engine's stuck thresholds:
 -- pending/failed_retryable before action_cutoff, in_flight/unknown_needs_verify

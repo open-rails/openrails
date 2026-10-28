@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/history"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/abuse"
-	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
 // ledger is the Store surface the Runner drives (interface for unit tests).
@@ -26,12 +25,9 @@ type ledger interface {
 	ClaimFirstByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
 	ClaimDueByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
 	ClaimNowByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
-	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error)
-	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error)
 	ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
 	ReleaseUnknownClaim(ctx context.Context, id uuid.UUID) (bool, error)
 	RenewClaim(ctx context.Context, id uuid.UUID, status string, attempts int32, now, leaseUntil time.Time) (bool, error)
-	ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
 	MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error
 	PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error
 	PruneTerminalPayload(ctx context.Context, id uuid.UUID) error
@@ -50,8 +46,6 @@ const (
 	// lapsed lease means a dead, partitioned or wedged executor, never a slow
 	// provider call.
 	DefaultLease = 2 * time.Minute
-	// DefaultBatchSize bounds one run's claim.
-	DefaultBatchSize = 50
 	// ParkRetryInterval is how soon a parked intent (mode gate, kill switch,
 	// unconfigured client) is re-checked. Parks are re-evaluated until the
 	// blocker lifts or relevance ends; they never escalate backoff.
@@ -100,7 +94,6 @@ type Runner struct {
 	Destructive DestructiveGate
 	Clock       clockwork.Clock
 	Lease       time.Duration
-	Batch       int64
 }
 
 func (r *Runner) transitionContext(ctx context.Context) context.Context {
@@ -124,65 +117,14 @@ func (r *Runner) lease() time.Duration {
 	return DefaultLease
 }
 
-func (r *Runner) batch() int64 {
-	if r.Batch > 0 {
-		return r.Batch
-	}
-	return DefaultBatchSize
-}
-
-// Stats summarizes one pass for logging.
+// Stats counts one execution's outcomes for logging.
 type Stats struct {
-	Claimed    int
 	Succeeded  int
 	Retryable  int
 	Unknown    int
 	Terminal   int
 	Parked     int
 	Superseded int
-	Expired    int64
-}
-
-// Add folds one merchant's pass into the deployment-wide totals the executor
-// and verifier workers log.
-func (s *Stats) Add(o Stats) {
-	s.Claimed += o.Claimed
-	s.Succeeded += o.Succeeded
-	s.Retryable += o.Retryable
-	s.Unknown += o.Unknown
-	s.Terminal += o.Terminal
-	s.Parked += o.Parked
-	s.Superseded += o.Superseded
-	s.Expired += o.Expired
-}
-
-// RunExecuteOnce expires overdue intents and executes them through their
-// handlers; production uses per-operation River dispatch instead. Intent-level
-// problems are recorded on the intent; the error is for infrastructure failure.
-func (r *Runner) RunExecuteOnce(ctx context.Context) (Stats, error) {
-	var stats Stats
-	now := r.now()
-
-	expired, err := r.Store.ExpireOverdue(ctx, now)
-	if err != nil {
-		return stats, err
-	}
-	stats.Expired = expired
-
-	claimed, err := r.Store.ClaimDue(ctx, now, now.Add(r.lease()), r.batch())
-	if err != nil {
-		return stats, err
-	}
-	stats.Claimed = len(claimed)
-
-	for _, intent := range claimed {
-		if ManualPaymentMethodDelete(intent) {
-			continue
-		}
-		progress.Mark(ctx, "intent execute "+intent.ID.String())
-		r.executeOne(ctx, intent, &stats)
-	}
-	return stats, nil
 }
 
 func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderIntent, stats *Stats) {
@@ -379,58 +321,6 @@ func (r *Runner) executeByID(ctx context.Context, id uuid.UUID, claim func(conte
 	var stats Stats
 	r.executeOne(ctx, claimed, &stats)
 	return r.Store.Get(ctx, row.ID)
-}
-
-// RunVerifyOnce claims unknown_needs_verify intents and resolves them via the
-// handlers' read-only Verify; production uses per-operation River dispatch.
-func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
-	var stats Stats
-	now := r.now()
-
-	claimed, err := r.Store.ClaimDueVerify(ctx, now, now.Add(r.lease()), r.batch())
-	if err != nil {
-		return stats, err
-	}
-	stats.Claimed = len(claimed)
-
-	for _, intent := range claimed {
-		if ManualPaymentMethodDelete(intent) {
-			continue
-		}
-		progress.Mark(ctx, "intent verify "+intent.ID.String())
-		// Pin the intent's merchant and PSP: a verifier's repair writes the
-		// same mirror rows the executor would have.
-		ctx := merchant.WithID(ctx, billing.MerchantID(intent.MerchantID))
-		ctx = pinIntentAddress(ctx, intent)
-		ctx = history.WithAttribution(ctx, intentHistoryAttribution(intent, "verification"))
-		logEntry := log.WithContext(ctx).WithFields(log.Fields{
-			"intent_id":   intent.ID,
-			"intent_type": intent.IntentType,
-			"provider":    intent.Rail,
-		})
-		ctx, err = r.bindIntentAction(ctx, intent)
-		if err != nil {
-			r.apply(ctx, logEntry, &stats, nil, intent, Parked(err.Error()), true)
-			continue
-		}
-		handler := r.Registry.Lookup(intent.IntentType)
-		if handler == nil {
-			// Leave it unknown; push the next look out (a verifier's park).
-			r.apply(ctx, logEntry, &stats, handler, intent, Parked("no handler registered for intent type "+intent.IntentType), true)
-			continue
-		}
-		rel, err := handler.CheckRelevance(ctx, intent)
-		if err == nil && !rel.Applicable {
-			r.supersede(ctx, logEntry, &stats, intent.ID, rel.Reason)
-			continue
-		}
-		// Verification is read-only: no mode gate.
-		verifyCtx, stopBeat := r.renewClaimWhile(ctx, logEntry, intent)
-		outcome := handler.Verify(verifyCtx, intent)
-		stopBeat()
-		r.apply(ctx, logEntry, &stats, handler, intent, outcome, true)
-	}
-	return stats, nil
 }
 
 // renewClaimWhile attaches the run's claim to ctx and beats its lease every
