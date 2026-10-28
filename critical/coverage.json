@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 237,
+  "scenario_count": 238,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1187,6 +1187,11 @@
       "id": "OR-J37-S61",
       "journey": "J37",
       "name": "A pull the chain refuses before its period end is retried, not taken as already paid"
+    },
+    {
+      "id": "OR-J21-S60",
+      "journey": "J21",
+      "name": "An import queues, with its own commit, the one read of the charges it attributed"
     }
   ]
 }

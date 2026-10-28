@@ -20,22 +20,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
 ORDER BY transaction_id
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: ListDueChargeAttributionMerchants :many
--- CROSS-MERCHANT: merchants holding a pending attribution due a provider read.
-SELECT a.merchant_id
-FROM billing.provider_charge_attributions a
-WHERE a.status = 'pending' AND a.next_attempt_at <= sqlc.arg(now)::timestamptz
-GROUP BY a.merchant_id
-ORDER BY MIN(a.next_attempt_at), a.merchant_id
-LIMIT sqlc.arg(merchant_limit)::int;
-
--- name: ListDueChargeAttributions :many
--- One merchant's pending attributions due a provider read, oldest due first.
-SELECT * FROM billing.provider_charge_attributions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'pending' AND next_attempt_at <= sqlc.arg(now)::timestamptz
-ORDER BY next_attempt_at, psp_id, transaction_id
-LIMIT sqlc.arg(row_limit)::int;
-
 -- name: ResolveChargeAttribution :execrows
 -- The attributed charge is recorded as this payment, even one already given up
 -- as unresolvable (a provider pull read it after all).

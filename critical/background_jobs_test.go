@@ -428,8 +428,8 @@ func TestBackgroundJobs(t *testing.T) {
 		t.Run("attribution-no-pull-reads-becomes-a-finding", func(t *testing.T) {
 			w := newWorld(t, func(w *world) { declareCCBill(w, nil) })
 			customer := importCCBillAttribution(t, w)
-			fleet := startFleet(t, w)
-			runRegistered(t, fleet, "openrails.charge_attributions", 1)
+			startFleet(t, w)
+			require.Eventually(t, func() bool { return len(unverifiedTransactions(t, w)) > 0 }, 20*time.Second, 20*time.Millisecond)
 			findings := unverifiedTransactions(t, w)
 			require.Len(t, findings, 1, "a charge nothing reads is evidence for review, not a perpetual wait")
 			require.Equal(t, "0112233446", findings[0].Evidence["transaction_id"])
@@ -446,15 +446,36 @@ func TestBackgroundJobs(t *testing.T) {
 			fleet.PeriodicJobs().Clear()
 			require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 			require.NoError(t, fleet.Start(t.Context()))
-			runRegistered(t, fleet, "openrails.charge_attributions", 1)
+			require.Eventually(t, func() bool {
+				return len(attributionJobs(t, fleet, rivertype.JobStateScheduled)) == 1
+			}, 20*time.Second, 20*time.Millisecond, "the import's read waits for the pull")
 			require.Empty(t, unverifiedTransactions(t, w), "the DataLink pull has not read the charge yet")
 			refreshMerchant(t, fleet, w.alpha.MerchantID().UUID())
 			payments := ccbillPayments(t, w, customer)
 			require.Contains(t, payments, "0112233446", "the pull records the attributed rebill")
 			require.EqualValues(t, 10_000_000, payments["0112233446"])
-			runRegistered(t, fleet, "openrails.charge_attributions", 1)
+			wakeJobs(t, fleet, "openrails.charge_attributions")
+			require.Eventually(t, func() bool {
+				return len(attributionJobs(t, fleet, rivertype.JobStateCompleted)) == 1
+			}, 20*time.Second, 20*time.Millisecond, "nothing the import declared is pending: its read ends")
 			require.Empty(t, unverifiedTransactions(t, w))
 		})
+	})
+	t.Run("OR-J21-S60/an-import-queues-the-read-of-the-charges-it-attributed", func(t *testing.T) {
+		w := newWorld(t, func(w *world) { declareCCBill(w, nil) })
+		fleet := hostFleet(t, w)
+		fleet.PeriodicJobs().Clear()
+		customer := importCCBillAttribution(t, w)
+		require.Len(t, attributionJobs(t, fleet), 1, "the import queues one read of what it attributed, with its own commit")
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		require.Eventually(t, func() bool {
+			return len(attributionJobs(t, fleet, rivertype.JobStateCompleted)) == 1
+		}, 20*time.Second, 20*time.Millisecond, "no periodic pass: the import's own job reads its charges")
+		findings := unverifiedTransactions(t, w)
+		require.Len(t, findings, 1, "a CCBill charge no pull reads is a finding at once")
+		require.Equal(t, "0112233446", findings[0].Evidence["transaction_id"])
+		require.Len(t, ccbillPayments(t, w, customer), 1)
 	})
 	t.Run("OR-J15-S30/rebill-watch-backs-off-a-failing-probe", func(t *testing.T) {
 		a, p, sub := nmiMembership(t)
@@ -585,6 +606,30 @@ func dataLinkFeed(t *testing.T, rebill time.Time) *httptest.Server {
 	}))
 	t.Cleanup(server.Close)
 	return server
+}
+
+// attributionJobs are the charge attribution reads imports queued, in states.
+func attributionJobs(t *testing.T, fleet *river.Client[pgx.Tx], states ...rivertype.JobState) []*rivertype.JobRow {
+	t.Helper()
+	params := river.NewJobListParams().Kinds("openrails.charge_attributions")
+	if len(states) > 0 {
+		params = params.States(states...)
+	}
+	jobs, err := fleet.JobList(t.Context(), params)
+	require.NoError(t, err)
+	return jobs.Jobs
+}
+
+// wakeJobs makes kind's jobs River scheduled on business time available now;
+// each still checks its own due time.
+func wakeJobs(t *testing.T, fleet *river.Client[pgx.Tx], kind string) {
+	t.Helper()
+	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds(kind).States(rivertype.JobStateScheduled, rivertype.JobStateRetryable))
+	require.NoError(t, err)
+	for _, job := range jobs.Jobs {
+		_, err = fleet.JobRetry(t.Context(), job.ID)
+		require.NoError(t, err)
+	}
 }
 
 type refreshMerchantJob struct {

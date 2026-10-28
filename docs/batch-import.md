@@ -170,8 +170,9 @@ A declared NMI or CCBill charge names the provider's own transaction id,
 which is digits only. Any other id (a host's synthetic id) is evidence: a
 `life.import.transaction_unverified` finding, no payment. An approved charge
 with a real id but no amount is kept as an attribution of that provider
-transaction to its subscription (`provider_charge_attributions`). OpenRails
-reads each one from NMI's Query API once, by transaction id, and records the
+transaction to its subscription (`provider_charge_attributions`). The import
+queues, with its own commit, one job that reads each one it declared from
+NMI's Query API, by transaction id, and records the
 provider's exact amount and time; a provider pull that reads the id binds it
 to the same subscription. An id NMI does not have, or reports declined or
 voided, records no payment and becomes a `life.import.transaction_unverified`

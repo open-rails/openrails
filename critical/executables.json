@@ -762,6 +762,9 @@
     ],
     "OR-J37-S61": [
       "TestSolanaPulls/OR-J37-S61/a-pull-the-chain-refuses-before-its-period-end-is-retried-not-taken-as-paid"
+    ],
+    "OR-J21-S60": [
+      "TestBackgroundJobs/OR-J21-S60/an-import-queues-the-read-of-the-charges-it-attributed"
     ]
   },
   "suites": {

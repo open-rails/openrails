@@ -197,7 +197,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addWorker(workers, &riverjobs.PSPImportWorker{Importer: r.PSPImporter}); err != nil {
 		return fmt.Errorf("add psp import worker: %w", err)
 	}
-	// Declared charges without an amount, read from their provider once.
+	// Declared charges without an amount, read from their provider by the
+	// job their import queued.
 	if err := addWorker(workers, &riverjobs.ChargeAttributionWorker{
 		DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver, Rails: r.RailConfigs,
 	}); err != nil {

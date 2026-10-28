@@ -42,7 +42,6 @@ var Periodics = []Periodic{
 	{Args: money.UsageOrderArgs{}, Every: money.UsageOrdersInterval, Gate: WithUsageBilling},
 	// Overdue rebills with no attempt are probed (NMI) or recorded as missed.
 	{Args: RebillWatchArgs{}, Every: RebillWatchInterval},
-	{Args: ChargeAttributionArgs{}, Every: ChargeAttributionInterval},
 	{Args: DelinquencyArgs{}, Every: DelinquencyInterval},
 	// Drift no inline mutation touched: stalled dunning, elapsed grace,
 	// abandoned purchases, unmaterialized grant effects.

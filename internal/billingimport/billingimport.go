@@ -444,8 +444,17 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		unskipped := func(ts []DeclaredTransaction) []DeclaredTransaction {
 			return slices.DeleteFunc(ts, func(t DeclaredTransaction) bool { return skipped[t.RailSubscriptionID] })
 		}
-		if err := attributeCharges(ctx, q, merchantID.UUID(), facts, unskipped(attributed), unskipped(unverified), timeutil.FirstClock(opts.Clock).Now().UTC()); err != nil {
+		declared, err := attributeCharges(ctx, q, merchantID.UUID(), facts, unskipped(attributed), unskipped(unverified), timeutil.FirstClock(opts.Clock).Now().UTC())
+		if err != nil {
 			return err
+		}
+		if len(declared) > 0 {
+			// One job reads the attributions this import declared.
+			args := reconcile.ChargeAttributionArgs{MerchantID: merchantID.UUID(), Declared: declared}
+			jobOpts := args.InsertOpts()
+			if _, err := database.InsertRiverJobTx(ctx, tx, args, &jobOpts); err != nil {
+				return fmt.Errorf("queue the charge attribution read: %w", err)
+			}
 		}
 		for _, f := range facts {
 			o := outcomes[f.SourceID]

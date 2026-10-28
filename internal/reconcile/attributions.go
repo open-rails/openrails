@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -81,7 +83,7 @@ type AttributionReader interface {
 	TransactionReport(ctx context.Context, filter nmi.QueryFilter) (nmi.TransactionReport, error)
 }
 
-// AttributionResult counts one merchant's pass.
+// AttributionResult counts one read of attributions.
 type AttributionResult struct{ Resolved, Unresolvable, Deferred int }
 
 // AttributionPull reports whether a provider pull reads the PSP's charges.
@@ -89,16 +91,58 @@ type AttributionResult struct{ Resolved, Unresolvable, Deferred int }
 // them, until its watermark passes them.
 type AttributionPull func(ctx context.Context, psp uuid.UUID, rail string) (bool, error)
 
-// ResolveChargeAttributions reads one merchant's due attributions from their
-// provider, nmi.MaxQueryIDs per read, and records each approved charge on its
-// declared subscription through the same writer a pull uses: settled history
-// before the accepted schedule, or the cycle it settles. A missing, declined
-// or unplaceable charge records no payment and becomes a finding. Another
-// rail's charge is left to a provider pull that reads it, and becomes a
-// finding once that pull has read past it, or at once when none does. A failed
-// read defers the PSP's rows with backoff. Only due rows are read, each once,
-// up to limit rows a pass.
-func ResolveChargeAttributions(ctx context.Context, database *db.DB, merchantID uuid.UUID, reader func(context.Context, uuid.UUID) (AttributionReader, error), pulled AttributionPull, now time.Time, limit int) (AttributionResult, error) {
+// KindChargeAttributions reads the charge attributions one import declared.
+const KindChargeAttributions = "openrails.charge_attributions"
+
+// ChargeAttributionArgs names the attributions one import declared: its
+// transaction ids, by PSP.
+type ChargeAttributionArgs struct {
+	MerchantID uuid.UUID              `json:"merchant_id"`
+	Declared   []DeclaredAttributions `json:"declared"`
+}
+
+// DeclaredAttributions are one PSP's declared transaction ids.
+type DeclaredAttributions struct {
+	PSPID          uuid.UUID `json:"psp_id"`
+	TransactionIDs []string  `json:"transaction_ids"`
+}
+
+func (ChargeAttributionArgs) Kind() string { return KindChargeAttributions }
+
+func (ChargeAttributionArgs) InsertOpts() river.InsertOpts { return river.InsertOpts{Queue: "billing"} }
+
+// PendingChargeAttributions are the declared attributions still waiting on a
+// provider read, oldest due first.
+func PendingChargeAttributions(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, declared []DeclaredAttributions) ([]gen.BillingProviderChargeAttribution, error) {
+	var out []gen.BillingProviderChargeAttribution
+	for _, d := range declared {
+		for ids := d.TransactionIDs; len(ids) > 0; {
+			n := min(len(ids), attributionBatch)
+			rows, err := q.ListChargeAttributionsByTransaction(ctx, gen.ListChargeAttributionsByTransactionParams{MerchantID: merchantID, PspID: d.PSPID, TransactionIds: ids[:n], RowLimit: int32(n)}) // #nosec G115 -- n <= attributionBatch
+			if err != nil {
+				return nil, err
+			}
+			for _, r := range rows {
+				if r.Status == "pending" && r.NextAttemptAt != nil {
+					out = append(out, r)
+				}
+			}
+			ids = ids[n:]
+		}
+	}
+	slices.SortFunc(out, func(a, b gen.BillingProviderChargeAttribution) int { return a.NextAttemptAt.Compare(*b.NextAttemptAt) })
+	return out, nil
+}
+
+// ResolveChargeAttributions reads rows, one merchant's due attributions, from
+// their provider, nmi.MaxQueryIDs per read, and records each approved charge
+// on its declared subscription through the same writer a pull uses: settled
+// history before the accepted schedule, or the cycle it settles. A missing,
+// declined or unplaceable charge records no payment and becomes a finding.
+// Another rail's charge is left to a provider pull that reads it, and becomes
+// a finding once that pull has read past it, or at once when none does. A
+// failed read defers the PSP's rows with backoff.
+func ResolveChargeAttributions(ctx context.Context, database *db.DB, merchantID uuid.UUID, rows []gen.BillingProviderChargeAttribution, reader func(context.Context, uuid.UUID) (AttributionReader, error), pulled AttributionPull, now time.Time) (AttributionResult, error) {
 	var res AttributionResult
 	q := database.Gen(ctx)
 	psps, err := q.ListPSPsForMerchant(ctx, merchantID)
@@ -109,55 +153,47 @@ func ResolveChargeAttributions(ctx context.Context, database *db.DB, merchantID 
 	for _, p := range psps {
 		rails[p.ID] = p.Rail
 	}
-	for read := 0; read < limit; {
-		rows, err := q.ListDueChargeAttributions(ctx, gen.ListDueChargeAttributionsParams{MerchantID: merchantID, Now: now, RowLimit: int32(min(attributionBatch, limit-read))}) // #nosec G115 -- at most attributionBatch
-		if err != nil || len(rows) == 0 {
-			return res, err
+	byPSP := map[uuid.UUID][]gen.BillingProviderChargeAttribution{}
+	var order []uuid.UUID
+	for _, r := range rows {
+		if _, ok := byPSP[r.PspID]; !ok {
+			order = append(order, r.PspID)
 		}
-		read += len(rows)
-		byPSP := map[uuid.UUID][]gen.BillingProviderChargeAttribution{}
-		var order []uuid.UUID
-		for _, r := range rows {
-			if _, ok := byPSP[r.PspID]; !ok {
-				order = append(order, r.PspID)
+		byPSP[r.PspID] = append(byPSP[r.PspID], r)
+	}
+	for _, psp := range order {
+		pending := byPSP[psp]
+		if rail := rails[psp]; rail != string(models.RailNMI) {
+			if err := awaitPull(ctx, q, merchantID, psp, rail, pending, pulled, now, &res); err != nil {
+				return res, err
 			}
-			byPSP[r.PspID] = append(byPSP[r.PspID], r)
+			continue
 		}
-		for _, psp := range order {
-			pending := byPSP[psp]
-			if rail := rails[psp]; rail != string(models.RailNMI) {
-				if err := awaitPull(ctx, q, merchantID, psp, rail, pending, pulled, now, &res); err != nil {
-					return res, err
-				}
-				continue
+		client, err := reader(ctx, psp)
+		if err != nil || client == nil {
+			if err := deferAttributions(ctx, q, pending, now.Add(attributionBackoff(pending[0].Attempts)), now, &res); err != nil {
+				return res, err
 			}
-			client, err := reader(ctx, psp)
-			if err != nil || client == nil {
+			continue
+		}
+		for len(pending) > 0 {
+			n := min(len(pending), nmi.MaxQueryIDs)
+			ids := make([]string, n)
+			for i, r := range pending[:n] {
+				ids[i] = r.TransactionID
+			}
+			report, err := client.TransactionReport(ctx, nmi.QueryFilter{TransactionID: strings.Join(ids, ",")})
+			if err != nil {
+				// The provider refused or failed: defer the rest of this PSP.
 				if err := deferAttributions(ctx, q, pending, now.Add(attributionBackoff(pending[0].Attempts)), now, &res); err != nil {
 					return res, err
 				}
-				continue
+				break
 			}
-			for len(pending) > 0 {
-				n := min(len(pending), nmi.MaxQueryIDs)
-				ids := make([]string, n)
-				for i, r := range pending[:n] {
-					ids[i] = r.TransactionID
-				}
-				report, err := client.TransactionReport(ctx, nmi.QueryFilter{TransactionID: strings.Join(ids, ",")})
-				if err != nil {
-					// The provider refused or failed: leave the rest of this
-					// PSP for a later pass.
-					if err := deferAttributions(ctx, q, pending, now.Add(attributionBackoff(pending[0].Attempts)), now, &res); err != nil {
-						return res, err
-					}
-					break
-				}
-				if err := resolveAttributions(ctx, database, pending[:n], report, now, &res); err != nil {
-					return res, err
-				}
-				pending = pending[n:]
+			if err := resolveAttributions(ctx, database, pending[:n], report, now, &res); err != nil {
+				return res, err
 			}
+			pending = pending[n:]
 		}
 	}
 	return res, nil

@@ -290,6 +290,9 @@ var preflightChecks = []rowCheck{
 	{"webhook_events", "completed_at IS NULL"},
 	{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','reconciliation','prune','approval','merchant_purge')"},
 	{"maintenance_runs", "kind IN ('prune','approval','merchant_purge') AND (coverage IS NOT NULL OR affected IS NOT NULL OR summary IS NOT NULL OR inventory_manifest IS NOT NULL OR inventory_total_rows IS NOT NULL)"},
+	// An import's charges still waiting on their provider read are read by
+	// the job the import queued here.
+	{"provider_charge_attributions", "status='pending'"},
 }
 
 func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {

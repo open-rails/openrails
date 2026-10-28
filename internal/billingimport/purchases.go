@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -344,10 +346,10 @@ func grantPurchaseAccess(ctx context.Context, q *gen.Queries, merchantID uuid.UU
 // attributeCharges keeps the book's charges it cannot record as payments: a
 // synthetic id as a finding, and an approved charge without an amount as an
 // attribution of its provider transaction to its subscription, read from the
-// provider after the import.
-func attributeCharges(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, facts []reconcile.DeclaredSubscriptionFact, attributed, unverified []DeclaredTransaction, now time.Time) error {
+// provider after the import. It returns the attributions it declared.
+func attributeCharges(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, facts []reconcile.DeclaredSubscriptionFact, attributed, unverified []DeclaredTransaction, now time.Time) ([]reconcile.DeclaredAttributions, error) {
 	if len(attributed) == 0 && len(unverified) == 0 {
-		return nil
+		return nil, nil
 	}
 	byRail := map[string]reconcile.DeclaredSubscriptionFact{}
 	for _, f := range facts {
@@ -364,24 +366,25 @@ func attributeCharges(ctx context.Context, q *gen.Queries, merchantID uuid.UUID,
 	for _, t := range unverified {
 		f, sub, err := subscription(t)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		var id *uuid.UUID
 		if sub != nil {
 			id = &sub.ID
 		}
 		if err := reconcile.RecordUnverifiedTransaction(ctx, q, merchantID, f.PspID, t.TransactionID, id, "the transaction id is not the provider's: NMI and CCBill ids are digits"); err != nil {
-			return err
+			return nil, err
 		}
 	}
+	ids := map[uuid.UUID][]string{}
 	for _, t := range attributed {
 		f, sub, err := subscription(t)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if sub == nil {
 			if err := reconcile.RecordUnverifiedTransaction(ctx, q, merchantID, f.PspID, t.TransactionID, nil, "its subscription was not imported"); err != nil {
-				return err
+				return nil, err
 			}
 			continue
 		}
@@ -390,26 +393,34 @@ func attributeCharges(ctx context.Context, q *gen.Queries, merchantID uuid.UUID,
 			Channel: string(models.ChannelRail), Rail: &rail, TransactionID: t.TransactionID}); err == nil {
 			continue // already recorded
 		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return err
+			return nil, err
 		}
 		var declared *time.Time
 		if !t.OccurredAt.IsZero() {
 			at := t.OccurredAt.UTC()
 			declared = &at
 		}
-		if _, err := q.InsertChargeAttribution(ctx, gen.InsertChargeAttributionParams{MerchantID: merchantID, PspID: sub.PspID, TransactionID: t.TransactionID,
-			CustomerID: sub.CustomerID, SubscriptionID: sub.ID, DeclaredAt: declared, Now: now}); err != nil {
-			return err
+		created, err := q.InsertChargeAttribution(ctx, gen.InsertChargeAttributionParams{MerchantID: merchantID, PspID: sub.PspID, TransactionID: t.TransactionID,
+			CustomerID: sub.CustomerID, SubscriptionID: sub.ID, DeclaredAt: declared, Now: now})
+		if err != nil {
+			return nil, err
+		}
+		if created == 1 {
+			ids[sub.PspID] = append(ids[sub.PspID], t.TransactionID)
 		}
 		existing, err := q.GetChargeAttribution(ctx, gen.GetChargeAttributionParams{MerchantID: merchantID, PspID: sub.PspID, TransactionID: t.TransactionID})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if existing.SubscriptionID != sub.ID {
 			if err := reconcile.RecordUnverifiedTransaction(ctx, q, merchantID, sub.PspID, t.TransactionID, &sub.ID, "the transaction is already attributed to another subscription"); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
-	return nil
+	out := make([]reconcile.DeclaredAttributions, 0, len(ids))
+	for _, psp := range slices.SortedFunc(maps.Keys(ids), func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) }) {
+		out = append(out, reconcile.DeclaredAttributions{PSPID: psp, TransactionIDs: ids[psp]})
+	}
+	return out, nil
 }

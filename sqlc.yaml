@@ -127,6 +127,7 @@ sql:
       - "internal/migrate/postgres/0150_job_health_from_river.up.sql"
       - "internal/migrate/postgres/0160_delinquency_due.up.sql"
       - "internal/migrate/postgres/0161_usage_due.up.sql"
+      - "internal/migrate/postgres/0171_charge_attributions_per_import.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

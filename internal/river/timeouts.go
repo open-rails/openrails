@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/reconcile"
 )
 
 // DefaultTimeout is an OpenRails job's budget: River cancels the job past it,
@@ -43,7 +44,7 @@ var kinds = map[string]time.Duration{
 	KindProviderRefreshMerchant:          time.Hour,
 	KindConvergeSweep:                    time.Hour,
 	KindRebillWatch:                      time.Hour,
-	KindChargeAttributions:               time.Hour,
+	reconcile.KindChargeAttributions:     time.Hour,
 	KindNMIHistory:                       time.Hour,
 	KindStripeWebhookReconcile:           time.Hour,
 	KindPSPImport:                        2 * time.Hour,
