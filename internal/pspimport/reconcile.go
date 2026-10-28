@@ -35,13 +35,15 @@ type heldSubscription struct {
 // as the customer: a subscription by its provider id, a provider customer by
 // the cards or customer link naming it, a transaction by its payment or by
 // its held subscription. One the rules or a person link to another customer
-// is a conflict naming both: a landed subscription never moves. It returns
-// the subscriptions it found held that were not held before.
+// is a conflict naming both: a landed subscription never moves. What belongs
+// to a conflicting object, and is not held itself, is in conflict too. It
+// returns the subscriptions it found held that were not held before.
 func (im *Importer) classify(ctx context.Context, row gen.BillingPspImport) ([]heldSubscription, error) {
 	q := im.DB.Gen(ctx)
 	subHolder := map[string]holding{}
+	conflicted := map[string]bool{}
 	var newly []heldSubscription
-	for _, kind := range []billing.PSPImportRecordKind{billing.PSPImportSubscription, billing.PSPImportCustomer, billing.PSPImportTransaction} {
+	for _, kind := range []billing.PSPImportRecordKind{billing.PSPImportCustomer, billing.PSPImportSubscription, billing.PSPImportTransaction} {
 		var page []gen.BillingPspImportRecord
 		flush := func() error {
 			refs := make([]string, 0, len(page))
@@ -95,10 +97,16 @@ func (im *Importer) classify(ctx context.Context, row gen.BillingPspImport) ([]h
 				if kind == billing.PSPImportTransaction && len(h.customers) == 0 {
 					h = subHolder[deref(r.SubscriptionRef)]
 				}
+				if vault := "customer:" + deref(r.CustomerRef); len(h.customers) == 0 && h.conflict == "" && conflicted[vault] {
+					h.conflict = vault + " is in conflict"
+				}
 				if len(h.customers) == 0 && h.conflict == "" {
 					continue
 				}
 				u, held := h.decide(r)
+				if kind == billing.PSPImportCustomer && !held {
+					conflicted["customer:"+r.Ref] = true
+				}
 				if kind == billing.PSPImportSubscription {
 					sh := holding{customers: h.customers}
 					if !held {

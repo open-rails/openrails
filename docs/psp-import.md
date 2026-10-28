@@ -143,8 +143,9 @@ schedule.
   customer by the cards or customer link naming it, a transaction by its
   payment or by its held subscription. If a rule or a manual link names
   another customer it is a `conflict` naming both, and nothing is proposed
-  about it until a person links it: a landed subscription never moves. Held
-  records never land.
+  about it until a person links it: a landed subscription never moves. What
+  belongs to a conflicting object and is not held itself is a `conflict`
+  too. Held records never land.
 - **Proposals.** The differences in what it holds become proposals (pull.*
   findings) tagged with the import (`pull_id`): a missed renewal
   (`adopt_subscription` and `record_charge`), a schedule gone at the

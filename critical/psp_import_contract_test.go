@@ -1268,16 +1268,16 @@ func TestPSPImport(t *testing.T) {
 			}
 			return out
 		}
-		applyAll := func(ids map[string]billing.PSPImportID) {
+		applyAll := func(ids map[string]billing.PSPImportID, state billing.PSPImportRecordState) {
 			t.Helper()
 			for key, id := range ids {
 				require.NoError(t, iw.link(t, id, billing.LinkPSPImportParams{}))
 				for ref, r := range iw.apply(t, id) {
-					require.Equal(t, billing.PSPImportImported, r.State, "%s %s %s: %v", key, r.Kind, ref, r.Reason)
+					require.Equal(t, state, r.State, "%s %s %s: %v", key, r.Kind, ref, r.Reason)
 				}
 			}
 		}
-		applyAll(imports)
+		applyAll(imports, billing.PSPImportImported)
 		want := map[string]landed{"nmi": {1, 1, 1}, "stripe": {1, 1, 1}, "ccbill": {1, 1, 0}}
 		require.Equal(t, want, book())
 		methods, err := iw.alpha.ListPaymentMethods(t.Context(), customerOf(iw.alice), billing.PaymentMethodListParams{})
@@ -1288,14 +1288,14 @@ func TestPSPImport(t *testing.T) {
 			require.True(t, iw.entitled(t, members[key], entitlement), key)
 		}
 
-		applyAll(imports)
+		applyAll(imports, billing.PSPImportImported)
 		require.Equal(t, want, book(), "relinking and applying again lands nothing twice")
 		manual := map[string]billing.PSPImportID{}
 		for _, key := range keys {
 			manual[key] = iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: key}}).ID
 		}
-		applyAll(manual)
-		require.Equal(t, want, book(), "a later manual import of the same PSP finds everything landed")
+		applyAll(manual, billing.PSPImportHeld)
+		require.Equal(t, want, book(), "a later manual import of the same PSP finds everything held")
 	})
 
 	t.Run("OR-J38-S11/stripe-customer-attribution", func(t *testing.T) {
@@ -1336,8 +1336,8 @@ func TestPSPImport(t *testing.T) {
 		require.Nil(t, recs[customers["alice"]].Reason)
 		require.Equal(t, billing.PSPImportImported, recs[customers["bob"]].State, "a customer already mapping another keeps it")
 		require.Contains(t, *recs[customers["bob"]].Reason, "cus_from_checkout")
-		require.Equal(t, billing.PSPImportBlocked, recs[customers["carol"]].State, "a customer object another customer holds blocks only its customer")
-		require.Contains(t, *recs[customers["carol"]].Reason, "already belongs")
+		require.Equal(t, billing.PSPImportConflict, recs[customers["carol"]].State, "a customer object another customer holds conflicts only its customer")
+		require.Contains(t, *recs[customers["carol"]].Reason, "OpenRails holds it for "+customerOf(dave).UUID().String())
 		require.Len(t, iw.subscriptions(t, customerOf(iw.alice)), 1)
 		require.Len(t, iw.subscriptions(t, customerOf(iw.bob)), 1)
 		require.Empty(t, iw.subscriptions(t, customerOf(carol)))

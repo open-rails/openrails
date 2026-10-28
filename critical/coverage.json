@@ -926,7 +926,7 @@
     {
       "id": "OR-J38-S11",
       "journey": "J38",
-      "name": "A landed Stripe customer attributes a later out-of-band subscription; a customer mapping another keeps it; one another customer holds blocks only its customer"
+      "name": "A landed Stripe customer attributes a later out-of-band subscription; a customer mapping another keeps it; one another customer holds is a conflict for only its customer"
     },
     {
       "id": "OR-J38-S12",

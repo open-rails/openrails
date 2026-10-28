@@ -55,7 +55,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   groups (`Routes.RouteGroups`: `Admin`, `Catalog`, `MerchantConfig`, `Metrics`) are off
   unless the host turns them on; `Programmatic` (`/v1/app`) admits applications.
   Customer support uses `/v1/admin`, Metrics uses `/v1/metrics`, Catalog uses `/v1/catalog`,
-  MerchantConfig uses `/v1/merchant`, including findings and PSP refresh.
+  MerchantConfig uses `/v1/merchant`, including findings, proposals and PSP imports.
   No public route reads the catalog: a host's server reads it with the Go client and puts products in its
   own pages (`billing.BuyerPrices`). Customer-support permissions
   are `merchant:customer:read` and `merchant:customer:manage` (or their `root:` twins); catalog, config

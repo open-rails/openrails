@@ -203,6 +203,7 @@ func TestPSPReconcile(t *testing.T) {
 		iw.nmi.AddScheduleSale(added, iw.clock.Now())
 		iw.nmi.RemovePlan("retired")
 
+		writes := len(iw.nmi.Calls())
 		before := iw.book(t)
 		manual := iw.manual(t, "nmi")
 		if diff := bookDiff(t, before, iw.book(t)); len(diff) > 0 {
@@ -276,6 +277,7 @@ func TestPSPReconcile(t *testing.T) {
 		view, err = iw.alpha.GetPSPImport(t.Context(), manual.ID)
 		require.NoError(t, err)
 		require.Equal(t, billing.PSPImportProposals{Open: 1, Approved: 3, Superseded: 2}, view.Proposals, "renewals wait for their settled bill")
+		require.Len(t, iw.nmi.Calls(), writes, "the pull, Apply and its corrections write nothing to NMI")
 	})
 
 	t.Run("OR-J38-S21/legacy-book-then-pull-provider-wins", func(t *testing.T) {
@@ -475,6 +477,7 @@ func TestPSPReconcile(t *testing.T) {
 
 		// A move without a paid invoice for the new price proposes nothing.
 		iw.stripe.PortalPriceChange(sub, "price_pro", 1999, 1000)
+		writes := len(iw.stripe.Mutations(""))
 		unpaid := iw.manual(t, "stripe")
 		require.Zero(t, kinds(iw.proposals(t, unpaid.ID))[billing.ChangeCorrectSubscription])
 
@@ -497,6 +500,7 @@ func TestPSPReconcile(t *testing.T) {
 			WHERE a.merchant_id = $1 AND a.customer_id = $2 AND a.source_type = 'grace' AND a.revoked_at IS NULL AND a.deleted_at IS NULL AND p.key = 'basic'`,
 			iw.table("product_access"), iw.table("products")), iw.alpha.MerchantID().UUID(), customerOf(iw.alice).UUID()).Scan(&grace))
 		require.Zero(t, grace, "the old product's grace is revoked: %s", iw.accessDump(t, customerOf(iw.alice)))
+		require.Len(t, iw.stripe.Mutations(""), writes, "the pulls, Apply and the approval write nothing to Stripe")
 	})
 
 	t.Run("OR-J38-S26/reconcile-refuses-an-implausible-roster", func(t *testing.T) {
