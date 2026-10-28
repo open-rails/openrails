@@ -86,6 +86,10 @@ func (d *DB) MerchantConfig() MerchantConfig {
 // ErrRiverTablesMissing reports a River schema that was never migrated.
 var ErrRiverTablesMissing = errors.New("River's tables are missing")
 
+// ErrNoRiverProducer is a job queued with its work where no River producer is
+// bound: the work is refused with it.
+var ErrNoRiverProducer = errors.New("a job queued with its work requires a bound River producer")
+
 // ValidateRiverJobBinding must succeed before the runtime enables a producer.
 // Validate during composition, before requests hold any transaction or pool pin.
 func (d *DB) ValidateRiverJobBinding(ctx context.Context, pool *pgxpool.Pool, schema string) error {
@@ -131,14 +135,17 @@ func (d *DB) SetRiverJobInserter(inserter RiverJobInserter) {
 }
 
 func (d *DB) InsertRiverJobTx(ctx context.Context, tx pgx.Tx, args river.JobArgs, opts *river.InsertOpts) error {
-	if d == nil || d.river == nil || tx == nil {
-		return fmt.Errorf("financial operation requires a bound River producer and transaction")
+	if d == nil || tx == nil {
+		return fmt.Errorf("a job queued with its work requires that work's transaction")
+	}
+	if d.river == nil {
+		return ErrNoRiverProducer
 	}
 	d.river.mu.RLock()
 	inserter := d.river.inserter
 	d.river.mu.RUnlock()
 	if inserter == nil {
-		return fmt.Errorf("financial operation requires a bound River producer")
+		return ErrNoRiverProducer
 	}
 	// River owns its SQL namespace. Unwrap only our schema adapter while
 	// retaining the exact host transaction/savepoint and connection.

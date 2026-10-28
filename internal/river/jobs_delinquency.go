@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -74,6 +75,7 @@ func (w DelinquencyWorker) Work(ctx context.Context, _ *river.Job[DelinquencyArg
 
 	svc := delinquency.NewService(w.DB, w.Clock)
 	evaluated, transitions := 0, 0
+	var workErr error
 	for _, mid := range merchantIDs {
 		merchantID := billing.MerchantID(mid)
 		progress.Mark(ctx, "delinquency merchant "+merchantID.String())
@@ -95,9 +97,8 @@ func (w DelinquencyWorker) Work(ctx context.Context, _ *river.Job[DelinquencyArg
 			}
 			return err
 		}); err != nil {
-			// One merchant's failure must not abort the rest of the run.
-			logger.WithError(err).WithField("merchant_id", merchantID.String()).
-				Error("Delinquency: merchant pass failed; continuing")
+			// One merchant's failure never stops the others; the job reports them all.
+			workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", merchantID, err))
 		}
 	}
 	if transitions > 0 {
@@ -105,5 +106,5 @@ func (w DelinquencyWorker) Work(ctx context.Context, _ *river.Job[DelinquencyArg
 			"merchants": len(merchantIDs), "evaluated": evaluated, "transitions": transitions,
 		}).Info("Delinquency evaluation pass complete")
 	}
-	return nil
+	return workErr
 }

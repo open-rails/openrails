@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 157,
+  "scenario_count": 164,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -787,6 +787,41 @@
       "id": "OR-J12-S07",
       "journey": "J12",
       "name": "Admitted merchant card removal preserves customer scope and provider write posture"
+    },
+    {
+      "id": "OR-J04-S07",
+      "journey": "J04",
+      "name": "Host workers on a composed fleet keep River's job timeout and crash rescue"
+    },
+    {
+      "id": "OR-J23-S06",
+      "journey": "J23",
+      "name": "Admission denial statistics count each closed hour once"
+    },
+    {
+      "id": "OR-J29-S07",
+      "journey": "J29",
+      "name": "One merchant's failed background pass fails its job after the other merchants finish"
+    },
+    {
+      "id": "OR-J37-S06",
+      "journey": "J37",
+      "name": "Solana renewal waits for the crank's deadline before a missed rebill"
+    },
+    {
+      "id": "OR-J21-S05",
+      "journey": "J21",
+      "name": "Declared charge on a rail OpenRails cannot read becomes a finding without a payment"
+    },
+    {
+      "id": "OR-J06-S07",
+      "journey": "J06",
+      "name": "PSP import and its queued job commit together"
+    },
+    {
+      "id": "OR-J15-S05",
+      "journey": "J15",
+      "name": "NMI attempts no client can read are given up instead of failing passes"
     }
   ]
 }

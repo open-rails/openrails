@@ -910,8 +910,9 @@ provider runs its own retries, and `next_retry_at` is its next attempt when
 OpenRails knows it (CCBill reports it; Stripe's is not stored). A case leaves the list when it is paid or its retries give up.
 
 **Missed rebills.** Every 15 minutes the rebill watch looks for renewals with
-no attempt past their deadline (engine: 1h; `nmi_schedule`: 24h, after reading
-NMI's Query API and schedule) and raises one `life.rebill.missed` finding per
+no attempt past their deadline (engine: 1h; Solana, renewed by the hourly
+crank: 3h; `nmi_schedule`: 24h, after reading NMI's Query API and schedule) and
+raises one `life.rebill.missed` finding per
 cycle. When NMI holds nothing for the cycle and its schedule has moved to the
 next period (`provider_skipped`), OpenRails charges the period itself, then duns
 a decline on the same schedule. "Nothing" means no transaction of any kind or
@@ -1200,11 +1201,11 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 | Balance watch (due customer watches only) | 30 s |
 | Due renewals and retries; job rescue | 1 min |
 | Merchant-secret cleanup | 5 min |
-| Order expiry; admission-denial flush | 5 min |
+| Order expiry | 5 min |
 | Convergence sweep | 15 min |
 | Rebill watch; charge-attribution read; arrears delinquency | 15 min |
 | Price-migration re-driver | 1 h |
-| Attempt enrichment; due daily NMI history read; expired-data cleanup; idempotency cleanup; credit expiry; Solana crank; Solana Pay reference GC; Stripe webhook reconciliation | 1 h |
+| Admission-denial flush (closed hours); attempt enrichment; due daily NMI history read; expired-data cleanup; idempotency cleanup; credit expiry; Solana crank; Solana Pay reference GC; Stripe webhook reconciliation | 1 h |
 | Provider refresh scheduler (fans out per merchant) | 2 h |
 | Account updater batch | 6 h |
 | Solana gas alert; Solana ledger reconciliation | 6 h |
@@ -1230,8 +1231,9 @@ fair-sweep cursor is a ring position, saved by compare-and-swap on an opaque
 per-save version (a counter, not a timestamp, so tokens never collide), so a
 pass finishing after a newer one keeps the newer position.
 
-No job runs under a clock. River's one-minute `JobTimeout` default is
-overridden to "never" on every OpenRails worker; a running job is canceled
+No OpenRails job runs under a clock. River's one-minute `JobTimeout` default
+is overridden to "never" on every OpenRails worker (a host's own workers keep
+the client's); a running job is canceled
 only when it reports no progress past the same staleness rule the health
 checker uses for its kind (3× the declared cadence, floored at 30 min), and
 the job row records what it last reported. A job that dies with its process

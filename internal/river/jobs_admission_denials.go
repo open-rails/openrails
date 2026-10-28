@@ -2,6 +2,8 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -25,11 +27,18 @@ type AdmissionDenialFlushArgs struct{}
 
 func (AdmissionDenialFlushArgs) Kind() string { return KindAdmissionDenialFlush }
 
+// AdmissionDenialFlushInterval is the flush cadence: an hour's counts appear
+// within this, plus denialHourGrace, of its close.
+const AdmissionDenialFlushInterval = time.Hour
+
+// denialHourGrace pads an hour's close for writers whose clock runs late.
+const denialHourGrace = 5 * time.Minute
+
 // AdmissionDenialFlushWorker moves the Redis hourly denial counters
-// (admission.DenialRecorder) into admission_denials_hourly. It upserts each
-// count additively, then HINCRBYs the same amount back out, so increments
-// landing mid-flush survive. A drained key whose hour closed over 5 minutes
-// ago is deleted: no writer touches a past hour.
+// (admission.DenialRecorder) of closed hours into admission_denials_hourly: it
+// writes each hour's counts as they stand, then deletes the key. No writer
+// touches a closed hour, so a repeated or concurrent flush writes the same
+// values.
 type AdmissionDenialFlushWorker struct {
 	river.WorkerDefaults[AdmissionDenialFlushArgs]
 	DB    *db.DB
@@ -51,6 +60,7 @@ func (w AdmissionDenialFlushWorker) Work(ctx context.Context, job *river.Job[Adm
 	logger := log.WithContext(ctx).WithField("worker", KindAdmissionDenialFlush)
 
 	flushed := 0
+	var keyErrs error
 	scan := func(ctx context.Context, node redis.UniversalClient) error {
 		var cursor uint64
 		for {
@@ -61,8 +71,8 @@ func (w AdmissionDenialFlushWorker) Work(ctx context.Context, job *river.Job[Adm
 			for _, key := range keys {
 				n, err := w.flushKey(ctx, key, now)
 				if err != nil {
-					logger.WithError(err).WithField("key", key).Error("denial flush failed for key")
-					continue // other keys still flush; this one retries next cycle
+					keyErrs = errors.Join(keyErrs, fmt.Errorf("key %s: %w", key, err))
+					continue // other keys still flush
 				}
 				flushed += n
 			}
@@ -87,7 +97,7 @@ func (w AdmissionDenialFlushWorker) Work(ctx context.Context, job *river.Job[Adm
 	if flushed > 0 {
 		logger.WithField("rows", flushed).Info("flushed admission denial counters")
 	}
-	return nil
+	return keyErrs
 }
 
 func (w AdmissionDenialFlushWorker) flushKey(ctx context.Context, key string, now time.Time) (int, error) {
@@ -99,6 +109,9 @@ func (w AdmissionDenialFlushWorker) flushKey(ctx context.Context, key string, no
 	if err != nil {
 		return 0, nil // foreign key shape; leave to TTL
 	}
+	if hour.Add(time.Hour + denialHourGrace).After(now) {
+		return 0, nil // the hour is still open
+	}
 	fields, err := w.Redis.HGetAll(ctx, key).Result()
 	if err != nil {
 		return 0, err
@@ -107,7 +120,6 @@ func (w AdmissionDenialFlushWorker) flushKey(ctx context.Context, key string, no
 	type row struct {
 		customer uuid.UUID
 		reason   string
-		field    string
 		count    int64
 	}
 	var rows []row
@@ -131,7 +143,7 @@ func (w AdmissionDenialFlushWorker) flushKey(ctx context.Context, key string, no
 		if count <= 0 {
 			continue
 		}
-		rows = append(rows, row{customer: customerID, reason: reason, field: field, count: count})
+		rows = append(rows, row{customer: customerID, reason: reason, count: count})
 	}
 
 	if len(rows) > 0 {
@@ -153,22 +165,9 @@ func (w AdmissionDenialFlushWorker) flushKey(ctx context.Context, key string, no
 		}); err != nil {
 			return 0, err
 		}
-		// PG has the counts; subtract exactly what was flushed so concurrent
-		// increments survive.
-		pipe := w.Redis.Pipeline()
-		for _, r := range rows {
-			pipe.HIncrBy(ctx, key, r.field, -r.count)
-		}
-		if _, err := pipe.Exec(ctx); err != nil {
-			return len(rows), err
-		}
 	}
-
-	// A closed hour (grace-padded) gets no new writes: drop the drained key.
-	if hour.Add(time.Hour + 5*time.Minute).Before(now) {
-		if err := w.Redis.Del(ctx, key).Err(); err != nil {
-			return len(rows), err
-		}
+	if err := w.Redis.Del(ctx, key).Err(); err != nil {
+		return len(rows), err
 	}
 	return len(rows), nil
 }

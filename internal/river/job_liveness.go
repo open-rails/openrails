@@ -21,8 +21,8 @@ import (
 // progress, never by elapsed time. The middleware rides on every OpenRails
 // worker, so a host's river.Config cannot omit it:
 //
-//   - JobTimeout is -1 (River's "never") on the wrapper worker and on the
-//     standalone client.
+//   - Timeout is -1 (River's "never") on the wrapper worker; the client's
+//     JobTimeout stays the host's, for its own workers.
 //   - Liveness: while a job runs, the middleware beats river_job.attempted_at.
 //     JobRescueWorker returns a running job only once its beat stops, so a
 //     live long job is never re-enqueued and run twice.

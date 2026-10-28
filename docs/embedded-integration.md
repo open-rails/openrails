@@ -228,7 +228,9 @@ collection pass. Runs are idempotent.
 workers: each declares `Timeout() = -1` and ends on observed lack of progress
 (3x its cadence, floored at 30 min). A running job beats
 `river_job.attempted_at`, so `RescueStuckJobsAfter` measures silence from a dead
-process, never the age of a live job.
+process, never the age of a live job. OpenRails leaves the client's
+`JobTimeout` alone, so your own workers keep it and River's rescuer still
+recovers them.
 
 ### 5. Declaring the merchant
 

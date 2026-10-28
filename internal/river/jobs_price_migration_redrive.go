@@ -35,14 +35,11 @@ func (w PriceMigrationRedriveWorker) Work(ctx context.Context, _ *river.Job[Pric
 		return nil
 	}
 	res, err := w.Migrations.RedriveBlocked(ctx, w.BatchSize)
-	if err != nil {
-		return err
-	}
-	if res.Examined > 0 {
+	if res != nil && res.Examined > 0 {
 		logger.WithFields(log.Fields{
 			"examined": res.Examined, "redriven": res.Redriven, "converged": res.Converged,
 			"deferred": res.Deferred, "skipped": res.Skipped, "failed": res.Failed,
 		}).Info("price-migration re-drive pass complete")
 	}
-	return nil
+	return err
 }

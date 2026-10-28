@@ -2,11 +2,11 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -45,28 +45,30 @@ func (w OrderExpiryWorker) Work(ctx context.Context, _ *river.Job[OrderExpiryArg
 	if err != nil {
 		return fmt.Errorf("order expiry: list merchants: %w", err)
 	}
+	// One merchant's failure never stops the others; the job reports them all.
+	var workErr error
 	for _, id := range merchants {
 		progress.Mark(ctx, "order expiry merchant "+id.String())
 		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(id), "order expiry sweep", func(ctx context.Context) error {
 			_, err := w.Orders.ExpireDue(ctx, orderExpiryBatch)
 			return err
 		}); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", id).Error("order expiry: merchant pass failed; continuing")
+			workErr = errors.Join(workErr, fmt.Errorf("order expiry: merchant %s: %w", id, err))
 		}
 	}
 	now := workerNow(w.Clock)
 	before := now.Add(-payment.SetupAbandonAfter)
 	stale, err := w.DB.GenDirectory().ListStaleSetupMerchants(ctx, gen.ListStaleSetupMerchantsParams{Before: before, Now: now, MerchantLimit: orderExpiryBatch})
 	if err != nil {
-		return fmt.Errorf("card save expiry: list merchants: %w", err)
+		return errors.Join(workErr, fmt.Errorf("card save expiry: list merchants: %w", err))
 	}
 	for _, id := range stale {
 		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(id), "card save expiry", func(ctx context.Context) error {
 			_, err := w.DB.Gen(ctx).AbandonStalePaymentMethodSetups(ctx, gen.AbandonStalePaymentMethodSetupsParams{MerchantID: id, Before: before, Now: now})
 			return err
 		}); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", id).Error("card save expiry: merchant pass failed; continuing")
+			workErr = errors.Join(workErr, fmt.Errorf("card save expiry: merchant %s: %w", id, err))
 		}
 	}
-	return nil
+	return workErr
 }

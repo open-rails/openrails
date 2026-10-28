@@ -38,6 +38,9 @@ const (
 	// Solana analog of the NMI DunningWorker: each run charges every due
 	// subscription.
 	KindSolanaCrank = "openrails.solana_crank"
+	// SolanaCrankInterval is the crank's cadence; next_pull_at decides what
+	// is due.
+	SolanaCrankInterval = time.Hour
 
 	solanaCrankBatchSize = 200
 )

@@ -116,6 +116,7 @@ migration 0114_account_usage_billing.up.sql sha256:1b818744089d9dc86b08b384be861
 migration 0115_notification_issue_revisions.up.sql sha256:f720b146566426f56c3b85c5051b07ede1283b9e3e06ca5f1395703e2673a3bd
 migration 0116_remove_hosted_account_state.up.sql sha256:8dc46947ff04dd7bd60c6a71fd2b6c059e0d60ec2298577f0fe4237bef303dde
 migration 0117_ledger_audit_at_restore_commit.up.sql sha256:aed275cb883723e3396ff19688e712bd2b3814dcae8c201d9ef2598ab5aadbf2
+migration 0118_unenriched_attempts_index.up.sql sha256:c54acc0cf8e041e88120ec230e2f4cc8dd178268afb9d20dbb99acbd4deee90a
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1565,6 +1566,7 @@ table billing.payment_attempts
   constraint payment_attempts_source_check CHECK ((source = ANY (ARRAY['openrails'::text, 'provider_schedule'::text, 'external'::text])))
   constraint payment_attempts_text_check CHECK ((length(response_text) <= 128))
   constraint payment_attempts_token_type_check CHECK ((token_type = ANY (ARRAY['network_token'::text, 'pan_via_proxy'::text, 'psp_token'::text])))
+  index CREATE INDEX payment_attempts_attempted_at_merchant_id_unenriched_idx ON billing.payment_attempts USING btree (attempted_at, merchant_id) WHERE ((enriched_at IS NULL) AND (rail = 'nmi'::text) AND (transaction_id IS NOT NULL))
   index CREATE INDEX payment_attempts_attempted_at_time_idx ON billing.payment_attempts USING btree (merchant_id, attempted_at)
   index CREATE INDEX payment_attempts_attempted_at_unenriched_idx ON billing.payment_attempts USING btree (merchant_id, attempted_at) WHERE ((enriched_at IS NULL) AND (rail = 'nmi'::text) AND (transaction_id IS NOT NULL))
   index CREATE INDEX payment_attempts_customer_id_purchase_target_attempted_at_idx ON billing.payment_attempts USING btree (merchant_id, customer_id, purchase_target, attempted_at) WHERE (purchase_target IS NOT NULL)

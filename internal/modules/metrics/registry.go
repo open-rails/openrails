@@ -821,7 +821,7 @@ var Measures = []Measure{
 		Formula:     "usage_revenue / credits_sold",
 		Dims:        []string{"currency"}},
 	{Name: "admission_denials", Class: ClassAdditive, Family: FamDenials, Unit: "count",
-		Description: "admission denials (hourly aggregates flushed from the Redis hot path; current hour may lag one flush cycle)",
+		Description: "admission denials (hourly aggregates flushed from the Redis hot path once each hour closes)",
 		Formula:     "SUM(hourly denial counters)",
 		Expr:        `COALESCE(SUM(ad.denials), 0)::bigint`,
 		Dims:        []string{"denial_reason", "customer"}},
@@ -929,7 +929,7 @@ var Caveats = []string{
 	"token_type exists from #796 instrumentation onward: NULL/legacy rows read 'unknown' and are excluded from token_type-filtered analyses; attempt_kind exists from instrumentation onward; older and imported rows read 'unknown'. Declines are measured on attempts, not payments: Stripe- and CCBill-owned renewals are recorded as their providers report them (#1111b)",
 	"attempts, purchases and rebill cycles begin at their instrumentation (#1110, #1111): earlier history lives in payments and the provider. Purchases and cycles are dated by their first attempt and due date; a purchase quiet for an hour, and a cycle past its 15-day dunning window, count as settled as of the range end",
 	"nmi_history measures are NMI's own transaction history, read daily per NMI PSP and kept 25 months: they include what OpenRails sent and what came before it. Rows are dated by their month's first instant, so use month-aligned ranges. one_off_sale cannot separate initial sales from retries of declined rebills",
-	"admission_denials are hourly aggregates flushed periodically from Redis; the current hour can lag one flush cycle",
+	"admission_denials are hourly aggregates flushed from Redis once each hour closes; the current hour is not yet counted",
 	"avg_membership_duration_days only counts subscriptions that ENDED in the bucket (right-censored: long-lived survivors are not included until they end)",
 	"time buckets zero-fill: a bucket present with zeros means genuinely zero activity, not missing data",
 }

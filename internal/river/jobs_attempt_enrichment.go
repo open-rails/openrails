@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -27,11 +28,13 @@ const (
 	AttemptEnrichmentInterval = time.Hour
 	// enrichAfter: NMI's Query API indexes a transaction with some lag.
 	enrichAfter = 10 * time.Minute
-	// enrichWindow: older attempts are left as they are.
-	enrichWindow = 30 * 24 * time.Hour
-	// enrichGiveUp: a transaction the report still lacks after this is
-	// marked read with nothing, so it is not asked for again.
+	// enrichGiveUp: a transaction the report still lacks after this, or whose
+	// PSP has no client, is marked read with nothing, so it is not asked for
+	// again.
 	enrichGiveUp = 48 * time.Hour
+	// enrichWindow: a day of passes past the give-up; older attempts are left
+	// as they are.
+	enrichWindow = enrichGiveUp + 24*time.Hour
 
 	enrichMerchantBatch = 200
 	enrichRowBatch      = 1000
@@ -94,7 +97,10 @@ func (w *AttemptEnrichmentWorker) enrich(ctx context.Context, mid uuid.UUID, sin
 	for psp, rows := range byPSP {
 		client, ok, err := w.NMIResolver.ResolveNMIClient(ctx, mid, &psp)
 		if err != nil || !ok || client == nil {
-			errs = errors.Join(errs, fmt.Errorf("psp %s: nmi client unavailable: %v", psp, err))
+			// Enrichment is best effort: an unarmed PSP's attempts wait out
+			// the give-up, then are marked read with nothing.
+			log.WithContext(ctx).WithError(err).WithField("psp_id", psp).Warn("attempt enrichment: nmi client unavailable; attempts past the give-up are marked read")
+			errs = errors.Join(errs, w.giveUp(ctx, mid, rows, now))
 			continue
 		}
 		for len(rows) > 0 {
@@ -104,6 +110,20 @@ func (w *AttemptEnrichmentWorker) enrich(ctx context.Context, mid uuid.UUID, sin
 		}
 	}
 	return errs
+}
+
+// giveUp marks the attempts past the give-up read with nothing.
+func (w *AttemptEnrichmentWorker) giveUp(ctx context.Context, mid uuid.UUID, rows []gen.ListUnenrichedNMIAttemptsRow, now time.Time) error {
+	q := w.DB.Gen(ctx)
+	for _, r := range rows {
+		if now.Sub(r.AttemptedAt) < enrichGiveUp {
+			continue
+		}
+		if err := attempts.Enrich(ctx, q, mid, r.ID, decline.Evidence{}, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // enrichBatch reads one batch of transactions and fills their attempts.

@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -57,9 +58,30 @@ const (
 	StepApply Step = "apply"
 )
 
+// JobKind is the River job that runs one step of an import.
+const JobKind = "openrails.psp_import"
+
+// JobAttempts bounds retries of a failing pull or landing; each resumes where
+// the last stopped.
+const JobAttempts = 5
+
+// JobArgs runs one step of an import: its pull or its landing. It is queued in
+// the transaction that admits the step, so a committed step always has its job.
+type JobArgs struct {
+	MerchantID uuid.UUID `json:"merchant_id"`
+	ImportID   uuid.UUID `json:"import_id"`
+	Step       Step      `json:"step"`
+}
+
+func (JobArgs) Kind() string { return JobKind }
+
+func (JobArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "billing", MaxAttempts: JobAttempts}
+}
+
 func (im *Importer) now() time.Time { return timeutil.FirstClock(im.Clock).Now().UTC() }
 
-// Create stages a new import of one PSP; the caller queues its pull.
+// Create stages a new import of one PSP and queues its pull with it.
 func (im *Importer) Create(ctx context.Context, p billing.CreatePSPImportParams) (*billing.PSPImport, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -87,8 +109,16 @@ func (im *Importer) Create(ctx context.Context, p billing.CreatePSPImportParams)
 		t := p.HistorySince.UTC()
 		since = &t
 	}
-	row, err := im.DB.Gen(ctx).CreatePSPImport(ctx, gen.CreatePSPImportParams{MerchantID: mid.UUID(), PspID: scope.ID, Rail: scope.Rail,
-		HistorySince: since, Rules: rules, Products: products})
+	var row gen.BillingPspImport
+	err = im.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := im.DB.NewWithPgxTx(tx)
+		var err error
+		if row, err = d.Gen(ctx).CreatePSPImport(ctx, gen.CreatePSPImportParams{MerchantID: mid.UUID(), PspID: scope.ID, Rail: scope.Rail,
+			HistorySince: since, Rules: rules, Products: products}); err != nil {
+			return err
+		}
+		return d.InsertRiverJob(ctx, JobArgs{MerchantID: mid.UUID(), ImportID: row.ID, Step: StepPull}, nil)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -354,12 +384,13 @@ func (im *Importer) SetMappings(ctx context.Context, p billing.SetPSPImportMappi
 	return out, err
 }
 
-// RequestApply checks an import can land and marks it applying; the caller
-// queues the job.
+// RequestApply checks an import can land, marks it applying and queues its
+// landing in the same transaction.
 func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID) (*billing.PSPImport, error) {
 	var out gen.BillingPspImport
 	err := im.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := im.DB.NewWithPgxTx(tx).Gen(ctx)
+		d := im.DB.NewWithPgxTx(tx)
+		q := d.Gen(ctx)
 		mid, err := merchant.Require(ctx)
 		if err != nil {
 			return err
@@ -374,8 +405,10 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID) (*
 		if busy(row.Status) || row.PulledAt == nil || row.HistoryThrough == nil || row.HistoryThrough.Before(*row.PulledAt) {
 			return apperr.Conflictf("the import is %s; it lands once its pull finished", row.Status)
 		}
-		out, err = q.SetPSPImportStatus(ctx, gen.SetPSPImportStatusParams{MerchantID: row.MerchantID, ID: row.ID, Status: string(billing.PSPImportApplying)})
-		return err
+		if out, err = q.SetPSPImportStatus(ctx, gen.SetPSPImportStatusParams{MerchantID: row.MerchantID, ID: row.ID, Status: string(billing.PSPImportApplying)}); err != nil {
+			return err
+		}
+		return d.InsertRiverJob(ctx, JobArgs{MerchantID: row.MerchantID, ImportID: row.ID, Step: StepApply}, nil)
 	})
 	if err != nil {
 		return nil, err

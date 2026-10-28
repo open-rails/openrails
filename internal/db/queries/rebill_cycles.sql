@@ -10,10 +10,12 @@ RETURNING id;
 -- name: ListOverdueRebillMerchants :many
 -- CROSS-MERCHANT: merchants holding a subscription whose period ended before its
 -- owner's deadline with neither an attempt nor a recorded miss for that cycle.
+-- Solana engine renewals come from the crank and have their own deadline.
 SELECT s.merchant_id
 FROM billing.subscriptions s
 WHERE s.status IN ('active', 'unverified', 'awaiting_method') AND s.deleted_at IS NULL
-  AND ((s.collection_policy = 'engine' AND s.current_period_ends_at <= sqlc.arg(engine_cutoff)::timestamptz)
+  AND ((s.collection_policy = 'engine' AND s.rail <> 'solana' AND s.current_period_ends_at <= sqlc.arg(engine_cutoff)::timestamptz)
+       OR (s.collection_policy = 'engine' AND s.rail = 'solana' AND s.current_period_ends_at <= sqlc.arg(solana_cutoff)::timestamptz)
        OR (s.collection_policy = 'nmi_schedule' AND s.current_period_ends_at <= sqlc.arg(nmi_cutoff)::timestamptz))
   AND NOT EXISTS (
       SELECT 1 FROM billing.rebill_cycles c
@@ -33,7 +35,8 @@ LIMIT sqlc.arg(merchant_limit)::int;
 SELECT sub.* FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid
   AND sub.status IN ('active', 'unverified', 'awaiting_method') AND sub.deleted_at IS NULL
-  AND ((sub.collection_policy = 'engine' AND sub.current_period_ends_at <= sqlc.arg(engine_cutoff)::timestamptz)
+  AND ((sub.collection_policy = 'engine' AND sub.rail <> 'solana' AND sub.current_period_ends_at <= sqlc.arg(engine_cutoff)::timestamptz)
+       OR (sub.collection_policy = 'engine' AND sub.rail = 'solana' AND sub.current_period_ends_at <= sqlc.arg(solana_cutoff)::timestamptz)
        OR (sub.collection_policy = 'nmi_schedule' AND sub.current_period_ends_at <= sqlc.arg(nmi_cutoff)::timestamptz))
   -- Separate anti-joins: an EXISTS under OR plans as a hash of every merchant's attempts.
   AND NOT EXISTS (
@@ -58,10 +61,11 @@ UPDATE billing.rebill_cycles SET missed_at = sqlc.arg(missed_at)::timestamptz, m
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND missed_at IS NULL;
 
 -- name: CountOpenSubscriptionCollections :one
--- An engine renewal still being attempted decides its cycle itself.
+-- An engine renewal still being attempted (a collection, or a Solana pull)
+-- decides its cycle itself.
 SELECT count(*) FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
-  AND intent_type = 'subscription_collection' AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
+  AND intent_type IN ('subscription_collection', 'solana_pull') AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
 
 -- name: ListRebillCycles :many
 -- The merchant's rebill cycles, latest due first, each with its first attempt,

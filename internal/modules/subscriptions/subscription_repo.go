@@ -782,26 +782,54 @@ func derefSubs(subs []*models.Subscription) []models.Subscription {
 	return out
 }
 
-// DueDunningBatch bounds one merchant's dunning pass: each row can charge a
-// card and terminate a subscription. Most-overdue first, and the claim lease
-// makes the remainder the next pass's head: nothing is skipped, only paced.
+// DueDunningBatch is one page of a merchant's dunning pass: each row can
+// charge a card and terminate a subscription.
 const DueDunningBatch = 500
 
-// ListDueDunningSubscriptions returns past_due subscriptions on the given
-// rails whose next retry is due (Price + PaymentMethod relations
-// attached) — the dunning worker's work list, capped at DueDunningBatch.
-func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rails []string, now time.Time, includeEngine bool) ([]models.Subscription, error) {
+// DueDunningCursor is the (due instant, id) of the last row a pass read.
+type DueDunningCursor struct {
+	DueAt time.Time
+	ID    uuid.UUID
+}
+
+// DueDunningCursorOf is the cursor after sub: the instant it came due, as
+// ListDueDunningSubscriptions orders it.
+func DueDunningCursorOf(sub *models.Subscription) DueDunningCursor {
+	due := sub.NextRetryAt
+	switch {
+	case sub.Status == models.StatusAwaitingMethod:
+		due = sub.GraceEndsAt
+	case sub.CollectionPolicy == models.CollectionPolicyEngine && sub.Status == models.StatusActive:
+		due = sub.CurrentPeriodEndsAt
+	}
+	var at time.Time
+	if due != nil {
+		at = *due
+	}
+	return DueDunningCursor{DueAt: at, ID: sub.ID}
+}
+
+// ListDueDunningSubscriptions returns one page of the merchant's due dunning
+// work after the cursor (nil: from the start), with Price and PaymentMethod
+// attached. includeEngine adds engine memberships whose wait for a card ended;
+// admitEngine adds engine renewals due for admission.
+func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rails []string, now time.Time, includeEngine, admitEngine bool, after *DueDunningCursor) ([]models.Subscription, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return nil, scopeErr
 	}
-	rows, err := r.db.Gen(ctx).ListDueDunningSubscriptions(ctx, gen.ListDueDunningSubscriptionsParams{
+	params := gen.ListDueDunningSubscriptionsParams{
 		IncludeEngine: includeEngine,
+		AdmitEngine:   admitEngine,
 		MerchantID:    scopeMerchantID.UUID(),
 		Rails:         rails,
 		Now:           now,
 		RowLimit:      DueDunningBatch,
-	})
+	}
+	if after != nil {
+		params.AfterDueAt, params.AfterID = &after.DueAt, after.ID
+	}
+	rows, err := r.db.Gen(ctx).ListDueDunningSubscriptions(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -816,16 +844,20 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rail
 	return out, nil
 }
 
+// RebillCutoffs are the latest period ends each owner's rebill is overdue by:
+// engine renewals of the due pass, Solana's of the crank, and NMI schedules.
+type RebillCutoffs struct{ Engine, Solana, NMI time.Time }
+
 // ListOverdueRebills returns auto-renewing subscriptions whose period ended
 // before its owner's cutoff with neither an attempt nor a recorded miss for
 // that cycle.
-func (r *SubscriptionRepo) ListOverdueRebills(ctx context.Context, engineCutoff, nmiCutoff time.Time) ([]*models.Subscription, error) {
+func (r *SubscriptionRepo) ListOverdueRebills(ctx context.Context, cutoffs RebillCutoffs) ([]*models.Subscription, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return nil, scopeErr
 	}
 	rows, err := r.db.Gen(ctx).ListOverdueRebills(ctx, gen.ListOverdueRebillsParams{
-		MerchantID: scopeMerchantID.UUID(), EngineCutoff: engineCutoff, NmiCutoff: nmiCutoff, RowLimit: DueDunningBatch,
+		MerchantID: scopeMerchantID.UUID(), EngineCutoff: cutoffs.Engine, SolanaCutoff: cutoffs.Solana, NmiCutoff: cutoffs.NMI, RowLimit: DueDunningBatch,
 	})
 	if err != nil {
 		return nil, err

@@ -156,7 +156,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addTrackedWorker(r, workers, &riverjobs.OrderExpiryWorker{DB: r.DB, Orders: r.Orders, Clock: clock}); err != nil {
 		return fmt.Errorf("add order expiry worker: %w", err)
 	}
-	// Flushes the Redis admission-denial counters to PG hourly aggregates.
+	// Flushes closed hours of the Redis admission-denial counters to PG.
 	// Redis may be nil (no-admission deployments); the worker no-ops then.
 	if err := addTrackedWorker(r, workers, &riverjobs.AdmissionDenialFlushWorker{
 		DB:    r.DB,
@@ -184,7 +184,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// Accepted operations carry their own durable River lifecycle job.
 	if err := addTrackedWorker(r, workers, &riverjobs.ProviderOperationWorker{
-		DB: r.DB, Config: r.Config, Clock: clock, Registry: intentRegistry, Admissions: r.DestructiveAdmissions,
+		DB: r.DB, Config: r.Config, Clock: clock, Runner: r.intentRunner(intentRegistry, clock),
 	}); err != nil {
 		return fmt.Errorf("add provider operation worker: %w", err)
 	}
@@ -342,28 +342,21 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		// The account-updater batch submit is a paid provider write, so it
 		// rides the intent ledger too.
 		intents.NewAccountUpdaterBatchHandler(r.DB, r.Config, r.RailConfigs, clock),
+		// Write-through kinds live with their domain services, which every
+		// worker runtime has (validateBillingWorkerRuntime): an accepted
+		// operation of an unregistered kind would never run.
+		payment.NewNMISaleIntentHandler(r.PurchaseService.NMISaleService),
+		payment.NewCustodianSaleIntentHandler(r.PurchaseService.CustodianSaleService),
+		payment.NewInitialMembershipIntentHandler(r.PurchaseService, r.CollectionResolver),
+		payment.NewNMIUpgradeIntentHandler(r.PurchaseService),
+		payment.NewStripeTierChangeIntentHandler(r.PurchaseService),
+		// Durable user-initiated vault writes; a handler with no rail client
+		// parks rather than fails.
+		intents.NewNMIPaymentMethodDeleteHandler(r.DB, r.RailPaymentMethodService, clock),
+		intents.NewHyperSwitchMethodDeleteHandler(r.DB, r.RailPaymentMethodService, clock),
+		intents.NewPlatformMethodDeleteHandler(r.DB, r.RailPaymentMethodService, clock),
+		intents.NewNMICardVaultHandler(r.DB, r.RailPaymentMethodService, intents.NewStore(r.DB), r.Posture(), clock),
 	)
-	// Write-through kinds live with their domain services and register only
-	// when those are wired (worker-only runtimes may lack them).
-	if r.PurchaseService != nil {
-		if r.PurchaseService.NMISaleService != nil {
-			registry.Register(payment.NewNMISaleIntentHandler(r.PurchaseService.NMISaleService))
-		}
-		if r.PurchaseService.CustodianSaleService != nil {
-			registry.Register(payment.NewCustodianSaleIntentHandler(r.PurchaseService.CustodianSaleService))
-		}
-		registry.Register(payment.NewInitialMembershipIntentHandler(r.PurchaseService, r.CollectionResolver))
-		registry.Register(payment.NewNMIUpgradeIntentHandler(r.PurchaseService))
-		registry.Register(payment.NewStripeTierChangeIntentHandler(r.PurchaseService))
-	}
-	// Durable user-initiated vault writes; a handler with no rail client parks
-	// rather than fails.
-	if r.RailPaymentMethodService != nil {
-		registry.Register(intents.NewNMIPaymentMethodDeleteHandler(r.DB, r.RailPaymentMethodService, r.Clock))
-		registry.Register(intents.NewHyperSwitchMethodDeleteHandler(r.DB, r.RailPaymentMethodService, clock))
-		registry.Register(intents.NewPlatformMethodDeleteHandler(r.DB, r.RailPaymentMethodService, clock))
-		registry.Register(intents.NewNMICardVaultHandler(r.DB, r.RailPaymentMethodService, intents.NewStore(r.DB), r.Posture(), clock))
-	}
 	// Solana recurring pull: the handler wraps the crank with a pre-submit
 	// signature write-ahead and chain-read verification. Its core worker has no
 	// Intents runner: the handler is the execution path, and a runner would recurse.
@@ -453,6 +446,12 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 	}
 	if r.WebhookDispatcher == nil {
 		return fmt.Errorf("billing worker runtime webhook dispatcher is required")
+	}
+	if r.PurchaseService == nil || r.PurchaseService.NMISaleService == nil || r.PurchaseService.CustodianSaleService == nil {
+		return fmt.Errorf("billing worker runtime purchase service is required")
+	}
+	if r.RailPaymentMethodService == nil {
+		return fmt.Errorf("billing worker runtime payment method service is required")
 	}
 	return nil
 }
@@ -622,11 +621,11 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 	// Every hour: crank due Solana recurring subscriptions. The next_pull_at
 	// due-query, not the tick, follows the billing cadence.
 	jobs = append(jobs, r.healthPeriodic(cfg,
-		time.Hour,
+		riverjobs.SolanaCrankInterval,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.SolanaCrankArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.SolanaCrankInterval},
 			}
 		},
 		nil,
@@ -711,13 +710,15 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 		nil,
 	))
 
-	// Every 5 minutes: flush admission-denial counters from Redis to PG.
+	// Hourly: flush the closed hours' admission-denial counters from this
+	// fleet's Redis to PG. Each fleet flushes its own Redis; a shared one is
+	// flushed to the same values.
 	jobs = append(jobs, r.fleetPeriodic(cfg,
-		5*time.Minute,
+		riverjobs.AdmissionDenialFlushInterval,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.AdmissionDenialFlushArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.AdmissionDenialFlushInterval},
 			}
 		},
 		nil,

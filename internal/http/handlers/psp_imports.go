@@ -1,15 +1,15 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pspimport"
-	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
 func pspImporter(r *httprequest.Request) (*pspimport.Importer, bool) {
@@ -32,28 +32,22 @@ func CreatePSPImport(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	ctx := r.Request.Context()
-	out, err := im.Create(ctx, params)
+	out, err := im.Create(r.Request.Context(), params)
 	if err != nil {
-		writeRefusal(r, err, "PSP import failed")
-		return
-	}
-	if !queuePSPImport(r, im, out.ID, pspimport.StepPull) {
+		writePSPImportRefusal(r, err, "PSP import failed")
 		return
 	}
 	r.JSON(http.StatusAccepted, out)
 }
 
-// queuePSPImport queues a step; an import whose job cannot queue is failed.
-func queuePSPImport(r *httprequest.Request, im *pspimport.Importer, id billing.PSPImportID, step pspimport.Step) bool {
-	ctx := r.Request.Context()
-	mid, _ := merchant.FromContext(ctx)
-	if _, err := riverjobs.EnqueuePSPImport(ctx, r.State.RiverProducer, mid, id, step); err != nil {
-		_ = im.Fail(ctx, id, fmt.Errorf("the %s job could not be queued", step))
+// writePSPImportRefusal answers a step that could not be queued as
+// unavailable: nothing of it was kept.
+func writePSPImportRefusal(r *httprequest.Request, err error, internalMessage string) {
+	if errors.Is(err, db.ErrNoRiverProducer) {
 		r.ErrorCode(billing.CodeServiceUnavailable, "PSP import unavailable: no job runner")
-		return false
+		return
 	}
-	return true
+	writeRefusal(r, err, internalMessage)
 }
 
 func ListPSPImports(r *httprequest.Request) {
@@ -238,10 +232,7 @@ func ApplyPSPImport(r *httprequest.Request) {
 	}
 	out, err := im.RequestApply(ctx, id)
 	if err != nil {
-		writeRefusal(r, err, "PSP import apply failed")
-		return
-	}
-	if !queuePSPImport(r, im, id, pspimport.StepApply) {
+		writePSPImportRefusal(r, err, "PSP import apply failed")
 		return
 	}
 	r.JSON(http.StatusAccepted, out)

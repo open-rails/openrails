@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -67,6 +68,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 
 	expired := map[string]int64{}
 	var customers int
+	var workErr error
 	for _, merchantID := range merchantIDs {
 		progress.Mark(ctx, "credit expiry merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(merchantID), "credit expiry sweep", func(ctx context.Context) error {
@@ -104,10 +106,8 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			}
 			return nil
 		}); err != nil {
-			// One merchant's failure must not abort the rest of the sweep.
-			logger.WithError(err).WithField("merchant_id", merchantID).
-				Error("credit expiry: merchant pass failed; continuing")
-			continue
+			// One merchant's failure never stops the others; the job reports them all.
+			workErr = errors.Join(workErr, fmt.Errorf("credit expiry: merchant %s: %w", merchantID, err))
 		}
 	}
 	if len(expired) > 0 {
@@ -115,6 +115,5 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			"merchants": len(merchantIDs), "customers": customers, "expired": moneyutil.FormatAmounts(expired),
 		}).Info("clawed back lapsed credit-lot remainders")
 	}
-
-	return nil
+	return workErr
 }

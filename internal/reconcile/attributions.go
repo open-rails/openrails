@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,9 +30,7 @@ const (
 	// attributionIndexLag: a just-declared id the provider has not indexed
 	// is asked for again until this has passed.
 	attributionIndexLag = 48 * time.Hour
-	// attributionUnreadable defers a rail OpenRails cannot yet read by id.
-	attributionUnreadable = 24 * time.Hour
-	attributionBatch      = 1000
+	attributionBatch    = 1000
 )
 
 // RecordUnverifiedTransaction keeps a declared charge as evidence: a finding,
@@ -87,9 +86,9 @@ type AttributionResult struct{ Resolved, Unresolvable, Deferred int }
 // provider, nmi.MaxQueryIDs per read, and records each approved charge on its
 // declared subscription through the same writer a pull uses: settled history
 // before the accepted schedule, or the cycle it settles. A missing, declined
-// or unplaceable charge records no payment and becomes a finding. A failed
-// read defers the PSP's rows with backoff. Only due rows are read, each once,
-// up to limit rows a pass.
+// or unplaceable charge records no payment and becomes a finding, as does one
+// on a rail OpenRails cannot read by id. A failed read defers the PSP's rows
+// with backoff. Only due rows are read, each once, up to limit rows a pass.
 func ResolveChargeAttributions(ctx context.Context, database *db.DB, merchantID uuid.UUID, reader func(context.Context, uuid.UUID) (AttributionReader, error), now time.Time, limit int) (AttributionResult, error) {
 	var res AttributionResult
 	q := database.Gen(ctx)
@@ -117,10 +116,12 @@ func ResolveChargeAttributions(ctx context.Context, database *db.DB, merchantID 
 		}
 		for _, psp := range order {
 			pending := byPSP[psp]
-			if rails[psp] != string(models.RailNMI) {
-				// CCBill attributions wait for a DataLink reader.
-				if err := deferAttributions(ctx, q, pending, now.Add(attributionUnreadable), now, &res); err != nil {
-					return res, err
+			if rail := rails[psp]; rail != string(models.RailNMI) {
+				// Only NMI is read by id: another rail's charge stays evidence.
+				for _, r := range pending {
+					if err := unresolvableAttribution(ctx, q, r, "OpenRails cannot read "+cmp.Or(rail, "this PSP's")+" charges by id", now, &res); err != nil {
+						return res, err
+					}
 				}
 				continue
 			}
@@ -161,6 +162,16 @@ func attributionBackoff(attempts int32) time.Duration {
 	return min(wait, 24*time.Hour)
 }
 
+// unresolvableAttribution closes an attribution that records no payment and
+// keeps its charge as a finding.
+func unresolvableAttribution(ctx context.Context, q *gen.Queries, r gen.BillingProviderChargeAttribution, reason string, now time.Time, res *AttributionResult) error {
+	if _, err := q.MarkChargeAttributionUnresolvable(ctx, gen.MarkChargeAttributionUnresolvableParams{MerchantID: r.MerchantID, PspID: r.PspID, TransactionID: r.TransactionID, Reason: reason, Now: now}); err != nil {
+		return err
+	}
+	res.Unresolvable++
+	return RecordUnverifiedTransaction(ctx, q, r.MerchantID, r.PspID, r.TransactionID, &r.SubscriptionID, reason)
+}
+
 func deferAttributions(ctx context.Context, q *gen.Queries, rows []gen.BillingProviderChargeAttribution, next, now time.Time, res *AttributionResult) error {
 	for _, r := range rows {
 		if _, err := q.DeferChargeAttribution(ctx, gen.DeferChargeAttributionParams{MerchantID: r.MerchantID, PspID: r.PspID, TransactionID: r.TransactionID, NextAttemptAt: next, Now: now}); err != nil {
@@ -179,13 +190,7 @@ func resolveAttributions(ctx context.Context, database *db.DB, rows []gen.Billin
 	}
 	q := database.Gen(ctx)
 	for _, r := range rows {
-		unresolvable := func(reason string) error {
-			if _, err := q.MarkChargeAttributionUnresolvable(ctx, gen.MarkChargeAttributionUnresolvableParams{MerchantID: r.MerchantID, PspID: r.PspID, TransactionID: r.TransactionID, Reason: reason, Now: now}); err != nil {
-				return err
-			}
-			res.Unresolvable++
-			return RecordUnverifiedTransaction(ctx, q, r.MerchantID, r.PspID, r.TransactionID, &r.SubscriptionID, reason)
-		}
+		unresolvable := func(reason string) error { return unresolvableAttribution(ctx, q, r, reason, now, res) }
 		t, ok := found[r.TransactionID]
 		if !ok {
 			if r.DeclaredAt != nil && now.Sub(*r.DeclaredAt) < attributionIndexLag {

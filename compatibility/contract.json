@@ -1807,6 +1807,7 @@
       "type position struct {\n\tRank int32     `json:\"r\"`\n\tAt   time.Time `json:\"t\"`\n\tID   uuid.UUID `json:\"i\"`\n}"
     ],
     "internal/pspimport": [
+      "type JobArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tImportID   uuid.UUID `json:\"import_id\"`\n\tStep       Step      `json:\"step\"`\n}",
       "type cardData struct {\n\tMethodRef string `json:\"method_ref\"`\n\tPrimary   bool   `json:\"primary,omitempty\"`\n\tBrand     string `json:\"brand,omitempty\"`\n\tLast4     string `json:\"last4,omitempty\"`\n\tExpMonth  int    `json:\"exp_month,omitempty\"`\n\tExpYear   int    `json:\"exp_year,omitempty\"`\n}",
       "type customerData struct {\n\tCards []cardData `json:\"cards\"`\n}",
       "type recordPosition struct {\n\tID uuid.UUID `json:\"i\"`\n}",
@@ -1868,7 +1869,6 @@
       "type CatalogReconciliationPullArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\" river:\"unique\"`\n}",
       "type DestructiveAlertArgs struct {\n\tMerchantID uuid.UUID            `json:\"merchant_id\"`\n\tHoldID     uuid.UUID            `json:\"hold_id\"`\n\tScope      string               `json:\"scope\"`\n\tOpenedAt   time.Time            `json:\"opened_at\"`\n\tChannel    *alerting.ChannelRef `json:\"channel,omitempty\"`\n}",
       "type DunningArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\"`\n}",
-      "type PSPImportArgs struct {\n\tMerchantID uuid.UUID      `json:\"merchant_id\"`\n\tImportID   uuid.UUID      `json:\"import_id\"`\n\tStep       pspimport.Step `json:\"step\"`\n}",
       "type ProviderRefreshMerchantArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\n\tRequested bool `json:\"requested,omitempty\" river:\"unique\"`\n}",
       "type SolanaPullAgreement struct {\n\tFingerprint           int64                     `json:\"plan_fingerprint\"`\n\tRow                   models.SolanaSubscription `json:\"row\"`\n\tPriceID               uuid.UUID                 `json:\"price_id\"`\n\tProductID             uuid.UUID                 `json:\"product_id\"`\n\tCustomerID            uuid.UUID                 `json:\"customer_id\"`\n\tDescription           string                    `json:\"description\"`\n\tAmount                int64                     `json:\"amount,string\"`\n\tCurrency              string                    `json:\"currency\"`\n\tNativeDecimals        int                       `json:\"native_decimals\"`\n\tTokenAmount           uint64                    `json:\"token_amount,string\"`\n\tTokenDecimals         int                       `json:\"token_decimals\"`\n\tPeriodHours           uint64                    `json:\"period_hours,string\"`\n\tAccessDurationHours   *int                      `json:\"access_duration_hours\"`\n\tProviderAccessDefault bool                      `json:\"provider_access_default,omitempty\"`\n\tQuantity              *int                      `json:\"quantity\"`\n\tRetryAttempts         int                       `json:\"retry_attempts\"`\n\tEpisodeAt             time.Time                 `json:\"episode_at\"`\n\tPreviousPeriodEnd     *time.Time                `json:\"previous_period_end\"`\n}",
       "type SolanaPullPayload struct {\n\tAgreement       *SolanaPullAgreement `json:\"agreement,omitempty\"`\n\tSubscriptionPDA string               `json:\"subscription_pda\"`\n\tRowID           uuid.UUID            `json:\"row_id\"`\n\tNextPullAt      time.Time            `json:\"next_pull_at\"`\n}",
@@ -4372,6 +4372,7 @@
       "merchants": "github.com/open-rails/openrails/internal/merchants",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
+      "river": "github.com/riverqueue/river",
       "sort": "sort",
       "strings": "strings",
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
@@ -4697,15 +4698,6 @@
       "v5": "github.com/jackc/pgx/v5",
       "webhookhealth": "github.com/open-rails/openrails/internal/modules/webhookhealth",
       "writeposture": "github.com/open-rails/openrails/internal/writeposture"
-    },
-    "internal/river/jobs_psp_import.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "errors": "errors",
-      "pspimport": "github.com/open-rails/openrails/internal/pspimport",
-      "river": "github.com/riverqueue/river",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/river/jobs_solana_pull_intent.go": {
       "context": "context",

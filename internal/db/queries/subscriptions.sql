@@ -368,11 +368,13 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = 
 -- CROSS-MERCHANT: merchants with due dunning work on the named rails. Three
 -- legs, each served by its own partial index so a pass reads only due rows:
 -- provider-billed NMI retries, expired awaiting_method grace, and engine
--- collections due. Ids only; due rows and charges run per merchant.
+-- collections due (admit_engine false while admissions are held). Ids only, in
+-- id order after a cursor, so a pass reaches every merchant; due rows and
+-- charges run per merchant.
 -- name: ListDueDunningMerchants :many
 SELECT d.merchant_id
 FROM (
-    SELECT s.merchant_id, s.next_retry_at AS due_at
+    SELECT s.merchant_id
       FROM billing.subscriptions s
      WHERE s.status = 'past_due' AND s.next_retry_at IS NOT NULL
        AND s.next_retry_at <= sqlc.arg(now)::timestamptz
@@ -380,7 +382,7 @@ FROM (
        AND s.collection_policy <> 'engine'
        AND s.deleted_at IS NULL
     UNION ALL
-    SELECT s.merchant_id, s.grace_ends_at
+    SELECT s.merchant_id
       FROM billing.subscriptions s
      WHERE s.grace_ends_at IS NOT NULL
        AND s.grace_ends_at <= sqlc.arg(now)::timestamptz
@@ -390,9 +392,9 @@ FROM (
             OR (s.collection_policy = 'nmi_schedule' AND s.rail = 'nmi'))
        AND s.deleted_at IS NULL
     UNION ALL
-    SELECT s.merchant_id, CASE WHEN s.status = 'active' THEN s.current_period_ends_at ELSE s.next_retry_at END
+    SELECT s.merchant_id
       FROM billing.subscriptions s
-     WHERE sqlc.arg(include_engine)::boolean
+     WHERE sqlc.arg(admit_engine)::boolean
        AND s.collection_policy = 'engine' AND s.status IN ('active', 'past_due') AND s.deleted_at IS NULL
        AND s.current_period_ends_at <= sqlc.arg(now)::timestamptz
        AND (s.status = 'active' OR s.next_retry_at <= sqlc.arg(now)::timestamptz)
@@ -403,25 +405,30 @@ FROM (
                 AND i.intent_type = 'subscription_collection'
                 AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))
 ) d
+WHERE d.merchant_id > sqlc.arg(after_merchant_id)::uuid
 GROUP BY d.merchant_id
-ORDER BY MIN(d.due_at), d.merchant_id
+ORDER BY d.merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListDueDunningSubscriptions :many
 -- Dunning work due in one merchant (see ListDueDunningMerchants): NMI retries
 -- due, awaiting_method past grace (due to end), and engine collections due,
 -- including one whose stored method is unusable, which admission routes to
--- awaiting_method (never the default card). Most overdue first, capped; the
--- claim lease lets the next pass continue.
+-- awaiting_method (never the default card). Most overdue first, a page after
+-- the (due instant, id) cursor: a row the pass left due is behind the cursor,
+-- so it never hides later due work.
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.rail = ANY(sqlc.arg(rails)::text[])
   AND ((sub.collection_policy <> 'engine' AND sub.rail='nmi' AND sub.status='past_due' AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz)
        OR (sub.status='awaiting_method' AND sub.grace_ends_at <= sqlc.arg(now)::timestamptz
            AND ((sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine') OR (sub.collection_policy='nmi_schedule' AND sub.rail='nmi')))
-       OR (sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine' AND sub.current_period_ends_at <= sqlc.arg(now)::timestamptz
+       OR (sqlc.arg(admit_engine)::boolean AND sub.collection_policy='engine' AND sub.current_period_ends_at <= sqlc.arg(now)::timestamptz
            AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= sqlc.arg(now)::timestamptz))
            AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
   AND sub.deleted_at IS NULL
+  AND (sqlc.narg(after_due_at)::timestamptz IS NULL
+       OR (CASE WHEN sub.status='awaiting_method' THEN sub.grace_ends_at WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id)
+          > (sqlc.narg(after_due_at)::timestamptz, sqlc.arg(after_id)::uuid))
 ORDER BY CASE WHEN sub.status='awaiting_method' THEN sub.grace_ends_at WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id
 LIMIT sqlc.arg(row_limit)::int;
 

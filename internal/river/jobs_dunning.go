@@ -43,9 +43,9 @@ const (
 	// engine renewal waits past its paid-period boundary.
 	DuePassInterval = time.Minute
 
-	// dunningMerchantBatch caps how many merchants one pass fans out to. The
-	// work queue is indexed on the due-dunning predicate, so this bounds a pass
-	// by ACTIVITY, never by the size of the merchant directory.
+	// dunningMerchantBatch is one page of the merchants with due work. The
+	// work queue is indexed on the due-dunning predicate, so a pass costs its
+	// ACTIVITY, never the size of the merchant directory.
 	dunningMerchantBatch = 500
 )
 
@@ -169,22 +169,33 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 
 	// Merchants with due work come from the dunning work queue (ids only); the
 	// scan and charge run inside each merchant's scope. w.now(), not SQL NOW(),
-	// so tests can mock time.
+	// so tests can mock time. Held admissions leave engine renewals unselected:
+	// they wait, untouched, until the hold lifts.
 	nmiRails := []string{string(models.RailNMI)}
 	if w.EngineCollections != nil {
 		nmiRails = append(nmiRails, string(models.RailStripe))
 	}
+	includeEngine := w.EngineCollections != nil
+	admitEngine := includeEngine && (w.Config == nil || !w.Config.EngineAdmissionHold)
+	now := w.now()
 	var merchantIDs []uuid.UUID
-	var err error
 	if job.Args.MerchantID != uuid.Nil {
 		merchantIDs = []uuid.UUID{job.Args.MerchantID}
 	} else {
-		merchantIDs, err = w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
-			Rails: nmiRails, Now: w.now(), MerchantLimit: dunningMerchantBatch, IncludeEngine: w.EngineCollections != nil,
-		})
-	}
-	if err != nil {
-		return fmt.Errorf("query merchants with due subscriptions: %w", err)
+		after := uuid.Nil
+		for {
+			page, err := w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
+				Rails: nmiRails, Now: now, MerchantLimit: dunningMerchantBatch, IncludeEngine: includeEngine, AdmitEngine: admitEngine, AfterMerchantID: after,
+			})
+			if err != nil {
+				return fmt.Errorf("query merchants with due subscriptions: %w", err)
+			}
+			merchantIDs = append(merchantIDs, page...)
+			if len(page) < dunningMerchantBatch {
+				break
+			}
+			after = page[len(page)-1]
+		}
 	}
 	if len(merchantIDs) == 0 {
 		log.WithContext(ctx).Debug("Dunning: no subscriptions due for retry")
@@ -214,16 +225,17 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		// The pin AND the proof it took: every read and write below runs under
 		// this merchant's openrails.merchant_id, exactly as a request would.
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "dunning pass", func(mctx context.Context) error {
-			dueSubscriptions, err := subscriptions.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(mctx, nmiRails, w.now(), w.EngineCollections != nil)
+			repo := subscriptions.NewSubscriptionRepo(w.DB)
+			dueSubscriptions, err := repo.ListDueDunningSubscriptions(mctx, nmiRails, now, includeEngine, admitEngine, nil)
 			if err != nil {
 				return fmt.Errorf("query due subscriptions: %w", err)
 			}
-			total += len(dueSubscriptions)
 			if len(dueSubscriptions) == 0 {
 				return nil
 			}
 			posture := postures.Posture(mctx, mid)
 			if posture.ReadOnly() {
+				total += len(dueSubscriptions)
 				log.WithContext(mctx).WithFields(log.Fields{"count": len(dueSubscriptions), "reason": posture.Reason}).
 					Warn("Readonly: dunning observes due subscriptions only (no charges, no cancellations, no intents)")
 				return nil
@@ -233,37 +245,49 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 				log.WithContext(mctx).WithField("reason", posture.Reason).
 					Warn("Limited: dunning materializes decisions — stale subscriptions park as unknown, charge intents enqueue parked")
 			}
-			log.WithContext(mctx).WithFields(log.Fields{
-				"count": len(dueSubscriptions), "merchant_id": merchantID.String(),
-			}).Info("Dunning: processing due subscriptions")
 
 			var merchantErr error
-			for _, sub := range dueSubscriptions {
-				progress.Mark(mctx, "dunning subscription "+sub.ID.String())
-				outcome, processErr := w.processSubscription(mctx, &sub, lifecycle, priceSvc, materialize)
-				// One subscription's refusal never fails the pass: it becomes a
-				// standing operator finding, and the pass (every minute) tries
-				// it again with everything else.
-				if err := w.recordSubscriptionOutcome(mctx, &sub, processErr); err != nil {
-					merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, err))
+			// Page by (due instant, id): a row this pass leaves due is behind
+			// the cursor, so it never hides later due work.
+			for len(dueSubscriptions) > 0 {
+				total += len(dueSubscriptions)
+				log.WithContext(mctx).WithFields(log.Fields{
+					"count": len(dueSubscriptions), "merchant_id": merchantID.String(),
+				}).Info("Dunning: processing due subscriptions")
+				for _, sub := range dueSubscriptions {
+					progress.Mark(mctx, "dunning subscription "+sub.ID.String())
+					outcome, processErr := w.processSubscription(mctx, &sub, lifecycle, priceSvc, materialize)
+					// One subscription's refusal never fails the pass: it becomes a
+					// standing operator finding, and the pass (every minute) tries
+					// it again with everything else.
+					if err := w.recordSubscriptionOutcome(mctx, &sub, processErr); err != nil {
+						merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, err))
+					}
+					// Re-converge this customer after the dunning transition.
+					// Best-effort: a convergence error must not fail the run.
+					if _, cerr := converge.AfterMutation(mctx, w.DB, billing.MerchantID(sub.MerchantID), sub.CustomerID, w.Clock); cerr != nil {
+						log.WithContext(mctx).WithError(cerr).WithField("subscription_id", sub.ID).
+							Warn("Dunning: inline converge failed; the sweep will reconcile")
+					}
+					switch outcome {
+					case dunningOutcomeSucceeded:
+						successCount++
+					case dunningOutcomeWindowExpired:
+						windowExpiredCount++
+					case dunningOutcomeMaterialized:
+						materializedCount++
+					case dunningOutcomeSettled:
+						settledCount++
+					default:
+						failCount++
+					}
 				}
-				// Re-converge this customer after the dunning transition.
-				// Best-effort: a convergence error must not fail the run.
-				if _, cerr := converge.AfterMutation(mctx, w.DB, billing.MerchantID(sub.MerchantID), sub.CustomerID, w.Clock); cerr != nil {
-					log.WithContext(mctx).WithError(cerr).WithField("subscription_id", sub.ID).
-						Warn("Dunning: inline converge failed; the sweep will reconcile")
+				if len(dueSubscriptions) < subscriptions.DueDunningBatch {
+					break
 				}
-				switch outcome {
-				case dunningOutcomeSucceeded:
-					successCount++
-				case dunningOutcomeWindowExpired:
-					windowExpiredCount++
-				case dunningOutcomeMaterialized:
-					materializedCount++
-				case dunningOutcomeSettled:
-					settledCount++
-				default:
-					failCount++
+				cursor := subscriptions.DueDunningCursorOf(&dueSubscriptions[len(dueSubscriptions)-1])
+				if dueSubscriptions, err = repo.ListDueDunningSubscriptions(mctx, nmiRails, now, includeEngine, admitEngine, &cursor); err != nil {
+					return errors.Join(merchantErr, fmt.Errorf("query due subscriptions: %w", err))
 				}
 			}
 			return merchantErr
@@ -333,9 +357,8 @@ func (w *DunningWorker) processSubscription(
 		return dunningOutcomeWindowExpired, nil
 	}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
-		// System and operator stops hold the renewal: access is kept and
-		// life.renewal.held reports it.
-		if w.EngineCollections == nil || (w.Config != nil && w.Config.EngineAdmissionHold) {
+		// The due query selects no engine renewal while admissions are held.
+		if w.EngineCollections == nil {
 			return dunningOutcomeFailed, nil
 		}
 		_, err := w.EngineCollections.AdmitDueSubscriptionCollection(ctx, sub.ID, w.now())

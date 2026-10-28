@@ -55,6 +55,8 @@ func (s *PriceMigrationService) RedriveBlocked(ctx context.Context, batchSize in
 		return nil, fmt.Errorf("redrive: list merchants: %w", err)
 	}
 	res := &PriceMigrationRedriveResult{}
+	// One merchant's failure never stops the others; the pass reports them all.
+	var passErr error
 	for _, mid := range merchantIDs {
 		if res.Examined >= batchSize {
 			break
@@ -63,13 +65,13 @@ func (s *PriceMigrationService) RedriveBlocked(ctx context.Context, batchSize in
 		if err := s.db.RunInMerchantScope(ctx, billing.MerchantID(mid), "price-migration re-driver",
 			func(ctx context.Context) error { return s.redriveMerchant(ctx, res, remaining) },
 		); err != nil {
-			return res, err
+			passErr = errors.Join(passErr, fmt.Errorf("merchant %s: %w", mid, err))
 		}
 	}
 	if err := s.finishSettledMigrations(ctx, batchSize); err != nil {
-		return res, err
+		passErr = errors.Join(passErr, err)
 	}
-	return res, nil
+	return res, passErr
 }
 
 func (s *PriceMigrationService) redriveMerchant(ctx context.Context, res *PriceMigrationRedriveResult, limit int) error {

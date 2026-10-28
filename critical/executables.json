@@ -514,6 +514,27 @@
     ],
     "OR-J12-S07": [
       "TestMerchantCardRemoval/OR-J12-S07/merchant-card-removal-keeps-customer-scope"
+    ],
+    "OR-J04-S07": [
+      "TestBackgroundJobs/OR-J04-S07/host-worker-on-the-composed-fleet-is-rescued-after-a-crash"
+    ],
+    "OR-J23-S06": [
+      "TestBackgroundJobs/OR-J23-S06/denials-count-each-closed-hour-once"
+    ],
+    "OR-J29-S07": [
+      "TestBackgroundJobs/OR-J29-S07/one-merchants-failed-pass-fails-the-job-after-the-others-finish"
+    ],
+    "OR-J37-S06": [
+      "TestBackgroundJobs/OR-J37-S06/solana-renewal-waits-for-the-crank-before-a-missed-rebill"
+    ],
+    "OR-J21-S05": [
+      "TestBackgroundJobs/OR-J21-S05/unreadable-rail-charge-attribution-becomes-a-finding"
+    ],
+    "OR-J06-S07": [
+      "TestBackgroundJobs/OR-J06-S07/psp-import-commits-with-its-job"
+    ],
+    "OR-J15-S05": [
+      "TestBackgroundJobs/OR-J15-S05/attempts-of-a-psp-without-credentials-are-given-up"
     ]
   },
   "suites": {

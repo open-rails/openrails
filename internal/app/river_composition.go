@@ -77,9 +77,6 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 				return fmt.Errorf("required River queue %q is disabled", name)
 			}
 		}
-		if cfg.JobTimeout == 0 {
-			cfg.JobTimeout = riverNoJobTimeout
-		}
 		r.ProviderRefreshQueue = refreshQueue
 		if err := r.addBillingWorkersToRegistry(ctx, cfg.Workers, refreshQueue); err != nil {
 			return err

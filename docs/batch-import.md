@@ -173,7 +173,8 @@ reads each one from NMI's Query API once, by transaction id, and records the
 provider's exact amount and time; a provider pull that reads the id binds it
 to the same subscription. An id NMI does not have, or reports declined or
 voided, records no payment and becomes a `life.import.transaction_unverified`
-finding. CCBill attributions are kept until a DataLink reader resolves them.
+finding. OpenRails reads only NMI by id: a CCBill attribution becomes that
+finding on its first read, and a provider pull that reads the id still binds it.
 Every path records a provider transaction once, by (psp, transaction_id).
 
 ### The migration playbook

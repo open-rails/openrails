@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
@@ -32,12 +31,13 @@ func workerNow(c clockwork.Clock) time.Time {
 // authorization, submission fences, provider evidence, and final accounting.
 type ProviderOperationWorker struct {
 	river.WorkerDefaults[intents.OperationArgs]
-	DB             *db.DB
-	Config         *config.Config
-	Clock          clockwork.Clock
-	Registry       *intents.Registry
-	MutationLogger intents.MutationLogger
-	Admissions     *destructive.Admissions
+	DB     *db.DB
+	Config *config.Config
+	Clock  clockwork.Clock
+	// Runner is the runtime's shared intent runner: the registry, gates and
+	// card-abuse accounting every executor uses. Each job runs a copy that
+	// carries its own successor hook.
+	Runner *intents.Runner
 }
 
 func (ProviderOperationWorker) Kind() string { return intents.OperationJobKind }
@@ -61,12 +61,13 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 	if job == nil || job.Args.MerchantID == uuid.Nil || job.Args.IntentID == uuid.Nil {
 		return river.JobCancel(fmt.Errorf("provider operation requires merchant and operation ids"))
 	}
-	if w.DB == nil || w.Registry == nil {
+	if w.DB == nil || w.Runner == nil {
 		return river.JobSnooze(operationInfrastructureRetry)
 	}
 	args := job.Args
 	store := intents.NewStore(w.DB)
-	runner := &intents.Runner{Store: store, Registry: w.Registry, Config: writeposture.View{Config: w.Config, DB: w.DB}, Clock: w.Clock, Logger: w.MutationLogger, Breaker: intents.NewVolumeBreaker(w.DB), Destructive: destructive.New(w.DB), Admissions: w.Admissions}
+	shared := *w.Runner
+	runner := &shared
 	runner.OnSuccessorCommitted = func(mid, id uuid.UUID) {
 		if mid == args.MerchantID && id == args.IntentID {
 			successorCommitted = true

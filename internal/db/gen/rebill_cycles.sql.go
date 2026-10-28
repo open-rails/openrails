@@ -15,7 +15,7 @@ import (
 const countOpenSubscriptionCollections = `-- name: CountOpenSubscriptionCollections :one
 SELECT count(*) FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
-  AND intent_type = 'subscription_collection' AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+  AND intent_type IN ('subscription_collection', 'solana_pull') AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
 `
 
 type CountOpenSubscriptionCollectionsParams struct {
@@ -23,7 +23,8 @@ type CountOpenSubscriptionCollectionsParams struct {
 	SubscriptionID uuid.UUID
 }
 
-// An engine renewal still being attempted decides its cycle itself.
+// An engine renewal still being attempted (a collection, or a Solana pull)
+// decides its cycle itself.
 func (q *Queries) CountOpenSubscriptionCollections(ctx context.Context, arg CountOpenSubscriptionCollectionsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countOpenSubscriptionCollections, arg.MerchantID, arg.SubscriptionID)
 	var count int64
@@ -82,8 +83,9 @@ const listOverdueRebillMerchants = `-- name: ListOverdueRebillMerchants :many
 SELECT s.merchant_id
 FROM billing.subscriptions s
 WHERE s.status IN ('active', 'unverified', 'awaiting_method') AND s.deleted_at IS NULL
-  AND ((s.collection_policy = 'engine' AND s.current_period_ends_at <= $1::timestamptz)
-       OR (s.collection_policy = 'nmi_schedule' AND s.current_period_ends_at <= $2::timestamptz))
+  AND ((s.collection_policy = 'engine' AND s.rail <> 'solana' AND s.current_period_ends_at <= $1::timestamptz)
+       OR (s.collection_policy = 'engine' AND s.rail = 'solana' AND s.current_period_ends_at <= $2::timestamptz)
+       OR (s.collection_policy = 'nmi_schedule' AND s.current_period_ends_at <= $3::timestamptz))
   AND NOT EXISTS (
       SELECT 1 FROM billing.rebill_cycles c
        WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at
@@ -94,19 +96,26 @@ WHERE s.status IN ('active', 'unverified', 'awaiting_method') AND s.deleted_at I
        WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at)
 GROUP BY s.merchant_id
 ORDER BY MIN(s.current_period_ends_at), s.merchant_id
-LIMIT $3::int
+LIMIT $4::int
 `
 
 type ListOverdueRebillMerchantsParams struct {
 	EngineCutoff  time.Time
+	SolanaCutoff  time.Time
 	NmiCutoff     time.Time
 	MerchantLimit int32
 }
 
 // CROSS-MERCHANT: merchants holding a subscription whose period ended before its
 // owner's deadline with neither an attempt nor a recorded miss for that cycle.
+// Solana engine renewals come from the crank and have their own deadline.
 func (q *Queries) ListOverdueRebillMerchants(ctx context.Context, arg ListOverdueRebillMerchantsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listOverdueRebillMerchants, arg.EngineCutoff, arg.NmiCutoff, arg.MerchantLimit)
+	rows, err := q.db.Query(ctx, listOverdueRebillMerchants,
+		arg.EngineCutoff,
+		arg.SolanaCutoff,
+		arg.NmiCutoff,
+		arg.MerchantLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -129,8 +138,9 @@ const listOverdueRebills = `-- name: ListOverdueRebills :many
 SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot FROM billing.subscriptions sub
 WHERE sub.merchant_id = $1::uuid
   AND sub.status IN ('active', 'unverified', 'awaiting_method') AND sub.deleted_at IS NULL
-  AND ((sub.collection_policy = 'engine' AND sub.current_period_ends_at <= $2::timestamptz)
-       OR (sub.collection_policy = 'nmi_schedule' AND sub.current_period_ends_at <= $3::timestamptz))
+  AND ((sub.collection_policy = 'engine' AND sub.rail <> 'solana' AND sub.current_period_ends_at <= $2::timestamptz)
+       OR (sub.collection_policy = 'engine' AND sub.rail = 'solana' AND sub.current_period_ends_at <= $3::timestamptz)
+       OR (sub.collection_policy = 'nmi_schedule' AND sub.current_period_ends_at <= $4::timestamptz))
   -- Separate anti-joins: an EXISTS under OR plans as a hash of every merchant's attempts.
   AND NOT EXISTS (
       SELECT 1 FROM billing.rebill_cycles c
@@ -141,12 +151,13 @@ WHERE sub.merchant_id = $1::uuid
         JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
        WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at)
 ORDER BY sub.current_period_ends_at, sub.id
-LIMIT $4::int
+LIMIT $5::int
 `
 
 type ListOverdueRebillsParams struct {
 	MerchantID   uuid.UUID
 	EngineCutoff time.Time
+	SolanaCutoff time.Time
 	NmiCutoff    time.Time
 	RowLimit     int32
 }
@@ -157,6 +168,7 @@ func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebills
 	rows, err := q.db.Query(ctx, listOverdueRebills,
 		arg.MerchantID,
 		arg.EngineCutoff,
+		arg.SolanaCutoff,
 		arg.NmiCutoff,
 		arg.RowLimit,
 	)

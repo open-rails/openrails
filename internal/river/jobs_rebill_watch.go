@@ -34,6 +34,11 @@ const (
 	// EngineRebillDeadline: the due pass admits an engine renewal within
 	// minutes of its boundary.
 	EngineRebillDeadline = time.Hour
+	// SolanaRebillDeadline: a Solana renewal is pulled by the crank, not the
+	// due pass. It starts at the first crank after its boundary, a failed
+	// crank retries at the next, and its confirmation has the engine's
+	// deadline.
+	SolanaRebillDeadline = 2*SolanaCrankInterval + EngineRebillDeadline
 	// NMIRebillDeadline: NMI charges once on the schedule day, and its Query
 	// API indexes a charge with some lag.
 	NMIRebillDeadline = 24 * time.Hour
@@ -78,9 +83,9 @@ func (RebillWatchWorker) Kind() string { return KindRebillWatch }
 
 func (w *RebillWatchWorker) Work(ctx context.Context, _ *river.Job[RebillWatchArgs]) error {
 	now := w.Clock.Now().UTC()
-	engineCutoff, nmiCutoff := now.Add(-EngineRebillDeadline), now.Add(-NMIRebillDeadline)
+	cutoffs := subscriptions.RebillCutoffs{Engine: now.Add(-EngineRebillDeadline), Solana: now.Add(-SolanaRebillDeadline), NMI: now.Add(-NMIRebillDeadline)}
 	merchantIDs, err := w.DB.GenDirectory().ListOverdueRebillMerchants(ctx, gen.ListOverdueRebillMerchantsParams{
-		EngineCutoff: engineCutoff, NmiCutoff: nmiCutoff, MerchantLimit: rebillWatchMerchantBatch,
+		EngineCutoff: cutoffs.Engine, SolanaCutoff: cutoffs.Solana, NmiCutoff: cutoffs.NMI, MerchantLimit: rebillWatchMerchantBatch,
 	})
 	if err != nil {
 		return fmt.Errorf("rebill watch: list merchants: %w", err)
@@ -88,7 +93,7 @@ func (w *RebillWatchWorker) Work(ctx context.Context, _ *river.Job[RebillWatchAr
 	var workErr error
 	for _, mid := range merchantIDs {
 		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "rebill watch", func(ctx context.Context) error {
-			subs, err := subscriptions.NewSubscriptionRepo(w.DB).ListOverdueRebills(ctx, engineCutoff, nmiCutoff)
+			subs, err := subscriptions.NewSubscriptionRepo(w.DB).ListOverdueRebills(ctx, cutoffs)
 			if err != nil {
 				return err
 			}
