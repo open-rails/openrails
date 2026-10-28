@@ -612,6 +612,18 @@
     "OR-J38-S13": [
       "TestPSPImport/OR-J38-S13/unreadable-answer-fails-visibly"
     ],
+    "OR-J38-S30": [
+      "TestMerchantConsole/OR-J38-S30/console-pull-link-map-apply-lands-once"
+    ],
+    "OR-J38-S31": [
+      "TestMerchantConsole/OR-J38-S31/console-mapping-upload-and-ccbill-price"
+    ],
+    "OR-J38-S33": [
+      "TestMerchantConsole/OR-J38-S33/console-parked-signup-lands-after-mapping"
+    ],
+    "OR-J38-S34": [
+      "TestMerchantConsole/OR-J38-S34/console-failed-pull-and-read-only-access"
+    ],
     "OR-J15-S08": [
       "TestProviderTrailing/OR-J15-S08/stripe-price-event-raises-one-finding"
     ],
@@ -679,7 +691,11 @@
       "OR-J04-S01",
       "OR-J04-S03",
       "OR-J04-S04",
-      "OR-J01-S09"
+      "OR-J01-S09",
+      "OR-J38-S30",
+      "OR-J38-S31",
+      "OR-J38-S33",
+      "OR-J38-S34"
     ]
   }
 }

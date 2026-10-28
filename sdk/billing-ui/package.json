@@ -63,7 +63,7 @@
     "lint": "eslint .",
     "test": "pnpm critical:build && cd ../.. && GOWORK=off go test -tags=integration -count=1 -p 2 -timeout 6m -run '^TestPublicSDK$' ./critical",
     "test:e2e": "pnpm test",
-    "critical:build": "pnpm build && vite build --config critical/vite.config.ts && vite build --config critical/hosted/vite.config.ts && tsc --noEmit --project critical/tsconfig.json",
+    "critical:build": "pnpm build && vite build --config critical/vite.config.ts && vite build --config critical/hosted/vite.config.ts && vite build --config critical/admin/vite.config.ts && tsc --noEmit --project critical/tsconfig.json",
     "critical:static": "pnpm typecheck && pnpm lint && tsc --noEmit --project critical/tsconfig.json && node critical/check-package.mjs",
     "contract": "cd ../.. && go run ./scripts/contracts -write",
     "contract:check": "cd ../.. && go run ./scripts/contracts",

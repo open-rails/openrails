@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 207,
+  "scenario_count": 211,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -937,6 +937,26 @@
       "id": "OR-J38-S13",
       "journey": "J38",
       "name": "A provider answer no attempt can read fails the import after five attempts with its error, deletable"
+    },
+    {
+      "id": "OR-J38-S30",
+      "journey": "J38",
+      "name": "The console shows an onboarding pull's phases to pulled; a person links one record by hand, maps the unmapped plan as an archived price and applies twice: each subscription lands once, no provider write"
+    },
+    {
+      "id": "OR-J38-S31",
+      "journey": "J38",
+      "name": "A 150-row mappings CSV goes out in two requests and deletes one mapping; re-link links by rule; a CCBill subscription two prices match lands on the price a person picks"
+    },
+    {
+      "id": "OR-J38-S33",
+      "journey": "J38",
+      "name": "An unmapped price's finding routes to provider prices; mapping a parked Stripe signup's price from the Parked page lands it once and resolves the finding"
+    },
+    {
+      "id": "OR-J38-S34",
+      "journey": "J38",
+      "name": "A refused pull shows its credentials error and settings link with no records; a configuration reader sees every console page with no action and writes nothing; Map needs catalog manage"
     },
     {
       "id": "OR-J15-S08",

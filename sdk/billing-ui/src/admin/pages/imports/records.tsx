@@ -489,8 +489,7 @@ function PriceDialog({
               <option value="">{text("Choose a price")}</option>
               {prices?.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.key} · {formatNativeAmount(p.unit_amount, p.currency)}{" "}
-                  {p.currency}
+                  {p.key} · {formatNativeAmount(p.unit_amount, p.currency)}
                   {p.archived ? ` (${text("archived")})` : ""}
                 </option>
               ))}
