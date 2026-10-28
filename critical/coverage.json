@@ -344,12 +344,12 @@
       "name": "Reversed or unrecorded existing charge is never recollected"
     },
     {
-      "id": "OR-J15-S05",
+      "id": "OR-J15-S06",
       "journey": "J15",
       "name": "Unverified subscription is read with its own PSP and a sibling account's absence cancels nothing"
     },
     {
-      "id": "OR-J15-S06",
+      "id": "OR-J15-S07",
       "journey": "J15",
       "name": "Bulk verification reads each NMI PSP's unverified rows with that PSP's own credentials"
     },
@@ -749,12 +749,12 @@
       "name": "Wrong instruction authority account stale blockhash or insufficient gas is refused safely"
     },
     {
-      "id": "OR-J37-S06",
+      "id": "OR-J37-S07",
       "journey": "J37",
       "name": "Retried recurring pull keeps its backoff and then renews the period once"
     },
     {
-      "id": "OR-J37-S07",
+      "id": "OR-J37-S08",
       "journey": "J37",
       "name": "Recurring pulls are scheduled only when a cranker is configured"
     },

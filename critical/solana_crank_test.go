@@ -16,7 +16,7 @@ import (
 )
 
 func TestSolanaCrank(t *testing.T) {
-	t.Run("OR-J37-S06/retried-pull-keeps-its-backoff-then-renews-once", func(t *testing.T) {
+	t.Run("OR-J37-S07/retried-pull-keeps-its-backoff-then-renews-once", func(t *testing.T) {
 		s := newSolanaWorld(t, true)
 		_, sub := s.subscribe(t)
 		due := *sub.CurrentPeriodEndsAt
@@ -61,7 +61,7 @@ func TestSolanaCrank(t *testing.T) {
 		require.Equal(t, sends+1, s.wire.sends())
 		require.EqualValues(t, 20_000_000, s.node.Balance(s.treasury.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))
 	})
-	t.Run("OR-J37-S07/crank-runs-only-with-a-cranker", func(t *testing.T) {
+	t.Run("OR-J37-S08/crank-runs-only-with-a-cranker", func(t *testing.T) {
 		for _, recurring := range []bool{false, true} {
 			name := "without-cranker"
 			if recurring {

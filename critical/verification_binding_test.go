@@ -144,7 +144,7 @@ func drainingStripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *
 }
 
 func TestVerificationBinding(t *testing.T) {
-	t.Run("OR-J15-S05/draining-account-is-read-with-its-own-credentials", func(t *testing.T) {
+	t.Run("OR-J15-S06/draining-account-is-read-with-its-own-credentials", func(t *testing.T) {
 		a, accounts, sub := drainingStripeMembership(t)
 		armDestructive(t, a, true)
 		old := accounts.accounts["sk_test_old"].core
@@ -223,7 +223,7 @@ func TestVerificationBinding(t *testing.T) {
 			return err == nil && current.Status == billing.SubscriptionCanceled
 		}, 30*time.Second, 50*time.Millisecond, "once allowed, the held cancel converges without another webhook")
 	})
-	t.Run("OR-J15-S06/bulk-read-binds-each-nmi-psp", func(t *testing.T) {
+	t.Run("OR-J15-S07/bulk-read-binds-each-nmi-psp", func(t *testing.T) {
 		const members = 201 // one past the bulk threshold
 		a, accounts := nmiAccountsWorld(t)
 		old := accounts.cores["nmi-old-key"]
