@@ -684,10 +684,9 @@ func (w *ProviderRefreshWorker) completeObservation(ctx context.Context, mid, ps
 		if changed == 0 {
 			return nil
 		}
-		merchantID := billing.MerchantID(mid)
 		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}}
 		if w.Config != nil && w.Config.UsageBillingEnabled {
-			jobs = append(jobs, money.UsageOrderArgs{MerchantID: &merchantID})
+			jobs = append(jobs, money.UsageOrderArgs{})
 		}
 		for _, args := range jobs {
 			// A merchant's wake is never absorbed by a scan sleeping on an

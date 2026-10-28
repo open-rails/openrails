@@ -9,12 +9,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
   AND period_starts_at = sqlc.arg(period_starts_at)::timestamptz AND period_ends_at = sqlc.arg(period_ends_at)::timestamptz;
 
 -- name: CreateUsageOrder :exec
--- An open usage order; one a funded balance already paid in full is created
+-- An open usage order, first charged at its due date when it is collected
+-- automatically; one a funded balance already paid in full is created
 -- complete, numbered.
 INSERT INTO billing.orders (
     merchant_id, id, customer_id, origin, status, payment_status, currency, total, amount_paid, number,
     period_starts_at, period_ends_at, due_at, completed_at, collection_method, po_number, memo, tax, billing_contacts,
-    collection_failure_count, created_at, updated_at
+    collection_failure_count, next_collection_attempt_at, created_at, updated_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, 'usage',
     CASE WHEN sqlc.narg(number)::bigint IS NULL THEN 'open' ELSE 'complete' END,
@@ -23,7 +24,8 @@ INSERT INTO billing.orders (
     sqlc.arg(period_starts_at)::timestamptz, sqlc.arg(period_ends_at)::timestamptz, sqlc.arg(due_at)::timestamptz,
     CASE WHEN sqlc.narg(number)::bigint IS NULL THEN NULL ELSE sqlc.arg(now)::timestamptz END,
     sqlc.arg(collection_method)::text, sqlc.narg(po_number)::text, sqlc.narg(memo)::text, sqlc.arg(tax)::jsonb, sqlc.arg(billing_contacts)::jsonb,
-    0, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
+    0, CASE WHEN sqlc.narg(number)::bigint IS NULL AND sqlc.arg(collection_method)::text = 'charge_automatically' THEN sqlc.arg(due_at)::timestamptz END,
+    sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
 );
 
 -- name: CreateUsageOrderLine :exec
@@ -74,22 +76,23 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
 GROUP BY 1
 ORDER BY 1 ASC;
 
--- name: ListChargeableUsageOrders :many
--- Open usage orders the scheduled collection charges now: charge_automatically,
--- due, on their first try or a retry that came due.
-SELECT o.id, o.customer_id, o.total - o.amount_paid AS amount_due
-FROM billing.orders o
-JOIN billing.money_settings s
-  ON s.merchant_id = o.merchant_id AND s.customer_id = o.customer_id AND s.currency = o.currency
-WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND o.origin = 'usage' AND o.status = 'open'
-  AND o.collection_method = 'charge_automatically'
-  AND o.amount_paid < o.total
-  AND s.default_payment_method_id IS NOT NULL
-  AND o.due_at <= sqlc.arg(now)::timestamptz
-  AND ((o.collection_failure_count = 0 AND o.next_collection_attempt_at IS NULL)
-       OR o.next_collection_attempt_at <= sqlc.arg(now)::timestamptz)
-ORDER BY o.due_at, o.created_at;
+-- name: ListDueUsageCollections :many
+-- CROSS-MERCHANT: open usage orders collected automatically whose next
+-- charge is due, in due order. An idle pass reads no row.
+SELECT merchant_id, id, customer_id, next_collection_attempt_at::timestamptz AS next_collection_attempt_at
+FROM billing.orders
+WHERE origin = 'usage' AND status = 'open' AND collection_method = 'charge_automatically'
+  AND next_collection_attempt_at <= sqlc.arg(now)::timestamptz
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (next_collection_attempt_at, merchant_id, id) > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_merchant_id)::uuid, sqlc.narg(after_id)::uuid))
+ORDER BY next_collection_attempt_at, merchant_id, id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ParkUsageCollection :execrows
+-- The customer has no card that can pay the order: charging waits until it
+-- designates one.
+UPDATE billing.orders SET next_collection_attempt_at = NULL, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND origin = 'usage' AND status = 'open';
 
 -- name: LockUsageOrder :one
 SELECT * FROM billing.orders
@@ -147,16 +150,17 @@ SET collection_failure_count = collection_failure_count + 1,
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND origin = 'usage' AND status = 'open';
 
 -- name: ResumeStoppedUsageCollection :execrows
--- A payer designating a collection card did what a stopped collection asked:
--- its usage orders are due again at once. Uncollectible ones need the
--- merchant, and live collections belong to their verifier.
+-- A payer designating a collection card did what a stopped or parked
+-- collection waited for: its usage orders are due again at once.
+-- Uncollectible ones need the merchant, and live collections belong to their
+-- verifier.
 UPDATE billing.orders
-SET next_collection_attempt_at = sqlc.arg(now)::timestamptz,
+SET next_collection_attempt_at = GREATEST(sqlc.arg(now)::timestamptz, due_at),
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)
   AND origin = 'usage' AND status = 'open' AND amount_paid < total
   AND collection_method = 'charge_automatically'
-  AND collection_failure_count > 0 AND next_collection_attempt_at IS NULL;
+  AND next_collection_attempt_at IS NULL;
 
 -- name: EarliestPendingOwedAccrual :one
 -- When the customer's unbilled usage in the currency began; none for none.

@@ -104,7 +104,6 @@ unbounded-many ListActiveSolanaMerchantWallets             # or#837 converge sca
 unbounded-many ReconcileListSolanaSubscriptionRefs         # or#837 converge scan
 unbounded-many ListStuckProviderIntents                        # or#837 scan of all live intents
 unbounded-many ListUsagePayers                             # or#837 aggregate over all ledger transfers and catalog usage
-unbounded-many ListChargeableUsageOrders                   # or#837 scan of all open usage orders
 unbounded-many ListUsageThresholdCandidates               # or#837 scan of every arrears payer with pending items
 
 # Unbounded fan-out: the caller's list is bounded, each element's row set is not.

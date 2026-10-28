@@ -749,6 +749,12 @@
     ],
     "OR-J26-S51": [
       "TestUsageBillingContracts/OR-J26-S51/an-overdue-order-is-told-without-automatic-usage-billing"
+    ],
+    "OR-J26-S52": [
+      "TestUsageBillingContracts/OR-J26-S52/an-account-billed-in-full-waits-for-its-next-spend"
+    ],
+    "OR-J26-S53": [
+      "TestUsageBillingContracts/OR-J26-S53/usage-pass-queues-the-charge-without-waiting-on-the-gateway"
     ]
   },
   "suites": {

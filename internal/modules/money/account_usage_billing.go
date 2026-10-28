@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -19,10 +20,11 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
-// KindUsageOrders bills, notifies and collects usage orders.
+// KindUsageOrders bills the due usage accounts and queues the due collections.
 const KindUsageOrders = "openrails.usage_orders"
 
-// UsageOrdersInterval is the deployment-wide pass's cadence.
+// UsageOrdersInterval is the pass's cadence: how long a bill date or a due
+// collection waits. A threshold crossing queues a pass at once.
 const UsageOrdersInterval = 5 * time.Minute
 
 // usageOutstanding are a pass's states before it finishes.
@@ -30,31 +32,36 @@ var usageOutstanding = []rivertype.JobState{
 	rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
 }
 
-// UsageOrderArgs is one usage-order pass: every merchant's due accounts, or
-// one merchant's after a threshold crossing. A merchant has at most one
-// outstanding wakeup, rather than a timer or job for every customer. After
-// continues a merchant's pass past a full page of due accounts.
+// UsageOrderArgs is one usage pass over every merchant: it bills the due
+// accounts, then queues the due collections. Bill or Collect continues a pass
+// past a full page.
 type UsageOrderArgs struct {
-	MerchantID *billing.MerchantID `json:"merchant_id,omitempty"`
-	After      *UsageAccount       `json:"after,omitempty"`
+	Bill    *UsageAccountKey `json:"bill,omitempty"`
+	Collect *UsageOrderKey   `json:"collect,omitempty"`
 }
 
-// UsageAccount is a customer's usage account in one currency.
-type UsageAccount struct {
+// UsageAccountKey is a due usage account's place in the pass.
+type UsageAccountKey struct {
+	DueAt      time.Time `json:"due_at"`
+	MerchantID uuid.UUID `json:"merchant_id"`
 	CustomerID uuid.UUID `json:"customer_id"`
 	Currency   string    `json:"currency"`
 }
 
+// UsageOrderKey is a due collection's place in the pass.
+type UsageOrderKey struct {
+	DueAt      time.Time `json:"due_at"`
+	MerchantID uuid.UUID `json:"merchant_id"`
+	OrderID    uuid.UUID `json:"order_id"`
+}
+
 func (UsageOrderArgs) Kind() string { return KindUsageOrders }
 
-// InsertOpts coalesces the deployment-wide passes and a merchant's
-// continuations. A merchant's wake coalesces only where its producer asks (a
-// threshold crossing).
-func (a UsageOrderArgs) InsertOpts() river.InsertOpts {
-	if a.MerchantID != nil && a.After == nil {
-		return river.InsertOpts{Queue: "billing"}
-	}
-	return river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: usageOutstanding}}
+// InsertOpts coalesces passes, and a pass's continuations, while one is
+// outstanding. A failed pass is not retried: what it left due, the next one
+// takes.
+func (UsageOrderArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "billing", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: usageOutstanding}}
 }
 
 func (s *MoneyService) usageBillingConfig(ctx context.Context, currency string) (*billing.UsageBillingSettings, *billing.UsageBillingCurrency, error) {
@@ -100,6 +107,9 @@ func (s *MoneyService) ensureUsageBillingAccount(ctx context.Context, q *gen.Que
 	}
 	// January contains every valid day; its year is immaterial to recurrence.
 	anchor := time.Date(2000, time.January, cfg.BillingDay, 0, 0, 0, 0, time.UTC)
+	if err == nil && existing.UsageBillingAnchor != nil {
+		anchor = *existing.UsageBillingAnchor
+	}
 	next := NextUsageBillingDate(s.now(), anchor)
 	if first, err := q.EarliestPendingOwedAccrual(ctx, gen.EarliestPendingOwedAccrualParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency}); err == nil {
 		next = NextUsageBillingDate(first, anchor)
@@ -172,35 +182,28 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 	if (!force && owed < terms.threshold) || owed <= 0 || owed < terms.minimum {
 		return err
 	}
-	if err = q.FlagUsageCollectionDue(ctx, gen.FlagUsageCollectionDueParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency}); err != nil {
+	if err = q.FlagUsageCollectionDue(ctx, gen.FlagUsageCollectionDueParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, Now: s.now()}); err != nil {
 		return err
 	}
-	_, err = s.db.InsertRiverJob(ctx, UsageOrderArgs{MerchantID: &mid}, &river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: usageOutstanding}})
+	_, err = s.db.InsertRiverJob(ctx, UsageOrderArgs{}, nil)
 	return err
 }
 
-// usageDuePage bounds one job's due accounts; a full page continues in a new
-// job.
-const usageDuePage = 200
-
-// FinalizeDueUsage bills one page of due accounts after after, and returns
-// where the next page starts when this one was full. Due rows survive process
-// restarts; all decisions and attachments serialize with usage writes on the
-// customer.
-func (s *MoneyService) FinalizeDueUsage(ctx context.Context, now time.Time, after *UsageAccount) (int, *UsageAccount, error) {
+// MarkUsageAccountsDue marks due, after a change to the merchant's usage
+// terms, each of its accounts whose arrears reach the resulting credit limit
+// with enough unbilled to bill, or that has unbilled charges and no bill
+// date.
+func (s *MoneyService) MarkUsageAccountsDue(ctx context.Context) error {
 	if !s.UsageBillingEnabled {
-		return 0, nil, nil
+		return nil
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return 0, nil, err
+		return err
 	}
 	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
-	if err != nil {
-		return 0, nil, err
-	}
-	if settings.Config.UsageBilling == nil {
-		return 0, nil, nil
+	if err != nil || settings.Config.UsageBilling == nil {
+		return err
 	}
 	limits := map[string]int64{}
 	minimums := map[string]int64{}
@@ -208,46 +211,25 @@ func (s *MoneyService) FinalizeDueUsage(ctx context.Context, now time.Time, afte
 		limits[cur.Currency] = cur.CreditLimit
 		minimums[cur.Currency] = cur.MinimumInvoiceAmount
 	}
-	encoded, err := json.Marshal(limits)
+	encodedLimits, err := json.Marshal(limits)
 	if err != nil {
-		return 0, nil, err
+		return err
 	}
 	encodedMinimums, err := json.Marshal(minimums)
 	if err != nil {
-		return 0, nil, err
+		return err
 	}
-	params := gen.ListUsageBillingDueAccountsParams{MerchantID: mid.UUID(), Now: now, RowLimit: usageDuePage, Limits: encoded, Minimums: encodedMinimums, Policies: settings.PoliciesParam()}
-	if after != nil {
-		params.AfterCustomer, params.AfterCurrency = after.CustomerID, after.Currency
-	}
-	rows, err := s.db.Gen(ctx).ListUsageBillingDueAccounts(ctx, params)
-	if err != nil {
-		return 0, nil, err
-	}
-	count := 0
-	var failures []error
-	for _, row := range rows {
-		billed, err := s.finalizeUsageAccount(ctx, row.CustomerID, row.Currency, now)
-		if err != nil {
-			failures = append(failures, fmt.Errorf("usage account %s/%s: %w", row.CustomerID, row.Currency, err))
-			if ctx.Err() != nil {
-				return count, nil, errors.Join(failures...)
-			}
-			continue
-		}
-		if billed {
-			count++
-		}
-	}
-	var next *UsageAccount
-	if len(rows) == usageDuePage {
-		last := rows[len(rows)-1]
-		next = &UsageAccount{CustomerID: last.CustomerID, Currency: last.Currency}
-	}
-	return count, next, errors.Join(failures...)
+	return s.db.Gen(ctx).MarkUsageAccountsDue(ctx, gen.MarkUsageAccountsDueParams{
+		MerchantID: mid.UUID(), Limits: encodedLimits, Minimums: encodedMinimums, Policies: settings.PoliciesParam(), Now: s.now(),
+	})
 }
 
-func (s *MoneyService) finalizeUsageAccount(ctx context.Context, customer uuid.UUID, currency string, now time.Time) (bool, error) {
+// BillDueUsageAccount checks one due usage account and bills what is due:
+// everything pending at its bill date, the period so far once spending
+// crossed its threshold or an admission asked to collect. The account is
+// then due at its next bill date, or not at all with nothing pending. The
+// check serializes with spending on the customer.
+func (s *MoneyService) BillDueUsageAccount(ctx context.Context, customer uuid.UUID, currency string, now time.Time) (bool, error) {
 	cfg, cur, err := s.usageBillingConfig(ctx, currency)
 	if err != nil {
 		return false, err
@@ -263,9 +245,9 @@ func (s *MoneyService) finalizeUsageAccount(ctx context.Context, customer uuid.U
 			return err
 		}
 		if cur == nil {
-			// Removing a currency stops creating new invoices and clears its
-			// stale wakeup; previously accepted payment operations still recover.
-			return q.CompleteUsageBillingCheck(ctx, gen.CompleteUsageBillingCheckParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, NextBillAt: now.Add(24 * time.Hour), Now: now})
+			// A currency without usage billing is not checked again until its
+			// terms are; previously accepted payment operations still recover.
+			return q.CompleteUsageBillingCheck(ctx, gen.CompleteUsageBillingCheckParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, Now: now})
 		}
 		row, err := s.ensureUsageBillingAccount(ctx, q, customer, currency, cfg)
 		if err != nil {
@@ -280,57 +262,72 @@ func (s *MoneyService) finalizeUsageAccount(ctx context.Context, customer uuid.U
 		if err != nil {
 			return err
 		}
-		next := *row.UsageNextBillAt
-		if due {
-			next = NextUsageBillingDate(now, *row.UsageBillingAnchor)
+		if due || row.UsageCollectionDue || owed >= terms.threshold {
+			if billed, err = s.billPendingUsage(ctx, s.db.NewWithPgxTx(tx), customer, currency, owed, terms, now); err != nil {
+				return err
+			}
 		}
-		// Clear the wakeup in the same transaction as the invoice. A failed
-		// invoice transaction leaves the account due for retry.
-		if err := q.CompleteUsageBillingCheck(ctx, gen.CompleteUsageBillingCheckParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, NextBillAt: next, Now: now}); err != nil {
+		// Due next at the bill date while something is pending. The check
+		// completes with the order: a failed one leaves the account due.
+		var next *time.Time
+		if _, err := q.EarliestPendingOwedAccrual(ctx, gen.EarliestPendingOwedAccrualParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency}); err == nil {
+			at := *row.UsageNextBillAt
+			if due {
+				at = NextUsageBillingDate(now, *row.UsageBillingAnchor)
+			}
+			next = &at
+		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if !due && !row.UsageCollectionDue && owed < terms.threshold {
-			return nil
-		}
-		from, err := q.EarliestPendingOwedAccrual(ctx, gen.EarliestPendingOwedAccrualParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		cutoff := now.Add(time.Microsecond)
-		last, err := q.LatestUsageOrderEnd(ctx, gen.LatestUsageOrderEndParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, PeriodStart: from})
-		if err != nil {
-			return err
-		}
-		if !last.Before(cutoff) {
-			cutoff = last.Add(time.Microsecond)
-		}
-		sources, err := q.SumPendingOwedItemAmountBySourceInPeriod(ctx, gen.SumPendingOwedItemAmountBySourceInPeriodParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, PeriodStartsAt: from, PeriodEndsAt: cutoff})
-		if err != nil {
-			return err
-		}
-		var pending int64
-		for _, source := range sources {
-			pending += source.Amount
-		}
-		claimed, err := q.SumOwedOrderClaims(ctx, gen.SumOwedOrderClaimsParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
-		if err != nil {
-			return err
-		}
-		amount := min(pending, max(owed-claimed, 0))
-		if amount <= 0 || amount < terms.minimum {
-			return nil
-		}
-		order, err := s.finalizeUsageTx(ctx, s.db.NewWithPgxTx(tx), identity.CustomerID(customer), currency, from, cutoff)
-		if err != nil {
-			return fmt.Errorf("invoice usage: %w", err)
-		}
-		billed = order != nil
-		return nil
+		return q.CompleteUsageBillingCheck(ctx, gen.CompleteUsageBillingCheckParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, NextBillAt: next, Now: now})
 	})
 	return billed, err
+}
+
+// billPendingUsage bills the account's pending charges through now as one
+// usage order, at most what no other order claims and not below the minimum.
+func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer uuid.UUID, currency string, owed int64, terms usageTerms, now time.Time) (bool, error) {
+	q := d.Gen(ctx)
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	from, err := q.EarliestPendingOwedAccrual(ctx, gen.EarliestPendingOwedAccrualParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	cutoff := now.Add(time.Microsecond)
+	last, err := q.LatestUsageOrderEnd(ctx, gen.LatestUsageOrderEndParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, PeriodStart: from})
+	if err != nil {
+		return false, err
+	}
+	if !last.Before(cutoff) {
+		cutoff = last.Add(time.Microsecond)
+	}
+	sources, err := q.SumPendingOwedItemAmountBySourceInPeriod(ctx, gen.SumPendingOwedItemAmountBySourceInPeriodParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, PeriodStartsAt: from, PeriodEndsAt: cutoff})
+	if err != nil {
+		return false, err
+	}
+	var pending int64
+	for _, source := range sources {
+		pending += source.Amount
+	}
+	claimed, err := q.SumOwedOrderClaims(ctx, gen.SumOwedOrderClaimsParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
+	if err != nil {
+		return false, err
+	}
+	amount := min(pending, max(owed-claimed, 0))
+	if amount <= 0 || amount < terms.minimum {
+		return false, nil
+	}
+	order, err := s.finalizeUsageTx(ctx, d, identity.CustomerID(customer), currency, from, cutoff)
+	if err != nil {
+		return false, fmt.Errorf("invoice usage: %w", err)
+	}
+	return order != nil, nil
 }
 
 func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Queries, payer identity.CustomerID, currency string, capacity AdmissionCapacity) (AdmissionCapacity, error) {

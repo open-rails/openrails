@@ -751,10 +751,12 @@ type BillingMoneySetting struct {
 	CreditLimitOverride bool
 	// Fixed monthly UTC anchor used for usage pricing and invoicing; threshold payments never alter it.
 	UsageBillingAnchor *time.Time
-	// Next monthly usage billing check. A below-minimum balance advances the check while its unbilled accruals carry forward.
+	// Next monthly usage bill date; null while nothing is pending, set again from the next accrual. A below-minimum balance advances it while its unbilled accruals carry forward.
 	UsageNextBillAt           *time.Time
 	UsageMinimumInvoiceAmount *int64
 	UsageCollectionDue        bool
+	// When the usage account is next checked: its next bill date, or now once spending crossed its threshold, an admission asked to collect or the merchant's usage terms changed. Null: nothing is pending.
+	UsageDueAt *time.Time
 }
 
 // The in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.
@@ -873,7 +875,7 @@ type BillingOrder struct {
 	CollectionFailureCount *int32
 	// A usage order's first declined collection, which its retry schedule counts from.
 	CollectionFailedAt *time.Time
-	// When a usage order's next scheduled charge runs; NULL while none is scheduled.
+	// When a usage order's next scheduled charge runs: its due date when it opens, then the retry schedule's; NULL while none is scheduled (stopped until the customer designates a card).
 	NextCollectionAttemptAt *time.Time
 	// Frozen collection authority: engine, NMI schedule with existing OpenRails dunning, or provider billing. A provider bill is never a generic local charge command.
 	CollectionOwner string

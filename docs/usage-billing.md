@@ -55,10 +55,17 @@ billing day; a null minimum restores its default. `credit_limits` with amount
 restores the merchant default. Existing database rows retain their explicit
 limits during migration, including zero. Reads include `next_bill_at`.
 
-One five-minute due scan catches monthly dates and missed wakeups. Threshold
-crossings enqueue a coalesced wakeup in the accrual transaction. Account due
-records and invoice creation serialize with spending; there are no per-account
-River timers and no once-per-thirty-day collection guard.
+Each account stores when it is next due: its bill date, or at once when
+spending crosses its threshold, an admission asks to collect, or the
+merchant's usage terms change. A threshold crossing also queues a pass in the
+accrual transaction; otherwise one pass every five minutes reads the due
+accounts across merchants, then the orders whose next charge is due, and
+queues each charge as an `order_collection` operation that its own job runs.
+An account with nothing pending has no bill date until it spends again. An
+order whose customer has no card that can pay it waits until one is
+designated. Account due records and invoice creation serialize with spending;
+there are no per-account River timers and no once-per-thirty-day collection
+guard.
 
 Deployment order: deploy this code to every worker before enabling the feature.
 The usage pass is the `openrails.usage_orders` job kind; OpenRails schedules

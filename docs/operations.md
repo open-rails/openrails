@@ -1246,7 +1246,7 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 | Provider refresh scheduler (fans out per merchant) | 2 h |
 | Stored card refresh ahead of renewal | 6 h |
 | Ledger integrity audit | 24 h |
-| Automatic usage billing (opt-in) | 5 min, plus threshold wakeups |
+| Automatic usage billing (opt-in): due accounts billed, due collections queued | 5 min, plus threshold wakeups |
 
 Automatic usage billing is enabled by the host's `usage_billing_enabled` option.
 It is not scheduled by subscription-only hosts. Merchants configure their

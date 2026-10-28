@@ -17,9 +17,10 @@ import (
 // MaxInvoiceNetTermsDays prevents overflow when terms become a due-date duration.
 const MaxInvoiceNetTermsDays = int64((1<<63 - 1) / (24 * time.Hour))
 
-// Invoice collection methods. charge_automatically charges the saved payment
-// method via ChargeOutstanding; send_invoice is a manual-remittance receivable
-// the collection path never touches, paid via RecordInvoiceRemittance.
+// Invoice collection methods. charge_automatically charges the customer's
+// default card from its due date (CollectDueUsageOrder); send_invoice is a
+// manual-remittance receivable the collection path never touches, paid via
+// RecordUsageRemittance.
 const (
 	CollectionChargeAutomatically = "charge_automatically"
 	CollectionSendInvoice         = "send_invoice"

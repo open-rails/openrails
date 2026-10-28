@@ -81,46 +81,16 @@ func (s *MoneyService) DefaultPaymentMethodCurrencies(ctx context.Context, payer
 	return out, nil
 }
 
-// ChargeOutstanding collects the usage orders due for automatic collection by
-// enqueuing and executing one durable order_collection operation per order.
-// Returns the number of settled collections.
-func (s *MoneyService) ChargeOutstanding(ctx context.Context, runner *intents.Runner) (int, error) {
+// CollectDueUsageOrder queues the scheduled collection of a usage order whose
+// next charge is due: one order_collection operation, which its own job
+// charges. An order whose customer has no card that can pay it waits until a
+// card is designated.
+func (s *MoneyService) CollectDueUsageOrder(ctx context.Context, payer identity.CustomerID, orderID uuid.UUID) error {
 	if s == nil || s.db == nil {
-		return 0, fmt.Errorf("money service not initialized")
+		return fmt.Errorf("money service not initialized")
 	}
-	if runner == nil {
-		return 0, fmt.Errorf("intent runner required")
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return 0, err
-	}
-	rows, err := s.db.Gen(ctx).ListChargeableUsageOrders(ctx, gen.ListChargeableUsageOrdersParams{MerchantID: tid.UUID(), Now: s.now()})
-	if err != nil {
-		return 0, err
-	}
-	// One order's failure must not abort the rest of the merchant's batch.
-	count := 0
-	var errs []error
-	for _, r := range rows {
-		intentID, _, err := s.enqueueUsageCollection(ctx, identity.CustomerID(r.CustomerID), r.ID, usageCollectionEnqueue{origin: intents.OriginSystem, originReason: "scheduled usage collection"})
-		if err != nil {
-			errs = append(errs, fmt.Errorf("claim order %s: %w", r.ID, err))
-			continue
-		}
-		if intentID == uuid.Nil {
-			continue
-		}
-		row, err := runner.ExecuteFirstByID(ctx, intentID)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("collect order %s: %w", r.ID, err))
-			continue
-		}
-		if row.Status == intents.StatusSucceeded {
-			count++
-		}
-	}
-	return count, errors.Join(errs...)
+	_, _, err := s.enqueueUsageCollection(ctx, payer, orderID, usageCollectionEnqueue{origin: intents.OriginSystem, originReason: "scheduled usage collection"})
+	return err
 }
 
 // PayUsageNow is the customer paying their usage order with a saved card,
@@ -182,11 +152,7 @@ func scheduledUsageCollectionEligible(order gen.BillingOrder, now time.Time) boo
 		usage.Due(order) <= 0 {
 		return false
 	}
-	if order.DueAt != nil && order.DueAt.After(now) {
-		return false
-	}
-	return derefInt32(order.CollectionFailureCount) == 0 && order.NextCollectionAttemptAt == nil ||
-		order.NextCollectionAttemptAt != nil && !order.NextCollectionAttemptAt.After(now)
+	return order.NextCollectionAttemptAt != nil && !order.NextCollectionAttemptAt.After(now)
 }
 
 type usageCollectionEnqueue struct {
@@ -272,6 +238,11 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 		if errors.Is(err, charge.ErrAgreementRequired) && !opts.manual {
 			return stopCollectionForAgreement(ctx, s.db.NewWithPgxTx(tx), order, now)
 		}
+		if !opts.manual && (err == nil && method == nil || errors.Is(err, ErrDefaultPaymentMethodInvalid)) {
+			// No card can pay it: charging waits until one is designated.
+			_, err := q.ParkUsageCollection(ctx, gen.ParkUsageCollectionParams{MerchantID: tid.UUID(), ID: order.ID, Now: now})
+			return err
+		}
 		if err != nil || method == nil {
 			return err
 		}
@@ -342,7 +313,9 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 				// renders; recovery finds a collection's sale by it.
 				Description: fmt.Sprintf("invoice %s", orderID),
 			},
-			IdempotencyKey: key, NextAttemptAt: now, Origin: opts.origin, OriginReason: opts.originReason, Inline: true,
+			// A customer's own payment runs in its request; a scheduled one in
+			// its operation's job.
+			IdempotencyKey: key, NextAttemptAt: now, Origin: opts.origin, OriginReason: opts.originReason, Inline: opts.manual,
 			Actor: func() string {
 				if opts.initiator == charge.InitiatorCustomer {
 					return payer.UUID().String()

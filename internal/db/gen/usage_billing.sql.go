@@ -14,18 +14,21 @@ import (
 
 const completeUsageBillingCheck = `-- name: CompleteUsageBillingCheck :exec
 UPDATE billing.money_settings SET usage_collection_due = false,
-    usage_next_bill_at = $1::timestamptz, updated_at = $2::timestamptz
+    usage_next_bill_at = $1::timestamptz, usage_due_at = $1::timestamptz,
+    updated_at = $2::timestamptz
 WHERE merchant_id = $3::uuid AND customer_id = $4::uuid AND currency = $5::text
 `
 
 type CompleteUsageBillingCheckParams struct {
-	NextBillAt time.Time
+	NextBillAt *time.Time
 	Now        time.Time
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
 }
 
+// A check done: the account is next due at its bill date, null with nothing
+// pending.
 func (q *Queries) CompleteUsageBillingCheck(ctx context.Context, arg CompleteUsageBillingCheckParams) error {
 	_, err := q.db.Exec(ctx, completeUsageBillingCheck,
 		arg.NextBillAt,
@@ -39,13 +42,15 @@ func (q *Queries) CompleteUsageBillingCheck(ctx context.Context, arg CompleteUsa
 
 const ensureUsageBillingAccount = `-- name: EnsureUsageBillingAccount :one
 INSERT INTO billing.money_settings (merchant_id, customer_id, currency, billing_mode,
-    usage_billing_anchor, usage_next_bill_at, created_at, updated_at)
+    usage_billing_anchor, usage_next_bill_at, usage_due_at, created_at, updated_at)
 VALUES ($1, $2, $3, 'arrears',
-    $4::timestamptz, $5::timestamptz, $6::timestamptz, $6::timestamptz)
+    $4::timestamptz, $5::timestamptz, $5::timestamptz,
+    $6::timestamptz, $6::timestamptz)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     usage_billing_anchor = COALESCE(billing.money_settings.usage_billing_anchor, EXCLUDED.usage_billing_anchor),
-    usage_next_bill_at = COALESCE(billing.money_settings.usage_next_bill_at, EXCLUDED.usage_next_bill_at)
-RETURNING merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at, credit_limit_override, usage_billing_anchor, usage_next_bill_at, usage_minimum_invoice_amount, usage_collection_due
+    usage_next_bill_at = COALESCE(billing.money_settings.usage_next_bill_at, EXCLUDED.usage_next_bill_at),
+    usage_due_at = LEAST(billing.money_settings.usage_due_at, COALESCE(billing.money_settings.usage_next_bill_at, EXCLUDED.usage_next_bill_at))
+RETURNING merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at, credit_limit_override, usage_billing_anchor, usage_next_bill_at, usage_minimum_invoice_amount, usage_collection_due, usage_due_at
 `
 
 type EnsureUsageBillingAccountParams struct {
@@ -57,6 +62,7 @@ type EnsureUsageBillingAccountParams struct {
 	Now        time.Time
 }
 
+// The account bills at its next bill date and is due no later.
 func (q *Queries) EnsureUsageBillingAccount(ctx context.Context, arg EnsureUsageBillingAccountParams) (BillingMoneySetting, error) {
 	row := q.db.QueryRow(ctx, ensureUsageBillingAccount,
 		arg.MerchantID,
@@ -83,6 +89,7 @@ func (q *Queries) EnsureUsageBillingAccount(ctx context.Context, arg EnsureUsage
 		&i.UsageNextBillAt,
 		&i.UsageMinimumInvoiceAmount,
 		&i.UsageCollectionDue,
+		&i.UsageDueAt,
 	)
 	return i, err
 }
@@ -123,18 +130,25 @@ func (q *Queries) FindInvalidUsageMinimum(ctx context.Context, arg FindInvalidUs
 }
 
 const flagUsageCollectionDue = `-- name: FlagUsageCollectionDue :exec
-UPDATE billing.money_settings SET usage_collection_due = true
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
+UPDATE billing.money_settings SET usage_collection_due = true, usage_due_at = LEAST(usage_due_at, $1::timestamptz)
+WHERE merchant_id = $2::uuid AND customer_id = $3::uuid AND currency = $4::text
 `
 
 type FlagUsageCollectionDueParams struct {
+	Now        time.Time
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
 }
 
+// Bill the period so far at once, whatever the threshold.
 func (q *Queries) FlagUsageCollectionDue(ctx context.Context, arg FlagUsageCollectionDueParams) error {
-	_, err := q.db.Exec(ctx, flagUsageCollectionDue, arg.MerchantID, arg.CustomerID, arg.Currency)
+	_, err := q.db.Exec(ctx, flagUsageCollectionDue,
+		arg.Now,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+	)
 	return err
 }
 
@@ -233,69 +247,57 @@ func (q *Queries) ListCustomerUsageBilling(ctx context.Context, arg ListCustomer
 	return items, nil
 }
 
-const listUsageBillingDueAccounts = `-- name: ListUsageBillingDueAccounts :many
-WITH scoped AS (
-    SELECT s.merchant_id, s.customer_id, s.billing_mode, s.created_at, s.updated_at, s.tier, s.currency, s.credit_limit_amount, s.default_payment_method_id, s.collection_revoked_at, s.credit_limit_override, s.usage_billing_anchor, s.usage_next_bill_at, s.usage_minimum_invoice_amount, s.usage_collection_due, LEAST(CASE WHEN s.credit_limit_override THEN s.credit_limit_amount ELSE ($2::jsonb->>s.currency)::bigint END,NULLIF(($8::jsonb -> 'policies' -> COALESCE(
-        CASE WHEN $8::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
-        $8::jsonb -> 'tiers' ->> s.tier,
-        $8::jsonb ->> 'default') ->> 'outstanding_cap_amount')::bigint,0)) AS effective_credit_limit
-    FROM billing.money_settings s JOIN billing.customers c ON c.merchant_id=s.merchant_id AND c.id=s.customer_id
-    WHERE s.merchant_id=$1::uuid
-)
-SELECT s.customer_id, s.currency
-FROM scoped s
-WHERE s.merchant_id = $1::uuid AND $2::jsonb ? s.currency
-    AND (s.customer_id,s.currency) > ($3::uuid,$4::text) AND (
-    s.usage_collection_due OR s.usage_next_bill_at <= $5::timestamptz OR
-    EXISTS (SELECT 1 FROM billing.ledger_accounts ar
-        WHERE ar.merchant_id=s.merchant_id AND ar.customer_id=s.customer_id AND ar.currency=s.currency AND ar.account_type='arrears_liability'
-        AND ar.debits_posted-ar.credits_posted >= s.effective_credit_limit
-        AND ar.debits_posted-ar.credits_posted > 0
-        AND ar.debits_posted-ar.credits_posted >= COALESCE(s.usage_minimum_invoice_amount,($6::jsonb->>s.currency)::bigint,0)
-        AND EXISTS (SELECT 1 FROM billing.owed_items oi WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency AND oi.status='pending' AND oi.order_id IS NULL
-            HAVING COALESCE(SUM(oi.amount),0) >= GREATEST(1,COALESCE(s.usage_minimum_invoice_amount,($6::jsonb->>s.currency)::bigint,0)))) OR
-    (s.usage_next_bill_at IS NULL AND EXISTS (SELECT 1 FROM billing.owed_items oi
-        WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency
-        AND oi.status='pending' AND oi.order_id IS NULL)))
-ORDER BY s.customer_id, s.currency
-LIMIT $7::int
+const listDueUsageAccounts = `-- name: ListDueUsageAccounts :many
+SELECT merchant_id, customer_id, currency, usage_due_at::timestamptz AS usage_due_at
+FROM billing.money_settings
+WHERE usage_due_at <= $1::timestamptz
+  AND ($2::timestamptz IS NULL
+       OR (usage_due_at, merchant_id, customer_id, currency)
+          > ($2::timestamptz, $3::uuid, $4::uuid, $5::text))
+ORDER BY usage_due_at, merchant_id, customer_id, currency
+LIMIT $6::int
 `
 
-type ListUsageBillingDueAccountsParams struct {
-	MerchantID    uuid.UUID
-	Limits        []byte
-	AfterCustomer uuid.UUID
-	AfterCurrency string
-	Now           time.Time
-	Minimums      []byte
-	RowLimit      int32
-	Policies      []byte
+type ListDueUsageAccountsParams struct {
+	Now             time.Time
+	AfterAt         *time.Time
+	AfterMerchantID *uuid.UUID
+	AfterCustomerID *uuid.UUID
+	AfterCurrency   *string
+	RowLimit        int32
 }
 
-type ListUsageBillingDueAccountsRow struct {
+type ListDueUsageAccountsRow struct {
+	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
+	UsageDueAt time.Time
 }
 
-func (q *Queries) ListUsageBillingDueAccounts(ctx context.Context, arg ListUsageBillingDueAccountsParams) ([]ListUsageBillingDueAccountsRow, error) {
-	rows, err := q.db.Query(ctx, listUsageBillingDueAccounts,
-		arg.MerchantID,
-		arg.Limits,
-		arg.AfterCustomer,
-		arg.AfterCurrency,
+// CROSS-MERCHANT: the usage accounts due now, in due order. An idle pass reads
+// no row.
+func (q *Queries) ListDueUsageAccounts(ctx context.Context, arg ListDueUsageAccountsParams) ([]ListDueUsageAccountsRow, error) {
+	rows, err := q.db.Query(ctx, listDueUsageAccounts,
 		arg.Now,
-		arg.Minimums,
+		arg.AfterAt,
+		arg.AfterMerchantID,
+		arg.AfterCustomerID,
+		arg.AfterCurrency,
 		arg.RowLimit,
-		arg.Policies,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListUsageBillingDueAccountsRow
+	var items []ListDueUsageAccountsRow
 	for rows.Next() {
-		var i ListUsageBillingDueAccountsRow
-		if err := rows.Scan(&i.CustomerID, &i.Currency); err != nil {
+		var i ListDueUsageAccountsRow
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.Currency,
+			&i.UsageDueAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -315,10 +317,82 @@ func (q *Queries) LockUsagePolicy(ctx context.Context, policyKey string) error {
 	return err
 }
 
+const markUsageAccountsDue = `-- name: MarkUsageAccountsDue :exec
+WITH scoped AS (
+    SELECT s.merchant_id, s.customer_id, s.currency, s.usage_next_bill_at, s.usage_minimum_invoice_amount,
+        LEAST(CASE WHEN s.credit_limit_override THEN s.credit_limit_amount ELSE ($3::jsonb->>s.currency)::bigint END,NULLIF(($4::jsonb -> 'policies' -> COALESCE(
+        CASE WHEN $4::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
+        $4::jsonb -> 'tiers' ->> s.tier,
+        $4::jsonb ->> 'default') ->> 'outstanding_cap_amount')::bigint,0)) AS effective_credit_limit
+    FROM billing.money_settings s JOIN billing.customers c ON c.merchant_id=s.merchant_id AND c.id=s.customer_id
+    WHERE s.merchant_id=$5::uuid AND $3::jsonb ? s.currency
+)
+UPDATE billing.money_settings m SET usage_due_at = LEAST(m.usage_due_at, $1::timestamptz)
+FROM scoped s
+WHERE m.merchant_id = s.merchant_id AND m.customer_id = s.customer_id AND m.currency = s.currency AND (
+    EXISTS (SELECT 1 FROM billing.ledger_accounts ar
+        WHERE ar.merchant_id=s.merchant_id AND ar.customer_id=s.customer_id AND ar.currency=s.currency AND ar.account_type='arrears_liability'
+        AND ar.debits_posted-ar.credits_posted >= s.effective_credit_limit
+        AND ar.debits_posted-ar.credits_posted > 0
+        AND ar.debits_posted-ar.credits_posted >= COALESCE(s.usage_minimum_invoice_amount,($2::jsonb->>s.currency)::bigint,0)
+        AND EXISTS (SELECT 1 FROM billing.owed_items oi WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency AND oi.status='pending' AND oi.order_id IS NULL
+            HAVING COALESCE(SUM(oi.amount),0) >= GREATEST(1,COALESCE(s.usage_minimum_invoice_amount,($2::jsonb->>s.currency)::bigint,0)))) OR
+    (s.usage_next_bill_at IS NULL AND EXISTS (SELECT 1 FROM billing.owed_items oi
+        WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency
+        AND oi.status='pending' AND oi.order_id IS NULL)))
+`
+
+type MarkUsageAccountsDueParams struct {
+	Now        time.Time
+	Minimums   []byte
+	Limits     []byte
+	Policies   []byte
+	MerchantID uuid.UUID
+}
+
+// The merchant's usage terms changed: each of its accounts in a configured
+// currency whose arrears reach the resulting credit limit with enough
+// unbilled to bill, or with unbilled charges and no bill date, is checked on
+// the next pass.
+func (q *Queries) MarkUsageAccountsDue(ctx context.Context, arg MarkUsageAccountsDueParams) error {
+	_, err := q.db.Exec(ctx, markUsageAccountsDue,
+		arg.Now,
+		arg.Minimums,
+		arg.Limits,
+		arg.Policies,
+		arg.MerchantID,
+	)
+	return err
+}
+
+const rebuildUsageDue = `-- name: RebuildUsageDue :exec
+UPDATE billing.money_settings s SET usage_due_at = CASE
+    WHEN s.usage_collection_due THEN $1::timestamptz
+    WHEN s.usage_next_bill_at IS NOT NULL THEN s.usage_next_bill_at
+    ELSE $1::timestamptz END
+WHERE s.merchant_id = $2::uuid
+  AND (s.usage_collection_due OR s.usage_next_bill_at IS NOT NULL OR EXISTS (SELECT 1 FROM billing.owed_items oi
+      WHERE oi.merchant_id = s.merchant_id AND oi.customer_id = s.customer_id AND oi.currency = s.currency
+        AND oi.status = 'pending' AND oi.order_id IS NULL))
+`
+
+type RebuildUsageDueParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+}
+
+// A restored merchant's usage accounts are due again: at their bill date, or
+// at once when they were due to bill or have unbilled charges and no date.
+func (q *Queries) RebuildUsageDue(ctx context.Context, arg RebuildUsageDueParams) error {
+	_, err := q.db.Exec(ctx, rebuildUsageDue, arg.Now, arg.MerchantID)
+	return err
+}
+
 const updateUsageBillingAccount = `-- name: UpdateUsageBillingAccount :exec
 UPDATE billing.money_settings SET
     usage_billing_anchor = CASE WHEN $1::boolean THEN $2::timestamptz ELSE usage_billing_anchor END,
     usage_next_bill_at = CASE WHEN $1::boolean THEN $3::timestamptz ELSE usage_next_bill_at END,
+    usage_due_at = CASE WHEN $1::boolean THEN LEAST(usage_due_at, $3::timestamptz) ELSE usage_due_at END,
     usage_minimum_invoice_amount = CASE WHEN $4::boolean THEN $5::bigint ELSE usage_minimum_invoice_amount END,
     updated_at = $6::timestamptz
 WHERE merchant_id = $7::uuid AND customer_id = $8::uuid AND currency = $9::text

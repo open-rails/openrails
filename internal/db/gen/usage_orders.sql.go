@@ -107,7 +107,7 @@ const createUsageOrder = `-- name: CreateUsageOrder :exec
 INSERT INTO billing.orders (
     merchant_id, id, customer_id, origin, status, payment_status, currency, total, amount_paid, number,
     period_starts_at, period_ends_at, due_at, completed_at, collection_method, po_number, memo, tax, billing_contacts,
-    collection_failure_count, created_at, updated_at
+    collection_failure_count, next_collection_attempt_at, created_at, updated_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, 'usage',
     CASE WHEN $4::bigint IS NULL THEN 'open' ELSE 'complete' END,
@@ -116,7 +116,8 @@ INSERT INTO billing.orders (
     $8::timestamptz, $9::timestamptz, $10::timestamptz,
     CASE WHEN $4::bigint IS NULL THEN NULL ELSE $11::timestamptz END,
     $12::text, $13::text, $14::text, $15::jsonb, $16::jsonb,
-    0, $11::timestamptz, $11::timestamptz
+    0, CASE WHEN $4::bigint IS NULL AND $12::text = 'charge_automatically' THEN $10::timestamptz END,
+    $11::timestamptz, $11::timestamptz
 )
 `
 
@@ -139,7 +140,8 @@ type CreateUsageOrderParams struct {
 	BillingContacts  []byte
 }
 
-// An open usage order; one a funded balance already paid in full is created
+// An open usage order, first charged at its due date when it is collected
+// automatically; one a funded balance already paid in full is created
 // complete, numbered.
 func (q *Queries) CreateUsageOrder(ctx context.Context, arg CreateUsageOrderParams) error {
 	_, err := q.db.Exec(ctx, createUsageOrder,
@@ -590,45 +592,55 @@ func (q *Queries) InsertPendingOwedItem(ctx context.Context, arg InsertPendingOw
 	return err
 }
 
-const listChargeableUsageOrders = `-- name: ListChargeableUsageOrders :many
-SELECT o.id, o.customer_id, o.total - o.amount_paid AS amount_due
-FROM billing.orders o
-JOIN billing.money_settings s
-  ON s.merchant_id = o.merchant_id AND s.customer_id = o.customer_id AND s.currency = o.currency
-WHERE o.merchant_id = $1::uuid
-  AND o.origin = 'usage' AND o.status = 'open'
-  AND o.collection_method = 'charge_automatically'
-  AND o.amount_paid < o.total
-  AND s.default_payment_method_id IS NOT NULL
-  AND o.due_at <= $2::timestamptz
-  AND ((o.collection_failure_count = 0 AND o.next_collection_attempt_at IS NULL)
-       OR o.next_collection_attempt_at <= $2::timestamptz)
-ORDER BY o.due_at, o.created_at
+const listDueUsageCollections = `-- name: ListDueUsageCollections :many
+SELECT merchant_id, id, customer_id, next_collection_attempt_at::timestamptz AS next_collection_attempt_at
+FROM billing.orders
+WHERE origin = 'usage' AND status = 'open' AND collection_method = 'charge_automatically'
+  AND next_collection_attempt_at <= $1::timestamptz
+  AND ($2::timestamptz IS NULL
+       OR (next_collection_attempt_at, merchant_id, id) > ($2::timestamptz, $3::uuid, $4::uuid))
+ORDER BY next_collection_attempt_at, merchant_id, id
+LIMIT $5::int
 `
 
-type ListChargeableUsageOrdersParams struct {
-	MerchantID uuid.UUID
-	Now        time.Time
+type ListDueUsageCollectionsParams struct {
+	Now             time.Time
+	AfterAt         *time.Time
+	AfterMerchantID *uuid.UUID
+	AfterID         *uuid.UUID
+	RowLimit        int32
 }
 
-type ListChargeableUsageOrdersRow struct {
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-	AmountDue  int64
+type ListDueUsageCollectionsRow struct {
+	MerchantID              uuid.UUID
+	ID                      uuid.UUID
+	CustomerID              uuid.UUID
+	NextCollectionAttemptAt time.Time
 }
 
-// Open usage orders the scheduled collection charges now: charge_automatically,
-// due, on their first try or a retry that came due.
-func (q *Queries) ListChargeableUsageOrders(ctx context.Context, arg ListChargeableUsageOrdersParams) ([]ListChargeableUsageOrdersRow, error) {
-	rows, err := q.db.Query(ctx, listChargeableUsageOrders, arg.MerchantID, arg.Now)
+// CROSS-MERCHANT: open usage orders collected automatically whose next
+// charge is due, in due order. An idle pass reads no row.
+func (q *Queries) ListDueUsageCollections(ctx context.Context, arg ListDueUsageCollectionsParams) ([]ListDueUsageCollectionsRow, error) {
+	rows, err := q.db.Query(ctx, listDueUsageCollections,
+		arg.Now,
+		arg.AfterAt,
+		arg.AfterMerchantID,
+		arg.AfterID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListChargeableUsageOrdersRow
+	var items []ListDueUsageCollectionsRow
 	for rows.Next() {
-		var i ListChargeableUsageOrdersRow
-		if err := rows.Scan(&i.ID, &i.CustomerID, &i.AmountDue); err != nil {
+		var i ListDueUsageCollectionsRow
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.ID,
+			&i.CustomerID,
+			&i.NextCollectionAttemptAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -962,6 +974,27 @@ func (q *Queries) MarkUsageOrderUncollectible(ctx context.Context, arg MarkUsage
 	return result.RowsAffected(), nil
 }
 
+const parkUsageCollection = `-- name: ParkUsageCollection :execrows
+UPDATE billing.orders SET next_collection_attempt_at = NULL, updated_at = $1::timestamptz
+WHERE merchant_id = $2::uuid AND id = $3::uuid AND origin = 'usage' AND status = 'open'
+`
+
+type ParkUsageCollectionParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// The customer has no card that can pay the order: charging waits until it
+// designates one.
+func (q *Queries) ParkUsageCollection(ctx context.Context, arg ParkUsageCollectionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, parkUsageCollection, arg.Now, arg.MerchantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const payUsageOrder = `-- name: PayUsageOrder :one
 UPDATE billing.orders
 SET amount_paid = amount_paid + $1::bigint,
@@ -1091,12 +1124,12 @@ func (q *Queries) RecordUsageCollectionFailure(ctx context.Context, arg RecordUs
 
 const resumeStoppedUsageCollection = `-- name: ResumeStoppedUsageCollection :execrows
 UPDATE billing.orders
-SET next_collection_attempt_at = $1::timestamptz,
+SET next_collection_attempt_at = GREATEST($1::timestamptz, due_at),
     updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND customer_id = $3::uuid AND currency = $4
   AND origin = 'usage' AND status = 'open' AND amount_paid < total
   AND collection_method = 'charge_automatically'
-  AND collection_failure_count > 0 AND next_collection_attempt_at IS NULL
+  AND next_collection_attempt_at IS NULL
 `
 
 type ResumeStoppedUsageCollectionParams struct {
@@ -1106,9 +1139,10 @@ type ResumeStoppedUsageCollectionParams struct {
 	Currency   string
 }
 
-// A payer designating a collection card did what a stopped collection asked:
-// its usage orders are due again at once. Uncollectible ones need the
-// merchant, and live collections belong to their verifier.
+// A payer designating a collection card did what a stopped or parked
+// collection waited for: its usage orders are due again at once.
+// Uncollectible ones need the merchant, and live collections belong to their
+// verifier.
 func (q *Queries) ResumeStoppedUsageCollection(ctx context.Context, arg ResumeStoppedUsageCollectionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, resumeStoppedUsageCollection,
 		arg.Now,

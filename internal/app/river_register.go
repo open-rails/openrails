@@ -221,14 +221,13 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addWorker(workers, &riverjobs.MerchantSecretCleanupWorker{Merchants: r.Merchants}); err != nil {
 		return fmt.Errorf("add merchant secret cleanup worker: %w", err)
 	}
-	// Usage orders: billing, notices and collection, which waits until an
-	// off-session charger is configured.
+	// Usage orders: due accounts billed, due collections queued as
+	// operations.
 	if err := addWorker(workers, &riverjobs.UsageOrderWorker{
-		DB:      r.DB,
-		Money:   r.MoneyService,
-		Intents: r.intentRunner(intentRegistry, clock),
-		Config:  r.Config,
-		Clock:   clock,
+		DB:     r.DB,
+		Money:  r.MoneyService,
+		Config: r.Config,
+		Clock:  clock,
 	}); err != nil {
 		return fmt.Errorf("add usage order worker: %w", err)
 	}

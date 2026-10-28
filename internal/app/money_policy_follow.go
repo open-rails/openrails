@@ -12,9 +12,10 @@ import (
 )
 
 // followMoneyPolicy marks the due work a change to a merchant's settings may
-// move: its payers in grace or delinquent are evaluated again. A first load
-// counts as a change, since the settings may have changed while no process
-// served the merchant.
+// move: its payers in grace or delinquent are evaluated again, and its usage
+// accounts the new terms put due to bill are checked. A first load counts as
+// a change, since the settings may have changed while no process served the
+// merchant.
 func (r *Runtime) followMoneyPolicy(mid billing.MerchantID, previous, current merchantdocs.Set) {
 	if r.DB == nil || !current.HasMerchant {
 		return
@@ -27,7 +28,13 @@ func (r *Runtime) followMoneyPolicy(mid billing.MerchantID, previous, current me
 	}
 	r.Go("money policy follow", func(ctx context.Context) {
 		err := r.DB.RunInMerchantScope(ctx, mid, "money policy follow", func(ctx context.Context) error {
-			return r.DB.Gen(ctx).MarkDelinquencyDue(ctx, gen.MarkDelinquencyDueParams{MerchantID: mid.UUID(), Now: r.Clock.Now().UTC()})
+			if err := r.DB.Gen(ctx).MarkDelinquencyDue(ctx, gen.MarkDelinquencyDueParams{MerchantID: mid.UUID(), Now: r.Clock.Now().UTC()}); err != nil {
+				return err
+			}
+			if r.MoneyService == nil {
+				return nil
+			}
+			return r.MoneyService.MarkUsageAccountsDue(ctx)
 		})
 		if err != nil && ctx.Err() == nil {
 			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("money policy: cannot mark the merchant's due work")

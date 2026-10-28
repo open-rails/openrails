@@ -187,7 +187,7 @@ one row per bucket, never one per record. The fleet reads are on-demand operator
 
 - *Deployment-wide or merchant-wide scans with no LIMIT* — the Solana converge
   scans, the reconciliation findings scans, `ListStuckProviderIntents`,
-  `ListUsagePayers`, `ListChargeableUsageOrders` and
+  `ListUsagePayers` and
   `ListUsageThresholdCandidates`.
 - *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`,
   `ListPaymentMethodsByRails` and `ListRecordedSubscriptionCharges`. The

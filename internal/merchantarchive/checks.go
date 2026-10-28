@@ -146,6 +146,8 @@ var omittedColumns = map[string]string{
 	// When time alone next changes a payer's delinquency: restore schedules
 	// every payer again.
 	"customer_delinquency": "next_evaluation_at",
+	// When a usage account is next checked: restore schedules it again.
+	"money_settings": "usage_due_at",
 }
 
 func checkSchema(ctx context.Context, tx pgx.Tx) error {

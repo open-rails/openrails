@@ -97,7 +97,9 @@ Ownership determines which system may initiate the renewal.
 | Provider Refresh | 4 h (+ on start) | watermarked missed-event backfill, unknown-cohort reconcile, CCBill DataLink refresh — reads only, never mutates a provider |
 | Due / dunning | 1 min | admits due engine renewals and retries `past_due` per the derived schedule; parks whole missed periods for verification instead of charging ([operations.md → Dunning](operations.md#dunning)) |
 | Solana crank | 1 h | executes due on-chain subscription pulls |
-| Cleanup / usage orders | 1 h – daily | expired-data cleanup, usage order collection + period billing |
+| Cleanup | 1 h | expired-data cleanup |
+| Usage orders | 5 min | bills due usage accounts and queues due collections as operations (opt-in) |
+| Arrears delinquency | 1 min | evaluates customers whose usage order fell due or whose grace ran out |
 
 **Health endpoint**: `GET /health/live` (liveness) and `GET /health/ready`
 (readiness; the failing dependency is logged, never answered). Readiness requires only

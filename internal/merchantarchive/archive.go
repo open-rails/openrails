@@ -292,6 +292,10 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		if err := q.MarkDelinquencyDue(ctx, gen.MarkDelinquencyDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err
 		}
+		// Usage accounts are due again at their bill dates.
+		if err := q.RebuildUsageDue(ctx, gen.RebuildUsageDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
+			return err
+		}
 		if err := landReadonly(ctx, q, id, restoreNow); err != nil {
 			return err
 		}

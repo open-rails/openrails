@@ -7,105 +7,138 @@ import (
 	"time"
 
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/open-rails/openrails/billing"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/money"
 )
 
-// forEachActiveMerchant runs fn once per active merchant inside its
-// RunInMerchantConn: River job contexts carry no merchant, and every money
-// path these workers call requires one. One merchant's failure does not abort
-// the rest; the joined error makes a failing run visible in River.
-func forEachActiveMerchant(ctx context.Context, dbi *db.DB, logger *log.Entry, fn func(ctx context.Context) error) error {
-	if dbi == nil {
-		logger.Debug("db not configured; skipping")
-		return nil
-	}
-	merchantIDs, err := dbi.GenDirectory().ListActiveMerchantIDs(ctx)
-	if err != nil {
-		return fmt.Errorf("list merchants: %w", err)
-	}
-	var errs []error
-	for _, mid := range merchantIDs {
-		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
-		if err := dbi.RunInMerchantConn(mctx, fn); err != nil {
-			logger.WithError(err).WithField("merchant_id", mid).Error("merchant failed; continuing")
-			errs = append(errs, fmt.Errorf("merchant %s: %w", mid, err))
-		}
-	}
-	return errors.Join(errs...)
-}
+// usagePage bounds one job's due accounts, and its due collections; a full
+// page continues in a new job.
+const usagePage = 200
 
-// UsageOrderWorker bills the usage orders that are due and collects them once
-// an off-session charger is configured. A pass with a merchant is that merchant's threshold wakeup.
+// UsageOrderWorker is the usage pass across merchants: it bills the usage
+// accounts that are due (money_settings.usage_due_at), then queues the usage
+// orders whose next charge is due (orders.next_collection_attempt_at) as
+// order_collection operations, which their own jobs charge. Both reads are
+// indexed on the due instant, so an idle pass reads no row. Collection waits
+// for limited mode to end. A failed account or order stays due and fails the
+// job once the others are done.
 type UsageOrderWorker struct {
 	WorkerDefaults[money.UsageOrderArgs]
-	DB    *db.DB
-	Money *money.MoneyService
-	// Intents runs the order_collection operations; nil skips collection.
-	// Unknown outcomes are the scheduled intent verifier's, not this worker's.
-	Intents *intents.Runner
-	Config  *config.Config
-	Clock   clockwork.Clock
+	DB     *db.DB
+	Money  *money.MoneyService
+	Config *config.Config
+	Clock  clockwork.Clock
 }
 
 func (UsageOrderWorker) Kind() string { return money.KindUsageOrders }
 
-func (w UsageOrderWorker) Work(ctx context.Context, job *river.Job[money.UsageOrderArgs]) error {
-	logger := log.WithContext(ctx).WithField("worker", money.KindUsageOrders)
-	if w.Money == nil || w.Config == nil || !w.Config.UsageBillingEnabled {
-		return nil
+func (w UsageOrderWorker) now() time.Time {
+	if w.Clock != nil {
+		return w.Clock.Now().UTC()
 	}
-	if job.Args.MerchantID != nil {
-		if job.Args.MerchantID.IsZero() {
-			return errors.New("a usage-order pass requires a nonzero merchant ID")
-		}
-		ctx = merchant.WithID(ctx, *job.Args.MerchantID)
-		return w.DB.RunInMerchantConn(ctx, func(ctx context.Context) error { return w.workMerchant(ctx, logger, job.Args.After) })
-	}
-	// Every money path below (finalize, notify, collect) requires a merchant
-	// in context: fan out per merchant.
-	return forEachActiveMerchant(ctx, w.DB, logger, func(ctx context.Context) error {
-		return w.workMerchant(ctx, logger, nil)
-	})
+	return time.Now().UTC()
 }
 
-// workMerchant runs one merchant's pass on a merchant-scoped context: a page
-// of due accounts after after. A full page continues in a new job, which
-// notifies and collects once the merchant's due accounts are billed.
-func (w UsageOrderWorker) workMerchant(ctx context.Context, logger *log.Entry, after *money.UsageAccount) error {
-	now := time.Now().UTC()
-	if w.Clock != nil {
-		now = w.Clock.Now().UTC()
+func (w UsageOrderWorker) Work(ctx context.Context, job *river.Job[money.UsageOrderArgs]) error {
+	if w.DB == nil || w.Money == nil || w.Config == nil || !w.Config.UsageBillingEnabled {
+		return nil
 	}
-	finalized, next, finalizeErr := w.Money.FinalizeDueUsage(ctx, now, after)
-	var failures []error
-	if finalizeErr != nil {
-		failures = append(failures, finalizeErr)
-	}
-	if finalized > 0 {
-		logger.WithField("orders", finalized).Info("usage orders billed")
-	}
-	if ctx.Err() != nil {
-		return errors.Join(append(failures, ctx.Err())...)
-	}
-	if next != nil {
-		mid, err := merchant.Require(ctx)
-		if err != nil {
-			return errors.Join(append(failures, err)...)
+	logger := log.WithContext(ctx).WithField("worker", money.KindUsageOrders)
+	now := w.now()
+	var failed error
+	if job.Args.Collect == nil {
+		next, err := w.bill(ctx, logger, now, job.Args.Bill)
+		failed = err
+		if next != nil {
+			return errors.Join(failed, continuePass(ctx, money.UsageOrderArgs{Bill: next}))
 		}
-		return errors.Join(append(failures, continuePass(ctx, money.UsageOrderArgs{MerchantID: &mid, After: next}))...)
 	}
-	if w.Intents == nil || config.IsLimitedMode(w.Config) {
-		return errors.Join(failures...)
+	if config.IsLimitedMode(w.Config) {
+		return failed
 	}
-	if _, err := w.Money.ChargeOutstanding(ctx, w.Intents); err != nil {
-		failures = append(failures, err)
+	next, err := w.collect(ctx, logger, now, job.Args.Collect)
+	failed = errors.Join(failed, err)
+	if next != nil {
+		return errors.Join(failed, continuePass(ctx, money.UsageOrderArgs{Collect: next}))
 	}
-	return errors.Join(failures...)
+	return failed
+}
+
+// bill checks one page of due usage accounts after after; it returns where
+// the next page starts when this one was full.
+func (w UsageOrderWorker) bill(ctx context.Context, logger *log.Entry, now time.Time, after *money.UsageAccountKey) (*money.UsageAccountKey, error) {
+	args := gen.ListDueUsageAccountsParams{Now: now, RowLimit: usagePage}
+	if after != nil {
+		args.AfterAt, args.AfterMerchantID, args.AfterCustomerID, args.AfterCurrency = &after.DueAt, &after.MerchantID, &after.CustomerID, &after.Currency
+	}
+	due, err := w.DB.GenDirectory().ListDueUsageAccounts(ctx, args)
+	if err != nil {
+		return nil, fmt.Errorf("list due usage accounts: %w", err)
+	}
+	var failed error
+	billed := 0
+	for _, row := range due {
+		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "usage billing", func(ctx context.Context) error {
+			ok, err := w.Money.BillDueUsageAccount(ctx, row.CustomerID, row.Currency, now)
+			if ok {
+				billed++
+			}
+			return err
+		})
+		if err != nil {
+			logger.WithError(err).WithFields(log.Fields{"merchant_id": row.MerchantID, "customer_id": row.CustomerID, "currency": row.Currency}).
+				Error("usage billing: account failed; continuing")
+			failed = errors.Join(failed, fmt.Errorf("usage account %s/%s/%s: %w", row.MerchantID, row.CustomerID, row.Currency, err))
+		}
+		if ctx.Err() != nil {
+			return nil, errors.Join(failed, ctx.Err())
+		}
+	}
+	if billed > 0 {
+		logger.WithField("orders", billed).Info("usage orders billed")
+	}
+	if len(due) < usagePage {
+		return nil, failed
+	}
+	last := due[len(due)-1]
+	return &money.UsageAccountKey{DueAt: last.UsageDueAt, MerchantID: last.MerchantID, CustomerID: last.CustomerID, Currency: last.Currency}, failed
+}
+
+// collect queues one page of due collections after after; it returns where
+// the next page starts when this one was full.
+func (w UsageOrderWorker) collect(ctx context.Context, logger *log.Entry, now time.Time, after *money.UsageOrderKey) (*money.UsageOrderKey, error) {
+	args := gen.ListDueUsageCollectionsParams{Now: now, RowLimit: usagePage}
+	if after != nil {
+		args.AfterAt, args.AfterMerchantID, args.AfterID = &after.DueAt, &after.MerchantID, &after.OrderID
+	}
+	due, err := w.DB.GenDirectory().ListDueUsageCollections(ctx, args)
+	if err != nil {
+		return nil, fmt.Errorf("list due usage collections: %w", err)
+	}
+	var failed error
+	for _, row := range due {
+		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "usage collection", func(ctx context.Context) error {
+			return w.Money.CollectDueUsageOrder(ctx, identity.CustomerID(row.CustomerID), row.ID)
+		})
+		if err != nil {
+			logger.WithError(err).WithFields(log.Fields{"merchant_id": row.MerchantID, "order_id": row.ID}).
+				Error("usage collection: order failed; continuing")
+			failed = errors.Join(failed, fmt.Errorf("usage order %s/%s: %w", row.MerchantID, row.ID, err))
+		}
+		if ctx.Err() != nil {
+			return nil, errors.Join(failed, ctx.Err())
+		}
+	}
+	if len(due) < usagePage {
+		return nil, failed
+	}
+	last := due[len(due)-1]
+	return &money.UsageOrderKey{DueAt: last.NextCollectionAttemptAt, MerchantID: last.MerchantID, OrderID: last.ID}, failed
 }
