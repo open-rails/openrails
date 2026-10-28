@@ -1443,9 +1443,10 @@ reaches every node at its next gate check.
 **It ships OFF** (engaged): a fresh deployment makes no cancellation,
 revocation, provider delete or pull overwrite until an operator enables it.
 Detection, findings and their alerts, additive repairs and access-ended notices
-run either way. A retraction the sweep holds stays `reconcile_required`, with
-`held_by: kill_switch` and the reason in its evidence, until the first sweep
-after the switch is enabled. A provider-confirmed cancel the switch holds (read
+run either way. A retraction a merchant-wide convergence holds (the sweep, the
+one after a provider pull, or the operator's converge and prune commands) stays
+`reconcile_required`, with `held_by: kill_switch` and the reason in its
+evidence, until the first sweep after the switch is enabled. A provider-confirmed cancel the switch holds (read
 by a webhook, a rebill or a verification) parks the subscription `unverified`
 with access kept; the first Provider Refresh after the switch is enabled reads
 it again with its own PSP and applies it. Inline convergence after a change is not held: it

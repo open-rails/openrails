@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
 
@@ -279,6 +280,71 @@ func TestVerificationBinding(t *testing.T) {
 			}, 30*time.Second, 50*time.Millisecond, "the archived account's renewals are read in bulk with its own credentials")
 		}
 	})
+	t.Run("OR-J34-S30/switch-turned-off-during-a-pull-holds-the-pulls-retractions", func(t *testing.T) {
+		a, p, sub := nmiMembership(t)
+		armDestructive(t, a, true)
+		customer, key := unretractedGrant(t, a)
+		// NMI charged the renewal: the pull changes the book and converges it.
+		due := *sub.CurrentPeriodEndsAt
+		p.core.AddScheduleSale(*sub.RailSubscriptionID, due)
+		a.clock.Advance(due.Sub(a.clock.Now()) + time.Hour)
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		// The PSP's onboarding pull would be the first provider read held.
+		cancelOnboarding(t, fleet, 1)
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		// The pull reads the switch as on, then the operator turns it off
+		// while the pull is reading the provider.
+		hold := p.core.Hold(func(*http.Request) bool { return true }, nmimock.HoldRequest)
+		events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
+		defer unsubscribe()
+		job, err := fleet.Insert(t.Context(), refreshMerchantJob{MerchantID: a.alpha.MerchantID().UUID()}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		require.NoError(t, err)
+		select {
+		case <-hold.Arrived():
+		case <-time.After(30 * time.Second):
+			t.Fatal("the pull never read the provider")
+		}
+		armDestructive(t, a, false)
+		hold.Release()
+		deadline := time.After(3 * time.Minute)
+		for done := false; !done; {
+			select {
+			case event := <-events:
+				done = event != nil && event.Job.ID == job.Job.ID
+			case <-deadline:
+				t.Fatal("provider refresh did not finish")
+			}
+		}
+		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{key}})
+		require.NoError(t, err)
+		require.True(t, access.Entitlements[key], "a switch turned off before the pull's convergence holds its retractions")
+		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "derive.grant_effect.excess"})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 1, "the pull's convergence saw the drift")
+		require.Equal(t, billing.FindingStatus("reconcile_required"), findings.Items[0].Status)
+	})
+}
+
+// unretractedGrant is drift for convergence to retract: a free grant revoked
+// in the ledger whose access window was left live.
+func unretractedGrant(t *testing.T, a *authorityWorld) (billing.CustomerID, string) {
+	t.Helper()
+	const key = "comp:reader"
+	customer := billing.CustomerID(uuid.New())
+	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp-reader", DisplayName: "Comp reader", Entitlements: []string{key}})
+	require.NoError(t, err)
+	granted, err := a.alpha.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: "comp-reader",
+		Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24 * 365), Reason: billing.GrantReasonComp}}})
+	require.NoError(t, err)
+	require.NoError(t, a.alpha.RevokeProductAccess(t.Context(), granted[0].ID, billing.RevokeProductAccessParams{Reason: "critical drift"}))
+	_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" SET revoked_at=NULL, revoke_reason=NULL WHERE id=$1", uuid.UUID(granted[0].ID))
+	require.NoError(t, err)
+	access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{key}})
+	require.NoError(t, err)
+	require.True(t, access.Entitlements[key])
+	return customer, key
 }
 
 // nmiAccounts is two independent NMI gateways behind one wire, chosen by the

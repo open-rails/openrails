@@ -464,6 +464,9 @@
     "OR-J34-S06": [
       "TestVerificationBinding/OR-J34-S06/held-webhook-cancel-keeps-access-until-the-switch-allows-it"
     ],
+    "OR-J34-S30": [
+      "TestVerificationBinding/OR-J34-S30/switch-turned-off-during-a-pull-holds-the-pulls-retractions"
+    ],
     "OR-J37-S01": [
       "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order",
       "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order/foreign-treasury",

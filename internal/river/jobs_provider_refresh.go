@@ -475,7 +475,7 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 }
 
 func (w *ProviderRefreshWorker) runConvergence(ctx context.Context, mid uuid.UUID) error {
-	engine := converge.NewConvergeEngine(w.DB)
+	engine := converge.NewConvergeEngine(w.DB, w.Clock)
 	engine.Now = func() time.Time { return w.now() }
 	if w.Alerts != nil {
 		// A nil *alerting.Service boxed into the FindingNotifier interface

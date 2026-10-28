@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 216,
+  "scenario_count": 217,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1082,6 +1082,11 @@
       "id": "OR-J19-S05",
       "journey": "J19",
       "name": "A migration move that no longer applies is skipped, terminally, and its migration settles"
+    },
+    {
+      "id": "OR-J34-S30",
+      "journey": "J34",
+      "name": "Kill switch turned off during a provider pull holds that pull's convergence retractions"
     }
   ]
 }

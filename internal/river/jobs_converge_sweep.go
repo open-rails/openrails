@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -60,9 +59,6 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 		// would panic on first use.
 		engine.Notifier = w.Alerts
 	}
-	// The kill switch, read per merchant, holds only the retractions the sweep
-	// would make on its own; detection, findings and notices always run.
-	engine.Retractions = destructive.New(w.DB)
 	logger := log.WithContext(ctx).WithField("worker", KindConvergeSweep)
 
 	// merchants is the global directory; per-merchant work runs inside

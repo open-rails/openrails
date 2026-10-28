@@ -98,7 +98,7 @@ type ConvergeFinding struct {
 	// abandoned order attempt). Every use must say why in a comment.
 	Ungated bool
 	// Retracts marks a repair of another shape that closes access, so the
-	// Retractions gate holds it as it holds every EXCESS repair.
+	// destructive gate holds it as it holds every EXCESS repair.
 	Retracts          bool
 	Evidence          map[string]any
 	RecommendedAction string                          // prose; "" = none
@@ -154,12 +154,6 @@ type ConvergeEngine struct {
 	// store. Optional; nil is a no-op. Set directly on the constructed engine.
 	Notifier reconcile.FindingNotifier
 
-	// Retractions, when set, is asked before each retraction repair (cancel,
-	// revoke, close); one it refuses stays reconcile_required, the reason in
-	// evidence. The sweep sets it. Inline convergence leaves it nil: its
-	// retractions finish a command already admitted.
-	Retractions *destructive.Gate
-
 	// notify is not in passes: it detects on the state the repairs just left
 	// (a window DERIVE re-projected this run never emails), so Converge runs it
 	// after the remediation loop.
@@ -190,7 +184,7 @@ type ConvergeResult struct {
 	RequiresReview    int
 	AdminRequired     int
 	Operator          int
-	// Held counts the retractions Retractions refused; HeldReason is why.
+	// Held counts the retractions the destructive gate refused; HeldReason is why.
 	Held       int
 	HeldReason string
 	RunID      *uuid.UUID
@@ -269,7 +263,14 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res Converg
 			runErr = errors.Join(runErr, fmt.Errorf("converge: finish run: %w", err))
 		}
 	}()
-	hold := &retractionHold{gate: e.Retractions, merchant: scope.Merchant.UUID()}
+	// A merchant-wide pass (the sweep, after a pull, an operator's command)
+	// asks the destructive gate before each retraction (cancel, revoke,
+	// close); one it refuses stays reconcile_required, the reason in evidence.
+	// Inline convergence of one customer finishes a command already admitted.
+	hold := &retractionHold{merchant: scope.Merchant.UUID()}
+	if scope.IsGlobal() {
+		hold.gate = destructive.New(e.DB)
+	}
 	apply := func(findings []ConvergeFinding) error {
 		if len(findings) == 0 {
 			return nil
@@ -370,7 +371,8 @@ func (e *ConvergeEngine) resolveCleared(ctx context.Context, q *gen.Queries, sco
 // findingKeySep joins a finding's type and subject (ResolveClearedFindings).
 const findingKeySep = "\x1f"
 
-// retractionHold reads the Retractions gate at most once per run.
+// retractionHold reads the destructive gate at most once per run, at the
+// first retraction.
 type retractionHold struct {
 	gate     *destructive.Gate
 	merchant uuid.UUID
@@ -395,7 +397,7 @@ func (h *retractionHold) why(ctx context.Context) string {
 // remediate decides a finding's ledger status and applies its repair. The
 // confirmed-absence gate keeps a destructive EXCESS repair in
 // reconcile_required until its source domain is proven fully reconciled, and
-// the Retractions gate keeps it there while it refuses; held is its reason.
+// the destructive gate keeps it there while it refuses; held is its reason.
 func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, hold *retractionHold, f ConvergeFinding) (status, held string, err error) {
 	// Every retraction passes the gate, including
 	// life.subscription.pending_stale, which cancels off a timeout.
