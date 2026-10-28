@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -144,40 +145,6 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 	}
 }
 
-// PurgeInventory is the manifest of what a merchant purge is ABOUT TO DESTROY.
-//
-// IT IS NOT A BACKUP AND IT RESTORES NOTHING. It holds counts, the names of
-// the merchant's configuration documents and an explicit list of everything it
-// does not capture — no customer, subscription, payment, entitlement or catalog
-// row is copied anywhere, and no credential ever leaves its store. Its whole job
-// is to put the blast radius in front of the operator before they type the
-// confirmation.
-//
-// The only restore path for a purged merchant is Postgres point-in-time recovery
-// plus its configuration (its file, or a Vault backup) — see
-// docs/backup-and-recovery.md. Until a per-merchant archive exists, a purge is
-// one-way.
-type PurgeInventory struct {
-	// ID is the billing.maintenance_runs row id.
-	ID string
-	// MerchantSlug is the merchant this inventory describes.
-	MerchantSlug string
-	// RowCounts is per-table, including rows a previous prune soft-deleted: the
-	// purge hard-deletes those too, so they belong in the blast radius.
-	RowCounts map[string]int
-	// TotalRows is the number Delete requires the operator to type back.
-	TotalRows int
-	// SecretNames are the merchant's Vault configuration documents. Values
-	// are never read.
-	SecretNames []string
-	// NotCaptured spells out, in operator-facing prose, everything this
-	// inventory does not and cannot bring back.
-	NotCaptured []string
-}
-
-// IsBackup answers the question the old name invited. It is always false.
-func (PurgeInventory) IsBackup() bool { return false }
-
 // notCaptured builds the honest list. Some entries are quantified from the
 // inventory itself so the sentence names a number the operator can check.
 func notCaptured(counts map[string]int, secrets int) []string {
@@ -216,64 +183,63 @@ func notCaptured(counts map[string]int, secrets int) []string {
 }
 
 // TakePurgeInventory records what a purge of this merchant would destroy and
-// returns it. It writes a billing.maintenance_runs row that Delete
-// then requires — the gate exists so the operator has SEEN the blast radius,
-// not because the inventory can undo anything. See PurgeInventory.
-//
-// Was Export (#225). The old name promised a restore point that never existed.
-func (s *Service) TakePurgeInventory(ctx context.Context, id billing.MerchantID) (PurgeInventory, error) {
+// returns it. Purge requires the recorded inventory, so the operator has seen
+// the blast radius; the inventory itself restores nothing.
+func (s *Service) TakePurgeInventory(ctx context.Context, id billing.MerchantID) (billing.MerchantPurgeInventory, error) {
 	m, err := s.merchantByID(ctx, id)
 	if err != nil {
-		return PurgeInventory{}, err
+		return billing.MerchantPurgeInventory{}, err
 	}
 
 	tables, err := s.existingMerchantTables(ctx)
 	if err != nil {
-		return PurgeInventory{}, err
+		return billing.MerchantPurgeInventory{}, err
 	}
 	counts, total, err := s.countMerchantOwnedRows(ctx, id, tables)
 	if err != nil {
-		return PurgeInventory{}, err
+		return billing.MerchantPurgeInventory{}, err
 	}
 
 	// Enumerate the merchant's configuration documents (never values).
-	var secretNames []string
+	documents := []string{}
 	if plan, err := s.captureSecretCleanup(ctx, id); err != nil {
-		return PurgeInventory{}, fmt.Errorf("merchants: purge inventory enumerate configuration: %w", err)
+		return billing.MerchantPurgeInventory{}, fmt.Errorf("merchants: purge inventory enumerate configuration: %w", err)
 	} else if plan != nil {
-		secretNames = plan.Names
+		documents = plan.Names
 	}
 
-	inv := PurgeInventory{
-		MerchantSlug: m.Slug,
-		RowCounts:    counts,
-		TotalRows:    total,
-		SecretNames:  secretNames,
-		NotCaptured:  notCaptured(counts, len(secretNames)),
+	inv := billing.MerchantPurgeInventory{
+		MerchantID:    id,
+		Name:          m.Slug,
+		RowCounts:     counts,
+		TotalRows:     total,
+		Documents:     documents,
+		NotCaptured:   notCaptured(counts, len(documents)),
+		ConfirmPhrase: PurgeConfirmPhrase(m.Slug),
 	}
 
 	manifestJSON, err := json.Marshal(map[string]any{
 		"kind":          "purge_inventory",
 		"is_backup":     false,
 		"restores":      "nothing",
-		"merchant_slug": inv.MerchantSlug,
+		"merchant_slug": inv.Name,
 		"row_counts":    inv.RowCounts,
 		"total_rows":    inv.TotalRows,
-		"secret_names":  inv.SecretNames,
+		"secret_names":  inv.Documents,
 		"not_captured":  inv.NotCaptured,
 		"restore_path": "Postgres point-in-time recovery + the merchant's configuration from its file or Vault " +
 			"(docs/backup-and-recovery.md). This inventory restores nothing.",
 	})
 	if err != nil {
-		return PurgeInventory{}, fmt.Errorf("merchants: marshal purge inventory: %w", err)
+		return billing.MerchantPurgeInventory{}, fmt.Errorf("merchants: marshal purge inventory: %w", err)
 	}
 
 	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		runID, err := gen.New(tx).RecordPurgeInventory(ctx, gen.RecordPurgeInventoryParams{MerchantID: id.UUID(), Manifest: manifestJSON})
-		inv.ID = runID.String()
+		inv.ID = billing.RunID(runID)
 		return err
 	}); err != nil {
-		return PurgeInventory{}, fmt.Errorf("merchants: record purge inventory: %w", err)
+		return billing.MerchantPurgeInventory{}, fmt.Errorf("merchants: record purge inventory: %w", err)
 	}
 	return inv, nil
 }
@@ -301,29 +267,12 @@ func (s *Service) countMerchantOwnedRows(ctx context.Context, id billing.Merchan
 	return counts, total, nil
 }
 
-// PurgeConfirmPhrase is the exact string DeleteOptions.ConfirmPhrase must carry.
+// PurgeConfirmPhrase is the exact string PurgeMerchantParams.ConfirmPhrase must carry.
 // Typing it is the point: the sentence states the true situation, so an operator
 // cannot authorise a purge without asserting in their own keystrokes that no
 // backup exists.
 func PurgeConfirmPhrase(slug string) string {
 	return fmt.Sprintf("purge merchant %s permanently, no backup exists", slug)
-}
-
-// DeleteOptions parameterizes a merchant purge. A bare boolean is not a
-// confirmation: it authorises a blast radius the operator never saw.
-type DeleteOptions struct {
-	// ConfirmPhrase must equal PurgeConfirmPhrase(slug) exactly.
-	ConfirmPhrase string
-	// ExpectRows is the operator's typed blast radius — the total merchant-owned
-	// row count they believe they are destroying. It must match what the purge
-	// discovers, or nothing is written.
-	ExpectRows *int
-	// InventoryID identifies the exact completed purge inventory the operator
-	// reviewed. A matching total alone is insufficient: a different set of
-	// rows can have the same total.
-	InventoryID string
-	// Actor is who asked for it; recorded on the destructive run.
-	Actor string
 }
 
 // ErrPurgeNotConfirmed: the typed confirmation was absent or wrong. Its message
@@ -338,22 +287,19 @@ func (e *ErrPurgeNotConfirmed) Error() string {
 	return fmt.Sprintf(
 		"refusing to purge merchant %s: this destroys %d rows across every merchant-owned table and is NOT reversible — "+
 			"the purge inventory is not a backup, and only Postgres PITR can bring the merchant back. "+
-			"To proceed, take a fresh inventory and pass its InventoryID, ConfirmPhrase=%q with ExpectRows=%d",
+			"To proceed, take a fresh inventory and pass its ID, ConfirmPhrase=%q and ExpectRows=%d",
 		e.Slug, e.TotalRows, e.Want, e.TotalRows)
 }
 
 // ErrPurgeRowCountMismatch: the typed row count disagrees with what the purge
 // found. Nothing is written.
 type ErrPurgeRowCountMismatch struct {
-	Expected *int
+	Expected int
 	Found    int
 }
 
 func (e *ErrPurgeRowCountMismatch) Error() string {
-	if e.Expected == nil {
-		return fmt.Sprintf("refusing to purge: ExpectRows is required. This merchant holds %d rows; take a purge inventory, read it, then confirm %d", e.Found, e.Found)
-	}
-	return fmt.Sprintf("refusing to purge: ExpectRows says %d, this merchant holds %d. Take a fresh purge inventory and confirm the number it reports", *e.Expected, e.Found)
+	return fmt.Sprintf("refusing to purge: ExpectRows says %d, this merchant holds %d. Take a fresh purge inventory and confirm the number it reports", e.Expected, e.Found)
 }
 
 // ErrPurgeInventoryStale: no inventory exists for the merchant's CURRENT row
@@ -396,32 +342,26 @@ func (e *ErrPurgeBlockedByRetainedHistory) Error() string {
 		e.Slug, e.Constraint, e.Detail)
 }
 
-// Delete performs the gated purge of a merchant. It is one-way: read
-// PurgeInventory before wiring anything to this.
+// Purge performs the gated purge of a merchant. It is one-way.
 //
-// Five refusals stand in front of it, in order:
+// Four refusals stand in front of it, in order:
 //
-//   - the destructive-action gate (#836/#835) — the same instance kill switch and
-//     per-merchant policy that hold a mass cancellation. A nil gate DENIES.
 //   - a typed confirmation phrase naming the merchant and stating that no backup
 //     exists (PurgeConfirmPhrase).
 //   - a typed row count that must equal the true blast radius.
-//   - a purge inventory whose recorded total still matches that count, so the
-//     operator demonstrably looked at THIS state.
-//   - Confirm-by-construction: DeleteOptions cannot be satisfied by a boolean.
+//   - the destructive-action gate: the instance kill switch and per-merchant
+//     policy that hold a mass cancellation. An unwired gate denies.
+//   - the purge inventory the operator read, whose recorded counts still match.
 //
-// It then purges the supported merchant-owned rows and DB-backed secrets,
-// and tombstones the directory row (status='deleted', deleted_at) inside one
-// transaction, stamped with a maintenance_runs row (kind=merchant_purge). The
-// run captures database completion and any external cleanup target atomically.
-// A Vault purge completes the run only after external cleanup is verified; failed
-// cleanup stays retryable through RetrySecretCleanup and its scheduled worker.
-//
-// Re-running Delete on an already-deleted merchant returns ErrMerchantNotFound.
-func (s *Service) Delete(ctx context.Context, id billing.MerchantID, opts DeleteOptions) error {
+// One transaction then deletes the merchant-owned rows, tombstones the
+// directory row, records a merchant_purge maintenance run and, when Vault holds
+// the merchant's configuration, queues the job that deletes it; River retries
+// that job until the merchant's subtree is empty. Purging an already purged
+// merchant returns ErrMerchantNotFound.
+func (s *Service) Purge(ctx context.Context, id billing.MerchantID, params billing.PurgeMerchantParams) (billing.MerchantPurge, error) {
 	m, err := s.merchantByID(ctx, id)
 	if err != nil {
-		return err
+		return billing.MerchantPurge{}, err
 	}
 
 	// Resolve which merchant-owned tables actually exist BEFORE opening the tx: a
@@ -429,43 +369,44 @@ func (s *Service) Delete(ctx context.Context, id billing.MerchantID, opts Delete
 	// so we must not issue a DELETE against a missing table.
 	tables, err := s.existingMerchantTables(ctx)
 	if err != nil {
-		return err
+		return billing.MerchantPurge{}, err
 	}
 
 	// The true blast radius, measured before any confirmation is judged, so every
 	// refusal below can state it.
 	counts, total, err := s.countMerchantOwnedRows(ctx, id, tables)
 	if err != nil {
-		return err
+		return billing.MerchantPurge{}, err
 	}
 
 	want := PurgeConfirmPhrase(m.Slug)
-	if opts.ConfirmPhrase != want {
-		return &ErrPurgeNotConfirmed{Slug: m.Slug, TotalRows: total, Want: want}
+	if params.ConfirmPhrase != want {
+		return billing.MerchantPurge{}, &ErrPurgeNotConfirmed{Slug: m.Slug, TotalRows: total, Want: want}
 	}
-	if opts.ExpectRows == nil || *opts.ExpectRows != total {
-		return &ErrPurgeRowCountMismatch{Expected: opts.ExpectRows, Found: total}
+	if params.ExpectRows != total {
+		return billing.MerchantPurge{}, &ErrPurgeRowCountMismatch{Expected: params.ExpectRows, Found: total}
 	}
 
-	// The gate is the LAST wall, deliberately after the read-only checks above:
-	// every refusal an operator can still act on states the true blast radius,
-	// and the gate then stands between a fully-typed request and the first write.
-	// Fail-closed — an unwired gate denies.
+	// The gate is the last read-only wall: every refusal an operator can still
+	// act on states the true blast radius.
 	gate := s.destructive
 	if gate == nil {
 		gate = deniedPolicy{}
 	}
 	if allowed, reason := gate.AllowDestructive(ctx, id.UUID()); !allowed {
-		return fmt.Errorf("merchants: refusing to purge merchant %s: %s", m.Slug, reason)
+		return billing.MerchantPurge{}, fmt.Errorf("merchants: refusing to purge merchant %s: %s", m.Slug, reason)
 	}
 
-	actor := opts.Actor
+	actor := strings.TrimSpace(params.Actor)
 	if actor == "" {
-		actor = "unknown"
+		return billing.MerchantPurge{}, errors.New("merchants: a purge names its actor")
 	}
 	cleanupPlan, err := s.captureSecretCleanup(ctx, id)
 	if err != nil {
-		return err
+		return billing.MerchantPurge{}, err
+	}
+	if cleanupPlan != nil && s.jobs == nil {
+		return billing.MerchantPurge{}, fmt.Errorf("merchants: refusing to purge merchant %s: no job queue for its Vault cleanup", m.Slug)
 	}
 	runID := uuid.New()
 	expected := int64(total)
@@ -481,7 +422,7 @@ func (s *Service) Delete(ctx context.Context, id billing.MerchantID, opts Delete
 	}
 	inventoryProof, err := json.Marshal(proof)
 	if err != nil {
-		return fmt.Errorf("merchants: marshal purge proof: %w", err)
+		return billing.MerchantPurge{}, fmt.Errorf("merchants: marshal purge proof: %w", err)
 	}
 
 	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
@@ -497,13 +438,9 @@ func (s *Service) Delete(ctx context.Context, id billing.MerchantID, opts Delete
 		if err != nil {
 			return fmt.Errorf("merchants: marshal current purge counts: %w", err)
 		}
-		inventoryID, err := uuid.Parse(opts.InventoryID)
-		if err != nil {
-			return &ErrPurgeInventoryStale{Slug: m.Slug, TotalRows: total}
-		}
 		txq := gen.New(tx)
 		matching, err := txq.CountMatchingPurgeInventories(ctx, gen.CountMatchingPurgeInventoriesParams{
-			ID: inventoryID, MerchantID: id.UUID(), TotalRows: int64(total), RowCounts: countsJSON,
+			ID: params.InventoryID.UUID(), MerchantID: id.UUID(), TotalRows: int64(total), RowCounts: countsJSON,
 		})
 		if err != nil {
 			return fmt.Errorf("merchants: check inventory-before-purge: %w", err)
@@ -541,7 +478,8 @@ func (s *Service) Delete(ctx context.Context, id billing.MerchantID, opts Delete
 			return err
 		}
 		if cleanupPlan != nil {
-			return nil
+			_, err := s.jobs.InsertRiverJobTx(ctx, tx, SecretCleanupArgs{MerchantID: id.UUID(), RunID: runID}, nil)
+			return err
 		}
 		if _, err := txq.FinishDestructiveRun(ctx, gen.FinishDestructiveRunParams{
 			MerchantID: id.UUID(), ID: runID, Status: "completed",
@@ -553,20 +491,16 @@ func (s *Service) Delete(ctx context.Context, id billing.MerchantID, opts Delete
 	}); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && (pgErr.Code == "23503" || pgErr.Code == "23001") {
-			return &ErrPurgeBlockedByRetainedHistory{Slug: m.Slug, Constraint: pgErr.ConstraintName, Detail: pgErr.Detail}
+			return billing.MerchantPurge{}, &ErrPurgeBlockedByRetainedHistory{Slug: m.Slug, Constraint: pgErr.ConstraintName, Detail: pgErr.Detail}
 		}
-		return err
+		return billing.MerchantPurge{}, err
 	}
 
 	if s.config != nil {
 		s.config.Forget(id)
 	}
 	s.changed(id)
-	if cleanupPlan != nil {
-		return s.RetrySecretCleanup(ctx, id, runID)
-	}
-
-	return nil
+	return billing.MerchantPurge{RunID: billing.RunID(runID), Rows: total, CleanupQueued: cleanupPlan != nil}, nil
 }
 
 // existingMerchantTables returns the subset of merchantOwnedTables that actually

@@ -267,6 +267,7 @@ and operational logging.
 | `intents` / `intents-log` | read-only intent-ledger views — see "Inspecting the ledger" |
 | `book status` / `book arm --by NAME` | report whether this database is the billing book's armed copy / arm it once every other copy is stopped |
 | `merchant arm` / `merchant hold --mode readonly\|limited` (`--merchant NAME --by NAME`) | restore or hold one merchant's provider writes; export and import leave it readonly |
+| `merchant purge --merchant NAME --by NAME [--inventory RUN --expect-rows N --confirm PHRASE]` | alone, record and print a purge inventory; with its `id`, `total_rows` and `confirm_phrase` typed back, permanently delete the merchant's rows (the destructive-action switch must be on). A job queued with the purge deletes its Vault configuration ([vault.md](vault.md#merchant-purge)) |
 
 The `push-*` commands push declared file state outward; `prune` reads a
 provider and never writes one.
@@ -1226,7 +1227,6 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 | Worker | Cadence |
 |---|---|
 | Balance watch (due customer watches only); due renewals and retries; job rescue | 1 min |
-| Merchant-secret cleanup | 5 min |
 | Order expiry | 5 min |
 | Convergence sweep | 15 min |
 | Rebill watch; charge-attribution read; arrears delinquency | 15 min |

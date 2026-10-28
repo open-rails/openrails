@@ -499,7 +499,7 @@ foundation; the `openrails` CLI covers the operator's (`merchants`,
 
 | Area | Methods |
 |---|---|
-| Merchants | `ProvisionMerchant` (create, or the merchant a name holds), `ListMerchants`, `GetMerchant`, `DeleteMerchant` (soft), `RestoreMerchant`, `RenameMerchant`, `MerchantByName`, `ListActiveMerchantIDs`, `ListMerchantsForSubject` |
+| Merchants | `ProvisionMerchant` (create, or the merchant a name holds), `ListMerchants`, `GetMerchant`, `DeleteMerchant` (soft), `RestoreMerchant`, `MerchantPurgeInventory`, `PurgeMerchant`, `RenameMerchant`, `MerchantByName`, `ListActiveMerchantIDs`, `ListMerchantsForSubject` |
 | Authority | `MerchantScope` (a merchant's AuthKit group, as an `auth.Scope`), `ListUserMerchants` (the merchants a user holds a role in), `AuthKit`, `EnsureCustomerPermissionGroup`; `server.MerchantRoles` names the declared merchant roles and `server.MerchantRole` resolves a declared or custom one ([roles](auth.md#roles)) |
 | Operations | `ListWorkerHealth`, `UnlockAdminLockout`, `PrivateHandler`, `FleetAnalytics`, `FleetTimeseries`, `ListMerchantRetirementCandidates`, `RetireUnusedMerchant`, `CompletePendingMerchantRetirements`, `SubjectHasVaultedPaymentMethod` |
 

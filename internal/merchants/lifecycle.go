@@ -68,10 +68,7 @@ type DestructivePolicy interface {
 	AllowDestructive(ctx context.Context, merchantID uuid.UUID) (bool, string)
 }
 
-// deniedPolicy is the zero value: no gate wired means no purge. A merchant purge
-// is unreachable by construction until an operator surface deliberately wires
-// the real gate — which is the point (or#858: Service.Delete has no route and no
-// CLI, and must not gain one while a purge is one-way).
+// deniedPolicy is the zero value: no gate wired means no purge.
 type deniedPolicy struct{}
 
 func (deniedPolicy) AllowDestructive(context.Context, uuid.UUID) (bool, string) {
@@ -107,9 +104,11 @@ type Service struct {
 	// nmiWire points credential probes at the runtime's NMI gateway and
 	// transport, as every NMI client it builds.
 	nmiWire func(*nmi.NMIClient)
-	// destructive gates the merchant purge (or#858). Never nil: NewService seeds
-	// it with deniedPolicy so an unwired service cannot purge.
+	// destructive gates the merchant purge. Never nil: NewService seeds it
+	// with deniedPolicy so an unwired service cannot purge.
 	destructive DestructivePolicy
+	// jobs queues a purge's secret cleanup with the purge.
+	jobs *db.DB
 	// clock and webhookSecretOverlap bound rotated webhook secrets (SEC-29).
 	clock                clockwork.Clock
 	webhookSecretOverlap time.Duration
@@ -124,7 +123,7 @@ type Service struct {
 }
 
 // WithDestructivePolicy wires the destructive-action gate the merchant purge
-// must clear. Without it, Delete refuses.
+// must clear. Without it, Purge refuses.
 func (s *Service) WithDestructivePolicy(p DestructivePolicy) *Service {
 	if s != nil && p != nil {
 		s.destructive = p

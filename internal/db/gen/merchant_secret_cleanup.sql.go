@@ -11,50 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const listPendingMerchantSecretCleanups = `-- name: ListPendingMerchantSecretCleanups :many
-SELECT r.merchant_id, r.id AS run_id
-FROM billing.maintenance_runs r
-JOIN billing.merchants m ON m.id = r.merchant_id
-WHERE r.kind = 'merchant_purge' AND r.status IN ('running', 'failed')
-  AND r.affected->>'database_purged' = 'true' AND r.coverage ? 'secret_cleanup'
-  AND m.deleted_at IS NOT NULL
-  AND ($1::uuid IS NULL OR r.id > $1::uuid)
-ORDER BY r.id
-LIMIT $2::int
-`
-
-type ListPendingMerchantSecretCleanupsParams struct {
-	AfterRunID *uuid.UUID
-	PageLimit  int32
-}
-
-type ListPendingMerchantSecretCleanupsRow struct {
-	MerchantID uuid.UUID
-	RunID      uuid.UUID
-}
-
-// CROSS-MERCHANT: committed tombstoned purge runs only. Per-run rows and cleanup
-// are handled under the captured merchant's scope.
-func (q *Queries) ListPendingMerchantSecretCleanups(ctx context.Context, arg ListPendingMerchantSecretCleanupsParams) ([]ListPendingMerchantSecretCleanupsRow, error) {
-	rows, err := q.db.Query(ctx, listPendingMerchantSecretCleanups, arg.AfterRunID, arg.PageLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListPendingMerchantSecretCleanupsRow
-	for rows.Next() {
-		var i ListPendingMerchantSecretCleanupsRow
-		if err := rows.Scan(&i.MerchantID, &i.RunID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const lockLiveMerchantForSecretWrite = `-- name: LockLiveMerchantForSecretWrite :one
 SELECT id FROM billing.merchants
 WHERE id=$1::uuid AND deleted_at IS NULL

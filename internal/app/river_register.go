@@ -243,7 +243,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}
-	if err := addTrackedWorker(r, workers, &riverjobs.MerchantSecretCleanupWorker{DB: r.DB, Merchants: r.Merchants}); err != nil {
+	// A merchant purge's Vault cleanup, queued with the purge.
+	if err := addTrackedWorker(r, workers, &riverjobs.MerchantSecretCleanupWorker{Merchants: r.Merchants}); err != nil {
 		return fmt.Errorf("add merchant secret cleanup worker: %w", err)
 	}
 	// Usage orders: billing, notices and collection, which waits until an
@@ -695,10 +696,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 		},
 		nil,
 	))
-
-	jobs = append(jobs, r.healthPeriodic(cfg, 5*time.Minute, func() (river.JobArgs, *river.InsertOpts) {
-		return riverjobs.MerchantSecretCleanupArgs{}, &river.InsertOpts{Queue: riverjobs.QueueBilling, UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute}}
-	}, nil))
 
 	// One usage-billing pass checks fixed account dates and pending threshold
 	// wakeups. Subscription-only hosts schedule no usage-billing scan.

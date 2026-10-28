@@ -1,6 +1,6 @@
 # Critical host and checkout contracts
 
-These 21 scenarios exercise public Go clients, real HTTP routes, the standalone
+These 22 scenarios exercise public Go clients, real HTTP routes, the standalone
 server, real PostgreSQL/AuthKit, and the shipped React component in Chromium.
 The external Stripe protocol fixture keeps an independent economic journal.
 PSP credential/routing coverage (J06) is maintained in the separate PSP suite.
@@ -10,7 +10,7 @@ PSP credential/routing coverage (J06) is maintained in the separate PSP suite.
 | J03 hosted checkout | 5 | Order capability scope and expiry, origin/frame limits, actual assets and configuration, built iframe completion binding |
 | J07 customer directory | 4 | Issuer-bound SCIM CRUD/bulk, atomic invalid patch, cross-issuer isolation, revoked keys and copied/live directory profiles |
 | J31 billing archive | 4 | Same-identity atomic restore, corruption/occupied-target refusal, restored write custody and explicit arming, unresolved-operation refusal |
-| J32 merchant host | 4 | Provision/find/rename, racing slug ownership, deletion/restore, exact unused-group retirement and name reuse |
+| J32 merchant host | 5 | Provision/find/rename, racing slug ownership, deletion/restore, exact unused-group retirement and name reuse, CLI purge and its queued Vault cleanup |
 | J34 destructive controls | 4 | Actor ceiling and durable incident, unauthorized clear refusal, reviewed clear and effect replay, finding resolution cannot bypass the hold |
 
 Archives preserve financial records, not deployment event-log streams. A source

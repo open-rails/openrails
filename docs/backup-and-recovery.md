@@ -106,8 +106,9 @@ the old source copy after the destination begins writing.
 
 ## What is not a backup
 
-**The merchant purge inventory.** `TakePurgeInventory` (was `Export`) writes row
-counts and secret *names* to `billing.maintenance_runs`. It copies no
+**The merchant purge inventory.** `openrails merchant purge` without its
+confirmation (or the server's `MerchantPurgeInventory`) writes row counts and
+configuration document *names* to `billing.maintenance_runs`. It copies no
 data — no customer, subscription, payment, entitlement or catalog row, and no
 secret value. It exists so an operator sees the blast radius before confirming a
 purge, and it can restore nothing. Its own recorded manifest says so

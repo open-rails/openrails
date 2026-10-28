@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 212,
+  "scenario_count": 213,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -692,6 +692,11 @@
       "id": "OR-J32-S04",
       "journey": "J32",
       "name": "Unused merchant retirement releases exact group and retries preserve a reclaimed name owner"
+    },
+    {
+      "id": "OR-J32-S05",
+      "journey": "J32",
+      "name": "Operator CLI purge confirms its inventory and the job queued with it deletes the merchant's Vault configuration"
     },
     {
       "id": "OR-J34-S01",

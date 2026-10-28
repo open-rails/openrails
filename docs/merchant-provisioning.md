@@ -282,11 +282,18 @@ A changed credential is checked against its declared account before it is used.
 
 ## Deleting a merchant
 
-A merchant is never hard-deleted through an API. The standalone operator
+A merchant is never hard-deleted through an HTTP route. The standalone operator
 soft-deletes one with the server's `DeleteMerchant` (`openrails merchants
 delete <id>`) and brings it back with `RestoreMerchant` (`openrails merchants
 restore <id>`); a never-used merchant is retired with `RetireUnusedMerchant`
 (above), which releases its name for good.
+
+A purge is permanent: `openrails merchant purge` (the server's
+`MerchantPurgeInventory` and `PurgeMerchant`) first records an inventory of
+what it would delete, then deletes the merchant's rows once that inventory's
+id, row count and confirmation phrase are typed back and the destructive-action
+switch is on. A job queued with the purge deletes its Vault configuration.
+Point-in-time recovery is the only way back.
 
 Two things no deletion does, by construction:
 

@@ -235,6 +235,41 @@ type MerchantRetirement struct {
 	Refusal MerchantRetirementRefusal
 }
 
+// MerchantPurgeInventory is what purging a merchant would destroy: row
+// counts and the names of its configuration documents, never a copy of
+// either. It restores nothing. PurgeMerchantParams types back its ID,
+// TotalRows and ConfirmPhrase.
+type MerchantPurgeInventory struct {
+	ID         RunID          `json:"id"`
+	MerchantID MerchantID     `json:"merchant_id"`
+	Name       string         `json:"name"`
+	RowCounts  map[string]int `json:"row_counts"`
+	TotalRows  int            `json:"total_rows"`
+	// Documents are the merchant's Vault configuration documents, which the
+	// purge's cleanup job deletes.
+	Documents []string `json:"documents"`
+	// NotCaptured is what neither the inventory nor anything else brings back.
+	NotCaptured   []string `json:"not_captured"`
+	ConfirmPhrase string   `json:"confirm_phrase"`
+}
+
+// PurgeMerchantParams confirms a purge with the inventory the operator read.
+type PurgeMerchantParams struct {
+	InventoryID   RunID
+	ExpectRows    int
+	ConfirmPhrase string
+	// Actor is who purges, recorded on the purge's maintenance run.
+	Actor string
+}
+
+// MerchantPurge is a committed purge: its maintenance run, the rows it deleted
+// and whether a job was queued to delete its Vault configuration.
+type MerchantPurge struct {
+	RunID         RunID `json:"run_id"`
+	Rows          int   `json:"rows"`
+	CleanupQueued bool  `json:"cleanup_queued"`
+}
+
 // A hosted product's user model, served on the server's Go API: the
 // signed-in user's merchants and the merchant's name. The JSON names are the
 // ones its own routes answer with.

@@ -63,10 +63,11 @@ func newBookCmd() *cobra.Command {
 	return cmd
 }
 
-// newMerchantPostureCmd sets one merchant's write posture. Export leaves its
-// source readonly and restore its destination; arm restores writes.
-func newMerchantPostureCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "merchant", Short: "Arm or hold one merchant's provider writes"}
+// newMerchantCmd sets one merchant's write posture, or purges it. Export
+// leaves its source readonly and restore its destination; arm restores writes.
+func newMerchantCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "merchant", Short: "Arm or hold one merchant's provider writes, or purge the merchant"}
+	cmd.AddCommand(newMerchantPurgeCmd())
 	var slug, by, mode string
 	set := func(cmd *cobra.Command, m writeposture.Mode) error {
 		cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)

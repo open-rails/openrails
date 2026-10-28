@@ -213,8 +213,9 @@ so rotate by creating a new key and listing it first instead.
 
 ## Merchant purge
 
-A committed merchant purge deletes every document under the merchant's id. The
-cleanup is recorded in `maintenance_runs` and retried by the
-`openrails.merchant_secret_cleanup` worker until the merchant's subtree is
+A merchant purge (`openrails merchant purge`) queues the
+`openrails.merchant_secret_cleanup` job in its own transaction. The job deletes
+every document under the merchant's id, records the cleanup on the purge's
+`maintenance_runs` row and is retried by River until the merchant's subtree is
 empty. A changed Vault address or mount is refused: restore the original to
 finish an outstanding cleanup.

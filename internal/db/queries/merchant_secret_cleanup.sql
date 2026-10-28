@@ -24,16 +24,3 @@ SET status=sqlc.arg(status)::text,
       'external_secrets_deleted',sqlc.arg(deleted)::bigint,
       'secret_cleanup_error',sqlc.narg(error)::text,'secret_cleanup_attempted_at',now())
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
-
--- CROSS-MERCHANT: committed tombstoned purge runs only. Per-run rows and cleanup
--- are handled under the captured merchant's scope.
--- name: ListPendingMerchantSecretCleanups :many
-SELECT r.merchant_id, r.id AS run_id
-FROM billing.maintenance_runs r
-JOIN billing.merchants m ON m.id = r.merchant_id
-WHERE r.kind = 'merchant_purge' AND r.status IN ('running', 'failed')
-  AND r.affected->>'database_purged' = 'true' AND r.coverage ? 'secret_cleanup'
-  AND m.deleted_at IS NOT NULL
-  AND (sqlc.narg(after_run_id)::uuid IS NULL OR r.id > sqlc.narg(after_run_id)::uuid)
-ORDER BY r.id
-LIMIT sqlc.arg(page_limit)::int;

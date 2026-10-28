@@ -9,7 +9,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
+
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 )
@@ -74,13 +77,36 @@ func (s *Service) cleanupSecrets(ctx context.Context, id billing.MerchantID, pla
 	return int64(len(plan.Names)), nil
 }
 
+// SecretCleanupArgs is the job that deletes a purged merchant's Vault
+// configuration. The purge queues it in its own transaction; River retries it.
+type SecretCleanupArgs struct {
+	MerchantID uuid.UUID `json:"merchant_id" river:"unique"`
+	RunID      uuid.UUID `json:"run_id" river:"unique"`
+}
+
+func (SecretCleanupArgs) Kind() string { return "openrails.merchant_secret_cleanup" }
+
+func (SecretCleanupArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true}}
+}
+
+// WithJobs binds the database whose River producer queues the purge's
+// secret cleanup. Without it a purge with Vault configuration refuses.
+func (s *Service) WithJobs(d *db.DB) *Service {
+	if s != nil {
+		s.jobs = d
+	}
+	return s
+}
+
 // ErrSecretCleanupPending means database purge committed but external cleanup
 // is not complete. Retrying the captured run never repeats the database purge.
 var ErrSecretCleanupPending = errors.New("merchant secret cleanup pending")
 
-// RetrySecretCleanup resumes only an already committed purge of a tombstoned
-// merchant. The destructive run is the durable task and audit authority.
-func (s *Service) RetrySecretCleanup(ctx context.Context, id billing.MerchantID, runID uuid.UUID) error {
+// CleanupPurgedSecrets deletes the Vault configuration of an already committed
+// purge of a tombstoned merchant. The purge's maintenance run is the task and
+// its audit record.
+func (s *Service) CleanupPurgedSecrets(ctx context.Context, id billing.MerchantID, runID uuid.UUID) error {
 	var cleanupErr error
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)

@@ -443,6 +443,9 @@
     "OR-J32-S04": [
       "TestMerchantHost/OR-J32-S04/retirement-retry-preserves-reclaimed-name-owner"
     ],
+    "OR-J32-S05": [
+      "TestMerchantHost/OR-J32-S05/cli-purge-queues-its-vault-cleanup"
+    ],
     "OR-J34-S01": [
       "TestDestructiveControls/OR-J34-S01/ceiling-persists-original-actor-target-and-denied-effect"
     ],

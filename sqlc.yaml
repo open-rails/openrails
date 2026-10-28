@@ -117,6 +117,7 @@ sql:
       - "internal/migrate/postgres/0134_parked_provider_subscriptions.up.sql"
       - "internal/migrate/postgres/0136_manual_reconcile.up.sql"
       - "internal/migrate/postgres/0140_drop_catalog_drift.up.sql"
+      - "internal/migrate/postgres/0141_purge_cleanup_job.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

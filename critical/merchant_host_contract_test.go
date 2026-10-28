@@ -3,10 +3,19 @@
 package critical_test
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os/exec"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func hostProvision(t *testing.T, w *standaloneWorld, slug string) billing.ProvisionMerchantResult {
@@ -147,5 +156,61 @@ func TestMerchantHost(t *testing.T) {
 		w.command(t, map[string]any{"Op": "host-retire", "Merchant": old.MerchantID, "ID": old.GroupID}, &retirement)
 		require.False(t, retirement.Retired)
 		require.Equal(t, billing.MerchantRetirementRefusedNotLive, retirement.Refusal)
+	})
+	t.Run("OR-J32-S05/cli-purge-queues-its-vault-cleanup", func(t *testing.T) {
+		a, _ := newPSPWorld(t)
+		_, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		require.NoError(t, err)
+		merchant := a.alpha.MerchantID().UUID()
+		documents := func() []any {
+			listed, err := a.deps.Vault.Logical().ListWithContext(t.Context(), a.cfg.Vault.KVMount+"/metadata/openrails/merchants/"+merchant.String()+"/psps")
+			require.NoError(t, err)
+			if listed == nil {
+				return nil
+			}
+			keys, _ := listed.Data["keys"].([]any)
+			return keys
+		}
+		require.NotEmpty(t, documents(), "the PSP's credentials live in Vault")
+		enableLifecycleMaintenance(t, a)
+		vault := map[string]any{"vault": map[string]any{"address": a.cfg.Vault.Address, "token": a.cfg.Vault.Token, "kv_mount": a.cfg.Vault.KVMount}}
+		purge := func(out any, args ...string) error {
+			stdout, err := hostCLICommand(t, a.world, vault, append([]string{"merchant", "purge", "--merchant", "alpha", "--by", "critical operator"}, args...)...).Output()
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				return fmt.Errorf("%w: %s", err, exit.Stderr)
+			}
+			if err != nil {
+				return err
+			}
+			return json.Unmarshal(stdout, out)
+		}
+
+		var inventory billing.MerchantPurgeInventory
+		require.NoError(t, purge(&inventory))
+		require.Equal(t, "alpha", inventory.Name)
+		require.Contains(t, inventory.Documents, "psps/stripe")
+		require.Equal(t, "purge merchant alpha permanently, no backup exists", inventory.ConfirmPhrase)
+		confirm := []string{"--inventory", inventory.ID.String(), "--confirm", inventory.ConfirmPhrase}
+		require.ErrorContains(t, purge(nil, append(confirm, "--expect-rows", strconv.Itoa(inventory.TotalRows+1))...), "refusing to purge")
+		var purged billing.MerchantPurge
+		require.NoError(t, purge(&purged, append(confirm, "--expect-rows", strconv.Itoa(inventory.TotalRows))...))
+		require.True(t, purged.CleanupQueued)
+		require.Equal(t, inventory.TotalRows, purged.Rows)
+		var deleted bool
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT deleted_at IS NOT NULL FROM "+pgx.Identifier{a.schema, "merchants"}.Sanitize()+" WHERE id=$1", merchant).Scan(&deleted))
+		require.True(t, deleted, "the purge tombstones the merchant")
+		require.NotEmpty(t, documents(), "the cleanup waits for a worker")
+
+		fleet := hostFleet(t, a.world)
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		run := func() string {
+			var status string
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT status FROM "+pgx.Identifier{a.schema, "maintenance_runs"}.Sanitize()+" WHERE merchant_id=$1 AND id=$2", merchant, purged.RunID.UUID()).Scan(&status))
+			return status
+		}
+		require.Eventually(t, func() bool { return run() == "completed" && len(documents()) == 0 },
+			30*time.Second, 100*time.Millisecond, "the job queued with the purge deletes the merchant's Vault configuration")
 	})
 }

@@ -47,3 +47,26 @@ func (s *Server) RenameMerchant(ctx context.Context, id billing.MerchantID, req 
 	}
 	return &billing.MerchantName{ID: m.ID, Name: m.Slug}, nil
 }
+
+// MerchantPurgeInventory records what purging a merchant would destroy and
+// returns it. It copies nothing and restores nothing; PurgeMerchant requires it.
+func (s *Server) MerchantPurgeInventory(ctx context.Context, id billing.MerchantID) (*billing.MerchantPurgeInventory, error) {
+	inventory, err := s.graph.Runtime.Merchants.TakePurgeInventory(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &inventory, nil
+}
+
+// PurgeMerchant permanently deletes a merchant's rows and tombstones it, once
+// params type back the inventory the operator read and the destructive-action
+// policy allows it. A job queued with the purge deletes its Vault
+// configuration, retried until none remains. Point-in-time recovery is the only
+// way back.
+func (s *Server) PurgeMerchant(ctx context.Context, id billing.MerchantID, params billing.PurgeMerchantParams) (*billing.MerchantPurge, error) {
+	purge, err := s.graph.Runtime.Merchants.Purge(ctx, id, params)
+	if err != nil {
+		return nil, err
+	}
+	return &purge, nil
+}
