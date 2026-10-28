@@ -289,7 +289,7 @@ func (h *harness) stripeDomains(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if err == nil && row.Status != intents.StatusSucceeded {
-			_, err = h.rt.IntentRunner().ExecuteByID(ctx, row.ID)
+			_, err = h.rt.IntentRunner().ExecuteNowByID(ctx, row.ID)
 		}
 		if err != nil {
 			reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

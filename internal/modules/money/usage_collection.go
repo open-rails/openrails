@@ -112,7 +112,7 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, runner *intents.Ru
 		if intentID == uuid.Nil {
 			continue
 		}
-		row, err := runner.ExecuteByID(ctx, intentID)
+		row, err := runner.ExecuteFirstByID(ctx, intentID)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("collect order %s: %w", r.ID, err))
 			continue
@@ -167,7 +167,7 @@ func (s *MoneyService) collectUsage(ctx context.Context, runner *intents.Runner,
 	if intentID == uuid.Nil {
 		return nil, ErrUsageNotCollectible
 	}
-	operation, err := runner.ExecuteByID(ctx, intentID)
+	operation, err := runner.ExecuteFirstByID(ctx, intentID)
 	if err != nil {
 		return nil, fmt.Errorf("collect usage order: %w", err)
 	}

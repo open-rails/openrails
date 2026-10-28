@@ -116,7 +116,8 @@ func (t *PaymentMethodDeleteThrough) executeManual(ctx context.Context, in gen.B
 			return row, err
 		}
 	}
-	row, err = t.Runner.ExecuteByID(ctx, row.ID)
+	// No scheduled wake runs a manual deletion: this request is its retry.
+	row, err = t.Runner.ExecuteNowByID(ctx, row.ID)
 	if err != nil || row.Status != StatusUnknownNeedsVerify {
 		return row, err
 	}

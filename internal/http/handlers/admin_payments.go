@@ -359,7 +359,7 @@ func adminRefundMetadataString(metadata map[string]any, key string) string {
 // The reservation and intent are already committed. Request cancellation cannot
 // discard the work; the scheduled executor can finish the same operation.
 func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, prepared *adminRefundPrepared) (*models.Payment, int, error) {
-	intent, err := r.State.IntentRunner().ExecuteByID(ctx, prepared.intentID)
+	intent, err := r.State.IntentRunner().ExecuteFirstByID(ctx, prepared.intentID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("execute refund intent: %w", err)
 	}

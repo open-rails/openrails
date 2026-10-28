@@ -530,7 +530,7 @@ func (t *PaymentSourceUpdateThrough) EnqueueSwap(ctx context.Context, tx pgx.Tx,
 // ExecuteSwap runs a committed swap inline; what does not settle is the
 // executor's.
 func (t *PaymentSourceUpdateThrough) ExecuteSwap(ctx context.Context, intentID uuid.UUID) error {
-	_, err := t.Runner.ExecuteByID(ctx, intentID)
+	_, err := t.Runner.ExecuteFirstByID(ctx, intentID)
 	return err
 }
 

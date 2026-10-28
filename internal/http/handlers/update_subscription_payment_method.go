@@ -124,7 +124,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 			if accepted.Status == intents.StatusUnknownNeedsVerify {
 				result, err = r.State.IntentRunner().VerifyByID(ctx, accepted.ID)
 			} else {
-				result, err = r.State.IntentRunner().ExecuteByID(ctx, accepted.ID)
+				result, err = r.State.IntentRunner().ExecuteFirstByID(ctx, accepted.ID)
 			}
 			if err != nil {
 				writeMoveRefusal(r, err, "Failed to confirm payment method")

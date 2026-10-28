@@ -80,7 +80,7 @@ func (s *Service) payRenewal(ctx context.Context, actor OrderActor, order *order
 	if accepted.Status == intents.StatusUnknownNeedsVerify {
 		result, err = rt.IntentRunner().VerifyByID(ctx, accepted.ID)
 	} else {
-		result, err = rt.IntentRunner().ExecuteByID(ctx, accepted.ID)
+		result, err = rt.IntentRunner().ExecuteFirstByID(ctx, accepted.ID)
 	}
 	if err != nil {
 		return payment.OrderCharge{}, replayed, err

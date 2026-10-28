@@ -172,7 +172,7 @@ func (r *Runner) resolveUnsent(ctx context.Context, row gen.BillingProviderInten
 		return row, fmt.Errorf("%w (status=%s)", ErrResolutionNotUnknown, row.Status)
 	}
 	now := r.now()
-	claimed, ok, err := r.Store.ClaimByID(ctx, row.ID, now, now.Add(r.lease()))
+	claimed, ok, err := r.Store.ClaimNowByID(ctx, row.ID, now, now.Add(r.lease()))
 	if err != nil {
 		return row, err
 	}

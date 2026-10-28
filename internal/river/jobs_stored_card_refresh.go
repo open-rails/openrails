@@ -133,9 +133,8 @@ func (w *StoredCardRefreshWorker) refresh(ctx context.Context, args paymentmetho
 	return w.askUnlessReissued(ctx, args)
 }
 
-// request records the card's account-updater request and runs it when this
-// call created it. A request that already exists runs on its own backoff:
-// claiming it here would retry it early.
+// request records the card's account-updater request and runs its first
+// attempt. One attempted already runs on its own backoff.
 func (w *StoredCardRefreshWorker) request(ctx context.Context, method gen.BillingPaymentMethod, declined bool, now time.Time) (gen.BillingProviderIntent, error) {
 	ref := models.DerefStr(method.RailMethodRef)
 	checked := "never"
@@ -162,10 +161,10 @@ func (w *StoredCardRefreshWorker) request(ctx context.Context, method gen.Billin
 		OriginReason:   "stored card refresh: " + cause,
 		Inline:         true,
 	})
-	if err != nil || row.Status != intents.StatusPending || row.Attempts != 0 {
+	if err != nil {
 		return row, err
 	}
-	return w.Intents.ExecuteByID(ctx, row.ID)
+	return w.Intents.ExecuteFirstByID(ctx, row.ID)
 }
 
 // askUnlessReissued asks for a card still as the job found it; a reissue

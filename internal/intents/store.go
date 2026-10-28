@@ -442,20 +442,27 @@ func (s *Store) SupersedeBySubject(ctx context.Context, intentType string, subsc
 	})
 }
 
-// ClaimByID leases ONE specific intent for the synchronous execute path.
-// ok=false means the row is not claimable (terminal, expired, or leased by a
-// live executor) — the caller inspects the canonical row instead.
-func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error) {
-	return s.claimByID(ctx, id, now, leaseUntil, false)
+// ClaimFirstByID leases ONE specific intent for its producer's first attempt.
+// ok=false means the row is not claimable (attempted already, terminal,
+// expired, or leased by a live executor): its retries belong to its scheduled
+// wake, and the caller inspects the canonical row instead.
+func (s *Store) ClaimFirstByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error) {
+	return s.claimByID(ctx, id, now, leaseUntil, "first")
 }
 
-// ClaimDueByID is ClaimByID for a scheduled wake: ok=false also when the next
-// attempt or a producer's hold is not yet due.
+// ClaimDueByID leases ONE specific intent for its scheduled wake: ok=false also
+// when the next attempt or a producer's hold is not yet due.
 func (s *Store) ClaimDueByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error) {
-	return s.claimByID(ctx, id, now, leaseUntil, true)
+	return s.claimByID(ctx, id, now, leaseUntil, "due")
 }
 
-func (s *Store) claimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time, dueOnly bool) (gen.BillingProviderIntent, bool, error) {
+// ClaimNowByID leases ONE specific intent whatever its backoff, for an
+// explicit retry by its owner or an operator.
+func (s *Store) ClaimNowByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error) {
+	return s.claimByID(ctx, id, now, leaseUntil, "now")
+}
+
+func (s *Store) claimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time, claim string) (gen.BillingProviderIntent, bool, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return gen.BillingProviderIntent{}, false, scopeErr
@@ -465,7 +472,7 @@ func (s *Store) claimByID(ctx context.Context, id uuid.UUID, now, leaseUntil tim
 		ID:             id,
 		Now:            now.UTC(),
 		LeaseExpiresAt: leaseUntil.UTC(),
-		DueOnly:        dueOnly,
+		Claim:          claim,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

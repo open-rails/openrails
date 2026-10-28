@@ -479,7 +479,7 @@ func (w *DunningWorker) processSubscription(
 		logEntry.WithField("intent_id", intent.ID).Info("Dunning: accepted intent is parked until provider writes are enabled")
 		return dunningOutcomeMaterialized, nil
 	}
-	intent, err = w.intentRunner().ExecuteByID(ctx, intent.ID)
+	intent, err = w.intentRunner().ExecuteFirstByID(ctx, intent.ID)
 	if err != nil {
 		return dunningOutcomeFailed, err
 	}

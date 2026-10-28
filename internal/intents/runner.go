@@ -23,8 +23,9 @@ import (
 type ledger interface {
 	Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error)
 	Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error)
-	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
+	ClaimFirstByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
 	ClaimDueByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
+	ClaimNowByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
 	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error)
 	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error)
 	ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
@@ -73,7 +74,7 @@ func LedgerWriteContext(ctx context.Context) (context.Context, context.CancelFun
 }
 
 // Runner applies financial claims and provider evidence. Production River
-// dispatch calls ExecuteByID/VerifyByID for one accepted operation.
+// dispatch calls ExecuteDueByID/VerifyByID for one accepted operation.
 type Runner struct {
 	// Admissions rechecks the original staff command before its first effect.
 	Admissions *destructive.Admissions
@@ -325,19 +326,27 @@ func (r *Runner) executeInline(ctx context.Context, row gen.BillingProviderInten
 	if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeInline, Kind: row.IntentType, Operation: row.ID}); err != nil {
 		return gen.BillingProviderIntent{}, err
 	}
-	return r.ExecuteByID(ctx, row.ID)
+	return r.ExecuteFirstByID(ctx, row.ID)
 }
 
-// ExecuteByID runs committed work without enqueuing or changing its payload.
-func (r *Runner) ExecuteByID(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error) {
-	return r.executeByID(ctx, id, r.Store.ClaimByID)
+// ExecuteFirstByID runs the first attempt of committed work its caller just
+// accepted, without enqueuing or changing its payload. An operation attempted
+// already is returned as it stands: its retries belong to its scheduled wake.
+func (r *Runner) ExecuteFirstByID(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error) {
+	return r.executeByID(ctx, id, r.Store.ClaimFirstByID)
 }
 
-// ExecuteDueByID is ExecuteByID for a scheduled wake: it claims only once the
-// next attempt is due, so a second wake of the same operation never runs it
-// before its backoff.
+// ExecuteDueByID runs committed work for its scheduled wake, only once its next
+// attempt is due, so a second wake of the same operation never runs it before
+// its backoff.
 func (r *Runner) ExecuteDueByID(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error) {
 	return r.executeByID(ctx, id, r.Store.ClaimDueByID)
+}
+
+// ExecuteNowByID runs committed work whatever its backoff. It is only for an
+// explicit retry by the operation's owner that no scheduled wake makes.
+func (r *Runner) ExecuteNowByID(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error) {
+	return r.executeByID(ctx, id, r.Store.ClaimNowByID)
 }
 
 func (r *Runner) executeByID(ctx context.Context, id uuid.UUID, claim func(context.Context, uuid.UUID, time.Time, time.Time) (gen.BillingProviderIntent, bool, error)) (gen.BillingProviderIntent, error) {
@@ -362,8 +371,8 @@ func (r *Runner) executeByID(ctx context.Context, id uuid.UUID, claim func(conte
 	}
 	if !ok {
 		// Raced into an unclaimable state (another executor's lease, expiry
-		// sweep, not yet due); the durable row stands and the scheduled
-		// pipeline owns it.
+		// sweep, attempted already or not yet due); the durable row stands
+		// and the scheduled pipeline owns it.
 		return r.Store.Get(ctx, row.ID)
 	}
 
@@ -742,7 +751,7 @@ func derefUUID(id *uuid.UUID) uuid.UUID {
 
 // VerifyByID reconciles one submitted operation on an explicit request replay.
 // It claims the same lease as the scheduled verifier and performs no provider
-// writes. A retryable result may subsequently enter ExecuteByID's write gates.
+// writes. A retryable result may subsequently enter the execute write gates.
 func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error) {
 	row, err := r.Store.Get(ctx, id)
 	if err != nil {
