@@ -17,23 +17,27 @@ import (
 // ApplyDecision, whatever the rail or caller. A pull-plane pass (verification,
 // the unknown cohort) decides its rows first and declares its planned cancels
 // once: the destructive switch and enforce arming, then the cancel budget
-// against the PSP's live book, all or nothing. Any other caller is a pass of
-// one, held by the destructive switch; one cancel is always within budget. An
-// admitted operator command (a declared book, an approved proposal) carries
-// its own authority.
+// against the PSP's live book, all or nothing; a cancel it did not plan (a
+// re-decision after a concurrent write) is held. Any other caller is a pass of
+// one, held by the destructive switch; one cancel is always within budget. The
+// switch is read again for every cancel, so turning it off stops a running
+// pass. An admitted operator command (a declared book, an approved proposal)
+// carries its own authority. A held cancel parks a live row `unverified`, access
+// kept, for the next read once the gate allows it.
 
 type cancelPassKey struct{}
 
 type cancelPass struct {
-	held   bool
-	reason string
+	held     bool
+	reason   string
+	admitted bool
 }
 
 // GateCancelPass evaluates one pull-plane pass's planned cancels for a PSP and
 // returns the context its decisions apply under. A budget overrun raises the
 // cancellation-cap finding. ctx must be merchant-scoped.
 func GateCancelPass(ctx context.Context, database *db.DB, mid billing.MerchantID, provider Provider, pspID uuid.UUID, planned int) context.Context {
-	pass := cancelPass{}
+	pass := cancelPass{held: true, reason: "the pass planned no cancellation"}
 	if planned > 0 {
 		pass = evaluateCancelPass(ctx, database, mid, provider, pspID, planned)
 	}
@@ -43,7 +47,7 @@ func GateCancelPass(ctx context.Context, database *db.DB, mid billing.MerchantID
 // WithAdmittedCancels marks ctx as an operator command already admitted: its
 // cancels apply without another gate.
 func WithAdmittedCancels(ctx context.Context) context.Context {
-	return context.WithValue(ctx, cancelPassKey{}, cancelPass{})
+	return context.WithValue(ctx, cancelPassKey{}, cancelPass{admitted: true})
 }
 
 // CancelsHeld reports whether the pass bound to ctx holds its cancels.
@@ -70,8 +74,8 @@ func evaluateCancelPass(ctx context.Context, database *db.DB, mid billing.Mercha
 
 // cancelHeld is ApplyDecision's brake on one cancel.
 func cancelHeld(ctx context.Context, database *db.DB, sub *models.Subscription, d Decision) bool {
-	pass, ok := ctx.Value(cancelPassKey{}).(cancelPass)
-	if !ok {
+	pass, _ := ctx.Value(cancelPassKey{}).(cancelPass)
+	if !pass.held && !pass.admitted {
 		if v := destructive.New(database).Check(ctx, sub.MerchantID); !v.Allowed {
 			pass = cancelPass{held: true, reason: v.Reason}
 		}

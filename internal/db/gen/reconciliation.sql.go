@@ -464,6 +464,41 @@ func (q *Queries) CountUnknownOperations(ctx context.Context, arg CountUnknownOp
 	return i, err
 }
 
+const countUnverifiedNMISubscriptionsByPSP = `-- name: CountUnverifiedNMISubscriptionsByPSP :many
+SELECT psp_id, count(*)::bigint AS rows FROM billing.subscriptions
+WHERE merchant_id = $1::uuid AND rail = 'nmi' AND status = 'unverified' AND deleted_at IS NULL
+  AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL
+GROUP BY psp_id
+ORDER BY psp_id
+`
+
+type CountUnverifiedNMISubscriptionsByPSPRow struct {
+	PspID uuid.UUID
+	Rows  int64
+}
+
+// How many unverified NMI rows each of the merchant's NMI PSPs holds: each PSP
+// is read in bulk or row by row on its own count.
+func (q *Queries) CountUnverifiedNMISubscriptionsByPSP(ctx context.Context, merchantID uuid.UUID) ([]CountUnverifiedNMISubscriptionsByPSPRow, error) {
+	rows, err := q.db.Query(ctx, countUnverifiedNMISubscriptionsByPSP, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountUnverifiedNMISubscriptionsByPSPRow
+	for rows.Next() {
+		var i CountUnverifiedNMISubscriptionsByPSPRow
+		if err := rows.Scan(&i.PspID, &i.Rows); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createReconciliationRun = `-- name: CreateReconciliationRun :one
 
 INSERT INTO billing.maintenance_runs (
@@ -2165,40 +2200,6 @@ func (q *Queries) ListUnresolvedScheduleSubscriptions(ctx context.Context, arg L
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUnverifiedNMISubscriptionIDs = `-- name: ListUnverifiedNMISubscriptionIDs :many
-SELECT id FROM billing.subscriptions
-WHERE merchant_id = $1::uuid AND rail = 'nmi' AND status = 'unverified' AND deleted_at IS NULL
-  AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL
-ORDER BY current_period_ends_at NULLS FIRST
-LIMIT $2::bigint
-`
-
-type ListUnverifiedNMISubscriptionIDsParams struct {
-	MerchantID uuid.UUID
-	RowLimit   int64
-}
-
-// Callers pass a limit one above their bulk threshold.
-func (q *Queries) ListUnverifiedNMISubscriptionIDs(ctx context.Context, arg ListUnverifiedNMISubscriptionIDsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listUnverifiedNMISubscriptionIDs, arg.MerchantID, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

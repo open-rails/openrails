@@ -1415,7 +1415,10 @@ revocation, provider delete or pull overwrite until an operator enables it.
 Detection, findings and their alerts, additive repairs and access-ended notices
 run either way. A retraction the sweep holds stays `reconcile_required`, with
 `held_by: kill_switch` and the reason in its evidence, until the first sweep
-after the switch is enabled. Inline convergence after a change is not held: it
+after the switch is enabled. A provider-confirmed cancel the switch holds (read
+by a webhook, a rebill or a verification) parks the subscription `unverified`
+with access kept; the first Provider Refresh after the switch is enabled reads
+it again with its own PSP and applies it. Inline convergence after a change is not held: it
 finishes a command already admitted.
 
 ### Stop everything, now
@@ -1480,9 +1483,9 @@ gates one merchant. Disabling either stops that merchant.
 ### Cancellation caps
 
 Every convergence cancel, whatever its rail or what read it (a pull, a
-verification read, a webhook or rebill read), waits for the switch. A
-pull-plane pass (the pull, verification, the unknown cohort) also needs the
-merchant armed, and is capped per PSP: one pass may cancel at most
+verification read, a webhook or rebill read), waits for the switch, read again
+for each cancel. A pull-plane pass (the pull, verification, the unknown cohort)
+also needs the merchant armed, and is capped per PSP: one pass may cancel at most
 `min(25, max(3, 5% of the PSP's live linked book))` subscriptions, or the
 whole book when it holds at most 5 live subscriptions (a tiny book whose
 schedules the provider ended must converge; no larger book is ever canceled

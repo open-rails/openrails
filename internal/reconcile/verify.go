@@ -31,7 +31,8 @@ import (
 // Requests arrive from the unverified trigger's NOTIFY (Listen) and the refresh
 // pass (Pass). A merchant's requests coalesce for Coalesce, then bounded
 // workers read them verifyBatchSize at a time; above BulkThreshold pending rows
-// (an import) the account is read in bulk instead.
+// (an import) each NMI PSP holding more than that is read in bulk first, and
+// the rows it did not cover are read in batches.
 type Verifier struct {
 	DB            *db.DB
 	Clock         clockwork.Clock
@@ -56,7 +57,8 @@ type Verifier struct {
 	busy     map[billing.MerchantID]int
 	timer    map[billing.MerchantID]bool
 	// bulking holds, per merchant with a bulk read running, the rows it
-	// covers: requests for them are dropped, the rest wait for it to end.
+	// covers: requests for them are dropped, the rest wait for it to end and
+	// are then read in batches.
 	bulking map[billing.MerchantID]map[uuid.UUID]struct{}
 	sem     chan struct{}
 	changed chan struct{}
@@ -144,16 +146,17 @@ func (v *Verifier) Enqueue(mid billing.MerchantID, ids ...uuid.UUID) {
 	v.mu.Unlock()
 	switch {
 	case now:
-		v.flush(mid)
+		v.flush(mid, true)
 	case arm:
-		time.AfterFunc(v.Coalesce, func() { v.flush(mid) })
+		time.AfterFunc(v.Coalesce, func() { v.flush(mid, true) })
 	}
 }
 
-// flush hands pending requests to workers: one bulk read above the
-// threshold, otherwise batches of verifyBatchSize. A row already being read
+// flush hands pending requests to workers: above the threshold (and bulk
+// allowed) a bulk read first, which keeps the requests it does not cover
+// pending; otherwise batches of verifyBatchSize. A row already being read
 // waits for that read to finish (per-subscription coalescing).
-func (v *Verifier) flush(mid billing.MerchantID) {
+func (v *Verifier) flush(mid billing.MerchantID, bulk bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.timer[mid] = false
@@ -161,8 +164,7 @@ func (v *Verifier) flush(mid billing.MerchantID) {
 		return
 	}
 	set := v.pending[mid]
-	if len(set) > v.BulkThreshold {
-		delete(v.pending, mid)
+	if bulk && len(set) > v.BulkThreshold {
 		v.bulking[mid] = map[uuid.UUID]struct{}{}
 		v.busy[mid]++
 		go v.runBulk(mid)
@@ -202,7 +204,7 @@ func (v *Verifier) done(mid billing.MerchantID, ids []uuid.UUID) {
 	v.changed = make(chan struct{})
 	v.mu.Unlock()
 	if again {
-		v.flush(mid)
+		v.flush(mid, true)
 	}
 }
 
@@ -432,27 +434,36 @@ func recordReads(ctx context.Context, database *db.DB, mid billing.MerchantID, s
 }
 
 // Pass is the refresh pass's verification of the merchant's unverified NMI
-// rows: a bulk read above BulkThreshold, otherwise every row is enqueued as
-// the listing reaches it and the pass waits for the reads. Must run on a
-// merchant-scoped connection.
+// rows, decided per PSP: a PSP holding more than BulkThreshold is read in
+// bulk, every other PSP's rows are enqueued, and the pass waits for the
+// reads. Must run on a merchant-scoped connection.
 func (v *Verifier) Pass(ctx context.Context, mid billing.MerchantID) error {
 	v.init()
-	// One past the threshold is enough to choose the bulk read.
-	ids, err := v.DB.Gen(ctx).ListUnverifiedNMISubscriptionIDs(ctx, gen.ListUnverifiedNMISubscriptionIDsParams{
-		MerchantID: mid.UUID(), RowLimit: int64(v.BulkThreshold) + 1,
-	})
+	counts, err := v.DB.Gen(ctx).CountUnverifiedNMISubscriptionsByPSP(ctx, mid.UUID())
 	if err != nil {
-		return fmt.Errorf("verify pass: list unverified: %w", err)
+		return fmt.Errorf("verify pass: count unverified: %w", err)
 	}
-	if len(ids) > v.BulkThreshold {
-		return v.Bulk(ctx, mid)
+	var errs error
+	bulk := false
+	for _, c := range counts {
+		if c.Rows > int64(v.BulkThreshold) {
+			bulk = true
+			continue
+		}
+		ids, err := v.DB.Gen(ctx).ListUnverifiedSubscriptionIDsForPSP(ctx, gen.ListUnverifiedSubscriptionIDsForPSPParams{MerchantID: mid.UUID(), PspID: c.PspID})
+		if err != nil {
+			return fmt.Errorf("verify pass: list unverified: %w", err)
+		}
+		for len(ids) > 0 {
+			n := min(len(ids), verifyBatchSize)
+			v.Enqueue(mid, ids[:n]...)
+			ids = ids[n:]
+		}
 	}
-	for len(ids) > 0 {
-		n := min(len(ids), verifyBatchSize)
-		v.Enqueue(mid, ids[:n]...)
-		ids = ids[n:]
+	if bulk {
+		errs = v.Bulk(ctx, mid)
 	}
-	return v.Drain(ctx, mid)
+	return errors.Join(errs, v.Drain(ctx, mid))
 }
 
 // cover drops pending requests for the rows a running bulk read covers.
@@ -475,7 +486,7 @@ func (v *Verifier) endBulk(mid billing.MerchantID) {
 	again := len(v.pending[mid]) > 0 && !v.timer[mid]
 	v.mu.Unlock()
 	if again {
-		v.flush(mid)
+		v.flush(mid, false) // what the bulk read did not cover
 	}
 }
 

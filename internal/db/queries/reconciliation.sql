@@ -976,13 +976,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid
   AND status = 'unverified' AND deleted_at IS NULL
   AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL;
 
--- Callers pass a limit one above their bulk threshold.
--- name: ListUnverifiedNMISubscriptionIDs :many
-SELECT id FROM billing.subscriptions
+-- How many unverified NMI rows each of the merchant's NMI PSPs holds: each PSP
+-- is read in bulk or row by row on its own count.
+-- name: CountUnverifiedNMISubscriptionsByPSP :many
+SELECT psp_id, count(*)::bigint AS rows FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'nmi' AND status = 'unverified' AND deleted_at IS NULL
   AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL
-ORDER BY current_period_ends_at NULLS FIRST
-LIMIT sqlc.arg(row_limit)::bigint;
+GROUP BY psp_id
+ORDER BY psp_id;
 
 -- name: ListUnverifiedSubscriptionIDsForPSP :many
 SELECT id FROM billing.subscriptions

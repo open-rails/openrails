@@ -270,12 +270,12 @@ func vaultsOf(ctx context.Context, database *db.DB, subs []*models.Subscription)
 	return out, nil
 }
 
-// Bulk resolves every unverified row of the merchant's NMI account from one
-// paged roster read and one paged transaction read by date range. Each
-// transaction page's charges are recorded as payments and checkpointed, so a
-// crashed pass resumes at the next page; rows are then decided from their
-// recorded charges. Rows the bulk read cannot attribute fall back to batched
-// reads.
+// Bulk reads, with its own credentials, each NMI PSP of the merchant holding
+// more than BulkThreshold unverified rows: one paged roster read and one paged
+// transaction read by date range. Each transaction page's charges are
+// recorded as payments and checkpointed, so a crashed pass resumes at the next
+// page; rows are then decided from their recorded charges. Rows the bulk read
+// cannot attribute fall back to batched reads.
 func (v *Verifier) Bulk(ctx context.Context, mid billing.MerchantID) error {
 	v.init()
 	v.mu.Lock()
@@ -291,150 +291,164 @@ func (v *Verifier) Bulk(ctx context.Context, mid billing.MerchantID) error {
 
 func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 	return v.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(ctx context.Context) error {
-		now := v.Clock.Now().UTC()
-		armed := v.Builder.Build(ctx, mid)
-		client, psp := NMIReader(armed)
-		if client == nil {
-			return nil
-		}
-		subs, err := listUnverifiedNMI(ctx, v.DB, mid, psp)
+		counts, err := v.DB.Gen(ctx).CountUnverifiedNMISubscriptionsByPSP(ctx, mid.UUID())
 		if err != nil {
-			return err
+			return fmt.Errorf("verify: count unverified: %w", err)
 		}
-		v.cover(mid, subs)
-		log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid.String(), "rows": len(subs)}).Info("verify: bulk read of the account's unverified rows")
-		if len(subs) == 0 {
-			return clearCheckpoint(ctx, v.DB, mid, psp)
-		}
-		roster, err := readRoster(ctx, client)
-		if err != nil {
-			return fmt.Errorf("nmi roster: %w", err)
-		}
-		live := map[string][]string{} // vault -> live schedules
-		nextBilling := map[string]*time.Time{}
-		for _, s := range roster {
-			live[strings.TrimSpace(s.CustomerVaultID)] = append(live[strings.TrimSpace(s.CustomerVaultID)], s.ID)
-			if next, err := s.NextBilling(); err == nil {
-				nextBilling[s.ID] = &next
+		var errs error
+		for _, c := range counts {
+			if c.Rows > int64(v.BulkThreshold) {
+				errs = errors.Join(errs, v.bulkReadPSP(ctx, mid, c.PspID))
 			}
 		}
-		byRail := map[string]*models.Subscription{}
-		byID := map[uuid.UUID]*models.Subscription{}
-		since := now.Add(-3 * 365 * 24 * time.Hour)
-		earliest := now
-		for _, s := range subs {
-			byRail[s.RailSubscriptionID] = s
-			byID[s.ID] = s
-			if s.CurrentPeriodEndsAt != nil {
-				earliest = minTime(earliest, s.CurrentPeriodEndsAt.UTC().Add(-AlignmentSlack(s.CurrentPeriodStartsAt, s.CurrentPeriodEndsAt)))
-			}
-		}
-		since = maxTime(since, earliest)
-		cp, err := loadCheckpoint(ctx, v.DB, mid, psp, since, now)
-		if err != nil {
-			return err
-		}
-		q := v.DB.Gen(ctx)
-		for page := cp.next; ; page++ {
-			// The durable checkpoint stores a one-based ordinal; NMI Query
-			// page_number is zero-based. Preserve the stored ordinal convention.
-			sales, n, err := client.SalesPage(ctx, cp.since, cp.until, page-1)
-			if err != nil {
-				return fmt.Errorf("nmi transaction page %d: %w", page, err)
-			}
-			perSub := map[*models.Subscription][]RemoteTransaction{}
-			ids := make([]string, 0, len(sales))
-			for _, sale := range sales {
-				ids = append(ids, sale.TransactionID)
-			}
-			attributed, err := chargeAttributions(ctx, q, mid.UUID(), psp, ids)
-			if err != nil {
-				return err
-			}
-			for _, sale := range sales {
-				id := sale.SubscriptionID
-				if id == "" {
-					if schedules := live[sale.VaultID]; len(schedules) == 1 {
-						id = schedules[0]
-					}
-				}
-				sub := byRail[id]
-				if declared, ok := byID[attributed[sale.TransactionID]]; ok {
-					sub = declared
-				}
-				if sub != nil {
-					transaction, err := remoteSale(sale.SaleAction, sub.RailSubscriptionID)
-					if err != nil {
-						return err
-					}
-					transaction.NextBillingAt = nextBilling[sub.RailSubscriptionID]
-					perSub[sub] = append(perSub[sub], transaction)
-				}
-			}
-			for sub, txns := range perSub {
-				if _, err := backfillSubscriptionPayments(ctx, v.DB, sub, txns, now, defaultBackfillLookback); err != nil {
-					return err
-				}
-				if err := refundChargesAfterCancel(ctx, v.DB, sub, txns, now); err != nil {
-					return err
-				}
-				if err := recordScheduleAttempts(attempts.ObservedVia(ctx, "pull"), q, sub, txns, now); err != nil {
-					return err
-				}
-			}
-			if err := saveCheckpoint(ctx, v.DB, mid, psp, page+1); err != nil {
-				return err
-			}
-			if n < nmi.QueryPageLimit {
-				break
-			}
-		}
-
-		charges, err := recordedCharges(ctx, v.DB, mid, subs, cp.since)
-		if err != nil {
-			return err
-		}
-		rosterByID := map[string]nmi.V5Subscription{}
-		for _, s := range roster {
-			rosterByID[s.ID] = s
-		}
-		cov := armed.Coverage[ProviderNMI]
-		localLive, err := q.CountLiveLinkedSubscriptionsForPSP(ctx, gen.CountLiveLinkedSubscriptionsForPSPParams{MerchantID: mid.UUID(), PspID: psp})
-		if err != nil {
-			return err
-		}
-		tripped, _ := RosterBreaker{}.Implausible(ProviderNMI, len(roster), int(localLive))
-		exhaustive := len(roster) > 0 && cov.Complete() && !tripped
-		snaps := map[uuid.UUID]*RemoteSnapshot{}
-		var fallback []*models.Subscription
-		for _, sub := range subs {
-			entry, listed := rosterByID[sub.RailSubscriptionID]
-			if listed && len(live[strings.TrimSpace(entry.CustomerVaultID)]) > 1 {
-				fallback = append(fallback, sub) // its charges could belong to a sibling schedule
-				continue
-			}
-			if !listed && !exhaustive {
-				fallback = append(fallback, sub)
-				continue
-			}
-			snap := &RemoteSnapshot{Provider: ProviderNMI, FetchedAt: now, Transactions: charges[sub.ID],
-				Coverage:     SnapshotCoverage{SubscriptionsExhaustive: exhaustive},
-				Capabilities: Capabilities{Subscriptions: true, Transactions: true}}
-			if listed {
-				next, _ := parseNMIV5Date(entry.NextBillingDate)
-				snap.Subscriptions = []RemoteSubscription{nmiRosterEntry(sub.RailSubscriptionID, next, now)}
-			}
-			snaps[sub.ID] = snap
-		}
-		lc := v.lifecycle()
-		errs := applyVerified(ctx, v.DB, lc, ProviderNMI, psp, subs, snaps, now)
-		errs = errors.Join(errs, resolveNMIBatch(ctx, v.DB, lc, client, psp, fallback, now))
-		recordReads(ctx, v.DB, mid, subs, now, errs)
-		if errs != nil {
-			return errs
-		}
-		return clearCheckpoint(ctx, v.DB, mid, psp)
+		return errs
 	})
+}
+
+func (v *Verifier) bulkReadPSP(ctx context.Context, mid billing.MerchantID, psp uuid.UUID) error {
+	now := v.Clock.Now().UTC()
+	armed, provider, ok := v.Builder.BuildPSP(ctx, mid, psp)
+	client, _ := NMIReader(armed)
+	if !ok || provider != ProviderNMI || client == nil {
+		return fmt.Errorf("verify: NMI PSP %s is not armed; its rows stay unverified", psp)
+	}
+	subs, err := listUnverifiedNMI(ctx, v.DB, mid, psp)
+	if err != nil {
+		return err
+	}
+	v.cover(mid, subs)
+	log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid.String(), "rows": len(subs)}).Info("verify: bulk read of the account's unverified rows")
+	if len(subs) == 0 {
+		return clearCheckpoint(ctx, v.DB, mid, psp)
+	}
+	roster, err := readRoster(ctx, client)
+	if err != nil {
+		return fmt.Errorf("nmi roster: %w", err)
+	}
+	live := map[string][]string{} // vault -> live schedules
+	nextBilling := map[string]*time.Time{}
+	for _, s := range roster {
+		live[strings.TrimSpace(s.CustomerVaultID)] = append(live[strings.TrimSpace(s.CustomerVaultID)], s.ID)
+		if next, err := s.NextBilling(); err == nil {
+			nextBilling[s.ID] = &next
+		}
+	}
+	byRail := map[string]*models.Subscription{}
+	byID := map[uuid.UUID]*models.Subscription{}
+	since := now.Add(-3 * 365 * 24 * time.Hour)
+	earliest := now
+	for _, s := range subs {
+		byRail[s.RailSubscriptionID] = s
+		byID[s.ID] = s
+		if s.CurrentPeriodEndsAt != nil {
+			earliest = minTime(earliest, s.CurrentPeriodEndsAt.UTC().Add(-AlignmentSlack(s.CurrentPeriodStartsAt, s.CurrentPeriodEndsAt)))
+		}
+	}
+	since = maxTime(since, earliest)
+	cp, err := loadCheckpoint(ctx, v.DB, mid, psp, since, now)
+	if err != nil {
+		return err
+	}
+	q := v.DB.Gen(ctx)
+	for page := cp.next; ; page++ {
+		// The durable checkpoint stores a one-based ordinal; NMI Query
+		// page_number is zero-based. Preserve the stored ordinal convention.
+		sales, n, err := client.SalesPage(ctx, cp.since, cp.until, page-1)
+		if err != nil {
+			return fmt.Errorf("nmi transaction page %d: %w", page, err)
+		}
+		perSub := map[*models.Subscription][]RemoteTransaction{}
+		ids := make([]string, 0, len(sales))
+		for _, sale := range sales {
+			ids = append(ids, sale.TransactionID)
+		}
+		attributed, err := chargeAttributions(ctx, q, mid.UUID(), psp, ids)
+		if err != nil {
+			return err
+		}
+		for _, sale := range sales {
+			id := sale.SubscriptionID
+			if id == "" {
+				if schedules := live[sale.VaultID]; len(schedules) == 1 {
+					id = schedules[0]
+				}
+			}
+			sub := byRail[id]
+			if declared, ok := byID[attributed[sale.TransactionID]]; ok {
+				sub = declared
+			}
+			if sub != nil {
+				transaction, err := remoteSale(sale.SaleAction, sub.RailSubscriptionID)
+				if err != nil {
+					return err
+				}
+				transaction.NextBillingAt = nextBilling[sub.RailSubscriptionID]
+				perSub[sub] = append(perSub[sub], transaction)
+			}
+		}
+		for sub, txns := range perSub {
+			if _, err := backfillSubscriptionPayments(ctx, v.DB, sub, txns, now, defaultBackfillLookback); err != nil {
+				return err
+			}
+			if err := refundChargesAfterCancel(ctx, v.DB, sub, txns, now); err != nil {
+				return err
+			}
+			if err := recordScheduleAttempts(attempts.ObservedVia(ctx, "pull"), q, sub, txns, now); err != nil {
+				return err
+			}
+		}
+		if err := saveCheckpoint(ctx, v.DB, mid, psp, page+1); err != nil {
+			return err
+		}
+		if n < nmi.QueryPageLimit {
+			break
+		}
+	}
+
+	charges, err := recordedCharges(ctx, v.DB, mid, subs, cp.since)
+	if err != nil {
+		return err
+	}
+	rosterByID := map[string]nmi.V5Subscription{}
+	for _, s := range roster {
+		rosterByID[s.ID] = s
+	}
+	cov := armed.Coverage[ProviderNMI]
+	localLive, err := q.CountLiveLinkedSubscriptionsForPSP(ctx, gen.CountLiveLinkedSubscriptionsForPSPParams{MerchantID: mid.UUID(), PspID: psp})
+	if err != nil {
+		return err
+	}
+	tripped, _ := RosterBreaker{}.Implausible(ProviderNMI, len(roster), int(localLive))
+	exhaustive := len(roster) > 0 && cov.Complete() && !tripped
+	snaps := map[uuid.UUID]*RemoteSnapshot{}
+	var fallback []*models.Subscription
+	for _, sub := range subs {
+		entry, listed := rosterByID[sub.RailSubscriptionID]
+		if listed && len(live[strings.TrimSpace(entry.CustomerVaultID)]) > 1 {
+			fallback = append(fallback, sub) // its charges could belong to a sibling schedule
+			continue
+		}
+		if !listed && !exhaustive {
+			fallback = append(fallback, sub)
+			continue
+		}
+		snap := &RemoteSnapshot{Provider: ProviderNMI, FetchedAt: now, Transactions: charges[sub.ID],
+			Coverage:     SnapshotCoverage{SubscriptionsExhaustive: exhaustive},
+			Capabilities: Capabilities{Subscriptions: true, Transactions: true}}
+		if listed {
+			next, _ := parseNMIV5Date(entry.NextBillingDate)
+			snap.Subscriptions = []RemoteSubscription{nmiRosterEntry(sub.RailSubscriptionID, next, now)}
+		}
+		snaps[sub.ID] = snap
+	}
+	lc := v.lifecycle()
+	errs := applyVerified(ctx, v.DB, lc, ProviderNMI, psp, subs, snaps, now)
+	errs = errors.Join(errs, resolveNMIBatch(ctx, v.DB, lc, client, psp, fallback, now))
+	recordReads(ctx, v.DB, mid, subs, now, errs)
+	if errs != nil {
+		return errs
+	}
+	return clearCheckpoint(ctx, v.DB, mid, psp)
 }
 
 func readRoster(ctx context.Context, client *nmi.NMIClient) ([]nmi.V5Subscription, error) {

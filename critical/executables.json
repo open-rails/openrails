@@ -215,6 +215,9 @@
     "OR-J15-S05": [
       "TestVerificationBinding/OR-J15-S05/draining-account-is-read-with-its-own-credentials"
     ],
+    "OR-J15-S06": [
+      "TestVerificationBinding/OR-J15-S06/bulk-read-binds-each-nmi-psp"
+    ],
     "OR-J16-S01": [
       "TestDunning/OR-J16-S01/retryable-decline-recovers-on-bounded-weekly-schedule"
     ],
@@ -454,6 +457,9 @@
     ],
     "OR-J34-S05": [
       "TestVerificationBinding/OR-J34-S05/provider-confirmed-cancel-waits-for-the-kill-switch"
+    ],
+    "OR-J34-S06": [
+      "TestVerificationBinding/OR-J34-S06/held-webhook-cancel-keeps-access-until-the-switch-allows-it"
     ],
     "OR-J37-S01": [
       "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order",

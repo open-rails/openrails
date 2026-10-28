@@ -509,7 +509,7 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 	err = errors.Join(verifyErr, err)
 	if res.Held > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "held": res.Held}).
-			Error("Provider Refresh: unknown-cohort cancellations withheld by a pass-level guard; a requires_review finding is open")
+			Warn("Provider Refresh: unknown-cohort cancellations held by the cancel gate (kill switch, arming or budget); the rows stay unverified")
 	}
 	if res.Renewed+res.Adopted+res.PastDue+res.Canceled+res.Backfilled > 0 || len(res.RailErrors) > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{

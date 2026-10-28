@@ -93,7 +93,11 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 
 	case TransitionCancel:
 		if cancelHeld(ctx, database, sub, d) {
-			return false, nil
+			if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
+				return false, nil
+			}
+			// Parked, the row is read again once the gate allows its cancel.
+			return true, lc.ApplyLocalUnknown(ctx, database, sub)
 		}
 		return transition(ctx, database, lc, sub, d, now, false)
 	}

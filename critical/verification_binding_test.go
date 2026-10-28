@@ -3,7 +3,10 @@
 package critical_test
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -86,10 +90,9 @@ func armDestructive(t *testing.T, a *authorityWorld, on bool) {
 	require.NoError(t, err)
 }
 
-// drainingStripeMembership imports a provider-owned Stripe subscription on
-// account "old", then restarts the engine with "old" archived (draining) and
-// a different active account "new" that has never heard of it.
-func drainingStripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *billing.Subscription) {
+// stripeMembership imports a provider-owned Stripe subscription on account
+// "old", the merchant's only Stripe PSP.
+func stripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *billing.Subscription) {
 	t.Helper()
 	var accounts *stripeAccounts
 	a := newAuthorityWorld(t, func(w *world) {
@@ -120,11 +123,19 @@ func drainingStripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *
 	sub, err := a.alpha.GetSubscription(t.Context(), subs.Items[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, billing.SubscriptionActive, sub.Status)
+	return a, accounts, sub
+}
 
+// drainingStripeMembership is stripeMembership restarted with "old" archived
+// (draining) and a different active account "new" that has never heard of it.
+func drainingStripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *billing.Subscription) {
+	t.Helper()
+	a, accounts, sub := stripeMembership(t)
 	require.NoError(t, a.engine.Close(context.Background()))
 	m := a.cfg.Merchants["alpha"]
 	m.PSPs = openrails.PSPs{"old": stripePSP("acct_old", "sk_test_old", true), "new": stripePSP("acct_new", "sk_test_new", false)}
 	a.cfg.Merchants["alpha"] = m
+	var err error
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
 	a.alpha, err = a.engine.MerchantBySlug("alpha")
@@ -188,4 +199,137 @@ func TestVerificationBinding(t *testing.T) {
 			return err == nil && current.Status == billing.SubscriptionCanceled
 		}, 20*time.Second, 50*time.Millisecond, "once enabled, the owning account's cancel converges")
 	})
+	t.Run("OR-J34-S06/held-webhook-cancel-keeps-access-until-the-switch-allows-it", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t)
+		old := accounts.accounts["sk_test_old"].core
+		remote := *sub.RailSubscriptionID
+		startFleet(t, a.world)
+		old.CancelSubscription(remote)
+		body := stripeNotice(t, "evt_held_cancel", "customer.subscription.deleted", old.Subscription(remote))
+		status, raw := callback(t, a, "acct_old", body, stripeSignature(body, "whsec_acct_old"))
+		require.Equal(t, http.StatusOK, status, raw)
+		require.Eventually(t, func() bool {
+			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+			return err == nil && current.Status == billing.SubscriptionStatus("unverified")
+		}, 30*time.Second, 50*time.Millisecond, "a cancel the switch holds parks the row for another read")
+		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"stripe:member"}})
+		require.NoError(t, err)
+		require.True(t, access.Entitlements["stripe:member"], "a held cancel keeps access")
+		armDestructive(t, a, true)
+		_, err = a.alpha.RefreshPSPs(t.Context())
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+			return err == nil && current.Status == billing.SubscriptionCanceled
+		}, 30*time.Second, 50*time.Millisecond, "once allowed, the held cancel converges without another webhook")
+	})
+	t.Run("OR-J15-S06/bulk-read-binds-each-nmi-psp", func(t *testing.T) {
+		const members = 201 // one past the bulk threshold
+		a, accounts := nmiAccountsWorld(t)
+		old := accounts.cores["nmi-old-key"]
+		old.AddPlan(nmimock.Plan{ID: "weekly", Name: "Weekly", Amount: "10.00", Days: 7})
+		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-membership", DisplayName: "NMI membership", Entitlements: []string{"nmi:member"}})
+		require.NoError(t, err)
+		price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-weekly", PSP: "old", PlanID: "weekly", Currency: "USD"})
+		require.NoError(t, err)
+		require.NoError(t, a.engine.Close(context.Background()))
+		m := a.cfg.Merchants["alpha"]
+		m.PSPs = openrails.PSPs{"old": nmiPSP("old", true), "new": nmiPSP("new", false)}
+		a.cfg.Merchants["alpha"] = m
+		a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
+		require.NoError(t, err)
+		a.alpha, err = a.engine.MerchantBySlug("alpha")
+		require.NoError(t, err)
+		startFleet(t, a.world)
+
+		// A lapsed book on the archived account: every row is imported with no
+		// evidence of the renewal the account has since charged, so all of
+		// them are unverified at once.
+		now := a.clock.Now()
+		started, paid := now.Add(-10*24*time.Hour), now.Add(-3*24*time.Hour)
+		book := billing.DeclaredBilling{AsOf: now, DefaultPSP: billing.PSPRef{Key: "old"}}
+		for i := range members {
+			customer := billing.CustomerID(uuid.New())
+			vault := old.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
+			schedule := old.AddSchedule(nmimock.Schedule{Vault: vault, Plan: "weekly", Amount: "10.00", Days: 7, Created: started, NextBilling: paid.Add(7 * 24 * time.Hour), Order: fmt.Sprintf("lapsed-%d", i)})
+			old.AddScheduleSale(schedule, paid)
+			ref := billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: old.Vault(vault).BillingID}
+			book.Customers = append(book.Customers, billing.DeclaredCustomer{Customer: customer})
+			book.PaymentMethods = append(book.PaymentMethods, billing.DeclaredPaymentMethod{Customer: customer, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: ref.RailMethodRef, CreatedAt: started})
+			book.Subscriptions = append(book.Subscriptions, billing.DeclaredSubscription{SourceID: fmt.Sprintf("lapsed-%d", i), Customer: customer, Price: price.ID, Rail: "nmi", RailSubscriptionID: schedule,
+				StartedAt: started, PaidThrough: &paid, PaymentMethod: &ref,
+				AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: schedule, Amount: 10_000_000, Currency: "USD", IntervalHours: 168, FirstDueAt: paid}})
+		}
+		imported, err := a.alpha.ImportBilling(t.Context(), book)
+		require.NoError(t, err)
+		require.Empty(t, imported.Blocked, "%+v", imported.Reasons)
+		require.Len(t, imported.Imported, members)
+		// The archived account still bills every schedule: its roster resolves
+		// the rows. No refresh is armed, so only the verifier can.
+		for _, i := range []int{0, members - 1} {
+			customer := book.Customers[i].Customer
+			require.Eventually(t, func() bool {
+				subs, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: customer})
+				return err == nil && len(subs.Items) == 1 && subs.Items[0].Status == billing.SubscriptionActive && subs.Items[0].CurrentPeriodEndsAt.After(now)
+			}, 30*time.Second, 50*time.Millisecond, "the archived account's renewals are read in bulk with its own credentials")
+		}
+	})
+}
+
+// nmiAccounts is two independent NMI gateways behind one wire, chosen by the
+// request's security key.
+type nmiAccounts struct {
+	cores map[string]*nmimock.Mock
+}
+
+func nmiPSP(name string, archived bool) openrails.PSPConfig {
+	return openrails.NMIPSP{GatewayID: name + "-gateway", Environment: openrails.EnvironmentTest, SecurityKey: "nmi-" + name + "-key",
+		WebhookSigningSecret: "nmi-" + name + "-webhook", TokenizationKey: "nmi-" + name + "-collect", Archived: archived}.PSPConfig()
+}
+
+// nmiAccountsWorld boots with only account "old" declared.
+func nmiAccountsWorld(t *testing.T) (*authorityWorld, *nmiAccounts) {
+	t.Helper()
+	accounts := &nmiAccounts{cores: map[string]*nmimock.Mock{}}
+	a := newAuthorityWorld(t, func(w *world) {
+		w.clock.Advance(-30 * 24 * time.Hour)
+		now := w.clock.Now()
+		w.clock.Advance(now.Truncate(24 * time.Hour).Sub(now))
+		for _, key := range []string{"nmi-old-key", "nmi-new-key"} {
+			accounts.cores[key] = nmimock.NewUnstarted(nmimock.Options{Clock: w.clock.Now})
+		}
+		server := httptest.NewServer(http.HandlerFunc(func(out http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(out, err.Error(), http.StatusBadRequest)
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			key := r.Header.Get("Authorization")
+			if key == "" {
+				form, _ := url.ParseQuery(string(body))
+				key = form.Get("security_key")
+			}
+			if key == "" {
+				key = r.URL.Query().Get("security_key")
+			}
+			core := accounts.cores[key]
+			if core == nil {
+				http.Error(out, "fixture rejects this credential", http.StatusUnauthorized)
+				return
+			}
+			core.ServeHTTP(out, r)
+		}))
+		t.Cleanup(server.Close)
+		target, err := url.Parse(server.URL)
+		require.NoError(t, err)
+		wire := http.DefaultTransport.(*http.Transport).Clone()
+		t.Cleanup(wire.CloseIdleConnections)
+		w.deps.NMITransport = loopbackWire{target: target, wire: wire}
+		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		m := w.cfg.Merchants["alpha"]
+		m.PSPs = openrails.PSPs{"old": nmiPSP("old", false)}
+		w.cfg.Merchants["alpha"] = m
+	})
+	return a, accounts
 }
