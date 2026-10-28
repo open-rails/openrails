@@ -318,6 +318,34 @@ func (q *Queries) RebuildDelinquencyDue(ctx context.Context, arg RebuildDelinque
 	return err
 }
 
+const scheduleDelinquency = `-- name: ScheduleDelinquency :exec
+INSERT INTO billing.customer_delinquency (merchant_id, customer_id, currency, state, overdue_amount, overdue_orders,
+    entered_at, transition_seq, evaluated_at, next_evaluation_at)
+VALUES ($1::uuid, $2::uuid, $3::text, 'current', 0, 0,
+    $4::timestamptz, 0, $4::timestamptz, $4::timestamptz)
+ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE
+SET next_evaluation_at = LEAST(billing.customer_delinquency.next_evaluation_at, EXCLUDED.next_evaluation_at)
+`
+
+type ScheduleDelinquencyParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Now        time.Time
+}
+
+// The payer is evaluated on the next pass: its policy could not be read when
+// one of its usage orders changed.
+func (q *Queries) ScheduleDelinquency(ctx context.Context, arg ScheduleDelinquencyParams) error {
+	_, err := q.db.Exec(ctx, scheduleDelinquency,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.Now,
+	)
+	return err
+}
+
 const upsertCustomerDelinquency = `-- name: UpsertCustomerDelinquency :one
 WITH previous AS (
     SELECT state, entered_at, transition_seq

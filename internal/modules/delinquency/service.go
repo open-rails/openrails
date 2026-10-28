@@ -24,13 +24,22 @@ import (
 )
 
 // A change to a usage order evaluates its payer in the same transaction:
-// paying, voiding or writing one off clears a payer at once.
+// paying, voiding or writing one off clears a payer at once. A policy that
+// cannot be read never fails the change: the payer is evaluated on the next
+// pass instead.
 func init() {
 	usage.Changed = func(ctx context.Context, d *db.DB, order gen.BillingOrder, now time.Time) error {
 		_, _, err := EvaluateTx(ctx, d, order.CustomerID, order.Currency, now)
-		return err
+		if !errors.Is(err, errPolicyUnavailable) {
+			return err
+		}
+		log.WithContext(ctx).WithError(err).WithField("customer_id", order.CustomerID).Warn("Delinquency: evaluation deferred to the next pass")
+		return d.Gen(ctx).ScheduleDelinquency(ctx, gen.ScheduleDelinquencyParams{MerchantID: order.MerchantID, CustomerID: order.CustomerID, Currency: order.Currency, Now: now})
 	}
 }
+
+// errPolicyUnavailable is a payer's policy that could not be read.
+var errPolicyUnavailable = errors.New("delinquency policy unavailable")
 
 // Host-lifecycle event types emitted on a delinquency transition. One per
 // destination state; `from_state` in the payload carries where it came from, so
@@ -235,11 +244,11 @@ type liveExposure struct {
 func readExposure(ctx context.Context, d *db.DB, q *gen.Queries, tid billing.MerchantID, customerID uuid.UUID, currency string, now time.Time) (Policy, Exposure, liveExposure, error) {
 	settings, err := merchantconfig.NewStore(d).Settings(ctx)
 	if err != nil {
-		return Policy{}, Exposure{}, liveExposure{}, err
+		return Policy{}, Exposure{}, liveExposure{}, fmt.Errorf("%w: %w", errPolicyUnavailable, err)
 	}
 	merchantPolicy, err := PolicyFromConfig(settings.Config)
 	if err != nil {
-		return Policy{}, Exposure{}, liveExposure{}, err
+		return Policy{}, Exposure{}, liveExposure{}, fmt.Errorf("%w: %w", errPolicyUnavailable, err)
 	}
 	row, err := q.GetOverdueOrderAggregate(ctx, gen.GetOverdueOrderAggregateParams{
 		MerchantID: tid.UUID(), CustomerID: customerID, Currency: currency, Now: now, Policies: settings.PoliciesParam(),
@@ -249,7 +258,7 @@ func readExposure(ctx context.Context, d *db.DB, q *gen.Queries, tid billing.Mer
 	}
 	policy, err := merchantPolicy.withOverrides(int(row.GraceDays), row.AmountFloor)
 	if err != nil {
-		return Policy{}, Exposure{}, liveExposure{}, err
+		return Policy{}, Exposure{}, liveExposure{}, fmt.Errorf("%w: %w", errPolicyUnavailable, err)
 	}
 	exposure := Exposure{OverdueStartedAt: row.OverdueStartedAt.UTC(), OverdueAmount: row.OverdueAmount, OverdueOrders: int(row.OverdueOrders)}
 	return policy, exposure, liveExposure{nextDueAt: row.NextDueAt.UTC(), pending: row.PendingOrders > 0}, nil

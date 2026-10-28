@@ -71,6 +71,16 @@ WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.customer_id = sqlc.arg(c
   AND o.due_at < sqlc.arg(now)::timestamptz
 ON CONFLICT (merchant_id, id) DO NOTHING;
 
+-- name: ScheduleDelinquency :exec
+-- The payer is evaluated on the next pass: its policy could not be read when
+-- one of its usage orders changed.
+INSERT INTO billing.customer_delinquency (merchant_id, customer_id, currency, state, overdue_amount, overdue_orders,
+    entered_at, transition_seq, evaluated_at, next_evaluation_at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, 'current', 0, 0,
+    sqlc.arg(now)::timestamptz, 0, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz)
+ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE
+SET next_evaluation_at = LEAST(billing.customer_delinquency.next_evaluation_at, EXCLUDED.next_evaluation_at);
+
 -- name: MarkDelinquencyDue :exec
 -- The merchant's delinquency policy may have changed: every payer it holds
 -- in grace or delinquent is evaluated again on the next pass.
