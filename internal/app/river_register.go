@@ -680,7 +680,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 		nil,
 	))
 
-	// Every 30 seconds: the balance watches that are due, of customers with
+	// Every minute: the balance watches that are due, of customers with
 	// a running charge. Overdue startup catches up; an idle pass is one indexed
 	// read. Outstanding passes coalesce.
 	jobs = append(jobs, r.healthPeriodic(cfg,

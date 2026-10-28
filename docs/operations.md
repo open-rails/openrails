@@ -1198,8 +1198,7 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 
 | Worker | Cadence |
 |---|---|
-| Balance watch (due customer watches only) | 30 s |
-| Due renewals and retries; job rescue | 1 min |
+| Balance watch (due customer watches only); due renewals and retries; job rescue | 1 min |
 | Merchant-secret cleanup | 5 min |
 | Order expiry | 5 min |
 | Convergence sweep | 15 min |

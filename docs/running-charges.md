@@ -117,7 +117,7 @@ OpenRails does not stop your work; it tells you when to. Each customer with a
 running charge has one watch: the earliest of the instant its balance goes
 under the low line, the instant its capacity reaches zero, and the next 00:00
 UTC. A deposit, a capture, a spend, a refund, an expiry or a new hold marks the
-watch due; every 30 seconds one job looks at the watches that are due, and at
+watch due; every minute one job looks at the watches that are due, and at
 nothing else. Stopping the last charge of a prepaid customer keeps its watch.
 
 It reaches you two ways:
@@ -132,7 +132,7 @@ It reaches you two ways:
   watcher has looked yet. Confirm with `GetBalance`, stop what you run, then
   stop the charge.
 
-Overshoot past the line is at most the watcher's 30 seconds plus your own
+Overshoot past the line is at most the watcher's minute plus your own
 pass, times the rate. It is real spend: it is posted as owed, and the next
 funding repays it.
 

@@ -19,8 +19,8 @@ charge is not watched: its limit is the credit line, refused at admission and
 covered by the [delinquency notices](arrears-delinquency.md).
 
 A watch costs nothing while nothing changes. A deposit, a credit grant, a
-spend, a capture, a hold, an expiry or a refund marks it due, and every 30
-seconds one job looks at the due watches. A burst of spends is one look.
+spend, a capture, a hold, an expiry or a refund marks it due, and every
+minute one job looks at the due watches. A burst of spends is one look.
 Time alone moves a balance in two ways, and each look schedules both: a
 running charge's accrual, and a credit lot whose lapse crosses a line.
 

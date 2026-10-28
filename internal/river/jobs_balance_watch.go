@@ -22,7 +22,7 @@ const (
 	// BalanceWatchInterval is the watcher's cadence: how long a balance that
 	// ran out, went low, changed, lost a lapsing lot or crossed 00:00 UTC
 	// waits to be looked at.
-	BalanceWatchInterval = 30 * time.Second
+	BalanceWatchInterval = time.Minute
 
 	// balanceWatchBatch is how many due watches one read takes. The read is
 	// indexed on the due instant, so a pass costs what is due, never what is
