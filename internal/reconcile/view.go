@@ -35,6 +35,10 @@ func (rec FindingRecord) View() billing.Finding {
 		change := rec.Change.FindingChange
 		v.Change = &change
 	}
+	if rec.PullID != nil {
+		pull := billing.PSPImportID(*rec.PullID)
+		v.Pull = &pull
+	}
 	if rec.ApprovalRunID != nil {
 		run := billing.RunID(*rec.ApprovalRunID)
 		v.ApprovalRunID = &run

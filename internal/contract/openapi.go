@@ -264,6 +264,9 @@ func (m *model) operation(r routes.Route) *obj {
 	if r.Sensitive {
 		op.set("x-openrails-sensitive", true)
 	}
+	if r.Person {
+		op.set("x-openrails-person", true)
+	}
 	if r.When != routes.Always {
 		op.set("x-openrails-mounted-when", string(r.When))
 	}

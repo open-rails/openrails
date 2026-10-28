@@ -22,12 +22,18 @@ type nmiSource struct {
 	client *nmi.NMIClient
 	// currency prices NMI amounts, which name none.
 	currency string
+	// now is when the roster is read: a schedule billing before it is past due.
+	now func() time.Time
 }
 
 const nmiPage = 100
 
 func (s *nmiSource) roster(ctx context.Context) ([]staged, error) {
 	var out []staged
+	now := time.Now().UTC()
+	if s.now != nil {
+		now = s.now()
+	}
 	cursor, seen := "", map[string]bool{}
 	for {
 		page, err := s.client.ListCustomersPage(ctx, cursor, nmiPage, "")
@@ -35,7 +41,11 @@ func (s *nmiSource) roster(ctx context.Context) ([]staged, error) {
 			return nil, fmt.Errorf("nmi customers: %w", err)
 		}
 		for _, c := range page.Customers {
-			out = append(out, nmiCustomer(c))
+			rec, err := nmiCustomer(c)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, rec)
 		}
 		if !page.HasMore {
 			break
@@ -61,7 +71,7 @@ func (s *nmiSource) roster(ctx context.Context) ([]staged, error) {
 			return nil, fmt.Errorf("nmi subscriptions: %w", err)
 		}
 		for _, sub := range page.Subscriptions {
-			rec, err := s.subscription(sub, rows[strings.TrimSpace(sub.ID)])
+			rec, err := s.subscription(sub, rows[strings.TrimSpace(sub.ID)], now)
 			if err != nil {
 				return nil, err
 			}
@@ -79,7 +89,7 @@ func (s *nmiSource) roster(ctx context.Context) ([]staged, error) {
 	return out, nil
 }
 
-func nmiCustomer(c nmi.V5Customer) staged {
+func nmiCustomer(c nmi.V5Customer) (staged, error) {
 	f := facts{}
 	ref := strings.TrimSpace(c.ID)
 	f.add(FactCustomerRef, ref)
@@ -108,10 +118,15 @@ func nmiCustomer(c nmi.V5Customer) staged {
 			f.add(name, v)
 		}
 	}
-	return staged{kind: billing.PSPImportCustomer, ref: ref, occurredAt: nmiTime(c.Created), facts: f, data: data}
+	remote, err := reconcile.NMIRemotePaymentMethods(c)
+	if err != nil {
+		return staged{}, err
+	}
+	data.Remote = remote
+	return staged{kind: billing.PSPImportCustomer, ref: ref, occurredAt: nmiTime(c.Created), facts: f, data: data}, nil
 }
 
-func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReportRow) (staged, error) {
+func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReportRow, now time.Time) (staged, error) {
 	ref := strings.TrimSpace(sub.ID)
 	vault := strings.TrimSpace(sub.CustomerVaultID)
 	f := facts{}
@@ -144,6 +159,12 @@ func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReport
 		return staged{}, err
 	}
 	data.Evidence, _ = json.Marshal(map[string]any{"source": "nmi_psp_import", "subscription": sub, "recurring": row})
+	remote, err := reconcile.NMIRemoteSubscription(sub, now)
+	if err != nil {
+		return staged{}, err
+	}
+	remote.Email, remote.Raw = strings.TrimSpace(row.Email), nil
+	data.Remote = &remote
 	return staged{kind: billing.PSPImportSubscription, ref: ref, customerRef: vault, occurredAt: data.StartedAt, facts: f, data: data, stated: stated}, nil
 }
 
@@ -179,8 +200,10 @@ func (s *nmiSource) history(ctx context.Context, since, until time.Time) ([]stag
 		if typ == "refund" {
 			ref = t.TransactionID + ":refund:" + t.OccurredAt.UTC().Format(time.RFC3339)
 		}
+		remote := t
 		out = append(out, staged{kind: billing.PSPImportTransaction, ref: ref, customerRef: t.CustomerRef, subscriptionRef: t.SubscriptionID,
-			occurredAt: t.OccurredAt, facts: f, data: transactionData{TransactionID: t.TransactionID, OriginalTransactionID: t.OriginalTransactionID, Type: typ, Success: t.Success, Amount: native, Currency: strings.ToUpper(t.Currency), OccurredAt: t.OccurredAt.UTC()}})
+			occurredAt: t.OccurredAt, facts: f, data: transactionData{TransactionID: t.TransactionID, OriginalTransactionID: t.OriginalTransactionID, Type: typ, Success: t.Success, Amount: native, Currency: strings.ToUpper(t.Currency), OccurredAt: t.OccurredAt.UTC(),
+				Remote: &remote}})
 	}
 	return out, nil
 }

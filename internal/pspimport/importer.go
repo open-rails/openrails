@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -32,6 +33,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/proposals"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -56,7 +58,9 @@ type Importer struct {
 	// Alerts tells the merchant's operator when a provider refuses a PSP's
 	// credentials.
 	Alerts reconcile.FindingNotifier
-	Clock  clockwork.Clock
+	// Proposals approves an applied import's corrections.
+	Proposals *proposals.Executor
+	Clock     clockwork.Clock
 }
 
 // ErrNotFound is an import or record the merchant does not have.
@@ -144,7 +148,11 @@ func (im *Importer) Create(ctx context.Context, p billing.CreatePSPImportParams)
 	if _, ok := sources[scope.Rail]; !ok {
 		return nil, apperr.Invalidf("PSP %q is on %s, which has no import yet", scope.Key, scope.Rail).WithParam("psp")
 	}
-	rules, err := encodeRules(p.Rules)
+	// Rules default to the PSP's latest import's.
+	rules, err := im.DB.Gen(ctx).GetLatestPSPImportRules(ctx, gen.GetLatestPSPImportRulesParams{MerchantID: mid.UUID(), PspID: scope.ID})
+	if p.Rules != nil || errors.Is(err, pgx.ErrNoRows) {
+		rules, err = encodeRules(p.Rules)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +167,7 @@ func (im *Importer) Create(ctx context.Context, p billing.CreatePSPImportParams)
 		var err error
 		if row, err = d.Gen(ctx).CreatePSPImport(ctx, gen.CreatePSPImportParams{MerchantID: mid.UUID(), PspID: scope.ID, Rail: scope.Rail,
 			HistorySince: since, Rules: rules}); err != nil {
-			return err
+			return inFlight(err)
 		}
 		_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: mid.UUID(), ImportID: row.ID, Step: StepPull}, nil)
 		return err
@@ -168,6 +176,18 @@ func (im *Importer) Create(ctx context.Context, p billing.CreatePSPImportParams)
 		return nil, err
 	}
 	return im.view(ctx, row)
+}
+
+// errInFlight refuses a second import of a PSP while one pulls or applies.
+var errInFlight = apperr.New(409, billing.CodePSPImportInProgress, "another import of the PSP is pulling or applying; wait for it to finish")
+
+// inFlight is errInFlight for the in-flight index's refusal.
+func inFlight(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "psp_imports_in_flight_key" {
+		return errInFlight
+	}
+	return err
 }
 
 // psp resolves a PSP reference to one of the merchant's PSPs.
@@ -194,7 +214,7 @@ func (im *Importer) psp(ctx context.Context, mid billing.MerchantID, ref billing
 
 func encodeRules(rules []billing.PSPImportRule) ([]byte, error) {
 	if rules == nil {
-		rules = DefaultRules
+		rules = billing.DefaultPSPImportRules()
 	}
 	return json.Marshal(rules)
 }
@@ -420,9 +440,13 @@ func (im *Importer) SetMappings(ctx context.Context, p billing.SetPSPImportMappi
 	return out, err
 }
 
-// RequestApply checks an import can land, marks it applying and queues its
-// landing in the same transaction.
-func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID) (*billing.PSPImport, error) {
+// RequestApply checks an import can land, marks it applying in the name of
+// the person who asked (who approves its corrections) and queues its landing
+// in the same transaction.
+func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, requestedBy string) (*billing.PSPImport, error) {
+	if strings.TrimSpace(requestedBy) == "" {
+		return nil, errors.New("pspimport: an apply names the person who asked")
+	}
 	var out gen.BillingPspImport
 	err := im.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := im.DB.NewWithPgxTx(tx)
@@ -441,8 +465,8 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID) (*
 		if busy(row.Status) || row.PulledAt == nil || row.HistoryThrough == nil || row.HistoryThrough.Before(*row.PulledAt) {
 			return apperr.Conflictf("the import is %s; it lands once its pull finished", row.Status)
 		}
-		if out, err = q.SetPSPImportStatus(ctx, gen.SetPSPImportStatusParams{MerchantID: row.MerchantID, ID: row.ID, Status: string(billing.PSPImportApplying)}); err != nil {
-			return err
+		if out, err = q.RequestPSPImportApply(ctx, gen.RequestPSPImportApplyParams{MerchantID: row.MerchantID, ID: row.ID, RequestedBy: requestedBy}); err != nil {
+			return inFlight(err)
 		}
 		_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: row.MerchantID, ImportID: row.ID, Step: StepApply}, nil)
 		return err
@@ -513,6 +537,11 @@ func (im *Importer) view(ctx context.Context, row gen.BillingPspImport) (*billin
 	for _, c := range counts {
 		out.Counts = append(out.Counts, billing.PSPImportCount{Kind: billing.PSPImportRecordKind(c.Kind), State: billing.PSPImportRecordState(c.State), Records: int(c.Records)})
 	}
+	p, err := im.DB.Gen(ctx).CountPSPImportProposals(ctx, gen.CountPSPImportProposalsParams{MerchantID: row.MerchantID, PullID: row.ID})
+	if err != nil {
+		return nil, err
+	}
+	out.Proposals = billing.PSPImportProposals{Open: int(p.Open), Corrections: int(p.Corrections), Approved: int(p.Approved), Dismissed: int(p.Dismissed), Superseded: int(p.Superseded)}
 	return out, nil
 }
 

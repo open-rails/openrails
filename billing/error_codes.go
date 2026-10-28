@@ -197,6 +197,7 @@ var errorCodes = []ErrorCode{
 	{CodeServiceCredentialCustomerScopeDenied, 403, authz, "The service credential may not act for this customer."},
 	{CodeInvokerScopedPrincipal, 403, authz, "An invoker-scoped credential spends a customer's balance but may not manage the account."},
 	{CodeApplicationRequired, 403, authz, "The route is your backend's: it takes an application's credential, never a person's."},
+	{CodePersonRequired, 403, authz, "Only a person signed in, or the embedding host in process, may take this action; an API key or service token may not."},
 	{CodeStepUpUnavailable, 403, authz, "The operation needs a recent sign-in and this credential cannot prove one."},
 	{CodeAuthorizationUnavailable, 503, fault, "Permissions could not be checked right now; retry."},
 	{"customer_action_required", 403, authz, "Only the customer may take this action, through their own step."},
@@ -340,6 +341,7 @@ var errorCodes = []ErrorCode{
 
 	// Merchant configuration and PSPs.
 	{"psp_not_found", 404, invalid, "The PSP does not exist."},
+	{CodePSPImportInProgress, 409, invalid, "Another import of the PSP is pulling or applying; wait for it to finish."},
 	{"psp_exists", 409, invalid, "The account is already a PSP, of this merchant or another; update it instead."},
 	{"psp_key_taken", 409, invalid, "Another live PSP holds the key."},
 	{"psp_credentials_rejected", 400, invalid, "The provider rejected the credentials, or answered that they are not in the PSP's declared environment."},

@@ -125,10 +125,12 @@ ORDER BY 1
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListPSPImportCustomerRecords :many
--- Every linked or landed record of these customers: a book carries a customer whole.
+-- Every linked or landed record of these customers, and the provider
+-- customers OpenRails holds for them (their cards' vaults): a book carries a
+-- customer whole.
 SELECT * FROM billing.psp_import_records
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND import_id = sqlc.arg(import_id)::uuid
-  AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[]) AND state IN ('linked', 'imported')
+  AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[]) AND (state IN ('linked', 'imported') OR state = 'held' AND kind = 'customer')
 ORDER BY customer_id, kind, id;
 
 -- name: ListPSPImportRecordsByRef :many
@@ -207,3 +209,111 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
   AND status = 'active' AND rail_method_ref IS NOT NULL
 ORDER BY created_at DESC, id DESC
 LIMIT 10;
+
+-- name: GetLatestPSPImportRules :one
+-- The rules of the PSP's latest import: a new import starts from them.
+SELECT rules FROM billing.psp_imports
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
+-- name: RequestPSPImportApply :one
+-- A person asked to land the import; its corrections are approved in their name.
+UPDATE billing.psp_imports SET status = 'applying', error = NULL, apply_requested_by = sqlc.arg(requested_by)::text, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+RETURNING *;
+
+-- name: RecordPSPImportBasis :exec
+-- Every subscription of the PSP at its row version, before the roster read. A
+-- retried pull keeps the first basis.
+INSERT INTO billing.psp_import_basis (merchant_id, import_id, subscription_id, row_version)
+SELECT s.merchant_id, sqlc.arg(import_id)::uuid, s.id, s.row_version FROM billing.subscriptions s
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.psp_id = sqlc.arg(psp_id)::uuid AND s.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- name: SetPSPImportBasis :exec
+-- Subscriptions an import first finds held at its Apply, at their current row version.
+INSERT INTO billing.psp_import_basis (merchant_id, import_id, subscription_id, row_version)
+SELECT s.merchant_id, sqlc.arg(import_id)::uuid, s.id, s.row_version FROM billing.subscriptions s
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = ANY(sqlc.arg(subscription_ids)::uuid[])
+ON CONFLICT (merchant_id, import_id, subscription_id) DO UPDATE SET row_version = EXCLUDED.row_version;
+
+-- name: ListPSPImportBasis :many
+SELECT subscription_id, row_version FROM billing.psp_import_basis
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND import_id = sqlc.arg(import_id)::uuid;
+
+-- name: ListPSPHeldSubscriptions :many
+-- The PSP's subscriptions OpenRails holds, by provider ref.
+SELECT id, customer_id, rail_subscription_id::text AS ref, facts_authority, row_version, status FROM billing.subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND deleted_at IS NULL
+  AND rail_subscription_id = ANY(sqlc.arg(refs)::text[]);
+
+-- name: ListPSPHeldVaults :many
+-- The customers holding the PSP's provider customers, by provider ref.
+SELECT DISTINCT rail_customer_ref::text AS ref, customer_id FROM billing.payment_methods
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND rail_customer_ref = ANY(sqlc.arg(refs)::text[])
+UNION
+SELECT remote_customer_ref, customer_id FROM billing.psp_customers
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND remote_customer_ref = ANY(sqlc.arg(refs)::text[])
+ORDER BY 1, 2;
+
+-- name: ListPSPHeldTransactions :many
+-- The customers holding the PSP's provider transactions, by transaction id.
+SELECT DISTINCT transaction_id::text AS ref, customer_id FROM billing.payments
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND deleted_at IS NULL
+  AND transaction_id = ANY(sqlc.arg(refs)::text[])
+ORDER BY 1, 2;
+
+-- name: ListPSPImportProposeCustomers :many
+-- The customers a reconcile diffs, in order: those holding the PSP's
+-- subscriptions or cards, and the holders of the import's held records.
+SELECT customer_id FROM (
+    SELECT s.customer_id FROM billing.subscriptions s
+    WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.psp_id = sqlc.arg(psp_id)::uuid AND s.deleted_at IS NULL
+    UNION
+    SELECT pm.customer_id FROM billing.payment_methods pm
+    WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.psp_id = sqlc.arg(psp_id)::uuid
+    UNION
+    SELECT r.customer_id FROM billing.psp_import_records r
+    WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.import_id = sqlc.arg(import_id)::uuid AND r.state = 'held'
+) c
+WHERE customer_id > sqlc.arg(after_customer_id)::uuid
+ORDER BY customer_id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListPSPImportHeldRecords :many
+-- The held records of these customers, and every conflicting record.
+SELECT * FROM billing.psp_import_records
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND import_id = sqlc.arg(import_id)::uuid
+  AND (state = 'held' AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[]) OR state = 'conflict' AND kind = 'subscription')
+ORDER BY kind, id;
+
+-- name: CountPSPImportProposals :one
+-- An import's proposals by outcome; corrections are the open ones its Apply approves.
+SELECT count(*) FILTER (WHERE status IN ('reconcile_required', 'requires_review'))::int AS open,
+    count(*) FILTER (WHERE status IN ('reconcile_required', 'requires_review') AND (
+        change->>'kind' IN ('record_charge', 'update_card')
+        OR change->>'kind' = 'adopt_subscription' AND change->'to'->>'transition' IN ('renew', 'adopt_period_end')
+        OR change->>'kind' = 'correct_subscription' AND NOT COALESCE((change->'effects'->>'ends_access')::boolean, false)))::int AS corrections,
+    count(*) FILTER (WHERE resolution = 'approved')::int AS approved,
+    count(*) FILTER (WHERE resolution = 'dismissed')::int AS dismissed,
+    count(*) FILTER (WHERE resolution = 'superseded')::int AS superseded
+FROM billing.reconciliation_findings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND pull_id = sqlc.arg(pull_id)::uuid;
+
+-- name: CountPSPLiveSubscriptions :one
+-- The PSP's live provider subscriptions: what a roster read is weighed against.
+SELECT count(*)::int FROM billing.subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND deleted_at IS NULL
+  AND rail_subscription_id IS NOT NULL AND status IN ('active', 'past_due', 'pending');
+
+-- name: ListPSPImportFlips :many
+-- The held subscriptions a host book landed whose row the import read is
+-- unchanged since: Apply hands them to the provider's evidence.
+SELECT s.id FROM billing.psp_import_basis b
+JOIN billing.subscriptions s ON s.merchant_id = b.merchant_id AND s.id = b.subscription_id
+JOIN billing.psp_import_records r ON r.merchant_id = b.merchant_id AND r.import_id = b.import_id AND r.kind = 'subscription'
+    AND r.state = 'held' AND r.ref = s.rail_subscription_id
+WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.import_id = sqlc.arg(import_id)::uuid
+  AND s.row_version = b.row_version AND s.facts_authority = 'host' AND s.deleted_at IS NULL
+ORDER BY s.id;

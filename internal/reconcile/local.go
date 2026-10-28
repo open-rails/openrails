@@ -68,6 +68,9 @@ type LocalSubscription struct {
 	// next renewal; TierChangePending an unresolved in-place tier change.
 	ScheduledPriceID  *uuid.UUID
 	TierChangePending bool
+	// AcceptedScheduleSource is the source of the provider schedule last
+	// accepted for it; "" when none is.
+	AcceptedScheduleSource string
 }
 
 // IsLive reports whether the subscription occupies a "billing relationship
@@ -78,6 +81,13 @@ func (s *LocalSubscription) IsLive() bool {
 		return true
 	}
 	return false
+}
+
+// awaitsProvider reports a subscription whose state the provider decides: a
+// live one, or one parked unverified until the provider tells. It is never
+// read as ended.
+func (s *LocalSubscription) awaitsProvider() bool {
+	return s.IsLive() || s.Status == string(models.StatusUnverified)
 }
 
 // LocalPayment is the slice of billing.payments the diff engine consumes.
@@ -121,6 +131,7 @@ type LocalPrice struct {
 	Amount                int64
 	Currency              string
 	BillingCycleDays      *int
+	BillingIntervalMonths *int
 	ProviderAccessDefault bool
 	Archived              bool
 	// PSPLinks is the provider-links blob: PSP key -> link entry
@@ -199,6 +210,12 @@ func (l *PGLocalStateLoader) fillCustomerEmails(ctx context.Context, merchantID 
 }
 
 func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID uuid.UUID) (*LocalState, error) {
+	return l.LoadCustomers(ctx, provider, pspID, nil)
+}
+
+// LoadCustomers is Load bounded to customers' subscriptions and payment
+// methods; nil reads the PSP's whole book.
+func (l *PGLocalStateLoader) LoadCustomers(ctx context.Context, provider Provider, pspID uuid.UUID, customers []uuid.UUID) (*LocalState, error) {
 	names := localRailNames(provider)
 	q := l.DB.Gen(ctx)
 
@@ -209,9 +226,10 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 		return nil, scopeErr
 	}
 	subs, err := q.ReconcileListSubscriptionsByRails(ctx, gen.ReconcileListSubscriptionsByRailsParams{
-		MerchantID: scopeMerchantID.UUID(),
-		Rails:      names,
-		PspID:      pspID,
+		MerchantID:  scopeMerchantID.UUID(),
+		Rails:       names,
+		PspID:       pspID,
+		CustomerIds: customers,
 	})
 	if err != nil {
 		return nil, err
@@ -240,6 +258,8 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			NextRetryAt:         row.NextRetryAt,
 			ScheduledPriceID:    row.ScheduledPriceID,
 			TierChangePending:   row.TierChangePending,
+
+			AcceptedScheduleSource: row.AcceptedScheduleSource,
 		}
 		if row.CancelType != nil {
 			s.CancelType = *row.CancelType
@@ -277,6 +297,10 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			days := int(*row.BillingIntervalHours) / 24
 			p.BillingCycleDays = &days
 		}
+		if row.BillingIntervalMonths != nil {
+			months := int(*row.BillingIntervalMonths)
+			p.BillingIntervalMonths = &months
+		}
 		mid, err := merchant.Require(ctx)
 		if err != nil {
 			return nil, err
@@ -290,9 +314,10 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 	}
 
 	pms, err := q.ReconcileListPaymentMethodsByRails(ctx, gen.ReconcileListPaymentMethodsByRailsParams{
-		MerchantID: scopeMerchantID.UUID(),
-		Rails:      names,
-		PspID:      pspID,
+		MerchantID:  scopeMerchantID.UUID(),
+		Rails:       names,
+		PspID:       pspID,
+		CustomerIds: customers,
 	})
 	if err != nil {
 		return nil, err

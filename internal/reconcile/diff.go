@@ -497,6 +497,18 @@ type diffOptions struct {
 	EvidenceFloor time.Time
 	// changes builds the proposals this diff raises.
 	changes *changeBuilder
+	// AwaitUnverified reads an unverified row as awaiting the provider, never
+	// as ended: a PSP import's proposals. The enforcing engine keeps reading
+	// it as not live.
+	AwaitUnverified bool
+}
+
+// live is whether the diff reads s as a billing relationship.
+func (o diffOptions) live(s *LocalSubscription) bool {
+	if o.AwaitUnverified {
+		return s.awaitsProvider()
+	}
+	return s.IsLive()
 }
 
 // diffProvider runs every capability-gated pull-plane check for one provider
@@ -592,7 +604,10 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 
 		// Matched pair: status comparison.
 		findings = append(findings, compareStatuses(provider, snap, localSub, r, now, opts)...)
-		if f := compareScheduleTerms(provider, idx, localSub, r); f != nil {
+		if f := compareScheduleTerms(provider, idx, planIdx, localSub, r); f != nil {
+			findings = append(findings, *f)
+		}
+		if f := compareFacts(provider, snap, idx, planIdx, localSub, r, opts); f != nil {
 			findings = append(findings, *f)
 		}
 	}
@@ -604,7 +619,7 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 	// cancellation cap guard it upstream.
 	if traits.absenceMeansCanceled && snap.Coverage.SubscriptionsExhaustive {
 		for _, s := range idx.byPSID {
-			if !s.IsLive() {
+			if !opts.live(s) {
 				continue
 			}
 			if _, present := ridx.subByPSID[s.RailSubscriptionID]; present {
@@ -921,7 +936,7 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 		return nil // the provider declared nothing comparable
 	}
 
-	localLive := s.IsLive()
+	localLive := opts.live(s)
 	remoteDead := r.Status == SubscriptionStatusCanceled || r.Status == SubscriptionStatusExpired
 
 	switch {
@@ -1026,10 +1041,11 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 }
 
 // compareScheduleTerms reports a matched, live NMI schedule that no longer
-// bills what the local subscription records: another amount, another plan,
-// another vault, or paused at the provider. The provider owns that schedule,
-// so the finding asks for review and nothing is changed automatically.
-func compareScheduleTerms(provider Provider, idx *localIndex, s *LocalSubscription, r *RemoteSubscription) *Finding {
+// bills what the local subscription records: another amount on an unmapped
+// plan, another vault, or paused at the provider. The provider owns that
+// schedule, so the finding asks for review and nothing is changed
+// automatically. A move onto a mapped plan is compareFacts'.
+func compareScheduleTerms(provider Provider, idx *localIndex, planIdx map[string][]planLink, s *LocalSubscription, r *RemoteSubscription) *Finding {
 	if provider != ProviderNMI || !s.IsLive() || (!remoteLive(r.Status) && !r.Paused) || s.TierChangePending {
 		return nil
 	}
@@ -1047,6 +1063,9 @@ func compareScheduleTerms(provider Provider, idx *localIndex, s *LocalSubscripti
 				price = &idx.prices[i]
 			}
 		}
+	}
+	if mapped := mappedPrice(planIdx, r.PlanID); mapped != nil && price != nil && mapped.ID != price.ID {
+		price = nil
 	}
 	if price != nil {
 		// NMI's schedule names no currency: its amount is read in the

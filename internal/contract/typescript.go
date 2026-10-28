@@ -134,6 +134,8 @@ export type OpenRailsRoute = {
   mountedWhen: string | null
   // Optional console assistance, outside the merchant Go client.
   consoleOnly?: true
+  // Only a person signed in, or the in-process host, may call it.
+  person?: true
   // wire.ts type names: the JSON body, and each success by status.
   request: string | null
   responses: Readonly<Record<number, string | null>>
@@ -169,6 +171,9 @@ export const OPENRAILS_ROUTES = [
 		console := ""
 		if r.ConsoleOnly {
 			console = "consoleOnly: true, "
+		}
+		if r.Person {
+			console += "person: true, "
 		}
 		fmt.Fprintf(&b, "  { method: %q, path: %q, group: %q, auth: %q, permission: %s, sensitive: %t, mountedWhen: %s, %srequest: %s, responses: { %s }, errors: [%s], errorSets: [%s] },\n",
 			r.Method, r.Path, r.Group, r.Auth, perm, r.Sensitive, when, console, m.bodyTS(r.Request), strings.Join(replies, ", "), quoted(r.Errors), quoted(r.ErrorSets()))

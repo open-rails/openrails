@@ -289,6 +289,10 @@ type Route struct {
 	// Sensitive: a customer operation needs a recent sign-in.
 	// Never set on an AuthMerchant route.
 	Sensitive bool
+	// Person: a merchant operation only a user acting in person, or the
+	// in-process host, may take; an API key or service token holding the
+	// permission is refused person_required.
+	Person bool
 	// Limit meters the operation per human administrator, after authorization.
 	Limit middleware.AdminOperation
 	// When is the configuration the route needs to be mounted.
@@ -397,6 +401,9 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		}
 		if r.Auth == AuthMerchant && r.Sensitive {
 			panic("routes: " + r.Key() + ": admin operations never require a recent sign-in")
+		}
+		if r.Person && r.Auth != AuthMerchant {
+			panic("routes: " + r.Key() + ": only a merchant route asks for a person")
 		}
 		if r.Group == App && (r.Sensitive || !strings.HasPrefix(r.Path, "/v1/app/")) {
 			panic("routes: " + r.Key() + ": a programmatic route is under /v1/app, never asks for a sign-in, and replay belongs to each operation")

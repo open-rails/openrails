@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
+	"github.com/open-rails/openrails/internal/proposals"
 	"github.com/open-rails/openrails/internal/pspimport"
 	"github.com/open-rails/openrails/internal/retry"
 )
@@ -35,7 +36,7 @@ func (r *Runtime) PSPImporter() *pspimport.Importer {
 		return nil
 	}
 	im := &pspimport.Importer{DB: r.DB, Merchants: r.Merchants, NMI: r.NMIClients, Stripe: r.StripeClients, Objects: r.ProviderObjects(),
-		CCBillDataLinkURL: config.SandboxCCBillDataLinkURL(r.Config), Directory: r.Contacts, Clock: r.Clock}
+		CCBillDataLinkURL: config.SandboxCCBillDataLinkURL(r.Config), Directory: r.Contacts, Proposals: proposals.New(r.DB, r.Config, r.Clock), Clock: r.Clock}
 	if r.AlertService != nil {
 		im.Alerts = r.AlertService
 	}

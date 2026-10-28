@@ -81,3 +81,14 @@ JOIN billing.prices price ON price.merchant_id = b.merchant_id AND price.id = b.
 WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.psp_id = sqlc.arg(psp_id)::uuid AND price.provider_owned AND price.deleted_at IS NULL
   AND (b.plan_id IS NOT NULL OR b.price_ref IS NOT NULL)
 ORDER BY 1;
+
+-- name: MarkProviderCatalogObjectsAbsent :many
+-- A complete, non-empty list read at observed_at lacks these objects an
+-- earlier list held: they are gone. Seeing one again clears deleted_at.
+UPDATE billing.provider_catalog_objects o
+SET deleted_at = COALESCE(o.deleted_at, sqlc.arg(observed_at)::timestamptz), observed_at = sqlc.arg(observed_at)::timestamptz,
+    observed_via = 'pull', updated_at = now()
+WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.psp_id = sqlc.arg(psp_id)::uuid AND o.observed_via = 'pull'
+  AND o.observed_at < sqlc.arg(observed_at)::timestamptz
+  AND NOT EXISTS (SELECT 1 FROM unnest(sqlc.arg(kinds)::text[], sqlc.arg(refs)::text[]) AS l(kind, ref) WHERE l.kind = o.kind AND l.ref = o.ref)
+RETURNING o.kind, o.ref;

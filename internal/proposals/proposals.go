@@ -78,6 +78,33 @@ func (e *Executor) Approve(ctx context.Context, req Request) (billing.ProposalRe
 	return out, nil
 }
 
+// ApproveSet approves a listed set of proposals of any size, each in its own
+// transaction, under one approval run in actor's name: a PSP import's
+// corrections, approved when a person applies it. ids must name pull.*
+// findings of the merchant in ctx.
+func (e *Executor) ApproveSet(ctx context.Context, ids []uuid.UUID, actor, notes string) (billing.ProposalResults, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return billing.ProposalResults{}, err
+	}
+	if strings.TrimSpace(actor) == "" {
+		return billing.ProposalResults{}, errors.New("proposals: an approval names who decided")
+	}
+	call := &approval{e: e, mid: mid.UUID(), notes: strings.TrimSpace(notes), actor: actor, ids: len(ids)}
+	out := billing.ProposalResults{Data: make([]billing.ProposalResult, 0, len(ids))}
+	for _, id := range ids {
+		out.Data = append(out.Data, call.one(ctx, id))
+	}
+	if call.run != uuid.Nil {
+		if err := call.finish(ctx); err != nil {
+			return out, err
+		}
+		run := billing.RunID(call.run)
+		out.RunID = &run
+	}
+	return out, nil
+}
+
 // Dismiss closes each listed open proposal without applying it; notes are
 // required. A dismissed proposal is raised again only on other evidence.
 func (e *Executor) Dismiss(ctx context.Context, req Request) (billing.ProposalResults, error) {
@@ -253,6 +280,10 @@ func (e *Executor) List(ctx context.Context, p billing.ProposalListParams) (bill
 	if p.Source != "" {
 		source := string(p.Source)
 		params.Source = &source
+	}
+	if !p.Pull.IsZero() {
+		pull := p.Pull.UUID()
+		params.PullID = &pull
 	}
 	rows, err := q.ListProposals(ctx, params)
 	if err != nil {

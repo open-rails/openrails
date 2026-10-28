@@ -13,7 +13,7 @@ import (
 
 // newProposalsCmd is the pull.* plane of the findings queue from the CLI:
 //
-//	openrails proposals list    --merchant M [--psp KEY] [--kind K] [--source S]
+//	openrails proposals list    --merchant M [--psp KEY] [--pull pim_…] [--kind K] [--source S]
 //	openrails proposals show    --merchant M <id>
 //	openrails proposals approve --merchant M <id>… --notes N
 //	openrails proposals approve --merchant M --psp KEY --kind K --expect N --notes N
@@ -25,7 +25,7 @@ import (
 // its size; at most 100 a call. Each approve call is one approval run, which
 // `openrails undo-run --run <id>` reverses.
 func newProposalsCmd() *cobra.Command {
-	var merchantSlug, format, psp, kind, source, notes string
+	var merchantSlug, format, psp, pull, kind, source, notes string
 	var expect, limit int
 
 	options := func(c *cobra.Command) (hosttools.ProposalsOptions, error) {
@@ -37,8 +37,8 @@ func newProposalsCmd() *cobra.Command {
 		return hosttools.ProposalsOptions{Config: cfg, MerchantID: mid, Actor: cliActor(), Format: format, Out: os.Stdout}, nil
 	}
 	set := func(c *cobra.Command, ids []string) (hosttools.ProposalSet, error) {
-		s := hosttools.ProposalSet{IDs: ids, PSP: psp, Kind: kind, Source: source, Expect: expect}
-		if len(ids) > 0 && (psp != "" || kind != "" || source != "") {
+		s := hosttools.ProposalSet{IDs: ids, PSP: psp, Pull: pull, Kind: kind, Source: source, Expect: expect}
+		if len(ids) > 0 && (psp != "" || pull != "" || kind != "" || source != "") {
 			return s, fmt.Errorf("name proposal ids or a filtered set, not both")
 		}
 		if len(ids) == 0 && !c.Flags().Changed("expect") {
@@ -61,6 +61,7 @@ func newProposalsCmd() *cobra.Command {
 
 	filters := func(c *cobra.Command) {
 		c.Flags().StringVar(&psp, "psp", "", "Only proposals raised by this PSP key")
+		c.Flags().StringVar(&pull, "pull", "", "Only proposals the pull of this PSP import (pim_…) raised")
 		c.Flags().StringVar(&kind, "kind", "", "Only proposals of this change kind (record_charge, cancel_subscription, …)")
 		c.Flags().StringVar(&source, "source", "", "Only proposals from this source: pull, verification")
 	}
@@ -72,7 +73,7 @@ func newProposalsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return hosttools.ProposalsList(c.Context(), opts, hosttools.ProposalSet{PSP: psp, Kind: kind, Source: source})
+			return hosttools.ProposalsList(c.Context(), opts, hosttools.ProposalSet{PSP: psp, Pull: pull, Kind: kind, Source: source})
 		},
 	}
 	filters(list)

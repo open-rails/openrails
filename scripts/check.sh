@@ -12,6 +12,7 @@ in_modules() {
 guards() {
   bash scripts/migration-prefix-collision.sh
   bash scripts/check_business_time.sh
+  bash scripts/check-one-pull-entry.sh
   bash scripts/scan-injected-code.sh --all
   local files=() unformatted
   while IFS= read -r -d '' file; do

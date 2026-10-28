@@ -86,7 +86,7 @@ WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL;
 
 -- name: RestoreSubscriptionsFromBeforeImages :execrows
--- Re-asserts the columns a converge-enforce pass can move, only on rows
+-- Re-asserts the columns an approval can move, only on rows
 -- unchanged since the run's own write: a row a renewal, cancel or payment moved
 -- later keeps its state (restoring could make a paid period due again) and its
 -- image stays unrestored. Updates in place: identity, FK columns and
@@ -123,6 +123,12 @@ SET lifecycle_rev            = s.lifecycle_rev + 1,
     cancel_type              = b.before->>'cancel_type',
     cancel_feedback          = b.before->>'cancel_feedback',
     deletion_scheduled_at    = (b.before->>'deletion_scheduled_at')::timestamptz,
+    -- A correction's price and start.
+    price_id                 = (b.before->>'price_id')::uuid,
+    product_id               = (b.before->>'product_id')::uuid,
+    access_duration_hours_snapshot   = (b.before->>'access_duration_hours_snapshot')::integer,
+    provider_access_default_snapshot = (b.before->>'provider_access_default_snapshot')::boolean,
+    started_at               = (b.before->>'started_at')::timestamptz,
     updated_at               = sqlc.arg(now)::timestamptz
 FROM restorable b
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid

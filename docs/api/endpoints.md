@@ -402,6 +402,23 @@ active PSP on a rail is `409 psp_last_active` unless `allow_last` is `true`.
 A manual PSP import (`POST /v1/merchant/psp-imports`) re-reads a PSP; its
 differences become proposals ([PSP import](../psp-import.md)).
 
+## Proposals
+
+A provider read never applies a difference on its own: each is a proposal, a
+pull.* finding carrying the change approving it applies.
+`GET /v1/merchant/proposals` lists open ones, most severe first; filters
+`psp_id`, `pull_id` (the PSP import whose pull raised it), `kind`, `source`,
+`status` and `ids`. `POST /v1/merchant/proposals/approve` (`{ids, notes}`, 1
+to 100 ids, `Idempotency-Key` required: a replay answers the first response,
+the key with another body is `422 idempotency_key_reused`) applies each in
+its own transaction under one approval run; `POST /v1/merchant/proposals/dismiss`
+closes them without applying (notes required). Each result is `approved`,
+`dismissed`, `superseded` (its basis moved), `held` (kill switch or readonly
+posture), `failed` or `already_resolved`. Approve, dismiss and
+`POST /v1/merchant/psp-imports/{id}/apply` take a person signed in or the
+in-process host; an API key or service token is `403 person_required`, even
+holding `merchant:config:manage`.
+
 ## Refunds
 
 `POST /v1/admin/payments/{id}/refunds` refunds through the rail: `{amount}`

@@ -34,7 +34,7 @@ var sources = map[string]func(ctx context.Context, im *Importer, mid billing.Mer
 			return nil, err
 		}
 		client.ReadOnly = true
-		return &nmiSource{client: client, currency: "USD"}, nil
+		return &nmiSource{client: client, currency: "USD", now: im.now}, nil
 	},
 	"stripe": func(ctx context.Context, im *Importer, mid billing.MerchantID, scope merchants.PSPScope) (source, error) {
 		key, err := im.secret(ctx, mid, scope, "secret_key")
@@ -108,11 +108,13 @@ const historyWindow = 30 * 24 * time.Hour
 // stageBatch bounds one staging write.
 const stageBatch = 500
 
-// Pull reads the import's PSP: its catalog and roster once, then its
-// transaction history window by window, each committed with how far it
-// reached, so a retried job resumes. It then links what it staged. A provider
-// refusing the credentials is permanent, ErrCredentialsRejected; so is a PSP
-// or credential the configuration no longer declares.
+// Pull reads the import's PSP: what OpenRails holds of it (the basis), its
+// catalog and roster once, then its transaction history window by window,
+// each committed with how far it reached, so a retried job resumes. It then
+// links what it staged, marks what OpenRails holds held and proposes every
+// difference in that; it lands nothing. A provider refusing the credentials
+// is permanent, ErrCredentialsRejected; so is a PSP or credential the
+// configuration no longer declares.
 func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID) error {
 	row, err := im.row(ctx, id)
 	if err != nil || row.Status != string(billing.PSPImportPulling) {
@@ -144,13 +146,17 @@ var errConfigChanged = errors.New("the PSP's configuration changed during the pu
 func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope merchants.PSPScope) error {
 	id := billing.PSPImportID(row.ID)
 	mid := billing.MerchantID(row.MerchantID)
-	build, ok := sources[scope.Rail]
-	if !ok {
-		return notReadable(fmt.Errorf("%s has no import", scope.Rail))
-	}
-	src, err := build(ctx, im, mid, scope)
-	if err != nil {
-		return clientError(scope, err)
+	var src source
+	// A read that finished (a relink) reads the provider no more.
+	if row.PulledAt == nil || row.HistoryThrough == nil || row.HistoryThrough.Before(*row.PulledAt) {
+		build, ok := sources[scope.Rail]
+		if !ok {
+			return notReadable(fmt.Errorf("%s has no import", scope.Rail))
+		}
+		var err error
+		if src, err = build(ctx, im, mid, scope); err != nil {
+			return clientError(scope, err)
+		}
 	}
 	// The first answer the provider gives closes the PSP's credentials
 	// finding.
@@ -164,6 +170,11 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 	}
 	q := im.DB.Gen(ctx)
 	if row.PulledAt == nil {
+		// What OpenRails holds before the roster read is the basis of every
+		// state change the pull proposes.
+		if err := q.RecordPSPImportBasis(ctx, gen.RecordPSPImportBasisParams{MerchantID: row.MerchantID, ImportID: row.ID, PspID: row.PspID}); err != nil {
+			return err
+		}
 		observed := im.now()
 		cat, err := im.observeCatalog(ctx, scope)
 		if err != nil {
@@ -225,26 +236,30 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 		}
 		through = until
 	}
-	if err := im.link(ctx, row, nil); err != nil {
+	if err := im.link(ctx, row); err != nil {
+		return err
+	}
+	if err := im.propose(ctx, row, scope, nil); err != nil {
 		return err
 	}
 	_, err = q.SetPSPImportStatus(ctx, gen.SetPSPImportStatusParams{MerchantID: row.MerchantID, ID: row.ID, Status: string(billing.PSPImportPulled)})
 	return err
 }
 
-// catalogPull is a pull's read of the PSP's catalog: what its lists held.
+// catalogPull is a pull's read of the PSP's catalog: what its lists held,
+// and what they no longer hold.
 type catalogPull struct {
-	im     *Importer
-	scope  merchants.PSPScope
-	reader providerobjects.Reader
-	listed map[string]bool
+	im             *Importer
+	scope          merchants.PSPScope
+	reader         providerobjects.Reader
+	listed, absent map[string]bool
 }
 
-func catalogKey(kind providerobjects.Kind, ref string) string { return string(kind) + "\x1f" + ref }
+func catalogKey(kind providerobjects.Kind, ref string) string { return providerobjects.Key(kind, ref) }
 
 // observeCatalog lists the PSP's whole catalog (Stripe products and prices,
-// active and not; NMI plans) and records it. A rail without a catalog
-// (CCBill) gives nil.
+// active and not; NMI plans) and records it, marking gone what an earlier
+// list held and this one lacks. A rail without a catalog (CCBill) gives nil.
 func (im *Importer) observeCatalog(ctx context.Context, scope merchants.PSPScope) (*catalogPull, error) {
 	if im.Objects == nil {
 		return nil, Permanent(errors.New("the provider catalog observer is not wired"))
@@ -261,10 +276,11 @@ func (im *Importer) observeCatalog(ctx context.Context, scope merchants.PSPScope
 	if err != nil {
 		return nil, fmt.Errorf("provider catalog: %w", err)
 	}
-	if err := im.Objects.Record(ctx, scope, at, objects, providerobjects.ViaPull); err != nil {
+	absent, err := im.Objects.RecordList(ctx, scope, at, objects)
+	if err != nil {
 		return nil, err
 	}
-	c := &catalogPull{im: im, scope: scope, reader: reader, listed: map[string]bool{}}
+	c := &catalogPull{im: im, scope: scope, reader: reader, listed: map[string]bool{}, absent: absent}
 	for _, obj := range objects {
 		c.listed[catalogKey(obj.Kind, obj.Ref)] = true
 	}
@@ -284,7 +300,7 @@ func (c *catalogPull) fill(ctx context.Context, recs []staged) error {
 	read := map[string]bool{}
 	observe := func(kind providerobjects.Kind, ref string, stated *providerobjects.Object) error {
 		key := catalogKey(kind, ref)
-		if ref == "" || c.listed[key] || read[key] {
+		if ref == "" || c.listed[key] || c.absent[key] || read[key] {
 			return nil
 		}
 		read[key] = true

@@ -75,8 +75,10 @@ type Finding struct {
 	Notes          *string                `json:"operator_notes"`
 	// Source, Change and ApprovalRunID are set on pull.* findings: what raised
 	// it, the change approving it applies (nil when only dismissing resolves
-	// it), and the approval run that applied it.
+	// it), and the approval run that applied it. Pull is the PSP import whose
+	// pull last raised it.
 	Source        *ProposalSource `json:"source"`
+	Pull          *PSPImportID    `json:"pull_id"`
 	Change        *FindingChange  `json:"change"`
 	ApprovalRunID *RunID          `json:"approval_run_id"`
 	CreatedAt     time.Time       `json:"created_at"`

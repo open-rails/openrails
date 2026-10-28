@@ -641,6 +641,30 @@
     ],
     "OR-J15-S17": [
       "TestProviderTrailing/OR-J15-S17/stripe-link-before-the-first-pull-lands-at-once"
+    ],
+    "OR-J38-S20": [
+      "TestPSPReconcile/OR-J38-S20/manual-reconcile-proposes-and-writes-nothing"
+    ],
+    "OR-J38-S21": [
+      "TestPSPReconcile/OR-J38-S21/legacy-book-then-pull-provider-wins"
+    ],
+    "OR-J38-S22": [
+      "TestPSPReconcile/OR-J38-S22/pull-then-legacy-book-is-skipped"
+    ],
+    "OR-J38-S23": [
+      "TestPSPReconcile/OR-J38-S23/legacy-row-landed-between-pull-and-apply-is-corrected-at-apply"
+    ],
+    "OR-J38-S24": [
+      "TestPSPReconcile/OR-J38-S24/reconcile-skips-rows-moved-since-the-pull"
+    ],
+    "OR-J38-S25": [
+      "TestPSPReconcile/OR-J38-S25/product-change-waits-for-a-person"
+    ],
+    "OR-J38-S26": [
+      "TestPSPReconcile/OR-J38-S26/reconcile-refuses-an-implausible-roster"
+    ],
+    "OR-J38-S27": [
+      "TestPSPReconcile/OR-J38-S27/proposal-routes-admit-a-person"
     ]
   },
   "suites": {

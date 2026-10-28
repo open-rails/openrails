@@ -223,6 +223,17 @@ Steps 6–8 in depth:
 [Cutover: booting against production credentials](operations.md#cutover-booting-against-production-credentials)
 and [Materialized backlog under mode=limited](operations.md#materialized-backlog-under-modelimited).
 
+### Provider facts outrank the book
+
+A book's subscriptions are the host's (`facts_authority` `host`). Re-sending
+the book keeps converging them, so incremental legacy runs work before a
+cutover. Once a PSP import reads a row, a person approves a proposal on it,
+or a webhook converges it, the row is the provider's: a later book skips it
+(`skipped`, reason `provider_authority`) and writes nothing for it, neither
+state, schedule, mandate nor charges. A PSP import corrects the host's rows
+with the provider's price, schedule terms and start ([PSP
+import](psp-import.md#provider-facts-outrank-a-hosts-book)).
+
 ### Gotchas
 
 - **Stale `past_due` is canceled, never charged.** Anything past the

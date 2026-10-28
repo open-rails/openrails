@@ -16,8 +16,10 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// Link stores the merchant's manual links and price picks and links every
-// staged record not yet imported again by the import's rules.
+// Link stores the merchant's manual links and price picks, then relinks the
+// import in the background: its job links every staged record not yet
+// imported by the import's rules, marks the ones OpenRails holds held and
+// proposes again. The import is pulling until it has.
 func (im *Importer) Link(ctx context.Context, id billing.PSPImportID, p billing.LinkPSPImportParams) (*billing.PSPImport, error) {
 	if len(p.Links) > billing.MaxBatchItems {
 		return nil, apperr.Invalidf("links holds at most %d items", billing.MaxBatchItems).WithParam("links")
@@ -29,16 +31,35 @@ func (im *Importer) Link(ctx context.Context, id billing.PSPImportID, p billing.
 	if err != nil {
 		return nil, err
 	}
-	if busy(row.Status) {
-		return nil, apperr.Conflictf("the import is %s; link it when its job finishes", row.Status)
+	if row.Status != string(billing.PSPImportPulled) && row.Status != string(billing.PSPImportApplied) {
+		return nil, apperr.Conflictf("the import is %s; link it once it is pulled", row.Status)
 	}
 	if err := im.pickPrices(ctx, row, p.Prices); err != nil {
 		return nil, err
 	}
-	if err := im.link(ctx, row, p.Links); err != nil {
+	if err := im.setManualLinks(ctx, row, p.Links); err != nil {
 		return nil, err
 	}
-	return im.view(ctx, row)
+	var out gen.BillingPspImport
+	err = im.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := im.DB.NewWithPgxTx(tx)
+		locked, err := d.Gen(ctx).LockPSPImport(ctx, gen.LockPSPImportParams{MerchantID: row.MerchantID, ID: row.ID})
+		if err != nil {
+			return err
+		}
+		if locked.Status != row.Status {
+			return apperr.Conflictf("the import is %s; link it once it is pulled", locked.Status)
+		}
+		if out, err = d.Gen(ctx).SetPSPImportStatus(ctx, gen.SetPSPImportStatusParams{MerchantID: row.MerchantID, ID: row.ID, Status: string(billing.PSPImportPulling)}); err != nil {
+			return inFlight(err)
+		}
+		_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: row.MerchantID, ImportID: row.ID, Step: StepPull}, nil)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return im.view(ctx, out)
 }
 
 // pickPrices stores the provider prices picked by hand for subscriptions
@@ -121,8 +142,8 @@ type linker struct {
 	dir    map[string][]uuid.UUID
 }
 
-func (im *Importer) link(ctx context.Context, row gen.BillingPspImport, links []billing.PSPImportLink) error {
-	mid := billing.MerchantID(row.MerchantID)
+// setManualLinks stores the records a person linked by hand.
+func (im *Importer) setManualLinks(ctx context.Context, row gen.BillingPspImport, links []billing.PSPImportLink) error {
 	if len(links) > 0 {
 		p := gen.SetPSPImportRecordManualLinksParams{MerchantID: row.MerchantID, ImportID: row.ID}
 		for i, l := range links {
@@ -143,6 +164,13 @@ func (im *Importer) link(ctx context.Context, row gen.BillingPspImport, links []
 			return apperr.New(404, billing.CodeResourceNotFound, "a linked record is not one of the import's").WithParam("links")
 		}
 	}
+	return nil
+}
+
+// link links every staged record not yet imported by the import's rules and
+// manual links, then marks the ones OpenRails holds held.
+func (im *Importer) link(ctx context.Context, row gen.BillingPspImport) error {
+	mid := billing.MerchantID(row.MerchantID)
 	var declared []billing.PSPImportRule
 	if err := json.Unmarshal(row.Rules, &declared); err != nil {
 		return err
@@ -208,7 +236,7 @@ func (im *Importer) link(ctx context.Context, row gen.BillingPspImport, links []
 	if err := im.writeLinks(ctx, row, adopted); err != nil {
 		return err
 	}
-	return l.pass(ctx, row, billing.PSPImportTransaction, func(r gen.BillingPspImportRecord) ([]candidate, string) {
+	if err := l.pass(ctx, row, billing.PSPImportTransaction, func(r gen.BillingPspImportRecord) ([]candidate, string) {
 		sub, vault := "subscription:"+deref(r.SubscriptionRef), "customer:"+deref(r.CustomerRef)
 		for _, parent := range []string{sub, vault} {
 			if conflicted[parent] {
@@ -223,7 +251,11 @@ func (im *Importer) link(ctx context.Context, row gen.BillingPspImport, links []
 			out = append(out, candidate{c, vault})
 		}
 		return out, ""
-	}, func(gen.BillingPspImportRecord, linkUpdate) {})
+	}, func(gen.BillingPspImportRecord, linkUpdate) {}); err != nil {
+		return err
+	}
+	_, err = im.classify(ctx, row)
+	return err
 }
 
 // pass links one kind of record, page by page.

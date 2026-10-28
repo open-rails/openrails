@@ -44,7 +44,7 @@ var merchantRoutes = []Route{
 	// by the merchant's rules and mappings, and land the linked ones through
 	// the billing import.
 	{Method: POST, Path: "/v1/merchant/psp-imports", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "CreatePSPImport",
-		Request: billing.CreatePSPImportParams{}, Responses: []Reply{{202, billing.PSPImport{}}}, Errors: codes("invalid_param", "psp_not_found", "service_unavailable"), Handler: h(handlers.CreatePSPImport)},
+		Request: billing.CreatePSPImportParams{}, Responses: []Reply{{202, billing.PSPImport{}}}, Errors: codes("invalid_param", "psp_import_in_progress", "psp_not_found", "service_unavailable"), Handler: h(handlers.CreatePSPImport)},
 	{Method: GET, Path: "/v1/merchant/psp-imports", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListPSPImports",
 		Query: params(queryOf(handlers.PSPImportQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.PSPImport]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "psp_not_found", "service_unavailable"), Handler: h(handlers.ListPSPImports)},
 	{Method: GET, Path: "/v1/merchant/psp-imports/{id}", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "GetPSPImport",
@@ -56,9 +56,9 @@ var merchantRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/psp-imports/{id}/records", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListPSPImportRecords",
 		Query: params(queryOf(handlers.PSPImportRecordQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.PSPImportRecord]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "resource_not_found", "service_unavailable"), Handler: h(handlers.ListPSPImportRecords)},
 	{Method: POST, Path: "/v1/merchant/psp-imports/{id}/link", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "LinkPSPImport",
-		Request: billing.LinkPSPImportParams{}, Responses: []Reply{{200, billing.PSPImport{}}}, Errors: codes("invalid_param", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.LinkPSPImport)},
-	{Method: POST, Path: "/v1/merchant/psp-imports/{id}/apply", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "ApplyPSPImport",
-		Responses: []Reply{{202, billing.PSPImport{}}}, Errors: codes("invalid_param", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ApplyPSPImport)},
+		Request: billing.LinkPSPImportParams{}, Responses: []Reply{{202, billing.PSPImport{}}}, Errors: codes("invalid_param", "psp_import_in_progress", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.LinkPSPImport)},
+	{Method: POST, Path: "/v1/merchant/psp-imports/{id}/apply", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "ApplyPSPImport", Person: true,
+		Responses: []Reply{{202, billing.PSPImport{}}}, Errors: codes("invalid_param", "person_required", "psp_import_in_progress", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ApplyPSPImport)},
 	{Method: POST, Path: "/v1/merchant/psp-import-mappings", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "SetPSPImportMappings",
 		Request: billing.SetPSPImportMappingsParams{}, Responses: []Reply{{200, billing.PSPImportMappingsResult{}}}, Errors: codes("invalid_param", "service_unavailable"), Handler: h(handlers.SetPSPImportMappings)},
 	// What each PSP's own catalog says, as last observed: the import's plans

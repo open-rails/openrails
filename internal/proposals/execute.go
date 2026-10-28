@@ -2,6 +2,7 @@ package proposals
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -110,6 +111,12 @@ func (x *execution) apply(ctx context.Context) (map[string]any, error) {
 			break
 		}
 		return x.collectRenewal(ctx, a.CollectRenewal.SubscriptionID)
+
+	case billing.ChangeCorrectSubscription:
+		if a.Correct == nil {
+			break
+		}
+		return x.correct(ctx, a.Correct)
 	}
 	return nil, fmt.Errorf("a %s change carries nothing to execute", c.Kind)
 }
@@ -259,6 +266,58 @@ func (x *execution) collectRenewal(ctx context.Context, subID uuid.UUID) (map[st
 			return nil, superseded{"subscription_moved: the renewal is no longer skipped"}
 		}
 		return map[string]any{"subscription_id": billing.SubscriptionID(subID).String(), "collection": "queued"}, nil
+	})
+}
+
+// correct adopts the provider's facts on the held subscription: its mapped
+// price (a move to another product ends the old one's grace), its start date
+// and its recurring record as the accepted schedule.
+func (x *execution) correct(ctx context.Context, c *reconcile.CorrectSubscriptionAction) (map[string]any, error) {
+	return x.capture(ctx, c.SubscriptionID, func() (map[string]any, error) {
+		repo := subscriptions.NewSubscriptionRepo(x.d)
+		sub, err := repo.GetByIDForUpdate(ctx, c.SubscriptionID)
+		if err != nil {
+			return nil, err
+		}
+		out := map[string]any{"subscription_id": billing.SubscriptionID(sub.ID).String()}
+		if c.PriceID != nil && *c.PriceID != sub.PriceID {
+			row, err := x.q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: x.mid, ID: *c.PriceID})
+			if err != nil {
+				return nil, err
+			}
+			price, err := models.PriceFromGen(row)
+			if err != nil {
+				return nil, err
+			}
+			if err := subscriptions.AdoptProviderPrice(ctx, x.d, sub, price, x.now, x.clock()); err != nil {
+				return nil, err
+			}
+			out["price_id"] = row.PublicID
+		}
+		if c.StartedAt != nil {
+			if err := x.q.CorrectSubscriptionStart(ctx, gen.CorrectSubscriptionStartParams{MerchantID: x.mid, ID: sub.ID, StartedAt: c.StartedAt.UTC(), Now: x.now}); err != nil {
+				return nil, err
+			}
+			out["started_at"] = c.StartedAt.UTC().Format(time.RFC3339)
+		}
+		if c.Schedule != nil {
+			if sub, err = repo.GetByIDForUpdate(ctx, sub.ID); err != nil {
+				return nil, err
+			}
+			price, err := x.q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: x.mid, ID: sub.PriceID})
+			if err != nil {
+				return nil, err
+			}
+			source, err := reconcile.AdoptProviderSchedule(ctx, x.d, sub, price, *c.Schedule, x.now)
+			if errors.Is(err, reconcile.ErrScheduleTerms) {
+				return nil, superseded{"schedule_moved: " + err.Error()}
+			}
+			if err != nil {
+				return nil, err
+			}
+			out["schedule"] = source
+		}
+		return out, nil
 	})
 }
 

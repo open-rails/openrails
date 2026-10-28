@@ -7,11 +7,13 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// CreatePSPImport starts importing a PSP's subscribers: OpenRails observes
-// its catalog, pulls its customers, saved cards, live subscriptions and
-// transaction history (reads only) and links each to a customer by the
-// import's rules. The pull runs in the background; GetPSPImport reports it.
-// ListProviderCatalog with Import then lists the plans to map.
+// CreatePSPImport pulls a PSP again: OpenRails observes its catalog, pulls
+// its customers, saved cards, live subscriptions and transaction history
+// (reads only), links what it does not hold to customers by the import's
+// rules, and proposes every difference in what it holds (ListProposals with
+// Pull). One import per PSP pulls or applies at a time. The pull runs in the
+// background; GetPSPImport reports it. ListProviderCatalog with Import then
+// lists the plans to map.
 func (c *Client) CreatePSPImport(ctx context.Context, params billing.CreatePSPImportParams, requestOptions ...RequestOption) (*billing.PSPImport, error) {
 	if params.PSP.IsZero() {
 		return nil, invalidErr("psp is required")
@@ -104,9 +106,11 @@ func (c *Client) ListPSPImportRecords(ctx context.Context, id billing.PSPImportI
 	return &out, nil
 }
 
-// LinkPSPImport stores manual links and price picks and links every staged
-// record not yet imported again by the import's rules and the merchant's
-// mappings.
+// LinkPSPImport stores manual links and price picks, then relinks the import
+// in the background: every staged record not yet imported is linked again by
+// the import's rules and the merchant's mappings, and the ones OpenRails
+// holds are marked held. The import is pulling until it has; GetPSPImport
+// reports it.
 func (c *Client) LinkPSPImport(ctx context.Context, id billing.PSPImportID, params billing.LinkPSPImportParams, requestOptions ...RequestOption) (*billing.PSPImport, error) {
 	path, err := requireTypedID("psp_import_id", id)
 	if err != nil {
@@ -120,7 +124,9 @@ func (c *Client) LinkPSPImport(ctx context.Context, id billing.PSPImportID, para
 }
 
 // ApplyPSPImport lands the import's linked records as customers, payment
-// methods, subscriptions and payments. It runs in the background. A
+// methods, subscriptions and payments, then approves its corrections (the
+// proposals that keep or extend access) in the caller's name. Only a person
+// signed in, or the in-process host, applies. It runs in the background. A
 // subscription lands on the provider price mapping its plan; one whose plan
 // is unmapped stays blocked until it is mapped (CreateProviderPrice), linked
 // and applied again.

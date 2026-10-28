@@ -86,6 +86,25 @@ const (
 	DeclaredBlocked        = "blocked"
 )
 
+// FactsAuthority is whose facts a book's subscriptions keep
+// (subscriptions.facts_authority).
+type FactsAuthority string
+
+const (
+	// HostFacts: a host's legacy book. It converges its own rows and skips
+	// the provider's.
+	HostFacts FactsAuthority = "host"
+	// ProviderFacts: the provider's records (a PSP import). It lands new rows
+	// only; a held row's differences are proposals.
+	ProviderFacts FactsAuthority = "provider"
+)
+
+// Reasons a book skips a row it found held.
+const (
+	SkippedProviderAuthority = "provider_authority"
+	SkippedHeld              = "held"
+)
+
 // declaredImportLookback effectively unbounds the payment backfill: a legacy
 // book's charges are all in recoverable scope by declaration.
 const declaredImportLookback = 200 * 365 * 24 * time.Hour
@@ -136,7 +155,11 @@ func ImportDeclaredSubscriptions(
 	coverage DeclaredCoverage,
 	asOf time.Time,
 	history *DeclaredHistory,
+	authority FactsAuthority,
 ) (map[string]DeclaredOutcome, error) {
+	if authority != HostFacts && authority != ProviderFacts {
+		return nil, fmt.Errorf("declared import: unknown facts authority %q", authority)
+	}
 	if history != nil {
 		ctx = context.WithValue(ctx, declaredHistoryKey{}, history)
 	}
@@ -301,6 +324,15 @@ func ImportDeclaredSubscriptions(
 
 		var subID uuid.UUID
 		outcome := DeclaredAlreadyPresent
+		// A held row is the provider's diff to correct, and a provider row
+		// no host book rewrites: either is skipped untouched.
+		if skip := heldSkip(exists, authority, existing.FactsAuthority); skip != "" {
+			out[f.SourceID] = DeclaredOutcome{Code: DeclaredAlreadyPresent, Reason: skip}
+			if history != nil {
+				history.skip(f.RailSubscriptionID, skip)
+			}
+			continue
+		}
 		if exists {
 			if existing.CustomerID != f.Customer {
 				// The rail key belongs to someone else locally — never silently
@@ -331,9 +363,9 @@ func ImportDeclaredSubscriptions(
 				var err error
 				txq := db.NewWithPgxTx(tx).Gen(ctx)
 				if f.CancelKind != DeclaredCancelNone {
-					subID, err = insertDeclaredCanceled(ctx, txq, merchantID, f, price, periodStart, periodEnd)
+					subID, err = insertDeclaredCanceled(ctx, txq, merchantID, f, price, periodStart, periodEnd, authority)
 				} else {
-					subID, err = materializeDeclaredUnknown(ctx, txq, merchantID, f, periodStart, periodEnd)
+					subID, err = materializeDeclaredUnknown(ctx, txq, merchantID, f, periodStart, periodEnd, authority)
 				}
 				return err
 			})
@@ -474,6 +506,7 @@ func insertDeclaredCanceled(
 	f *DeclaredSubscriptionFact,
 	price gen.BillingPrice,
 	periodStart, periodEnd *time.Time,
+	authority FactsAuthority,
 ) (uuid.UUID, error) {
 
 	var cancelType string
@@ -519,6 +552,7 @@ func insertDeclaredCanceled(
 		CreatedAt:             f.StartedAt.UTC(),
 		UpdatedAt:             canceledAt,
 		PspID:                 f.PspID,
+		FactsAuthority:        string(authority),
 	}); err != nil {
 		// A race with a concurrent writer trips the (merchant, rail, sub-id)
 		// unique index — a loud blocked row, never silent corruption.
@@ -536,6 +570,7 @@ func materializeDeclaredUnknown(
 	merchantID uuid.UUID,
 	f *DeclaredSubscriptionFact,
 	periodStart, periodEnd *time.Time,
+	authority FactsAuthority,
 ) (uuid.UUID, error) {
 	started := f.StartedAt.UTC()
 	rows, err := q.ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
@@ -551,6 +586,7 @@ func materializeDeclaredUnknown(
 		PspID:              f.PspID,
 		PriceID:            f.PriceID,
 		Rails:              []string{f.Rail},
+		FactsAuthority:     string(authority),
 	})
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("materialize subscription: %w", err)
@@ -792,6 +828,29 @@ func RecordDeclaredHistory(ctx context.Context, database *db.DB, h *DeclaredHist
 		}
 	}
 	return nil
+}
+
+// heldSkip is why a book skips an existing row, "" when it may converge it.
+func heldSkip(exists bool, book FactsAuthority, row string) string {
+	switch {
+	case !exists:
+		return ""
+	case book == ProviderFacts:
+		return SkippedHeld
+	case row == string(ProviderFacts):
+		return SkippedProviderAuthority
+	}
+	return ""
+}
+
+// skip answers the receipts of a skipped subscription as skipped too.
+func (h *DeclaredHistory) skip(subscription, reason string) {
+	prefix := subscription + "\x1f"
+	for key := range h.outcomes {
+		if strings.HasPrefix(key, prefix) {
+			h.outcomes[key] = DeclaredOutcome{Code: DeclaredAlreadyPresent, Reason: reason}
+		}
+	}
 }
 
 // Track requests an outcome for an NMI receipt even when its subscription is blocked.

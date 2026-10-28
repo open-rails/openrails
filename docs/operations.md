@@ -594,7 +594,7 @@ to, effects, the basis it was computed against and the provider evidence). A
 person approves or dismisses it:
 
 ```
-openrails proposals list    --merchant=<slug> [--psp=KEY] [--kind=K] [--source=pull|verification]
+openrails proposals list    --merchant=<slug> [--psp=KEY] [--pull=pim_…] [--kind=K] [--source=pull|verification]
 openrails proposals show    --merchant=<slug> <fnd_id>
 openrails proposals approve --merchant=<slug> <fnd_id>… [--notes=N]
 openrails proposals approve --merchant=<slug> --psp=KEY --kind=record_charge --expect=N [--notes=N]
@@ -626,6 +626,13 @@ openrails proposals runs    --merchant=<slug>
   and to a dismissed one, which still holds recovery; the dismissal is kept
   in the finding's evidence. A foreign schedule no longer holds provider
   recovery, and a second `foreign` answers `already_resolved`.
+
+Over HTTP the same calls are `ListProposals`, `ApproveProposals` and
+`DismissProposals` (`/v1/merchant/proposals`); approving and dismissing take a
+person signed in or the in-process host, never an API key
+(`person_required`). Applying a PSP import approves its corrections, the
+proposals that keep or extend access, under one approval run in the name of
+the person who applied it ([PSP import](psp-import.md#reconcile)).
 
 `ResolveFinding` refuses a `pull.*` finding (`finding_requires_merchant_config`).
 

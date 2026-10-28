@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/progress"
@@ -24,10 +25,12 @@ import (
 // applyCustomers is how many customers one billing import book carries.
 const applyCustomers = 50
 
-// Apply lands the import's linked records through billingimport, a book of
-// whole customers at a time at the pull's horizon. A book the import refuses
-// is retried one customer at a time, so one customer's refusal blocks only
-// its own records.
+// Apply lands the import's linked records through billingimport as the
+// provider's book, a book of whole customers at a time at the pull's
+// horizon, then approves the import's corrections in the name of the person
+// who asked and hands the held rows it read to the provider's evidence. A
+// book the import refuses is retried one customer at a time, so one
+// customer's refusal blocks only its own records.
 func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID) error {
 	row, err := im.row(ctx, id)
 	if err != nil || row.Status != string(billing.PSPImportApplying) {
@@ -39,6 +42,22 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID) error {
 	}
 	if !found {
 		return Permanent(errors.New("the import's PSP is no longer declared"))
+	}
+	// Records OpenRails came to hold after the pull are held now. A host
+	// book's row among them is diffed at its current version; a provider
+	// row is left to its newer evidence.
+	newly, err := im.classify(ctx, row)
+	if err != nil {
+		return err
+	}
+	customers, err := im.basisNow(ctx, row, newly)
+	if err != nil {
+		return err
+	}
+	if len(customers) > 0 {
+		if err := im.propose(ctx, row, scope, customers); err != nil {
+			return err
+		}
 	}
 	prices, pspPrices, err := im.providerPrices(ctx, row)
 	if err != nil {
@@ -84,6 +103,9 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID) error {
 			return err
 		}
 		after = customers[len(customers)-1]
+	}
+	if err := im.approveCorrections(ctx, row); err != nil {
+		return err
 	}
 	return im.DB.Gen(ctx).SetPSPImportApplied(ctx, gen.SetPSPImportAppliedParams{MerchantID: row.MerchantID, ID: row.ID, AppliedAt: im.now()})
 }
@@ -266,7 +288,8 @@ func (im *Importer) importBook(ctx context.Context, row gen.BillingPspImport, bo
 	if len(book.Customers) == 0 {
 		return billing.BillingImportResult{}, nil
 	}
-	return billingimport.Import(ctx, billingimport.Options{DB: im.DB, MerchantID: billing.MerchantID(row.MerchantID), Book: book, Clock: im.Clock})
+	return billingimport.Import(ctx, billingimport.Options{DB: im.DB, MerchantID: billing.MerchantID(row.MerchantID), Book: book, Clock: im.Clock,
+		Authority: reconcile.ProviderFacts})
 }
 
 // record maps subscription and receipt results onto their staged records.
@@ -293,6 +316,13 @@ func (d *declaration) record(res billing.BillingImportResult) {
 		}
 	}
 	for src, id := range d.subscriptions {
+		if res.Reasons[src] == reconcile.SkippedHeld {
+			d.outcomes[id] = outcome{billing.PSPImportBlocked, "OpenRails came to hold it after the pull; reconcile the PSP again"}
+			for _, t := range d.txns[src] {
+				d.outcomes[t] = outcome{billing.PSPImportBlocked, "its subscription is held; reconcile the PSP again"}
+			}
+			continue
+		}
 		if landed[src] {
 			if _, decided := d.outcomes[id]; !decided {
 				d.outcomes[id] = outcome{state: billing.PSPImportImported}
@@ -347,7 +377,9 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 				}
 				d.customers = append(d.customers, r.ID)
 			case billing.PSPImportSubscription:
-				subs[r.Ref] = r
+				if r.State != string(billing.PSPImportHeld) {
+					subs[r.Ref] = r
+				}
 			}
 		}
 		rebills := rebillsOf(g.records)

@@ -45,6 +45,7 @@ type ProposalsOptions struct {
 type ProposalSet struct {
 	IDs    []string
 	PSP    string // a PSP key
+	Pull   string // a PSP import id (pim_…)
 	Kind   string
 	Source string
 	Expect int
@@ -218,6 +219,13 @@ func setIDs(ctx context.Context, database *db.DB, x *proposals.Executor, set Pro
 // whether more remain.
 func selectProposals(ctx context.Context, database *db.DB, x *proposals.Executor, set ProposalSet, limit int) ([]billing.Finding, bool, error) {
 	params := billing.ProposalListParams{Kind: billing.ChangeKind(set.Kind), Source: billing.ProposalSource(set.Source)}
+	if set.Pull != "" {
+		pull, err := billing.ParsePSPImportID(set.Pull)
+		if err != nil {
+			return nil, false, fmt.Errorf("--pull: %w", err)
+		}
+		params.Pull = pull
+	}
 	if set.PSP != "" {
 		psp, err := pspByKey(ctx, database, set.PSP)
 		if err != nil {

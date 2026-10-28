@@ -69,6 +69,11 @@ type Options struct {
 	Book       DeclaredBilling
 	// Clock is the runtime clock the post-import derivation evaluates at.
 	Clock clockwork.Clock
+	// Authority is whose facts the book's subscriptions keep: a host's book
+	// (zero, the HTTP import) skips rows provider evidence owns; only a PSP
+	// import passes reconcile.ProviderFacts, whose book skips every row
+	// OpenRails already holds.
+	Authority reconcile.FactsAuthority
 }
 
 // Import lands a host-declared billing book. Explicitly canceled facts are
@@ -89,6 +94,10 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		return res, err
 	}
 	asOf := opts.Book.AsOf.UTC()
+	authority := opts.Authority
+	if authority == "" {
+		authority = reconcile.HostFacts
+	}
 
 	database := opts.DB
 	if database == nil {
@@ -421,16 +430,26 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		outcomes, err := reconcile.ImportDeclaredSubscriptions(ctx, txdb, lc, deferDelete, merchantID.UUID(), facts, txns, reconcile.DeclaredCoverage{
 			SubscriptionsExhaustive: opts.Book.SubscriptionsExhaustive,
 			ExpectedSubscriptions:   opts.Book.ExpectedSubscriptions,
-		}, asOf, history)
+		}, asOf, history, authority)
 		if err != nil {
 			return err
 		}
-		if err := attributeCharges(ctx, q, merchantID.UUID(), facts, attributed, unverified, timeutil.FirstClock(opts.Clock).Now().UTC()); err != nil {
+		// A skipped row takes nothing from the book: no charges, no mandate.
+		skipped := map[string]bool{}
+		for _, f := range facts {
+			if o := outcomes[f.SourceID]; o.Code == reconcile.DeclaredAlreadyPresent && o.Reason != "" {
+				skipped[f.RailSubscriptionID] = true
+			}
+		}
+		unskipped := func(ts []DeclaredTransaction) []DeclaredTransaction {
+			return slices.DeleteFunc(ts, func(t DeclaredTransaction) bool { return skipped[t.RailSubscriptionID] })
+		}
+		if err := attributeCharges(ctx, q, merchantID.UUID(), facts, unskipped(attributed), unskipped(unverified), timeutil.FirstClock(opts.Clock).Now().UTC()); err != nil {
 			return err
 		}
 		for _, f := range facts {
 			o := outcomes[f.SourceID]
-			if anchor := mandateAnchors[f.SourceID]; anchor != "" && (o.Code == reconcile.DeclaredImported || o.Code == reconcile.DeclaredAlreadyPresent) {
+			if anchor := mandateAnchors[f.SourceID]; anchor != "" && !skipped[f.RailSubscriptionID] && (o.Code == reconcile.DeclaredImported || o.Code == reconcile.DeclaredAlreadyPresent) {
 				if err := importRecurringMandate(ctx, q, merchantID.UUID(), f, anchor, asOf); err != nil {
 					return err
 				}
@@ -442,6 +461,9 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				res.Imported = append(res.Imported, src)
 			case reconcile.DeclaredAlreadyPresent:
 				res.Skipped = append(res.Skipped, src)
+				if o.Reason != "" {
+					res.Reasons[src] = o.Reason
+				}
 			default:
 				res.Blocked = append(res.Blocked, src)
 				res.Reasons[src] = o.Reason
@@ -489,6 +511,9 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			res.Imported = append(res.Imported, t.SourceID)
 		case reconcile.DeclaredAlreadyPresent:
 			res.Skipped = append(res.Skipped, t.SourceID)
+			if o.Reason != "" {
+				res.Reasons[t.SourceID] = o.Reason
+			}
 		default:
 			res.Blocked = append(res.Blocked, t.SourceID)
 			res.Reasons[t.SourceID] = o.Reason

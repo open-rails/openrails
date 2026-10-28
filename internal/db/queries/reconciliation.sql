@@ -46,7 +46,7 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 INSERT INTO billing.reconciliation_findings (
     merchant_id, finding_type, subject_key, severity, status,
     recommended_action, evidence, resolved_at, resolution,
-    first_seen_run, last_seen_run, psp_id, rail, change, source, evidence_digest
+    first_seen_run, last_seen_run, psp_id, rail, change, source, evidence_digest, pull_id
 ) VALUES (
     sqlc.arg(merchant_id), sqlc.arg(finding_type), sqlc.arg(subject_key),
     sqlc.arg(severity), sqlc.arg(status), sqlc.narg(recommended_action),
@@ -56,9 +56,11 @@ INSERT INTO billing.reconciliation_findings (
     sqlc.narg(run_id), sqlc.narg(run_id), sqlc.narg(psp_id)::uuid,
     -- A pull finding carries its PSP's rail (the psps FK checks they agree).
     (SELECT p.rail FROM billing.psps p WHERE p.merchant_id = sqlc.arg(merchant_id) AND p.id = sqlc.narg(psp_id)::uuid),
-    sqlc.narg(change)::jsonb, sqlc.narg(source)::text, sqlc.narg(evidence_digest)::text
+    sqlc.narg(change)::jsonb, sqlc.narg(source)::text, sqlc.narg(evidence_digest)::text, sqlc.narg(pull_id)::uuid
 )
 ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
+    -- The latest import whose pull saw the finding.
+    pull_id = COALESCE(EXCLUDED.pull_id, billing.reconciliation_findings.pull_id),
     severity = EXCLUDED.severity,
     status = CASE
         WHEN billing.reconciliation_findings.status = 'ignored'
@@ -409,6 +411,7 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(psp_id)::uuid IS NULL OR f.psp_id = sqlc.narg(psp_id)::uuid)
   AND (sqlc.narg(kind)::text IS NULL OR f.change->>'kind' = sqlc.narg(kind)::text)
   AND (sqlc.narg(source)::text IS NULL OR f.source = sqlc.narg(source)::text)
+  AND (sqlc.narg(pull_id)::uuid IS NULL OR f.pull_id = sqlc.narg(pull_id)::uuid)
   AND (sqlc.narg(after_rank)::int IS NULL
        OR (CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, f.created_at, f.id)
           > (sqlc.narg(after_rank)::int, sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
@@ -453,6 +456,9 @@ SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subs
        subscriptions.access_duration_hours_snapshot, subscriptions.provider_access_default_snapshot,
        scheduled.price_id AS scheduled_price_id,
        price.currency AS price_currency,
+       COALESCE((SELECT ps.source_reference FROM billing.provider_schedules ps
+                 WHERE ps.merchant_id = subscriptions.merchant_id AND ps.subscription_id = subscriptions.id
+                 ORDER BY ps.accepted_version DESC LIMIT 1), '')::text AS accepted_schedule_source,
        EXISTS (SELECT 1 FROM billing.provider_intents ri
                WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
                  AND ri.intent_type = 'nmi_upgrade'
@@ -465,7 +471,8 @@ LEFT JOIN billing.payment_methods charged ON charged.merchant_id = subscriptions
   AND charged.id = billing.subscription_payment_method_id(subscriptions.merchant_id, subscriptions.customer_id, subscriptions.payment_method_id, subscriptions.price_id, subscriptions.rail, subscriptions.collection_policy)
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscriptions.rail = ANY (sqlc.arg(rails)::text[])
   AND subscriptions.deleted_at IS NULL
-  AND subscriptions.psp_id = sqlc.arg(psp_id)::uuid;
+  AND subscriptions.psp_id = sqlc.arg(psp_id)::uuid
+  AND (sqlc.narg(customer_ids)::uuid[] IS NULL OR subscriptions.customer_id = ANY(sqlc.narg(customer_ids)::uuid[]));
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, currency, status,
@@ -500,7 +507,8 @@ SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, card_brand, ca
         ORDER BY v.effective_at DESC, v.id DESC LIMIT 1), '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS card_version_id
 FROM billing.payment_methods
 WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = ANY (sqlc.arg(rails)::text[])
-  AND psp_id = sqlc.arg(psp_id)::uuid;
+  AND psp_id = sqlc.arg(psp_id)::uuid
+  AND (sqlc.narg(customer_ids)::uuid[] IS NULL OR payment_methods.customer_id = ANY(sqlc.narg(customer_ids)::uuid[]));
 
 -- name: ReconcileListSolanaSubscriptionRefs :many
 SELECT subscription_pda, plan_pda, subscriber_wallet
@@ -511,7 +519,7 @@ WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid
 -- Prices bound to this PSP (price_psp_bindings), archived included:
 -- grandfathered subscriptions still bill them.
 -- name: ReconcileListPricesWithPSPLinks :many
-SELECT id, product_id, amount, currency, access_duration_hours, billing_interval_hours, provider_access_default, archived
+SELECT id, product_id, amount, currency, access_duration_hours, billing_interval_hours, billing_interval_months, provider_access_default, archived
 FROM billing.prices
 WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM billing.price_psp_bindings b WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.price_id = billing.prices.id AND b.merchant_id = billing.prices.merchant_id AND b.psp_id = sqlc.arg(psp_id)::uuid);
 
@@ -533,14 +541,15 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) A
 INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     current_period_starts_at, current_period_ends_at, started_at,
-    access_duration_hours_snapshot, provider_access_default_snapshot, customer_id, psp_id, collection_policy
+    access_duration_hours_snapshot, provider_access_default_snapshot, customer_id, psp_id, collection_policy, facts_authority
 )
 SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::text,
        sqlc.arg(rail), NULLIF(sqlc.arg(rail_subscription_id)::text, ''),
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
-       pr.access_duration_hours, pr.provider_access_default, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider')
+       pr.access_duration_hours, pr.provider_access_default, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider'),
+       COALESCE(NULLIF(sqlc.arg(facts_authority)::text,''),'provider')
 FROM billing.prices pr
 JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.id = sqlc.arg(price_id)
@@ -1072,3 +1081,25 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = 'pull.bill.un
   AND evidence->>'subscription_id' = ANY(sqlc.arg(subscription_ids)::text[])
 ORDER BY subject_key
 LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListPullCorrections :many
+-- The import's open proposals its Apply approves: recorded charges and cards,
+-- renewals and period ends, and corrections that keep access. Corrections go
+-- first: a charge is placed on the schedule a correction accepts.
+SELECT id FROM billing.reconciliation_findings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND pull_id = sqlc.arg(pull_id)::uuid
+  AND status IN ('reconcile_required', 'requires_review') AND (
+    change->>'kind' IN ('record_charge', 'update_card')
+    OR change->>'kind' = 'adopt_subscription' AND change->'to'->>'transition' IN ('renew', 'adopt_period_end')
+    OR change->>'kind' = 'correct_subscription' AND NOT COALESCE((change->'effects'->>'ends_access')::boolean, false))
+ORDER BY change->>'kind' = 'correct_subscription' DESC, created_at, id;
+
+-- name: TakeProviderFacts :execrows
+-- The provider's evidence now owns these subscriptions: a host book skips them.
+UPDATE billing.subscriptions SET facts_authority = 'provider'
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]) AND facts_authority = 'host';
+
+-- name: CorrectSubscriptionStart :exec
+-- A correction adopts the provider's start date.
+UPDATE billing.subscriptions SET started_at = sqlc.arg(started_at)::timestamptz, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;

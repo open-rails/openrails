@@ -62,7 +62,7 @@ func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		if params.SubscriptionID != "" && rec.SubscriptionID != params.SubscriptionID {
 			continue
 		}
-		snap.Subscriptions = append(snap.Subscriptions, normalizeCCBillActiveMember(rec))
+		snap.Subscriptions = append(snap.Subscriptions, CCBillRemoteSubscription(rec))
 	}
 
 	// Transaction-type exports need a window; default to the trailing 30 days
@@ -88,7 +88,7 @@ func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		case ccbill.DataLinkTxnCancellation, ccbill.DataLinkTxnExpire:
 			snap.Subscriptions = append(snap.Subscriptions, normalizeCCBillTermination(row))
 		case ccbill.DataLinkTxnRebill, ccbill.DataLinkTxnRefund, ccbill.DataLinkTxnChargeback:
-			snap.Transactions = append(snap.Transactions, normalizeCCBillTransaction(row))
+			snap.Transactions = append(snap.Transactions, CCBillRemoteTransaction(row))
 		default:
 			// Unknown events remain raw evidence, not evidence of a failed charge.
 			snap.Transactions = append(snap.Transactions, RemoteTransaction{
@@ -103,7 +103,8 @@ func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 	return snap, nil
 }
 
-func normalizeCCBillActiveMember(rec ccbill.CCBillRecord) RemoteSubscription {
+// CCBillRemoteSubscription is one ACTIVEMEMBERS row as a pull reads it.
+func CCBillRemoteSubscription(rec ccbill.CCBillRecord) RemoteSubscription {
 	sub := RemoteSubscription{
 		RailSubscriptionID: rec.SubscriptionID,
 		Status:             SubscriptionStatusActive,
@@ -138,7 +139,8 @@ func normalizeCCBillTermination(row ccbill.DataLinkExportRow) RemoteSubscription
 	}
 }
 
-func normalizeCCBillTransaction(row ccbill.DataLinkExportRow) RemoteTransaction {
+// CCBillRemoteTransaction is one rebill, refund or chargeback export row.
+func CCBillRemoteTransaction(row ccbill.DataLinkExportRow) RemoteTransaction {
 	txn := RemoteTransaction{
 		TransactionID:  row.TransactionID(),
 		SubscriptionID: row.SubscriptionID(),

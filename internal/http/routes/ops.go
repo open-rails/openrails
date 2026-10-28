@@ -26,6 +26,13 @@ var opsRoutes = []Route{
 		Query: params(queryOf(handlers.FindingsQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.Finding]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.AdminListFindings)},
 	{Method: GET, Path: "/v1/merchant/findings/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "GetFinding", Level: LevelRead,
 		Responses: []Reply{{200, billing.Finding{}}}, Errors: codes("invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminGetFinding)},
+	// Proposals: pull.* findings a person approves or dismisses.
+	{Method: GET, Path: "/v1/merchant/proposals", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListProposals", Level: LevelRead,
+		Query: params(queryOf(handlers.ProposalsQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.Finding]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListProposals)},
+	{Method: POST, Path: "/v1/merchant/proposals/approve", Group: MerchantConfig, Auth: AuthMerchant, Name: "ApproveProposals", Level: LevelUpdate, Person: true, IdempotencyKey: true,
+		Request: billing.ApproveProposalsParams{}, Responses: []Reply{{200, billing.ProposalResults{}}}, Errors: codes("idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "person_required", "service_unavailable"), Handler: h(handlers.ApproveProposals)},
+	{Method: POST, Path: "/v1/merchant/proposals/dismiss", Group: MerchantConfig, Auth: AuthMerchant, Name: "DismissProposals", Level: LevelUpdate, Person: true,
+		Request: billing.DismissProposalsParams{}, Responses: []Reply{{200, billing.ProposalResults{}}}, Errors: codes("invalid_param", "person_required", "service_unavailable"), Handler: h(handlers.DismissProposals)},
 	{Method: POST, Path: "/v1/merchant/findings/{id}/resolve", Group: MerchantConfig, Auth: AuthMerchant, Name: "ResolveFinding", Level: LevelUpdate,
 		Request: billing.ResolveFindingParams{}, Responses: []Reply{{200, billing.FindingResolution{}}}, Errors: codes("finding_action_failed", "finding_not_actionable", "finding_requires_merchant_config", "idempotency_key_reused", "invalid_param", "payment_not_found", "payment_not_refundable", "provider_cancel_held", "rebill_terms_committed", "refund_failed", "refund_rail_unavailable", "refund_unsupported", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminResolveFinding)},
 }

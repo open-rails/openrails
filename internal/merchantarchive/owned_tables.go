@@ -80,6 +80,7 @@ var ownedTables = []string{
 	"provider_mutation_logs",
 	"provider_schedules",
 	"psp_customers",
+	"psp_import_basis",
 	"psp_import_mappings",
 	"psp_import_records",
 	"psp_imports",

@@ -52,7 +52,8 @@ SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings f
  WHERE f.merchant_id=sqlc.arg(merchant_id)::uuid AND f.psp_id=sqlc.arg(psp_id)::uuid
    AND f.status IN ('reconcile_required','requires_review','ignored')
    AND f.finding_type IN ('pull.charge.missing','pull.refund.missing','pull.reversal.unlinked',
-     'pull.dispute.chargeback','pull.subscription.missing','pull.subscription.duplicate','pull.subscription.drift')
+     'pull.dispute.chargeback','pull.subscription.missing','pull.subscription.duplicate','pull.subscription.drift',
+     'pull.subscription.facts')
    AND f.resolution IS DISTINCT FROM 'foreign'
    AND NOT COALESCE(f.evidence @> '{"quiet_foreign":true}', false))::boolean;
 

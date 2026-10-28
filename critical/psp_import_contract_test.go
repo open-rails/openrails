@@ -270,12 +270,24 @@ func (iw *importWorld) pull(t *testing.T, params billing.CreatePSPImportParams) 
 	return iw.await(t, imp.ID, billing.PSPImportPulled)
 }
 
+// apply lands the import as the in-process host: only a person or the host
+// applies.
 func (iw *importWorld) apply(t *testing.T, id billing.PSPImportID) map[string]billing.PSPImportRecord {
 	t.Helper()
-	_, err := iw.api.ApplyPSPImport(t.Context(), id)
+	_, err := iw.alpha.ApplyPSPImport(t.Context(), id)
 	require.NoError(t, err)
 	iw.await(t, id, billing.PSPImportApplied)
 	return iw.records(t, id)
+}
+
+// link stores links and picks and waits for the relink.
+func (iw *importWorld) link(t *testing.T, id billing.PSPImportID, params billing.LinkPSPImportParams) error {
+	t.Helper()
+	if _, err := iw.api.LinkPSPImport(t.Context(), id, params); err != nil {
+		return err
+	}
+	iw.await(t, id, billing.PSPImportPulled)
+	return nil
 }
 
 // records are the import's staged records by provider ref.
@@ -412,7 +424,7 @@ func TestPSPImport(t *testing.T) {
 		since := start.Add(-24 * time.Hour)
 		imp := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since})
 
-		plans := iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP, Import: &imp.ID})
+		plans := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}, Import: &imp.ID})
 		require.Len(t, plans, 2)
 		for ref, amount := range map[string]string{"gold": "20.00", "silver": "10.00"} {
 			p := plans["price:"+ref]
@@ -446,8 +458,7 @@ func TestPSPImport(t *testing.T) {
 		require.False(t, price.Archived)
 		require.Equal(t, reads, iw.nmi.Reads()["v5:plans/{id}"], "mapping reads the observed plan, not NMI")
 
-		_, err = iw.alphaRemote.LinkPSPImport(t.Context(), imp.ID, billing.LinkPSPImportParams{})
-		require.NoError(t, err)
+		require.NoError(t, iw.link(t, imp.ID, billing.LinkPSPImportParams{}))
 		recs = iw.apply(t, imp.ID)
 		require.Equal(t, billing.PSPImportImported, recs[gold].State, "%v", recs[gold].Reason)
 		require.Equal(t, billing.PSPImportBlocked, recs[silver].State)
@@ -468,7 +479,7 @@ func TestPSPImport(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, reads+1, iw.nmi.Reads()["v5:plans/{id}"], "a plan never observed is read once by id")
 		require.Equal(t, 1, *bronze.BillingIntervalMonths)
-		mapped := iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP, Mapped: new(true)})
+		mapped := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}, Mapped: new(true)})
 		require.Len(t, mapped, 2)
 		require.Equal(t, bronze.ID, *mapped["price:bronze"].Price)
 		require.Equal(t, "read", mapped["price:bronze"].ObservedVia)
@@ -490,7 +501,7 @@ func TestPSPImport(t *testing.T) {
 		iw.stripe.AddSubscription(customer, "pm_alice", "price_basic", 999, start, start.AddDate(0, 1, 0))
 		since := start.Add(-24 * time.Hour)
 		imp := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "stripe"}, HistorySince: &since})
-		all := iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP})
+		all := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}})
 		require.Len(t, all, 6)
 		require.True(t, all["price:price_old"].Retired)
 		require.False(t, all["price:price_old"].Active)
@@ -596,7 +607,7 @@ func TestPSPImport(t *testing.T) {
 		iw.ccbill.AddRebill(ccbillmock.Rebill{SubscriptionID: undated, At: rebilled, Amount: "5.00"})
 		since := rebilled.Add(-24 * time.Hour)
 		imp := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "ccbill"}, HistorySince: &since})
-		require.Empty(t, iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP}), "CCBill has no catalog to observe")
+		require.Empty(t, iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}}), "CCBill has no catalog to observe")
 
 		recs := iw.apply(t, imp.ID)
 		require.Equal(t, billing.PSPImportImported, recs[m23].State, "%v", recs[m23].Reason)
@@ -617,8 +628,7 @@ func TestPSPImport(t *testing.T) {
 		require.Empty(t, iw.subscriptions(t, customerOf(dave)))
 
 		pick := func(id billing.PSPImportID, record billing.PSPImportRecordID, price *billing.PriceID) error {
-			_, err := iw.alphaRemote.LinkPSPImport(t.Context(), id, billing.LinkPSPImportParams{Prices: []billing.PSPImportPriceLink{{Record: record, Price: price}}})
-			return err
+			return iw.link(t, id, billing.LinkPSPImportParams{Prices: []billing.PSPImportPriceLink{{Record: record, Price: price}}})
 		}
 		refused := func(err error) {
 			t.Helper()
@@ -667,7 +677,7 @@ func TestPSPImport(t *testing.T) {
 		since := start.Add(-24 * time.Hour)
 		imp := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since})
 
-		named := iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP, Import: &imp.ID})
+		named := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}, Import: &imp.ID})
 		require.Len(t, named, 1)
 		gone := named["price:legacy"]
 		require.NotNil(t, gone.DeletedAt, "a by-id 404 records the plan gone")
@@ -693,16 +703,16 @@ func TestPSPImport(t *testing.T) {
 		iw.stripe.AddSubscription(customer, "pm_bob", "price_inline", 1500, start, start.AddDate(0, 1, 0))
 		stripeImp := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "stripe"}, HistorySince: &since})
 		require.Equal(t, 1, iw.stripe.Reads("/v1/prices/price_inline"), "an inline price is never listed: one by-id read observes it")
-		inline := iw.catalog(t, billing.ProviderCatalogListParams{PSP: stripeImp.PSP, Import: &stripeImp.ID})
+		inline := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &stripeImp.PSP}, Import: &stripeImp.ID})
 		require.Equal(t, "15.00", *inline["price:price_inline"].Terms.StatedAmount)
 		require.Equal(t, "USD", *inline["price:price_inline"].Terms.Currency)
 		require.Equal(t, 1, *inline["price:price_inline"].Subscriptions)
 
-		first := iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP})
+		first := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}})
 		require.Len(t, first, 2)
 		iw.clock.Advance(time.Hour)
 		again := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since})
-		second := iw.catalog(t, billing.ProviderCatalogListParams{PSP: again.PSP})
+		second := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &again.PSP}})
 		require.Len(t, second, 2, "a second pull adds no rows")
 		for key, o := range second {
 			require.True(t, o.ObservedAt.After(first[key].ObservedAt), "%s observed again", key)
@@ -717,12 +727,12 @@ func TestPSPImport(t *testing.T) {
 			slices.Sort(out)
 			return out
 		}
-		require.Equal(t, []string{"price:legacy"}, keys(iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP, Mapped: new(true)})))
-		require.Equal(t, []string{"price:current"}, keys(iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP, Mapped: new(false)})))
-		require.Equal(t, []string{"price:legacy"}, keys(iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP, Retired: new(true)})))
-		require.Equal(t, []string{"price:current"}, keys(iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP, Retired: new(false)})))
-		require.Equal(t, []string{"price:price_inline", "product:prod_inline"}, keys(iw.catalog(t, billing.ProviderCatalogListParams{PSP: iw.psp(t, "stripe")})))
-		_, err = iw.alphaRemote.ListProviderCatalog(t.Context(), billing.ProviderCatalogListParams{PSP: imp.PSP, Import: &stripeImp.ID})
+		require.Equal(t, []string{"price:legacy"}, keys(iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}, Mapped: new(true)})))
+		require.Equal(t, []string{"price:current"}, keys(iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}, Mapped: new(false)})))
+		require.Equal(t, []string{"price:legacy"}, keys(iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}, Retired: new(true)})))
+		require.Equal(t, []string{"price:current"}, keys(iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}, Retired: new(false)})))
+		require.Equal(t, []string{"price:price_inline", "product:prod_inline"}, keys(iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{Key: "stripe"}})))
+		_, err = iw.alphaRemote.ListProviderCatalog(t.Context(), billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}, Import: &stripeImp.ID})
 		status, code := refusalCode(t, err)
 		require.Equal(t, http.StatusBadRequest, status, "an import lists only its own PSP's plans")
 		require.Equal(t, billing.CodeInvalidParam, code)
@@ -745,7 +755,7 @@ func TestPSPImport(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, billing.SyncStatusUnknown, unknown.Provider.SyncStatus)
 		require.False(t, unknown.Provider.Retired)
-		require.Nil(t, iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP})["price:current"].DeletedAt)
+		require.Nil(t, iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}})["price:current"].DeletedAt)
 		for _, plan := range []string{"current", "spare"} {
 			_, err = iw.pool.Exec(t.Context(), "DELETE FROM "+pgx.Identifier{iw.schema, "provider_catalog_objects"}.Sanitize()+" WHERE ref = $1", plan)
 			require.NoError(t, err)
@@ -758,11 +768,11 @@ func TestPSPImport(t *testing.T) {
 		stored, err := iw.alpha.GetPrice(t.Context(), mapped["spare"].ID, billing.GetPriceParams{})
 		require.NoError(t, err)
 		require.True(t, stored.Provider.Retired, "verify records the vanished plan from the price's own terms")
-		require.Equal(t, "read", iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP})["price:spare"].ObservedVia)
-		require.NotContains(t, iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP}), "price:current", "not yet read again: nothing says it is gone")
+		require.Equal(t, "read", iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}})["price:spare"].ObservedVia)
+		require.NotContains(t, iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}}), "price:current", "not yet read again: nothing says it is gone")
 		iw.clock.Advance(time.Hour)
 		iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since})
-		retired := iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP, Retired: new(true)})
+		retired := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}, Retired: new(true)})
 		for plan, amount := range map[string]string{"current": "12.00", "spare": "8.00"} {
 			require.NotNil(t, retired["price:"+plan].DeletedAt, plan)
 			require.Equal(t, amount, *retired["price:"+plan].Terms.StatedAmount, plan)
@@ -817,7 +827,7 @@ func TestPSPImport(t *testing.T) {
 		})
 		since := start.Add(-24 * time.Hour)
 		imp := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "stripe"}, HistorySince: &since})
-		all := iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP})
+		all := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}})
 		require.Nil(t, all["price:price_xyz"].Terms.StatedAmount, "an unsupported currency leaves no amount")
 		require.Equal(t, "XYZ", *all["price:price_xyz"].Terms.Currency)
 		require.Nil(t, all["price:price_custom"].Terms.StatedAmount)
@@ -855,7 +865,7 @@ func TestPSPImport(t *testing.T) {
 		require.True(t, verify("a").Provider.Retired, "a price read by id refreshes its product")
 		iw.stripe.DeleteProduct("prod_c")
 		require.True(t, verify("c").Provider.Retired)
-		products := iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP, Kind: billing.ProviderCatalogProduct})
+		products := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}, Kind: billing.ProviderCatalogProduct})
 		require.False(t, products["product:prod_a"].Active)
 		require.NotNil(t, products["product:prod_c"].DeletedAt)
 
@@ -864,7 +874,7 @@ func TestPSPImport(t *testing.T) {
 			return answer(r, http.StatusNotFound, `{"error":{"type":"invalid_request_error","message":"Unrecognized request URL"}}`), nil
 		})
 		require.Equal(t, billing.SyncStatusUnknown, verify("d").Provider.SyncStatus, "a 404 that is not resource_missing is no evidence")
-		require.Nil(t, iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP})["price:price_d"].DeletedAt)
+		require.Nil(t, iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}})["price:price_d"].DeletedAt)
 		iw.stripe.ClearIntercepts()
 
 		// A pull's list read before a later by-id read never overwrites it.
@@ -881,10 +891,10 @@ func TestPSPImport(t *testing.T) {
 		require.False(t, verify("d").Provider.Retired)
 		held.Release()
 		iw.await(t, again.ID, billing.PSPImportPulled)
-		d := iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP})["price:price_d"]
+		d := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}})["price:price_d"]
 		require.True(t, d.Active, "the older list observation lost to the newer read")
 		require.Equal(t, "read", d.ObservedVia)
-		require.Contains(t, iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP}), "price:price_unread", "read once Stripe answers")
+		require.Contains(t, iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}}), "price:price_unread", "read once Stripe answers")
 	})
 
 	t.Run("OR-J38-S06/onboarding-pull-per-rail", func(t *testing.T) {
@@ -1261,8 +1271,7 @@ func TestPSPImport(t *testing.T) {
 		applyAll := func(ids map[string]billing.PSPImportID) {
 			t.Helper()
 			for key, id := range ids {
-				_, err := iw.api.LinkPSPImport(t.Context(), id, billing.LinkPSPImportParams{})
-				require.NoError(t, err)
+				require.NoError(t, iw.link(t, id, billing.LinkPSPImportParams{}))
 				for ref, r := range iw.apply(t, id) {
 					require.Equal(t, billing.PSPImportImported, r.State, "%s %s %s: %v", key, r.Kind, ref, r.Reason)
 				}
@@ -1321,8 +1330,7 @@ func TestPSPImport(t *testing.T) {
 			_, err = iw.api.CreateProviderPrice(t.Context(), p)
 			require.NoError(t, err)
 		}
-		_, err = iw.api.LinkPSPImport(t.Context(), imp.ID, billing.LinkPSPImportParams{})
-		require.NoError(t, err)
+		require.NoError(t, iw.link(t, imp.ID, billing.LinkPSPImportParams{}))
 		recs := iw.apply(t, imp.ID)
 		require.Equal(t, billing.PSPImportImported, recs[customers["alice"]].State)
 		require.Nil(t, recs[customers["alice"]].Reason)

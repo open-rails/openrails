@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -73,6 +74,10 @@ const (
 	// vault or paused state changed at the provider. Never acted on
 	// automatically; requires_review.
 	FindingProviderScheduleDrift FindingType = "pull.subscription.drift"
+	// FindingSubscriptionFacts: a held provider-run subscription records
+	// another price, schedule or start than the provider's; approving adopts
+	// the provider's (correct_subscription).
+	FindingSubscriptionFacts FindingType = "pull.subscription.facts"
 )
 
 // The entitlement check (derive.grant_effect.mismatch) and stuck-intent check
@@ -144,9 +149,11 @@ type Finding struct {
 	Apply *ApplyAction `json:"-"`
 
 	// Change is the proposal approving the finding applies; nil when only
-	// dismissing resolves it. Source is what raised a pull.* finding.
+	// dismissing resolves it. Source is what raised a pull.* finding, and
+	// PullID the PSP import whose pull did.
 	Change *Change
 	Source billing.ProposalSource
+	PullID uuid.UUID
 }
 
 // ApplyAction is one idempotent local write the enforce mode performs for a
@@ -291,7 +298,12 @@ var stateRosterFindingTypes = []FindingType{
 	FindingPaymentMethodMismatch,
 	FindingDuplicateSubscriptions,
 	FindingProviderScheduleDrift,
+	FindingSubscriptionFacts,
 }
+
+// StateRosterFindingTypes are the finding types a completed read of a
+// provider's whole roster re-raises: one it no longer raises vanished.
+func StateRosterFindingTypes() []FindingType { return slices.Clone(stateRosterFindingTypes) }
 
 // SeverityRank orders severities worst-first (critical=0 .. low=3) for sorting
 // and escalation (a FindingNotifier re-fires only when the rank strictly

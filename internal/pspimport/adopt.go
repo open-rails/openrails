@@ -42,7 +42,7 @@ func (im *Importer) AdoptNMISubscription(ctx context.Context, pspID uuid.UUID, s
 	if !found {
 		return fmt.Errorf("adopt: PSP %s is not declared", pspID)
 	}
-	st, err := (&nmiSource{currency: "USD"}).subscription(sub, nmi.RecurringReportRow{})
+	st, err := (&nmiSource{currency: "USD"}).subscription(sub, nmi.RecurringReportRow{}, im.now())
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func (im *Importer) AdoptNMISubscription(ctx context.Context, pspID uuid.UUID, s
 		history = append(history, declared)
 	}
 	psp := billing.PSPID(pspID)
-	res, err := billingimport.Import(ctx, billingimport.Options{DB: im.DB, MerchantID: mid, Clock: im.Clock, Book: billing.DeclaredBilling{
+	res, err := billingimport.Import(ctx, billingimport.Options{DB: im.DB, MerchantID: mid, Clock: im.Clock, Authority: reconcile.ProviderFacts, Book: billing.DeclaredBilling{
 		AsOf: l.asOf, DefaultPSP: billing.PSPRef{ID: &psp}, Customers: []billing.DeclaredCustomer{{Customer: billing.CustomerID(customer)}},
 		Subscriptions: []billing.DeclaredSubscription{declared}, Transactions: history,
 	}})

@@ -48,11 +48,12 @@ type ProviderCatalogTerms struct {
 }
 
 // ProviderCatalogListParams filters one PSP's observed catalog, in (kind,
-// ref) order. Mapped and Retired filter when set. Import lists only the
-// prices that import's staged subscriptions name: its plans to map.
+// ref) order. PSP names it by id or key. Mapped and Retired filter when set.
+// Import lists only the prices that import's staged subscriptions name: its
+// plans to map.
 type ProviderCatalogListParams struct {
 	PageRequest
-	PSP     PSPID
+	PSP     PSPRef
 	Kind    ProviderCatalogKind
 	Mapped  *bool
 	Retired *bool

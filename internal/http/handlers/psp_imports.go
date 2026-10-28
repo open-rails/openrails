@@ -181,6 +181,8 @@ func ListPSPImportRecords(r *httprequest.Request) {
 	r.SuccessJSON(out)
 }
 
+// LinkPSPImport handles POST /v1/merchant/psp-imports/{id}/link: it stores
+// manual links and price picks and queues the relink.
 func LinkPSPImport(r *httprequest.Request) {
 	id, ok := pathID(r, billing.ParsePSPImportID)
 	if !ok {
@@ -196,15 +198,16 @@ func LinkPSPImport(r *httprequest.Request) {
 	}
 	out, err := im.Link(r.Request.Context(), id, params)
 	if err != nil {
-		writeRefusal(r, err, "PSP import link failed")
+		writePSPImportRefusal(r, err, "PSP import link failed")
 		return
 	}
-	r.SuccessJSON(out)
+	r.JSON(http.StatusAccepted, out)
 }
 
-// ApplyPSPImport handles POST /v1/merchant/psp-imports/{id}/apply: it queues
-// the landing of the linked records. A subscription whose plan no provider
-// price maps stays blocked until a person maps it, links and applies again.
+// ApplyPSPImport handles POST /v1/merchant/psp-imports/{id}/apply: a person
+// queues the landing of the linked records and the approval, in their name,
+// of the import's corrections. A subscription whose plan no provider price
+// maps stays blocked until a person maps it, links and applies again.
 func ApplyPSPImport(r *httprequest.Request) {
 	id, ok := pathID(r, billing.ParsePSPImportID)
 	if !ok {
@@ -214,7 +217,7 @@ func ApplyPSPImport(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := im.RequestApply(r.Request.Context(), id)
+	out, err := im.RequestApply(r.Request.Context(), id, personActor(r))
 	if err != nil {
 		writePSPImportRefusal(r, err, "PSP import apply failed")
 		return
@@ -241,11 +244,21 @@ func SetPSPImportMappings(r *httprequest.Request) {
 
 // ProviderCatalogQuery filters ListProviderCatalog.
 type ProviderCatalogQuery struct {
-	PSP     billing.PSPID               `form:"psp"`
+	// PSP is the PSP's id or key.
+	PSP     string                      `form:"psp"`
 	Kind    billing.ProviderCatalogKind `form:"kind"`
 	Mapped  *bool                       `form:"mapped"`
 	Retired *bool                       `form:"retired"`
 	Import  *billing.PSPImportID        `form:"import"`
+}
+
+// pspRef reads a PSP named by id (psp_…) or key.
+func pspRef(v string) billing.PSPRef {
+	v = strings.TrimSpace(v)
+	if id, err := billing.ParsePSPID(v); err == nil {
+		return billing.PSPRef{ID: &id}
+	}
+	return billing.PSPRef{Key: v}
 }
 
 // ListProviderCatalog handles GET /v1/merchant/provider-catalog: one PSP's
@@ -265,7 +278,7 @@ func ListProviderCatalog(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeServiceUnavailable, "provider catalog unavailable")
 		return
 	}
-	out, err := objects.List(r.Request.Context(), billing.ProviderCatalogListParams{PageRequest: page, PSP: query.PSP, Kind: query.Kind, Mapped: query.Mapped, Retired: query.Retired, Import: query.Import})
+	out, err := objects.List(r.Request.Context(), billing.ProviderCatalogListParams{PageRequest: page, PSP: pspRef(query.PSP), Kind: query.Kind, Mapped: query.Mapped, Retired: query.Retired, Import: query.Import})
 	if err != nil {
 		writeRefusal(r, err, "provider catalog list failed")
 		return

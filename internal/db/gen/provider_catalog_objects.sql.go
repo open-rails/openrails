@@ -316,6 +316,57 @@ func (q *Queries) MarkProviderCatalogObjectDeleted(ctx context.Context, arg Mark
 	return result.RowsAffected(), nil
 }
 
+const markProviderCatalogObjectsAbsent = `-- name: MarkProviderCatalogObjectsAbsent :many
+UPDATE billing.provider_catalog_objects o
+SET deleted_at = COALESCE(o.deleted_at, $1::timestamptz), observed_at = $1::timestamptz,
+    observed_via = 'pull', updated_at = now()
+WHERE o.merchant_id = $2::uuid AND o.psp_id = $3::uuid AND o.observed_via = 'pull'
+  AND o.observed_at < $1::timestamptz
+  AND NOT EXISTS (SELECT 1 FROM unnest($4::text[], $5::text[]) AS l(kind, ref) WHERE l.kind = o.kind AND l.ref = o.ref)
+RETURNING o.kind, o.ref
+`
+
+type MarkProviderCatalogObjectsAbsentParams struct {
+	ObservedAt time.Time
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Kinds      []string
+	Refs       []string
+}
+
+type MarkProviderCatalogObjectsAbsentRow struct {
+	Kind string
+	Ref  string
+}
+
+// A complete, non-empty list read at observed_at lacks these objects an
+// earlier list held: they are gone. Seeing one again clears deleted_at.
+func (q *Queries) MarkProviderCatalogObjectsAbsent(ctx context.Context, arg MarkProviderCatalogObjectsAbsentParams) ([]MarkProviderCatalogObjectsAbsentRow, error) {
+	rows, err := q.db.Query(ctx, markProviderCatalogObjectsAbsent,
+		arg.ObservedAt,
+		arg.MerchantID,
+		arg.PspID,
+		arg.Kinds,
+		arg.Refs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarkProviderCatalogObjectsAbsentRow
+	for rows.Next() {
+		var i MarkProviderCatalogObjectsAbsentRow
+		if err := rows.Scan(&i.Kind, &i.Ref); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertProviderCatalogObjects = `-- name: UpsertProviderCatalogObjects :exec
 INSERT INTO billing.provider_catalog_objects (merchant_id, psp_id, kind, ref, product_ref, name, active, deleted_at, amount, currency,
     billing_interval_hours, billing_interval_months, evidence, observed_at, observed_via)

@@ -63,6 +63,8 @@ type FindingRecord struct {
 	Source         string     `json:"-"`
 	EvidenceDigest string     `json:"-"`
 	ApprovalRunID  *uuid.UUID `json:"-"`
+	// PullID is the PSP import whose pull last raised it.
+	PullID *uuid.UUID `json:"-"`
 }
 
 // Quiet reports a finding about a provider object this book did not create:
@@ -231,9 +233,12 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 	if err != nil {
 		return FindingRecord{}, err
 	}
-	var pspID *uuid.UUID
+	var pspID, pullID *uuid.UUID
 	if f.PSPID != uuid.Nil {
 		pspID = &f.PSPID
+	}
+	if f.PullID != uuid.Nil {
+		pullID = &f.PullID
 	}
 	proposal, err := proposalColumns(f)
 	if err != nil {
@@ -252,6 +257,7 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 		Change:            proposal.change,
 		Source:            proposal.source,
 		EvidenceDigest:    proposal.digest,
+		PullID:            pullID,
 	})
 	if err != nil {
 		return FindingRecord{}, err
@@ -657,6 +663,7 @@ func FindingRecordFromRow(row gen.BillingReconciliationFinding) FindingRecord {
 		UpdatedAt:      row.UpdatedAt,
 		NotifiedAt:     row.NotifiedAt,
 		ApprovalRunID:  row.ApprovalRunID,
+		PullID:         row.PullID,
 
 		PSPID:              row.PspID,
 		ResourceType:       row.OpenrailsResourceType,

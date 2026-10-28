@@ -151,55 +151,64 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 		}
 	}
 
-	today := now.Truncate(24 * time.Hour)
 	out := make([]RemoteSubscription, 0, len(subs))
 	for _, s := range subs {
-		if strings.TrimSpace(s.ID) == "" {
-			return nil, fmt.Errorf("nmi subscription roster row has no identity")
+		sub, err := NMIRemoteSubscription(s, now)
+		if err != nil {
+			return nil, err
 		}
-		railCustomerRef := strings.TrimSpace(s.CustomerVaultID)
-		sub := RemoteSubscription{
-			RailSubscriptionID: strings.TrimSpace(s.ID),
-			// NMI declares no per-subscription status (see fetcher doc);
-			// RawStatus stays empty on purpose.
-			Status:     SubscriptionStatusUnknown,
-			CustomerID: railCustomerRef,
-			Currency:   "", // the subscription resource does not echo currency
-			Raw:        rawJSON(map[string]any{"source": "nmi_recurring_v5", "subscription": s}),
-		}
-		sub.Paused = nmiFlag(s.PausedSubscription)
-		sub.BookID = s.BookID()
-		sub.CreatedAt = nmiDate(s.StartDate)
-		if who, ok := identity[railCustomerRef]; ok {
+		if who, ok := identity[sub.CustomerID]; ok {
 			sub.Email = who.Email
 			sub.Username = who.Username
 			if sub.BookID == "" {
 				sub.BookID = who.Book
 			}
 		}
-		if s.Plan != nil {
-			sub.PlanID = strings.TrimSpace(s.Plan.ID)
-			sub.IntervalDays, _ = strconv.Atoi(strings.TrimSpace(s.Plan.DayFrequency))
-			sub.IntervalMonths, _ = strconv.Atoi(strings.TrimSpace(s.Plan.MonthFrequency))
-		}
-		sub.Amount = s.DeclaredAmount()
-		if next, err := parseNMIV5Date(s.NextBillingDate); err == nil {
-			sub.NextBillingAt = &next
-			if next.Before(today) {
-				sub.Status = SubscriptionStatusPastDue
-			} else {
-				sub.Status = SubscriptionStatusActive
-			}
-		}
-		if sub.Paused {
-			// A paused schedule bills nothing and is not dead: neither live
-			// nor terminal, so status comparison skips it and the drift check
-			// reports it.
-			sub.Status, sub.RawStatus = SubscriptionStatusUnknown, "paused"
-		}
 		out = append(out, sub)
 	}
 	return out, nil
+}
+
+// NMIRemoteSubscription is one v5 subscription as a pull reads it at now.
+// NMI states no status: one billing today or later is active, earlier past
+// due, paused or undated unknown. Email and username join from its vault.
+func NMIRemoteSubscription(s nmi.V5Subscription, now time.Time) (RemoteSubscription, error) {
+	if strings.TrimSpace(s.ID) == "" {
+		return RemoteSubscription{}, fmt.Errorf("nmi subscription roster row has no identity")
+	}
+	sub := RemoteSubscription{
+		RailSubscriptionID: strings.TrimSpace(s.ID),
+		// NMI declares no per-subscription status (see fetcher doc);
+		// RawStatus stays empty on purpose.
+		Status:     SubscriptionStatusUnknown,
+		CustomerID: strings.TrimSpace(s.CustomerVaultID),
+		Currency:   "", // the subscription resource does not echo currency
+		Raw:        rawJSON(map[string]any{"source": "nmi_recurring_v5", "subscription": s}),
+	}
+	sub.Paused = nmiFlag(s.PausedSubscription)
+	sub.BookID = s.BookID()
+	sub.CreatedAt = nmiDate(s.StartDate)
+	if s.Plan != nil {
+		sub.PlanID = strings.TrimSpace(s.Plan.ID)
+		sub.IntervalDays, _ = strconv.Atoi(strings.TrimSpace(s.Plan.DayFrequency))
+		sub.IntervalMonths, _ = strconv.Atoi(strings.TrimSpace(s.Plan.MonthFrequency))
+	}
+	sub.Amount = s.DeclaredAmount()
+	if next, err := parseNMIV5Date(s.NextBillingDate); err == nil {
+		sub.NextBillingAt = &next
+		if next.Before(now.Truncate(24 * time.Hour)) {
+			sub.Status = SubscriptionStatusPastDue
+		} else {
+			sub.Status = SubscriptionStatusActive
+		}
+	}
+	if sub.Paused {
+		// A paused schedule bills nothing and is not dead: neither live
+		// nor terminal, so status comparison skips it and the drift check
+		// reports it.
+		sub.Status, sub.RawStatus = SubscriptionStatusUnknown, "paused"
+	}
+	return sub, nil
 }
 
 // parseNMIV5Date accepts the date shapes v5 emits (ISO 8601 timestamp or bare
@@ -488,41 +497,53 @@ func (f *NMIFetcher) paymentMethodsFromCustomers(customers []nmi.V5Customer) ([]
 	out := make([]RemotePaymentMethod, 0, len(customers))
 	identity := make(map[string]nmiCustomerIdentity, len(customers))
 	for _, c := range customers {
-		if strings.TrimSpace(c.ID) == "" {
-			return nil, nil, fmt.Errorf("nmi customer roster row has no identity")
+		cards, err := NMIRemotePaymentMethods(c)
+		if err != nil {
+			return nil, nil, err
 		}
-		entry := RemotePaymentMethod{
-			RailCustomerRef: strings.TrimSpace(c.ID),
-			Raw:             rawJSON(map[string]any{"source": "nmi_customer_vault_v5", "customer": c}),
-		}
-		primary := c.PrimaryBilling()
-		if primary == nil {
-			out = append(out, entry)
-			continue
-		}
-		identity[entry.RailCustomerRef] = nmiCustomerIdentity{
-			Email:    strings.TrimSpace(primary.Email),
-			Username: strings.TrimSpace(strings.TrimSpace(primary.FirstName) + " " + strings.TrimSpace(primary.LastName)),
-			Book:     c.BookID(),
-		}
-		// One entry per card, primary first: a multi-card vault's other
-		// cards are compared on their own billing ids.
-		billings := []*nmi.V5CustomerBilling{primary}
-		for i := range c.Billing {
-			if &c.Billing[i] != primary {
-				billings = append(billings, &c.Billing[i])
+		out = append(out, cards...)
+		if primary := c.PrimaryBilling(); primary != nil {
+			identity[strings.TrimSpace(c.ID)] = nmiCustomerIdentity{
+				Email:    strings.TrimSpace(primary.Email),
+				Username: strings.TrimSpace(strings.TrimSpace(primary.FirstName) + " " + strings.TrimSpace(primary.LastName)),
+				Book:     c.BookID(),
 			}
-		}
-		for _, billing := range billings {
-			card := entry
-			card.RailMethodRef = strings.TrimSpace(billing.ID)
-			card.CardLast4 = cardLast4(billing.PaymentDetails.CardNumber)
-			card.CardExpiry = strings.TrimSpace(billing.PaymentDetails.CardExp)
-			card.Email = strings.TrimSpace(billing.Email)
-			out = append(out, card)
 		}
 	}
 	return out, identity, nil
+}
+
+// NMIRemotePaymentMethods is one v5 customer vault as a pull reads it: one
+// entry per card, primary first; a vault without cards is one bare entry.
+func NMIRemotePaymentMethods(c nmi.V5Customer) ([]RemotePaymentMethod, error) {
+	if strings.TrimSpace(c.ID) == "" {
+		return nil, fmt.Errorf("nmi customer roster row has no identity")
+	}
+	entry := RemotePaymentMethod{
+		RailCustomerRef: strings.TrimSpace(c.ID),
+		Raw:             rawJSON(map[string]any{"source": "nmi_customer_vault_v5", "customer": c}),
+	}
+	primary := c.PrimaryBilling()
+	if primary == nil {
+		return []RemotePaymentMethod{entry}, nil
+	}
+	// A multi-card vault's other cards are compared on their own billing ids.
+	billings := []*nmi.V5CustomerBilling{primary}
+	for i := range c.Billing {
+		if &c.Billing[i] != primary {
+			billings = append(billings, &c.Billing[i])
+		}
+	}
+	out := make([]RemotePaymentMethod, 0, len(billings))
+	for _, billing := range billings {
+		card := entry
+		card.RailMethodRef = strings.TrimSpace(billing.ID)
+		card.CardLast4 = cardLast4(billing.PaymentDetails.CardNumber)
+		card.CardExpiry = strings.TrimSpace(billing.PaymentDetails.CardExp)
+		card.Email = strings.TrimSpace(billing.Email)
+		out = append(out, card)
+	}
+	return out, nil
 }
 
 // cardLast4 extracts the trailing four digits from a masked PAN such as

@@ -42,6 +42,11 @@ func refusalOf(err error) *api.APIError {
 		return api.Coded(billing.CodeIdempotencyKeyReused, "the operation identity already names another destructive action")
 	}
 
+	// A coded refusal a service already answered in the wire's terms.
+	var coded *api.APIError
+	if errors.As(err, &coded) && coded.HTTPStatus < 500 {
+		return coded
+	}
 	var refusal *apperr.Error
 	if !errors.As(err, &refusal) {
 		return nil

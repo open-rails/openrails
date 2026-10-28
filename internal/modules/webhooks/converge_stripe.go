@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
-	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/parking"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -385,10 +384,8 @@ func (s *StripeConvergeService) parkDeferred(ctx context.Context, sub *models.Su
 // Stripe ended the subscription, else as converged.
 func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, deferred map[string][]string, now time.Time) error {
 	var (
-		updatedSub *models.Subscription
-		oldProduct uuid.UUID
-		parked     *models.Subscription
-		parkOn     string
+		parked *models.Subscription
+		parkOn string
 	)
 	status := strings.ToLower(strings.TrimSpace(rec.Status))
 	remoteAlive := status == "active" || status == "trialing"
@@ -441,29 +438,15 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 		if price == nil {
 			return nil
 		}
-		oldProduct = sub.ProductID
-		sub.PriceID, sub.ProductID = price.ID, price.ProductID
-		// The new price's immutable access choice is the one accepted with it.
-		sub.AccessDurationHoursSnapshot = price.AccessDurationHours
-		sub.ProviderAccessDefaultSnapshot = price.ProviderAccessDefault
-		if err := subscriptions.ProviderMovedPrice(ctx, txdb, sub.ID, price.ID, now); err != nil {
-			return fmt.Errorf("stripe converge: settle the scheduled change: %w", err)
+		if err := subscriptions.AdoptProviderPrice(ctx, txdb, sub, price, now, s.Clock); err != nil {
+			return fmt.Errorf("stripe converge: %w", err)
 		}
-		if err := subRepo.UpdateAt(ctx, sub, now); err != nil {
-			return fmt.Errorf("stripe converge: write price remap: %w", err)
-		}
-		updatedSub = sub
 		return nil
 	}); err != nil {
 		return err
 	}
 	if parked != nil {
 		return s.parkDeferred(ctx, parked, rec, parkOn, deferred[parkOn], now)
-	}
-
-	// A product move ends the old product's grace window.
-	if updatedSub != nil && oldProduct != uuid.Nil && oldProduct != updatedSub.ProductID {
-		return s.revokeMovedGrace(ctx, updatedSub, oldProduct)
 	}
 	return nil
 }
@@ -525,15 +508,4 @@ func (s *StripeConvergeService) paidPriceMove(ctx context.Context, sub *models.S
 		return nil, false, nil
 	}
 	return price, false, nil
-}
-
-func (s *StripeConvergeService) revokeMovedGrace(ctx context.Context, sub *models.Subscription, product uuid.UUID) error {
-	sourceType := models.AccessSourceGrace
-	sourceID := sub.ID.String()
-	if err := entitlements.NewEntitlementService(s.DB, s.Clock).RevokeAccess(ctx, entitlements.RevokeAccessParams{
-		UserID: sub.CustomerID.String(), ProductID: product, SourceType: &sourceType, SourceID: &sourceID, Reason: models.AccessRevokeDowngrade,
-	}); err != nil {
-		return fmt.Errorf("stripe converge: revoke moved grace: %w", err)
-	}
-	return nil
 }

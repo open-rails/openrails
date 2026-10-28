@@ -30,9 +30,6 @@ var (
 	mappingName = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,63}$`)
 )
 
-// DefaultRules link by the directory's email when the merchant declares none.
-var DefaultRules = []billing.PSPImportRule{{Fact: FactEmail, Via: billing.PSPImportViaDirectory}}
-
 // maxRules bounds an import's rules.
 const maxRules = 20
 
@@ -55,10 +52,10 @@ func (r rule) key(value string) string {
 	return strings.TrimSpace(m[1])
 }
 
-// compileRules checks the merchant's rules; nil is DefaultRules.
+// compileRules checks the merchant's rules; nil is the default.
 func compileRules(in []billing.PSPImportRule) ([]rule, error) {
 	if in == nil {
-		in = DefaultRules
+		in = billing.DefaultPSPImportRules()
 	}
 	if len(in) > maxRules {
 		return nil, apperr.Invalidf("at most %d rules", maxRules).WithParam("rules")

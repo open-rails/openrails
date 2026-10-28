@@ -33,6 +33,7 @@ type ChangeApply struct {
 	RefundCharge       *RefundChargeAction            `json:"refund_charge,omitempty"`
 	CancelSchedule     *CancelScheduleAction          `json:"cancel_schedule,omitempty"`
 	CollectRenewal     *CollectRenewalAction          `json:"collect_renewal,omitempty"`
+	Correct            *CorrectSubscriptionAction     `json:"correct,omitempty"`
 }
 
 // RevokeAccessAction revokes a subscription's live access.

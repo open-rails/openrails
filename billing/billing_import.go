@@ -260,7 +260,9 @@ type DeclaredAdminGrant struct {
 
 // BillingImportResult reports per-SourceID outcomes for subscriptions, admin
 // grants, purchases, historical payments and named NMI receipts. Customers and
-// payment methods are idempotent upserts.
+// payment methods are idempotent upserts. Reasons says why a source was
+// blocked, or skipped untouched: provider_authority for a subscription whose
+// facts the provider's evidence owns, which a host's book never rewrites.
 type BillingImportResult struct {
 	Imported []string          `json:"imported"`
 	Skipped  []string          `json:"skipped"`

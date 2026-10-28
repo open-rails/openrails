@@ -10,7 +10,7 @@ INSERT INTO billing.subscriptions (
     rail_subscription_id, payment_method_id, last_retry_at,
     retry_attempts, next_retry_at, grace_ends_at, cancel_feedback,
     cancel_type, canceled_at, deletion_scheduled_at, gateway_response,
-    created_at, updated_at, psp_id, collection_policy, quantity
+    created_at, updated_at, psp_id, collection_policy, quantity, facts_authority
 ) SELECT
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4,
     sqlc.narg(access_duration_hours_snapshot)::int, sqlc.arg(provider_access_default_snapshot)::boolean,
@@ -26,7 +26,8 @@ INSERT INTO billing.subscriptions (
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.arg(psp_id)::uuid,
     COALESCE(NULLIF(sqlc.arg(collection_policy)::text, ''), 'provider'),
-    sqlc.narg(quantity)::int
+    sqlc.narg(quantity)::int,
+    COALESCE(NULLIF(sqlc.arg(facts_authority)::text, ''), 'provider')
 FROM history;
 
 -- name: UpdateSubscriptionAt :execrows

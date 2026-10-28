@@ -132,6 +132,11 @@ func stripeCustomer(c stripeCustomerJSON, cards []json.RawMessage) staged {
 		}
 		data.Cards = append(data.Cards, cardData{MethodRef: pm.ID, Primary: pm.ID == primary || primary == "" && len(cards) == 1,
 			Brand: strings.ToLower(pm.Card.Brand), Last4: pm.Card.Last4, ExpMonth: pm.Card.ExpMonth, ExpYear: pm.Card.ExpYear})
+		remote := reconcile.RemotePaymentMethod{RailCustomerRef: c.ID, RailMethodRef: pm.ID, CardLast4: pm.Card.Last4, Email: c.Email}
+		if pm.Card.ExpMonth > 0 && pm.Card.ExpYear > 0 {
+			remote.CardExpiry = fmt.Sprintf("%02d%02d", pm.Card.ExpMonth, pm.Card.ExpYear%100)
+		}
+		data.Remote = append(data.Remote, remote)
 	}
 	rec := staged{kind: billing.PSPImportCustomer, ref: c.ID, facts: f, data: data}
 	if t := stripeTime(c.Created); t != nil {
@@ -154,12 +159,16 @@ func stripeSubscription(sub reconcile.RemoteSubscription, raw json.RawMessage) (
 			f.add(name, v)
 		}
 	}
-	data := subscriptionData{Plan: sub.PlanID, Currency: sub.Currency, NextBillingAt: sub.NextBillingAt, MethodRef: stripeRef(x.DefaultPaymentMethod), Evidence: raw}
+	remote := sub
+	remote.Raw = nil
+	data := subscriptionData{Plan: sub.PlanID, Currency: sub.Currency, NextBillingAt: sub.NextBillingAt, MethodRef: stripeRef(x.DefaultPaymentMethod), Evidence: raw,
+		Remote: &remote}
 	if t := stripeTime(x.StartDate); t != nil {
 		data.StartedAt = *t
 	} else {
 		data.StartedAt = sub.CreatedAt
 	}
+	remote.CreatedAt = data.StartedAt
 	native, err := moneyutil.RailMinorToNative(sub.Currency, moneyutil.Cents(sub.AmountCents))
 	if err != nil {
 		return staged{}, fmt.Errorf("stripe subscription %s amount: %w", sub.RailSubscriptionID, err)
@@ -234,9 +243,14 @@ func (s *stripeSource) history(ctx context.Context, since, until time.Time) ([]s
 		if err != nil {
 			return nil, fmt.Errorf("stripe transaction %s: %w", t.TransactionID, err)
 		}
-		data := transactionData{TransactionID: t.TransactionID, Type: typ, Success: t.Success, Amount: native, Currency: t.Currency, OccurredAt: t.OccurredAt}
+		remote := t
+		data := transactionData{TransactionID: t.TransactionID, Type: typ, Success: t.Success, Amount: native, Currency: t.Currency, OccurredAt: t.OccurredAt, Remote: &remote}
 		rec := staged{kind: billing.PSPImportTransaction, ref: t.TransactionID, customerRef: customerOf[charge], occurredAt: t.OccurredAt}
 		if bill, ok := s.billOf[charge]; ok {
+			if typ == "sale" {
+				paid := bill
+				remote.StripeBill, remote.SubscriptionID = &paid, bill.SubscriptionID
+			}
 			rec.subscriptionRef, rec.customerRef = bill.SubscriptionID, bill.CustomerID
 			if typ == "sale" {
 				invoice, err := declaredInvoice(bill)

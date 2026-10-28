@@ -51,7 +51,8 @@ type Object struct {
 	ProductRef string
 	Name       string
 	Active     bool
-	// DeletedAt is when a by-id read found the object gone.
+	// DeletedAt is when a by-id read, or a complete list lacking it, found
+	// the object gone.
 	DeletedAt *time.Time
 	// Amount is the decimal major-unit amount the provider states, "" when
 	// the price has no fixed amount. Currency is "" where the provider
@@ -173,6 +174,39 @@ func (o *Observer) Record(ctx context.Context, psp merchants.PSPScope, at time.T
 	}
 	return nil
 }
+
+// RecordList records what a whole-catalog list that started at at read. A
+// complete, non-empty list is also a deletion source: an object an earlier
+// list held and this one lacks is marked deleted (seeing it again clears
+// that). An empty list marks nothing. It returns the objects marked absent.
+func (o *Observer) RecordList(ctx context.Context, psp merchants.PSPScope, at time.Time, objects []Object) (map[string]bool, error) {
+	if err := o.Record(ctx, psp, at, objects, ViaPull); err != nil {
+		return nil, err
+	}
+	absent := map[string]bool{}
+	if len(objects) == 0 {
+		return absent, nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p := gen.MarkProviderCatalogObjectsAbsentParams{MerchantID: mid.UUID(), PspID: psp.ID, ObservedAt: at.UTC()}
+	for _, obj := range objects {
+		p.Kinds, p.Refs = append(p.Kinds, string(obj.Kind)), append(p.Refs, obj.Ref)
+	}
+	rows, err := o.DB.Gen(ctx).MarkProviderCatalogObjectsAbsent(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("mark absent provider catalog objects: %w", err)
+	}
+	for _, r := range rows {
+		absent[Key(Kind(r.Kind), r.Ref)] = true
+	}
+	return absent, nil
+}
+
+// Key names one object of a PSP's catalog.
+func Key(kind Kind, ref string) string { return string(kind) + "\x1f" + ref }
 
 // distinct keeps one object per (kind, ref), in (kind, ref) order, so
 // concurrent writers lock rows alike. An object a read saw both active and

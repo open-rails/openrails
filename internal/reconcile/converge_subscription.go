@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -113,6 +115,12 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.
 		}
 	}
 	out.Applied = applied
+	// Provider evidence now owns the row: a host's legacy book skips it.
+	if snap.Provider != ProviderDeclared {
+		if _, err := database.Gen(ctx).TakeProviderFacts(ctx, gen.TakeProviderFactsParams{MerchantID: sub.MerchantID, Ids: []uuid.UUID{sub.ID}}); err != nil {
+			return out, fmt.Errorf("converge subscription: take provider facts: %w", err)
+		}
+	}
 	if applied && d.Reason == reasonRenewedBeforeDecline {
 		// The renewed row now ends where the later decline's period begins.
 		next := Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, dunningWindow)

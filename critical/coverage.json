@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 197,
+  "scenario_count": 205,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -987,6 +987,46 @@
       "id": "OR-J15-S17",
       "journey": "J15",
       "name": "A Stripe customer linked before the PSP's first pull lands its parked subscription at once"
+    },
+    {
+      "id": "OR-J38-S20",
+      "journey": "J38",
+      "name": "A manual reconcile stages what OpenRails does not hold, proposes every difference in what it holds and lands nothing until a person applies"
+    },
+    {
+      "id": "OR-J38-S21",
+      "journey": "J38",
+      "name": "A pull after a host's legacy book corrects price, schedule and start; ending access waits for a person"
+    },
+    {
+      "id": "OR-J38-S22",
+      "journey": "J38",
+      "name": "A host's legacy book after a pull skips provider rows; a webhook converge hands a host row to the provider"
+    },
+    {
+      "id": "OR-J38-S23",
+      "journey": "J38",
+      "name": "A host row landed after the pull is held and corrected at Apply, never landed twice"
+    },
+    {
+      "id": "OR-J38-S24",
+      "journey": "J38",
+      "name": "A row that moved after the roster read gets no state proposal and says so; its money facts are still proposed"
+    },
+    {
+      "id": "OR-J38-S25",
+      "journey": "J38",
+      "name": "A paid Stripe move to another product's price is proposed and waits for a person; an unpaid one proposes nothing"
+    },
+    {
+      "id": "OR-J38-S26",
+      "journey": "J38",
+      "name": "An NMI roster implausibly small against the live book fails the import and raises nothing"
+    },
+    {
+      "id": "OR-J38-S27",
+      "journey": "J38",
+      "name": "Only a person or the in-process host approves, dismisses or applies; approve is idempotent per key; one import per PSP in flight"
     }
   ]
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
+	"github.com/open-rails/openrails/internal/reconcile"
 )
 
 // staged is one provider object as a source read it.
@@ -32,9 +33,11 @@ type source interface {
 	history(ctx context.Context, since, until time.Time) ([]staged, error)
 }
 
-// customerData is a provider customer's saved cards.
+// customerData is a provider customer's saved cards. Remote is the vault as
+// a pull reads it: what a reconcile diffs a held one by.
 type customerData struct {
-	Cards []cardData `json:"cards"`
+	Cards  []cardData                      `json:"cards"`
+	Remote []reconcile.RemotePaymentMethod `json:"remote,omitempty"`
 }
 
 type cardData struct {
@@ -65,6 +68,8 @@ type subscriptionData struct {
 	// MethodRef is the saved card the provider bills, when it names one.
 	MethodRef string          `json:"method_ref,omitempty"`
 	Evidence  json.RawMessage `json:"evidence,omitempty"`
+	// Remote is the subscription as a pull reads it.
+	Remote *reconcile.RemoteSubscription `json:"remote,omitempty"`
 }
 
 // transactionData is one charge, decline or refund. Amount is in the
@@ -84,6 +89,8 @@ type transactionData struct {
 	Decimal string `json:"decimal,omitempty"`
 	// StripeInvoice is the complete invoice a Stripe charge paid.
 	StripeInvoice *billing.DeclaredStripeInvoice `json:"stripe_invoice,omitempty"`
+	// Remote is the transaction as a pull reads it.
+	Remote *reconcile.RemoteTransaction `json:"remote,omitempty"`
 }
 
 // attribution places transactions on the subscription they paid when the

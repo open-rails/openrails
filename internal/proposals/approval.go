@@ -28,6 +28,23 @@ type approval struct {
 	run      uuid.UUID
 	approved int
 	affected map[string]int
+	// moved is each subscription this call's approvals changed: the row
+	// version they found and the one they left. A proposal computed on the
+	// same basis still holds after them.
+	moved map[uuid.UUID]versionMove
+}
+
+type versionMove struct{ from, to int64 }
+
+// touchedSubscription is the subscription a change writes, if any.
+func touchedSubscription(c *reconcile.Change) (uuid.UUID, bool) {
+	if id, err := c.BasisSubscription(); err == nil {
+		return id, true
+	}
+	if b := c.Apply.BackfillPayment; b != nil && b.SubscriptionID != nil {
+		return *b.SubscriptionID, true
+	}
+	return uuid.Nil, false
 }
 
 // errNeedRun stops an id that is about to apply until the call's run exists:
@@ -82,7 +99,7 @@ func (a *approval) try(ctx context.Context, id uuid.UUID) (billing.ProposalResul
 			return nil
 		}
 		now := a.e.now()
-		x := &execution{e: a.e, d: txdb, q: q, mid: a.mid, psp: *rec.PSPID, finding: rec, now: now}
+		x := &execution{e: a.e, d: txdb, q: q, mid: a.mid, psp: *rec.PSPID, finding: rec, now: now, moved: a.moved}
 		if err := x.basis(ctx); err != nil {
 			var s superseded
 			if !errors.As(err, &s) {
@@ -102,6 +119,17 @@ func (a *approval) try(ctx context.Context, id uuid.UUID) (billing.ProposalResul
 			return errNeedRun
 		}
 		x.run = a.run
+		// The row the change touches, as it stood before: this call's later
+		// proposals on it were computed on the same basis.
+		touched, touches := touchedSubscription(rec.Change)
+		var before int64
+		if touches {
+			row, err := lockSubscription(ctx, txdb, touched)
+			if err != nil {
+				return err
+			}
+			before = row.RowVersion
+		}
 		// The change applies in a savepoint: a write that finds nothing to do
 		// leaves no before-image behind.
 		var done map[string]any
@@ -122,6 +150,24 @@ func (a *approval) try(ctx context.Context, id uuid.UUID) (billing.ProposalResul
 			}
 			result.Outcome = billing.ProposalSuperseded
 			return nil
+		}
+		if touches {
+			// The provider's evidence now owns the row: a host book skips it.
+			if _, err := q.TakeProviderFacts(ctx, gen.TakeProviderFactsParams{MerchantID: a.mid, Ids: []uuid.UUID{touched}}); err != nil {
+				return err
+			}
+			after, err := lockSubscription(ctx, txdb, touched)
+			if err != nil {
+				return err
+			}
+			if a.moved == nil {
+				a.moved = map[uuid.UUID]versionMove{}
+			}
+			from := before
+			if m, ok := a.moved[touched]; ok && m.to == before {
+				from = m.from
+			}
+			a.moved[touched] = versionMove{from: from, to: after.RowVersion}
 		}
 		done["kind"] = string(rec.Change.Kind)
 		done["applied_at"] = now.Format(time.RFC3339)
@@ -185,6 +231,7 @@ type execution struct {
 	now      time.Time
 	run      uuid.UUID
 	affected map[string]int
+	moved    map[uuid.UUID]versionMove
 }
 
 func (x *execution) change() *reconcile.Change { return x.finding.Change }
@@ -206,7 +253,7 @@ func (x *execution) basis(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if sub.RowVersion != *b.RowVersion {
+		if m, ok := x.moved[subID]; sub.RowVersion != *b.RowVersion && !(ok && m.from == *b.RowVersion && m.to == sub.RowVersion) {
 			return superseded{fmt.Sprintf("subscription_moved: row version %d, the proposal was computed at %d", sub.RowVersion, *b.RowVersion)}
 		}
 	}

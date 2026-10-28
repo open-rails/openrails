@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -11,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -34,12 +36,19 @@ func (o *Observer) List(ctx context.Context, p billing.ProviderCatalogListParams
 	if o.Merchants == nil {
 		return out, errors.New("provider catalog: merchant configuration is not wired")
 	}
-	if _, found, err := o.Merchants.PSPScopeByID(ctx, mid, p.PSP.UUID()); err != nil {
+	var scope merchants.PSPScope
+	var found bool
+	if p.PSP.ID != nil && !p.PSP.ID.IsZero() {
+		scope, found, err = o.Merchants.PSPScopeByID(ctx, mid, p.PSP.ID.UUID())
+	} else {
+		scope, found, err = o.Merchants.PSPScopeByKey(ctx, mid, strings.TrimSpace(p.PSP.Key))
+	}
+	if err != nil {
 		return out, err
 	} else if !found {
 		return out, apperr.New(404, "psp_not_found", fmt.Sprintf("PSP %s not found", p.PSP)).WithParam("psp")
 	}
-	params := gen.ListProviderCatalogParams{MerchantID: mid.UUID(), PspID: p.PSP.UUID(), Mapped: p.Mapped, Retired: p.Retired}
+	params := gen.ListProviderCatalogParams{MerchantID: mid.UUID(), PspID: scope.ID, Mapped: p.Mapped, Retired: p.Retired}
 	switch p.Kind {
 	case "":
 	case billing.ProviderCatalogProduct, billing.ProviderCatalogPrice:
@@ -55,7 +64,7 @@ func (o *Observer) List(ctx context.Context, p billing.ProviderCatalogListParams
 		if err != nil {
 			return out, err
 		}
-		if row.PspID != p.PSP.UUID() {
+		if row.PspID != scope.ID {
 			return out, apperr.Invalidf("import %s pulled another PSP", p.Import).WithParam("import")
 		}
 		params.ImportID = new(row.ID)

@@ -592,10 +592,20 @@ func (e *Env) staffCheck(route Route, a billingauth.Authenticator, pair Pair) ro
 			if !ok || !e.permitted(r, route, a, v, target.MerchantID, pair) {
 				return
 			}
+			if route.Person && !inPerson(c) {
+				refuseCode(r, route, a, billing.CodePersonRequired, "")
+				return
+			}
 			bindStaff(r, c, route, target)
 			next(r)
 		}
 	}
+}
+
+// inPerson admits a user acting in person, or the in-process host: the host
+// is the root of trust for its own merchant.
+func inPerson(c billingauth.Identity) bool {
+	return billingauth.Interactive(c) || c.Issuer == billingauth.HostIssuer && c.Subject == hostSubject
 }
 
 // staffCan answers a handler that asks whether its caller would pass the

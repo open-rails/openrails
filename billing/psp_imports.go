@@ -49,6 +49,9 @@ func (id *PSPImportRecordID) UnmarshalText(text []byte) error {
 	return err
 }
 
+// CodePSPImportInProgress: one import per PSP pulls or applies at a time.
+const CodePSPImportInProgress = "psp_import_in_progress"
+
 // PSPImportStatus is where an import is: its pull, then its landing.
 type PSPImportStatus string
 
@@ -75,8 +78,8 @@ const (
 	PSPImportManual PSPImportOrigin = "manual"
 )
 
-// PSPImportErrorCode is why a failed import stopped when only a change to
-// the PSP's configuration lets it pull.
+// PSPImportErrorCode is why a failed import stopped when pulling it again
+// would stop the same way.
 type PSPImportErrorCode string
 
 const (
@@ -87,6 +90,9 @@ const (
 	// PSPImportNotReadable: the PSP is gone, its rail has no import, or a
 	// credential the pull needs is not declared.
 	PSPImportNotReadable PSPImportErrorCode = "psp_not_readable"
+	// PSPImportRosterImplausible: the NMI roster listed under a tenth of the
+	// PSP's live subscriptions; the import proposed nothing.
+	PSPImportRosterImplausible PSPImportErrorCode = "pull_roster_implausible"
 )
 
 // PSPImportRecordKind is what a staged provider object is.
@@ -112,6 +118,9 @@ const (
 	PSPImportImported PSPImportRecordState = "imported"
 	// PSPImportBlocked: linked, but it did not land; Reason says why.
 	PSPImportBlocked PSPImportRecordState = "blocked"
+	// PSPImportHeld: OpenRails already holds the object; Customer is its
+	// holder. Its differences are the import's proposals, never landed.
+	PSPImportHeld PSPImportRecordState = "held"
 )
 
 // PSPImportRuleVia is where a rule looks a fact's value up.
@@ -138,9 +147,17 @@ type PSPImportRule struct {
 	Mapping string           `json:"mapping,omitempty"`
 }
 
-// CreatePSPImportParams starts pulling one PSP. HistorySince bounds the
-// transaction history read; nil reads from the earliest customer or
-// subscription the provider lists. Rules nil links by the directory's email.
+// DefaultPSPImportRules link a staged object by the directory's email: the
+// rules of a PSP's first import when it names none.
+func DefaultPSPImportRules() []PSPImportRule {
+	return []PSPImportRule{{Fact: "email", Via: PSPImportViaDirectory}}
+}
+
+// CreatePSPImportParams starts pulling one PSP: one import per PSP pulls or
+// applies at a time. HistorySince bounds the transaction history read; nil
+// reads from the earliest customer or subscription the provider lists. Rules
+// nil takes the rules of the PSP's latest import, so a reconcile links as the
+// import before it did; a PSP's first import takes DefaultPSPImportRules.
 type CreatePSPImportParams struct {
 	PSP          PSPRef          `json:"psp"`
 	HistorySince *time.Time      `json:"history_since,omitempty"`
@@ -178,8 +195,20 @@ type PSPImport struct {
 	ErrorCode      *PSPImportErrorCode `json:"error_code"`
 	Rules          []PSPImportRule     `json:"rules"`
 	Counts         []PSPImportCount    `json:"counts"`
-	CreatedAt      time.Time           `json:"created_at"`
-	UpdatedAt      time.Time           `json:"updated_at"`
+	// Proposals counts what its pull proposed about what OpenRails holds.
+	Proposals PSPImportProposals `json:"proposals"`
+	CreatedAt time.Time          `json:"created_at"`
+	UpdatedAt time.Time          `json:"updated_at"`
+}
+
+// PSPImportProposals counts an import's proposals: Open ones wait for a
+// person, of which Corrections are the ones its Apply approves.
+type PSPImportProposals struct {
+	Open        int `json:"open"`
+	Corrections int `json:"corrections"`
+	Approved    int `json:"approved"`
+	Dismissed   int `json:"dismissed"`
+	Superseded  int `json:"superseded"`
 }
 
 // PSPImportFact is one identity fact a provider holds for an object.

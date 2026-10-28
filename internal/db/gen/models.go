@@ -904,7 +904,7 @@ type BillingOrderAttempt struct {
 	CustomerID     uuid.UUID
 	// PSP selected for this attempt. Required.
 	PspID uuid.UUID
-	// Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
+	// Soft delete: set, the row is invisible to every live read. Only `openrails prune` sets it, and `openrails undo-run` clears it.
 	DeletedAt           *time.Time
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
@@ -1031,7 +1031,7 @@ type BillingPayment struct {
 	ReversalKind *string
 	// Credential form presented to the network: network_token | pan_via_proxy | psp_token. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
 	TokenType *string
-	// Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
+	// Soft delete: set, the row is invisible to every live read. Only `openrails prune` sets it, and `openrails undo-run` clears it.
 	DeletedAt           *time.Time
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
@@ -1590,8 +1590,18 @@ type BillingPspImport struct {
 	UpdatedAt      time.Time
 	// onboarding: the one pull OpenRails starts by itself when a PSP is first loaded (re-armed in place when it failed and the PSP is loaded again); manual: created by a person.
 	Origin string
-	// Why a failed import stopped, when the cause is a configuration one: psp_credentials_rejected (the provider refused the credentials) or psp_not_readable (the PSP, its rail's import or a credential is not declared).
+	// Why a failed import stopped when pulling it again would stop the same way: psp_credentials_rejected (the provider refused the credentials), psp_not_readable (the PSP, its rail's import or a credential is not declared) or pull_roster_implausible (the NMI roster listed under a tenth of the PSP's live subscriptions).
 	ErrorCode *string
+	// The person who last asked to apply the import; its corrections are approved in their name.
+	ApplyRequestedBy *string
+}
+
+// Each subscription of the PSP an import found before it read the roster, at its row version: the import proposes a state change only for a row still at that version. Deleted with its import.
+type BillingPspImportBasis struct {
+	MerchantID     uuid.UUID
+	ImportID       uuid.UUID
+	SubscriptionID uuid.UUID
+	RowVersion     int64
 }
 
 // A merchant's own identifiers mapped to its customers (a legacy user id, a legacy order id), named by mapping. PSP import rules read a provider fact through one.
@@ -1705,6 +1715,8 @@ type BillingReconciliationFinding struct {
 	EvidenceDigest *string
 	// The approval run (maintenance_runs kind approval) that applied this proposal; undo-run reverses it. Set exactly when the resolution is approved.
 	ApprovalRunID *uuid.UUID
+	// The PSP import whose pull last raised this pull.* proposal; NULL when none did or the import was deleted.
+	PullID *uuid.UUID
 }
 
 // Per-(merchant, source_domain) reconciliation watermark. fully_reconciled gates the confirmed-absence rule: a destructive EXCESS repair is HELD until its source domain (subscriptions|payments|grants) is proven fully reconciled.
@@ -1873,7 +1885,7 @@ type BillingSubscription struct {
 	CustomerID          uuid.UUID
 	// PSP that produced this remote subscription mirror row. Required.
 	PspID uuid.UUID
-	// Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
+	// Soft delete: set, the row is invisible to every live read. Only `openrails prune` sets it, and `openrails undo-run` clears it.
 	DeletedAt           *time.Time
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
@@ -1887,6 +1899,8 @@ type BillingSubscription struct {
 	Quantity *int32
 	// The accepted access choice for this phase: verified provider service-period end, otherwise the explicit access_duration_hours_snapshot. Existing accepted windows are never inferred to be defaults.
 	ProviderAccessDefaultSnapshot bool
+	// host: a host's legacy book landed the row and may still converge it; provider: provider evidence owns it, and a host book skips it. Moves only from host to provider.
+	FactsAuthority string
 }
 
 // Append-only observed subscription card and retry changes. References and before/after values are snapshots, not charging instructions. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -50,6 +51,9 @@ func (s *ccbillSource) roster(ctx context.Context) ([]staged, error) {
 			// Canceled with access left: it ends at its expiry.
 			data.NextBillingAt, data.Ended, data.UserCanceled = &t, true, true
 		}
+		remote := reconcile.CCBillRemoteSubscription(m)
+		remote.Raw = nil
+		data.Remote = &remote
 		out = append(out, staged{kind: billing.PSPImportSubscription, ref: m.SubscriptionID, occurredAt: data.StartedAt, facts: f, data: data})
 	}
 	return out, nil
@@ -75,8 +79,9 @@ func (s *ccbillSource) history(ctx context.Context, since, until time.Time) ([]s
 			f := facts{}
 			f.add(FactSubscriptionRef, row.SubscriptionID())
 			// DataLink names no currency: the subscription's price prices it.
+			remote := reconcile.CCBillRemoteTransaction(row)
 			out = append(out, staged{kind: billing.PSPImportTransaction, ref: row.TransactionID(), subscriptionRef: row.SubscriptionID(), occurredAt: at, facts: f,
-				data: transactionData{TransactionID: row.TransactionID(), Type: "sale", Success: true, Decimal: row.Amount(), OccurredAt: at}})
+				data: transactionData{TransactionID: row.TransactionID(), Type: "sale", Success: true, Decimal: row.Amount(), OccurredAt: at, Remote: &remote}})
 		}
 	}
 	return out, nil

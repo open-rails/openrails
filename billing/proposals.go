@@ -36,6 +36,9 @@ const (
 	CodeDestructiveActionsHeld = "destructive_actions_held"
 	// CodeProviderWritesHeld: a readonly write posture holds the proposal.
 	CodeProviderWritesHeld = "provider_writes_held"
+	// CodePersonRequired: only a person acting in person, or the in-process
+	// host, approves; an API key or service token does not.
+	CodePersonRequired = "person_required"
 )
 
 // ChangeKind is what approving a proposal does. The set is closed.
@@ -69,13 +72,17 @@ const (
 	// ChangeCollectSkippedRenewal queues the collection of a renewal the
 	// provider skipped.
 	ChangeCollectSkippedRenewal ChangeKind = "collect_skipped_renewal"
+	// ChangeCorrectSubscription adopts the provider's facts on a held
+	// subscription: its mapped price, schedule terms and start date. A price
+	// of another product ends the old product's access.
+	ChangeCorrectSubscription ChangeKind = "correct_subscription"
 )
 
 // ChangeKinds is every change kind.
 func ChangeKinds() []ChangeKind {
 	return []ChangeKind{ChangeCreateSubscription, ChangeRecordCharge, ChangeRecordRefund, ChangeAdoptSubscription,
 		ChangeCancelSubscription, ChangeUpdateCard, ChangeRevokeAccess, ChangeRefundChargeAfterCancel,
-		ChangeCancelProviderSchedule, ChangeCollectSkippedRenewal}
+		ChangeCancelProviderSchedule, ChangeCollectSkippedRenewal, ChangeCorrectSubscription}
 }
 
 // ProposalSource is what raised a proposal: a PSP read, or a by-id read of a
@@ -145,10 +152,12 @@ type ProposalListParams struct {
 	Kind   ChangeKind
 	Source ProposalSource
 	Status FindingStatus
+	// Pull is the PSP import whose pull last raised them.
+	Pull PSPImportID
 }
 
 // ApproveProposalsParams approves 1 to MaxBatchItems proposals, each applied
-// in its own transaction.
+// in its own transaction. Only a person approves.
 type ApproveProposalsParams struct {
 	IDs   []FindingID `json:"ids"`
 	Notes string      `json:"notes"`

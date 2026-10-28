@@ -82,43 +82,110 @@ start, a CCBill signup), unless a manual import names `history_since`.
    key: "1002", customer: "<uuid>"}`. A null customer deletes one.
 2. **Create**, or take the onboarding import. `Client.CreatePSPImport`
    (`POST /v1/merchant/psp-imports`) names the PSP, the rules and optionally
-   `history_since` (default: the earliest object the provider lists). The
-   pull runs as a job; `GetPSPImport` reports `pulling`, then `pulled`. It
-   observes the PSP's catalog, reads the roster once, then the transaction
-   history in 30-day windows, committing each (`history_through`), so a
-   retried job resumes. `UpdatePSPImport` replaces the rules of either kind.
+   `history_since` (default: the earliest object the provider lists). Rules
+   default to those of the PSP's latest import, and for its first import to
+   `billing.DefaultPSPImportRules` (the directory's email). One import per
+   PSP pulls or applies at a time: another is `409 psp_import_in_progress`
+   (a pulled, unapplied onboarding import does not hold it). The pull runs
+   as a job; `GetPSPImport` reports `pulling`, then `pulled`. It observes the
+   PSP's catalog, reads the roster once, then the transaction history in
+   30-day windows, committing each (`history_through`), so a retried job
+   resumes. `UpdatePSPImport` replaces the rules of either kind.
 3. **Review.** `ListPSPImportRecords` lists the staged objects
    (`customer`, `subscription`, `transaction`) with their facts, filtered by
-   `state`: `unmatched`, `conflict`, `linked`, `imported`, `blocked`.
+   `state`: `unmatched`, `conflict`, `linked`, `imported`, `blocked`, `held`.
 4. **Map prices.** `ListProviderCatalog` with `import` lists the plans the
    import's subscriptions name, with the provider's terms, how many
    subscriptions name each, and the provider price mapping it (`price`, null
    when unmapped). Map one by creating a provider price on a product
    (`CreateProviderPrice`, or a catalog document's `provider_prices`); its
    terms come from the observed plan. Nothing is mapped by default.
-5. **Link.** `LinkPSPImport` links every record not yet imported again by
-   the rules and the current mappings, after storing manual links
-   (`{record, customer}`; a manual link wins over every rule) and CCBill
-   price picks (`prices`).
+5. **Link.** `LinkPSPImport` stores manual links (`{record, customer}`; a
+   manual link wins over every rule) and CCBill price picks (`prices`), then
+   relinks in the background: every record not yet imported is linked again
+   by the rules and the current mappings. The import is `pulling` until it
+   has; wait for `pulled` before applying.
 6. **Apply.** `ApplyPSPImport` lands the linked records through the billing
-   import, a few customers per book, at the pull's horizon. A subscription
-   lands on the provider price mapping its plan; one whose plan is unmapped
-   stays `blocked` ("plan X is unmapped"): map it, link and apply again. A
-   customer the billing import refuses blocks only its own records. Applying
-   again lands what was linked since; landed records stay `imported`, so
-   nothing lands twice, and a later import of the same PSP finds them
-   present. A linked NMI vault lands as the customer's payment method.
-   A linked Stripe customer also lands as the customer's link at the PSP
-   (`psp_customers`), so a later subscription Stripe bills on it attributes
-   to the customer. A customer with several picks the one a live subscription
-   bills, else the newest; a customer already linked to another keeps it;
-   either way the record's reason says so. One another customer holds blocks
-   its customer.
+   import as the provider's book, a few customers per book, at the pull's
+   horizon, then approves the import's [corrections](#reconcile). Only a
+   person signed in, or the in-process host, applies; an API key is
+   `403 person_required`. A subscription lands on the provider price mapping
+   its plan; one whose plan is unmapped stays `blocked` ("plan X is
+   unmapped"): map it, link and apply again. A customer the billing import
+   refuses blocks only its own records. Applying again lands what was linked
+   since; landed records stay `imported`, so nothing lands twice, and a later
+   import of the same PSP finds them held. A linked NMI vault lands as the
+   customer's payment method. A linked Stripe customer also lands as the
+   customer's link at the PSP (`psp_customers`), so a later subscription
+   Stripe bills on it attributes to the customer. A customer with several
+   picks the one a live subscription bills, else the newest; a customer
+   already linked to another keeps it; either way the record's reason says
+   so. One another customer holds blocks its customer.
 7. `DeletePSPImport` removes the import and its staged copies; what it
    landed stays. The observed catalog stays.
 
 Creating a provider price needs `merchant:catalog:manage`; the import routes
 need `merchant:config:manage`.
+
+## Reconcile
+
+Every import, the first one and any later one, compares what it read with
+what OpenRails already holds of the PSP. A later import is how a person
+re-reads a PSP: OpenRails trails it by webhook and never pulls on a
+schedule.
+
+- **Basis.** Before the roster read the import records every subscription of
+  the PSP at its row version. A state change is proposed only for a row still
+  at that version; a row created since is never read as absent. A row that
+  moved says so on its record ("changed after the pull read it").
+- **Held.** A staged object OpenRails already holds is `held`, with its
+  holder as the customer: a subscription by its provider id, a provider
+  customer by the cards or customer link naming it, a transaction by its
+  payment or by its held subscription. If a rule or a manual link names
+  another customer it is a `conflict` naming both, and nothing is proposed
+  about it until a person links it: a landed subscription never moves. Held
+  records never land.
+- **Proposals.** The differences in what it holds become proposals (pull.*
+  findings) tagged with the import (`pull_id`): a missed renewal
+  (`adopt_subscription` and `record_charge`), a schedule gone at the
+  provider (`cancel_subscription`), a changed card (`update_card`), and a
+  provider's other price, schedule terms or start (`correct_subscription`).
+  A Stripe price counts once an invoice for it is paid. Unmapped plans,
+  vault moves and pauses are review-only (`pull.subscription.drift`). An
+  NMI roster under a tenth of the PSP's live book fails the import with
+  `pull_roster_implausible` and proposes nothing. `PSPImport.proposals`
+  counts them; `ListProposals` with `pull_id` lists them.
+- **Corrections.** Apply approves, in its requester's name and under one
+  approval run (`openrails undo-run` reverses it), the import's open
+  `record_charge`, `update_card`, renewal and period-end `adopt_subscription`
+  proposals, and `correct_subscription` ones that keep access. Everything
+  else waits for a person: cancels, past due, refunds, revokes, a move to
+  another product's price.
+- **Apply re-reads what changed since the pull.** A record OpenRails came to
+  hold after the pull (a webhook landed it, or a host's book) is held at
+  Apply, not landed twice. One a host's book landed is diffed then, its basis
+  its current row version.
+
+The catalog list is a deletion source too: a complete, non-empty list that
+lacks an object an earlier list held marks it deleted, and seeing it again
+clears that.
+
+An onboarding import applied days after it pulled reads what was true then.
+Apply holds what landed meanwhile; to propose what changed meanwhile, create
+another import right after Apply.
+
+## Provider facts outrank a host's book
+
+Each subscription records whose facts it keeps (`host` or `provider`), one
+way only, from host to provider. A [host's legacy book](batch-import.md)
+lands `host` rows and keeps converging them; it skips a `provider` row
+(reason `provider_authority`) and writes nothing for it: no state, schedule,
+mandate or charge. An import's book lands `provider` rows and skips every row
+OpenRails holds (`held`): its differences are proposals. A row becomes the
+provider's when an Apply reads it unchanged, when a person approves a
+proposal on it, or when a webhook or verification read converges it. So
+provider truth wins in either order: a legacy book after a pull is skipped,
+and a pull after a legacy book corrects it.
 
 ## Observed catalog
 
@@ -126,16 +193,17 @@ need `merchant:config:manage`.
 catalog as OpenRails last observed it: Stripe products and prices, NMI plans
 (as prices), each with `active`, `deleted_at`, `retired`, the provider's
 `terms` (`stated_amount` in major units as the provider states it; NMI names
-no `currency`) and when and how it was observed. Filters: `kind`, `mapped`,
-`retired`, `import`.
+no `currency`) and when and how it was observed. `psp` names the PSP by id
+or key. Filters: `kind`, `mapped`, `retired`, `import`.
 
 OpenRails only observes; it never writes a provider's catalog. A pull lists
 the whole catalog and reads by id what the lists lack: a Stripe price created
 inline on a subscription, an NMI plan gone from the gateway (recorded from
 its subscriptions' copy of it, as deleted), every object a provider price
-binds and every object stored earlier. An object is recorded deleted only
-when the provider answers that it is missing (Stripe `resource_missing`,
-NMI `E_NOT_FOUND`); any other answer leaves it as it was. A gone object never
+binds and every object stored earlier. An object is recorded deleted when
+the provider answers that it is missing (Stripe `resource_missing`, NMI
+`E_NOT_FOUND`), or when a complete list lacks what an earlier list held; any
+other answer leaves it as it was. A gone object never
 observed is recorded from the terms its provider price stores. Reading a
 Stripe price by id reads its product too. The latest observation wins: what
 a pull listed never replaces a later read. A price in a currency OpenRails
@@ -202,7 +270,8 @@ placeholder, and looks the key up `via`:
 | `mapping` | the merchant's mapping named `mapping` |
 | `customer_id` | the key itself, as a customer id |
 
-Without rules an import links by the directory's email.
+Without rules an import takes its PSP's latest import's, else links by the
+directory's email (`billing.DefaultPSPImportRules`).
 
 ```json
 {"psp": {"key": "mobius"},

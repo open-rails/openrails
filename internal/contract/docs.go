@@ -48,7 +48,7 @@ func (m *model) routesMD() []byte {
 	b.WriteString("Error codes are in [error-codes.md](error-codes.md).\n\n")
 	b.WriteString("**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).\n\n")
 	b.WriteString("**Permission** is, for a staff or programmatic route, what its caller holds (`billing.Permissions`): the `merchant:` name in the scope of the merchant the request acts on, or the `root:` name in the Auth's root scope.\n\n")
-	b.WriteString("**Notes**: `when` is the configuration that mounts the route; `sensitive` a customer operation that also needs a recent sign-in; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header; `console only` optional assistance outside the merchant Go client.\n")
+	b.WriteString("**Notes**: `when` is the configuration that mounts the route; `sensitive` a customer operation that also needs a recent sign-in; `person` a merchant operation only a person signed in, or the in-process host, may take; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header; `console only` optional assistance outside the merchant Go client.\n")
 	titled := map[routes.Group]bool{}
 	for _, g := range groupTitles {
 		titled[g.group] = true
@@ -92,6 +92,9 @@ func (m *model) routesMD() []byte {
 			}
 			if r.Sensitive {
 				notes = append(notes, "sensitive")
+			}
+			if r.Person {
+				notes = append(notes, "person")
 			}
 			if r.CatalogUpdate() {
 				notes = append(notes, "catalog update")
