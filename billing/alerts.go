@@ -112,17 +112,23 @@ type UnreadCount struct {
 	UnreadCount int64 `json:"unread_count"`
 }
 
-// WorkerHealth is one background job kind's recent runs, an operator's read
-// (the server's ListWorkerHealth, openrails workers). LastError is the job's
-// error text, which can name any merchant's records.
+// WorkerHealth is one background job kind as River's tables hold it, an
+// operator's read (the server's ListWorkerHealth, openrails workers).
+// LastError is a job's error text, which can name any merchant's records.
 type WorkerHealth struct {
-	WorkerKind            string     `json:"worker_kind"`
-	RegisteredAt          time.Time  `json:"registered_at"`
-	ExpectedPeriodSeconds *int64     `json:"expected_period_seconds"`
-	LastSuccessAt         *time.Time `json:"last_success_at"`
-	LastErrorAt           *time.Time `json:"last_error_at"`
-	LastError             *string    `json:"last_error"`
-	ConsecutiveFailures   int32      `json:"consecutive_failures"`
-	LastAlertedAt         *time.Time `json:"last_alerted_at"`
-	UpdatedAt             time.Time  `json:"updated_at"`
+	Kind string `json:"kind"`
+	// TimeoutSeconds is the kind's budget. PeriodSeconds is its cadence; null
+	// for a kind that runs when queued.
+	TimeoutSeconds int64  `json:"timeout_seconds"`
+	PeriodSeconds  *int64 `json:"period_seconds"`
+	// Overrunning jobs are running past their timeout: River cancels a live
+	// one and rescues one whose process died.
+	Overrunning int64 `json:"overrunning"`
+	Retryable   int64 `json:"retryable"`
+	// Discarded jobs ran out of attempts; River keeps them a week.
+	Discarded int64 `json:"discarded"`
+	// LastCompletedAt is a periodic kind's last completion in this River
+	// schema; a pass leased to another fleet completes in that fleet's.
+	LastCompletedAt *time.Time `json:"last_completed_at"`
+	LastError       *string    `json:"last_error"`
 }

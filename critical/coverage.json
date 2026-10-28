@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 226,
+  "scenario_count": 227,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1132,6 +1132,11 @@
       "id": "OR-J06-S31",
       "journey": "J06",
       "name": "A Dashboard-registered endpoint of a file-declared Stripe PSP is managed, not refused"
+    },
+    {
+      "id": "OR-J04-S41",
+      "journey": "J04",
+      "name": "Job health reads overrunning, discarded and completed jobs from River; the progress probe fails without a leader or on an overrunning job"
     }
   ]
 }

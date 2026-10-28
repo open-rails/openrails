@@ -55,7 +55,6 @@ import (
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
-	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
@@ -252,16 +251,6 @@ type Runtime struct {
 	workerConsumerRunning  atomic.Bool
 	externalRiverClient    bool
 	riverSchema            string // Config.Database.RiverSchema's, or the bound host client's
-
-	// progressLifecycle owns the #895 out-of-River progress detector: a plain
-	// goroutine that answers "is the periodic fleet progressing?" without
-	// needing a job to run to find out.
-	progressLifecycle
-
-	// workerHealthRegs captures every registered worker kind + periodic cadence
-	// for the #689 health checker; lazily built (see workerHealthRegistrations).
-	workerHealthRegs     *riverjobs.WorkerRegistrations
-	workerHealthRegsOnce sync.Once
 	// DeferredDeletes is the SYSTEM-origin deferred NMI-delete scheduler
 	// (issue 216 / #344). Since #358 phase A it enqueues durable
 	// nmi_delete_subscription intents on the provider intent ledger (no River
@@ -347,10 +336,6 @@ func (r *Runtime) Close(ctx context.Context) error {
 	if r.MerchantConfig != nil {
 		defer r.MerchantConfig.Close()
 	}
-
-	// #895: stop the out-of-River progress detector first — it outlives the
-	// River client on purpose, so nothing else will cancel it.
-	r.stopRiverProgressMonitor()
 
 	if r.Verifier != nil {
 		r.Verifier.Close()
@@ -473,8 +458,7 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 }
 
 // StartWorkers starts OpenRails' work and returns once it runs: the River
-// fleet, the non-River loops (the Solana Pay poller) and the River progress
-// monitor. With fleet nil it binds and starts OpenRails' own River client.
+// fleet and the non-River loops (the Solana Pay poller). With fleet nil it binds and starts OpenRails' own River client.
 // Otherwise fleet is the host's client, composed with RiverJobs; the host
 // starts and stops it. ctx bounds the workers' lifetime; stop joins the loops
 // so the host can then stop its fleet and close pools.
@@ -505,7 +489,6 @@ func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx])
 		pollerDone = make(chan struct{})
 		go func() { defer close(pollerDone); r.SolanaPayPoller.Start(loopCtx) }()
 	}
-	r.StartRiverProgressMonitor(ctx)
 	joinLoops := func() {
 		stopLoops()
 		if pollerDone != nil {
@@ -542,7 +525,7 @@ func cancelOnly(ctx context.Context) context.Context {
 }
 
 // SetRiverSchema records the schema the bound River client keeps its tables
-// in, so out-of-client reads (the progress monitor) look in the same place.
+// in, so out-of-client reads (job health, periodic leases) use the same one.
 func (r *Runtime) SetRiverSchema(schema string) {
 	if r == nil {
 		return

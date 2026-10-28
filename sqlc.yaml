@@ -124,6 +124,7 @@ sql:
       - "internal/migrate/postgres/0145_price_migration_push.up.sql"
       - "internal/migrate/postgres/0146_due_pass_recheck.up.sql"
       - "internal/migrate/postgres/0147_rebill_probe_backoff.up.sql"
+      - "internal/migrate/postgres/0150_job_health_from_river.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

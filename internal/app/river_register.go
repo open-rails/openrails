@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/destructive"
@@ -45,16 +46,16 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// One registry feeds every worker that runs intents; IntentRunner builds
 	// the same set, so per-type semantics never diverge.
-	if err := addTrackedWorker(r, workers, &riverjobs.DestructiveAlertWorker{DB: r.DB, Alerts: r.AlertService}); err != nil {
+	if err := addWorker(workers, &riverjobs.DestructiveAlertWorker{DB: r.DB, Alerts: r.AlertService}); err != nil {
 		return fmt.Errorf("add destructive alert worker: %w", err)
 	}
 	intentRegistry := r.buildIntentRegistry(clock)
-	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService}); err != nil {
+	if err := addWorker(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	// Provider refresh: the periodic kind is a scheduler that fans out one
 	// staggered, per-merchant-unique refresh job, skipping merchants with no PSPs.
-	if err := addTrackedWorker(r, workers, &riverjobs.ProviderRefreshSchedulerWorker{
+	if err := addWorker(workers, &riverjobs.ProviderRefreshSchedulerWorker{
 		DB:            r.DB,
 		Config:        r.Config,
 		Clock:         clock,
@@ -73,7 +74,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// The per-merchant body: bounded provider event pulls, the unknown-cohort
 	// reconcile (the one per-subscription verification path), CCBill DataLink,
 	// and scoped convergence after refresh writes.
-	if err := addTrackedWorker(r, workers, &riverjobs.ProviderRefreshWorker{
+	if err := addWorker(workers, &riverjobs.ProviderRefreshWorker{
 		StripeClients: r.StripeClients,
 		DB:            r.DB,
 		Config:        r.Config,
@@ -112,7 +113,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return err
 	}
 	cleanupConfig.EventRetention = eventRetention
-	if err := addTrackedWorker(r, workers, &riverjobs.CleanupExpiredDataWorker{
+	if err := addWorker(workers, &riverjobs.CleanupExpiredDataWorker{
 		DB:     r.DB,
 		Clock:  clock,
 		Config: cleanupConfig,
@@ -122,21 +123,21 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// Stored cards a vault must be asked about: one refresh per card, queued on
 	// an expired or reissued decline and ahead of each renewal.
 	updaters, _ := r.CollectionResolver.(paymentmethods.AccountUpdaters)
-	if err := addTrackedWorker(r, workers, &riverjobs.StoredCardRefreshWorker{DB: r.DB, Clock: clock, Updaters: updaters, Intents: r.intentRunner(intentRegistry, clock), Lifecycle: r.SubscriptionLifecycleService}); err != nil {
+	if err := addWorker(workers, &riverjobs.StoredCardRefreshWorker{DB: r.DB, Clock: clock, Updaters: updaters, Intents: r.intentRunner(intentRegistry, clock), Lifecycle: r.SubscriptionLifecycleService}); err != nil {
 		return fmt.Errorf("add stored card refresh worker: %w", err)
 	}
-	if err := addTrackedWorker(r, workers, &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture()}); err != nil {
+	if err := addWorker(workers, &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture()}); err != nil {
 		return fmt.Errorf("add stored card refresh pass worker: %w", err)
 	}
-	if err := addTrackedWorker(r, workers, &riverjobs.BalanceWatchWorker{DB: r.DB, Money: r.MoneyService}); err != nil {
+	if err := addWorker(workers, &riverjobs.BalanceWatchWorker{DB: r.DB, Money: r.MoneyService}); err != nil {
 		return fmt.Errorf("add balance watch worker: %w", err)
 	}
-	if err := addTrackedWorker(r, workers, &riverjobs.OrderExpiryWorker{DB: r.DB, Orders: r.Orders, Clock: clock}); err != nil {
+	if err := addWorker(workers, &riverjobs.OrderExpiryWorker{DB: r.DB, Orders: r.Orders, Clock: clock}); err != nil {
 		return fmt.Errorf("add order expiry worker: %w", err)
 	}
 	// Flushes closed hours of the Redis admission-denial counters to PG.
 	// Redis may be nil (no-admission deployments); the worker no-ops then.
-	if err := addTrackedWorker(r, workers, &riverjobs.AdmissionDenialFlushWorker{
+	if err := addWorker(workers, &riverjobs.AdmissionDenialFlushWorker{
 		DB:    r.DB,
 		Redis: r.RedisClient,
 		Clock: clock,
@@ -145,7 +146,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// Converge sweep: reconcile.Converge for every active merchant, catching
 	// drift no inline mutation touched.
-	if err := addTrackedWorker(r, workers, &riverjobs.ConvergeSweepWorker{
+	if err := addWorker(workers, &riverjobs.ConvergeSweepWorker{
 		DB:     r.DB,
 		Config: r.Config,
 		Clock:  clock,
@@ -154,14 +155,14 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add converge sweep worker: %w", err)
 	}
 	// Accepted operations carry their own durable River lifecycle job.
-	if err := addTrackedWorker(r, workers, &riverjobs.ProviderOperationWorker{
+	if err := addWorker(workers, &riverjobs.ProviderOperationWorker{
 		DB: r.DB, Config: r.Config, Clock: clock, Runner: r.intentRunner(intentRegistry, clock),
 	}); err != nil {
 		return fmt.Errorf("add provider operation worker: %w", err)
 	}
 	// Webhook wake-ups: the coalesced per-subscription fetch-and-converge job
 	// the Stripe/NMI subscription-state handlers enqueue.
-	if err := addTrackedWorker(r, workers, &riverjobs.SubscriptionConvergeWorker{
+	if err := addWorker(workers, &riverjobs.SubscriptionConvergeWorker{
 		StripeClients:                r.StripeClients,
 		DB:                           r.DB,
 		Config:                       r.Config,
@@ -183,32 +184,32 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add subscription converge worker: %w", err)
 	}
 	// Each NMI PSP's own history, as monthly aggregates.
-	if err := addTrackedWorker(r, workers, &riverjobs.NMIHistoryWorker{
+	if err := addWorker(workers, &riverjobs.NMIHistoryWorker{
 		DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver,
 	}); err != nil {
 		return fmt.Errorf("add nmi history worker: %w", err)
 	}
 	// Catalog objects a Stripe event announced, read by id.
-	if err := addTrackedWorker(r, workers, &riverjobs.ProviderObjectObserveWorker{Objects: r.ProviderObjects}); err != nil {
+	if err := addWorker(workers, &riverjobs.ProviderObjectObserveWorker{Objects: r.ProviderObjects}); err != nil {
 		return fmt.Errorf("add provider object observe worker: %w", err)
 	}
 	// PSP imports: a read-only pull of a PSP, then its landing.
-	if err := addTrackedWorker(r, workers, &riverjobs.PSPImportWorker{Importer: r.PSPImporter}); err != nil {
+	if err := addWorker(workers, &riverjobs.PSPImportWorker{Importer: r.PSPImporter}); err != nil {
 		return fmt.Errorf("add psp import worker: %w", err)
 	}
 	// Declared charges without an amount, read from their provider once.
-	if err := addTrackedWorker(r, workers, &riverjobs.ChargeAttributionWorker{
+	if err := addWorker(workers, &riverjobs.ChargeAttributionWorker{
 		DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver, Rails: r.RailConfigs,
 	}); err != nil {
 		return fmt.Errorf("add charge attribution worker: %w", err)
 	}
 	// Rebills that never happened are recorded as missed.
-	if err := addTrackedWorker(r, workers, &riverjobs.RebillWatchWorker{
+	if err := addWorker(workers, &riverjobs.RebillWatchWorker{
 		DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService,
 	}); err != nil {
 		return fmt.Errorf("add rebill watch worker: %w", err)
 	}
-	if err := addTrackedWorker(r, workers, &riverjobs.StripeWebhookReconcileWorker{
+	if err := addWorker(workers, &riverjobs.StripeWebhookReconcileWorker{
 		StripeClients: r.StripeClients,
 		DB:            r.DB,
 		Config:        r.Config,
@@ -217,12 +218,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}
 	// A merchant purge's Vault cleanup, queued with the purge.
-	if err := addTrackedWorker(r, workers, &riverjobs.MerchantSecretCleanupWorker{Merchants: r.Merchants}); err != nil {
+	if err := addWorker(workers, &riverjobs.MerchantSecretCleanupWorker{Merchants: r.Merchants}); err != nil {
 		return fmt.Errorf("add merchant secret cleanup worker: %w", err)
 	}
 	// Usage orders: billing, notices and collection, which waits until an
 	// off-session charger is configured.
-	if err := addTrackedWorker(r, workers, &riverjobs.UsageOrderWorker{
+	if err := addWorker(workers, &riverjobs.UsageOrderWorker{
 		DB:      r.DB,
 		Money:   r.MoneyService,
 		Intents: r.intentRunner(intentRegistry, clock),
@@ -231,7 +232,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add usage order worker: %w", err)
 	}
-	if err := addTrackedWorker(r, workers, &riverjobs.DelinquencyWorker{
+	if err := addWorker(workers, &riverjobs.DelinquencyWorker{
 		DB:    r.DB,
 		Clock: clock,
 	}); err != nil {
@@ -247,11 +248,25 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 			Intents:  r.intentRunner(intentRegistry, clock),
 			Balances: r.SolanaCrankerBalances,
 		}
-		if err := addTrackedWorker(r, workers, solanaCrankWorker); err != nil {
+		if err := addWorker(workers, solanaCrankWorker); err != nil {
 			return fmt.Errorf("add solana cranker worker: %w", err)
 		}
 	}
 	return nil
+}
+
+// addWorker registers an OpenRails worker. Its timeout is its kind's budget,
+// which job health reads; the client's JobTimeout is the host's.
+func addWorker[T river.JobArgs](workers *river.Workers, worker river.Worker[T]) error {
+	var args T
+	want := riverjobs.Timeout(args.Kind())
+	if want == 0 {
+		return fmt.Errorf("%s is not an OpenRails job kind", args.Kind())
+	}
+	if got := worker.Timeout(&river.Job[T]{JobRow: &rivertype.JobRow{Kind: args.Kind()}}); got != want {
+		return fmt.Errorf("%s: timeout %s is not its kind's budget %s", args.Kind(), got, want)
+	}
+	return river.AddWorkerSafely(workers, worker)
 }
 
 // buildIntentRegistry registers the handler of every provider intent type.

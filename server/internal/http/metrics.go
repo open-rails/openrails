@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
-	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
 // PrivateHandler is the operator's private surface, never the public one:
@@ -45,8 +44,8 @@ func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	var workers []billing.WorkerHealth
 	if runtime != nil && runtime.DB != nil {
 		var err error
-		if workers, err = riverjobs.ListWorkerHealth(ctx, runtime.DB); err != nil {
-			log.WithError(err).Warn("metrics: worker health")
+		if workers, err = runtime.ListWorkerHealth(ctx); err != nil {
+			log.WithError(err).Warn("metrics: job health")
 		}
 	}
 	writeMetrics(w, deps, abuse, workers)
@@ -75,16 +74,24 @@ func writeMetrics(w http.ResponseWriter, deps []app.ReadinessDependency, abuse *
 	if len(workers) == 0 {
 		return
 	}
-	_, _ = fmt.Fprintln(w, "# HELP openrails_worker_consecutive_failures Failed runs of a job kind since its last success.")
-	_, _ = fmt.Fprintln(w, "# TYPE openrails_worker_consecutive_failures gauge")
-	for _, h := range workers {
-		_, _ = fmt.Fprintf(w, "openrails_worker_consecutive_failures{kind=%q} %d\n", h.WorkerKind, h.ConsecutiveFailures)
+	for _, gauge := range []struct {
+		name, help string
+		value      func(billing.WorkerHealth) int64
+	}{
+		{"openrails_job_overrunning", "Jobs of a kind running past their timeout.", func(h billing.WorkerHealth) int64 { return h.Overrunning }},
+		{"openrails_job_retryable", "Jobs of a kind waiting to retry after an error.", func(h billing.WorkerHealth) int64 { return h.Retryable }},
+		{"openrails_job_discarded", "Jobs of a kind that ran out of attempts (River keeps them a week).", func(h billing.WorkerHealth) int64 { return h.Discarded }},
+	} {
+		_, _ = fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n", gauge.name, gauge.help, gauge.name)
+		for _, h := range workers {
+			_, _ = fmt.Fprintf(w, "%s{kind=%q} %d\n", gauge.name, h.Kind, gauge.value(h))
+		}
 	}
-	_, _ = fmt.Fprintln(w, "# HELP openrails_worker_last_success_timestamp_seconds When a job kind last succeeded (Unix seconds; absent: never).")
-	_, _ = fmt.Fprintln(w, "# TYPE openrails_worker_last_success_timestamp_seconds gauge")
+	_, _ = fmt.Fprintln(w, "# HELP openrails_job_last_completed_timestamp_seconds When a periodic job kind last completed (Unix seconds; absent: never).")
+	_, _ = fmt.Fprintln(w, "# TYPE openrails_job_last_completed_timestamp_seconds gauge")
 	for _, h := range workers {
-		if h.LastSuccessAt != nil {
-			_, _ = fmt.Fprintf(w, "openrails_worker_last_success_timestamp_seconds{kind=%q} %d\n", h.WorkerKind, h.LastSuccessAt.Unix())
+		if h.LastCompletedAt != nil {
+			_, _ = fmt.Fprintf(w, "openrails_job_last_completed_timestamp_seconds{kind=%q} %d\n", h.Kind, h.LastCompletedAt.Unix())
 		}
 	}
 }

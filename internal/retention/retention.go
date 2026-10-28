@@ -62,8 +62,8 @@ const (
 	// MetricCounters keeps an hourly admission-denial count and a daily
 	// webhook-health count 13 months: a month is compared with a year before.
 	MetricCounters = 397 * Day
-	// OrphanState keeps the deployment-global lease and worker state of a
-	// kind no fleet has scheduled, registered or run for 30 days.
+	// OrphanState keeps the deployment-global lease of a periodic kind no
+	// fleet has scheduled for 30 days.
 	OrphanState = 30 * Day
 	// MeterPeriodQuantities keeps a customer's meter quantity for a billing
 	// period 100 days past the period's start: a month plus the ingest window.

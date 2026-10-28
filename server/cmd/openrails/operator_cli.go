@@ -210,20 +210,24 @@ func newWorkersCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "workers",
-		Short: "Each background job kind's recent runs, with its last error",
+		Short: "Each background job kind as River holds it: overrunning, retrying and discarded jobs, last completion and newest error",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
-				health, err := riverjobs.ListWorkerHealth(ctx, database)
+				health, err := riverjobs.ReadHealth(ctx, database.Pool(), config.RiverSchemaName(cfg))
 				if err != nil {
 					return err
 				}
 				if asJSON {
-					return printJSON(cmd.OutOrStdout(), health)
+					return printJSON(cmd.OutOrStdout(), health.Kinds)
+				}
+				if health.LeaderElectedAt == nil {
+					fmt.Fprintln(cmd.OutOrStdout(), "No River leader: periodic passes and crash rescue are not running.")
 				}
 				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-				fmt.Fprintln(tw, "KIND\tLAST SUCCESS\tFAILURES\tLAST ERROR")
-				for _, h := range health {
+				fmt.Fprintln(tw, "KIND\tLAST COMPLETED\tOVERRUNNING\tRETRYABLE\tDISCARDED\tLAST ERROR")
+				for _, h := range health.Kinds {
 					last := ""
 					if h.LastError != nil {
 						last = strings.Join(strings.Fields(*h.LastError), " ")
@@ -231,7 +235,11 @@ func newWorkersCmd() *cobra.Command {
 							last = last[:117] + "..."
 						}
 					}
-					fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", h.WorkerKind, when(h.LastSuccessAt), h.ConsecutiveFailures, last)
+					completed := "-"
+					if h.PeriodSeconds != nil {
+						completed = when(h.LastCompletedAt)
+					}
+					fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%s\n", h.Kind, completed, h.Overrunning, h.Retryable, h.Discarded, last)
 				}
 				return tw.Flush()
 			})

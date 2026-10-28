@@ -203,9 +203,10 @@ Composing `RiverJobs` into a fleet in another schema is refused. Once
 `RiverJobs` went to a fleet, `Start` without `WithRiverClient` is refused, and
 `WithRiverClient` refuses a fleet built without this engine's `RiverJobs`; a
 second `Start` is refused too. Cancelling `Start`'s context stops nothing:
-`Close` stops what `Start` started; close the engine before the pool. OpenRails
-also watches the fleet from outside River: `openrails_job_progress` fails while
-it is stalled.
+`Close` stops what `Start` started; close the engine before the pool. The
+`openrails_job_progress` probe reads River's tables: it fails while your River
+schema has no leader, an OpenRails job runs past its timeout, or a periodic
+pass your fleet queues has not completed within two periods and its timeout.
 
 **Several hosts, one database.** Hosts that embed OpenRails on one database
 declare the same merchants in `Config.Merchants`: whichever host runs a pass
@@ -629,7 +630,7 @@ dunning, the intents ledger), [billing-policies.md](billing-policies.md)
 
 
 OpenRails serves no team or API-key routes: the host owns its identity and
-team UI. Worker health is the engine's `Probes` (`openrails_job_progress`).
+team UI. Job health is the engine's `Probes` (`openrails_job_progress`).
 
 ### Merchant purchase authority
 

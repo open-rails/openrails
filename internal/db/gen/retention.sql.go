@@ -218,34 +218,11 @@ type DeleteOrphanPeriodicLeasesParams struct {
 	RowLimit      int32
 }
 
-// Deployment-global state of a periodic or worker kind no fleet has
-// scheduled, registered or run for the period: a kind since removed. A lease
-// that expired is free either way, so deleting one never races a claim.
+// The lease of a periodic kind no fleet has scheduled for the period: a kind
+// since removed. A lease that expired is free either way, so deleting one
+// never races a claim.
 func (q *Queries) DeleteOrphanPeriodicLeases(ctx context.Context, arg DeleteOrphanPeriodicLeasesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteOrphanPeriodicLeases, arg.RetentionDays, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const deleteOrphanWorkerState = `-- name: DeleteOrphanWorkerState :execrows
-DELETE FROM billing.worker_state
-WHERE worker_kind IN (
-    SELECT s.worker_kind FROM billing.worker_state s
-    WHERE s.updated_at < now() - make_interval(days => $1::int)
-    ORDER BY s.worker_kind
-    LIMIT $2::int
-)
-`
-
-type DeleteOrphanWorkerStateParams struct {
-	RetentionDays int32
-	RowLimit      int32
-}
-
-func (q *Queries) DeleteOrphanWorkerState(ctx context.Context, arg DeleteOrphanWorkerStateParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteOrphanWorkerState, arg.RetentionDays, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}

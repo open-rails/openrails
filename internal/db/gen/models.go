@@ -2040,23 +2040,3 @@ type BillingWebhookHealthDaily struct {
 	Rejected    int64
 	Drift       int64
 }
-
-// Global by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields; every fleet's registration touches updated_at, and a kind none has touched for 30 days is deleted. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.
-type BillingWorkerState struct {
-	WorkerKind       string
-	CursorMerchantID *uuid.UUID
-	// Opaque compare-and-swap token for fair-sweep cursor saves: +1 per applied save, never touched by health writes, independent of any clock.
-	CursorVersion int64
-	// First time this kind was seeded (deploy that introduced it) — anchors the never-succeeded-since-deploy alert.
-	RegisteredAt time.Time
-	// Declared periodic cadence captured at registration; NULL/0 = on-demand kind (no staleness alerting).
-	ExpectedPeriodSeconds *int64
-	LastSuccessAt         *time.Time
-	LastErrorAt           *time.Time
-	// Most recent work error, truncated by the writer.
-	LastError           *string
-	ConsecutiveFailures int32
-	// When the health checker last raised a repair alert for this kind (dedup/re-alert pacing).
-	LastAlertedAt *time.Time
-	UpdatedAt     time.Time
-}

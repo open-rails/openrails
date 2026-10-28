@@ -140,7 +140,6 @@ type CleanupResult struct {
 	IdempotencyKeys            int64
 	SolanaPayReferences        int64
 	PeriodicLeases             int64
-	WorkerStates               int64
 	NotificationsSeen          int64
 	NotificationsAll           int64
 	WebhookEvents              int64
@@ -172,8 +171,8 @@ type CleanupResult struct {
 
 // Work is the one retention owner. A pass's first job runs the
 // deployment-wide sweeps (event log, notification journal, reservations,
-// partitions, carts, idempotency keys, Solana Pay references, orphan leases
-// and worker state); every job then runs each retention sweep once per
+// partitions, carts, idempotency keys, Solana Pay references and orphan
+// leases); every job then runs each retention sweep once per
 // merchant with due work, inside that merchant's scope and with the merchant
 // predicate in the SQL:
 //
@@ -270,7 +269,6 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 		"idempotency_keys":             result.IdempotencyKeys,
 		"solana_pay_references":        result.SolanaPayReferences,
 		"periodic_leases":              result.PeriodicLeases,
-		"worker_states":                result.WorkerStates,
 		"notification_events":          result.NotificationEvents,
 		"event_log":                    result.EventLog,
 		"notifications_seen":           result.NotificationsSeen,
@@ -389,9 +387,6 @@ func (w CleanupExpiredDataWorker) sweepDeployment(ctx context.Context, now time.
 	})
 	global("delete orphan periodic leases", &result.PeriodicLeases, func(limit int32) (int64, error) {
 		return directory.DeleteOrphanPeriodicLeases(ctx, gen.DeleteOrphanPeriodicLeasesParams{RetentionDays: retention.Days(retention.OrphanState), RowLimit: limit})
-	})
-	global("delete orphan worker state", &result.WorkerStates, func(limit int32) (int64, error) {
-		return directory.DeleteOrphanWorkerState(ctx, gen.DeleteOrphanWorkerStateParams{RetentionDays: retention.Days(retention.OrphanState), RowLimit: limit})
 	})
 }
 

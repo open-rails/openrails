@@ -1,9 +1,15 @@
 package riverjobs
 
 import (
+	"slices"
 	"time"
 
 	"github.com/riverqueue/river"
+
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 )
 
 // DefaultTimeout is an OpenRails job's budget: River cancels the job past it,
@@ -15,27 +21,46 @@ const DefaultTimeout = 10 * time.Minute
 // a long pass is never rescued while it runs inside its budget.
 const RescueAfter = 10 * time.Minute
 
-// longTimeouts are the passes that read every merchant's providers, or a
-// whole PSP, and the stored-card pass, whose own budget is 10 minutes.
-var longTimeouts = map[string]time.Duration{
-	KindStoredCardRefreshDue:    time.Hour,
-	KindCleanupExpiredData:      time.Hour,
-	KindProviderRefreshMerchant: time.Hour,
-	KindConvergeSweep:           time.Hour,
-	KindRebillWatch:             time.Hour,
-	KindChargeAttributions:      time.Hour,
-	KindNMIHistory:              time.Hour,
-	KindStripeWebhookReconcile:  time.Hour,
-	KindSolanaCrank:             time.Hour,
-	KindPSPImport:               2 * time.Hour,
+// kinds are OpenRails' job kinds and their timeouts: an hour for the passes
+// that read every merchant's providers, and for the stored-card pass, whose
+// own budget is 10 minutes; two for a PSP import.
+var kinds = map[string]time.Duration{
+	KindDunning:                          DefaultTimeout,
+	KindBalanceWatch:                     DefaultTimeout,
+	KindOrderExpiry:                      DefaultTimeout,
+	money.KindUsageOrders:                DefaultTimeout,
+	KindDelinquency:                      DefaultTimeout,
+	KindAdmissionDenialFlush:             DefaultTimeout,
+	KindProviderRefresh:                  DefaultTimeout,
+	KindSubscriptionConverge:             DefaultTimeout,
+	KindProviderObjectObserve:            DefaultTimeout,
+	DestructiveAlertArgs{}.Kind():        DefaultTimeout,
+	intents.OperationJobKind:             DefaultTimeout,
+	paymentmethods.KindStoredCardRefresh: DefaultTimeout,
+	merchants.SecretCleanupArgs{}.Kind(): DefaultTimeout,
+	KindStoredCardRefreshDue:             time.Hour,
+	KindCleanupExpiredData:               time.Hour,
+	KindProviderRefreshMerchant:          time.Hour,
+	KindConvergeSweep:                    time.Hour,
+	KindRebillWatch:                      time.Hour,
+	KindChargeAttributions:               time.Hour,
+	KindNMIHistory:                       time.Hour,
+	KindStripeWebhookReconcile:           time.Hour,
+	KindSolanaCrank:                      time.Hour,
+	KindPSPImport:                        2 * time.Hour,
 }
 
-// Timeout is kind's budget.
-func Timeout(kind string) time.Duration {
-	if d, ok := longTimeouts[kind]; ok {
-		return d
+// Timeout is kind's budget; zero for a kind that is not OpenRails'.
+func Timeout(kind string) time.Duration { return kinds[kind] }
+
+// Kinds are OpenRails' job kinds, sorted.
+func Kinds() []string {
+	out := make([]string, 0, len(kinds))
+	for kind := range kinds {
+		out = append(out, kind)
 	}
-	return DefaultTimeout
+	slices.Sort(out)
+	return out
 }
 
 // WorkerDefaults is River's, with the kind's budget as the job's timeout:

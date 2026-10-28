@@ -34,3 +34,34 @@ func (q *Queries) ClaimPeriodicLease(ctx context.Context, arg ClaimPeriodicLease
 	}
 	return result.RowsAffected(), nil
 }
+
+const listPeriodicLeasesHeldElsewhere = `-- name: ListPeriodicLeasesHeldElsewhere :many
+SELECT kind FROM billing.periodic_leases
+WHERE kind = ANY($1::text[]) AND holder <> $2::text AND expires_at > now()
+`
+
+type ListPeriodicLeasesHeldElsewhereParams struct {
+	Kinds  []string
+	Holder string
+}
+
+// The kinds whose live lease another fleet holds.
+func (q *Queries) ListPeriodicLeasesHeldElsewhere(ctx context.Context, arg ListPeriodicLeasesHeldElsewhereParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listPeriodicLeasesHeldElsewhere, arg.Kinds, arg.Holder)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var kind string
+		if err := rows.Scan(&kind); err != nil {
+			return nil, err
+		}
+		items = append(items, kind)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

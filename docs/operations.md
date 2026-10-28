@@ -849,8 +849,7 @@ disappears. Two safety doctrines matter operationally:
 - **Operational problems** outside the sweep are findings too:
   `consistency.ledger.unbooked` (a provider event OpenRails could not book; the
   merchant repairs the ledger and resolves the finding) and
-  `life.worker.stalled` (a periodic job kind stopped completing; it resolves
-  itself when the kind progresses) and `life.solana.cranker_low_gas` (a crank
+  `life.solana.cranker_low_gas` (a crank
   pass that signed found its cranker wallet below 0.05 SOL; the next signing
   pass that finds it funded resolves it). The findings queue is the one merchant
   inbox, and its counts are metrics measures (`open_findings`,
@@ -1131,7 +1130,7 @@ Row retention:
 | `failed_usage_windows` | once the window has ended |
 | `meter_period_quantities` | 100 days after `period_starts_at` |
 | `admission_denials_hourly`, `webhook_health_daily` | 13 months (397 days) after the hour or day |
-| `periodic_leases`, `worker_state` | a kind no fleet has scheduled, registered or run for 30 days |
+| `periodic_leases` | a kind no fleet has scheduled for 30 days |
 
 What is kept on purpose:
 
@@ -1255,14 +1254,10 @@ It is not scheduled by subscription-only hosts. Merchants configure their
 date across restarts and supports minimum-amount carryover. Explicit manual
 invoice operations remain available independently. See [usage billing](usage-billing.md).
 
-The health checker seeds `billing.worker_state` and raises a critical
-`life.worker.stalled` finding in every merchant when a periodic kind stops
-completing; the finding resolves itself when the kind progresses again. Its per-kind rows are written
-monotonically: job completions of one kind reach the row in any order, so a
-late write can only add what is newer (timestamps never move back, the error
-text is the newest failure's, a success resets the failure streak only when no
-newer failure is recorded, and a failure counts only when no newer success is
-recorded — the streak can over-count after reordering, never under-count).
+Job health is a read of River's own tables (`openrails workers`, the server's
+`ListWorkerHealth`, `/metrics`, the `openrails_job_progress` probe): per kind,
+jobs running past their timeout, waiting to retry and discarded, a periodic
+kind's last completion and the newest error. OpenRails stores none of it.
 
 A pass bounded per job (retention cleanup's 200 merchants, a merchant's 200
 due usage accounts) continues in a new job after the last one it handled, so

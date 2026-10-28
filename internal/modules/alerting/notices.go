@@ -19,9 +19,6 @@ const (
 	// FindingLedgerUnbooked is a provider event OpenRails could not book; the
 	// merchant repairs the ledger by hand and resolves the finding.
 	FindingLedgerUnbooked reconcile.FindingType = "consistency.ledger.unbooked"
-	// FindingWorkerStalled is background work that stopped progressing. It
-	// resolves itself when the work progresses again.
-	FindingWorkerStalled reconcile.FindingType = "life.worker.stalled"
 	// FindingSolanaCrankerLowGas is a Solana cranker wallet low on the SOL its
 	// pulls pay fees with. It resolves itself once a pull pass finds it funded.
 	FindingSolanaCrankerLowGas reconcile.FindingType = "life.solana.cranker_low_gas"
@@ -102,43 +99,6 @@ func RecordLedgerRepair(ctx context.Context, database *db.DB, now time.Time, rep
 		return fmt.Errorf("ledger repair: %w", err)
 	}
 	return nil
-}
-
-// WorkerStall is background work that stopped progressing. It names the job
-// kind and the reason, never the job's error text, which can name another
-// merchant's records.
-type WorkerStall struct {
-	WorkerKind string
-	Reason     string
-	Metadata   map[string]any
-}
-
-// RecordWorkerStall raises a life.worker.stalled finding for the worker kind.
-func RecordWorkerStall(ctx context.Context, database *db.DB, now time.Time, stall WorkerStall) error {
-	if database == nil {
-		return fmt.Errorf("worker stall: database is required")
-	}
-	evidence := map[string]any{"worker_kind": stall.WorkerKind, "reason": stall.Reason, "fired_at": now.UTC().Format(time.RFC3339)}
-	if len(stall.Metadata) > 0 {
-		evidence["metadata"] = stall.Metadata
-	}
-	if _, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
-		Type: FindingWorkerStalled, SubjectKey: stall.WorkerKind, Severity: reconcile.SeverityCritical,
-		RecommendedAction: fmt.Sprintf("%s is not progressing: %s. It resolves itself when the work progresses again.", stall.WorkerKind, stall.Reason),
-		Evidence:          evidence,
-	}); err != nil {
-		return fmt.Errorf("worker stall: %w", err)
-	}
-	return nil
-}
-
-// ResolveWorkerStall resolves the worker kind's stall finding once its work
-// progresses again.
-func ResolveWorkerStall(ctx context.Context, database *db.DB, workerKind string) error {
-	if database == nil {
-		return fmt.Errorf("worker stall: database is required")
-	}
-	return (&reconcile.PGStore{DB: database}).ResolveRaisedFinding(ctx, FindingWorkerStalled, workerKind)
 }
 
 // CrankerGas is one Solana cranker wallet's SOL balance on a merchant's PSP.

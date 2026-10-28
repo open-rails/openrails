@@ -8,3 +8,8 @@ VALUES (sqlc.arg(kind)::text, sqlc.arg(holder)::text, now() + make_interval(secs
 ON CONFLICT (kind) DO UPDATE
 SET holder = EXCLUDED.holder, expires_at = EXCLUDED.expires_at, claimed_at = now()
 WHERE billing.periodic_leases.holder = EXCLUDED.holder OR billing.periodic_leases.expires_at <= now();
+
+-- name: ListPeriodicLeasesHeldElsewhere :many
+-- The kinds whose live lease another fleet holds.
+SELECT kind FROM billing.periodic_leases
+WHERE kind = ANY(sqlc.arg(kinds)::text[]) AND holder <> sqlc.arg(holder)::text AND expires_at > now();

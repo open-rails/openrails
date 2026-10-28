@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -135,6 +136,67 @@ func TestBackgroundJobs(t *testing.T) {
 			t.Fatal("River's rescuer never returned the host's crashed job to work")
 		}
 	})
+	t.Run("OR-J04-S41/job-health-reads-overrunning-discarded-and-completed-jobs-from-river", func(t *testing.T) {
+		w := newWorld(t)
+		// A long rescue window keeps the overrunning job running.
+		fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema, RescueStuckJobsAfter: 2 * time.Hour,
+			Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}}}, w.engine.RiverJobs())
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			require.NoError(t, fleet.StopAndCancel(ctx))
+		})
+		fleet.PeriodicJobs().Clear()
+		var progress func(context.Context) error
+		for _, p := range w.engine.Probes() {
+			if p.Name == "openrails_job_progress" {
+				progress = p.Check
+			}
+		}
+		require.NotNil(t, progress)
+		require.ErrorContains(t, progress(t.Context()), "no River leader", "nothing schedules or rescues jobs before the fleet starts")
+
+		jobs := pgx.Identifier{w.schema, "river_job"}.Sanitize()
+		insert := func(kind, set string) {
+			job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: openrails.QueueBilling})
+			require.NoError(t, err)
+			_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET attempt=1, "+set+" WHERE id=$1", job.Job.ID)
+			require.NoError(t, err)
+		}
+		insert("openrails.order_expiry", "state='running', attempted_at=now()-interval '11 minutes', attempted_by=ARRAY['stuck']")
+		insert("openrails.balance_watch", "state='discarded', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute', "+
+			"errors=ARRAY[jsonb_build_object('at', now(), 'attempt', 1, 'error', 'critical: the pass failed', 'trace', '')]")
+		insert("openrails.rebill_watch", "state='completed', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute'")
+
+		var kinds []billing.WorkerHealth
+		require.NoError(t, json.Unmarshal([]byte(hostCLI(t, w, "workers", "--json")), &kinds))
+		health := map[string]billing.WorkerHealth{}
+		for _, k := range kinds {
+			health[k.Kind] = k
+		}
+		require.EqualValues(t, 1, health["openrails.order_expiry"].Overrunning)
+		require.EqualValues(t, 600, health["openrails.order_expiry"].TimeoutSeconds)
+		require.EqualValues(t, 1, health["openrails.balance_watch"].Discarded)
+		require.NotNil(t, health["openrails.balance_watch"].LastError)
+		require.Equal(t, "critical: the pass failed", *health["openrails.balance_watch"].LastError)
+		require.NotNil(t, health["openrails.rebill_watch"].LastCompletedAt)
+		require.NotNil(t, health["openrails.rebill_watch"].PeriodSeconds)
+		require.EqualValues(t, 900, *health["openrails.rebill_watch"].PeriodSeconds)
+		require.Contains(t, health, "openrails.provider_operation")
+		require.Nil(t, health["openrails.provider_operation"].PeriodSeconds, "an operation runs when queued")
+		require.Zero(t, health["openrails.cleanup_expired_data"].Overrunning)
+
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		require.Eventually(t, func() bool {
+			err := progress(t.Context())
+			return err != nil && strings.Contains(err.Error(), "openrails.order_expiry has 1 jobs running past their 10m0s timeout")
+		}, 20*time.Second, 50*time.Millisecond, "the probe names the job running past its timeout")
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET state='completed', finalized_at=now() WHERE kind='openrails.order_expiry'")
+		require.NoError(t, err)
+		require.NoError(t, progress(t.Context()), "a fresh leader and no overrunning job")
+	})
 	t.Run("OR-J23-S06/denials-count-each-closed-hour-once", func(t *testing.T) {
 		w := newWorld(t, func(w *world) { w.deps.Redis = criticalRedis(t) })
 		customer := billing.CustomerID(uuid.New())
@@ -212,17 +274,15 @@ func TestBackgroundJobs(t *testing.T) {
 		denied, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, billing.CustomerID(uuid.New()), "denied", 500)})
 		require.NoError(t, err)
 		require.False(t, denied[0].Allowed())
-		// The deployment-global state of a kind no fleet runs any more.
+		// The lease of a periodic kind no fleet runs any more.
 		orphans := func() int {
 			var n int
-			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM "+pgx.Identifier{w.schema, "periodic_leases"}.Sanitize()+" WHERE kind = 'openrails.retired') + (SELECT count(*) FROM "+pgx.Identifier{w.schema, "worker_state"}.Sanitize()+" WHERE worker_kind = 'openrails.retired')").Scan(&n))
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "periodic_leases"}.Sanitize()+" WHERE kind = 'openrails.retired'").Scan(&n))
 			return n
 		}
 		_, err = w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "periodic_leases"}.Sanitize()+" (kind, holder, expires_at) VALUES ('openrails.retired', 'gone', now() - interval '31 days')")
 		require.NoError(t, err)
-		_, err = w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "worker_state"}.Sanitize()+" (worker_kind, updated_at) VALUES ('openrails.retired', now() - interval '31 days')")
-		require.NoError(t, err)
-		require.Equal(t, 2, orphans())
+		require.Equal(t, 1, orphans())
 
 		w.clock.Advance(25 * time.Hour)
 		runRegistered(t, fleet, "openrails.admission_denial_flush", 1)

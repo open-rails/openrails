@@ -31,11 +31,5 @@ func (e *Engine) Probes() []Probe {
 		Probe{Name: "openrails_psp_posture", Check: func(context.Context) error { return rt.PostureState() }},
 		Probe{Name: "openrails_configuration", Check: func(context.Context) error { return rt.RefusalState() }},
 		Probe{Name: "openrails_solana_crankers", Check: rt.SolanaCrankersCheck},
-		Probe{Name: "openrails_job_progress", Check: func(ctx context.Context) error {
-			report, err := rt.RiverProgress(ctx)
-			if err != nil {
-				return err
-			}
-			return report.Err()
-		}})
+		Probe{Name: "openrails_job_progress", Check: rt.JobProgress})
 }

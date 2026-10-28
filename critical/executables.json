@@ -728,6 +728,9 @@
     ],
     "OR-J12-S30": [
       "TestStoredCardRefresh/OR-J12-S30/marked-cards-never-starve-a-planned-check"
+    ],
+    "OR-J04-S41": [
+      "TestBackgroundJobs/OR-J04-S41/job-health-reads-overrunning-discarded-and-completed-jobs-from-river"
     ]
   },
   "suites": {

@@ -5,17 +5,16 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
-	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
 // Operator operations with no HTTP route: the openrails CLI calls them, and a
 // hosted product may build its own operator pages on them.
 
-// ListWorkerHealth is every background job kind's recent runs, with the
-// verbatim error text, which can name any merchant's records. The private
-// listener's /metrics carries the same as gauges.
+// ListWorkerHealth is each background job kind as River's tables hold it,
+// with the verbatim error text, which can name any merchant's records. The
+// private listener's /metrics carries the same as gauges.
 func (s *Server) ListWorkerHealth(ctx context.Context) ([]billing.WorkerHealth, error) {
-	return riverjobs.ListWorkerHealth(ctx, s.graph.Runtime.DB)
+	return s.graph.Runtime.ListWorkerHealth(ctx)
 }
 
 // UnlockAdminLockout ends a person's lockout from administrative operations

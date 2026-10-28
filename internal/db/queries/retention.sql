@@ -328,23 +328,14 @@ WHERE ctid IN (
     LIMIT sqlc.arg(row_limit)::int
 );
 
--- Deployment-global state of a periodic or worker kind no fleet has
--- scheduled, registered or run for the period: a kind since removed. A lease
--- that expired is free either way, so deleting one never races a claim.
+-- The lease of a periodic kind no fleet has scheduled for the period: a kind
+-- since removed. A lease that expired is free either way, so deleting one
+-- never races a claim.
 -- name: DeleteOrphanPeriodicLeases :execrows
 DELETE FROM billing.periodic_leases
 WHERE kind IN (
     SELECT l.kind FROM billing.periodic_leases l
     WHERE l.expires_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
     ORDER BY l.kind
-    LIMIT sqlc.arg(row_limit)::int
-);
-
--- name: DeleteOrphanWorkerState :execrows
-DELETE FROM billing.worker_state
-WHERE worker_kind IN (
-    SELECT s.worker_kind FROM billing.worker_state s
-    WHERE s.updated_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
-    ORDER BY s.worker_kind
     LIMIT sqlc.arg(row_limit)::int
 );

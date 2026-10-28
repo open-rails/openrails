@@ -98,7 +98,6 @@ Ownership determines which system may initiate the renewal.
 | Due / dunning | 1 min | admits due engine renewals and retries `past_due` per the derived schedule; parks whole missed periods for verification instead of charging ([operations.md → Dunning](operations.md#dunning)) |
 | Solana crank | 1 h | executes due on-chain subscription pulls |
 | Cleanup / usage orders | 1 h – daily | expired-data cleanup, usage order collection + period billing |
-| Worker health check | 5 min | seeds `billing.worker_state`, raises a critical notification in the merchant inbox when a kind stops completing |
 
 **Health endpoint**: `GET /health/live` (liveness) and `GET /health/ready`
 (readiness; the failing dependency is logged, never answered). Readiness requires only
@@ -119,17 +118,18 @@ The standalone server serves `GET /metrics` on its private listener
 (`private_port`; `server.Config.PrivateAddr`, or mount `PrivateHandler`
 yourself), never on the public port: one gauge per dependency,
 `openrails_dependency_up{dependency,class}` (class `required` or `optional`;
-alert on optional ones at 0 as degraded), and per job kind
-`openrails_worker_consecutive_failures{kind}` and
-`openrails_worker_last_success_timestamp_seconds{kind}`. Beyond that there is
+alert on optional ones at 0 as degraded), and per job kind, read from River's
+tables, `openrails_job_overrunning{kind}`, `openrails_job_retryable{kind}`,
+`openrails_job_discarded{kind}` and
+`openrails_job_last_completed_timestamp_seconds{kind}`. Beyond that there is
 no runtime telemetry endpoint.
 `/v1/metrics`, `/query`, and `/schema` are authenticated merchant
 business analytics, not process/runtime metrics.
 
 **Healthy looks like**: `openrails intents` shows a near-empty active set (the
 sweep flags `pending` older than 24h and `in_flight`/`unknown` older than 2h as
-findings), the findings queue (`GET /v1/merchant/findings`) holds nothing open, and worker-health
-alerts are quiet.
+findings), the findings queue (`GET /v1/merchant/findings`) holds nothing open, and
+`openrails workers` shows no overrunning or discarded jobs.
 
 ### Merchants and administrators
 
@@ -264,10 +264,14 @@ Billing address country is still accepted for payments; it does not control rout
   evidence; `openrails intents-log` is the durable audit trail of provider
   mutations. Provider Refresh logs a per-pass heartbeat and per-merchant
   reconcile summary.
-- **Worker health**: `billing.worker_state` rows per job kind; the 5-minute
-  checker raises a critical merchant notification when a periodic kind stops
-  completing. `openrails workers` prints each kind's last success, failure
-  streak and last error (`--json` for the full text).
+- **Job health**: read from River's own tables, never stored by OpenRails.
+  `openrails workers` prints each job kind's jobs running past their timeout,
+  waiting to retry and discarded, a periodic kind's last completion and the
+  newest error (`--json` for the full text). The `openrails_job_progress`
+  probe fails while the River schema has no leader, a job runs past its
+  timeout, or a periodic pass the fleet queues has not completed within two
+  periods and its timeout. Stalls are an operator signal, never a merchant
+  notification.
 - **Notifications**: reconciliation findings raise deduplicated console
   notifications and, by severity, outbound webhooks / the alert email
   ([merchant-notifications.md](merchant-notifications.md)).
