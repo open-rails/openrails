@@ -3,14 +3,11 @@ package hosttools
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/reconcile"
 )
 
 // Local maintenance over an owned engine graph: process ownership is the
@@ -32,46 +29,6 @@ func Converge(ctx context.Context, a *app.App, merchantID billing.MerchantID) (C
 	return ConvergeMerchant(ctx, ConvergeMerchantOptions{
 		Config: a.Config, PGXPool: a.Runtime.DB.Pool(), MerchantID: merchantID, Clock: a.Runtime.Clock,
 		MerchantConfig: a.Runtime.DB.MerchantConfig(),
-	})
-}
-
-// PullProviderRun configures one provider pull. Bare calls are dry-run; local
-// writes require Insert, Overwrite or Prune, and a prune writes only with
-// PruneExpectRows matching what the pass found.
-type PullProviderRun struct {
-	MerchantID      billing.MerchantID
-	Providers       []string
-	PSP             string
-	Since           string
-	Until           string
-	Format          string
-	LogDir          string
-	Insert          bool
-	Overwrite       bool
-	Prune           bool
-	PruneExpectRows *int
-	PruneActor      string
-	Out             io.Writer
-	// MerchantManifest is the manifest the host boots from; nil reads
-	// MerchantManifestPath (or the conventional path).
-	MerchantManifest     *merchantbootstrap.BillingConfig
-	MerchantManifestPath string
-	// Endpoints overrides provider base URLs (a test seam for fake providers).
-	Endpoints reconcile.ProviderEndpoints
-}
-
-// Pull pulls provider-observed state into the merchant's local mirror.
-func Pull(ctx context.Context, a *app.App, run PullProviderRun) error {
-	if err := initialized(a); err != nil {
-		return err
-	}
-	return PullProvider(ctx, PullProviderOptions{
-		StripeClients: a.Runtime.StripeClients,
-		PGXPool:       a.Runtime.DB.Pool(), Config: a.Config,
-		MerchantID: run.MerchantID, Providers: run.Providers, PSP: run.PSP, Since: run.Since, Until: run.Until,
-		Format: run.Format, LogDir: run.LogDir, Insert: run.Insert, Overwrite: run.Overwrite, Prune: run.Prune,
-		Out: run.Out, PruneExpectRows: run.PruneExpectRows, PruneActor: run.PruneActor,
-		MerchantManifest: run.MerchantManifest, MerchantManifestPath: run.MerchantManifestPath, Endpoints: run.Endpoints,
 	})
 }
 

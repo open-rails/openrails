@@ -18,7 +18,7 @@ exactly four ways the system diverges, each with its own mechanism:
 | # | Divergence | Direction | Mechanism |
 |---|---|---|---|
 | 1 | Catalog wrong at the provider | separate provider workflow | `catalog apply` commits local catalog changes and read-verifies existing provider bindings. Its one provider write publishes the on-chain plan of a recurring Solana price declared without one, before the local commit ([Solana](rails/solana.md)); it updates no provider object and queues no provider work. Other changes requiring provider writes fail before local mutation. Scheduled drift watching is alert-only (`catalog_reconciliation_interval`, default 1h, `0` disables); catalog prune never deletes provider extras |
-| 2 | Money state wrong locally | pull (provider → OpenRails) | webhooks in real time; **Provider Refresh** as the always-on scheduled read; **`pull-provider`** as the manual batch truth-pull |
+| 2 | Money state wrong locally | pull (provider → OpenRails) | webhooks in real time; **Provider Refresh** as the always-on scheduled read; a manual PSP import (`POST /v1/merchant/psp-imports`) re-reads a PSP on demand, its differences becoming proposals |
 | 3 | Outbound action never executed | (intent, not sync) | **durable intent + replay** — see "Durability model"; the Convergence Engine's stuck-intent check is its detector |
 | 4 | Entitlements inconsistent | derived | the **Convergence Engine** re-derives them once 1–3 are true |
 
@@ -222,7 +222,7 @@ ends.
 
 ## Mutation Flags
 
-Provider pull and merchant-configuration commands use mutation flags. Catalog
+Merchant-configuration commands use mutation flags. Catalog
 application instead carries optional `prune` in its document; it has no
 insert/overwrite flags. Each canonical catalog content hash is remembered
 permanently, so replaying an old document never rolls back later edits. For
@@ -260,16 +260,16 @@ and operational logging.
 | `catalog apply PATH --merchant NAME [--force-conflicts]` | apply a catalog document and print what changed: each product, price and meter applies whole unless an edit set a field it names differently, which is skipped, listed, and exits non-zero (`--force-conflicts` overwrites it); a refused document exits non-zero. A document that applied whole replays by content hash; omission is preserved unless `prune: true` ([catalog ownership](catalog-ownership.md)). Starting the server never applies a catalog |
 | `catalog export --merchant UUID --out PATH` / `catalog import --merchant UUID --in PATH` | [full catalog YAML snapshot](catalog-export.md), preserving archived rows, original IDs and retained history; restore requires an empty catalog |
 | `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / [active catalog YAML](catalog-export.md); full billing history uses `billing export` |
-| `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
+| `prune --merchant NAME [--psp ID\|KEY] [--expect-rows N]` | soft-delete a PSP's local subscriptions and payments its provider no longer lists; plan-only without `--expect-rows` — see "Prune" |
 | `proposals list\|show\|approve\|dismiss\|foreign\|runs` | review the changes provider reads propose; approve, dismiss or close them as foreign; list approval runs — see "Proposals" |
-| `prune list` | inspect the destructive runs a `--prune` opened |
+| `prune list` | list the merchant's destructive runs (prunes, approvals), newest first |
 | `undo-run --run <id>` | plan or apply the reversal of one destructive run, whatever kind — see "Reversing a destructive run" |
 | `intents` / `intents-log` | read-only intent-ledger views — see "Inspecting the ledger" |
 | `book status` / `book arm --by NAME` | report whether this database is the billing book's armed copy / arm it once every other copy is stopped |
 | `merchant arm` / `merchant hold --mode readonly\|limited` (`--merchant NAME --by NAME`) | restore or hold one merchant's provider writes; export and import leave it readonly |
 
-The `push-*` commands push declared file state outward; `pull-provider` moves
-the opposite direction and never mutates a payment rail.
+The `push-*` commands push declared file state outward; `prune` reads a
+provider and never writes one.
 
 ### Merchant secrets
 
@@ -428,7 +428,7 @@ deliver webhooks at-least-once and retry from their end; our handlers are
 idempotent for exactly that reason. **There is deliberately no local inbound
 queue** — it would share fate with the database it protects. The backstop for
 an outage that exhausts the provider's webhook retries is Provider Refresh's
-watermarked event backfill (and, for investigation, `pull-provider`).
+watermarked event backfill (and, on demand, a manual PSP import).
 
 ### Inspecting the ledger
 
@@ -561,31 +561,30 @@ account_id)` key. They resolve the
 CUSTODIAN, not a PSP: the event is about the stored instrument, and asking
 which of several referencing PSPs it belongs to has no answer.
 
-## Provider Pull
+## Prune
 
-Manual-only — **never scheduled**. It never writes to a provider.
+Manual-only — **never scheduled**. It reads a provider and never writes one.
 
 ```
-openrails pull-provider --merchant=<slug> [--rail=nmi,stripe,…] [--psp=<uuid>]
-                        [--since=… --until=…] [--manifest=…] [--format table|json]
-                        [--log-dir=…] [--insert] [--overwrite] [--prune [--expect-rows=N]]
-openrails pull-provider report --merchant=<slug> [--run=ID] [--format table|json]
-openrails prune list    --merchant=<slug> [--limit=N] [--format table|json]
+openrails prune          --merchant=<slug> [--psp=<id|key>] [--rail=nmi,stripe,…]
+                         [--since=… --until=…] [--manifest=…] [--format table|json]
+                         [--log-dir=…] [--expect-rows=N]
+openrails prune list     --merchant=<slug> [--limit=N] [--format table|json]
 openrails proposals runs --merchant=<slug> [--limit=N] [--format table|json]
-openrails undo-run      --merchant=<slug> --run=<id> [--apply --expect-rows=N] [--format table|json]
+openrails undo-run       --merchant=<slug> --run=<id> [--apply --expect-rows=N] [--format table|json]
 ```
 
-A bare `pull-provider` pulls provider truth, diffs, logs what it WOULD
-change, and persists nothing; the mutation flags follow the standard contract
-(`--prune` retires eligible local subscriptions/payments attributed to the
-pulled PSP that are absent from the provider source). `--rail` is repeatable
-(default: every configured rail); `--merchant` is required; `--manifest` arms
-mode-1 credentials from a merchant manifest. After a mutating pull the engine
-runs a one-shot `Converge(merchant)`. A mutating pull waits for the merchant's
-pull lock, so it never runs beside a scheduled refresh of the same merchant.
-`--overwrite` is refused while the destructive-action kill switch is off (for
-the instance or the merchant) or the merchant's provider writes are readonly,
-as the scheduled refresh's overwrites are.
+A prune reads a PSP's roster and transactions and retires the local
+subscriptions and payments attributed to that PSP that the provider no longer
+lists. `--psp` names one PSP by id (archived ones included) or key; without it,
+each armed rail's PSP is read, narrowed by `--rail`. Payments prune only inside
+a `--since`/`--until` window the provider listed completely. `--manifest` arms
+mode-1 credentials from a merchant manifest. A prune waits for the merchant's
+pull lock, so it never runs beside a scheduled refresh; an applied one then
+runs `Converge(merchant)`. Each prune writes a log to `--log-dir`.
+
+To re-read a PSP without removing anything, create a manual PSP import
+(`POST /v1/merchant/psp-imports`); its differences become proposals.
 
 ### Proposals
 
@@ -638,7 +637,7 @@ carries this book's id (see [provider recovery](provider-recovery.md)); otherwis
 the finding is low, `evidence.quiet_foreign` is true, and it neither alerts nor
 holds recovery.
 
-### `--prune` is reversible, and refuses uncertainty
+### A prune is reversible, and refuses uncertainty
 
 A prune acts on ABSENCE — "the provider did not list this row" — the weakest
 evidence there is. So it is built to be undone and hard to fire by accident:
@@ -646,9 +645,10 @@ evidence there is. So it is built to be undone and hard to fire by accident:
 - **Nothing is deleted.** Eligible rows are soft-deleted (`deleted_at`) and
   stamped with a destructive-run id. They vanish from every live read; the data
   stays.
-- **`--prune` alone is a plan.** It reports what it would retire and writes
-  nothing. Applying needs `--expect-rows N`, and N must equal the number the
-  plan reported — an operator who miscounts is stopped, not obeyed.
+- **Without `--expect-rows` a prune is a plan.** It reports what it would
+  retire and writes nothing. Applying needs `--expect-rows N`, and N must equal
+  the number the plan reported — an operator who miscounts is stopped, not
+  obeyed. It applies to one PSP at a time.
 - **An empty provider roster refuses outright.** A successful-but-empty pull is
   indistinguishable from a misdeclared `account_id`, a credential rotated onto a
   sibling sub-account, or a provider incident. It never means "prune everything".
@@ -657,7 +657,7 @@ evidence there is. So it is built to be undone and hard to fire by accident:
 
 ### An enforcing pull is reversible too
 
-`--prune` retires rows; an **enforcing** pull (mutation flags set) overwrites
+A prune retires rows; an **enforcing** pull (the scheduled refresh) overwrites
 them — the measured incident is a bad NMI roster cancelling 40/40 subscriptions,
 which changed `status`, `ended_at`, `canceled_at`, the grace/retry schedule and
 the period bounds, and queued deferred NMI vault deletes behind them. Tombstones
@@ -684,7 +684,6 @@ nobody can reverse the wrong way round and be told it worked.
 openrails prune list --merchant=<slug>            # or `proposals runs`: find the run id
 openrails undo-run   --merchant=<slug> --run=<id>                        # PLAN — changes nothing
 openrails undo-run   --merchant=<slug> --run=<id> --apply --expect-rows=N
-openrails pull-provider --merchant=<slug>          # advisory: review findings, then re-arm
 ```
 
 **Dry run is the default.** With no `--apply` the command prints what it would
@@ -739,10 +738,11 @@ cluster PITR or a snapshot taken beforehand), and a kind that exists in the
 ledger but has not been made reversible yet says so instead of marking itself
 reversed.
 
-The final pull is not optional. A rollback restores local state to before the
-run while the provider has moved on; `rollback → pull → converge` is the
-complete operation, and the pull runs **advisory** until an operator reviews the
-findings and re-arms enforcement by hand.
+The final read is not optional. A rollback restores local state to before the
+run while the provider has moved on; `rollback → read → converge` is the
+complete operation. Re-read the PSP with a manual PSP import and review its
+proposals; the scheduled refresh runs **advisory** until an operator re-arms
+enforcement by hand.
 
 A pull is authoritative only for the `(merchant, rail, psp)` it actually
 queried; mirror reads/writes are scoped to that PSP row, and historical rows
@@ -783,7 +783,7 @@ idempotent **`Converge(scope)`** — scope-narrowable from a single customer to
 a whole merchant — runs from three places so the system never *holds* an
 inconsistency: **inline** after every source mutation (purchase completes,
 renewal bills, refund webhook lands, dunning transitions, free product grants);
-**after every mutating `pull-provider` run**; and **on the sweep** — a
+**after every applied `prune`**; and **on the sweep** — a
 15-minute River job (RunOnStart) over every active merchant, catching drift
 no inline mutation touched.
 
@@ -989,8 +989,7 @@ twice and only inside the key retention window. Unresolved outcomes raise
 
 ## Provider Refresh and the unknown cohort
 
-`pull-provider` is the manual operator command. **Provider Refresh** is the
-always-on provider-read system: a 4-hourly scheduler (RunOnStart, so startup
+**Provider Refresh** is the always-on provider-read system: a 4-hourly scheduler (RunOnStart, so startup
 after a stale dump or outage does not wait for the tick) fans out one
 per-merchant refresh job — staggered, unique per merchant, on a bounded
 queue, skipping merchants with no declared PSPs. Three lanes:
@@ -1410,8 +1409,8 @@ accumulates:
    drain forecast ("N execute under limited, M require full"). If the
    forecast shows something you do NOT want to fire, resolve it first.
 2. **The admin findings queue** — never fires automatically.
-   `openrails pull-provider report --merchant=<slug>` shows findings
-   requiring a human; raising the mode does nothing to this queue by design.
+   `GET /v1/merchant/findings` and `openrails proposals list --merchant=<slug>`
+   show findings requiring a human; raising the mode does nothing to this queue by design.
 
 The sequence: boot `limited` → the first dunning cycle materializes the
 backlog → `openrails intents` shows the real drain forecast → review (and

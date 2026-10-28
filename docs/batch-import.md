@@ -15,8 +15,9 @@ for live money state**. For provider-vaulted rails (NMI, CCBill, Stripe) the
 provider owns the card vault and the recurring billing schedule: it keeps
 charging on its own clock after your cutover. Importing brings OpenRails'
 mirror up to date as of a declared horizon; from then on webhooks, the
-scheduled [Provider Refresh](operations.md#provider-refresh-and-the-unknown-cohort),
-and manual `pull-provider` runs converge the mirror against provider truth.
+scheduled [Provider Refresh](operations.md#provider-refresh-and-the-unknown-cohort)
+converge the mirror against provider truth, and a manual PSP import re-reads a
+PSP on demand, its differences becoming proposals.
 
 You hand over **facts, not classifications**: who, which price, which rail,
 the provider's subscription id, paid-through evidence, explicit cancel
@@ -214,9 +215,9 @@ billing data over this seam:
    `openrails intents` — the
    [drain forecast](operations.md#inspecting-the-ledger) is the dry-run view
    of your cutover ("N execute under limited, M require full").
-8. **Verify against the provider** with `openrails pull-provider` /
-   `pull-provider report`, then raise to `PROVIDER_WRITE_MODE=full` — it
-   drains exactly what the forecast showed.
+8. **Verify against the provider** with a manual PSP import
+   (`POST /v1/merchant/psp-imports`) and its proposals, then raise to
+   `PROVIDER_WRITE_MODE=full` — it drains exactly what the forecast showed.
 
 Steps 6–8 in depth:
 [Cutover: booting against production credentials](operations.md#cutover-booting-against-production-credentials)
@@ -255,8 +256,7 @@ and [Materialized backlog under mode=limited](operations.md#materialized-backlog
 - Status distribution is sane at `as_of`: runway → `active`, mid-dunning →
   `past_due`, explicit cancels carry their true `cancel_type`, the rest
   `unverified`.
-- `openrails pull-provider report` shows a clean (or explained) diff against
-  each provider's roster.
+- A manual PSP import of each PSP raises no unexplained proposals.
 - `openrails intents` shows only the drains you expect before raising the
   mode; nothing fires at `full` that the forecast didn't show.
 - The `unverified` cohort shrinks over subsequent Provider Refresh cycles as

@@ -18,7 +18,7 @@ import (
 // DestructiveRunKindPrune is this run kind's key in billing.maintenance_runs.
 const DestructiveRunKindPrune = "prune"
 
-// PruneParams bounds a pull-provider --prune pass.
+// PruneParams bounds an `openrails prune` pass.
 type PruneParams struct {
 	Since time.Time
 	Until time.Time
@@ -71,7 +71,7 @@ func (e *ErrPruneEmptyRemoteSet) Error() string {
 		e.Domain, e.Provider, e.AccountID, e.Domain, e.LocalRows)
 }
 
-// ErrPruneCountMismatch: --apply's typed expected row count disagrees with what
+// ErrPruneCountMismatch: the typed --expect-rows count disagrees with what
 // the pass discovered. Nothing is written.
 type ErrPruneCountMismatch struct {
 	Expected int
@@ -79,7 +79,7 @@ type ErrPruneCountMismatch struct {
 }
 
 func (e *ErrPruneCountMismatch) Error() string {
-	return fmt.Sprintf("refusing to prune: --expect-rows says %d, this pass found %d. Re-run without --apply to review the plan, then confirm the number it reports",
+	return fmt.Sprintf("refusing to prune: --expect-rows says %d, this pass found %d. Re-run without --expect-rows to review the plan, then confirm the number it reports",
 		e.Expected, e.Found)
 }
 
@@ -93,7 +93,7 @@ func (e *ErrPruneCountMismatch) Error() string {
 //     reverses the pass.
 //   - An empty remote set refuses, in the SQL and here, rather than matching
 //     everything.
-//   - --apply requires a typed expected row count that must match.
+//   - Applying requires a typed expected row count that must match.
 //   - A subscription that fed the grant ledger is skipped (removing it would
 //     orphan an append-only grant; convergence revokes instead), as is a
 //     payment with protected dependents (grant, refund, entitlement grant,
@@ -233,7 +233,7 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 	// --- typed confirmation ---
 	found := len(eligibleSubs) + len(eligiblePays)
 	if params.ExpectedRows == nil {
-		return res, fmt.Errorf("refusing to prune: --apply requires --expect-rows. This pass found %d rows to prune; review the dry-run plan, then re-run with --expect-rows %d", found, found)
+		return res, fmt.Errorf("refusing to prune: applying requires --expect-rows. This pass found %d rows to prune; review the dry-run plan, then re-run with --expect-rows %d", found, found)
 	}
 	if *params.ExpectedRows != found {
 		return res, &ErrPruneCountMismatch{Expected: *params.ExpectedRows, Found: found}
@@ -254,7 +254,7 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 	}
 	pspID := binding.ID
 	expected := int64(found)
-	note := fmt.Sprintf("pull-provider --prune %s account %s", provider, binding.AccountID)
+	note := fmt.Sprintf("openrails prune %s account %s", provider, binding.AccountID)
 	if _, err := q.CreateDestructiveRun(ctx, gen.CreateDestructiveRunParams{
 		ID: runID, MerchantID: mid, PspID: &pspID, Kind: DestructiveRunKindPrune,
 		Actor: actor, DryRun: false, Coverage: coverage, ExpectedRows: &expected, Note: &note,

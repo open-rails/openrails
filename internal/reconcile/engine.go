@@ -108,8 +108,8 @@ type RunParams struct {
 	Until time.Time
 }
 
-// LocalMutationPolicy limits pull-provider's local mirror writes by operator
-// mutation class. It never permits external provider writes.
+// LocalMutationPolicy limits a pull's local mirror writes by mutation class.
+// It never permits external provider writes.
 type LocalMutationPolicy struct {
 	Insert    bool
 	Overwrite bool
@@ -198,8 +198,7 @@ type RunResult struct {
 }
 
 // MutationRecord is a row-level local change planned or applied during a
-// provider pull. It is intentionally derived from the reconcile apply action,
-// not persisted; operators get it in the pull-provider log artifact.
+// provider pull. It is derived from the reconcile apply action, not persisted.
 type MutationRecord struct {
 	Phase        string         `json:"phase"`
 	Provider     Provider       `json:"provider"`

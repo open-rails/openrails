@@ -109,7 +109,7 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 	if jsonOut {
 		return encodeJSON(opts.Out, res)
 	}
-	printUndoResult(opts.Out, res, merchantID)
+	printUndoResult(opts.Out, res)
 	return nil
 }
 
@@ -178,7 +178,7 @@ func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantID billing.Merc
 		merchantFlag(merchantID), plan.RunID, plan.ExpectedRows())
 }
 
-func printUndoResult(w io.Writer, res reconcile.UndoResult, merchantID billing.MerchantID) {
+func printUndoResult(w io.Writer, res reconcile.UndoResult) {
 	fmt.Fprintf(w, "reversed run %s (kind %s)\n", res.Plan.RunID, res.Plan.Kind)
 	for _, table := range []string{"subscriptions", "payments", "order_attempts", "product_access"} {
 		if n, ok := res.Restored[table]; ok {
@@ -217,7 +217,6 @@ func printUndoResult(w io.Writer, res reconcile.UndoResult, merchantID billing.M
 			"re-write will be attempted — resubscribe / card re-entry is operator and customer work.\n",
 			len(res.IntentsIrreversible)+len(res.IntentsAmbiguous))
 	}
-	fmt.Fprintf(w, "local state is now BEFORE the run while the provider is at now — a rollback is not a complete operation.\n"+
-		"Finish it:  openrails pull-provider --merchant %s     (advisory; review findings, then re-arm and re-run with mutation flags)\n",
-		merchantFlag(merchantID))
+	fmt.Fprintln(w, "local state is now BEFORE the run while the provider is at now — a rollback is not a complete operation.\n"+
+		"Finish it: re-read the provider with a manual PSP import (POST /v1/merchant/psp-imports) and review its proposals.")
 }

@@ -518,5 +518,5 @@ take turns, and one whose migration fails crash-loops while the old version
 keeps serving. For everything
 operational — the `provider_write_mode` matrix, cutover onto production
 credentials (boot `limited`, inspect `openrails intents`, then raise to
-`full`), the durable provider-intent ledger, `pull-provider` reconciliation,
+`full`), the durable provider-intent ledger, provider reconciliation,
 and dunning — see [operations.md](operations.md).

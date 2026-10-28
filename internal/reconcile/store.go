@@ -373,32 +373,6 @@ func (s *PGStore) MarkFindingNotified(ctx context.Context, id uuid.UUID, at time
 	return err
 }
 
-// FindingFilter narrows ListFindings.
-type FindingFilter struct {
-	Status         string
-	Provider       string
-	Type           string
-	OnlyAdminQueue bool
-	Limit          int
-	Offset         int
-}
-
-func (s *PGStore) GetRun(ctx context.Context, id uuid.UUID) (RunRecord, error) {
-	row, err := s.DB.Gen(ctx).GetReconciliationRun(ctx, id)
-	if err != nil {
-		return RunRecord{}, err
-	}
-	return runRecordFromRow(row), nil
-}
-
-func (s *PGStore) GetLatestRun(ctx context.Context) (RunRecord, error) {
-	row, err := s.DB.Gen(ctx).GetLatestReconciliationRun(ctx)
-	if err != nil {
-		return RunRecord{}, err
-	}
-	return runRecordFromRow(row), nil
-}
-
 func (s *PGStore) ListRuns(ctx context.Context, limit, offset int) ([]RunRecord, error) {
 	if limit <= 0 {
 		limit = 50
@@ -423,40 +397,6 @@ func (s *PGStore) GetFinding(ctx context.Context, id uuid.UUID) (FindingRecord, 
 		return FindingRecord{}, err
 	}
 	return FindingRecordFromRow(row), nil
-}
-
-func (s *PGStore) ListFindings(ctx context.Context, filter FindingFilter) ([]FindingRecord, error) {
-	if filter.Limit <= 0 {
-		filter.Limit = 100
-	}
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	params := gen.ListReconciliationFindingsParams{
-		MerchantID:      scopeMerchantID.UUID(),
-		OnlyReviewQueue: filter.OnlyAdminQueue,
-		PageLimit:       int64(filter.Limit),
-		PageOffset:      int64(filter.Offset),
-	}
-	if filter.Status != "" {
-		params.Status = &filter.Status
-	}
-	if filter.Provider != "" {
-		params.Provider = &filter.Provider
-	}
-	if filter.Type != "" {
-		params.FindingType = &filter.Type
-	}
-	rows, err := s.DB.Gen(ctx).ListReconciliationFindings(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]FindingRecord, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, FindingRecordFromRow(row))
-	}
-	return out, nil
 }
 
 // AckFinding resolves a finding as admin-acknowledged. Returns false when the

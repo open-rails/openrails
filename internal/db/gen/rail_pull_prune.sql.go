@@ -303,7 +303,7 @@ type ListExcessSubscriptionsForPSPParams struct {
 	PresentIds []string
 }
 
-// pull-provider --prune: excess detection and reversible soft deletion. Excess =
+// openrails prune: excess detection and reversible soft deletion. Excess =
 // a local row of the pulled psp_id whose provider key is absent from the fresh
 // snapshot. Every row belongs to exactly one PSP and matching fails closed: a
 // row whose PSP was not pulled is out of scope. Nothing here DELETEs: a prune

@@ -8,7 +8,7 @@ territory. The primary deep manual is [operations.md](operations.md).
 
 | Service | Required | What it does | Losing it |
 |---|---|---|---|
-| **Postgres 18+** | yes | Source of truth: double-entry money ledger, grant ledger, subscriptions, entitlements, catalog, the provider-intent ledger, and River's job queue. Can share an instance with your host app — OpenRails owns one schema (default `billing`) and its River's (default `billing_river`). | Data loss. Provider-owned facts (charges, remote subscription liveness) can be re-imported with `pull-provider`, but the ledger, credits, entitlements, and catalog are OpenRails-owned and exist nowhere else. **Back this up.** |
+| **Postgres 18+** | yes | Source of truth: double-entry money ledger, grant ledger, subscriptions, entitlements, catalog, the provider-intent ledger, and River's job queue. Can share an instance with your host app — OpenRails owns one schema (default `billing`) and its River's (default `billing_river`). | Data loss. Provider-owned facts (charges, remote subscription liveness) can be re-imported with a PSP import, but the ledger, credits, entitlements, and catalog are OpenRails-owned and exist nowhere else. **Back this up.** |
 | **Redis-compatible service** (Garnet recommended) | optional for one instance, required for several | Rate limits, admin lockouts, captcha challenges and card-testing declines shared by every instance, and admission-denial counters flushed to Postgres hourly, once each hour closes. The atomic spending-admission gate and failed-usage grace and cutoff windows are in PostgreSQL. | Without Redis, rate limits, admin lockouts, captcha challenges and card-testing declines live in the process's memory: right for one instance, while several would each allow the full limit. They are never in PostgreSQL. Denial statistics are best-effort. No money path needs Redis. A declared Redis that stops answering costs sharing, not service: each instance keeps them in its own memory, logs an error, counts `openrails_abuse_state_fallbacks_total`, readiness reports Redis degraded without failing, and boot never waits for it. |
 | **HashiCorp Vault** | optional | Name a KV mount (`vault.kv_mount`) and Vault holds every merchant's configuration, credentials included; name only a Transit mount and it signs for Solana. See [vault.md](vault.md). | Without a KV mount the merchant manifest is the configuration, read-only. With one, startup needs Vault; afterwards an outage is ridden out from each replica's cache. |
 
@@ -129,7 +129,7 @@ business analytics, not process/runtime metrics.
 
 **Healthy looks like**: `openrails intents` shows a near-empty active set (the
 sweep flags `pending` older than 24h and `in_flight`/`unknown` older than 2h as
-findings), `pull-provider report` shows no open findings, and worker-health
+findings), the findings queue (`GET /v1/merchant/findings`) holds nothing open, and worker-health
 alerts are quiet.
 
 ### Merchants and administrators
@@ -149,15 +149,12 @@ openrails admin-lockouts unlock <user-id>       # the lockout in Redis (without 
 
 ### When things drift
 
-The operator's toolbox — all read-only or plan-only by default. Mutation flags
-follow one contract everywhere: no flags = plan/report; `--insert` creates
-missing, `--overwrite` updates existing, `--prune` removes extras
-([operations.md → Mutation Flags](operations.md#mutation-flags)).
+The operator's toolbox — all read-only or plan-only by default.
 
 | Command | What it does |
 |---|---|
-| `openrails pull-provider --merchant=<slug>` | pull provider-observed truth, diff against the local mirror, write nothing. Add `--insert/--overwrite/--prune` to converge local state; the remote rails are **never** mutated. Filters: `--rail`, `--psp`, `--since/--until`, `--format table\|json`. |
-| `openrails pull-provider report --merchant=<slug> [--run=ID]` | render a run's summary, standing open findings, and the dunning-forensics report |
+| `openrails prune --merchant=<slug> [--psp=<id\|key>] [--expect-rows=N]` | soft-delete a PSP's local subscriptions and payments its provider no longer lists: a plan without `--expect-rows`, reversible with `openrails undo-run`; the provider is never written ([operations.md → Prune](operations.md#prune)) |
+| `openrails proposals list --merchant=<slug>` | the changes provider reads propose, for a person to approve or dismiss ([operations.md → Proposals](operations.md#proposals)) |
 | `openrails nmi decline-report --merchant=<slug> --since=<date> [--until] [--psp] [--format table\|json]` | read-only decline baseline from an NMI account's history: approval and refusal rates of card verifications, one-off sales and NMI-scheduled rebills by month, and each refusal's reason and category from OpenRails' classifier. Writes nothing. History cannot say who sent a one-off sale, so rebill retries are not separated. The history job stores the same numbers daily for Payments → Health. |
 | `openrails intents [--status=…] [--rail=…] [--type=…] [--merchant=…]` | list the provider-intent ledger: queued outbound mutations, each row's `executes_under` mode, and the drain forecast |
 | `openrails intents-log [--rail=…] [--intent=…] [--phase=…]` | append-only log of actual provider mutation attempts/results (the executor's audit trail) |
@@ -165,10 +162,9 @@ missing, `--overwrite` updates existing, `--prune` removes extras
 | `openrails catalog apply PATH --merchant NAME [--force-conflicts]` | apply one catalog document and print what changed; applying it again changes nothing. A refused document, or an object whose field an edit set differently (skipped and listed), exits non-zero; `--force-conflicts` overwrites it. Prune is explicit in the document ([catalog ownership](catalog-ownership.md)). Starting the server never applies a catalog |
 | `openrails push-merchant-config` / `push-auth-bootstrap` | provision merchant/provider configuration or AuthKit authority under their own command contracts |
 
-`pull-provider` is manual-only by design — never scheduled. Routine catch-up is
-Provider Refresh's job; `pull-provider` is the full-surface investigation tool
-with the findings ledger and forensics
-([operations.md → Provider Pull](operations.md#provider-pull)).
+Routine catch-up is Provider Refresh's job. To re-read a PSP now, create a
+manual PSP import (`POST /v1/merchant/psp-imports`); its differences become
+proposals ([PSP import](psp-import.md)).
 
 **The findings queue doctrine**: findings that require judgment (remote
 mutations, ambiguous identity matches) land in the admin queue and **never
@@ -194,8 +190,8 @@ For a cutover requiring manual review before system-origin collection:
 3. `openrails intents --merchant=<slug>` shows the real drain forecast
    ("N execute under limited, M require full"). Resolve anything you do not
    want to fire.
-4. `openrails pull-provider report --merchant=<slug>` — review the human-judgment
-   findings queue. Resolve financial conflicts from evidence; dismissing a
+4. `GET /v1/merchant/findings` and `openrails proposals list --merchant=<slug>` —
+   review the human-judgment findings queue. Resolve financial conflicts from evidence; dismissing a
    finding does not satisfy the recovery gate.
 5. Raise to `PROVIDER_WRITE_MODE=full`: eligible work resumes after its current
    policy and freshness checks pass. Missed whole periods are never back-billed.
@@ -265,7 +261,7 @@ Billing address country is still accepted for payments; it does not control rout
   scoped to the API key's merchant, designed to be driven by an LLM agent.
   [metrics-for-llms.md](metrics-for-llms.md).
 - **Logs**: structured logrus to stdout; level via `logger.level` in
-  config.yaml. Every `pull-provider` local write is logged with finding id +
+  config.yaml. Every local write a pull applies is logged with finding id +
   evidence; `openrails intents-log` is the durable audit trail of provider
   mutations. Provider Refresh logs a per-pass heartbeat and per-merchant
   reconcile summary.

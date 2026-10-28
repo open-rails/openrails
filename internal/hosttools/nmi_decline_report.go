@@ -30,7 +30,7 @@ type NMIDeclineReportOptions struct {
 	Config     *config.Config
 	PGXPool    *pgxpool.Pool
 	MerchantID billing.MerchantID
-	// PSP pins the NMI account; empty reads the merchant's armed one.
+	// PSP pins the NMI account by id or key; empty reads the merchant's armed one.
 	PSP string
 	// Since is required; Until defaults to now (RFC3339 or YYYY-MM-DD).
 	Since, Until string
@@ -50,21 +50,21 @@ func NMIDeclineReport(ctx context.Context, opts NMIDeclineReportOptions) error {
 	if opts.Out == nil {
 		opts.Out = io.Discard
 	}
-	since, err := parsePullProviderTime(opts.Since, "since")
+	since, err := parseProviderTime(opts.Since, "since")
 	if err != nil {
 		return err
 	}
 	if since.IsZero() {
 		return errors.New("--since is required")
 	}
-	until, err := parsePullProviderTime(opts.Until, "until")
+	until, err := parseProviderTime(opts.Until, "until")
 	if err != nil {
 		return err
 	}
 	if until.IsZero() {
 		until = time.Now().UTC()
 	}
-	rt, cleanup, err := newPullProviderRuntime(ctx, PullProviderOptions{Config: opts.Config, PGXPool: opts.PGXPool, MerchantID: opts.MerchantID,
+	rt, cleanup, err := newProviderRuntime(ctx, providerRuntimeOptions{Config: opts.Config, PGXPool: opts.PGXPool, MerchantID: opts.MerchantID,
 		MerchantManifest: opts.MerchantManifest, MerchantManifestPath: opts.MerchantManifestPath})
 	if err != nil {
 		return err
@@ -74,7 +74,7 @@ func NMIDeclineReport(ctx context.Context, opts NMIDeclineReportOptions) error {
 	return rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		pins := map[reconcile.Provider]string{}
 		if strings.TrimSpace(opts.PSP) != "" {
-			provider, binding, err := resolvePullPSPTarget(ctx, rt, opts.PSP)
+			provider, binding, err := resolvePSPTarget(ctx, rt.DB, opts.PSP)
 			if err != nil {
 				return err
 			}
