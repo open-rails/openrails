@@ -18,7 +18,9 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchantdocs"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/stretchr/testify/require"
@@ -363,4 +365,37 @@ func TestPSPControls(t *testing.T) {
 		}
 		require.False(t, httpx.IsBlockedIP(net.ParseIP("8.8.8.8")))
 	})
+	t.Run("OR-J06-S30/a-declared-stripe-psp-registers-its-webhook-endpoint", func(t *testing.T) {
+		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicBillingBaseURL = stripeWebhookBase })
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		_, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		require.NoError(t, err)
+		require.Eventually(t, func() bool { return len(p.provider.core.WebhookEndpoints("acct_e2e")) == 1 }, 20*time.Second, 20*time.Millisecond,
+			"a new Stripe PSP's endpoint is registered when it is declared, not at the next hourly pass")
+		endpoint := p.provider.core.WebhookEndpoints("acct_e2e")[0]
+		require.Equal(t, stripeWebhookBase+"/v1/webhooks/stripe/acct_e2e", endpoint["url"])
+		require.Equal(t, stripeapi.APIVersion, endpoint["api_version"])
+		require.Equal(t, strings.Join(webhooks.HandledStripeEventTypes, ","), endpoint["enabled_events"])
+	})
+	t.Run("OR-J06-S31/a-dashboard-endpoint-of-a-file-declared-psp-is-managed-not-refused", func(t *testing.T) {
+		a, p := newPaymentWorld(t, func(w *world) { w.cfg.PublicBillingBaseURL = stripeWebhookBase })
+		url := stripeWebhookBase + "/v1/webhooks/stripe/acct_e2e"
+		id := p.core.SeedWebhookEndpoint("acct_e2e", url, stripeapi.APIVersion, []string{"invoice.paid"})
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		runRegistered(t, fleet, "openrails.stripe_webhook_reconcile", 1)
+		endpoints := p.core.WebhookEndpoints("acct_e2e")
+		require.Len(t, endpoints, 1, "a file-declared PSP never mints an endpoint it cannot keep the secret of")
+		require.Equal(t, id, endpoints[0]["id"])
+		require.Equal(t, "true", endpoints[0]["metadata"].(map[string]string)["openrails_managed"])
+		require.Equal(t, strings.Join(webhooks.HandledStripeEventTypes, ","), endpoints[0]["enabled_events"])
+	})
 }
+
+// stripeWebhookBase is a public https billing mount Stripe could reach.
+const stripeWebhookBase = "https://billing.example.test"

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -36,9 +37,23 @@ const stripeWebhookMerchantBatch = 1000
 // superseded endpoints still live, or an exhausted endpoint budget.
 const FindingStripeWebhookEndpoint = "consistency.stripe_webhook_endpoint"
 
-type StripeWebhookReconcileArgs struct{}
+// StripeWebhookReconcileArgs is one pass. A set MerchantID scopes it to that
+// merchant, and a set AccountID to that Stripe account: the pass a declared or
+// changed PSP queues.
+type StripeWebhookReconcileArgs struct {
+	MerchantID uuid.UUID `json:"merchant_id,omitempty"`
+	AccountID  string    `json:"account_id,omitempty"`
+}
 
 func (StripeWebhookReconcileArgs) Kind() string { return KindStripeWebhookReconcile }
+
+// InsertOpts coalesces a PSP's passes until one has run; a failed one
+// retries a few times, and the hourly pass covers it after that.
+func (a StripeWebhookReconcileArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: QueueBilling, MaxAttempts: 5, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{
+		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateScheduled, rivertype.JobStateRetryable,
+	}}}
+}
 
 type StripeWebhookReconcileWorker struct {
 	StripeClients *stripeapi.Factory
@@ -55,7 +70,6 @@ type StripeWebhookReconcileWorker struct {
 func (StripeWebhookReconcileWorker) Kind() string { return KindStripeWebhookReconcile }
 
 func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[StripeWebhookReconcileArgs]) error {
-	_ = job
 	if w.DB == nil {
 		return fmt.Errorf("stripe webhook reconcile: db not configured")
 	}
@@ -99,11 +113,15 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 	var after *uuid.UUID
 	var sweepErr error
 	for {
-		merchantIDs, err := w.DB.GenDirectory().ListRailArmedMerchants(ctx, gen.ListRailArmedMerchantsParams{
-			Rails: []string{string(models.RailStripe)}, MerchantLimit: stripeWebhookMerchantBatch, AfterMerchantID: after,
-		})
-		if err != nil {
-			return preferSweepError(sweepErr, fmt.Errorf("stripe webhook reconcile: list armed merchants: %w", err))
+		merchantIDs := []uuid.UUID{job.Args.MerchantID}
+		if job.Args.MerchantID == uuid.Nil {
+			var err error
+			merchantIDs, err = w.DB.GenDirectory().ListRailArmedMerchants(ctx, gen.ListRailArmedMerchantsParams{
+				Rails: []string{string(models.RailStripe)}, MerchantLimit: stripeWebhookMerchantBatch, AfterMerchantID: after,
+			})
+			if err != nil {
+				return preferSweepError(sweepErr, fmt.Errorf("stripe webhook reconcile: list armed merchants: %w", err))
+			}
 		}
 		for _, mid := range merchantIDs {
 			after = &mid
@@ -125,6 +143,9 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 					return fmt.Errorf("list stripe psps: %w", err)
 				}
 				for _, psp := range psps {
+					if job.Args.AccountID != "" && psp.AccountID != job.Args.AccountID {
+						continue
+					}
 					verdict := gate.CheckMerchant(mctx, merchantID.UUID())
 					fields := log.Fields{"merchant": row.Slug, "stripe_account_id": psp.AccountID}
 					res, err := catalog.ReconcileManagedStripeWebhook(mctx, catalog.ManagedStripeWebhookParams{
@@ -179,7 +200,7 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 					Warn("StripeWebhookReconcile: merchant pass failed; continuing")
 			}
 		}
-		if len(merchantIDs) < stripeWebhookMerchantBatch {
+		if job.Args.MerchantID != uuid.Nil || len(merchantIDs) < stripeWebhookMerchantBatch {
 			break
 		}
 	}

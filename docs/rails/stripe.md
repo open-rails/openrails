@@ -50,8 +50,8 @@ The inbound endpoint is `POST /v1/webhooks/stripe/{account_id}` (standalone) or
 are verified against the `Stripe-Signature` header using the account's
 `webhook_signing_secret`.
 
-OpenRails registers the endpoint on Stripe **automatically** — at merchant bootstrap
-and via an hourly reconcile job — subscribing exactly to the event types it handles
+OpenRails registers the endpoint on Stripe **automatically** — when a Stripe PSP is
+declared or changed, and via an hourly reconcile job — subscribing exactly to the event types it handles
 (`invoice.paid`, `invoice.payment_failed`, `checkout.session.completed` and the other
 purchase-session events, `customer.subscription.updated/deleted`, `charge.succeeded`,
 `charge.refunded`, `refund.created/updated`, `payment_method.attached` and
@@ -67,9 +67,11 @@ Signing-secret handling depends on where the configuration lives:
   can the old endpoint become superseded; a failed write keeps the previous
   configuration.
 - **A file**: OpenRails cannot retain a newly minted key, so it refuses endpoint
-  creation. Register the endpoint once in the Stripe Dashboard and declare its
-  `whsec_…`. Reconciliation can manage the existing endpoint within
-  provider-write policy.
+  creation. Register the endpoint once in the Stripe Dashboard at the inbound URL
+  above, with the pinned `api_version`, and declare its `whsec_…`. Reconciliation
+  marks that endpoint as its own and keeps its events and URL current within
+  provider-write policy. Until one is registered, the reconcile raises the
+  `consistency.stripe_webhook_endpoint` finding naming what to register.
 
 The endpoint's `api_version` is pinned to the same single constant that stamps the
 `Stripe-Version` header on every outbound call, so inbound event shapes and outbound

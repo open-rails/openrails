@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 224,
+  "scenario_count": 226,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1122,6 +1122,16 @@
       "id": "OR-J12-S30",
       "journey": "J12",
       "name": "Marked cards never starve a planned ahead-of-renewal check"
+    },
+    {
+      "id": "OR-J06-S30",
+      "journey": "J06",
+      "name": "A declared or changed Stripe PSP registers its webhook endpoint at once"
+    },
+    {
+      "id": "OR-J06-S31",
+      "journey": "J06",
+      "name": "A Dashboard-registered endpoint of a file-declared Stripe PSP is managed, not refused"
     }
   ]
 }

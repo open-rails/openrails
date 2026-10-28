@@ -93,8 +93,10 @@ type Mock struct {
 	reads    []string
 	// domains are each account's payment method domains.
 	domains map[string][]Object
-	webhook webhookTarget
-	events  []Event
+	// webhookEndpoints are each account's webhook endpoints.
+	webhookEndpoints map[string][]Object
+	webhook          webhookTarget
+	events           []Event
 }
 
 // New starts a Mock on a loopback listener; see URL and Close.
@@ -112,7 +114,7 @@ func NewUnstarted(opts Options) *Mock {
 	}
 	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{},
 		intents: map[string]Object{}, charges: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
-		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{},
+		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{}, webhookEndpoints: map[string][]Object{},
 		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}}
 }
 
@@ -298,6 +300,8 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 		}
 	case seg[0] == "payment_method_domains":
 		return m.paymentMethodDomain(r, form, seg)
+	case seg[0] == "webhook_endpoints":
+		return m.webhookEndpoint(r, form, seg)
 	case r.Method == http.MethodGet && (seg[0] == "invoices" || seg[0] == "invoice_payments"):
 		return m.invoiceRead(seg, q)
 	case r.Method == http.MethodGet && p == "/v1/customers/search":

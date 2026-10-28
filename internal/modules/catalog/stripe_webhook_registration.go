@@ -181,6 +181,14 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		Now:           p.Now,
 		RetireOverlap: p.RetireOverlap,
 	})
+	if errors.Is(err, ErrWebhookCreateForbidden) && cannotPersist {
+		// The operator registers the endpoint; until then it is theirs to do,
+		// not a failing pass.
+		return ManagedStripeWebhookResult{
+			SecretName: secretName, WebhookURL: webhookURL,
+			OperatorAction: fmt.Sprintf("register the Stripe webhook endpoint %s at api_version %s in the Dashboard and declare its signing secret as webhook_signing_secret: this configuration cannot keep a secret OpenRails creates", webhookURL, stripeapi.APIVersion),
+		}, nil
+	}
 	if errors.Is(err, ErrWebhookCreateForbidden) {
 		return ManagedStripeWebhookResult{}, fmt.Errorf("credential backend cannot retain generated webhook secret for endpoint %s: register it out-of-band and declare webhook_signing_secret: %w", webhookURL, err)
 	}

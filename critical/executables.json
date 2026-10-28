@@ -579,6 +579,12 @@
     "OR-J06-S07": [
       "TestBackgroundJobs/OR-J06-S07/psp-import-commits-with-its-job"
     ],
+    "OR-J06-S30": [
+      "TestPSPControls/OR-J06-S30/a-declared-stripe-psp-registers-its-webhook-endpoint"
+    ],
+    "OR-J06-S31": [
+      "TestPSPControls/OR-J06-S31/a-dashboard-endpoint-of-a-file-declared-psp-is-managed-not-refused"
+    ],
     "OR-J12-S08": [
       "TestStoredCardRefresh/OR-J12-S08/merchant-owned-vault",
       "TestStoredCardRefresh/OR-J12-S08/hosted-isolated-vault",

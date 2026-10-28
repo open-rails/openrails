@@ -333,7 +333,8 @@ type WebhookReconcileResult struct {
 //   - already correct -> no-op
 //
 // No branch deletes. Endpoints without the openrails_managed marker are never
-// touched.
+// touched, except one a caller that cannot create endpoints adopts: the one
+// registered at its URL and pinned api_version.
 func (s *StripeCatalogService) ReconcileWebhookEndpoint(ctx context.Context, desired DesiredWebhookEndpoint) (WebhookReconcileResult, error) {
 	if strings.TrimSpace(desired.URL) == "" {
 		return WebhookReconcileResult{}, fmt.Errorf("desired webhook url required")
@@ -352,6 +353,13 @@ func (s *StripeCatalogService) ReconcileWebhookEndpoint(ctx context.Context, des
 		return WebhookReconcileResult{}, fmt.Errorf("list webhook endpoints: %w", err)
 	}
 	managed, current := partitionManagedEndpoints(all)
+	if current == nil && len(managed) == 0 && desired.ForbidCreate && desired.HaveSecret {
+		// A caller that cannot create one manages the endpoint the operator
+		// registered at its URL, as declaring its secret asks.
+		if current, err = s.adoptRegisteredEndpoint(ctx, all, desired.URL); err != nil {
+			return WebhookReconcileResult{}, err
+		}
+	}
 
 	if current != nil && desired.HaveSecret && (!desired.RequirePublishedIdentity || current.ID == desired.PublishedEndpointID) {
 		res, err := s.patchInPlace(ctx, current, desired)
@@ -424,6 +432,26 @@ func (s *StripeCatalogService) ReconcileWebhookEndpoint(ctx context.Context, des
 	}
 	res.Legacy = supersededEndpoints(managed, ep.ID, desired.RetireOverlap)
 	return res, nil
+}
+
+// adoptRegisteredEndpoint marks the unmanaged endpoint at url, at the pinned
+// api_version, as OpenRails-managed. None there is nil.
+func (s *StripeCatalogService) adoptRegisteredEndpoint(ctx context.Context, all []StripeWebhookEndpoint, url string) (*StripeWebhookEndpoint, error) {
+	for i := range all {
+		ep := &all[i]
+		if ep.managed() || strings.TrimSpace(ep.URL) != strings.TrimSpace(url) || ep.APIVersion != stripeapi.APIVersion {
+			continue
+		}
+		if err := s.UpdateWebhookEndpoint(ctx, ep.ID, UpdateWebhookEndpointParams{Metadata: map[string]string{StripeMetadataOpenRailsManaged: "true"}}); err != nil {
+			return nil, fmt.Errorf("adopt webhook endpoint %s: %w", ep.ID, err)
+		}
+		if ep.Metadata == nil {
+			ep.Metadata = map[string]string{}
+		}
+		ep.Metadata[StripeMetadataOpenRailsManaged] = "true"
+		return ep, nil
+	}
+	return nil, nil
 }
 
 // patchInPlace applies the cheap drifts to the current-version endpoint; the
