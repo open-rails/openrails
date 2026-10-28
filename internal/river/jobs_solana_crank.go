@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/failpoint"
@@ -24,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -131,6 +133,10 @@ type SolanaCrankWorker struct {
 	// signature, never a blind re-pull. The intent handler's own core is
 	// runner-less and never registered as a worker.
 	Intents *intents.Runner
+	// Balances reads the cranker wallets of the ctx merchant. After a pass
+	// that signed a merchant's pulls, a low wallet raises its low-gas finding
+	// and a funded one resolves it.
+	Balances func(context.Context) ([]solanamodule.CrankerBalance, error)
 }
 
 func (SolanaCrankWorker) Kind() string { return KindSolanaCrank }
@@ -169,6 +175,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 	log.WithContext(ctx).WithField("count", len(due)).Info("Solana cranker: processing due subscriptions")
 
 	failures := 0
+	signed := map[uuid.UUID]bool{}
 	for _, row := range due {
 		select {
 		case <-ctx.Done():
@@ -183,7 +190,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 		// it executes.
 		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "solana crank pull intent", func(mctx context.Context) error {
 			mctx = db.WithPSPID(mctx, row.PspID)
-			_, err := w.Intents.EnqueueAndExecute(mctx, intents.EnqueueParams{
+			pull, err := w.Intents.EnqueueAndExecute(mctx, intents.EnqueueParams{
 				MerchantID:     row.MerchantID,
 				Provider:       string(models.RailSolana),
 				PspID:          row.PspID,
@@ -199,6 +206,9 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 				Origin:         intents.OriginSystem,
 				OriginReason:   "solana recurring pull (cranking)",
 			})
+			if err == nil && pullSigned(pull) {
+				signed[row.MerchantID] = true
+			}
 			return err
 		})
 		if err != nil {
@@ -207,10 +217,41 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 			failures++
 		}
 	}
+	for mid := range signed {
+		w.checkGas(ctx, billing.MerchantID(mid))
+	}
 	if failures > 0 {
 		return fmt.Errorf("solana crank: %d of %d pull intents failed", failures, len(due))
 	}
 	return nil
+}
+
+// pullSigned reports whether a pull's transaction was signed: its submission
+// recorded the signature.
+func pullSigned(pull gen.BillingProviderIntent) bool {
+	var evidence struct {
+		TransactionID string `json:"transaction_id"`
+	}
+	return json.Unmarshal(pull.ResultEvidence, &evidence) == nil && evidence.TransactionID != ""
+}
+
+// checkGas raises or resolves the low-gas finding of each cranker wallet that
+// signs mid's pulls. A wallet whose balance cannot be read keeps its finding.
+func (w *SolanaCrankWorker) checkGas(ctx context.Context, mid billing.MerchantID) {
+	if w.Balances == nil {
+		return
+	}
+	err := w.DB.RunInMerchantScope(ctx, mid, "solana cranker gas", func(mctx context.Context) error {
+		balances, err := w.Balances(mctx)
+		for _, b := range balances {
+			err = errors.Join(err, alerting.RecordCrankerGas(mctx, w.DB, w.now(), alerting.CrankerGas{
+				PSPID: b.PSPID, Wallet: b.Wallet.String(), Network: b.Network, Lamports: b.Lamports, Threshold: solanamodule.CrankerWarningLamports}))
+		}
+		return err
+	})
+	if err != nil {
+		log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("Solana cranker: gas check failed")
+	}
 }
 
 // listDue is the pass's due episodes, merchants taking turns. A merchant whose

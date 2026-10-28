@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,5 +88,42 @@ func TestSolanaCrank(t *testing.T) {
 					"a deployment with no cranker has no recurring pulls to run")
 			})
 		}
+	})
+	t.Run("OR-J37-S09/low-cranker-gas-after-a-signed-pull-is-a-finding-until-funded", func(t *testing.T) {
+		s := newSolanaWorld(t, true)
+		_, sub := s.subscribe(t)
+		cranker := s.cranker.PublicKey().String()
+		lowGas := func() []billing.Finding {
+			page, err := s.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.solana.cranker_low_gas"})
+			require.NoError(t, err)
+			var open []billing.Finding
+			for _, f := range page.Items {
+				if strings.HasSuffix(f.SubjectKey, ":"+cranker) {
+					open = append(open, f)
+				}
+			}
+			return open
+		}
+		fleet := startFleet(t, s.world)
+		renew := func() {
+			t.Helper()
+			current, err := s.alpha.GetSubscription(t.Context(), sub.ID)
+			require.NoError(t, err)
+			due := *current.CurrentPeriodEndsAt
+			s.clock.Advance(due.Sub(s.clock.Now()))
+			runRegistered(t, fleet, "openrails.solana_crank", 1)
+			renewed, err := s.alpha.GetSubscription(t.Context(), sub.ID)
+			require.NoError(t, err)
+			require.True(t, renewed.CurrentPeriodEndsAt.After(due), "the pass signs and lands the pull")
+		}
+
+		s.node.SetSOLBalance(s.cranker.PublicKey(), 1_000)
+		renew()
+		require.Len(t, lowGas(), 1, "a pass that signed with a low cranker raises its finding")
+		require.Equal(t, "high", lowGas()[0].Severity)
+
+		s.node.SetSOLBalance(s.cranker.PublicKey(), 10_000_000_000)
+		renew()
+		require.Empty(t, lowGas(), "the next signing pass finds it funded and resolves it")
 	})
 }

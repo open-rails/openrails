@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 213,
+  "scenario_count": 214,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -762,6 +762,11 @@
       "id": "OR-J37-S08",
       "journey": "J37",
       "name": "Recurring pulls are scheduled only when a cranker is configured"
+    },
+    {
+      "id": "OR-J37-S09",
+      "journey": "J37",
+      "name": "A crank pass that signed with a low cranker wallet raises a finding that the next funded pass resolves"
     },
     {
       "id": "OR-J07-S05",

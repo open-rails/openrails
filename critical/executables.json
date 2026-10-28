@@ -494,6 +494,9 @@
       "TestSolanaCrank/OR-J37-S08/crank-runs-only-with-a-cranker/without-cranker",
       "TestSolanaCrank/OR-J37-S08/crank-runs-only-with-a-cranker/with-cranker"
     ],
+    "OR-J37-S09": [
+      "TestSolanaCrank/OR-J37-S09/low-cranker-gas-after-a-signed-pull-is-a-finding-until-funded"
+    ],
     "OR-J01-S09": [
       "TestCustomerBindingContracts/OR-J01-S09/host-mapping-preserves-source-and-owned-customer-views",
       "TestCustomerBindingContracts/OR-J01-S09/standalone-mapping-remains-independent-of-hosted-account-owner"

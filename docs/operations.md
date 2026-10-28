@@ -850,7 +850,9 @@ disappears. Two safety doctrines matter operationally:
   `consistency.ledger.unbooked` (a provider event OpenRails could not book; the
   merchant repairs the ledger and resolves the finding) and
   `life.worker.stalled` (a periodic job kind stopped completing; it resolves
-  itself when the kind progresses). The findings queue is the one merchant
+  itself when the kind progresses) and `life.solana.cranker_low_gas` (a crank
+  pass that signed found its cranker wallet below 0.05 SOL; the next signing
+  pass that finds it funded resolves it). The findings queue is the one merchant
   inbox, and its counts are metrics measures (`open_findings`,
   `orphaned_members`, `freeloaders`, `duplicate_coverage`,
   `verification_pressure`).
@@ -1234,7 +1236,6 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 | Admission-denial flush (closed hours); attempt enrichment; due daily NMI history read; expired-data cleanup; idempotency cleanup; credit expiry; Solana crank; Solana Pay reference GC; Stripe webhook reconciliation | 1 h |
 | Provider refresh scheduler (fans out per merchant) | 2 h |
 | Stored card refresh ahead of renewal | 6 h |
-| Solana gas alert | 6 h |
 | Ledger integrity audit | 24 h |
 | Automatic usage billing (opt-in) | 5 min, plus threshold wakeups |
 

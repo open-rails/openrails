@@ -273,7 +273,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 			Cranker:   r.SolanaCranker,
 			Lifecycle: r.SubscriptionLifecycleService,
 			// Pulls run as durable solana_pull intents through the shared registry.
-			Intents: r.intentRunner(intentRegistry, clock),
+			Intents:  r.intentRunner(intentRegistry, clock),
+			Balances: r.SolanaCrankerBalances,
 		}
 		if r.SolanaRPCResolver != nil {
 			solanaCrankWorker.Chain = r.SolanaRPCResolver.ChainReader()
@@ -281,13 +282,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		if err := addTrackedWorker(r, workers, solanaCrankWorker); err != nil {
 			return fmt.Errorf("add solana cranker worker: %w", err)
 		}
-	}
-	// Warns when a merchant's Solana cranker wallet is low on SOL. Alert-only,
-	// no auto-top-up.
-	if err := addTrackedWorker(r, workers, &riverjobs.SolanaGasAlertWorker{
-		Check: r.SolanaCrankerBalances,
-	}); err != nil {
-		return fmt.Errorf("add solana gas alert worker: %w", err)
 	}
 	// Jobs orphaned by a dead process (their liveness beat stopped) return to
 	// work; River's rescuer skips OpenRails' timeout-free jobs.
@@ -613,18 +607,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 			nil,
 		))
 	}
-
-	// Every 6 hours: alert on low Solana cranker-wallet SOL gas.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		6*time.Hour,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.SolanaGasAlertArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
-			}
-		},
-		nil,
-	))
 
 	// Hourly: delete settled Solana Pay references past their watch window.
 	// Pending payments and review receipts are never selected by this GC.

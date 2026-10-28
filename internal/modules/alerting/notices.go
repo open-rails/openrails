@@ -22,6 +22,9 @@ const (
 	// FindingWorkerStalled is background work that stopped progressing. It
 	// resolves itself when the work progresses again.
 	FindingWorkerStalled reconcile.FindingType = "life.worker.stalled"
+	// FindingSolanaCrankerLowGas is a Solana cranker wallet low on the SOL its
+	// pulls pay fees with. It resolves itself once a pull pass finds it funded.
+	FindingSolanaCrankerLowGas reconcile.FindingType = "life.solana.cranker_low_gas"
 )
 
 // LedgerRepair is a provider event OpenRails could not book, which the
@@ -136,4 +139,38 @@ func ResolveWorkerStall(ctx context.Context, database *db.DB, workerKind string)
 		return fmt.Errorf("worker stall: database is required")
 	}
 	return (&reconcile.PGStore{DB: database}).ResolveRaisedFinding(ctx, FindingWorkerStalled, workerKind)
+}
+
+// CrankerGas is one Solana cranker wallet's SOL balance on a merchant's PSP.
+type CrankerGas struct {
+	PSPID     uuid.UUID
+	Wallet    string
+	Network   string
+	Lamports  uint64
+	Threshold uint64
+}
+
+func (g CrankerGas) subject() string { return g.PSPID.String() + ":" + g.Wallet }
+
+// RecordCrankerGas raises the wallet's low-gas finding when it is below its
+// threshold, and resolves it when it is not.
+func RecordCrankerGas(ctx context.Context, database *db.DB, now time.Time, gas CrankerGas) error {
+	if database == nil {
+		return fmt.Errorf("cranker gas: database is required")
+	}
+	store := &reconcile.PGStore{DB: database}
+	if gas.Lamports >= gas.Threshold {
+		return store.ResolveRaisedFinding(ctx, FindingSolanaCrankerLowGas, gas.subject())
+	}
+	_, err := store.RaiseFinding(ctx, reconcile.RaisedFinding{
+		Type: FindingSolanaCrankerLowGas, SubjectKey: gas.subject(), Severity: reconcile.SeverityHigh,
+		RecommendedAction: fmt.Sprintf("Solana cranker %s on %s has %d lamports, below %d: top it up with SOL or its pulls fail. It resolves itself once a pull pass finds it funded.",
+			gas.Wallet, gas.Network, gas.Lamports, gas.Threshold),
+		Evidence: map[string]any{"psp_id": gas.PSPID.String(), "wallet": gas.Wallet, "network": gas.Network,
+			"lamports": gas.Lamports, "threshold_lamports": gas.Threshold, "observed_at": now.UTC().Format(time.RFC3339)},
+	})
+	if err != nil {
+		return fmt.Errorf("cranker gas: %w", err)
+	}
+	return nil
 }
