@@ -165,7 +165,7 @@ jobs:
     needs: scope
     if: ${{ needs.scope.outputs.runtime == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Start PostgreSQL
@@ -187,6 +187,11 @@ jobs:
           "$sqlc_bin" generate
           "$sqlc_bin" vet
           git diff --exit-code -- internal/db/gen
+      # api/, docs/api, the TypeScript wire types and compatibility/contract.json;
+      # the schema list is read from a database migrated on this server.
+      - name: Reviewed contracts are current
+        run: go run ./scripts/contracts -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable'
+
   critical:
     name: Critical public-interface journeys
     needs: scope
