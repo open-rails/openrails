@@ -611,22 +611,6 @@ func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, u
 	return derefSubs(subs), nil
 }
 
-func (r *SubscriptionRepo) GetActiveSubscriptionsForPSP(ctx context.Context, rail string) ([]*models.Subscription, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	pspID, err := db.RequirePSPID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsForPSP(ctx, gen.ListActiveSubscriptionsForPSPParams{MerchantID: mid.UUID(), PspID: pspID, Rail: rail})
-	if err != nil {
-		return nil, err
-	}
-	return r.manyWithDetails(ctx, rows)
-}
-
 func (r *SubscriptionRepo) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error) {
 	return r.GetSubscriptionsWithDetailsForUser(ctx, userID, page, pageSize)
 }

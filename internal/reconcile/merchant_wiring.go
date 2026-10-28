@@ -31,9 +31,6 @@ import (
 type MerchantPullClients struct {
 	Fetchers map[Provider]RailFetcher
 	Probers  map[Provider]SubscriptionProber
-	// CCBillDataLink feeds the CCBill DataLink bulk lane (the ACTIVEMEMBERS
-	// roster reconcile) with the same per-merchant client the fetcher uses.
-	CCBillDataLink *ccbill.DataLinkClient
 	// Coverage records, per armed rail, how many PSPs the merchant declares
 	// active versus how many this pass read. A pull arms from one PSP, so with
 	// two NMI PSPs an "exhaustive" roster would cancel every subscription of
@@ -321,7 +318,6 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.Mer
 	}
 	out.Fetchers[ProviderCCBill] = keyedFetcher{RailFetcher: NewCCBillFetcher(dl), key: scope.AccountID}
 	out.Probers[ProviderCCBill] = &CCBillSubscriptionProber{Client: dl}
-	out.CCBillDataLink = dl
 }
 
 func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, out *MerchantPullClients) {

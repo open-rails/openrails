@@ -313,8 +313,3 @@ func (s *SubscriptionService) GetByPSPSubscriptionID(ctx context.Context, rail, 
 func (s *SubscriptionService) GetByGatewayOrder(ctx context.Context, rail, orderID string) (*models.Subscription, error) {
 	return s.subscriptionRepo.GetByGatewayOrder(ctx, rail, orderID)
 }
-
-// GetActiveSubscriptionsForPSP gets all active subscriptions for a rail
-func (s *SubscriptionService) GetActiveSubscriptionsForPSP(ctx context.Context, rail string) ([]*models.Subscription, error) {
-	return s.subscriptionRepo.GetActiveSubscriptionsForPSP(ctx, rail)
-}

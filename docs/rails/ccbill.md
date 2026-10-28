@@ -199,11 +199,11 @@ PSP alone accepts nothing extra.
   success; ambiguous outcomes re-verify rather than decline). CCBill keeps
   the subscriber's access through the paid period on its own side. CCBill
   cancels are destructive: no resume.
-- DataLink (`datalink.ccbill.com`) also powers transaction-export
-  reconciliation, gated on the `datalink_username`/`datalink_password` pair.
-  Once the merchant is armed for enforcement, a member DataLink lists as
-  active while the local row is not raises a `pull.ccbill.active_without_payment`
-  finding. A roster is not payment: only a RenewalSuccess restores access.
+- DataLink (`datalink.ccbill.com`) also powers the provider pull (its
+  ACTIVEMEMBERS roster and transaction exports), gated on the
+  `datalink_username`/`datalink_password` pair. A member absent from the roster
+  is not evidence of anything. A roster is not payment: only a RenewalSuccess
+  restores access.
 - Webhooks mirror CCBill through the lifecycle machine, one event per post on
   the locked row. BillingDateChange never moves the paid period;
   UserReactivation resumes only inside a paid period (else a

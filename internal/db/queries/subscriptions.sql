@@ -216,12 +216,6 @@ FROM targets, history
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = targets.id AND s.row_version = targets.row_version
   AND s.deleted_at IS NULL;
 
--- name: ListActiveSubscriptionsForPSP :many
-SELECT * FROM billing.subscriptions sub
-WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
-  AND sub.rail = $1 AND sub.status = 'active'
-  AND sub.deleted_at IS NULL;
-
 -- name: CountSubscriptionsByCustomer :one
 SELECT count(*) FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1

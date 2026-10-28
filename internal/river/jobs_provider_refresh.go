@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/identity"
-	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -316,7 +315,6 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		"updated_findings": stats.UpdatedFindings,
 		"watermark_errors": stats.WatermarkErrors,
 		"provider_errors":  stats.ProviderErrors,
-		"ccbill_errors":    stats.CCBillErrors,
 		"converge_errors":  stats.ConvergeErrors,
 		"lane_errors":      stats.LaneErrors,
 		"gated":            stats.Gated,
@@ -331,9 +329,9 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	if stats.More {
 		return river.JobSnooze(time.Second)
 	}
-	if stats.ProviderErrors+stats.WatermarkErrors+stats.LaneErrors+stats.ConvergeErrors+stats.CCBillErrors > 0 {
-		return fmt.Errorf("provider refresh incomplete: provider=%d watermark=%d lane=%d converge=%d ccbill=%d",
-			stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors, stats.ConvergeErrors, stats.CCBillErrors)
+	if stats.ProviderErrors+stats.WatermarkErrors+stats.LaneErrors+stats.ConvergeErrors > 0 {
+		return fmt.Errorf("provider refresh incomplete: provider=%d watermark=%d lane=%d converge=%d",
+			stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors, stats.ConvergeErrors)
 	}
 	if stats.Held > 0 && stats.NewFindings > 0 {
 		// Findings this pass raised may be stale: a concurrent verifier or
@@ -403,14 +401,6 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 		if !overwrite {
 			return nil
 		}
-		armed := builder.Build(tctx, billing.MerchantID(mid))
-
-		// The DataLink lane reactivates local rows, so it runs only once the
-		// merchant is armed for enforcement.
-		if err := w.runCCBillDataLinkLane(db.WithPSPID(tctx, armed.Coverage[reconcile.ProviderCCBill].Binding.ID), armed.CCBillDataLink); err != nil {
-			stats.CCBillErrors++
-			logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: CCBill DataLink lane failed")
-		}
 
 		// Confirmed-absence gate: a completed exhaustive pull proves a source
 		// domain; mark it reconciled before convergence so held excess
@@ -442,14 +432,6 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 		return err
 	}
 	return nil
-}
-
-func (w *ProviderRefreshWorker) runCCBillDataLinkLane(ctx context.Context, dataLink *ccbill.DataLinkClient) error {
-	return CCBillReconciler{
-		Clock:    w.Clock,
-		DB:       w.DB,
-		DataLink: dataLink,
-	}.Run(ctx)
 }
 
 // runUnknownReconcile resolves the merchant's `unknown` subscriptions against
@@ -776,7 +758,6 @@ type providerRefreshStats struct {
 	UpdatedFindings int
 	WatermarkErrors int
 	ProviderErrors  int
-	CCBillErrors    int
 	ConvergeErrors  int
 	LaneErrors      int
 	// Gated counts passes that observed receipts with lifecycle changes held.
