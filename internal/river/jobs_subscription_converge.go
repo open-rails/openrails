@@ -122,14 +122,22 @@ func (e *SubscriptionConvergeEnqueuer) EnqueueSubscriptionConverge(ctx context.C
 		ScheduledAt: time.Now().Add(debounce),
 		UniqueOpts:  river.UniqueOpts{ByArgs: true, ByState: subscriptionConvergeUniqueStates},
 	}
-	// A job that is not running yet will fetch after this event. A running one
-	// may have fetched already, so chain a follow-up behind it.
+	// A job that is not running yet will fetch after this event; one snoozed
+	// past the debounce (a pending signup's backoff) is woken now. A running
+	// one may have fetched already, so chain a follow-up behind it.
 	for range subscriptionConvergeMaxChain {
 		res, err := e.Client.Insert(ctx, args, opts)
 		if err != nil {
 			return err
 		}
-		if !res.UniqueSkippedAsDuplicate || res.Job == nil || res.Job.State != rivertype.JobStateRunning {
+		if !res.UniqueSkippedAsDuplicate || res.Job == nil {
+			return nil
+		}
+		if res.Job.State == rivertype.JobStateScheduled && res.Job.ScheduledAt.After(opts.ScheduledAt) {
+			_, err := e.Client.JobRetry(ctx, res.Job.ID)
+			return err
+		}
+		if res.Job.State != rivertype.JobStateRunning {
 			return nil
 		}
 		args.After = res.Job.ID
