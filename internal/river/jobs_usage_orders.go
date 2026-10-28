@@ -47,7 +47,7 @@ func forEachActiveMerchant(ctx context.Context, dbi *db.DB, logger *log.Entry, f
 // the overdue ones and collects them once an off-session charger is
 // configured. A pass with a merchant is that merchant's threshold wakeup.
 type UsageOrderWorker struct {
-	river.WorkerDefaults[money.UsageOrderArgs]
+	WorkerDefaults[money.UsageOrderArgs]
 	DB    *db.DB
 	Money *money.MoneyService
 	// Intents runs the order_collection operations; nil skips collection.

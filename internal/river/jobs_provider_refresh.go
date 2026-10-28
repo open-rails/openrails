@@ -88,7 +88,7 @@ type refreshJobInserter interface {
 // River supplies per-merchant error isolation and retries; the bounded queue
 // caps refresh concurrency.
 type ProviderRefreshSchedulerWorker struct {
-	river.WorkerDefaults[ProviderRefreshArgs]
+	WorkerDefaults[ProviderRefreshArgs]
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock
@@ -230,7 +230,7 @@ func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[
 // across merchants.
 type ProviderRefreshWorker struct {
 	StripeClients *stripeapi.Factory
-	river.WorkerDefaults[ProviderRefreshMerchantArgs]
+	WorkerDefaults[ProviderRefreshMerchantArgs]
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock

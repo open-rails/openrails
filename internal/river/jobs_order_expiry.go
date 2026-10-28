@@ -28,7 +28,7 @@ func (OrderExpiryArgs) Kind() string { return KindOrderExpiry }
 // processing: only the provider's answer ends that. It also removes card
 // saves left waiting for the bank's authentication.
 type OrderExpiryWorker struct {
-	river.WorkerDefaults[OrderExpiryArgs]
+	WorkerDefaults[OrderExpiryArgs]
 	DB     *db.DB
 	Orders *orders.Service
 	Clock  clockwork.Clock

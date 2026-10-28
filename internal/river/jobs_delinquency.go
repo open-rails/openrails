@@ -38,7 +38,7 @@ func (DelinquencyArgs) Kind() string { return KindDelinquency }
 // keeps a customer who paid blocked from spending), so it runs on a tighter
 // cadence than collection.
 type DelinquencyWorker struct {
-	river.WorkerDefaults[DelinquencyArgs]
+	WorkerDefaults[DelinquencyArgs]
 	DB    *db.DB
 	Clock clockwork.Clock
 }

@@ -43,7 +43,7 @@ func (e ProviderObjectObserveEnqueuer) EnqueueProviderObjectObserve(ctx context.
 // unmapped finding true. Provider errors retry; a lost read is caught by the
 // next event or a manual reconcile.
 type ProviderObjectObserveWorker struct {
-	river.WorkerDefaults[wakejobs.ProviderObjectObserveArgs]
+	WorkerDefaults[wakejobs.ProviderObjectObserveArgs]
 	Objects func() *providerobjects.Observer
 }
 

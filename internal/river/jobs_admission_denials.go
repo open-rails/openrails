@@ -41,7 +41,7 @@ const denialHourGrace = 5 * time.Minute
 // touches a closed hour, so a repeated or concurrent flush writes the same
 // values.
 type AdmissionDenialFlushWorker struct {
-	river.WorkerDefaults[AdmissionDenialFlushArgs]
+	WorkerDefaults[AdmissionDenialFlushArgs]
 	DB    *db.DB
 	Redis redis.UniversalClient
 	Clock clockwork.Clock

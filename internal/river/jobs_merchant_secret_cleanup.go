@@ -13,7 +13,7 @@ import (
 // MerchantSecretCleanupWorker deletes a purged merchant's Vault configuration.
 // The purge queued it with its commit; a failure is retried by River.
 type MerchantSecretCleanupWorker struct {
-	river.WorkerDefaults[merchants.SecretCleanupArgs]
+	WorkerDefaults[merchants.SecretCleanupArgs]
 	Merchants *merchants.Service
 }
 

@@ -53,7 +53,7 @@ func (SolanaCrankArgs) Kind() string { return KindSolanaCrank }
 // already paid", no banked balance), so even a buggy cranker cannot collect
 // more than the current period.
 type SolanaCrankWorker struct {
-	river.WorkerDefaults[SolanaCrankArgs]
+	WorkerDefaults[SolanaCrankArgs]
 	DB        *db.DB
 	Config    *config.Config
 	Clock     clockwork.Clock

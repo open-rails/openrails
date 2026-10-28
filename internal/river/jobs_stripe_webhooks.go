@@ -57,7 +57,7 @@ func (a StripeWebhookReconcileArgs) InsertOpts() river.InsertOpts {
 
 type StripeWebhookReconcileWorker struct {
 	StripeClients *stripeapi.Factory
-	river.WorkerDefaults[StripeWebhookReconcileArgs]
+	WorkerDefaults[StripeWebhookReconcileArgs]
 	DB        *db.DB
 	Config    *config.Config
 	Merchants *merchants.Service

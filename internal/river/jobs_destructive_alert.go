@@ -31,7 +31,7 @@ func DestructiveAlertOptions() *river.InsertOpts {
 }
 
 type DestructiveAlertWorker struct {
-	river.WorkerDefaults[DestructiveAlertArgs]
+	WorkerDefaults[DestructiveAlertArgs]
 	DB     *db.DB
 	Alerts *alerting.Service
 }

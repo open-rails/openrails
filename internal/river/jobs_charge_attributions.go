@@ -38,7 +38,7 @@ func (ChargeAttributionArgs) Kind() string { return KindChargeAttributions }
 // declared subscription. Only due rows are read; a failed read backs off. A
 // CCBill attribution is left to the provider pull while DataLink reads it.
 type ChargeAttributionWorker struct {
-	river.WorkerDefaults[ChargeAttributionArgs]
+	WorkerDefaults[ChargeAttributionArgs]
 	DB          *db.DB
 	Clock       clockwork.Clock
 	NMIResolver railresolve.NMIClientResolver

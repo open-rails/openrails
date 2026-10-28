@@ -49,7 +49,7 @@ func (NMIHistoryArgs) Kind() string { return KindNMIHistory }
 // transaction, so a rerun is idempotent and a failed read leaves the stored
 // months as they were. It only reads NMI.
 type NMIHistoryWorker struct {
-	river.WorkerDefaults[NMIHistoryArgs]
+	WorkerDefaults[NMIHistoryArgs]
 	DB          *db.DB
 	Clock       clockwork.Clock
 	NMIResolver railresolve.NMIClientResolver

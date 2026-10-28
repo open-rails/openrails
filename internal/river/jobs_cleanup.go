@@ -108,7 +108,7 @@ type CleanupExpiredDataArgs struct{}
 func (CleanupExpiredDataArgs) Kind() string { return KindCleanupExpiredData }
 
 type CleanupExpiredDataWorker struct {
-	river.WorkerDefaults[CleanupExpiredDataArgs]
+	WorkerDefaults[CleanupExpiredDataArgs]
 	DB     *db.DB
 	Clock  clockwork.Clock
 	Config CleanupConfig

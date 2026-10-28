@@ -23,7 +23,7 @@ const (
 // the credentials, the PSP or a credential is not declared), or is out of
 // attempts, marks the import failed with why.
 type PSPImportWorker struct {
-	river.WorkerDefaults[pspimport.JobArgs]
+	WorkerDefaults[pspimport.JobArgs]
 	Importer func() *pspimport.Importer
 }
 

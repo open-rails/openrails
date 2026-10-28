@@ -53,7 +53,7 @@ const (
 // StoredCardRefreshWorker refreshes one stored card from a holder that must be
 // asked. A decline queues it with Declined; the ahead-of-renewal pass without.
 type StoredCardRefreshWorker struct {
-	river.WorkerDefaults[paymentmethods.StoredCardRefreshArgs]
+	WorkerDefaults[paymentmethods.StoredCardRefreshArgs]
 	DB        *db.DB
 	Clock     clockwork.Clock
 	Updaters  paymentmethods.AccountUpdaters
@@ -400,7 +400,7 @@ func (StoredCardRefreshDueArgs) Kind() string { return KindStoredCardRefreshDue 
 // card's next check, queues it, or drops it until its renewals change again.
 // A vault armed later is first asked about a card ahead of its next renewal.
 type StoredCardRefreshDueWorker struct {
-	river.WorkerDefaults[StoredCardRefreshDueArgs]
+	WorkerDefaults[StoredCardRefreshDueArgs]
 	DB        *db.DB
 	Clock     clockwork.Clock
 	Merchants func() *merchants.Service

@@ -28,7 +28,7 @@ func (JobRescueArgs) Kind() string { return KindJobRescue }
 // dead. Rescued work re-enters through its own recovery (an operation
 // re-reads the provider before any write), never as a blind re-send.
 type JobRescueWorker struct {
-	river.WorkerDefaults[JobRescueArgs]
+	WorkerDefaults[JobRescueArgs]
 	River   RiverTableAccess
 	Silence time.Duration
 }

@@ -90,7 +90,7 @@ func (e *SubscriptionConvergeEnqueuer) EnqueueSubscriptionConverge(ctx context.C
 // signup/mirror legs (webhooks.StripeConvergeService / NMIConvergeService).
 type SubscriptionConvergeWorker struct {
 	StripeClients *stripeapi.Factory
-	river.WorkerDefaults[SubscriptionConvergeArgs]
+	WorkerDefaults[SubscriptionConvergeArgs]
 	DB     *db.DB
 	Config *config.Config
 	Rails  railresolve.Source

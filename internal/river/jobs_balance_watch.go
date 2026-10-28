@@ -44,7 +44,7 @@ func (BalanceWatchArgs) Kind() string { return KindBalanceWatch }
 // service's clock. An idle pass reads no row. A failed look stays due and
 // fails the pass once the others are done.
 type BalanceWatchWorker struct {
-	river.WorkerDefaults[BalanceWatchArgs]
+	WorkerDefaults[BalanceWatchArgs]
 	DB    *db.DB
 	Money *money.MoneyService
 }

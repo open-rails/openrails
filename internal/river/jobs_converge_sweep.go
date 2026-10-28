@@ -30,7 +30,7 @@ func (ConvergeSweepArgs) Kind() string { return KindConvergeSweep }
 // schedule, catching drift no request path touched. One merchant's failure
 // never stops the others; the job reports them all.
 type ConvergeSweepWorker struct {
-	river.WorkerDefaults[ConvergeSweepArgs]
+	WorkerDefaults[ConvergeSweepArgs]
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock

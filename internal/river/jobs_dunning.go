@@ -85,7 +85,7 @@ func (DunningArgs) Kind() string { return KindDunning }
 // collection, and ends memberships whose wait for a card outlived the dunning
 // window. It never waits on a provider: each operation's own job charges.
 type DunningWorker struct {
-	river.WorkerDefaults[DunningArgs]
+	WorkerDefaults[DunningArgs]
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock

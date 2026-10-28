@@ -29,7 +29,7 @@ func workerNow(c clockwork.Clock) time.Time {
 // financial operation is terminal. River owns waking/retrying; the ledger owns
 // authorization, submission fences, provider evidence, and final accounting.
 type ProviderOperationWorker struct {
-	river.WorkerDefaults[intents.OperationArgs]
+	WorkerDefaults[intents.OperationArgs]
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock

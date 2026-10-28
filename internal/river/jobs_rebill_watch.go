@@ -72,7 +72,7 @@ func (RebillWatchArgs) Kind() string { return KindRebillWatch }
 // converged, and only a proven absence is a miss. A period NMI's schedule
 // skipped is then collected by OpenRails.
 type RebillWatchWorker struct {
-	river.WorkerDefaults[RebillWatchArgs]
+	WorkerDefaults[RebillWatchArgs]
 	DB          *db.DB
 	Config      *config.Config
 	Clock       clockwork.Clock

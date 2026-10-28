@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -55,19 +56,9 @@ func (w *healthTrackedWorker[T]) NextRetry(job *river.Job[T]) time.Time {
 	return w.inner.NextRetry(job)
 }
 
-// riverNoJobTimeout is River's spelling of "never cancel on elapsed time"
-// (river.Config.JobTimeout docs: -1). It is the ONLY value an OpenRails worker
-// may declare.
-const riverNoJobTimeout = -1
-
-// Timeout is -1 for every OpenRails worker, whatever the inner worker or the
-// host's client says. River resolves cmp.Or(worker.Timeout(),
-// client.JobTimeout), so declaring it on the wrapper every worker registers
-// through stops a host client's JobTimeout (default 1 minute) from cancelling
-// billing work. A job ends on observed lack of progress
-// (riverjobs.JobLivenessMiddleware), never on a clock.
-func (w *healthTrackedWorker[T]) Timeout(*river.Job[T]) time.Duration {
-	return riverNoJobTimeout
+// Timeout is the inner worker's: its kind's budget.
+func (w *healthTrackedWorker[T]) Timeout(job *river.Job[T]) time.Duration {
+	return w.inner.Timeout(job)
 }
 
 func (w *healthTrackedWorker[T]) Work(ctx context.Context, job *river.Job[T]) error {
@@ -86,6 +77,9 @@ func addTrackedWorker[T river.JobArgs](r *Runtime, workers *river.Workers, worke
 // supplied — tests hand in one with short beats.
 func addTrackedWorkerWithLiveness[T river.JobArgs](r *Runtime, workers *river.Workers, worker river.Worker[T], liveness rivertype.WorkerMiddleware) error {
 	var args T
+	if got, want := worker.Timeout(&river.Job[T]{JobRow: &rivertype.JobRow{Kind: args.Kind()}}), riverjobs.Timeout(args.Kind()); got != want {
+		return fmt.Errorf("%s: timeout %s is not its kind's budget %s", args.Kind(), got, want)
+	}
 	r.workerHealthRegistrations().NoteKind(args.Kind())
 	return river.AddWorkerSafely[T](workers, &healthTrackedWorker[T]{
 		inner:      worker,
