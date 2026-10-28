@@ -131,6 +131,7 @@ migration 0144_retention_owner.up.sql sha256:33e9df916390a846b964f3cbeb93fb58ab7
 migration 0145_price_migration_push.up.sql sha256:1c3019f43fa69a2948799f2c7e7f4aa8459486387f09a9301e06c3ada2a49595
 migration 0146_due_pass_recheck.up.sql sha256:9b83533cf2093669bcc01975a2f1b81bb7ad79de4c45873e84891c683bd9afe7
 migration 0147_rebill_probe_backoff.up.sql sha256:350c039b3cda3783c72222709160fcb37d5abc6ec0668762b04435d16c35f695
+migration 0150_job_health_from_river.up.sql sha256:40570212847e3b3ffabd9d0fc22189f80bbc0a040413ba755f031d9bbaa4ccb1
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3041,21 +3042,6 @@ table billing.webhook_health_daily
   constraint webhook_health_daily_source_check CHECK (((psp_id IS NULL) <> (custodian_id IS NULL)))
   index CREATE INDEX webhook_health_daily_day_at_idx ON billing.webhook_health_daily USING btree (merchant_id, day_at)
   index CREATE UNIQUE INDEX webhook_health_daily_psp_id_custodian_id_day_at_key ON billing.webhook_health_daily USING btree (merchant_id, psp_id, custodian_id, day_at) NULLS NOT DISTINCT
-
-table billing.worker_state
-  column worker_kind text NOT NULL
-  column cursor_merchant_id uuid
-  column cursor_version bigint NOT NULL DEFAULT 0
-  column registered_at timestamp with time zone NOT NULL DEFAULT now()
-  column expected_period_seconds bigint
-  column last_success_at timestamp with time zone
-  column last_error_at timestamp with time zone
-  column last_error text
-  column consecutive_failures integer NOT NULL DEFAULT 0
-  column last_alerted_at timestamp with time zone
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint worker_state_pkey PRIMARY KEY (worker_kind)
-  index CREATE UNIQUE INDEX worker_state_pkey ON billing.worker_state USING btree (worker_kind)
 
 function billing.arm_book(text,timestamp with time zone)
   CREATE OR REPLACE FUNCTION billing.arm_book(p_armed_by text, p_armed_at timestamp with time zone)

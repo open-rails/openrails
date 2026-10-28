@@ -1062,7 +1062,7 @@
       "type UsageOutcome string",
       "type UsageRow struct {\n\tKey        string           `json:\"key\"`\n\tCell       *string          `json:\"cell\"`\n\tEventCount int64            `json:\"event_count\"`\n\tAmount     int64            `json:\"amount,string\"`\n\tQuantity   *int64           `json:\"quantity\"`\n\tDimensions map[string]int64 `json:\"dimensions\"`\n}",
       "type UserMerchant struct {\n\tID          MerchantID `json:\"id\"`\n\tSlug        string     `json:\"slug\"`\n\tDisplayName string     `json:\"display_name\"`\n\tRole        string     `json:\"role\"`\n\tPermissions []string   `json:\"permissions\"`\n}",
-      "type WorkerHealth struct {\n\tWorkerKind            string     `json:\"worker_kind\"`\n\tRegisteredAt          time.Time  `json:\"registered_at\"`\n\tExpectedPeriodSeconds *int64     `json:\"expected_period_seconds\"`\n\tLastSuccessAt         *time.Time `json:\"last_success_at\"`\n\tLastErrorAt           *time.Time `json:\"last_error_at\"`\n\tLastError             *string    `json:\"last_error\"`\n\tConsecutiveFailures   int32      `json:\"consecutive_failures\"`\n\tLastAlertedAt         *time.Time `json:\"last_alerted_at\"`\n\tUpdatedAt             time.Time  `json:\"updated_at\"`\n}",
+      "type WorkerHealth struct {\n\tKind string `json:\"kind\"`\n\n\tTimeoutSeconds int64  `json:\"timeout_seconds\"`\n\tPeriodSeconds  *int64 `json:\"period_seconds\"`\n\n\tOverrunning int64 `json:\"overrunning\"`\n\tRetryable   int64 `json:\"retryable\"`\n\n\tDiscarded int64 `json:\"discarded\"`\n\n\tLastCompletedAt *time.Time `json:\"last_completed_at\"`\n\tLastError       *string    `json:\"last_error\"`\n}",
       "var ErrCardDeclined error = newCodedError(CodeCardDeclined, ErrPaymentRefused)",
       "var ErrConflict = errors.New(\"openrails: conflict\")",
       "var ErrDenied = errors.New(\"openrails: denied\")",
@@ -1714,7 +1714,8 @@
     ],
     "internal/modules/money": [
       "type CustomerInvoiceProfile struct {\n\tNetTermsDays     int                     `json:\"net_terms_days\"`\n\tCollectionMethod string                  `json:\"collection_method\"`\n\tPONumber         string                  `json:\"po_number,omitempty\"`\n\tTax              map[string]any          `json:\"tax,omitempty\"`\n\tBillingContacts  []models.InvoiceContact `json:\"billing_contacts,omitempty\"`\n\tMemo             string                  `json:\"memo,omitempty\"`\n}",
-      "type UsageOrderArgs struct {\n\tMerchantID *billing.MerchantID `json:\"merchant_id,omitempty\"`\n}",
+      "type UsageAccount struct {\n\tCustomerID uuid.UUID `json:\"customer_id\"`\n\tCurrency   string    `json:\"currency\"`\n}",
+      "type UsageOrderArgs struct {\n\tMerchantID *billing.MerchantID `json:\"merchant_id,omitempty\"`\n\tAfter      *UsageAccount       `json:\"after,omitempty\"`\n}",
       "type captureTerms struct {\n\tbilling.CaptureUsage\n\tAmount *int64 `json:\"amount,omitempty,string\"`\n}",
       "type meterKeyPosition struct {\n\tKey string `json:\"k\"`\n}",
       "type ratingCard struct {\n\tMeterKey    string              `json:\"meter_key\"`\n\tValueKey    string              `json:\"value_property\"`\n\tAggregation catalog.Aggregation `json:\"aggregation\"`\n\tGroupBy     map[string]string   `json:\"group_by,omitempty\"`\n\tFilter      map[string][]string `json:\"filter,omitempty\"`\n\tAllowance   *catalog.Allowance  `json:\"allowance,omitempty\"`\n\tPrice       catalog.RatePrice   `json:\"price\"`\n}",
@@ -1909,6 +1910,7 @@
       "type Recommendation struct {\n\tAction       string           `json:\"action\"`\n\tParams       map[string]any   `json:\"params,omitempty\"`\n\tAlternatives []Recommendation `json:\"alternatives,omitempty\"`\n}"
     ],
     "internal/river": [
+      "type CleanupExpiredDataArgs struct {\n\tAfter *uuid.UUID `json:\"after,omitempty\"`\n}",
       "type DestructiveAlertArgs struct {\n\tMerchantID uuid.UUID            `json:\"merchant_id\"`\n\tHoldID     uuid.UUID            `json:\"hold_id\"`\n\tScope      string               `json:\"scope\"`\n\tOpenedAt   time.Time            `json:\"opened_at\"`\n\tChannel    *alerting.ChannelRef `json:\"channel,omitempty\"`\n}",
       "type DunningArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\"`\n}",
       "type ProviderRefreshMerchantArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}",
@@ -4681,6 +4683,29 @@
       "transient": "github.com/open-rails/openrails/internal/shared/transient",
       "url": "net/url"
     },
+    "internal/river/jobs_cleanup.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "clockwork": "github.com/jonboulle/clockwork",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "destructive": "github.com/open-rails/openrails/internal/destructive",
+      "errors": "errors",
+      "eventlog": "github.com/open-rails/openrails/internal/eventlog",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "idempotency": "github.com/open-rails/openrails/internal/modules/idempotency",
+      "log": "github.com/sirupsen/logrus",
+      "math": "math",
+      "opsmetric": "github.com/open-rails/openrails/internal/shared/opsmetric",
+      "orders": "github.com/open-rails/openrails/internal/modules/orders",
+      "retention": "github.com/open-rails/openrails/internal/retention",
+      "river": "github.com/riverqueue/river",
+      "solanamodule": "github.com/open-rails/openrails/internal/modules/solana",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5",
+      "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks"
+    },
     "internal/river/jobs_destructive_alert.go": {
       "alerting": "github.com/open-rails/openrails/internal/modules/alerting",
       "billing": "github.com/open-rails/openrails/billing",
@@ -4718,7 +4743,6 @@
       "money": "github.com/open-rails/openrails/internal/modules/money",
       "normalize": "github.com/open-rails/openrails/internal/shared/normalize",
       "payments": "github.com/open-rails/openrails/internal/modules/payments",
-      "progress": "github.com/open-rails/openrails/internal/shared/progress",
       "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
       "river": "github.com/riverqueue/river",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
@@ -4744,7 +4768,7 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
       "money": "github.com/open-rails/openrails/internal/modules/money",
-      "progress": "github.com/open-rails/openrails/internal/shared/progress",
+      "providerrecovery": "github.com/open-rails/openrails/internal/providerrecovery",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
       "reconcile": "github.com/open-rails/openrails/internal/reconcile",
       "river": "github.com/riverqueue/river",
@@ -4777,7 +4801,6 @@
       "merchants": "github.com/open-rails/openrails/internal/merchants",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
-      "progress": "github.com/open-rails/openrails/internal/shared/progress",
       "river": "github.com/riverqueue/river",
       "strconv": "strconv",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
@@ -4792,6 +4815,7 @@
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "destructive": "github.com/open-rails/openrails/internal/destructive",
+      "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
@@ -4799,7 +4823,6 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
       "models": "github.com/open-rails/openrails/internal/db/models",
-      "progress": "github.com/open-rails/openrails/internal/shared/progress",
       "river": "github.com/riverqueue/river",
       "rivertype": "github.com/riverqueue/river/rivertype",
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
@@ -5271,8 +5294,7 @@
     "server/operations.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
-      "http": "net/http",
-      "riverjobs": "github.com/open-rails/openrails/internal/river"
+      "http": "net/http"
     },
     "server/payment_page.go": {
       "fs": "io/fs",

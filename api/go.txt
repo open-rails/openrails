@@ -3865,15 +3865,14 @@ pkg openrails/billing, type UserMerchant struct, Permissions []string `json:"per
 pkg openrails/billing, type UserMerchant struct, Role string `json:"role"`
 pkg openrails/billing, type UserMerchant struct, Slug string `json:"slug"`
 pkg openrails/billing, type WorkerHealth struct
-pkg openrails/billing, type WorkerHealth struct, ConsecutiveFailures int32 `json:"consecutive_failures"`
-pkg openrails/billing, type WorkerHealth struct, ExpectedPeriodSeconds *int64 `json:"expected_period_seconds"`
-pkg openrails/billing, type WorkerHealth struct, LastAlertedAt *time.Time `json:"last_alerted_at"`
+pkg openrails/billing, type WorkerHealth struct, Discarded int64 `json:"discarded"`
+pkg openrails/billing, type WorkerHealth struct, Kind string `json:"kind"`
+pkg openrails/billing, type WorkerHealth struct, LastCompletedAt *time.Time `json:"last_completed_at"`
 pkg openrails/billing, type WorkerHealth struct, LastError *string `json:"last_error"`
-pkg openrails/billing, type WorkerHealth struct, LastErrorAt *time.Time `json:"last_error_at"`
-pkg openrails/billing, type WorkerHealth struct, LastSuccessAt *time.Time `json:"last_success_at"`
-pkg openrails/billing, type WorkerHealth struct, RegisteredAt time.Time `json:"registered_at"`
-pkg openrails/billing, type WorkerHealth struct, UpdatedAt time.Time `json:"updated_at"`
-pkg openrails/billing, type WorkerHealth struct, WorkerKind string `json:"worker_kind"`
+pkg openrails/billing, type WorkerHealth struct, Overrunning int64 `json:"overrunning"`
+pkg openrails/billing, type WorkerHealth struct, PeriodSeconds *int64 `json:"period_seconds"`
+pkg openrails/billing, type WorkerHealth struct, Retryable int64 `json:"retryable"`
+pkg openrails/billing, type WorkerHealth struct, TimeoutSeconds int64 `json:"timeout_seconds"`
 pkg openrails/billing, var ErrCardDeclined error
 pkg openrails/billing, var ErrConflict error
 pkg openrails/billing, var ErrDenied error
