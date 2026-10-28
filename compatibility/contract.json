@@ -1622,7 +1622,6 @@
       "type NMIDeletePayload struct {\n\tUserID             string `json:\"user_id\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n}",
       "type NMIPaymentMethodDeletePayload struct {\n\tBillingEntryOnly bool      `json:\"billing_entry_only\"`\n\tUserID           string    `json:\"user_id\"`\n\tPaymentMethodID  uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef  string    `json:\"rail_customer_ref,omitempty\"`\n\tRailMethodRef    string    `json:\"rail_method_ref,omitempty\"`\n}",
       "type NMIPaymentSourceUpdatePayload struct {\n\tUserID             string     `json:\"user_id\"`\n\tRailSubscriptionID string     `json:\"rail_subscription_id,omitempty\"`\n\tNewPaymentMethodID uuid.UUID  `json:\"new_payment_method_id\"`\n\tNewRailCustomerRef string     `json:\"new_vault_id\"`\n\tNewPspID           uuid.UUID  `json:\"new_psp_id\"`\n\tOldPaymentMethodID *uuid.UUID `json:\"old_payment_method_id,omitempty\"`\n\tOldRailCustomerRef string     `json:\"old_vault_id,omitempty\"`\n\n\tFollow bool `json:\"follow,omitempty\"`\n\n\tVerifiedTransactionID string `json:\"verified_transaction_id,omitempty\"`\n}",
-      "type OperationArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tIntentID   uuid.UUID `json:\"intent_id\" river:\"unique\"`\n}",
       "type OrderCollectionPayload struct {\n\tOrderCaptchaSubjects []string `json:\"order_captcha_subjects,omitempty\"`\n\n\tInitiator           charge.Initiator           `json:\"initiator\"`\n\tOrderID             uuid.UUID                  `json:\"order_id\"`\n\tCustomerID          uuid.UUID                  `json:\"customer_id\"`\n\tPaymentID           uuid.UUID                  `json:\"payment_id\"`\n\tPaymentMethodID     uuid.UUID                  `json:\"payment_method_id\"`\n\tRail                string                     `json:\"rail\"`\n\tInstrument          charge.FrozenInstrument    `json:\"instrument\"`\n\tHyperSwitch         *charge.HyperSwitchBinding `json:\"hyperswitch,omitempty\"`\n\tCurrency            string                     `json:\"currency\"`\n\tAmount              int64                      `json:\"amount\"`\n\tAmountMinor         moneyutil.Cents            `json:\"amount_minor\"`\n\tProviderCustomerRef string                     `json:\"provider_customer_ref\"`\n\tDescription         string                     `json:\"description\"`\n}",
       "type PlatformMethodDeletePayload struct {\n\tCustomerID      uuid.UUID               `json:\"customer_id\"`\n\tPaymentMethodID uuid.UUID               `json:\"payment_method_id\"`\n\tInstrument      charge.FrozenInstrument `json:\"instrument\"`\n\tTenantID        string                  `json:\"tenant_id\"`\n\tEnvironment     string                  `json:\"environment\"`\n}",
       "type PriceMigrationPushPayload struct {\n\tScheduledChangeID uuid.UUID `json:\"scheduled_change_id\"`\n}",
@@ -1641,6 +1640,9 @@
       "type recurringConfirmation struct {\n\tconfirmationTerms\n\tOrderReference string    `json:\"order_reference\"`\n\tAcceptedAt     time.Time `json:\"accepted_at\"`\n}",
       "type stripeDomain struct {\n\tID       string `json:\"id\"`\n\tDomain   string `json:\"domain_name\"`\n\tEnabled  bool   `json:\"enabled\"`\n\tApplePay struct {\n\t\tStatus        string `json:\"status\"`\n\t\tStatusDetails struct {\n\t\t\tErrorMessage string `json:\"error_message\"`\n\t\t} `json:\"status_details\"`\n\t} `json:\"apple_pay\"`\n\tGooglePay struct {\n\t\tStatus string `json:\"status\"`\n\t} `json:\"google_pay\"`\n}",
       "type stripeRecurringDecline struct {\n\tDeclineCode     string         `json:\"decline_code,omitempty\"`\n\tBinding         receiptBinding `json:\"binding\"`\n\tFailureCode     string         `json:\"failure_code\"`\n\tPaymentIntentID string         `json:\"payment_intent_id\"`\n}"
+    ],
+    "internal/intents/wake": [
+      "type Args struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tIntentID   uuid.UUID `json:\"intent_id\" river:\"unique\"`\n}"
     ],
     "internal/merchantarchive": [
       "type CatalogDependencies struct {\n\tPSPs []CatalogPSPIdentity `json:\"psps\"`\n\n\tCustomers *[]string `json:\"customers,omitempty\"`\n}",
@@ -1766,7 +1768,10 @@
     ],
     "internal/modules/solana/pull": [
       "type Agreement struct {\n\tFingerprint           int64                     `json:\"plan_fingerprint\"`\n\tRow                   models.SolanaSubscription `json:\"row\"`\n\tPriceID               uuid.UUID                 `json:\"price_id\"`\n\tProductID             uuid.UUID                 `json:\"product_id\"`\n\tCustomerID            uuid.UUID                 `json:\"customer_id\"`\n\tDescription           string                    `json:\"description\"`\n\tAmount                int64                     `json:\"amount,string\"`\n\tCurrency              string                    `json:\"currency\"`\n\tNativeDecimals        int                       `json:\"native_decimals\"`\n\tTokenAmount           uint64                    `json:\"token_amount,string\"`\n\tTokenDecimals         int                       `json:\"token_decimals\"`\n\tPeriodHours           uint64                    `json:\"period_hours,string\"`\n\tAccessDurationHours   *int                      `json:\"access_duration_hours\"`\n\tProviderAccessDefault bool                      `json:\"provider_access_default,omitempty\"`\n\tQuantity              *int                      `json:\"quantity\"`\n\tRetryAttempts         int                       `json:\"retry_attempts\"`\n\tEpisodeAt             time.Time                 `json:\"episode_at\"`\n\tPreviousPeriodEnd     *time.Time                `json:\"previous_period_end\"`\n}",
-      "type Payload struct {\n\tAgreement       *Agreement `json:\"agreement,omitempty\"`\n\tSubscriptionPDA string     `json:\"subscription_pda\"`\n\tRowID           uuid.UUID  `json:\"row_id\"`\n\tNextPullAt      time.Time  `json:\"next_pull_at\"`\n}"
+      "type Payload struct {\n\tAgreement *Agreement `json:\"agreement,omitempty\"`\n\tsolanasubs.PullEpisode\n}"
+    ],
+    "internal/modules/solana/solanasubs": [
+      "type PullEpisode struct {\n\tSubscriptionPDA string    `json:\"subscription_pda\"`\n\tRowID           uuid.UUID `json:\"row_id\"`\n\tNextPullAt      time.Time `json:\"next_pull_at\"`\n}"
     ],
     "internal/modules/subscriptions": [
       "func (p *NMIUpgradePayload) UnmarshalJSON(data []byte) error {\n\ttype plain NMIUpgradePayload\n\tvar decoded plain\n\tif err := json.Unmarshal(data, \u0026decoded); err != nil {\n\t\treturn err\n\t}\n\tif _, _, err := grants.DecodeAcceptedEntitlements(decoded.Entitlements, decoded.LegacyEntitlements); err != nil {\n\t\treturn err\n\t}\n\tvar fields map[string]json.RawMessage\n\tif err := json.Unmarshal(data, \u0026fields); err != nil {\n\t\treturn err\n\t}\n\tif _, present := fields[\"access_duration_hours\"]; !present {\n\t\tdecoded.AccessEndsAt = \u0026decoded.PeriodEnd\n\t}\n\t*p = NMIUpgradePayload(decoded)\n\treturn nil\n}",
@@ -1870,8 +1875,10 @@
       "type Capabilities struct {\n\tSubscriptions bool `json:\"subscriptions\"`\n\tTransactions  bool `json:\"transactions\"`\n\tRefunds       bool `json:\"refunds\"`\n\tChargebacks   bool `json:\"chargebacks\"`\n\tVault         bool `json:\"vault\"`\n}",
       "type Change struct {\n\tbilling.FindingChange\n\tApply ChangeApply `json:\"apply\"`\n}",
       "type ChangeApply struct {\n\tMaterialize        *MaterializeSubscriptionAction `json:\"materialize,omitempty\"`\n\tBackfillPayment    *BackfillPaymentAction         `json:\"backfill_payment,omitempty\"`\n\tRecordRefund       *RecordRefundAction            `json:\"record_refund,omitempty\"`\n\tDecide             *DecideAction                  `json:\"decide,omitempty\"`\n\tAdoptPaymentMethod *AdoptPaymentMethodAction      `json:\"adopt_payment_method,omitempty\"`\n\tRevokeAccess       *RevokeAccessAction            `json:\"revoke_access,omitempty\"`\n\tRefundCharge       *RefundChargeAction            `json:\"refund_charge,omitempty\"`\n\tCancelSchedule     *CancelScheduleAction          `json:\"cancel_schedule,omitempty\"`\n\tCollectRenewal     *CollectRenewalAction          `json:\"collect_renewal,omitempty\"`\n\tCorrect            *CorrectSubscriptionAction     `json:\"correct,omitempty\"`\n}",
+      "type ChargeAttributionArgs struct {\n\tMerchantID uuid.UUID              `json:\"merchant_id\"`\n\tDeclared   []DeclaredAttributions `json:\"declared\"`\n}",
       "type ConvergeRollbackResult struct {\n\tRunID uuid.UUID `json:\"run_id\"`\n\n\tSubscriptionsRestored int64 `json:\"subscriptions_restored\"`\n\n\tSubscriptionsChanged int64 `json:\"subscriptions_changed\"`\n\n\tAccessCaptured int64 `json:\"access_captured\"`\n\n\tAccessInvalidated int64 `json:\"access_invalidated\"`\n\n\tIntentsSuperseded int `json:\"intents_superseded\"`\n\n\tIntentsIrreversible []IntentDivergence `json:\"intents_irreversible,omitempty\"`\n\n\tIntentsAmbiguous []IntentDivergence `json:\"intents_ambiguous,omitempty\"`\n\n\tProvenDomainsReset int64 `json:\"proven_domains_reset\"`\n\n\tEnforcementDisarmed bool `json:\"enforcement_disarmed\"`\n\n\tRecomputed bool `json:\"recomputed\"`\n}",
       "type CorrectSubscriptionAction struct {\n\tSubscriptionID uuid.UUID  `json:\"subscription_id\"`\n\tPriceID        *uuid.UUID `json:\"price_id,omitempty\"`\n\tStartedAt      *time.Time `json:\"started_at,omitempty\"`\n\n\tSchedule *RemoteSubscription `json:\"schedule,omitempty\"`\n}",
+      "type DeclaredAttributions struct {\n\tPSPID          uuid.UUID `json:\"psp_id\"`\n\tTransactionIDs []string  `json:\"transaction_ids\"`\n}",
       "type DunningForensics struct {\n\tProvider              Provider `json:\"provider\"`\n\tSubscriptionsExamined int      `json:\"subscriptions_examined\"`\n\n\tNeverAttempted int `json:\"never_attempted\"`\n\n\tAttemptedExhausted int `json:\"attempted_and_exhausted\"`\n\n\tAttemptedInProgress int `json:\"attempted_in_progress\"`\n\n\tNoRemoteDeclines int `json:\"no_remote_declines\"`\n\n\tLastLocalDunningAction *time.Time `json:\"last_local_dunning_action,omitempty\"`\n\n\tLastProviderAttempt *time.Time `json:\"last_provider_attempt,omitempty\"`\n\n\tLastHistoryAttempt *time.Time `json:\"last_history_attempt,omitempty\"`\n\n\tLastDunningActionAnySource *time.Time     `json:\"last_dunning_action_any_source,omitempty\"`\n\tLastDunningActionVia       string         `json:\"last_dunning_action_via,omitempty\"`\n\tDeclineReasons             map[string]int `json:\"decline_reason_histogram,omitempty\"`\n\n\tHistorySource string `json:\"history_source,omitempty\"`\n\n\tDetails        []DunningSubscriptionReport `json:\"details,omitempty\"`\n\tDetailsCovered int                         `json:\"details_covered\"`\n}",
       "type DunningSubscriptionReport struct {\n\tSubscriptionID     string     `json:\"subscription_id\"`\n\tRailSubscriptionID string     `json:\"rail_subscription_id,omitempty\"`\n\tStatus             string     `json:\"status\"`\n\tCancelType         string     `json:\"cancel_type,omitempty\"`\n\tRetryAttempts      int        `json:\"retry_attempts\"`\n\tLastRetryAt        *time.Time `json:\"last_retry_at,omitempty\"`\n\tNextRetryAt        *time.Time `json:\"next_retry_at,omitempty\"`\n\tRemoteDeclines     int        `json:\"remote_declines\"`\n\tRemoteSuccesses    int        `json:\"remote_successes\"`\n\tFirstDeclineAt     *time.Time `json:\"first_decline_at,omitempty\"`\n\tLastDeclineAt      *time.Time `json:\"last_decline_at,omitempty\"`\n\tDeclineReasons     []string   `json:\"decline_reasons,omitempty\"`\n\n\tHistoryEvents    int        `json:\"history_events,omitempty\"`\n\tHistoryFailures  int        `json:\"history_failures,omitempty\"`\n\tHistorySuccesses int        `json:\"history_successes,omitempty\"`\n\tFirstHistoryAt   *time.Time `json:\"first_history_at,omitempty\"`\n\tLastHistoryAt    *time.Time `json:\"last_history_at,omitempty\"`\n\tClassification   string     `json:\"classification\"`\n\n\tTimeline []TimelineEvent `json:\"timeline,omitempty\"`\n}",
       "type Finding struct {\n\tProvider Provider\n\n\tPSPID             uuid.UUID\n\tType              FindingType\n\tSubjectKey        string\n\tSeverity          Severity\n\tStatus            FindingStatus\n\tRequiresAdmin     bool\n\tRecommendedAction string\n\tLocalEvidence     map[string]any\n\tRemoteEvidence    map[string]any\n\n\tIntentEvidence map[string]any\n\n\tProvenance string\n\tQuiet      bool\n\n\tApply *ApplyAction `json:\"-\"`\n\n\tChange *Change\n\tSource billing.ProposalSource\n\tPullID uuid.UUID\n}",
@@ -3353,17 +3360,6 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
-    "internal/intents/river_dispatch.go": {
-      "context": "context",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "math": "math",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "river": "github.com/riverqueue/river",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
-    },
     "internal/intents/stripe_cancel.go": {
       "clockwork": "github.com/jonboulle/clockwork",
       "config": "github.com/open-rails/openrails/internal/config",
@@ -3412,6 +3408,16 @@
       "json": "encoding/json",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions"
+    },
+    "internal/intents/wake/wake.go": {
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "math": "math",
+      "river": "github.com/riverqueue/river",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/merchantarchive/archive.go": {
       "archivewire": "github.com/open-rails/openrails/internal/archivewire",
@@ -4028,6 +4034,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/solana/pull/pull.go": {
+      "billing": "github.com/open-rails/openrails/billing",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
@@ -4049,6 +4056,18 @@
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/modules/solana/solanasubs/pull.go": {
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5",
+      "wake": "github.com/open-rails/openrails/internal/intents/wake"
     },
     "internal/modules/subscriptions/admin_service.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
@@ -4482,6 +4501,26 @@
       "time": "time",
       "url": "net/url"
     },
+    "internal/reconcile/attributions.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "cmp": "cmp",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
+      "river": "github.com/riverqueue/river",
+      "slices": "slices",
+      "strings": "strings",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "internal/reconcile/change.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "fmt": "fmt",
@@ -4813,6 +4852,7 @@
     "internal/river/jobs_stripe_webhooks.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
+      "clockwork": "github.com/jonboulle/clockwork",
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
@@ -4820,6 +4860,7 @@
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "hex": "encoding/hex",
       "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
@@ -4827,9 +4868,13 @@
       "models": "github.com/open-rails/openrails/internal/db/models",
       "river": "github.com/riverqueue/river",
       "rivertype": "github.com/riverqueue/river/rivertype",
+      "sha256": "crypto/sha256",
+      "slices": "slices",
+      "strings": "strings",
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
       "time": "time",
       "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5",
       "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks"
     },
     "internal/scim/bulk.go": {

@@ -134,6 +134,8 @@ migration 0147_rebill_probe_backoff.up.sql sha256:350c039b3cda3783c72222709160fc
 migration 0150_job_health_from_river.up.sql sha256:40570212847e3b3ffabd9d0fc22189f80bbc0a040413ba755f031d9bbaa4ccb1
 migration 0160_delinquency_due.up.sql sha256:cbd0dd44ca9a681e0f46bb8c2518f678e568cfdbb7d3571d9a52b2f52128931c
 migration 0161_usage_due.up.sql sha256:5ab44df98f3eaa152b3e9045326ba5fd4bf9f253c4398be8b3b0dbab378a01f1
+migration 0170_stripe_webhook_digest.up.sql sha256:0e8047430b99bfadf16a1dc1cda8ceece9e1f3f48917b4ea00c9fa5f55d946fe
+migration 0171_charge_attributions_per_import.up.sql sha256:19257983ad8d74b30215db6729c122bb77dc42840237230042e3922b895c22f1
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2154,7 +2156,6 @@ table billing.provider_charge_attributions
   constraint provider_charge_attributions_status_check CHECK ((((status = 'pending'::text) AND (next_attempt_at IS NOT NULL) AND (payment_id IS NULL) AND (resolved_at IS NULL) AND (reason IS NULL)) OR ((status = 'resolved'::text) AND (next_attempt_at IS NULL) AND (payment_id IS NOT NULL) AND (resolved_at IS NOT NULL) AND (reason IS NULL)) OR ((status = 'unresolvable'::text) AND (next_attempt_at IS NULL) AND (payment_id IS NULL) AND (resolved_at IS NOT NULL) AND (reason IS NOT NULL) AND (reason <> ''::text))))
   constraint provider_charge_attributions_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id) ON DELETE RESTRICT
   constraint provider_charge_attributions_transaction_id_check CHECK (((octet_length(transaction_id) >= 1) AND (octet_length(transaction_id) <= 128)))
-  index CREATE INDEX provider_charge_attributions_due_idx ON billing.provider_charge_attributions USING btree (next_attempt_at, merchant_id) WHERE (status = 'pending'::text)
   index CREATE UNIQUE INDEX provider_charge_attributions_pkey ON billing.provider_charge_attributions USING btree (merchant_id, psp_id, transaction_id)
 
 table billing.provider_cycle_receipts
@@ -2460,6 +2461,7 @@ table billing.psps
   column credential_duplicate_at timestamp with time zone
   column superseded_at timestamp with time zone
   column live boolean NOT NULL GENERATED ALWAYS AS ((environment = ANY (ARRAY['live'::text, 'mainnet'::text]))) STORED
+  column webhook_digest text
   constraint psps_credential_fingerprint_check CHECK ((credential_fingerprint ~ '^[0-9a-f]{64}$'::text))
   constraint psps_environment_check CHECK ( CASE WHEN (rail = 'solana'::text) THEN (environment = ANY (ARRAY['mainnet'::text, 'devnet'::text, 'testnet'::text])) ELSE (environment = ANY (ARRAY['live'::text, 'test'::text, 'sandbox'::text])) END)
   constraint psps_id_rail_key UNIQUE (merchant_id, id, rail)
@@ -2467,6 +2469,7 @@ table billing.psps
   constraint psps_nonempty_check CHECK (((btrim(key) <> ''::text) AND (btrim(account_id) <> ''::text)))
   constraint psps_pkey PRIMARY KEY (merchant_id, id)
   constraint psps_rail_check CHECK ((rail = ANY (ARRAY['nmi'::text, 'ccbill'::text, 'stripe'::text, 'solana'::text])))
+  constraint psps_webhook_digest_check CHECK ((webhook_digest ~ '^[0-9a-f]{64}$'::text))
   index CREATE INDEX psps_environment_rail_created_at_id_idx ON billing.psps USING btree (merchant_id, environment, rail, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX psps_id_rail_key ON billing.psps USING btree (merchant_id, id, rail)
   index CREATE UNIQUE INDEX psps_key_key ON billing.psps USING btree (merchant_id, lower(key)) WHERE (superseded_at IS NULL)
