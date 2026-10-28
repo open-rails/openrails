@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,6 +39,43 @@ type pspWire struct {
 	keys        []string
 	redirect    string
 	liveBalance bool
+	// listHeld, when set, holds the next webhook endpoint list until
+	// listRelease closes.
+	listHeld, listRelease chan struct{}
+	// listedWith are the keys webhook endpoints were listed with.
+	listedWith  []string
+	releaseList func()
+}
+
+// holdEndpointList holds the next webhook endpoint list Stripe is asked
+// for; the returned channel closes when one is held. The test's end
+// releases it on every path.
+func (p *pspWire) holdEndpointList(t *testing.T) <-chan struct{} {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	held, release := make(chan struct{}), make(chan struct{})
+	p.listHeld, p.listRelease = held, release
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+	p.releaseList = func() { once.Do(func() { close(release) }) }
+	return held
+}
+
+func (p *pspWire) releaseEndpointList() {
+	p.mu.Lock()
+	release := p.releaseList
+	p.listHeld, p.listRelease, p.releaseList = nil, nil, nil
+	p.mu.Unlock()
+	if release != nil {
+		release()
+	}
+}
+
+// listed reports whether webhook endpoints were listed with key.
+func (p *pspWire) listed(key string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Contains(p.listedWith, key)
 }
 
 func (p *pspWire) serve(out http.ResponseWriter, r *http.Request) {
@@ -46,7 +84,25 @@ func (p *pspWire) serve(out http.ResponseWriter, r *http.Request) {
 	p.keys = append(p.keys, key)
 	redirect := p.redirect
 	live := p.liveBalance
+	held, release := p.listHeld, p.listRelease
+	listing := r.Method == http.MethodGet && r.URL.Path == "/v1/webhook_endpoints"
+	if listing {
+		p.listedWith = append(p.listedWith, key)
+	}
+	if held != nil && listing {
+		close(held)
+		p.listHeld = nil
+	} else {
+		release = nil
+	}
 	p.mu.Unlock()
+	if release != nil {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		case <-time.After(time.Minute):
+		}
+	}
 	if redirect != "" {
 		http.Redirect(out, r, redirect, http.StatusTemporaryRedirect)
 		return
@@ -506,14 +562,14 @@ func TestStripeWebhookDueWork(t *testing.T) {
 		}, 20*time.Second, 20*time.Millisecond, "the rollover's pass waits for the predecessor's retirement")
 
 		// A change while the retirement waits runs the pass now; it waits again.
-		ran := *waiting().AttemptedAt
+		first := waiting()
 		current, err := a.alphaRemote.GetPSP(t.Context(), psp.ID)
 		require.NoError(t, err)
 		_, err = a.alphaRemote.UpdatePSP(t.Context(), psp.ID, billing.UpdatePSPParams{ExpectedRevision: &current.Revision, Credentials: map[string]string{"secret_key": "sk_test_rotated"}})
 		require.NoError(t, err)
 		require.Eventually(t, func() bool {
 			job := waiting()
-			return job != nil && job.AttemptedAt.After(ran)
+			return job != nil && job.ID != first.ID
 		}, 20*time.Second, 20*time.Millisecond)
 		require.Len(t, p.provider.core.WebhookEndpoints("acct_e2e"), 2, "the predecessor keeps delivering through its overlap")
 
@@ -523,6 +579,35 @@ func TestStripeWebhookDueWork(t *testing.T) {
 			endpoints := p.provider.core.WebhookEndpoints("acct_e2e")
 			return len(endpoints) == 1 && endpoints[0]["id"] != old
 		}, 20*time.Second, 20*time.Millisecond, "the pass retires the predecessor at its deadline")
+	})
+	t.Run("OR-J06-S63/a-psp-change-while-its-pass-runs-reaches-stripe-without-the-backstop", func(t *testing.T) {
+		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicBillingBaseURL = stripeWebhookBase })
+		fleet := engineFleet(t, a.world, a.engine)
+		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			return len(p.provider.core.WebhookEndpoints("acct_e2e")) == 1 && len(stripeWebhookPasses(t, fleet, rivertype.JobStateCompleted)) > 0 &&
+				len(stripeWebhookPasses(t, fleet, rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStateRetryable)) == 0
+		}, 20*time.Second, 20*time.Millisecond)
+
+		// The daily backstop's pass is in flight at Stripe when the PSP's key
+		// is rotated.
+		held := p.holdEndpointList(t)
+		runRegistered(t, fleet, "openrails.stripe_webhook_reconcile", 1)
+		select {
+		case <-held:
+		case <-time.After(20 * time.Second):
+			t.Fatal("the PSP's pass never reached Stripe")
+		}
+		current, err := a.alphaRemote.GetPSP(t.Context(), psp.ID)
+		require.NoError(t, err)
+		_, err = a.alphaRemote.UpdatePSP(t.Context(), psp.ID, billing.UpdatePSPParams{ExpectedRevision: &current.Revision, Credentials: map[string]string{"secret_key": "sk_test_rotated"}})
+		require.NoError(t, err)
+		require.False(t, p.listed("sk_test_rotated"))
+		p.releaseEndpointList()
+		require.Eventually(t, func() bool { return p.listed("sk_test_rotated") }, 20*time.Second, 20*time.Millisecond,
+			"the pass that ran on the old key queues the next at once, not at the daily backstop")
+		require.Len(t, p.provider.core.WebhookEndpoints("acct_e2e"), 1)
 	})
 	t.Run("OR-J06-S62/an-unresolved-undeclared-account-alerts-again-once-a-day", func(t *testing.T) {
 		mail := &alertMailbox{}

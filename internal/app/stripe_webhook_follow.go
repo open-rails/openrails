@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"maps"
 	"reflect"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
@@ -20,12 +22,14 @@ import (
 // followStripeWebhooks queues the webhook endpoint pass of each Stripe PSP a
 // configuration change declared or changed, so Stripe reaches it at once. A
 // PSP this process loads for the first time is queued only when its endpoint
-// was not settled at this boot's configuration (StripeWebhookDigest).
+// was not settled at this boot's configuration and its document
+// (StripeWebhookDigest).
 func (r *Runtime) followStripeWebhooks(mid billing.MerchantID, previous, current merchantdocs.Set) {
 	if r.DB == nil {
 		return
 	}
-	var changed, loaded []string
+	var changed []string
+	loaded := map[string]string{}
 	for key, doc := range current.PSPs {
 		p := doc.Value
 		if p.Rail != string(models.RailStripe) || p.Archived {
@@ -37,7 +41,7 @@ func (r *Runtime) followStripeWebhooks(mid billing.MerchantID, previous, current
 		before, ok := previous.PSPs[key]
 		switch {
 		case !ok:
-			loaded = append(loaded, p.AccountID)
+			loaded[p.AccountID] = riverjobs.StripeWebhookDigest(r.Config, p.AccountID, p.Environment, doc.Revision)
 		case !reflect.DeepEqual(before.Value, p):
 			changed = append(changed, p.AccountID)
 		}
@@ -60,8 +64,8 @@ func (r *Runtime) followStripeWebhooks(mid billing.MerchantID, previous, current
 						at[s.AccountID] = *s.WebhookDigest
 					}
 				}
-				for _, account := range loaded {
-					if at[account] != riverjobs.StripeWebhookDigest(r.Config, account) {
+				for _, account := range slices.Sorted(maps.Keys(loaded)) {
+					if at[account] != loaded[account] {
 						accounts = append(accounts, account)
 					}
 				}

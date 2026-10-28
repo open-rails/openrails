@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 242,
+  "scenario_count": 243,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1212,6 +1212,11 @@
       "id": "OR-J04-S60",
       "journey": "J04",
       "name": "A live provider operation whose River wake was lost is queued again once overdue"
+    },
+    {
+      "id": "OR-J06-S63",
+      "journey": "J06",
+      "name": "A Stripe PSP changed while its pass runs reaches Stripe without waiting for the backstop"
     }
   ]
 }

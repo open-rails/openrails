@@ -460,6 +460,29 @@ func (q *Queries) ListRailArmedMerchants(ctx context.Context, arg ListRailArmedM
 	return items, nil
 }
 
+const lockStripePSPWebhook = `-- name: LockStripePSPWebhook :one
+SELECT id FROM billing.psps
+WHERE merchant_id = $1::uuid AND rail = 'stripe' AND account_id = $2::text
+  AND superseded_at IS NULL
+ORDER BY id
+LIMIT 1
+FOR UPDATE
+`
+
+type LockStripePSPWebhookParams struct {
+	MerchantID uuid.UUID
+	AccountID  string
+}
+
+// Locks the Stripe PSP's row: a queued endpoint pass and a pass settling take
+// it in turn, so a change either reaches the pass or queues the next one.
+func (q *Queries) LockStripePSPWebhook(ctx context.Context, arg LockStripePSPWebhookParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockStripePSPWebhook, arg.MerchantID, arg.AccountID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const markPSPCredentialDuplicate = `-- name: MarkPSPCredentialDuplicate :exec
 UPDATE billing.psps SET credential_fingerprint = $1::text,
     credential_duplicate_at = COALESCE(credential_duplicate_at, $2::timestamptz)

@@ -218,6 +218,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Config:        r.Config,
 		Merchants:     r.Merchants,
 		Clock:         clock,
+		Reload:        r.reloadMerchantConfig,
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}

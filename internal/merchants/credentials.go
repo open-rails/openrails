@@ -241,6 +241,25 @@ func (s *Service) ActivePSPScopesForRail(ctx context.Context, id billing.Merchan
 	return j.live(normalizeProviderSecretType(rail)), nil
 }
 
+// PSPDocumentVersion is the revision and environment of the live document
+// declaring account on rail, read from the configuration's source rather than
+// the cache; ok is false when no live document declares it.
+func (s *Service) PSPDocumentVersion(ctx context.Context, id billing.MerchantID, rail, account string) (revision int64, environment string, ok bool, err error) {
+	if s == nil || s.config == nil {
+		return 0, "", false, nil
+	}
+	set, err := s.config.Source().Load(ctx, id)
+	if err != nil {
+		return 0, "", false, err
+	}
+	for _, doc := range set.PSPs {
+		if doc.Value.Rail == rail && doc.Value.AccountID == account && !doc.Value.Archived {
+			return doc.Revision, doc.Value.Environment, true, nil
+		}
+	}
+	return 0, "", false, nil
+}
+
 // PSPIdentities lists the merchant's current PSP identities on rail from
 // Postgres alone, oldest first: what was provisioned, whether or not a
 // configuration names it now. Only identity fields are set.

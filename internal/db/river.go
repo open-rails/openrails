@@ -181,16 +181,20 @@ func (d *DB) riverTx(tx pgx.Tx) (RiverJobInserter, pgx.Tx, error) {
 	if inserter == nil {
 		return nil, nil, ErrNoRiverProducer
 	}
-	// River owns its SQL namespace. Unwrap only our schema adapter while
-	// retaining the exact host transaction/savepoint and connection.
+	return inserter, RiverTx(tx), nil
+}
+
+// RiverTx is tx as River takes it. River owns its SQL namespace: only our
+// schema adapter is unwrapped, keeping the exact host transaction or
+// savepoint and its connection.
+func RiverTx(tx pgx.Tx) pgx.Tx {
 	for {
 		scoped, ok := tx.(schemaTx)
 		if !ok {
-			break
+			return tx
 		}
 		tx = scoped.Tx
 	}
-	return inserter, tx, nil
 }
 
 // InsertRiverJob enqueues args in d's own transaction, so the job commits or

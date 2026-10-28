@@ -179,3 +179,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 -- its webhook endpoint was last settled at.
 SELECT account_id, webhook_digest FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = sqlc.arg(rail)::text AND superseded_at IS NULL;
+
+-- name: LockStripePSPWebhook :one
+-- Locks the Stripe PSP's row: a queued endpoint pass and a pass settling take
+-- it in turn, so a change either reaches the pass or queues the next one.
+SELECT id FROM billing.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe' AND account_id = sqlc.arg(account_id)::text
+  AND superseded_at IS NULL
+ORDER BY id
+LIMIT 1
+FOR UPDATE;

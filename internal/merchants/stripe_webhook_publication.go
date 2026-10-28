@@ -49,6 +49,12 @@ func (p *StripeWebhookPublication) Load(ctx context.Context) (StripeWebhookCrede
 	}, nil
 }
 
+// Revision is the revision of the PSP's document the pass loaded or last
+// wrote; false before Load.
+func (p *StripeWebhookPublication) Revision() (int64, bool) {
+	return p.scope.Revision, p.loaded
+}
+
 // Publish writes the signing secret of the endpoint the provider created; the
 // outgoing secret keeps verifying for MaxWebhookSecretOverlap.
 func (p *StripeWebhookPublication) Publish(ctx context.Context, endpoint, secret string) error {

@@ -4867,6 +4867,7 @@
       "merchants": "github.com/open-rails/openrails/internal/merchants",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "river": "github.com/riverqueue/river",
+      "riverpgxv5": "github.com/riverqueue/river/riverdriver/riverpgxv5",
       "rivertype": "github.com/riverqueue/river/rivertype",
       "sha256": "crypto/sha256",
       "slices": "slices",
