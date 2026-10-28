@@ -84,6 +84,12 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID, ID: payerID}); err != nil {
 			return fmt.Errorf("lock usage payer: %w", err)
 		}
+		// Running charges are owed through the window's end, as far as it has
+		// come, before the window is billed.
+		now := s.now()
+		if _, err := postRunningChargesThrough(ctx, q, merchantID, payerID, cur, earlier(pto, now), now); err != nil {
+			return err
+		}
 		existing, err := q.GetUsageOrderByPeriod(ctx, gen.GetUsageOrderByPeriodParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur, PeriodStartsAt: pfrom, PeriodEndsAt: pto})
 		if err == nil {
 			out = &existing
@@ -129,7 +135,6 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		now := s.now()
 		u := usage.Order{CustomerID: payerID, Currency: cur, PeriodStart: pfrom, PeriodEnd: pto, DueAt: now, Paid: receivable - due,
 			Lines: lines, CollectionMethod: CollectionChargeAutomatically}
 		if profile != nil {

@@ -89,6 +89,25 @@ func TestCreditExpiry(t *testing.T) {
 		}
 		require.Equal(t, 1, expiredEntries)
 	})
+	t.Run("OR-J22-S50/admission-refuses-credit-that-lapsed-before-its-watch-looks", func(t *testing.T) {
+		w := newWorld(t)
+		meterForCapture(t, w)
+		customer := billing.CustomerID(uuid.New())
+		_, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 500, Source: "critical", SourceID: "lasting"}})
+		require.NoError(t, err)
+		endsAt := w.clock.Now().Add(time.Hour)
+		_, err = w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "lapsing", ExpiresAt: &endsAt}})
+		require.NoError(t, err)
+		// No balance watch runs: the lapsed lot is still in the ledger balance.
+		w.clock.Advance(time.Hour + time.Second)
+		refused, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "past-the-lapse", 1000)})
+		require.NoError(t, err)
+		require.False(t, refused[0].Allowed(), "credit that lapsed is not spent")
+		admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "within-what-lasts", 500)})
+		require.NoError(t, err)
+		require.True(t, admitted[0].Allowed())
+		balance(t, w.alpha, customer, 0, 500, 500)
+	})
 	t.Run("OR-J22-S06/lapsed-credit-leaves-available-at-its-lapse-and-its-watch-expires-it", func(t *testing.T) {
 		w := newWorld(t)
 		customer := billing.CustomerID(uuid.New())

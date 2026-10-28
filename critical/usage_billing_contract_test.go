@@ -364,6 +364,23 @@ func TestUsageBillingContracts(t *testing.T) {
 		}, 15*time.Second, 20*time.Millisecond)
 		p.money(t, 1, 3000)
 	})
+	t.Run("OR-J26-S54/a-running-charge-is-billed-through-the-bill-date-before-its-daily-posting", func(t *testing.T) {
+		a, _, customer := usageBillingWorld(t, true, true)
+		oneUsage(t, a.alpha, usageInput(customer, "before-the-bill-date", 1))
+		_, err := a.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "through-the-bill-date", CustomerID: customer, Currency: "USD", RatePerHour: 360_000})
+		require.NoError(t, err)
+		// No balance watch runs, so nothing posts the charge at 00:00 UTC.
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		a.clock.Advance(12*time.Hour + 10*time.Second)
+		runUsageDue(t, fleet)
+		order := oneUsageOrder(t, a, customer)
+		// 10 USD of usage and 12 h 10 s at 0.36 USD an hour, to the pass.
+		require.EqualValues(t, 14_321_000, order.Total)
+		require.Equal(t, time.Date(2026, 9, 25, 0, 0, 10, 0, time.UTC), order.Usage.PeriodEndsAt.UTC().Truncate(time.Second))
+	})
 	t.Run("OR-J26-S30/admission-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
 			m := w.cfg.Merchants["alpha"]

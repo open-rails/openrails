@@ -244,6 +244,11 @@ func (s *MoneyService) BillDueUsageAccount(ctx context.Context, customer uuid.UU
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: customer}); err != nil {
 			return err
 		}
+		// What the running charges accrued is owed before it is billed, so the
+		// day before a bill date is in that bill whichever job runs first.
+		if _, err := postRunningChargesThrough(ctx, q, mid.UUID(), customer, currency, now, now); err != nil {
+			return err
+		}
 		if cur == nil {
 			// A currency without usage billing is not checked again until its
 			// terms are; previously accepted payment operations still recover.

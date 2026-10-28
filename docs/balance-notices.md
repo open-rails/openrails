@@ -25,7 +25,7 @@ minute one job looks at the due watches. A burst of spends is one look.
 Time alone moves a balance in two ways, and each look schedules both: a
 running charge's accrual, and a credit lot's lapse. The look at a lapse
 expires the lot; a balance read leaves it out of `available_amount` from its
-lapse on.
+lapse on, and an admission expires it before reading the balance.
 
 ## The lines
 

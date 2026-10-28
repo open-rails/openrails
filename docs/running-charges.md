@@ -104,6 +104,8 @@ hold would refuse it.
 - **Before a credit lot is expired, revoked or refunded**, what accrued while
   the lot lived is posted first and draws that lot, so credit never expires
   under a charge it should have paid.
+- **Before usage is billed**, every running charge of the customer is posted
+  through the bill, so what accrued before a bill date is in that bill.
 
 A posting draws the balance first and records the rest as owed, as a capture
 past the balance does; the customer's next funding repays what is owed first.

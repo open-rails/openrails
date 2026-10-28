@@ -755,6 +755,12 @@
     ],
     "OR-J26-S53": [
       "TestUsageBillingContracts/OR-J26-S53/usage-pass-queues-the-charge-without-waiting-on-the-gateway"
+    ],
+    "OR-J22-S50": [
+      "TestCreditExpiry/OR-J22-S50/admission-refuses-credit-that-lapsed-before-its-watch-looks"
+    ],
+    "OR-J26-S54": [
+      "TestUsageBillingContracts/OR-J26-S54/a-running-charge-is-billed-through-the-bill-date-before-its-daily-posting"
     ]
   },
   "suites": {

@@ -253,6 +253,11 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 			return err
 		}
 		now := s.now()
+		// Credit that lapsed is expired before the balance is read: admission
+		// never spends it, however long its watch takes to come round.
+		if _, err := txSvc.grantLedger(q, tenantID).ExpireLapsedBy(ctx, payerID, cur, now); err != nil {
+			return err
+		}
 		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
 			MerchantID: tenantID,
 			CustomerID: payerID,

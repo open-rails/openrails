@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 234,
+  "scenario_count": 236,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1172,6 +1172,16 @@
       "id": "OR-J26-S53",
       "journey": "J26",
       "name": "The usage pass queues a due collection as an operation its own job charges"
+    },
+    {
+      "id": "OR-J22-S50",
+      "journey": "J22",
+      "name": "Admission refuses credit that lapsed before its balance watch expired it"
+    },
+    {
+      "id": "OR-J26-S54",
+      "journey": "J26",
+      "name": "A running charge is billed through the bill date before any daily posting runs"
     }
   ]
 }

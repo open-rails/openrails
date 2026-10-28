@@ -19,10 +19,10 @@ import (
 
 // A posting moves what a running charge accrued through an instant to the
 // ledger: balance first, the rest owed, as a capture does. Postings happen on
-// events only: the stop, each 00:00 UTC (the balance watch gets to it), and
-// before a credit lot the accrual draws is expired, revoked or refunded. No
-// posting straddles 00:00 UTC, and any number of them sums to the charge's
-// total through its stop.
+// events only: the stop, each 00:00 UTC (the balance watch gets to it),
+// before a credit lot the accrual draws is expired, revoked or refunded, and
+// before usage is billed. No posting straddles 00:00 UTC, and any number of
+// them sums to the charge's total through its stop.
 
 const (
 	// runningChargeSource is the ledger source of a posting; its source id is
