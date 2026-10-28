@@ -298,10 +298,11 @@ OpenRails.
    schedule once; card updates repoint the schedule to the new vault; refunds
    go to NMI, and a refund with `revoke_access` also ends the membership and
    deletes its NMI schedule (refused with `provider_cancel_held` while
-   disarmed). `Client.RefreshPSPs` (`POST /v1/merchant/psps/refresh`)
-   runs the merchant's provider refresh now, from embedded or remote hosts;
-   otherwise it runs every two hours, and NMI's own subscription webhooks
-   converge the schedule they name at once. Tier changes (same tier group,
+   disarmed). The provider refresh runs every two hours, and NMI's own
+   subscription webhooks converge the schedule they name at once. To re-read
+   a PSP now, create a manual PSP import (`Client.CreatePSPImport`,
+   `POST /v1/merchant/psp-imports`); its differences become proposals.
+   Tier changes (same tier group,
    same billing cycle) modify the member's existing NMI schedule in place
    (Direct Post `update_subscription`; its next billing date E is kept; no
    second schedule is ever created). A custom-amount schedule takes the new
@@ -349,9 +350,8 @@ subscription, with a `life.import.schedule_unresolved` finding; its receipts sta
 `pull.bill.unresolved` findings. A receipt no accepted bill can hold never fails
 the import.
 
-The provider's own recurring record then decides. The next provider pull (the
-scheduled refresh, `Client.RefreshPSPs` or `openrails pull-provider`) reads each
-such NMI subscription's schedule: when it is active, its amount equals the
+The provider's own recurring record then decides. The next scheduled provider
+refresh reads each such NMI subscription's schedule: when it is active, its amount equals the
 price's and its `day_frequency` equals the price's cadence, its terms become the
 accepted schedule (source reference `nmi_subscription:<id>`), first due on NMI's
 next charge date. The subscription's unresolved receipts are read again from

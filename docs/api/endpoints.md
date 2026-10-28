@@ -382,9 +382,7 @@ financial versions starting at one, identified as `product-key:price-key:v1`.
 The separate `revision` tracks edits to the price key. `PATCH` archives or restores a price and
 merges `psps` (a PSP set to null is unlinked). `GET …/prices/{id}?verify=true` reads each linked PSP's
 copy and reports drift; `GET /v1/merchant/findings?type=catalog.*` lists the open
-drift findings, each with the `psp_id` that was compared, and
-`POST /v1/merchant/psps/refresh` (merchant configuration) reads every PSP's
-catalog again.
+drift findings, each with the `psp_id` that was compared.
 
 ## PSPs
 
@@ -400,6 +398,9 @@ Archive is not deletion: the row, its id, credentials and history remain, and
 existing subscriptions, operations and inbound webhooks keep resolving to it
 until they drain. New purchase selects only active PSPs. Archiving the last
 active PSP on a rail is `409 psp_last_active` unless `allow_last` is `true`.
+
+A manual PSP import (`POST /v1/merchant/psp-imports`) re-reads a PSP; its
+differences become proposals ([PSP import](../psp-import.md)).
 
 ## Refunds
 

@@ -10,7 +10,6 @@ import type {
   CreatePSPParams,
   Custodian,
   PutCustodianParams,
-  PSPRefresh,
   CreatePriceParams,
   Customer,
   CustomerSettingsResult,
@@ -560,11 +559,6 @@ export function createEndpoints(client: AdminClient) {
       ...(force ? { query: { force: "true" } } : {}),
     })
 
-  // refreshPSPs re-reads every PSP now, its catalog drift included; the pass
-  // runs in the background.
-  const refreshPSPs = () =>
-    api<PSPRefresh>("/merchant/psps/refresh", { method: "POST" })
-
   // --- Ops ---
 
   // listFindings reads the findings queue; type is one finding type or a prefix
@@ -731,7 +725,6 @@ export function createEndpoints(client: AdminClient) {
     listPriceMigrations,
     cancelPriceMigration,
     applyCatalog,
-    refreshPSPs,
     listFindings,
     getFinding,
     resolveFinding,

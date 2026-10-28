@@ -1,7 +1,7 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
 import { useAdminServices } from "#orck/admin/context"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { Add01Icon, Refresh01Icon } from "@hugeicons/core-free-icons"
+import { Add01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Link } from "#orck/admin/router"
 
@@ -65,7 +65,6 @@ import {
   useAccess,
   useCatalogWrites,
   useMerchantConfig,
-  useMerchantConfigUpdates,
 } from "#orck/admin/lib/capabilities"
 
 // Each part of the catalog is its own page, reached from the sub-items the
@@ -1037,44 +1036,14 @@ function PriceDialog({ products }: { products: Product[] }) {
 }
 
 function DriftTab() {
-  const { toast, toastApiError, adminMutations, adminQueries } =
-    useAdminServices()
-
-  const queryClient = useQueryClient()
+  const { adminQueries } = useAdminServices()
   const canRead = useMerchantConfig()
-  const canRefresh = useMerchantConfigUpdates()
-  const { data, isPending: loading } = useQuery(adminQueries.catalogDrift(canRead))
-  const refreshDrift = useMutation(adminMutations.refreshPSPs(queryClient))
+  const { data, isPending: loading } = useQuery(
+    adminQueries.catalogDrift(canRead)
+  )
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-end">
-        {canRefresh && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={refreshDrift.isPending}
-            onClick={async () => {
-              try {
-                await refreshDrift.mutateAsync()
-                toast.success(
-                  "Re-reading every PSP: new drift appears here as it is found"
-                )
-              } catch (err) {
-                toastApiError(err, "Refresh drift")
-              }
-            }}
-          >
-            <HugeiconsIcon
-              icon={Refresh01Icon}
-              className={
-                refreshDrift.isPending ? "size-4 animate-spin" : "size-4"
-              }
-            />
-            <AdminMessage id={"Refresh scan"} />
-          </Button>
-        )}
-      </div>
       {loading ? (
         <div className="flex flex-col gap-3 py-2">
           {Array.from({ length: 4 }).map((_, i) => (

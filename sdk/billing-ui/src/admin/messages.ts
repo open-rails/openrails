@@ -556,7 +556,6 @@ export const billingAdminMessages = {
   Reference: "Reference",
   Refresh: "Refresh",
   "Refresh payment methods": "Refresh payment methods",
-  "Refresh scan": "Refresh scan",
   "Refresh widget": "Refresh widget",
   Refund: "Refund",
   "Refund payment": "Refund payment",

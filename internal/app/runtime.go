@@ -112,9 +112,7 @@ type Runtime struct {
 	// host's, else the insert-only client New binds in the same schema.
 	RiverProducer  *river.Client[pgx.Tx]
 	insertProducer *river.Client[pgx.Tx]
-	// ProviderRefreshQueue is where per-merchant provider refresh jobs run.
-	ProviderRefreshQueue string
-	RiverClient          *river.Client[pgx.Tx]
+	RiverClient    *river.Client[pgx.Tx]
 
 	SubscriptionService      *subscriptions.SubscriptionService
 	ProductService           *catalog.ProductService

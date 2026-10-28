@@ -9,7 +9,6 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
 // PSPListQuery filters GET /v1/merchant/psps.
@@ -92,34 +91,6 @@ func UpdatePSP(r *httprequest.Request) {
 		return
 	}
 	r.JSON(http.StatusOK, out)
-}
-
-// RefreshPSPs handles POST /v1/merchant/psps/refresh: the merchant's PSP pull
-// and its catalog drift pass run now.
-func RefreshPSPs(r *httprequest.Request) {
-	ctx := r.Request.Context()
-	mid, ok := merchant.FromContext(ctx)
-	if !ok || mid.IsZero() {
-		r.ErrorCode(billing.CodeInternalError, "merchant unresolved")
-		return
-	}
-	if r.State == nil || r.State.RiverProducer == nil {
-		r.ErrorCode(billing.CodeServiceUnavailable, "PSP refresh unavailable: no job runner")
-		return
-	}
-	id, queued, err := riverjobs.EnqueueMerchantRefresh(ctx, r.State.RiverProducer, mid.UUID(), r.State.ProviderRefreshQueue)
-	if err == nil {
-		err = riverjobs.EnqueueCatalogReconciliation(ctx, r.State.RiverProducer, mid.UUID())
-	}
-	if err != nil {
-		r.InternalError("failed to request PSP refresh", err)
-		return
-	}
-	status := "queued"
-	if queued {
-		status = "already_running"
-	}
-	r.JSON(http.StatusAccepted, billing.PSPRefresh{Status: status, JobID: id})
 }
 
 func pspPathContext(r *httprequest.Request) (*merchants.Service, billing.MerchantID, billing.PSPID, bool) {

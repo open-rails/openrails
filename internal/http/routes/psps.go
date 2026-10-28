@@ -31,12 +31,6 @@ var pspsRoutes = []Route{
 	// PSP catalog, so it takes the same read.
 	{Method: POST, Path: "/v1/merchant/psps/routing-preview", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "PreviewPSPRouting",
 		Request: billing.PreviewPSPRoutingParams{}, Responses: []Reply{{200, billing.PSPRoutingPreview{}}}, Errors: codes("invalid_param"), Handler: h(handlers.PreviewPSPRouting)},
-	// A refresh rewrites the subscription mirrors from provider truth and
-	// reads each PSP's catalog for drift, which it records as findings: a
-	// heavy pull that may overwrite local state, so it is the merchant
-	// configuration's.
-	{Method: POST, Path: "/v1/merchant/psps/refresh", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "RefreshPSPs",
-		Responses: []Reply{{202, billing.PSPRefresh{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.RefreshPSPs)},
 
 	// The provider callback surface. The provider's account identity resolves
 	// its merchant; runtime bindings and signatures remain mandatory. The body

@@ -289,7 +289,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | Creator-owned catalogs: `EnsureOwnCatalog`, `EnsureCatalogForOwner`, `GetCatalogForOwner`, `WithOwnCatalog()`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs`; `billing.Catalog`, `billing.CatalogID`, `billing.EnsureCatalogParams`, `billing.CatalogListParams` | Removed: a merchant has one catalog |
 | `CatalogID` on `billing.Product`, `CreateProductParams`, `CreatePriceProduct`, `ProductListParams`, `PriceListParams` and `CatalogApplicationReceipt`; `catalog.Application.CatalogID` | Removed with the catalogs |
 | Product and price activate and deactivate; price `providers` | `archived` in the update; `psps` |
-| `CheckCatalogDrift` | `client.RefreshPSPs(`, which also reads each PSP's catalog for drift |
+| `CheckCatalogDrift` | `client.GetPrice(` with `Verify`; a manual PSP import (`client.CreatePSPImport(`) observes a PSP's whole catalog again |
 | `ListPurchaseReviews`, `ResolvePurchaseReview`; `ArchiveProductParams` with `Action` and `Window` | Removed: archiving a product (`client.UpdateProduct(` with `Archived`) stops its sales and refunds nobody; refund a purchase with `client.RefundPayment(` |
 
 ### Checkout
@@ -362,7 +362,7 @@ upgrade; its buyer buys through an order.
 
 | Before | After |
 |---|---|
-| `client.PaymentProviders.List`, `Retrieve`, `Upsert`, `Archive`; `RefreshProviders` | `client.ListPSPs(`, `client.GetPSP(`, `client.CreatePSP(`, `client.UpdatePSP(` (which also archives), `client.PreviewPSPRouting(`, `client.RefreshPSPs(`; the rail registry is `rails` in the public `GET /v1/config` |
+| `client.PaymentProviders.List`, `Retrieve`, `Upsert`, `Archive`; `RefreshProviders` | `client.ListPSPs(`, `client.GetPSP(`, `client.CreatePSP(`, `client.UpdatePSP(` (which also archives), `client.PreviewPSPRouting(`; a manual PSP import (`client.CreatePSPImport(`) re-reads a PSP, its differences becoming proposals; the rail registry is `rails` in the public `GET /v1/config` |
 | `psp_id` as a UUID string; `DeclarePSP` returned a `uuid.UUID` | `billing.PSPID` (`psp_…` on the wire); `local.DeclarePSP(` returns the `billing.PSP` |
 | `GetMerchantSettings`, `SetMerchantSettings`, `Verify`, `client.MerchantConfiguration` | `client.GetMerchantConfiguration(`, `client.UpdateMerchantConfiguration(`. A `Remote`'s `Ready` checks reachability; any authenticated call proves the credential |
 | `ListHostEvents` and source acknowledgments | `client.ListEvents(ctx, billing.EventQuery{After: cursor})`; persist your own cursor after idempotent effects, with no source registration or acknowledgment |
@@ -434,7 +434,7 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/merchant/…` (mixed staff and configuration routes) | Customer billing operations use `/v1/admin/…`; deployment and merchant configuration use `/v1/merchant/…`; catalog uses `/v1/catalog/…`. The [route inventory](api/routes.md) lists each path |
 | The standalone server's own credential codes: `sender_proof_required` and its nonce refusal, `access_token_invalid`, `access_token_issuer_unknown`, `access_token_merchant_not_bound`, `insufficient_scope`, `service_credential_invalid`, `service_credential_merchant_unresolved`, `service_credential_resource_scope_denied`, `host_merchant_mismatch`, `merchant_context_mismatch` | A refused credential is `401 authentication_required` (or `credential_expired`, `credential_revoked`) with the auth provider's challenge headers; a credential bound to no merchant here is `403 merchant_unresolved`; a missing permission `403 permission_required` |
 | The `OpenRails-Merchant` header (a merchant's slug or `id:<uuid>`) and its codes `merchant_selector_invalid`, `merchant_not_found`, `merchant_binding_mismatch`, `merchant_directory_unavailable` | Removed: the credential binds the merchant, by its group (the merchant id), its declared issuer or the OpenRails object it was issued for; anything else is `403 merchant_unresolved`. A customer of another issuer whose subject is already taken is `403 customer_issuer_mismatch` |
-| `/v1/merchant/payment-providers…` | `/v1/merchant/psps`, `/v1/merchant/psps/{id}` (`PATCH` with `expected_revision`, or `{archived: true}`), `/v1/merchant/psps/routing-preview`, `/v1/merchant/psps/refresh`; rails in `GET /v1/config` |
+| `/v1/merchant/payment-providers…` | `/v1/merchant/psps`, `/v1/merchant/psps/{id}` (`PATCH` with `expected_revision`, or `{archived: true}`), `/v1/merchant/psps/routing-preview`; a manual PSP import (`POST /v1/merchant/psp-imports`) re-reads a PSP; rails in `GET /v1/config` |
 | `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions`, `/v1/merchant/checkout-sessions…` (engine checkout) | `POST /v1/app/orders` (an unpaid order for a customer), `POST /v1/me/orders` and `POST /v1/me/orders/{id}/pay` |
 | `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `POST /v1/admin/credit-grants`, `/v1/admin/credit-grants?customer_id=`, `/v1/admin/credit-grants/{id}/revoke` |
 | `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/admin/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `PATCH /v1/admin/customers/{customer_id}` |

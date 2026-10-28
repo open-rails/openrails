@@ -64,10 +64,6 @@ func (ProviderRefreshArgs) Kind() string { return KindProviderRefresh }
 // ProviderRefreshMerchantArgs is one merchant's refresh job.
 type ProviderRefreshMerchantArgs struct {
 	MerchantID uuid.UUID `json:"merchant_id" river:"unique"`
-	// Requested marks a host-requested refresh: it must observe provider state
-	// from after the request, so it never merges into a scheduled pass that
-	// may already be running.
-	Requested bool `json:"requested,omitempty" river:"unique"`
 }
 
 func (ProviderRefreshMerchantArgs) Kind() string { return KindProviderRefreshMerchant }
@@ -81,31 +77,6 @@ var providerRefreshUniqueStates = []rivertype.JobState{
 	rivertype.JobStateRetryable,
 	rivertype.JobStateRunning,
 	rivertype.JobStateScheduled,
-}
-
-// EnqueueMerchantRefresh requests the merchant's provider refresh now on
-// queue. An in-flight refresh absorbs the request; one scheduled for later
-// (the staggered periodic tick) is started now.
-func EnqueueMerchantRefresh(ctx context.Context, client *river.Client[pgx.Tx], merchantID uuid.UUID, queue string) (jobID int64, alreadyQueued bool, err error) {
-	if client == nil {
-		return 0, false, errors.New("provider refresh: no River producer")
-	}
-	if queue == "" {
-		queue = QueueProviderRefresh
-	}
-	res, err := client.Insert(ctx, ProviderRefreshMerchantArgs{MerchantID: merchantID, Requested: true}, &river.InsertOpts{
-		Queue:      queue,
-		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: providerRefreshUniqueStates},
-	})
-	if err != nil {
-		return 0, false, err
-	}
-	if res.UniqueSkippedAsDuplicate && res.Job.State == rivertype.JobStateScheduled {
-		if _, err := client.JobRetry(ctx, res.Job.ID); err != nil {
-			return 0, false, err
-		}
-	}
-	return res.Job.ID, res.UniqueSkippedAsDuplicate, nil
 }
 
 // refreshJobInserter is the slice of river.Client the scheduler uses (test seam).

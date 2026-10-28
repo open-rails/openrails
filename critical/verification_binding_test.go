@@ -194,8 +194,7 @@ func TestVerificationBinding(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, access.Entitlements["stripe:member"], "a held cancel keeps access")
 		armDestructive(t, a, true)
-		_, err = a.alpha.RefreshPSPs(t.Context())
-		require.NoError(t, err)
+		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
 		require.Eventually(t, func() bool {
 			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 			return err == nil && current.Status == billing.SubscriptionCanceled
@@ -205,7 +204,7 @@ func TestVerificationBinding(t *testing.T) {
 		a, accounts, sub := stripeMembership(t)
 		old := accounts.accounts["sk_test_old"].core
 		remote := *sub.RailSubscriptionID
-		startFleet(t, a.world)
+		fleet := startFleet(t, a.world)
 		old.CancelSubscription(remote)
 		body := stripeNotice(t, "evt_held_cancel", "customer.subscription.deleted", old.Subscription(remote))
 		status, raw := callback(t, a, "acct_old", body, stripeSignature(body, "whsec_acct_old"))
@@ -218,8 +217,7 @@ func TestVerificationBinding(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, access.Entitlements["stripe:member"], "a held cancel keeps access")
 		armDestructive(t, a, true)
-		_, err = a.alpha.RefreshPSPs(t.Context())
-		require.NoError(t, err)
+		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
 		require.Eventually(t, func() bool {
 			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 			return err == nil && current.Status == billing.SubscriptionCanceled

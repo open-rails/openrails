@@ -206,11 +206,3 @@ type PSPRoutingCandidate struct {
 	// Skip says why the PSP was passed over; null when it was eligible.
 	Skip *string `json:"skip"`
 }
-
-// PSPRefresh reports a requested refresh of the merchant's PSPs: the pull of
-// renewals, declines, cancellations and vault changes. Status is queued, or
-// already_running when a refresh in flight absorbs the request.
-type PSPRefresh struct {
-	Status string `json:"status"`
-	JobID  int64  `json:"job_id,string"`
-}

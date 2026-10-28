@@ -108,7 +108,6 @@ export function createMutations(
     previewPriceMigration,
     previewSubscriptionChange,
     applyCatalog,
-    refreshPSPs,
     refundPayment,
     createPriceMigration,
     resolveFinding,
@@ -437,14 +436,6 @@ export function createMutations(
           force: boolean
         }) => applyCatalog(document, force),
         onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
-      })
-    },
-    refreshPSPs: (queryClient: QueryClient) => {
-      const keys = merchantQueryKeys()
-      return mutationOptions({
-        mutationKey: [...keys.catalogDrift(), "refresh"],
-        mutationFn: () => refreshPSPs(),
-        onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalogDrift()),
       })
     },
     createProduct: (queryClient: QueryClient) => {

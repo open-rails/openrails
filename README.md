@@ -387,7 +387,7 @@ Every route needs `merchant:config:manage` (or `root:config:manage`). These oper
 | `GET /v1/merchant/psps/{id}` | one PSP |
 | `PATCH /v1/merchant/psps/{id}` | change a PSP's settings or credentials, or retire it |
 | `POST /v1/merchant/psps/routing-preview` | which PSP an order for a price would use |
-| `POST /v1/merchant/psps/refresh` | re-read every PSP now: renewals, declines, cancellations, card changes and catalog drift |
+| `POST /v1/merchant/psp-imports` | re-read a PSP: the differences become proposals ([PSP import](docs/psp-import.md)) |
 | `GET /v1/merchant/findings` | problems OpenRails found that need an operator, catalog drift included (`?type=`) |
 | `GET /v1/merchant/findings/{id}` | one finding |
 | `POST /v1/merchant/findings/{id}/resolve` | resolve one |

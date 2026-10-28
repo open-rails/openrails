@@ -88,17 +88,6 @@ func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPS
 	return &out, nil
 }
 
-// RefreshPSPs pulls the merchant's PSPs now: provider-side renewals, declines,
-// cancellations and vault changes, the pull that otherwise runs on a
-// schedule.
-func (c *Client) RefreshPSPs(ctx context.Context, requestOptions ...RequestOption) (*billing.PSPRefresh, error) {
-	var out billing.PSPRefresh
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psps/refresh", nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 func pspPath(id billing.PSPID) (string, error) {
 	if id.IsZero() {
 		return "", invalidErr("PSP id is required")

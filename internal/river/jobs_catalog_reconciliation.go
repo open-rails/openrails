@@ -2,12 +2,10 @@ package riverjobs
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
@@ -32,15 +30,10 @@ import (
 // CCBill is intentionally NOT reconciled here: CCBill has no catalog-list API,
 // so enumeration is structurally impossible (see the package doc on
 // internal/service/catalog_drift.go). CCBill links stay manual-only.
-//
-// A merchant's POST /v1/merchant/psps/refresh runs the pass for it alone.
 const KindCatalogReconciliationPull = "openrails.catalog_reconciliation_pull"
 
-// CatalogReconciliationPullArgs is one pass: every armed merchant's, or
-// MerchantID's alone.
-type CatalogReconciliationPullArgs struct {
-	MerchantID uuid.UUID `json:"merchant_id,omitempty" river:"unique"`
-}
+// CatalogReconciliationPullArgs is one pass over every armed merchant.
+type CatalogReconciliationPullArgs struct{}
 
 func (CatalogReconciliationPullArgs) Kind() string { return KindCatalogReconciliationPull }
 
@@ -75,17 +68,13 @@ const catalogReconcileMerchantBatch = 1000
 // against nothing. Alert-only or not, "no drift" was never an answer this
 // worker had actually computed — and the NMI leg silently skipped itself
 // entirely, because merchant.Require(ctx) could not succeed on a bare context.
-func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Job[CatalogReconciliationPullArgs]) error {
+func (w CatalogReconciliationPullWorker) Work(ctx context.Context, _ *river.Job[CatalogReconciliationPullArgs]) error {
 	if w.DB == nil {
 		return fmt.Errorf("catalog reconciliation: db not configured")
 	}
 	if w.Config == nil {
 		return fmt.Errorf("catalog reconciliation: config not configured")
 	}
-	if mid := job.Args.MerchantID; mid != uuid.Nil {
-		return w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "catalog reconciliation", w.reconcileMerchant)
-	}
-
 	var after *uuid.UUID
 	var sweepErr error
 	for {
@@ -159,16 +148,4 @@ func (w CatalogReconciliationPullWorker) reconcileMerchant(ctx context.Context) 
 		"resolved_events":   report.ResolvedEvents,
 	}).Info("CatalogReconciliation: completed pull-and-diff pass")
 	return nil
-}
-
-// EnqueueCatalogReconciliation queues merchantID's pass; one already waiting
-// serves the request.
-func EnqueueCatalogReconciliation(ctx context.Context, client *river.Client[pgx.Tx], merchantID uuid.UUID) error {
-	if client == nil {
-		return errors.New("catalog reconciliation: no River producer")
-	}
-	_, err := client.Insert(ctx, CatalogReconciliationPullArgs{MerchantID: merchantID}, &river.InsertOpts{
-		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: providerRefreshUniqueStates},
-	})
-	return err
 }
