@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/payment"
-	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
 const KindOrderExpiry = "openrails.order_expiry"
@@ -50,7 +49,6 @@ func (w OrderExpiryWorker) Work(ctx context.Context, _ *river.Job[OrderExpiryArg
 	// One merchant's failure never stops the others; the job reports them all.
 	var workErr error
 	for _, id := range merchants {
-		progress.Mark(ctx, "order expiry merchant "+id.String())
 		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(id), "order expiry sweep", func(ctx context.Context) error {
 			if _, err := w.Orders.ExpireDue(ctx, orderExpiryBatch); err != nil {
 				return err

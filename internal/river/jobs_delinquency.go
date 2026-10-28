@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/delinquency"
-	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
 const (
@@ -78,7 +77,6 @@ func (w DelinquencyWorker) Work(ctx context.Context, _ *river.Job[DelinquencyArg
 	var workErr error
 	for _, mid := range merchantIDs {
 		merchantID := billing.MerchantID(mid)
-		progress.Mark(ctx, "delinquency merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "delinquency evaluation", func(mctx context.Context) error {
 			res, err := svc.Evaluate(mctx, now)
 			evaluated += res.Evaluated

@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
 // heldVia is linked_via of a record OpenRails already holds.
@@ -278,7 +277,6 @@ func (im *Importer) propose(ctx context.Context, row gen.BillingPspImport, scope
 		if len(ids) == 0 {
 			break
 		}
-		progress.Mark(ctx, fmt.Sprintf("psp import %s reconcile after %s", billing.PSPImportID(row.ID), after))
 		if err := page(ids); err != nil {
 			return finish(err)
 		}
@@ -408,7 +406,6 @@ func (im *Importer) approveCorrections(ctx context.Context, row gen.BillingPspIm
 			return err
 		}
 		if len(ids) > 0 {
-			progress.Mark(ctx, fmt.Sprintf("psp import %s approve %d corrections", billing.PSPImportID(row.ID), len(ids)))
 			if _, err := im.Proposals.ApproveSet(ctx, ids, *row.ApplyRequestedBy, "applied with "+billing.PSPImportID(row.ID).String()); err != nil {
 				return err
 			}

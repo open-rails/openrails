@@ -28,7 +28,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/normalize"
-	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/internal/writeposture"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -186,7 +185,6 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 
 	for _, mid := range merchantIDs {
 		merchantID := billing.MerchantID(mid)
-		progress.Mark(ctx, "dunning merchant "+merchantID.String())
 		// The pin AND the proof it took: every read and write below runs under
 		// this merchant's openrails.merchant_id, exactly as a request would.
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "dunning pass", func(mctx context.Context) error {
@@ -220,7 +218,6 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 					"count": len(dueSubscriptions), "merchant_id": merchantID.String(),
 				}).Info("Dunning: processing due subscriptions")
 				for _, sub := range dueSubscriptions {
-					progress.Mark(mctx, "dunning subscription "+sub.ID.String())
 					outcome, processErr := w.processSubscription(mctx, &sub, lifecycle, priceSvc, materialize)
 					// One subscription's refusal never fails the pass: it becomes a
 					// standing operator finding, and the row waits for its recheck.

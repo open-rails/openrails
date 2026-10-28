@@ -62,6 +62,11 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 		if want := r.riverSchemaOrDefault(); cfg.Schema != want {
 			return fmt.Errorf("openrails: River fleet schema %q differs from Config.Database.RiverSchema %q", cfg.Schema, want)
 		}
+		// River's rescuer returns a crashed job to work once it has run past
+		// its timeout and this window. It must not be shorter than JobTimeout.
+		if cfg.RescueStuckJobsAfter == 0 {
+			cfg.RescueStuckJobsAfter = max(riverjobs.RescueAfter, cfg.JobTimeout)
+		}
 		// The PSP import queue is added to every fleet, the host's too: a job
 		// on a queue no fleet serves never runs.
 		queues := map[string]int{riverjobs.QueueBilling: standaloneRiverBillingQueueMaxWorkers, riverjobs.QueuePSPImport: riverPSPImportQueueMaxWorkers}

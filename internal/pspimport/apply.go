@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
 // applyCustomers is how many customers one billing import book carries.
@@ -94,7 +93,6 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID) error {
 		if len(customers) == 0 {
 			break
 		}
-		progress.Mark(ctx, fmt.Sprintf("psp import %s apply after %s", id, after))
 		records, err := im.DB.Gen(ctx).ListPSPImportCustomerRecords(ctx, gen.ListPSPImportCustomerRecordsParams{MerchantID: row.MerchantID, ImportID: row.ID, CustomerIds: customers})
 		if err != nil {
 			return err

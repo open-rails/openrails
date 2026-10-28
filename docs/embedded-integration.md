@@ -222,13 +222,13 @@ minutes earlier as its Redis holds them. Work a request starts (a provider
 call, an enqueued intent) runs on the engine that received it. Give each host
 its own `RiverSchema`.
 
-**No job clock.** `river.Config.JobTimeout` does not apply to OpenRails'
-workers: each declares `Timeout() = -1` and ends on observed lack of progress
-(3x its cadence, floored at 30 min). A running job beats
-`river_job.attempted_at`, so `RescueStuckJobsAfter` measures silence from a dead
-process, never the age of a live job. OpenRails leaves the client's
-`JobTimeout` alone, so your own workers keep it and River's rescuer still
-recovers them.
+**Job timeouts and rescue.** Each OpenRails worker declares its own timeout:
+10 minutes, an hour for passes that read every merchant's providers, two for
+a PSP import. `river.Config.JobTimeout` stays yours, for your own workers.
+When you leave `RescueStuckJobsAfter` unset, `RiverJobs` sets it to 10
+minutes (or your `JobTimeout`, if longer). River's rescuer returns a crashed
+job to work once it has run past both that window and its own timeout, so a
+long pass is never rescued while it runs inside its budget.
 
 ### 5. Declaring the merchant
 

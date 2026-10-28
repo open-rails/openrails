@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
-	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -362,7 +361,6 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	visited := make([]uuid.UUID, 0, len(merchantIDs))
 	for _, merchantID := range merchantIDs {
 		visited = append(visited, merchantID)
-		progress.Mark(ctx, "cleanup merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(merchantID), "cleanup expired data", func(mctx context.Context) error {
 			w.sweepMerchant(mctx, merchantID, now, config, &result, &cleanupErr)
 			return nil
@@ -459,7 +457,6 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 			}
 			*total += n
 			budget -= int(n)
-			progress.Mark(ctx, name)
 			if n < int64(limit) {
 				return
 			}

@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
 const (
@@ -73,7 +72,6 @@ func (w *NMIHistoryWorker) Work(ctx context.Context, _ *river.Job[NMIHistoryArgs
 		}
 		for _, mid := range merchantIDs {
 			after = &mid
-			progress.Mark(ctx, "nmi history merchant "+mid.String())
 			err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "nmi history", func(ctx context.Context) error {
 				return w.readMerchant(ctx, mid, now)
 			})

@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
 // sources are the rails an import reads, each building its read-only source.
@@ -145,7 +144,6 @@ func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID, relink boo
 var errConfigChanged = errors.New("the PSP's configuration changed during the pull")
 
 func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope merchants.PSPScope, relink bool) error {
-	id := billing.PSPImportID(row.ID)
 	mid := billing.MerchantID(row.MerchantID)
 	var src source
 	// A read that finished (a relink) reads the provider no more.
@@ -227,7 +225,6 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 		if until.After(*row.PulledAt) {
 			until = *row.PulledAt
 		}
-		progress.Mark(ctx, fmt.Sprintf("psp import %s history %s", id, through.Format(time.DateOnly)))
 		recs, err := src.history(ctx, through, until)
 		if err != nil {
 			return err
@@ -338,7 +335,6 @@ func (c *catalogPull) fill(ctx context.Context, recs []staged) error {
 			return nil
 		}
 		read[key] = true
-		progress.Mark(ctx, fmt.Sprintf("psp import catalog %s %s", kind, ref))
 		if _, err := c.im.Objects.Observe(ctx, c.reader, c.scope, kind, ref, stated, providerobjects.ViaRead); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

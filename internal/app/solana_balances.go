@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
-	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
 // SolanaCrankerBalances checks the publisher before its first subscription and
@@ -47,7 +46,6 @@ func (r *Runtime) SolanaCrankerBalances(ctx context.Context) ([]solanamodule.Cra
 		if err != nil {
 			errs = append(errs, fmt.Errorf("solana balances for merchant %s: %w", mid, err))
 		}
-		progress.Mark(ctx, "checked merchant cranker balances")
 	}
 	return balances, errors.Join(errs...)
 }

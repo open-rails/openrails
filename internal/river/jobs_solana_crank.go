@@ -20,7 +20,6 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/pull"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
-	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/internal/writeposture"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -111,7 +110,6 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 			return ctx.Err()
 		default:
 		}
-		progress.Mark(ctx, "solana crank subscription "+row.ID.String())
 		// Per-row isolation: one subscriber's failure never aborts the batch.
 		// Durable intent first, inline execution, pre-submit signature
 		// write-ahead: a crash resolves off the recorded signature, never a

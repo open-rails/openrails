@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -33,7 +32,6 @@ func forEachActiveMerchant(ctx context.Context, dbi *db.DB, logger *log.Entry, f
 	}
 	var errs []error
 	for _, mid := range merchantIDs {
-		progress.Mark(ctx, "credit money-in merchant "+mid.String())
 		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 		if err := dbi.RunInMerchantConn(mctx, fn); err != nil {
 			logger.WithError(err).WithField("merchant_id", mid).Error("merchant failed; continuing")

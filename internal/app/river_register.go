@@ -254,11 +254,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 			return fmt.Errorf("add solana cranker worker: %w", err)
 		}
 	}
-	// Jobs orphaned by a dead process (their liveness beat stopped) return to
-	// work; River's rescuer skips OpenRails' timeout-free jobs.
-	if err := addTrackedWorker(r, workers, &riverjobs.JobRescueWorker{River: r.riverTableAccess}); err != nil {
-		return fmt.Errorf("add job rescue worker: %w", err)
-	}
 	return nil
 }
 
@@ -468,25 +463,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 			return riverjobs.ProviderRefreshArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: providerrecovery.RefreshInterval, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled}},
-			}
-		},
-		nil,
-	))
-
-	// Every minute, including overdue startup: return jobs whose process died.
-	jobs = append(jobs, r.fleetPeriodic(cfg,
-		time.Minute,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.JobRescueArgs{}, &river.InsertOpts{
-				Queue: riverjobs.QueueBilling,
-				// Bound active uniqueness by period: if this rescuer dies while
-				// running, a later pass must be able to rescue it. River's
-				// built-in rescuer ignores our negative-timeout workers.
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Minute, ByState: []rivertype.JobState{
-					rivertype.JobStateAvailable, rivertype.JobStatePending,
-					rivertype.JobStateRunning, rivertype.JobStateRetryable,
-					rivertype.JobStateScheduled,
-				}},
 			}
 		},
 		nil,

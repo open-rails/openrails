@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/decline"
-	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
 // Authorization kinds NMI's transaction history can tell apart.
@@ -85,7 +84,6 @@ func (c *NMIClient) readHistoryWindow(ctx context.Context, from, to time.Time, h
 		if err != nil {
 			return fmt.Errorf("nmi transactions from %s, page %d: %w", from.Format(time.DateOnly), filter.PageNumber, err)
 		}
-		progress.Mark(ctx, fmt.Sprintf("nmi history %s page %d", from.Format("2006-01"), filter.PageNumber))
 		if len(batch.Transactions) > 0 {
 			first := strings.TrimSpace(batch.Transactions[0].TransactionID)
 			if firsts[first] {

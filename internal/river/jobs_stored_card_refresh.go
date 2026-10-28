@@ -26,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
 // TypeAccountUpdater is the account-updater request for one stored card. It
@@ -491,7 +490,6 @@ func (w StoredCardRefreshDueWorker) lookAt(ctx context.Context, due []dueCheck, 
 	queued := 0
 	var passErr error
 	for _, mid := range order {
-		progress.Mark(ctx, "stored card refresh merchant "+mid.String())
 		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "stored card refresh pass", func(ctx context.Context) error {
 			n, err := w.lookAtMerchant(ctx, mid, cards[mid], now)
 			queued += n

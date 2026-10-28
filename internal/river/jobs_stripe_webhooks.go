@@ -3,6 +3,7 @@ package riverjobs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -23,7 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
-	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
 const KindStripeWebhookReconcile = "openrails.stripe_webhook_reconcile"
@@ -120,18 +120,17 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 				Rails: []string{string(models.RailStripe)}, MerchantLimit: stripeWebhookMerchantBatch, AfterMerchantID: after,
 			})
 			if err != nil {
-				return preferSweepError(sweepErr, fmt.Errorf("stripe webhook reconcile: list armed merchants: %w", err))
+				return errors.Join(sweepErr, fmt.Errorf("stripe webhook reconcile: list armed merchants: %w", err))
 			}
 		}
 		for _, mid := range merchantIDs {
 			after = &mid
 			merchantID := billing.MerchantID(mid)
-			progress.Mark(ctx, "stripe webhook reconcile merchant "+merchantID.String())
 			// The directory carries the slug (billing.merchants is global);
 			// the PSP rows are the merchant's own and are read in its scope.
 			row, err := w.DB.GenDirectory().GetPlatformMerchant(ctx, merchantID.UUID())
 			if err != nil {
-				sweepErr = preferSweepError(sweepErr, fmt.Errorf("stripe webhook merchant %s directory: %w", merchantID, err))
+				sweepErr = errors.Join(sweepErr, fmt.Errorf("stripe webhook merchant %s directory: %w", merchantID, err))
 				failed++
 				log.WithContext(ctx).WithError(err).WithField("merchant_id", merchantID.String()).
 					Warn("StripeWebhookReconcile: merchant directory lookup failed")
@@ -162,7 +161,7 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 						RetireOverlap:       w.RetireOverlap,
 					})
 					if err != nil {
-						sweepErr = preferSweepError(sweepErr, fmt.Errorf("stripe webhook merchant %s account %s: %w", merchantID, psp.AccountID, err))
+						sweepErr = errors.Join(sweepErr, fmt.Errorf("stripe webhook merchant %s account %s: %w", merchantID, psp.AccountID, err))
 						failed++
 						log.WithContext(mctx).WithError(err).WithFields(fields).Warn("StripeWebhookReconcile: merchant reconcile failed")
 						continue
@@ -194,7 +193,7 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 				}
 				return nil
 			}); err != nil {
-				sweepErr = preferSweepError(sweepErr, fmt.Errorf("stripe webhook merchant %s scope: %w", merchantID, err))
+				sweepErr = errors.Join(sweepErr, fmt.Errorf("stripe webhook merchant %s scope: %w", merchantID, err))
 				failed++
 				log.WithContext(ctx).WithError(err).WithField("merchant_id", merchantID.String()).
 					Warn("StripeWebhookReconcile: merchant pass failed; continuing")

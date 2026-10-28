@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
-	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
@@ -74,7 +73,6 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 	var swept, findings, autoFixed, reconcileRequired, adminRequired, held, readOnly int
 	var workErr error
 	for _, mid := range merchantIDs {
-		progress.Mark(ctx, "converge sweep merchant "+mid.String())
 		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 		var res converge.ConvergeResult
 		var blocked string

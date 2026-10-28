@@ -156,9 +156,9 @@ inconsistent-ledger rejection to transaction commit.
 ### Background work and leadership
 
 Every instance that calls `Start` (or runs `run-server` without `--no-workers`,
-or `run-worker`) works River jobs; River hands each job to one instance. A job
-whose instance dies stops its liveness beat and is rescued about five minutes
-later. Periodic work is scheduled by River's leader alone: the first instance
+or `run-worker`) works River jobs; River hands each job to one instance. River's
+rescuer returns a job whose instance died to work once it has run past its
+timeout (10 minutes for most kinds, see below). Periodic work is scheduled by River's leader alone: the first instance
 to start leads, an instance that closes resigns and another takes over at once,
 and a crashed leader is replaced within about 20 seconds. Periodic deadlines
 survive leadership changes and restarts through retained River job history. Startup recovery catches up an overdue pass; it does not
@@ -405,7 +405,7 @@ unconditional automatic recovery and a guarantee against duplicate charges in
 that ambiguous window.
 
 **Outages within a billing period.** After a five-day outage of a monthly book,
-startup's normal due and rescue jobs recover queued work and overdue renewals.
+startup's normal due passes and River's rescuer recover queued work and overdue renewals.
 The payment covers the original due period and preserves its next billing date.
 Fresh collection is refused once the entire next renewal period has elapsed;
 an accepted but never-submitted operation also expires at its frozen period end.
@@ -1239,7 +1239,7 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 
 | Worker | Cadence |
 |---|---|
-| Balance watch (due customer watches only, credit lot lapses included); due renewals and retries; job rescue | 1 min |
+| Balance watch (due customer watches only, credit lot lapses included); due renewals and retries | 1 min |
 | Order expiry | 5 min |
 | Convergence sweep | 15 min |
 | Rebill watch; charge-attribution read; arrears delinquency | 15 min |
@@ -1267,14 +1267,13 @@ fair-sweep cursor is a ring position, saved by compare-and-swap on an opaque
 per-save version (a counter, not a timestamp, so tokens never collide), so a
 pass finishing after a newer one keeps the newer position.
 
-No OpenRails job runs under a clock. River's one-minute `JobTimeout` default
-is overridden to "never" on every OpenRails worker (a host's own workers keep
-the client's); a running job is canceled
-only when it reports no progress past the same staleness rule the health
-checker uses for its kind (3× the declared cadence, floored at 30 min), and
-the job row records what it last reported. A job that dies with its process
-is reclaimed by River's rescuer, which measures silence from the job's last
-liveness beat rather than from its start.
+Each OpenRails job runs under its kind's timeout: 10 minutes, an hour for
+the passes that read every merchant's providers (`cleanup_expired_data`,
+`provider_refresh_merchant`, `converge_sweep`, `rebill_watch`,
+`charge_attributions`, `nmi_history`, `stripe_webhook_reconcile`,
+`solana_crank`), two for `psp_import`. River cancels a job past it. River's
+rescuer returns a job whose process died to work once it has run past both
+its timeout and `RescueStuckJobsAfter` (10 minutes unless the host sets it).
 
 ### Health endpoints
 

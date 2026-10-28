@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
 const (
@@ -62,7 +61,6 @@ func (w BalanceWatchWorker) Work(ctx context.Context, _ *river.Job[BalanceWatchA
 			return errors.Join(failed, err)
 		}
 		for _, row := range due {
-			progress.Mark(ctx, "balance watch "+row.CustomerID.String())
 			err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "balance watch", func(ctx context.Context) error {
 				return w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 					return w.Money.WatchBalanceInTx(ctx, w.DB.NewWithPgxTx(tx), identity.CustomerID(row.CustomerID), row.Currency)

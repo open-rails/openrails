@@ -32,7 +32,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/cadence"
-	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
@@ -179,7 +178,6 @@ func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[
 	// A merchant with no PSP has nothing to refresh: skip it before enqueue.
 	var enqueued, deduped, skipped, failed, slot int
 	for _, mid := range merchantIDs {
-		progress.Mark(ctx, "refresh scheduler merchant "+mid.String())
 		ok, err := w.merchantHasRailAccounts(ctx, mid)
 		if err != nil {
 			// Fail open: a broken predicate must not starve refresh.
@@ -572,7 +570,6 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	if until.After(horizon) {
 		until = horizon
 	}
-	progress.Mark(ctx, fmt.Sprintf("refresh %s window %s..%s", provider, since.Format(time.RFC3339), until.Format(time.RFC3339)))
 	params := reconcile.RunParams{
 		Mode:        mode,
 		Mutations:   mutations,
