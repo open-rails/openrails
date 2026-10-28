@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/pull"
@@ -169,14 +170,18 @@ func (w *SolanaCrankWorker) checkGas(ctx context.Context, mid billing.MerchantID
 	if w.Balances == nil {
 		return
 	}
-	err := w.DB.RunInMerchantScope(ctx, mid, "solana cranker gas", func(mctx context.Context) error {
-		balances, err := w.Balances(mctx)
-		for _, b := range balances {
-			err = errors.Join(err, alerting.RecordCrankerGas(mctx, w.DB, w.now(), alerting.CrankerGas{
-				PSPID: b.PSPID, Wallet: b.Wallet.String(), Network: b.Network, Lamports: b.Lamports, Threshold: solanamodule.CrankerWarningLamports}))
-		}
-		return err
-	})
+	// The chain reads hold no connection; only the findings do.
+	balances, err := w.Balances(merchant.WithID(ctx, mid))
+	if len(balances) > 0 {
+		err = errors.Join(err, w.DB.RunInMerchantScope(ctx, mid, "solana cranker gas", func(mctx context.Context) error {
+			var errs error
+			for _, b := range balances {
+				errs = errors.Join(errs, alerting.RecordCrankerGas(mctx, w.DB, w.now(), alerting.CrankerGas{
+					PSPID: b.PSPID, Wallet: b.Wallet.String(), Network: b.Network, Lamports: b.Lamports, Threshold: solanamodule.CrankerWarningLamports}))
+			}
+			return errs
+		}))
+	}
 	if err != nil {
 		log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("Solana cranker: gas check failed")
 	}
