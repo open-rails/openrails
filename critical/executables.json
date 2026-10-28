@@ -528,6 +528,7 @@
       "TestBackgroundJobs/OR-J37-S06/solana-renewal-waits-for-the-crank-before-a-missed-rebill"
     ],
     "OR-J21-S05": [
+      "TestBackgroundJobs/OR-J21-S05",
       "TestBackgroundJobs/OR-J21-S05/attribution-no-pull-reads-becomes-a-finding",
       "TestBackgroundJobs/OR-J21-S05/attribution-the-pull-records-raises-no-finding"
     ],
