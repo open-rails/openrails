@@ -96,6 +96,42 @@ const routes = [
     ),
   },
   {
+    path: "/ops/imports",
+    Component: lazy(() =>
+      import("./pages/imports").then((m) => ({ default: m.ImportsPage }))
+    ),
+  },
+  {
+    path: "/ops/imports/:id",
+    Component: lazy(() =>
+      import("./pages/imports/detail").then((m) => ({
+        default: m.ImportDetailPage,
+      }))
+    ),
+  },
+  {
+    path: "/ops/imports/:id/records",
+    Component: lazy(() =>
+      import("./pages/imports/records").then((m) => ({
+        default: m.ImportRecordsPage,
+      }))
+    ),
+  },
+  {
+    path: "/ops/provider-prices",
+    Component: lazy(() =>
+      import("./pages/provider-prices").then((m) => ({
+        default: m.ProviderPricesPage,
+      }))
+    ),
+  },
+  {
+    path: "/ops/parked",
+    Component: lazy(() =>
+      import("./pages/parked").then((m) => ({ default: m.ParkedPage }))
+    ),
+  },
+  {
     path: "/ops",
     Component: lazy(() =>
       import("./pages/ops").then((m) => ({ default: m.OpsPage }))

@@ -156,40 +156,7 @@ export type {
   ScheduledChange,
 } from "#orck/client/generated/wire"
 
-// --- Ops: findings and repair alerts ---
-
-export interface Recommendation {
-  action: string
-  params?: Record<string, unknown>
-}
-
-export interface Finding {
-  id: string
-  provider: string | null
-  // Catalog and pull.* findings name the PSP whose read raised them; a catalog
-  // finding also names the resource, the field and both values.
-  psp_id?: string | null
-  resource_type?: string | null
-  resource_id?: string | null
-  external_resource_id?: string | null
-  field?: string | null
-  openrails_value?: string | null
-  external_value?: string | null
-  finding_type: string
-  subject_key: string
-  severity: "critical" | "high" | "medium" | "low"
-  status: string
-  requires_review?: boolean
-  recommended_action?: string
-  evidence?: Record<string, unknown>
-  last_seen_at: string
-  resolved_at?: string
-  resolution?: string
-  operator_notes?: string
-  created_at: string
-  updated_at: string
-  recommendation?: Recommendation
-}
+// --- Ops ---
 
 // The findings queue at a glance, from the metrics query's findings measures.
 export interface FindingsGauges {

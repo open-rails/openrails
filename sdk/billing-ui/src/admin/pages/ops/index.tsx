@@ -4,7 +4,7 @@ import * as React from "react"
 
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useSearchParams } from "#orck/admin/router"
+import { Link, useSearchParams } from "#orck/admin/router"
 
 import { StatusBadge } from "#orck/admin/components/status-badge"
 import { Badge } from "#orck/admin/components/ui/badge"
@@ -33,11 +33,15 @@ import {
   TableRow,
 } from "#orck/admin/components/ui/table"
 import { Textarea } from "#orck/admin/components/ui/textarea"
-import type { Finding } from "#orck/admin/lib/api/types"
+import type { Finding } from "#orck/client/generated/wire"
 import { DIALOG_FORM } from "#orck/admin/lib/dialog-width"
 import { formatDate } from "#orck/admin/lib/format"
 
-import { useMerchantConfig, useMerchantConfigUpdates, useMetrics } from "#orck/admin/lib/capabilities"
+import {
+  useMerchantConfig,
+  useMerchantConfigUpdates,
+  useMetrics,
+} from "#orck/admin/lib/capabilities"
 
 export function OpsPage() {
   return useMerchantConfig() ? <FindingsTab /> : null
@@ -153,15 +157,11 @@ function FindingsTab() {
                   </TableCell>
                   <TableCell>{formatDate(f.last_seen_at)}</TableCell>
                   <TableCell className="text-right">
-                    {canUpdate && !f.resolved_at && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setResolving(f)}
-                      >
-                        <AdminMessage id={"Resolve"} />
-                      </Button>
-                    )}
+                    <FindingAction
+                      finding={f}
+                      canUpdate={canUpdate}
+                      onResolve={() => setResolving(f)}
+                    />
                   </TableCell>
                 </TableRow>
               ))}
@@ -176,6 +176,48 @@ function FindingsTab() {
         />
       )}
     </div>
+  )
+}
+
+// FindingAction is what a person does with an open finding. A pull's
+// proposal is approved or dismissed in the inbox, never resolved here; an
+// unmapped provider price is mapped or dismissed among provider prices.
+function FindingAction({
+  finding: f,
+  canUpdate,
+  onResolve,
+}: {
+  finding: Finding
+  canUpdate: boolean
+  onResolve: () => void
+}) {
+  if (f.resolved_at) return null
+  if (f.finding_type.startsWith("pull."))
+    return (
+      <Link
+        className="text-sm underline"
+        to={`/ops/proposals?ids=${encodeURIComponent(f.id)}`}
+      >
+        <AdminMessage id={"Review"} />
+      </Link>
+    )
+  if (f.finding_type === "catalog.price.unmapped")
+    return (
+      <Link
+        className="text-sm underline"
+        to={`/ops/provider-prices?${new URLSearchParams({
+          ...(f.psp_id ? { psp: f.psp_id } : {}),
+          ref: f.subject_key,
+        })}`}
+      >
+        <AdminMessage id={"Provider prices"} />
+      </Link>
+    )
+  if (!canUpdate) return null
+  return (
+    <Button variant="outline" size="sm" onClick={onResolve}>
+      <AdminMessage id={"Resolve"} />
+    </Button>
   )
 }
 

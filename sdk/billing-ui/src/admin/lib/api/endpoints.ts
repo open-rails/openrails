@@ -13,6 +13,8 @@ import type {
   CreatePriceParams,
   Customer,
   CustomerSettingsResult,
+  Finding,
+  FindingResolution,
   ListPage,
   MerchantConfigurationState,
   Meter,
@@ -38,7 +40,6 @@ import type {
 import type {
   AdminSubscription,
   CustomerEntitlement,
-  Finding,
   PSPRoutingPreview,
   RawProductAccessGrant,
   PriceMigration,
@@ -580,10 +581,10 @@ export function createEndpoints(client: AdminClient) {
     outcome: "approve" | "ignore",
     notes: string
   ) =>
-    api<{ finding: Finding; execution?: Record<string, unknown> }>(
-      `/merchant/findings/${id}/resolve`,
-      { method: "POST", body: { outcome, notes } }
-    )
+    api<FindingResolution>(`/merchant/findings/${id}/resolve`, {
+      method: "POST",
+      body: { outcome, notes },
+    })
 
   // --- Settings ---
 

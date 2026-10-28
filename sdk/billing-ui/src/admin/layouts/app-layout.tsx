@@ -36,7 +36,19 @@ const trails: [string, { label: string; to?: string }[]][] = [
     [{ label: "Catalog", to: "/catalog" }, { label: "Drift" }],
   ],
   ["/catalog", [{ label: "Catalog", to: "/catalog" }, { label: "Products" }]],
-  ["/ops", [{ label: "Ops" }]],
+  [
+    "/ops/imports",
+    [
+      { label: "Ops", to: "/ops" },
+      { label: "PSP imports", to: "/ops/imports" },
+    ],
+  ],
+  [
+    "/ops/provider-prices",
+    [{ label: "Ops", to: "/ops" }, { label: "Provider prices" }],
+  ],
+  ["/ops/parked", [{ label: "Ops", to: "/ops" }, { label: "Parked" }]],
+  ["/ops", [{ label: "Ops", to: "/ops" }, { label: "Findings" }]],
   ["/settings", [{ label: "Settings" }]],
 ]
 

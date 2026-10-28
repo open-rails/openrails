@@ -87,6 +87,12 @@ export const coreNav: AdminNavItem[] = [
     icon: Wrench01Icon,
     order: 60,
     useVisible: useMerchantConfig,
+    items: [
+      { title: "Findings", path: "/ops" },
+      { title: "PSP imports", path: "/ops/imports" },
+      { title: "Provider prices", path: "/ops/provider-prices" },
+      { title: "Parked", path: "/ops/parked" },
+    ],
   },
   { title: "Settings", path: "/settings", icon: Settings01Icon, order: 70 },
 ].map((item) => ({ ...item }))

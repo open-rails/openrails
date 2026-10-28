@@ -16,7 +16,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "#orck/admin/components/ui/dropdown-menu"
-import type { Finding } from "#orck/admin/lib/api/types"
+import type { Finding } from "#orck/client/generated/wire"
 import { timeAgo } from "#orck/admin/lib/format"
 import { useMerchantConfig, useMetrics } from "#orck/admin/lib/capabilities"
 
