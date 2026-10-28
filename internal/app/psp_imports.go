@@ -42,6 +42,27 @@ func (r *Runtime) PSPImporter() *pspimport.Importer {
 	return im
 }
 
+// EnsurePSPOnboarding gives each live PSP of the merchant its onboarding
+// import now, restarting a failed one, as a process's first load of its
+// configuration does in the background. It reads the published configuration,
+// loading it first if needed. A tool that reads the onboarding import
+// afterwards sees its latest state or the restart.
+func (r *Runtime) EnsurePSPOnboarding(ctx context.Context, mid billing.MerchantID) error {
+	if r == nil || r.DB == nil || r.Merchants == nil {
+		return errors.New("psp onboarding: merchant configuration is not wired")
+	}
+	ctx = merchant.WithID(ctx, mid)
+	scopes, err := r.Merchants.LivePSPScopes(ctx, mid)
+	if err != nil {
+		return err
+	}
+	rearm := make(map[uuid.UUID]bool, len(scopes))
+	for _, scope := range scopes {
+		rearm[scope.ID] = true
+	}
+	return r.PSPImporter().EnsureOnboarding(ctx, mid, scopes, rearm)
+}
+
 // followPSPImports gives the merchant's PSPs their onboarding imports when a
 // PSP document is new to this process or changed, in the background and
 // retried until the database answers. It reads the PSPs from current, the set

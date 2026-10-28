@@ -278,6 +278,14 @@ func (e *Engine) RiverJobs() riverhelpers.Contribution {
 	return e.engine.App.Runtime.RiverJobs()
 }
 
+// EnsurePSPOnboarding gives each live PSP of merchant its onboarding import
+// now, restarting a failed one, as the engine's first load of the
+// configuration does in the background. A tool calls it after New to read the
+// onboarding import's latest state, or its restart, right away.
+func (e *Engine) EnsurePSPOnboarding(ctx context.Context, merchant billing.MerchantID) error {
+	return e.engine.App.Runtime.EnsurePSPOnboarding(ctx, merchant)
+}
+
 // QueueBilling and QueuePSPImport are the queues RiverJobs contributes, the
 // latter for PSP import pulls and landings. Hosts may set their concurrency
 // in the shared River config; each needs at least one worker.

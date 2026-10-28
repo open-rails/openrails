@@ -578,7 +578,9 @@ func TestPSPImport(t *testing.T) {
 
 		carol, dave, erin, frank := authtest.NewUser(t, iw.auth), authtest.NewUser(t, iw.auth), authtest.NewUser(t, iw.auth), authtest.NewUser(t, iw.auth)
 		signup := iw.clock.Now().Add(-40 * 24 * time.Hour)
-		rebilled := iw.clock.Now().Add(-10 * 24 * time.Hour)
+		// CCBill states its next rebill as a date: rebilling in the afternoon
+		// (UTC) must not make the 30-day cadence 29 days.
+		rebilled := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour).Add(18 * time.Hour)
 		next := rebilled.Add(30 * 24 * time.Hour)
 		member := func(u authtest.User, rebill string) string {
 			id := iw.ccbill.AddMember(ccbillmock.Member{Username: u.Username, Email: u.Email, Signup: signup, Rebill: &next})
@@ -959,7 +961,13 @@ func TestPSPImport(t *testing.T) {
 		replica, err := openrails.New(t.Context(), iw.cfg, iw.deps)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, replica.Close(context.Background())) })
-		again := iw.await(t, iw.onboarding(t, "stripe").ID, billing.PSPImportPulled)
+		// A tool awaits the onboarding step instead of guessing how long the
+		// background load takes.
+		require.NoError(t, replica.EnsurePSPOnboarding(t.Context(), iw.alpha.MerchantID()))
+		made, err := iw.api.ListPSPImports(t.Context(), billing.PSPImportListParams{PSP: billing.PSPRef{Key: "stripe"}, Origin: billing.PSPImportOnboarding})
+		require.NoError(t, err)
+		require.Len(t, made.Items, 1, "the import exists once the step returns")
+		again := iw.await(t, made.Items[0].ID, billing.PSPImportPulled)
 		require.NotEqual(t, imports["stripe"].ID, again.ID)
 		require.NotEqual(t, manual.ID, again.ID)
 		for _, key := range []string{"nmi", "ccbill"} {

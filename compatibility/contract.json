@@ -140,6 +140,7 @@
       "func (e *Engine) Close(ctx context.Context) error",
       "func (e *Engine) CustomerConfig(selection Routes, r *http.Request) (*billing.CustomerConfig, error)",
       "func (e *Engine) CustomerRoutes(selection CustomerRoutes) ([]Route, error)",
+      "func (e *Engine) EnsurePSPOnboarding(ctx context.Context, merchant billing.MerchantID) error",
       "func (e *Engine) ListOpenDestructiveHolds(ctx context.Context, limit int, after billing.DestructiveHoldID) ([]billing.DestructiveHoldReview, error)",
       "func (e *Engine) LocalMerchant(id billing.MerchantID) (*LocalClient, error)",
       "func (e *Engine) Merchant(id billing.MerchantID) (*Client, error)",

@@ -158,6 +158,7 @@ pkg openrails, method (*Engine) ClearDestructiveHold(context.Context, billing.Me
 pkg openrails, method (*Engine) Close(context.Context) error
 pkg openrails, method (*Engine) CustomerConfig(Routes, *http.Request) (*billing.CustomerConfig, error)
 pkg openrails, method (*Engine) CustomerRoutes(CustomerRoutes) ([]Route, error)
+pkg openrails, method (*Engine) EnsurePSPOnboarding(context.Context, billing.MerchantID) error
 pkg openrails, method (*Engine) ListOpenDestructiveHolds(context.Context, int, billing.DestructiveHoldID) ([]billing.DestructiveHoldReview, error)
 pkg openrails, method (*Engine) LocalMerchant(billing.MerchantID) (*LocalClient, error)
 pkg openrails, method (*Engine) Merchant(billing.MerchantID) (*Client, error)

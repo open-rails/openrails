@@ -38,7 +38,10 @@ Hentai0 share one merchant) loads it first creates it, and the others find it.
 Existing PSPs get theirs on the first boot after upgrading. It runs in the
 background, also with provider writes `readonly`, and lands nothing: a person
 reviews, maps, links and applies it as any import. Find it with
-`ListPSPImports{PSP, Origin: onboarding}`. An import a person creates is
+`ListPSPImports{PSP, Origin: onboarding}`. A tool that just started an engine
+calls `Engine.EnsurePSPOnboarding` first: it does the same step at once (and
+restarts a failed import), so the list shows the import's latest state or its
+restart. An import a person creates is
 `manual` and never stands in for it; deleting the onboarding import makes it
 again at the PSP's next load.
 
@@ -158,9 +161,9 @@ amount and interval. A member lands on the price picked for it by hand
 `manual_price`; a null price clears it), else on the one recurring provider
 price of the import's PSP, on any product and archived ones included, whose
 amount equals its latest rebill read in that price's currency and whose
-interval is the cadence the member rebills at (from its latest rebill to
-its next rebill or expiry date, else between its last two rebills; a tenth
-either way, at least two days). No rebill, no match or several matches
+interval is the cadence the member rebills at (in calendar days, from its
+latest rebill's date to its next rebill or expiry date, else between its last
+two rebills; a tenth either way, at least two days). No rebill, no match or several matches
 leave it `blocked`, naming the count. A pick is a live recurring provider
 price of the import's PSP, for a subscription; only plan-less (CCBill)
 imports take picks. Its terms become the

@@ -681,20 +681,26 @@ func rebillsOf(records []gen.BillingPspImportRecord) map[string]rebills {
 	return out
 }
 
-// cadence is how often the subscription rebills, as observed: from its
-// latest rebill to the next the provider schedules (or to the expiry of a
-// canceled one), else between its latest two rebills; 0 when unknown.
+// cadence is how often the subscription rebills, as observed, in whole
+// calendar days: from its latest rebill to the next the provider schedules
+// (or to the expiry of a canceled one), else between its latest two rebills;
+// 0 when unknown. The provider schedules dates, not times: a rebill counts by
+// its date, so the time of day it ran never shifts the cadence.
 func (rb rebills) cadence(next *time.Time) time.Duration {
+	at, previous := calendarDay(rb.at), calendarDay(rb.previousAt)
 	switch {
 	case rb.at.IsZero():
 		return 0
-	case next != nil && next.After(rb.at):
-		return next.Sub(rb.at)
-	case !rb.previousAt.IsZero():
-		return rb.at.Sub(rb.previousAt)
+	case next != nil && calendarDay(*next).After(at):
+		return calendarDay(*next).Sub(at)
+	case !rb.previousAt.IsZero() && at.After(previous):
+		return at.Sub(previous)
 	}
 	return 0
 }
+
+// calendarDay is t's date, as the provider stated it (parsed as UTC).
+func calendarDay(t time.Time) time.Time { return t.UTC().Truncate(24 * time.Hour) }
 
 // period is a price's billing interval, 0 for a price that does not recur.
 // A calendar month counts its average length.
@@ -754,7 +760,7 @@ func (l *lander) priceOf(r gen.BillingPspImportRecord, plan string, rebill rebil
 	if len(match) != 1 {
 		every := ""
 		if cadence > 0 {
-			every = fmt.Sprintf(" every %.0f days", cadence.Hours()/24)
+			every = fmt.Sprintf(" every %d days", int(cadence/(24*time.Hour)))
 		}
 		return priceTerms{}, fmt.Sprintf("its latest rebill %s%s: %d match among this PSP's recurring provider prices; %s", rebill.decimal, every, len(match), pick)
 	}
