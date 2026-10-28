@@ -1234,7 +1234,7 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 | Admission-denial flush (closed hours); attempt enrichment; due daily NMI history read; expired-data cleanup; idempotency cleanup; credit expiry; Solana crank; Solana Pay reference GC; Stripe webhook reconciliation | 1 h |
 | Provider refresh scheduler (fans out per merchant) | 2 h |
 | Stored card refresh ahead of renewal | 6 h |
-| Solana gas alert; Solana ledger reconciliation | 6 h |
+| Solana gas alert | 6 h |
 | Ledger integrity audit | 24 h |
 | Automatic usage billing (opt-in) | 5 min, plus threshold wakeups |
 

@@ -87,7 +87,6 @@ internal/river/jobs_provider_refresh.go|clock = clockwork.NewRealClock()|busines
 internal/river/jobs_provider_refresh.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|2
 internal/river/jobs_psp_import.go|return time.Now().Add(pspimport.RetryDelay(job.Attempt))|infrastructure_time|River schedules a retry on its own wall clock|1
 internal/river/jobs_solana_crank.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/river/jobs_solana_reconcile.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/progress.go|return time.Now().UTC()|infrastructure_time|Worker heartbeat and elapsed-work observation|1
 internal/river/progress.go|ticker = clockwork.NewRealClock().NewTicker(m.interval())|infrastructure_time|Worker heartbeat and elapsed-work observation|1
 internal/river/worker_health.go|now := time.Now().UTC()|infrastructure_time|Worker heartbeat observation; optional clock override supported|1

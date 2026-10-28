@@ -161,58 +161,6 @@ func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context, merchantI
 	return items, nil
 }
 
-const listActiveSolanaSubscriptionsWithSignature = `-- name: ListActiveSolanaSubscriptionsWithSignature :many
-SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature, next_pull_at, status, created_at, updated_at, treasury FROM billing.solana_subscriptions
-WHERE solana_subscriptions.merchant_id = $1::uuid AND status = 'active'
-  AND last_signature IS NOT NULL
-  AND last_signature <> ''
-ORDER BY updated_at ASC
-LIMIT NULLIF($2::int, 0)
-`
-
-type ListActiveSolanaSubscriptionsWithSignatureParams struct {
-	MerchantID uuid.UUID
-	PageLimit  int32
-}
-
-func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context, arg ListActiveSolanaSubscriptionsWithSignatureParams) ([]BillingSolanaSubscription, error) {
-	rows, err := q.db.Query(ctx, listActiveSolanaSubscriptionsWithSignature, arg.MerchantID, arg.PageLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingSolanaSubscription
-	for rows.Next() {
-		var i BillingSolanaSubscription
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.SubscriptionID,
-			&i.SubscriberWallet,
-			&i.AuthorityPda,
-			&i.SubscriptionPda,
-			&i.PlanPda,
-			&i.MerchantAddress,
-			&i.Mint,
-			&i.PlanCreatedAtFingerprint,
-			&i.LastPulledPeriodStartsAt,
-			&i.LastSignature,
-			&i.NextPullAt,
-			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Treasury,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listDueSolanaPulls = `-- name: ListDueSolanaPulls :many
 WITH due AS (
     SELECT s.merchant_id, s.id, sub.psp_id,

@@ -240,58 +240,6 @@ func (r *SolanaSubscriptionRepo) listActiveMerchantWalletsScoped(ctx context.Con
 	return out, nil
 }
 
-// ListActiveWithSignature returns active subscriptions with at least one
-// confirmed pull (last_signature set), which the reconciliation worker checks
-// against billing.payments. `limit` caps the batch (0 = no limit).
-func (r *SolanaSubscriptionRepo) ListActiveWithSignature(ctx context.Context, limit int) ([]*models.SolanaSubscription, error) {
-	if _, ok := merchant.FromContext(ctx); ok {
-		return r.listActiveWithSignatureScoped(ctx, limit)
-	}
-	merchantIDs, err := r.activeMerchantIDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*models.SolanaSubscription, 0)
-	for _, id := range merchantIDs {
-		if limit > 0 && len(out) >= limit {
-			break
-		}
-		remaining := limit
-		if remaining > 0 {
-			remaining -= len(out)
-		}
-		err := r.db.RunInMerchantConn(merchant.WithID(ctx, billing.MerchantID(id)), func(ctx context.Context) error {
-			rows, err := r.listActiveWithSignatureScoped(ctx, remaining)
-			if err != nil {
-				return err
-			}
-			out = append(out, rows...)
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
-}
-
-func (r *SolanaSubscriptionRepo) listActiveWithSignatureScoped(ctx context.Context, limit int) ([]*models.SolanaSubscription, error) {
-	limit32, _ := safecast.Convert[int32](limit)
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	rows, err := r.db.Gen(ctx).ListActiveSolanaSubscriptionsWithSignature(ctx, gen.ListActiveSolanaSubscriptionsWithSignatureParams{MerchantID: scopeMerchantID.UUID(), PageLimit: limit32})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*models.SolanaSubscription, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, solanaSubscriptionFromGen(row))
-	}
-	return out, nil
-}
-
 // SetStatus transitions the on-chain record's lifecycle (canceled/expired).
 func (r *SolanaSubscriptionRepo) SetStatus(ctx context.Context, id uuid.UUID, status string) error {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)

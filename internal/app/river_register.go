@@ -293,14 +293,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addTrackedWorker(r, workers, &riverjobs.JobRescueWorker{River: r.riverTableAccess}); err != nil {
 		return fmt.Errorf("add job rescue worker: %w", err)
 	}
-	// Solana ledger reconciliation: cross-checks confirmed on-chain pulls
-	// against billing.payments and raises operator repair alerts on drift.
-	if err := addTrackedWorker(r, workers, &riverjobs.SolanaReconcileWorker{
-		DB:    r.DB,
-		Clock: clock,
-	}); err != nil {
-		return fmt.Errorf("add solana reconcile worker: %w", err)
-	}
 	return nil
 }
 
@@ -626,18 +618,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 		6*time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.SolanaGasAlertArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
-			}
-		},
-		nil,
-	))
-
-	// Every 6 hours: reconcile confirmed Solana pulls against the ledger.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		6*time.Hour,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.SolanaReconcileArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
 			}
