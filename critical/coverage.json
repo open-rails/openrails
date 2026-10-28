@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 227,
+  "scenario_count": 230,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1137,6 +1137,21 @@
       "id": "OR-J04-S41",
       "journey": "J04",
       "name": "Job health reads overrunning, discarded and completed jobs from River; the progress probe fails without a leader or on an overrunning job"
+    },
+    {
+      "id": "OR-J04-S40",
+      "journey": "J04",
+      "name": "With no rescue window set, River rescues crashed OpenRails and host jobs after ten minutes, and a long pass only past its timeout"
+    },
+    {
+      "id": "OR-J26-S40",
+      "journey": "J26",
+      "name": "A merchant's usage pass bills past a full page of due accounts in a continuation job"
+    },
+    {
+      "id": "OR-J29-S40",
+      "journey": "J29",
+      "name": "Retention cleanup continues past a full batch of merchants in a new job and reaches every merchant"
     }
   ]
 }

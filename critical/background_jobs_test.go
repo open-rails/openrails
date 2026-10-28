@@ -136,6 +136,49 @@ func TestBackgroundJobs(t *testing.T) {
 			t.Fatal("River's rescuer never returned the host's crashed job to work")
 		}
 	})
+	t.Run("OR-J04-S40/crashed-jobs-are-rescued-after-the-window-and-long-passes-after-their-timeout", func(t *testing.T) {
+		w := newWorld(t)
+		chores := &hostChoreWorker{ran: make(chan int64, 4)}
+		workers := river.NewWorkers()
+		river.AddWorker(workers, chores)
+		// The host sets no rescue window, so OpenRails' ten minutes applies.
+		fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Workers: workers,
+			Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}, "host": {MaxWorkers: 1}}}, w.engine.RiverJobs())
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			require.NoError(t, fleet.StopAndCancel(ctx))
+		})
+		fleet.PeriodicJobs().Clear()
+		host, err := fleet.Insert(t.Context(), hostChore{}, &river.InsertOpts{Queue: "host"})
+		require.NoError(t, err)
+		short, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.order_expiry"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		require.NoError(t, err)
+		long, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.cleanup_expired_data"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		require.NoError(t, err)
+		// Their processes died eleven minutes into the runs.
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{w.schema, "river_job"}.Sanitize()+
+			" SET state='running', attempt=1, attempted_at=now()-interval '11 minutes', attempted_by=ARRAY['crashed'] WHERE id = ANY($1)",
+			[]int64{host.Job.ID, short.Job.ID, long.Job.ID})
+		require.NoError(t, err)
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		select {
+		case id := <-chores.ran:
+			require.Equal(t, host.Job.ID, id)
+		case <-time.After(60 * time.Second):
+			t.Fatal("River's rescuer never returned the host's crashed job to work")
+		}
+		require.Eventually(t, func() bool {
+			job, err := fleet.JobGet(t.Context(), short.Job.ID)
+			return err == nil && job.State == rivertype.JobStateCompleted
+		}, 60*time.Second, 50*time.Millisecond, "River's rescuer returns a crashed OpenRails job to work after ten minutes")
+		job, err := fleet.JobGet(t.Context(), long.Job.ID)
+		require.NoError(t, err)
+		require.Equal(t, rivertype.JobStateRunning, job.State, "an hour-long pass is not rescued eleven minutes in")
+		require.Empty(t, job.Errors)
+	})
 	t.Run("OR-J04-S41/job-health-reads-overrunning-discarded-and-completed-jobs-from-river", func(t *testing.T) {
 		w := newWorld(t)
 		// A long rescue window keeps the overrunning job running.
@@ -304,6 +347,30 @@ func TestBackgroundJobs(t *testing.T) {
 		w.clock.Advance(397 * 24 * time.Hour)
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		require.Zero(t, deniedAdmissions(t, w, hour))
+	})
+	t.Run("OR-J29-S40/cleanup-continues-past-a-full-batch-of-merchants", func(t *testing.T) {
+		w := newWorld(t)
+		fleet := hostFleet(t, w)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		notifications := pgx.Identifier{w.schema, "notifications"}.Sanitize()
+		// More merchants than one job's batch each hold a notification past
+		// its retention.
+		_, err := w.pool.Exec(t.Context(), `WITH m AS (INSERT INTO `+pgx.Identifier{w.schema, "merchants"}.Sanitize()+` (slug, status)
+			SELECT 'retention-' || g, 'active' FROM generate_series(1, 201) g RETURNING id)
+			INSERT INTO `+notifications+` (merchant_id, event_type, data, recipient_kind, severity, title, body, created_at)
+			SELECT id, 'operator.alert', '{}', 'merchant', 'info', 'Old', 'Past its retention', now() - interval '200 days' FROM m`)
+		require.NoError(t, err)
+		expired := func() int {
+			var n int
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+notifications+" WHERE created_at < now() - interval '199 days'").Scan(&n))
+			return n
+		}
+		require.Equal(t, 201, expired())
+		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
+		require.Eventually(t, func() bool { return expired() == 0 }, 30*time.Second, 50*time.Millisecond,
+			"the pass continues in a new job after its first 200 merchants")
 	})
 	t.Run("OR-J29-S30/converge-sweep-fails-its-job-after-the-other-merchants-converge", func(t *testing.T) {
 		w := newWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })

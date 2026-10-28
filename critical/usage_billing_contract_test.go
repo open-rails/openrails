@@ -220,6 +220,37 @@ func TestUsageBillingContracts(t *testing.T) {
 			})
 		}
 	})
+	t.Run("OR-J26-S40/usage-pass-bills-past-a-full-page-of-due-accounts", func(t *testing.T) {
+		a, p, customer := usageBillingWorld(t, true, false)
+		// Two hundred accounts due ahead of Alice's fill the pass's first page.
+		mid := a.alpha.MerchantID().UUID()
+		_, err := a.pool.Exec(t.Context(), `WITH c AS (INSERT INTO `+pgx.Identifier{a.schema, "customers"}.Sanitize()+` (id, merchant_id)
+			SELECT ('00000000-0000-0000-0000-' || lpad(to_hex(g), 12, '0'))::uuid, $1 FROM generate_series(1, 200) g RETURNING id)
+			INSERT INTO `+pgx.Identifier{a.schema, "money_settings"}.Sanitize()+` (merchant_id, customer_id, billing_mode, currency, usage_collection_due)
+			SELECT $1, id, 'arrears', 'USD', true FROM c`, mid)
+		require.NoError(t, err)
+		oneUsage(t, a.alpha, usageInput(customer, "past-the-first-page", 3))
+		fleet := startFleet(t, a.world)
+		require.Eventually(t, func() bool {
+			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
+		}, 30*time.Second, 50*time.Millisecond, "the merchant's pass continues past its first page")
+		require.Eventually(t, func() bool {
+			jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.usage_orders").States(rivertype.JobStateCompleted).First(100))
+			require.NoError(t, err)
+			for _, job := range jobs.Jobs {
+				var args struct {
+					After *struct{} `json:"after"`
+				}
+				require.NoError(t, json.Unmarshal(job.EncodedArgs, &args))
+				if args.After != nil {
+					return true
+				}
+			}
+			return false
+		}, 20*time.Second, 50*time.Millisecond, "a continuation job billed the second page")
+		p.money(t, 1, 3000)
+	})
 	t.Run("OR-J26-S30/admission-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
 			m := w.cfg.Merchants["alpha"]

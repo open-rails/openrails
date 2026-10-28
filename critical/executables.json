@@ -731,6 +731,15 @@
     ],
     "OR-J04-S41": [
       "TestBackgroundJobs/OR-J04-S41/job-health-reads-overrunning-discarded-and-completed-jobs-from-river"
+    ],
+    "OR-J04-S40": [
+      "TestBackgroundJobs/OR-J04-S40/crashed-jobs-are-rescued-after-the-window-and-long-passes-after-their-timeout"
+    ],
+    "OR-J26-S40": [
+      "TestUsageBillingContracts/OR-J26-S40/usage-pass-bills-past-a-full-page-of-due-accounts"
+    ],
+    "OR-J29-S40": [
+      "TestBackgroundJobs/OR-J29-S40/cleanup-continues-past-a-full-batch-of-merchants"
     ]
   },
   "suites": {
