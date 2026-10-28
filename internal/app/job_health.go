@@ -59,7 +59,7 @@ func (r *Runtime) JobProgress(ctx context.Context) error {
 	for _, k := range h.Kinds {
 		byKind[k.Kind] = k
 		if k.Overrunning > 0 {
-			stalled = append(stalled, fmt.Sprintf("%s has %d jobs running past their %s timeout", k.Kind, k.Overrunning, riverjobs.Timeout(k.Kind)))
+			stalled = append(stalled, fmt.Sprintf("%s: %d running past its %s timeout", k.Kind, k.Overrunning, riverjobs.Timeout(k.Kind)))
 		}
 	}
 	for _, p := range riverjobs.Periodics {

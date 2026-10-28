@@ -234,7 +234,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, fleet.Start(t.Context()))
 		require.Eventually(t, func() bool {
 			err := progress(t.Context())
-			return err != nil && strings.Contains(err.Error(), "openrails.order_expiry has 1 jobs running past their 10m0s timeout")
+			return err != nil && strings.Contains(err.Error(), "openrails.order_expiry: 1 running past its 10m0s timeout")
 		}, 20*time.Second, 50*time.Millisecond, "the probe names the job running past its timeout")
 		_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET state='completed', finalized_at=now() WHERE kind='openrails.order_expiry'")
 		require.NoError(t, err)
