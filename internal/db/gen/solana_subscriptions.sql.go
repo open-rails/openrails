@@ -213,6 +213,84 @@ func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context
 	return items, nil
 }
 
+const listDueSolanaPulls = `-- name: ListDueSolanaPulls :many
+WITH due AS (
+    SELECT s.merchant_id, s.id, sub.psp_id,
+           row_number() OVER (PARTITION BY s.merchant_id ORDER BY s.next_pull_at, s.id) AS turn
+    FROM billing.solana_subscriptions s
+    JOIN billing.subscriptions sub ON sub.merchant_id = s.merchant_id AND sub.id = s.subscription_id
+    WHERE s.status = 'active' AND s.next_pull_at <= $2::timestamptz
+      AND sub.deleted_at IS NULL AND sub.status <> 'canceled'
+      AND s.merchant_id <> ALL($3::uuid[])
+      AND NOT EXISTS (
+          SELECT 1 FROM billing.provider_intents i
+          WHERE i.merchant_id = s.merchant_id
+            AND i.idempotency_key = 'solana_pull:' || s.id::text || ':' || floor(extract(epoch FROM s.next_pull_at))::bigint::text
+            AND i.status NOT IN ('superseded', 'expired'))
+)
+SELECT s.id, s.merchant_id, s.subscription_id, s.subscriber_wallet, s.authority_pda, s.subscription_pda, s.plan_pda, s.merchant_address, s.mint, s.plan_created_at_fingerprint, s.last_pulled_period_starts_at, s.last_signature, s.next_pull_at, s.status, s.created_at, s.updated_at, s.treasury, due.psp_id
+FROM due
+JOIN billing.solana_subscriptions s ON s.merchant_id = due.merchant_id AND s.id = due.id
+ORDER BY due.turn, s.next_pull_at, s.id
+LIMIT $1::int
+`
+
+type ListDueSolanaPullsParams struct {
+	PageLimit     int32
+	Now           time.Time
+	HeldMerchants []uuid.UUID
+}
+
+type ListDueSolanaPullsRow struct {
+	BillingSolanaSubscription BillingSolanaSubscription
+	PspID                     uuid.UUID
+}
+
+// CROSS-MERCHANT: the crank's due pull episodes, merchants taking turns (each
+// one's oldest, then each one's next), so no merchant's backlog holds back
+// another's renewals. An episode that has an operation is owned by it: an open
+// one by its dispatcher, a final one that did not advance the row by the
+// operator its finding names. Superseded and expired operations revive on
+// enqueue. The key is SolanaPullIdempotencyKey.
+func (q *Queries) ListDueSolanaPulls(ctx context.Context, arg ListDueSolanaPullsParams) ([]ListDueSolanaPullsRow, error) {
+	rows, err := q.db.Query(ctx, listDueSolanaPulls, arg.PageLimit, arg.Now, arg.HeldMerchants)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDueSolanaPullsRow
+	for rows.Next() {
+		var i ListDueSolanaPullsRow
+		if err := rows.Scan(
+			&i.BillingSolanaSubscription.ID,
+			&i.BillingSolanaSubscription.MerchantID,
+			&i.BillingSolanaSubscription.SubscriptionID,
+			&i.BillingSolanaSubscription.SubscriberWallet,
+			&i.BillingSolanaSubscription.AuthorityPda,
+			&i.BillingSolanaSubscription.SubscriptionPda,
+			&i.BillingSolanaSubscription.PlanPda,
+			&i.BillingSolanaSubscription.MerchantAddress,
+			&i.BillingSolanaSubscription.Mint,
+			&i.BillingSolanaSubscription.PlanCreatedAtFingerprint,
+			&i.BillingSolanaSubscription.LastPulledPeriodStartsAt,
+			&i.BillingSolanaSubscription.LastSignature,
+			&i.BillingSolanaSubscription.NextPullAt,
+			&i.BillingSolanaSubscription.Status,
+			&i.BillingSolanaSubscription.CreatedAt,
+			&i.BillingSolanaSubscription.UpdatedAt,
+			&i.BillingSolanaSubscription.Treasury,
+			&i.PspID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDueSolanaSubscriptions = `-- name: ListDueSolanaSubscriptions :many
 SELECT s.id, s.merchant_id, s.subscription_id, s.subscriber_wallet, s.authority_pda, s.subscription_pda, s.plan_pda, s.merchant_address, s.mint, s.plan_created_at_fingerprint, s.last_pulled_period_starts_at, s.last_signature, s.next_pull_at, s.status, s.created_at, s.updated_at, s.treasury, sub.psp_id
 FROM billing.solana_subscriptions s

@@ -146,19 +146,6 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 	if err != nil {
 		return intents.Retryable("load solana subscription: " + err.Error())
 	}
-	if p.Agreement == nil {
-		p.Agreement, err = h.admitLegacyAgreement(ctx, intent, p, row)
-		if err != nil {
-			return intents.Parked("legacy pull agreement could not be admitted: " + err.Error())
-		}
-		intent.Payload, err = json.Marshal(p)
-		if err != nil {
-			return intents.Parked(err.Error())
-		}
-	}
-	if err := p.Agreement.validate(intent, p); err != nil {
-		return intents.Parked("pull has no qualified accepted agreement: " + err.Error())
-	}
 	repo := solanasubs.NewSolanaSubscriptionRepo(h.Core.DB)
 
 	// A previously-recorded signature means a tx WAS signed (and possibly
@@ -177,6 +164,9 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 			if err := verifyPullMemoMatchesIntent(result, intent.ID); err != nil {
 				return intents.Parked("recorded pull signature landed but " + err.Error())
 			}
+			if err := p.Agreement.validate(intent, p); err != nil {
+				return intents.Parked("landed pull has no qualified accepted agreement: " + err.Error())
+			}
 			return h.repairFromSignature(ctx, repo, p.Agreement, intent, sig)
 		case sigVerdictNotLanded:
 			// Release only this exact signature after a positive chain revert.
@@ -187,9 +177,18 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 		}
 	}
 
+	// Nothing signed is pending: freeze what this attempt pulls from the
+	// subscription as it stands now.
+	p.Agreement, err = h.freezeAgreement(ctx, intent, p, row)
+	switch {
+	case errors.Is(err, errPullEpisodeOver):
+		return intents.TerminalWithEvidence(err.Error(), map[string]any{"not_executed": true})
+	case err != nil:
+		return intents.Retryable("freeze the pull agreement: " + err.Error())
+	}
+
 	var recorded string
 	var execution *observed.Execution
-	stopped := errors.New("Solana pull superseded before submission")
 	presubmit := func(sig string) error {
 		if h.Store == nil {
 			return errors.New("intent store unavailable for signature write-ahead")
@@ -211,8 +210,8 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 			if err != nil {
 				return err
 			}
-			if sub.Status == models.StatusCanceled || sub.CollectionPolicy != models.CollectionPolicyEngine || sub.PriceID != p.Agreement.PriceID || sub.ProductID != p.Agreement.ProductID || sub.CustomerID != p.Agreement.CustomerID || sub.PspID != p.Agreement.Row.PspID || current.Status != models.SolanaSubscriptionActive || current.NextPullAt.UTC().Unix() != p.NextPullAt.UTC().Unix() {
-				return stopped
+			if err := pullEpisodeState(sub, current, p.NextPullAt, p.Agreement); err != nil {
+				return err
 			}
 			execution = &observed.Execution{IntentID: intent.ID, AttemptID: uuidutil.NewV7(), ClaimAttempt: intent.Attempts, Signature: sig, SubmittedAt: h.Core.now().Truncate(time.Microsecond)}
 			encoded, err := json.Marshal(execution)
@@ -226,7 +225,7 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 				return err
 			}
 			if fenced != 1 {
-				return stopped
+				return errPullEpisodeOver
 			}
 			return nil
 		})
@@ -243,8 +242,11 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 	// record is lost.
 	outcome, crankErr := h.Core.crankOne(ctx, repo, &p.Agreement.Row, p.Agreement.plan(), intent.ID, presubmit)
 	if crankErr != nil {
-		if errors.Is(crankErr, stopped) {
-			return intents.TerminalWithEvidence(stopped.Error(), map[string]any{"not_executed": true})
+		if errors.Is(crankErr, errPullEpisodeOver) {
+			return intents.TerminalWithEvidence(errPullEpisodeOver.Error(), map[string]any{"not_executed": true})
+		}
+		if errors.Is(crankErr, errPullTermsMoved) && recorded == "" {
+			return intents.Retryable(crankErr.Error())
 		}
 		if recorded != "" || outcome.signature != "" {
 			// The tx was signed (and its signature durably recorded) before the

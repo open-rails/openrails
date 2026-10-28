@@ -225,11 +225,12 @@ only, across every merchant and PSP.
   record one engine-owned order, actual payment and canonical order attempt,
   and grant that one period. Later catalog edits and verifier clocks cannot
   reprice or extend it. Missing or mismatched evidence stays unresolved.
-- **Queued work survives an upgrade conservatively.** A never-signed legacy
-  pull can accept its complete agreement under the current subscription and
-  claim fence. An already-signed legacy pull without retained terms keeps its
-  signature for evidence-based recovery; current catalog data cannot supply
-  its missing historical agreement.
+- **Each attempt freezes its terms when it executes.** An attempt with nothing
+  signed, or whose signed transaction reverted, freezes its agreement from the
+  subscription as it stands, a due scheduled change applied, under the
+  subscription lock and its claim. A signed pull without retained terms keeps
+  its signature for evidence-based recovery; current catalog data cannot
+  supply its missing historical agreement.
 - **One pull per period, enforced twice.** The on-chain program independently
   caps pulls at one plan-amount per period (a second pull fails with
   `Custom:400` "period already paid"), so even a buggy biller cannot
@@ -244,8 +245,11 @@ only, across every merchant and PSP.
 - **Delegate revoked** (the subscriber revokes the SPL token delegation in their
   wallet) → pulls can never succeed again; OpenRails treats it as terminal and
   cancels the subscription. No dunning.
-- **RPC/gas failures** are operational: retried next run, never held against the
-  subscriber.
+- **RPC/gas failures** are operational: the pull's operation retries on its own
+  backoff, never held against the subscriber. A crank pass starts only
+  episodes that have no operation yet, merchants taking turns; an episode
+  whose operation ended without advancing the subscription (a period already
+  paid on chain) waits for the operator its finding names.
 - **Cancellation is pending until the paid period ends and needs no wallet.**
   `POST /v1/me/subscriptions/{id}/cancel` records it immediately and stops the
   cranker from pulling another renewal. Paid access continues until the period
@@ -292,9 +296,10 @@ when live pricing is unavailable, so they never require a price feed.
 ### Operational notes
 
 - Recurring pulls are system-initiated provider writes: under
-  `provider_write_mode: limited` or `readonly` the pull worker skips its runs
-  entirely. When you return to `full`, each subscription gets exactly one pull
-  (see "missed periods" above) — there is no catch-up billing.
+  `provider_write_mode: limited` or `readonly` the crank skips that merchant.
+  When you return to `full`, each subscription gets exactly one pull
+  (see "missed periods" above) — there is no catch-up billing. Without a
+  cranker no crank is scheduled.
 - Keep the crankers topped up with SOL; the gas monitor warns below
   ~0.05 SOL (~10k pulls of runway). A pull that fails for lack of gas is
   retried, not dunned.

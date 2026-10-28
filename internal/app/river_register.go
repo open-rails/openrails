@@ -273,24 +273,23 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add delinquency worker: %w", err)
 	}
-	// Solana recurring cranker. Without a Cranker (SetSolanaCranker) it logs
-	// and skips.
-	solanaCrankWorker := &riverjobs.SolanaCrankWorker{
-		DB:        r.DB,
-		Config:    r.Config,
-		Clock:     clock,
-		Lifecycle: r.SubscriptionLifecycleService,
-		// Pulls run as durable solana_pull intents through the shared registry.
-		Intents: r.intentRunner(intentRegistry, clock),
-	}
+	// Solana recurring cranker: only a deployment with a cranker pulls.
 	if r.SolanaCranker != nil {
-		solanaCrankWorker.Cranker = r.SolanaCranker
-	}
-	if r.SolanaRPCResolver != nil {
-		solanaCrankWorker.Chain = r.SolanaRPCResolver.ChainReader()
-	}
-	if err := addTrackedWorker(r, workers, solanaCrankWorker); err != nil {
-		return fmt.Errorf("add solana cranker worker: %w", err)
+		solanaCrankWorker := &riverjobs.SolanaCrankWorker{
+			DB:        r.DB,
+			Config:    r.Config,
+			Clock:     clock,
+			Cranker:   r.SolanaCranker,
+			Lifecycle: r.SubscriptionLifecycleService,
+			// Pulls run as durable solana_pull intents through the shared registry.
+			Intents: r.intentRunner(intentRegistry, clock),
+		}
+		if r.SolanaRPCResolver != nil {
+			solanaCrankWorker.Chain = r.SolanaRPCResolver.ChainReader()
+		}
+		if err := addTrackedWorker(r, workers, solanaCrankWorker); err != nil {
+			return fmt.Errorf("add solana cranker worker: %w", err)
+		}
 	}
 	// Warns when a merchant's Solana cranker wallet is low on SOL. Alert-only,
 	// no auto-top-up.
@@ -613,18 +612,20 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config)
 		nil,
 	))
 
-	// Every hour: crank due Solana recurring subscriptions. The next_pull_at
-	// due-query, not the tick, follows the billing cadence.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		riverjobs.SolanaCrankInterval,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.SolanaCrankArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.SolanaCrankInterval},
-			}
-		},
-		nil,
-	))
+	// Every hour, with a cranker: crank due Solana recurring subscriptions. The
+	// next_pull_at due-query, not the tick, follows the billing cadence.
+	if r.SolanaCranker != nil {
+		jobs = append(jobs, r.healthPeriodic(cfg,
+			riverjobs.SolanaCrankInterval,
+			func() (river.JobArgs, *river.InsertOpts) {
+				return riverjobs.SolanaCrankArgs{}, &river.InsertOpts{
+					Queue:      riverjobs.QueueBilling,
+					UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.SolanaCrankInterval},
+				}
+			},
+			nil,
+		))
+	}
 
 	// Every 6 hours: alert on low Solana cranker-wallet SOL gas.
 	jobs = append(jobs, r.healthPeriodic(cfg,

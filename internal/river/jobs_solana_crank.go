@@ -148,8 +148,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 		return nil
 	}
 	if w.Cranker == nil || w.Lifecycle == nil {
-		log.WithContext(ctx).Warn("Solana cranker not fully wired (no cranker/lifecycle); skipping run")
-		return nil
+		return fmt.Errorf("solana crank: registered without a cranker or lifecycle")
 	}
 	// A pull without a durable intent is a charge nothing can recover: a
 	// wiring defect, so fail the job loudly.
@@ -160,8 +159,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 	if batch <= 0 {
 		batch = solanaCrankBatchSize
 	}
-	repo := solanasubs.NewSolanaSubscriptionRepo(w.DB)
-	due, err := repo.ListDue(ctx, w.now(), batch)
+	due, err := w.listDue(ctx, batch)
 	if err != nil {
 		return fmt.Errorf("solana crank: list due: %w", err)
 	}
@@ -171,7 +169,6 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 	log.WithContext(ctx).WithField("count", len(due)).Info("Solana cranker: processing due subscriptions")
 
 	failures := 0
-	postures := writeposture.View{Config: w.Config, DB: w.DB}
 	for _, row := range due {
 		select {
 		case <-ctx.Done():
@@ -179,25 +176,14 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 		default:
 		}
 		progress.Mark(ctx, "solana crank subscription "+row.ID.String())
-		if posture := postures.Posture(ctx, row.MerchantID); posture.Limited() {
-			log.WithContext(ctx).WithFields(log.Fields{"merchant_id": row.MerchantID, "reason": posture.Reason}).Warn("Solana cranker: recurring pulls wait for this merchant's write posture")
-			continue
-		}
 		// Per-row isolation: one subscriber's failure never aborts the batch.
 		// Durable intent first, inline execution, pre-submit signature
 		// write-ahead: a crash resolves off the recorded signature, never a
-		// paid-but-unrenewed subscriber.
+		// paid-but-unrenewed subscriber. The handler freezes what it pulls when
+		// it executes.
 		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "solana crank pull intent", func(mctx context.Context) error {
 			mctx = db.WithPSPID(mctx, row.PspID)
-			plan, err := w.resolvePlan(mctx, row)
-			if err != nil {
-				return err
-			}
-			agreement, err := w.acceptPull(mctx, row, plan)
-			if err != nil {
-				return err
-			}
-			_, err = w.Intents.EnqueueAndExecute(mctx, intents.EnqueueParams{
+			_, err := w.Intents.EnqueueAndExecute(mctx, intents.EnqueueParams{
 				MerchantID:     row.MerchantID,
 				Provider:       string(models.RailSolana),
 				PspID:          row.PspID,
@@ -207,7 +193,6 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 					SubscriptionPDA: row.SubscriptionPDA,
 					RowID:           row.ID,
 					NextPullAt:      row.NextPullAt.UTC(),
-					Agreement:       agreement,
 				},
 				IdempotencyKey: SolanaPullIdempotencyKey(row.ID, row.NextPullAt),
 				NextAttemptAt:  w.now(),
@@ -226,6 +211,35 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 		return fmt.Errorf("solana crank: %d of %d pull intents failed", failures, len(due))
 	}
 	return nil
+}
+
+// listDue is the pass's due episodes, merchants taking turns. A merchant whose
+// write posture holds recurring pulls is left out, so its rows take no slot.
+func (w *SolanaCrankWorker) listDue(ctx context.Context, batch int) ([]*models.SolanaSubscription, error) {
+	repo := solanasubs.NewSolanaSubscriptionRepo(w.DB)
+	postures := writeposture.View{Config: w.Config, DB: w.DB}
+	var held []uuid.UUID
+	checked := map[uuid.UUID]bool{}
+	for {
+		due, err := repo.ListDuePulls(ctx, w.now(), held, batch)
+		if err != nil {
+			return nil, err
+		}
+		limited := false
+		for _, row := range due {
+			if checked[row.MerchantID] {
+				continue
+			}
+			checked[row.MerchantID] = true
+			if posture := postures.Posture(ctx, row.MerchantID); posture.Limited() {
+				log.WithContext(ctx).WithFields(log.Fields{"merchant_id": row.MerchantID, "reason": posture.Reason}).Warn("Solana cranker: recurring pulls wait for this merchant's write posture")
+				held, limited = append(held, row.MerchantID), true
+			}
+		}
+		if !limited {
+			return due, nil
+		}
+	}
 }
 
 // crankKind classifies a completed (error-free) crankOne for the intent ledger.

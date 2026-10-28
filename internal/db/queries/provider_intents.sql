@@ -915,13 +915,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND intent_type = 'solana_pull' AND status = 'in_flight'
   AND attempts = sqlc.arg(attempts)::int AND lease_expires_at > sqlc.arg(now)::timestamptz;
 
--- A pre-upgrade queued pull has no signed transaction yet. Adopt its complete
--- accepted agreement under the subscription lock and current claim only.
--- name: AdmitUnsignedSolanaPullAgreement :execrows
+-- A pull with nothing signed, or whose signed transaction reverted, freezes
+-- what it pulls under the subscription lock and its current claim, before
+-- anything is signed.
+-- name: FreezeSolanaPullAgreement :execrows
 UPDATE billing.provider_intents
 SET payload = jsonb_set(payload, '{agreement}', sqlc.arg(agreement)::jsonb), updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND intent_type='solana_pull' AND status='in_flight' AND attempts=sqlc.arg(attempts)::int
   AND lease_expires_at > sqlc.arg(now)::timestamptz
-  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'transaction_id')
-  AND NOT (payload ? 'agreement');
+  AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'transaction_id')
+       OR result_evidence->>'transaction_id' = result_evidence->>'reverted_transaction_id');

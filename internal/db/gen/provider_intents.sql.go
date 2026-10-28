@@ -12,40 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const admitUnsignedSolanaPullAgreement = `-- name: AdmitUnsignedSolanaPullAgreement :execrows
-UPDATE billing.provider_intents
-SET payload = jsonb_set(payload, '{agreement}', $1::jsonb), updated_at = $2::timestamptz
-WHERE merchant_id = $3::uuid AND id = $4::uuid
-  AND intent_type='solana_pull' AND status='in_flight' AND attempts=$5::int
-  AND lease_expires_at > $2::timestamptz
-  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'transaction_id')
-  AND NOT (payload ? 'agreement')
-`
-
-type AdmitUnsignedSolanaPullAgreementParams struct {
-	Agreement  []byte
-	Now        time.Time
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	Attempts   int32
-}
-
-// A pre-upgrade queued pull has no signed transaction yet. Adopt its complete
-// accepted agreement under the subscription lock and current claim only.
-func (q *Queries) AdmitUnsignedSolanaPullAgreement(ctx context.Context, arg AdmitUnsignedSolanaPullAgreementParams) (int64, error) {
-	result, err := q.db.Exec(ctx, admitUnsignedSolanaPullAgreement,
-		arg.Agreement,
-		arg.Now,
-		arg.MerchantID,
-		arg.ID,
-		arg.Attempts,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const advanceProviderIntentVerification = `-- name: AdvanceProviderIntentVerification :execrows
 UPDATE billing.provider_intents
 SET next_attempt_at = LEAST(next_attempt_at, $1::timestamptz), updated_at = now()
@@ -986,6 +952,41 @@ func (q *Queries) FenceSolanaPullSubmission(ctx context.Context, arg FenceSolana
 	result, err := q.db.Exec(ctx, fenceSolanaPullSubmission,
 		arg.Signature,
 		arg.Execution,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+		arg.Attempts,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const freezeSolanaPullAgreement = `-- name: FreezeSolanaPullAgreement :execrows
+UPDATE billing.provider_intents
+SET payload = jsonb_set(payload, '{agreement}', $1::jsonb), updated_at = $2::timestamptz
+WHERE merchant_id = $3::uuid AND id = $4::uuid
+  AND intent_type='solana_pull' AND status='in_flight' AND attempts=$5::int
+  AND lease_expires_at > $2::timestamptz
+  AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'transaction_id')
+       OR result_evidence->>'transaction_id' = result_evidence->>'reverted_transaction_id')
+`
+
+type FreezeSolanaPullAgreementParams struct {
+	Agreement  []byte
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	Attempts   int32
+}
+
+// A pull with nothing signed, or whose signed transaction reverted, freezes
+// what it pulls under the subscription lock and its current claim, before
+// anything is signed.
+func (q *Queries) FreezeSolanaPullAgreement(ctx context.Context, arg FreezeSolanaPullAgreementParams) (int64, error) {
+	result, err := q.db.Exec(ctx, freezeSolanaPullAgreement,
+		arg.Agreement,
 		arg.Now,
 		arg.MerchantID,
 		arg.ID,

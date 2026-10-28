@@ -93,13 +93,31 @@ func (a *SolanaPullAgreement) plan() resolvedPlan {
 		priceID: a.PriceID, productID: a.ProductID, description: a.Description, accessDurationHours: a.AccessDurationHours, providerAccessDefault: a.ProviderAccessDefault, quantity: a.Quantity, periodEnd: a.PreviousPeriodEnd}
 }
 
-// admitLegacyAgreement upgrades only a never-signed queued episode. A signed
-// legacy operation cannot adopt subsequently edited catalog terms as proof.
-func (h *SolanaPullIntentHandler) admitLegacyAgreement(ctx context.Context, in gen.BillingProviderIntent, p SolanaPullPayload, row *models.SolanaSubscription) (*SolanaPullAgreement, error) {
-	sig, err := recordedSignature(in)
-	if err != nil || sig != "" {
-		return nil, errors.New("signed pull has no retained accepted agreement")
+// errPullEpisodeOver: the subscription no longer owns this pull episode
+// (canceled, collected elsewhere, or its mirror moved on); nothing is pulled.
+var errPullEpisodeOver = errors.New("Solana pull superseded before submission")
+
+// errPullTermsMoved: the subscription's terms changed after the agreement was
+// frozen; the next attempt freezes them again.
+var errPullTermsMoved = errors.New("Solana pull terms changed before submission")
+
+// pullEpisodeState says whether sub and its mirror still own the episode at
+// nextPullAt, and whether agreement still matches the subscription's terms.
+func pullEpisodeState(sub *models.Subscription, current *models.SolanaSubscription, nextPullAt time.Time, agreement *SolanaPullAgreement) error {
+	if sub.Status == models.StatusCanceled || sub.CollectionPolicy != models.CollectionPolicyEngine || current.Status != models.SolanaSubscriptionActive || current.NextPullAt.UTC().Unix() != nextPullAt.UTC().Unix() {
+		return errPullEpisodeOver
 	}
+	if sub.PriceID != agreement.PriceID || sub.ProductID != agreement.ProductID || sub.CustomerID != agreement.CustomerID || sub.PspID != agreement.Row.PspID {
+		return errPullTermsMoved
+	}
+	return nil
+}
+
+// freezeAgreement freezes what this attempt pulls from the subscription as it
+// stands now, a due scheduled change applied, and records it on the claimed
+// operation before anything is signed. Only an attempt with nothing signed, or
+// whose signed transaction reverted, freezes.
+func (h *SolanaPullIntentHandler) freezeAgreement(ctx context.Context, in gen.BillingProviderIntent, p SolanaPullPayload, row *models.SolanaSubscription) (*SolanaPullAgreement, error) {
 	plan, err := h.Core.resolvePlan(ctx, row)
 	if err != nil {
 		return nil, err
@@ -125,15 +143,15 @@ func (h *SolanaPullIntentHandler) admitLegacyAgreement(ctx context.Context, in g
 		if err != nil {
 			return err
 		}
-		if sub.Status == models.StatusCanceled || sub.CollectionPolicy != models.CollectionPolicyEngine || sub.PriceID != agreement.PriceID || sub.ProductID != agreement.ProductID || sub.CustomerID != agreement.CustomerID || sub.PspID != agreement.Row.PspID || current.Status != models.SolanaSubscriptionActive || !current.NextPullAt.Equal(p.NextPullAt) {
-			return errors.New("queued pull no longer owns its accepted subscription")
+		if err := pullEpisodeState(sub, current, p.NextPullAt, agreement); err != nil {
+			return err
 		}
-		changed, err := d.Gen(ctx).AdmitUnsignedSolanaPullAgreement(ctx, gen.AdmitUnsignedSolanaPullAgreementParams{MerchantID: in.MerchantID, ID: in.ID, Attempts: in.Attempts, Agreement: encoded, Now: h.Core.now()})
+		changed, err := d.Gen(ctx).FreezeSolanaPullAgreement(ctx, gen.FreezeSolanaPullAgreementParams{MerchantID: in.MerchantID, ID: in.ID, Attempts: in.Attempts, Agreement: encoded, Now: h.Core.now()})
 		if err != nil {
 			return err
 		}
 		if changed != 1 {
-			return errors.New("queued pull claim changed before agreement admission")
+			return errors.New("pull claim changed before its agreement froze")
 		}
 		return nil
 	})

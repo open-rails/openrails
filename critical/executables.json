@@ -477,6 +477,14 @@
       "TestSolanaContracts/OR-J37-S05/BlockhashNotFound",
       "TestSolanaContracts/OR-J37-S05/insufficient_funds_for_fee"
     ],
+    "OR-J37-S06": [
+      "TestSolanaCrank/OR-J37-S06/retried-pull-keeps-its-backoff-then-renews-once"
+    ],
+    "OR-J37-S07": [
+      "TestSolanaCrank/OR-J37-S07/crank-runs-only-with-a-cranker",
+      "TestSolanaCrank/OR-J37-S07/crank-runs-only-with-a-cranker/without-cranker",
+      "TestSolanaCrank/OR-J37-S07/crank-runs-only-with-a-cranker/with-cranker"
+    ],
     "OR-J01-S09": [
       "TestCustomerBindingContracts/OR-J01-S09/host-mapping-preserves-source-and-owned-customer-views",
       "TestCustomerBindingContracts/OR-J01-S09/standalone-mapping-remains-independent-of-hosted-account-owner"

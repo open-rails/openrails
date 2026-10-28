@@ -126,52 +126,18 @@ func (r *SolanaSubscriptionRepo) GetBySubscriptionID(ctx context.Context, subscr
 	return solanaSubscriptionFromGen(row), nil
 }
 
-// ListDue returns active subscriptions whose next_pull_at is at/before `now`,
-// ordered by merchant so the worker can load each merchant's signer once. `limit`
-// caps the batch (0 = no limit).
-func (r *SolanaSubscriptionRepo) ListDue(ctx context.Context, now time.Time, limit int) ([]*models.SolanaSubscription, error) {
-	if _, ok := merchant.FromContext(ctx); ok {
-		return r.listDueScoped(ctx, now, limit)
-	}
-	merchantIDs, err := r.activeMerchantIDs(ctx)
+// ListDuePulls returns the crank's due pull episodes across merchants, the
+// merchants taking turns, leaving out held merchants and episodes another
+// operation owns. `limit` caps the batch.
+func (r *SolanaSubscriptionRepo) ListDuePulls(ctx context.Context, now time.Time, held []uuid.UUID, limit int) ([]*models.SolanaSubscription, error) {
+	limit32, err := safecast.Convert[int32](limit)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*models.SolanaSubscription, 0)
-	for _, id := range merchantIDs {
-		if limit > 0 && len(out) >= limit {
-			break
-		}
-		remaining := limit
-		if remaining > 0 {
-			remaining -= len(out)
-		}
-		err := r.db.RunInMerchantConn(merchant.WithID(ctx, billing.MerchantID(id)), func(ctx context.Context) error {
-			rows, err := r.listDueScoped(ctx, now, remaining)
-			if err != nil {
-				return err
-			}
-			out = append(out, rows...)
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
+	if held == nil {
+		held = []uuid.UUID{}
 	}
-	return out, nil
-}
-
-func (r *SolanaSubscriptionRepo) listDueScoped(ctx context.Context, now time.Time, limit int) ([]*models.SolanaSubscription, error) {
-	limit32, _ := safecast.Convert[int32](limit)
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	rows, err := r.db.Gen(ctx).ListDueSolanaSubscriptions(ctx, gen.ListDueSolanaSubscriptionsParams{
-		MerchantID: scopeMerchantID.UUID(),
-		Now:        now.UTC(),
-		PageLimit:  limit32,
-	})
+	rows, err := r.db.GenDirectory().ListDueSolanaPulls(ctx, gen.ListDueSolanaPullsParams{Now: now.UTC(), HeldMerchants: held, PageLimit: limit32})
 	if err != nil {
 		return nil, err
 	}

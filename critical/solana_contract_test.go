@@ -43,6 +43,9 @@ type solanaWire struct {
 	signed      chan string
 	aborted     chan struct{}
 	failure     string
+	// failMethod refuses every call of one RPC method; calls counts them all.
+	failMethod string
+	calls      map[string]int
 }
 
 func newSolanaWire(t *testing.T, node *solanafake.Node) *solanaWire {
@@ -50,7 +53,7 @@ func newSolanaWire(t *testing.T, node *solanafake.Node) *solanaWire {
 	u, err := url.Parse(node.URL())
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(u)
-	w := &solanaWire{reads: map[string]int{}, signed: make(chan string, 1), aborted: make(chan struct{}, 1)}
+	w := &solanaWire{reads: map[string]int{}, calls: map[string]int{}, signed: make(chan string, 1), aborted: make(chan struct{}, 1)}
 	w.server = httptest.NewServer(http.HandlerFunc(func(out http.ResponseWriter, r *http.Request) {
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -69,6 +72,8 @@ func newSolanaWire(t *testing.T, node *solanafake.Node) *solanaWire {
 		}
 		w.mu.Lock()
 		gate, failure := w.gate, w.failure
+		w.calls[rpc.Method]++
+		refused := rpc.Method == w.failMethod
 		var historyGate *wireGate
 		if rpc.Method == "sendTransaction" {
 			w.sent++
@@ -88,6 +93,11 @@ func newSolanaWire(t *testing.T, node *solanafake.Node) *solanaWire {
 			w.gate = nil
 		}
 		w.mu.Unlock()
+		if refused {
+			out.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(out).Encode(map[string]any{"jsonrpc": "2.0", "id": rpc.ID, "error": map[string]any{"code": -32005, "message": "Node is behind"}})
+			return
+		}
 		if historyGate != nil {
 			// Capture the node's history before admitting a later transfer, but
 			// delay delivery to reproduce an in-flight poll finishing afterward.
@@ -142,6 +152,12 @@ func (w *solanaWire) historyReads(reference string) int {
 	return w.reads["reference:"+reference]
 }
 func (w *solanaWire) sends() int { w.mu.Lock(); defer w.mu.Unlock(); return w.sent }
+func (w *solanaWire) count(method string) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.calls[method]
+}
+func (w *solanaWire) refuse(method string) { w.mu.Lock(); defer w.mu.Unlock(); w.failMethod = method }
 
 type solanaFixtureOptions struct {
 	freshWallet bool
