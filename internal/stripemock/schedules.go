@@ -8,14 +8,6 @@ import (
 	"time"
 )
 
-// legacyAmountLocked is a legacy price's amount: 9.99 unless SetLegacyPrice set it.
-func (m *Mock) legacyAmountLocked(price string) int64 {
-	if amount, ok := m.amounts[price]; ok {
-		return amount
-	}
-	return 999
-}
-
 // changeItemLocked moves the subscription's item to another price. With
 // billing_cycle_anchor=now the cycle restarts and the proration is invoiced
 // and charged at once; error_if_incomplete refuses a declined charge. A zero
@@ -29,7 +21,13 @@ func (m *Mock) changeItemLocked(s Object, form url.Values) (int, any) {
 		return 400, stripeErr("subscription_schedule_managed")
 	}
 	price := form.Get("items[0][price]")
-	amount := m.legacyAmountLocked(price)
+	amount, ok := m.priceAmountLocked(price)
+	switch {
+	case !ok:
+		return 400, stripeErr("resource_missing")
+	case m.prices[price]["active"] != true:
+		return 400, Object{"error": Object{"type": "invalid_request_error", "code": "price_inactive", "param": "items[0][price]", "message": "The price specified is inactive. This field only accepts active prices."}}
+	}
 	if form.Get("billing_cycle_anchor") != "now" {
 		item["price"] = Object{"id": price, "unit_amount": amount, "currency": "usd"}
 		return 0, nil

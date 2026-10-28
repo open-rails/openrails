@@ -20,8 +20,12 @@
 //   - Charge and refund lists honor created[gte]/[lte], customer, limit and
 //     starting_after; PaymentIntent lists filter by customer only; disputes
 //     are always empty.
-//   - Checkout amount_total sums inline price_data lines (a price id is a
-//     legacy price). Only a payment-mode session completes, paid by a visa
+//   - Products and prices are what AddProduct and AddPrice seed. Lists honor
+//     active (prices list only active ones unless asked) and never show
+//     inline prices; a by-id read does. Moving a subscription onto an
+//     inactive price is refused.
+//   - Checkout amount_total sums inline price_data lines and seeded prices.
+//     Only a payment-mode session completes, paid by a visa
 //     ending 4242; a guest gets no customer; the only event sent is
 //     checkout.session.completed.
 //   - Subscriptions bill only when a test plays Stripe's renewal; periods are

@@ -572,6 +572,18 @@
     ],
     "OR-J12-S11": [
       "TestStoredCardRefresh/OR-J12-S11/psp-held-card-declined-as-expired-asks-the-customer"
+    ],
+    "OR-J38-S01": [
+      "TestPSPImport/OR-J38-S01/unmapped-plan-blocks-until-mapped-and-lands-once"
+    ],
+    "OR-J38-S02": [
+      "TestPSPImport/OR-J38-S02/provider-inactive-price-is-not-a-change-target"
+    ],
+    "OR-J38-S03": [
+      "TestPSPImport/OR-J38-S03/plan-less-ccbill-lands-on-one-exact-match-or-a-persons-pick"
+    ],
+    "OR-J38-S04": [
+      "TestPSPImport/OR-J38-S04/pull-observes-the-whole-catalog-read-only"
     ]
   },
   "suites": {

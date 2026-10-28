@@ -43,7 +43,11 @@ func (m *Mock) createCheckoutSession(form url.Values) (int, any) {
 		}
 		amount, err := strconv.ParseInt(form.Get(item+"[price_data][unit_amount]"), 10, 64)
 		if price := form.Get(item + "[price]"); price != "" {
-			amount, err = m.priceAmount(price), nil
+			stored, ok := m.priceAmountLocked(price)
+			if !ok {
+				return http.StatusBadRequest, stripeErr("resource_missing")
+			}
+			amount, err = stored, nil
 		}
 		if err != nil || amount < 0 {
 			return http.StatusBadRequest, stripeErr("parameter_invalid_integer")
@@ -65,13 +69,6 @@ func (m *Mock) createCheckoutSession(form url.Values) (int, any) {
 	m.sessions[id] = s
 	m.sessionOrder = append(m.sessionOrder, id)
 	return 200, s
-}
-
-func (m *Mock) priceAmount(id string) int64 {
-	if amount, ok := m.amounts[id]; ok {
-		return amount
-	}
-	return 999
 }
 
 func nilIfEmpty(s string) any {

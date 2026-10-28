@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 174,
+  "scenario_count": 178,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -872,6 +872,26 @@
       "id": "OR-J12-S11",
       "journey": "J12",
       "name": "PSP-held card declined as expired asks the customer with no refresh"
+    },
+    {
+      "id": "OR-J38-S01",
+      "journey": "J38",
+      "name": "An unmapped NMI plan blocks its subscriptions until a person maps it from the observed catalog; re-apply lands once"
+    },
+    {
+      "id": "OR-J38-S02",
+      "journey": "J38",
+      "name": "A Stripe price the provider deactivated is retired: not a tier-change target, still billing"
+    },
+    {
+      "id": "OR-J38-S03",
+      "journey": "J38",
+      "name": "A plan-less CCBill member lands only on the one PSP price its rebill equals or a person's pick"
+    },
+    {
+      "id": "OR-J38-S04",
+      "journey": "J38",
+      "name": "The pull observes the whole provider catalog read-only, deleted and inline objects included"
     }
   ]
 }

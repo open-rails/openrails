@@ -85,8 +85,12 @@ type Mock struct {
 	chargesDown     bool
 	subsDown        bool
 	pricesDown      bool
-	// amounts are legacy prices created at Stripe at other than 9.99.
-	amounts map[string]int64
+	// products and prices are the account's catalog; inline prices are
+	// readable by id and never listed. reads are the GET paths served.
+	products map[string]Object
+	prices   map[string]Object
+	inline   map[string]bool
+	reads    []string
 	// domains are each account's payment method domains.
 	domains map[string][]Object
 	webhook webhookTarget
@@ -108,7 +112,8 @@ func NewUnstarted(opts Options) *Mock {
 	}
 	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{},
 		intents: map[string]Object{}, charges: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
-		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{}}
+		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{},
+		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}}
 }
 
 // URL is the loopback API root; OpenRails' provider_sandbox.stripe_api_url.
@@ -158,6 +163,8 @@ func (m *Mock) RoundTrip(r *http.Request) (*http.Response, error) {
 	m.mu.Lock()
 	if r.Method != http.MethodGet {
 		m.requests = append(m.requests, Call{Method: r.Method, Path: r.URL.Path, IdempotencyKey: r.Header.Get("Idempotency-Key"), Form: form})
+	} else {
+		m.reads = append(m.reads, r.URL.Path)
 	}
 	creates := r.Method == http.MethodPost && r.URL.Path == "/v1/payment_intents"
 	lost := m.lose > 0 && creates
@@ -285,6 +292,10 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 		return 200, Object{"object": "account", "id": accountOf(r), "charges_enabled": true}
 	case p == "/v1/balance":
 		return 200, Object{"object": "balance", "livemode": false, "available": []any{}, "pending": []any{}}
+	case seg[0] == "products" || seg[0] == "prices":
+		if status, out, ok := m.catalogLocked(r, seg, q); ok {
+			return status, out
+		}
 	case seg[0] == "payment_method_domains":
 		return m.paymentMethodDomain(r, form, seg)
 	case r.Method == http.MethodGet && (seg[0] == "invoices" || seg[0] == "invoice_payments"):
@@ -373,10 +384,6 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 			return 200, s
 		}
 		return 404, stripeErr("resource_missing")
-	case r.Method == http.MethodGet && seg[0] == "prices" && len(seg) == 2 && strings.HasPrefix(seg[1], "price_legacy_"):
-		// A legacy monthly price: 9.99 unless SetLegacyPrice set it.
-		return 200, Object{"object": "price", "id": seg[1], "product": "prod_legacy", "unit_amount": m.legacyAmountLocked(seg[1]), "currency": "usd", "active": true, "livemode": false,
-			"type": "recurring", "recurring": Object{"interval": "month", "interval_count": 1}, "metadata": map[string]string{}}
 	case r.Method == http.MethodGet && seg[0] == "payment_methods" && len(seg) == 2:
 		if pm, ok := m.methods[seg[1]]; ok {
 			return 200, pm

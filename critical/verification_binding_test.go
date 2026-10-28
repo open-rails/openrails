@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,7 +104,8 @@ func stripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *billing.
 		w.cfg.Merchants["alpha"] = m
 	})
 	old := accounts.accounts["sk_test_old"].core
-	old.SetLegacyPrice("price_legacy_monthly", 1000)
+	old.AddProduct("prod_legacy", "Legacy membership")
+	old.AddPrice(stripemock.Price{ID: "price_legacy_monthly", Product: "prod_legacy", Amount: 1000, Interval: "month"})
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "stripe-membership", DisplayName: "Stripe membership", Entitlements: []string{"stripe:member"}})
 	require.NoError(t, err)
 	price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "stripe-monthly", PSP: "old", PriceID: "price_legacy_monthly"})

@@ -71,6 +71,14 @@ func (m *Mock) AddPlan(p Plan) {
 	m.plans[p.ID] = &p
 }
 
+// RemovePlan deletes a Recurring Plan at the gateway: lists omit it and a
+// read of it answers 404. Schedules keep their copy of it.
+func (m *Mock) RemovePlan(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.plans, id)
+}
+
 // AddSchedule stores a recurring subscription NMI bills, and returns its
 // id (s.ID when set).
 func (m *Mock) AddSchedule(s Schedule) string {

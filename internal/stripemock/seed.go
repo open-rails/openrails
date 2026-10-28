@@ -89,17 +89,6 @@ func (m *Mock) Refund(charge string, amount int64) (Object, error) {
 	return clone(out.(Object)), nil
 }
 
-// SetLegacyPrice gives a legacy monthly price (id price_legacy_…) amount
-// cents; one never set is 9.99.
-func (m *Mock) SetLegacyPrice(id string, amount int64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.amounts == nil {
-		m.amounts = map[string]int64{}
-	}
-	m.amounts[id] = amount
-}
-
 // AddCustomer seeds a customer an account already has and returns its id.
 func (m *Mock) AddCustomer(email, name string, metadata map[string]string) string {
 	m.mu.Lock()
@@ -124,10 +113,14 @@ func (m *Mock) AddSubscription(customer, method, price string, amount int64, sta
 	}
 	m.methods[method] = Object{"object": "payment_method", "id": method, "type": "card", "customer": customer, "livemode": false, "card": Object{"brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2035}}
 	id := m.id("sub")
+	item := Object{"id": price, "unit_amount": amount, "currency": "usd"}
+	if stored, ok := m.prices[price]; ok {
+		item["object"], item["product"], item["recurring"] = "price", stored["product"], stored["recurring"]
+	}
 	m.subs[id] = Object{"object": "subscription", "id": id, "customer": customer, "status": "active", "cancel_at_period_end": false, "canceled_at": nil, "livemode": false,
 		"created": start.Unix(), "start_date": start.Unix(),
 		"default_payment_method": method, "metadata": map[string]string{}, "currency": "usd",
-		"items": Object{"object": "list", "data": []Object{{"id": m.id("si"), "price": Object{"id": price, "unit_amount": amount, "currency": "usd"}, "current_period_start": start.Unix(), "current_period_end": end.Unix()}}}}
+		"items": Object{"object": "list", "data": []Object{{"id": m.id("si"), "price": item, "current_period_start": start.Unix(), "current_period_end": end.Unix()}}}}
 	m.invoiceLocked(id, amount, true)["billing_reason"] = "subscription_create"
 	return id
 }
@@ -219,7 +212,8 @@ func (m *Mock) RenewSubscription(sub string, paid bool) Object {
 	start, end := item["current_period_end"].(int64), item["current_period_end"].(int64)+monthHours*3600
 	item["current_period_start"], item["current_period_end"] = start, end
 	if price, ok := m.schedulePriceLocked(s, start); ok {
-		item["price"] = Object{"id": price, "unit_amount": m.legacyAmountLocked(price), "currency": "usd"}
+		amount, _ := m.priceAmountLocked(price)
+		item["price"] = Object{"id": price, "unit_amount": amount, "currency": "usd"}
 	}
 	amount := item["price"].(Object)["unit_amount"].(int64)
 	s["status"] = "active"
