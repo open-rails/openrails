@@ -252,8 +252,6 @@ type Runtime struct {
 	workerConsumerRunning  atomic.Bool
 	externalRiverClient    bool
 	riverSchema            string // Config.Database.RiverSchema's, or the bound host client's
-	// periodicIDs are the River IDs of the periodic jobs composed last.
-	periodicIDs []string
 
 	// progressLifecycle owns the #895 out-of-River progress detector: a plain
 	// goroutine that answers "is the periodic fleet progressing?" without
@@ -541,13 +539,6 @@ func cancelOnly(ctx context.Context) context.Context {
 	run, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	context.AfterFunc(ctx, cancel)
 	return run
-}
-
-// ValidateBillingPeriodicJobs checks configured cadences before workers start.
-// Embedded hosts compose the actual schedules and their hooks through RiverJobs.
-func (r *Runtime) ValidateBillingPeriodicJobs(ctx context.Context) error {
-	_, err := r.buildRiverPeriodicJobs(ctx, &river.Config{})
-	return err
 }
 
 // SetRiverSchema records the schema the bound River client keeps its tables

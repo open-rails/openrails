@@ -21,9 +21,14 @@ import (
 
 const KindConvergeSweep = "openrails.converge_sweep"
 
+// ConvergeSweepInterval is the converge sweep's cadence.
+const ConvergeSweepInterval = 15 * time.Minute
+
 type ConvergeSweepArgs struct{}
 
 func (ConvergeSweepArgs) Kind() string { return KindConvergeSweep }
+
+func (ConvergeSweepArgs) InsertOpts() river.InsertOpts { return periodPass(ConvergeSweepInterval) }
 
 // ConvergeSweepWorker runs the converge engine for every active merchant on a
 // schedule, catching drift no request path touched. One merchant's failure

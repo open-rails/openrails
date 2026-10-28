@@ -28,6 +28,9 @@ import (
 
 const KindCleanupExpiredData = "openrails.cleanup_expired_data"
 
+// CleanupInterval is the retention pass's cadence.
+const CleanupInterval = time.Hour
+
 const (
 	// cleanupMerchantBatch caps one pass's fan-out; the durable cursor makes
 	// the merchants beyond the cap the next pass's head.
@@ -105,6 +108,10 @@ func (c CleanupConfig) validate() error {
 type CleanupExpiredDataArgs struct{}
 
 func (CleanupExpiredDataArgs) Kind() string { return KindCleanupExpiredData }
+
+func (CleanupExpiredDataArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByPeriod: CleanupInterval}}
+}
 
 type CleanupExpiredDataWorker struct {
 	WorkerDefaults[CleanupExpiredDataArgs]

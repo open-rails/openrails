@@ -28,6 +28,9 @@ import (
 
 const KindStripeWebhookReconcile = "openrails.stripe_webhook_reconcile"
 
+// StripeWebhookReconcileInterval is the deployment-wide pass's cadence.
+const StripeWebhookReconcileInterval = time.Hour
+
 // stripeWebhookMerchantBatch bounds each page of the pass. The work queue is the
 // armed-PSP set, so a pass scales with merchants ON STRIPE, not the directory.
 const stripeWebhookMerchantBatch = 1000

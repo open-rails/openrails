@@ -79,6 +79,15 @@ type DunningArgs struct {
 
 func (DunningArgs) Kind() string { return KindDunning }
 
+// InsertOpts coalesces the deployment-wide passes; a merchant's wake is never
+// absorbed by a pass waiting out an earlier outage.
+func (a DunningArgs) InsertOpts() river.InsertOpts {
+	if a.MerchantID != uuid.Nil {
+		return river.InsertOpts{Queue: QueueBilling}
+	}
+	return river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByState: outstanding}}
+}
+
 // DunningWorker is the due pass: per merchant with due work it queues past_due
 // NMI retries as manual_rebill operations, admits due engine renewals to
 // collection, and ends memberships whose wait for a card outlived the dunning

@@ -28,6 +28,10 @@ type AdmissionDenialFlushArgs struct{}
 
 func (AdmissionDenialFlushArgs) Kind() string { return KindAdmissionDenialFlush }
 
+func (AdmissionDenialFlushArgs) InsertOpts() river.InsertOpts {
+	return periodPass(AdmissionDenialFlushInterval)
+}
+
 // AdmissionDenialFlushInterval is the flush cadence: an hour's counts appear
 // within this, plus denialHourGrace, of its close.
 const AdmissionDenialFlushInterval = time.Hour

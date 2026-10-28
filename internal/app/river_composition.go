@@ -87,11 +87,7 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 		if err := r.addBillingWorkersToRegistry(ctx, cfg.Workers, refreshQueue); err != nil {
 			return err
 		}
-		periodic, err := r.buildRiverPeriodicJobs(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		cfg.PeriodicJobs = append(cfg.PeriodicJobs, periodic...)
+		cfg.PeriodicJobs = append(cfg.PeriodicJobs, r.buildRiverPeriodicJobs(cfg)...)
 		return nil
 	}, func(ctx context.Context, binding riverhelpers.Binding) error {
 		client := binding.Client

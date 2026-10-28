@@ -33,6 +33,10 @@ type ChargeAttributionArgs struct{}
 
 func (ChargeAttributionArgs) Kind() string { return KindChargeAttributions }
 
+func (ChargeAttributionArgs) InsertOpts() river.InsertOpts {
+	return periodPass(ChargeAttributionInterval)
+}
+
 // ChargeAttributionWorker reads each due declared charge attribution from its
 // provider once, up to nmi.MaxQueryIDs per read, and records the charge on its
 // declared subscription. Only due rows are read; a failed read backs off. A

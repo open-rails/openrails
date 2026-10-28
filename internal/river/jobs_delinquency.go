@@ -18,6 +18,9 @@ import (
 
 const (
 	KindDelinquency = "openrails.delinquency"
+	// DelinquencyInterval is tighter than collection: a customer who paid is
+	// told promptly they may spend again.
+	DelinquencyInterval = 15 * time.Minute
 
 	// delinquencyMerchantBatch caps one pass's fan-out. The work queue is
 	// indexed on the work itself (overdue receivables / already-parked payers),
@@ -29,6 +32,8 @@ const (
 type DelinquencyArgs struct{}
 
 func (DelinquencyArgs) Kind() string { return KindDelinquency }
+
+func (DelinquencyArgs) InsertOpts() river.InsertOpts { return periodPass(DelinquencyInterval) }
 
 // DelinquencyWorker evaluates arrears delinquency and emits the host signal.
 // It is its own job, not a leg of the usage order pass: it moves no money and

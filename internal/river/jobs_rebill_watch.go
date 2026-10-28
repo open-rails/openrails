@@ -65,6 +65,8 @@ type RebillWatchArgs struct{}
 
 func (RebillWatchArgs) Kind() string { return KindRebillWatch }
 
+func (RebillWatchArgs) InsertOpts() river.InsertOpts { return periodPass(RebillWatchInterval) }
+
 // RebillWatchWorker records rebills that never happened: an auto-renewing
 // subscription whose period ended past its owner's deadline with no attempt
 // for that cycle. An NMI-owned one is probed first: the Query API is the

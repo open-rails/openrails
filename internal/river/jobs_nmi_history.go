@@ -41,6 +41,10 @@ type NMIHistoryArgs struct{}
 
 func (NMIHistoryArgs) Kind() string { return KindNMIHistory }
 
+func (NMIHistoryArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByPeriod: NMIHistoryInterval}}
+}
+
 // NMIHistoryWorker keeps each NMI PSP's authorization history as monthly
 // aggregates: the decline report's numbers, through the same read. A PSP's
 // first read backfills NMIHistoryMonths; later ones, daily, re-read from the

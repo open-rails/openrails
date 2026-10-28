@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/destructive"
@@ -20,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/solana/pull"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/reconcile"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/writeposture"
@@ -390,215 +387,26 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 	return nil
 }
 
-// periodPassOpts queues a pass whose retry is the next period's pass: one
-// attempt, unique per period, so a pass that keeps failing never stacks
-// copies.
-func periodPassOpts(period time.Duration) *river.InsertOpts {
-	return &river.InsertOpts{Queue: riverjobs.QueueBilling, MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: period}}
+// buildRiverPeriodicJobs declares the periodic passes whose gate this runtime
+// opens.
+func (r *Runtime) buildRiverPeriodicJobs(cfg *river.Config) []*river.PeriodicJob {
+	var jobs []*river.PeriodicJob
+	for _, p := range riverjobs.Periodics {
+		if r.declares(p.Gate) {
+			jobs = append(jobs, r.periodicJob(cfg, p))
+		}
+	}
+	return jobs
 }
 
-// buildRiverPeriodicJobs defines recurring schedules for workers using River periodic jobs.
-func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context, cfg *river.Config) ([]*river.PeriodicJob, error) {
-	var jobs []*river.PeriodicJob
-	r.periodicIDs = nil
-
-	// The due pass admits engine renewals at their paid-period boundary and
-	// runs retries whose next_retry_at has passed. Engine access is bounded by
-	// the paid period, so the pass cadence is the longest a paying member can
-	// wait at the boundary; an overdue restart catches up immediately.
-	// An idle pass is one indexed work-queue read.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		riverjobs.DuePassInterval,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.DunningArgs{}, &river.InsertOpts{
-				Queue: riverjobs.QueueBilling,
-				// Coalesce outstanding scans; the persisted periodic deadline
-				// decides whether a completed pass is due after a restart.
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByState: []rivertype.JobState{
-					rivertype.JobStateAvailable, rivertype.JobStatePending,
-					rivertype.JobStateRunning, rivertype.JobStateRetryable,
-					rivertype.JobStateScheduled,
-				}},
-			}
-		},
-		nil,
-	))
-
-	// Every 15 minutes: overdue rebills with no attempt are probed (NMI) or
-	// recorded as missed.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		riverjobs.RebillWatchInterval,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.RebillWatchArgs{}, periodPassOpts(riverjobs.RebillWatchInterval)
-		},
-		nil,
-	))
-
-	// Hourly: read the history of NMI PSPs due their daily read.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		riverjobs.NMIHistoryInterval,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.NMIHistoryArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.NMIHistoryInterval},
-			}
-		},
-		nil,
-	))
-
-	// Every 15 minutes: read due declared charge attributions.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		riverjobs.ChargeAttributionInterval,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.ChargeAttributionArgs{}, periodPassOpts(riverjobs.ChargeAttributionInterval)
-		},
-		nil,
-	))
-
-	// Every providerrecovery.RefreshInterval: the provider refresh scheduler
-	// fans out one job per merchant. An overdue restart catches up immediately.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		providerrecovery.RefreshInterval,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.ProviderRefreshArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: providerrecovery.RefreshInterval, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled}},
-			}
-		},
-		nil,
-	))
-
-	// Every 6 hours: queue the cards an armed vault must be asked about ahead
-	// of their renewal, from the due checks subscription changes leave. The
-	// lookahead is at least a day (default 14), so a card entering it is
-	// checked long before the renewal it protects; requests spread over the
-	// hour after the pass.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		6*time.Hour,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.StoredCardRefreshDueArgs{}, &river.InsertOpts{
-				Queue: riverjobs.QueueBilling,
-				// The next pass is the retry: a failed one never piles up.
-				MaxAttempts: 1,
-				UniqueOpts:  river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
-			}
-		},
-		nil,
-	))
-
-	// Every hour: retention cleanup, the one owner of row retention.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		time.Hour,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.CleanupExpiredDataArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
-			}
-		},
-		nil,
-	))
-
-	// Every hour, with a cranker: crank due Solana recurring subscriptions. The
-	// next_pull_at due-query, not the tick, follows the billing cadence.
-	if r.SolanaCranker != nil {
-		jobs = append(jobs, r.healthPeriodic(cfg,
-			riverjobs.SolanaCrankInterval,
-			func() (river.JobArgs, *river.InsertOpts) {
-				return riverjobs.SolanaCrankArgs{}, &river.InsertOpts{
-					Queue:      riverjobs.QueueBilling,
-					UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.SolanaCrankInterval},
-				}
-			},
-			nil,
-		))
+func (r *Runtime) declares(gate riverjobs.Gate) bool {
+	switch gate {
+	case riverjobs.WithUsageBilling:
+		return r.Config != nil && r.Config.UsageBillingEnabled
+	case riverjobs.WithSolanaCranker:
+		return r.SolanaCranker != nil
 	}
-
-	// Every minute: the balance watches that are due, credit lot lapses
-	// included. Overdue startup catches up; an idle pass is one indexed read.
-	// Outstanding passes coalesce; a failed pass is retried by the next one.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		riverjobs.BalanceWatchInterval,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.BalanceWatchArgs{}, &river.InsertOpts{
-				Queue:       riverjobs.QueueBilling,
-				MaxAttempts: 1,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByState: []rivertype.JobState{
-					rivertype.JobStateAvailable, rivertype.JobStatePending,
-					rivertype.JobStateRunning, rivertype.JobStateRetryable,
-					rivertype.JobStateScheduled,
-				}},
-			}
-		},
-		nil,
-	))
-
-	// Every 5 minutes: expire orders past their expiry.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		5*time.Minute,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.OrderExpiryArgs{}, periodPassOpts(5 * time.Minute)
-		},
-		nil,
-	))
-
-	// Hourly: flush the closed hours' admission-denial counters from this
-	// fleet's Redis to PG. Each fleet flushes its own Redis; a shared one is
-	// flushed to the same values.
-	jobs = append(jobs, r.fleetPeriodic(cfg,
-		riverjobs.AdmissionDenialFlushInterval,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.AdmissionDenialFlushArgs{}, periodPassOpts(riverjobs.AdmissionDenialFlushInterval)
-		},
-		nil,
-	))
-
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		time.Hour,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.StripeWebhookReconcileArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
-			}
-		},
-		nil,
-	))
-
-	// One usage-billing pass checks fixed account dates and pending threshold
-	// wakeups. Subscription-only hosts schedule no usage-billing scan.
-	if r.Config != nil && r.Config.UsageBillingEnabled {
-		jobs = append(jobs, r.healthPeriodic(cfg, 5*time.Minute, func() (river.JobArgs, *river.InsertOpts) {
-			return money.UsageOrderArgs{}, &river.InsertOpts{Queue: riverjobs.QueueBilling, UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true, ByState: []rivertype.JobState{
-				rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
-			}}}
-		}, &river.PeriodicJobOpts{ID: money.KindUsageOrders + ".due"}))
-	}
-
-	// Every 15 minutes: arrears delinquency evaluation. Tighter than hourly
-	// collection on purpose: the exit half stops telling a customer who has
-	// already paid that they cannot spend.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		15*time.Minute,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.DelinquencyArgs{}, periodPassOpts(15 * time.Minute)
-		},
-		nil,
-	))
-
-	// Every 15 minutes: converge sweep, remediating internal drift (stalled
-	// dunning, elapsed grace, abandoned purchases, unmaterialized grant effects).
-	// Overdue startup catches up drift accumulated during downtime.
-	jobs = append(jobs, r.healthPeriodic(cfg,
-		15*time.Minute,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.ConvergeSweepArgs{}, periodPassOpts(15 * time.Minute)
-		},
-		nil,
-	))
-
-	// No worker-health job: the progress detector runs outside River
-	// (StartRiverProgressMonitor), so a stalled River cannot silence it.
-
-	return jobs, nil
+	return true
 }
 
 // findingNotifier is the alert service as a finding notifier; nil when none.

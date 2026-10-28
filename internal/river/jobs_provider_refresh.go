@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -58,6 +59,10 @@ const (
 type ProviderRefreshArgs struct{}
 
 func (ProviderRefreshArgs) Kind() string { return KindProviderRefresh }
+
+func (ProviderRefreshArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByPeriod: providerrecovery.RefreshInterval, ByState: outstanding}}
+}
 
 // ProviderRefreshMerchantArgs is one merchant's refresh job.
 type ProviderRefreshMerchantArgs struct {
@@ -685,9 +690,10 @@ func (w *ProviderRefreshWorker) completeObservation(ctx context.Context, mid, ps
 			jobs = append(jobs, money.UsageOrderArgs{MerchantID: &merchantID})
 		}
 		for _, args := range jobs {
-			// Do not deduplicate against a scan sleeping on an earlier outage.
-			// Canonical usage/renewal admission and durable cadence own money.
-			if _, err := w.DB.InsertRiverJobTx(ctx, tx, args, &river.InsertOpts{Queue: QueueBilling}); err != nil {
+			// A merchant's wake is never absorbed by a scan sleeping on an
+			// earlier outage. Canonical usage/renewal admission and durable
+			// cadence own money.
+			if _, err := w.DB.InsertRiverJobTx(ctx, tx, args, nil); err != nil {
 				return err
 			}
 		}

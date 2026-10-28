@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/riverqueue/river"
@@ -70,46 +69,18 @@ func addTrackedWorker[T river.JobArgs](r *Runtime, workers *river.Workers, worke
 	})
 }
 
-// healthPeriodic registers a restart-safe interval, recording
-// kind -> interval (shortest wins) for the staleness alert rule. A periodic's
-// River ID is its job kind unless opts names one, so a River client can turn
-// a single periodic off (PeriodicJobs().RemoveByID). The pass is queued only
-// by the fleet holding the kind's lease (see claimPeriodic).
-func (r *Runtime) healthPeriodic(cfg *river.Config, interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
-	return r.periodic(cfg, true, interval, ctor, opts)
-}
-
-// fleetPeriodic is a periodic over this fleet's own state (its River jobs, its
-// Redis): every fleet runs it.
-func (r *Runtime) fleetPeriodic(cfg *river.Config, interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
-	return r.periodic(cfg, false, interval, ctor, opts)
-}
-
-func (r *Runtime) periodic(cfg *river.Config, leased bool, interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
-	own := river.PeriodicJobOpts{}
-	if opts != nil {
-		own = *opts
-	}
-	// RunOnStart asks the shared helper to catch up due or never-seen work.
-	// Its retained-history check suppresses recent runs after a restart.
-	own.RunOnStart = true
-	if args, _ := ctor(); args != nil {
-		r.workerHealthRegistrations().NotePeriod(args.Kind(), interval)
-		if own.ID == "" {
-			own.ID = args.Kind()
+// periodicJob declares p with River. RunOnStart catches up an overdue pass;
+// the shared helper's retained-history check skips a recent one after a
+// restart. A leased pass is queued only by the fleet holding its lease.
+func (r *Runtime) periodicJob(cfg *river.Config, p riverjobs.Periodic) *river.PeriodicJob {
+	id := p.Args.Kind()
+	r.workerHealthRegistrations().NotePeriod(id, p.Every)
+	return riverhelpers.NewPeriodicJob(cfg, p.Every, func() (river.JobArgs, *river.InsertOpts) {
+		if !p.PerFleet && !r.claimPeriodic(id, p.Every) {
+			return nil, nil
 		}
-	}
-	r.periodicIDs = append(r.periodicIDs, own.ID)
-	if leased {
-		inner, id := ctor, own.ID
-		ctor = func() (river.JobArgs, *river.InsertOpts) {
-			if !r.claimPeriodic(id, interval) {
-				return nil, nil
-			}
-			return inner()
-		}
-	}
-	return riverhelpers.NewPeriodicJob(cfg, interval, ctor, &own)
+		return p.Args, nil
+	}, &river.PeriodicJobOpts{ID: id, RunOnStart: true})
 }
 
 // claimPeriodic takes the periodic's lease for most of its period. Hosts
@@ -138,7 +109,3 @@ func (r *Runtime) claimPeriodic(id string, interval time.Duration) bool {
 	}
 	return true
 }
-
-// PeriodicJobIDs are the River IDs of the periodic jobs this runtime gave its
-// River client.
-func (r *Runtime) PeriodicJobIDs() []string { return slices.Clone(r.periodicIDs) }

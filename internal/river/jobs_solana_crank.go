@@ -42,6 +42,10 @@ type SolanaCrankArgs struct{}
 
 func (SolanaCrankArgs) Kind() string { return KindSolanaCrank }
 
+func (SolanaCrankArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByPeriod: SolanaCrankInterval}}
+}
+
 // SolanaCrankWorker cranks each due Solana subscription: pull the plan amount
 // on-chain, RenewMembership (idempotent on the tx signature) and advance
 // next_pull_at. A failed pull routes to FailMembership and dunning.

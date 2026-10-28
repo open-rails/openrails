@@ -22,6 +22,14 @@ import (
 // KindUsageOrders bills, notifies and collects usage orders.
 const KindUsageOrders = "openrails.usage_orders"
 
+// UsageOrdersInterval is the deployment-wide pass's cadence.
+const UsageOrdersInterval = 5 * time.Minute
+
+// usageOutstanding are a pass's states before it finishes.
+var usageOutstanding = []rivertype.JobState{
+	rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
+}
+
 // UsageOrderArgs is one usage-order pass: every merchant's due accounts, or
 // one merchant's after a threshold crossing. A merchant has at most one
 // outstanding wakeup, rather than a timer or job for every customer.
@@ -30,6 +38,15 @@ type UsageOrderArgs struct {
 }
 
 func (UsageOrderArgs) Kind() string { return KindUsageOrders }
+
+// InsertOpts coalesces the deployment-wide passes. A merchant's wake coalesces
+// only where its producer asks (a threshold crossing).
+func (a UsageOrderArgs) InsertOpts() river.InsertOpts {
+	if a.MerchantID != nil {
+		return river.InsertOpts{Queue: "billing"}
+	}
+	return river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: usageOutstanding}}
+}
 
 func (s *MoneyService) usageBillingConfig(ctx context.Context, currency string) (*billing.UsageBillingSettings, *billing.UsageBillingCurrency, error) {
 	if !s.UsageBillingEnabled {
@@ -149,9 +166,7 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 	if err = q.FlagUsageCollectionDue(ctx, gen.FlagUsageCollectionDueParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency}); err != nil {
 		return err
 	}
-	_, err = s.db.InsertRiverJob(ctx, UsageOrderArgs{MerchantID: &mid}, &river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true, ByState: []rivertype.JobState{
-		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
-	}}})
+	_, err = s.db.InsertRiverJob(ctx, UsageOrderArgs{MerchantID: &mid}, &river.InsertOpts{Queue: "billing", UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: usageOutstanding}})
 	return err
 }
 

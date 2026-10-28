@@ -369,6 +369,11 @@ func (h *AccountUpdaterHandler) Verify(context.Context, gen.BillingProviderInten
 
 const KindStoredCardRefreshDue = "openrails.stored_card_refresh_due"
 
+// StoredCardRefreshDueInterval is the ahead-of-renewal pass's cadence. The
+// lookahead is at least a day, so a card entering it is checked long before
+// the renewal it protects.
+const StoredCardRefreshDueInterval = 6 * time.Hour
+
 const (
 	// storedCardBatch is one page of each kind of due check: cards marked for
 	// a look and planned checks are read side by side, so neither starves the
@@ -391,6 +396,10 @@ const (
 type StoredCardRefreshDueArgs struct{}
 
 func (StoredCardRefreshDueArgs) Kind() string { return KindStoredCardRefreshDue }
+
+func (StoredCardRefreshDueArgs) InsertOpts() river.InsertOpts {
+	return periodPass(StoredCardRefreshDueInterval)
+}
 
 // StoredCardRefreshDueWorker queues a refresh for each card an armed vault
 // holds whose next renewal is inside the vault's lookahead and that was not
