@@ -102,9 +102,9 @@ const HISTORY = [
   { value: "full", label: "Full history" },
 ]
 
-// ReconcileDialog pulls one PSP again, read-only: the import stages what
+// PullDialog creates an import of one PSP, read-only: it stages what
 // OpenRails does not hold and nothing lands before Apply.
-export function ReconcileDialog({
+export function PullDialog({
   psp: initial,
   onClose,
 }: {
@@ -135,18 +135,18 @@ export function ReconcileDialog({
       <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>
-            <AdminMessage id="Reconcile a PSP" />
+            <AdminMessage id="Pull a PSP" />
           </DialogTitle>
           <DialogDescription>
-            <AdminMessage id="Reads the PSP's catalog, customers, subscriptions and history again, read-only. Nothing lands before you apply it." />
+            <AdminMessage id="Reads the PSP's catalog, customers, subscriptions and history, read-only. Nothing lands before you apply it." />
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-1.5">
-          <Label htmlFor={adminId("reconcile-psp")}>
+          <Label htmlFor={adminId("pull-psp")}>
             <AdminMessage id="PSP" />
           </Label>
           <select
-            id={adminId("reconcile-psp")}
+            id={adminId("pull-psp")}
             className={selectClass}
             value={chosen}
             onChange={(e) => setPSP(e.target.value)}
@@ -159,11 +159,11 @@ export function ReconcileDialog({
           </select>
         </div>
         <div className="grid gap-1.5">
-          <Label htmlFor={adminId("reconcile-history")}>
+          <Label htmlFor={adminId("pull-history")}>
             <AdminMessage id="History since" />
           </Label>
           <select
-            id={adminId("reconcile-history")}
+            id={adminId("pull-history")}
             className={selectClass}
             value={history}
             onChange={(e) => setHistory(e.target.value)}
@@ -209,15 +209,15 @@ export function ReconcileDialog({
                   psp: { id: chosen },
                   history_since: since(),
                 })
-                toast.success(adminText("Reconcile started"))
+                toast.success(adminText("Pull started"))
                 onClose()
                 navigate(`/ops/imports/${imp.id}`)
               } catch (err) {
-                toastApiError(err, adminText("Reconcile"))
+                toastApiError(err, adminText("Pull"))
               }
             }}
           >
-            <AdminMessage id="Reconcile" />
+            <AdminMessage id="Pull" />
           </Button>
         </DialogFooter>
       </DialogContent>

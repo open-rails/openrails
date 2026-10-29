@@ -6,7 +6,6 @@ import { Link } from "#orck/admin/router"
 
 import { CursorPager } from "#orck/admin/components/cursor-pager"
 import { StatusBadge } from "#orck/admin/components/status-badge"
-import { Badge } from "#orck/admin/components/ui/badge"
 import { Button } from "#orck/admin/components/ui/button"
 import {
   Dialog,
@@ -37,7 +36,7 @@ import { formatDate } from "#orck/admin/lib/format"
 import type { PSPImport } from "#orck/client/generated/wire"
 import { chunks, parseMappingCSV, type MappingRow } from "./mapping-csv"
 import { recordCount } from "./progress"
-import { ProgressText, ReconcileDialog, pspKey, usePSPs } from "./shared"
+import { ProgressText, PullDialog, pspKey, usePSPs } from "./shared"
 
 const STATES = [
   "linked",
@@ -61,7 +60,7 @@ function Imports() {
   const { data, isPending, isFetching } = useQuery(
     importQueries.list({}, paging.size, paging.cursor || undefined)
   )
-  const [dialog, setDialog] = React.useState<"reconcile" | "mappings">()
+  const [dialog, setDialog] = React.useState<"pull" | "mappings">()
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -78,8 +77,8 @@ function Imports() {
             <Button variant="outline" onClick={() => setDialog("mappings")}>
               <AdminMessage id="Upload mappings" />
             </Button>
-            <Button onClick={() => setDialog("reconcile")}>
-              <AdminMessage id="Reconcile" />
+            <Button onClick={() => setDialog("pull")}>
+              <AdminMessage id="Pull" />
             </Button>
           </div>
         )}
@@ -88,14 +87,7 @@ function Imports() {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {[
-                "Started",
-                "PSP",
-                "Origin",
-                "Status",
-                "Progress",
-                "Records",
-              ].map((h) => (
+              {["Started", "PSP", "Status", "Progress", "Records"].map((h) => (
                 <TableHead key={h} className="text-muted-foreground">
                   {text(h)}
                 </TableHead>
@@ -105,13 +97,13 @@ function Imports() {
           <TableBody>
             {isPending ? (
               <TableRow>
-                <TableCell colSpan={6}>
+                <TableCell colSpan={5}>
                   <AdminMessage id="Loading…" />
                 </TableCell>
               </TableRow>
             ) : !data?.data.length ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground">
+                <TableCell colSpan={5} className="text-muted-foreground">
                   <AdminMessage id="No PSP has been pulled yet." />
                 </TableCell>
               </TableRow>
@@ -124,9 +116,6 @@ function Imports() {
                     </Link>
                   </TableCell>
                   <TableCell>{pspKey(psps.byId, imp.psp)}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{imp.origin}</Badge>
-                  </TableCell>
                   <TableCell>
                     <StatusBadge status={imp.status} />
                   </TableCell>
@@ -148,9 +137,7 @@ function Imports() {
         nextCursor={data?.next_cursor}
         busy={isFetching}
       />
-      {dialog === "reconcile" && (
-        <ReconcileDialog onClose={() => setDialog(undefined)} />
-      )}
+      {dialog === "pull" && <PullDialog onClose={() => setDialog(undefined)} />}
       {dialog === "mappings" && (
         <MappingsDialog
           imports={data?.data ?? []}
@@ -309,7 +296,7 @@ function MappingsDialog({
                 {relinkable.map((imp) => (
                   <div key={imp.id} className="flex items-center gap-2">
                     <span>
-                      {pspKey(psps.byId, imp.psp)} · {imp.origin} ·{" "}
+                      {pspKey(psps.byId, imp.psp)} ·{" "}
                       {formatDate(imp.created_at)}
                     </span>
                     <Button

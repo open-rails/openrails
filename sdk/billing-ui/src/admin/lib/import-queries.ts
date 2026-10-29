@@ -61,7 +61,7 @@ export function createImportQueries(client: AdminClient, api: AdminAPI) {
             : false,
         meta: { errorAction: "Load PSP imports" },
       }),
-    // The PSP's newest import: whose rules a reconcile copies.
+    // The PSP's newest import: whose rules a pull copies.
     latest: (psp: string) =>
       queryOptions({
         queryKey: [...importKeys.imports(), "latest", psp],

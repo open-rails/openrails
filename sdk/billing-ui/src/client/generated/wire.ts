@@ -1574,7 +1574,6 @@ export type PSPImport = {
   id: string
   psp: string
   rail: string
-  origin: "manual" | "onboarding"
   status: "applied" | "applying" | "failed" | "pulled" | "pulling"
   history_since: string | null
   history_through: string | null

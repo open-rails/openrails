@@ -906,17 +906,12 @@
     {
       "id": "OR-J38-S06",
       "journey": "J38",
-      "name": "Loading a PSP's configuration starts one read-only onboarding pull per live NMI, Stripe and CCBill PSP; a deleted one is made again; a manual import never stands in"
-    },
-    {
-      "id": "OR-J38-S07",
-      "journey": "J38",
-      "name": "Several processes loading one merchant at once on one database make one onboarding import and one pull job per PSP, and restarts make nothing more"
+      "name": "Loading PSPs, in one process or another, pulls none; a person pulls each NMI, Stripe and CCBill PSP, history from the earliest object, landing nothing; Solana has no import"
     },
     {
       "id": "OR-J38-S08",
       "journey": "J38",
-      "name": "A provider refusing a PSP's credentials fails its onboarding import with one finding; each later load re-arms it in place; replaced credentials pull and close the finding"
+      "name": "A provider refusing a PSP's credentials fails the import with psp_credentials_rejected; neither a reload nor replaced credentials restart it; a person's new pull reads them"
     },
     {
       "id": "OR-J38-S09",
@@ -936,7 +931,7 @@
     {
       "id": "OR-J38-S12",
       "journey": "J38",
-      "name": "A PSP added to a running process gets its onboarding pull; rotating refused credentials there restarts it in place and closes the finding"
+      "name": "A PSP added to a running process is not pulled; a refused pull stays failed when its credentials rotate, and a person's new pull reads the rotated ones"
     },
     {
       "id": "OR-J38-S13",
@@ -946,7 +941,7 @@
     {
       "id": "OR-J38-S30",
       "journey": "J38",
-      "name": "The console shows an onboarding pull's phases to pulled; a person links one record by hand, maps the unmapped plan as an archived price and applies twice: each subscription lands once, no provider write"
+      "name": "A person pulls a PSP from the console, which shows the pull's phases to pulled; one record is linked by hand, the unmapped plan mapped as an archived price, and two applies land each subscription once, no provider write"
     },
     {
       "id": "OR-J38-S31",
@@ -1016,7 +1011,7 @@
     {
       "id": "OR-J15-S17",
       "journey": "J15",
-      "name": "A Stripe customer linked before the PSP's first pull lands its parked subscription at once"
+      "name": "With no import yet, an unlinked Stripe subscription parks with its high finding, and linking its customer lands it at once and resolves the finding"
     },
     {
       "id": "OR-J15-S18",
@@ -1032,6 +1027,11 @@
       "id": "OR-J15-S20",
       "journey": "J15",
       "name": "An NMI schedule OpenRails does not hold that names no plan raises a high finding naming it once no import stages it, parks nothing, and the finding resolves when NMI deletes it"
+    },
+    {
+      "id": "OR-J15-S21",
+      "journey": "J15",
+      "name": "Only an import that is pulling, or stages a subscription unlanded, owns it: before any import and after a failed one its park raises a finding, which a pulling import resolves"
     },
     {
       "id": "OR-J38-S20",

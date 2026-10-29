@@ -20,7 +20,6 @@ import type {
 export interface PSPImportFilters {
   // A PSP's id or key.
   psp?: string
-  origin?: PSPImport["origin"]
 }
 
 export interface PSPImportRecordFilters {

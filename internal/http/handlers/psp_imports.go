@@ -52,8 +52,7 @@ func writePSPImportRefusal(r *httprequest.Request, err error, internalMessage st
 
 // PSPImportQuery filters ListPSPImports: psp names one PSP by id or key.
 type PSPImportQuery struct {
-	PSP    string                  `form:"psp"`
-	Origin billing.PSPImportOrigin `form:"origin"`
+	PSP string `form:"psp"`
 }
 
 func ListPSPImports(r *httprequest.Request) {
@@ -73,7 +72,7 @@ func ListPSPImports(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	params := billing.PSPImportListParams{PageRequest: page, IDs: ids, Origin: query.Origin}
+	params := billing.PSPImportListParams{PageRequest: page, IDs: ids}
 	if psp := strings.TrimSpace(query.PSP); strings.HasPrefix(psp, billing.PSPIDPrefix) {
 		id, err := billing.ParsePSPID(psp)
 		if err != nil {

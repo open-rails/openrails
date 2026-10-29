@@ -7,7 +7,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// CreatePSPImport pulls a PSP again: OpenRails observes its catalog, pulls
+// CreatePSPImport pulls a PSP: OpenRails observes its catalog, pulls
 // its customers, saved cards, live subscriptions and transaction history
 // (reads only), links what it does not hold to customers by the import's
 // rules, and proposes every difference in what it holds (ListProposals with
@@ -26,8 +26,7 @@ func (c *Client) CreatePSPImport(ctx context.Context, params billing.CreatePSPIm
 }
 
 // ListPSPImports lists the merchant's PSP imports, newest first: one PSP's
-// and of one origin when set. ListPSPImports{PSP, Origin: onboarding} finds
-// the PSP's onboarding import.
+// when set.
 func (c *Client) ListPSPImports(ctx context.Context, params billing.PSPImportListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PSPImport], error) {
 	q := pageValues(nil, params.PageRequest)
 	if err := setIDs(q, params.IDs); err != nil {
@@ -35,9 +34,6 @@ func (c *Client) ListPSPImports(ctx context.Context, params billing.PSPImportLis
 	}
 	if !params.PSP.IsZero() {
 		q.Set("psp", params.PSP.String())
-	}
-	if params.Origin != "" {
-		q.Set("origin", string(params.Origin))
 	}
 	var out billing.ListPage[billing.PSPImport]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/psp-imports?"+q.Encode(), nil, &out, requestOptions...); err != nil {

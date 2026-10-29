@@ -264,12 +264,11 @@ export const billingAdminMessages = {
   "Re-link an import to apply them:": "Re-link an import to apply them:",
   "Re-link requested": "Re-link requested",
   "Reading catalog and roster": "Reading catalog and roster",
-  "Reads the PSP's catalog, customers, subscriptions and history again, read-only. Nothing lands before you apply it.":
-    "Reads the PSP's catalog, customers, subscriptions and history again, read-only. Nothing lands before you apply it.",
-  Reconcile: "Reconcile",
-  "Reconcile PSP": "Reconcile PSP",
-  "Reconcile a PSP": "Reconcile a PSP",
-  "Reconcile started": "Reconcile started",
+  "Reads the PSP's catalog, customers, subscriptions and history, read-only. Nothing lands before you apply it.":
+    "Reads the PSP's catalog, customers, subscriptions and history, read-only. Nothing lands before you apply it.",
+  "Pull PSP": "Pull PSP",
+  "Pull a PSP": "Pull a PSP",
+  "Pull started": "Pull started",
   "Record state": "Record state",
   Records: "Records",
   Reload: "Reload",
@@ -651,10 +650,11 @@ export const billingAdminMessages = {
   "Testnet: Solana's test network": "Testnet: Solana's test network",
   "The customer holds this product already: cancel one at the provider.":
     "The customer holds this product already: cancel one at the provider.",
-  "The provider listed far fewer live subscriptions than OpenRails holds, so nothing was proposed. Check the PSP's account and reconcile again.":
-    "The provider listed far fewer live subscriptions than OpenRails holds, so nothing was proposed. Check the PSP's account and reconcile again.",
-  "The provider refused this PSP's credentials. A new pull starts when they change in ":
-    "The provider refused this PSP's credentials. A new pull starts when they change in ",
+  "The provider listed far fewer live subscriptions than OpenRails holds, so nothing was proposed. Check the PSP's account and pull again.":
+    "The provider listed far fewer live subscriptions than OpenRails holds, so nothing was proposed. Check the PSP's account and pull again.",
+  "The provider refused this PSP's credentials. Correct them in ":
+    "The provider refused this PSP's credentials. Correct them in ",
+  ", then pull again.": ", then pull again.",
   "The provider retired it: it keeps billing its subscriptions and is never sold.":
     "The provider retired it: it keeps billing its subscriptions and is never sold.",
   "This PSP cannot be read: it is gone, or a credential the pull needs is not declared.":

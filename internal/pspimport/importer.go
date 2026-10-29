@@ -21,7 +21,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -35,7 +34,6 @@ import (
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/proposals"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/transient"
@@ -55,9 +53,6 @@ type Importer struct {
 	// CCBillDataLinkURL points DataLink at a loopback fake (sandbox runs).
 	CCBillDataLinkURL string
 	Directory         identity.Directory
-	// Alerts tells the merchant's operator when a provider refuses a PSP's
-	// credentials.
-	Alerts reconcile.FindingNotifier
 	// Proposals approves an applied import's corrections.
 	Proposals *proposals.Executor
 	Clock     clockwork.Clock
@@ -98,10 +93,9 @@ const RetryBudget = 5
 const JobQueue = "psp_import"
 
 // Transient reports whether a later attempt of a step can outlive err: a
-// provider, Vault or the database that did not answer, or a configuration
-// that changed under the step.
+// provider, Vault or the database that did not answer.
 func Transient(err error) bool {
-	return transient.Is(err) || errors.Is(err, merchantdocs.ErrUnavailable) || errors.Is(err, errConfigChanged)
+	return transient.Is(err) || errors.Is(err, merchantdocs.ErrUnavailable)
 }
 
 // RetryCap is the longest wait between two attempts of a step.
@@ -280,13 +274,6 @@ func (im *Importer) List(ctx context.Context, p billing.PSPImportListParams) (bi
 			return out, err
 		}
 		params.PspID = &scope.ID
-	}
-	switch p.Origin {
-	case "":
-	case billing.PSPImportOnboarding, billing.PSPImportManual:
-		params.Origin = new(string(p.Origin))
-	default:
-		return out, apperr.Invalidf("origin is onboarding or manual").WithParam("origin")
 	}
 	rows, err := im.DB.Gen(ctx).ListPSPImportsPage(ctx, params)
 	if err != nil {
@@ -484,8 +471,7 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, re
 }
 
 // Fail records why an import's job gave up, with the PermanentError's code
-// when cause has one. A provider refusing the credentials also opens the
-// PSP's credentials finding and alerts the merchant's operator.
+// when cause has one. The person who created the import reads it there.
 func (im *Importer) Fail(ctx context.Context, id billing.PSPImportID, cause error) error {
 	row, err := im.row(ctx, id)
 	if err != nil {
@@ -500,34 +486,12 @@ func (im *Importer) Fail(ctx context.Context, id billing.PSPImportID, cause erro
 	if errors.As(cause, &permanent) && permanent.Code != "" {
 		params.ErrorCode = new(string(permanent.Code))
 	}
-	pspKey := billing.PSPID(row.PspID).String()
-	if scope, found, err := im.Merchants.PSPScopeByID(ctx, billing.MerchantID(row.MerchantID), row.PspID); err == nil && found {
-		pspKey = scope.Key
-	}
-	var opened *gen.BillingReconciliationFinding
-	err = im.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := im.DB.NewWithPgxTx(tx).Gen(ctx)
-		if _, err := q.SetPSPImportStatus(ctx, params); err != nil {
-			return err
-		}
-		if permanent.Code != billing.PSPImportCredentialsRejected {
-			return nil
-		}
-		f, err := openCredentialsFinding(ctx, q, row, pspKey, msg)
-		opened = &f
-		return err
-	})
-	if err != nil || opened == nil || im.Alerts == nil {
-		return err
-	}
-	if err := im.Alerts.NotifyFinding(ctx, reconcile.FindingRecordFromRow(*opened)); err != nil && ctx.Err() == nil {
-		log.WithContext(ctx).WithError(err).WithField("finding_id", opened.ID.String()).Warn("psp import: alerting the operator failed; the finding stays in the console")
-	}
-	return nil
+	_, err = im.DB.Gen(ctx).SetPSPImportStatus(ctx, params)
+	return err
 }
 
 func (im *Importer) view(ctx context.Context, row gen.BillingPspImport) (*billing.PSPImport, error) {
-	out := &billing.PSPImport{ID: billing.PSPImportID(row.ID), PSP: billing.PSPID(row.PspID), Rail: row.Rail, Origin: billing.PSPImportOrigin(row.Origin),
+	out := &billing.PSPImport{ID: billing.PSPImportID(row.ID), PSP: billing.PSPID(row.PspID), Rail: row.Rail,
 		Status: billing.PSPImportStatus(row.Status), HistorySince: row.HistorySince, HistoryThrough: row.HistoryThrough, PulledAt: row.PulledAt, AppliedAt: row.AppliedAt,
 		Error: row.Error, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, Counts: []billing.PSPImportCount{}}
 	if row.ErrorCode != nil {

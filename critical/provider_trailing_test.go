@@ -42,18 +42,10 @@ const (
 	kindObserve  = "openrails.provider_object_observe"
 )
 
-// newTrailWorld is a trail world whose PSPs' onboarding pulls ran: what they
-// hold from then on is not their backlog.
+// newTrailWorld is a running trail world; no PSP has an import yet.
 func newTrailWorld(t *testing.T, psps ...string) *trailWorld {
 	t.Helper()
 	return trail(newImportWorld(t, psps...))
-}
-
-// bootTrailWorld is a trail world whose fleet has not started: its PSPs'
-// onboarding pulls are queued.
-func bootTrailWorld(t *testing.T, psps ...string) *trailWorld {
-	t.Helper()
-	return trail(bootImportWorld(t, psps...))
 }
 
 func trail(iw *importWorld) *trailWorld {
@@ -175,8 +167,8 @@ func (tw *trailWorld) findings(t *testing.T, kind string) map[string]billing.Fin
 	return out
 }
 
-// pulled is the PSP's onboarding pull of what it holds now: parks wait for
-// one (the backlog rule).
+// pulled is a pull of what the PSP holds now: while it stages a
+// subscription unlanded, the import owns it (the backlog rule).
 func (tw *trailWorld) pulled(t *testing.T, key string) *billing.PSPImport {
 	t.Helper()
 	since := tw.clock.Now().Add(-24 * time.Hour)
@@ -544,7 +536,7 @@ func TestProviderTrailing(t *testing.T) {
 	})
 
 	t.Run("OR-J15-S13/nmi-unheld-subscription-adopts-or-parks", func(t *testing.T) {
-		tw := bootTrailWorld(t, "nmi")
+		tw := newTrailWorld(t, "nmi")
 		tw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
 		tw.nmi.AddPlan(nmimock.Plan{ID: "silver", Name: "Silver", Amount: "10.00", Days: 30})
 		product, err := tw.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "gold", DisplayName: "Gold", Entitlements: []string{"member:gold"}})
@@ -552,31 +544,20 @@ func TestProviderTrailing(t *testing.T) {
 		gold, err := tw.alphaRemote.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-gold", PSP: "nmi", PlanID: "gold"})
 		require.NoError(t, err)
 
-		// (d) While the PSP's onboarding pull has not run, its backlog is the
-		// import's.
-		cancelOnboarding(t, tw.fleet, 1)
-		tw.start(t)
+		// (d) With no import yet, an unmapped plan parks with its finding;
+		// once an import stages the schedule unlanded, the import owns it.
 		early := tw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "1111"})
 		earlySub := tw.nmiSchedule(t, early, "silver", "10.00")
 		nmiNotice(t, tw.server.URL, "evt_early", "recurring.subscription.add", map[string]any{"subscription_id": earlySub})
 		completedOnce(t, tw.fleet, kindConverge)
-		onboarding := tw.onboarding(t, "nmi")
-		require.Equal(t, billing.PSPImportPulling, onboarding.Status)
-		early1 := openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), earlySub)
-		require.True(t, early1.ImportOwned, "the pending onboarding pull owns it")
-		require.Empty(t, tw.findings(t, "catalog.price.unmapped"), "an import-owned park raises no finding")
-		pending, err := tw.fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.psp_import"))
-		require.NoError(t, err)
-		for _, job := range pending.Jobs {
-			_, err := tw.fleet.JobRetry(t.Context(), job.ID)
-			require.NoError(t, err)
-		}
-		imp := tw.await(t, onboarding.ID, billing.PSPImportPulled)
+		require.False(t, openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), earlySub).ImportOwned, "no import owns it")
+		require.Equal(t, "high", tw.findings(t, "catalog.price.unmapped")["silver"].Severity)
+		imp := tw.pulled(t, "nmi")
 		require.Equal(t, billing.PSPImportUnmatched, tw.records(t, imp.ID)[earlySub].State)
 		nmiNotice(t, tw.server.URL, "evt_early_again", "recurring.subscription.update", map[string]any{"subscription_id": earlySub})
 		completedOnce(t, tw.fleet, kindConverge)
 		require.True(t, openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), earlySub).ImportOwned, "the import stages it unlanded")
-		require.Empty(t, tw.findings(t, "catalog.price.unmapped"))
+		require.Equal(t, "medium", tw.findings(t, "catalog.price.unmapped")["silver"].Severity, "a park the import owns no longer counts")
 
 		// (a) One owner, mapped plan: adopted once.
 		aliceVault := tw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
@@ -769,13 +750,11 @@ func TestProviderTrailing(t *testing.T) {
 		require.False(t, strings.Contains(string(raw), refs[0]), "a customer token reads no park")
 	})
 
-	t.Run("OR-J15-S17/stripe-link-before-the-first-pull-lands-at-once", func(t *testing.T) {
-		tw := bootTrailWorld(t, "stripe")
+	t.Run("OR-J15-S17/stripe-unlinked-before-any-import-parks-with-its-finding", func(t *testing.T) {
+		tw := newTrailWorld(t, "stripe")
 		tw.stripe.AddProduct("prod_gold", "Gold")
 		tw.stripe.AddPrice(stripemock.Price{ID: "price_gold", Product: "prod_gold", Amount: 1500, Interval: "month"})
 		tw.mapStripe(t, tw.stripeProduct(t, "gold", "member:gold"), "stripe-gold", "price_gold")
-		cancelOnboarding(t, tw.fleet, 1)
-		tw.start(t)
 		start := tw.clock.Now().Add(-time.Hour)
 		customer := tw.stripe.AddCustomer(tw.bob.Email, "Bob", nil)
 		sub := tw.stripe.AddSubscription(customer, "pm_bob", "price_gold", 1500, start, start.AddDate(0, 1, 0))
@@ -783,8 +762,10 @@ func TestProviderTrailing(t *testing.T) {
 		completedOnce(t, tw.fleet, kindConverge)
 		park := openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), sub)
 		require.Equal(t, billing.ParkCustomerUnlinked, park.Reason)
-		require.True(t, park.ImportOwned, "no pull has run yet")
-		require.Empty(t, tw.findings(t, "life.subscription.unattributed"), "an import-owned park raises no finding")
+		require.False(t, park.ImportOwned, "no import exists, so none owns it")
+		finding := tw.findings(t, "life.subscription.unattributed")[sub]
+		require.Equal(t, "high", finding.Severity, "the park raises its finding")
+		require.Nil(t, finding.ResolvedAt)
 
 		tw.send(t, "checkout.session.completed", stripemock.Object{"id": "cs_link_bob", "object": "checkout.session", "mode": "subscription", "status": "complete",
 			"customer": customer, "subscription": sub, "metadata": map[string]string{"user_id": tw.bob.ID}})
@@ -795,6 +776,7 @@ func TestProviderTrailing(t *testing.T) {
 		closed := openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{Released: true}), sub)
 		require.Equal(t, billing.ParkLanded, *closed.ReleasedBy)
 		require.Equal(t, subs[0].ID, *closed.Subscription)
+		require.NotNil(t, tw.findings(t, "life.subscription.unattributed")[sub].ResolvedAt)
 	})
 
 	t.Run("OR-J15-S18/held-stripe-subscription-ends-only-on-resource-missing", func(t *testing.T) {
@@ -811,7 +793,9 @@ func TestProviderTrailing(t *testing.T) {
 		held := subscriptionOf(t, tw.importWorld, customerOf(tw.alice), sub)
 		armDestructive(t, tw.authorityWorld, true)
 
-		read := func(r *http.Request) bool { return r.Method == http.MethodGet && r.URL.Path == "/v1/subscriptions/"+sub }
+		read := func(r *http.Request) bool {
+			return r.Method == http.MethodGet && r.URL.Path == "/v1/subscriptions/"+sub
+		}
 		tw.stripe.Intercept(read, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
 			return answer(r, http.StatusNotFound, `{"error":{"type":"invalid_request_error","message":"Unrecognized request URL (GET: /v1/subscriptions/`+sub+`)"}}`), nil
 		})
@@ -908,5 +892,42 @@ func TestProviderTrailing(t *testing.T) {
 		nmiNotice(t, tw.server.URL, "evt_later_gone", "recurring.subscription.update", map[string]any{"subscription_id": later})
 		completedOnce(t, tw.fleet, kindConverge)
 		require.NotNil(t, tw.findings(t, "life.subscription.unattributed")[later].ResolvedAt, "a schedule gone at NMI settles it")
+	})
+
+	t.Run("OR-J15-S21/only-a-pulling-or-staging-import-owns-a-subscription", func(t *testing.T) {
+		tw := newTrailWorld(t, "nmi")
+		tw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
+		product, err := tw.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "gold", DisplayName: "Gold", Entitlements: []string{"member:gold"}})
+		require.NoError(t, err)
+		_, err = tw.alphaRemote.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-gold", PSP: "nmi", PlanID: "gold"})
+		require.NoError(t, err)
+		refuseNMI(tw.nmi, "critical-import-key")
+		tw.await(t, tw.started(t, "nmi").ID, billing.PSPImportFailed)
+		tw.nmi.ClearIntercepts()
+
+		sub := tw.nmiSchedule(t, tw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "2222"}), "gold", "20.00")
+		nmiNotice(t, tw.server.URL, "evt_unowned", "recurring.subscription.add", map[string]any{"subscription_id": sub})
+		completedOnce(t, tw.fleet, kindConverge)
+		require.False(t, openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), sub).ImportOwned, "a failed import owns nothing")
+		require.Nil(t, tw.findings(t, "life.subscription.unattributed")[sub].ResolvedAt)
+
+		held := tw.nmi.Hold(func(r *http.Request) bool {
+			return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/plans")
+		}, nmimock.HoldRequest)
+		pulling := tw.started(t, "nmi")
+		select {
+		case <-held.Arrived():
+		case <-time.After(30 * time.Second):
+			t.Fatal("the pull never read the catalog")
+		}
+		nmiNotice(t, tw.server.URL, "evt_while_pulling", "recurring.subscription.update", map[string]any{"subscription_id": sub})
+		completedOnce(t, tw.fleet, kindConverge)
+		require.True(t, openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), sub).ImportOwned, "a pulling import owns it")
+		require.NotNil(t, tw.findings(t, "life.subscription.unattributed")[sub].ResolvedAt, "its finding resolves")
+		held.Release()
+		tw.await(t, pulling.ID, billing.PSPImportPulled)
+		nmiNotice(t, tw.server.URL, "evt_staged", "recurring.subscription.update", map[string]any{"subscription_id": sub})
+		completedOnce(t, tw.fleet, kindConverge)
+		require.True(t, openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), sub).ImportOwned, "its pull stages it unlanded")
 	})
 }

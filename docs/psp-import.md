@@ -1,7 +1,8 @@
-# PSP import: onboarding subscribers straight from the provider
+# PSP import: subscribers straight from the provider
 
-A merchant moving onto OpenRails hands over its PSP credentials; OpenRails
-observes the provider's catalog, pulls every customer, saved card, live
+A merchant moving onto OpenRails hands over its PSP credentials and a person
+starts an import; OpenRails observes the provider's catalog, pulls every
+customer, saved card, live
 subscription and charge from the provider, links each to one of the
 merchant's customers, and lands the linked ones as real subscriptions,
 payment methods and payments on the provider prices a person mapped. The
@@ -28,24 +29,12 @@ The pull only reads: list, report and get calls on a read-only client. It
 never refunds, voids, cancels or edits anything at the provider. A landed
 subscription stays provider-run, exactly as an imported one does.
 
-## Onboarding import
+## Pulling
 
-The first time a process loads a PSP's configuration (an NMI, Stripe or CCBill
-account that is declared, live and not a duplicate), OpenRails creates the
-PSP's **onboarding import** (`origin: onboarding`) and queues its pull, in one
-transaction. A PSP has at most one: whichever replica or host sharing the
-merchant loads it first creates it, and the others find it.
-Existing PSPs get theirs on the first boot after upgrading. It runs in the
-background, also with provider writes `readonly`, and lands nothing: a person
-reviews, maps, links and applies it as any import. Find it with
-`ListPSPImports{PSP, Origin: onboarding}`. A tool that just started an engine
-calls `Engine.EnsurePSPOnboarding` first: it does the same step at once (and
-restarts a failed import), so the list shows the import's latest state or its
-restart. A PSP another import is pulling or applying is passed over and named
-in an error matching `billing.ErrPSPImportInProgress`; call again once that
-import finishes. An import a person creates is
-`manual` and never stands in for it; deleting the onboarding import makes it
-again at the PSP's next load.
+OpenRails never pulls a PSP by itself: adding or changing a PSP's
+credentials starts nothing. A person (or the host's tool) creates each import
+with `CreatePSPImport`, the first one and every later one. The pull runs in
+the background, also with provider writes `readonly`, and lands nothing.
 
 **Retries.** Import steps run on their own River queue (`psp_import`, two
 workers per fleet), apart from renewals and dunning. A provider that does not
@@ -59,22 +48,15 @@ one is applied again. Two causes fail a pull at once, with `error_code`:
 
 - `psp_credentials_rejected`: the provider refused the credentials (NMI v5
   401/403 or a Query API authentication error, Stripe 401/403, DataLink
-  401/403 or "Authentication failed"). It also opens one
-  `consistency.psp_import.credentials_rejected` finding per PSP (high,
-  review queue) and alerts the operator. The finding closes when a pull of
-  the PSP is answered again, or the PSP is no longer importable.
+  401/403 or "Authentication failed").
 - `psp_not_readable`: the PSP is gone, its rail has no import, or a
   credential the pull needs is not declared.
 
-A failed onboarding import restarts in place (same import, same staged
-records) when a process first loads the PSP's configuration or sees it change:
-fix the credentials and it pulls. A pull refused with credentials replaced
-while it ran retries with the new ones. While they stay rejected, each boot
-costs one provider read.
+A failed import stays failed: fix the cause and create another.
 
 **History** reads from the earliest object the provider lists, customers
 included (an NMI vault's or Stripe customer's creation, a subscription's
-start, a CCBill signup), unless a manual import names `history_since`.
+start, a CCBill signup), unless the import names `history_since`.
 
 ## Flow
 
@@ -82,17 +64,17 @@ start, a CCBill signup), unless a manual import names `history_since`.
    (`POST /v1/merchant/psp-import-mappings`) maps the merchant's own
    identifiers to customers, up to 100 per call: `{mapping: "legacy_user",
    key: "1002", customer: "<uuid>"}`. A null customer deletes one.
-2. **Create**, or take the onboarding import. `Client.CreatePSPImport`
+2. **Create.** `Client.CreatePSPImport`
    (`POST /v1/merchant/psp-imports`) names the PSP, the rules and optionally
    `history_since` (default: the earliest object the provider lists). Rules
    default to those of the PSP's latest import, and for its first import to
    `billing.DefaultPSPImportRules` (the directory's email). One import per
    PSP pulls or applies at a time: another is `409 psp_import_in_progress`
-   (a pulled, unapplied onboarding import does not hold it). The pull runs
+   (a pulled, unapplied import does not hold it). The pull runs
    as a job; `GetPSPImport` reports `pulling`, then `pulled`. It observes the
    PSP's catalog, reads the roster once, then the transaction history in
    30-day windows, committing each (`history_through`), so a retried job
-   resumes. `UpdatePSPImport` replaces the rules of either kind.
+   resumes. `UpdatePSPImport` replaces the rules.
 3. **Review.** `ListPSPImportRecords` lists the staged objects
    (`customer`, `subscription`, `transaction`) with their facts, filtered by
    `state`: `unmatched`, `conflict`, `linked`, `imported`, `blocked`, `held`.
@@ -132,7 +114,7 @@ Creating a provider price needs `merchant:catalog:manage`; the import routes
 need `merchant:config:manage`.
 
 The billing console (`BillingAdmin`, Ops) runs the same flow: PSP imports
-(Reconcile, mappings upload), an import's records, Provider prices (Map to
+(Pull, mappings upload), an import's records, Provider prices (Map to
 product) and Apply; see [billing administration](billing-admin.md#ops-pages).
 
 ## Reconcile
@@ -187,7 +169,7 @@ lacks an object an earlier list held marks it deleted, and seeing it again
 clears that. Only a pull whose roster lists a subscription (and passes the
 NMI breaker) marks anything: wrong credentials list another account.
 
-An onboarding import applied days after it pulled reads what was true then.
+An import applied days after it pulled reads what was true then.
 Apply holds what landed meanwhile; to propose what changed meanwhile, create
 another import right after Apply.
 
@@ -246,12 +228,14 @@ grandfathered subscriptions land.
 
 ## Backlog and webhooks
 
-Until a PSP's first pull, while one is pending, and while its latest pull
-stages a subscription not yet landed, the import owns that subscription: a
-webhook about it adopts nothing, and a park it needs is `import_owned`, with no
-finding, so a fix still wakes it. A failed pull is no pull. Once pulled and not staged (a subscription that
-began after the pull), converge lands it, adopts it (NMI) or parks it with a
-finding (`ListParkedSubscriptions`). A park closes when its subscription lands,
+While a PSP's latest import is pulling, and while it stages a subscription
+not yet landed, the import owns that subscription: a webhook about it adopts
+nothing, and a park it needs is `import_owned`, with no finding, so a fix
+still wakes it. A failed import owns nothing. Otherwise (no import yet, or a
+subscription that began after the pull) converge lands it, adopts it (NMI) or
+parks it with a finding (`ListParkedSubscriptions`). An NMI schedule that
+names no plan cannot be mapped, so it raises a `life.subscription.unattributed`
+finding (`reason: plan_missing`) instead of parking. A park closes when its subscription lands,
 by converge or by an import's Apply; the trigger on `subscriptions` closes it
 either way, so nothing lands twice.
 

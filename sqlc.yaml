@@ -131,6 +131,7 @@ sql:
       - "internal/migrate/postgres/0171_charge_attributions_per_import.up.sql"
       - "internal/migrate/postgres/0190_notifications_drop_email.up.sql"
       - "internal/migrate/postgres/0191_provider_intents_comment.up.sql"
+      - "internal/migrate/postgres/0200_explicit_psp_imports.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

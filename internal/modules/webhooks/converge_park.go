@@ -41,7 +41,7 @@ func parkSubscription(ctx context.Context, database *db.DB, findings reconcile.F
 	}
 	fields := log.Fields{"rail": s.Rail, "subscription_reference": s.SubscriptionRef, "reason": s.Reason, "price_ref": s.PriceRef, "customer_ref": s.CustomerRef}
 	if res.ImportOwned {
-		log.WithContext(ctx).WithFields(fields).Info("converge: parked a subscription the PSP's import owns; no finding until it is pulled and not staged")
+		log.WithContext(ctx).WithFields(fields).Info("converge: parked a subscription the PSP's import owns; no finding while it pulls or stages it")
 		return nil
 	}
 	log.WithContext(ctx).WithFields(fields).Warn("converge: parked a live provider subscription it cannot land")

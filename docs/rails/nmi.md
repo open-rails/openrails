@@ -190,10 +190,14 @@ NMI sends no catalog events. Converge records the plan of each subscription it
 reads; a plan not observed before is read once by id (`GET /v5/plans/{id}`).
 
 A reference OpenRails holds nothing for is read with `GET
-/v5/subscriptions/{ref}`. A 404 or deleted record (an order id, a one-off sale)
-is dropped, and so is a schedule carrying an OpenRails book id (its purchase
-owns it). A live schedule from elsewhere (a legacy site still selling):
+/v5/subscriptions/{ref}`. An `E_NOT_FOUND` or deleted record (an order id, a
+one-off sale) is dropped, and so is a schedule carrying an OpenRails book id
+(its purchase owns it); any other 404 (`E_ROUTE_NOT_FOUND`) is retried. A held
+subscription likewise ends only on those two answers. A live schedule from
+elsewhere (a legacy site still selling):
 
+- no plan: a high `life.subscription.unattributed` finding (`reason:
+  plan_missing`) names it, and nothing parks;
 - plan mapped to no provider price: it parks `price_unmapped` with a high
   `catalog.price.unmapped` finding;
 - otherwise its vault must belong to exactly one customer (the live cards on
@@ -204,9 +208,9 @@ owns it). A live schedule from elsewhere (a legacy site still selling):
   transaction history as receipts, then converged as held. A customer already
   holding the product parks `product_held` instead.
 
-Before the PSP's first pull, while one is pending, or while its latest import
-stages the subscription unlanded, nothing is adopted and a park is
-`import_owned` (no finding): the import owns it. Mapping the plan, or
+While the PSP's latest import is pulling, or stages the subscription
+unlanded, nothing is adopted and a park is `import_owned` (no finding): the
+import owns it. Mapping the plan, or
 landing a card in the vault, wakes converge in the same transaction; the park
 closes when the subscription lands by any path. Parks are listed by
 `ListParkedSubscriptions` (`GET /v1/merchant/parked-subscriptions`). Parking

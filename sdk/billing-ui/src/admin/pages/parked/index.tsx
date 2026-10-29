@@ -25,7 +25,7 @@ import { useUrlCursor } from "#orck/admin/lib/cursor-pages"
 import { formatDate, shortId } from "#orck/admin/lib/format"
 import type { ParkedSubscription } from "#orck/client/generated/wire"
 import {
-  ReconcileDialog,
+  PullDialog,
   pspKey,
   selectClass,
   usePSPs,
@@ -64,7 +64,7 @@ function Parked() {
     importQueries.parked(filters, paging.size, paging.cursor || undefined)
   )
   const [mapping, setMapping] = React.useState<ParkedSubscription>()
-  const [reconciling, setReconciling] = React.useState<string>()
+  const [pulling, setPulling] = React.useState<string>()
   const set = (key: string, value: string) => {
     const next = new URLSearchParams(params)
     if (value) next.set(key, value)
@@ -181,7 +181,7 @@ function Parked() {
                       <Remedy
                         park={p}
                         onMap={() => setMapping(p)}
-                        onReconcile={() => setReconciling(p.psp)}
+                        onPull={() => setPulling(p.psp)}
                       />
                     )}
                   </TableCell>
@@ -204,11 +204,8 @@ function Parked() {
           onClose={() => setMapping(undefined)}
         />
       )}
-      {reconciling && (
-        <ReconcileDialog
-          psp={reconciling}
-          onClose={() => setReconciling(undefined)}
-        />
+      {pulling && (
+        <PullDialog psp={pulling} onClose={() => setPulling(undefined)} />
       )}
     </div>
   )
@@ -239,19 +236,19 @@ function ParkStatus({ park }: { park: ParkedSubscription }) {
 function Remedy({
   park,
   onMap,
-  onReconcile,
+  onPull,
 }: {
   park: ParkedSubscription
   onMap: () => void
-  onReconcile: () => void
+  onPull: () => void
 }) {
   switch (park.reason) {
     case "price_unmapped":
       return <MapButton onClick={onMap} />
     case "customer_unlinked":
       return (
-        <Button size="sm" variant="outline" onClick={onReconcile}>
-          <AdminMessage id="Reconcile PSP" />
+        <Button size="sm" variant="outline" onClick={onPull}>
+          <AdminMessage id="Pull PSP" />
         </Button>
       )
     case "product_held":

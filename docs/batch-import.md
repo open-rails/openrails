@@ -16,7 +16,7 @@ provider owns the card vault and the recurring billing schedule: it keeps
 charging on its own clock after your cutover. Importing brings OpenRails'
 mirror up to date as of a declared horizon; from then on webhooks, the
 scheduled [Provider Refresh](operations.md#provider-refresh-and-the-unknown-cohort)
-converge the mirror against provider truth, and a manual PSP import re-reads a
+converge the mirror against provider truth, and a PSP import re-reads a
 PSP on demand, its differences becoming proposals.
 
 You hand over **facts, not classifications**: who, which price, which rail,
@@ -216,7 +216,7 @@ billing data over this seam:
    `openrails intents` — the
    [drain forecast](operations.md#inspecting-the-ledger) is the dry-run view
    of your cutover ("N execute under limited, M require full").
-8. **Verify against the provider** with a manual PSP import
+8. **Verify against the provider** with a PSP import
    (`POST /v1/merchant/psp-imports`) and its proposals, then raise to
    `PROVIDER_WRITE_MODE=full` — it drains exactly what the forecast showed.
 
@@ -312,7 +312,7 @@ OpenRails.
    deletes its NMI schedule (refused with `provider_cancel_held` while
    disarmed). The provider refresh runs every two hours, and NMI's own
    subscription webhooks converge the schedule they name at once. To re-read
-   a PSP now, create a manual PSP import (`Client.CreatePSPImport`,
+   a PSP now, create a PSP import (`Client.CreatePSPImport`,
    `POST /v1/merchant/psp-imports`); its differences become proposals.
    Tier changes (same tier group,
    same billing cycle) modify the member's existing NMI schedule in place

@@ -172,9 +172,9 @@ Features. Hosted one-time Checkout uses inline price/product data for its
 inactive, nonreusable payment objects; it creates no Stripe subscription.
 New subscriptions are sold only on our `prices`, whose terms remain local.
 
-After the PSP's first pull, OpenRails trails Stripe's catalog by webhook. A
+OpenRails trails Stripe's catalog by webhook. A
 `product.*` or `price.*` event queues one coalesced read of that object by id
-(read-only; a deleted one answers 404 and is recorded deleted) into the observed
+(read-only; a deleted one answers `resource_missing` and is recorded deleted) into the observed
 catalog (`ListProviderCatalog`, `observed_via: webhook`). A price an event shows
 for the first time, live and with no provider price mapping it, raises a medium
 `catalog.price.unmapped` finding; prices the pull listed are the import's.
@@ -245,9 +245,14 @@ held subscription moved onto an unmapped price keeps its paid tier and parks
 too, and so does one with a bill on an unmapped price; those bills wait.
 Mapping the price or linking the customer (a checkout, an import) wakes
 converge in the same transaction, and the park closes when the subscription
-lands, by any path, exactly once. Before the PSP's first pull, while one is
-pending, or while its latest import stages the subscription, the park is
-`import_owned`: it raises no finding, and the import lands it.
+lands, by any path, exactly once. While the PSP's latest import is pulling,
+or stages the subscription, the park is `import_owned`: it raises no finding,
+and the import lands it.
+
+A held subscription ends only when Stripe says so: a canceled or expired
+subscription, or `404 resource_missing` for it. Any other refusal (another
+404, a 401 or 403, no answer) fails its converge, which retries, access
+intact.
 
 A dispute or a provider refund that revokes access also queues a durable
 `stripe_cancel_subscription` intent in the same transaction. It reads the

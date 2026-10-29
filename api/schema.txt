@@ -139,6 +139,7 @@ migration 0171_charge_attributions_per_import.up.sql sha256:19257983ad8d74b30215
 migration 0180_retire_converge_sweep_findings.up.sql sha256:e348935f97512ded02ea6ce15261fbf6587326c9009e13dbdad43dc09a2e208d
 migration 0190_notifications_drop_email.up.sql sha256:3ccba1a268cf8e8214656f30449f6f3d5762f3d38c714ec3945effa7fafa0987
 migration 0191_provider_intents_comment.up.sql sha256:fff345e0143e09a85fe52e54669da31fcac5eee10b79c4af8d76b94799b955e6
+migration 0200_explicit_psp_imports.up.sql sha256:44eefa51bbbe338d21941762c9b82da60c76a345ccc73d91e5e228de58ea176f
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2417,20 +2418,17 @@ table billing.psp_imports
   column rules jsonb NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  column origin text NOT NULL
   column error_code text
   column apply_requested_by text
   constraint psp_imports_apply_requested_by_check CHECK (((apply_requested_by IS NULL) OR (apply_requested_by <> ''::text)))
   constraint psp_imports_error_check CHECK ((((status = 'failed'::text) = (error IS NOT NULL)) AND ((error IS NULL) OR (error <> ''::text))))
   constraint psp_imports_error_code_check CHECK (((error_code IS NULL) OR ((status = 'failed'::text) AND (error_code = ANY (ARRAY['psp_credentials_rejected'::text, 'psp_not_readable'::text, 'pull_roster_implausible'::text])))))
-  constraint psp_imports_origin_check CHECK ((origin = ANY (ARRAY['onboarding'::text, 'manual'::text])))
   constraint psp_imports_pkey PRIMARY KEY (merchant_id, id)
   constraint psp_imports_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint psp_imports_rules_check CHECK ((jsonb_typeof(rules) = 'array'::text))
   constraint psp_imports_status_check CHECK ((status = ANY (ARRAY['pulling'::text, 'pulled'::text, 'applying'::text, 'applied'::text, 'failed'::text])))
   index CREATE INDEX psp_imports_created_at_id_idx ON billing.psp_imports USING btree (merchant_id, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX psp_imports_in_flight_key ON billing.psp_imports USING btree (merchant_id, psp_id) WHERE (status = ANY (ARRAY['pulling'::text, 'applying'::text]))
-  index CREATE UNIQUE INDEX psp_imports_onboarding_key ON billing.psp_imports USING btree (merchant_id, psp_id) WHERE ((origin = 'onboarding'::text) AND (status <> 'failed'::text))
   index CREATE UNIQUE INDEX psp_imports_pkey ON billing.psp_imports USING btree (merchant_id, id)
 
 table billing.psp_refresh_watermarks

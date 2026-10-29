@@ -85,7 +85,7 @@ func (w *ProviderObjectObserveWorker) Work(ctx context.Context, job *river.Job[w
 			return nil
 		}
 		// A price an event first shows us, live and unmapped, is new since
-		// onboarding: raise it. A pulled one is the import's to list.
+		// the last pull: raise it. A pulled one is the import's to list.
 		raise := before == nil && obj != nil && !obj.Retired
 		return objects.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			_, err := parking.SyncPriceFinding(ctx, gen.New(tx), args.MerchantID, args.PSPID, args.Ref, raise)

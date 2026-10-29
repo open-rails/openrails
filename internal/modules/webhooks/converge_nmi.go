@@ -208,7 +208,7 @@ func (s *NMIConvergeService) convergeUnheld(ctx context.Context, rail, reference
 		return uuid.Nil, err
 	} else if owned {
 		log.WithContext(ctx).WithFields(log.Fields{"rail": rail, "subscription_reference": reference}).
-			Info("nmi converge: unheld subscription is its PSP import's until it is pulled and not staged")
+			Info("nmi converge: unheld subscription is its PSP import's while it pulls or stages it")
 		return uuid.Nil, nil
 	}
 	if held, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndProductID(ctx, owners[0].String(), price.ProductID); err == nil && held != nil {

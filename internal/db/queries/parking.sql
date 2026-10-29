@@ -78,9 +78,9 @@ LIMIT 2;
 
 -- name: GetParkBacklog :one
 -- The PSP's latest import that has not failed, and how it staged one
--- subscription: until a pull has listed the PSP's backlog (none yet, or the
--- latest still pulling), or while it lists the subscription unlanded, the
--- import owns it and nothing parks. A failed import is no pull.
+-- subscription: while it is pulling, or lists the subscription unlanded, the
+-- import owns it and its park raises no finding. A failed import owns
+-- nothing.
 SELECT i.id AS import_id, i.status, COALESCE(r.state, '')::text AS staged_state
 FROM billing.psp_imports i
 LEFT JOIN billing.psp_import_records r ON r.merchant_id = i.merchant_id AND r.import_id = i.id

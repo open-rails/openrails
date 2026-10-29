@@ -218,13 +218,17 @@ func TestMerchantConsole(t *testing.T) {
 		}
 		gold, err := iw.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: products["gold"], Key: "nmi-gold", PSP: "nmi", PlanID: "gold"})
 		require.NoError(t, err)
-		imp := iw.onboarding(t, "nmi")
-		require.Equal(t, billing.PSPImportPulling, imp.Status, "the fleet has not run its pull")
+		iw.noImports(t)
 
 		counts := consoleBrowser(t, iw.authorityWorld,
 			map[string]any{"tokens": map[string]string{"staff": consoleOperator(t, iw.authorityWorld)}, "carol": carol.ID, "vault": vault},
 			map[string]consoleAction{"start": consoleStart(t, iw)},
 			"console-pull-link-map-apply-lands-once")
+		require.Equal(t, 1, counts["POST /v1/merchant/psp-imports"], "the console's Pull creates the import")
+		created, err := iw.alpha.ListPSPImports(t.Context(), billing.PSPImportListParams{})
+		require.NoError(t, err)
+		require.Len(t, created.Items, 1)
+		imp := created.Items[0]
 
 		var silver *billing.Price
 		prices, err := iw.alpha.ListPrices(t.Context(), billing.PriceListParams{})
@@ -295,7 +299,7 @@ func TestMerchantConsole(t *testing.T) {
 		}
 		m23, m999, unmapped := member(iw.alice, "23.00"), member(carol, "9.99"), member(dave, "23.00")
 		iw.start(t)
-		imp := iw.await(t, iw.onboarding(t, "ccbill").ID, billing.PSPImportPulled)
+		imp := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "ccbill"}})
 		_, err := iw.api.UpdatePSPImport(t.Context(), imp.ID, billing.UpdatePSPImportParams{Rules: &[]billing.PSPImportRule{{Fact: "username", Via: billing.PSPImportViaMapping, Mapping: "legacy"}}})
 		require.NoError(t, err)
 		_, err = iw.api.SetPSPImportMappings(t.Context(), billing.SetPSPImportMappingsParams{Mappings: []billing.PSPImportMapping{{Mapping: "legacy", Key: dave.Username, Customer: new(billing.CustomerID(uuid.MustParse(dave.ID)))}}})
@@ -349,7 +353,7 @@ func TestMerchantConsole(t *testing.T) {
 			require.Zero(t, counts["POST /v1/merchant/psp-imports/"+first.ID.String()+"/"+step], "the console offers no %s of a superseded import", step)
 		}
 
-		imports, err := iw.alpha.ListPSPImports(t.Context(), billing.PSPImportListParams{Origin: billing.PSPImportManual})
+		imports, err := iw.alpha.ListPSPImports(t.Context(), billing.PSPImportListParams{})
 		require.NoError(t, err)
 		reconciled := imports.Items[0]
 		require.Equal(t, billing.PSPImportApplied, reconciled.Status)
@@ -426,8 +430,8 @@ func TestMerchantConsole(t *testing.T) {
 		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
 		iw.nmiMember(t, iw.alice.Email, "gold", "20.00", start)
 		iw.start(t)
-		nmiImport := iw.await(t, iw.onboarding(t, "nmi").ID, billing.PSPImportPulled)
-		stripeImport := iw.await(t, iw.onboarding(t, "stripe").ID, billing.PSPImportFailed)
+		nmiImport := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}})
+		stripeImport := iw.await(t, iw.started(t, "stripe").ID, billing.PSPImportFailed)
 		require.Equal(t, billing.PSPImportCredentialsRejected, *stripeImport.ErrorCode)
 
 		counts := consoleBrowser(t, iw.authorityWorld,

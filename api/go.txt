@@ -161,7 +161,6 @@ pkg openrails, method (*Engine) ClearDestructiveHold(context.Context, billing.Me
 pkg openrails, method (*Engine) Close(context.Context) error
 pkg openrails, method (*Engine) CustomerConfig(Routes, *http.Request) (*billing.CustomerConfig, error)
 pkg openrails, method (*Engine) CustomerRoutes(CustomerRoutes) ([]Route, error)
-pkg openrails, method (*Engine) EnsurePSPOnboarding(context.Context, billing.MerchantID) error
 pkg openrails, method (*Engine) ListOpenDestructiveHolds(context.Context, int, billing.DestructiveHoldID) ([]billing.DestructiveHoldReview, error)
 pkg openrails, method (*Engine) LocalMerchant(billing.MerchantID) (*LocalClient, error)
 pkg openrails, method (*Engine) Merchant(billing.MerchantID) (*Client, error)
@@ -979,9 +978,7 @@ pkg openrails/billing, const PSPImportHeld PSPImportRecordState = "held"
 pkg openrails/billing, const PSPImportIDPrefix untyped string = "pim_"
 pkg openrails/billing, const PSPImportImported PSPImportRecordState = "imported"
 pkg openrails/billing, const PSPImportLinked PSPImportRecordState = "linked"
-pkg openrails/billing, const PSPImportManual PSPImportOrigin = "manual"
 pkg openrails/billing, const PSPImportNotReadable PSPImportErrorCode = "psp_not_readable"
-pkg openrails/billing, const PSPImportOnboarding PSPImportOrigin = "onboarding"
 pkg openrails/billing, const PSPImportPulled PSPImportStatus = "pulled"
 pkg openrails/billing, const PSPImportPulling PSPImportStatus = "pulling"
 pkg openrails/billing, const PSPImportRecordIDPrefix untyped string = "pir_"
@@ -2841,7 +2838,6 @@ pkg openrails/billing, type PSPImport struct, ErrorCode *PSPImportErrorCode `jso
 pkg openrails/billing, type PSPImport struct, HistorySince *time.Time `json:"history_since"`
 pkg openrails/billing, type PSPImport struct, HistoryThrough *time.Time `json:"history_through"`
 pkg openrails/billing, type PSPImport struct, ID PSPImportID `json:"id"`
-pkg openrails/billing, type PSPImport struct, Origin PSPImportOrigin `json:"origin"`
 pkg openrails/billing, type PSPImport struct, PSP PSPID `json:"psp"`
 pkg openrails/billing, type PSPImport struct, Proposals PSPImportProposals `json:"proposals"`
 pkg openrails/billing, type PSPImport struct, PulledAt *time.Time `json:"pulled_at"`
@@ -2863,7 +2859,6 @@ pkg openrails/billing, type PSPImportLink struct, Customer *CustomerID `json:"cu
 pkg openrails/billing, type PSPImportLink struct, Record PSPImportRecordID `json:"record"`
 pkg openrails/billing, type PSPImportListParams struct
 pkg openrails/billing, type PSPImportListParams struct, IDs []PSPImportID
-pkg openrails/billing, type PSPImportListParams struct, Origin PSPImportOrigin
 pkg openrails/billing, type PSPImportListParams struct, PSP PSPRef
 pkg openrails/billing, type PSPImportListParams struct, embedded PageRequest
 pkg openrails/billing, type PSPImportMapping struct
@@ -2873,7 +2868,6 @@ pkg openrails/billing, type PSPImportMapping struct, Mapping string `json:"mappi
 pkg openrails/billing, type PSPImportMappingsResult struct
 pkg openrails/billing, type PSPImportMappingsResult struct, Deleted int `json:"deleted"`
 pkg openrails/billing, type PSPImportMappingsResult struct, Set int `json:"set"`
-pkg openrails/billing, type PSPImportOrigin string
 pkg openrails/billing, type PSPImportPriceLink struct
 pkg openrails/billing, type PSPImportPriceLink struct, Price *PriceID `json:"price"`
 pkg openrails/billing, type PSPImportPriceLink struct, Record PSPImportRecordID `json:"record"`

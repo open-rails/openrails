@@ -6,7 +6,6 @@ import { Link, useParams } from "#orck/admin/router"
 
 import { StatusBadge } from "#orck/admin/components/status-badge"
 import { TypedConfirmDialog } from "#orck/admin/components/typed-confirm-dialog"
-import { Badge } from "#orck/admin/components/ui/badge"
 import { Button } from "#orck/admin/components/ui/button"
 import {
   Card,
@@ -84,7 +83,6 @@ function ImportDetail() {
           <h1 className="flex items-center gap-2 text-xl font-semibold">
             {text("Import of ")}
             {psp?.key ?? imp.psp}
-            <Badge variant="secondary">{imp.origin}</Badge>
             <StatusBadge status={imp.status} />
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -189,16 +187,16 @@ function Progress({ imp }: { imp: PSPImport }) {
         </p>
         {imp.error_code === "psp_credentials_rejected" && (
           <p className="mt-1">
-            <AdminMessage id="The provider refused this PSP's credentials. A new pull starts when they change in " />
+            <AdminMessage id="The provider refused this PSP's credentials. Correct them in " />
             <Link className="underline" to="/settings?tab=psps">
               <AdminMessage id="Settings › PSPs" />
             </Link>
-            .
+            <AdminMessage id=", then pull again." />
           </p>
         )}
         {imp.error_code === "pull_roster_implausible" && (
           <p className="mt-1">
-            <AdminMessage id="The provider listed far fewer live subscriptions than OpenRails holds, so nothing was proposed. Check the PSP's account and reconcile again." />
+            <AdminMessage id="The provider listed far fewer live subscriptions than OpenRails holds, so nothing was proposed. Check the PSP's account and pull again." />
           </p>
         )}
         {imp.error_code === "psp_not_readable" && (

@@ -1,25 +1,7 @@
 -- name: CreatePSPImport :one
-INSERT INTO billing.psp_imports (merchant_id, psp_id, rail, origin, status, history_since, rules)
-VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(rail)::text, 'manual', 'pulling', sqlc.narg(history_since)::timestamptz,
+INSERT INTO billing.psp_imports (merchant_id, psp_id, rail, status, history_since, rules)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(rail)::text, 'pulling', sqlc.narg(history_since)::timestamptz,
     sqlc.arg(rules)::jsonb)
-RETURNING *;
-
--- name: CreateOnboardingPSPImport :many
--- A PSP's onboarding import, unless it has one in any status. A replica or
--- host inserting it concurrently wins on psp_imports_onboarding_key: this
--- then returns no row.
-INSERT INTO billing.psp_imports (merchant_id, psp_id, rail, origin, status, rules)
-SELECT sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(rail)::text, 'onboarding', 'pulling', sqlc.arg(rules)::jsonb
-WHERE NOT EXISTS (SELECT 1 FROM billing.psp_imports
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND origin = 'onboarding')
-ON CONFLICT (merchant_id, psp_id) WHERE origin = 'onboarding' AND status <> 'failed' DO NOTHING
-RETURNING *;
-
--- name: RearmOnboardingPSPImport :many
--- Restarts a failed onboarding import in place; a concurrent re-arm or a
--- live import matches nothing.
-UPDATE billing.psp_imports SET status = 'pulling', error = NULL, error_code = NULL, updated_at = now()
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND origin = 'onboarding' AND status = 'failed'
 RETURNING *;
 
 -- name: GetPSPImport :one
@@ -33,7 +15,6 @@ SELECT * FROM billing.psp_imports WHERE merchant_id = sqlc.arg(merchant_id)::uui
 SELECT * FROM billing.psp_imports
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(psp_id)::uuid IS NULL OR psp_id = sqlc.narg(psp_id)::uuid)
-  AND (sqlc.narg(origin)::text IS NULL OR origin = sqlc.narg(origin)::text)
   AND (sqlc.narg(after_at)::timestamptz IS NULL OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;

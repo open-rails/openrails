@@ -614,13 +614,10 @@
       "TestPSPImport/OR-J38-S05/stripe-catalog-keeps-the-newest-truth-and-skips-what-it-cannot-read"
     ],
     "OR-J38-S06": [
-      "TestPSPImport/OR-J38-S06/onboarding-pull-per-rail"
-    ],
-    "OR-J38-S07": [
-      "TestPSPImport/OR-J38-S07/two-runtimes-one-database"
+      "TestPSPImport/OR-J38-S06/a-person-pulls-each-rail"
     ],
     "OR-J38-S08": [
-      "TestPSPImport/OR-J38-S08/credentials-rejected-rearms"
+      "TestPSPImport/OR-J38-S08/credentials-rejected-fail-the-import"
     ],
     "OR-J38-S09": [
       "TestPSPImport/OR-J38-S09/provider-unreachable-retries"
@@ -632,7 +629,7 @@
       "TestPSPImport/OR-J38-S11/stripe-customer-attribution"
     ],
     "OR-J38-S12": [
-      "TestPSPImport/OR-J38-S12/psp-added-and-rotated-at-runtime"
+      "TestPSPImport/OR-J38-S12/psp-added-and-rotated-at-runtime-pulls-only-when-asked"
     ],
     "OR-J38-S13": [
       "TestPSPImport/OR-J38-S13/unreadable-answer-fails-visibly"
@@ -680,7 +677,7 @@
       "TestProviderTrailing/OR-J15-S16/list-parked-subscriptions"
     ],
     "OR-J15-S17": [
-      "TestProviderTrailing/OR-J15-S17/stripe-link-before-the-first-pull-lands-at-once"
+      "TestProviderTrailing/OR-J15-S17/stripe-unlinked-before-any-import-parks-with-its-finding"
     ],
     "OR-J15-S18": [
       "TestProviderTrailing/OR-J15-S18/held-stripe-subscription-ends-only-on-resource-missing"
@@ -690,6 +687,9 @@
     ],
     "OR-J15-S20": [
       "TestProviderTrailing/OR-J15-S20/nmi-schedule-with-no-plan-raises-a-finding-and-parks-nothing"
+    ],
+    "OR-J15-S21": [
+      "TestProviderTrailing/OR-J15-S21/only-a-pulling-or-staging-import-owns-a-subscription"
     ],
     "OR-J38-S20": [
       "TestPSPReconcile/OR-J38-S20/manual-reconcile-proposes-and-writes-nothing"

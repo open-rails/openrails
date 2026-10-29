@@ -164,9 +164,9 @@ type GetParkBacklogRow struct {
 }
 
 // The PSP's latest import that has not failed, and how it staged one
-// subscription: until a pull has listed the PSP's backlog (none yet, or the
-// latest still pulling), or while it lists the subscription unlanded, the
-// import owns it and nothing parks. A failed import is no pull.
+// subscription: while it is pulling, or lists the subscription unlanded, the
+// import owns it and its park raises no finding. A failed import owns
+// nothing.
 func (q *Queries) GetParkBacklog(ctx context.Context, arg GetParkBacklogParams) (GetParkBacklogRow, error) {
 	row := q.db.QueryRow(ctx, getParkBacklog, arg.SubscriptionRef, arg.MerchantID, arg.PspID)
 	var i GetParkBacklogRow

@@ -241,10 +241,7 @@ func TestVerificationBinding(t *testing.T) {
 		require.NoError(t, err)
 		a.alpha, err = a.engine.MerchantBySlug("alpha")
 		require.NoError(t, err)
-		// The first boot queued the old account's onboarding pull; it would
-		// read the 201 members below beside the verifier under test.
 		fleet := hostFleet(t, a.world, 2)
-		cancelOnboarding(t, fleet, 2)
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
 
@@ -290,8 +287,6 @@ func TestVerificationBinding(t *testing.T) {
 		a.clock.Advance(due.Sub(a.clock.Now()) + time.Hour)
 		fleet := hostFleet(t, a.world)
 		fleet.PeriodicJobs().Clear()
-		// The PSP's onboarding pull would be the first provider read held.
-		cancelOnboarding(t, fleet, 1)
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
 		// The pull reads the switch as on, then the operator turns it off

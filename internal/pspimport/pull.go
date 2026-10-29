@@ -132,16 +132,8 @@ func (im *Importer) Pull(ctx context.Context, id billing.PSPImportID, relink boo
 	if err == nil || !rejected(err) {
 		return err
 	}
-	// Credentials replaced while this pull read the old ones: the change's
-	// re-arm found the import still pulling, so retry with the new ones.
-	if now, found, rerr := im.Merchants.PSPScopeByID(ctx, mid, row.PspID); rerr == nil && found && now.Revision != scope.Revision {
-		return fmt.Errorf("%w: %w", errConfigChanged, err)
-	}
 	return PermanentError{Err: fmt.Errorf("%w: %w", ErrCredentialsRejected, err), Code: billing.PSPImportCredentialsRejected}
 }
-
-// errConfigChanged is a pull whose PSP's configuration changed under it.
-var errConfigChanged = errors.New("the PSP's configuration changed during the pull")
 
 func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope merchants.PSPScope, relink bool) error {
 	mid := billing.MerchantID(row.MerchantID)
@@ -157,16 +149,6 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 			return clientError(scope, err)
 		}
 	}
-	// The first answer the provider gives closes the PSP's credentials
-	// finding.
-	answered := false
-	read := func() error {
-		if answered {
-			return nil
-		}
-		answered = true
-		return im.resolveCredentialsFinding(ctx, row)
-	}
 	q := im.DB.Gen(ctx)
 	if row.PulledAt == nil {
 		// What OpenRails holds before the roster read is the basis of every
@@ -181,9 +163,6 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 		}
 		recs, err := src.roster(ctx)
 		if err != nil {
-			return err
-		}
-		if err := read(); err != nil {
 			return err
 		}
 		// A roster the breaker refuses records nothing, the catalog's
@@ -227,9 +206,6 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 		}
 		recs, err := src.history(ctx, through, until)
 		if err != nil {
-			return err
-		}
-		if err := read(); err != nil {
 			return err
 		}
 		for i := range recs {

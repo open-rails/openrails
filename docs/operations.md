@@ -489,12 +489,9 @@ bills, readiness and `openrails_configuration` report it and a
 only history it is informational. Declaring the account again, under any
 key, re-arms it.
 
-A PSP's first load also starts its read-only [onboarding import](psp-import.md#onboarding-import).
-When the provider refuses its credentials, the import fails with
-`psp_credentials_rejected` and a `consistency.psp_import.credentials_rejected`
-finding (subject: the PSP id) alerts the operator. Correct the credentials:
-the import restarts when the configuration changes or a process next loads
-it, and the finding closes once the provider answers.
+Adding or changing a PSP pulls nothing: a person [pulls it](psp-import.md#pulling)
+with `CreatePSPImport`. When the provider refuses its credentials, that
+import fails with `psp_credentials_rejected`; correct them and create another.
 
 Every provider intent is stamped at enqueue with the `psp_id` it was produced
 against, and the executor/verifier arm the rail client for **that** PSP row
@@ -872,7 +869,9 @@ disappears. Two safety doctrines matter operationally:
     means "not ours": it stays ignored and its parks stay listed.
   - `life.subscription.unattributed` (subject: the provider subscription),
     high: its provider customer is linked to no customer, or the customer
-    already holds the product. It resolves when the park closes.
+    already holds the product. It resolves when the park closes. An NMI
+    schedule naming no plan raises it without a park (evidence `reason:
+    plan_missing`); it resolves when the schedule lands or NMI deletes it.
   Mapping the price or linking the customer wakes the park's converge; the
   park closes once the subscription lands by any path. Released parks are
   deleted 90 days after release.

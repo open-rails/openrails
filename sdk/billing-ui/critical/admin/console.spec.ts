@@ -35,21 +35,28 @@ const cell = (page: Page, kind: string, state: string) =>
 test("console-pull-link-map-apply-lands-once", async ({ page }) => {
   const fx = await fixture<{ carol: string; vault: string }>(page)
   await open(page, "/ops/imports")
+  await expect(page.getByText("No PSP has been pulled yet.")).toBeVisible()
+  await page.getByRole("button", { name: "Pull", exact: true }).click()
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Pull", exact: true })
+    .click()
+  await expect(page.getByText("Pull started")).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(
+    "Import of nmi"
+  )
+  const detail = page.url()
+  await open(page, "/ops/imports")
   const row = page.locator("tr[data-import]")
   await expect(row).toHaveCount(1)
-  await expect(row).toContainText("onboarding")
   await expect(row).toContainText("pulling")
   await expect(row).toContainText("Reading catalog and roster")
   await act(page, "start")
   // The list polls while the pull runs.
   await expect(row).toContainText("Pulled: ready to apply")
   await expect(row).toContainText("unmatched")
-
   await row.getByRole("link").click()
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(
-    "Import of nmi"
-  )
-  const detail = page.url()
+  await expect(page).toHaveURL(detail)
   await expect(cell(page, "subscription", "linked")).toHaveText("2")
   await expect(cell(page, "subscription", "unmatched")).toHaveText("1")
   await expect(page.locator('tr[data-ref="gold"]')).not.toContainText(
@@ -187,7 +194,7 @@ test("console-failed-pull-and-read-only-access", async ({ page }) => {
   await expect(
     page.locator(`tr[data-import="${fx.stripeImport}"]`)
   ).toContainText("failed")
-  await expect(page.getByRole("button", { name: "Reconcile" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Pull" })).toHaveCount(0)
   await expect(
     page.getByRole("button", { name: "Upload mappings" })
   ).toHaveCount(0)
@@ -228,13 +235,6 @@ test("console-failed-pull-and-read-only-access", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Dismiss" })).toHaveCount(0)
   await open(page, "/ops/parked", "reader")
   await expect(page.getByText("Nothing is parked.")).toBeVisible()
-  await open(page, "/ops", "reader")
-  await expect(
-    page.locator("tr", {
-      hasText: "consistency.psp_import.credentials_rejected",
-    })
-  ).toBeVisible()
-  await expect(page.getByRole("button", { name: "Resolve" })).toHaveCount(0)
 
   // Configuration without catalog manage: Map is there, disabled, naming
   // the permission it needs.
@@ -247,7 +247,9 @@ test("console-failed-pull-and-read-only-access", async ({ page }) => {
   await expect(map).toBeDisabled()
   await expect(map).toHaveAttribute("title", "Needs merchant:catalog:manage")
   await open(page, "/ops/imports", "config")
-  await expect(page.getByRole("button", { name: "Reconcile" })).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Pull", exact: true })
+  ).toBeVisible()
 })
 
 test("console-proposals-group-approve-held-dismiss", async ({
@@ -255,14 +257,10 @@ test("console-proposals-group-approve-held-dismiss", async ({
   context,
 }) => {
   await open(page, "/ops/imports")
-  await page.getByRole("button", { name: "Reconcile" }).click()
-  const reconcile = page.getByRole("dialog")
-  await reconcile
-    .getByLabel("History since")
-    .selectOption({ label: "Full history" })
-  await reconcile
-    .getByRole("button", { name: "Reconcile", exact: true })
-    .click()
+  await page.getByRole("button", { name: "Pull", exact: true }).click()
+  const pull = page.getByRole("dialog")
+  await pull.getByLabel("History since").selectOption({ label: "Full history" })
+  await pull.getByRole("button", { name: "Pull", exact: true }).click()
   await expect(page.getByTestId("import-progress")).toContainText(
     "Pulled: ready to apply"
   )
@@ -279,7 +277,7 @@ test("console-proposals-group-approve-held-dismiss", async ({
   await expect(pulls.getByRole("link", { name: "Review" })).toHaveCount(5)
   await expect(pulls.getByRole("button", { name: "Resolve" })).toHaveCount(0)
 
-  // The reconcile supersedes the first import: it says so and offers nothing.
+  // The pull supersedes the first import: it says so and offers nothing.
   const fx = await fixture<{ first: string }>(page)
   await open(page, `/ops/imports/${fx.first}`)
   await expect(page.getByTestId("superseded")).toContainText(

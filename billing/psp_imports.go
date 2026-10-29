@@ -52,9 +52,8 @@ func (id *PSPImportRecordID) UnmarshalText(text []byte) error {
 // CodePSPImportInProgress: one import per PSP pulls or applies at a time.
 const CodePSPImportInProgress = "psp_import_in_progress"
 
-// ErrPSPImportInProgress matches the in-progress refusal, from the API or an
-// embedded call such as Engine.EnsurePSPOnboarding: retry once the PSP's
-// import finishes.
+// ErrPSPImportInProgress matches the in-progress refusal of CreatePSPImport,
+// from the API or in process: retry once the PSP's import finishes.
 var ErrPSPImportInProgress error = newCodedError(CodePSPImportInProgress, ErrConflict)
 
 // PSPImportStatus is where an import is: its pull, then its landing.
@@ -65,22 +64,8 @@ const (
 	PSPImportPulled   PSPImportStatus = "pulled"
 	PSPImportApplying PSPImportStatus = "applying"
 	PSPImportApplied  PSPImportStatus = "applied"
-	// PSPImportFailed names its error. A failed onboarding import restarts
-	// when its PSP's configuration is next loaded or changes; a manual one is
-	// created again.
+	// PSPImportFailed names its error; a person creates the import again.
 	PSPImportFailed PSPImportStatus = "failed"
-)
-
-// PSPImportOrigin is who started an import.
-type PSPImportOrigin string
-
-const (
-	// PSPImportOnboarding is the one pull OpenRails starts by itself when a
-	// PSP's configuration is first loaded: one per PSP, whichever replica or
-	// host loads it first.
-	PSPImportOnboarding PSPImportOrigin = "onboarding"
-	// PSPImportManual is an import a person created.
-	PSPImportManual PSPImportOrigin = "manual"
 )
 
 // PSPImportErrorCode is why a failed import stopped when pulling it again
@@ -89,8 +74,7 @@ type PSPImportErrorCode string
 
 const (
 	// PSPImportCredentialsRejected: the provider refused the PSP's
-	// credentials. A consistency.psp_import.credentials_rejected finding is
-	// open until a pull of the PSP reads it.
+	// credentials.
 	PSPImportCredentialsRejected PSPImportErrorCode = "psp_credentials_rejected"
 	// PSPImportNotReadable: the PSP is gone, its rail has no import, or a
 	// credential the pull needs is not declared.
@@ -190,7 +174,6 @@ type PSPImport struct {
 	ID             PSPImportID         `json:"id"`
 	PSP            PSPID               `json:"psp"`
 	Rail           string              `json:"rail"`
-	Origin         PSPImportOrigin     `json:"origin"`
 	Status         PSPImportStatus     `json:"status"`
 	HistorySince   *time.Time          `json:"history_since"`
 	HistoryThrough *time.Time          `json:"history_through"`
@@ -246,13 +229,12 @@ type PSPImportRecord struct {
 }
 
 // PSPImportListParams lists the merchant's imports, newest first: one PSP's
-// (by id or key) and of one origin when set.
+// (by id or key) when set.
 type PSPImportListParams struct {
 	PageRequest
 	// IDs instead reads 1 to MaxBatchItems named imports in one page.
-	IDs    []PSPImportID
-	PSP    PSPRef
-	Origin PSPImportOrigin
+	IDs []PSPImportID
+	PSP PSPRef
 }
 
 // PSPImportRecordListParams filters an import's records, in id order.

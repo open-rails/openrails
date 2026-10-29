@@ -500,19 +500,10 @@ func TestBackgroundJobs(t *testing.T) {
 		a, _ := newNMIWorld(t)
 		// A bound producer that is never started: the pull job is queued, not run.
 		fleet := hostFleet(t, a.world)
-		// The PSP's onboarding import, never run here, holds its one import
-		// in flight: set it aside so a manual import may start.
-		require.Eventually(t, func() bool {
-			tag, err := a.pool.Exec(t.Context(), fmt.Sprintf(`UPDATE %s SET status = 'failed', error = 'set aside by the test' WHERE origin = 'onboarding' AND status = 'pulling'`,
-				pgx.Identifier{a.schema, "psp_imports"}.Sanitize()))
-			require.NoError(t, err)
-			return tag.RowsAffected() > 0
-		}, 30*time.Second, 50*time.Millisecond)
 		restore := storageFault(t, a.world, a.world.schema, "river_job", "NEW.kind = 'openrails.psp_import'")
 		_, err := a.alpha.CreatePSPImport(t.Context(), billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}})
 		require.Error(t, err)
-		// The PSP's onboarding import may hold the other psp_import job.
-		imports, err := a.alpha.ListPSPImports(t.Context(), billing.PSPImportListParams{Origin: billing.PSPImportManual})
+		imports, err := a.alpha.ListPSPImports(t.Context(), billing.PSPImportListParams{})
 		require.NoError(t, err)
 		require.Empty(t, imports.Items, "an import whose job was not queued is not kept")
 		restore()

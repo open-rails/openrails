@@ -10030,13 +10030,6 @@
             }
           },
           {
-            "name": "origin",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "psp",
             "in": "query",
             "schema": {
@@ -19120,13 +19113,6 @@
           "rail": {
             "type": "string"
           },
-          "origin": {
-            "type": "string",
-            "enum": [
-              "manual",
-              "onboarding"
-            ]
-          },
           "status": {
             "type": "string",
             "enum": [
@@ -19234,7 +19220,6 @@
           "id",
           "psp",
           "rail",
-          "origin",
           "status",
           "history_since",
           "history_through",

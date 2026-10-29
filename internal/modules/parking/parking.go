@@ -46,9 +46,9 @@ type Subject struct {
 	// HeldBy is the subscription a product_held customer already has.
 	HeldBy *uuid.UUID
 	// Unheld is a subscription no row holds: it parks only while none does,
-	// and the backlog rule applies. While the PSP's import owns it (no pull
-	// yet, a pull pending, or staged unlanded) it parks without a finding,
-	// so a fix still wakes it.
+	// and the backlog rule applies. While the PSP's import owns it (pulling,
+	// or staging it unlanded) it parks without a finding, so a fix still
+	// wakes it.
 	Unheld   bool
 	Evidence map[string]any
 }
@@ -134,10 +134,15 @@ func Park(ctx context.Context, d *db.DB, s Subject, now time.Time) (Result, erro
 			}
 		}
 		switch {
+		case s.Reason == billing.ParkPriceUnmapped:
+			// Recounted either way: a park the import now owns no longer counts.
+			f, err := SyncPriceFinding(ctx, q, mid.UUID(), s.PSPID, s.PriceRef, false)
+			if !res.ImportOwned {
+				res.Finding = f
+			}
+			return err
 		case res.ImportOwned:
 			return nil
-		case s.Reason == billing.ParkPriceUnmapped:
-			res.Finding, err = SyncPriceFinding(ctx, q, mid.UUID(), s.PSPID, s.PriceRef, false)
 		default:
 			res.Finding, err = openUnattributed(ctx, q, mid.UUID(), s, evidence)
 		}
@@ -251,14 +256,13 @@ func causeFixed(ctx context.Context, q *gen.Queries, mid uuid.UUID, s Subject) (
 	return false, nil
 }
 
-// importOwns applies the backlog rule: the PSP has no import that has not
-// failed (none yet, or its onboarding pull failed and waits to restart), its
-// latest is still pulling, or that pull staged the subscription and has not
-// landed it.
+// importOwns applies the backlog rule: the PSP's latest import that has not
+// failed is still pulling, or staged the subscription and has not landed it.
+// With no such import, nothing owns it.
 func importOwns(ctx context.Context, q *gen.Queries, mid uuid.UUID, s Subject) (bool, error) {
 	row, err := q.GetParkBacklog(ctx, gen.GetParkBacklogParams{MerchantID: mid, PspID: s.PSPID, SubscriptionRef: s.SubscriptionRef})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return true, nil
+		return false, nil
 	}
 	if err != nil {
 		return false, err

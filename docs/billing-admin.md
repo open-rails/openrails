@@ -59,11 +59,11 @@ Ops needs merchant configuration read (`merchant:config:read`); its actions need
 | --- | --- | --- |
 | Findings | Open findings | Resolve. A `pull.*` finding opens the proposals inbox instead; a `catalog.price.unmapped` finding opens Provider prices |
 | Proposals | Open `pull.*` proposals grouped by PSP and change kind, with customer, subject, change, effects and the provider record; filtered by import (`pull_id`) | Approve, Dismiss (notes required) a selection or a whole group, 100 a request, each approve request with its own `Idempotency-Key`; approving changes that end access, move money or write to a provider takes their count typed. Only a signed-in person decides (`person_required`) |
-| PSP imports | Each PSP pull, newest first, with its progress (polled while it runs) and record counts | Reconcile (a manual import, `CreatePSPImport`); Upload mappings (CSV `mapping,key,customer`, sent 100 rows a request) |
+| PSP imports | Each PSP pull, newest first, with its progress (polled while it runs) and record counts | Pull (creates an import, `CreatePSPImport`); Upload mappings (CSV `mapping,key,customer`, sent 100 rows a request) |
 | Import | Progress or failure, counts by kind and state, its proposals, the plans its subscriptions name, its rules | Re-link (runs as a job; the import is `pulling` until it ends); Apply and Apply again (type the PSP key; a signed-in person only) |
 | Records | Staged records by state and kind, with facts, reason and how each linked | Link to customer, Unlink; Set price on a CCBill subscription (`LinkPSPImport`) |
 | Provider prices | A PSP's observed prices, unmapped by default, with parks and findings | Map to product (`CreateProviderPrice`, not a tier-change target unless chosen; also needs `merchant:catalog:manage`); Dismiss (ignores the price's finding) |
-| Parked | Open parks, or released ones | Map the price (`price_unmapped`); Reconcile the PSP (`customer_unlinked`) |
+| Parked | Open parks, or released ones | Map the price (`price_unmapped`); Pull the PSP (`customer_unlinked`) |
 
 With customer support read (`merchant:customer:read`), Records shows linked customers' emails and searches customers to link.
 
