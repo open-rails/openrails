@@ -229,6 +229,13 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
       SELECT 1 FROM billing.grants t
       WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
   )
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.subscriptions s
+      WHERE g.kind = 'access' AND g.source_type = 'subscription'
+        AND s.merchant_id = g.merchant_id AND s.customer_id = g.customer_id AND s.id::text = g.source_id
+        AND s.deleted_at IS NULL AND s.status = 'canceled' AND s.cancel_type = 'chargeback'
+        AND g.starts_at >= s.canceled_at
+  )
   AND (
     (g.kind = 'access' AND NOT EXISTS (
         SELECT 1 FROM billing.product_access pa
@@ -239,6 +246,24 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
         WHERE lt.merchant_id = g.merchant_id AND lt.transfer_type = 'deposit' AND lt.grant_id = g.id))
   )
 ORDER BY g.created_at;
+
+-- name: AccessGrantPastChargebackBoundary :one
+-- Recheck after the customer lock: a missing-effect finding may predate the
+-- source's chargeback. Its gated subscription repair owns the termination.
+SELECT EXISTS (
+    SELECT 1 FROM billing.grants g
+    JOIN billing.subscriptions s ON s.merchant_id = g.merchant_id
+      AND s.customer_id = g.customer_id AND s.id::text = g.source_id
+    WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.id = sqlc.arg(grant_id)::uuid
+      AND g.kind = 'access' AND g.event = 'grant' AND g.source_type = 'subscription'
+      AND s.deleted_at IS NULL AND s.status = 'canceled' AND s.cancel_type = 'chargeback'
+      AND g.starts_at >= s.canceled_at
+      AND NOT EXISTS (
+          SELECT 1 FROM billing.grants t
+          WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+            AND t.event IN ('revoke', 'expire', 'supersede')
+      )
+) AS beyond_boundary;
 
 -- derive.grant_effect.excess: terminated grants whose effect is still live (an
 -- unrevoked window, or a credit remainder > 0). NULL customer_id =
