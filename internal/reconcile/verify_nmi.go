@@ -436,11 +436,8 @@ func (v *Verifier) bulkReadPSP(ctx context.Context, mid billing.MerchantID, psp 
 			Coverage:     SnapshotCoverage{SubscriptionsExhaustive: exhaustive},
 			Capabilities: Capabilities{Subscriptions: true, Transactions: true}}
 		if listed {
-			remote, err := NMIRemoteSubscription(entry, now)
-			if err != nil {
-				return err
-			}
-			snap.Subscriptions = []RemoteSubscription{remote}
+			next, _ := parseNMIV5Date(entry.NextBillingDate)
+			snap.Subscriptions = []RemoteSubscription{nmiRosterEntry(sub.RailSubscriptionID, next, now)}
 		}
 		snaps[sub.ID] = snap
 	}

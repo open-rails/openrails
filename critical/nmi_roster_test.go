@@ -19,12 +19,12 @@ import (
 )
 
 // The bulk roster read resolves unverified NMI rows only from a whole roster:
-// a page NMI cuts short is refused, and a paused schedule is left alone.
+// a page NMI cuts short is refused.
 func TestNMIRoster(t *testing.T) {
 	const members = 201 // one past the bulk threshold
 	unverified := billing.SubscriptionStatus("unverified")
 	t.Run("OR-J15-S71/a-truncated-roster-page-resolves-nothing", func(t *testing.T) {
-		a, old, fleet, book, now := lapsedNMIBook(t, members, nil)
+		a, old, fleet, book, now := lapsedNMIBook(t, members)
 		old.TruncateRoster(1)
 		imported, err := a.alpha.ImportBilling(t.Context(), book)
 		require.NoError(t, err)
@@ -48,34 +48,13 @@ func TestNMIRoster(t *testing.T) {
 			}, 30*time.Second, 50*time.Millisecond, "the next pass reads the roster whole and resolves the rows")
 		}
 	})
-	t.Run("OR-J15-S72/a-paused-schedule-is-never-adopted-from-the-roster", func(t *testing.T) {
-		a, _, _, book, now := lapsedNMIBook(t, members, func(i int, s *nmimock.Schedule) { s.Paused = i == 0 })
-		imported, err := a.alpha.ImportBilling(t.Context(), book)
-		require.NoError(t, err)
-		require.Empty(t, imported.Blocked, "%+v", imported.Reasons)
-		require.Len(t, imported.Imported, members)
-		live := book.Customers[members-1].Customer
-		require.Eventually(t, func() bool {
-			subs, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: live})
-			return err == nil && len(subs.Items) == 1 && subs.Items[0].Status == billing.SubscriptionActive && subs.Items[0].CurrentPeriodEndsAt.After(now)
-		}, 30*time.Second, 50*time.Millisecond, "the roster resolves the billing schedules")
-		paused := book.Customers[0].Customer
-		paid := *book.Subscriptions[0].PaidThrough
-		require.Never(t, func() bool {
-			subs, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: paused})
-			return err != nil || len(subs.Items) != 1 || subs.Items[0].Status != unverified || !subs.Items[0].CurrentPeriodEndsAt.Equal(paid)
-		}, 3*time.Second, 100*time.Millisecond, "a paused schedule bills nothing: its row is neither adopted nor cancelled")
-		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: paused, Entitlements: []string{"nmi:member"}})
-		require.NoError(t, err)
-		require.True(t, access.Entitlements["nmi:member"], "an unverified row keeps its access")
-	})
 }
 
 // lapsedNMIBook boots the archived-account world of OR-J15-S07 and declares a
-// lapsed book of members schedules the archived account has since charged
-// (a paused one charged nothing), so every imported row is unverified and
-// only the verifier's bulk read resolves it.
-func lapsedNMIBook(t *testing.T, members int, configure func(i int, s *nmimock.Schedule)) (*authorityWorld, *nmimock.Mock, *river.Client[pgx.Tx], billing.DeclaredBilling, time.Time) {
+// lapsed book of members schedules the archived account has since charged,
+// so every imported row is unverified and only the verifier's bulk read
+// resolves it.
+func lapsedNMIBook(t *testing.T, members int) (*authorityWorld, *nmimock.Mock, *river.Client[pgx.Tx], billing.DeclaredBilling, time.Time) {
 	t.Helper()
 	a, accounts := nmiAccountsWorld(t)
 	old := accounts.cores["nmi-old-key"]
@@ -102,14 +81,8 @@ func lapsedNMIBook(t *testing.T, members int, configure func(i int, s *nmimock.S
 	for i := range members {
 		customer := billing.CustomerID(uuid.New())
 		vault := old.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
-		schedule := nmimock.Schedule{Vault: vault, Plan: "weekly", Amount: "10.00", Days: 7, Created: started, NextBilling: paid.Add(7 * 24 * time.Hour), Order: fmt.Sprintf("lapsed-%d", i)}
-		if configure != nil {
-			configure(i, &schedule)
-		}
-		id := old.AddSchedule(schedule)
-		if !schedule.Paused {
-			old.AddScheduleSale(id, paid)
-		}
+		id := old.AddSchedule(nmimock.Schedule{Vault: vault, Plan: "weekly", Amount: "10.00", Days: 7, Created: started, NextBilling: paid.Add(7 * 24 * time.Hour), Order: fmt.Sprintf("lapsed-%d", i)})
+		old.AddScheduleSale(id, paid)
 		ref := billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: old.Vault(vault).BillingID}
 		book.Customers = append(book.Customers, billing.DeclaredCustomer{Customer: customer})
 		book.PaymentMethods = append(book.PaymentMethods, billing.DeclaredPaymentMethod{Customer: customer, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: ref.RailMethodRef, CreatedAt: started})

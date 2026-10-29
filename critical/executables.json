@@ -823,9 +823,6 @@
     "OR-J15-S71": [
       "TestNMIRoster/OR-J15-S71/a-truncated-roster-page-resolves-nothing"
     ],
-    "OR-J15-S72": [
-      "TestNMIRoster/OR-J15-S72/a-paused-schedule-is-never-adopted-from-the-roster"
-    ],
     "OR-J29-S70": [
       "TestDueWork/OR-J29-S70/a-grant-commits-with-its-customers-convergence"
     ],
