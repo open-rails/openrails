@@ -451,14 +451,13 @@ func TestProcessRecovery(t *testing.T) {
 			}
 			renewalSettled(t, a, p, sub, due)
 			for _, id := range recoveredJobs {
-				job, err := queue.JobGet(t.Context(), id)
-				require.NoError(t, err)
-				if job.State == rivertype.JobStateScheduled {
-					_, err = queue.JobRetry(t.Context(), id)
-					require.NoError(t, err)
-				}
+				// A wakeup that read the operation while its competitor still
+				// held the claim snoozes; drive it now, as its scheduled time would.
 				require.Eventually(t, func() bool {
 					job, err := queue.JobGet(t.Context(), id)
+					if err == nil && job.State == rivertype.JobStateScheduled {
+						_, _ = queue.JobRetry(t.Context(), id)
+					}
 					return err == nil && job.State == rivertype.JobStateCompleted
 				}, 20*time.Second, 20*time.Millisecond, "both competing recovery jobs must run and converge")
 			}
