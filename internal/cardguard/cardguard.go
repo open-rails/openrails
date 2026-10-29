@@ -139,7 +139,7 @@ func plausibleGrouping(lens []int) bool {
 //	2        16, 19  Mastercard 2-series, Mir
 //	3        14-19   Amex 15, Diners 14/16/19, JCB 16-19
 //	4        13-19   Visa
-//	5        13-19   Mastercard, Maestro, Diners US
+//	5        16      Mastercard / Diners US (51-55); other ranges 13-19
 //	6        13-19   Discover, UnionPay, Maestro, RuPay, WEX
 //	7        19      Fuelman / FleetOne fleet cards
 //	8        15, 19  Voyager fleet cards
@@ -156,7 +156,12 @@ func issuedRange(digits []byte) bool {
 		return n == 16 || n == 19
 	case 3:
 		return n >= 14
-	case 4, 5, 6:
+	case 5:
+		if digits[1] >= 1 && digits[1] <= 5 {
+			return n == 16
+		}
+		return true
+	case 4, 6:
 		return true
 	case 7:
 		return n == 19

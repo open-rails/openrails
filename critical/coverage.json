@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 254,
+  "scenario_count": 256,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1089,6 +1089,11 @@
       "name": "A correction adopts an ended row's cancel kind and date from the provider at Apply, never into or out of a chargeback and never for an unpaid Stripe subscription; status, period and access stay byte-identical and the provider sees no write"
     },
     {
+      "id": "OR-J38-S36",
+      "journey": "J38",
+      "name": "Numeric CCBill references survive host import replay and archive validation while real cards are refused"
+    },
+    {
       "id": "OR-J22-S06",
       "journey": "J22",
       "name": "Lapsed credit stops being available at its lapse and its balance watch, arrears included, expires it"
@@ -1137,6 +1142,11 @@
       "id": "OR-J12-S30",
       "journey": "J12",
       "name": "Marked cards never starve a planned ahead-of-renewal check"
+    },
+    {
+      "id": "OR-J12-S12",
+      "journey": "J12",
+      "name": "Mastercard 51 through 55 uses 16 digits; other supported cards and formatted values remain blocked"
     },
     {
       "id": "OR-J06-S30",

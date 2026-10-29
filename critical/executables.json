@@ -813,6 +813,12 @@
     ],
     "OR-J04-S70": [
       "TestDueWork/OR-J04-S70/the-hourly-health-pass-raises-held-renewals"
+    ],
+    "OR-J12-S12": [
+      "TestCardGuard/OR-J12-S12/mastercard-length-rule-keeps-real-cards-blocked"
+    ],
+    "OR-J38-S36": [
+      "TestCardGuard/OR-J38-S36/ccbill-references-import-and-export-unchanged"
     ]
   },
   "suites": {
