@@ -15,23 +15,25 @@ through `host-four`; these are placeholders, not customer or repository names.
   implementation themselves. There is no separate contract module or version.
 - `server/` is its own module, `github.com/open-rails/openrails/server`: package `server`,
   the binary `server/cmd/openrails`, everything AuthKit-backed under `server/internal/`
-  (controlplane, operator, hostconfig, …) and the server's e2e suite `server/ci`. It may
+  (controlplane, operator, hostconfig, …) and `server/ci/paymentpage`, the fixture server
+  for web/pay's Playwright suite. It may
   import the root's `internal/` packages; the root never imports it. In the repo it builds
   against the root's source (`replace … => ../`).
-- `examples/` is a module too. Check each module on its own (`GOWORK=off`;
-  `scripts/check.sh` runs all three).
-- `scripts/release` releases root and server in lockstep: `prepare vX.Y.Z` opens a PR pinning
-  server's require of the root; once it is green, `publish vX.Y.Z` fast-forwards master to it and
-  pushes the `vX.Y.Z` and `server/vX.Y.Z` tags with it.
+- `examples/` and `adapters/authkit` are modules too. Check each on its own (`GOWORK=off`;
+  `scripts/check.sh build` builds all four).
+- `scripts/release` releases root, server and the AuthKit adapter in lockstep: `prepare vX.Y.Z`
+  opens a PR pinning their requires of the root; once it is green, `publish vX.Y.Z` fast-forwards
+  master to it and pushes the `vX.Y.Z`, `server/vX.Y.Z` and `adapters/authkit/vX.Y.Z` tags with it.
 
 ## v1 is frozen
 - From v1.0.0 three contracts change only by adding to them (`docs/compatibility.md`):
   the Go API (`openrails`, `billing`, `catalog`, `adapters/*`, `server/web/console`, `server`), the
   HTTP API, and the database schema. `api/go.txt` lists both modules.
-- Each has a generated snapshot: `api/go.txt` (`TestGoAPISurface`), `api/openapi.json`
-  (`TestGeneratedContractIsFresh`), `api/schema.txt` (`TestSchemaSnapshot` in `ci/`).
-  `go run ./scripts/contracts -write` rewrites all three; the schema needs
-  `OPENRAILS_E2E_DSN` naming a disposable PostgreSQL 18. Never hand-merge them.
+- Each has a generated snapshot: `api/go.txt`, `api/openapi.json`, `api/schema.txt`.
+  `go run ./scripts/contracts` verifies them (CI runs it with `-dsn`); `-write` rewrites
+  them with `compatibility/contract.json` and the files generated from the route catalog.
+  The schema list needs `-dsn` (or `OPENRAILS_E2E_DSN`) naming a disposable PostgreSQL 18.
+  Never hand-merge them.
 - A removed or changed snapshot line is a break. Don't make one without the owner.
 
 ## Public surface
@@ -168,8 +170,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   writer supplies (one stated exception: `payments.money_movement` fails closed to `'none'`).
 - Absent text is NULL, and a CHECK refuses `''`; `''` is stored only as part of a key
   (`payment_attempts.step`, `nmi_history_months.reason`). No `varchar`.
-- Text + CHECK, never Postgres enums. SQL lives in sqlc queries (`TestNoInlineSQL`), and
-  `TestQueryAudit` plans every one.
+- Text + CHECK, never Postgres enums. SQL lives in sqlc queries, and `sqlc vet` prepares
+  every one against PostgreSQL.
 - Every table has a retention class (`internal/retention`: permanent, partitioned, rows,
   state), stated in its table comment; `docs/operations.md` lists the periods.
   `usage_events` and `admission_operations` are partitioned by month, so every read of
@@ -197,7 +199,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Background work scales with activity, not records: watermarks, indexed due work and
   push. No routine sweep over every row.
 - No evidence, no action: OpenRails never cancels, revokes or deletes on uncertain data;
-  a state it cannot confirm is `unknown`, and `unknown` keeps access.
+  a subscription it cannot confirm is `unverified`, and `unverified` keeps access.
 - Libraries never read the environment; only binaries and config loaders do. Environment
   variables are configuration and secrets, never logic gates.
 
@@ -211,17 +213,16 @@ through `host-four`; these are placeholders, not customer or repository names.
 
 ## Docs
 - `docs/` is public documentation for integrators and operators; design history lives in
-  the tracker. No tracker ids, no host names. `TestDocsNameWhatExists` fails a document
-  that names a route, Go identifier, table, permission or error code that does not exist.
+  the tracker. No tracker ids, no host names. A document names only routes, Go
+  identifiers, tables, permissions and error codes that exist.
 
 ## Tests
-- Package tests (`go test ./...` in each module) are guards, contracts and focused
-  regressions; they need no database. The root's source guards walk `server/` too.
-- `ci/` and `server/ci` are the end-to-end suites (build tags `e2e,integration`;
-  `scripts/e2e.sh` runs both with `OPENRAILS_E2E_DSN` naming a disposable PostgreSQL 18).
-  Every test gets its own schema; `scripts/e2e.sh` gives each test process its own
-  database (`docs/dev/testing.md`); a test needing Vault gets its own KV v2 mount from
-  `internal/vaulttest` (`OPENRAILS_E2E_VAULT_ADDR`/`_TOKEN`, a dev server; skipped
-  when unset). A deliberate behaviour change must sweep them: `grep`
-  `ci/` and `server/ci` for the codes, constants and statuses you changed.
-  Green-in-my-package is not green.
+- The suite is `critical/`: named end-to-end scenarios over real PostgreSQL, Redis and
+  Vault (`docs/dev/testing.md`). `critical/coverage.json` lists the scenarios and
+  `critical/executables.json` maps each to the test that runs it; a `t.Run` with subtests
+  registers its parent too. `scripts/critical-tests.sh --case OR-Jxx-Syy` runs one against
+  disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all.
+- A behaviour change gets a scenario that fails first, and sweeps `critical/` for the codes,
+  constants and statuses it changed. Green-in-my-package is not green.
+- Static checks: `scripts/check.sh guards`, `scripts/check-embedded-auth-boundary.sh`,
+  `sqlc vet` and `go run ./scripts/contracts`.
