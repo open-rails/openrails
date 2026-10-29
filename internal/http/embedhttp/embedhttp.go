@@ -146,22 +146,28 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 		entry.Browser = browserRoutes[entry.Method+" "+entry.Path]
 	}
 	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, state, s.CaptchaStore, resolver)
-	mux.Wrap(func(entry router.Entry) http.Handler {
-		return middleware.ChainHTTP(entry.Handler,
-			middleware.WithRoutePath(entry.Path),
-			middleware.SecurityHeadersHTTP(),
-			// #765: static permissive CORS on exactly the purchase patterns
-			// registered into browserTier above — `*` from any origin, no
-			// credentials, nothing on merchant-admin/catalog/psps/
-			// merchant-API/webhooks.
-			middleware.PermissiveCORSHTTP(func(*http.Request) bool { return entry.Browser }, s.Auth),
-			middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
-			middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
-			// OpenRails-native rate-limiting + captcha for embedded hosts.
-			limiter,
-		)
-	})
+	mux.Wrap(func(entry router.Entry) http.Handler { return s.chain(entry, limiter) })
 	return mux
+}
+
+// chain is every embedded route's security chain. A panic answers OpenRails'
+// error envelope here, as on the other chains, instead of reaching the host's
+// router.
+func (s *Assembler) chain(entry router.Entry, limiter middleware.HTTPMiddleware) http.Handler {
+	return middleware.ChainHTTP(entry.Handler,
+		middleware.WithRoutePath(entry.Path),
+		middleware.RecoverHTTP(),
+		middleware.SecurityHeadersHTTP(),
+		// #765: static permissive CORS on exactly the purchase patterns
+		// registered into browserTier above — `*` from any origin, no
+		// credentials, nothing on merchant-admin/catalog/psps/
+		// merchant-API/webhooks.
+		middleware.PermissiveCORSHTTP(func(*http.Request) bool { return entry.Browser }, s.Auth),
+		middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
+		middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
+		// OpenRails-native rate-limiting + captcha for embedded hosts.
+		limiter,
+	)
 }
 
 func (s *Assembler) providerRoutes(override *routesurface.ProviderRoutes) routesurface.ProviderRoutes {
