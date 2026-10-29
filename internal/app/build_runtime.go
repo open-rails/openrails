@@ -440,11 +440,10 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		return nil, err
 	}
 
-	// Wire the deferred NMI delete schedulers (issue 216). Since #358 phase A
-	// scheduling enqueues a durable nmi_delete_subscription intent on the
-	// provider intent ledger and River transactionally; the operation
-	// intent executor drains it. Two instances of the one mechanism,
-	// differing only in origin:
+	// Wire the deferred NMI delete schedulers. Scheduling enqueues a durable
+	// nmi_delete_subscription intent and its River job in one transaction; the
+	// job runs it. Two instances of the one mechanism, differing only in
+	// origin:
 	//   - user-origin for user-asked cancellations (UserSubscriptionService):
 	//     reactive completion, executes under mode=limited;
 	//   - system-origin for dunning exhaustion (the lifecycle service shared

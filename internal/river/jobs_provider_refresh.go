@@ -226,8 +226,8 @@ func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[
 
 // ProviderRefreshWorker is one merchant's provider-read refresh. It keeps
 // provider truth fresh without remote mutations: bounded event pulls with
-// durable watermarks, the unknown-cohort reconcile (the one per-subscription
-// verification path) and the CCBill DataLink lane. Provider outages leave
+// durable watermarks and the unknown-cohort reconcile (the one
+// per-subscription verification path). Provider outages leave
 // watermarks in place for the next pass. Fetchers and probers arm per
 // merchant, inside its scope, from its PSPs; nothing credentialed is cached
 // across merchants.

@@ -25,16 +25,18 @@ type Table struct {
 
 const permanent = "permanent, never pruned."
 
-// Tables classifies every table of the baseline. A table without an entry
-// fails TestEveryTableHasARetentionClass.
+// Tables classifies every table of the schema. Nothing checks it against the
+// schema, so a new table adds its entry here.
 var Tables = map[string]Table{
-	"eventlog_migrations": {Class: State},
-	"eventlog_events":     {Rows, "events expire after the configured event retention, independently of reader progress."},
-	"eventlog_streams":    {Class: State},
-	"eventlog_pending":    {Class: State},
-	"destructive_actions": {Permanent, permanent},
-	"destructive_holds":   {Permanent, permanent},
-	"notification_events": {Rows, "rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers."},
+	"eventlog_migrations":          {Class: State},
+	"eventlog_events":              {Rows, "events expire after the configured event retention, independently of reader progress."},
+	"eventlog_streams":             {Class: State},
+	"eventlog_pending":             {Class: State},
+	"destructive_actions":          {Permanent, permanent},
+	"destructive_holds":            {Permanent, permanent},
+	"notification_events":          {Rows, "rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers."},
+	"notification_issue_revisions": {Class: State},
+	"notification_channel_state":   {Class: State},
 	// Money, grants, owed usage and receipts.
 	"ledger_accounts":               {Permanent, permanent},
 	"ledger_transfers":              {Permanent, permanent},

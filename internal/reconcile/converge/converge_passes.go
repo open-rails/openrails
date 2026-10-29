@@ -425,9 +425,9 @@ func (p *healthPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 
 	// life.provider_intent.stuck — a rail intent sitting non-terminal beyond
 	// the stuck thresholds. Mode/kill-switch parks are informational (the
-	// executor drains them when the blocker lifts); anything else means
-	// provider failures, bad credentials or a dead executor/verifier. Never
-	// repaired here: the executor/verifier own the intent.
+	// intent's job runs it once the blocker lifts); anything else means
+	// provider failures, bad credentials or a lost job. Never repaired here:
+	// the intent's job owns it.
 	actionCutoff, verifyCutoff := now.Add(-stuckActionableAge), now.Add(-stuckVerifyAge)
 	stuck, err := q.ListStuckProviderIntents(ctx, gen.ListStuckProviderIntentsParams{
 		MerchantID: mid, ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff, Now: now,
@@ -448,11 +448,11 @@ func (p *healthPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	return out, nil
 }
 
-// Stuck-intent thresholds — HARDCODED (no-knobs policy): the executor runs
-// every minute, so a day-old actionable intent means provider failures, bad
-// credentials, a dead worker — or a deliberate park; a healthy verifier
-// resolves unknowns in minutes, and an in_flight lease outliving hours means
-// a dead executor.
+// Stuck-intent thresholds — HARDCODED (no-knobs policy): each intent's job
+// wakes at its next attempt, so a day-old actionable intent means provider
+// failures, bad credentials, a lost job — or a deliberate park; a healthy job
+// resolves an unknown in minutes, and an in_flight lease outliving hours
+// means its job died.
 const (
 	stuckActionableAge = 24 * time.Hour // pending / failed_retryable
 	stuckVerifyAge     = 2 * time.Hour  // in_flight / unknown_needs_verify
@@ -460,7 +460,7 @@ const (
 
 // isModeParkedReason reports whether last_failure_reason records a deliberate
 // park by the operating mode / kill switch (intents.GateExecution "mode=..."
-// strings). Parked is not broken — the executor drains the queue when the
+// strings). Parked is not broken — each intent's job runs it when the
 // blocker lifts — so the finding is informational, not the admin queue.
 func isModeParkedReason(reason string) bool { return strings.Contains(reason, "mode=") }
 
@@ -521,9 +521,9 @@ const accessLapseLookback = 25 * time.Hour
 
 // notifyPass is the NOTIFY plane: whatever plane closed a customer's last
 // entitlement window (dunning, reconcile-driven cancel, grant lapse), the
-// customer is told exactly once. It only creates notification rows. Dedupe: any
-// premium_ended row at or after the close means a transition site already
-// told them.
+// customer is told exactly once. It only records premium_ended notification
+// events; the host's applications deliver them. Dedupe: any premium_ended
+// event at or after the close means a transition site already told them.
 type notifyPass struct {
 	e        *ConvergeEngine
 	lookback time.Duration

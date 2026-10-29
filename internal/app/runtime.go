@@ -251,17 +251,15 @@ type Runtime struct {
 	workerConsumerRunning  atomic.Bool
 	externalRiverClient    bool
 	riverSchema            string // Config.Database.RiverSchema's, or the bound host client's
-	// DeferredDeletes is the SYSTEM-origin deferred NMI-delete scheduler
-	// (issue 216 / #344). Since #358 phase A it enqueues durable
-	// nmi_delete_subscription intents on the provider intent ledger (no River
-	// producer involved); the scheduled intent executor drains them. The
-	// dunning worker threads it into its per-run lifecycle so terminal
+	// DeferredDeletes is the SYSTEM-origin deferred NMI-delete scheduler: it
+	// enqueues a durable nmi_delete_subscription intent, which its own River
+	// job runs. The dunning worker threads it into its per-run lifecycle so terminal
 	// cancellations schedule the rail-side delete through the ONE
 	// mechanism (no inline deletes). User-asked cancellations use a separate
 	// user-origin instance wired into UserSubscriptionService.
 	DeferredDeletes subscriptions.ProviderCancelScheduler
 	// Verifier reads unverified subscriptions from their provider as soon as
-	// they become unverified (#1094); started with the billing workers.
+	// they become unverified; started with the billing workers.
 	Verifier *reconcile.Verifier
 	// changes are the watchers of committed merchant changes (#1232).
 	changes merchantChanges
