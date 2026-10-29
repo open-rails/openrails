@@ -741,13 +741,23 @@ FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL AND s.status = 'canceled' AND s.cancel_type = 'chargeback'
-  AND EXISTS (
+  AND (EXISTS (
       SELECT 1 FROM billing.product_access e
       WHERE e.merchant_id = s.merchant_id
         AND e.source_type = 'subscription' AND e.source_id = s.id::text
         AND e.revoked_at IS NULL AND e.deleted_at IS NULL
         AND (e.ends_at IS NULL OR (e.ends_at > sqlc.arg(now)::timestamptz AND e.ends_at > s.canceled_at))
-  )
+  ) OR EXISTS (
+      SELECT 1 FROM billing.grants g
+      WHERE g.merchant_id = s.merchant_id AND g.customer_id = s.customer_id
+        AND g.kind = 'access' AND g.event = 'grant' AND g.source_type = 'subscription'
+        AND g.source_id = s.id::text AND g.starts_at >= s.canceled_at
+        AND NOT EXISTS (
+            SELECT 1 FROM billing.grants t
+            WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+              AND t.event IN ('revoke', 'expire', 'supersede')
+        )
+  ))
 ORDER BY s.canceled_at, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
