@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 254,
+  "scenario_count": 255,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1197,6 +1197,11 @@
       "id": "OR-J26-S54",
       "journey": "J26",
       "name": "A running charge is billed through the bill date before any daily posting runs"
+    },
+    {
+      "id": "OR-J26-S55",
+      "journey": "J26",
+      "name": "A direct NMI collection refused before dispatch retains nonexecution proof and recovers without duplicate payment"
     },
     {
       "id": "OR-J37-S60",
