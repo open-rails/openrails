@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 243,
+  "scenario_count": 249,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1084,11 +1084,6 @@
       "name": "Kill switch turned off during a provider pull holds that pull's convergence retractions"
     },
     {
-      "id": "OR-J29-S30",
-      "journey": "J29",
-      "name": "One merchant's failed converge sweep fails its job after the other merchants converge"
-    },
-    {
       "id": "OR-J16-S30",
       "journey": "J16",
       "name": "A provider-seen NMI decline opens dunning and schedules its retry in one transaction"
@@ -1217,6 +1212,41 @@
       "id": "OR-J06-S63",
       "journey": "J06",
       "name": "A Stripe PSP changed while its pass runs reaches Stripe without waiting for the backstop"
+    },
+    {
+      "id": "OR-J14-S70",
+      "journey": "J14",
+      "name": "An engine renewal nothing attempted by its deadline reads as missed without a recorded miss"
+    },
+    {
+      "id": "OR-J16-S70",
+      "journey": "J16",
+      "name": "A provider-billed grace that ends unanswered is read by id from the due pass"
+    },
+    {
+      "id": "OR-J15-S70",
+      "journey": "J15",
+      "name": "An NMI renewal the probe cannot settle is read by id once its grace passes"
+    },
+    {
+      "id": "OR-J29-S70",
+      "journey": "J29",
+      "name": "A grant commits with its customer convergence job or not at all"
+    },
+    {
+      "id": "OR-J29-S71",
+      "journey": "J29",
+      "name": "A revoked last window tells the customer through the revoke convergence"
+    },
+    {
+      "id": "OR-J29-S72",
+      "journey": "J29",
+      "name": "A timed window that lapses is told once by the hourly health pass"
+    },
+    {
+      "id": "OR-J04-S70",
+      "journey": "J04",
+      "name": "The hourly health pass raises held engine renewals and closes them once attempted"
     }
   ]
 }

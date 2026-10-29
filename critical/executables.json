@@ -715,9 +715,6 @@
     "OR-J29-S08": [
       "TestBackgroundJobs/OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-counters-and-orphan-state"
     ],
-    "OR-J29-S30": [
-      "TestBackgroundJobs/OR-J29-S30/converge-sweep-fails-its-job-after-the-other-merchants-converge"
-    ],
     "OR-J19-S05": [
       "TestPriceMigrationContracts/OR-J19-S05/move-that-no-longer-applies-is-skipped-and-settles-its-migration"
     ],
@@ -780,6 +777,27 @@
     ],
     "OR-J06-S63": [
       "TestStripeWebhookDueWork/OR-J06-S63/a-psp-change-while-its-pass-runs-reaches-stripe-without-the-backstop"
+    ],
+    "OR-J14-S70": [
+      "TestDueWork/OR-J14-S70/an-engine-renewal-nothing-attempted-reads-as-missed"
+    ],
+    "OR-J16-S70": [
+      "TestDueWork/OR-J16-S70/a-provider-billed-grace-that-ends-unanswered-is-read-by-the-due-pass"
+    ],
+    "OR-J15-S70": [
+      "TestDueWork/OR-J15-S70/an-nmi-renewal-the-probe-cannot-settle-is-read-by-id-after-its-grace"
+    ],
+    "OR-J29-S70": [
+      "TestDueWork/OR-J29-S70/a-grant-commits-with-its-customers-convergence"
+    ],
+    "OR-J29-S71": [
+      "TestDueWork/OR-J29-S71/a-revoked-last-window-tells-the-customer-without-a-sweep"
+    ],
+    "OR-J29-S72": [
+      "TestDueWork/OR-J29-S72/a-timed-window-that-lapses-is-told-by-the-health-pass"
+    ],
+    "OR-J04-S70": [
+      "TestDueWork/OR-J04-S70/the-hourly-health-pass-raises-held-renewals"
     ]
   },
   "suites": {

@@ -157,7 +157,7 @@ func TestVerificationBinding(t *testing.T) {
 		old.RenewSubscription(remote, true)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) + 49*time.Hour)
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.converge_sweep", 1)
+		runRegistered(t, fleet, "openrails.rebill_watch", 1)
 		require.Eventually(t, func() bool { return accounts.read("sk_test_old", "/v1/subscriptions/"+remote) }, 20*time.Second, 20*time.Millisecond,
 			"the unverified row must be read from the account that owns it")
 		require.Never(t, func() bool {
@@ -182,7 +182,7 @@ func TestVerificationBinding(t *testing.T) {
 		old.CancelSubscription(remote)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) + 49*time.Hour)
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.converge_sweep", 1)
+		runRegistered(t, fleet, "openrails.rebill_watch", 1)
 		require.Eventually(t, func() bool { return accounts.read("sk_test_old", "/v1/subscriptions/"+remote) }, 20*time.Second, 20*time.Millisecond)
 		require.Never(t, func() bool {
 			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
@@ -340,6 +340,9 @@ func unretractedGrant(t *testing.T, a *authorityWorld) (billing.CustomerID, stri
 	require.NoError(t, err)
 	require.NoError(t, a.alpha.RevokeProductAccess(t.Context(), granted[0].ID, billing.RevokeProductAccessParams{Reason: "critical drift"}))
 	_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" SET revoked_at=NULL, revoke_reason=NULL WHERE id=$1", uuid.UUID(granted[0].ID))
+	require.NoError(t, err)
+	// Drift no writer made: the revoke's own convergence is not left queued.
+	_, err = a.pool.Exec(t.Context(), "DELETE FROM "+pgx.Identifier{a.schema, "river_job"}.Sanitize()+" WHERE kind='openrails.customer_converge'")
 	require.NoError(t, err)
 	access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{key}})
 	require.NoError(t, err)

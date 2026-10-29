@@ -399,56 +399,19 @@ func TestBackgroundJobs(t *testing.T) {
 		require.Eventually(t, func() bool { return expired() == 0 }, 30*time.Second, 50*time.Millisecond,
 			"the pass continues in a new job after its first 200 merchants")
 	})
-	t.Run("OR-J29-S30/converge-sweep-fails-its-job-after-the-other-merchants-converge", func(t *testing.T) {
-		w := newWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
-		customer := billing.CustomerID(uuid.New())
-		for _, client := range []*openrails.Client{w.alpha, w.beta} {
-			product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sweep-reader", DisplayName: "Sweep reader", Entitlements: []string{"sweep:reader"}})
-			require.NoError(t, err)
-			_, err = client.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: "sweep-reader",
-				Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(720), Reason: billing.GrantReasonComp}}})
-			require.NoError(t, err)
-		}
-		// Both grants lost their projection: drift the sweep repairs.
-		_, err := w.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{w.schema, "product_access"}.Sanitize()+" SET deleted_at=now()")
-		require.NoError(t, err)
-		reads := func(client *openrails.Client) bool {
-			access, err := client.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"sweep:reader"}})
-			require.NoError(t, err)
-			return access.Entitlements["sweep:reader"]
-		}
-		require.False(t, reads(w.alpha))
-		restore := storageFault(t, w, w.schema, "product_access", fmt.Sprintf("NEW.merchant_id = '%s'::uuid", w.alpha.MerchantID().UUID()))
-		fleet := hostFleet(t, w)
-		fleet.PeriodicJobs().Clear()
-		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
-		require.NoError(t, fleet.Start(t.Context()))
-		runRegisteredFails(t, fleet, "openrails.converge_sweep")
-		require.True(t, reads(w.beta), "the other merchant converges")
-		require.False(t, reads(w.alpha))
-		restore()
-		runRegistered(t, fleet, "openrails.converge_sweep", 1)
-		require.True(t, reads(w.alpha))
-	})
 	t.Run("OR-J37-S06/a-solana-renewal-whose-pull-is-still-owed-is-not-a-missed-rebill", func(t *testing.T) {
 		s := newSolanaWorld(t, true)
 		_, sub := s.subscribe(t)
 		due := *sub.CurrentPeriodEndsAt
-		fleet := hostFleet(t, s.world)
-		fleet.PeriodicJobs().Clear()
-		require.NoError(t, s.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
-		require.NoError(t, fleet.Start(t.Context()))
 		missed := func() int {
-			findings, err := s.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.rebill.missed"})
+			renewals, err := s.alpha.ListRenewals(t.Context(), billing.RenewalListParams{SubscriptionID: sub.ID, FirstOutcome: []string{"missed"}})
 			require.NoError(t, err)
-			return len(findings.Items)
+			return len(renewals.Items)
 		}
 		// Past the due pass's deadline and the Solana one.
 		s.clock.Advance(due.Add(90 * time.Minute).Sub(s.clock.Now()))
-		runRegistered(t, fleet, "openrails.rebill_watch", 1)
 		require.Zero(t, missed(), "a Solana renewal is pulled by its scheduled operation, not the due pass")
 		s.clock.Advance(due.Add(3*time.Hour + time.Minute).Sub(s.clock.Now()))
-		runRegistered(t, fleet, "openrails.rebill_watch", 1)
 		require.Zero(t, missed(), "the period's pull operation, still owed, decides its cycle")
 	})
 	t.Run("OR-J21-S05", func(t *testing.T) {
