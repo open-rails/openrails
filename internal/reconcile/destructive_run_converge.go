@@ -324,7 +324,7 @@ func RollbackApprovalRun(ctx context.Context, database *db.DB, runID uuid.UUID, 
 	// Recomputer is reported loudly rather than passed over.
 	if recompute != nil {
 		if rerr := recompute(ctx); rerr != nil {
-			return res, fmt.Errorf("rows restored and intents superseded, but re-derivation failed — access for the restored subscriptions stays down until Converge runs (the converge sweep runs it): %w", rerr)
+			return res, fmt.Errorf("rows restored and intents superseded, but re-derivation failed — access for the restored subscriptions stays down until Converge runs (`openrails converge` runs it): %w", rerr)
 		}
 		res.Recomputed = true
 	} else {
