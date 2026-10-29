@@ -69,9 +69,9 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 	snap := &RemoteSnapshot{
 		Provider:  ProviderNMI,
 		FetchedAt: now,
-		// Per-subscription scope: the v5 GET's 404 IS authoritative absence at
-		// NMI (canceled records are deleted), so this one-row roster is
-		// exhaustive FOR THIS SUBJECT.
+		// Per-subscription scope: the v5 GET's E_NOT_FOUND or tombstone IS
+		// authoritative absence at NMI (canceled records are deleted), so this
+		// one-row roster is exhaustive FOR THIS SUBJECT.
 		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
 		Capabilities: Capabilities{Subscriptions: true, Transactions: subj.PeriodEnd != nil},
 	}
@@ -216,7 +216,7 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 	snap := &RemoteSnapshot{
 		Provider:  ProviderStripe,
 		FetchedAt: now,
-		// A 404 is Stripe's authoritative "gone" — exhaustive for this subject.
+		// Found=false is Stripe's resource_missing: exhaustive for this subject.
 		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
 		Capabilities: Capabilities{Subscriptions: true, Transactions: true},
 	}

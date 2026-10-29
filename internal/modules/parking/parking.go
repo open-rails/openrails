@@ -127,7 +127,8 @@ func Park(ctx context.Context, d *db.DB, s Subject, now time.Time) (Result, erro
 				return err
 			}
 		}
-		if open && prev.Reason != string(billing.ParkPriceUnmapped) && (s.Reason == billing.ParkPriceUnmapped || res.ImportOwned) {
+		if s.Reason == billing.ParkPriceUnmapped || res.ImportOwned {
+			// A customer cause or a missing plan raised before is settled.
 			if err := resolve(ctx, q, mid.UUID(), s.PSPID, FindingUnattributed, s.SubscriptionRef); err != nil {
 				return err
 			}
@@ -145,8 +146,9 @@ func Park(ctx context.Context, d *db.DB, s Subject, now time.Time) (Result, erro
 	return res, err
 }
 
-// Close ends the subscription's open park, if any, and settles its finding.
-// q must be the transaction converge's verdict commits in.
+// Close ends the subscription's open park, if any, and settles its finding
+// (a plan-less schedule's has no park). q must be the transaction converge's
+// verdict commits in.
 func Close(ctx context.Context, q *gen.Queries, pspID uuid.UUID, subscriptionRef string, by billing.ParkRelease, now time.Time) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -154,7 +156,7 @@ func Close(ctx context.Context, q *gen.Queries, pspID uuid.UUID, subscriptionRef
 	}
 	row, err := q.CloseOpenPark(ctx, gen.CloseOpenParkParams{MerchantID: mid.UUID(), PspID: pspID, SubscriptionRef: subscriptionRef, ReleasedBy: string(by), At: now})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+		return resolve(ctx, q, mid.UUID(), pspID, FindingUnattributed, subscriptionRef)
 	}
 	if err != nil {
 		return err
@@ -274,6 +276,46 @@ func ImportOwns(ctx context.Context, q *gen.Queries, pspID uuid.UUID, subscripti
 		return false, err
 	}
 	return importOwns(ctx, q, mid.UUID(), Subject{PSPID: pspID, SubscriptionRef: subscriptionRef})
+}
+
+// SyncPlanless keeps life.subscription.unattributed true to an unheld
+// subscription that names no plan. No price can map it and no fix wakes a
+// park, so nothing parks: the finding names the subscription once the PSP's
+// import no longer owns it (the backlog rule), and resolves while one does.
+// It returns the finding it raised.
+func SyncPlanless(ctx context.Context, d *db.DB, s Subject) (*gen.BillingReconciliationFinding, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.PSPID == uuid.Nil || s.Rail == "" || s.SubscriptionRef == "" {
+		return nil, fmt.Errorf("plan-less finding %q: incomplete subject", s.SubscriptionRef)
+	}
+	if s.Evidence == nil {
+		s.Evidence = map[string]any{}
+	}
+	s.Evidence["reason"] = "plan_missing"
+	evidence, err := json.Marshal(s.Evidence)
+	if err != nil {
+		return nil, err
+	}
+	var raised *gen.BillingReconciliationFinding
+	err = d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		raised = nil
+		q := gen.New(tx)
+		if owned, err := importOwns(ctx, q, mid.UUID(), s); err != nil || owned {
+			if err != nil {
+				return err
+			}
+			return resolve(ctx, q, mid.UUID(), s.PSPID, FindingUnattributed, s.SubscriptionRef)
+		}
+		action := fmt.Sprintf("Provider subscription %s names no plan, so no price maps it and it cannot land: give it a plan at the provider (its next event lands or parks it), or cancel it there.", s.SubscriptionRef)
+		row, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid.UUID(), FindingType: FindingUnattributed, SubjectKey: s.SubscriptionRef,
+			Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence, PspID: &s.PSPID})
+		raised = &row
+		return err
+	})
+	return raised, err
 }
 
 // SyncPriceFinding keeps catalog.price.unmapped true to one provider price:

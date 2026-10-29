@@ -485,35 +485,12 @@ func (c *NMIClient) ListSubscriptionsPage(ctx context.Context, cursor string, pe
 	return SubscriptionPage{Subscriptions: *wire.Subscriptions, NextCursor: wire.NextCursor, HasMore: *wire.HasMore}, nil
 }
 
-// GetSubscription fetches one subscription by id. found=false when it is gone
-// at NMI: a 404 (never existed) or a deletion tombstone (200 with
-// delayed_condition=inactive; live-verified). found means a live recurring
-// record, so absence is terminal.
+// GetSubscription fetches one subscription by id. found=false only when NMI
+// says it is gone: E_NOT_FOUND (ErrV5Missing) or a deletion tombstone (200
+// with delayed_condition=inactive; live-verified). Any other 404, such as
+// E_ROUTE_NOT_FOUND, is an error, never evidence it is gone. found means a
+// live recurring record, so absence is terminal.
 func (c *NMIClient) GetSubscription(ctx context.Context, subscriptionID string) (V5Subscription, bool, error) {
-	var sub V5Subscription
-	if err := c.checkConfiguration(); err != nil {
-		return sub, false, err
-	}
-	if strings.TrimSpace(subscriptionID) == "" {
-		return sub, false, errors.New("subscriptionID is required")
-	}
-	err := c.sendV5Request(ctx, http.MethodGet, "/subscriptions/"+url.PathEscape(strings.TrimSpace(subscriptionID)), nil, &sub)
-	if errors.Is(err, ErrV5NotFound) {
-		return sub, false, nil
-	}
-	if err != nil {
-		return sub, false, err
-	}
-	if sub.canceledAtNMI() {
-		return sub, false, nil
-	}
-	return sub, true, nil
-}
-
-// ReadSubscription is GetSubscription where found is false only when NMI
-// answers that the subscription is missing (ErrV5Missing) or deleted (a
-// tombstone); any other 404 is an error, not evidence it is gone.
-func (c *NMIClient) ReadSubscription(ctx context.Context, subscriptionID string) (V5Subscription, bool, error) {
 	var sub V5Subscription
 	if err := c.checkConfiguration(); err != nil {
 		return sub, false, err

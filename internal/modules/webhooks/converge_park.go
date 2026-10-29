@@ -53,6 +53,27 @@ func parkSubscription(ctx context.Context, database *db.DB, findings reconcile.F
 	return nil
 }
 
+// raisePlanless raises the finding for an unheld subscription that names no
+// plan, or resolves it while the PSP's import owns the subscription.
+func raisePlanless(ctx context.Context, database *db.DB, findings reconcile.FindingNotifier, s parking.Subject) error {
+	f, err := parking.SyncPlanless(ctx, database, s)
+	if err != nil {
+		return err
+	}
+	fields := log.Fields{"rail": s.Rail, "subscription_reference": s.SubscriptionRef, "customer_ref": s.CustomerRef}
+	if f == nil {
+		log.WithContext(ctx).WithFields(fields).Info("converge: unheld subscription names no plan; its PSP import lists it")
+		return nil
+	}
+	log.WithContext(ctx).WithFields(fields).Warn("converge: unheld subscription names no plan and cannot land; raised a finding")
+	if findings != nil {
+		if err := findings.NotifyFinding(ctx, reconcile.FindingRecordFromRow(*f)); err != nil && ctx.Err() == nil {
+			log.WithContext(ctx).WithError(err).WithFields(fields).Warn("converge: notifying the plan-less finding failed; it stays in the console")
+		}
+	}
+	return nil
+}
+
 // closePark ends the subscription's open park, if any.
 func closePark(ctx context.Context, database *db.DB, railSubID string, by billing.ParkRelease, now time.Time) error {
 	pspID, err := db.RequirePSPID(ctx)

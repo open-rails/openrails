@@ -102,6 +102,44 @@ func completedOnce(t *testing.T, fleet *river.Client[pgx.Tx], kinds ...string) [
 	return jobs
 }
 
+// lastJob is the newest job of kinds, 0 when there is none.
+func lastJob(t *testing.T, fleet *river.Client[pgx.Tx], kinds ...string) int64 {
+	t.Helper()
+	res, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds(kinds...).OrderBy(river.JobListOrderByID, river.SortOrderDesc).First(1))
+	require.NoError(t, err)
+	if len(res.Jobs) == 0 {
+		return 0
+	}
+	return res.Jobs[0].ID
+}
+
+// failing runs the jobs of kinds queued after job id after now, and waits
+// until one has run: it must have failed and wait to retry.
+func failing(t *testing.T, fleet *river.Client[pgx.Tx], after int64, kinds ...string) *rivertype.JobRow {
+	t.Helper()
+	var ran *rivertype.JobRow
+	require.Eventually(t, func() bool {
+		res, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds(kinds...).First(200))
+		if err != nil {
+			return false
+		}
+		for _, j := range res.Jobs {
+			switch {
+			case j.ID <= after:
+			case len(j.Errors) > 0 || j.FinalizedAt != nil:
+				ran = j
+				return true
+			case j.State == rivertype.JobStateScheduled:
+				_, _ = fleet.JobRetry(t.Context(), j.ID)
+			}
+		}
+		return false
+	}, 60*time.Second, 100*time.Millisecond)
+	require.NotEmpty(t, ran.Errors, "%s %d ended %s without failing", ran.Kind, ran.ID, ran.State)
+	require.Nil(t, ran.FinalizedAt, "%s %d gave up: %v", ran.Kind, ran.ID, ran.Errors)
+	return ran
+}
+
 func (tw *trailWorld) send(t *testing.T, kind string, object stripemock.Object) string {
 	t.Helper()
 	id, err := tw.stripe.SendEvent(t.Context(), kind, object)
@@ -757,5 +795,118 @@ func TestProviderTrailing(t *testing.T) {
 		closed := openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{Released: true}), sub)
 		require.Equal(t, billing.ParkLanded, *closed.ReleasedBy)
 		require.Equal(t, subs[0].ID, *closed.Subscription)
+	})
+
+	t.Run("OR-J15-S18/held-stripe-subscription-ends-only-on-resource-missing", func(t *testing.T) {
+		tw := newTrailWorld(t, "stripe")
+		tw.stripe.AddProduct("prod_gold", "Gold")
+		tw.stripe.AddPrice(stripemock.Price{ID: "price_gold", Product: "prod_gold", Amount: 1500, Interval: "month"})
+		tw.mapStripe(t, tw.stripeProduct(t, "gold", "member:gold"), "stripe-gold", "price_gold")
+		start := tw.clock.Now().Add(-time.Hour)
+		customer := tw.stripe.AddCustomer(tw.alice.Email, "Alice", nil)
+		sub := tw.stripe.AddSubscription(customer, "pm_alice", "price_gold", 1500, start, start.AddDate(0, 1, 0))
+		tw.stripe.TagSubscription(sub, "user_id", tw.alice.ID, start)
+		tw.invoicePaid(t, sub)
+		completedOnce(t, tw.fleet, kindConverge)
+		held := subscriptionOf(t, tw.importWorld, customerOf(tw.alice), sub)
+		armDestructive(t, tw.authorityWorld, true)
+
+		read := func(r *http.Request) bool { return r.Method == http.MethodGet && r.URL.Path == "/v1/subscriptions/"+sub }
+		tw.stripe.Intercept(read, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+			return answer(r, http.StatusNotFound, `{"error":{"type":"invalid_request_error","message":"Unrecognized request URL (GET: /v1/subscriptions/`+sub+`)"}}`), nil
+		})
+		after := lastJob(t, tw.fleet, kindConverge)
+		tw.send(t, "customer.subscription.updated", tw.stripe.Subscription(sub))
+		job := failing(t, tw.fleet, after, kindConverge)
+		require.Contains(t, job.Errors[len(job.Errors)-1].Error, "404")
+		current, err := tw.alpha.GetSubscription(t.Context(), held.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionActive, current.Status, "a 404 that is not resource_missing ends nothing")
+		require.True(t, tw.entitled(t, customerOf(tw.alice), "member:gold"))
+
+		tw.stripe.ClearIntercepts()
+		tw.stripe.Intercept(read, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+			return answer(r, http.StatusNotFound, `{"error":{"type":"invalid_request_error","code":"resource_missing","message":"No such subscription: '`+sub+`'"}}`), nil
+		})
+		jobs := settle(t, tw.fleet, kindConverge)
+		require.Equal(t, rivertype.JobStateCompleted, jobs[len(jobs)-1].State, "%v", jobs[len(jobs)-1].Errors)
+		current, err = tw.alpha.GetSubscription(t.Context(), held.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionCanceled, current.Status, "resource_missing is Stripe's word that it is gone")
+	})
+
+	t.Run("OR-J15-S19/held-nmi-subscription-ends-only-on-e-not-found", func(t *testing.T) {
+		tw := newTrailWorld(t, "nmi")
+		tw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
+		product, err := tw.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "gold", DisplayName: "Gold", Entitlements: []string{"member:gold"}})
+		require.NoError(t, err)
+		_, err = tw.alphaRemote.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-gold", PSP: "nmi", PlanID: "gold"})
+		require.NoError(t, err)
+		vault := tw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
+		tw.ownVault(t, customerOf(tw.alice), vault)
+		sub := tw.nmiSchedule(t, vault, "gold", "20.00")
+		nmiNotice(t, tw.server.URL, "evt_adopt", "recurring.subscription.add", map[string]any{"subscription_id": sub})
+		completedOnce(t, tw.fleet, kindConverge)
+		held := subscriptionOf(t, tw.importWorld, customerOf(tw.alice), sub)
+		armDestructive(t, tw.authorityWorld, true)
+
+		read := func(r *http.Request) bool {
+			return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/subscriptions/"+sub)
+		}
+		tw.nmi.Intercept(read, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+			return answer(r, http.StatusNotFound, `{"type":"notFound","error_code":"E_ROUTE_NOT_FOUND","message":"route not found"}`), nil
+		})
+		after := lastJob(t, tw.fleet, kindConverge)
+		nmiNotice(t, tw.server.URL, "evt_misrouted", "recurring.subscription.update", map[string]any{"subscription_id": sub})
+		job := failing(t, tw.fleet, after, kindConverge)
+		require.Contains(t, job.Errors[len(job.Errors)-1].Error, "404")
+		current, err := tw.alpha.GetSubscription(t.Context(), held.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionActive, current.Status, "E_ROUTE_NOT_FOUND ends nothing")
+		require.True(t, tw.entitled(t, customerOf(tw.alice), "member:gold"))
+
+		tw.nmi.ClearIntercepts()
+		tw.nmi.Intercept(read, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+			return answer(r, http.StatusNotFound, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`), nil
+		})
+		jobs := settle(t, tw.fleet, kindConverge)
+		require.Equal(t, rivertype.JobStateCompleted, jobs[len(jobs)-1].State, "%v", jobs[len(jobs)-1].Errors)
+		current, err = tw.alpha.GetSubscription(t.Context(), held.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionCanceled, current.Status, "E_NOT_FOUND is NMI's word that it is gone")
+	})
+
+	t.Run("OR-J15-S20/nmi-schedule-with-no-plan-raises-a-finding-and-parks-nothing", func(t *testing.T) {
+		tw := newTrailWorld(t, "nmi")
+		staged := tw.nmiSchedule(t, tw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "1111"}), "", "10.00")
+		imp := tw.pulled(t, "nmi")
+		require.Contains(t, tw.records(t, imp.ID), staged)
+		nmiNotice(t, tw.server.URL, "evt_staged", "recurring.subscription.add", map[string]any{"subscription_id": staged})
+		completedOnce(t, tw.fleet, kindConverge)
+		require.Empty(t, tw.findings(t, "life.subscription.unattributed"), "the import lists the plan-less schedule it stages")
+
+		later := tw.nmiSchedule(t, tw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "2222"}), "", "10.00")
+		nmiNotice(t, tw.server.URL, "evt_later", "recurring.subscription.add", map[string]any{"subscription_id": later})
+		completedOnce(t, tw.fleet, kindConverge)
+		findings := tw.findings(t, "life.subscription.unattributed")
+		require.Len(t, findings, 1)
+		finding := findings[later]
+		require.Equal(t, "high", finding.Severity)
+		require.Nil(t, finding.ResolvedAt)
+		require.Equal(t, "plan_missing", finding.Evidence["reason"])
+		require.Contains(t, *finding.RecommendedAction, later)
+		require.Empty(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), "no fix could wake a park")
+		require.Empty(t, tw.parks(t, billing.ParkedSubscriptionListParams{Released: true}))
+
+		nmiNotice(t, tw.server.URL, "evt_later_again", "recurring.subscription.update", map[string]any{"subscription_id": later})
+		completedOnce(t, tw.fleet, kindConverge)
+		findings = tw.findings(t, "life.subscription.unattributed")
+		require.Len(t, findings, 1)
+		require.Equal(t, finding.ID, findings[later].ID, "another event raises nothing new")
+
+		tw.nmi.DeleteSchedule(later)
+		nmiNotice(t, tw.server.URL, "evt_later_gone", "recurring.subscription.update", map[string]any{"subscription_id": later})
+		completedOnce(t, tw.fleet, kindConverge)
+		require.NotNil(t, tw.findings(t, "life.subscription.unattributed")[later].ResolvedAt, "a schedule gone at NMI settles it")
 	})
 }

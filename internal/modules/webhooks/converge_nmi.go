@@ -37,8 +37,8 @@ import (
 //     only off a fetched settled charge; a fetched decline fails it. The
 //     decider does not own pending.
 //  2. decider convergence: reconcile.Decide/ApplyDecision over the probe
-//     snapshot for active/past_due/unknown rows. An NMI v5 404 is
-//     provider-confirmed gone.
+//     snapshot for active/past_due/unknown rows. NMI's E_NOT_FOUND or a
+//     tombstone is provider-confirmed gone; any other refusal retries.
 type NMIConvergeService struct {
 	DB                           *db.DB
 	Clock                        clockwork.Clock
@@ -138,12 +138,13 @@ func (s *NMIConvergeService) convergeHeld(ctx context.Context, rail string, sub 
 }
 
 // convergeUnheld converges a reference that resolves to nothing local: a
-// one-time sale or order id (the v5 GET answers 404 or a tombstone) is
-// dropped; a live subscription OpenRails does not hold is adopted when its
+// one-time sale or order id (the v5 GET answers E_NOT_FOUND or a tombstone)
+// is dropped; a live subscription OpenRails does not hold is adopted when its
 // plan is mapped and its vault has exactly one owner, and parked otherwise.
-// Price is checked before customer, and nothing is guessed.
+// One naming no plan raises a finding instead. Price is checked before
+// customer, and nothing is guessed.
 func (s *NMIConvergeService) convergeUnheld(ctx context.Context, rail, reference string, now time.Time) (uuid.UUID, error) {
-	remote, found, err := s.NMIClient.ReadSubscription(ctx, reference)
+	remote, found, err := s.NMIClient.GetSubscription(ctx, reference)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("nmi converge: read unheld %s: %w", reference, err)
 	}
@@ -177,9 +178,7 @@ func (s *NMIConvergeService) convergeUnheld(ctx context.Context, rail, reference
 	subject := parking.Subject{PSPID: pspID, Rail: rail, SubscriptionRef: reference, PriceRef: plan, CustomerRef: vault, Unheld: true,
 		Evidence: map[string]any{"plan": plan, "vault": vault, "amount": remote.Amount, "next_billing_date": remote.NextBillingDate}}
 	if plan == "" {
-		log.WithContext(ctx).WithFields(log.Fields{"rail": rail, "subscription_reference": reference}).
-			Info("nmi converge: unheld subscription names no plan; its PSP import lists it")
-		return uuid.Nil, nil
+		return uuid.Nil, raisePlanless(ctx, s.DB, s.Findings, subject)
 	}
 	if err := observePrice(ctx, s.Objects, plan, stated); err != nil {
 		return uuid.Nil, fmt.Errorf("nmi converge: observe plan %s: %w", plan, err)

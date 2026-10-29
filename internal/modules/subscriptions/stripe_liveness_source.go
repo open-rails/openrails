@@ -22,13 +22,10 @@ import (
 // long webhook outages.
 
 // StripeLivenessRecord is the normalized remote-truth view of one Stripe
-// subscription for liveness classification. Found=false means Stripe no
-// longer knows the subscription (deleted/never existed).
+// subscription for liveness classification. Found=false means Stripe answered
+// that it does not know the subscription (404 resource_missing).
 type StripeLivenessRecord struct {
-	Found bool
-	// Missing: Stripe answered that the subscription is missing (404
-	// resource_missing), not another 404.
-	Missing            bool
+	Found              bool
 	Status             string
 	CancelAtPeriodEnd  bool
 	CanceledAt         time.Time
@@ -217,9 +214,9 @@ func parseStripeLivenessSubscription(body []byte) (StripeLivenessRecord, error) 
 }
 
 // ProbeSubscription fetches GET /v1/subscriptions/{id} with its latest
-// invoice and that invoice's payments expanded.
-// A 404 returns Found=false with a nil error — at Stripe that is an answer
-// (remote absent), not a transport failure.
+// invoice and that invoice's payments expanded. Only a 404 resource_missing
+// returns Found=false: any other 404 (a misrouted read) is an error, never
+// evidence that the subscription is gone.
 func (p *HTTPStripeLivenessProber) ProbeSubscription(ctx context.Context, railSubscriptionID string) (StripeLivenessRecord, error) {
 	id := strings.TrimSpace(railSubscriptionID)
 	if id == "" {
@@ -259,21 +256,16 @@ func (p *HTTPStripeLivenessProber) ProbeSubscription(ctx context.Context, railSu
 	if readErr != nil {
 		return StripeLivenessRecord{}, fmt.Errorf("read stripe subscription probe response: %w", readErr)
 	}
-	if resp.StatusCode == http.StatusNotFound {
+	if resp.StatusCode >= 400 {
 		var envelope struct {
 			Error struct {
 				Code string `json:"code"`
 			} `json:"error"`
 		}
-		_ = json.Unmarshal(body, &envelope)
-		return StripeLivenessRecord{Found: false, Missing: envelope.Error.Code == "resource_missing"}, nil
-	}
-	if resp.StatusCode >= 400 {
-		msg := ParseStripeAPIError(body)
-		if msg == "" {
-			msg = fmt.Sprintf("stripe subscription probe failed (%d)", resp.StatusCode)
+		if resp.StatusCode == http.StatusNotFound && json.Unmarshal(body, &envelope) == nil && envelope.Error.Code == "resource_missing" {
+			return StripeLivenessRecord{Found: false}, nil
 		}
-		return StripeLivenessRecord{}, errors.New(msg)
+		return StripeLivenessRecord{}, fmt.Errorf("stripe subscription probe failed (%d): %s", resp.StatusCode, ParseStripeAPIError(body))
 	}
 	rec, err := parseStripeLivenessSubscription(body)
 	if err != nil || rec.LatestInvoiceID == "" || rec.LatestInvoiceStatus == "draft" {

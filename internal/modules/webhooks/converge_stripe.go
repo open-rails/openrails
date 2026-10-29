@@ -83,9 +83,10 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 		return uuid.Nil, fmt.Errorf("stripe converge: verified invoice reader is required")
 	}
 
+	// Only Stripe's resource_missing is Found=false; any other refusal (a
+	// misrouted 404, a 401, the API down) retries, ending nothing.
 	rec, err := s.Prober.ProbeSubscription(ctx, railSubID)
 	if err != nil {
-		// Provider API down: the queued job IS the dirty mark — retry later.
 		return uuid.Nil, fmt.Errorf("stripe converge: fetch %s: %w", railSubID, err)
 	}
 
@@ -97,20 +98,16 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 		if !rec.Found {
 			log.WithContext(ctx).WithField("rail_subscription_id", railSubID).
 				Info("stripe converge: subscription unknown locally and gone at Stripe; nothing to do")
-			if !rec.Missing {
-				return uuid.Nil, nil
-			}
 			return uuid.Nil, closePark(ctx, s.DB, railSubID, billing.ParkGone, now)
 		}
 		return s.createFromFetchedRecord(ctx, railSubID, rec, reader, now)
 	}
 
-	if !rec.Found && rec.Missing {
+	if !rec.Found {
 		if err := closePark(ctx, s.DB, railSubID, billing.ParkGone, now); err != nil {
 			return sub.CustomerID, err
 		}
-	}
-	if rec.Found {
+	} else {
 		deferred, err := s.recordFetchedBills(ctx, sub, rec, reader, now)
 		if err != nil {
 			return sub.CustomerID, err

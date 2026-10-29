@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 250,
+  "scenario_count": 253,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1017,6 +1017,21 @@
       "id": "OR-J15-S17",
       "journey": "J15",
       "name": "A Stripe customer linked before the PSP's first pull lands its parked subscription at once"
+    },
+    {
+      "id": "OR-J15-S18",
+      "journey": "J15",
+      "name": "A held Stripe subscription ends only when Stripe answers resource_missing; any other 404 fails its converge, which retries with access intact"
+    },
+    {
+      "id": "OR-J15-S19",
+      "journey": "J15",
+      "name": "A held NMI subscription ends only when NMI answers E_NOT_FOUND; E_ROUTE_NOT_FOUND fails its converge, which retries with access intact"
+    },
+    {
+      "id": "OR-J15-S20",
+      "journey": "J15",
+      "name": "An NMI schedule OpenRails does not hold that names no plan raises a high finding naming it once no import stages it, parks nothing, and the finding resolves when NMI deletes it"
     },
     {
       "id": "OR-J38-S20",
