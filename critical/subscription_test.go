@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
@@ -30,9 +31,21 @@ func purchasedMembershipWith(t *testing.T, hours int, configure ...func(*world))
 	// its actual clock and remains independent of these financial periods.
 	configure = append([]func(*world){func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) }}, configure...)
 	a, provider := newPaymentWorld(t, configure...)
-	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "membership", DisplayName: "Membership", Entitlements: []string{"membership:paid"}})
+	sub := buyMembership(t, a, a.alpha, provider, hours)
+	effects := provider.effects(t)
+	require.Len(t, effects, 1)
+	require.Equal(t, "charge", effects[0].Kind)
+	require.EqualValues(t, 1000, effects[0].Amount)
+	return a, provider, sub
+}
+
+// buyMembership is alice buying a membership with a kept card at client's
+// merchant, the one her sign-in is bound to; the engine renews it.
+func buyMembership(t *testing.T, a *authorityWorld, client *openrails.Client, provider *providerLedger, hours int) *billing.Subscription {
+	t.Helper()
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "membership", DisplayName: "Membership", Entitlements: []string{"membership:paid"}})
 	require.NoError(t, err)
-	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "membership-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(hours), AccessDurationHours: ptr(hours)})
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "membership-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(hours), AccessDurationHours: ptr(hours)})
 	require.NoError(t, err)
 	token := provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
 	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
@@ -44,20 +57,16 @@ func purchasedMembershipWith(t *testing.T, hours int, configure ...func(*world))
 	require.Len(t, order.Lines, 1)
 	require.NotNil(t, order.Lines[0].SubscriptionID)
 	require.NotNil(t, order.Payment.PaymentID)
-	payment, err := a.alpha.GetPayment(t.Context(), *order.Payment.PaymentID)
+	payment, err := client.GetPayment(t.Context(), *order.Payment.PaymentID)
 	require.NoError(t, err)
 	require.EqualValues(t, 10_000_000, payment.Amount)
 	require.Equal(t, billing.PaymentSucceeded, payment.Status)
-	sub, err := a.alpha.GetSubscription(t.Context(), *order.Lines[0].SubscriptionID)
+	sub, err := client.GetSubscription(t.Context(), *order.Lines[0].SubscriptionID)
 	require.NoError(t, err)
 	require.NotNil(t, sub.CurrentPeriodStartsAt)
 	require.NotNil(t, sub.CurrentPeriodEndsAt)
 	require.Equal(t, time.Duration(hours)*time.Hour, sub.CurrentPeriodEndsAt.Sub(*sub.CurrentPeriodStartsAt))
-	effects := provider.effects(t)
-	require.Len(t, effects, 1)
-	require.Equal(t, "charge", effects[0].Kind)
-	require.EqualValues(t, 1000, effects[0].Amount)
-	return a, provider, sub
+	return sub
 }
 
 func TestSubscriptions(t *testing.T) {

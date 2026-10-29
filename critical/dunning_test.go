@@ -3,6 +3,8 @@
 package critical_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -181,6 +183,81 @@ func TestDunning(t *testing.T) {
 			}
 		}
 		renewalSettled(t, a, p, sub, due)
+	})
+	t.Run("OR-J16-S05/a-failing-due-pass-holds-back-no-other-merchants-renewal", func(t *testing.T) {
+		a, provider, stuck := purchasedMembershipWith(t, 24, func(w *world) {
+			beta := w.cfg.Merchants["beta"]
+			beta.PSPs = openrails.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e_beta", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_beta", PublishableKey: "pk_test_critical"}.PSPConfig()}
+			beta.CardVault = "stripe"
+			w.cfg.Merchants["beta"] = beta
+		})
+		a.clock.Advance(time.Hour)
+		a.bindCustomers(t, "beta")
+		member := buyMembership(t, a, a.beta, provider, 24)
+		stuckDue, memberDue := *stuck.CurrentPeriodEndsAt, *member.CurrentPeriodEndsAt
+		// Alpha's member can be neither renewed nor recorded as refused, so
+		// every pass that reaches it fails.
+		storageFault(t, a.world, a.schema, "provider_intents", fmt.Sprintf("NEW.subscription_id = '%s'", stuck.ID.UUID()))
+		storageFault(t, a.world, a.schema, "reconciliation_findings", fmt.Sprintf("NEW.subject_key = '%s'", stuck.ID.UUID()))
+		a.clock.Advance(stuckDue.Sub(a.clock.Now()))
+		// The fleet's own periodic schedule queues the passes: one on start,
+		// then one a minute.
+		fleet := hostFleet(t, a.world)
+		finished, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
+		defer unsubscribe()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		global := func(job *rivertype.JobRow) bool {
+			var args struct {
+				MerchantID uuid.UUID `json:"merchant_id"`
+			}
+			return job.Kind == "openrails.dunning" && json.Unmarshal(job.EncodedArgs, &args) == nil && args.MerchantID == uuid.Nil
+		}
+		pass := func(within time.Duration) *river.Event {
+			deadline := time.After(within)
+			for {
+				select {
+				case event := <-finished:
+					if event != nil && global(event.Job) {
+						return event
+					}
+				case <-deadline:
+					t.Fatal("no deployment-wide due pass finished")
+				}
+			}
+		}
+		// A pass waiting to retry is one not finished that has failed before.
+		retrying := func() (waiting []int64) {
+			jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.dunning"))
+			require.NoError(t, err)
+			for _, job := range jobs.Jobs {
+				if global(job) && job.FinalizedAt == nil && len(job.Errors) > 0 {
+					waiting = append(waiting, job.ID)
+				}
+			}
+			return waiting
+		}
+		first := pass(30 * time.Second)
+		require.Equal(t, river.EventKindJobFailed, first.Kind, "the pass reports the member it could not finish")
+		job, err := fleet.JobGet(t.Context(), first.Job.ID)
+		require.NoError(t, err)
+		require.Equal(t, rivertype.JobStateDiscarded, job.State, "a failed pass is not retried: the next minute's pass is its retry")
+		require.Empty(t, retrying())
+		a.clock.Advance(memberDue.Sub(a.clock.Now()))
+		second := pass(90 * time.Second)
+		require.NotEqual(t, first.Job.ID, second.Job.ID, "the next minute's pass is queued, not absorbed")
+		require.Eventually(t, func() bool {
+			current, err := a.beta.GetSubscription(t.Context(), member.ID)
+			return err == nil && current.CurrentPeriodStartsAt != nil && current.CurrentPeriodStartsAt.Equal(memberDue)
+		}, 30*time.Second, 50*time.Millisecond, "the other merchant's member renews on the next minute's pass")
+		renewals, err := a.beta.ListRenewals(t.Context(), billing.RenewalListParams{SubscriptionID: member.ID})
+		require.NoError(t, err)
+		require.Len(t, renewals.Items, 1)
+		require.Equal(t, "collected", renewals.Items[0].Outcome)
+		current, err := a.alpha.GetSubscription(t.Context(), stuck.ID)
+		require.NoError(t, err)
+		require.Equal(t, stuckDue, *current.CurrentPeriodEndsAt, "the stuck member stays as it was")
+		require.Empty(t, retrying())
 	})
 	t.Run("OR-J16-S30/a-seen-nmi-decline-opens-dunning-in-one-transaction", func(t *testing.T) {
 		a, p, sub := nmiMembership(t)

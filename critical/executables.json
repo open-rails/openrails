@@ -233,6 +233,9 @@
     "OR-J16-S04": [
       "TestDunning/OR-J16-S04/unknown-renewal-is-not-a-decline-or-replacement-obligation"
     ],
+    "OR-J16-S05": [
+      "TestDunning/OR-J16-S05/a-failing-due-pass-holds-back-no-other-merchants-renewal"
+    ],
     "OR-J16-S30": [
       "TestDunning/OR-J16-S30/a-seen-nmi-decline-opens-dunning-in-one-transaction"
     ],

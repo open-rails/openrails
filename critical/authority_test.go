@@ -123,14 +123,42 @@ func newAuthorityWorldWithAuth(t *testing.T, configureAuth func(*authkit.Config)
 		*item.key, err = a.auth.CreateAPIKey(t.Context(), iam.SystemIdentity(), *item.group, iam.NewAPIKey{Name: "merchant-backend", Role: a.merchant.Owner})
 		require.NoError(t, err)
 	}
+	a.serve(t)
+	a.alphaRemote = a.remote(t, a.alpha.MerchantID(), a.alphaKey.Secret)
+	a.betaRemote = a.remote(t, a.beta.MerchantID(), a.betaKey.Secret)
+	return a
+}
+
+// serve mounts the engine's routes on the world's server.
+func (a *authorityWorld) serve(t *testing.T) {
+	t.Helper()
 	mux := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(mux, a.engine, openrails.Routes{Auth: a.auth.Authenticator(), RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}}))
 	a.server = httptest.NewServer(mux)
 	a.server.Client().Timeout = 5 * time.Second
 	t.Cleanup(a.server.Close)
-	a.alphaRemote = a.remote(t, a.alpha.MerchantID(), a.alphaKey.Secret)
-	a.betaRemote = a.remote(t, a.beta.MerchantID(), a.betaKey.Secret)
-	return a
+}
+
+// bindCustomers restarts the engine with the customer sign-in bound to slug's
+// merchant instead.
+func (a *authorityWorld) bindCustomers(t *testing.T, slug string) {
+	t.Helper()
+	require.NoError(t, a.engine.Close(context.Background()))
+	for name, declaration := range a.cfg.Merchants {
+		declaration.Issuer = ""
+		if name == slug {
+			declaration.Issuer = authtest.Issuer
+		}
+		a.cfg.Merchants[name] = declaration
+	}
+	var err error
+	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
+	require.NoError(t, err)
+	a.alpha, err = a.engine.MerchantBySlug("alpha")
+	require.NoError(t, err)
+	a.beta, err = a.engine.MerchantBySlug("beta")
+	require.NoError(t, err)
+	a.serve(t)
 }
 
 func mustPermission(t *testing.T, text string) iam.Perm {

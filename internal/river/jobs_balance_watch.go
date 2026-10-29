@@ -36,10 +36,7 @@ type BalanceWatchArgs struct{}
 
 func (BalanceWatchArgs) Kind() string { return KindBalanceWatch }
 
-// InsertOpts coalesces outstanding passes; a failed one is retried by the next.
-func (BalanceWatchArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: QueueBilling, MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByState: outstanding}}
-}
+func (BalanceWatchArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
 
 // BalanceWatchWorker looks at every customer whose balance watch is due: it
 // expires the credit lots that lapsed, posts the daily checkpoint of its
