@@ -481,7 +481,7 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 				s["metadata"] = merged
 			}
 		case http.MethodDelete:
-			s["status"], s["canceled_at"] = "canceled", m.now().Unix()
+			m.endLocked(s, "cancellation_requested")
 		}
 		return 200, s
 	case r.Method == http.MethodPost && p == "/v1/subscription_schedules":

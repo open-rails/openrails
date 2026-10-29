@@ -270,8 +270,9 @@ func (x *execution) collectRenewal(ctx context.Context, subID uuid.UUID) (map[st
 }
 
 // correct adopts the provider's facts on the held subscription: its mapped
-// price (a move to another product ends the old one's grace), its start date
-// and its recurring record as the accepted schedule.
+// price (a move to another product ends the old one's grace), its start date,
+// its recurring record as the accepted schedule and an ended row's cancel
+// kind and date (its access stands).
 func (x *execution) correct(ctx context.Context, c *reconcile.CorrectSubscriptionAction) (map[string]any, error) {
 	return x.capture(ctx, c.SubscriptionID, func() (map[string]any, error) {
 		repo := subscriptions.NewSubscriptionRepo(x.d)
@@ -280,6 +281,24 @@ func (x *execution) correct(ctx context.Context, c *reconcile.CorrectSubscriptio
 			return nil, err
 		}
 		out := map[string]any{"subscription_id": billing.SubscriptionID(sub.ID).String()}
+		if c.CancelType != nil || c.CanceledAt != nil {
+			if sub.Status != models.StatusCanceled {
+				return nil, superseded{"subscription_moved: it is no longer ended"}
+			}
+			if c.CancelType != nil {
+				kind := models.CancelType(*c.CancelType)
+				sub.CancelType, out["cancel_type"] = &kind, *c.CancelType
+			}
+			if c.CanceledAt != nil {
+				at := c.CanceledAt.UTC()
+				sub.CanceledAt, out["canceled_at"] = &at, at.Format(time.RFC3339)
+			}
+			// Status, period and end stand: only the cancel's metadata moves.
+			sub.MarkLifecycleDecision("provider_cancel_facts")
+			if err := repo.UpdateAt(ctx, sub, x.now); err != nil {
+				return nil, err
+			}
+		}
 		if c.PriceID != nil && *c.PriceID != sub.PriceID {
 			// A change scheduled since the pull is its renewal's or a person's.
 			if pending, err := subscriptions.PendingChange(ctx, x.d, sub.ID); err != nil || pending != nil {

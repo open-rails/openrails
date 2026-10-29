@@ -264,14 +264,21 @@ func (m *Mock) CollectDraft(sub string) Object {
 	return clone(inv)
 }
 
-// CancelSubscription is the subscription ended at Stripe (dashboard or
-// dunning); it returns the subscription.
+// CancelSubscription is the subscription ended at Stripe at someone's
+// request (the customer's portal or the dashboard); it returns the
+// subscription.
 func (m *Mock) CancelSubscription(sub string) Object {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.subs[sub]
-	s["status"], s["canceled_at"] = "canceled", m.now().Unix()
+	m.endLocked(s, "cancellation_requested")
 	return clone(s)
+}
+
+// endLocked ends s now, for reason (Stripe's cancellation_details.reason).
+func (m *Mock) endLocked(s Object, reason string) {
+	s["status"], s["canceled_at"], s["ended_at"] = "canceled", m.now().Unix(), m.now().Unix()
+	s["cancellation_details"] = Object{"reason": reason, "comment": nil, "feedback": nil}
 }
 
 // SetSubscriptionStatus moves a subscription to status; retrying says

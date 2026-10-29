@@ -1084,6 +1084,11 @@
       "name": "The legacy provider refresh between a pull and its Apply leaves the pull's proposals untouched"
     },
     {
+      "id": "OR-J38-S35",
+      "journey": "J38",
+      "name": "A correction adopts an ended row's cancel kind and date from the provider at Apply; status, period and access stay byte-identical and the provider sees no write"
+    },
+    {
       "id": "OR-J22-S06",
       "journey": "J22",
       "name": "Lapsed credit stops being available at its lapse and its balance watch, arrears included, expires it"

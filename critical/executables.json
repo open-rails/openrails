@@ -721,6 +721,9 @@
     "OR-J38-S29": [
       "TestPSPReconcile/OR-J38-S29/provider-refresh-leaves-a-pulls-proposals"
     ],
+    "OR-J38-S35": [
+      "TestPSPReconcile/OR-J38-S35/correction-adopts-an-ended-rows-cancel-facts"
+    ],
     "OR-J22-S06": [
       "TestCreditExpiry/OR-J22-S06/lapsed-credit-leaves-available-at-its-lapse-and-its-watch-expires-it"
     ],

@@ -742,6 +742,68 @@ func TestPSPReconcile(t *testing.T) {
 		require.Equal(t, "approved", *correct.Resolution, "notes %v", correct.Notes)
 		require.Equal(t, prices["current19"].ID.String(), iw.held(t, schedule).Price)
 	})
+
+	t.Run("OR-J38-S35/correction-adopts-an-ended-rows-cancel-facts", func(t *testing.T) {
+		iw := reconcileWorld(t, "stripe")
+		iw.stripe.AddProduct("prod_basic", "Basic")
+		iw.stripe.AddPrice(stripemock.Price{ID: "price_basic", Product: "prod_basic", Amount: 999, Interval: "month"})
+		product, err := iw.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "basic", DisplayName: "Basic", Entitlements: []string{"member:basic"}})
+		require.NoError(t, err)
+		_, err = iw.alphaRemote.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "stripe-basic", PSP: "stripe", PriceID: "price_basic"})
+		require.NoError(t, err)
+		start := iw.clock.Now().Add(-10 * 24 * time.Hour)
+		sub := iw.stripe.AddSubscription(iw.stripe.AddCustomer(iw.alice.Email, "Alice", nil), "pm_alice", "price_basic", 999, start, start.AddDate(0, 1, 0))
+		since := start.Add(-24 * time.Hour)
+		iw.apply(t, iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "stripe"}, HistorySince: &since}).ID)
+		require.True(t, iw.entitled(t, customerOf(iw.alice), "member:basic"))
+
+		// Alice cancels at Stripe. OpenRails hears two days later and records
+		// the provider's end as its own: expired, that day.
+		canceledAt := time.Unix(int64(iw.stripe.CancelSubscription(sub)["canceled_at"].(float64)), 0).UTC()
+		iw.clock.Advance(2 * 24 * time.Hour)
+		armDestructive(t, iw.authorityWorld, true)
+		iw.stripe.SendWebhooksTo(iw.server.URL+"/v1/webhooks/stripe/acct_import", "whsec_import")
+		_, err = iw.stripe.SendEvent(t.Context(), "customer.subscription.deleted", iw.stripe.Subscription(sub))
+		require.NoError(t, err)
+		settle(t, iw.fleet, kindConverge)
+		cancel := func() (kind string, at time.Time) {
+			require.NoError(t, iw.pool.QueryRow(t.Context(), fmt.Sprintf(`SELECT cancel_type, canceled_at FROM %s WHERE merchant_id = $1 AND rail_subscription_id = $2`, iw.table("subscriptions")),
+				iw.alpha.MerchantID().UUID(), sub).Scan(&kind, &at))
+			return kind, at.UTC()
+		}
+		kind, at := cancel()
+		require.Equal(t, "expired", kind)
+		require.False(t, at.Truncate(24*time.Hour).Equal(canceledAt.Truncate(24*time.Hour)), "recorded on another day: %s", at)
+		accessColumns := func() string {
+			var out string
+			require.NoError(t, iw.pool.QueryRow(t.Context(), fmt.Sprintf(`SELECT jsonb_build_object('status', status, 'price_id', price_id, 'product_id', product_id,
+				'current_period_starts_at', current_period_starts_at, 'current_period_ends_at', current_period_ends_at, 'ended_at', ended_at)::text
+				FROM %s WHERE merchant_id = $1 AND rail_subscription_id = $2`, iw.table("subscriptions")), iw.alpha.MerchantID().UUID(), sub).Scan(&out))
+			return out
+		}
+		row, access, writes := accessColumns(), iw.accessDump(t, customerOf(iw.alice)), len(iw.stripe.Mutations(""))
+
+		imp := iw.manual(t, "stripe")
+		held := subscriptionOf(t, iw, customerOf(iw.alice), sub)
+		correct := proposalOf(t, iw.proposals(t, imp.ID), billing.ChangeCorrectSubscription, held.ID.String())
+		require.False(t, correct.Change.Effects.EndsAccess, "cancel facts are metadata")
+		require.Equal(t, "user", correct.Change.To["cancel_type"])
+		require.Equal(t, canceledAt.Format(time.RFC3339), correct.Change.To["canceled_at"])
+		iw.apply(t, imp.ID)
+		applied, err := iw.alpha.GetFinding(t.Context(), correct.ID)
+		require.NoError(t, err)
+		require.NotNil(t, applied.Resolution, "Apply approves it as a correction: %s, notes %v, %v", applied.Status, deref(applied.Notes), applied.Evidence["resolution"])
+		require.Equal(t, "approved", *applied.Resolution, "notes %v", deref(applied.Notes))
+		kind, at = cancel()
+		require.Equal(t, "user", kind, "the provider's cancel kind")
+		require.True(t, at.Equal(canceledAt), "the provider's cancel date: %s", at)
+		require.Equal(t, row, accessColumns(), "status, period and end stand")
+		require.Equal(t, access, iw.accessDump(t, customerOf(iw.alice)), "access stays byte-identical")
+		require.Len(t, iw.stripe.Mutations(""), writes, "the pull, Apply and the correction write nothing to Stripe")
+
+		again := iw.manual(t, "stripe")
+		require.Zero(t, kinds(iw.proposals(t, again.ID))[billing.ChangeCorrectSubscription], "the adopted facts agree")
+	})
 }
 
 // pulled is what one import's pull proposed, as stored.

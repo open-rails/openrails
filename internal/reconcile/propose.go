@@ -146,23 +146,29 @@ func stateSubject(f *Finding, subs map[uuid.UUID]*LocalSubscription) (uuid.UUID,
 
 // CorrectSubscriptionAction adopts the provider's facts on a held
 // subscription: the price its plan maps to, the recurring record its
-// schedule bills by, and the date it started. Unset fields stand.
+// schedule bills by, the date it started and, on an ended row, the kind and
+// date of its cancel. Unset fields stand.
 type CorrectSubscriptionAction struct {
 	SubscriptionID uuid.UUID  `json:"subscription_id"`
 	PriceID        *uuid.UUID `json:"price_id,omitempty"`
 	StartedAt      *time.Time `json:"started_at,omitempty"`
 	// Schedule is the provider's recurring record, as the pull read it.
 	Schedule *RemoteSubscription `json:"schedule,omitempty"`
+	// CancelType and CanceledAt are metadata: the row's access stands.
+	CancelType *string    `json:"cancel_type,omitempty"`
+	CanceledAt *time.Time `json:"canceled_at,omitempty"`
 }
 
-// adopted is what a correction makes OpenRails record: the price, start and
-// schedule terms, without the schedule's next due date.
+// adopted is what a correction makes OpenRails record: the price, start,
+// schedule terms (without the schedule's next due date) and cancel.
 func (c *CorrectSubscriptionAction) adopted() any {
 	out := struct {
-		PriceID   *uuid.UUID `json:"price_id,omitempty"`
-		StartedAt *time.Time `json:"started_at,omitempty"`
-		Schedule  any        `json:"schedule,omitempty"`
-	}{PriceID: c.PriceID, StartedAt: c.StartedAt}
+		PriceID    *uuid.UUID `json:"price_id,omitempty"`
+		StartedAt  *time.Time `json:"started_at,omitempty"`
+		Schedule   any        `json:"schedule,omitempty"`
+		CancelType *string    `json:"cancel_type,omitempty"`
+		CanceledAt *time.Time `json:"canceled_at,omitempty"`
+	}{PriceID: c.PriceID, StartedAt: c.StartedAt, CancelType: c.CancelType, CanceledAt: c.CanceledAt}
 	if r := c.Schedule; r != nil {
 		out.Schedule = []any{r.RailSubscriptionID, r.PlanID, r.Amount, r.IntervalDays, r.IntervalMonths}
 	}
@@ -181,9 +187,11 @@ func mappedPrice(planIdx map[string][]planLink, plan string) *LocalPrice {
 // compareFacts proposes adopting the provider's facts on a held provider-run
 // subscription (pull.subscription.facts, correct_subscription): the price its
 // plan maps to (on Stripe once an invoice for it is paid), the schedule terms
-// of its recurring record in place of a derived or missing one, and its start
-// date. A price of another product ends the old product's access. Unmapped
-// plans, vault moves and pauses stay compareScheduleTerms' drift.
+// of its recurring record in place of a derived or missing one, its start
+// date and, when it ended both here and at the provider, the provider's
+// cancel kind and date. A price of another product ends the old product's
+// access; nothing else touches access. Unmapped plans, vault moves and pauses
+// stay compareScheduleTerms' drift.
 func compareFacts(provider Provider, snap *RemoteSnapshot, idx *localIndex, planIdx map[string][]planLink, s *LocalSubscription, r *RemoteSubscription, opts diffOptions) *Finding {
 	if !opts.Pull || opts.changes == nil || s.PriceID == nil || s.CollectionPolicy == models.CollectionPolicyEngine || s.TierChangePending || r.Paused {
 		return nil
@@ -214,18 +222,36 @@ func compareFacts(provider Provider, snap *RemoteSnapshot, idx *localIndex, plan
 		to["schedule"] = map[string]any{"source": providerScheduleSource(models.Rail(s.Rail), s.RailSubscriptionID), "amount": r.Amount,
 			"interval_days": r.IntervalDays, "interval_months": r.IntervalMonths, "first_due_at": timeOrNil(r.NextBillingAt)}
 	}
-	if !r.CreatedAt.IsZero() && !r.CreatedAt.UTC().Truncate(24*time.Hour).Equal(s.StartedAt.UTC().Truncate(24*time.Hour)) {
+	if !r.CreatedAt.IsZero() && !sameDay(r.CreatedAt, s.StartedAt) {
 		started := r.CreatedAt.UTC()
 		act.StartedAt = &started
 		from["started_at"], to["started_at"] = s.StartedAt.UTC().Format(time.RFC3339), started.Format(time.RFC3339)
 	}
-	if act.PriceID == nil && act.Schedule == nil && act.StartedAt == nil {
+	if s.Status == string(models.StatusCanceled) && (r.Status == SubscriptionStatusCanceled || r.Status == SubscriptionStatusExpired) {
+		if kind := r.CancelKind; kind != "" && cancelClass(kind) != cancelClass(s.CancelType) {
+			act.CancelType = &kind
+			from["cancel_type"], to["cancel_type"] = s.CancelType, kind
+		}
+		// A cancel dated after the row's access ended would move that end.
+		if at := r.CanceledAt; at != nil && (s.CanceledAt == nil || !sameDay(*s.CanceledAt, *at)) && (s.EndedAt == nil || !at.After(*s.EndedAt)) {
+			canceled := at.UTC()
+			act.CanceledAt = &canceled
+			from["canceled_at"], to["canceled_at"] = timeOrNil(s.CanceledAt), canceled.Format(time.RFC3339)
+		}
+	}
+	if act.PriceID == nil && act.Schedule == nil && act.StartedAt == nil && act.CancelType == nil && act.CanceledAt == nil {
 		return nil
 	}
 	remote := remoteSubEvidence(r)
 	remote["amount"], remote["interval_days"], remote["interval_months"] = r.Amount, r.IntervalDays, r.IntervalMonths
 	if !r.CreatedAt.IsZero() {
 		remote["started_at"] = r.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	if r.CanceledAt != nil {
+		remote["canceled_at"] = r.CanceledAt.UTC().Format(time.RFC3339)
+	}
+	if r.CancelKind != "" {
+		remote["cancel_kind"] = r.CancelKind
 	}
 	f := Finding{
 		Provider:          provider,
@@ -252,6 +278,21 @@ func compareFacts(provider Provider, snap *RemoteSnapshot, idx *localIndex, plan
 	c.Apply.Correct = act
 	f.Change = c
 	return &f
+}
+
+// cancelClass groups cancel kinds by what a provider can tell apart: a
+// cancel someone requested (the customer, the merchant or a tier change), a
+// failed payment, a dispute.
+func cancelClass(kind string) string {
+	switch models.CancelType(kind) {
+	case models.CancelTypeUser, models.CancelTypeMerchant, models.CancelTypeUpgrade:
+		return string(models.CancelTypeUser)
+	}
+	return kind
+}
+
+func sameDay(a, b time.Time) bool {
+	return a.UTC().Truncate(24 * time.Hour).Equal(b.UTC().Truncate(24 * time.Hour))
 }
 
 func localPrice(idx *localIndex, id uuid.UUID) *LocalPrice {

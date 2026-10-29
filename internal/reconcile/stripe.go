@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/transient"
@@ -336,6 +337,10 @@ type stripeSubscriptionJSON struct {
 	LatestInvoice        json.RawMessage   `json:"latest_invoice"`
 	Created              int64             `json:"created"`
 	Metadata             map[string]string `json:"metadata"`
+	CanceledAt           int64             `json:"canceled_at"`
+	CancellationDetails  struct {
+		Reason string `json:"reason"`
+	} `json:"cancellation_details"`
 }
 
 type stripePaymentMethodJSON struct {
@@ -369,6 +374,20 @@ func stripeRemoteStatus(status string, retryExhausted bool) SubscriptionStatus {
 	}
 }
 
+// stripeCancelKind is why Stripe says a subscription ended, in OpenRails'
+// cancel vocabulary; "" when it does not say.
+func stripeCancelKind(reason string) string {
+	switch reason {
+	case "cancellation_requested":
+		return string(models.CancelTypeUser)
+	case "payment_failed":
+		return string(models.CancelTypeExpired)
+	case "payment_disputed":
+		return string(models.CancelTypeChargeback)
+	}
+	return ""
+}
+
 // stripeInvoiceRetryExhausted reports an expanded latest invoice that is open
 // with no further payment attempt scheduled: Stripe has stopped retrying. An
 // unexpanded (string) invoice proves nothing.
@@ -399,6 +418,13 @@ func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *Remo
 	}
 	if s.Created > 0 {
 		sub.CreatedAt = time.Unix(s.Created, 0).UTC()
+	}
+	if sub.Status == SubscriptionStatusCanceled || sub.Status == SubscriptionStatusExpired {
+		if s.CanceledAt > 0 {
+			at := time.Unix(s.CanceledAt, 0).UTC()
+			sub.CanceledAt = &at
+		}
+		sub.CancelKind = stripeCancelKind(s.CancellationDetails.Reason)
 	}
 	periodStart, periodEnd := s.CurrentPeriodStart, s.CurrentPeriodEnd
 	if len(s.Items.Data) > 0 {
