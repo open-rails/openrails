@@ -1492,6 +1492,9 @@
     "internal/contractaudit": [
       "type Snapshot struct {\n\tAPI map[string][]string `json:\"go_api\"`\n\n\tWire map[string][]string `json:\"wire_types\"`\n\n\tImports map[string]map[string]string `json:\"declaring_file_imports\"`\n}"
     ],
+    "internal/convergejob": [
+      "type Args struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tCustomerID uuid.UUID `json:\"customer_id\" river:\"unique\"`\n\tAfter      int64     `json:\"after,omitempty\" river:\"unique\"`\n}"
+    ],
     "internal/custodymigration": [
       "type ImportedToken struct {\n\tSourceRailCustomerRef string `json:\"source_rail_customer_ref\"`\n\n\tSourceRailMethodRef string `json:\"source_rail_method_ref,omitempty\"`\n\n\tToken       string `json:\"token\"`\n\tFingerprint string `json:\"fingerprint,omitempty\"`\n\tLastFour    string `json:\"last_four,omitempty\"`\n\tCardType    string `json:\"card_type,omitempty\"`\n\tExpiryDate  string `json:\"expiry_date,omitempty\"`\n\n\tNetworkTokenID     string `json:\"network_token_id,omitempty\"`\n\tNetworkTokenStatus string `json:\"network_token_status,omitempty\"`\n\tNetworkTokenPAR    string `json:\"network_token_par,omitempty\"`\n\n\tCustomer *uuid.UUID `json:\"customer,omitempty\"`\n}",
       "type PSPRef struct {\n\tRail        string `json:\"rail\"`\n\tEnvironment string `json:\"environment,omitempty\"`\n\tAccountID   string `json:\"account_id\"`\n}",
@@ -2615,6 +2618,16 @@
       "strings": "strings",
       "token": "go/token"
     },
+    "internal/convergejob/convergejob.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "river": "github.com/riverqueue/river",
+      "rivertype": "github.com/riverqueue/river/rivertype",
+      "uuid": "github.com/google/uuid"
+    },
     "internal/custodymigration/custodymigration.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "boot": "github.com/open-rails/openrails/internal/merchantbootstrap",
@@ -2803,13 +2816,10 @@
     "internal/http/handlers/entitlements.go": {
       "api": "github.com/open-rails/openrails/internal/api",
       "billing": "github.com/open-rails/openrails/billing",
-      "converge": "github.com/open-rails/openrails/internal/reconcile/converge",
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "fmt": "fmt",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
-      "log": "github.com/sirupsen/logrus",
       "math": "math",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "strings": "strings",
       "time": "time",
@@ -2877,7 +2887,6 @@
       "billing": "github.com/open-rails/openrails/billing",
       "billingservice": "github.com/open-rails/openrails/internal/service",
       "context": "context",
-      "converge": "github.com/open-rails/openrails/internal/reconcile/converge",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
@@ -4534,15 +4543,12 @@
     },
     "internal/reconcile/converge/converge_passes.go": {
       "billing": "github.com/open-rails/openrails/billing",
-      "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "grants": "github.com/open-rails/openrails/internal/modules/grants",
       "json": "encoding/json",
-      "lifecycle": "github.com/open-rails/openrails/internal/lifecycle",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
@@ -4769,7 +4775,6 @@
       "collection": "github.com/open-rails/openrails/internal/modules/collection",
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
-      "converge": "github.com/open-rails/openrails/internal/reconcile/converge",
       "db": "github.com/open-rails/openrails/internal/db",
       "decline": "github.com/open-rails/openrails/internal/decline",
       "destructive": "github.com/open-rails/openrails/internal/destructive",
