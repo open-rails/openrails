@@ -339,10 +339,22 @@ func unjustifiedAccessFinding(o *gen.ListUnjustifiedAccessWindowsRow) ConvergeFi
 func (p *derivePass) lockedMaterialize(ctx context.Context, scope Scope, g gen.BillingGrant) error {
 	ctx = merchant.WithID(ctx, scope.Merchant)
 	return p.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		gl := grants.New(gen.New(tx), scope.Merchant.UUID())
+		q := gen.New(tx)
+		gl := grants.New(q, scope.Merchant.UUID())
 		gl.SetClock(p.e.Now)
 		if err := gl.LockCustomer(ctx, g.CustomerID); err != nil {
 			return err
+		}
+		if g.Kind == string(grants.Access) && g.SourceType == string(grants.Subscription) {
+			closed, err := q.AccessGrantPastChargebackBoundary(ctx, gen.AccessGrantPastChargebackBoundaryParams{
+				MerchantID: scope.Merchant.UUID(), GrantID: g.ID,
+			})
+			if err != nil {
+				return err
+			}
+			if closed {
+				return nil
+			}
 		}
 		return gl.MaterializeGrant(ctx, g)
 	})

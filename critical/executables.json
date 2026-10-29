@@ -398,6 +398,21 @@
     "OR-J27-S04": [
       "TestPublicEntitlements/OR-J27-S04/archive-and-refund-obey-explicit-access-policy"
     ],
+    "OR-J27-S05": [
+      "TestSubscriptionAccessRepair/OR-J27-S05/future-subscription-repair-stays-closed"
+    ],
+    "OR-J27-S06": [
+      "TestSubscriptionAccessBoundary/OR-J27-S06/closure-is-atomic-and-source-scoped"
+    ],
+    "OR-J27-S07": [
+      "TestSubscriptionAccessRepairRecheck/OR-J27-S07/repair-rechecks-chargeback-after-detection"
+    ],
+    "OR-J27-S08": [
+      "TestSubscriptionAccessRepairPreservesSources/OR-J27-S08/ordinary-and-uncertain-sources-keep-their-grants"
+    ],
+    "OR-J27-S09": [
+      "TestSubscriptionAccessRepairTerminated/OR-J27-S09/an-ended-window-still-applies-its-recorded-revocation"
+    ],
     "OR-J28-S01": [
       "TestCallbackContracts/OR-J28-S01/signed-account-bound-evidence-settles-the-original-order"
     ],
@@ -816,6 +831,12 @@
     ],
     "OR-J04-S70": [
       "TestDueWork/OR-J04-S70/the-hourly-health-pass-raises-held-renewals"
+    ],
+    "OR-J12-S12": [
+      "TestCardGuard/OR-J12-S12/mastercard-length-rule-keeps-real-cards-blocked"
+    ],
+    "OR-J38-S36": [
+      "TestCardGuard/OR-J38-S36/ccbill-references-import-and-export-unchanged"
     ]
   },
   "suites": {

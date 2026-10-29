@@ -104,13 +104,32 @@ WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_type = 'subscri
   AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(ends_at)::timestamptz);
 
 -- name: SoftDeleteFutureProductAccessBySubscription :exec
+-- The subscription boundary terminates future grants even when an older
+-- writer already removed their windows without recording the retraction.
+WITH retracted AS (
 UPDATE billing.product_access pa SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_type = 'subscription'
   AND pa.source_id = sqlc.arg(source_id)::text
   AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-  AND pa.starts_at >= sqlc.arg(ends_at)::timestamptz;
+  AND pa.starts_at >= sqlc.arg(ends_at)::timestamptz
+RETURNING pa.grant_id
+)
+INSERT INTO billing.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, starts_at, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, sqlc.arg(ends_at)::timestamptz, 'subscription access bound'
+FROM billing.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'access' AND g.event = 'grant'
+  AND g.source_type = 'subscription' AND g.source_id = sqlc.arg(source_id)::text
+  AND (g.id IN (SELECT grant_id FROM retracted) OR g.starts_at >= sqlc.arg(ends_at)::timestamptz)
+ORDER BY g.id
+ON CONFLICT (merchant_id, supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING;
 
 -- name: RetractFutureProductAccessByPayment :exec
 -- A refund removes the payment's windows that have not started; their grants
