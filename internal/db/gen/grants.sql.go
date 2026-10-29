@@ -21,6 +21,11 @@ SELECT EXISTS (
       AND g.kind = 'access' AND g.event = 'grant' AND g.source_type = 'subscription'
       AND s.deleted_at IS NULL AND s.status = 'canceled' AND s.cancel_type = 'chargeback'
       AND g.starts_at >= s.canceled_at
+      AND NOT EXISTS (
+          SELECT 1 FROM billing.grants t
+          WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+            AND t.event IN ('revoke', 'expire', 'supersede')
+      )
 ) AS beyond_boundary
 `
 

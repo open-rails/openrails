@@ -13,10 +13,12 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/stretchr/testify/require"
 )
@@ -376,4 +378,47 @@ func subscriptionAccessWindow(t *testing.T, a *authorityWorld, service *entitlem
 	window, err := service.GetAccessByID(ctx, id)
 	require.NoError(t, err)
 	return window
+}
+
+func TestSubscriptionAccessRepairTerminated(t *testing.T) {
+	t.Run("OR-J27-S09/an-ended-window-still-applies-its-recorded-revocation", func(t *testing.T) {
+		a, _, sub := purchasedMembership(t)
+		armDestructive(t, a, true)
+		database, err := db.NewWithPGXPool(a.pool, a.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		a.clock.Advance(time.Hour)
+		bound := a.clock.Now().Truncate(time.Microsecond)
+		a.clock.Advance(bound.Sub(a.clock.Now()))
+		start, end := bound.Add(time.Hour), bound.Add(2*time.Hour)
+		window := subscriptionAccessWindow(t, a, entitlements.NewEntitlementService(database, a.clock), sub, start, end)
+		_, err = a.pool.Exec(ctx, "UPDATE "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" SET status='canceled', cancel_type='chargeback', canceled_at=$1, ended_at=$1, lifecycle_rev=lifecycle_rev+1 WHERE merchant_id=$2 AND id=$3", bound, a.alpha.MerchantID().UUID(), sub.ID.UUID())
+		require.NoError(t, err)
+		_, err = a.pool.Exec(ctx, "UPDATE "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" SET ends_at=$1 WHERE merchant_id=$2 AND source_type='subscription' AND source_id=$3 AND starts_at < $1", bound, a.alpha.MerchantID().UUID(), sub.ID.UUID().String())
+		require.NoError(t, err)
+		// Model a committed revocation whose projection still needs repair.
+		err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			ledger := grants.New(gen.New(tx), a.alpha.MerchantID().UUID())
+			if err := ledger.LockCustomer(ctx, sub.CustomerID.UUID()); err != nil {
+				return err
+			}
+			_, err := ledger.RevokeAsOf(ctx, window.GrantID, "chargeback", bound)
+			return err
+		})
+		require.NoError(t, err)
+		a.clock.Advance(3 * time.Hour)
+		customer := sub.CustomerID.UUID()
+		repair := converge.NewConvergeEngine(database, a.clock)
+		for pass := range 2 {
+			result, err := repair.Converge(ctx, converge.Scope{Merchant: a.alpha.MerchantID(), Customer: &customer})
+			require.NoError(t, err)
+			var retracted bool
+			require.NoError(t, a.pool.QueryRow(ctx, "SELECT revoked_at IS NOT NULL OR deleted_at IS NOT NULL FROM "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), window.ID).Scan(&retracted))
+			require.True(t, retracted, "an ended window must honor its already recorded grant revocation")
+			assertGrantTermination(t, a, window.GrantID, &bound)
+			if pass == 1 {
+				require.Zero(t, result.AutoFixed, "a completed retraction must not be reported as fixed again")
+			}
+		}
+	})
 }

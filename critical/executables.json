@@ -410,6 +410,9 @@
     "OR-J27-S08": [
       "TestSubscriptionAccessRepairPreservesSources/OR-J27-S08/ordinary-and-uncertain-sources-keep-their-grants"
     ],
+    "OR-J27-S09": [
+      "TestSubscriptionAccessRepairTerminated/OR-J27-S09/an-ended-window-still-applies-its-recorded-revocation"
+    ],
     "OR-J28-S01": [
       "TestCallbackContracts/OR-J28-S01/signed-account-bound-evidence-settles-the-original-order"
     ],
