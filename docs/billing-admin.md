@@ -69,7 +69,7 @@ With customer support read (`merchant:customer:read`), Records shows linked cust
 
 ## Standalone server console
 
-The standalone browser entry is `/admin`. For a server at `https://billing.doujins.com`, open `https://billing.doujins.com/admin`; its JSON APIs remain under `/v1`. An embedded host chooses the component's `basePath` itself.
+The standalone browser entry is `/admin`. For a server at `https://billing.example.com`, open `https://billing.example.com/admin`; its JSON APIs remain under `/v1`. An embedded host chooses the component's `basePath` itself.
 
 The app in `server/web/console` composes three tabs from the public packages:
 

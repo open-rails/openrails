@@ -1004,7 +1004,7 @@ local accounts with `local_sign_in`. Set `admin_console.disabled: true` for an
 API-only server; see the [standalone console](docs/billing-admin.md).
 
 The browser entry and JSON API have separate URLs. For a server hosted at
-`https://billing.doujins.com`, open `https://billing.doujins.com/admin`.
+`https://billing.example.com`, open `https://billing.example.com/admin`.
 `GET /v1/metrics/dashboard` returns the saved JSON layout and widget definitions;
 `POST /v1/metrics/query` returns chart data. A host embedding `BillingAdmin`
 chooses its own `basePath`.

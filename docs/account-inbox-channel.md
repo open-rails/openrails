@@ -57,8 +57,7 @@ Order requests are withdrawn when the order completes, is canceled, expires or
 is voided. Full payment by a provider, a recorded remittance or funded credit has
 the same effect. Partial payment and marking debt uncollectible keep its request.
 
-Implementation and rollout are tracked in AuthKit #470 and OpenRails #1291 in
-the central tracker. Preserve retained receipt IDs and read/archive state when
+Preserve retained receipt IDs and read/archive state when
 adopting the account inbox, and retire ContentKit's billing-event inbox importer
 only after the producer channel and host wiring have been qualified.
 

@@ -33,8 +33,8 @@ subscription stays provider-run, exactly as an imported one does.
 The first time a process loads a PSP's configuration (an NMI, Stripe or CCBill
 account that is declared, live and not a duplicate), OpenRails creates the
 PSP's **onboarding import** (`origin: onboarding`) and queues its pull, in one
-transaction. A PSP has at most one: whichever replica or host (Doujins and
-Hentai0 share one merchant) loads it first creates it, and the others find it.
+transaction. A PSP has at most one: whichever replica or host sharing the
+merchant loads it first creates it, and the others find it.
 Existing PSPs get theirs on the first boot after upgrading. It runs in the
 background, also with provider writes `readonly`, and lands nothing: a person
 reviews, maps, links and applies it as any import. Find it with
