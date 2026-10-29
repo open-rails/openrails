@@ -32,7 +32,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/pspimport"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/wakejobs"
 )
 
@@ -137,27 +136,13 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 	}
 
 	mctx := db.WithPSPID(merchant.WithID(ctx, billing.MerchantID(args.MerchantID)), args.PSPID)
-	var customerID uuid.UUID
 	err := w.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
-		var cerr error
-		customerID, cerr = w.convergeOne(cctx, args)
+		_, cerr := w.convergeOne(cctx, args)
 		if errors.Is(cerr, parking.ErrCauseFixed) {
 			// The cause was fixed while this read was in flight: read again.
-			customerID, cerr = w.convergeOne(cctx, args)
+			_, cerr = w.convergeOne(cctx, args)
 		}
-		if cerr != nil {
-			return cerr
-		}
-		// Project the entitlement windows and grant effects the transition
-		// implies. Best-effort: the sweep backstops.
-		if customerID != uuid.Nil {
-			if _, aerr := converge.AfterMutation(cctx, w.DB, billing.MerchantID(args.MerchantID), customerID, w.Clock); aerr != nil {
-				log.WithContext(cctx).WithError(aerr).WithFields(log.Fields{
-					"merchant_id": args.MerchantID, "customer_id": customerID,
-				}).Warn("subscription converge: inline converge after transition failed; the sweep will reconcile")
-			}
-		}
-		return nil
+		return cerr
 	})
 	if err == nil {
 		return nil

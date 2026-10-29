@@ -17,16 +17,17 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/failpoint"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // The Convergence Engine is the single idempotent driver of the internal
-// DERIVE / LIFE / CON planes; the provider pull feeds it. Converge runs inline
-// after a source mutation (customer/subscription scope), once after a pull
-// (merchant scope) and on a background sweep. A converged scope emits no
-// findings and every repair is a no-op, so re-running changes nothing.
+// DERIVE / CON / NOTIFY planes and the merchant's health findings. A
+// customer's job runs it after each mutation that changed the customer
+// (convergejob, queued in that mutation's transaction); a provider pull runs
+// it merchant-wide, and the hourly health pass runs Health for merchants with
+// activity. A converged scope emits no findings and every repair is a no-op,
+// so re-running changes nothing.
 
 // Severity is a finding's urgency label, persisted verbatim to the ledger.
 type Severity string
@@ -56,47 +57,23 @@ const (
 	ClassOperator Class = "OPERATOR" // no API / too sensitive (refund, dispute); surfaced
 )
 
-// SourceDomain names the source domain a destructive EXCESS repair depends on,
-// so the confirmed-absence gate can hold it until that domain is proven fully
-// reconciled. Empty = not gated (e.g. MISSING/MISMATCH, which are always safe).
-type SourceDomain string
-
-const (
-	DomainNone          SourceDomain = ""
-	DomainSubscriptions SourceDomain = "subscriptions"
-	DomainPayments      SourceDomain = "payments"
-	DomainGrants        SourceDomain = "grants"
-)
-
-// Scope narrows a Converge pass. Merchant is required; Customer and
-// Subscription narrow it for the cheap inline path. A merchant-only scope (both
-// nil) is the exhaustive sweep / post-pull pass.
+// Scope narrows a Converge pass to a merchant, or to one of its customers.
 type Scope struct {
-	Merchant     billing.MerchantID
-	Customer     *uuid.UUID
-	Subscription *uuid.UUID
+	Merchant billing.MerchantID
+	Customer *uuid.UUID
 }
-
-// IsGlobal reports whether the scope is merchant-wide (the sweep / post-pull pass).
-func (s Scope) IsGlobal() bool { return s.Customer == nil && s.Subscription == nil }
 
 // ConvergeFinding is one divergence emitted by a plane pass. Repair, when set,
 // is the idempotent local write that fixes an AUTO finding; nil means
 // surface-only. RecommendedAction is the operator prose for ADMIN findings;
 // the machine-executable shape rides in Evidence under recommend.EvidenceKey.
 type ConvergeFinding struct {
-	Type         string // finding_type, e.g. "derive.grant.excess"
-	Shape        Shape
-	Class        Class
-	Severity     Severity
-	SubjectKey   string // stable per-finding identity within (merchant, provider, type)
-	Provider     string // "self" for internal planes; a provider name for PULL
-	SourceDomain SourceDomain
-	// Ungated opts a ShapeExcess repair out of the confirmed-absence gate. Only
-	// legitimate when a local terminal fact, not an absence in provider data,
-	// justifies the retraction (an already-terminated grant's effect, an
-	// abandoned order attempt). Every use must say why in a comment.
-	Ungated bool
+	Type       string // finding_type, e.g. "derive.grant.excess"
+	Shape      Shape
+	Class      Class
+	Severity   Severity
+	SubjectKey string // stable per-finding identity within (merchant, provider, type)
+	Provider   string // "self" for internal planes; a provider name for PULL
 	// Retracts marks a repair of another shape that closes access, so the
 	// destructive gate holds it as it holds every EXCESS repair.
 	Retracts          bool
@@ -105,12 +82,12 @@ type ConvergeFinding struct {
 	Repair            func(ctx context.Context) error // AUTO repair; nil = surface only
 }
 
-// Pass is one diagnostic plane. Passes run in DERIVE → LIFE → CON order; the
-// NOTIFY stage runs after their repairs, on the converged state.
+// Pass is one diagnostic plane. Converge runs DERIVE then CON, and the
+// NOTIFY stage after their repairs, on the converged state.
 type Pass interface {
 	Plane() string
 	Run(ctx context.Context, scope Scope) ([]ConvergeFinding, error)
-	// Standing lists the finding types a merchant-wide Run reports in full:
+	// Standing lists the finding types a Run reports in full for its scope:
 	// an open finding of one of them that the run no longer reports has
 	// cleared and resolves itself.
 	Standing() []string
@@ -136,42 +113,32 @@ func markTruncated(ctx context.Context, n int, findingTypes ...string) {
 }
 
 // ConvergeEngine runs the internal plane passes and persists their findings to the
-// shared reconciliation_findings ledger, applying AUTO repairs through the
-// confirmed-absence gate.
+// shared reconciliation_findings ledger, applying AUTO repairs; the
+// destructive gate holds every retraction.
 type ConvergeEngine struct {
 	DB  *db.DB
 	Now func() time.Time
-	// lifecycle is the shared subscription core: the LIFE pass's terminal
-	// repairs (grace_exhausted / pending_stale) go through it, so a converged
-	// cancellation equals a user-driven one (status flip, Solana cranker
-	// cascade, as-of entitlement revoke) minus the durable side effects, which
-	// are not re-fired for a transition that already happened. Side-effect
-	// deps are intentionally nil.
-	lifecycle *subscriptions.SubscriptionLifecycleService
-	passes    []Pass
-
 	// Notifier bridges persisted findings into the operator notification
 	// store. Optional; nil is a no-op. Set directly on the constructed engine.
 	Notifier reconcile.FindingNotifier
 
+	passes []Pass
 	// notify is not in passes: it detects on the state the repairs just left
-	// (a window DERIVE re-projected this run never emails), so Converge runs it
-	// after the remediation loop.
+	// (a window DERIVE re-projected this run never emails), so it runs after
+	// the remediation loop.
 	notify *notifyPass
+	health *healthPass
 }
 
-// NewConvergeEngine wires the engine with the DERIVE → LIFE → CON passes plus
-// the post-repair NOTIFY stage. It reads the caller's clock when one is given.
+// NewConvergeEngine wires the engine with the DERIVE → CON passes, the
+// post-repair NOTIFY stage and the health pass. It reads the caller's clock
+// when one is given.
 func NewConvergeEngine(database *db.DB, clocks ...clockwork.Clock) *ConvergeEngine {
 	clock := timeutil.FirstClock(clocks...)
 	e := &ConvergeEngine{DB: database, Now: func() time.Time { return clock.Now().UTC() }}
-	// Real clock: the LIFE pass passes its own detection instants (now / grace-end)
-	// explicitly into the cores, so the lifecycle clock only stamps canceled_at.
-	// Side-effect deps (notifications / event log / payments / deferred delete) are
-	// nil: convergence applies LOCAL state only — converge-not-replay.
-	e.lifecycle = subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, nil, clock)
-	e.passes = []Pass{&derivePass{e: e}, &lifePass{e: e}, &conPass{e: e}}
-	e.notify = &notifyPass{e: e}
+	e.passes = []Pass{&derivePass{e: e}, &conPass{e: e}}
+	e.notify = &notifyPass{e: e, lookback: accessEndedLookback}
+	e.health = &healthPass{e: e}
 	return e
 }
 
@@ -190,48 +157,56 @@ type ConvergeResult struct {
 	RunID      *uuid.UUID
 }
 
-// AfterMutation runs Converge for a customer inline, right after a state mutation
-// commits, so the customer is left consistent by construction (entitlement/credit
-// effects, lifecycle state, references). It is the per-mutation companion to the
-// background sweep: every mutation re-converges its own scope, so drift never
-// accumulates between sweeps. Cheap by design — a customer-scoped Converge scans
-// only that customer's rows (all three planes take a customer filter) and does
-// ZERO writes when nothing diverged.
-//
-// Best-effort: convergence failures are returned for the caller to LOG, never to
-// fail the mutation that already succeeded — the sweep is the backstop. Must run
-// on the request's merchant-scoped connection, after the mutation committed.
-func AfterMutation(ctx context.Context, database *db.DB, merchantID billing.MerchantID, customer uuid.UUID, clocks ...clockwork.Clock) (ConvergeResult, error) {
-	return NewConvergeEngine(database, clocks...).Converge(ctx, Scope{Merchant: merchantID, Customer: &customer})
+// Converge runs DERIVE then CON for the scope, persists and remediates each
+// finding, then runs NOTIFY on the converged state. Must run merchant-scoped.
+// A clean scope does no writes besides closing what cleared.
+func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeResult, error) {
+	standing := e.notify.Standing()
+	for _, p := range e.passes {
+		standing = append(standing, p.Standing()...)
+	}
+	return e.run(ctx, scope, func(ctx context.Context) ([]ConvergeFinding, error) {
+		var collected []ConvergeFinding
+		for _, p := range e.passes {
+			fs, err := p.Run(ctx, scope)
+			if err != nil {
+				return nil, fmt.Errorf("converge %s pass: %w", p.Plane(), err)
+			}
+			collected = append(collected, fs...)
+		}
+		return collected, nil
+	}, e.notify, standing)
 }
 
-// Converge runs every plane pass for the scope (DERIVE → LIFE → CON), persists
-// and remediates each finding, then runs the post-repair NOTIFY stage on the
-// converged state. Must run merchant-scoped. A clean scope does no writes at
-// all, which keeps the inline hot path cheap.
-func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res ConvergeResult, runErr error) {
+// Health evaluates the merchant's health findings (recovery funnel, held
+// renewals, payment health, the unverified backlog, stuck and abandoned
+// provider operations) and tells customers whose timed access lapsed.
+func (e *ConvergeEngine) Health(ctx context.Context, merchantID billing.MerchantID) (ConvergeResult, error) {
+	scope := Scope{Merchant: merchantID}
+	return e.run(ctx, scope, func(ctx context.Context) ([]ConvergeFinding, error) {
+		return e.health.Run(ctx, scope)
+	}, &notifyPass{e: e, lookback: accessLapseLookback}, e.health.Standing())
+}
+
+// run persists and remediates what collect reports, then what notify finds
+// on the converged state, and closes the open standing findings of the scope
+// it no longer reports.
+func (e *ConvergeEngine) run(ctx context.Context, scope Scope, collect func(context.Context) ([]ConvergeFinding, error), notify *notifyPass, standing []string) (res ConvergeResult, runErr error) {
 	res.Scope = scope
 	if scope.Merchant.UUID() == uuid.Nil {
 		return res, fmt.Errorf("converge: scope.Merchant required")
 	}
 	scans := &scanState{truncated: map[string]bool{}}
 	ctx = context.WithValue(ctx, scanStateKey{}, scans)
-	// A merchant-wide pass closes what it no longer sees, but only what was
-	// last seen before it began to look (resolveCleared).
-	var observedFrom time.Time
-	if scope.IsGlobal() {
-		var err error
-		if observedFrom, err = e.DB.Gen(ctx).ConvergeObservedFrom(ctx); err != nil {
-			return res, fmt.Errorf("converge: read the database clock: %w", err)
-		}
+	// A pass closes what it no longer sees, but only what was last seen
+	// before it began to look (resolveCleared).
+	observedFrom, err := e.DB.Gen(ctx).ConvergeObservedFrom(ctx)
+	if err != nil {
+		return res, fmt.Errorf("converge: read the database clock: %w", err)
 	}
-	var collected []ConvergeFinding
-	for _, p := range e.passes {
-		fs, err := p.Run(ctx, scope)
-		if err != nil {
-			return res, fmt.Errorf("converge %s pass: %w", p.Plane(), err)
-		}
-		collected = append(collected, fs...)
+	collected, err := collect(ctx)
+	if err != nil {
+		return res, err
 	}
 
 	q := e.DB.Gen(ctx)
@@ -263,14 +238,9 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res Converg
 			runErr = errors.Join(runErr, fmt.Errorf("converge: finish run: %w", err))
 		}
 	}()
-	// A merchant-wide pass (the sweep, after a pull, an operator's command)
-	// asks the destructive gate before each retraction (cancel, revoke,
-	// close); one it refuses stays reconcile_required, the reason in evidence.
-	// Inline convergence of one customer finishes a command already admitted.
-	hold := &retractionHold{merchant: scope.Merchant.UUID()}
-	if scope.IsGlobal() {
-		hold.gate = destructive.New(e.DB)
-	}
+	// Every retraction (cancel, revoke, close) asks the destructive gate; one
+	// it refuses stays reconcile_required, the reason in evidence.
+	hold := &retractionHold{merchant: scope.Merchant.UUID(), gate: destructive.New(e.DB)}
 	apply := func(findings []ConvergeFinding) error {
 		if len(findings) == 0 {
 			return nil
@@ -284,7 +254,7 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res Converg
 			res.RunID = runID
 		}
 		for i := range findings {
-			status, held, err := e.remediate(ctx, scope, hold, findings[i])
+			status, held, err := e.remediate(ctx, hold, findings[i])
 			if err != nil {
 				return err
 			}
@@ -324,14 +294,14 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res Converg
 
 	// NOTIFY detects on the state the repairs above just converged, so a
 	// window DERIVE re-projected in this very run never emails "access ended".
-	notifyFindings, err := e.notify.Run(ctx, scope)
+	notifyFindings, err := notify.Run(ctx, scope)
 	if err != nil {
-		return res, fmt.Errorf("converge %s pass: %w", e.notify.Plane(), err)
+		return res, fmt.Errorf("converge %s pass: %w", notify.Plane(), err)
 	}
 	if err := apply(notifyFindings); err != nil {
 		return res, err
 	}
-	if err := e.resolveCleared(ctx, q, scope, scans, observedFrom, append(collected, notifyFindings...)); err != nil {
+	if err := e.resolveCleared(ctx, q, scope, scans, observedFrom, standing, append(collected, notifyFindings...)); err != nil {
 		return res, err
 	}
 
@@ -339,30 +309,32 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res Converg
 	return res, nil
 }
 
-// resolveCleared closes the open standing findings a merchant-wide pass no
-// longer reports: their subject has cleared. Subject keys do not carry the
-// customer, so a narrower scope cannot tell cleared from out of scope. A
-// finding another pass saw after observedFrom stays open: this pass's scan
-// is older than that sighting.
-func (e *ConvergeEngine) resolveCleared(ctx context.Context, q *gen.Queries, scope Scope, scans *scanState, observedFrom time.Time, reported []ConvergeFinding) error {
-	if !scope.IsGlobal() {
-		return nil
-	}
+// resolveCleared closes the open standing findings of the scope the pass no
+// longer reports: their subject has cleared. A customer's findings carry
+// customer_id in their evidence. A finding another pass saw after
+// observedFrom stays open: this pass's scan is older than that sighting.
+func (e *ConvergeEngine) resolveCleared(ctx context.Context, q *gen.Queries, scope Scope, scans *scanState, observedFrom time.Time, standing []string, reported []ConvergeFinding) error {
 	var types []string
-	for _, p := range append(e.passes, e.notify) {
-		for _, t := range p.Standing() {
-			if !scans.truncated[t] {
-				types = append(types, t)
-			}
+	for _, t := range standing {
+		if !scans.truncated[t] {
+			types = append(types, t)
 		}
 	}
 	keep := make([]string, 0, len(reported))
 	for _, f := range reported {
 		keep = append(keep, f.Type+findingKeySep+f.SubjectKey)
 	}
-	if _, err := q.ResolveClearedFindings(ctx, gen.ResolveClearedFindingsParams{
-		MerchantID: scope.Merchant.UUID(), FindingTypes: types, ObservedFrom: observedFrom, Keep: keep,
-	}); err != nil {
+	var err error
+	if scope.Customer != nil {
+		_, err = q.ResolveClearedCustomerFindings(ctx, gen.ResolveClearedCustomerFindingsParams{
+			MerchantID: scope.Merchant.UUID(), FindingTypes: types, CustomerID: scope.Customer.String(), ObservedFrom: observedFrom, Keep: keep,
+		})
+	} else {
+		_, err = q.ResolveClearedFindings(ctx, gen.ResolveClearedFindingsParams{
+			MerchantID: scope.Merchant.UUID(), FindingTypes: types, ObservedFrom: observedFrom, Keep: keep,
+		})
+	}
+	if err != nil {
 		return fmt.Errorf("converge: resolve cleared findings: %w", err)
 	}
 	return nil
@@ -395,29 +367,9 @@ func (h *retractionHold) why(ctx context.Context) string {
 }
 
 // remediate decides a finding's ledger status and applies its repair. The
-// confirmed-absence gate keeps a destructive EXCESS repair in
-// reconcile_required until its source domain is proven fully reconciled, and
-// the destructive gate keeps it there while it refuses; held is its reason.
-func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, hold *retractionHold, f ConvergeFinding) (status, held string, err error) {
-	// Every retraction passes the gate, including
-	// life.subscription.pending_stale, which cancels off a timeout.
-	if f.Shape == ShapeExcess && !f.Ungated {
-		if f.SourceDomain == DomainNone {
-			// A retraction that names no source of truth cannot prove the thing
-			// it is retracting is really gone. That is a human decision.
-			return "requires_review", "", nil
-		}
-		reconciled, err := e.DB.Gen(ctx).IsSourceDomainReconciled(ctx, gen.IsSourceDomainReconciledParams{
-			MerchantID: scope.Merchant.UUID(), SourceDomain: string(f.SourceDomain),
-		})
-		if err != nil {
-			return "", "", fmt.Errorf("converge: gate check %s: %w", f.SourceDomain, err)
-		}
-		if reconciled == nil || !*reconciled {
-			return "reconcile_required", "", nil // confirmed-absence gate: do not retract yet
-		}
-	}
-
+// destructive gate keeps a retraction in reconcile_required while it refuses;
+// held is its reason.
+func (e *ConvergeEngine) remediate(ctx context.Context, hold *retractionHold, f ConvergeFinding) (status, held string, err error) {
 	switch f.Class {
 	case ClassAuto:
 		if f.Repair != nil {
@@ -435,10 +387,8 @@ func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, hold *retra
 			return "auto_fixed", "", nil
 		}
 		return "reconcile_required", "", nil
-	case ClassAdmin, ClassOperator:
-		return "requires_review", "", nil // queued for human review
 	default:
-		return "requires_review", "", nil
+		return "requires_review", "", nil // queued for human review
 	}
 }
 
@@ -448,9 +398,6 @@ func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, hold *retra
 func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scope, runID uuid.UUID, f ConvergeFinding, status, held string) (gen.BillingReconciliationFinding, error) {
 	meta := map[string]any{
 		"shape": string(f.Shape), "class": string(f.Class),
-	}
-	if f.SourceDomain != DomainNone {
-		meta["source_domain"] = string(f.SourceDomain)
 	}
 	for k, v := range f.Evidence {
 		meta[k] = v

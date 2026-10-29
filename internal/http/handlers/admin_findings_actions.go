@@ -199,7 +199,6 @@ func executeRevokeProductAccess(r *httprequest.Request, params map[string]any, r
 	}
 	result["revoke"] = "revoked"
 	result["access_id"] = accessID.String()
-	convergeAfterMutation(r, access.CustomerID)
 	return nil
 }
 
@@ -234,7 +233,6 @@ func executeGrantProduct(r *httprequest.Request, finding reconcile.FindingRecord
 	}
 	result["access_id"] = window.ID.String()
 	result["grant_created"] = created
-	convergeAfterMutation(r, window.CustomerID)
 	return nil
 }
 

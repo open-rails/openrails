@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/reconcile/converge"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/redact"
 )
@@ -85,7 +84,6 @@ func CancelSubscription(r *httprequest.Request) {
 			r.APIError(solanaClientError(err))
 			return
 		}
-		convergeAfter(ctx, r, sub, "subscription_cancel")
 		writeMySubscription(r, userID, sub.ID, nil)
 		return
 	}
@@ -283,20 +281,6 @@ func resumeNMI(ctx context.Context, r *httprequest.Request, sub *models.Subscrip
 		}
 	}
 	return nil
-}
-
-// convergeAfter reconciles the customer right after a lifecycle change, so
-// the drift it implies is repaired now rather than at the next sweep.
-// Best-effort: the sweep is the backstop.
-func convergeAfter(ctx context.Context, r *httprequest.Request, sub *models.Subscription, operation string) {
-	if r.State.DB == nil {
-		return
-	}
-	if _, err := converge.AfterMutation(ctx, r.State.DB, billing.MerchantID(sub.MerchantID), sub.CustomerID, r.Clock); err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"operation": operation, "merchant_id": sub.MerchantID, "customer_id": sub.CustomerID,
-		}).Warn("inline converge after a subscription change failed; the sweep will reconcile")
-	}
 }
 
 // subscriptionIDParam reads the {id} path parameter.

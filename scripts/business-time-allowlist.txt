@@ -75,7 +75,6 @@ internal/reconcile/store.go|return time.Now().UTC()|business_time_boundary|Expli
 internal/reconcile/unknown_probe.go|return time.Now().UTC()|business_time_boundary|Standalone provider probe default; owning reconcile paths pass an observation instant|1
 internal/river/jobs_admission_denials.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_cleanup.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/river/jobs_converge_sweep.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_usage_orders.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_delinquency.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_dunning.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1

@@ -50,7 +50,7 @@ var credentialCodes = []string{"410", "411"}
 var newCardFilters = map[string][]string{"kind": {"verify", "initial"}, "card_entry": {"new"}}
 
 // paymentHealthFindings evaluates the merchant's payment health at now.
-func (p *lifePass) paymentHealthFindings(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
+func (p *healthPass) paymentHealthFindings(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
 	var out []ConvergeFinding
 	for _, step := range []func(context.Context, time.Time) ([]ConvergeFinding, error){
 		p.newCardSpikes, p.rebillSpikes, p.systemErrors, p.unmappedDeclines, p.webhookSilence,
@@ -90,7 +90,7 @@ func (s share) String() string {
 }
 
 // shares runs [failed, total] by PSP and owner over [from, to).
-func (p *lifePass) shares(ctx context.Context, failed, total string, filters map[string][]string, from, to, now time.Time) (map[healthKey]share, error) {
+func (p *healthPass) shares(ctx context.Context, failed, total string, filters map[string][]string, from, to, now time.Time) (map[healthKey]share, error) {
 	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{failed, total}, By: []string{"psp", "owner"}, Filters: filters}, from, to, now)
 	if err != nil {
 		return nil, err
@@ -103,7 +103,7 @@ func (p *lifePass) shares(ctx context.Context, failed, total string, filters map
 }
 
 // spikes compares the last day against the 28 days before it.
-func (p *lifePass) spikes(ctx context.Context, failed, total string, filters map[string][]string, now time.Time) (recent, baseline map[healthKey]share, err error) {
+func (p *healthPass) spikes(ctx context.Context, failed, total string, filters map[string][]string, now time.Time) (recent, baseline map[healthKey]share, err error) {
 	if recent, err = p.shares(ctx, failed, total, filters, now.Add(-spikeWindow), now, now); err != nil {
 		return nil, nil, err
 	}
@@ -113,7 +113,7 @@ func (p *lifePass) spikes(ctx context.Context, failed, total string, filters map
 
 // newCardSpikes: the trailing-24h new-card decline rate at least ten points
 // above its 28-day baseline, both with the minimum volume.
-func (p *lifePass) newCardSpikes(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
+func (p *healthPass) newCardSpikes(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
 	recent, baseline, err := p.spikes(ctx, "failed_attempts", "attempts", newCardFilters, now)
 	if err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func (p *lifePass) newCardSpikes(ctx context.Context, now time.Time) ([]Converge
 
 // rebillSpikes: the trailing-24h rebill first-attempt failure rate at least
 // ten points above its baseline, or above 25%, over the minimum cycles.
-func (p *lifePass) rebillSpikes(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
+func (p *healthPass) rebillSpikes(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
 	recent, baseline, err := p.spikes(ctx, "rebill_first_failures", "rebills_attempted", nil, now)
 	if err != nil {
 		return nil, err
@@ -170,7 +170,7 @@ func spikeFinding(kind string, k healthKey, cur, base share, action string) Conv
 
 // systemErrors: system errors above 2% of the last hour's attempts (at least
 // 20), or any answer about our own credentials, which is critical.
-func (p *lifePass) systemErrors(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
+func (p *healthPass) systemErrors(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
 	from := now.Add(-systemErrorWindow)
 	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "owner", "category"}}, from, now, now)
 	if err != nil {
@@ -224,7 +224,7 @@ func (p *lifePass) systemErrors(ctx context.Context, now time.Time) ([]ConvergeF
 
 // unmappedDeclines: a decline code no table maps, per rail and code. It
 // resolves once the code is mapped or ages out of the lookback.
-func (p *lifePass) unmappedDeclines(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
+func (p *healthPass) unmappedDeclines(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
 	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"failed_attempts"}, By: []string{"rail", "response_code"}}, now.Add(-unmappedLookback), now, now)
 	if err != nil {
 		return nil, err
@@ -249,7 +249,7 @@ func (p *lifePass) unmappedDeclines(ctx context.Context, now time.Time) ([]Conve
 // webhookSilence: a PSP whose provider-scheduled charges normally arrive by
 // webhook has sent none for a day while pulls still find its charges. One per
 // PSP account; it resolves when webhooks resume.
-func (p *lifePass) webhookSilence(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
+func (p *healthPass) webhookSilence(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
 	observed := func(from, to time.Time) (map[string]map[string]int64, error) {
 		rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "observed_via"},
 			Filters: map[string][]string{"source": {"provider_schedule"}}}, from, to, now)
@@ -299,7 +299,7 @@ func (p *lifePass) webhookSilence(ctx context.Context, now time.Time) ([]Converg
 
 // metricRows runs one metrics query over [from, to) and returns its rows by
 // column name.
-func (p *lifePass) metricRows(ctx context.Context, q metrics.Query, from, to, now time.Time) ([]map[string]any, error) {
+func (p *healthPass) metricRows(ctx context.Context, q metrics.Query, from, to, now time.Time) ([]map[string]any, error) {
 	q.Range = &metrics.QueryRange{From: from.UTC().Format(time.RFC3339), To: to.UTC().Format(time.RFC3339)}
 	plan, verr := metrics.ValidateAt(&q, now)
 	if verr != nil {

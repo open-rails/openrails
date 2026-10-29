@@ -94,7 +94,7 @@ Ownership determines which system may initiate the renewal.
 |---|---|---|
 | Provider-intent executor | 1 min (+ on start) | drains due outbound provider mutations from the intent ledger |
 | Provider-intent verifier | 5 min | resolves `unknown_needs_verify` outcomes by *reading* the provider before any retry |
-| Convergence Engine sweep | 15 min (+ on start) | per-merchant internal-drift repair: stalled dunning, lapsed periods, unmaterialized grants ([operations.md](operations.md#the-convergence-engine)) |
+| Merchant health | hourly | health findings and timed access lapses, for merchants with activity ([operations.md](operations.md#the-convergence-engine)) |
 | Provider Refresh | 4 h (+ on start) | watermarked missed-event backfill, unknown-cohort reconcile, CCBill DataLink refresh — reads only, never mutates a provider |
 | Due / dunning | 1 min | admits due engine renewals and retries `past_due` per the derived schedule; parks whole missed periods for verification instead of charging ([operations.md → Dunning](operations.md#dunning)) |
 | Cleanup | 1 h | expired-data cleanup |

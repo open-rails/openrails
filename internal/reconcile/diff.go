@@ -997,8 +997,8 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 		// chooses the transition: roster alive w/ future boundary → adopt the
 		// period END only; verified charge → renew; declared failure →
 		// dunning within the window, cancel-with-certainty beyond. A pending
-		// local row has no decider transition (the signup/confirm path or
-		// pending_stale owns it) — the divergence is still surfaced.
+		// local row has no decider transition (the signup/confirm path owns
+		// it) — the divergence is still surfaced.
 		f := Finding{
 			Provider:          provider,
 			Type:              FindingStatusMismatch,

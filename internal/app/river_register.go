@@ -144,15 +144,17 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add admission denial flush worker: %w", err)
 	}
-	// Converge sweep: reconcile.Converge for every active merchant, catching
-	// drift no inline mutation touched.
-	if err := addWorker(workers, &riverjobs.ConvergeSweepWorker{
-		DB:     r.DB,
-		Config: r.Config,
-		Clock:  clock,
-		Alerts: r.AlertService, // requires_review findings -> operator notifications
+	// A customer's convergence, queued by each mutation that changed it.
+	if err := addWorker(workers, &riverjobs.CustomerConvergeWorker{
+		DB: r.DB, Config: r.Config, Clock: clock, Alerts: r.AlertService,
 	}); err != nil {
-		return fmt.Errorf("add converge sweep worker: %w", err)
+		return fmt.Errorf("add customer converge worker: %w", err)
+	}
+	// Health findings and timed access lapses, for merchants with activity.
+	if err := addWorker(workers, &riverjobs.MerchantHealthWorker{
+		DB: r.DB, Config: r.Config, Clock: clock, Alerts: r.AlertService,
+	}); err != nil {
+		return fmt.Errorf("add merchant health worker: %w", err)
 	}
 	// Accepted operations carry their own durable River lifecycle job.
 	if err := addWorker(workers, &riverjobs.ProviderOperationWorker{
@@ -204,7 +206,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add charge attribution worker: %w", err)
 	}
-	// Rebills that never happened are recorded as missed.
+	// Overdue NMI rebills are probed; provider-billed renewals unconfirmed past
+	// their grace are read by id.
 	if err := addWorker(workers, &riverjobs.RebillWatchWorker{
 		DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService,
 	}); err != nil {

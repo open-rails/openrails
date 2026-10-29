@@ -12,26 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countOpenSubscriptionCollections = `-- name: CountOpenSubscriptionCollections :one
-SELECT count(*) FROM billing.provider_intents
-WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
-  AND intent_type IN ('subscription_collection', 'solana_pull') AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
-`
-
-type CountOpenSubscriptionCollectionsParams struct {
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
-}
-
-// An engine renewal still being attempted (a collection, or a Solana pull)
-// decides its cycle itself.
-func (q *Queries) CountOpenSubscriptionCollections(ctx context.Context, arg CountOpenSubscriptionCollectionsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countOpenSubscriptionCollections, arg.MerchantID, arg.SubscriptionID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const cycleHasAttempt = `-- name: CycleHasAttempt :one
 SELECT EXISTS (
     SELECT 1 FROM billing.rebill_cycles c JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
@@ -84,41 +64,34 @@ SELECT DISTINCT s.merchant_id
 FROM billing.subscriptions s
 WHERE s.status IN ('active', 'unverified', 'awaiting_method') AND s.deleted_at IS NULL
   AND s.merchant_id > $1::uuid
-  AND ((s.collection_policy = 'engine' AND s.rail <> 'solana' AND s.current_period_ends_at <= $2::timestamptz)
-       OR (s.collection_policy = 'engine' AND s.rail = 'solana' AND s.current_period_ends_at <= $3::timestamptz)
-       OR (s.collection_policy = 'nmi_schedule' AND s.current_period_ends_at <= $4::timestamptz))
+  AND s.collection_policy = 'nmi_schedule' AND s.current_period_ends_at <= $2::timestamptz
   AND NOT EXISTS (
       SELECT 1 FROM billing.rebill_cycles c
        WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at
-         AND (c.missed_at IS NOT NULL OR c.next_probe_at > $5::timestamptz))
+         AND (c.missed_at IS NOT NULL OR c.next_probe_at > $3::timestamptz))
   AND NOT EXISTS (
       SELECT 1 FROM billing.rebill_cycles c
         JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
        WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at)
 ORDER BY s.merchant_id
-LIMIT $6::int
+LIMIT $4::int
 `
 
 type ListOverdueRebillMerchantsParams struct {
 	AfterMerchantID uuid.UUID
-	EngineCutoff    time.Time
-	SolanaCutoff    time.Time
-	NmiCutoff       time.Time
+	Cutoff          time.Time
 	Now             time.Time
 	MerchantLimit   int32
 }
 
-// CROSS-MERCHANT: merchants holding a subscription whose period ended before its
-// owner's deadline with neither an attempt nor a recorded miss for that cycle,
-// and no failed probe waiting out its backoff. Solana engine renewals come
-// from the crank and have their own deadline. Ids in order after a cursor, so
-// a pass reaches every merchant.
+// CROSS-MERCHANT: merchants holding an NMI schedule whose period ended before
+// the cutoff with neither an attempt nor a recorded miss for that cycle, and
+// no failed probe waiting out its backoff. Ids in order after a cursor, so a
+// pass reaches every merchant.
 func (q *Queries) ListOverdueRebillMerchants(ctx context.Context, arg ListOverdueRebillMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listOverdueRebillMerchants,
 		arg.AfterMerchantID,
-		arg.EngineCutoff,
-		arg.SolanaCutoff,
-		arg.NmiCutoff,
+		arg.Cutoff,
 		arg.Now,
 		arg.MerchantLimit,
 	)
@@ -144,43 +117,36 @@ const listOverdueRebills = `-- name: ListOverdueRebills :many
 SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at FROM billing.subscriptions sub
 WHERE sub.merchant_id = $1::uuid
   AND sub.status IN ('active', 'unverified', 'awaiting_method') AND sub.deleted_at IS NULL
-  AND ((sub.collection_policy = 'engine' AND sub.rail <> 'solana' AND sub.current_period_ends_at <= $2::timestamptz)
-       OR (sub.collection_policy = 'engine' AND sub.rail = 'solana' AND sub.current_period_ends_at <= $3::timestamptz)
-       OR (sub.collection_policy = 'nmi_schedule' AND sub.current_period_ends_at <= $4::timestamptz))
-  AND (sub.current_period_ends_at, sub.id) > ($5::timestamptz, $6::uuid)
-  -- Separate anti-joins: an EXISTS under OR plans as a hash of every merchant's attempts.
+  AND sub.collection_policy = 'nmi_schedule' AND sub.current_period_ends_at <= $2::timestamptz
+  AND (sub.current_period_ends_at, sub.id) > ($3::timestamptz, $4::uuid)
   AND NOT EXISTS (
       SELECT 1 FROM billing.rebill_cycles c
        WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at
-         AND (c.missed_at IS NOT NULL OR c.next_probe_at > $7::timestamptz))
+         AND (c.missed_at IS NOT NULL OR c.next_probe_at > $5::timestamptz))
   AND NOT EXISTS (
       SELECT 1 FROM billing.rebill_cycles c
         JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
        WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at)
 ORDER BY sub.current_period_ends_at, sub.id
-LIMIT $8::int
+LIMIT $6::int
 `
 
 type ListOverdueRebillsParams struct {
-	MerchantID   uuid.UUID
-	EngineCutoff time.Time
-	SolanaCutoff time.Time
-	NmiCutoff    time.Time
-	AfterDueAt   time.Time
-	AfterID      uuid.UUID
-	Now          time.Time
-	RowLimit     int32
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	AfterDueAt time.Time
+	AfterID    uuid.UUID
+	Now        time.Time
+	RowLimit   int32
 }
 
-// Auto-renewing subscriptions whose period ended before its owner's deadline
-// with neither an attempt nor a recorded miss for that cycle, and no failed
-// probe waiting out its backoff: a page after the (period end, id) cursor.
+// NMI schedules whose period ended before the cutoff with neither an attempt
+// nor a recorded miss for that cycle, and no failed probe waiting out its
+// backoff: a page after the (period end, id) cursor.
 func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebillsParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listOverdueRebills,
 		arg.MerchantID,
-		arg.EngineCutoff,
-		arg.SolanaCutoff,
-		arg.NmiCutoff,
+		arg.Cutoff,
 		arg.AfterDueAt,
 		arg.AfterID,
 		arg.Now,
@@ -245,7 +211,34 @@ func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebills
 }
 
 const listRebillCycles = `-- name: ListRebillCycles :many
-WITH cf AS (
+WITH cy AS (
+    SELECT c.id, c.subscription_id, c.customer_id, c.psp_id, c.rail, c.owner, c.due_at, c.amount, c.currency, c.missed_at, c.miss_reason
+      FROM billing.rebill_cycles c
+     WHERE c.merchant_id = $13::uuid
+    UNION ALL
+    -- An engine renewal nothing attempted by its deadline, with none in
+    -- flight, is read as missed: a cycle row exists only once attempted.
+    SELECT md5('renewal:' || s.id::text || ':' || extract(epoch FROM s.current_period_ends_at)::text)::uuid,
+           s.id, s.customer_id, s.psp_id, s.rail, 'engine'::text, s.current_period_ends_at,
+           pr.amount * COALESCE(s.quantity, 1)::bigint, pr.currency,
+           s.current_period_ends_at + make_interval(secs => CASE WHEN s.rail = 'solana' THEN $14::float8 ELSE $15::float8 END),
+           CASE WHEN s.status = 'awaiting_method' THEN 'method_unusable'
+                WHEN EXISTS (SELECT 1 FROM billing.reconciliation_findings f
+                              WHERE f.merchant_id = s.merchant_id AND f.finding_type = 'life.due_pass.refused' AND f.subject_key = s.id::text
+                                AND f.status IN ('reconcile_required', 'requires_review')) THEN 'refused'
+                ELSE 'not_attempted' END::text
+      FROM billing.subscriptions s
+      JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id
+     WHERE s.merchant_id = $13::uuid
+       AND s.collection_policy = 'engine' AND s.status IN ('active', 'awaiting_method') AND s.deleted_at IS NULL
+       AND s.current_period_ends_at + make_interval(secs => CASE WHEN s.rail = 'solana' THEN $14::float8 ELSE $15::float8 END) <= $9::timestamptz
+       AND NOT EXISTS (SELECT 1 FROM billing.rebill_cycles c
+                        WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at)
+       AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i
+                        WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
+                          AND i.intent_type IN ('subscription_collection', 'solana_pull')
+                          AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))
+), cf AS (
     SELECT c.id, c.subscription_id, c.customer_id, c.psp_id, c.rail, c.owner, c.due_at, c.amount, c.currency,
            c.missed_at, c.miss_reason, CASE WHEN w.id IS NOT NULL THEN w.attempted_at END AS won_at,
            CASE WHEN c.missed_at IS NOT NULL THEN 'missed'
@@ -258,19 +251,18 @@ WITH cf AS (
            CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.category <> 'approved', false)) THEN ''
                 WHEN w.source = 'provider_schedule' THEN 'late_provider_charge'
                 WHEN EXISTS (SELECT 1 FROM billing.payment_method_versions u
-                              WHERE u.merchant_id = c.merchant_id AND u.payment_method_id = w.payment_method_id
+                              WHERE u.merchant_id = $13::uuid AND u.payment_method_id = w.payment_method_id
                                 AND u.kind IN ('updated', 'brand_changed')
                                 AND u.effective_at >= COALESCE(c.missed_at, f.attempted_at) AND u.effective_at <= w.attempted_at) THEN 'updated_card'
                 WHEN w.kind = 'customer_retry' THEN 'customer_retry'
                 ELSE 'dunning_retry' END::text AS recovered_by
-      FROM billing.rebill_cycles c
+      FROM cy c
       LEFT JOIN LATERAL (SELECT a.category, a.attempted_at FROM billing.payment_attempts a
-                          WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
+                          WHERE a.merchant_id = $13::uuid AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
       LEFT JOIN LATERAL (SELECT a.id, a.kind, a.source, a.attempted_at, a.payment_method_id FROM billing.payment_attempts a
-                          WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id AND a.category = 'approved'
+                          WHERE a.merchant_id = $13::uuid AND a.cycle_id = c.id AND a.category = 'approved'
                           ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
-      LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL
-     WHERE c.merchant_id = $13::uuid
+      LEFT JOIN billing.subscriptions s ON s.merchant_id = $13::uuid AND s.id = c.subscription_id AND s.deleted_at IS NULL
 )
 SELECT cf.id, cf.subscription_id, cf.customer_id, cf.psp_id, cf.rail, cf.owner, cf.due_at, cf.amount, cf.currency, cf.missed_at, cf.miss_reason, cf.won_at, cf.first_outcome, cf.closed_at, cf.recovered_by
 FROM cf
@@ -292,19 +284,21 @@ LIMIT $12::int
 `
 
 type ListRebillCyclesParams struct {
-	Owners         []string
-	FirstOutcomes  []string
-	MissReasons    []string
-	PspID          *uuid.UUID
-	SubscriptionID *uuid.UUID
-	DueSince       *time.Time
-	DueUntil       *time.Time
-	Outcomes       []string
-	Now            time.Time
-	AfterAt        *time.Time
-	AfterID        *uuid.UUID
-	RowLimit       int32
-	MerchantID     uuid.UUID
+	Owners                []string
+	FirstOutcomes         []string
+	MissReasons           []string
+	PspID                 *uuid.UUID
+	SubscriptionID        *uuid.UUID
+	DueSince              *time.Time
+	DueUntil              *time.Time
+	Outcomes              []string
+	Now                   time.Time
+	AfterAt               *time.Time
+	AfterID               *uuid.UUID
+	RowLimit              int32
+	MerchantID            uuid.UUID
+	SolanaDeadlineSeconds float64
+	EngineDeadlineSeconds float64
 }
 
 type ListRebillCyclesRow struct {
@@ -346,6 +340,8 @@ func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesPara
 		arg.AfterID,
 		arg.RowLimit,
 		arg.MerchantID,
+		arg.SolanaDeadlineSeconds,
+		arg.EngineDeadlineSeconds,
 	)
 	if err != nil {
 		return nil, err
@@ -382,7 +378,34 @@ func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesPara
 }
 
 const listRebillCyclesByIDs = `-- name: ListRebillCyclesByIDs :many
-WITH cf AS (
+WITH cy AS (
+    SELECT c.id, c.subscription_id, c.customer_id, c.psp_id, c.rail, c.owner, c.due_at, c.amount, c.currency, c.missed_at, c.miss_reason
+      FROM billing.rebill_cycles c
+     WHERE c.merchant_id = $1::uuid
+    UNION ALL
+    -- An engine renewal nothing attempted by its deadline, with none in
+    -- flight, is read as missed: a cycle row exists only once attempted.
+    SELECT md5('renewal:' || s.id::text || ':' || extract(epoch FROM s.current_period_ends_at)::text)::uuid,
+           s.id, s.customer_id, s.psp_id, s.rail, 'engine'::text, s.current_period_ends_at,
+           pr.amount * COALESCE(s.quantity, 1)::bigint, pr.currency,
+           s.current_period_ends_at + make_interval(secs => CASE WHEN s.rail = 'solana' THEN $2::float8 ELSE $3::float8 END),
+           CASE WHEN s.status = 'awaiting_method' THEN 'method_unusable'
+                WHEN EXISTS (SELECT 1 FROM billing.reconciliation_findings f
+                              WHERE f.merchant_id = s.merchant_id AND f.finding_type = 'life.due_pass.refused' AND f.subject_key = s.id::text
+                                AND f.status IN ('reconcile_required', 'requires_review')) THEN 'refused'
+                ELSE 'not_attempted' END::text
+      FROM billing.subscriptions s
+      JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id
+     WHERE s.merchant_id = $1::uuid
+       AND s.collection_policy = 'engine' AND s.status IN ('active', 'awaiting_method') AND s.deleted_at IS NULL
+       AND s.current_period_ends_at + make_interval(secs => CASE WHEN s.rail = 'solana' THEN $2::float8 ELSE $3::float8 END) <= $4::timestamptz
+       AND NOT EXISTS (SELECT 1 FROM billing.rebill_cycles c
+                        WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at)
+       AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i
+                        WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
+                          AND i.intent_type IN ('subscription_collection', 'solana_pull')
+                          AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))
+), cf AS (
     SELECT c.id, c.subscription_id, c.customer_id, c.psp_id, c.rail, c.owner, c.due_at, c.amount, c.currency,
            c.missed_at, c.miss_reason, CASE WHEN w.id IS NOT NULL THEN w.attempted_at END AS won_at,
            CASE WHEN c.missed_at IS NOT NULL THEN 'missed'
@@ -395,27 +418,31 @@ WITH cf AS (
            CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.category <> 'approved', false)) THEN ''
                 WHEN w.source = 'provider_schedule' THEN 'late_provider_charge'
                 WHEN EXISTS (SELECT 1 FROM billing.payment_method_versions u
-                              WHERE u.merchant_id = c.merchant_id AND u.payment_method_id = w.payment_method_id
+                              WHERE u.merchant_id = $1::uuid AND u.payment_method_id = w.payment_method_id
                                 AND u.kind IN ('updated', 'brand_changed')
                                 AND u.effective_at >= COALESCE(c.missed_at, f.attempted_at) AND u.effective_at <= w.attempted_at) THEN 'updated_card'
                 WHEN w.kind = 'customer_retry' THEN 'customer_retry'
                 ELSE 'dunning_retry' END::text AS recovered_by
-      FROM billing.rebill_cycles c
+      FROM cy c
       LEFT JOIN LATERAL (SELECT a.category, a.attempted_at FROM billing.payment_attempts a
-                          WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
+                          WHERE a.merchant_id = $1::uuid AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
       LEFT JOIN LATERAL (SELECT a.id, a.kind, a.source, a.attempted_at, a.payment_method_id FROM billing.payment_attempts a
-                          WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id AND a.category = 'approved'
+                          WHERE a.merchant_id = $1::uuid AND a.cycle_id = c.id AND a.category = 'approved'
                           ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
-      LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL
-     WHERE c.merchant_id = $1::uuid AND c.id = ANY($2::uuid[])
-)SELECT cf.id, cf.subscription_id, cf.customer_id, cf.psp_id, cf.rail, cf.owner, cf.due_at, cf.amount, cf.currency, cf.missed_at, cf.miss_reason, cf.won_at, cf.first_outcome, cf.closed_at, cf.recovered_by
+      LEFT JOIN billing.subscriptions s ON s.merchant_id = $1::uuid AND s.id = c.subscription_id AND s.deleted_at IS NULL
+     WHERE c.id = ANY($5::uuid[])
+)
+SELECT cf.id, cf.subscription_id, cf.customer_id, cf.psp_id, cf.rail, cf.owner, cf.due_at, cf.amount, cf.currency, cf.missed_at, cf.miss_reason, cf.won_at, cf.first_outcome, cf.closed_at, cf.recovered_by
 FROM cf
 ORDER BY cf.due_at DESC, cf.id DESC
 `
 
 type ListRebillCyclesByIDsParams struct {
-	MerchantID uuid.UUID
-	Ids        []uuid.UUID
+	MerchantID            uuid.UUID
+	SolanaDeadlineSeconds float64
+	EngineDeadlineSeconds float64
+	Now                   time.Time
+	Ids                   []uuid.UUID
 }
 
 type ListRebillCyclesByIDsRow struct {
@@ -438,7 +465,13 @@ type ListRebillCyclesByIDsRow struct {
 
 // The named cycles with ListRebillCycles' facts, latest due first.
 func (q *Queries) ListRebillCyclesByIDs(ctx context.Context, arg ListRebillCyclesByIDsParams) ([]ListRebillCyclesByIDsRow, error) {
-	rows, err := q.db.Query(ctx, listRebillCyclesByIDs, arg.MerchantID, arg.Ids)
+	rows, err := q.db.Query(ctx, listRebillCyclesByIDs,
+		arg.MerchantID,
+		arg.SolanaDeadlineSeconds,
+		arg.EngineDeadlineSeconds,
+		arg.Now,
+		arg.Ids,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -17,6 +17,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/convergejob"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -69,11 +71,22 @@ type Grant struct {
 	Actor          string
 }
 
-// GrantProduct records one free grant once per idempotency key. A replay
-// returns the recorded window and created=false.
+// GrantProduct records one free grant once per idempotency key, with its
+// customer's convergence. A replay returns the recorded window and
+// created=false.
 func (s *Service) GrantProduct(ctx context.Context, g Grant) (*models.ProductAccess, bool, error) {
 	if s == nil || s.db == nil {
 		return nil, false, fmt.Errorf("product access service not initialized")
+	}
+	if s.db.Tx() == nil {
+		var window *models.ProductAccess
+		var created bool
+		err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			var err error
+			window, created, err = NewService(s.db.NewWithPgxTx(tx), s.clock).GrantProduct(ctx, g)
+			return err
+		})
+		return window, created, err
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -124,7 +137,7 @@ func (s *Service) GrantProduct(ctx context.Context, g Grant) (*models.ProductAcc
 	if window == nil || window.SourceID != g.IdempotencyKey || window.CustomerID != g.CustomerID || window.ProductID != g.ProductID {
 		return nil, false, ErrIdempotencyKeyReused
 	}
-	return window, true, nil
+	return window, true, convergejob.Queue(ctx, s.db, mid, g.CustomerID)
 }
 
 // RevokeProductAccess revokes a window; a revoked window stays as it is. Not
@@ -174,9 +187,14 @@ func (s *Service) RevokeProductAccessAsOf(ctx context.Context, accessID uuid.UUI
 			return false, nil
 		}
 		if asOf != nil {
-			return true, local.RevokeAccess(ctx, entitlements.RevokeAccessParams{AccessID: &accessID, Reason: reason, AsOf: asOf})
+			err = local.RevokeAccess(ctx, entitlements.RevokeAccessParams{AccessID: &accessID, Reason: reason, AsOf: asOf})
+		} else {
+			err = local.RevokeGrantedAccess(ctx, current, reason)
 		}
-		return true, local.RevokeGrantedAccess(ctx, current, reason)
+		if err != nil {
+			return true, err
+		}
+		return true, convergejob.Queue(ctx, txDB, billing.MerchantID(command.MerchantID), window.CustomerID)
 	})
 	return true, err
 }

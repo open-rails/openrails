@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -24,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/pagination"
-	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -396,14 +394,7 @@ func (s *Service) CancelSubscriptionForCustomer(ctx context.Context, customer bi
 		}
 	}
 
-	if err := s.cancelForCustomer(ctx, customer, sub, reason); err != nil {
-		return err
-	}
-	if _, err := converge.AfterMutation(ctx, s.rt.DB, billing.MerchantID(sub.MerchantID), sub.CustomerID, s.rt.Clock); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
-			Warn("inline converge after a subscription cancel failed; the sweep will reconcile")
-	}
-	return nil
+	return s.cancelForCustomer(ctx, customer, sub, reason)
 }
 
 // cancelForCustomer records the cancel at once. A provider-billed schedule is

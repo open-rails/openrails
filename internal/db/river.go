@@ -214,6 +214,14 @@ func (d *DB) RetryRiverJob(ctx context.Context, id int64) error {
 	return d.RetryRiverJobTx(ctx, d.pgtx, id)
 }
 
+// Tx is d's own transaction; nil when d holds none.
+func (d *DB) Tx() pgx.Tx {
+	if d == nil {
+		return nil
+	}
+	return d.pgtx
+}
+
 // RiverProducerBound reports whether a River producer is bound: a host tool
 // without one queues no jobs.
 func (d *DB) RiverProducerBound() bool {

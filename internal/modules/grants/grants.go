@@ -433,9 +433,8 @@ func (l *Ledger) RevokeBySourceAsOf(ctx context.Context, customer uuid.UUID, kin
 	return nil
 }
 
-// The four DERIVE detections below are single set queries: customer nil
-// sweeps the whole merchant, non-nil scopes to one customer (the inline
-// AfterMutation path).
+// The DERIVE detections below are single set queries: customer nil reads the
+// whole merchant, non-nil one customer (its convergence job).
 
 // MissingEffects returns live grants whose derived effects are not fully
 // materialized (`derive.grant_effect.missing`). Repair = MaterializeGrant

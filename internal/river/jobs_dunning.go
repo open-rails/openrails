@@ -25,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/writeposture"
@@ -59,7 +58,8 @@ const (
 	dunningOutcomeFailed dunningOutcome = iota
 	dunningOutcomeSucceeded
 	// dunningOutcomeWindowExpired: the dunning window passed. A past_due
-	// subscription parks as unknown uncharged; one awaiting a card expires.
+	// subscription parks as unknown uncharged; one awaiting a card expires;
+	// a provider-billed one whose grace ended unanswered is read by id.
 	dunningOutcomeWindowExpired
 	// dunningOutcomeMaterialized: the charge was queued as a provider
 	// operation, which its own job runs (parked under mode=limited).
@@ -90,8 +90,10 @@ func (a DunningArgs) InsertOpts() river.InsertOpts {
 
 // DunningWorker is the due pass: per merchant with due work it queues past_due
 // NMI retries as manual_rebill operations, admits due engine renewals to
-// collection, and ends memberships whose wait for a card outlived the dunning
-// window. It never waits on a provider: each operation's own job charges.
+// collection, ends memberships whose wait for a card outlived the dunning
+// window, and asks the provider about a provider-billed past_due row whose
+// grace ended unanswered. It never waits on a provider: each operation's own
+// job charges.
 type DunningWorker struct {
 	WorkerDefaults[DunningArgs]
 	DB     *db.DB
@@ -240,12 +242,6 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 						failCount++
 						continue
 					}
-					// Re-converge this customer after the dunning transition.
-					// Best-effort: a convergence error must not fail the run.
-					if _, cerr := converge.AfterMutation(mctx, w.DB, billing.MerchantID(sub.MerchantID), sub.CustomerID, w.Clock); cerr != nil {
-						log.WithContext(mctx).WithError(cerr).WithField("subscription_id", sub.ID).
-							Warn("Dunning: inline converge failed; the sweep will reconcile")
-					}
 					switch outcome {
 					case dunningOutcomeSucceeded:
 						successCount++
@@ -345,6 +341,13 @@ func (w *DunningWorker) processSubscription(
 		}
 		if blocked != "" {
 			return dunningOutcomeRefused, nil
+		}
+		return dunningOutcomeWindowExpired, nil
+	}
+	if sub.Status == models.StatusPastDue && sub.NextRetryAt == nil && sub.CollectionPolicy != models.CollectionPolicyEngine {
+		// Grace ended and the provider never said renewed or canceled: ask it.
+		if _, err := lifecycle.AskProviderPastGrace(ctx, w.DB, sub, w.now()); err != nil {
+			return dunningOutcomeFailed, err
 		}
 		return dunningOutcomeWindowExpired, nil
 	}

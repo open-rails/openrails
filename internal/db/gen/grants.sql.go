@@ -933,7 +933,7 @@ func (q *Queries) ListLiveGrantsMissingEffects(ctx context.Context, arg ListLive
 }
 
 const listLiveGrantsWithRefundedPayment = `-- name: ListLiveGrantsWithRefundedPayment :many
-SELECT g.id, g.kind, g.payment_id
+SELECT g.id, g.customer_id, g.kind, g.payment_id
 FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR g.customer_id = $2::uuid)
@@ -963,9 +963,10 @@ type ListLiveGrantsWithRefundedPaymentParams struct {
 }
 
 type ListLiveGrantsWithRefundedPaymentRow struct {
-	ID        uuid.UUID
-	Kind      string
-	PaymentID *uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	Kind       string
+	PaymentID  *uuid.UUID
 }
 
 // derive.grant.excess: live grants whose payment was refunded. Surface-only: a
@@ -980,7 +981,12 @@ func (q *Queries) ListLiveGrantsWithRefundedPayment(ctx context.Context, arg Lis
 	var items []ListLiveGrantsWithRefundedPaymentRow
 	for rows.Next() {
 		var i ListLiveGrantsWithRefundedPaymentRow
-		if err := rows.Scan(&i.ID, &i.Kind, &i.PaymentID); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.CustomerID,
+			&i.Kind,
+			&i.PaymentID,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1187,7 +1193,7 @@ func (q *Queries) ListSpendableCreditLots(ctx context.Context, arg ListSpendable
 }
 
 const listUngrantedGrantablePayments = `-- name: ListUngrantedGrantablePayments :many
-SELECT p.id, p.amount, p.currency
+SELECT p.id, p.customer_id, p.amount, p.currency
 FROM billing.payments p
 WHERE p.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR p.customer_id = $2::uuid)
@@ -1211,9 +1217,10 @@ type ListUngrantedGrantablePaymentsParams struct {
 }
 
 type ListUngrantedGrantablePaymentsRow struct {
-	ID       uuid.UUID
-	Amount   int64
-	Currency string
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	Amount     int64
+	Currency   string
 }
 
 // derive.grant.missing: succeeded, positive, non-subscription payments that
@@ -1229,7 +1236,12 @@ func (q *Queries) ListUngrantedGrantablePayments(ctx context.Context, arg ListUn
 	var items []ListUngrantedGrantablePaymentsRow
 	for rows.Next() {
 		var i ListUngrantedGrantablePaymentsRow
-		if err := rows.Scan(&i.ID, &i.Amount, &i.Currency); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.CustomerID,
+			&i.Amount,
+			&i.Currency,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

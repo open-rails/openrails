@@ -279,9 +279,8 @@ func CreateProductAccess(r *httprequest.Request) {
 		return
 	}
 	out := billing.CreateProductAccessBatchResult{Items: make([]billing.ProductAccessGrant, len(granted))}
-	// A grant writes its window in its own transaction; the converge sweep
-	// is the backstop. An inline converge would scan every window of a heavy
-	// buyer on each grant.
+	// Each grant writes its window and queues its customer's convergence in
+	// the batch's transaction.
 	for i, row := range granted {
 		out.Items[i] = productAccessGrant(row, now)
 	}

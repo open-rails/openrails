@@ -446,9 +446,8 @@ func (s *EntitlementService) RevokeSourcesForSubscription(ctx context.Context, u
 }
 
 // RevokeSourcesForSubscriptionAsOf revokes a subscription's windows of the
-// given sources as of asOf (the LIFE-plane grace_exhausted repair revokes as of
-// when grace lapsed), and terminates their grants in the same transaction so
-// the ledger agrees.
+// given sources as of asOf, and terminates their grants in the same
+// transaction so the ledger agrees.
 func (s *EntitlementService) RevokeSourcesForSubscriptionAsOf(ctx context.Context, userID string, subscriptionID uuid.UUID, asOf time.Time, reason models.AccessRevokeReason, sourceTypes ...models.AccessSourceType) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")

@@ -173,7 +173,7 @@ ORDER BY g.ends_at ASC;
 -- refunded purchase keeps its grant event, so it is not flagged. Surface-only:
 -- re-granting re-runs derive-1. NULL customer_id = merchant-wide.
 -- name: ListUngrantedGrantablePayments :many
-SELECT p.id, p.amount, p.currency
+SELECT p.id, p.customer_id, p.amount, p.currency
 FROM billing.payments p
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
@@ -194,7 +194,7 @@ ORDER BY p.id;
 -- goodwill refund may keep access, so an operator decides. NULL customer_id =
 -- merchant-wide.
 -- name: ListLiveGrantsWithRefundedPayment :many
-SELECT g.id, g.kind, g.payment_id
+SELECT g.id, g.customer_id, g.kind, g.payment_id
 FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)

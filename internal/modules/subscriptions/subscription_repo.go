@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/convergejob"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -117,7 +118,7 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 	}
 	s.LifecycleRev, s.RowVersion = 0, 0
 	s.RememberLifecycle()
-	return nil
+	return convergejob.Queue(ctx, r.db, tid, s.CustomerID)
 }
 
 func (r *SubscriptionRepo) Update(ctx context.Context, s *models.Subscription) error {
@@ -222,7 +223,7 @@ func (r *SubscriptionRepo) updateAt(ctx context.Context, s *models.Subscription,
 		s.LifecycleRev++
 		s.RowVersion++
 		s.RememberLifecycle()
-		return nil
+		return convergejob.Queue(ctx, r.db, scopeMerchantID, s.CustomerID)
 	}
 	rows, err := r.db.Gen(ctx).UpdateSubscriptionAt(ctx, p)
 	if err != nil {
@@ -787,7 +788,7 @@ type DueDunningCursor struct {
 func DueDunningCursorOf(sub *models.Subscription) DueDunningCursor {
 	due := sub.NextRetryAt
 	switch {
-	case sub.Status == models.StatusAwaitingMethod:
+	case sub.Status == models.StatusAwaitingMethod, sub.Status == models.StatusPastDue && sub.NextRetryAt == nil:
 		due = sub.GraceEndsAt
 	case sub.CollectionPolicy == models.CollectionPolicyEngine && sub.Status == models.StatusActive:
 		due = sub.CurrentPeriodEndsAt
@@ -834,21 +835,17 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rail
 	return out, nil
 }
 
-// RebillCutoffs are the latest period ends each owner's rebill is overdue by:
-// engine renewals of the due pass, Solana's of the crank, and NMI schedules.
-type RebillCutoffs struct{ Engine, Solana, NMI time.Time }
-
 // ListOverdueRebills returns a page, after the (period end, id) cursor, of
-// auto-renewing subscriptions whose period ended before its owner's cutoff
-// with neither an attempt nor a recorded miss for that cycle, and no failed
-// look waiting out its backoff at now.
-func (r *SubscriptionRepo) ListOverdueRebills(ctx context.Context, cutoffs RebillCutoffs, now time.Time, after DueDunningCursor) ([]*models.Subscription, error) {
+// NMI schedules whose period ended before cutoff with neither an attempt nor a
+// recorded miss for that cycle, and no failed look waiting out its backoff at
+// now.
+func (r *SubscriptionRepo) ListOverdueRebills(ctx context.Context, cutoff, now time.Time, after DueDunningCursor) ([]*models.Subscription, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return nil, scopeErr
 	}
 	rows, err := r.db.Gen(ctx).ListOverdueRebills(ctx, gen.ListOverdueRebillsParams{
-		MerchantID: scopeMerchantID.UUID(), EngineCutoff: cutoffs.Engine, SolanaCutoff: cutoffs.Solana, NmiCutoff: cutoffs.NMI, Now: now,
+		MerchantID: scopeMerchantID.UUID(), Cutoff: cutoff, Now: now,
 		AfterDueAt: after.DueAt, AfterID: after.ID, RowLimit: DueDunningBatch,
 	})
 	if err != nil {

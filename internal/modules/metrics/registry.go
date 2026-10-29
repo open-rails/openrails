@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
@@ -169,7 +171,7 @@ var Dimensions = []Dimension{
 	{Name: "first_outcome", Description: "a rebill cycle's first outcome: approved | declined | error | missed | pending (nothing yet)", Values: []string{"approved", "declined", "error", "missed", "pending"}},
 	{Name: "first_failure_category", Description: "the category of a cycle's failed first attempt (empty otherwise)"},
 	{Name: "first_failure_reason", Description: "the decline reason of a cycle's failed first attempt (empty otherwise)"},
-	{Name: "miss_reason", Description: "why a cycle's rebill never happened (empty when it did)", Values: []string{"", "held", "refused", "method_unusable", "not_attempted", "provider_skipped", "provider_stalled", "provider_reversed", "provider_unrecorded", "schedule_gone"}},
+	{Name: "miss_reason", Description: "why a cycle's rebill never happened (empty when it did)", Values: []string{"", "refused", "method_unusable", "not_attempted", "provider_skipped", "provider_stalled", "provider_reversed", "provider_unrecorded", "schedule_gone"}},
 	{Name: "recovered_by", Description: "what collected a cycle whose first outcome failed: dunning_retry | customer_retry | updated_card | late_provider_charge (empty otherwise)", Values: []string{"", "dunning_retry", "customer_retry", "updated_card", "late_provider_charge"}},
 	{Name: "recovery_attempt", Description: "the attempt that collected a failed cycle, counting the first: 1 (a missed cycle's first attempt) | 2 | 3 | 4 | 5+ (empty otherwise)", Values: []string{"", "1", "2", "3", "4", "5+"}},
 	{Name: "days_to_recover", Description: "whole days from a cycle's first failure to its collection (empty otherwise)"},
@@ -454,10 +456,44 @@ var families = map[Family]familySpec{
 	},
 }
 
+// A renewal the engine owns is missed when nothing attempted it by its
+// deadline after the period ended and none is in flight: the due pass admits
+// one within minutes, and a Solana one's pull runs PullMargin after the
+// boundary. Read as of the query, never recorded.
+const (
+	EngineRenewalDeadline = time.Hour
+	SolanaRenewalDeadline = solanasubs.PullMargin + EngineRenewalDeadline
+)
+
+// rebillCycles are the recorded cycles and the engine renewals missed as of
+// @to (a cycle row exists only once attempted).
+var rebillCycles = fmt.Sprintf(`(SELECT c.merchant_id, c.id, c.subscription_id, c.psp_id, c.rail, c.owner, c.due_at, c.currency, c.missed_at, c.miss_reason
+		FROM billing.rebill_cycles c
+	UNION ALL
+	SELECT s.merchant_id, md5('renewal:' || s.id::text || ':' || extract(epoch FROM s.current_period_ends_at)::text)::uuid, s.id, s.psp_id, s.rail,
+		'engine'::text, s.current_period_ends_at, pr.currency, s.current_period_ends_at + %[1]s,
+		CASE WHEN s.status = 'awaiting_method' THEN 'method_unusable'
+			WHEN EXISTS (SELECT 1 FROM billing.reconciliation_findings f
+				WHERE f.merchant_id = s.merchant_id AND f.finding_type = 'life.due_pass.refused' AND f.subject_key = s.id::text
+				AND f.status IN ('reconcile_required', 'requires_review')) THEN 'refused'
+			ELSE 'not_attempted' END::text
+		FROM billing.subscriptions s
+		JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id
+		WHERE s.collection_policy = 'engine' AND s.status IN ('active', 'awaiting_method') AND s.deleted_at IS NULL
+		AND s.current_period_ends_at + %[1]s <= @to
+		AND NOT EXISTS (SELECT 1 FROM billing.rebill_cycles c
+			WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at)
+		AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i
+			WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
+			AND i.intent_type IN ('subscription_collection', 'solana_pull')
+			AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')))`,
+	fmt.Sprintf("CASE WHEN s.rail = 'solana' THEN interval '%d seconds' ELSE interval '%d seconds' END",
+		int(SolanaRenewalDeadline.Seconds()), int(EngineRenewalDeadline.Seconds())))
+
 // Each rebill cycle with its first attempt, the attempt that collected it and
 // when it closes: collected, the subscription canceled, or 15 days past due
 // (the dunning window is at most 14). ListRenewals derives the same facts.
-const rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner, c.due_at, c.currency, c.missed_at, c.miss_reason,
+var rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner, c.due_at, c.currency, c.missed_at, c.miss_reason,
 		f.category AS first_category, f.reason AS first_reason, f.attempted_at AS first_at,
 		w.attempted_at AS won_at, w.ordinal AS won_ordinal,
 		(c.missed_at IS NOT NULL OR COALESCE(f.category <> 'approved', false)) AS first_failed,
@@ -475,7 +511,7 @@ const rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner
 				AND u.effective_at >= COALESCE(c.missed_at, f.attempted_at) AND u.effective_at <= w.attempted_at) THEN 'updated_card'
 			WHEN w.kind = 'customer_retry' THEN 'customer_retry'
 			ELSE 'dunning_retry' END AS recovered_by
-	FROM billing.rebill_cycles c
+	FROM ` + rebillCycles + ` c
 	LEFT JOIN LATERAL (SELECT a.category, a.reason, a.attempted_at FROM billing.payment_attempts a
 		WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
 	LEFT JOIN LATERAL (SELECT a.id, a.kind, a.source, a.attempted_at, a.payment_method_id,
@@ -694,7 +730,7 @@ var Measures = []Measure{
 		Dims:        purchaseDims},
 	// --- rebill cycles (#1116): cohort by the period that came due ---------------
 	{Name: "rebills_due", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
-		Description: "rebill cycles: paid periods that came due in the bucket and were attempted or recorded missed",
+		Description: "rebill cycles: paid periods that came due in the bucket and were attempted or missed",
 		Formula:     "COUNT(rebill cycles)",
 		Expr:        `COUNT(*)`,
 		Dims:        cycleDims},
@@ -704,7 +740,7 @@ var Measures = []Measure{
 		Expr:        `COUNT(*) FILTER (WHERE NOT ` + cycleClosed + `)`,
 		Dims:        cycleDims},
 	{Name: "rebills_attempted", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
-		Description: "cycles with a first outcome: attempted, or recorded missed (the rebill failure rate's denominator)",
+		Description: "cycles with a first outcome: attempted, or missed (the rebill failure rate's denominator)",
 		Formula:     "COUNT(cycles attempted or missed)",
 		Expr:        `COUNT(*) FILTER (WHERE cy.missed_at IS NOT NULL OR cy.first_category IS NOT NULL)`,
 		Dims:        cycleDims},

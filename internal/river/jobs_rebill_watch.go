@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/attempts"
-	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -33,18 +32,11 @@ const (
 
 	// RebillWatchInterval is how often overdue rebills are looked for.
 	RebillWatchInterval = 15 * time.Minute
-	// EngineRebillDeadline: the due pass admits an engine renewal within
-	// minutes of its boundary.
-	EngineRebillDeadline = time.Hour
-	// SolanaRebillDeadline: a Solana renewal is pulled by its scheduled
-	// operation, PullMargin after its boundary, not by the due pass; its
-	// confirmation has the engine's deadline.
-	SolanaRebillDeadline = solanasubs.PullMargin + EngineRebillDeadline
 	// NMIRebillDeadline: NMI charges once on the schedule day, and its Query
 	// API indexes a charge with some lag.
 	NMIRebillDeadline = 24 * time.Hour
 
-	// FindingRebillMissed is one cycle whose rebill never happened.
+	// FindingRebillMissed is one NMI cycle whose rebill never happened.
 	FindingRebillMissed = "life.rebill.missed"
 
 	// MissProviderSkipped: NMI's schedule moved past the period without
@@ -67,12 +59,14 @@ func (RebillWatchArgs) Kind() string { return KindRebillWatch }
 
 func (RebillWatchArgs) InsertOpts() river.InsertOpts { return periodPass(RebillWatchInterval) }
 
-// RebillWatchWorker records rebills that never happened: an auto-renewing
-// subscription whose period ended past its owner's deadline with no attempt
-// for that cycle. An NMI-owned one is probed first: the Query API is the
-// backstop for a lost webhook, so a charge found there is recorded and
-// converged, and only a proven absence is a miss. A period NMI's schedule
-// skipped is then collected by OpenRails.
+// RebillWatchWorker looks at renewals whose confirming evidence is overdue.
+// An NMI schedule past its deadline with no attempt for the cycle is probed:
+// the Query API is the backstop for a lost webhook, so a charge found there
+// is recorded and converged, and only a proven absence is a miss; a period
+// NMI's schedule skipped is then collected by OpenRails. Any provider-billed
+// renewal still unconfirmed reconcile.PeriodGrace after its period is moved
+// to unverified, so the provider is asked by id; access is kept. Engine
+// renewals the due pass never attempted are read as missed, not recorded.
 type RebillWatchWorker struct {
 	WorkerDefaults[RebillWatchArgs]
 	DB          *db.DB
@@ -86,19 +80,24 @@ func (RebillWatchWorker) Kind() string { return KindRebillWatch }
 
 func (w *RebillWatchWorker) Work(ctx context.Context, _ *river.Job[RebillWatchArgs]) error {
 	now := w.Clock.Now().UTC()
-	cutoffs := subscriptions.RebillCutoffs{Engine: now.Add(-EngineRebillDeadline), Solana: now.Add(-SolanaRebillDeadline), NMI: now.Add(-NMIRebillDeadline)}
+	return errors.Join(w.watchNMI(ctx, now), w.overdueRenewals(ctx, now))
+}
+
+// watchNMI decides every merchant's overdue NMI cycles.
+func (w *RebillWatchWorker) watchNMI(ctx context.Context, now time.Time) error {
+	cutoff := now.Add(-NMIRebillDeadline)
 	var workErr error
 	after := uuid.Nil
 	for {
 		merchantIDs, err := w.DB.GenDirectory().ListOverdueRebillMerchants(ctx, gen.ListOverdueRebillMerchantsParams{
-			EngineCutoff: cutoffs.Engine, SolanaCutoff: cutoffs.Solana, NmiCutoff: cutoffs.NMI, Now: now, AfterMerchantID: after, MerchantLimit: rebillWatchMerchantBatch,
+			Cutoff: cutoff, Now: now, AfterMerchantID: after, MerchantLimit: rebillWatchMerchantBatch,
 		})
 		if err != nil {
 			return errors.Join(workErr, fmt.Errorf("rebill watch: list merchants: %w", err))
 		}
 		for _, mid := range merchantIDs {
 			if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "rebill watch", func(ctx context.Context) error {
-				return w.watchMerchant(ctx, cutoffs, now)
+				return w.watchMerchant(ctx, cutoff, now)
 			}); err != nil {
 				workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
 			}
@@ -113,12 +112,12 @@ func (w *RebillWatchWorker) Work(ctx context.Context, _ *river.Job[RebillWatchAr
 // watchMerchant decides each of the merchant's overdue cycles, a page at a
 // time. A cycle whose look fails waits out its backoff, so it never holds up
 // the cycles after it.
-func (w *RebillWatchWorker) watchMerchant(ctx context.Context, cutoffs subscriptions.RebillCutoffs, now time.Time) error {
+func (w *RebillWatchWorker) watchMerchant(ctx context.Context, cutoff, now time.Time) error {
 	repo := subscriptions.NewSubscriptionRepo(w.DB)
 	var after subscriptions.DueDunningCursor
 	var merchantErr error
 	for {
-		subs, err := repo.ListOverdueRebills(ctx, cutoffs, now, after)
+		subs, err := repo.ListOverdueRebills(ctx, cutoff, now, after)
 		if err != nil {
 			return errors.Join(merchantErr, err)
 		}
@@ -137,6 +136,65 @@ func (w *RebillWatchWorker) watchMerchant(ctx context.Context, cutoffs subscript
 		}
 		last := subs[len(subs)-1]
 		after = subscriptions.DueDunningCursor{DueAt: *last.CurrentPeriodEndsAt, ID: last.ID}
+	}
+}
+
+// overdueRenewals moves each provider-billed renewal still unconfirmed
+// reconcile.PeriodGrace after its period to unverified: a clock reading is
+// not evidence, so it only asks the provider. The row leaves the due set.
+func (w *RebillWatchWorker) overdueRenewals(ctx context.Context, now time.Time) error {
+	if w.Lifecycle == nil {
+		return errors.New("rebill watch: lifecycle not wired")
+	}
+	before := now.Add(-reconcile.PeriodGrace)
+	postures := writeposture.View{Config: w.Config, DB: w.DB}
+	var workErr error
+	after := uuid.Nil
+	for {
+		merchantIDs, err := w.DB.GenDirectory().ListOverdueRenewalMerchants(ctx, gen.ListOverdueRenewalMerchantsParams{
+			OverdueBefore: before, AfterMerchantID: after, MerchantLimit: rebillWatchMerchantBatch,
+		})
+		if err != nil {
+			return errors.Join(workErr, fmt.Errorf("rebill watch: list merchants with overdue renewals: %w", err))
+		}
+		for _, mid := range merchantIDs {
+			if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "overdue renewals", func(ctx context.Context) error {
+				if p := postures.Posture(ctx, mid); p.ReadOnly() {
+					return nil
+				}
+				return w.overdueMerchantRenewals(ctx, mid, before)
+			}); err != nil {
+				workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
+			}
+		}
+		if len(merchantIDs) < rebillWatchMerchantBatch {
+			return workErr
+		}
+		after = merchantIDs[len(merchantIDs)-1]
+	}
+}
+
+func (w *RebillWatchWorker) overdueMerchantRenewals(ctx context.Context, mid uuid.UUID, before time.Time) error {
+	var merchantErr error
+	var afterAt time.Time
+	afterID := uuid.Nil
+	for {
+		rows, err := w.DB.Gen(ctx).ListOverdueRenewals(ctx, gen.ListOverdueRenewalsParams{
+			MerchantID: mid, OverdueBefore: before, AfterDueAt: afterAt, AfterID: afterID, RowLimit: subscriptions.DueDunningBatch,
+		})
+		if err != nil {
+			return errors.Join(merchantErr, err)
+		}
+		for _, row := range rows {
+			if _, err := w.Lifecycle.AskProviderOverdueRenewal(ctx, w.DB, row.ID, *row.CurrentPeriodEndsAt); err != nil {
+				merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", row.ID, err))
+			}
+		}
+		if len(rows) < subscriptions.DueDunningBatch {
+			return merchantErr
+		}
+		last := rows[len(rows)-1]
+		afterAt, afterID = *last.CurrentPeriodEndsAt, last.ID
 	}
 }
 
@@ -173,34 +231,13 @@ func (w *RebillWatchWorker) cycle(sub *models.Subscription) (gen.UpsertRebillCyc
 	}, nil
 }
 
-// watch decides one overdue cycle.
+// watch decides one overdue NMI cycle.
 func (w *RebillWatchWorker) watch(ctx context.Context, sub *models.Subscription, now time.Time) error {
-	due := sub.CurrentPeriodEndsAt.UTC()
-	if sub.CollectionPolicy == models.CollectionPolicyNMISchedule {
-		reason, held, missed, err := w.probeNMI(ctx, sub, now)
-		if err != nil || !missed {
-			return err
-		}
-		return w.miss(ctx, sub, due, reason, held, now)
+	reason, held, missed, err := w.probeNMI(ctx, sub, now)
+	if err != nil || !missed {
+		return err
 	}
-	if open, err := w.DB.Gen(ctx).CountOpenSubscriptionCollections(ctx, gen.CountOpenSubscriptionCollectionsParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID}); err != nil || open > 0 {
-		return err // a renewal in flight decides the cycle itself
-	}
-	return w.miss(ctx, sub, due, w.engineReason(ctx, sub), nil, now)
-}
-
-func (w *RebillWatchWorker) engineReason(ctx context.Context, sub *models.Subscription) string {
-	switch {
-	case w.Config != nil && w.Config.EngineAdmissionHold:
-		return "held"
-	case sub.Status == models.StatusAwaitingMethod:
-		return "method_unusable"
-	}
-	finding, err := w.DB.Gen(ctx).GetReconciliationFindingByIdentity(ctx, gen.GetReconciliationFindingByIdentityParams{MerchantID: sub.MerchantID, FindingType: FindingDuePassRefused, SubjectKey: sub.ID.String()})
-	if err == nil && finding.ResolvedAt == nil {
-		return "refused"
-	}
-	return "not_attempted"
+	return w.miss(ctx, sub, sub.CurrentPeriodEndsAt.UTC(), reason, held, now)
 }
 
 // probeNMI fetches NMI's record of the cycle and converges on it. A charge
@@ -298,7 +335,7 @@ func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, 
 			return err
 		}
 		evidence, _ := json.Marshal(map[string]any{"subscription_id": sub.ID, "cycle_id": cycle, "period_end": due, "owner": sub.CollectionPolicy, "reason": reason, "collected": collect, "nmi_transactions": held})
-		action := fmt.Sprintf("subscription %s was due to rebill at %s and no attempt happened (%s). Check the provider's schedule and the due pass; the member keeps access until the rebill is resolved.", sub.ID, due.Format(time.RFC3339), reason)
+		action := fmt.Sprintf("subscription %s was due to rebill at %s and no attempt happened (%s). Check the provider's schedule; the member keeps access until the rebill is resolved.", sub.ID, due.Format(time.RFC3339), reason)
 		switch {
 		case collect:
 			action = fmt.Sprintf("NMI's schedule passed subscription %s's rebill due at %s without charging it. OpenRails charges the period now and duns a decline on the merchant's schedule; check the schedule at NMI.", sub.ID, due.Format(time.RFC3339))

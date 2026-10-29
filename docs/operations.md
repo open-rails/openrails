@@ -786,14 +786,24 @@ never an error.
 
 ## The Convergence Engine
 
-The continuous internal-repair half of the system (the pull feeds it). One
-idempotent **`Converge(scope)`** — scope-narrowable from a single customer to
-a whole merchant — runs from three places so the system never *holds* an
-inconsistency: **inline** after every source mutation (purchase completes,
-renewal bills, refund webhook lands, dunning transitions, free product grants);
-**after every applied `prune`**; and **on the sweep** — a
-15-minute River job (RunOnStart) over every active merchant, catching drift
-no inline mutation touched.
+The internal-repair half of the system (the pull feeds it). One idempotent
+**`Converge(scope)`**, for one customer or a whole merchant, runs: for a
+**customer**, in a job committed with each mutation that changed it (a
+lifecycle decision, a payment or refund recorded, a free grant or a revoke);
+merchant-wide **after every applied `prune`** and on the
+operator's `openrails converge`. Writers commit a change and its effects in
+one transaction, so there is no routine sweep: deadlines no event marks are
+indexed due work (below), and the health findings come from an hourly pass
+over the merchants with activity.
+
+Deadlines with no event:
+
+| Deadline | Picked up by | What happens |
+|---|---|---|
+| a provider-billed `past_due` row's grace ends with no retry scheduled | the due pass (every minute) | `unverified`: the provider is read by id, access kept |
+| a provider-billed renewal has no payment 48h after its period | the rebill watch (15 min) | `unverified`, as above |
+| a timed access window lapses | the health pass (hourly) | the customer's access-ended notice |
+| an engine renewal past its allowance, an unverified row past 72h, a stuck or abandoned provider operation | the health pass | `life.renewal.held`, `life.unverified.unresolved`, `life.provider_intent.stuck` / `.abandoned` |
 
 A clean scope is **zero writes** — the second run of anything is a no-op. The
 engine is the single writer of grants and grant effects, so each invariant
@@ -821,7 +831,7 @@ retract, `mismatch` → adjust) and a **remediation class**: AUTO (idempotent
 local write, applied immediately), ADMIN (queued for human approval),
 OPERATOR (surfaced with a runbook; never auto-fires). Representative types:
 `pull.charge.missing`, `pull.subscription.duplicate`, `derive.grant.missing`,
-`life.subscription.dunning_overdue`, `life.provider_intent.stuck`,
+`life.renewal.held`, `life.provider_intent.stuck`,
 `consistency.duplicate.provider_charge`.
 
 Finding states: `reconcile_required` (open, engine may still converge it —
@@ -831,22 +841,22 @@ queue), `auto_fixed`, `fixed` (operator-acked or the drift vanished),
 have stable identity across runs and auto-resolve when the divergence
 disappears. Two safety doctrines matter operationally:
 
-- **Confirmed-absence gate**: `excess`/retract repairs (revoking access,
-  cancelling) do not auto-fire until the relevant source domain
+- **Confirmed-absence gate**: a pull's `excess`/retract repairs (revoking
+  access, cancelling) do not auto-fire until the relevant source domain
   (subscriptions / payments / grants) is marked *fully reconciled* for the
   merchant — flipped automatically after a completed mutating pull whose
   fetcher proved exhaustive coverage across every declared PSP
   (`billing.reconciliation_state`, a ratchet). During an import, "not in
   the local DB" is not absence — it usually means *not imported yet*. Held
   repairs stay `reconcile_required` with the unproven domain in evidence.
-- **Stuck intents** (`life.provider_intent.stuck`): the sweep flags provider
+- **Stuck intents** (`life.provider_intent.stuck`): the health pass flags provider
   intents sitting non-terminal too long — `pending`/`failed_retryable` older
   than 24h, `in_flight`/`unknown_needs_verify` older than 2h; thresholds are
   hardcoded. Mode-parked intents are informational (that wait is by design);
   everything else is `requires_review` — provider failures, bad credentials,
   or a dead worker. The engine never touches intent rows (the
   executor/verifier own them); findings auto-resolve on recovery.
-- **Operational problems** outside the sweep are findings too:
+- **Operational problems** outside the engine are findings too:
   `consistency.ledger.unbooked` (a provider event OpenRails could not book; the
   merchant repairs the ledger and resolves the finding) and
   `life.solana.cranker_low_gas` (a crank
@@ -944,11 +954,15 @@ provider-owned subscription carries no `retries_left` or `final_retry_at`: the
 provider runs its own retries, and `next_retry_at` is its next attempt when
 OpenRails knows it (CCBill reports it; Stripe's is not stored). A case leaves the list when it is paid or its retries give up.
 
-**Missed rebills.** Every 15 minutes the rebill watch looks for renewals with
-no attempt past their deadline (engine: 1h; Solana, renewed by the hourly
-crank: 3h; `nmi_schedule`: 24h, after reading NMI's Query API and schedule) and
-raises one `life.rebill.missed` finding per
-cycle. When NMI holds nothing for the cycle and its schedule has moved to the
+**Missed rebills.** An engine renewal nothing attempted by its deadline (1h
+after its period; a Solana one, pulled a minute after it, 1h1m), with no
+collection in flight, reads as missed in `GET /v1/admin/renewals` and the
+`rebill_cycles` measures, with why (`method_unusable`, `refused` or
+`not_attempted`); `life.renewal.held` and `life.due_pass.refused` are its
+findings. Every 15 minutes the rebill watch reads an `nmi_schedule` renewal
+with no attempt 24h after its period from NMI's Query API and schedule, and
+raises one `life.rebill.missed` finding per cycle it proves missed. When NMI
+holds nothing for the cycle and its schedule has moved to the
 next period (`provider_skipped`), OpenRails charges the period itself, then duns
 a decline on the same schedule. "Nothing" means no transaction of any kind or
 outcome since the period's midpoint under the schedule, the subscription's order
@@ -960,8 +974,9 @@ finding: NMI may still bill it. A cycle whose look fails (NMI unreachable, a
 transaction no attempt records) is looked at again after 15 minutes, the wait
 doubling to at most a day.
 
-**Payment health alerts.** Each LIFE sweep reads the decline measures per PSP
-account and owner and keeps these findings open while their condition holds
+**Payment health alerts.** The hourly health pass reads the decline measures
+per PSP account and owner, for each merchant with attempts in the last day or
+one of these findings open, and keeps them open while their condition holds
 (one notification per episode):
 
 | Finding | Fires when |
@@ -1023,7 +1038,7 @@ the same idempotent reconciliation writers the pull uses, then runs scoped
 convergence. It never mutates a provider and **never charges** — charging
 stays inside dunning. Dunning owns `past_due` (we SAW the failure); the
 **silence cohort** — lapsed subscriptions with NO webhook either way — is
-parked as `unverified` by the LIFE plane and resolved by the Unknown-cohort lane
+parked as `unverified` by the rebill watch and the due pass, and resolved by the Unknown-cohort lane
 against ONE verdict set:
 
 | Provider evidence | Resolution |
@@ -1240,9 +1255,9 @@ coalesce merchant-wide passes when multiple embedded fleets share merchants.
 |---|---|
 | Balance watch (due customer watches only, credit lot lapses included); due renewals and retries; due arrears delinquency | 1 min |
 | Order expiry | 5 min |
-| Convergence sweep | 15 min |
 | Rebill watch; lost provider-operation wakes | 15 min |
-| Admission-denial flush (closed hours); due daily NMI history read; retention cleanup; undeclared-account re-alerts | 1 h |
+| Admission-denial flush (closed hours); due daily NMI history read; retention cleanup; undeclared-account re-alerts; merchant health (merchants with activity) | 1 h |
+| A customer's convergence | committed with each mutation that changed the customer |
 | Provider refresh scheduler (fans out per merchant) | 2 h |
 | Stored card refresh ahead of renewal | 6 h |
 | Ledger integrity audit; Stripe webhook endpoint backstop | 24 h |
@@ -1265,7 +1280,7 @@ each job stays short and the pass still reaches all of its work.
 
 Each OpenRails job runs under its kind's timeout: 10 minutes, an hour for
 the passes that read every merchant's providers (`cleanup_expired_data`,
-`provider_refresh_merchant`, `converge_sweep`, `rebill_watch`,
+`provider_refresh_merchant`, `merchant_health`, `rebill_watch`,
 `nmi_history`) and an import's `charge_attributions` read, and for
 `stored_card_refresh_due` (which stops opening pages
 after 10 minutes), two for `psp_import`. River cancels a job past it. River's
@@ -1446,14 +1461,13 @@ reaches every node at its next gate check.
 **It ships OFF** (engaged): a fresh deployment makes no cancellation,
 revocation, provider delete or pull overwrite until an operator enables it.
 Detection, findings and their alerts, additive repairs and access-ended notices
-run either way. A retraction a merchant-wide convergence holds (the sweep, the
-one after a provider pull, or the operator's converge and prune commands) stays
+run either way. A retraction any convergence holds (a customer's, the one after
+a provider pull, or the operator's converge and prune commands) stays
 `reconcile_required`, with `held_by: kill_switch` and the reason in its
-evidence, until the first sweep after the switch is enabled. A provider-confirmed cancel the switch holds (read
+evidence, until a convergence of that scope after the switch is enabled. A provider-confirmed cancel the switch holds (read
 by a webhook, a rebill or a verification) parks the subscription `unverified`
 with access kept; the first Provider Refresh after the switch is enabled reads
-it again with its own PSP and applies it. Inline convergence after a change is not held: it
-finishes a command already admitted.
+it again with its own PSP and applies it.
 
 ### Stop everything, now
 

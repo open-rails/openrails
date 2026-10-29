@@ -249,6 +249,37 @@ func (q *Queries) AutoResolveFindingBySubject(ctx context.Context, arg AutoResol
 	return err
 }
 
+const autoResolveRecoveredAbandonedIntentFindings = `-- name: AutoResolveRecoveredAbandonedIntentFindings :execrows
+UPDATE billing.reconciliation_findings f
+SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, updated_at = now()
+WHERE f.merchant_id = $1::uuid
+  AND f.finding_type = 'life.provider_intent.abandoned'
+  AND f.status IN ('reconcile_required', 'requires_review')
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.provider_intents pi
+      WHERE pi.merchant_id = f.merchant_id AND 'provider_intent:' || pi.id::text = f.subject_key
+        AND (pi.status IN ('failed_terminal', 'expired')
+             OR (pi.status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
+                 AND pi.expires_at IS NOT NULL AND pi.expires_at < $2::timestamptz))
+  )
+`
+
+type AutoResolveRecoveredAbandonedIntentFindingsParams struct {
+	MerchantID uuid.UUID
+	Now        time.Time
+}
+
+// life.provider_intent.abandoned findings close subject-first once their
+// operation is no longer abandoned (it ran after all, or is gone).
+func (q *Queries) AutoResolveRecoveredAbandonedIntentFindings(ctx context.Context, arg AutoResolveRecoveredAbandonedIntentFindingsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, autoResolveRecoveredAbandonedIntentFindings, arg.MerchantID, arg.Now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const autoResolveRecoveredStuckIntentFindings = `-- name: AutoResolveRecoveredStuckIntentFindings :execrows
 UPDATE billing.reconciliation_findings f
 SET status = 'fixed',
@@ -857,28 +888,6 @@ func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (Billi
 	return i, err
 }
 
-const isSourceDomainReconciled = `-- name: IsSourceDomainReconciled :one
-SELECT COALESCE((
-    SELECT fully_reconciled FROM billing.reconciliation_state
-    WHERE merchant_id = $1::uuid
-      AND source_domain = $2::text
-), false) AS fully_reconciled
-`
-
-type IsSourceDomainReconciledParams struct {
-	MerchantID   uuid.UUID
-	SourceDomain string
-}
-
-// The confirmed-absence gate: is this source domain proven fully reconciled for
-// the merchant? No row = false.
-func (q *Queries) IsSourceDomainReconciled(ctx context.Context, arg IsSourceDomainReconciledParams) (*bool, error) {
-	row := q.db.QueryRow(ctx, isSourceDomainReconciled, arg.MerchantID, arg.SourceDomain)
-	var fully_reconciled *bool
-	err := row.Scan(&fully_reconciled)
-	return fully_reconciled, err
-}
-
 const latestCardVersionID = `-- name: LatestCardVersionID :one
 SELECT COALESCE((SELECT v.id FROM billing.payment_method_versions v
     WHERE v.merchant_id = $1::uuid AND v.payment_method_id = $2::uuid
@@ -901,19 +910,18 @@ func (q *Queries) LatestCardVersionID(ctx context.Context, arg LatestCardVersion
 const listAbandonedProviderIntents = `-- name: ListAbandonedProviderIntents :many
 SELECT id, intent_type, status, rail FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR subscription_id = $2::uuid)
   AND (
-        status IN ('failed_terminal', 'expired')
+        (status IN ('failed_terminal', 'expired') AND updated_at > $2::timestamptz)
         OR (status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
             AND expires_at IS NOT NULL AND expires_at < $3::timestamptz)
       )
-ORDER BY created_at
+ORDER BY created_at, id
 `
 
 type ListAbandonedProviderIntentsParams struct {
-	MerchantID     uuid.UUID
-	SubscriptionID *uuid.UUID
-	Now            time.Time
+	MerchantID uuid.UUID
+	Since      time.Time
+	Now        time.Time
 }
 
 type ListAbandonedProviderIntentsRow struct {
@@ -923,11 +931,10 @@ type ListAbandonedProviderIntentsRow struct {
 	Rail       string
 }
 
-// LIFE life.provider_intent.abandoned: provider actions that will not auto-retry
-// (terminal, expired, or past their deadline). Surface-only; optional
-// subscription filter.
+// life.provider_intent.abandoned: provider actions that will not auto-retry:
+// ended failed or expired since since, or past their deadline while live.
 func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAbandonedProviderIntentsParams) ([]ListAbandonedProviderIntentsRow, error) {
-	rows, err := q.db.Query(ctx, listAbandonedProviderIntents, arg.MerchantID, arg.SubscriptionID, arg.Now)
+	rows, err := q.db.Query(ctx, listAbandonedProviderIntents, arg.MerchantID, arg.Since, arg.Now)
 	if err != nil {
 		return nil, err
 	}
@@ -1018,7 +1025,7 @@ WHERE status = 'active' AND deleted_at IS NULL
 ORDER BY id
 `
 
-// CROSS-MERCHANT: the active merchants the converge sweep walks.
+// CROSS-MERCHANT: the active merchants.
 func (q *Queries) ListActiveMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listActiveMerchantIDs)
 	if err != nil {
@@ -1252,54 +1259,64 @@ func (q *Queries) ListDeadSubsWithLiveAccess(ctx context.Context, arg ListDeadSu
 	return items, nil
 }
 
-const listDunningPastGrace = `-- name: ListDunningPastGrace :many
-SELECT s.id, s.current_period_ends_at, s.grace_ends_at
-FROM billing.subscriptions s
-WHERE s.merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
-  AND s.deleted_at IS NULL
-  AND s.status = 'past_due'
-  AND s.collection_policy <> 'engine'
-  AND s.next_retry_at IS NULL
-  AND s.grace_ends_at < $3::timestamptz
-ORDER BY s.grace_ends_at, s.id
-LIMIT $4::int
+const listHealthMerchants = `-- name: ListHealthMerchants :many
+SELECT m.id FROM billing.merchants m
+WHERE m.status = 'active' AND m.deleted_at IS NULL AND m.id > $1::uuid
+  AND (EXISTS (SELECT 1 FROM billing.payment_attempts a WHERE a.merchant_id = m.id AND a.attempted_at > $2::timestamptz)
+    OR EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = m.id AND f.finding_type = ANY($3::text[])
+               AND f.status IN ('reconcile_required', 'requires_review'))
+    OR EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id = m.id AND s.status = 'unverified' AND s.deleted_at IS NULL)
+    OR EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id = m.id AND s.collection_policy = 'engine'
+               AND s.status IN ('active', 'past_due') AND s.deleted_at IS NULL AND s.current_period_ends_at <= $4::timestamptz)
+    OR EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id = m.id AND i.updated_at > $2::timestamptz)
+    OR EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id = m.id
+               AND i.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify') AND i.created_at <= $5::timestamptz)
+    OR EXISTS (SELECT 1 FROM billing.product_access e WHERE e.merchant_id = m.id AND e.deleted_at IS NULL
+               AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > $6::timestamptz
+               AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= $7::timestamptz))
+ORDER BY m.id
+LIMIT $8::int
 `
 
-type ListDunningPastGraceParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Now        time.Time
-	RowLimit   int32
+type ListHealthMerchantsParams struct {
+	AfterMerchantID uuid.UUID
+	ActiveSince     time.Time
+	FindingTypes    []string
+	HeldBefore      time.Time
+	StuckBefore     time.Time
+	LapsedSince     time.Time
+	Now             time.Time
+	MerchantLimit   int32
 }
 
-type ListDunningPastGraceRow struct {
-	ID                  uuid.UUID
-	CurrentPeriodEndsAt *time.Time
-	GraceEndsAt         *time.Time
-}
-
-// LIFE life.subscription.grace_exhausted: a provider-billed subscription
-// past_due whose grace ended with no attempt scheduled. The repair asks the
-// provider (DunningStale -> unverified). Capped.
-func (q *Queries) ListDunningPastGrace(ctx context.Context, arg ListDunningPastGraceParams) ([]ListDunningPastGraceRow, error) {
-	rows, err := q.db.Query(ctx, listDunningPastGrace,
-		arg.MerchantID,
-		arg.CustomerID,
+// CROSS-MERCHANT: the merchants whose health findings may have changed since
+// the last hourly pass: payment attempts in the spike window, health findings
+// still open, unverified subscriptions, engine renewals past their earliest
+// allowance, provider operations that changed or aged past the stuck
+// threshold, and timed access windows that lapsed. Index probes per merchant;
+// ids in order after a cursor.
+func (q *Queries) ListHealthMerchants(ctx context.Context, arg ListHealthMerchantsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listHealthMerchants,
+		arg.AfterMerchantID,
+		arg.ActiveSince,
+		arg.FindingTypes,
+		arg.HeldBefore,
+		arg.StuckBefore,
+		arg.LapsedSince,
 		arg.Now,
-		arg.RowLimit,
+		arg.MerchantLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListDunningPastGraceRow
+	var items []uuid.UUID
 	for rows.Next() {
-		var i ListDunningPastGraceRow
-		if err := rows.Scan(&i.ID, &i.CurrentPeriodEndsAt, &i.GraceEndsAt); err != nil {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1307,47 +1324,46 @@ func (q *Queries) ListDunningPastGrace(ctx context.Context, arg ListDunningPastG
 	return items, nil
 }
 
-const listDunningStalledSubscriptions = `-- name: ListDunningStalledSubscriptions :many
-SELECT id, (COALESCE(retry_attempts, 0) >= 1 AND last_retry_at IS NOT NULL)::bool AS attempt_recorded
-FROM billing.subscriptions
-WHERE merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR customer_id = $2::uuid)
-  AND deleted_at IS NULL
-  AND collection_policy = 'nmi_schedule'
-  AND status = 'past_due'
-  AND next_retry_at IS NULL
-  AND (grace_ends_at IS NULL OR grace_ends_at > $3::timestamptz)
-ORDER BY current_period_ends_at
+const listOverdueRenewalMerchants = `-- name: ListOverdueRenewalMerchants :many
+SELECT DISTINCT s.merchant_id
+FROM billing.subscriptions s
+WHERE s.status = 'active'
+  AND s.current_period_ends_at < $1::timestamptz
+  AND s.collection_policy <> 'engine'
+  AND s.deleted_at IS NULL
+  AND s.merchant_id > $2::uuid
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.payments p
+      WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
+        AND p.deleted_at IS NULL AND p.status = 'succeeded'
+        AND p.purchased_at >= s.current_period_ends_at
+  )
+ORDER BY s.merchant_id
+LIMIT $3::int
 `
 
-type ListDunningStalledSubscriptionsParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Now        time.Time
+type ListOverdueRenewalMerchantsParams struct {
+	OverdueBefore   time.Time
+	AfterMerchantID uuid.UUID
+	MerchantLimit   int32
 }
 
-type ListDunningStalledSubscriptionsRow struct {
-	ID              uuid.UUID
-	AttemptRecorded bool
-}
-
-// LIFE plane (life.subscription.dunning_overdue): an OpenRails-dunned NMI
-// schedule past_due in grace with NO retry scheduled. Engine rows own their
-// schedule (past_due without a retry is their awaiting-new-card state);
-// provider-owned rows are retried by the provider or not at all.
-func (q *Queries) ListDunningStalledSubscriptions(ctx context.Context, arg ListDunningStalledSubscriptionsParams) ([]ListDunningStalledSubscriptionsRow, error) {
-	rows, err := q.db.Query(ctx, listDunningStalledSubscriptions, arg.MerchantID, arg.CustomerID, arg.Now)
+// CROSS-MERCHANT: merchants holding an active provider-billed subscription
+// whose paid period ended before overdue_before with no renewal payment (see
+// ListOverdueRenewals), ids in order after a cursor.
+func (q *Queries) ListOverdueRenewalMerchants(ctx context.Context, arg ListOverdueRenewalMerchantsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listOverdueRenewalMerchants, arg.OverdueBefore, arg.AfterMerchantID, arg.MerchantLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListDunningStalledSubscriptionsRow
+	var items []uuid.UUID
 	for rows.Next() {
-		var i ListDunningStalledSubscriptionsRow
-		if err := rows.Scan(&i.ID, &i.AttemptRecorded); err != nil {
+		var merchant_id uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, merchant_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1359,11 +1375,11 @@ const listOverdueRenewals = `-- name: ListOverdueRenewals :many
 SELECT s.id, s.rail, s.current_period_ends_at
 FROM billing.subscriptions s
 WHERE s.merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'active'
   AND s.collection_policy <> 'engine'
-  AND s.current_period_ends_at < $3::timestamptz
+  AND s.current_period_ends_at < $2::timestamptz
+  AND (s.current_period_ends_at, s.id) > ($3::timestamptz, $4::uuid)
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
@@ -1371,13 +1387,14 @@ WHERE s.merchant_id = $1::uuid
         AND p.purchased_at >= s.current_period_ends_at
   )
 ORDER BY s.current_period_ends_at, s.id
-LIMIT $4::int
+LIMIT $5::int
 `
 
 type ListOverdueRenewalsParams struct {
 	MerchantID    uuid.UUID
-	CustomerID    *uuid.UUID
 	OverdueBefore time.Time
+	AfterDueAt    time.Time
+	AfterID       uuid.UUID
 	RowLimit      int32
 }
 
@@ -1387,15 +1404,16 @@ type ListOverdueRenewalsRow struct {
 	CurrentPeriodEndsAt *time.Time
 }
 
-// LIFE life.subscription.renewal_overdue: an active provider-billed subscription
-// whose paid period ended before overdue_before with no renewal payment. A clock
-// reading only: the repair asks the provider (RenewalOverdue -> unverified).
-// Oldest lapse first, capped.
+// An active provider-billed subscription whose paid period ended before
+// overdue_before with no renewal payment. A clock reading only: rebill watch
+// asks the provider (RenewalOverdue -> unverified). Oldest lapse first, a page
+// after the (period end, id) cursor.
 func (q *Queries) ListOverdueRenewals(ctx context.Context, arg ListOverdueRenewalsParams) ([]ListOverdueRenewalsRow, error) {
 	rows, err := q.db.Query(ctx, listOverdueRenewals,
 		arg.MerchantID,
-		arg.CustomerID,
 		arg.OverdueBefore,
+		arg.AfterDueAt,
+		arg.AfterID,
 		arg.RowLimit,
 	)
 	if err != nil {
@@ -1406,73 +1424,6 @@ func (q *Queries) ListOverdueRenewals(ctx context.Context, arg ListOverdueRenewa
 	for rows.Next() {
 		var i ListOverdueRenewalsRow
 		if err := rows.Scan(&i.ID, &i.Rail, &i.CurrentPeriodEndsAt); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPaidPendingSubscriptions = `-- name: ListPaidPendingSubscriptions :many
-SELECT s.id, s.rail, s.created_at, p.id AS payment_id, p.transaction_id, p.purchased_at
-FROM billing.subscriptions s
-JOIN LATERAL (
-    SELECT p.id, p.transaction_id, p.purchased_at FROM billing.payments p
-    WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-      AND p.status = 'succeeded' AND p.deleted_at IS NULL
-    ORDER BY p.purchased_at DESC, p.id DESC
-    LIMIT 1
-) p ON true
-WHERE s.merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
-  AND s.deleted_at IS NULL
-  AND s.status = 'pending'
-  AND s.created_at < $3::timestamptz
-ORDER BY s.created_at, s.id
-LIMIT $4::int
-`
-
-type ListPaidPendingSubscriptionsParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Cutoff     time.Time
-	RowLimit   int32
-}
-
-type ListPaidPendingSubscriptionsRow struct {
-	ID            uuid.UUID
-	Rail          string
-	CreatedAt     time.Time
-	PaymentID     uuid.UUID
-	TransactionID string
-	PurchasedAt   time.Time
-}
-
-func (q *Queries) ListPaidPendingSubscriptions(ctx context.Context, arg ListPaidPendingSubscriptionsParams) ([]ListPaidPendingSubscriptionsRow, error) {
-	rows, err := q.db.Query(ctx, listPaidPendingSubscriptions,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Cutoff,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListPaidPendingSubscriptionsRow
-	for rows.Next() {
-		var i ListPaidPendingSubscriptionsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Rail,
-			&i.CreatedAt,
-			&i.PaymentID,
-			&i.TransactionID,
-			&i.PurchasedAt,
-		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1954,57 +1905,6 @@ func (q *Queries) ListRecordedSubscriptionCharges(ctx context.Context, arg ListR
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listStalePendingSubscriptions = `-- name: ListStalePendingSubscriptions :many
-SELECT s.id FROM billing.subscriptions s
-WHERE s.merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
-  AND s.deleted_at IS NULL
-  AND s.status = 'pending'
-  AND s.created_at < $3::timestamptz
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.payments p
-      WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-        AND p.status = 'succeeded' AND p.deleted_at IS NULL
-  )
-ORDER BY s.created_at, s.id
-LIMIT $4::int
-`
-
-type ListStalePendingSubscriptionsParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Cutoff     time.Time
-	RowLimit   int32
-}
-
-// LIFE life.subscription.pending_stale: pending subscriptions unconfirmed past
-// the threshold (cutoff = now - PendingStaleAfter).
-// Oldest first, capped.
-func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListStalePendingSubscriptionsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listStalePendingSubscriptions,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Cutoff,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -3310,6 +3210,43 @@ func (q *Queries) RecordSubscriptionVerificationReads(ctx context.Context, arg R
 		arg.SubscriptionIds,
 	)
 	return err
+}
+
+const resolveClearedCustomerFindings = `-- name: ResolveClearedCustomerFindings :execrows
+UPDATE billing.reconciliation_findings
+   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
+       notified_at = NULL, notified_severity = NULL, updated_at = now()
+ WHERE merchant_id = $1::uuid
+   AND finding_type = ANY($2::text[])
+   AND status IN ('reconcile_required', 'requires_review')
+   AND evidence->'local'->>'customer_id' = $3::text
+   AND last_seen_at < $4::timestamptz
+   AND NOT ((finding_type || chr(31) || subject_key) = ANY($5::text[]))
+`
+
+type ResolveClearedCustomerFindingsParams struct {
+	MerchantID   uuid.UUID
+	FindingTypes []string
+	CustomerID   string
+	ObservedFrom time.Time
+	Keep         []string
+}
+
+// Open findings of the given standing types about one customer that its
+// converge no longer reports (keep, as ResolveClearedFindings) have cleared,
+// unless another pass saw them after this one began to look.
+func (q *Queries) ResolveClearedCustomerFindings(ctx context.Context, arg ResolveClearedCustomerFindingsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveClearedCustomerFindings,
+		arg.MerchantID,
+		arg.FindingTypes,
+		arg.CustomerID,
+		arg.ObservedFrom,
+		arg.Keep,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const resolveClearedFindings = `-- name: ResolveClearedFindings :execrows

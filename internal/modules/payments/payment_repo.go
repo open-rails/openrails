@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/convergejob"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -166,7 +167,7 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
-	return nil
+	return convergejob.Queue(ctx, r.db, tid, payment.CustomerID)
 }
 
 func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
@@ -191,10 +192,10 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 		params.PspID = &psp
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
-	if err != nil {
+	if err != nil || rows == 0 {
 		return false, err
 	}
-	return rows > 0, nil
+	return true, convergejob.Queue(ctx, r.db, tid, payment.CustomerID)
 }
 
 func (r *PaymentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Payment, error) {

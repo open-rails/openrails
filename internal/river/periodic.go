@@ -40,12 +40,12 @@ var Periodics = []Periodic{
 	{Args: BalanceWatchArgs{}, Every: BalanceWatchInterval},
 	{Args: OrderExpiryArgs{}, Every: OrderExpiryInterval},
 	{Args: money.UsageOrderArgs{}, Every: money.UsageOrdersInterval, Gate: WithUsageBilling},
-	// Overdue rebills with no attempt are probed (NMI) or recorded as missed.
+	// Overdue NMI rebills are probed; provider-billed renewals unconfirmed
+	// past their grace are read by id.
 	{Args: RebillWatchArgs{}, Every: RebillWatchInterval},
 	{Args: DelinquencyArgs{}, Every: DelinquencyInterval},
-	// Drift no inline mutation touched: stalled dunning, elapsed grace,
-	// abandoned purchases, unmaterialized grant effects.
-	{Args: ConvergeSweepArgs{}, Every: ConvergeSweepInterval},
+	// Health findings and timed access lapses, for merchants with activity.
+	{Args: MerchantHealthArgs{}, Every: MerchantHealthInterval},
 	{Args: NMIHistoryArgs{}, Every: NMIHistoryInterval},
 	{Args: CleanupExpiredDataArgs{}, Every: CleanupInterval},
 	// Queues every Stripe PSP's endpoint pass: Stripe disables or deletes an

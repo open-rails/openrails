@@ -33,10 +33,10 @@ type ConvergeMerchantResult struct {
 	AdminRequired     int
 }
 
-// ConvergeMerchant runs one merchant-wide convergence pass on demand: the same
-// idempotent engine as the scheduled sweep and the inline AfterMutation path,
-// so after a legacy import it materializes every grant and entitlement without
-// waiting for the sweep. A no-op when clean.
+// ConvergeMerchant runs one merchant-wide convergence pass and the health
+// pass on demand: the same idempotent engine a customer's job and the hourly
+// health pass run, so after a legacy import it materializes every grant and
+// entitlement at once. A no-op when clean.
 func ConvergeMerchant(ctx context.Context, opts ConvergeMerchantOptions) (ConvergeMerchantResult, error) {
 	var res ConvergeMerchantResult
 	if ctx == nil {
@@ -66,11 +66,15 @@ func ConvergeMerchant(ctx context.Context, opts ConvergeMerchantOptions) (Conver
 		if e != nil {
 			return e
 		}
+		health, e := engine.Health(ctx, merchantID)
+		if e != nil {
+			return e
+		}
 		res = ConvergeMerchantResult{
-			Findings:          out.Findings,
-			AutoFixed:         out.AutoFixed,
-			ReconcileRequired: out.ReconcileRequired,
-			AdminRequired:     out.AdminRequired,
+			Findings:          out.Findings + health.Findings,
+			AutoFixed:         out.AutoFixed + health.AutoFixed,
+			ReconcileRequired: out.ReconcileRequired + health.ReconcileRequired,
+			AdminRequired:     out.AdminRequired + health.AdminRequired,
 		}
 		return nil
 	})

@@ -7,35 +7,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/pagination"
-	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
-
-// convergeAfterMutation runs the inline Convergence Engine for one customer after
-// a successful state mutation (#511): the customer is left consistent by
-// construction. Best-effort — a convergence failure is logged, never surfaced to
-// the caller (the mutation already succeeded; the background sweep is the
-// backstop). Cheap: a customer-scoped Converge scans only that customer's rows and
-// writes nothing when already consistent.
-func convergeAfterMutation(r *httprequest.Request, customer uuid.UUID) {
-	mID, ok := merchant.FromContext(r.Request.Context())
-	if !ok || customer == uuid.Nil {
-		return
-	}
-	if _, err := converge.AfterMutation(r.Request.Context(), r.State.DB, mID, customer, r.Clock); err != nil {
-		log.WithContext(r.Request.Context()).WithError(err).
-			Warn("inline converge after mutation failed; background sweep will reconcile")
-	}
-}
 
 // ListEntitlements is one page of the keys customers hold at ?at= (zero:
 // now), by customer then key: of the customers ?customer_id= names (comma

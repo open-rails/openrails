@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -102,8 +103,13 @@ func GetPaymentAttempt(r *httprequest.Request) {
 	r.JSON(http.StatusOK, paymentAttemptToAPI(row))
 }
 
-// ListRenewals lists the merchant's renewals, latest due first
-// (#1116).
+// An engine renewal nothing attempted by its deadline is listed as missed.
+var (
+	engineRenewalDeadline = metrics.EngineRenewalDeadline.Seconds()
+	solanaRenewalDeadline = metrics.SolanaRenewalDeadline.Seconds()
+)
+
+// ListRenewals lists the merchant's renewals, latest due first.
 //
 //	GET /admin/renewals?owner&first_outcome&miss_reason&outcome&psp_id&subscription_id&due_since&due_until&limit&offset
 //
@@ -119,7 +125,9 @@ func ListRenewals(r *httprequest.Request) {
 	}
 	if ids != nil {
 		now := r.Clock.Now()
-		rows, err := r.State.DB.Gen(r.Request.Context()).ListRebillCyclesByIDs(r.Request.Context(), gen.ListRebillCyclesByIDsParams{MerchantID: mid, Ids: uuidutil.Of(ids)})
+		rows, err := r.State.DB.Gen(r.Request.Context()).ListRebillCyclesByIDs(r.Request.Context(), gen.ListRebillCyclesByIDsParams{
+			MerchantID: mid, Ids: uuidutil.Of(ids), Now: now, EngineDeadlineSeconds: engineRenewalDeadline, SolanaDeadlineSeconds: solanaRenewalDeadline,
+		})
 		if err != nil {
 			r.InternalError("renewals could not be listed", err)
 			return
@@ -139,7 +147,7 @@ func ListRenewals(r *httprequest.Request) {
 	}
 	now := r.Clock.Now()
 	params := gen.ListRebillCyclesParams{
-		MerchantID: mid, Now: now, Owners: q.list("owner"), FirstOutcomes: q.list("first_outcome"), MissReasons: q.list("miss_reason"), Outcomes: outcomes,
+		MerchantID: mid, Now: now, EngineDeadlineSeconds: engineRenewalDeadline, SolanaDeadlineSeconds: solanaRenewalDeadline, Owners: q.list("owner"), FirstOutcomes: q.list("first_outcome"), MissReasons: q.list("miss_reason"), Outcomes: outcomes,
 		PspID: q.typed("psp_id", parsePSPID), SubscriptionID: q.typed("subscription_id", func(s string) (uuid.UUID, error) {
 			id, err := billing.ParseSubscriptionID(s)
 			return id.UUID(), err
@@ -175,7 +183,9 @@ func GetRenewal(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	q := r.State.DB.Gen(ctx)
 	now := r.Clock.Now()
-	rows, err := q.ListRebillCyclesByIDs(ctx, gen.ListRebillCyclesByIDsParams{MerchantID: mid, Ids: []uuid.UUID{id.UUID()}})
+	rows, err := q.ListRebillCyclesByIDs(ctx, gen.ListRebillCyclesByIDsParams{
+		MerchantID: mid, Ids: []uuid.UUID{id.UUID()}, Now: now, EngineDeadlineSeconds: engineRenewalDeadline, SolanaDeadlineSeconds: solanaRenewalDeadline,
+	})
 	if err != nil {
 		r.InternalError("renewal could not be read", err)
 		return

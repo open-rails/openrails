@@ -610,28 +610,39 @@ ON CONFLICT (merchant_id, source_domain) DO UPDATE SET
     updated_at = now()
 RETURNING *;
 
--- name: IsSourceDomainReconciled :one
--- The confirmed-absence gate: is this source domain proven fully reconciled for
--- the merchant? No row = false.
-SELECT COALESCE((
-    SELECT fully_reconciled FROM billing.reconciliation_state
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-      AND source_domain = sqlc.arg(source_domain)::text
-), false) AS fully_reconciled;
+-- CROSS-MERCHANT: merchants holding an active provider-billed subscription
+-- whose paid period ended before overdue_before with no renewal payment (see
+-- ListOverdueRenewals), ids in order after a cursor.
+-- name: ListOverdueRenewalMerchants :many
+SELECT DISTINCT s.merchant_id
+FROM billing.subscriptions s
+WHERE s.status = 'active'
+  AND s.current_period_ends_at < sqlc.arg(overdue_before)::timestamptz
+  AND s.collection_policy <> 'engine'
+  AND s.deleted_at IS NULL
+  AND s.merchant_id > sqlc.arg(after_merchant_id)::uuid
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.payments p
+      WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
+        AND p.deleted_at IS NULL AND p.status = 'succeeded'
+        AND p.purchased_at >= s.current_period_ends_at
+  )
+ORDER BY s.merchant_id
+LIMIT sqlc.arg(merchant_limit)::int;
 
--- LIFE life.subscription.renewal_overdue: an active provider-billed subscription
--- whose paid period ended before overdue_before with no renewal payment. A clock
--- reading only: the repair asks the provider (RenewalOverdue -> unverified).
--- Oldest lapse first, capped.
+-- An active provider-billed subscription whose paid period ended before
+-- overdue_before with no renewal payment. A clock reading only: rebill watch
+-- asks the provider (RenewalOverdue -> unverified). Oldest lapse first, a page
+-- after the (period end, id) cursor.
 -- name: ListOverdueRenewals :many
 SELECT s.id, s.rail, s.current_period_ends_at
 FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'active'
   AND s.collection_policy <> 'engine'
   AND s.current_period_ends_at < sqlc.arg(overdue_before)::timestamptz
+  AND (s.current_period_ends_at, s.id) > (sqlc.arg(after_due_at)::timestamptz, sqlc.arg(after_id)::uuid)
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
@@ -641,71 +652,34 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY s.current_period_ends_at, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- LIFE life.subscription.grace_exhausted: a provider-billed subscription
--- past_due whose grace ended with no attempt scheduled. The repair asks the
--- provider (DunningStale -> unverified). Capped.
--- name: ListDunningPastGrace :many
-SELECT s.id, s.current_period_ends_at, s.grace_ends_at
-FROM billing.subscriptions s
-WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
-  AND s.deleted_at IS NULL
-  AND s.status = 'past_due'
-  AND s.collection_policy <> 'engine'
-  AND s.next_retry_at IS NULL
-  AND s.grace_ends_at < sqlc.arg(now)::timestamptz
-ORDER BY s.grace_ends_at, s.id
-LIMIT sqlc.arg(row_limit)::int;
-
--- LIFE life.subscription.pending_stale: pending subscriptions unconfirmed past
--- the threshold (cutoff = now - PendingStaleAfter).
--- name: ListStalePendingSubscriptions :many
-SELECT s.id FROM billing.subscriptions s
-WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
-  AND s.deleted_at IS NULL
-  AND s.status = 'pending'
-  AND s.created_at < sqlc.arg(cutoff)::timestamptz
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.payments p
-      WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-        AND p.status = 'succeeded' AND p.deleted_at IS NULL
-  )
--- Oldest first, capped.
-ORDER BY s.created_at, s.id
-LIMIT sqlc.arg(row_limit)::int;
-
--- name: ListPaidPendingSubscriptions :many
-SELECT s.id, s.rail, s.created_at, p.id AS payment_id, p.transaction_id, p.purchased_at
-FROM billing.subscriptions s
-JOIN LATERAL (
-    SELECT p.id, p.transaction_id, p.purchased_at FROM billing.payments p
-    WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-      AND p.status = 'succeeded' AND p.deleted_at IS NULL
-    ORDER BY p.purchased_at DESC, p.id DESC
-    LIMIT 1
-) p ON true
-WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
-  AND s.deleted_at IS NULL
-  AND s.status = 'pending'
-  AND s.created_at < sqlc.arg(cutoff)::timestamptz
-ORDER BY s.created_at, s.id
-LIMIT sqlc.arg(row_limit)::int;
-
--- LIFE life.provider_intent.abandoned: provider actions that will not auto-retry
--- (terminal, expired, or past their deadline). Surface-only; optional
--- subscription filter.
+-- life.provider_intent.abandoned: provider actions that will not auto-retry:
+-- ended failed or expired since since, or past their deadline while live.
 -- name: ListAbandonedProviderIntents :many
 SELECT id, intent_type, status, rail FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (
-        status IN ('failed_terminal', 'expired')
+        (status IN ('failed_terminal', 'expired') AND updated_at > sqlc.arg(since)::timestamptz)
         OR (status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
             AND expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz)
       )
-ORDER BY created_at;
+ORDER BY created_at, id;
+
+-- life.provider_intent.abandoned findings close subject-first once their
+-- operation is no longer abandoned (it ran after all, or is gone).
+-- name: AutoResolveRecoveredAbandonedIntentFindings :execrows
+UPDATE billing.reconciliation_findings f
+SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, updated_at = now()
+WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND f.finding_type = 'life.provider_intent.abandoned'
+  AND f.status IN ('reconcile_required', 'requires_review')
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.provider_intents pi
+      WHERE pi.merchant_id = f.merchant_id AND 'provider_intent:' || pi.id::text = f.subject_key
+        AND (pi.status IN ('failed_terminal', 'expired')
+             OR (pi.status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
+                 AND pi.expires_at IS NOT NULL AND pi.expires_at < sqlc.arg(now)::timestamptz))
+  );
 
 -- The unverified cohort awaiting provider verification, oldest period first,
 -- bounded per call so a provider pull windows it in batches. NULLS FIRST: rows
@@ -721,22 +695,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
 ORDER BY current_period_ends_at ASC NULLS FIRST
 LIMIT sqlc.arg(max_rows)::int;
-
--- LIFE plane (life.subscription.dunning_overdue): an OpenRails-dunned NMI
--- schedule past_due in grace with NO retry scheduled. Engine rows own their
--- schedule (past_due without a retry is their awaiting-new-card state);
--- provider-owned rows are retried by the provider or not at all.
--- name: ListDunningStalledSubscriptions :many
-SELECT id, (COALESCE(retry_attempts, 0) >= 1 AND last_retry_at IS NOT NULL)::bool AS attempt_recorded
-FROM billing.subscriptions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
-  AND deleted_at IS NULL
-  AND collection_policy = 'nmi_schedule'
-  AND status = 'past_due'
-  AND next_retry_at IS NULL
-  AND (grace_ends_at IS NULL OR grace_ends_at > sqlc.arg(now)::timestamptz)
-ORDER BY current_period_ends_at;
 
 -- derive.grant_effect.mismatch (grant direction): an active subscription in a
 -- running period with a subscription grant but no subscription window (live or
@@ -858,7 +816,7 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY e.starts_at, e.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- CROSS-MERCHANT: the active merchants the converge sweep walks.
+-- CROSS-MERCHANT: the active merchants.
 -- name: ListActiveMerchantIDs :many
 SELECT id FROM billing.merchants
 WHERE status = 'active' AND deleted_at IS NULL
@@ -928,6 +886,44 @@ UPDATE billing.reconciliation_findings
    AND status IN ('reconcile_required', 'requires_review')
    AND last_seen_at < sqlc.arg(observed_from)::timestamptz
    AND NOT ((finding_type || chr(31) || subject_key) = ANY(sqlc.arg(keep)::text[]));
+
+-- name: ResolveClearedCustomerFindings :execrows
+-- Open findings of the given standing types about one customer that its
+-- converge no longer reports (keep, as ResolveClearedFindings) have cleared,
+-- unless another pass saw them after this one began to look.
+UPDATE billing.reconciliation_findings
+   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
+       notified_at = NULL, notified_severity = NULL, updated_at = now()
+ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+   AND finding_type = ANY(sqlc.arg(finding_types)::text[])
+   AND status IN ('reconcile_required', 'requires_review')
+   AND evidence->'local'->>'customer_id' = sqlc.arg(customer_id)::text
+   AND last_seen_at < sqlc.arg(observed_from)::timestamptz
+   AND NOT ((finding_type || chr(31) || subject_key) = ANY(sqlc.arg(keep)::text[]));
+
+-- CROSS-MERCHANT: the merchants whose health findings may have changed since
+-- the last hourly pass: payment attempts in the spike window, health findings
+-- still open, unverified subscriptions, engine renewals past their earliest
+-- allowance, provider operations that changed or aged past the stuck
+-- threshold, and timed access windows that lapsed. Index probes per merchant;
+-- ids in order after a cursor.
+-- name: ListHealthMerchants :many
+SELECT m.id FROM billing.merchants m
+WHERE m.status = 'active' AND m.deleted_at IS NULL AND m.id > sqlc.arg(after_merchant_id)::uuid
+  AND (EXISTS (SELECT 1 FROM billing.payment_attempts a WHERE a.merchant_id = m.id AND a.attempted_at > sqlc.arg(active_since)::timestamptz)
+    OR EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = m.id AND f.finding_type = ANY(sqlc.arg(finding_types)::text[])
+               AND f.status IN ('reconcile_required', 'requires_review'))
+    OR EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id = m.id AND s.status = 'unverified' AND s.deleted_at IS NULL)
+    OR EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id = m.id AND s.collection_policy = 'engine'
+               AND s.status IN ('active', 'past_due') AND s.deleted_at IS NULL AND s.current_period_ends_at <= sqlc.arg(held_before)::timestamptz)
+    OR EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id = m.id AND i.updated_at > sqlc.arg(active_since)::timestamptz)
+    OR EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id = m.id
+               AND i.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify') AND i.created_at <= sqlc.arg(stuck_before)::timestamptz)
+    OR EXISTS (SELECT 1 FROM billing.product_access e WHERE e.merchant_id = m.id AND e.deleted_at IS NULL
+               AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > sqlc.arg(lapsed_since)::timestamptz
+               AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= sqlc.arg(now)::timestamptz))
+ORDER BY m.id
+LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: SummarizeHeldEngineRenewals :one
 -- LIFE life.renewal.held: engine renewals with no outcome past their allowance,
