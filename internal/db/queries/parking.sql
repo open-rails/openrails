@@ -41,6 +41,15 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
 ORDER BY subscription_ref
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: ListOpenImportOwnedParks :many
+-- The open parks an import owns, a page at a time: a failed or deleted
+-- import wakes them.
+SELECT subscription_ref, rail FROM billing.parked_provider_subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND import_owned
+  AND released_at IS NULL AND subscription_ref > sqlc.arg(after)::text
+ORDER BY subscription_ref
+LIMIT sqlc.arg(row_limit)::int;
+
 -- name: ListOpenParksByCustomer :many
 -- The customer_unlinked parks linking customer_ref wakes, a page at a time.
 SELECT subscription_ref, rail FROM billing.parked_provider_subscriptions

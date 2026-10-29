@@ -261,7 +261,9 @@ lock, so replicas take turns, while the old pods keep serving; schema changes
 are additive ([compatibility](compatibility.md)), so the old image runs on the
 new schema. A pod whose migration fails never becomes ready, and the rollout
 stops there. `helm rollback` returns the previous image; migrations are never
-reversed.
+reversed. Before v1 a release may break the schema in one step: its release
+notes say so, the previous image does not run on its schema, so there is no
+rollback past it, and hosts sharing the schema upgrade together.
 
 ## Backups
 

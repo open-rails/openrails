@@ -419,7 +419,9 @@ func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *Remo
 	if s.Created > 0 {
 		sub.CreatedAt = time.Unix(s.Created, 0).UTC()
 	}
-	if sub.Status == SubscriptionStatusCanceled || sub.Status == SubscriptionStatusExpired {
+	// Only a subscription Stripe ended states a cancel: an unpaid or paused
+	// one, or one with a cancel scheduled, carries canceled_at while it lives.
+	if s.Status == "canceled" || s.Status == "incomplete_expired" {
 		if s.CanceledAt > 0 {
 			at := time.Unix(s.CanceledAt, 0).UTC()
 			sub.CanceledAt = &at

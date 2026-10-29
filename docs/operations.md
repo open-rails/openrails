@@ -213,7 +213,9 @@ is a file or Vault, cached per instance. Per-instance caches:
 instance migrates, the others wait for it, and none fails or applies a
 migration twice. Migrations are additive, so instances of the previous build
 keep running on the migrated schema and a rollback to it is safe; the newer
-migration stays. `openrails migrate up` can run first as a deploy step
+migration stays. Before v1 a release whose notes name a breaking migration is
+the exception: no rollback past it, and hosts sharing the schema upgrade
+together. `openrails migrate up` can run first as a deploy step
 instead. During the rollout a browser may load the admin console from a new
 instance and its assets from an old one; a reload fixes it once the rollout
 ends.

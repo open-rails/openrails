@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -911,12 +912,25 @@ func TestProviderTrailing(t *testing.T) {
 		require.False(t, openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), sub).ImportOwned, "a failed import owns nothing")
 		require.Nil(t, tw.findings(t, "life.subscription.unattributed")[sub].ResolvedAt)
 
-		held := tw.nmi.Hold(func(r *http.Request) bool {
+		// An import pulling owns it; once that pull fails, its park wakes
+		// and raises the finding again.
+		arrived, refuse := make(chan struct{}), make(chan struct{})
+		var once sync.Once
+		tw.nmi.Intercept(func(r *http.Request) bool {
 			return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/plans")
-		}, nmimock.HoldRequest)
+		},
+			func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+				once.Do(func() { close(arrived) })
+				select {
+				case <-refuse:
+				case <-r.Context().Done():
+					return nil, r.Context().Err()
+				}
+				return answer(r, http.StatusUnauthorized, `{"type":"unauthorized","error_code":"E_UNAUTHORIZED","message":"unauthorized"}`), nil
+			})
 		pulling := tw.started(t, "nmi")
 		select {
-		case <-held.Arrived():
+		case <-arrived:
 		case <-time.After(30 * time.Second):
 			t.Fatal("the pull never read the catalog")
 		}
@@ -924,8 +938,14 @@ func TestProviderTrailing(t *testing.T) {
 		completedOnce(t, tw.fleet, kindConverge)
 		require.True(t, openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), sub).ImportOwned, "a pulling import owns it")
 		require.NotNil(t, tw.findings(t, "life.subscription.unattributed")[sub].ResolvedAt, "its finding resolves")
-		held.Release()
-		tw.await(t, pulling.ID, billing.PSPImportPulled)
+		close(refuse)
+		tw.await(t, pulling.ID, billing.PSPImportFailed)
+		completedOnce(t, tw.fleet, kindConverge)
+		require.False(t, openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), sub).ImportOwned, "the failed pull's park wakes and no import owns it")
+		require.Nil(t, tw.findings(t, "life.subscription.unattributed")[sub].ResolvedAt, "its finding opens again")
+
+		tw.nmi.ClearIntercepts()
+		tw.pulled(t, "nmi")
 		nmiNotice(t, tw.server.URL, "evt_staged", "recurring.subscription.update", map[string]any{"subscription_id": sub})
 		completedOnce(t, tw.fleet, kindConverge)
 		require.True(t, openPark(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), sub).ImportOwned, "its pull stages it unlanded")

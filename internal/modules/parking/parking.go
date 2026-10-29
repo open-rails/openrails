@@ -234,6 +234,39 @@ func Wake(ctx context.Context, d *db.DB, pspID uuid.UUID, reason billing.ParkRea
 	}
 }
 
+// WakeImportOwned queues converge, in d's transaction, for every open park
+// the PSP's import owns: once that import fails or is deleted, converge
+// decides again who owns each, and raises the findings no import holds back.
+// d must be transaction-scoped.
+func WakeImportOwned(ctx context.Context, d *db.DB, pspID uuid.UUID) (int, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if !d.RiverProducerBound() {
+		log.WithContext(ctx).WithField("psp_id", pspID).Warn("import-owned park wake skipped: no River producer is bound")
+		return 0, nil
+	}
+	q := d.Gen(ctx)
+	woken, after := 0, ""
+	for {
+		rows, err := q.ListOpenImportOwnedParks(ctx, gen.ListOpenImportOwnedParksParams{MerchantID: mid.UUID(), PspID: pspID, After: after, RowLimit: wakePage})
+		if err != nil {
+			return woken, err
+		}
+		for _, r := range rows {
+			if err := wakejobs.Enqueue(ctx, wakejobs.Tx{DB: d}, wakejobs.SubscriptionConvergeArgs{MerchantID: mid.UUID(), PSPID: pspID, Rail: r.Rail, SubscriptionReference: r.SubscriptionRef}, 0); err != nil {
+				return woken, fmt.Errorf("wake park %s: %w", r.SubscriptionRef, err)
+			}
+			woken++
+		}
+		if len(rows) < wakePage {
+			return woken, nil
+		}
+		after = rows[len(rows)-1].SubscriptionRef
+	}
+}
+
 // causeFixed re-reads the cause under its lock.
 func causeFixed(ctx context.Context, q *gen.Queries, mid uuid.UUID, s Subject) (bool, error) {
 	switch s.Reason {

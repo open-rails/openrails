@@ -101,7 +101,9 @@ after. A breaking change therefore ships in two releases: the first stops
 using what is removed, the second removes it in a contract migration, one
 whose file name ends in `_contract.up.sql`. A build that migrates a
 schema already holding newer migrations logs them, contract ones as a
-warning.
+warning. Before v1 a release may instead break the schema in one step; its
+release notes name the migration, the previous build does not run on the
+migrated schema, and hosts sharing it upgrade together.
 
 ## Not covered
 

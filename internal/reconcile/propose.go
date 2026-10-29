@@ -227,7 +227,11 @@ func compareFacts(provider Provider, snap *RemoteSnapshot, idx *localIndex, plan
 		act.StartedAt = &started
 		from["started_at"], to["started_at"] = s.StartedAt.UTC().Format(time.RFC3339), started.Format(time.RFC3339)
 	}
-	if s.Status == string(models.StatusCanceled) && (r.Status == SubscriptionStatusCanceled || r.Status == SubscriptionStatusExpired) {
+	// A chargeback's kind and date decide when its access is retracted, and
+	// OpenRails' dispute handling owns them: no correction moves a row into
+	// or out of one.
+	disputed := s.CancelType == string(models.CancelTypeChargeback) || r.CancelKind == string(models.CancelTypeChargeback)
+	if s.Status == string(models.StatusCanceled) && (r.CanceledAt != nil || r.CancelKind != "") && !disputed {
 		if kind := r.CancelKind; kind != "" && cancelClass(kind) != cancelClass(s.CancelType) {
 			act.CancelType = &kind
 			from["cancel_type"], to["cancel_type"] = s.CancelType, kind

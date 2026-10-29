@@ -268,10 +268,17 @@ func (m *Mock) CollectDraft(sub string) Object {
 // request (the customer's portal or the dashboard); it returns the
 // subscription.
 func (m *Mock) CancelSubscription(sub string) Object {
+	return m.EndSubscription(sub, "cancellation_requested")
+}
+
+// EndSubscription is the subscription ended at Stripe for reason
+// (cancellation_details.reason: cancellation_requested, payment_failed or
+// payment_disputed); it returns the subscription.
+func (m *Mock) EndSubscription(sub, reason string) Object {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.subs[sub]
-	m.endLocked(s, "cancellation_requested")
+	m.endLocked(s, reason)
 	return clone(s)
 }
 

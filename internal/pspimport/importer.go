@@ -31,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
+	"github.com/open-rails/openrails/internal/modules/parking"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/proposals"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -324,8 +325,15 @@ func (im *Importer) Delete(ctx context.Context, id billing.PSPImportID) error {
 	if busy(row.Status) {
 		return apperr.Conflictf("the import is %s; delete it when its job finishes", row.Status)
 	}
-	_, err = im.DB.Gen(ctx).DeletePSPImport(ctx, gen.DeletePSPImportParams{MerchantID: row.MerchantID, ID: row.ID})
-	return err
+	// What it staged is no import's once it is gone: its parks wake.
+	return im.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := im.DB.NewWithPgxTx(tx)
+		if _, err := d.Gen(ctx).DeletePSPImport(ctx, gen.DeletePSPImportParams{MerchantID: row.MerchantID, ID: row.ID}); err != nil {
+			return err
+		}
+		_, err := parking.WakeImportOwned(ctx, d, row.PspID)
+		return err
+	})
 }
 
 func busy(status string) bool {
@@ -471,7 +479,8 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, re
 }
 
 // Fail records why an import's job gave up, with the PermanentError's code
-// when cause has one. The person who created the import reads it there.
+// when cause has one. The person who created the import reads it there. A
+// failed import owns nothing, so the parks it held back wake.
 func (im *Importer) Fail(ctx context.Context, id billing.PSPImportID, cause error) error {
 	row, err := im.row(ctx, id)
 	if err != nil {
@@ -486,8 +495,14 @@ func (im *Importer) Fail(ctx context.Context, id billing.PSPImportID, cause erro
 	if errors.As(cause, &permanent) && permanent.Code != "" {
 		params.ErrorCode = new(string(permanent.Code))
 	}
-	_, err = im.DB.Gen(ctx).SetPSPImportStatus(ctx, params)
-	return err
+	return im.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := im.DB.NewWithPgxTx(tx)
+		if _, err := d.Gen(ctx).SetPSPImportStatus(ctx, params); err != nil {
+			return err
+		}
+		_, err := parking.WakeImportOwned(ctx, d, row.PspID)
+		return err
+	})
 }
 
 func (im *Importer) view(ctx context.Context, row gen.BillingPspImport) (*billing.PSPImport, error) {

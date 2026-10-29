@@ -1031,7 +1031,7 @@
     {
       "id": "OR-J15-S21",
       "journey": "J15",
-      "name": "Only an import that is pulling, or stages a subscription unlanded, owns it: before any import and after a failed one its park raises a finding, which a pulling import resolves"
+      "name": "Only an import that is pulling, or stages a subscription unlanded, owns it: before any import and after a failed one its park raises a finding, a pulling import resolves it, and that pull failing wakes the park to raise it again"
     },
     {
       "id": "OR-J38-S20",
@@ -1086,7 +1086,7 @@
     {
       "id": "OR-J38-S35",
       "journey": "J38",
-      "name": "A correction adopts an ended row's cancel kind and date from the provider at Apply; status, period and access stay byte-identical and the provider sees no write"
+      "name": "A correction adopts an ended row's cancel kind and date from the provider at Apply, never into or out of a chargeback and never for an unpaid Stripe subscription; status, period and access stay byte-identical and the provider sees no write"
     },
     {
       "id": "OR-J22-S06",

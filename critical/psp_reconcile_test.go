@@ -749,56 +749,97 @@ func TestPSPReconcile(t *testing.T) {
 		iw.stripe.AddPrice(stripemock.Price{ID: "price_basic", Product: "prod_basic", Amount: 999, Interval: "month"})
 		product, err := iw.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "basic", DisplayName: "Basic", Entitlements: []string{"member:basic"}})
 		require.NoError(t, err)
-		_, err = iw.alphaRemote.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "stripe-basic", PSP: "stripe", PriceID: "price_basic"})
+		price, err := iw.alphaRemote.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "stripe-basic", PSP: "stripe", PriceID: "price_basic"})
 		require.NoError(t, err)
 		start := iw.clock.Now().Add(-10 * 24 * time.Hour)
-		sub := iw.stripe.AddSubscription(iw.stripe.AddCustomer(iw.alice.Email, "Alice", nil), "pm_alice", "price_basic", 999, start, start.AddDate(0, 1, 0))
+		carol, dave := authtest.NewUser(t, iw.auth), authtest.NewUser(t, iw.auth)
+		member := func(u authtest.User) string {
+			return iw.stripe.AddSubscription(iw.stripe.AddCustomer(u.Email, u.Username, nil), "pm_"+u.ID, "price_basic", 999, start, start.AddDate(0, 1, 0))
+		}
+		subs := map[string]string{"alice": member(iw.alice), "bob": member(iw.bob), "carol": member(carol), "dave": member(dave)}
+		customers := map[string]billing.CustomerID{"alice": customerOf(iw.alice), "bob": customerOf(iw.bob), "carol": customerOf(carol), "dave": customerOf(dave)}
+		// Dave's legacy book has a chargeback; at Stripe, OpenRails' own
+		// dispute cancel reads as requested.
+		iw.stripe.CancelSubscription(subs["dave"])
+		paid, disputed := start.AddDate(0, 1, 0), start.Add(24*time.Hour)
+		_, err = iw.alpha.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: iw.clock.Now(), DefaultPSP: billing.PSPRef{Key: "stripe"},
+			Customers: []billing.DeclaredCustomer{{Customer: customers["dave"]}},
+			Subscriptions: []billing.DeclaredSubscription{{SourceID: "legacy-dave", Customer: customers["dave"], Price: price.ID, Rail: "stripe", RailSubscriptionID: subs["dave"],
+				StartedAt: start, PaidThrough: &paid, Cancel: billing.CancelEvidence{Kind: "chargeback", At: disputed}}}})
+		require.NoError(t, err)
 		since := start.Add(-24 * time.Hour)
 		iw.apply(t, iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "stripe"}, HistorySince: &since}).ID)
-		require.True(t, iw.entitled(t, customerOf(iw.alice), "member:basic"))
+		require.True(t, iw.entitled(t, customers["alice"], "member:basic"))
 
-		// Alice cancels at Stripe. OpenRails hears two days later and records
-		// the provider's end as its own: expired, that day.
-		canceledAt := time.Unix(int64(iw.stripe.CancelSubscription(sub)["canceled_at"].(float64)), 0).UTC()
+		// At Stripe: Alice cancels; Bob's subscription ends in a dispute;
+		// Carol asked to cancel, then went unpaid, so Stripe has not ended
+		// it. OpenRails hears two days later and records each end as its own:
+		// expired, that day.
+		canceledAt := time.Unix(int64(iw.stripe.CancelSubscription(subs["alice"])["canceled_at"].(float64)), 0).UTC()
+		iw.stripe.EndSubscription(subs["bob"], "payment_disputed")
+		iw.stripe.CancelSubscription(subs["carol"])
+		iw.stripe.SetSubscriptionStatus(subs["carol"], "unpaid", false)
 		iw.clock.Advance(2 * 24 * time.Hour)
 		armDestructive(t, iw.authorityWorld, true)
 		iw.stripe.SendWebhooksTo(iw.server.URL+"/v1/webhooks/stripe/acct_import", "whsec_import")
-		_, err = iw.stripe.SendEvent(t.Context(), "customer.subscription.deleted", iw.stripe.Subscription(sub))
-		require.NoError(t, err)
-		settle(t, iw.fleet, kindConverge)
-		cancel := func() (kind string, at time.Time) {
-			require.NoError(t, iw.pool.QueryRow(t.Context(), fmt.Sprintf(`SELECT cancel_type, canceled_at FROM %s WHERE merchant_id = $1 AND rail_subscription_id = $2`, iw.table("subscriptions")),
-				iw.alpha.MerchantID().UUID(), sub).Scan(&kind, &at))
-			return kind, at.UTC()
+		for _, who := range []string{"alice", "bob", "carol"} {
+			_, err = iw.stripe.SendEvent(t.Context(), "customer.subscription.updated", iw.stripe.Subscription(subs[who]))
+			require.NoError(t, err)
 		}
-		kind, at := cancel()
-		require.Equal(t, "expired", kind)
-		require.False(t, at.Truncate(24*time.Hour).Equal(canceledAt.Truncate(24*time.Hour)), "recorded on another day: %s", at)
-		accessColumns := func() string {
+		settle(t, iw.fleet, kindConverge, "openrails.customer_converge")
+		type facts struct {
+			Kind string
+			At   time.Time
+		}
+		cancel := func(who string) facts {
+			var f facts
+			require.NoError(t, iw.pool.QueryRow(t.Context(), fmt.Sprintf(`SELECT cancel_type, canceled_at FROM %s WHERE merchant_id = $1 AND rail_subscription_id = $2`, iw.table("subscriptions")),
+				iw.alpha.MerchantID().UUID(), subs[who]).Scan(&f.Kind, &f.At))
+			f.At = f.At.UTC()
+			return f
+		}
+		before := map[string]facts{}
+		for who := range subs {
+			before[who] = cancel(who)
+		}
+		require.Equal(t, map[string]string{"alice": "expired", "bob": "expired", "carol": "expired", "dave": "chargeback"},
+			map[string]string{"alice": before["alice"].Kind, "bob": before["bob"].Kind, "carol": before["carol"].Kind, "dave": before["dave"].Kind})
+		require.False(t, before["alice"].At.Truncate(24*time.Hour).Equal(canceledAt.Truncate(24*time.Hour)), "recorded on another day: %s", before["alice"].At)
+		accessColumns := func(who string) string {
 			var out string
 			require.NoError(t, iw.pool.QueryRow(t.Context(), fmt.Sprintf(`SELECT jsonb_build_object('status', status, 'price_id', price_id, 'product_id', product_id,
 				'current_period_starts_at', current_period_starts_at, 'current_period_ends_at', current_period_ends_at, 'ended_at', ended_at)::text
-				FROM %s WHERE merchant_id = $1 AND rail_subscription_id = $2`, iw.table("subscriptions")), iw.alpha.MerchantID().UUID(), sub).Scan(&out))
+				FROM %s WHERE merchant_id = $1 AND rail_subscription_id = $2`, iw.table("subscriptions")), iw.alpha.MerchantID().UUID(), subs[who]).Scan(&out))
 			return out
 		}
-		row, access, writes := accessColumns(), iw.accessDump(t, customerOf(iw.alice)), len(iw.stripe.Mutations(""))
+		rows, access := map[string]string{}, map[string]string{}
+		for who := range subs {
+			rows[who], access[who] = accessColumns(who), iw.accessDump(t, customers[who])
+		}
+		writes := len(iw.stripe.Mutations(""))
 
 		imp := iw.manual(t, "stripe")
-		held := subscriptionOf(t, iw, customerOf(iw.alice), sub)
-		correct := proposalOf(t, iw.proposals(t, imp.ID), billing.ChangeCorrectSubscription, held.ID.String())
+		open := iw.proposals(t, imp.ID)
+		correct := proposalOf(t, open, billing.ChangeCorrectSubscription, subscriptionOf(t, iw, customers["alice"], subs["alice"]).ID.String())
 		require.False(t, correct.Change.Effects.EndsAccess, "cancel facts are metadata")
 		require.Equal(t, "user", correct.Change.To["cancel_type"])
 		require.Equal(t, canceledAt.Format(time.RFC3339), correct.Change.To["canceled_at"])
+		require.Equal(t, 1, kinds(open)[billing.ChangeCorrectSubscription],
+			"no correction moves a row into or out of a chargeback, and an unpaid subscription has not ended: %s", iw.findingDump(t))
 		iw.apply(t, imp.ID)
 		applied, err := iw.alpha.GetFinding(t.Context(), correct.ID)
 		require.NoError(t, err)
 		require.NotNil(t, applied.Resolution, "Apply approves it as a correction: %s, notes %v, %v", applied.Status, deref(applied.Notes), applied.Evidence["resolution"])
 		require.Equal(t, "approved", *applied.Resolution, "notes %v", deref(applied.Notes))
-		kind, at = cancel()
-		require.Equal(t, "user", kind, "the provider's cancel kind")
-		require.True(t, at.Equal(canceledAt), "the provider's cancel date: %s", at)
-		require.Equal(t, row, accessColumns(), "status, period and end stand")
-		require.Equal(t, access, iw.accessDump(t, customerOf(iw.alice)), "access stays byte-identical")
+		settle(t, iw.fleet, kindConverge, "openrails.customer_converge")
+		require.Equal(t, facts{"user", canceledAt}, cancel("alice"), "the provider's cancel kind and date")
+		for who := range subs {
+			if who != "alice" {
+				require.Equal(t, before[who], cancel(who), "%s keeps its cancel", who)
+			}
+			require.Equal(t, rows[who], accessColumns(who), "%s: status, period and end stand", who)
+			require.Equal(t, access[who], iw.accessDump(t, customers[who]), "%s: access stays byte-identical", who)
+		}
 		require.Len(t, iw.stripe.Mutations(""), writes, "the pull, Apply and the correction write nothing to Stripe")
 
 		again := iw.manual(t, "stripe")

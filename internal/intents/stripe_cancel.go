@@ -2,6 +2,7 @@ package intents
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -123,7 +124,7 @@ func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 	if err != nil {
 		return parkedBeforeEffect(err.Error())
 	}
-	status, msg, err := h.write(ctx, key, method, psid, form, intent.IdempotencyKey+":"+op)
+	status, code, msg, err := h.write(ctx, key, method, psid, form, intent.IdempotencyKey+":"+op)
 	switch {
 	case errors.Is(err, stripeapi.ErrProviderReadOnly):
 		return parkedBeforeEffect("stripe provider writes blocked (mode=readonly)")
@@ -131,7 +132,9 @@ func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 		return parkedBeforeEffect("stripe cancel held by sandbox posture gate: " + err.Error())
 	case err != nil:
 		return Ambiguous("stripe cancel outcome unknown: " + err.Error())
-	case status < 300 || status == http.StatusNotFound:
+	case status < 300 || status == http.StatusNotFound && code == "resource_missing":
+		// Any other 404 (a misrouted write) falls to Ambiguous: the
+		// verifier's read decides.
 		return h.stopped(ctx, intent, psid, map[string]any{"rail_subscription_id": psid, "action": op})
 	case status == http.StatusTooManyRequests:
 		return Retryable("stripe rate limited: " + msg)
@@ -208,14 +211,16 @@ func (h *StripeCancelHandler) probe(ctx context.Context, key, psid string) (subs
 	return p.ProbeSubscription(ctx, psid)
 }
 
-func (h *StripeCancelHandler) write(ctx context.Context, key, method, psid string, form url.Values, idempotencyKey string) (int, string, error) {
+// write sends the cancel and answers Stripe's status, error code and
+// message.
+func (h *StripeCancelHandler) write(ctx context.Context, key, method, psid string, form url.Values, idempotencyKey string) (int, string, string, error) {
 	var body io.Reader
 	if form != nil {
 		body = strings.NewReader(form.Encode())
 	}
 	req, err := http.NewRequestWithContext(ctx, method, "https://api.stripe.com/v1/subscriptions/"+url.PathEscape(psid), body)
 	if err != nil {
-		return 0, "", err
+		return 0, "", "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
 	if form != nil {
@@ -224,11 +229,17 @@ func (h *StripeCancelHandler) write(ctx context.Context, key, method, psid strin
 	stripeapi.SetIdempotencyKey(req, idempotencyKey)
 	resp, err := h.Clients.Client(h.Config, 0).Do(req)
 	if err != nil {
-		return 0, "", err
+		return 0, "", "", err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	return resp.StatusCode, subscriptions.ParseStripeAPIError(raw), nil
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(raw, &envelope)
+	return resp.StatusCode, envelope.Error.Code, subscriptions.ParseStripeAPIError(raw), nil
 }
 
 func (h *StripeCancelHandler) loadSubscription(ctx context.Context, intent gen.BillingProviderIntent) (*models.Subscription, error) {

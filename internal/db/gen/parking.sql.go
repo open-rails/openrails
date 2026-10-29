@@ -228,6 +228,53 @@ func (q *Queries) GetProviderFinding(ctx context.Context, arg GetProviderFinding
 	return i, err
 }
 
+const listOpenImportOwnedParks = `-- name: ListOpenImportOwnedParks :many
+SELECT subscription_ref, rail FROM billing.parked_provider_subscriptions
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND import_owned
+  AND released_at IS NULL AND subscription_ref > $3::text
+ORDER BY subscription_ref
+LIMIT $4::int
+`
+
+type ListOpenImportOwnedParksParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	After      string
+	RowLimit   int32
+}
+
+type ListOpenImportOwnedParksRow struct {
+	SubscriptionRef string
+	Rail            string
+}
+
+// The open parks an import owns, a page at a time: a failed or deleted
+// import wakes them.
+func (q *Queries) ListOpenImportOwnedParks(ctx context.Context, arg ListOpenImportOwnedParksParams) ([]ListOpenImportOwnedParksRow, error) {
+	rows, err := q.db.Query(ctx, listOpenImportOwnedParks,
+		arg.MerchantID,
+		arg.PspID,
+		arg.After,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOpenImportOwnedParksRow
+	for rows.Next() {
+		var i ListOpenImportOwnedParksRow
+		if err := rows.Scan(&i.SubscriptionRef, &i.Rail); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenParksByCustomer = `-- name: ListOpenParksByCustomer :many
 SELECT subscription_ref, rail FROM billing.parked_provider_subscriptions
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND reason = 'customer_unlinked'

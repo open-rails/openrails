@@ -132,9 +132,10 @@ type RemoteSubscription struct {
 	// says it was made, zero when unknown.
 	BookID    string    `json:"book_id,omitempty"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
-	// CanceledAt and CancelKind are the cancel the provider states for an
-	// ended subscription: when, and why in OpenRails' cancel vocabulary
-	// (user, expired, chargeback). Nil and empty when it states none.
+	// CanceledAt and CancelKind are the cancel the provider states for a
+	// subscription it ended: when, and why in OpenRails' cancel vocabulary
+	// (user, expired, chargeback). Nil and empty when it states none or the
+	// subscription has not ended.
 	CanceledAt *time.Time `json:"canceled_at,omitempty"`
 	CancelKind string     `json:"cancel_kind,omitempty"`
 	// Raw preserves the provider's record for forensics (original XML element,
