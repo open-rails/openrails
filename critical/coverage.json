@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 253,
+  "scenario_count": 254,
   "scenarios": [
     {
       "id": "OR-J01-S01",
