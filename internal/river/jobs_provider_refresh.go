@@ -61,7 +61,7 @@ type ProviderRefreshArgs struct{}
 func (ProviderRefreshArgs) Kind() string { return KindProviderRefresh }
 
 func (ProviderRefreshArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByPeriod: providerrecovery.RefreshInterval, ByState: outstanding}}
+	return river.InsertOpts{Queue: QueueBilling, MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByPeriod: providerrecovery.RefreshInterval, ByState: outstanding}}
 }
 
 // ProviderRefreshMerchantArgs is one merchant's refresh job.
@@ -218,7 +218,7 @@ func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[
 		"stagger":             cadence.FormatDuration(w.stagger()),
 	}).Info("Provider Refresh: scheduled merchant refresh jobs")
 	if failed > 0 {
-		// Retry the scheduler; per-merchant unique keys make the rerun idempotent.
+		// The next pass retries; per-merchant unique keys make it idempotent.
 		return fmt.Errorf("provider refresh scheduler: %d/%d enqueues failed", failed, len(merchantIDs))
 	}
 	return nil
