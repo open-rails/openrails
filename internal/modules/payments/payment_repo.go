@@ -47,7 +47,7 @@ func resolveMoneyMovement(p *models.Payment) (models.MoneyMovement, error) {
 	case p.MoneyMovement != models.MoneyMovementUndeclared:
 		return "", fmt.Errorf("payment money_movement %q is not a known value", string(p.MoneyMovement))
 	case IsSettlementCandidate(p):
-		return "", errors.New("payment money_movement must be declared on a completed positive charge (or#827)")
+		return "", errors.New("payment money_movement must be declared on a completed positive charge")
 	default:
 		return models.MoneyMovementNone, nil
 	}

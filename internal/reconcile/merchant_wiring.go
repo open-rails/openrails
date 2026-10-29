@@ -177,7 +177,7 @@ func (b MerchantFetcherBuilder) resolveScopeCoverage(ctx context.Context, mid bi
 	if declared > 1 {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"merchant_id": mid.String(), "rail": string(provider), "active_psps": declared,
-		}).Warn("provider pull: rail has multiple active PSPs but a pull arms from ONE — its roster cannot prove absence for the siblings it did not read (#841)")
+		}).Warn("provider pull: rail has multiple active PSPs but a pull arms from ONE — its roster cannot prove absence for the siblings it did not read")
 	}
 	out.Coverage[provider] = PSPCoverage{
 		Declared: declared,
@@ -259,7 +259,7 @@ func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid billing.M
 		name, _ := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
 		log.WithContext(ctx).WithFields(log.Fields{
 			"merchant_id": mid.String(), "rail": scope.Rail, "secret": name,
-		}).Warn("provider pull: rail not armed — merchant secret missing (#699)")
+		}).Warn("provider pull: rail not armed — merchant secret missing")
 		return "", false
 	}
 	return value, true

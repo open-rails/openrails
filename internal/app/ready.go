@@ -47,7 +47,7 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 
 	var merchantsErr error
 	if r.Merchants == nil {
-		merchantsErr = fmt.Errorf("merchants service not armed (#699)")
+		merchantsErr = fmt.Errorf("merchants service not armed")
 	}
 	add("merchants", false, merchantsErr)
 

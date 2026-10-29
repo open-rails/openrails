@@ -29,7 +29,7 @@ func (e *ErrUnscopedMerchantWork) Error() string {
 	}
 	return fmt.Sprintf(
 		"db: %s is scoped to merchant %s but the work belongs to merchant %s — the connection's %s was "+
-			"pinned by someone else; every row it touches would be the wrong merchant's (or#868)",
+			"pinned by someone else; every row it touches would be the wrong merchant's",
 		e.Op, e.Got, e.Want, MerchantGUC)
 }
 

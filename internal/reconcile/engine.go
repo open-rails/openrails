@@ -418,7 +418,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		snap.Coverage.SubscriptionsExhaustive = false
 		log.WithContext(ctx).WithFields(log.Fields{
 			"provider": provider, "active_psps": cov.Declared, "pulled_psps": cov.Pulled,
-		}).Warn("reconcile: rail is covered by only some of its active PSPs; the roster is NOT an absence proof (#841)")
+		}).Warn("reconcile: rail is covered by only some of its active PSPs; the roster is NOT an absence proof")
 	}
 	rep.Coverage = snap.Coverage
 	rep.RemoteSubscriptions = len(snap.Subscriptions)
@@ -771,7 +771,7 @@ func (e *Engine) openDestructiveRun(ctx context.Context, provider Provider, bind
 		return uuid.Nil, nil
 	}
 	if e.Runs == nil {
-		return uuid.Nil, fmt.Errorf("reconcile: enforce mode with %d subscription state transitions requires a DestructiveRunRecorder (or#859: a destructive pass with no run record has no undo)", plannedOverwrites)
+		return uuid.Nil, fmt.Errorf("reconcile: enforce mode with %d subscription state transitions requires a DestructiveRunRecorder (a destructive pass with no run record has no undo)", plannedOverwrites)
 	}
 	var pspID *uuid.UUID
 	note := fmt.Sprintf("converge-enforce pull %s", provider)

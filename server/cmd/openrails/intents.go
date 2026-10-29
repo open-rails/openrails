@@ -39,7 +39,7 @@ func newIntentsCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "intents",
-		Short: "List the provider intent ledger (#358): queued outbound provider mutations and which mode executes them (read-only)",
+		Short: "List the provider intent ledger: queued outbound provider mutations and which mode executes them (read-only)",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return runIntentsList(c, status, provider, intentType, format, merchantSlug, limit)
@@ -144,7 +144,7 @@ func newIntentsLogCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "intents-log",
-		Short: "List provider mutation attempts/results (#533)",
+		Short: "List provider mutation attempts/results",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return runIntentsMutationLog(c, provider, intent, psp, phase, format, merchant, limit)

@@ -15,7 +15,7 @@ func newNMICmd() *cobra.Command {
 	var merchantSlug, psp, since, until, format, manifestPath string
 	report := &cobra.Command{
 		Use:   "decline-report",
-		Short: "Approval and refusal rates from an NMI account's history (#1114); writes nothing",
+		Short: "Approval and refusal rates from an NMI account's history; writes nothing",
 		Long: "Reads the NMI account's transaction history through the Query API and reports, by month, the approval and " +
 			"refusal rates of card verifications, one-off sales and NMI-scheduled rebills, and each refusal's reason and " +
 			"category from OpenRails' decline classifier. Nothing is written.",

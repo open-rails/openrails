@@ -54,6 +54,6 @@ func classifyRunKind(kind string) error {
 	if why, ok := UnrecoverableRunKinds[kind]; ok {
 		return fmt.Errorf("destructive run kind %q is NOT reversible: %s", kind, why)
 	}
-	return fmt.Errorf("destructive run kind %q has no undo: it is declared in the run ledger but not yet converted to a reversible operation (or#859 phase 1). "+
+	return fmt.Errorf("destructive run kind %q has no undo: it is declared in the run ledger but not yet converted to a reversible operation. "+
 		"Reversing it would restore nothing and still mark the run reversed", kind)
 }

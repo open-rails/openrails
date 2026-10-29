@@ -168,7 +168,7 @@ func (r *MerchantChainReader) client(ctx context.Context) (*solanarpc.RPCClient,
 		return nil, err
 	}
 	if client == nil {
-		return nil, fmt.Errorf("solana chain read: no RPC client armed for merchant %s (#728)", mid.String())
+		return nil, fmt.Errorf("solana chain read: no RPC client armed for merchant %s", mid.String())
 	}
 	return client, nil
 }

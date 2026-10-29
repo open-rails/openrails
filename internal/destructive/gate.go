@@ -65,7 +65,7 @@ func (g *Gate) Check(ctx context.Context, merchantID uuid.UUID) Verdict {
 	}
 	v := Verdict{Allowed: true, EnforceArmed: row.EnforceArmedAt != nil, FirstPullCompletedAt: row.FirstPullCompletedAt}
 	if !v.EnforceArmed {
-		v.Reason = fmt.Sprintf("merchant %s has never been armed for enforcing pulls (#835): this pass runs ADVISORY — findings are persisted, nothing is mutated. Review them, then ArmMerchantEnforcement", merchantID)
+		v.Reason = fmt.Sprintf("merchant %s has never been armed for enforcing pulls: this pass runs ADVISORY — findings are persisted, nothing is mutated. Review them, then ArmMerchantEnforcement", merchantID)
 	}
 	return v
 }

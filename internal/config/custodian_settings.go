@@ -32,15 +32,15 @@ import (
 // of them named a credential that now belongs to the custodian entry, and a
 // custody knob accepted-but-inert sits on a money path reading as "this works".
 var retiredPSPCustodySettingKeys = map[string]string{
-	"custodian":                "moved (or#880): custody is a REFERENCE now — declare merchants.<slug>.custodians.<key>.<kind> once and point this PSP at it with `custodian: <key>` on the PSP entry (a sibling of account_id), not a settings key",
-	"custodian_account_id":     "moved (or#880): the custodian-native tenant id is the custodian entry's account_id",
-	"custodian_public_api_key": "moved (or#880): declare it as the custodian entry's settings." + custodians.SettingPublicAPIKey,
-	"custodian_network_tokens": "moved (or#880): declare it as the custodian entry's settings." + custodians.SettingNetworkTokens,
-	"custodian_api_key":        "moved (or#880): the custodian's private application key is the custodian entry's `" + custodians.SecretAPIKey + "` secret, not a PSP setting",
+	"custodian":                "moved: custody is a REFERENCE now — declare merchants.<slug>.custodians.<key>.<kind> once and point this PSP at it with `custodian: <key>` on the PSP entry (a sibling of account_id), not a settings key",
+	"custodian_account_id":     "moved: the custodian-native tenant id is the custodian entry's account_id",
+	"custodian_public_api_key": "moved: declare it as the custodian entry's settings." + custodians.SettingPublicAPIKey,
+	"custodian_network_tokens": "moved: declare it as the custodian entry's settings." + custodians.SettingNetworkTokens,
+	"custodian_api_key":        "moved: the custodian's private application key is the custodian entry's `" + custodians.SecretAPIKey + "` secret, not a PSP setting",
 	// or#879's own retirements, still loud: they were keys of the fake
 	// `vaulted_card` rail, and accepting one would arm a PSP charging nothing.
-	"gateway_account": "removed (or#879): a vaulted_card account pointed at the NMI PSP it charged through. Declare the custodian once and reference it from that NMI PSP instead",
-	"nt_charges":      "removed (or#879): it was only ever a hard error (NMI documents no external DPAN+cryptogram acceptance). charge_via routing is decided per instrument, not per account",
+	"gateway_account": "removed: a vaulted_card account pointed at the NMI PSP it charged through. Declare the custodian once and reference it from that NMI PSP instead",
+	"nt_charges":      "removed: it was only ever a hard error (NMI documents no external DPAN+cryptogram acceptance). charge_via routing is decided per instrument, not per account",
 }
 
 // RejectRetiredCustodySettings refuses a PSP settings map that still carries an

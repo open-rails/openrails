@@ -479,7 +479,7 @@ func deletionIntent(s *LocalSubscription) map[string]any {
 	}
 	return map[string]any{
 		"deletion_scheduled_at": s.DeletionScheduledAt.Format(time.RFC3339),
-		"explanation":           "local cancellation recorded a deferred rail delete that has not executed yet; the provider intent executor (#358) replays the recorded delete",
+		"explanation":           "local cancellation recorded a deferred rail delete that has not executed yet; its provider operation replays the recorded delete",
 	}
 }
 
@@ -719,7 +719,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 	if discoveredNotLocalRaw(r.Raw) {
 		// Chain-scan discoveries (permissionless `subscribe`) never
 		// auto-create local billing state: operator decision only.
-		blockers = append(blockers, "subscription was discovered on-chain with no local purchase trail (#714); creating billing state from chain data alone is an operator decision")
+		blockers = append(blockers, "subscription was discovered on-chain with no local purchase trail; creating billing state from chain data alone is an operator decision")
 	}
 	if len(blockers) > 0 {
 		if opts.Materialize {

@@ -375,7 +375,7 @@ func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, 
 		}
 		if sub.PspID != *intent.PspID || *intent.PspID != p.NewPspID || p.NewPspID != currentTargetPSP {
 			refused = ptr(TerminalWithEvidence(
-				fmt.Sprintf("provider-account invariant violated: subscription PSP %s, intent PSP %s, target method PSP %s at enqueue / %s now — a cross-PSP payment-source update is never sent; repair: card re-entry on the subscription's active provider account (#657)",
+				fmt.Sprintf("provider-account invariant violated: subscription PSP %s, intent PSP %s, target method PSP %s at enqueue / %s now — a cross-PSP payment-source update is never sent; repair: card re-entry on the subscription's active provider account",
 					sub.PspID, *intent.PspID, p.NewPspID, currentTargetPSP),
 				map[string]any{
 					"code":                  EvidenceCodePSPMismatch,

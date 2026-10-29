@@ -72,7 +72,7 @@ func (s *signerSubmitter) rpcFor(ctx context.Context, tenantID billing.MerchantI
 			return rpc, nil
 		}
 	}
-	return nil, fmt.Errorf("solana: no RPC client armed for merchant %s (#728)", tenantID.String())
+	return nil, fmt.Errorf("solana: no RPC client armed for merchant %s", tenantID.String())
 }
 
 func (s *signerSubmitter) Publisher(ctx context.Context) (solanago.PublicKey, error) {
@@ -187,7 +187,7 @@ func (s *PlanService) MintDecimals(ctx context.Context, symbol string) (int, err
 // reader.
 func (s *PlanService) mintDecimals(ctx context.Context, mintStr string) (int, error) {
 	if s.reader == nil {
-		return 0, fmt.Errorf("recurring: no chain reader armed to read mint %s decimals (#817)", mintStr)
+		return 0, fmt.Errorf("recurring: no chain reader armed to read mint %s decimals", mintStr)
 	}
 	mint, err := solanago.PublicKeyFromBase58(mintStr)
 	if err != nil {
@@ -299,7 +299,7 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 	if in.AmountDecimals != onchainDecimals {
 		return nil, fmt.Errorf(
 			"recurring: plan amount %d was computed at %d decimals but mint %s (%s) has %d on-chain — "+
-				"refusing to publish an immutable plan at the wrong scale (#817)",
+				"refusing to publish an immutable plan at the wrong scale",
 			in.AmountBaseUnits, in.AmountDecimals, symbol, mintStr, onchainDecimals)
 	}
 

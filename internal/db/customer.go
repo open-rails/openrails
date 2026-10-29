@@ -16,7 +16,7 @@ import (
 // errNonUUIDSubject rejects a non-UUID payable identity. The auth boundary
 // already refuses them; this is defense in depth.
 func errNonUUIDSubject(userID string) error {
-	return fmt.Errorf("merchant subject %q is not a UUID: payable identities are UUID-only (#364)", userID)
+	return fmt.Errorf("merchant subject %q is not a UUID: payable identities are UUID-only", userID)
 }
 
 // EnsureCustomerID upserts the customers row for a UUID subject and returns

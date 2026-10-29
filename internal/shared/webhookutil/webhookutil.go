@@ -56,7 +56,7 @@ var retiredRailSegments = map[string]string{
 func CanonicalRail(rail string) (string, error) {
 	rail = strings.Trim(strings.ToLower(rail), " /")
 	if canonical, retired := retiredRailSegments[rail]; retired {
-		return "", fmt.Errorf("%w: /webhooks/%s was removed (or#893) — post to /webhooks/%s/{account_id}; a provider account is named by the required account_id path segment, not by the rail segment", ErrWebhookRailRetired, rail, canonical)
+		return "", fmt.Errorf("%w: /webhooks/%s was removed — post to /webhooks/%s/{account_id}; a provider account is named by the required account_id path segment, not by the rail segment", ErrWebhookRailRetired, rail, canonical)
 	}
 	// A Basis Theory event's source is the custodian itself, not a rail.
 	if rail == "basistheory" {

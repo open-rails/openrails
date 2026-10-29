@@ -100,7 +100,7 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 		}
 		return schemaTx{Tx: tx, rw: d.rw, river: d.river}, nil
 	}
-	return nil, fmt.Errorf("db: no pgx handle available to begin transaction (issue #334)")
+	return nil, fmt.Errorf("db: no pgx handle available to begin transaction")
 }
 
 // RunInTx runs fn in a transaction without setting the merchant GUC, for work

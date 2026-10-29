@@ -156,7 +156,7 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Bil
 			"batch_id":           p.batchID,
 			"target_psp":         p.targetPSPID(),
 			"subscriptions_move": false,
-		}).Info("or#297: instrument custody remapped; subscriptions unchanged (same payment_method_id)")
+		}).Info("instrument custody remapped; subscriptions unchanged (same payment_method_id)")
 	}
 	return out, nil
 }

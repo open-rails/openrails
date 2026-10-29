@@ -86,7 +86,7 @@ func crossConstraintRefusal(from, to *models.Price) *billing.CatalogDraftRefusal
 		return &billing.CatalogDraftRefusal{
 			Code:       "cross_product",
 			Reason:     "the target price belongs to a DIFFERENT product — moving subscribers onto a pre-existing, distinct product is plan consolidation, not a price change",
-			Workaround: "cross-product migration is deferred (#778) until a real consolidation need appears. Workaround: archive the old product's prices (stops new sales) and leave the existing cohort grandfathered on it; a genuine consolidation needs a human to plan the entitlement/invoice-naming implications.",
+			Workaround: "cross-product migration is deferred until a real consolidation need appears. Workaround: archive the old product's prices (stops new sales) and leave the existing cohort grandfathered on it; a genuine consolidation needs a human to plan the entitlement/invoice-naming implications.",
 		}
 	}
 	if !strings.EqualFold(strings.TrimSpace(to.Currency), strings.TrimSpace(from.Currency)) {
@@ -104,7 +104,7 @@ const toolDraftPriceChange = "draft_price_change"
 func toolDefDraftPriceChange() ToolDef {
 	return ToolDef{
 		Name:        toolDraftPriceChange,
-		Description: "Draft a #777 wizard price-change plan for an EXISTING price key: a version bump (new amount, same key) plus an optional migration. NEVER mutates anything — returns a DRAFT payload for human review/confirm in the console wizard, with the affected-subscriber count and review text already computed. migration_mode defaults per direction (increase->grandfather, decrease->migrate); effective_date defaults to the notice-window floor for an increase, or now for a decrease/grandfather. Pass migrate_to_price_key ONLY if the merchant is asking to move subscribers onto a DIFFERENT, pre-existing product/price (plan consolidation) — that request is refused with a typed reason and workaround, never drafted. Amounts are integer native units of the price currency.",
+		Description: "Draft a console wizard price-change plan for an EXISTING price key: a version bump (new amount, same key) plus an optional migration. NEVER mutates anything — returns a DRAFT payload for human review/confirm in the console wizard, with the affected-subscriber count and review text already computed. migration_mode defaults per direction (increase->grandfather, decrease->migrate); effective_date defaults to the notice-window floor for an increase, or now for a decrease/grandfather. Pass migrate_to_price_key ONLY if the merchant is asking to move subscribers onto a DIFFERENT, pre-existing product/price (plan consolidation) — that request is refused with a typed reason and workaround, never drafted. Amounts are integer native units of the price currency.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -114,7 +114,7 @@ func toolDefDraftPriceChange() ToolDef {
 				"new_amount": {"type": "integer", "description": "New amount in the price currency's native units (see the doctrine scale table)."},
 				"migration_mode": {"type": "string", "enum": ["grandfather", "migrate"], "description": "Optional; defaults per direction."},
 				"effective_date": {"type": "string", "description": "Optional YYYY-MM-DD; only meaningful when migration_mode=migrate. Defaults per doctrine."},
-				"migrate_to_price_key": {"type": "string", "description": "Optional: a DIFFERENT existing key the merchant wants to move price_key's subscribers onto. Out of scope (#778) — always refused; included only so the refusal can be typed and explained."}
+				"migrate_to_price_key": {"type": "string", "description": "Optional: a DIFFERENT existing key the merchant wants to move price_key's subscribers onto. Out of scope — always refused; included only so the refusal can be typed and explained."}
 			},
 			"required": ["product_key", "price_key", "new_amount"],
 			"additionalProperties": false

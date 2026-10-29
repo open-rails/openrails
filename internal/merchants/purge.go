@@ -338,7 +338,7 @@ func (e *ErrPurgeBlockedByRetainedHistory) Error() string {
 			"NOTHING was deleted — the transaction rolled back. The append-only ledger, grant log and status-transition history are "+
 			"never purged, and they reference the payments/products/prices they justify, so a merchant with real billing history "+
 			"cannot be purged this way. Retire the merchant (status/archived) instead, or take the question to a real per-merchant "+
-			"archive (or#859)",
+			"archive",
 		e.Slug, e.Constraint, e.Detail)
 }
 

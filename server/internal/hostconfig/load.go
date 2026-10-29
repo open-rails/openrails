@@ -381,18 +381,18 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// load time. Private posture is fixed in this repo, not a disabled control
 	// plane.
 	if k.Exists("auth.control_plane.enabled") {
-		return nil, fmt.Errorf("auth.control_plane.enabled was removed (#469): the control plane is always on in standalone mode — delete the key; private/self-hosted registration is the default")
+		return nil, fmt.Errorf("auth.control_plane.enabled was removed: the control plane is always on in standalone mode — delete the key; private/self-hosted registration is the default")
 	}
 	if k.Exists("merchant_cors") {
-		return nil, fmt.Errorf("merchant_cors was removed (#519): browser CORS belongs to the host app, not OpenRails merchant config")
+		return nil, fmt.Errorf("merchant_cors was removed: browser CORS belongs to the host app, not OpenRails merchant config")
 	}
 	// HARD CUT (#710): the deprecated provider_write_mode alias is gone.
 	if k.Exists("mode") || os.Getenv("MODE") != "" || os.Getenv("BILLING_MODE") != "" {
-		return nil, fmt.Errorf("mode was removed (#710): set provider_write_mode (env PROVIDER_WRITE_MODE, flag --provider-write-mode) to full|limited|readonly")
+		return nil, fmt.Errorf("mode was removed: set provider_write_mode (env PROVIDER_WRITE_MODE, flag --provider-write-mode) to full|limited|readonly")
 	}
 	// #712: ad-hoc library env knobs moved into config; the old names fail loudly.
 	if os.Getenv("OPENRAILS_SQL_TRACE") != "" {
-		return nil, fmt.Errorf("OPENRAILS_SQL_TRACE was renamed (#712): set db.sql_trace (env DB_SQL_TRACE)")
+		return nil, fmt.Errorf("OPENRAILS_SQL_TRACE was renamed: set db.sql_trace (env DB_SQL_TRACE)")
 	}
 	// HARD CUT (or#917, authkit ak#266/v0.89.0): the inline signing-key env
 	// names are AUTHKIT_-prefixed, matching the authkit binary. The old names
@@ -400,7 +400,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// the operator's key — refuse, never silently drop key material.
 	for _, old := range []string{"ACTIVE_KEY_ID", "ACTIVE_PRIVATE_KEY_PEM", "PUBLIC_KEYS"} {
 		if os.Getenv(old) != "" {
-			return nil, fmt.Errorf("%s was renamed (or#917, authkit ak#266): set AUTHKIT_%s", old, old)
+			return nil, fmt.Errorf("%s was renamed: set AUTHKIT_%s", old, old)
 		}
 	}
 	if k.Exists("billing_hot_path") || os.Getenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY") != "" || os.Getenv("BILLING_HOT_PATH_FAIL_POLICY") != "" {
@@ -409,7 +409,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// HARD CUT (#735): ClickHouse is gone — metrics and dunning forensics are
 	// Postgres-backed. Stale config fails loudly, never silently ignored.
 	if k.Exists("clickhouse") || hasEnvPrefix("CLICKHOUSE_") || hasEnvPrefix("BILLING_CLICKHOUSE_") {
-		return nil, fmt.Errorf("clickhouse config was removed (#735): delete the clickhouse yaml key and CLICKHOUSE_* env vars; analytics/forensics read Postgres")
+		return nil, fmt.Errorf("clickhouse config was removed: delete the clickhouse yaml key and CLICKHOUSE_* env vars; analytics/forensics read Postgres")
 	}
 
 	_, oldCardVaultEnv := os.LookupEnv("PLATFORM_VAULT")
@@ -427,7 +427,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		retiredSendGrid = retiredSendGrid || strings.HasPrefix(name, "SENDGRID_")
 	}
 	if retiredSendGrid {
-		return nil, fmt.Errorf("sendgrid config was removed (#1176): email goes through any SMTP server; set email_smtp (EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, EMAIL_SMTP_USERNAME, EMAIL_SMTP_PASSWORD, EMAIL_SMTP_FROM): SendGrid is host smtp.sendgrid.net, port 587, username apikey, password the API key; delete the sendgrid yaml key and SENDGRID_* env vars and secret files")
+		return nil, fmt.Errorf("sendgrid config was removed: email goes through any SMTP server; set email_smtp (EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, EMAIL_SMTP_USERNAME, EMAIL_SMTP_PASSWORD, EMAIL_SMTP_FROM): SendGrid is host smtp.sendgrid.net, port 587, username apikey, password the API key; delete the sendgrid yaml key and SENDGRID_* env vars and secret files")
 	}
 
 	// or#893 phase 3: the retired families below used to warn-and-boot. An
@@ -461,33 +461,33 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// HARD CUT (#1185): auth is AuthKit's own configuration, by AuthKit's
 	// keys; the server's former auth keys name their replacements.
 	if _, present := os.LookupEnv("AUTHKIT_KEYS_PATH"); present {
-		return nil, fmt.Errorf("AUTHKIT_KEYS_PATH was renamed (#1185): set AUTH_KEYS_PATH (auth.keys.path)")
+		return nil, fmt.Errorf("AUTHKIT_KEYS_PATH was renamed: set AUTH_KEYS_PATH (auth.keys.path)")
 	}
 	for old, now := range retiredAuthKeys {
 		if k.Exists(old) {
-			return nil, fmt.Errorf("%s was removed (#1185): auth is AuthKit's configuration; set %s", old, now)
+			return nil, fmt.Errorf("%s was removed: auth is AuthKit's configuration; set %s", old, now)
 		}
 	}
 	if retiredStoreConfig {
-		return nil, fmt.Errorf("store config was removed (#520): seed merchant profile fields with openrails push-merchant-config under merchants[].profile; delete the store yaml key and STORE_* env vars")
+		return nil, fmt.Errorf("store config was removed: seed merchant profile fields with openrails push-merchant-config under merchants[].profile; delete the store yaml key and STORE_* env vars")
 	}
 	if retiredMerchantConfig {
-		return nil, fmt.Errorf("merchant config was removed (#520/#521): seed merchants with openrails push-merchant-config; standalone no longer pins a process-wide merchant — delete the merchant yaml key and MERCHANT env var")
+		return nil, fmt.Errorf("merchant config was removed: seed merchants with openrails push-merchant-config; standalone no longer pins a process-wide merchant — delete the merchant yaml key and MERCHANT env var")
 	}
 	if retiredCORSConfig {
-		return nil, fmt.Errorf("cors_origins config was removed (#519/#765): browser CORS is a fixed engine policy (purchase/self-service = public *, everything else = none) — bearer JWTs are the security boundary, not a configurable origin allowlist; delete the cors_origins yaml key and CORS_ORIGINS env var")
+		return nil, fmt.Errorf("cors_origins config was removed: browser CORS is a fixed engine policy (purchase/self-service = public *, everything else = none) — bearer JWTs are the security boundary, not a configurable origin allowlist; delete the cors_origins yaml key and CORS_ORIGINS env var")
 	}
 	if retiredDBRequireRLS {
 		return nil, fmt.Errorf("db.require_rls config was removed: merchant isolation uses explicit scoped queries, not PostgreSQL RLS; delete the db.require_rls yaml key and DB_REQUIRE_RLS env var")
 	}
 	if retiredAuthIssuers {
-		return nil, fmt.Errorf("auth.issuers / auth.expected_audience config was removed (#521/#527): declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest; delete the keys and AUTH_ISSUERS / AUTH_EXPECTED_AUDIENCE env vars")
+		return nil, fmt.Errorf("auth.issuers / auth.expected_audience config was removed: declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest; delete the keys and AUTH_ISSUERS / AUTH_EXPECTED_AUDIENCE env vars")
 	}
 	if retiredRails {
-		return nil, fmt.Errorf("rails config was removed (#521): seed merchant PSPs and secrets with openrails push-merchant-config under merchants[].psps; delete the rails yaml key and RAILS_* env vars")
+		return nil, fmt.Errorf("rails config was removed: seed merchant PSPs and secrets with openrails push-merchant-config under merchants[].psps; delete the rails yaml key and RAILS_* env vars")
 	}
 	if retiredControlPlaneLegacy {
-		return nil, fmt.Errorf("auth.control_plane config was removed (#521): use auth.token.issuer (env AUTH_TOKEN_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in the hosted product; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars")
+		return nil, fmt.Errorf("auth.control_plane config was removed: use auth.token.issuer (env AUTH_TOKEN_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in the hosted product; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars")
 	}
 
 	// Unmarshal into fileConfig (overlay onto defaults). Strict (or#915,
@@ -510,7 +510,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 			MatchName:        matchField,
 		},
 	}); err != nil {
-		return nil, fmt.Errorf("unmarshaling config (unknown keys refuse boot — or#915): %w", err)
+		return nil, fmt.Errorf("unmarshaling config (unknown keys refuse boot): %w", err)
 	}
 
 	if f.RateLimitsDisabled { // defaults() seeded them; off means none
