@@ -104,7 +104,7 @@ var excludedColumns = map[string]string{
 	"notification_events":           "merchant_id id customer_id event_type data created_at inserted_at",
 	"notification_issue_revisions":  "merchant_id customer_id issue_key revision withdrawn source_event",
 	"notification_channel_state":    "merchant_id restore_required",
-	"notifications":                 "id event_type data recipient_kind read_at severity title body link created_at merchant_id customer_id emailed_at email_lease_expires_at",
+	"notifications":                 "id event_type data recipient_kind read_at severity title body link created_at merchant_id customer_id",
 	"provider_mutation_logs":        "id merchant_id rail psp_id provider_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id origin actor executor operation_id subscription_id reason_code",
 	"subscription_verifications":    "merchant_id subscription_id unverified_at reads last_read_at last_error",
 	"stored_card_checks":            "merchant_id payment_method_id due_at",

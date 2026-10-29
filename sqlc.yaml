@@ -129,6 +129,8 @@ sql:
       - "internal/migrate/postgres/0161_usage_due.up.sql"
       - "internal/migrate/postgres/0170_stripe_webhook_digest.up.sql"
       - "internal/migrate/postgres/0171_charge_attributions_per_import.up.sql"
+      - "internal/migrate/postgres/0190_notifications_drop_email.up.sql"
+      - "internal/migrate/postgres/0191_provider_intents_comment.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

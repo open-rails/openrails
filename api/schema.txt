@@ -137,6 +137,8 @@ migration 0161_usage_due.up.sql sha256:5ab44df98f3eaa152b3e9045326ba5fd4bf9f253c
 migration 0170_stripe_webhook_digest.up.sql sha256:0e8047430b99bfadf16a1dc1cda8ceece9e1f3f48917b4ea00c9fa5f55d946fe
 migration 0171_charge_attributions_per_import.up.sql sha256:19257983ad8d74b30215db6729c122bb77dc42840237230042e3922b895c22f1
 migration 0180_retire_converge_sweep_findings.up.sql sha256:e348935f97512ded02ea6ce15261fbf6587326c9009e13dbdad43dc09a2e208d
+migration 0190_notifications_drop_email.up.sql sha256:3ccba1a268cf8e8214656f30449f6f3d5762f3d38c714ec3945effa7fafa0987
+migration 0191_provider_intents_comment.up.sql sha256:fff345e0143e09a85fe52e54669da31fcac5eee10b79c4af8d76b94799b955e6
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1230,18 +1232,15 @@ table billing.notifications
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column merchant_id uuid NOT NULL
   column customer_id uuid
-  column emailed_at timestamp with time zone
-  column email_lease_expires_at timestamp with time zone
   constraint notifications_body_check CHECK ((body <> ''::text))
   constraint notifications_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint notifications_link_check CHECK ((link <> ''::text))
   constraint notifications_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint notifications_operator_only CHECK ((recipient_kind = 'merchant'::text))
   constraint notifications_pkey PRIMARY KEY (merchant_id, id)
-  constraint notifications_recipient_check CHECK ((((recipient_kind = 'customer'::text) AND (customer_id IS NOT NULL) AND (severity IS NULL) AND (title IS NULL) AND (body IS NULL) AND (link IS NULL)) OR ((recipient_kind = 'merchant'::text) AND (customer_id IS NULL) AND (event_type = 'operator.alert'::text) AND (emailed_at IS NULL) AND (severity IS NOT NULL) AND (title IS NOT NULL) AND (body IS NOT NULL))))
+  constraint notifications_recipient_check CHECK ((((recipient_kind = 'customer'::text) AND (customer_id IS NOT NULL) AND (severity IS NULL) AND (title IS NULL) AND (body IS NULL) AND (link IS NULL)) OR ((recipient_kind = 'merchant'::text) AND (customer_id IS NULL) AND (event_type = 'operator.alert'::text) AND (severity IS NOT NULL) AND (title IS NOT NULL) AND (body IS NOT NULL))))
   constraint notifications_severity_check CHECK ((severity <> ''::text))
   constraint notifications_title_check CHECK ((title <> ''::text))
-  index CREATE INDEX notifications_created_at_id_idx ON billing.notifications USING btree (merchant_id, created_at, id) WHERE ((recipient_kind = 'customer'::text) AND (emailed_at IS NULL))
   index CREATE INDEX notifications_created_at_idx ON billing.notifications USING btree (merchant_id, created_at)
   index CREATE INDEX notifications_customer_id_idx ON billing.notifications USING btree (merchant_id, customer_id) WHERE (customer_id IS NOT NULL)
   index CREATE INDEX notifications_event_type_idx ON billing.notifications USING btree (event_type)

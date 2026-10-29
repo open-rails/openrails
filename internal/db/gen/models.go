@@ -801,10 +801,6 @@ type BillingNotification struct {
 	CreatedAt     time.Time
 	MerchantID    uuid.UUID
 	CustomerID    *uuid.UUID
-	// Unused legacy customer delivery marker; operator alerts do not set it.
-	EmailedAt *time.Time
-	// Unused legacy customer delivery lease; customer channels are application-owned.
-	EmailLeaseExpiresAt *time.Time
 }
 
 // Internal notification emission and deduplication journal; the public feed is event_log. Retention: rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers.
@@ -1432,7 +1428,7 @@ type BillingProviderCycleReceipt struct {
 	Approved                bool
 }
 
-// Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads. Retention: finished intents that only instructed a provider (cancel, update, archive, vault, token, account updater) are deleted 25 months (761 days) after they last changed; an intent that moved or refused money, enrolled a membership or erased a card is permanent.
+// Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key). Each is run by its own openrails.provider_operation River job, queued in the transaction that records it (a manual card removal runs only on request); an ambiguous outcome is resolved by provider reads before any retry. Retention: finished intents that only instructed a provider (cancel, update, archive, vault, token, account updater) are deleted 25 months (761 days) after they last changed; an intent that moved or refused money, enrolled a membership or erased a card is permanent.
 type BillingProviderIntent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -1449,7 +1445,7 @@ type BillingProviderIntent struct {
 	Status         string
 	Attempts       int32
 	NextAttemptAt  time.Time
-	// Single-executor lease (SKIP LOCKED claim). An in_flight row whose lease elapsed was orphaned by a crashed executor and becomes claimable again; per-type execute semantics (verify-then-execute, verifier-before-retry) make the reclaim safe.
+	// The running attempt's claim. An in_flight row whose lease elapsed lost its attempt and becomes unknown_needs_verify: a provider read settles it before any retry.
 	LeaseExpiresAt *time.Time
 	// Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.
 	Origin       string
