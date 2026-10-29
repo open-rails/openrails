@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 254,
+  "scenario_count": 258,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -607,6 +607,26 @@
       "id": "OR-J27-S04",
       "journey": "J27",
       "name": "Refunded or archived content follows declared access and retained-history policy"
+    },
+    {
+      "id": "OR-J27-S05",
+      "journey": "J27",
+      "name": "Subscription boundary repair records grant termination and never restores forbidden future access"
+    },
+    {
+      "id": "OR-J27-S06",
+      "journey": "J27",
+      "name": "Subscription closure is atomic under rollback and concurrent replay and leaves other sources intact"
+    },
+    {
+      "id": "OR-J27-S07",
+      "journey": "J27",
+      "name": "Missing projection repair rechecks a chargeback recorded after detection"
+    },
+    {
+      "id": "OR-J27-S08",
+      "journey": "J27",
+      "name": "Ordinary cancellation and uncertain subscription state preserve purchased grants"
     },
     {
       "id": "OR-J28-S01",

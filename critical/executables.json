@@ -398,6 +398,18 @@
     "OR-J27-S04": [
       "TestPublicEntitlements/OR-J27-S04/archive-and-refund-obey-explicit-access-policy"
     ],
+    "OR-J27-S05": [
+      "TestSubscriptionAccessRepair/OR-J27-S05/future-subscription-repair-stays-closed"
+    ],
+    "OR-J27-S06": [
+      "TestSubscriptionAccessBoundary/OR-J27-S06/closure-is-atomic-and-source-scoped"
+    ],
+    "OR-J27-S07": [
+      "TestSubscriptionAccessRepairRecheck/OR-J27-S07/repair-rechecks-chargeback-after-detection"
+    ],
+    "OR-J27-S08": [
+      "TestSubscriptionAccessRepairPreservesSources/OR-J27-S08/ordinary-and-uncertain-sources-keep-their-grants"
+    ],
     "OR-J28-S01": [
       "TestCallbackContracts/OR-J28-S01/signed-account-bound-evidence-settles-the-original-order"
     ],

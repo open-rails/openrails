@@ -12,6 +12,32 @@ import (
 	"github.com/google/uuid"
 )
 
+const accessGrantPastChargebackBoundary = `-- name: AccessGrantPastChargebackBoundary :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.grants g
+    JOIN billing.subscriptions s ON s.merchant_id = g.merchant_id
+      AND s.customer_id = g.customer_id AND s.id::text = g.source_id
+    WHERE g.merchant_id = $1::uuid AND g.id = $2::uuid
+      AND g.kind = 'access' AND g.event = 'grant' AND g.source_type = 'subscription'
+      AND s.deleted_at IS NULL AND s.status = 'canceled' AND s.cancel_type = 'chargeback'
+      AND g.starts_at >= s.canceled_at
+) AS beyond_boundary
+`
+
+type AccessGrantPastChargebackBoundaryParams struct {
+	MerchantID uuid.UUID
+	GrantID    uuid.UUID
+}
+
+// Recheck after the customer lock: a missing-effect finding may predate the
+// source's chargeback. Its gated subscription repair owns the termination.
+func (q *Queries) AccessGrantPastChargebackBoundary(ctx context.Context, arg AccessGrantPastChargebackBoundaryParams) (bool, error) {
+	row := q.db.QueryRow(ctx, accessGrantPastChargebackBoundary, arg.MerchantID, arg.GrantID)
+	var beyond_boundary bool
+	err := row.Scan(&beyond_boundary)
+	return beyond_boundary, err
+}
+
 const accessGrantWindowExists = `-- name: AccessGrantWindowExists :one
 SELECT EXISTS (
     SELECT 1 FROM billing.grants g
@@ -870,6 +896,13 @@ WHERE g.merchant_id = $1::uuid
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants t
       WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.subscriptions s
+      WHERE g.kind = 'access' AND g.source_type = 'subscription'
+        AND s.merchant_id = g.merchant_id AND s.customer_id = g.customer_id AND s.id::text = g.source_id
+        AND s.deleted_at IS NULL AND s.status = 'canceled' AND s.cancel_type = 'chargeback'
+        AND g.starts_at >= s.canceled_at
   )
   AND (
     (g.kind = 'access' AND NOT EXISTS (

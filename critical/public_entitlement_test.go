@@ -3,12 +3,21 @@
 package critical_test
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/stretchr/testify/require"
 )
 
@@ -125,4 +134,246 @@ func TestPublicEntitlements(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestSubscriptionAccessRepair(t *testing.T) {
+	t.Run("OR-J27-S05/future-subscription-repair-stays-closed", func(t *testing.T) {
+		for _, removed := range []bool{false, true} {
+			name := "close-future-window"
+			if removed {
+				name = "already-removed-window"
+			}
+			t.Run(name, func(t *testing.T) {
+				a, _, sub := purchasedMembership(t)
+				enableLifecycleMaintenance(t, a)
+				database, err := db.NewWithPGXPool(a.pool, a.schema)
+				require.NoError(t, err)
+				ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+				a.clock.Advance(time.Hour)
+				closedAt := a.clock.Now().Truncate(time.Microsecond)
+				a.clock.Advance(closedAt.Sub(a.clock.Now()))
+				start, end := closedAt.Add(2*time.Hour), closedAt.Add(4*time.Hour)
+				service := entitlements.NewEntitlementService(database, a.clock)
+				window := subscriptionAccessWindow(t, a, service, sub, start, end)
+				// Retained source drift is deliberate fixture state, not the normal chargeback writer.
+				_, err = a.pool.Exec(ctx, "UPDATE "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" SET status='canceled', cancel_type='chargeback', canceled_at=$1, ended_at=$1, lifecycle_rev=lifecycle_rev+1 WHERE merchant_id=$2 AND id=$3", closedAt, a.alpha.MerchantID().UUID(), sub.ID.UUID())
+				require.NoError(t, err)
+				if removed {
+					// The previous boundary writer changed projections without terminating grants.
+					_, err = a.pool.Exec(ctx, "UPDATE "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" SET deleted_at=CASE WHEN starts_at >= $1 THEN $1 ELSE deleted_at END, ends_at=CASE WHEN starts_at < $1 AND (ends_at IS NULL OR ends_at > $1) THEN $1 ELSE ends_at END WHERE merchant_id=$2 AND source_type='subscription' AND source_id=$3 AND deleted_at IS NULL AND revoked_at IS NULL", closedAt, a.alpha.MerchantID().UUID(), sub.ID.UUID().String())
+					require.NoError(t, err)
+				} else {
+					require.NoError(t, service.BoundSubscriptionAccess(ctx, sub.ID.UUID(), closedAt))
+				}
+				a.clock.Advance(3 * time.Hour)
+				check := func(at time.Time, want bool) {
+					t.Helper()
+					answer, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"membership:paid"}, At: at})
+					require.NoError(t, err)
+					require.Equal(t, want, answer.Entitlements["membership:paid"])
+				}
+				check(a.clock.Now(), false)
+				customer := sub.CustomerID.UUID()
+				repair := converge.NewConvergeEngine(database, a.clock)
+				if removed {
+					armDestructive(t, a, false)
+					_, err = repair.Converge(ctx, converge.Scope{Merchant: a.alpha.MerchantID(), Customer: &customer})
+					require.NoError(t, err)
+					check(a.clock.Now(), false)
+					assertGrantTermination(t, a, window.GrantID, nil)
+					armDestructive(t, a, true)
+				}
+				results := make(chan error, 4)
+				for range 4 {
+					go func() {
+						_, err := repair.Converge(ctx, converge.Scope{Merchant: a.alpha.MerchantID(), Customer: &customer})
+						results <- err
+					}()
+				}
+				for range 4 {
+					require.NoError(t, <-results)
+				}
+				for range 4 {
+					_, err := repair.Converge(ctx, converge.Scope{Merchant: a.alpha.MerchantID(), Customer: &customer})
+					require.NoError(t, err)
+					check(a.clock.Now(), false)
+					check(closedAt.Add(-time.Microsecond), true)
+					assertGrantTermination(t, a, window.GrantID, &closedAt)
+				}
+			})
+		}
+	})
+}
+
+// Original grants stay immutable; a boundary is one additional event at business time.
+func assertGrantTermination(t *testing.T, a *authorityWorld, grant uuid.UUID, at *time.Time) {
+	t.Helper()
+	var count int
+	var startsAt *time.Time
+	err := a.pool.QueryRow(t.Context(), "SELECT count(*), min(starts_at) FROM "+pgx.Identifier{a.schema, "grants"}.Sanitize()+" WHERE merchant_id=$1 AND supersedes_id=$2", a.alpha.MerchantID().UUID(), grant).Scan(&count, &startsAt)
+	require.NoError(t, err)
+	if at == nil {
+		require.Zero(t, count)
+	} else {
+		require.Equal(t, 1, count)
+		require.Equal(t, at.UTC(), startsAt.UTC())
+	}
+}
+
+func TestSubscriptionAccessBoundary(t *testing.T) {
+	t.Run("OR-J27-S06/closure-is-atomic-and-source-scoped", func(t *testing.T) {
+		a, _, sub := purchasedMembership(t)
+		database, err := db.NewWithPGXPool(a.pool, a.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		a.clock.Advance(time.Hour)
+		bound := a.clock.Now().Truncate(time.Microsecond)
+		a.clock.Advance(bound.Sub(a.clock.Now()))
+		service := entitlements.NewEntitlementService(database, a.clock)
+		end := bound.Add(4 * time.Hour)
+		var windows []*models.ProductAccess
+		for _, start := range []time.Time{bound.Add(-time.Microsecond), bound, bound.Add(time.Microsecond)} {
+			window := subscriptionAccessWindow(t, a, service, sub, start, end)
+			windows = append(windows, window)
+		}
+		// A manual grant overlaps the same product; it must survive the subscription closure.
+		grants, err := a.alpha.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: "unrelated-source", Items: []billing.CreateProductAccessParams{{CustomerID: sub.CustomerID, ProductID: sub.ProductID, EndsAt: &end, Reason: billing.GrantReasonComp}}})
+		require.NoError(t, err)
+		require.Len(t, grants, 1)
+		var before string
+		require.NoError(t, a.pool.QueryRow(ctx, "SELECT json_agg(g ORDER BY g.id)::text FROM "+pgx.Identifier{a.schema, "grants"}.Sanitize()+" g WHERE merchant_id=$1 AND event='grant'", a.alpha.MerchantID().UUID()).Scan(&before))
+		rollback := errors.New("abort caller transaction")
+		err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			require.NoError(t, entitlements.NewEntitlementService(database.NewWithPgxTx(tx), a.clock).BoundSubscriptionAccess(ctx, sub.ID.UUID(), bound))
+			return rollback
+		})
+		require.ErrorIs(t, err, rollback)
+		for _, window := range windows {
+			retained, err := service.GetAccessByID(ctx, window.ID)
+			require.NoError(t, err)
+			require.Nil(t, retained.DeletedAt)
+			require.Equal(t, end.UTC(), retained.EndsAt.UTC())
+			assertGrantTermination(t, a, window.GrantID, nil)
+		}
+		// A merchant cannot close a different merchant's source by knowing its ID.
+		require.NoError(t, service.BoundSubscriptionAccess(merchant.WithID(t.Context(), a.beta.MerchantID()), sub.ID.UUID(), bound))
+		for _, window := range windows {
+			assertGrantTermination(t, a, window.GrantID, nil)
+		}
+		results := make(chan error, 4)
+		for range 4 {
+			go func() { results <- service.BoundSubscriptionAccess(ctx, sub.ID.UUID(), bound) }()
+		}
+		for range 4 {
+			require.NoError(t, <-results)
+		}
+		for i, window := range windows {
+			if i == 0 {
+				retained, err := service.GetAccessByID(ctx, window.ID)
+				require.NoError(t, err)
+				require.Equal(t, bound.UTC(), retained.EndsAt.UTC())
+				assertGrantTermination(t, a, window.GrantID, nil)
+			} else {
+				assertGrantTermination(t, a, window.GrantID, &bound)
+			}
+		}
+		var after string
+		require.NoError(t, a.pool.QueryRow(ctx, "SELECT json_agg(g ORDER BY g.id)::text FROM "+pgx.Identifier{a.schema, "grants"}.Sanitize()+" g WHERE merchant_id=$1 AND event='grant'", a.alpha.MerchantID().UUID()).Scan(&after))
+		require.Equal(t, before, after, "original grant facts must not change")
+		a.clock.Advance(2 * time.Hour)
+		answer, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"membership:paid"}})
+		require.NoError(t, err)
+		require.True(t, answer.Entitlements["membership:paid"], "the independent grant still covers access")
+	})
+}
+
+func TestSubscriptionAccessRepairRecheck(t *testing.T) {
+	t.Run("OR-J27-S07/repair-rechecks-chargeback-after-detection", func(t *testing.T) {
+		a, _, sub := purchasedMembership(t)
+		database, err := db.NewWithPGXPool(a.pool, a.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		a.clock.Advance(time.Hour)
+		bound := a.clock.Now().Truncate(time.Microsecond)
+		a.clock.Advance(bound.Sub(a.clock.Now()))
+		start, end := bound.Add(time.Hour), bound.Add(3*time.Hour)
+		window := subscriptionAccessWindow(t, a, entitlements.NewEntitlementService(database, a.clock), sub, start, end)
+		_, err = a.pool.Exec(ctx, "UPDATE "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" SET deleted_at=$1 WHERE merchant_id=$2 AND id=$3", bound, a.alpha.MerchantID().UUID(), window.ID)
+		require.NoError(t, err)
+		// The source changes after detection, before the repair acquires its customer lock.
+		fired := false
+		remove := failpoint.Set(func(ctx context.Context, site failpoint.Site) error {
+			if fired || site.Point != failpoint.BeforeRepair || site.Kind != "derive.grant_effect.missing" {
+				return nil
+			}
+			fired = true
+			_, err := a.pool.Exec(ctx, "UPDATE "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" SET status='canceled', cancel_type='chargeback', canceled_at=$1, ended_at=$1, lifecycle_rev=lifecycle_rev+1 WHERE merchant_id=$2 AND id=$3", bound, a.alpha.MerchantID().UUID(), sub.ID.UUID())
+			return err
+		})
+		t.Cleanup(remove)
+		customer := sub.CustomerID.UUID()
+		repair := converge.NewConvergeEngine(database, a.clock)
+		_, err = repair.Converge(ctx, converge.Scope{Merchant: a.alpha.MerchantID(), Customer: &customer})
+		require.NoError(t, err)
+		require.True(t, fired)
+		remove()
+		var deletedAt *time.Time
+		require.NoError(t, a.pool.QueryRow(ctx, "SELECT deleted_at FROM "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), window.ID).Scan(&deletedAt))
+		require.NotNil(t, deletedAt, "stale missing-effect repair must not restore the window")
+		assertGrantTermination(t, a, window.GrantID, nil)
+		armDestructive(t, a, true)
+		_, err = repair.Converge(ctx, converge.Scope{Merchant: a.alpha.MerchantID(), Customer: &customer})
+		require.NoError(t, err)
+		assertGrantTermination(t, a, window.GrantID, &bound)
+	})
+}
+
+func TestSubscriptionAccessRepairPreservesSources(t *testing.T) {
+	t.Run("OR-J27-S08/ordinary-and-uncertain-sources-keep-their-grants", func(t *testing.T) {
+		for _, status := range []string{"canceled", "unverified"} {
+			t.Run(status, func(t *testing.T) {
+				a, _, sub := purchasedMembership(t)
+				database, err := db.NewWithPGXPool(a.pool, a.schema)
+				require.NoError(t, err)
+				ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+				a.clock.Advance(time.Hour)
+				bound := a.clock.Now().Truncate(time.Microsecond)
+				a.clock.Advance(bound.Sub(a.clock.Now()))
+				start, end := bound.Add(time.Hour), bound.Add(3*time.Hour)
+				window := subscriptionAccessWindow(t, a, entitlements.NewEntitlementService(database, a.clock), sub, start, end)
+				_, err = a.pool.Exec(ctx, "UPDATE "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" SET status=$1, cancel_type='user', canceled_at=$2, ended_at=$2, lifecycle_rev=lifecycle_rev+1 WHERE merchant_id=$3 AND id=$4", status, bound, a.alpha.MerchantID().UUID(), sub.ID.UUID())
+				require.NoError(t, err)
+				_, err = a.pool.Exec(ctx, "UPDATE "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" SET deleted_at=$1 WHERE merchant_id=$2 AND id=$3", bound, a.alpha.MerchantID().UUID(), window.ID)
+				require.NoError(t, err)
+				enableLifecycleMaintenance(t, a)
+				customer := sub.CustomerID.UUID()
+				_, err = converge.NewConvergeEngine(database, a.clock).Converge(ctx, converge.Scope{Merchant: a.alpha.MerchantID(), Customer: &customer})
+				require.NoError(t, err)
+				assertGrantTermination(t, a, window.GrantID, nil)
+				var restored bool
+				require.NoError(t, a.pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" WHERE merchant_id=$1 AND grant_id=$2 AND deleted_at IS NULL)", a.alpha.MerchantID().UUID(), window.GrantID).Scan(&restored))
+				require.True(t, restored, "ordinary and uncertain sources still repair missing windows")
+				a.clock.Advance(2 * time.Hour)
+				answer, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"membership:paid"}})
+				require.NoError(t, err)
+				require.True(t, answer.Entitlements["membership:paid"])
+			})
+		}
+	})
+}
+
+func subscriptionAccessWindow(t *testing.T, a *authorityWorld, service *entitlements.EntitlementService, sub *billing.Subscription, start, end time.Time) *models.ProductAccess {
+	t.Helper()
+	ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+	_, err := service.PushAccess(ctx, entitlements.PushAccessParams{
+		UserID: sub.CustomerID.UUID().String(), CustomerID: sub.CustomerID.UUID(), ProductID: sub.ProductID.UUID(),
+		SourceType: models.AccessSourceSubscription, SourceID: sub.ID.UUID().String(), NotBefore: &start, EndsAt: &end,
+	})
+	require.NoError(t, err)
+	// PushAccess returns the longest window of the source, which can be an older period.
+	var id uuid.UUID
+	require.NoError(t, a.pool.QueryRow(ctx, "SELECT id FROM "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" WHERE merchant_id=$1 AND source_type='subscription' AND source_id=$2 AND starts_at=$3", a.alpha.MerchantID().UUID(), sub.ID.UUID().String(), start).Scan(&id))
+	window, err := service.GetAccessByID(ctx, id)
+	require.NoError(t, err)
+	return window
 }
