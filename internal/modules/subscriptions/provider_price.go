@@ -8,14 +8,17 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/grants"
 )
 
 // AdoptProviderPrice moves a provider-run subscription onto the provider
 // price its provider now bills, with that price's access choice, and settles
 // a scheduled change the move fulfils. A move to another product ends the old
-// product's grace. sub is locked in d's transaction.
+// product's grace and opens the new product's access in the same
+// transaction. sub is locked in d's transaction.
 func AdoptProviderPrice(ctx context.Context, d *db.DB, sub *models.Subscription, price *models.Price, now time.Time, clock clockwork.Clock) error {
 	if err := requireTx(d); err != nil {
 		return err
@@ -39,6 +42,15 @@ func AdoptProviderPrice(ctx context.Context, d *db.DB, sub *models.Subscription,
 		UserID: sub.CustomerID.String(), ProductID: oldProduct, SourceType: &sourceType, SourceID: &sourceID, Reason: models.AccessRevokeDowngrade,
 	}); err != nil {
 		return fmt.Errorf("revoke the moved product's grace: %w", err)
+	}
+	ledger := grants.New(d.Gen(ctx), sub.MerchantID)
+	ledger.SetClock(func() time.Time { return now.UTC() })
+	if err := ledger.DeriveSubscriptionGrant(ctx, gen.ListUngrantedSubscriptionsRow{
+		ID: sub.ID, CustomerID: sub.CustomerID, ProductID: sub.ProductID, Status: string(sub.Status),
+		CurrentPeriodStartsAt: sub.CurrentPeriodStartsAt, CurrentPeriodEndsAt: sub.CurrentPeriodEndsAt, StartedAt: sub.StartedAt, EndedAt: sub.EndedAt,
+		AccessDurationHoursSnapshot: models.IntPtrTo32(sub.AccessDurationHoursSnapshot), ProviderAccessDefaultSnapshot: sub.ProviderAccessDefaultSnapshot,
+	}); err != nil {
+		return fmt.Errorf("open the moved product's access: %w", err)
 	}
 	return nil
 }
