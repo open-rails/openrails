@@ -151,16 +151,12 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 	return out, nil
 }
 
-type nmiRosterLister interface {
-	ListSubscriptionsPage(ctx context.Context, cursor string, perPage int) (nmi.SubscriptionPage, error)
-}
-
 // readNMIRoster reads every page of GET /v5/subscriptions. Live-verified
 // pagination contract: next_cursor is a string and empty pages mid-stream are
 // legal; the read stops only on has_more=false. A page claiming more rows
 // without a cursor, or repeating one, is refused: an incomplete roster must
 // never pass for an exhaustive one.
-func readNMIRoster(ctx context.Context, client nmiRosterLister) ([]nmi.V5Subscription, error) {
+func readNMIRoster(ctx context.Context, client nmiQueryClient) ([]nmi.V5Subscription, error) {
 	var out []nmi.V5Subscription
 	cursor, seen := "", map[string]bool{}
 	for {
