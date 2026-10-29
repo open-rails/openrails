@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 262,
+  "scenario_count": 264,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1292,6 +1292,16 @@
       "id": "OR-J15-S70",
       "journey": "J15",
       "name": "An NMI renewal the probe cannot settle is read by id once its grace passes"
+    },
+    {
+      "id": "OR-J15-S71",
+      "journey": "J15",
+      "name": "A roster page NMI cuts short resolves no unverified row; the next whole read does"
+    },
+    {
+      "id": "OR-J15-S72",
+      "journey": "J15",
+      "name": "A paused NMI schedule is never adopted or cancelled from the roster"
     },
     {
       "id": "OR-J29-S70",

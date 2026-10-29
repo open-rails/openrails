@@ -321,7 +321,7 @@ func (v *Verifier) bulkReadPSP(ctx context.Context, mid billing.MerchantID, psp 
 	if len(subs) == 0 {
 		return clearCheckpoint(ctx, v.DB, mid, psp)
 	}
-	roster, err := readRoster(ctx, client)
+	roster, err := readNMIRoster(ctx, client)
 	if err != nil {
 		return fmt.Errorf("nmi roster: %w", err)
 	}
@@ -436,8 +436,11 @@ func (v *Verifier) bulkReadPSP(ctx context.Context, mid billing.MerchantID, psp 
 			Coverage:     SnapshotCoverage{SubscriptionsExhaustive: exhaustive},
 			Capabilities: Capabilities{Subscriptions: true, Transactions: true}}
 		if listed {
-			next, _ := parseNMIV5Date(entry.NextBillingDate)
-			snap.Subscriptions = []RemoteSubscription{nmiRosterEntry(sub.RailSubscriptionID, next, now)}
+			remote, err := NMIRemoteSubscription(entry, now)
+			if err != nil {
+				return err
+			}
+			snap.Subscriptions = []RemoteSubscription{remote}
 		}
 		snaps[sub.ID] = snap
 	}
@@ -449,26 +452,6 @@ func (v *Verifier) bulkReadPSP(ctx context.Context, mid billing.MerchantID, psp 
 		return errs
 	}
 	return clearCheckpoint(ctx, v.DB, mid, psp)
-}
-
-func readRoster(ctx context.Context, client *nmi.NMIClient) ([]nmi.V5Subscription, error) {
-	var out []nmi.V5Subscription
-	cursor, seen := "", map[string]bool{}
-	for {
-		page, err := client.ListSubscriptionsPage(ctx, cursor, nmiV5PageLimit)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, page.Subscriptions...)
-		next := string(page.NextCursor)
-		if !page.HasMore || next == "" {
-			return out, nil
-		}
-		if seen[next] {
-			return nil, fmt.Errorf("nmi subscription pagination repeated cursor %s", next)
-		}
-		seen[next], cursor = true, next
-	}
 }
 
 func listUnverifiedNMI(ctx context.Context, database *db.DB, mid billing.MerchantID, psp uuid.UUID) ([]*models.Subscription, error) {

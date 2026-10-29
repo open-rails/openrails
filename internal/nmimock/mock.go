@@ -61,6 +61,7 @@ type Mock struct {
 	refusedSaves              int
 	declineValid              int
 	duplicate                 int
+	truncateRoster            int
 	lose, lost                int
 	drop                      int
 	dropValidations           int
