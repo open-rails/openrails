@@ -76,11 +76,14 @@ solana:
   the key, or create a new Transit key and list it.
 
 Crankers sign on whichever network each Solana PSP names, so each needs SOL
-there for fees. The optional `openrails_solana_crankers` probe and the operator
-alert raised after a pull a cranker signed warn below 0.05 SOL. They check the publishing cranker before
+there for fees. The optional `openrails_solana_crankers` probe warns below
+0.05 SOL, and a pull a cranker signed raises `life.solana.cranker_low_gas` for
+each of the merchant's cranker wallets below that; the next signed pull that
+finds the wallet funded resolves it. Both check the publishing cranker before
 its first subscription, and older plan owners while their subscriptions remain
-active, using each obligation's own merchant and configured PSP network (including archived
-PSPs). Unused keys do not need funding merely because they are listed.
+active, using each obligation's own merchant and configured PSP network
+(including archived PSPs). Unused keys do not need funding merely because they
+are listed.
 
 A warning names the wallet, merchant, PSP, network and observed balance. Fund
 that wallet on that network; funding the treasury does not fund a different
@@ -88,7 +91,8 @@ cranker. The threshold is an operational warning, not a guarantee of a number
 of future payments. Successful network and balance checks are reused for up to
 five minutes, with a fresh check after the target or RPC configuration changes.
 A failed check reports an unknown balance, never a zero balance or an expired
-healthy result. The next signed pull checks again. These warnings never fail the
+healthy result, and leaves the finding as it was; the next signed pull checks
+again. These warnings never fail the
 engine's mandatory readiness check or alter customer access. There is no
 automatic top-up.
 
@@ -112,10 +116,6 @@ treasury applies to one-time payments at once, and the next catalog apply
 (even of the same document) publishes new plans for recurring prices, so new
 subscriptions pay the new treasury; existing subscriptions keep paying the
 treasury their plan was published with.
-
-DEV lists its Transit key `openrails-solana-doujins` (address
-`CXFYwCTBtzsF3qS5zZyWqMKYwBVFHUHCrtTiJkAa5c1w`) as its cranker; that address
-is also its treasury.
 
 #### Accepted tokens
 
@@ -279,7 +279,7 @@ The network is the PSP's `environment`; a test PSP declares `devnet`:
       solana:
         rail: solana
         environment: devnet
-        treasury: CXFYwCTBtzsF3qS5zZyWqMKYwBVFHUHCrtTiJkAa5c1w
+        treasury: replace-with-your-devnet-wallet-address
 ```
 
 To exercise the flows on devnet:
@@ -303,9 +303,9 @@ when live pricing is unavailable, so they never require a price feed.
   re-checked every few minutes. When you return to `full`, each subscription
   gets exactly one pull (see "missed periods" above) — there is no catch-up
   billing. Without a cranker the pulls park.
-- Keep the crankers topped up with SOL; the gas monitor warns below
-  ~0.05 SOL (~10k pulls of runway). A pull that fails for lack of gas is
-  retried, not dunned.
+- Keep the crankers topped up with SOL; the probe and the low-gas finding
+  warn below ~0.05 SOL (~10k pulls of runway). A pull that fails for lack of
+  gas is retried, not dunned.
 - Every pull is confirmed on-chain before being treated as success, and the
   transaction signature is durably recorded before submission, so a crash
   mid-pull is resolved by reading the chain — never by blindly re-charging.

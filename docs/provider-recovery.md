@@ -6,9 +6,11 @@ not block purchases, renewals, refunds, cancellations, or card removal.
 Operators review findings separately; ordinary operations retain their own
 ownership, payment-method, duplicate-charge, and provider checks.
 
-Provider refresh runs every two hours. It reads bounded time windows with a
-five-minute indexing overlap and records qualified payments, refunds and
-provider-owned records. A failed read retries normally. Unknown identities,
+Provider refresh runs every two hours. Each PSP is read in bounded time windows
+from its watermark to five minutes ago; NMI and Stripe start 24 hours before
+theirs, for late provider indexing. It records qualified payments, refunds and
+provider-owned records. A failed read leaves the watermark and is read again
+next pass. Unknown identities,
 duplicate subscriptions and conflicting receipts remain visible findings;
 acknowledging an alert does not resolve its underlying evidence.
 

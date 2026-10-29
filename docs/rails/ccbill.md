@@ -26,7 +26,7 @@ From CCBill (dashboard or merchant support) you need:
 - `clientAccnum` + `clientSubacc`
 - the **salt** used to sign FlexForm URLs
 - a **DataLink** username/password (optional — enables merchant-initiated
-  cancels and reconciliation; without it those paths cannot execute)
+  cancels and the provider pull; without it those paths cannot execute)
 - per price: a **FlexForm** (`flex_id`) created in CCBill's FlexForms admin
   with matching pricing, and its **Recurring Billing Option**
   (`recurring_billing_option_id`)

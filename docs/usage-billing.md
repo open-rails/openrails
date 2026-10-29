@@ -1,8 +1,8 @@
 # Automatic usage billing
 
 A host opts in with `usage_billing_enabled: true` (`Config.UsageBillingEnabled`).
-It is off by default; subscription-only sites need no usage-billing jobs. This
-switch does not remove the separate manual invoice or credit APIs.
+It is off by default; subscription-only sites need no usage-billing jobs.
+Orders a host creates and credit grants work either way.
 
 Each merchant declares its defaults in its configuration:
 

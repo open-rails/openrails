@@ -92,14 +92,16 @@ Ownership determines which system may initiate the renewal.
 
 | Worker | Cadence | Job |
 |---|---|---|
-| Provider-intent executor | 1 min (+ on start) | drains due outbound provider mutations from the intent ledger |
-| Provider-intent verifier | 5 min | resolves `unknown_needs_verify` outcomes by *reading* the provider before any retry |
-| Merchant health | hourly | health findings and timed access lapses, for merchants with activity ([operations.md](operations.md#the-convergence-engine)) |
-| Provider Refresh | 4 h (+ on start) | watermarked missed-event backfill, unknown-cohort reconcile, CCBill DataLink refresh — reads only, never mutates a provider |
+| Provider operation | its own job, at each attempt | runs one outbound provider mutation from the intent ledger (Solana pulls included, scheduled at each due period); resolves an `unknown_needs_verify` outcome by *reading* the provider before any retry |
 | Due / dunning | 1 min | admits due engine renewals and retries `past_due` per the derived schedule; parks whole missed periods for verification instead of charging ([operations.md → Dunning](operations.md#dunning)) |
-| Cleanup | 1 h | expired-data cleanup |
-| Usage orders | 5 min | bills due usage accounts and queues due collections as operations (opt-in) |
+| Customer convergence | with each mutation | re-derives the changed customer's state in a job committed with the mutation ([operations.md](operations.md#the-convergence-engine)) |
+| Merchant health | hourly | health findings and timed access lapses, for merchants with activity ([operations.md](operations.md#the-convergence-engine)) |
+| Provider Refresh | 2 h (+ on start) | watermarked missed-event backfill, unknown-cohort reconcile — reads only, never mutates a provider |
+| Retention cleanup | 1 h | deletes rows past their retention ([operations.md → Data retention](operations.md#data-retention)) |
+| Usage orders (opt-in) | 5 min | bills due usage accounts and queues due collections as operations ([usage billing](usage-billing.md)) |
 | Arrears delinquency | 1 min | evaluates customers whose usage order fell due or whose grace ran out |
+
+The full list: [operations.md → Background worker schedule](operations.md#background-worker-schedule).
 
 **Health endpoint**: `GET /health/live` (liveness) and `GET /health/ready`
 (readiness; the failing dependency is logged, never answered). Readiness requires only
@@ -210,13 +212,13 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
   (`PATCH /v1/merchant/psps/{id}`) with the expected revision; the new credential
   is checked with the provider before it is written, and every replica reloads
   at once. With a manifest, change the file and restart.
-- **Pointing credentials at a different account** trips the account guard:
-  every provider intent is stamped with the PSP row it was
-  enqueued against, and the executor parks intents whose account no longer
-  resolves — a queue built against one account never executes against another.
-  Options: restore the old account's credentials so the queue drains, or let
-  stale intents expire/supersede. Rules:
-  [operations.md → Durability model](operations.md#durability-model).
+- **Declaring a PSP key with a different account** registers a new PSP.
+  Every provider intent is stamped with the PSP row it was enqueued against,
+  so a queue built against one account never executes against another: the
+  old account's intents wait without credentials. Restore its declaration so
+  the queue drains, or let stale intents expire or be superseded. There is no
+  check that a credential belongs to the declared account. Rules:
+  [operations.md → PSP binding](operations.md#psp-binding-and-credential-rotation).
 
 ### Processor routing
 

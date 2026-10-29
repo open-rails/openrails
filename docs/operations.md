@@ -76,8 +76,6 @@ call `openrails.New` and `Start` (embedded), or several `openrails run-server`
 and `run-worker` processes (standalone). They need the database and Redis, and
 nothing from each other: there is no instance count to configure, no primary
 instance and no sticky session. Without Redis, run one instance.
-`TestInstancesShareOneDatabase`, `TestServersShareOneDatabase` and the
-`TestReplicas` suites run several instances on one database.
 
 ### What they share
 
@@ -310,11 +308,13 @@ against a provider must survive failure of the attempt. The mechanism is the
 **provider intent ledger** (`billing.provider_intents`): every outbound
 mutation is durably recorded with an idempotency key (re-enqueues dedupe), an
 origin (`user`/`admin`/`system`), the PSP row it was produced against, and a
-relevance window. Two scheduled workers drain it: the **executor** (every
-minute, and on startup) claims due intents under a SKIP LOCKED lease, checks
-relevance, gates on operating mode × origin, executes, and classifies the
-outcome; the **verifier** (every 5 minutes) resolves `unknown_needs_verify`
-intents via provider READS before any retry.
+relevance window. Each intent but a manual card removal (below) has its own
+River job (`openrails.provider_operation`), queued in the transaction that
+records it.
+The job claims the intent under a lease, checks relevance, gates on operating
+mode × origin, executes and classifies the outcome; an `unknown_needs_verify`
+outcome is resolved by provider READS before any retry. Until the intent is
+final, the job sleeps to its next attempt.
 
 Statuses: `pending`, `in_flight`, `succeeded`, `failed_retryable`,
 `failed_terminal`, `unknown_needs_verify`, `superseded`, `expired`. Failure
@@ -359,8 +359,7 @@ same locks. A pass that finds its membership already settled by another replica
 does nothing. Lease checks and provider-call deadlines require synchronized
 instance clocks; keep replicas NTP-synchronized. A known failure before dispatch
 retains proof that permits another attempt. A crashed sender cannot supply that
-proof merely because a provider lookup is empty. `ci/`'s
-`TestReplicas*` fleets exercise shared-database concurrency and recovery.
+proof merely because a provider lookup is empty.
 Database claims are not a provider-enforced fence against an arbitrarily paused
 sender or an independently writable database copy.
 
@@ -411,9 +410,7 @@ Fresh collection is refused once the entire next renewal period has elapsed;
 an accepted but never-submitted operation also expires at its frozen period end.
 This produces a reviewable finding instead of shifting the schedule or charging
 a backlog. Already submitted payments continue receipt recovery even after that
-boundary. `TestNMIFiveDayRestartRecovery` exercises real process termination and
-restart with two replicas; provider fixtures establish the local contract, not
-live processor qualification.
+boundary.
 
 Automatic usage billing checks per-account due records every five minutes and
 catches up overdue work after a restart. A fixed account billing date and its
@@ -1020,16 +1017,15 @@ twice and only inside the key retention window. Unresolved outcomes raise
 
 ## Provider Refresh and the unknown cohort
 
-**Provider Refresh** is the always-on provider-read system: a 4-hourly scheduler (RunOnStart, so startup
+**Provider Refresh** is the always-on provider-read system: a 2-hourly scheduler (RunOnStart, so startup
 after a stale dump or outage does not wait for the tick) fans out one
 per-merchant refresh job — staggered, unique per merchant, on a bounded
-queue, skipping merchants with no declared PSPs. Three lanes:
+queue, skipping merchants with no declared PSPs. Two lanes:
 
 | Lane | Purpose |
 |---|---|
-| Provider Event Refresh | bounded missed-event backfill for NMI, Stripe, CCBill using durable per-merchant/rail/account/domain watermarks (`billing.psp_refresh_watermarks`) |
+| Provider Event Refresh | bounded missed-event backfill for NMI, Stripe, CCBill (its DataLink roster and transaction exports) using durable per-PSP watermarks (`billing.psp_refresh_watermarks`) |
 | Unknown-cohort Reconcile | resolves `unverified` subscriptions against provider truth, each with the PSP that owns it (archived ones included): one windowed bulk pull per PSP + targeted per-subscription probes for rows the bulk pull can't decide |
-| CCBill DataLink Refresh | scheduled active-member bulk refresh (CCBill has no cheap per-subscription liveness API) |
 
 A watermark advances only after its provider/window completes successfully;
 errors, missing credentials, or partial reads leave it unchanged and the next
@@ -1050,8 +1046,10 @@ against ONE verdict set:
 | remote absent/terminal | cancel locally + revoke entitlements (no remote delete — it's already gone) |
 | no conclusive evidence / rail unreachable | stays `unverified`; the next pass re-derives the cohort and retries |
 
-Mode gating: Provider Refresh runs under `full` AND `limited`; skipped under
-`readonly`. Each pass logs a heartbeat plus a per-merchant summary
+Mode gating: Provider Refresh reads in every write mode. Overwriting local rows,
+convergence and the Unknown-cohort lane wait until the merchant is armed for
+enforcing pulls, the kill switch allows them and its posture is not `readonly`.
+Each pass logs a heartbeat plus a per-merchant summary
 (`renewed/adopted/past_due/canceled/still_unknown/probed/backfilled/rail_errors`).
 
 **Access during silence — standing access.** There is no timed grace
@@ -1107,8 +1105,8 @@ across all references.
 ## Data retention
 
 Retention periods are constants, the same for every merchant, and not
-configuration (`internal/retention`). Every table has one class; its table
-comment states it, and a table added without one fails the build.
+configuration (`internal/retention`), except the event log's `event_retention`.
+Every table has one class, which its table comment states.
 
 | Class | What it means |
 |---|---|
@@ -1128,16 +1126,19 @@ Row retention:
 
 | Table | Deleted |
 |---|---|
-| `subscription_status_transitions` | 25 months (761 days) after `occurred_at` |
-| `provider_intents` | finished intents that only instructed a provider (subscription cancel, payment-method and source update, card vault, network token, account-updater request), 25 months after they last changed |
+| `subscription_status_transitions`, `subscription_billing_changes` | 25 months (761 days) after `occurred_at` |
+| `provider_intents` | finished intents that only instructed a provider (subscription cancel, payment-method and source update, card vault, network token, catalog archive, account-updater request), 25 months after they last changed |
 | `provider_mutation_logs` | 25 months after `created_at` |
 | `reconciliation_findings` | resolved findings, 12 months (366 days) after they were resolved and last seen |
 | `maintenance_runs` | reconciliation runs no finding names, 12 months after they started; every other kind is permanent |
 | `order_attempts` | attempts that expired without reaching a provider, 90 days after `expires_at` |
 | `orders`, `order_lines` | unpaid canceled and expired orders that never started a payment attempt, 90 days after they closed |
+| `parked_provider_subscriptions` | released parks, 90 days after `released_at` |
 | `carts` | 30 days after `last_changed_at` |
 | `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
-| `notifications` (customers') | 90 days once read, 180 days if never read |
+| `notifications` (merchant alerts) | 90 days once read, 180 days if never read |
+| `notification_events` | 90 days after `inserted_at`, and never before `event_retention` |
+| the event log | after `event_retention` (90 days by default) |
 | `webhook_events` | 90 days after completion |
 | `host_outbox` | 90 days after `recorded_at`, and never before the configured event retention |
 | `idempotency_keys`, `solana_pay_references` | at expiry, and after the 7-day watch window |
@@ -1155,9 +1156,8 @@ What is kept on purpose:
   card erasure is the proof the card is gone, and a Stripe payment-method
   domain registration (one per PSP and checkout origin) is the record that the
   host is registered. Only the instruction-only types
-  above age out. The list lives once in the baseline's
-  `provider_intents_updated_at_idx` and once in the retention code; a test
-  keeps them equal.
+  above age out. The list is in the retention code and in the partial index
+  `provider_intents_updated_at_idx` the cleanup job reads.
 - **A order attempt that reached a provider is permanent**, expired or not:
   one with a payment, a subscription or a provider transaction, or that a
   provider intent or a Solana Pay reference or receipt names.
@@ -1249,25 +1249,32 @@ older than the interval or no retained run exists. A quick restart does not enqu
 and retrying work keeps its normal retry behavior; explicit
 user-triggered work does not wait for a periodic deadline. Each River schema
 has one scheduling leader, and OpenRails' cross-fleet leases additionally
-coalesce merchant-wide passes when multiple embedded fleets share merchants.
+coalesce merchant-wide passes when embedded fleets share a database.
 
 | Worker | Cadence |
 |---|---|
 | Balance watch (due customer watches only, credit lot lapses included); due renewals and retries; due arrears delinquency | 1 min |
-| Order expiry | 5 min |
+| Order expiry (abandoned card saves included) | 5 min |
 | Rebill watch; lost provider-operation wakes | 15 min |
 | Admission-denial flush (closed hours); due daily NMI history read; retention cleanup; undeclared-account re-alerts; merchant health (merchants with activity) | 1 h |
 | A customer's convergence | committed with each mutation that changed the customer |
 | Provider refresh scheduler (fans out per merchant) | 2 h |
 | Stored card refresh ahead of renewal | 6 h |
-| Ledger integrity audit; Stripe webhook endpoint backstop | 24 h |
+| Stripe webhook endpoint backstop | 24 h |
 | Automatic usage billing (opt-in): due accounts billed, due collections queued | 5 min, plus threshold wakeups |
+
+Other jobs are queued by the change that needs them, not by a clock: each
+provider operation (`openrails.provider_operation`, which sleeps to its next
+attempt; a Solana pull is one, scheduled for its period), a customer's
+convergence (`openrails.customer_converge`), a PSP import and its
+charge-attribution read, a merchant purge's Vault cleanup, a Stripe PSP's
+webhook pass when it is declared or changed.
 
 Automatic usage billing is enabled by the host's `usage_billing_enabled` option.
 It is not scheduled by subscription-only hosts. Merchants configure their
 `usage_billing` defaults; each customer's due record preserves its fixed billing
-date across restarts and supports minimum-amount carryover. Explicit manual
-invoice operations remain available independently. See [usage billing](usage-billing.md).
+date across restarts and supports minimum-amount carryover. Orders a host
+creates and credit grants do not depend on it. See [usage billing](usage-billing.md).
 
 Job health is a read of River's own tables (`openrails workers`, the server's
 `ListWorkerHealth`, `/metrics`, the `openrails_job_progress` probe): per kind,

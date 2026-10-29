@@ -159,8 +159,9 @@ group_by) and attach `rate_cards:` to a product: each card binds one meter to a 
 model, with an optional `allowance` (`included` usage netted off first, per period).
 Usage products declare no billing cadence — the billing period is the window. Each
 usage event is priced through the cards when it is recorded and draws the prepaid
-balance or is owed at once; the daily pass bills each customer's owed usage as a
-usage order. A metered card states no `payment_term`. See
+balance or is owed at once; with automatic usage billing, a customer's owed usage
+becomes a usage order at their monthly billing date or when it reaches their
+credit limit ([usage billing](usage-billing.md)). A metered card states no `payment_term`. See
 [usage pricing](usage-pricing.md).
 
 ### Our prices and provider prices
@@ -401,7 +402,7 @@ the embedded Go engine serves no console. Build and mounting details are in
 Pages: **Customers** (search → profile with grant/revoke),
 **Subscriptions** (status filters, cancel with typed confirmation, resume, payment-
 method change), **Payments** (filters, detail, rail-aware refund), **Catalog**
-(products/prices CRUD, archive/restore, durable catalog batch application), **Ops** (findings queue, the merchant inbox), **Settings** (profile,
+(products/prices CRUD, archive/restore, durable catalog batch application), **Ops** (findings, proposals, PSP imports, provider prices, parked subscriptions), **Settings** (profile,
 PSPs, credit limit, trust level), **Dashboard**. Hosts may extend BillingAdmin with their own pages and panels. Each billing area
 shows only to staff holding its
 route group's permission (`GET /v1/admin/access`).

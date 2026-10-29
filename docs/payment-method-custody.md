@@ -252,7 +252,7 @@ Existing card retention/consent policy still applies.
 
 An unconfirmed browser request retries the same payment details and
 idempotency key, including when paying with a saved card. An accepted sale's
-durable submission fence prevents another charge; the existing verifier completes conversion from the retained receipt.
+durable submission fence prevents another charge; the sale's provider operation completes conversion from the retained receipt.
 An expired token intent can leave a confirmed payment with no saved method,
 following the existing Basis Theory recovery policy.
 
@@ -420,7 +420,8 @@ order charges the card. If the instrument is already saved for this customer,
 confirmation returns that method and marks the pending resource as replaced.
 
 The SDK authorization is encrypted at rest and erased on confirmation or
-expiry. The normal cleanup sweep removes expired setups. A captured card has
+expiry. The order expiry job (every 5 minutes) removes a setup once its
+session expires or 24 hours after it began. A captured card has
 no holding PSP (`psp_id: null`); its orders and recurring agreements select the
 processor that can reach its custodian.
 
