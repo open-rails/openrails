@@ -5,11 +5,14 @@ three contracts below only by adding to them; removing or changing anything in
 them waits for v2. A security fix may change behavior when that behavior was
 the vulnerability.
 
-| Contract | Snapshot | CI fails when it is stale |
-|---|---|---|
-| Go API | [`api/go.txt`](../api/go.txt) | `TestGoAPISurface` (Checks) |
-| HTTP API | [`api/openapi.json`](../api/openapi.json) | `TestGeneratedContractIsFresh` (Checks) |
-| Database schema | [`api/schema.txt`](../api/schema.txt) | `TestSchemaSnapshot` (End-to-end) |
+| Contract | Snapshot |
+|---|---|
+| Go API | [`api/go.txt`](../api/go.txt) |
+| HTTP API | [`api/openapi.json`](../api/openapi.json) |
+| Database schema | [`api/schema.txt`](../api/schema.txt) |
+
+CI's "SQL bindings and query audit" job fails when one is stale
+(`go run ./scripts/contracts`, the schema read from its PostgreSQL).
 
 Each snapshot is generated from the code, never written by hand, so a change
 to a contract cannot merge without its snapshot changing in the same pull
@@ -22,7 +25,8 @@ addition; a removed or changed line is a break, and is refused in v1.x.
 OPENRAILS_E2E_DSN=postgres://postgres:postgres@127.0.0.1:5432/postgres \
   go run ./scripts/contracts -write
 
-go run ./scripts/contracts   # check them, as CI does
+# Check them, as CI does.
+go run ./scripts/contracts -dsn postgres://postgres:postgres@127.0.0.1:5432/postgres
 ```
 
 Without a server the command still rewrites the Go and HTTP snapshots. It
@@ -95,15 +99,9 @@ Hosts that share one schema roll out one after another, so a build keeps
 running on a schema the next release already migrated, before v1 as well as
 after. A breaking change therefore ships in two releases: the first stops
 using what is removed, the second removes it in a contract migration, one
-whose file name ends in `_contract.up.sql`. From migration 0110 a check fails
-a migration that drops or renames a table, column, view, type or
-sequence, changes a column's type or sets NOT NULL without that name. It
-reads SQL text, so review still decides what else is safe. A build that migrates a
+whose file name ends in `_contract.up.sql`. A build that migrates a
 schema already holding newer migrations logs them, contract ones as a
 warning.
-
-`TestSchemaSnapshotNamesTheMigrations` (Checks) needs no database: it fails as
-soon as a migration file changes without the snapshot.
 
 ## Not covered
 

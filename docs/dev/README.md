@@ -63,8 +63,9 @@ rule PREPAREs every query) need a live Postgres whose schema matches
 
 So the usual loop: `task docker-up`, edit queries or migrations, `task sqlc`,
 commit the regenerated `internal/db/gen`. `task sqlc-check` checks generated
-code, query plans and SQL discipline locally; CI's `End-to-end` job regenerates
-the bindings and prepares every query against a disposable migrated PostgreSQL database.
+code and prepares every query locally; CI's "SQL bindings and query audit" job
+does the same against a disposable migrated PostgreSQL database, then checks
+the contracts below.
 
 ## Frozen contracts
 
@@ -78,8 +79,9 @@ OPENRAILS_E2E_DSN=postgres://postgres:postgres@127.0.0.1:5432/postgres \
 ```
 
 That rewrites `api/go.txt`, `api/openapi.json` with the generated TypeScript
-wire types and the tables under `docs/api`, and `api/schema.txt` (read from the
-PostgreSQL 18 the DSN names). Never hand-merge a generated file: regenerate it.
+wire types and the tables under `docs/api`, `compatibility/contract.json`, and
+`api/schema.txt` (read from the PostgreSQL 18 the DSN names). Without `-write`
+it checks them, as CI does. Never hand-merge a generated file: regenerate it.
 
 ## Migrations
 
@@ -129,7 +131,7 @@ In the root module:
 
 The root, `billing`, `catalog`, the adapters, `openrailstest` (and its
 `nmimock` and `stripemock`), `server/web/console` and `server` are the only importable non-`main` packages;
-`internal/contractaudit` `TestPublicPackages` fails on any other.
+another one changes `compatibility/contract.json`, which the contract check holds to its snapshot.
 
 ## Releases
 

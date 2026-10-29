@@ -14,7 +14,7 @@ bash scripts/critical-tests.sh
 
 For local iteration, `bash scripts/critical-tests.sh --case OR-J14-S05` runs a named scenario; it cannot qualify hosted CI. Pure public-value tests may be run directly with an exact `go test -run` or the SDK's Node driver without starting unrelated services. These focused runs do not claim the whole selected set passed.
 
-Isolated UI changes run `bash scripts/critical-tests.sh --suite browser`: the four reviewed public-client and embedded-checkout scenarios, including their eight actual browser cases. The same strict result gate requires every selected case; it is not an arbitrary CI filter. Shared, unknown and backend changes run all 148 scenarios. Browser assets are built once in either selection.
+Isolated UI changes run `bash scripts/critical-tests.sh --suite browser`: the scenarios under `suites.browser` in `critical/executables.json`. The same strict result gate requires every selected case; it is not an arbitrary CI filter. Shared, unknown and backend changes run every scenario in `critical/coverage.json`. Browser assets are built once in either selection.
 
 `critical/coverage.json` is the required logical scenario roster; `critical/executables.json` is the independently reviewed executable map. Every selected owner must actually run and pass once. Nested successes cannot hide a missing parent. Real service cases may expand into provider/actor/time subcases; counts are reported separately.
 
@@ -22,4 +22,4 @@ To avoid repeated standalone compilation, build `critical/server-fixture` once w
 
 `OPENRAILS_CRITICAL_REPORT_DIR` retains structured Go results and browser evidence. Fixture state remains separate per case, even when immutable binaries and bundles are reused. The required run fails on missing/skipped cases, package failure, duplicate owners or unmapped cases.
 
-`task sqlc-check` retains SQL generation and real PostgreSQL preparation. `scripts/check_business_time.sh` runs the retained physical-clock source guard directly, and `scripts/check-embedded-auth-boundary.sh` compiles an independent host without linking AuthKit's runtime. These are static/compile checks, separate from behavioral coverage.
+`task sqlc-check` retains SQL generation and real PostgreSQL preparation. `go run ./scripts/contracts -dsn <disposable PostgreSQL 18>` checks the reviewed contracts ([compatibility](../compatibility.md)). `scripts/check_business_time.sh` runs the retained physical-clock source guard directly, and `scripts/check-embedded-auth-boundary.sh` compiles an independent host without linking AuthKit's runtime. These are static/compile checks, separate from behavioral coverage; CI's "SQL bindings and query audit" job runs sqlc and the contracts.
