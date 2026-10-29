@@ -95,6 +95,9 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 		StoredCredential: storedCredential,
 	})
 	if err != nil {
+		if errors.Is(err, nmi.ErrNotDispatched) {
+			return charge.Result{}, errors.Join(charge.ErrNotDispatched, err)
+		}
 		var pmErr *nmi.CustomerVaultError
 		if errors.As(err, &pmErr) && IsHardDecline(pmErr.ResponseCode) {
 			code := FailureCode(pmErr)

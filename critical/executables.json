@@ -784,6 +784,9 @@
     "OR-J26-S54": [
       "TestUsageBillingContracts/OR-J26-S54/a-running-charge-is-billed-through-the-bill-date-before-its-daily-posting"
     ],
+    "OR-J26-S55": [
+      "TestNMICollectionRefusal/OR-J26-S55/a-never-sent-collection-retains-its-proof"
+    ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"
     ],
