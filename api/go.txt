@@ -631,6 +631,7 @@ pkg openrails, type VaultConfig struct, Namespace string `yaml:"namespace" json:
 pkg openrails, type VaultConfig struct, RoleID string `yaml:"role_id" json:"role_id"`
 pkg openrails, type VaultConfig struct, ScopePrefix string `yaml:"scope_prefix" json:"scope_prefix"`
 pkg openrails, type VaultConfig struct, SecretID string `yaml:"secret_id" json:"secret_id"`
+pkg openrails, type VaultConfig struct, SecretsPath string `yaml:"secrets_path" json:"secrets_path"`
 pkg openrails, type VaultConfig struct, Token string `yaml:"token" json:"token"`
 pkg openrails, type VaultConfig struct, TransitMount string `yaml:"transit_mount" json:"transit_mount"`
 pkg openrails, var ErrMigrationsRequired error

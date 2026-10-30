@@ -1,6 +1,7 @@
 package hostconfig
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -228,9 +229,9 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		if upperKey == "MERCHANT" || upperKey == "AUTH_ISSUERS" || upperKey == "CORS_ORIGINS" || strings.HasPrefix(upperKey, "RAILS_") || strings.HasPrefix(upperKey, "STORE_") {
 			return "", nil
 		}
-		// VAULT_SECRETS_PATH is consumed directly by config.SecretFiles, not a
-		// vault.* field. Without this skip the strict unmarshal would refuse
-		// boot on vault.secrets_path.
+		// VAULT_SECRETS_PATH names the mounted secret files directory, which
+		// the loader reads itself; mapping it to vault.secrets_path would
+		// declare a Vault connection on its own.
 		if upperKey == "VAULT_SECRETS_PATH" {
 			return "", nil
 		}
@@ -266,7 +267,8 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// Operator-mounted secret files (filename = env-var name) load BELOW env,
 	// so env wins. This is the default self-hosted secret path: Vault renders
 	// files into the mounted dir; no live Vault connection needed.
-	secretFiles, err := billing.SecretFiles()
+	secretsDir := cmp.Or(strings.TrimSpace(os.Getenv("VAULT_SECRETS_PATH")), billing.DefaultSecretsPath)
+	secretFiles, err := billing.SecretFiles(secretsDir)
 	if err != nil {
 		return nil, err
 	}
@@ -361,6 +363,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 			}); err != nil {
 				return nil, fmt.Errorf("unmarshaling directory vault config: %w", err)
 			}
+			vault.SecretsPath = cmp.Or(vault.SecretsPath, secretsDir)
 			databaseConfig.Vault = &vault
 		}
 		return databaseConfig, nil
@@ -515,6 +518,9 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 
 	if f.RateLimitsDisabled { // defaults() seeded them; off means none
 		f.RateLimits, f.Captcha = nil, nil
+	}
+	if f.Vault != nil && f.Vault.SecretsPath == "" {
+		f.Vault.SecretsPath = secretsDir
 	}
 	cfg, err := f.config()
 	if err != nil {

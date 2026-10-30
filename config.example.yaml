@@ -109,6 +109,7 @@ naming:
 #   token: ""
 #   role_id: ""
 #   secret_id: ""
+#   secrets_path: "" # directory of mounted secret files; a VAULT_SECRET_ID file there is re-read on re-auth
 #   k8s_role: ""
 #   auth_mount: ""    # approle/kubernetes mount path without auth/; default the method's name
 
