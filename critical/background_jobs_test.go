@@ -564,29 +564,7 @@ func importCCBillAttribution(t *testing.T, w *world) billing.CustomerID {
 // active, and its rebill is in the export of any window holding it.
 func dataLinkFeed(t *testing.T, rebill time.Time) *httptest.Server {
 	t.Helper()
-	mst := time.FixedZone("MST", -7*60*60)
-	server := httptest.NewServer(http.HandlerFunc(func(out http.ResponseWriter, r *http.Request) {
-		if r.ParseForm() != nil || r.URL.Path != "/data/main.cgi" {
-			http.Error(out, "unexpected DataLink request", http.StatusBadRequest)
-			return
-		}
-		if r.Form.Get("transactionTypes") == "ACTIVEMEMBERS" {
-			fmt.Fprintf(out, "\"ACTIVEMEMBERS\",\"945280\",\"critical-flex\",\"0112233445\",\"%s\",\"member\",\"member@critical.invalid\",\"1\",\"%s\",\"\"\n",
-				rebill.Add(-720*time.Hour).Format("2006-01-02"), rebill.Add(720*time.Hour).Format("2006-01-02"))
-			return
-		}
-		from, errFrom := time.ParseInLocation("20060102150405", r.Form.Get("startTime"), mst)
-		until, errUntil := time.ParseInLocation("20060102150405", r.Form.Get("endTime"), mst)
-		if errFrom != nil || errUntil != nil {
-			http.Error(out, "unbounded DataLink export", http.StatusBadRequest)
-			return
-		}
-		if !rebill.Before(from) && rebill.Before(until) {
-			fmt.Fprintf(out, "REBILL,945280,0001,0112233445,%s,0112233446,10.00\n", rebill.UTC().Format("2006-01-02 15:04:05"))
-		}
-	}))
-	t.Cleanup(server.Close)
-	return server
+	return dataLinkFeedFor(t, "0112233445", "0112233446", rebill)
 }
 
 // attributionJobs are the charge attribution reads imports queued, in states.

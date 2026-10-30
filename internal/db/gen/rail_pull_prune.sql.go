@@ -288,13 +288,14 @@ func (q *Queries) ListExcessPaymentsForPSP(ctx context.Context, arg ListExcessPa
 
 const listExcessSubscriptionsForPSP = `-- name: ListExcessSubscriptionsForPSP :many
 
-SELECT id FROM billing.subscriptions
-WHERE merchant_id = $1::uuid
-  AND psp_id = $2::uuid
-  AND rail_subscription_id IS NOT NULL
-  AND deleted_at IS NULL
+SELECT s.id FROM billing.psps p JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.psp_id = p.id
+WHERE p.merchant_id = $1::uuid
+  AND p.id = $2::uuid
+  AND s.rail_subscription_id IS NOT NULL
+  AND s.deleted_at IS NULL
   AND cardinality($3::text[]) > 0
-  AND rail_subscription_id <> ALL($3::text[])
+  AND NOT EXISTS (SELECT 1 FROM unnest($3::text[]) AS r(ref)
+      WHERE billing.rail_subscription_key(p.rail, r.ref) = s.rail_subscription_key)
 `
 
 type ListExcessSubscriptionsForPSPParams struct {

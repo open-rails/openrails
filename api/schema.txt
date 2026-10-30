@@ -140,6 +140,7 @@ migration 0180_retire_converge_sweep_findings.up.sql sha256:e348935f97512ded02ea
 migration 0190_notifications_drop_email.up.sql sha256:3ccba1a268cf8e8214656f30449f6f3d5762f3d38c714ec3945effa7fafa0987
 migration 0191_provider_intents_comment.up.sql sha256:fff345e0143e09a85fe52e54669da31fcac5eee10b79c4af8d76b94799b955e6
 migration 0200_explicit_psp_imports.up.sql sha256:44eefa51bbbe338d21941762c9b82da60c76a345ccc73d91e5e228de58ea176f
+migration 0201_rail_subscription_key.up.sql sha256:023a4c674fbffbd1cf9a944ee932e02ac815e408dfc48d49b09ee5220aadf11b
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2869,6 +2870,7 @@ table billing.subscriptions
   column provider_access_default_snapshot boolean NOT NULL DEFAULT false
   column facts_authority text NOT NULL DEFAULT 'provider'::text
   column due_recheck_at timestamp with time zone
+  column rail_subscription_key text GENERATED ALWAYS AS (billing.rail_subscription_key(rail, rail_subscription_id)) STORED
   constraint subscriptions_access_duration_hours_snapshot_check CHECK (((access_duration_hours_snapshot IS NULL) OR (access_duration_hours_snapshot > 0)))
   constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text])))
   constraint subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
@@ -2922,8 +2924,7 @@ table billing.subscriptions
   index CREATE INDEX subscriptions_price_id_idx ON billing.subscriptions USING btree (merchant_id, price_id)
   index CREATE INDEX subscriptions_product_id_idx ON billing.subscriptions USING btree (merchant_id, product_id)
   index CREATE INDEX subscriptions_psp_id_idx ON billing.subscriptions USING btree (merchant_id, psp_id)
-  index CREATE UNIQUE INDEX subscriptions_psp_id_rail_subscription_id_key ON billing.subscriptions USING btree (merchant_id, psp_id, rail_subscription_id) WHERE ((rail_subscription_id IS NOT NULL) AND (deleted_at IS NULL))
-  index CREATE INDEX subscriptions_rail_rail_subscription_id_idx ON billing.subscriptions USING btree (rail, rail_subscription_id)
+  index CREATE UNIQUE INDEX subscriptions_psp_id_rail_subscription_key_key ON billing.subscriptions USING btree (merchant_id, psp_id, rail_subscription_key) WHERE ((rail_subscription_key IS NOT NULL) AND (deleted_at IS NULL))
   index CREATE INDEX subscriptions_started_at_idx ON billing.subscriptions USING btree (merchant_id, started_at)
   index CREATE INDEX subscriptions_status_idx ON billing.subscriptions USING btree (status)
   trigger CREATE TRIGGER subscriptions_close_landed_park AFTER INSERT ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.close_landed_park()
@@ -3320,7 +3321,8 @@ function billing.close_landed_park()
       WITH closed AS (
           UPDATE billing.parked_provider_subscriptions p
           SET released_at = now(), released_by = 'landed'
-          WHERE p.merchant_id = NEW.merchant_id AND p.psp_id = NEW.psp_id AND p.subscription_ref = NEW.rail_subscription_id
+          WHERE p.merchant_id = NEW.merchant_id AND p.psp_id = NEW.psp_id
+            AND billing.rail_subscription_key(p.rail, p.subscription_ref) = NEW.rail_subscription_key
             AND p.released_at IS NULL
           RETURNING p.subscription_ref
       )
@@ -4492,6 +4494,13 @@ function billing.queue_event_log(jsonb)
   END;
   $function$
 
+function billing.rail_subscription_key(text,text)
+  CREATE OR REPLACE FUNCTION billing.rail_subscription_key(rail text, ref text)
+   RETURNS text
+   LANGUAGE sql
+   IMMUTABLE PARALLEL SAFE
+  AS $function$ SELECT CASE WHEN rail = 'ccbill' THEN ltrim(ref, '0') ELSE ref END $function$
+
 function billing.reject_immutable_billing_fact()
   CREATE OR REPLACE FUNCTION billing.reject_immutable_billing_fact()
    RETURNS trigger
@@ -4821,6 +4830,10 @@ function billing.subscriptions_row_version()
       unchanged.facts_authority := OLD.facts_authority;
       unchanged.row_version := OLD.row_version;
       unchanged.destructive_run_class := OLD.destructive_run_class;
+      unchanged.rail_subscription_key := OLD.rail_subscription_key;
+      IF billing.rail_subscription_key(NEW.rail, NEW.rail_subscription_id) IS NOT DISTINCT FROM OLD.rail_subscription_key THEN
+          unchanged.rail_subscription_id := OLD.rail_subscription_id;
+      END IF;
       IF unchanged IS NOT DISTINCT FROM OLD THEN
           RETURN NEW;
       END IF;

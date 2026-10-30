@@ -8,13 +8,14 @@
 -- An empty present_ids proves nothing, yet `x <> ALL('{}')` is true for every
 -- row: the cardinality guard makes it match nothing, so even a caller that
 -- skipped its own refusal cannot wipe a PSP's book.
-SELECT id FROM billing.subscriptions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND psp_id = sqlc.arg(psp_id)::uuid
-  AND rail_subscription_id IS NOT NULL
-  AND deleted_at IS NULL
+SELECT s.id FROM billing.psps p JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.psp_id = p.id
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND p.id = sqlc.arg(psp_id)::uuid
+  AND s.rail_subscription_id IS NOT NULL
+  AND s.deleted_at IS NULL
   AND cardinality(sqlc.arg(present_ids)::text[]) > 0
-  AND rail_subscription_id <> ALL(sqlc.arg(present_ids)::text[]);
+  AND NOT EXISTS (SELECT 1 FROM unnest(sqlc.arg(present_ids)::text[]) AS r(ref)
+      WHERE billing.rail_subscription_key(p.rail, r.ref) = s.rail_subscription_key);
 
 -- name: ListPSPSubscriptionCandidates :many
 -- Every account-bound subscription a prune WOULD have considered. Reports what

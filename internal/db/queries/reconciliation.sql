@@ -347,7 +347,8 @@ FOR UPDATE;
 -- reports: a subscription on its PSP by the record's id, or the record's
 -- customer reference on a payment method or PSP customer of that PSP.
 SELECT (EXISTS(SELECT 1 FROM billing.subscriptions s
-          WHERE s.merchant_id=f.merchant_id AND s.psp_id=f.psp_id AND s.rail=f.rail AND s.rail_subscription_id=f.subject_key)
+          WHERE s.merchant_id=f.merchant_id AND s.psp_id=f.psp_id AND s.rail=f.rail
+            AND s.rail_subscription_key=billing.rail_subscription_key(f.rail, f.subject_key))
      OR EXISTS(SELECT 1 FROM billing.payment_methods pm
           WHERE pm.merchant_id=f.merchant_id AND pm.psp_id=f.psp_id AND pm.rail_customer_ref=f.evidence->'remote'->>'customer_id')
      OR EXISTS(SELECT 1 FROM billing.psp_customers pc
@@ -362,7 +363,7 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.id = sqlc.arg(id)::uuid 
 SELECT p.live::boolean AS live,
     (EXISTS(SELECT 1 FROM billing.subscriptions s
             WHERE s.merchant_id=p.merchant_id AND s.psp_id=p.id AND sqlc.narg(subscription_ref)::text IS NOT NULL
-              AND s.rail_subscription_id=sqlc.narg(subscription_ref)::text)
+              AND s.rail_subscription_key=billing.rail_subscription_key(p.rail, sqlc.narg(subscription_ref)::text))
      OR EXISTS(SELECT 1 FROM billing.payment_methods pm
             WHERE pm.merchant_id=p.merchant_id AND pm.psp_id=p.id AND sqlc.narg(customer_ref)::text IS NOT NULL
               AND pm.rail_customer_ref=sqlc.narg(customer_ref)::text)
@@ -441,8 +442,9 @@ SELECT COALESCE((SELECT v.id FROM billing.payment_method_versions v
 -- A create or record proposal's basis is its rail id still unrecorded on the
 -- finding's PSP: a subscription's, or a payment's transaction.
 SELECT CASE WHEN sqlc.arg(subscription)::boolean
-    THEN EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-        AND s.psp_id = sqlc.arg(psp_id)::uuid AND s.rail_subscription_id = sqlc.arg(rail_id)::text AND s.deleted_at IS NULL)
+    THEN EXISTS (SELECT 1 FROM billing.psps p JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.psp_id = p.id
+        WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(psp_id)::uuid
+          AND s.rail_subscription_key = billing.rail_subscription_key(p.rail, sqlc.arg(rail_id)::text) AND s.deleted_at IS NULL)
     ELSE EXISTS (SELECT 1 FROM billing.payments p WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
         AND p.psp_id = sqlc.arg(psp_id)::uuid AND p.transaction_id = sqlc.arg(rail_id)::text AND p.deleted_at IS NULL)
 END::boolean AS recorded;
@@ -567,7 +569,8 @@ JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.id = sqlc.arg(price_id)
   AND NOT EXISTS (
       SELECT 1 FROM billing.subscriptions s
-      WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.rail_subscription_id = sqlc.arg(rail_subscription_id)::text
+      WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+        AND s.rail_subscription_key = billing.rail_subscription_key(sqlc.arg(rail)::text, sqlc.arg(rail_subscription_id)::text)
         AND s.deleted_at IS NULL
         AND s.rail = ANY (sqlc.arg(rails)::text[])
         -- A provider subscription id is unique only within a gateway account,
@@ -1118,13 +1121,13 @@ ORDER BY change->>'kind' = 'correct_subscription' DESC, created_at, id;
 -- landed, at the row version the import read: one statement, so a row moved
 -- meanwhile is left.
 UPDATE billing.subscriptions s SET facts_authority = 'provider'
-FROM billing.psp_import_basis b
+FROM billing.psp_import_basis b JOIN billing.psp_imports i ON i.merchant_id = b.merchant_id AND i.id = b.import_id
 WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.import_id = sqlc.arg(import_id)::uuid
   AND s.merchant_id = b.merchant_id AND s.id = b.subscription_id
   AND s.row_version = b.row_version AND s.facts_authority = 'host' AND s.deleted_at IS NULL
   AND EXISTS (SELECT 1 FROM billing.psp_import_records r
       WHERE r.merchant_id = b.merchant_id AND r.import_id = b.import_id AND r.kind = 'subscription'
-        AND r.state = 'held' AND r.ref = s.rail_subscription_id);
+        AND r.state = 'held' AND billing.rail_subscription_key(i.rail, r.ref) = s.rail_subscription_key);
 
 -- name: TakeProviderFacts :execrows
 -- The provider's evidence now owns these subscriptions: a host book skips them.

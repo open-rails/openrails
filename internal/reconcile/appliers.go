@@ -35,6 +35,7 @@ type LocalWriter interface {
 	GrantAccess(ctx context.Context, a GrantAccessAction) (bool, error)
 	MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error)
 	AcceptProviderSchedules(ctx context.Context, psp uuid.UUID, snap *RemoteSnapshot, exhaustive bool, reader TransactionReader) (ProviderScheduleResult, error)
+	RespellSubscriptions(ctx context.Context, psp uuid.UUID, refs []string) (int64, error)
 }
 
 // PGLocalWriter applies enforce writes via the sqlc layer on a merchant-pinned
@@ -198,6 +199,16 @@ func (w *PGLocalWriter) GrantAccess(ctx context.Context, a GrantAccessAction) (b
 		return err
 	})
 	return granted, err
+}
+
+// RespellSubscriptions rewrites the PSP's subscriptions that refs name by
+// identity but spell otherwise to the provider's spelling.
+func (w *PGLocalWriter) RespellSubscriptions(ctx context.Context, psp uuid.UUID, refs []string) (int64, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return w.DB.Gen(ctx).RespellPSPSubscriptions(ctx, gen.RespellPSPSubscriptionsParams{MerchantID: mid.UUID(), PspID: psp, Refs: refs})
 }
 
 // MaterializeSubscription creates the local subscription for a resolved

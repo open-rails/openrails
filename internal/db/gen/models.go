@@ -1902,6 +1902,8 @@ type BillingSubscription struct {
 	FactsAuthority string
 	// The due pass left the row unchanged; it is not due again before this instant.
 	DueRecheckAt *time.Time
+	// rail_subscription_id as an identity (billing.rail_subscription_key): every lookup by provider id matches it. A provider contact matching it spelled otherwise rewrites rail_subscription_id to the provider's spelling.
+	RailSubscriptionKey *string
 }
 
 // Append-only observed subscription card and retry changes. References and before/after values are snapshots, not charging instructions. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

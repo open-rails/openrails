@@ -376,7 +376,7 @@ SELECT p.id, p.psp_id, p.rail, p.subscription_ref, p.reason, p.price_ref, p.cust
     p.released_at, p.released_by, s.id AS subscription_id
 FROM billing.parked_provider_subscriptions p
 LEFT JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.psp_id = p.psp_id
-    AND s.rail_subscription_id = p.subscription_ref AND s.deleted_at IS NULL
+    AND s.rail_subscription_key = billing.rail_subscription_key(p.rail, p.subscription_ref) AND s.deleted_at IS NULL
 WHERE p.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR p.psp_id = $2::uuid)
   AND ($3::text IS NULL OR p.reason = $3::text)
@@ -603,9 +603,9 @@ func (q *Queries) ProviderRefMapped(ctx context.Context, arg ProviderRefMappedPa
 }
 
 const subscriptionLanded = `-- name: SubscriptionLanded :one
-SELECT EXISTS (SELECT 1 FROM billing.subscriptions
-    WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
-      AND rail_subscription_id = $3::text AND deleted_at IS NULL)::boolean AS landed
+SELECT EXISTS (SELECT 1 FROM billing.psps p JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.psp_id = p.id
+    WHERE p.merchant_id = $1::uuid AND p.id = $2::uuid
+      AND s.rail_subscription_key = billing.rail_subscription_key(p.rail, $3::text) AND s.deleted_at IS NULL)::boolean AS landed
 `
 
 type SubscriptionLandedParams struct {
