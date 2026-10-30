@@ -67,7 +67,7 @@ func (q *Queries) GetConflictingInitialEnrollmentOperation(ctx context.Context, 
 }
 
 const getConflictingInitialEnrollmentSubscription = `-- name: GetConflictingInitialEnrollmentSubscription :one
-SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.canceled_at, s.cancel_type, s.cancel_feedback, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy, s.access_duration_hours_snapshot, s.quantity, s.provider_access_default_snapshot, s.facts_authority, s.due_recheck_at FROM billing.subscriptions s
+SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.canceled_at, s.cancel_type, s.cancel_feedback, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy, s.access_duration_hours_snapshot, s.quantity, s.provider_access_default_snapshot, s.facts_authority, s.due_recheck_at, s.rail_subscription_key FROM billing.subscriptions s
 JOIN billing.products accepted ON accepted.merchant_id=s.merchant_id AND accepted.id=$1::uuid
 JOIN billing.products existing ON existing.merchant_id=s.merchant_id AND existing.id=s.product_id
 WHERE s.merchant_id=$2::uuid AND s.customer_id=$3::uuid
@@ -128,6 +128,7 @@ func (q *Queries) GetConflictingInitialEnrollmentSubscription(ctx context.Contex
 		&i.ProviderAccessDefaultSnapshot,
 		&i.FactsAuthority,
 		&i.DueRecheckAt,
+		&i.RailSubscriptionKey,
 	)
 	return i, err
 }
@@ -155,7 +156,7 @@ func (q *Queries) GetConflictingOrderClaim(ctx context.Context, arg GetConflicti
 }
 
 const getPaidRunwaySubscription = `-- name: GetPaidRunwaySubscription :one
-SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.canceled_at, s.cancel_type, s.cancel_feedback, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy, s.access_duration_hours_snapshot, s.quantity, s.provider_access_default_snapshot, s.facts_authority, s.due_recheck_at FROM billing.subscriptions s
+SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.canceled_at, s.cancel_type, s.cancel_feedback, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy, s.access_duration_hours_snapshot, s.quantity, s.provider_access_default_snapshot, s.facts_authority, s.due_recheck_at, s.rail_subscription_key FROM billing.subscriptions s
 JOIN billing.products accepted ON accepted.merchant_id=s.merchant_id AND accepted.id=$1::uuid
 JOIN billing.products existing ON existing.merchant_id=s.merchant_id AND existing.id=s.product_id
 WHERE s.merchant_id=$2::uuid AND s.customer_id=$3::uuid
@@ -222,6 +223,7 @@ func (q *Queries) GetPaidRunwaySubscription(ctx context.Context, arg GetPaidRunw
 		&i.ProviderAccessDefaultSnapshot,
 		&i.FactsAuthority,
 		&i.DueRecheckAt,
+		&i.RailSubscriptionKey,
 	)
 	return i, err
 }

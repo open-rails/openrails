@@ -204,6 +204,12 @@ PSP alone accepts nothing extra.
   `datalink_username`/`datalink_password` pair. A member absent from the roster
   is not evidence of anything. A roster is not payment: only a RenewalSuccess
   restores access.
+- A CCBill subscription id is a number. Webhooks, DataLink reads, PSP import
+  `subscription_ref` mappings and host books match a stored id with leading
+  zeros ignored (a legacy bigint column keeps `112233445566778899` for CCBill's
+  `0112233445566778899`). The first webhook or DataLink read naming a row
+  rewrites its id to CCBill's spelling, which outbound DataLink calls then use;
+  a host book never rewrites it.
 - Webhooks mirror CCBill through the lifecycle machine, one event per post on
   the locked row. BillingDateChange never moves the paid period;
   UserReactivation resumes only inside a paid period (else a

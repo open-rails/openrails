@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -59,7 +60,7 @@ func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		return nil, fmt.Errorf("ccbill activemembers export: %w", err)
 	}
 	for _, rec := range active {
-		if params.SubscriptionID != "" && rec.SubscriptionID != params.SubscriptionID {
+		if params.SubscriptionID != "" && !rails.SameSubscription(string(ProviderCCBill), rec.SubscriptionID, params.SubscriptionID) {
 			continue
 		}
 		snap.Subscriptions = append(snap.Subscriptions, CCBillRemoteSubscription(rec))
@@ -81,7 +82,7 @@ func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		return nil, fmt.Errorf("ccbill transaction export: %w", err)
 	}
 	for _, row := range rows {
-		if params.SubscriptionID != "" && row.SubscriptionID() != params.SubscriptionID {
+		if params.SubscriptionID != "" && !rails.SameSubscription(string(ProviderCCBill), row.SubscriptionID(), params.SubscriptionID) {
 			continue
 		}
 		switch row.TransactionType {

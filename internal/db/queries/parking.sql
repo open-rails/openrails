@@ -66,9 +66,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
 
 -- name: SubscriptionLanded :one
 -- Whether a live subscription row holds the provider subscription.
-SELECT EXISTS (SELECT 1 FROM billing.subscriptions
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
-      AND rail_subscription_id = sqlc.arg(subscription_ref)::text AND deleted_at IS NULL)::boolean AS landed;
+SELECT EXISTS (SELECT 1 FROM billing.psps p JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.psp_id = p.id
+    WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(psp_id)::uuid
+      AND s.rail_subscription_key = billing.rail_subscription_key(p.rail, sqlc.arg(subscription_ref)::text) AND s.deleted_at IS NULL)::boolean AS landed;
 
 -- name: ProviderRefMapped :one
 -- Whether a provider price or plan binds to a price of ours on this PSP.
@@ -120,7 +120,7 @@ SELECT p.id, p.psp_id, p.rail, p.subscription_ref, p.reason, p.price_ref, p.cust
     p.released_at, p.released_by, s.id AS subscription_id
 FROM billing.parked_provider_subscriptions p
 LEFT JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.psp_id = p.psp_id
-    AND s.rail_subscription_id = p.subscription_ref AND s.deleted_at IS NULL
+    AND s.rail_subscription_key = billing.rail_subscription_key(p.rail, p.subscription_ref) AND s.deleted_at IS NULL
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(psp_id)::uuid IS NULL OR p.psp_id = sqlc.narg(psp_id)::uuid)
   AND (sqlc.narg(reason)::text IS NULL OR p.reason = sqlc.narg(reason)::text)

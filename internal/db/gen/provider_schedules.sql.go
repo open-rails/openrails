@@ -173,10 +173,11 @@ func (q *Queries) LatestSettledProviderCycle(ctx context.Context, arg LatestSett
 }
 
 const listProviderSchedules = `-- name: ListProviderSchedules :many
-SELECT merchant_id, subscription_id, customer_id, psp_id, initial_order_id, accepted_version, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at FROM billing.provider_schedules
-WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
-  AND provider_reference = $3::text
-ORDER BY first_due_at ASC, accepted_version ASC FOR UPDATE
+SELECT ps.merchant_id, ps.subscription_id, ps.customer_id, ps.psp_id, ps.initial_order_id, ps.accepted_version, ps.source_reference, ps.provider_reference, ps.first_due_at, ps.cadence_hours, ps.cadence_months, ps.accepted_bill, ps.created_at FROM billing.provider_schedules ps
+JOIN billing.subscriptions s ON s.merchant_id = ps.merchant_id AND s.id = ps.subscription_id
+WHERE ps.merchant_id = $1::uuid AND ps.subscription_id = $2::uuid
+  AND billing.rail_subscription_key(s.rail, ps.provider_reference) = billing.rail_subscription_key(s.rail, $3::text)
+ORDER BY ps.first_due_at ASC, ps.accepted_version ASC FOR UPDATE OF ps
 `
 
 type ListProviderSchedulesParams struct {
@@ -185,6 +186,8 @@ type ListProviderSchedulesParams struct {
 	ProviderReference string
 }
 
+// provider_reference is the subscription's provider id when accepted: it
+// matches by identity, so a later respelling keeps its schedules.
 func (q *Queries) ListProviderSchedules(ctx context.Context, arg ListProviderSchedulesParams) ([]BillingProviderSchedule, error) {
 	rows, err := q.db.Query(ctx, listProviderSchedules, arg.MerchantID, arg.SubscriptionID, arg.ProviderReference)
 	if err != nil {
@@ -217,6 +220,24 @@ func (q *Queries) ListProviderSchedules(ctx context.Context, arg ListProviderSch
 		return nil, err
 	}
 	return items, nil
+}
+
+const sameProviderSubscription = `-- name: SameProviderSubscription :one
+SELECT COALESCE(billing.rail_subscription_key($1::text, $2::text) = billing.rail_subscription_key($1::text, $3::text), false)::boolean AS same
+`
+
+type SameProviderSubscriptionParams struct {
+	Rail string
+	A    string
+	B    string
+}
+
+// Whether two provider subscription ids name one subscription on the rail.
+func (q *Queries) SameProviderSubscription(ctx context.Context, arg SameProviderSubscriptionParams) (bool, error) {
+	row := q.db.QueryRow(ctx, sameProviderSubscription, arg.Rail, arg.A, arg.B)
+	var same bool
+	err := row.Scan(&same)
+	return same, err
 }
 
 const subscriptionRenewalSettledOn = `-- name: SubscriptionRenewalSettledOn :one

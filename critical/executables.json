@@ -840,6 +840,26 @@
     ],
     "OR-J38-S36": [
       "TestCardGuard/OR-J38-S36/ccbill-references-import-and-export-unchanged"
+    ],
+    "OR-J38-S37": [
+      "TestCCBillIdentity/OR-J38-S37",
+      "TestCCBillIdentity/OR-J38-S37/another-number-matches-nothing",
+      "TestCCBillIdentity/OR-J38-S37/cancellation-applies-and-takes-the-providers-spelling",
+      "TestCCBillIdentity/OR-J38-S37/chargeback-applies-and-takes-the-providers-spelling",
+      "TestCCBillIdentity/OR-J38-S37/renewal-extends-paid-through-and-access",
+      "TestCCBillIdentity/OR-J38-S37/a-replayed-legacy-book-names-the-respelled-row",
+      "TestCCBillIdentity/OR-J38-S37/expiration-ends-a-lapsed-membership"
+    ],
+    "OR-J38-S38": [
+      "TestCCBillIdentity/OR-J38-S38/datalink-import-matches-a-zero-dropped-legacy-id"
+    ],
+    "OR-J38-S39": [
+      "TestCCBillIdentity/OR-J38-S39/provider-refresh-respells-and-records-the-rebill"
+    ],
+    "OR-J38-S40": [
+      "TestCCBillIdentity/OR-J38-S40",
+      "TestCCBillIdentity/OR-J38-S40/advisory-matches-by-identity",
+      "TestCCBillIdentity/OR-J38-S40/enforce-without-insert-matches-by-identity"
     ]
   },
   "suites": {

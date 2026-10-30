@@ -134,7 +134,8 @@ func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, fi
 	// Serialize accepted amendments. A second confirmed change for the same
 	// future cycle supersedes the first by durable acceptance order; source
 	// replay keeps its original version and cannot become current again.
-	if _, err := q.GetSubscriptionByIDForUpdate(ctx, gen.GetSubscriptionByIDForUpdateParams{MerchantID: mid.UUID(), ID: *bill.SubscriptionID}); err != nil {
+	locked, err := q.GetSubscriptionByIDForUpdate(ctx, gen.GetSubscriptionByIDForUpdateParams{MerchantID: mid.UUID(), ID: *bill.SubscriptionID})
+	if err != nil {
 		return err
 	}
 
@@ -148,6 +149,17 @@ func DeclareSchedule(ctx context.Context, d *db.DB, source string, bill Bill, fi
 		var accepted Bill
 		if err := json.Unmarshal(prior.AcceptedBill, &accepted); err != nil {
 			return err
+		}
+		// A replay keeps the accepted spelling of the same provider
+		// subscription, which the provider may have respelled since.
+		if accepted.ProviderReference != bill.ProviderReference {
+			same, err := q.SameProviderSubscription(ctx, gen.SameProviderSubscriptionParams{Rail: locked.Rail, A: accepted.ProviderReference, B: bill.ProviderReference})
+			if err != nil {
+				return err
+			}
+			if same {
+				bill.ProviderReference = accepted.ProviderReference
+			}
 		}
 		// A replay keeps the accepted line's frozen name and ownership.
 		if len(accepted.Lines) == 1 && sameID(line.PriceID, accepted.Lines[0].PriceID) && sameID(line.ProductID, accepted.Lines[0].ProductID) {

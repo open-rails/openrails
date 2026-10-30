@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
 
@@ -344,6 +345,47 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 	return result, nil
 }
 
+// respell takes the snapshot's spelling of the provider ids the loaded rows
+// name by identity (rails.SubscriptionKey): always in the loaded state, so the
+// diff matches them, and in the database when write is set.
+func (e *Engine) respell(ctx context.Context, binding PSPBinding, snap *RemoteSnapshot, local *LocalState, write bool) error {
+	byKey := make(map[string]int, len(local.Subscriptions))
+	for i := range local.Subscriptions {
+		if s := &local.Subscriptions[i]; s.RailSubscriptionID != "" {
+			byKey[rails.SubscriptionKey(s.Rail, s.RailSubscriptionID)] = i
+		}
+	}
+	seen := map[string]bool{}
+	var refs []string
+	take := func(ref string) {
+		if ref == "" || seen[ref] {
+			return
+		}
+		seen[ref] = true
+		i, ok := byKey[rails.SubscriptionKey(binding.Rail, ref)]
+		if !ok || local.Subscriptions[i].RailSubscriptionID == ref {
+			return
+		}
+		local.Subscriptions[i].RailSubscriptionID = ref
+		refs = append(refs, ref)
+	}
+	for i := range snap.Subscriptions {
+		take(snap.Subscriptions[i].RailSubscriptionID)
+	}
+	for i := range snap.Transactions {
+		take(snap.Transactions[i].SubscriptionID)
+	}
+	if len(refs) == 0 || !write {
+		return nil
+	}
+	n, err := e.Writer.RespellSubscriptions(ctx, binding.ID, refs)
+	if err != nil {
+		return err
+	}
+	log.WithContext(ctx).WithField("respelled", n).Info("reconcile: provider subscription ids took the provider's spelling")
+	return nil
+}
+
 func (e *Engine) syncDBClocks() {
 	if store, ok := e.Store.(*PGStore); ok {
 		store.Now = e.now
@@ -424,6 +466,15 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	rep.RemoteSubscriptions = len(snap.Subscriptions)
 	rep.RemoteTransactions = len(snap.Transactions)
 	rep.RemotePaymentMethods = len(snap.PaymentMethods)
+
+	// The provider's spelling of a provider id wins, before anything matches
+	// by id: rows the snapshot names by identity but spelled otherwise (a
+	// CCBill id whose leading zero a legacy import dropped) take it in every
+	// mode, and in the database as a mirror write of a provider fact.
+	write := params.Mode == ModeEnforce && e.Writer != nil && params.Mutations.allowsInsert()
+	if err := e.respell(ctx, binding, snap, local, write); err != nil {
+		return rep, nil, nil, nil, fmt.Errorf("respell provider subscription ids: %w", err)
+	}
 
 	localLive := 0
 	for i := range local.Subscriptions {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -885,8 +886,8 @@ func latestChargeForRemoteSub(snap *RemoteSnapshot, r *RemoteSubscription) *Remo
 
 // perSubscriptionSnapshot narrows a bulk snapshot to one subscription's
 // evidence slice (roster entry, linked charge events, coverage), the shape the
-// decider consumes.
-func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string) *RemoteSnapshot {
+// decider consumes. It matches the id by its identity on the rail.
+func perSubscriptionSnapshot(snap *RemoteSnapshot, rail, psid string) *RemoteSnapshot {
 	out := &RemoteSnapshot{
 		Provider:     snap.Provider,
 		FetchedAt:    snap.FetchedAt,
@@ -894,12 +895,12 @@ func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string) *RemoteSnapshot 
 		Coverage:     snap.Coverage,
 	}
 	for i := range snap.Subscriptions {
-		if snap.Subscriptions[i].RailSubscriptionID == psid {
+		if rails.SameSubscription(rail, snap.Subscriptions[i].RailSubscriptionID, psid) {
 			out.Subscriptions = append(out.Subscriptions, snap.Subscriptions[i])
 		}
 	}
 	for i := range snap.Transactions {
-		if snap.Transactions[i].SubscriptionID == psid {
+		if rails.SameSubscription(rail, snap.Transactions[i].SubscriptionID, psid) {
 			out.Transactions = append(out.Transactions, snap.Transactions[i])
 		}
 	}
@@ -919,7 +920,7 @@ func decideApply(s *LocalSubscription, snap *RemoteSnapshot, now time.Time, opts
 		PeriodEnd:          s.CurrentPeriodEndsAt,
 		NextRetryScheduled: s.NextRetryAt != nil,
 	}
-	d := Decide(state, EvidenceBundle{Snapshot: perSubscriptionSnapshot(snap, s.RailSubscriptionID), EvidenceFloor: opts.EvidenceFloor}, now, 0)
+	d := Decide(state, EvidenceBundle{Snapshot: perSubscriptionSnapshot(snap, s.Rail, s.RailSubscriptionID), EvidenceFloor: opts.EvidenceFloor}, now, 0)
 	if d.Kind == TransitionNone {
 		return nil
 	}

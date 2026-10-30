@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/history"
 	"github.com/open-rails/openrails/internal/merchant"
+	log "github.com/sirupsen/logrus"
 )
 
 type SubscriptionFilters struct {
@@ -516,32 +517,23 @@ func (r *SubscriptionRepo) GetActiveSubscriptionAt(ctx context.Context, userID s
 // webhook-apply read-modify-writes. Must run inside a transaction; UpdateAt is
 // a full-row write, so the lock must be held from read to write.
 func (r *SubscriptionRepo) GetByPSPSubscriptionIDForUpdate(ctx context.Context, rail, railSubscriptionID string) (*models.Subscription, error) {
-	railSubscriptionID = strings.TrimSpace(railSubscriptionID)
-	if railSubscriptionID == "" {
-		return nil, errors.New("provider subscription reference is required")
-	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	pspID, err := db.RequirePSPID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	row, err := r.db.Gen(ctx).GetSubscriptionByPSPSubIDForUpdate(ctx, gen.GetSubscriptionByPSPSubIDForUpdateParams{
-		MerchantID:         merchantID.UUID(),
-		PspID:              pspID,
-		Rail:               rail,
-		RailSubscriptionID: railSubscriptionID,
+	return r.getByPSPSubscriptionID(ctx, rail, railSubscriptionID, func(q *gen.Queries, p gen.GetSubscriptionByPSPSubIDParams) (gen.BillingSubscription, error) {
+		return q.GetSubscriptionByPSPSubIDForUpdate(ctx, gen.GetSubscriptionByPSPSubIDForUpdateParams(p))
 	})
-	if err != nil {
-		return nil, err
-	}
-	return r.oneWithDetails(ctx, row, false)
 }
 
 // GetByPSPSubscriptionID finds a subscription by rail and rail_subscription_id.
 func (r *SubscriptionRepo) GetByPSPSubscriptionID(ctx context.Context, rail, railSubscriptionID string) (*models.Subscription, error) {
+	return r.getByPSPSubscriptionID(ctx, rail, railSubscriptionID, func(q *gen.Queries, p gen.GetSubscriptionByPSPSubIDParams) (gen.BillingSubscription, error) {
+		return q.GetSubscriptionByPSPSubID(ctx, p)
+	})
+}
+
+// getByPSPSubscriptionID matches the provider's id by its identity on the rail
+// (billing.rail_subscription_key). The id is the provider's spelling: a row
+// spelled otherwise (a CCBill id whose leading zero a legacy import dropped)
+// is respelled to it, so outbound calls use the provider's own id.
+func (r *SubscriptionRepo) getByPSPSubscriptionID(ctx context.Context, rail, railSubscriptionID string, get func(*gen.Queries, gen.GetSubscriptionByPSPSubIDParams) (gen.BillingSubscription, error)) (*models.Subscription, error) {
 	railSubscriptionID = strings.TrimSpace(railSubscriptionID)
 	if railSubscriptionID == "" {
 		return nil, errors.New("provider subscription reference is required")
@@ -554,14 +546,27 @@ func (r *SubscriptionRepo) GetByPSPSubscriptionID(ctx context.Context, rail, rai
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetSubscriptionByPSPSubID(ctx, gen.GetSubscriptionByPSPSubIDParams{
-		MerchantID:         merchantID.UUID(),
-		PspID:              pspID,
-		Rail:               rail,
-		RailSubscriptionID: railSubscriptionID,
-	})
+	q := r.db.Gen(ctx)
+	p := gen.GetSubscriptionByPSPSubIDParams{MerchantID: merchantID.UUID(), PspID: pspID, Rail: rail, RailSubscriptionID: railSubscriptionID}
+	row, err := get(q, p)
 	if err != nil {
 		return nil, err
+	}
+	if models.DerefStr(row.RailSubscriptionID) != railSubscriptionID {
+		healed, err := q.RespellSubscription(ctx, gen.RespellSubscriptionParams{MerchantID: row.MerchantID, ID: row.ID, RailSubscriptionID: railSubscriptionID})
+		switch {
+		case err == nil:
+			log.WithContext(ctx).WithFields(log.Fields{"subscription_id": row.ID, "rail": rail, "stored": models.DerefStr(row.RailSubscriptionID), "provider": railSubscriptionID}).
+				Info("Respelled the provider subscription id to the provider's spelling")
+			row = healed
+		case db.IsNotFound(err):
+			// A concurrent contact respelled it first.
+			if row, err = get(q, p); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("respell subscription %s to the provider's %q: %w", row.ID, railSubscriptionID, err)
+		}
 	}
 	return r.oneWithDetails(ctx, row, false)
 }

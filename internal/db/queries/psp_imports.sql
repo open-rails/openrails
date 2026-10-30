@@ -156,6 +156,13 @@ WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.mapping = d.mapping AND 
 SELECT key, customer_id FROM billing.psp_import_mappings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND mapping = sqlc.arg(mapping)::text AND key = ANY(sqlc.arg(keys)::text[]);
 
+-- name: LookupPSPImportSubscriptionMappings :many
+-- A mapping read by provider subscription ids matches each by its identity on
+-- the rail: key is the one given.
+SELECT k.key::text AS key, m.customer_id FROM unnest(sqlc.arg(keys)::text[]) AS k(key)
+JOIN billing.psp_import_mappings m ON m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.mapping = sqlc.arg(mapping)::text
+    AND billing.rail_subscription_key(sqlc.arg(rail)::text, m.key) = billing.rail_subscription_key(sqlc.arg(rail)::text, k.key);
+
 -- name: ListPSPImportsByIDs :many
 SELECT * FROM billing.psp_imports WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
 ORDER BY created_at DESC, id DESC;
@@ -239,10 +246,24 @@ SELECT subscription_id, row_version FROM billing.psp_import_basis
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND import_id = sqlc.arg(import_id)::uuid;
 
 -- name: ListPSPHeldSubscriptions :many
--- The PSP's subscriptions OpenRails holds, by provider ref.
-SELECT id, customer_id, rail_subscription_id::text AS ref, facts_authority, row_version, status FROM billing.subscriptions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND deleted_at IS NULL
-  AND rail_subscription_id = ANY(sqlc.arg(refs)::text[]);
+-- The PSP's subscriptions OpenRails holds, by provider ref: ref is the one
+-- given that names it.
+SELECT s.id, s.customer_id, r.ref::text AS ref, s.facts_authority, s.row_version, s.status
+FROM billing.psps p
+CROSS JOIN unnest(sqlc.arg(refs)::text[]) AS r(ref)
+JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.psp_id = p.id AND s.deleted_at IS NULL
+    AND s.rail_subscription_key = billing.rail_subscription_key(p.rail, r.ref)
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(psp_id)::uuid;
+
+-- name: RespellPSPSubscriptions :execrows
+-- The provider's spelling of a provider id wins: a provider read naming the
+-- PSP's subscriptions by identity rewrites those spelled otherwise.
+UPDATE billing.subscriptions s SET rail_subscription_id = r.ref
+FROM billing.psps p CROSS JOIN unnest(sqlc.arg(refs)::text[]) AS r(ref)
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(psp_id)::uuid
+  AND s.merchant_id = p.merchant_id AND s.psp_id = p.id AND s.deleted_at IS NULL
+  AND s.rail_subscription_key = billing.rail_subscription_key(p.rail, r.ref)
+  AND s.rail_subscription_id <> r.ref;
 
 -- name: ListPSPHeldVaults :many
 -- The customers holding the PSP's provider customers, by provider ref.
@@ -285,7 +306,7 @@ WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.import_id = sqlc.arg(imp
   AND (r.state = 'held' AND r.customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
        OR r.state = 'conflict' AND r.kind = 'subscription' AND EXISTS (
            SELECT 1 FROM billing.subscriptions s JOIN billing.psp_imports i ON i.merchant_id = s.merchant_id AND i.psp_id = s.psp_id
-           WHERE i.merchant_id = r.merchant_id AND i.id = r.import_id AND s.rail_subscription_id = r.ref
+           WHERE i.merchant_id = r.merchant_id AND i.id = r.import_id AND s.rail_subscription_key = billing.rail_subscription_key(i.rail, r.ref)
              AND s.customer_id = ANY(sqlc.arg(customer_ids)::uuid[]) AND s.deleted_at IS NULL))
 ORDER BY r.kind, r.id;
 
