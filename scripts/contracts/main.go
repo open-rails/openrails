@@ -99,14 +99,17 @@ func schema(ctx context.Context, root *os.Root, dsn string, write bool) error {
 	if err != nil && !write {
 		return err
 	}
-	if err := inventory(listed); err != nil {
-		return err
-	}
 	if dsn == "" {
+		if err := inventory(listed); err != nil {
+			return err
+		}
 		return schemasnapshot.CheckMigrations(listed)
 	}
 	applied, err := schemasnapshot.Capture(ctx, dsn)
 	if err != nil {
+		return err
+	}
+	if err := inventory(applied); err != nil {
 		return err
 	}
 	if write {
@@ -122,8 +125,8 @@ var schemaTable = regexp.MustCompile(`(?m)^table billing\.(\w+)`)
 
 // inventory requires the merchant archive's table inventory to name exactly
 // the schema list's tables: the archive judges only its inventory, so a table
-// a migration adds without an inventory decision would otherwise be exported
-// as nothing.
+// a migration adds without an inventory decision would otherwise be left out
+// of the export.
 func inventory(schema []byte) error {
 	var tables []string
 	for _, m := range schemaTable.FindAllSubmatch(schema, -1) {
