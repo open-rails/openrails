@@ -131,14 +131,15 @@ func (c *Connection) Probe(ctx context.Context) error {
 
 func vaultConfig(vc *config.VaultConfig) vault.Config {
 	return vault.Config{
-		Address:    vc.Address,
-		Namespace:  vc.Namespace,
-		AuthMethod: vc.AuthMethod,
-		Token:      vc.Token,
-		RoleID:     vc.RoleID,
-		SecretID:   vc.SecretID,
-		K8sRole:    vc.K8sRole,
-		AuthMount:  vc.AuthMount,
+		Address:     vc.Address,
+		Namespace:   vc.Namespace,
+		AuthMethod:  vc.AuthMethod,
+		Token:       vc.Token,
+		RoleID:      vc.RoleID,
+		SecretID:    vc.SecretID,
+		SecretsPath: vc.SecretsPath,
+		K8sRole:     vc.K8sRole,
+		AuthMount:   vc.AuthMount,
 	}
 }
 

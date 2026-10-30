@@ -34,10 +34,12 @@ type Config struct {
 	// see Login's token-mode doc for the (no-recovery) failure posture.
 	Token string
 	// AppRole credentials (AuthMethod == "approle"). The first attempt uses
-	// SecretID as supplied. Retries and reauthentication reread the mounted
-	// VAULT_SECRET_ID file when present, otherwise they use this static value.
-	RoleID   string
-	SecretID string
+	// SecretID as supplied. Retries and reauthentication reread the
+	// VAULT_SECRET_ID file under SecretsPath when present, otherwise they use
+	// this static value. An empty SecretsPath rereads nothing.
+	RoleID      string
+	SecretID    string
+	SecretsPath string
 	// Kubernetes auth (AuthMethod == "kubernetes").
 	K8sRole    string
 	K8sJWTPath string // defaults to the in-cluster service-account token path
@@ -48,11 +50,9 @@ type Config struct {
 
 const defaultK8sJWTPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
-// reauthSecretIDEnvVar is the operator-mounted-secret-file name (filename =
-// env-var name, config/secret_files.go's convention) resolveApproleSecretID
-// re-reads on retries and reauthentication when the approle secret_id is
-// file-delivered.
-const reauthSecretIDEnvVar = "VAULT_SECRET_ID"
+// reauthSecretIDFile is the operator-mounted secret file resolveApproleSecretID
+// rereads on retries and reauthentication.
+const reauthSecretIDFile = "VAULT_SECRET_ID"
 
 // ErrNotAuthenticated means this process holds no working Vault token yet (or
 // any longer). Operations refuse without a network call until the background
@@ -138,35 +138,20 @@ func login(ctx context.Context, client *vaultapi.Client, cfg Config) (*vaultapi.
 	}
 }
 
-// resolveApproleSecretID resolves the CURRENT approle secret_id on retries
-// and reauthentication (#751 task 2), mirroring the configuration loader's
-// operator-mounted-secret-file convention (config/secret_files.go: a file
-// named after the env var, typically rendered by a Vault Agent template or a
-// CSI driver into /vault/secrets):
-//
-//   - a VAULT_SECRET_ID file under the mounted secrets dir: its CURRENT
-//     content, re-read fresh every call via config.SecretFiles() (the SAME
-//     accessor config.Load uses), so operator rotation is visible to the
-//     very next re-auth attempt;
-//   - otherwise: staticFallback, the value config.Load already resolved once
-//     at boot (an env var or a literal config value — either way frozen for
-//     the process lifetime, so there is nothing to re-read).
-//
-// This deliberately does NOT re-check the env var directly (#712: env is
-// read exactly once, at the binary boundary, by the config package — no
-// other package may call os.Getenv). Practically this never matters: the
-// file and env conventions are alternative delivery mechanisms for the same
-// slot, not meant to be set together. In the pathological case where an
-// operator sets both, config.Load's boot-time precedence (env wins) governs
-// the INITIAL login; a re-auth that finds the file still mounted will use
-// its content rather than the frozen env value — a documented, accepted
-// corner case, not a silent bug.
-func resolveApproleSecretID(staticFallback string) (string, error) {
-	files, err := config.SecretFiles()
+// resolveApproleSecretID is the approle secret_id for a retry or
+// reauthentication (#751): the current content of the VAULT_SECRET_ID file
+// under dir, so operator rotation is visible to the next attempt, otherwise
+// staticFallback, the value configuration resolved once at boot. The initial
+// login never comes here (#1252).
+func resolveApproleSecretID(dir, staticFallback string) (string, error) {
+	if dir == "" {
+		return staticFallback, nil
+	}
+	files, err := config.SecretFiles(dir)
 	if err != nil {
 		return "", fmt.Errorf("re-read mounted secret files: %w", err)
 	}
-	if v, ok := files[reauthSecretIDEnvVar]; ok {
+	if v, ok := files[reauthSecretIDFile]; ok {
 		return v, nil
 	}
 	return staticFallback, nil
@@ -299,7 +284,7 @@ func (s *Supervisor) authenticate(ctx context.Context, initial bool) (*vaultapi.
 	if s.reauthable {
 		cfg := s.cfg
 		if !initial && cfg.AuthMethod == "approle" {
-			secretID, err := resolveApproleSecretID(cfg.SecretID)
+			secretID, err := resolveApproleSecretID(cfg.SecretsPath, cfg.SecretID)
 			if err != nil {
 				return nil, fmt.Errorf("vault: resolve approle secret_id: %w", err)
 			}

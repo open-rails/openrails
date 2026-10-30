@@ -232,7 +232,11 @@ type VaultConfig struct {
 	Token    string `yaml:"token" json:"token"`
 	RoleID   string `yaml:"role_id" json:"role_id"`
 	SecretID string `yaml:"secret_id" json:"secret_id"`
-	K8sRole  string `yaml:"k8s_role" json:"k8s_role"`
+	// SecretsPath is a directory of operator-mounted secret files named after
+	// environment variables. Approle reauthentication re-reads VAULT_SECRET_ID
+	// there, so a rotated secret is used; empty re-reads nothing.
+	SecretsPath string `yaml:"secrets_path" json:"secrets_path"`
+	K8sRole     string `yaml:"k8s_role" json:"k8s_role"`
 	// AuthMount is where the approle or kubernetes auth method is mounted:
 	// the -path of `vault auth enable`, without auth/. Empty is the method's
 	// name.
