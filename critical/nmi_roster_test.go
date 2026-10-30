@@ -33,7 +33,7 @@ func TestNMIRoster(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, imported.Blocked, "%+v", imported.Reasons)
 		require.Len(t, imported.Imported, members)
-		require.Eventually(t, func() bool { return old.RosterTruncations() < truncated }, 30*time.Second, 50*time.Millisecond, "the bulk read meets the cut-short page")
+		require.Eventually(t, func() bool { return old.RosterTruncations() < truncated }, 30*time.Second, 50*time.Millisecond, "a roster read meets the cut-short page")
 		paid := *book.Subscriptions[0].PaidThrough
 		for _, i := range []int{0, members - 1} {
 			customer := book.Customers[i].Customer
