@@ -126,29 +126,11 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 			subs = append(subs, sub)
 		}
 	} else {
-		// Live-verified pagination contract: next_cursor is a STRING and empty
-		// pages mid-stream are legal — stop only on has_more=false/no cursor.
-		cursor := ""
-		seenCursor := map[string]bool{}
-		for {
-			page, err := f.Client.ListSubscriptionsPage(ctx, cursor, nmiV5PageLimit)
-			if err != nil {
-				return nil, err
-			}
-			subs = append(subs, page.Subscriptions...)
-			next := string(page.NextCursor)
-			if !page.HasMore {
-				break
-			}
-			if next == "" {
-				return nil, fmt.Errorf("nmi subscription pagination omitted the next cursor")
-			}
-			if seenCursor[next] {
-				return nil, fmt.Errorf("nmi subscription pagination repeated cursor %s; refusing incomplete snapshot", next)
-			}
-			seenCursor[next] = true
-			cursor = next
+		roster, err := readNMIRoster(ctx, f.Client)
+		if err != nil {
+			return nil, err
 		}
+		subs = roster
 	}
 
 	out := make([]RemoteSubscription, 0, len(subs))
@@ -167,6 +149,34 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 		out = append(out, sub)
 	}
 	return out, nil
+}
+
+// readNMIRoster reads every page of GET /v5/subscriptions. Live-verified
+// pagination contract: next_cursor is a string and empty pages mid-stream are
+// legal; the read stops only on has_more=false. A page claiming more rows
+// without a cursor, or repeating one, is refused: an incomplete roster must
+// never pass for an exhaustive one.
+func readNMIRoster(ctx context.Context, client nmiQueryClient) ([]nmi.V5Subscription, error) {
+	var out []nmi.V5Subscription
+	cursor, seen := "", map[string]bool{}
+	for {
+		page, err := client.ListSubscriptionsPage(ctx, cursor, nmiV5PageLimit)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page.Subscriptions...)
+		next := string(page.NextCursor)
+		if !page.HasMore {
+			return out, nil
+		}
+		if next == "" {
+			return nil, fmt.Errorf("nmi subscription pagination omitted the next cursor")
+		}
+		if seen[next] {
+			return nil, fmt.Errorf("nmi subscription pagination repeated cursor %s; refusing incomplete snapshot", next)
+		}
+		seen[next], cursor = true, next
+	}
 }
 
 // NMIRemoteSubscription is one v5 subscription as a pull reads it at now.

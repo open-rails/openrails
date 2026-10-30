@@ -820,6 +820,9 @@
     "OR-J15-S70": [
       "TestDueWork/OR-J15-S70/an-nmi-renewal-the-probe-cannot-settle-is-read-by-id-after-its-grace"
     ],
+    "OR-J15-S71": [
+      "TestNMIRoster/OR-J15-S71/a-truncated-roster-page-resolves-nothing"
+    ],
     "OR-J29-S70": [
       "TestDueWork/OR-J29-S70/a-grant-commits-with-its-customers-convergence"
     ],

@@ -231,6 +231,10 @@ func (m *Mock) v5(method string, seg []string, q url.Values, body []byte) (int, 
 			}
 		}
 		data, next, more := page(data, q)
+		if m.truncateRoster > 0 {
+			m.truncateRoster--
+			next, more = "", true
+		}
 		return http.StatusOK, obj{"subscriptions": data, "next_cursor": next, "has_more": more}
 	case seg[0] == "subscriptions" && len(seg) == 2 && (method == http.MethodGet || method == http.MethodDelete):
 		s, ok := m.schedules[seg[1]]
