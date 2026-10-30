@@ -11,10 +11,17 @@ ON CONFLICT (merchant_id, subscription_id, source_reference) DO NOTHING;
 SELECT * FROM billing.provider_schedules WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid AND source_reference = sqlc.arg(source_reference)::text FOR UPDATE;
 
 -- name: ListProviderSchedules :many
-SELECT * FROM billing.provider_schedules
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
-  AND provider_reference = sqlc.arg(provider_reference)::text
-ORDER BY first_due_at ASC, accepted_version ASC FOR UPDATE;
+-- provider_reference is the subscription's provider id when accepted: it
+-- matches by identity, so a later respelling keeps its schedules.
+SELECT ps.* FROM billing.provider_schedules ps
+JOIN billing.subscriptions s ON s.merchant_id = ps.merchant_id AND s.id = ps.subscription_id
+WHERE ps.merchant_id = sqlc.arg(merchant_id)::uuid AND ps.subscription_id = sqlc.arg(subscription_id)::uuid
+  AND billing.rail_subscription_key(s.rail, ps.provider_reference) = billing.rail_subscription_key(s.rail, sqlc.arg(provider_reference)::text)
+ORDER BY ps.first_due_at ASC, ps.accepted_version ASC FOR UPDATE OF ps;
+
+-- name: SameProviderSubscription :one
+-- Whether two provider subscription ids name one subscription on the rail.
+SELECT COALESCE(billing.rail_subscription_key(sqlc.arg(rail)::text, sqlc.arg(a)::text) = billing.rail_subscription_key(sqlc.arg(rail)::text, sqlc.arg(b)::text), false)::boolean AS same;
 
 -- name: GetProviderCycleReceipt :one
 SELECT * FROM billing.provider_cycle_receipts WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND transaction_id = sqlc.arg(transaction_id)::text;

@@ -344,6 +344,43 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 	return result, nil
 }
 
+// respell takes the snapshot's spelling of the PSP's provider ids, in the
+// database and in the loaded local state.
+func (e *Engine) respell(ctx context.Context, psp uuid.UUID, snap *RemoteSnapshot, local *LocalState) error {
+	seen := map[string]bool{}
+	var refs []string
+	add := func(ref string) {
+		if ref != "" && !seen[ref] {
+			seen[ref] = true
+			refs = append(refs, ref)
+		}
+	}
+	for i := range snap.Subscriptions {
+		add(snap.Subscriptions[i].RailSubscriptionID)
+	}
+	for i := range snap.Transactions {
+		add(snap.Transactions[i].SubscriptionID)
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	respelled, err := e.Writer.RespellSubscriptions(ctx, psp, refs)
+	if err != nil || len(respelled) == 0 {
+		return err
+	}
+	byID := make(map[uuid.UUID]Respelled, len(respelled))
+	for _, r := range respelled {
+		byID[r.ID] = r
+	}
+	for i := range local.Subscriptions {
+		if r, ok := byID[local.Subscriptions[i].ID]; ok {
+			local.Subscriptions[i].RailSubscriptionID, local.Subscriptions[i].RowVersion = r.Ref, r.RowVersion
+		}
+	}
+	log.WithContext(ctx).WithField("respelled", len(respelled)).Info("reconcile: provider subscription ids took the provider's spelling")
+	return nil
+}
+
 func (e *Engine) syncDBClocks() {
 	if store, ok := e.Store.(*PGStore); ok {
 		store.Now = e.now
@@ -424,6 +461,16 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	rep.RemoteSubscriptions = len(snap.Subscriptions)
 	rep.RemoteTransactions = len(snap.Transactions)
 	rep.RemotePaymentMethods = len(snap.PaymentMethods)
+
+	// The provider's spelling of a provider id wins: a mirror write of a
+	// provider fact, before anything matches by id, respells the rows the
+	// snapshot names by identity but spelled otherwise (a CCBill id whose
+	// leading zero a legacy import dropped).
+	if params.Mode == ModeEnforce && e.Writer != nil && params.Mutations.allowsInsert() {
+		if err := e.respell(ctx, binding.ID, snap, local); err != nil {
+			return rep, nil, nil, nil, fmt.Errorf("respell provider subscription ids: %w", err)
+		}
+	}
 
 	localLive := 0
 	for i := range local.Subscriptions {

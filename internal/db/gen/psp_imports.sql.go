@@ -341,15 +341,18 @@ func (q *Queries) ListCustomerVaultMethods(ctx context.Context, arg ListCustomer
 }
 
 const listPSPHeldSubscriptions = `-- name: ListPSPHeldSubscriptions :many
-SELECT id, customer_id, rail_subscription_id::text AS ref, facts_authority, row_version, status FROM billing.subscriptions
-WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND deleted_at IS NULL
-  AND rail_subscription_id = ANY($3::text[])
+SELECT s.id, s.customer_id, r.ref::text AS ref, s.facts_authority, s.row_version, s.status
+FROM billing.psps p
+CROSS JOIN unnest($1::text[]) AS r(ref)
+JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.psp_id = p.id AND s.deleted_at IS NULL
+    AND s.rail_subscription_key = billing.rail_subscription_key(p.rail, r.ref)
+WHERE p.merchant_id = $2::uuid AND p.id = $3::uuid
 `
 
 type ListPSPHeldSubscriptionsParams struct {
+	Refs       []string
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
-	Refs       []string
 }
 
 type ListPSPHeldSubscriptionsRow struct {
@@ -361,9 +364,10 @@ type ListPSPHeldSubscriptionsRow struct {
 	Status         string
 }
 
-// The PSP's subscriptions OpenRails holds, by provider ref.
+// The PSP's subscriptions OpenRails holds, by provider ref: ref is the one
+// given that names it.
 func (q *Queries) ListPSPHeldSubscriptions(ctx context.Context, arg ListPSPHeldSubscriptionsParams) ([]ListPSPHeldSubscriptionsRow, error) {
-	rows, err := q.db.Query(ctx, listPSPHeldSubscriptions, arg.MerchantID, arg.PspID, arg.Refs)
+	rows, err := q.db.Query(ctx, listPSPHeldSubscriptions, arg.Refs, arg.MerchantID, arg.PspID)
 	if err != nil {
 		return nil, err
 	}
@@ -565,7 +569,7 @@ WHERE r.merchant_id = $1::uuid AND r.import_id = $2::uuid
   AND (r.state = 'held' AND r.customer_id = ANY($3::uuid[])
        OR r.state = 'conflict' AND r.kind = 'subscription' AND EXISTS (
            SELECT 1 FROM billing.subscriptions s JOIN billing.psp_imports i ON i.merchant_id = s.merchant_id AND i.psp_id = s.psp_id
-           WHERE i.merchant_id = r.merchant_id AND i.id = r.import_id AND s.rail_subscription_id = r.ref
+           WHERE i.merchant_id = r.merchant_id AND i.id = r.import_id AND s.rail_subscription_key = billing.rail_subscription_key(i.rail, r.ref)
              AND s.customer_id = ANY($3::uuid[]) AND s.deleted_at IS NULL))
 ORDER BY r.kind, r.id
 `
@@ -1255,6 +1259,51 @@ func (q *Queries) LookupPSPImportMappings(ctx context.Context, arg LookupPSPImpo
 	return items, nil
 }
 
+const lookupPSPImportSubscriptionMappings = `-- name: LookupPSPImportSubscriptionMappings :many
+SELECT k.key::text AS key, m.customer_id FROM unnest($1::text[]) AS k(key)
+JOIN billing.psp_import_mappings m ON m.merchant_id = $2::uuid AND m.mapping = $3::text
+    AND billing.rail_subscription_key($4::text, m.key) = billing.rail_subscription_key($4::text, k.key)
+`
+
+type LookupPSPImportSubscriptionMappingsParams struct {
+	Keys       []string
+	MerchantID uuid.UUID
+	Mapping    string
+	Rail       string
+}
+
+type LookupPSPImportSubscriptionMappingsRow struct {
+	Key        string
+	CustomerID uuid.UUID
+}
+
+// A mapping read by provider subscription ids matches each by its identity on
+// the rail: key is the one given.
+func (q *Queries) LookupPSPImportSubscriptionMappings(ctx context.Context, arg LookupPSPImportSubscriptionMappingsParams) ([]LookupPSPImportSubscriptionMappingsRow, error) {
+	rows, err := q.db.Query(ctx, lookupPSPImportSubscriptionMappings,
+		arg.Keys,
+		arg.MerchantID,
+		arg.Mapping,
+		arg.Rail,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LookupPSPImportSubscriptionMappingsRow
+	for rows.Next() {
+		var i LookupPSPImportSubscriptionMappingsRow
+		if err := rows.Scan(&i.Key, &i.CustomerID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordPSPImportBasis = `-- name: RecordPSPImportBasis :exec
 INSERT INTO billing.psp_import_basis (merchant_id, import_id, subscription_id, row_version)
 SELECT s.merchant_id, $1::uuid, s.id, s.row_version FROM billing.subscriptions s
@@ -1309,6 +1358,50 @@ func (q *Queries) RequestPSPImportApply(ctx context.Context, arg RequestPSPImpor
 		&i.ApplyRequestedBy,
 	)
 	return i, err
+}
+
+const respellPSPSubscriptions = `-- name: RespellPSPSubscriptions :many
+UPDATE billing.subscriptions s SET rail_subscription_id = r.ref
+FROM billing.psps p CROSS JOIN unnest($3::text[]) AS r(ref)
+WHERE p.merchant_id = $1::uuid AND p.id = $2::uuid
+  AND s.merchant_id = p.merchant_id AND s.psp_id = p.id AND s.deleted_at IS NULL
+  AND s.rail_subscription_key = billing.rail_subscription_key(p.rail, r.ref)
+  AND s.rail_subscription_id <> r.ref
+RETURNING s.id, s.rail_subscription_id::text AS ref, s.row_version
+`
+
+type RespellPSPSubscriptionsParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Refs       []string
+}
+
+type RespellPSPSubscriptionsRow struct {
+	ID         uuid.UUID
+	Ref        string
+	RowVersion int64
+}
+
+// The provider's spelling of a provider id wins: a provider read naming the
+// PSP's subscriptions by identity rewrites those spelled otherwise.
+func (q *Queries) RespellPSPSubscriptions(ctx context.Context, arg RespellPSPSubscriptionsParams) ([]RespellPSPSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, respellPSPSubscriptions, arg.MerchantID, arg.PspID, arg.Refs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RespellPSPSubscriptionsRow
+	for rows.Next() {
+		var i RespellPSPSubscriptionsRow
+		if err := rows.Scan(&i.ID, &i.Ref, &i.RowVersion); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setPSPImportApplied = `-- name: SetPSPImportApplied :exec

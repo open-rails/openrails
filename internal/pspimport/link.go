@@ -150,9 +150,22 @@ type linkUpdate struct {
 type linker struct {
 	im     *Importer
 	mid    billing.MerchantID
+	rail   string
 	rules  []rule
 	mapped map[string]map[string]uuid.UUID
 	dir    map[string][]uuid.UUID
+}
+
+// byIdentity: a mapping read by a provider subscription id matches keys by
+// the id's identity on the rail (a CCBill id without its leading zeros).
+func byIdentity(r rule) bool { return r.Fact == FactSubscriptionRef }
+
+// mappingCache names the cache of a rule's mapping reads.
+func mappingCache(r rule) string {
+	if byIdentity(r) {
+		return FactSubscriptionRef + "\x1f" + r.Mapping
+	}
+	return r.Mapping
 }
 
 // setManualLinks stores the records a person linked by hand.
@@ -193,7 +206,7 @@ func (im *Importer) link(ctx context.Context, row gen.BillingPspImport) ([]heldS
 	if err != nil {
 		return nil, err
 	}
-	l := &linker{im: im, mid: mid, rules: rules, mapped: map[string]map[string]uuid.UUID{}, dir: map[string][]uuid.UUID{}}
+	l := &linker{im: im, mid: mid, rail: row.Rail, rules: rules, mapped: map[string]map[string]uuid.UUID{}, dir: map[string][]uuid.UUID{}}
 	custOf := map[string]uuid.UUID{}
 	subOf := map[string]uuid.UUID{}
 	// conflicted are the customer and subscription refs whose rules disagree:
@@ -338,7 +351,7 @@ func (l *linker) decide(ctx context.Context, r gen.BillingPspImportRecord, paren
 			}
 			switch rule.Via {
 			case billing.PSPImportViaMapping:
-				if c, ok := l.mapped[rule.Mapping][key]; ok {
+				if c, ok := l.mapped[mappingCache(rule)][key]; ok {
 					cands = append(cands, candidate{c, via})
 				}
 			case billing.PSPImportViaCustomerID:
@@ -386,7 +399,11 @@ func distinct(cands []candidate) map[uuid.UUID]bool {
 
 // prefetch loads the mappings a page of records looks up, one query per mapping.
 func (l *linker) prefetch(ctx context.Context, page []gen.BillingPspImportRecord) error {
-	keys := map[string][]string{}
+	type lookup struct {
+		rule rule
+		keys []string
+	}
+	lookups := map[string]*lookup{}
 	for _, r := range page {
 		var f facts
 		if err := json.Unmarshal(r.Facts, &f); err != nil {
@@ -396,25 +413,40 @@ func (l *linker) prefetch(ctx context.Context, page []gen.BillingPspImportRecord
 			if rule.Via != billing.PSPImportViaMapping {
 				continue
 			}
+			cache := mappingCache(rule)
 			for _, v := range f[rule.Fact] {
 				if k := rule.key(v); k != "" {
-					if _, cached := l.mapped[rule.Mapping][k]; !cached {
-						keys[rule.Mapping] = append(keys[rule.Mapping], k)
+					if _, cached := l.mapped[cache][k]; !cached {
+						if lookups[cache] == nil {
+							lookups[cache] = &lookup{rule: rule}
+						}
+						lookups[cache].keys = append(lookups[cache].keys, k)
 					}
 				}
 			}
 		}
 	}
-	for mapping, ks := range keys {
-		rows, err := l.im.DB.Gen(ctx).LookupPSPImportMappings(ctx, gen.LookupPSPImportMappingsParams{MerchantID: l.mid.UUID(), Mapping: mapping, Keys: ks})
+	q := l.im.DB.Gen(ctx)
+	for cache, lk := range lookups {
+		if l.mapped[cache] == nil {
+			l.mapped[cache] = map[string]uuid.UUID{}
+		}
+		if byIdentity(lk.rule) {
+			rows, err := q.LookupPSPImportSubscriptionMappings(ctx, gen.LookupPSPImportSubscriptionMappingsParams{MerchantID: l.mid.UUID(), Mapping: lk.rule.Mapping, Rail: l.rail, Keys: lk.keys})
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				l.mapped[cache][row.Key] = row.CustomerID
+			}
+			continue
+		}
+		rows, err := q.LookupPSPImportMappings(ctx, gen.LookupPSPImportMappingsParams{MerchantID: l.mid.UUID(), Mapping: lk.rule.Mapping, Keys: lk.keys})
 		if err != nil {
 			return err
 		}
-		if l.mapped[mapping] == nil {
-			l.mapped[mapping] = map[string]uuid.UUID{}
-		}
 		for _, row := range rows {
-			l.mapped[mapping][row.Key] = row.CustomerID
+			l.mapped[cache][row.Key] = row.CustomerID
 		}
 	}
 	return nil

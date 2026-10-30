@@ -110,13 +110,18 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	}
 	ctx = merchant.WithID(ctx, merchantID)
 
+	book, err := respellHeld(ctx, database.Gen(ctx), merchantID.UUID(), opts.Book)
+	if err != nil {
+		return res, err
+	}
+	opts.Book = book
 	history := reconcile.NewDeclaredHistory()
 	if err := validateReceiptSources(opts.Book, history); err != nil {
 		return res, err
 	}
 	var plans []plannedPurchase
 	var historical []historicalPayment
-	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := database.NewWithPgxTx(tx)
 		qx := txdb.Qx(ctx)
 		q := txdb.Gen(ctx)

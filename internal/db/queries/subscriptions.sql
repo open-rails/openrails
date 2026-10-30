@@ -44,7 +44,10 @@ UPDATE billing.subscriptions SET
     current_period_starts_at = sqlc.narg(current_period_starts_at),
     current_period_ends_at = sqlc.narg(current_period_ends_at),
     rail = sqlc.arg(rail),
-    rail_subscription_id = NULLIF(sqlc.arg(rail_subscription_id)::text, ''),
+    -- An image keeps the stored spelling of the same provider id: only a
+    -- provider contact respells it (RespellSubscription).
+    rail_subscription_id = CASE WHEN billing.rail_subscription_key(sqlc.arg(rail)::text, NULLIF(sqlc.arg(rail_subscription_id)::text, '')) = subscriptions.rail_subscription_key
+        THEN subscriptions.rail_subscription_id ELSE NULLIF(sqlc.arg(rail_subscription_id)::text, '') END,
     payment_method_id = sqlc.narg(payment_method_id),
     last_retry_at = sqlc.narg(last_retry_at),
     retry_attempts = sqlc.narg(retry_attempts),
@@ -79,7 +82,10 @@ UPDATE billing.subscriptions SET
     current_period_starts_at = sqlc.narg(current_period_starts_at),
     current_period_ends_at = sqlc.narg(current_period_ends_at),
     rail = sqlc.arg(rail),
-    rail_subscription_id = NULLIF(sqlc.arg(rail_subscription_id)::text, ''),
+    -- An image keeps the stored spelling of the same provider id: only a
+    -- provider contact respells it (RespellSubscription).
+    rail_subscription_id = CASE WHEN billing.rail_subscription_key(sqlc.arg(rail)::text, NULLIF(sqlc.arg(rail_subscription_id)::text, '')) = subscriptions.rail_subscription_key
+        THEN subscriptions.rail_subscription_id ELSE NULLIF(sqlc.arg(rail_subscription_id)::text, '') END,
     payment_method_id = sqlc.narg(payment_method_id),
     last_retry_at = sqlc.narg(last_retry_at),
     retry_attempts = sqlc.narg(retry_attempts),
@@ -147,7 +153,8 @@ LIMIT 1;
 -- name: GetSubscriptionByPSPSubID :one
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
-  AND sub.rail = $1 AND sub.rail_subscription_id = sqlc.arg(rail_subscription_id)::text
+  AND sub.rail = sqlc.arg(rail)::text
+  AND sub.rail_subscription_key = billing.rail_subscription_key(sqlc.arg(rail)::text, sqlc.arg(rail_subscription_id)::text)
   AND sub.deleted_at IS NULL
 LIMIT 1;
 
@@ -156,10 +163,29 @@ LIMIT 1;
 -- the read so a concurrent full-row UpdateAt can't clobber it.
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
-  AND sub.rail = $1 AND sub.rail_subscription_id = sqlc.arg(rail_subscription_id)::text
+  AND sub.rail = sqlc.arg(rail)::text
+  AND sub.rail_subscription_key = billing.rail_subscription_key(sqlc.arg(rail)::text, sqlc.arg(rail_subscription_id)::text)
   AND sub.deleted_at IS NULL
 LIMIT 1
 FOR UPDATE;
+
+-- name: ListRespelledSubscriptions :many
+-- The rows naming these provider ids by identity but spelled otherwise: ref
+-- as given, spelled as stored.
+SELECT r.ref::text AS ref, s.rail_subscription_id::text AS spelled
+FROM unnest(sqlc.arg(psp_ids)::uuid[], sqlc.arg(rails)::text[], sqlc.arg(refs)::text[]) AS r(psp_id, rail, ref)
+JOIN billing.subscriptions s ON s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.psp_id = r.psp_id AND s.rail = r.rail
+    AND s.rail_subscription_key = billing.rail_subscription_key(r.rail, r.ref) AND s.deleted_at IS NULL
+WHERE s.rail_subscription_id <> r.ref;
+
+-- name: RespellSubscription :one
+-- The provider's spelling of the row's provider id wins: a webhook naming it
+-- by identity rewrites it. No row: already so spelled.
+UPDATE billing.subscriptions SET rail_subscription_id = sqlc.arg(rail_subscription_id)::text
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND deleted_at IS NULL
+  AND rail_subscription_key = billing.rail_subscription_key(rail, sqlc.arg(rail_subscription_id)::text)
+  AND rail_subscription_id <> sqlc.arg(rail_subscription_id)::text
+RETURNING *;
 
 -- name: GetSubscriptionByGatewayOrder :one
 SELECT * FROM billing.subscriptions sub
@@ -186,7 +212,7 @@ UPDATE billing.subscriptions SET
     updated_at = now()
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe'
   AND psp_id = sqlc.arg(psp_id)::uuid
-  AND rail_subscription_id = sqlc.arg(rail_subscription_id)::text
+  AND rail_subscription_key = billing.rail_subscription_key('stripe', sqlc.arg(rail_subscription_id)::text)
   AND deleted_at IS NULL
   AND payment_method_id IS DISTINCT FROM sqlc.narg(payment_method_id)::uuid
   AND set_config('openrails.subscription_history', jsonb_build_object(
@@ -466,7 +492,7 @@ UPDATE billing.subscriptions
 SET deletion_scheduled_at=NULL, updated_at=sqlc.arg(now)::timestamptz
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
   AND psp_id=sqlc.arg(psp_id)::uuid
-  AND rail_subscription_id=sqlc.arg(rail_subscription_id)::text
+  AND rail_subscription_key=billing.rail_subscription_key(rail, sqlc.arg(rail_subscription_id)::text)
   AND deleted_at IS NULL
   AND deletion_scheduled_at IS NOT NULL;
 

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 262,
+  "scenario_count": 265,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1117,6 +1117,21 @@
       "id": "OR-J38-S36",
       "journey": "J38",
       "name": "Numeric CCBill references survive host import replay and archive validation while real cards are refused"
+    },
+    {
+      "id": "OR-J38-S37",
+      "journey": "J38",
+      "name": "CCBill webhooks naming a 19-digit id apply to the legacy row stored without its leading zero, which takes the provider's spelling; another number matches nothing"
+    },
+    {
+      "id": "OR-J38-S38",
+      "journey": "J38",
+      "name": "A CCBill DataLink import holds and respells a legacy row stored without the leading zero, and links through a zero-dropped legacy mapping"
+    },
+    {
+      "id": "OR-J38-S39",
+      "journey": "J38",
+      "name": "A CCBill provider refresh respells a zero-dropped legacy row to the roster's id and records its rebill"
     },
     {
       "id": "OR-J22-S06",

@@ -53,6 +53,11 @@ func (im *Importer) classify(ctx context.Context, row gen.BillingPspImport) ([]h
 			subs := map[string]gen.ListPSPHeldSubscriptionsRow{}
 			switch kind {
 			case billing.PSPImportSubscription:
+				// The provider's spelling wins: a held row it names by
+				// identity but spelled otherwise takes the provider's id.
+				if _, err := q.RespellPSPSubscriptions(ctx, gen.RespellPSPSubscriptionsParams{MerchantID: row.MerchantID, PspID: row.PspID, Refs: refs}); err != nil {
+					return err
+				}
 				rows, err := q.ListPSPHeldSubscriptions(ctx, gen.ListPSPHeldSubscriptionsParams{MerchantID: row.MerchantID, PspID: row.PspID, Refs: refs})
 				if err != nil {
 					return err
