@@ -25,12 +25,15 @@ func TestNMIRoster(t *testing.T) {
 	unverified := billing.SubscriptionStatus("unverified")
 	t.Run("OR-J15-S71/a-truncated-roster-page-resolves-nothing", func(t *testing.T) {
 		a, old, fleet, book, now := lapsedNMIBook(t, members)
-		old.TruncateRoster(1)
+		// Every roster read is cut short until the test lifts the fault, so
+		// the pull lane and the bulk read both meet it whichever runs first.
+		const truncated = 1 << 20
+		old.TruncateRoster(truncated)
 		imported, err := a.alpha.ImportBilling(t.Context(), book)
 		require.NoError(t, err)
 		require.Empty(t, imported.Blocked, "%+v", imported.Reasons)
 		require.Len(t, imported.Imported, members)
-		require.Eventually(t, func() bool { return old.RosterTruncations() == 0 }, 30*time.Second, 50*time.Millisecond, "the bulk read meets the cut-short page")
+		require.Eventually(t, func() bool { return old.RosterTruncations() < truncated }, 30*time.Second, 50*time.Millisecond, "the bulk read meets the cut-short page")
 		paid := *book.Subscriptions[0].PaidThrough
 		for _, i := range []int{0, members - 1} {
 			customer := book.Customers[i].Customer
@@ -39,6 +42,7 @@ func TestNMIRoster(t *testing.T) {
 				return err != nil || len(subs.Items) != 1 || subs.Items[0].Status != unverified || !subs.Items[0].CurrentPeriodEndsAt.Equal(paid)
 			}, 3*time.Second, 100*time.Millisecond, "a cut-short roster is no evidence: nothing is adopted or cancelled")
 		}
+		old.TruncateRoster(0)
 		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
 		for _, i := range []int{0, members - 1} {
 			customer := book.Customers[i].Customer
@@ -67,10 +71,14 @@ func lapsedNMIBook(t *testing.T, members int) (*authorityWorld, *nmimock.Mock, *
 	m := a.cfg.Merchants["alpha"]
 	m.PSPs = openrails.PSPs{"old": nmiPSP("old", true), "new": nmiPSP("new", false)}
 	a.cfg.Merchants["alpha"] = m
+	// A refresh pass verifies unverified rows only for a merchant whose
+	// provider writes are not held, so the next whole read can happen.
+	a.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
 	a.alpha, err = a.engine.MerchantBySlug("alpha")
 	require.NoError(t, err)
+	armDestructive(t, a, true)
 	fleet := hostFleet(t, a.world, 2)
 	require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 	require.NoError(t, fleet.Start(t.Context()))
