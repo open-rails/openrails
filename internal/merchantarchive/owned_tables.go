@@ -108,3 +108,7 @@ var ownedTables = []string{
 	"webhook_health_daily",
 	"periodic_leases",
 }
+
+// OwnedTables is the inventory, for the contracts check that keeps it equal
+// to the schema snapshot's tables.
+func OwnedTables() []string { return ownedTables }
