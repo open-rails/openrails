@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 265,
+  "scenario_count": 266,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1132,6 +1132,11 @@
       "id": "OR-J38-S39",
       "journey": "J38",
       "name": "A CCBill provider refresh respells a zero-dropped legacy row to the roster's id and records its rebill"
+    },
+    {
+      "id": "OR-J38-S40",
+      "journey": "J38",
+      "name": "A CCBill pull that may not write the mirror, advisory or enforce without inserts, matches a zero-dropped legacy row by identity against a complete roster: nothing reads as missing, gone or canceled, and the row keeps its spelling"
     },
     {
       "id": "OR-J22-S06",

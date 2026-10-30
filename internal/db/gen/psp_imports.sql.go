@@ -1360,14 +1360,13 @@ func (q *Queries) RequestPSPImportApply(ctx context.Context, arg RequestPSPImpor
 	return i, err
 }
 
-const respellPSPSubscriptions = `-- name: RespellPSPSubscriptions :many
+const respellPSPSubscriptions = `-- name: RespellPSPSubscriptions :execrows
 UPDATE billing.subscriptions s SET rail_subscription_id = r.ref
 FROM billing.psps p CROSS JOIN unnest($3::text[]) AS r(ref)
 WHERE p.merchant_id = $1::uuid AND p.id = $2::uuid
   AND s.merchant_id = p.merchant_id AND s.psp_id = p.id AND s.deleted_at IS NULL
   AND s.rail_subscription_key = billing.rail_subscription_key(p.rail, r.ref)
   AND s.rail_subscription_id <> r.ref
-RETURNING s.id, s.rail_subscription_id::text AS ref, s.row_version
 `
 
 type RespellPSPSubscriptionsParams struct {
@@ -1376,32 +1375,14 @@ type RespellPSPSubscriptionsParams struct {
 	Refs       []string
 }
 
-type RespellPSPSubscriptionsRow struct {
-	ID         uuid.UUID
-	Ref        string
-	RowVersion int64
-}
-
 // The provider's spelling of a provider id wins: a provider read naming the
 // PSP's subscriptions by identity rewrites those spelled otherwise.
-func (q *Queries) RespellPSPSubscriptions(ctx context.Context, arg RespellPSPSubscriptionsParams) ([]RespellPSPSubscriptionsRow, error) {
-	rows, err := q.db.Query(ctx, respellPSPSubscriptions, arg.MerchantID, arg.PspID, arg.Refs)
+func (q *Queries) RespellPSPSubscriptions(ctx context.Context, arg RespellPSPSubscriptionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, respellPSPSubscriptions, arg.MerchantID, arg.PspID, arg.Refs)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	defer rows.Close()
-	var items []RespellPSPSubscriptionsRow
-	for rows.Next() {
-		var i RespellPSPSubscriptionsRow
-		if err := rows.Scan(&i.ID, &i.Ref, &i.RowVersion); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return result.RowsAffected(), nil
 }
 
 const setPSPImportApplied = `-- name: SetPSPImportApplied :exec

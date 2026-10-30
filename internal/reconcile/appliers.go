@@ -35,14 +35,7 @@ type LocalWriter interface {
 	GrantAccess(ctx context.Context, a GrantAccessAction) (bool, error)
 	MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error)
 	AcceptProviderSchedules(ctx context.Context, psp uuid.UUID, snap *RemoteSnapshot, exhaustive bool, reader TransactionReader) (ProviderScheduleResult, error)
-	RespellSubscriptions(ctx context.Context, psp uuid.UUID, refs []string) ([]Respelled, error)
-}
-
-// Respelled is a subscription whose provider id took the provider's spelling.
-type Respelled struct {
-	ID         uuid.UUID
-	Ref        string
-	RowVersion int64
+	RespellSubscriptions(ctx context.Context, psp uuid.UUID, refs []string) (int64, error)
 }
 
 // PGLocalWriter applies enforce writes via the sqlc layer on a merchant-pinned
@@ -210,20 +203,12 @@ func (w *PGLocalWriter) GrantAccess(ctx context.Context, a GrantAccessAction) (b
 
 // RespellSubscriptions rewrites the PSP's subscriptions that refs name by
 // identity but spell otherwise to the provider's spelling.
-func (w *PGLocalWriter) RespellSubscriptions(ctx context.Context, psp uuid.UUID, refs []string) ([]Respelled, error) {
+func (w *PGLocalWriter) RespellSubscriptions(ctx context.Context, psp uuid.UUID, refs []string) (int64, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	rows, err := w.DB.Gen(ctx).RespellPSPSubscriptions(ctx, gen.RespellPSPSubscriptionsParams{MerchantID: mid.UUID(), PspID: psp, Refs: refs})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Respelled, len(rows))
-	for i, r := range rows {
-		out[i] = Respelled(r)
-	}
-	return out, nil
+	return w.DB.Gen(ctx).RespellPSPSubscriptions(ctx, gen.RespellPSPSubscriptionsParams{MerchantID: mid.UUID(), PspID: psp, Refs: refs})
 }
 
 // MaterializeSubscription creates the local subscription for a resolved

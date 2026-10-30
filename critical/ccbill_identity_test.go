@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,11 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/ccbillmock"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
@@ -285,6 +291,88 @@ func TestCCBillIdentity(t *testing.T) {
 		payments := ccbillPayments(t, w, customer)
 		require.EqualValues(t, 10_000_000, payments["0912233445566778801"], "the pull records the rebill of the row it names: %v", payments)
 	})
+
+	t.Run("OR-J38-S40", func(t *testing.T) {
+		var feed *httptest.Server
+		var rebill time.Time
+		w := newWorld(t, func(w *world) {
+			rebill = w.clock.Now().Truncate(time.Second).Add(-10 * 24 * time.Hour)
+			feed = dataLinkFeedFor(t, ccbillProvider, "0912233445566778801", rebill)
+			declareCCBill(w, feed)
+		})
+		price := ccbillMemberPrice(t, w.alpha)
+		customer := billing.CustomerID(uuid.New())
+		start, paid := rebill.Add(-720*time.Hour), rebill.Add(720*time.Hour)
+		res, err := w.alpha.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "ccbill"},
+			Customers: []billing.DeclaredCustomer{{Customer: customer}},
+			Subscriptions: []billing.DeclaredSubscription{{SourceID: "ccbill-member", Customer: customer, Price: price, Rail: "ccbill", RailSubscriptionID: ccbillStored,
+				StartedAt: start, PaidThrough: &paid,
+				AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: ccbillStored, Amount: 10_000_000, Currency: "USD", IntervalHours: 720, FirstDueAt: paid}}},
+			Transactions: []billing.DeclaredTransaction{
+				{RailSubscriptionID: ccbillStored, TransactionID: "0812233445566778801", Type: "sale", Success: true, Amount: 10_000_000, Currency: "USD", OccurredAt: start},
+				{RailSubscriptionID: ccbillStored, TransactionID: "0912233445566778801", Type: "sale", Success: true, Amount: 10_000_000, Currency: "USD", OccurredAt: rebill},
+			}})
+		require.NoError(t, err)
+		require.Empty(t, res.Blocked, "%+v", res.Reasons)
+		require.Equal(t, billing.SubscriptionStatus("active"), onlySubscription(t, w.alpha, customer).Status)
+
+		for _, pass := range []struct {
+			name      string
+			mode      reconcile.Mode
+			mutations *reconcile.LocalMutationPolicy
+		}{
+			{"advisory-matches-by-identity", reconcile.ModeAdvisory, nil},
+			{"enforce-without-insert-matches-by-identity", reconcile.ModeEnforce, &reconcile.LocalMutationPolicy{Overwrite: true}},
+		} {
+			t.Run(pass.name, func(t *testing.T) {
+				run := ccbillPull(t, w, feed, rebill.Add(-24*time.Hour), pass.mode, pass.mutations)
+				for _, f := range run.Findings {
+					require.NotContains(t, []reconcile.FindingType{reconcile.FindingRemoteSubMissingLocal, reconcile.FindingLocalActiveRemoteDead, reconcile.FindingStatusMismatch},
+						f.Type, "the roster names the held row: %s %s %s", f.Type, f.SubjectKey, f.RecommendedAction)
+				}
+				sub := onlySubscription(t, w.alpha, customer)
+				require.Equal(t, billing.SubscriptionStatus("active"), sub.Status)
+				require.Nil(t, sub.CanceledAt)
+				require.Equal(t, ccbillStored, *sub.RailSubscriptionID, "only a mirror write respells the row")
+			})
+		}
+	})
+}
+
+// completeRoster claims the roster it reads is complete. CCBill's never does:
+// it is the strongest absence evidence a pull can hold.
+type completeRoster struct{ reconcile.RailFetcher }
+
+func (c completeRoster) Fetch(ctx context.Context, params reconcile.FetchParams) (*reconcile.RemoteSnapshot, error) {
+	snap, err := c.RailFetcher.Fetch(ctx, params)
+	if snap != nil {
+		snap.Coverage.SubscriptionsExhaustive = true
+	}
+	return snap, err
+}
+
+// ccbillPull runs alpha's CCBill provider pull over feed in mode, with the
+// policy a caller may hold that the provider refresh never does.
+func ccbillPull(t *testing.T, w *world, feed *httptest.Server, since time.Time, mode reconcile.Mode, mutations *reconcile.LocalMutationPolicy) *reconcile.RunResult {
+	t.Helper()
+	database, err := db.NewWithPGXPool(w.pool, w.schema)
+	require.NoError(t, err)
+	dl := ccbill.NewDataLinkClient(&config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0001", Sandbox: true,
+		DataLinkUsername: "critical-datalink", DataLinkPassword: "critical-datalink-password"})
+	dl.BaseURL = feed.URL
+	engine := reconcile.NewEngine(database, &w.cfg, nil, map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderCCBill: completeRoster{reconcile.NewCCBillFetcher(dl)}}, nil)
+	engine.Now = w.clock.Now
+	psps, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+	require.NoError(t, err)
+	require.Len(t, psps.Items, 1)
+	binding := reconcile.PSPBinding{ID: psps.Items[0].ID.UUID(), Rail: "ccbill", AccountID: "945280-0001"}
+	var res *reconcile.RunResult
+	require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), w.alpha.MerchantID()), func(ctx context.Context) error {
+		res, err = engine.Run(ctx, reconcile.RunParams{Mode: mode, Mutations: mutations, Providers: []reconcile.Provider{reconcile.ProviderCCBill},
+			PSPs: map[reconcile.Provider]reconcile.PSPBinding{reconcile.ProviderCCBill: binding}, Since: since, Until: w.clock.Now()})
+		return err
+	}))
+	return res
 }
 
 // dataLinkFeedFor is CCBill's DataLink holding one active membership sub,

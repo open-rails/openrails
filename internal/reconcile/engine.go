@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
 
@@ -344,40 +345,44 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 	return result, nil
 }
 
-// respell takes the snapshot's spelling of the PSP's provider ids, in the
-// database and in the loaded local state.
-func (e *Engine) respell(ctx context.Context, psp uuid.UUID, snap *RemoteSnapshot, local *LocalState) error {
+// respell takes the snapshot's spelling of the provider ids the loaded rows
+// name by identity (rails.SubscriptionKey): always in the loaded state, so the
+// diff matches them, and in the database when write is set.
+func (e *Engine) respell(ctx context.Context, binding PSPBinding, snap *RemoteSnapshot, local *LocalState, write bool) error {
+	byKey := make(map[string]int, len(local.Subscriptions))
+	for i := range local.Subscriptions {
+		if s := &local.Subscriptions[i]; s.RailSubscriptionID != "" {
+			byKey[rails.SubscriptionKey(s.Rail, s.RailSubscriptionID)] = i
+		}
+	}
 	seen := map[string]bool{}
 	var refs []string
-	add := func(ref string) {
-		if ref != "" && !seen[ref] {
-			seen[ref] = true
-			refs = append(refs, ref)
+	take := func(ref string) {
+		if ref == "" || seen[ref] {
+			return
 		}
+		seen[ref] = true
+		i, ok := byKey[rails.SubscriptionKey(binding.Rail, ref)]
+		if !ok || local.Subscriptions[i].RailSubscriptionID == ref {
+			return
+		}
+		local.Subscriptions[i].RailSubscriptionID = ref
+		refs = append(refs, ref)
 	}
 	for i := range snap.Subscriptions {
-		add(snap.Subscriptions[i].RailSubscriptionID)
+		take(snap.Subscriptions[i].RailSubscriptionID)
 	}
 	for i := range snap.Transactions {
-		add(snap.Transactions[i].SubscriptionID)
+		take(snap.Transactions[i].SubscriptionID)
 	}
-	if len(refs) == 0 {
+	if len(refs) == 0 || !write {
 		return nil
 	}
-	respelled, err := e.Writer.RespellSubscriptions(ctx, psp, refs)
-	if err != nil || len(respelled) == 0 {
+	n, err := e.Writer.RespellSubscriptions(ctx, binding.ID, refs)
+	if err != nil {
 		return err
 	}
-	byID := make(map[uuid.UUID]Respelled, len(respelled))
-	for _, r := range respelled {
-		byID[r.ID] = r
-	}
-	for i := range local.Subscriptions {
-		if r, ok := byID[local.Subscriptions[i].ID]; ok {
-			local.Subscriptions[i].RailSubscriptionID, local.Subscriptions[i].RowVersion = r.Ref, r.RowVersion
-		}
-	}
-	log.WithContext(ctx).WithField("respelled", len(respelled)).Info("reconcile: provider subscription ids took the provider's spelling")
+	log.WithContext(ctx).WithField("respelled", n).Info("reconcile: provider subscription ids took the provider's spelling")
 	return nil
 }
 
@@ -462,14 +467,13 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	rep.RemoteTransactions = len(snap.Transactions)
 	rep.RemotePaymentMethods = len(snap.PaymentMethods)
 
-	// The provider's spelling of a provider id wins: a mirror write of a
-	// provider fact, before anything matches by id, respells the rows the
-	// snapshot names by identity but spelled otherwise (a CCBill id whose
-	// leading zero a legacy import dropped).
-	if params.Mode == ModeEnforce && e.Writer != nil && params.Mutations.allowsInsert() {
-		if err := e.respell(ctx, binding.ID, snap, local); err != nil {
-			return rep, nil, nil, nil, fmt.Errorf("respell provider subscription ids: %w", err)
-		}
+	// The provider's spelling of a provider id wins, before anything matches
+	// by id: rows the snapshot names by identity but spelled otherwise (a
+	// CCBill id whose leading zero a legacy import dropped) take it in every
+	// mode, and in the database as a mirror write of a provider fact.
+	write := params.Mode == ModeEnforce && e.Writer != nil && params.Mutations.allowsInsert()
+	if err := e.respell(ctx, binding, snap, local, write); err != nil {
+		return rep, nil, nil, nil, fmt.Errorf("respell provider subscription ids: %w", err)
 	}
 
 	localLive := 0

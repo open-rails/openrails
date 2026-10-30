@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -300,7 +301,7 @@ func decide(sub SubscriptionState, ev EvidenceBundle, now time.Time, dunningWind
 	// Stage 1: provider truth.
 	var carried Decision // backfill/customer-id survive an inconclusive snapshot
 	if ev.Snapshot != nil && sub.RailSubscriptionID != "" {
-		d := decideFromSnapshot(sub.RailSubscriptionID, sub.PeriodStart, sub.PeriodEnd, periodEnd, ev.Snapshot, now, dunningWindow)
+		d := decideFromSnapshot(sub.Rail, sub.RailSubscriptionID, sub.PeriodStart, sub.PeriodEnd, periodEnd, ev.Snapshot, now, dunningWindow)
 		if d.Kind == TransitionAdoptPeriodEnd && sub.Status == string(models.StatusPastDue) {
 			// A recorded decline stands until a verified charge renews the row.
 			// A future provider date is not payment: NMI advances it on a decline too.
@@ -417,17 +418,19 @@ func EvidenceFloorFor(ctx context.Context, database *db.DB, merchantID uuid.UUID
 }
 
 // decideFromSnapshot is the provider-truth law. TransitionNone = inconclusive.
-func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, periodEnd time.Time, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration) Decision {
+// The snapshot names the subscription by its identity on the rail: a CCBill
+// roster may spell an id with the leading zero a stored id lost.
+func decideFromSnapshot(rail, railSubID string, localStart, localEnd *time.Time, periodEnd time.Time, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration) Decision {
 	// This subscription's charge events + roster entry from the pull.
 	var txns []RemoteTransaction
 	for i := range snap.Transactions {
-		if snap.Transactions[i].SubscriptionID == railSubID {
+		if rails.SameSubscription(rail, snap.Transactions[i].SubscriptionID, railSubID) {
 			txns = append(txns, snap.Transactions[i])
 		}
 	}
 	var remoteSub *RemoteSubscription
 	for i := range snap.Subscriptions {
-		if snap.Subscriptions[i].RailSubscriptionID == railSubID {
+		if rails.SameSubscription(rail, snap.Subscriptions[i].RailSubscriptionID, railSubID) {
 			remoteSub = &snap.Subscriptions[i]
 			break
 		}

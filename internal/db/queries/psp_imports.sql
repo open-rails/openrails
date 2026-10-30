@@ -255,7 +255,7 @@ JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.psp_id = p.i
     AND s.rail_subscription_key = billing.rail_subscription_key(p.rail, r.ref)
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(psp_id)::uuid;
 
--- name: RespellPSPSubscriptions :many
+-- name: RespellPSPSubscriptions :execrows
 -- The provider's spelling of a provider id wins: a provider read naming the
 -- PSP's subscriptions by identity rewrites those spelled otherwise.
 UPDATE billing.subscriptions s SET rail_subscription_id = r.ref
@@ -263,8 +263,7 @@ FROM billing.psps p CROSS JOIN unnest(sqlc.arg(refs)::text[]) AS r(ref)
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(psp_id)::uuid
   AND s.merchant_id = p.merchant_id AND s.psp_id = p.id AND s.deleted_at IS NULL
   AND s.rail_subscription_key = billing.rail_subscription_key(p.rail, r.ref)
-  AND s.rail_subscription_id <> r.ref
-RETURNING s.id, s.rail_subscription_id::text AS ref, s.row_version;
+  AND s.rail_subscription_id <> r.ref;
 
 -- name: ListPSPHeldVaults :many
 -- The customers holding the PSP's provider customers, by provider ref.

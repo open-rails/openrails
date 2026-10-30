@@ -636,7 +636,7 @@ func retainingUnresolved(ctx context.Context, database *db.DB, sub *models.Subsc
 		}
 		kept := make([]RemoteTransaction, 0, len(txns))
 		for _, t := range txns {
-			if (t.TransactionID != unresolved.TransactionID && (sub.Rail != models.RailNMI || t.OriginalTransactionID != unresolved.TransactionID)) || t.SubscriptionID != sub.RailSubscriptionID {
+			if (t.TransactionID != unresolved.TransactionID && (sub.Rail != models.RailNMI || t.OriginalTransactionID != unresolved.TransactionID)) || !rails.SameSubscription(string(sub.Rail), t.SubscriptionID, sub.RailSubscriptionID) {
 				kept = append(kept, t)
 			}
 		}
@@ -648,7 +648,7 @@ func retainingUnresolved(ctx context.Context, database *db.DB, sub *models.Subsc
 		}
 		if history != nil {
 			for _, t := range txns {
-				if t.SubscriptionID == sub.RailSubscriptionID && (t.TransactionID == unresolved.TransactionID || t.OriginalTransactionID == unresolved.TransactionID) {
+				if rails.SameSubscription(string(sub.Rail), t.SubscriptionID, sub.RailSubscriptionID) && (t.TransactionID == unresolved.TransactionID || t.OriginalTransactionID == unresolved.TransactionID) {
 					history.outcomes[declaredReceiptKey(t.SubscriptionID, t.TransactionID)] = DeclaredOutcome{Code: DeclaredBlocked, Reason: unresolved.Error()}
 				}
 			}

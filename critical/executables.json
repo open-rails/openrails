@@ -852,6 +852,11 @@
     ],
     "OR-J38-S39": [
       "TestCCBillIdentity/OR-J38-S39/provider-refresh-respells-and-records-the-rebill"
+    ],
+    "OR-J38-S40": [
+      "TestCCBillIdentity/OR-J38-S40",
+      "TestCCBillIdentity/OR-J38-S40/advisory-matches-by-identity",
+      "TestCCBillIdentity/OR-J38-S40/enforce-without-insert-matches-by-identity"
     ]
   },
   "suites": {

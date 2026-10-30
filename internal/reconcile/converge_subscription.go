@@ -147,7 +147,7 @@ func snapshotChargesFor(sub *models.Subscription, snap *RemoteSnapshot) []Remote
 	}
 	var txns []RemoteTransaction
 	for i := range snap.Transactions {
-		if snap.Transactions[i].SubscriptionID == sub.RailSubscriptionID {
+		if rails.SameSubscription(string(sub.Rail), snap.Transactions[i].SubscriptionID, sub.RailSubscriptionID) {
 			txns = append(txns, snap.Transactions[i])
 		}
 	}
