@@ -8,35 +8,18 @@ import (
 	"strings"
 )
 
-// Operator-mounted secrets: the default self-hosted secret path. The operator
-// renders secrets out of Vault (Vault Agent template, k8s secret volume, CSI)
-// into a directory mounted read-only in the container — one file per secret,
-// filename = the env-var name, content = the value. OpenRails needs no live
-// Vault connection at runtime. Embedded host apps use the same directory
-// convention; env always overrides files.
-
-// DefaultSecretsPath is where operator-rendered secret files are expected;
-// VAULT_SECRETS_PATH overrides it.
+// DefaultSecretsPath is where a binary expects operator-rendered secret files
+// unless its configuration names another directory.
 const DefaultSecretsPath = "/vault/secrets"
-
-// SecretsPath returns the mounted secrets directory.
-func SecretsPath() string {
-	if p := strings.TrimSpace(os.Getenv("VAULT_SECRETS_PATH")); p != "" {
-		return p
-	}
-	return DefaultSecretsPath
-}
 
 var secretFileNameShape = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
-// SecretFiles reads the mounted secrets dir into env-var-name -> value. An
-// absent dir is nil (mounting is optional). Subdirectories, k8s "..data"
-// symlink metadata, and files not named like env vars (e.g. the host app's own
-// dash-cased secrets sharing the dir) are skipped; whitespace-trimmed empty
-// values are skipped. An unreadable file is an error — a mounted secret that
-// cannot be read must fail loudly, never silently drop.
-func SecretFiles() (map[string]string, error) {
-	dir := SecretsPath()
+// SecretFiles reads a directory of operator-mounted secret files, one per
+// environment-variable name, into name -> value. An absent directory is nil.
+// Subdirectories, k8s "..data" symlink metadata, files not named like
+// environment variables and empty values are skipped. An unreadable file is
+// an error: a mounted secret that cannot be read must fail loudly.
+func SecretFiles(dir string) (map[string]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -50,7 +33,7 @@ func SecretFiles() (map[string]string, error) {
 		if e.IsDir() || strings.HasPrefix(name, "..") || !secretFileNameShape.MatchString(name) {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 -- dir is operator-mounted (VAULT_SECRETS_PATH/default), name comes from os.ReadDir on that same dir, filtered to the env-var name shape above
+		raw, err := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 -- dir is the configured secrets directory; name comes from os.ReadDir on it, filtered to the env-var name shape above
 		if err != nil {
 			return nil, fmt.Errorf("read secret file %s: %w", name, err)
 		}
