@@ -363,6 +363,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 			}); err != nil {
 				return nil, fmt.Errorf("unmarshaling directory vault config: %w", err)
 			}
+			vault.SecretsPath = cmp.Or(vault.SecretsPath, secretsDir)
 			databaseConfig.Vault = &vault
 		}
 		return databaseConfig, nil
