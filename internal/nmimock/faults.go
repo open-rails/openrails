@@ -52,6 +52,21 @@ func (m *Mock) DeclineValidations(n int) {
 	m.declineValid = n
 }
 
+// TruncateRoster makes the next n subscription roster pages claim more rows
+// without naming a cursor, as a gateway cutting a listing short does.
+func (m *Mock) TruncateRoster(n int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.truncateRoster = n
+}
+
+// RosterTruncations is how many truncated roster pages remain to be served.
+func (m *Mock) RosterTruncations() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.truncateRoster
+}
+
 // RefuseDuplicates makes the next n sales trip the duplicate check.
 func (m *Mock) RefuseDuplicates(n int) {
 	m.mu.Lock()
