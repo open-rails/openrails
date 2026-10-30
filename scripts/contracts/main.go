@@ -16,11 +16,14 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/apisurface"
 	"github.com/open-rails/openrails/internal/contract"
 	"github.com/open-rails/openrails/internal/contractaudit"
+	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/schemasnapshot"
 )
 
@@ -97,10 +100,16 @@ func schema(ctx context.Context, root *os.Root, dsn string, write bool) error {
 		return err
 	}
 	if dsn == "" {
+		if err := inventory(listed); err != nil {
+			return err
+		}
 		return schemasnapshot.CheckMigrations(listed)
 	}
 	applied, err := schemasnapshot.Capture(ctx, dsn)
 	if err != nil {
+		return err
+	}
+	if err := inventory(applied); err != nil {
 		return err
 	}
 	if write {
@@ -108,6 +117,31 @@ func schema(ctx context.Context, root *os.Root, dsn string, write bool) error {
 	}
 	if !bytes.Equal(listed, applied) {
 		return schemasnapshot.ErrStale
+	}
+	return nil
+}
+
+var schemaTable = regexp.MustCompile(`(?m)^table billing\.(\w+)`)
+
+// inventory requires the merchant archive's table inventory to name exactly
+// the schema list's tables: the archive judges only its inventory, so a table
+// a migration adds without an inventory decision would otherwise be left out
+// of the export.
+func inventory(schema []byte) error {
+	var tables []string
+	for _, m := range schemaTable.FindAllSubmatch(schema, -1) {
+		tables = append(tables, string(m[1]))
+	}
+	owned := merchantarchive.OwnedTables()
+	for _, name := range tables {
+		if !slices.Contains(owned, name) {
+			return fmt.Errorf("%s lists billing.%s, which the merchant archive inventory does not name: decide whether the archive carries it", schemasnapshot.File, name)
+		}
+	}
+	for _, name := range owned {
+		if !slices.Contains(tables, name) {
+			return fmt.Errorf("the merchant archive inventory names %s, which %s does not list", name, schemasnapshot.File)
+		}
 	}
 	return nil
 }
