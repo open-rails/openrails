@@ -35,6 +35,27 @@ const (
 	PaymentStatusRefundedValue  = "refunded"
 )
 
+// SetCard stamps p with the brand, in lower case, and last four of the card
+// it charged.
+func SetCard(p *models.Payment, c models.Card) {
+	c.Brand = strings.ToLower(c.Brand)
+	p.CardBrand, p.CardLast4, _, _ = c.Columns()
+}
+
+// SetMethodCard stamps p with the card of the saved method it charged; a
+// method that is gone leaves p as it is.
+func SetMethodCard(ctx context.Context, q *gen.Queries, merchantID, methodID uuid.UUID, p *models.Payment) error {
+	pm, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: merchantID, ID: methodID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	SetCard(p, models.CardFromColumns(pm.CardBrand, pm.CardLast4, nil, nil))
+	return nil
+}
+
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *PaymentService) now() time.Time {
 	if s.clock != nil {

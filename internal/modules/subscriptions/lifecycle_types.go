@@ -61,6 +61,9 @@ type RenewMembershipParams struct {
 	// PaymentPSPID is the accepted platform renewal account, independent of
 	// Prepared.PSPID, which retains the subscription identity.
 	PaymentPSPID uuid.UUID
+	// PaymentMethodID is the saved method an accepted engine charge used; its
+	// card stamps the payment.
+	PaymentMethodID uuid.UUID
 	// Prepared is supplied only by an accepted durable recurring-charge operation.
 	// Observed provider renewals use the ordinary catalog-convergence path.
 	Prepared              *RenewalTerms

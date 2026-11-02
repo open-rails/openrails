@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/payments"
 )
 
 func initialBill(ctx context.Context, d *db.DB, params *CreateMembershipParams, sub *models.Subscription, p *models.Payment, now time.Time) (observed.Result, error) {
@@ -50,6 +51,11 @@ func initialBill(ctx context.Context, d *db.DB, params *CreateMembershipParams, 
 }
 
 func renewalBill(ctx context.Context, d *db.DB, params *RenewMembershipParams, sub *models.Subscription, p *models.Payment, now time.Time) (observed.Result, error) {
+	if p != nil && params.PaymentMethodID != uuid.Nil {
+		if err := payments.SetMethodCard(ctx, d.Gen(ctx), sub.MerchantID, params.PaymentMethodID, p); err != nil {
+			return observed.Result{}, err
+		}
+	}
 	if params.ProviderBill != nil {
 		b := *params.ProviderBill
 		if p != nil {

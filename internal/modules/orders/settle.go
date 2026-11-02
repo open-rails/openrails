@@ -47,9 +47,12 @@ type Charge struct {
 	Amount          int64
 	Currency        string
 	PaymentMethodID uuid.UUID
-	PurchasedAt     time.Time
-	TokenType       string
-	Metadata        map[string]any
+	// Card is the card reported for a new card no method keeps (Stripe's,
+	// a Basis Theory collection's; NMI's sale reports none).
+	Card        models.Card
+	PurchasedAt time.Time
+	TokenType   string
+	Metadata    map[string]any
 	// Cites is the card's lineage the charge used; nil when it was its
 	// agreement's storing transaction, referenced by StoringRef.
 	Cites      *paycharge.Mandate
@@ -291,19 +294,14 @@ func (s *Service) recordPayment(ctx context.Context, d *db.DB, order *Order, cha
 	if charge.TokenType != "" {
 		payment.TokenType = &charge.TokenType
 	}
-	// The card it charged, as its attempt records it.
+	// The card it charged: its saved method's, else the one reported for a
+	// new card no method keeps.
 	if charge.PaymentMethodID != uuid.Nil {
-		pm, err := d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: order.MerchantID, ID: charge.PaymentMethodID})
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-		case err != nil:
+		if err := payments.SetMethodCard(ctx, d.Gen(ctx), order.MerchantID, charge.PaymentMethodID, payment); err != nil {
 			return nil, err
-		default:
-			if pm.CardBrand != nil {
-				payment.CardBrand = new(strings.ToLower(*pm.CardBrand))
-			}
-			payment.CardLast4 = pm.CardLast4
 		}
+	} else {
+		payments.SetCard(payment, charge.Card)
 	}
 	if err := payments.NewPaymentService(d, s.Clock).Create(ctx, payment); err != nil {
 		return nil, err

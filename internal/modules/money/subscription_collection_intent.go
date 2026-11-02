@@ -465,7 +465,7 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, PreviousPeriodEnd: &p.PreviousPeriodEnd, PaymentCustodian: p.Instrument.Custodian, Rail: models.Rail(in.Rail), TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
+	params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, PreviousPeriodEnd: &p.PreviousPeriodEnd, PaymentCustodian: p.Instrument.Custodian, PaymentMethodID: p.PaymentMethodID, Rail: models.Rail(in.Rail), TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
 	if p.Instrument.Custodian == models.CustodianPlatform {
 		params.PaymentPSPID = p.Instrument.PSPID
 	}

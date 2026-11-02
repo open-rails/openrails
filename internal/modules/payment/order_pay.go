@@ -846,8 +846,13 @@ func (s *OrderAttemptService) prepareBasisTheoryCard(ctx context.Context, purcha
 			return nil, err
 		}
 	}
-	return &newCard{instrument: charge.FrozenInstrument{PSPID: option.PSPID, Custodian: option.Custodian, CustodianID: option.CustodianID},
-		token: token, reuse: mandates.KeepsNewCard(in.Card.Reusable, billingCountry, "")}, nil
+	out := &newCard{instrument: charge.FrozenInstrument{PSPID: option.PSPID, Custodian: option.Custodian, CustodianID: option.CustodianID},
+		token: token, reuse: mandates.KeepsNewCard(in.Card.Reusable, billingCountry, "")}
+	if intent.Card != nil {
+		card := models.ParseCard(intent.Card.Brand, intent.Card.Last4, "")
+		out.card = &card
+	}
+	return out, nil
 }
 
 // newCardBilling is who a new NMI card bills: the details entered with it,
@@ -1112,8 +1117,11 @@ func (h *NMISaleIntentHandler) completeOrder(ctx context.Context, d *db.DB, in g
 		paid := orders.Charge{PaymentID: p.PaymentID, AttemptID: p.OrderAttemptID, PSPID: *in.PspID, Rail: in.Rail,
 			TransactionID: receipt.TransactionID(), Amount: p.Amount, Currency: p.Currency, PurchasedAt: p.AcceptedAt,
 			TokenType: saleTokenType(p), Metadata: metadata, Cites: p.Instrument.Mandate, StoringRef: storing, Reuse: reuse}
-		if method != nil {
+		switch {
+		case method != nil:
 			paid.PaymentMethodID = *method
+		case p.Card != nil:
+			paid.Card = *p.Card
 		}
 		if _, err := h.Sale.Orders.Paid(ctx, d, p.OrderID, paid); err != nil {
 			return err
