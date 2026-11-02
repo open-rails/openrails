@@ -473,18 +473,18 @@ function ClearHoldDialog({
         <form
           id={adminId("clear-hold")}
           className="grid gap-1.5"
-          onSubmit={(event) => {
+          onSubmit={async (event) => {
             event.preventDefault()
             if (!trimmed) return
-            clear.mutate(
-              { id: hold.id, reason: trimmed },
-              {
-                onSuccess: () => {
-                  toast.success(adminText("Hold cleared"))
-                  onClose()
-                },
-              }
-            )
+            // Awaited, not a mutate callback: the refreshed list drops the
+            // hold and this dialog with it before such a callback would run.
+            try {
+              await clear.mutateAsync({ id: hold.id, reason: trimmed })
+            } catch {
+              return // shown from clear.error
+            }
+            toast.success(adminText("Hold cleared"))
+            onClose()
           }}
         >
           <Label htmlFor={adminId("clear-hold-reason")}>

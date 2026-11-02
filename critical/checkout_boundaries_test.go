@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -79,6 +81,67 @@ func TestCheckoutBoundaries(t *testing.T) {
 		facts, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
 		require.NoError(t, err)
 		require.Empty(t, facts.Events)
+
+		// On NMI with a ZIP-only checkout: a plain decline is reported as one,
+		// another price of the product is the one paid, and the declines raise
+		// no operator finding.
+		nmi, journal := newNMIWorld(t)
+		pass, err := nmi.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-pass", DisplayName: "NMI pass", Entitlements: []string{"pass:owned"}})
+		require.NoError(t, err)
+		cheap, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: pass.ID, Key: "nmi-pass-test", UnitAmount: 500_000, Currency: "USD"})
+		require.NoError(t, err)
+		dear, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: pass.ID, Key: "nmi-pass", UnitAmount: 23_000_000, Currency: "USD"})
+		require.NoError(t, err)
+		// As BuyButton buys: the customer's order of the lines, then its payment.
+		buy := func(price billing.PriceID, total int64, card nmimock.Card, key string) (int, billing.Order) {
+			t.Helper()
+			status, raw := nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}})
+			require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
+			var order billing.Order
+			require.NoError(t, json.Unmarshal(raw, &order))
+			pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: journal.core.Tokenize(card)}, ExpectedTotal: total, Reusable: ptr(false)}
+			status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", nmi.aliceToken, pay, map[string]string{"Idempotency-Key": key})
+			require.Contains(t, []int{http.StatusOK, http.StatusPaymentRequired}, status, string(raw))
+			current, err := nmi.alpha.GetOrder(t.Context(), order.ID)
+			require.NoError(t, err)
+			return status, *current
+		}
+		declined := nmimock.Card{Brand: "visa", Last4: "1111", CVV: "M", Decline: "200"}
+		declined.AVS = "Z" // the ZIP matched; no street was sent
+		_, first := buy(cheap.ID, 500_000, declined, "nmi-decline-zip-matched")
+		require.Equal(t, string(billing.DeclineGeneric), first.Payment.LastPaymentError.Reason, "a matched ZIP is no address fault")
+		declined.AVS = "N"
+		_, again := buy(cheap.ID, 500_000, declined, "nmi-decline-zip-unmatched")
+		require.Equal(t, first.ID, again.ID, "the same price pays the same order")
+		require.Equal(t, string(billing.DeclineIncorrectZip), again.Payment.LastPaymentError.Reason, "an unmatched ZIP is named")
+		// Another price, by BuyButton's two calls, then by one: each pays the
+		// price chosen and releases the unpaid order of the other.
+		_, other := buy(dear.ID, 23_000_000, declined, "nmi-other-price")
+		require.NotEqual(t, first.ID, other.ID)
+		require.EqualValues(t, 23_000_000, other.Total)
+		replaced, err := nmi.alpha.GetOrder(t.Context(), first.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.OrderCanceled, replaced.Status, "the unpaid order of the other price is released")
+		in := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: cheap.ID}}, ExpectedTotal: ptr(int64(500_000)), Reusable: ptr(false),
+			Payment: &billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", AVS: "Z", CVV: "M"})}}
+		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, in, map[string]string{"Idempotency-Key": "nmi-one-call"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var paid billing.Order
+		require.NoError(t, json.Unmarshal(raw, &paid))
+		require.Equal(t, billing.OrderComplete, paid.Status)
+		require.EqualValues(t, 500_000, paid.Total, "the customer pays the price they chose")
+		require.Equal(t, "0.50", journal.core.LastSale().Amount)
+		replaced, err = nmi.alpha.GetOrder(t.Context(), other.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.OrderCanceled, replaced.Status)
+		fleet := hostFleet(t, nmi.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, nmi.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		abandoned, err := nmi.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.provider_intent.abandoned"})
+		require.NoError(t, err)
+		require.Empty(t, abandoned.Items, "a customer leaving a declined card is no operator incident")
 	})
 	t.Run("OR-J10-S02/lost-client-response-replays-original-committed-result", func(t *testing.T) {
 		a, p := newPaymentWorld(t)

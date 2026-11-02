@@ -657,11 +657,14 @@ LIMIT sqlc.arg(row_limit)::int;
 
 -- life.provider_intent.abandoned: provider actions that will not auto-retry:
 -- ended failed or expired since since, or past their deadline while live.
+-- A provider's decline is no abandoned action: nothing moved, and the order
+-- or dunning that asked for it owns what follows.
 -- name: ListAbandonedProviderIntents :many
 SELECT id, intent_type, status, rail FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (
-        (status IN ('failed_terminal', 'expired') AND updated_at > sqlc.arg(since)::timestamptz)
+        (status IN ('failed_terminal', 'expired') AND updated_at > sqlc.arg(since)::timestamptz
+         AND NOT (status = 'failed_terminal' AND result_evidence->>'declined' = 'true'))
         OR (status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
             AND expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz)
       )
@@ -679,7 +682,8 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
   AND NOT EXISTS (
       SELECT 1 FROM billing.provider_intents pi
       WHERE pi.merchant_id = f.merchant_id AND 'provider_intent:' || pi.id::text = f.subject_key
-        AND (pi.status IN ('failed_terminal', 'expired')
+        AND ((pi.status IN ('failed_terminal', 'expired')
+              AND NOT (pi.status = 'failed_terminal' AND pi.result_evidence->>'declined' = 'true'))
              OR (pi.status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
                  AND pi.expires_at IS NOT NULL AND pi.expires_at < sqlc.arg(now)::timestamptz))
   );

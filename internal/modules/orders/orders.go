@@ -64,6 +64,16 @@ func (e *LineError) Error() string {
 	return fmt.Sprintf("lines[%d]: %s", e.Index, e.Refusal.Message)
 }
 
+// HeldBy is the customer's other order whose claim refused the line: the
+// order of other lines FindOrCreate replaces when it can.
+func (e *LineError) HeldBy() (uuid.UUID, bool) {
+	if e.Refusal.Code != RefusalAlreadyOwned || e.Refusal.OwnedBy == nil {
+		return uuid.Nil, false
+	}
+	id, err := billing.ParseOrderID(*e.Refusal.OwnedBy)
+	return id.UUID(), err == nil
+}
+
 // Code is the wire error code.
 func (e *LineError) Code() string {
 	switch e.Refusal.Code {

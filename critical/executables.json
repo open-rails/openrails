@@ -860,6 +860,9 @@
       "TestCCBillIdentity/OR-J38-S40",
       "TestCCBillIdentity/OR-J38-S40/advisory-matches-by-identity",
       "TestCCBillIdentity/OR-J38-S40/enforce-without-insert-matches-by-identity"
+    ],
+    "OR-J38-S41": [
+      "TestMerchantConsole/OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms"
     ]
   },
   "suites": {
@@ -873,7 +876,8 @@
       "OR-J38-S31",
       "OR-J38-S32",
       "OR-J38-S33",
-      "OR-J38-S34"
+      "OR-J38-S34",
+      "OR-J38-S41"
     ]
   }
 }

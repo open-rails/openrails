@@ -217,28 +217,15 @@ func cvvMismatch(rail, cvv string) bool {
 	return strings.EqualFold(cvv, "N")
 }
 
-// zipMismatch: NMI AVS letters where the postal code did not match, Stripe
-// address_postal_code_check fail.
+// zipMismatch: NMI AVS letters where the postal code did not match (A, B:
+// street only; N, C: neither), Stripe address_postal_code_check fail.
 func zipMismatch(rail, avs string) bool {
 	avs = strings.ToUpper(strings.TrimSpace(avs))
 	if rail == "stripe" {
 		return avs == "FAIL"
 	}
 	switch avs {
-	case "A", "B", "N", "O":
-		return true
-	}
-	return false
-}
-
-// addressMismatch: NMI AVS letters where the postal code matched and the
-// street did not.
-func addressMismatch(rail, avs string) bool {
-	if rail == "stripe" {
-		return false
-	}
-	switch strings.ToUpper(strings.TrimSpace(avs)) {
-	case "W", "Z", "P", "L":
+	case "A", "B", "N", "C":
 		return true
 	}
 	return false

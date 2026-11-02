@@ -14,7 +14,9 @@ var (
 // mandatory: a retry with the same key returns the same refund and never
 // refunds twice; the same key with different terms is ErrIdempotencyKeyReused.
 // RevokeAccess removes only access funded by this payment, in the refund's
-// transaction. Subscription renewal and newer paid periods are preserved.
+// transaction; newer paid periods are preserved. Once the payment is fully
+// refunded, a membership OpenRails renews is canceled with it: it ends now
+// when the payment bought its latest period, else at its period end.
 // If seat or plan changes make the funding ambiguous, the refund completes
 // and a merchant finding requests review while access stays intact.
 // Provider notifications of an OpenRails refund preserve this decision.
