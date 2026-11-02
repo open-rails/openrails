@@ -274,8 +274,8 @@ select:not(:disabled),
 }
 
 /* Touch: controls are at least 40px in each direction, so they can be hit
-   with a thumb. Keyed to the input, not the width: a touch laptop gets them,
-   a narrow desktop window does not. */
+   with a thumb. Keyed to the primary input, not the width: a phone or tablet
+   gets them, a narrow desktop window does not. */
 @media (pointer: coarse) {
   [data-slot="button"],
   [data-slot="select-trigger"],

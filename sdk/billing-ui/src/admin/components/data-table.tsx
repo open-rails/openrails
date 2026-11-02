@@ -38,7 +38,7 @@ interface DataTableProps<TData> {
 const CARD_ROWS = [
   "@max-[40rem]/page:block @max-[40rem]/page:[&_thead]:hidden @max-[40rem]/page:[&_tbody]:grid @max-[40rem]/page:[&_tbody]:gap-2 @min-[30rem]/page:@max-[40rem]/page:[&_tbody]:grid-cols-2",
   "@max-[40rem]/page:[&_tr]:grid @max-[40rem]/page:[&_tr]:gap-1.5 @max-[40rem]/page:[&_tr]:rounded-lg @max-[40rem]/page:[&_tr]:border-0 @max-[40rem]/page:[&_tr]:ring-1 @max-[40rem]/page:[&_tr]:ring-border @max-[40rem]/page:[&_tr]:ring-inset @max-[40rem]/page:[&_tr]:px-3 @max-[40rem]/page:[&_tr]:py-2.5",
-  "@max-[40rem]/page:[&_td]:flex @max-[40rem]/page:[&_td]:min-w-0 @max-[40rem]/page:[&_td]:items-baseline @max-[40rem]/page:[&_td]:justify-between @max-[40rem]/page:[&_td]:gap-3 @max-[40rem]/page:[&_td]:p-0 @max-[40rem]/page:[&_td]:whitespace-normal",
+  "@max-[40rem]/page:[&_td:not([colspan])]:flex @max-[40rem]/page:[&_td:not([colspan])]:min-w-0 @max-[40rem]/page:[&_td:not([colspan])]:items-baseline @max-[40rem]/page:[&_td:not([colspan])]:justify-between @max-[40rem]/page:[&_td:not([colspan])]:gap-3 @max-[40rem]/page:[&_td:not([colspan])]:p-0 @max-[40rem]/page:[&_td:not([colspan])]:whitespace-normal",
   "@max-[40rem]/page:[&_td[data-label]]:before:shrink-0 @max-[40rem]/page:[&_td[data-label]]:before:text-xs @max-[40rem]/page:[&_td[data-label]]:before:text-muted-foreground @max-[40rem]/page:[&_td[data-label]]:before:content-[attr(data-label)]",
   "@max-[40rem]/page:[&_td:first-child]:font-medium @max-[40rem]/page:[&_td:first-child]:before:hidden",
 ].join(" ")
