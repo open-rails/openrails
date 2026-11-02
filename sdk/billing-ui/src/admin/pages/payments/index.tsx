@@ -241,7 +241,7 @@ export function PaymentsPage() {
             <TabsTrigger
               key={value}
               value={value}
-              className="h-10 flex-none px-0 after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary md:h-8"
+              className="h-8 flex-none px-0 after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary pointer-coarse:h-10"
             >
               {label}
             </TabsTrigger>

@@ -1,4 +1,5 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { FACT_TILES } from "#orck/admin/lib/tile-grids"
 import { useAdminServices } from "#orck/admin/context"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons"
@@ -125,7 +126,7 @@ export function SubscriptionDetailPage() {
             {planName ?? adminText("Subscription")}
             <StatusBadge status={sub.status} />
           </h1>
-          <p className="text-xs break-all text-muted-foreground">
+          <p className="text-xs [overflow-wrap:anywhere] text-muted-foreground">
             {sub.id} · {sub.rail}
             {sub.rail_subscription_id ? ` · ${sub.rail_subscription_id}` : ""}
           </p>
@@ -168,7 +169,7 @@ export function SubscriptionDetailPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={FACT_TILES}>
         <Fact label={adminText("Customer")}>
           {sub.customer_id ? (
             <Link
@@ -283,13 +284,13 @@ export function SubscriptionDetailPage() {
                   <TableHead className="text-muted-foreground">
                     <AdminMessage id={"Status"} />
                   </TableHead>
-                  <TableHead className="text-muted-foreground">
+                  <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                     <AdminMessage id={"Kind"} />
                   </TableHead>
                   <TableHead className="text-muted-foreground">
                     <AdminMessage id={"Amount"} />
                   </TableHead>
-                  <TableHead className="text-muted-foreground">
+                  <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                     <AdminMessage id={"Created"} />
                   </TableHead>
                 </TableRow>
@@ -308,11 +309,15 @@ export function SubscriptionDetailPage() {
                     <TableCell>
                       <StatusBadge status={p.status} />
                     </TableCell>
-                    <TableCell>{p.kind}</TableCell>
+                    <TableCell className="@max-[36rem]/page:hidden">
+                      {p.kind}
+                    </TableCell>
                     <TableCell>
                       {formatNativeAmount(p.amount, p.currency)}
                     </TableCell>
-                    <TableCell>{formatDate(p.created_at)}</TableCell>
+                    <TableCell className="@max-[36rem]/page:hidden">
+                      {formatDate(p.created_at)}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

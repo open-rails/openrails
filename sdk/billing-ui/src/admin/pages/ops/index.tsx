@@ -1,4 +1,5 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { STAT_TILES_4 } from "#orck/admin/lib/tile-grids"
 import { useAdminServices } from "#orck/admin/context"
 import * as React from "react"
 
@@ -81,7 +82,7 @@ function FindingsTab() {
       </h1>
       <DestructiveHolds canUpdate={canUpdate} />
       {metrics && gauges && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className={STAT_TILES_4}>
           {/* Each gauge says what is wrong with the MONEY, not what the check
               is called internally: a merchant reading "freeloaders" cannot tell
               whether that costs them anything. */}

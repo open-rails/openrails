@@ -1,4 +1,5 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { STAT_TILES_4 } from "#orck/admin/lib/tile-grids"
 import { useAdminContext, useAdminServices } from "#orck/admin/context"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
@@ -112,7 +113,7 @@ export function CustomerDetailPage() {
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
           size="icon"
@@ -121,11 +122,11 @@ export function CustomerDetailPage() {
         >
           <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
         </Button>
-        <div className="min-w-0">
-          <h1 className="truncate text-2xl font-semibold tracking-tight">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]">
             {customer.contact?.name || customer.contact?.email || "Customer"}
           </h1>
-          <p className="truncate text-xs text-muted-foreground">
+          <p className="text-xs [overflow-wrap:anywhere] text-muted-foreground">
             {customer.id}
             <AdminMessage id={" · since "} />
             {formatDate(customer.created_at)}
@@ -134,7 +135,7 @@ export function CustomerDetailPage() {
           </p>
         </div>
         {canUpdate && (
-          <div className="ml-auto flex gap-2">
+          <div className="flex gap-2 @max-[36rem]/page:w-full">
             <GrantProductAccessDialog customerId={customerId} />
           </div>
         )}
@@ -149,7 +150,7 @@ export function CustomerDetailPage() {
       {host.customerPanels?.(customer)}
 
       {customer.balances.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className={STAT_TILES_4}>
           {customer.balances.map((b) => (
             <Card key={b.currency}>
               <CardHeader className="pb-1">
@@ -197,8 +198,8 @@ export function CustomerDetailPage() {
         <CustomerInvoiceProfileSection customerId={customerId} />
       )}
 
-      <div className="grid gap-4 lg:grid-cols-3 lg:items-start">
-        <div className="grid gap-4 lg:col-span-2">
+      <div className="grid gap-4 @min-[56rem]/page:grid-cols-3 @min-[56rem]/page:items-start">
+        <div className="grid gap-4 @min-[56rem]/page:col-span-2">
           <CustomerSubscriptions customerId={customerId} />
           <CustomerPayments customerId={customerId} />
           <CustomerPaymentMethods customerId={customerId} />
@@ -242,13 +243,13 @@ function CustomerSubscriptions({ customerId }: { customerId: string }) {
                 <TableHead className="text-muted-foreground">
                   <AdminMessage id={"Status"} />
                 </TableHead>
-                <TableHead className="text-muted-foreground">
+                <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                   <AdminMessage id={"Rail"} />
                 </TableHead>
                 <TableHead className="text-muted-foreground">
                   <AdminMessage id={"Period ends"} />
                 </TableHead>
-                <TableHead className="text-muted-foreground">
+                <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                   <AdminMessage id={"Dunning"} />
                 </TableHead>
               </TableRow>
@@ -267,11 +268,13 @@ function CustomerSubscriptions({ customerId }: { customerId: string }) {
                   <TableCell>
                     <StatusBadge status={s.status} />
                   </TableCell>
-                  <TableCell>{s.rail}</TableCell>
-                  <TableCell className="tabular-nums">
+                  <TableCell className="@max-[36rem]/page:hidden">
+                    {s.rail}
+                  </TableCell>
+                  <TableCell className="tabular-nums @max-[36rem]/page:whitespace-normal">
                     {formatDate(s.current_period_ends_at)}
                   </TableCell>
-                  <TableCell className="text-xs">
+                  <TableCell className="text-xs @max-[36rem]/page:hidden">
                     {s.dunning ? dunningSummary(s.dunning) : "—"}
                   </TableCell>
                 </LinkedTableRow>
@@ -323,13 +326,13 @@ function CustomerPayments({ customerId }: { customerId: string }) {
                 <TableHead className="text-muted-foreground">
                   <AdminMessage id={"Amount"} />
                 </TableHead>
-                <TableHead className="text-muted-foreground">
+                <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                   <AdminMessage id={"Kind"} />
                 </TableHead>
-                <TableHead className="text-muted-foreground">
+                <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                   <AdminMessage id={"Rail"} />
                 </TableHead>
-                <TableHead className="text-muted-foreground">
+                <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                   <AdminMessage id={"Purchased"} />
                 </TableHead>
               </TableRow>
@@ -351,9 +354,13 @@ function CustomerPayments({ customerId }: { customerId: string }) {
                   <TableCell className="tabular-nums">
                     {formatNativeAmount(p.amount, p.currency)}
                   </TableCell>
-                  <TableCell>{p.kind}</TableCell>
-                  <TableCell>{p.rail ?? p.channel}</TableCell>
-                  <TableCell className="tabular-nums">
+                  <TableCell className="@max-[36rem]/page:hidden">
+                    {p.kind}
+                  </TableCell>
+                  <TableCell className="@max-[36rem]/page:hidden">
+                    {p.rail ?? p.channel}
+                  </TableCell>
+                  <TableCell className="tabular-nums @max-[36rem]/page:hidden">
                     {formatDate(p.created_at)}
                   </TableCell>
                 </LinkedTableRow>

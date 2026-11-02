@@ -119,7 +119,7 @@ export function OrderDetail({ order }: { order: Order }) {
         </Link>{" "}
         · {order.origin} · {order.currency}
       </p>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,max(10rem,calc((100%_-_2rem)/3))),1fr))]">
         {[
           ["Total", order.total],
           ...(order.usage
@@ -147,7 +147,7 @@ export function OrderDetail({ order }: { order: Order }) {
               <AdminMessage id={"Renewal"} />
             </CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3 text-sm md:grid-cols-2">
+          <CardContent className="grid gap-3 text-sm @min-[40rem]/page:grid-cols-2">
             <p>
               <AdminMessage id={"Subscription:"} />{" "}
               <Link
@@ -292,7 +292,7 @@ function UsageFacts({ usage }: { usage: OrderUsage }) {
           <AdminMessage id={"Usage billed"} />
         </CardTitle>
       </CardHeader>
-      <CardContent className="grid gap-3 text-sm md:grid-cols-2">
+      <CardContent className="grid gap-3 text-sm @min-[40rem]/page:grid-cols-2">
         <p>
           <AdminMessage id={"Period: "} />
           {formatDate(usage.period_starts_at)} –{" "}
@@ -345,7 +345,7 @@ function UsageFacts({ usage }: { usage: OrderUsage }) {
             </p>
           ))}
         </div>
-        <p className="text-muted-foreground md:col-span-2">
+        <p className="text-muted-foreground @min-[40rem]/page:col-span-2">
           <AdminMessage
             id={
               "These are the customer&apos;s invoice profile when the order was billed. Editing the profile affects later orders."

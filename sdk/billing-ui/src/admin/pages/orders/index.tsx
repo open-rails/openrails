@@ -143,7 +143,7 @@ function OrderFiltersForm({
     setDraft((old) => ({ ...old, [key]: value }))
   return (
     <form
-      className="grid gap-3 md:grid-cols-3"
+      className="grid gap-3 @min-[40rem]/page:grid-cols-3"
       onSubmit={(event) => {
         event.preventDefault()
         onApply(draft)
@@ -207,7 +207,7 @@ function OrderFiltersForm({
           ))}
         </select>
       </div>
-      <label className="flex items-center gap-2 text-sm md:col-span-3">
+      <label className="flex items-center gap-2 text-sm @min-[40rem]/page:col-span-3">
         <input
           type="checkbox"
           checked={draft.overdue === "true"}
@@ -215,7 +215,7 @@ function OrderFiltersForm({
         />
         <AdminMessage id={"Overdue only: still owed past the due date"} />
       </label>
-      <div className="flex gap-2 md:col-span-3">
+      <div className="flex flex-wrap gap-2 @min-[40rem]/page:col-span-3">
         <Button type="submit">
           <AdminMessage id={"Apply filters"} />
         </Button>

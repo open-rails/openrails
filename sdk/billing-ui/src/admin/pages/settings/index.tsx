@@ -80,7 +80,7 @@ import { CustodySettings } from "./custody"
 // Base UI marks a tab's orientation with data-orientation, which tabs.tsx's
 // data-horizontal indicator rules never match, so the indicator is placed here.
 const LINE_TAB =
-  "h-10 flex-none px-0 after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary md:h-8"
+  "h-8 flex-none px-0 after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary pointer-coarse:h-10"
 
 export function SettingsPage() {
   // The tab lives in the URL so a settings page can be linked to, and so the

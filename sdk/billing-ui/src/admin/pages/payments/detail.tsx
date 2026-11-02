@@ -1,4 +1,5 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { FACT_TILES } from "#orck/admin/lib/tile-grids"
 import { useAdminServices } from "#orck/admin/context"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { ArrowLeft01Icon, Undo02Icon } from "@hugeicons/core-free-icons"
@@ -114,7 +115,7 @@ export function PaymentDetailPage() {
             {customer ? customerName(customer) : adminText("Payment")}
             <StatusBadge status={payment.status} />
           </h1>
-          <p className="text-xs break-all text-muted-foreground">
+          <p className="text-xs [overflow-wrap:anywhere] text-muted-foreground">
             {payment.id} · {payment.kind} · {payment.rail ?? payment.channel}
             <AdminMessage id={" · txn"} /> {payment.transaction_id || "—"}
           </p>
@@ -130,7 +131,7 @@ export function PaymentDetailPage() {
         )}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={FACT_TILES}>
         <Fact label={adminText("Amount")}>
           {formatNativeAmount(payment.amount, payment.currency)}
         </Fact>
@@ -219,7 +220,7 @@ export function PaymentDetailPage() {
                   <TableHead className="text-muted-foreground">
                     <AdminMessage id={"Amount"} />
                   </TableHead>
-                  <TableHead className="text-muted-foreground">
+                  <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                     <AdminMessage id={"Created"} />
                   </TableHead>
                 </TableRow>
@@ -238,7 +239,9 @@ export function PaymentDetailPage() {
                     <TableCell>
                       {formatNativeAmount(r.amount, r.currency)}
                     </TableCell>
-                    <TableCell>{formatDate(r.created_at)}</TableCell>
+                    <TableCell className="@max-[36rem]/page:hidden">
+                      {formatDate(r.created_at)}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

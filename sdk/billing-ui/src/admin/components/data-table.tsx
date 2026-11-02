@@ -33,6 +33,16 @@ interface DataTableProps<TData> {
   emptyMessage?: string
 }
 
+// CARD_ROWS turns the table into stacked cards when the page container is
+// narrower than 40rem.
+const CARD_ROWS = [
+  "@max-[40rem]/page:block @max-[40rem]/page:[&_thead]:hidden @max-[40rem]/page:[&_tbody]:grid @max-[40rem]/page:[&_tbody]:gap-2 @min-[30rem]/page:@max-[40rem]/page:[&_tbody]:grid-cols-2",
+  "@max-[40rem]/page:[&_tr]:grid @max-[40rem]/page:[&_tr]:gap-1.5 @max-[40rem]/page:[&_tr]:rounded-lg @max-[40rem]/page:[&_tr]:border-0 @max-[40rem]/page:[&_tr]:ring-1 @max-[40rem]/page:[&_tr]:ring-border @max-[40rem]/page:[&_tr]:ring-inset @max-[40rem]/page:[&_tr]:px-3 @max-[40rem]/page:[&_tr]:py-2.5",
+  "@max-[40rem]/page:[&_td]:flex @max-[40rem]/page:[&_td]:min-w-0 @max-[40rem]/page:[&_td]:items-baseline @max-[40rem]/page:[&_td]:justify-between @max-[40rem]/page:[&_td]:gap-3 @max-[40rem]/page:[&_td]:p-0 @max-[40rem]/page:[&_td]:whitespace-normal",
+  "@max-[40rem]/page:[&_td[data-label]]:before:shrink-0 @max-[40rem]/page:[&_td[data-label]]:before:text-xs @max-[40rem]/page:[&_td[data-label]]:before:text-muted-foreground @max-[40rem]/page:[&_td[data-label]]:before:content-[attr(data-label)]",
+  "@max-[40rem]/page:[&_td:first-child]:font-medium @max-[40rem]/page:[&_td:first-child]:before:hidden",
+].join(" ")
+
 export function DataTable<TData>({
   columns,
   data,
@@ -45,6 +55,11 @@ export function DataTable<TData>({
   emptyMessage = "No results.",
 }: DataTableProps<TData>) {
   const { text: adminText } = useAdminUI()
+
+  // headerLabel is a column's name for its cells in the card layout; a
+  // header rendered by a function has none.
+  const headerLabel = (header: unknown) =>
+    typeof header === "string" ? adminText(header) : undefined
 
   const table = useReactTable({
     data,
@@ -62,9 +77,11 @@ export function DataTable<TData>({
   return (
     <div className="flex flex-col gap-3">
       <div className="overflow-x-auto">
-        {/* On a phone the table scrolls sideways with its first column held,
-            so every row stays named. */}
-        <Table className="max-md:[&_tr>*:first-child]:sticky max-md:[&_tr>*:first-child]:left-0 max-md:[&_tr>*:first-child]:z-10 max-md:[&_tr>*:first-child]:bg-background">
+        {/* Below 40rem of page a row of six or more columns no longer fits,
+            so each row becomes a card: the first cell is its title and every
+            other cell is labelled with its column. From 30rem the cards sit
+            two to a row. */}
+        <Table className={CARD_ROWS}>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="hover:bg-transparent">
@@ -126,7 +143,11 @@ export function DataTable<TData>({
                   }
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="py-3.5">
+                    <TableCell
+                      key={cell.id}
+                      className="py-3.5"
+                      data-label={headerLabel(cell.column.columnDef.header)}
+                    >
                       {flexRender(
                         cell.column.columnDef.cell,
                         cell.getContext()
