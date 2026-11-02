@@ -123,14 +123,14 @@ func (s *Service) GetCreditGrant(ctx context.Context, id billing.CreditGrantID) 
 	return s.moneyService().GetCreditGrant(ctx, id.UUID())
 }
 
-// RevokeCreditGrant revokes a grant's unspent remainder.
-func (s *Service) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, reason string) (*billing.CreditGrant, error) {
+// RevokeCreditGrant revokes a grant's unspent remainder on actor's behalf.
+func (s *Service) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, reason, actor string) (*billing.CreditGrant, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	return s.moneyService().RevokeCreditGrant(ctx, id.UUID(), reason)
+	return s.moneyService().RevokeCreditGrant(ctx, id.UUID(), reason, actor)
 }
 
 // ListBalanceTransactions lists a customer's ledger in one currency, newest

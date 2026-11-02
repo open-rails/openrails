@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
@@ -58,6 +59,11 @@ func TestDestructiveControls(t *testing.T) {
 		require.NotEmpty(t, reviews[0].TriggerActor.ID)
 		require.NotEmpty(t, reviews[0].TriggerActor.Issuer)
 		require.Equal(t, grants[5].ID.UUID().String(), reviews[0].Target)
+		var revoker *string
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT actor FROM "+pgx.Identifier{a.schema, "grants"}.Sanitize()+" WHERE merchant_id = $1 AND supersedes_id = $2 AND event = 'revoke'",
+			a.alpha.MerchantID().UUID(), grants[0].ID.UUID()).Scan(&revoker))
+		require.NotNil(t, revoker, "a credit grant's revoke names the staff member who made it")
+		require.NotEmpty(t, *revoker)
 		for range 2 {
 			_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), grants[5].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 			require.Error(t, err)

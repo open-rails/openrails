@@ -125,6 +125,14 @@ func TestRenewal(t *testing.T) {
 		renewalSettled(t, a, p, sub, due)
 		runRegistered(t, fleet, "openrails.dunning", 2)
 		renewalSettled(t, a, p, sub, due)
+		paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+		require.NoError(t, err)
+		require.Len(t, paid.Items, 2)
+		for _, payment := range paid.Items {
+			require.NotNil(t, payment.Card, "the enrollment and the renewal name the card they charged")
+			require.Equal(t, "visa", *payment.Card.Brand)
+			require.Equal(t, "4242", *payment.Card.Last4)
+		}
 	})
 	t.Run("OR-J14-S03/overdue-engine-restart-keeps-original-obligation", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t)

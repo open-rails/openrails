@@ -69,8 +69,8 @@ A permission is `persona:resource:action`, with AuthKit's actions `read` and
 listed by `billing.Permissions()`. A host declares them in its auth and grants
 them in its roles from the constants, so a renamed one fails its build.
 
-Every permission has two names, the persona being where it is held. A route
-acting on merchant M admits a caller holding either:
+Every permission but one has two names, the persona being where it is held. A
+route acting on merchant M admits a caller holding either:
 
 - the `merchant:` name in M's own scope: `{Authority: RootScope's, ID: M's
   id}`, with AuthKit the group whose id is the merchant's;
@@ -80,6 +80,12 @@ acting on merchant M admits a caller holding either:
 Grants are ordinary per-user roles, embedded and standalone alike: a person
 holding a role in one merchant's group acts at that merchant, one holding a
 root role at all of them.
+
+The exception is `root:admin-rate-limits:unlock`
+(`billing.RootAdminRateLimitsUnlock`): it has no `merchant:` name and is held
+on root alone. Clearing a [destructive hold](destructive-actions.md#review-and-clear)
+needs it besides the merchant configuration permission, from a person other
+than the actor whose action was held.
 
 | Routes | `merchant:` | `root:` | Covers |
 |---|---|---|---|
@@ -94,6 +100,7 @@ root role at all of them.
 | `/v1/app` | `billing.MerchantEventsRead` | `billing.RootEventsRead` | host events |
 | `/v1/app` | `billing.MerchantOrdersManage` | `billing.RootOrdersManage` | merchant orders: `POST /v1/app/orders` (`CreateOrder`), `/preview`, `/{id}/cancel` |
 | `/v1/app` | `billing.MerchantCustomersRead` | `billing.RootCustomersRead` | `GET /v1/app/customers`: a customer by openrails.dev account, where the [customer network](customer-network.md) runs |
+| merchant config | none | `billing.RootAdminRateLimitsUnlock` | `POST /v1/merchant/destructive-holds/{id}/clear`, with `billing.RootConfigManage` or `billing.MerchantConfigManage` |
 
 A route group that is on mounts all its routes; what a caller may use is its
 roles. Each `/v1/app` route has its own permission, so a program's role grants

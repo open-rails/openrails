@@ -66,6 +66,19 @@ func TestCheckout(t *testing.T) {
 		}
 		require.Equal(t, 1, settled)
 		require.Equal(t, 1, completed)
+		// A card kept for this purchase only still names the card it charged.
+		once := provider.core.NewPaymentMethod(stripemock.Card{Brand: "mastercard", Last4: "4444"})
+		input = billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false), Payment: &billing.OrderPaymentParams{Token: once}}
+		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "purchase-unkept-card"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var unkept billing.Order
+		require.NoError(t, json.Unmarshal(raw, &unkept))
+		require.Equal(t, billing.OrderComplete, unkept.Status)
+		money, err = a.alpha.GetPayment(t.Context(), *unkept.Payment.PaymentID)
+		require.NoError(t, err)
+		require.NotNil(t, money.Card, "the payment names the card it charged")
+		require.Equal(t, "mastercard", *money.Card.Brand)
+		require.Equal(t, "4444", *money.Card.Last4)
 		require.Empty(t, provider.core.Unexpected(), "every provider request must be explicitly modeled")
 	})
 }

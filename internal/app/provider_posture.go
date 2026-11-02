@@ -42,34 +42,45 @@ import (
 func (r *Runtime) StartProviderPosture(declared ...billing.MerchantID) {
 	if r == nil || r.Config == nil || config.IsProviderReadOnly(r.Config) || r.DB == nil || r.Merchants == nil {
 		if r != nil {
-			r.posturePending.Store(0)
+			r.postureWait.Store(nil)
 		}
 		return
 	}
-	r.posturePending.Store(-1)
+	r.postureWait.Store(&postureWait{first: true})
 	r.Go("provider posture", func(ctx context.Context) {
 		known := map[uuid.UUID]bool{}
 		for attempt := 0; ; attempt++ {
-			pending := r.verifyProviderPosture(ctx, declared, known)
-			r.posturePending.Store(int64(pending))
-			if pending == 0 || !retry.Sleep(ctx, retry.Backoff(attempt, time.Second, postureRetryMax)) {
+			waiting, unreadable := r.verifyProviderPosture(ctx, declared, known)
+			r.postureWait.Store(&postureWait{psps: waiting, unreadable: unreadable})
+			if len(waiting)+unreadable == 0 || !retry.Sleep(ctx, postureBackoff(attempt)) {
 				return
 			}
 		}
 	})
 }
 
-// postureRetryMax caps the background re-verification of a PSP whose
-// provider does not answer.
+// postureBackoff is the wait before the background pass after attempt, capped
+// at postureRetryMax for a PSP whose provider does not answer.
+func postureBackoff(attempt int) time.Duration {
+	return retry.Backoff(attempt, time.Second, postureRetryMax)
+}
+
 const postureRetryMax = 5 * time.Minute
 
+// postureWait is what StartProviderPosture's last pass left unknown: the PSPs
+// whose provider had not answered and the merchants whose PSPs could not be
+// read. first marks its first pass still running.
+type postureWait struct {
+	first      bool
+	psps       []uuid.UUID
+	unreadable int
+}
+
 // verifyProviderPosture verifies every loaded PSP whose verdict is not yet
-// known and returns how many remain unknown. known collects the PSPs already
-// answered: a later pass skips one the registry holds no verdict for (CCBill),
-// so it is not checked and logged again.
-func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.MerchantID, known map[uuid.UUID]bool) int {
+// known. It returns the PSPs still unanswered and how many merchants' PSPs
+// could not be read.
+func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.MerchantID, known map[uuid.UUID]bool) (waiting []uuid.UUID, unreadable int) {
 	registry := providerposture.Process()
-	pending := 0
 	seen := map[billing.MerchantID]bool{}
 	for _, mid := range declared {
 		if mid.IsZero() || seen[mid] {
@@ -87,36 +98,49 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.
 			if ctx.Err() == nil {
 				log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Error("provider posture: cannot read merchant PSPs")
 			}
-			pending++
+			unreadable++
 			continue
 		}
-		// One unanswering provider must not hold the others' verdicts.
-		var wg sync.WaitGroup
-		answered := make([]bool, len(ids))
-		for i, id := range ids {
-			status, cached := r.providerPosture.PSPStatus(registry, id)
-			if cached && status.Verdict != providerposture.Unknown || !cached && known[id] {
-				answered[i] = true
-				continue
-			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				vctx, cancel := context.WithTimeout(ctx, postureCheckTimeout)
-				defer cancel()
-				answered[i] = r.verifyPSPPosture(merchant.WithID(vctx, mid), mid, id)
-			}()
+		status := func(id uuid.UUID) (providerposture.Status, bool) { return r.providerPosture.PSPStatus(registry, id) }
+		waiting = append(waiting, posturePass(ids, known, status, func(id uuid.UUID) bool {
+			vctx, cancel := context.WithTimeout(ctx, postureCheckTimeout)
+			defer cancel()
+			return r.verifyPSPPosture(merchant.WithID(vctx, mid), mid, id)
+		})...)
+	}
+	return waiting, unreadable
+}
+
+// posturePass verifies each of ids not yet answered, concurrently so one
+// unanswering provider does not hold the others' verdicts, and returns those
+// still unanswered. One is answered when status holds its verdict. known
+// collects the answered PSPs: a later pass skips one status holds no verdict
+// for (CCBill), so it is not checked and logged again.
+func posturePass(ids []uuid.UUID, known map[uuid.UUID]bool, status func(uuid.UUID) (providerposture.Status, bool), verify func(uuid.UUID) bool) []uuid.UUID {
+	var wg sync.WaitGroup
+	answered := make([]bool, len(ids))
+	for i, id := range ids {
+		s, cached := status(id)
+		if cached && s.Verdict != providerposture.Unknown || !cached && known[id] {
+			answered[i] = true
+			continue
 		}
-		wg.Wait()
-		for i, id := range ids {
-			if answered[i] {
-				known[id] = true
-			} else {
-				pending++
-			}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			answered[i] = verify(id)
+		}()
+	}
+	wg.Wait()
+	var waiting []uuid.UUID
+	for i, id := range ids {
+		if answered[i] {
+			known[id] = true
+		} else {
+			waiting = append(waiting, id)
 		}
 	}
-	return pending
+	return waiting
 }
 
 const postureCheckTimeout = 30 * time.Second
@@ -259,8 +283,22 @@ func (r *Runtime) PSPPostureDisarmed(pspID uuid.UUID) bool {
 // postureState summarizes the cached posture of the loaded PSPs without
 // contacting any provider: nil when every one is verified and armed.
 func (r *Runtime) postureState() error {
-	pending := r.posturePending.Load()
-	unarmed := r.providerPosture.Unarmed(providerposture.Process())
+	registry := providerposture.Process()
+	pending := 0
+	if wait := r.postureWait.Load(); wait != nil {
+		if wait.first {
+			pending = -1
+		} else {
+			pending = wait.unreadable
+			// A PSP a mutation has armed (or refused) since the pass is answered.
+			for _, id := range wait.psps {
+				if s, cached := r.providerPosture.PSPStatus(registry, id); !cached || s.Verdict == providerposture.Unknown {
+					pending++
+				}
+			}
+		}
+	}
+	unarmed := r.providerPosture.Unarmed(registry)
 	if pending == 0 && len(unarmed) == 0 {
 		return nil
 	}

@@ -78,7 +78,8 @@ type NMISalePayload struct {
 	// details.
 	Token   string          `json:"token,omitempty"`
 	Billing *NewCardBilling `json:"billing,omitempty"`
-	// Card and Fingerprint are a new Stripe card as Stripe reported it.
+	// Card is a new card as Stripe or the Basis Theory collection reported
+	// it; Fingerprint is a new Stripe card's.
 	Card        *models.Card `json:"card,omitempty"`
 	Fingerprint string       `json:"fingerprint,omitempty"`
 	// Reuse: the customer keeps the order's new card for one-click buys.

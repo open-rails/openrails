@@ -122,7 +122,8 @@ func (s *MoneyService) GetCreditGrant(ctx context.Context, grantID uuid.UUID) (*
 
 // RevokeCreditGrant removes the unspent remainder under the payer money lock,
 // respecting the same durable reservation total as admission and spending.
-func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID, reason string) (*billing.CreditGrant, error) {
+// actor is the staff subject the revoke event names, "" for none.
+func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID, reason, actor string) (*billing.CreditGrant, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -233,7 +234,7 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 			changed = true
 			ledger := grants.New(q, mid.UUID())
 			ledger.SetClock(s.now)
-			if _, err := ledger.Revoke(ctx, grantID, reason, ""); err != nil {
+			if _, err := ledger.Revoke(ctx, grantID, reason, actor); err != nil {
 				return err
 			}
 			if err := ledger.MaterializeGrant(ctx, original); err != nil {
