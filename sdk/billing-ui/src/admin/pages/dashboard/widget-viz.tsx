@@ -256,6 +256,10 @@ function TimeSeriesViz({
   )
 }
 
+// Recharts animates in script, out of reach of the reduced-motion CSS.
+const animate = () =>
+  !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+
 function TimeSeriesChart({
   viz,
   data,
@@ -318,6 +322,7 @@ function TimeSeriesChart({
               strokeWidth={2}
               // A rate's empty buckets are gaps; dots keep a lone value visible.
               connectNulls={s.unit === "ratio"}
+              isAnimationActive={animate()}
               dot={s.unit === "ratio" ? { r: 2.5 } : false}
             />
           ))}
@@ -336,6 +341,7 @@ function TimeSeriesChart({
               stroke={chartColor(i)}
               fill={chartColor(i)}
               fillOpacity={0.35}
+              isAnimationActive={animate()}
             />
           ))}
         </AreaChart>
@@ -351,6 +357,7 @@ function TimeSeriesChart({
               stackId={s.measure}
               fill={chartColor(i)}
               radius={2}
+              isAnimationActive={animate()}
             />
           ))}
         </BarChart>
@@ -414,6 +421,7 @@ function DonutViz({
               dataKey="value"
               nameKey="key"
               innerRadius="55%"
+              isAnimationActive={animate()}
               stroke="var(--card)"
               strokeWidth={2}
             >

@@ -261,7 +261,7 @@ function RefundDialog({
 }) {
   const { toast, toastApiError, adminMutations } = useAdminServices()
 
-  const { id: adminId } = useAdminUI()
+  const { id: adminId, text: adminText } = useAdminUI()
 
   const [open, setOpen] = React.useState(false)
   const remaining = (
@@ -339,10 +339,11 @@ function RefundDialog({
               <AdminMessage id={"Refund payment"} />
             </DialogTitle>
             <DialogDescription>
-              <AdminMessage id={"Executes the refund at the "} />
+              <AdminMessage id={"The money goes back through "} />
               {payment.rail}
-              <AdminMessage id={" rail. Remaining refundable: "} />
-              {formatNativeAmount(remaining, payment.currency)}.
+              <AdminMessage id={". Up to "} />
+              {formatNativeAmount(remaining, payment.currency)}
+              <AdminMessage id={" can still be refunded."} />
             </DialogDescription>
           </DialogHeader>
           <form
@@ -379,10 +380,11 @@ function RefundDialog({
                     </Label>
                     <Input
                       id={adminId("refund-amount")}
-                      type="number"
-                      step="any"
-                      min="0"
-                      max={nativeAmountToInput(remaining, payment.currency)}
+                      // Text, not number: a number field changes its value
+                      // under the scroll wheel and accepts exponents.
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
                       value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(event) =>
@@ -436,29 +438,39 @@ function RefundDialog({
                   ] as const
                 }
               >
-                {([amountInput, canSubmit, isSubmitting]) => (
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => handleOpenChange(false)}
-                      disabled={isSubmitting}
-                    >
-                      <AdminMessage id={"Close"} />
-                    </Button>
-                    <Button
-                      type="submit"
-                      variant="destructive"
-                      disabled={
-                        !nativeAmountFromInput(amountInput, payment.currency) ||
-                        !canSubmit ||
-                        isSubmitting
-                      }
-                    >
-                      {isSubmitting ? "Refunding…" : "Refund"}
-                    </Button>
-                  </>
-                )}
+                {([amountInput, canSubmit, isSubmitting]) => {
+                  const amount = nativeAmountFromInput(
+                    amountInput,
+                    payment.currency
+                  )
+                  const valid =
+                    amount !== null &&
+                    BigInt(amount) > 0n &&
+                    BigInt(amount) <= BigInt(remaining)
+                  return (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => handleOpenChange(false)}
+                        disabled={isSubmitting}
+                      >
+                        <AdminMessage id={"Close"} />
+                      </Button>
+                      <Button
+                        type="submit"
+                        variant="destructive"
+                        disabled={!amount || !canSubmit || isSubmitting}
+                      >
+                        {isSubmitting
+                          ? adminText("Refunding…")
+                          : valid
+                            ? `${adminText("Refund")} ${formatNativeAmount(amount, payment.currency)}`
+                            : adminText("Refund")}
+                      </Button>
+                    </>
+                  )
+                }}
               </form.Subscribe>
             </DialogFooter>
           </form>

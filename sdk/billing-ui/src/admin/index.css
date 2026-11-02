@@ -259,3 +259,16 @@ select:not(:disabled),
   font-family: var(--orck-font, inherit);
   color: var(--foreground);
 }
+
+/* Reduced motion: transitions and entrances settle at once. A loading spinner
+   keeps turning, since it reports work rather than decorating it. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

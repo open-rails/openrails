@@ -1043,4 +1043,12 @@ export const billingAdminMessages = {
   "This hold was already cleared or no longer exists.":
     "This hold was already cleared or no longer exists.",
   "None": "None",
+  "Payment methods are up to date": "Payment methods are up to date",
+  "Refreshing…": "Refreshing…",
+  "Last updated": "Last updated",
+  "Current, read from your directory": "Current, read from your directory",
+  "Refunding…": "Refunding…",
+  "The money goes back through ": "The money goes back through ",
+  ". Up to ": ". Up to ",
+  " can still be refunded.": " can still be refunded.",
 } as const

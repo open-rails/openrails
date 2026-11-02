@@ -5,6 +5,7 @@ import {
   Add01Icon,
   ArrowLeft01Icon,
   Delete02Icon,
+  Refresh01Icon,
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Link, useNavigate, useParams } from "#orck/admin/router"
@@ -59,6 +60,7 @@ import {
 import type { CustomerContact } from "#orck/client/generated/wire"
 
 import { DIALOG_FORM } from "#orck/admin/lib/dialog-width"
+import { cn } from "#orck/admin/lib/utils"
 
 import { CustomerInvoiceProfileSection } from "./invoice-profile"
 import { DefaultCardBadges } from "./default-card-badges"
@@ -375,8 +377,10 @@ function CustomerPaymentMethods({ customerId }: { customerId: string }) {
     adminQueries,
     queryKeys,
     deleteCustomerPaymentMethod,
+    toast,
     toastApiError,
   } = useAdminServices()
+  const { text: adminText } = useAdminUI()
   const canUpdate = useAdminUpdates()
   const confirm = useConfirm()
 
@@ -407,13 +411,19 @@ function CustomerPaymentMethods({ customerId }: { customerId: string }) {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() =>
-            void queryClient.invalidateQueries({
+          disabled={isFetching}
+          onClick={async () => {
+            await queryClient.invalidateQueries({
               queryKey: [...queryKeys.customer(customerId), "payment-methods"],
             })
-          }
+            toast.success(adminText("Payment methods are up to date"))
+          }}
         >
-          <AdminMessage id={"Refresh payment methods"} />
+          <HugeiconsIcon
+            icon={Refresh01Icon}
+            className={cn("size-3.5", isFetching && "animate-spin")}
+          />
+          {adminText(isFetching ? "Refreshing…" : "Refresh payment methods")}
         </Button>
       </CardHeader>
       <CardContent className="grid gap-3">
@@ -919,6 +929,7 @@ export function GrantProductAccessDialog({
 // CustomerContactCard is who the customer is, from the merchant's directory:
 // read live, or the copy its SCIM provisioning keeps.
 function CustomerContactCard({ contact }: { contact: CustomerContact | null }) {
+  const { text: adminText } = useAdminUI()
   return (
     <Card>
       <CardHeader className="pb-1">
@@ -960,10 +971,12 @@ function CustomerContactCard({ contact }: { contact: CustomerContact | null }) {
               </>
             )}
             <dt className="text-muted-foreground">
-              <AdminMessage id={"Synced"} />
+              <AdminMessage id={"Last updated"} />
             </dt>
             <dd className="tabular-nums">
-              {contact.synced_at ? formatDate(contact.synced_at) : "Live"}
+              {contact.synced_at
+                ? formatDate(contact.synced_at)
+                : adminText("Current, read from your directory")}
             </dd>
           </dl>
         )}
