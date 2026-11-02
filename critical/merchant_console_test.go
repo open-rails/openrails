@@ -422,6 +422,7 @@ func TestMerchantConsole(t *testing.T) {
 
 	t.Run("OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms", func(t *testing.T) {
 		a, _, sub := purchasedMembership(t)
+		a.clock.Advance(time.Hour)
 		var in []billing.CreateCreditGrantParams
 		for i := range 6 {
 			in = append(in, billing.CreateCreditGrantParams{CustomerID: sub.CustomerID, Currency: "USD", Amount: 100, Source: "critical", SourceID: fmt.Sprintf("console-hold-%d", i)})

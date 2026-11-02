@@ -209,6 +209,7 @@ func TestPublicEntitlements(t *testing.T) {
 		})
 		t.Run("membership-full-refund-revoking-access-ends-it", func(t *testing.T) {
 			a, p, sub := purchasedMembership(t)
+			a.clock.Advance(time.Hour)
 			_, err := a.alpha.RefundPayment(t.Context(), membershipPayment(t, a, sub), billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund and end", IdempotencyKey: "membership-full"})
 			require.NoError(t, err)
 			ended, err := a.alpha.GetSubscription(t.Context(), sub.ID)
