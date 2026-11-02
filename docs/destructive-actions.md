@@ -51,7 +51,14 @@ The merchant can read incident summaries with
 `POST /v1/merchant/destructive-holds/{id}/clear` accepts `{"reason":"reviewed"}`.
 It requires merchant configuration authority plus `root:admin-rate-limits:unlock`
 from a self-acting human. Application keys, personal API keys, delegated identities
-and the triggering actor are refused. This adds no recent-sign-in requirement.
+and the triggering actor are refused, so a different person must clear a hold.
+This adds no recent-sign-in requirement.
+
+A host grants clearing by declaring `billing.RootAdminRateLimitsUnlock` on root,
+as it does every name `billing.Permissions()` lists, and giving it to a root role
+of the people who review holds. It has no `merchant:` name. A host that grants
+all of `billing.Permissions()` to one root role grants clearing with it; one
+that wants it separate leaves it out of that role and grants it on another.
 
 Trusted host tooling can call `Engine.ListOpenDestructiveHolds` and
 `Engine.ClearDestructiveHold`; the standalone server exposes the same methods.

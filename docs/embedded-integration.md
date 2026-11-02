@@ -406,7 +406,10 @@ and grant them to roles, as [auth](auth.md#permissions) lists:
 `root:config:manage`, `root:metrics:read`, `root:entitlements:read`,
 `root:catalog:read`, `root:usage:manage`, `root:events:read`,
 `root:orders:manage`, and each one's `merchant:` twin
-(`merchant:customer:read`, …) for staff of one merchant alone. The admin
+(`merchant:customer:read`, …) for staff of one merchant alone, and
+`root:admin-rate-limits:unlock`, which has no twin: with
+`root:config:manage` or `merchant:config:manage` it clears a
+[destructive hold](destructive-actions.md#review-and-clear). The admin
 group's reads need `root:customer:read` and its updates `root:customer:manage`
 (each route's level is OpenRails'; read-only staff hold a role with the read
 alone), the catalog `root:catalog:manage`, the merchant's own configuration
