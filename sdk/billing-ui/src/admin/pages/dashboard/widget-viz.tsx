@@ -108,7 +108,7 @@ function StatViz({
     // No rows and no currency filter: a money total has no currency to be
     // zero in, so it reads as no value rather than a sentence.
     return (
-      <div className="text-3xl font-semibold tabular-nums">
+      <div className="text-2xl font-semibold tabular-nums @min-[12rem]/tile:text-3xl">
         {primary.unit === "money" && !fallback
           ? "—"
           : formatMeasure(0, primary.unit, fallback)}
@@ -138,7 +138,11 @@ function StatViz({
             <span
               className={cn(
                 "font-semibold tabular-nums",
-                rows.length > 1 ? "text-lg" : "text-3xl"
+                // A narrow tile steps the figure down so a four-digit amount
+                // still fits on one line.
+                rows.length > 1
+                  ? "text-lg"
+                  : "text-2xl @min-[12rem]/tile:text-3xl"
               )}
             >
               {formatMeasure(row[primary.index], primary.unit, currency)}

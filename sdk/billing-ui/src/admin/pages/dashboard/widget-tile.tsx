@@ -64,8 +64,8 @@ export function WidgetTile({
   const isStat = widget.viz === "stat"
 
   return (
-    <Card className="group/tile relative h-full gap-2">
-      <div className="absolute top-2 right-2 z-10 flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-card opacity-0 shadow-sm transition-opacity group-hover/tile:opacity-100 focus-within:opacity-100">
+    <Card className="group/tile @container/tile relative h-full gap-2">
+      <div className="absolute top-2 right-2 z-10 flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-card opacity-0 shadow-sm transition-opacity group-hover/tile:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100">
         {editable && (
           <HugeiconsIcon
             icon={DragDropVerticalIcon}

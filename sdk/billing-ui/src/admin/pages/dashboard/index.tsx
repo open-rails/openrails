@@ -41,24 +41,73 @@ function useMeasuredWidth() {
     observer.observe(el)
     return () => observer.disconnect()
   }, [el])
-  return { containerRef: setEl, width, mounted: width > 0 }
+  return { containerRef: setEl, width, mounted: width > 0, el }
 }
 
-// useWide reports the md breakpoint (48rem), where the dashboard switches from
-// the stacked phone flow to the grid. Only one of the two is rendered, so no
-// hidden copy of every tile runs its query or measures a 0×0 chart.
-const wideQuery = "(min-width: 48rem)"
-function useWide() {
-  return React.useSyncExternalStore(
-    (notify) => {
-      const query = window.matchMedia(wideQuery)
-      query.addEventListener("change", notify)
-      return () => query.removeEventListener("change", notify)
-    },
-    () => window.matchMedia(wideQuery).matches,
-    () => true
-  )
+// A stat tile's label is one uppercase line of 12px medium text at 0.05em
+// tracking, wrapping to two lines; it needs its widest word plus the tile's
+// 16px padding on each side. The saved grid is kept wherever every stat tile
+// has that room; narrower, the dashboard reflows instead of cutting labels.
+const STAT_PADDING = 32
+const MARGIN = 12
+function labelRoom(widgets: Widget[], font: string): number {
+  const context = document.createElement("canvas").getContext("2d")
+  if (!context) return 0
+  context.font = `500 12px ${font}`
+  let widest = 0
+  for (const widget of widgets) {
+    if (widget.viz !== "stat") continue
+    for (const word of widget.title.toUpperCase().split(/\s+/))
+      widest = Math.max(
+        widest,
+        context.measureText(word).width + word.length * 0.6
+      )
+  }
+  return Math.ceil(widest) + STAT_PADDING
 }
+
+// narrowestStat is the width react-grid-layout gives the narrowest stat tile
+// in the saved layout at this container width.
+function narrowestStat(widgets: Widget[], width: number): number {
+  const column = (width - MARGIN * (COLS - 1) - MARGIN * 2) / COLS
+  let narrowest = Infinity
+  for (const widget of widgets)
+    if (widget.viz === "stat")
+      narrowest = Math.min(
+        narrowest,
+        column * widget.grid.w + MARGIN * (widget.grid.w - 1)
+      )
+  return narrowest
+}
+
+// runs splits the reflowed order into consecutive stat and chart runs, so
+// each run gets its own columns while the saved order is kept.
+function runs(widgets: Widget[]): { stat: boolean; widgets: Widget[] }[] {
+  const out: { stat: boolean; widgets: Widget[] }[] = []
+  for (const widget of widgets) {
+    const stat = widget.viz === "stat"
+    const last = out.at(-1)
+    if (last && last.stat === stat) last.widgets.push(widget)
+    else out.push({ stat, widgets: [widget] })
+  }
+  return out
+}
+
+// Reflowed columns come from the content, not from device sizes: a stat tile
+// needs 10rem (its widest label with room for a four-digit amount), a chart
+// 22rem to keep its axis labels readable. Of the columns that fit, the row
+// count is kept and the tiles are spread evenly over it, so twelve tiles that
+// fit five across sit four, four and four rather than five, five and two.
+const STAT_MIN = 160
+const CHART_MIN = 352
+function balancedColumns(count: number, width: number, min: number) {
+  const fit = Math.max(1, Math.floor((width + MARGIN) / (min + MARGIN)))
+  return Math.ceil(count / Math.ceil(count / fit))
+}
+const STAT_FLOW =
+  "grid grid-cols-[repeat(auto-fill,minmax(min(100%,10rem),1fr))] gap-3"
+const CHART_FLOW =
+  "grid grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))] gap-3"
 
 // stackedWidgets orders widgets by their grid position (top-left first) for
 // the single-column mobile flow.
@@ -105,8 +154,7 @@ function MetricsDashboard() {
   const widgets = draftWidgets ?? data?.widgets ?? null
   const [editorOpen, setEditorOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<Widget | null>(null)
-  const { width, containerRef, mounted } = useMeasuredWidth()
-  const wide = useWide()
+  const { width, containerRef, mounted, el } = useMeasuredWidth()
   const [range] = useDashboardRange()
   const confirm = useConfirm()
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -191,17 +239,25 @@ function MetricsDashboard() {
     return (
       <div className="flex flex-col gap-4">
         {header}
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className={STAT_FLOW}>
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-[124px]" />
           ))}
-          <Skeleton className="h-64 md:col-span-2" />
-          <Skeleton className="h-64 md:col-span-2" />
+        </div>
+        <div className={CHART_FLOW}>
+          <Skeleton className="h-64" />
+          <Skeleton className="h-64" />
         </div>
       </div>
     )
   }
   if (!widgets) return null
+
+  const fits =
+    mounted &&
+    el !== null &&
+    narrowestStat(widgets, width) >=
+      labelRoom(widgets, getComputedStyle(el).fontFamily)
 
   const layout: Layout = widgets.map((w) => ({
     i: w.id,
@@ -224,23 +280,34 @@ function MetricsDashboard() {
               <AdminMessage id={"No widgets yet"} />
             </p>
           </div>
-        ) : !wide ? (
-          <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
-            {stackedWidgets(widgets, layout).map((w) => (
+        ) : mounted && !fits ? (
+          <div className="flex flex-col gap-3">
+            {runs(stackedWidgets(widgets, layout)).map((run) => (
               <div
-                key={w.id}
-                className={w.viz === "stat" ? "h-[124px]" : "h-64"}
+                key={run.widgets[0].id}
+                className="grid gap-3"
+                style={{
+                  gridTemplateColumns: `repeat(${balancedColumns(
+                    run.widgets.length,
+                    width,
+                    run.stat ? STAT_MIN : CHART_MIN
+                  )}, minmax(0, 1fr))`,
+                }}
               >
-                <WidgetTile
-                  widget={w}
-                  range={range}
-                  editable={editable}
-                  onEdit={() => {
-                    setEditing(w)
-                    setEditorOpen(true)
-                  }}
-                  onDelete={() => void removeWidget(w)}
-                />
+                {run.widgets.map((w) => (
+                  <div key={w.id} className={run.stat ? "h-[124px]" : "h-64"}>
+                    <WidgetTile
+                      widget={w}
+                      range={range}
+                      editable={editable}
+                      onEdit={() => {
+                        setEditing(w)
+                        setEditorOpen(true)
+                      }}
+                      onDelete={() => void removeWidget(w)}
+                    />
+                  </div>
+                ))}
               </div>
             ))}
           </div>
