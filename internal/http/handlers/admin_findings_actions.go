@@ -194,7 +194,11 @@ func executeRevokeProductAccess(r *httprequest.Request, params map[string]any, r
 		result["revoke"] = "noop_already_revoked"
 		return nil
 	}
-	if _, err := svc.RevokeProductAccessAsOf(ctx, accessID, models.AccessRevokeAdmin, asOf); err != nil {
+	var actor string
+	if admin, ok := r.Staff(); ok {
+		actor = admin.Subject
+	}
+	if _, err := svc.RevokeProductAccessAsOf(ctx, accessID, models.AccessRevokeAdmin, asOf, actor); err != nil {
 		return fmt.Errorf("revoke product access %s: %w", accessID, err)
 	}
 	result["revoke"] = "revoked"

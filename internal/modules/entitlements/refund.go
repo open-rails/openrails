@@ -69,7 +69,7 @@ func (s *EntitlementService) RevokeRefundedPaymentAccess(ctx context.Context, pa
 				return err
 			}
 			if !ended {
-				if _, err := ledger.Revoke(ctx, g.ID, string(models.AccessRevokeRefund)); err != nil {
+				if _, err := ledger.Revoke(ctx, g.ID, string(models.AccessRevokeRefund), ""); err != nil {
 					return err
 				}
 			}

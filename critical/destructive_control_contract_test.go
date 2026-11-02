@@ -5,9 +5,13 @@ package critical_test
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/authtest"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
@@ -79,14 +83,42 @@ func TestDestructiveControls(t *testing.T) {
 			_, err := client.ClearDestructiveHold(t.Context(), hold.ID, billing.ClearDestructiveHoldParams{Reason: "untrusted clear"})
 			require.Error(t, err)
 		}
+		// A person with merchant configuration authority still needs the
+		// unlock permission; one the host never declared is held by no one.
+		clear := "/v1/merchant/destructive-holds/" + hold.ID.String() + "/clear"
+		status, raw := a.request(t, "POST", clear, a.aliceToken, billing.ClearDestructiveHoldParams{Reason: "untrusted clear"})
+		require.Equal(t, http.StatusForbidden, status, string(raw))
+		require.Contains(t, string(raw), `"code":"permission_required"`)
+		undeclared := newAuthorityWorldWithAuth(t, func(c *authkit.Config) {
+			roles := authkit.NewRoles(authkit.APIKeys)
+			merchant := roles.Persona(billing.MerchantGroupPersona, authkit.APIKeys, authkit.CustomRoles, authkit.RemoteApplications)
+			for _, permission := range billing.Permissions() {
+				switch {
+				case permission == billing.RootAdminRateLimitsUnlock:
+				case permission.Persona() == billing.MerchantGroupPersona:
+					merchant.Declare(string(permission))
+				default:
+					roles.Root.Declare(string(permission))
+				}
+			}
+			c.Roles = roles
+		})
+		status, raw = undeclared.request(t, "POST", clear, undeclared.aliceToken, billing.ClearDestructiveHoldParams{Reason: "untrusted clear"})
+		require.Equal(t, http.StatusForbidden, status, string(raw))
+		require.Contains(t, string(raw), `"code":"permission_required"`)
 		path := "/v1/admin/credit-grants/" + grants[5].ID.String() + "/revoke"
-		status, raw := a.request(t, "POST", path, a.alphaKey.Secret, billing.RevokeCreditGrantParams{Reason: "operator correction"}, map[string]string{"X-Actor-ID": a.bob.ID, "X-Invoker-ID": a.bob.ID})
+		status, raw = a.request(t, "POST", path, a.alphaKey.Secret, billing.RevokeCreditGrantParams{Reason: "operator correction"}, map[string]string{"X-Actor-ID": a.bob.ID, "X-Invoker-ID": a.bob.ID})
 		require.Equal(t, 429, status, string(raw))
 		stored, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{IDs: []billing.DestructiveHoldID{hold.ID}})
 		require.NoError(t, err)
 		require.Len(t, stored.Items, 1)
 		require.Nil(t, stored.Items[0].ClearedAt)
 		balance(t, a.alpha, grants[5].CustomerID, 200, 0, 200)
+		// A different person holding root's permissions clears it over HTTP.
+		authtest.GrantRole(t, a.auth, iam.RootGroup(), iam.UserSubject(a.alice.ID), iam.RootPersona().OwnerRole())
+		cleared, err := a.remote(t, a.alpha.MerchantID(), a.aliceToken).ClearDestructiveHold(t.Context(), hold.ID, billing.ClearDestructiveHoldParams{Reason: "reviewed"})
+		require.NoError(t, err)
+		require.NotNil(t, cleared.ClearedAt)
 	})
 	t.Run("OR-J34-S03/reviewed-clear-resumes-action-without-replaying-prior-effects", func(t *testing.T) {
 		a, grants, hold := hostHeldCredits(t)
