@@ -1010,4 +1010,13 @@ export const billingAdminMessages = {
   "Billing couldn't check your permissions just now. Try again in a moment.":
     "Billing couldn't check your permissions just now. Try again in a moment.",
   "Your role doesn't allow this.": "Your role doesn't allow this.",
+  "Search customers": "Search customers",
+  "Customer email, ref, or id": "Customer email, ref, or id",
+  "Clear search": "Clear search",
+  "Searching…": "Searching…",
+  "Search": "Search",
+  "No customer matches": "No customer matches",
+  "More customers match. Choose one, or search for more of the name or email.":
+    "More customers match. Choose one, or search for more of the name or email.",
+  "customers match. Choose one.": "customers match. Choose one.",
 } as const

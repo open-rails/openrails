@@ -1,21 +1,17 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
 import { useAdminServices } from "#orck/admin/context"
 import { HugeiconsIcon } from "@hugeicons/react"
-import {
-  Cancel01Icon,
-  Download01Icon,
-  Search01Icon,
-} from "@hugeicons/core-free-icons"
-import * as React from "react"
+import { Cancel01Icon, Download01Icon } from "@hugeicons/core-free-icons"
 import { useNavigate, useSearchParams } from "#orck/admin/router"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
+import type { Customer } from "#orck/client/generated/wire"
 
 import { CursorPager } from "#orck/admin/components/cursor-pager"
+import { CustomerSearch } from "#orck/admin/components/customer-search"
 import { DataTable } from "#orck/admin/components/data-table"
 import { StatusBadge } from "#orck/admin/components/status-badge"
 import { Button } from "#orck/admin/components/ui/button"
-import { Input } from "#orck/admin/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -107,8 +103,7 @@ function csvAmount(amount: string, currency: string): string {
 }
 
 export function PaymentsPage() {
-  const { toast, toastApiError, adminMutations, adminQueries } =
-    useAdminServices()
+  const { toastApiError, adminMutations, adminQueries } = useAdminServices()
 
   const { text: adminText } = useAdminUI()
 
@@ -118,9 +113,7 @@ export function PaymentsPage() {
   const userId = params.get("customer_id") ?? ""
   const customerLabel = params.get("customer") ?? ""
   const paging = useUrlCursor()
-  const [input, setInput] = React.useState("")
   const navigate = useNavigate()
-  const customerLookup = useMutation(adminMutations.findCustomer())
   const exportPayments = useMutation(adminMutations.exportPayments())
 
   const filters: PaymentFilters = {
@@ -142,26 +135,14 @@ export function PaymentsPage() {
     setParams(p)
   }
 
-  // The payments API has no free-text search: resolve the term to a customer,
-  // then filter by its id.
-  const searchCustomer = async () => {
-    const term = input.trim()
-    if (!term) return
-    try {
-      const c = await customerLookup.mutateAsync(term)
-      if (!c) {
-        toast.info("No customer matches")
-        return
-      }
-      const p = new URLSearchParams(params)
-      p.set("customer_id", c.id)
-      p.set("customer", customerName(c))
-      p.delete("cursor")
-      setParams(p)
-      setInput("")
-    } catch (err) {
-      toastApiError(err, "Search customers")
-    }
+  // The payments API has no free-text search: CustomerSearch resolves the
+  // term to a customer, then the list filters by its id.
+  const pickCustomer = (c: Customer) => {
+    const p = new URLSearchParams(params)
+    p.set("customer_id", c.id)
+    p.set("customer", customerName(c))
+    p.delete("cursor")
+    setParams(p)
   }
 
   const clearCustomer = () => {
@@ -216,26 +197,7 @@ export function PaymentsPage() {
           <AdminMessage id={"Payments"} />
         </h1>
         <div className="flex flex-wrap items-center gap-3">
-          <form
-            className="relative"
-            aria-busy={customerLookup.isPending}
-            onSubmit={(e) => {
-              e.preventDefault()
-              void searchCustomer()
-            }}
-          >
-            <HugeiconsIcon
-              icon={Search01Icon}
-              className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              className="w-64 pl-8"
-              placeholder={adminText("Search customer email, ref, or id…")}
-              value={input}
-              disabled={customerLookup.isPending}
-              onChange={(e) => setInput(e.target.value)}
-            />
-          </form>
+          <CustomerSearch onPick={pickCustomer} />
           <Select
             items={[
               { value: "all", label: "All rails" },

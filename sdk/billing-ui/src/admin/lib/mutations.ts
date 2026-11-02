@@ -79,6 +79,9 @@ const reloadIfMoved =
     }
   }
 
+// CUSTOMER_MATCHES is how many matching customers a search offers to choose.
+export const CUSTOMER_MATCHES = 8
+
 export function createMutations(
   client: AdminClient,
   api: AdminAPI,
@@ -154,15 +157,15 @@ export function createMutations(
       })
     },
 
-    findCustomer: () => {
+    // findCustomers resolves a search term to customers: one more than
+    // CUSTOMER_MATCHES, so a caller can tell there are more to narrow.
+    findCustomers: () => {
       const keys = merchantQueryKeys()
       const customersKey = keys.customers()
       return mutationOptions({
         mutationKey: [...customersKey, "find"],
-        mutationFn: async (term: string) => {
-          const result = await listCustomers(term, 1, "")
-          return result.data[0]
-        },
+        mutationFn: async (term: string) =>
+          (await listCustomers(term, CUSTOMER_MATCHES + 1, "")).data,
       })
     },
     exportCustomers: () => {
