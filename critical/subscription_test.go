@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -95,6 +96,21 @@ func TestSubscriptions(t *testing.T) {
 	})
 	t.Run("OR-J17-S01/cancel-resume-keeps-the-purchased-window", func(t *testing.T) {
 		a, provider, sub := purchasedMembership(t)
+		mrr := func() int64 {
+			result, err := a.alpha.QueryMetrics(t.Context(), billing.MetricsQuery{Measures: []string{"mrr"},
+				Range: &billing.MetricsRange{From: a.clock.Now().Add(-time.Hour).Format(time.RFC3339), To: a.clock.Now().Add(time.Second).Format(time.RFC3339)}})
+			require.NoError(t, err)
+			var total int64
+			for _, row := range result.Rows {
+				var n int64
+				_, err := fmt.Sscan(fmt.Sprint(row[len(row)-1]), &n)
+				require.NoError(t, err)
+				total += n
+			}
+			return total
+		}
+		renewing := mrr()
+		require.Positive(t, renewing)
 		end := *sub.CurrentPeriodEndsAt
 		status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Customer pauses renewal"})
 		require.Equal(t, http.StatusOK, status, string(raw))
@@ -103,6 +119,7 @@ func TestSubscriptions(t *testing.T) {
 		require.True(t, canceled.Resumable, "an ordinary customer cancellation remains reversible within the paid period")
 		require.Equal(t, "canceled", string(canceled.Status))
 		require.Equal(t, end, *canceled.CurrentPeriodEndsAt)
+		require.Zero(t, mrr(), "a canceled subscription inside its paid period no longer counts as recurring revenue")
 		for _, sample := range []struct {
 			at      time.Time
 			allowed bool
@@ -115,6 +132,7 @@ func TestSubscriptions(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "active", string(resumed.Status))
 		require.Equal(t, end, *resumed.CurrentPeriodEndsAt)
+		require.Equal(t, renewing, mrr())
 		require.Len(t, provider.effects(t), 1, "cancel/resume inside the paid period does not buy another period")
 		// A merchant revocation is a different decision and may not be undone
 		// by treating it as an ordinary customer pause.
