@@ -140,15 +140,15 @@ func (s *Service) GrantProduct(ctx context.Context, g Grant) (*models.ProductAcc
 	return window, true, convergejob.Queue(ctx, s.db, mid, g.CustomerID)
 }
 
-// RevokeProductAccess revokes a window; a revoked window stays as it is. Not
-// found reports found=false.
-func (s *Service) RevokeProductAccess(ctx context.Context, accessID uuid.UUID, reason models.AccessRevokeReason) (bool, error) {
-	return s.RevokeProductAccessAsOf(ctx, accessID, reason, nil)
+// RevokeProductAccess revokes a window on actor's behalf; a revoked window
+// stays as it is. Not found reports found=false.
+func (s *Service) RevokeProductAccess(ctx context.Context, accessID uuid.UUID, reason models.AccessRevokeReason, actor string) (bool, error) {
+	return s.RevokeProductAccessAsOf(ctx, accessID, reason, nil, actor)
 }
 
 // RevokeProductAccessAsOf is the operator finding's explicit effective-time
 // revocation. Its admission time always comes from the command clock.
-func (s *Service) RevokeProductAccessAsOf(ctx context.Context, accessID uuid.UUID, reason models.AccessRevokeReason, asOf *time.Time) (bool, error) {
+func (s *Service) RevokeProductAccessAsOf(ctx context.Context, accessID uuid.UUID, reason models.AccessRevokeReason, asOf *time.Time, actor string) (bool, error) {
 	ents := entitlements.NewEntitlementService(s.db, s.clock)
 	window, err := ents.GetAccessByID(ctx, accessID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -189,7 +189,7 @@ func (s *Service) RevokeProductAccessAsOf(ctx context.Context, accessID uuid.UUI
 		if asOf != nil {
 			err = local.RevokeAccess(ctx, entitlements.RevokeAccessParams{AccessID: &accessID, Reason: reason, AsOf: asOf})
 		} else {
-			err = local.RevokeGrantedAccess(ctx, current, reason)
+			err = local.RevokeGrantedAccess(ctx, current, reason, actor)
 		}
 		if err != nil {
 			return true, err

@@ -241,22 +241,22 @@ func (l *Ledger) GrantAccessOnce(ctx context.Context, in GrantInput) (g gen.Bill
 
 // Revoke appends a 'revoke' event terminating the grant (derive-1), effective now.
 // The grant row is never edited. A grant may be terminated at most once (unique index).
-func (l *Ledger) Revoke(ctx context.Context, grantID uuid.UUID, reason string) (gen.BillingGrant, error) {
-	return l.terminate(ctx, grantID, "revoke", reason, time.Time{})
+func (l *Ledger) Revoke(ctx context.Context, grantID uuid.UUID, reason, actor string) (gen.BillingGrant, error) {
+	return l.terminate(ctx, grantID, "revoke", reason, actor, time.Time{})
 }
 
 // RevokeAsOf is Revoke with an explicit effective instant (valid time) on the
 // termination's starts_at, so a converged revocation agrees with the
 // entitlement effect instead of stamping wall clock. Zero means now.
 func (l *Ledger) RevokeAsOf(ctx context.Context, grantID uuid.UUID, reason string, asOf time.Time) (gen.BillingGrant, error) {
-	return l.terminate(ctx, grantID, "revoke", reason, asOf)
+	return l.terminate(ctx, grantID, "revoke", reason, "", asOf)
 }
 
 // terminate appends a termination event (revoke/expire) superseding the grant.
 // asOf is the effective instant on starts_at; zero means now(). ends_at is
 // always NULL, so it never trips grants_valid_window_check even when the
 // grant already expired.
-func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason string, asOf time.Time) (gen.BillingGrant, error) {
+func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason, actor string, asOf time.Time) (gen.BillingGrant, error) {
 	g, err := l.q.GetGrant(ctx, gen.GetGrantParams{MerchantID: l.merchant, ID: grantID})
 	if err != nil {
 		return gen.BillingGrant{}, fmt.Errorf("grants: load grant %s: %w", grantID, err)
@@ -276,12 +276,16 @@ func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason
 	}
 	sup := grantID
 	r := reason
+	var by *string
+	if actor != "" {
+		by = &actor
+	}
 	return l.q.InsertGrant(ctx, gen.InsertGrantParams{
 		Quantity:   g.Quantity,
 		MerchantID: l.merchant, CustomerID: g.CustomerID, ProductID: g.ProductID,
 		Kind: g.Kind, SourceType: g.SourceType, SourceID: sourceIDOf(g), PaymentID: g.PaymentID,
 		Event: event, SupersedesID: &sup, SpecSnapshot: g.SpecSnapshot,
-		StartsAt: effective, EndsAt: nil, Amount: g.Amount, Currency: g.Currency, Reason: &r,
+		StartsAt: effective, EndsAt: nil, Amount: g.Amount, Currency: g.Currency, Reason: &r, Actor: by,
 	})
 }
 
@@ -317,7 +321,7 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 			return err
 		}
 		if revoked {
-			if _, err := l.Revoke(ctx, g.ID, "refund"); err != nil {
+			if _, err := l.Revoke(ctx, g.ID, "refund", ""); err != nil {
 				return err
 			}
 			_, err := l.q.RevokeProductAccessByGrant(ctx, gen.RevokeProductAccessByGrantParams{

@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,7 +27,10 @@ import (
 // StartProviderPosture verifies, in the background, every PSP credential set
 // of the merchants this runtime loads at startup (its configured merchant plus
 // the declared ones) against the PSP's declared environment, then re-verifies
-// unknown verdicts with capped full-jitter backoff until each is known.
+// unknown verdicts with full-jitter backoff, capped at postureRetryMax, until
+// each is known. A mutation still re-verifies an unknown verdict on its own
+// schedule (providerposture.Registry.Require), so the long cap only quiets a
+// provider that keeps not answering.
 // Construction never waits on a provider. A PSP the provider does not prove to
 // be in its declared environment stays disarmed (its mutations are refused)
 // while reads and other PSPs keep working; Ready reports it as degraded. A PSP
@@ -46,19 +48,26 @@ func (r *Runtime) StartProviderPosture(declared ...billing.MerchantID) {
 	}
 	r.posturePending.Store(-1)
 	r.Go("provider posture", func(ctx context.Context) {
+		known := map[uuid.UUID]bool{}
 		for attempt := 0; ; attempt++ {
-			pending := r.verifyProviderPosture(ctx, declared)
+			pending := r.verifyProviderPosture(ctx, declared, known)
 			r.posturePending.Store(int64(pending))
-			if pending == 0 || !retry.Sleep(ctx, retry.Backoff(attempt, time.Second, retry.Max)) {
+			if pending == 0 || !retry.Sleep(ctx, retry.Backoff(attempt, time.Second, postureRetryMax)) {
 				return
 			}
 		}
 	})
 }
 
+// postureRetryMax caps the background re-verification of a PSP whose
+// provider does not answer.
+const postureRetryMax = 5 * time.Minute
+
 // verifyProviderPosture verifies every loaded PSP whose verdict is not yet
-// known and returns how many remain unknown.
-func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.MerchantID) int {
+// known and returns how many remain unknown. known collects the PSPs already
+// answered: a later pass skips one the registry holds no verdict for (CCBill),
+// so it is not checked and logged again.
+func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.MerchantID, known map[uuid.UUID]bool) int {
 	registry := providerposture.Process()
 	pending := 0
 	seen := map[billing.MerchantID]bool{}
@@ -83,9 +92,11 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.
 		}
 		// One unanswering provider must not hold the others' verdicts.
 		var wg sync.WaitGroup
-		var unknown atomic.Int64
-		for _, id := range ids {
-			if status, ok := r.providerPosture.PSPStatus(registry, id); ok && status.Verdict != providerposture.Unknown {
+		answered := make([]bool, len(ids))
+		for i, id := range ids {
+			status, cached := r.providerPosture.PSPStatus(registry, id)
+			if cached && status.Verdict != providerposture.Unknown || !cached && known[id] {
+				answered[i] = true
 				continue
 			}
 			wg.Add(1)
@@ -93,13 +104,17 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.
 				defer wg.Done()
 				vctx, cancel := context.WithTimeout(ctx, postureCheckTimeout)
 				defer cancel()
-				if !r.verifyPSPPosture(merchant.WithID(vctx, mid), mid, id) {
-					unknown.Add(1)
-				}
+				answered[i] = r.verifyPSPPosture(merchant.WithID(vctx, mid), mid, id)
 			}()
 		}
 		wg.Wait()
-		pending += int(unknown.Load())
+		for i, id := range ids {
+			if answered[i] {
+				known[id] = true
+			} else {
+				pending++
+			}
+		}
 	}
 	return pending
 }

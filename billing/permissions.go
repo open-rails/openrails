@@ -78,8 +78,9 @@ const (
 	RootCustomersRead     Permission = "root:customers:read"
 )
 
-// Permissions is every permission a route checks, in both personas: what a
-// host declares in its auth and grants in its roles.
+// Permissions is every permission a route checks, in both personas but for
+// RootAdminRateLimitsUnlock, which is root's alone: what a host declares in
+// its auth and grants in its roles.
 func Permissions() []Permission {
 	return []Permission{
 		MerchantCustomerRead, RootCustomerRead, MerchantCustomerManage, RootCustomerManage,
@@ -89,12 +90,14 @@ func Permissions() []Permission {
 		MerchantUsageRead, RootUsageRead, MerchantUsageManage, RootUsageManage,
 		MerchantEventsRead, RootEventsRead, MerchantOrdersManage, RootOrdersManage,
 		MerchantCustomersRead, RootCustomersRead,
+		RootAdminRateLimitsUnlock,
 	}
 }
 
 // Platform-operator (root) permissions of the standalone server's accounts.
 // No route checks them, so Permissions leaves them out; a hosted product
-// gates its own operator pages with them.
+// gates its own operator pages with them. RootAdminRateLimitsUnlock is the
+// exception: clearing a destructive hold checks it, so Permissions lists it.
 const (
 	RootMerchantsRead    Permission = "root:merchants:read"
 	RootMerchantsDelete  Permission = "root:merchants:delete"

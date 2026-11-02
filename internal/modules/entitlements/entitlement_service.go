@@ -588,8 +588,9 @@ func revokeAccessTx(ctx context.Context, tx pgx.Tx, mid billing.MerchantID, p Re
 
 // RevokeGrantedAccess revokes one window. A free grant is revoked in the
 // grant ledger and its projection follows, so a future window of it does not
-// come back; a purchase or subscription window is revoked on its own.
-func (s *EntitlementService) RevokeGrantedAccess(ctx context.Context, access *models.ProductAccess, reason models.AccessRevokeReason) error {
+// come back; a purchase or subscription window is revoked on its own. actor
+// is the staff subject the grant's revoke event names, "" for none.
+func (s *EntitlementService) RevokeGrantedAccess(ctx context.Context, access *models.ProductAccess, reason models.AccessRevokeReason, actor string) error {
 	if access.SourceType != models.AccessSourceGrant {
 		id := access.ID
 		return s.RevokeAccess(ctx, RevokeAccessParams{AccessID: &id, Reason: reason})
@@ -613,7 +614,7 @@ func (s *EntitlementService) RevokeGrantedAccess(ctx context.Context, access *mo
 		}
 		l := s.ledger(q, mid.UUID())
 		if !terminated {
-			if _, err := l.Revoke(ctx, g.ID, string(reason)); err != nil {
+			if _, err := l.Revoke(ctx, g.ID, string(reason), actor); err != nil {
 				return err
 			}
 		}

@@ -23,7 +23,9 @@ func incidentClear(e *Env) router.Handler {
 			r.ErrorCode(billing.CodeAuthorizationUnavailable, "")
 			return
 		}
-		allowed, err := can(r.Request.Context(), v, root, string(billing.RootAdminRateLimitsUnlock))
+		// A permission the host never declared is held by no one.
+		unlock := asked(e.Auth, Pair{Root: billing.RootAdminRateLimitsUnlock}).Root
+		allowed, err := can(r.Request.Context(), v, root, string(unlock))
 		if err != nil {
 			r.ErrorCode(billing.CodeAuthorizationUnavailable, "")
 			return
