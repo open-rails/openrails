@@ -291,6 +291,20 @@ func (s *Service) recordPayment(ctx context.Context, d *db.DB, order *Order, cha
 	if charge.TokenType != "" {
 		payment.TokenType = &charge.TokenType
 	}
+	// The card it charged, as its attempt records it.
+	if charge.PaymentMethodID != uuid.Nil {
+		pm, err := d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: order.MerchantID, ID: charge.PaymentMethodID})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return nil, err
+		default:
+			if pm.CardBrand != nil {
+				payment.CardBrand = new(strings.ToLower(*pm.CardBrand))
+			}
+			payment.CardLast4 = pm.CardLast4
+		}
+	}
 	if err := payments.NewPaymentService(d, s.Clock).Create(ctx, payment); err != nil {
 		return nil, err
 	}

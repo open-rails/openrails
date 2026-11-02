@@ -92,6 +92,12 @@ func TestSubscriptions(t *testing.T) {
 		}
 		require.Equal(t, 1, settled)
 		require.Equal(t, 1, completed)
+		paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+		require.NoError(t, err)
+		require.Len(t, paid.Items, 1)
+		require.NotNil(t, paid.Items[0].Card, "the payment names the card it charged")
+		require.Equal(t, "visa", *paid.Items[0].Card.Brand)
+		require.Equal(t, "4242", *paid.Items[0].Card.Last4)
 		require.Empty(t, provider.core.Unexpected())
 	})
 	t.Run("OR-J17-S01/cancel-resume-keeps-the-purchased-window", func(t *testing.T) {
