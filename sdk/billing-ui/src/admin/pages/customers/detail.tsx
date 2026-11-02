@@ -72,7 +72,7 @@ import {
   type GrantDuration,
 } from "./grant-duration"
 import { dunningSummary } from "#orck/admin/pages/subscriptions/dunning"
-import { useAdminUpdates } from "#orck/admin/lib/capabilities"
+import { useAdminUpdates, useCatalogSells } from "#orck/admin/lib/capabilities"
 import { useConfirm } from "#orck/admin/lib/confirm"
 
 export function CustomerDetailPage() {
@@ -82,6 +82,7 @@ export function CustomerDetailPage() {
   const { adminQueries } = useAdminServices()
 
   const canUpdate = useAdminUpdates()
+  const sells = useCatalogSells()
   const { customerId = "" } = useParams()
   const navigate = useNavigate()
   const { data: customer, isPending: loading } = useQuery(
@@ -176,11 +177,17 @@ export function CustomerDetailPage() {
         </p>
       )}
 
-      <CustomerCreditSupportSection
-        customerId={customerId}
-        currencies={customer.balances.map((balance) => balance.currency)}
-      />
-      <CustomerInvoiceProfileSection customerId={customerId} />
+      {/* Credits serve credit and usage products, the invoice profile usage
+          billing: a merchant selling neither sees neither. */}
+      {sells?.credit && (
+        <CustomerCreditSupportSection
+          customerId={customerId}
+          currencies={customer.balances.map((balance) => balance.currency)}
+        />
+      )}
+      {sells?.usage && (
+        <CustomerInvoiceProfileSection customerId={customerId} />
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3 lg:items-start">
         <div className="grid gap-4 lg:col-span-2">

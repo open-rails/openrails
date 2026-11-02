@@ -162,7 +162,7 @@ function CreditSupport({
             <AdminMessage id={"Grants · "} />
             {currency}
           </h3>
-          {grants.isPending ? (
+          {grants.isLoading ? (
             <p className="text-sm text-muted-foreground">
               <AdminMessage id={"Loading grants…"} />
             </p>
@@ -265,7 +265,7 @@ function CreditSupport({
             <AdminMessage id={"Transaction ledger · "} />
             {currency}
           </h3>
-          {ledger.isPending ? (
+          {ledger.isLoading ? (
             <p className="text-sm text-muted-foreground">
               <AdminMessage id={"Loading transactions…"} />
             </p>
