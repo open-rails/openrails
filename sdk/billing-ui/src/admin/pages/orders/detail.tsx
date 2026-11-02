@@ -8,6 +8,8 @@ import type { ColumnDef } from "@tanstack/react-table"
 import { CursorPager } from "#orck/admin/components/cursor-pager"
 import { DataTable } from "#orck/admin/components/data-table"
 import { StatusBadge } from "#orck/admin/components/status-badge"
+import { MissingRecord } from "#orck/admin/components/missing-record"
+import { errorText } from "#orck/admin/lib/error-text"
 import { Button } from "#orck/admin/components/ui/button"
 import { Input } from "#orck/admin/components/ui/input"
 import { Label } from "#orck/admin/components/ui/label"
@@ -79,17 +81,14 @@ export function OrderDetailPage() {
         <AdminMessage id={"Loading order…"} />
       </p>
     )
-  if (error)
-    return (
-      <p role="alert" className="text-destructive">
-        {error.message}
-      </p>
-    )
   if (!order)
     return (
-      <p>
-        <AdminMessage id={"Order not found."} />
-      </p>
+      <MissingRecord
+        title="Order not found"
+        error={error}
+        back="/orders"
+        backLabel="Orders"
+      />
     )
   return <OrderDetail key={order.id} order={order} />
 }
@@ -107,7 +106,9 @@ export function OrderDetail({ order }: { order: Order }) {
         <AdminMessage id={"← Orders"} />
       </Link>
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-semibold">{order.number != null ? `#${order.number}` : order.id}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {order.number != null ? `#${order.number}` : order.id}
+        </h1>
         <StatusBadge status={order.status} />
         {order.usage?.delinquent && <StatusBadge status="delinquent" />}
       </div>
@@ -118,7 +119,7 @@ export function OrderDetail({ order }: { order: Order }) {
         </Link>{" "}
         · {order.origin} · {order.currency}
       </p>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,max(10rem,calc((100%_-_2rem)/3))),1fr))]">
         {[
           ["Total", order.total],
           ...(order.usage
@@ -146,7 +147,7 @@ export function OrderDetail({ order }: { order: Order }) {
               <AdminMessage id={"Renewal"} />
             </CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3 text-sm md:grid-cols-2">
+          <CardContent className="grid gap-3 text-sm @min-[40rem]/page:grid-cols-2">
             <p>
               <AdminMessage id={"Subscription:"} />{" "}
               <Link
@@ -259,7 +260,7 @@ export function OrderDetail({ order }: { order: Order }) {
         <CardContent>
           {history.error ? (
             <p role="alert" className="text-destructive">
-              {history.error.message}
+              {errorText(history.error).text}
             </p>
           ) : (
             <>
@@ -291,7 +292,7 @@ function UsageFacts({ usage }: { usage: OrderUsage }) {
           <AdminMessage id={"Usage billed"} />
         </CardTitle>
       </CardHeader>
-      <CardContent className="grid gap-3 text-sm md:grid-cols-2">
+      <CardContent className="grid gap-3 text-sm @min-[40rem]/page:grid-cols-2">
         <p>
           <AdminMessage id={"Period: "} />
           {formatDate(usage.period_starts_at)} –{" "}
@@ -344,7 +345,7 @@ function UsageFacts({ usage }: { usage: OrderUsage }) {
             </p>
           ))}
         </div>
-        <p className="text-muted-foreground md:col-span-2">
+        <p className="text-muted-foreground @min-[40rem]/page:col-span-2">
           <AdminMessage
             id={
               "These are the customer&apos;s invoice profile when the order was billed. Editing the profile affects later orders."

@@ -45,9 +45,8 @@ import {
   TableRow,
 } from "#orck/admin/components/ui/table"
 import { useAdminUpdates } from "#orck/admin/lib/capabilities"
-
-const errorText = (error: unknown) =>
-  error instanceof Error ? error.message : "The request failed. Try again."
+import { DIALOG_FIT } from "#orck/admin/lib/dialog-width"
+import { errorText } from "#orck/admin/lib/error-text"
 
 export function CustomerCreditSupportSection({
   customerId,
@@ -117,6 +116,7 @@ function CreditSupport({
           </CardTitle>
           {canUpdate && (
             <Button
+              variant="outline"
               size="sm"
               disabled={decimals === undefined}
               onClick={() => setGranting(true)}
@@ -161,13 +161,13 @@ function CreditSupport({
             <AdminMessage id={"Grants · "} />
             {currency}
           </h3>
-          {grants.isPending ? (
+          {grants.isLoading ? (
             <p className="text-sm text-muted-foreground">
               <AdminMessage id={"Loading grants…"} />
             </p>
           ) : grants.error ? (
             <p role="alert" className="text-sm text-destructive">
-              {errorText(grants.error)}
+              {errorText(grants.error).text}
             </p>
           ) : !grants.data?.data.length ? (
             <p className="text-sm text-muted-foreground">
@@ -264,13 +264,13 @@ function CreditSupport({
             <AdminMessage id={"Transaction ledger · "} />
             {currency}
           </h3>
-          {ledger.isPending ? (
+          {ledger.isLoading ? (
             <p className="text-sm text-muted-foreground">
               <AdminMessage id={"Loading transactions…"} />
             </p>
           ) : ledger.error ? (
             <p role="alert" className="text-sm text-destructive">
-              {errorText(ledger.error)}
+              {errorText(ledger.error).text}
             </p>
           ) : !ledger.data?.data.length ? (
             <p className="text-sm text-muted-foreground">
@@ -372,7 +372,7 @@ function GrantCreditDialog({
         if (!open && !mutation.isPending) onClose()
       }}
     >
-      <DialogContent>
+      <DialogContent className={DIALOG_FIT}>
         <DialogHeader>
           <DialogTitle>
             <AdminMessage id={"Grant credit"} />
@@ -401,7 +401,7 @@ function GrantCreditDialog({
               toast.success("Credit granted")
               onClose()
             } catch (error) {
-              setError(errorText(error))
+              setError(errorText(error).text)
             }
           }}
         >
@@ -492,7 +492,7 @@ function RevokeCreditDialog({
         if (!open && !mutation.isPending) onClose()
       }}
     >
-      <DialogContent>
+      <DialogContent className={DIALOG_FIT}>
         <DialogHeader>
           <DialogTitle>
             <AdminMessage id={"Revoke remaining credit"} />
@@ -523,7 +523,7 @@ function RevokeCreditDialog({
               )
               onClose()
             } catch (error) {
-              setError(errorText(error))
+              setError(errorText(error).text)
             }
           }}
         >

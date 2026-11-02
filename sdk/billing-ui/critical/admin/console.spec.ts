@@ -49,7 +49,7 @@ test("console-pull-link-map-apply-lands-once", async ({ page }) => {
   await open(page, "/ops/imports")
   const row = page.locator("tr[data-import]")
   await expect(row).toHaveCount(1)
-  await expect(row).toContainText("pulling")
+  await expect(row).toContainText("Pulling")
   await expect(row).toContainText("Reading catalog and roster")
   await act(page, "start")
   // The list polls while the pull runs.
@@ -184,7 +184,7 @@ test("console-parked-signup-lands-after-mapping", async ({ page }) => {
   // Mapping wakes the parked subscription's converge; run it now.
   await act(page, "settle")
   await page.getByLabel("Show released").check()
-  await expect(park).toContainText("landed")
+  await expect(park).toContainText("Landed")
   await expect(park.getByRole("link")).toBeVisible()
 })
 
@@ -193,7 +193,7 @@ test("console-failed-pull-and-read-only-access", async ({ page }) => {
   await open(page, "/ops/imports", "reader")
   await expect(
     page.locator(`tr[data-import="${fx.stripeImport}"]`)
-  ).toContainText("failed")
+  ).toContainText("Failed")
   await expect(page.getByRole("button", { name: "Pull" })).toHaveCount(0)
   await expect(
     page.getByRole("button", { name: "Upload mappings" })
@@ -333,7 +333,7 @@ test("console-proposals-group-approve-held-dismiss", async ({
   await expect(confirmDismiss).toBeDisabled()
   await dismiss.getByLabel("Notes (required)").fill("kept: the member paid us")
   await confirmDismiss.click()
-  await expect(row.getByTestId("outcome")).toContainText("dismissed")
+  await expect(row.getByTestId("outcome")).toContainText("Dismissed")
 
   const late = stale.locator("tr[data-proposal]")
   await late.getByRole("checkbox").check()
@@ -343,6 +343,6 @@ test("console-proposals-group-approve-held-dismiss", async ({
     .getByRole("dialog")
     .getByRole("button", { name: "Approve", exact: true })
     .click()
-  await expect(late.getByTestId("outcome")).toContainText("already_resolved")
+  await expect(late.getByTestId("outcome")).toContainText("Already resolved")
   await stale.close()
 })

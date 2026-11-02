@@ -28,7 +28,7 @@ export function LinkedTableRow({
         follow(event.target)
       }}
       className={cn(
-        "cursor-pointer focus-visible:bg-muted/50 focus-visible:outline-none",
+        "cursor-pointer focus-visible:bg-muted/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
         className
       )}
       {...props}

@@ -1,4 +1,5 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { FACT_TILES } from "#orck/admin/lib/tile-grids"
 import { useAdminServices } from "#orck/admin/context"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons"
@@ -9,6 +10,7 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Fact } from "#orck/admin/components/fact-card"
+import { MissingRecord } from "#orck/admin/components/missing-record"
 import { FormFieldErrors } from "#orck/admin/components/form-field-errors"
 import { StatusBadge } from "#orck/admin/components/status-badge"
 import { TypedConfirmDialog } from "#orck/admin/components/typed-confirm-dialog"
@@ -38,7 +40,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "#orck/admin/components/ui/select"
-import { Switch } from "#orck/admin/components/ui/switch"
 import {
   Table,
   TableBody,
@@ -50,11 +51,16 @@ import {
 import type { ScheduledChange } from "#orck/admin/lib/api/types"
 import { DIALOG_FORM } from "#orck/admin/lib/dialog-width"
 import {
+  customerName,
   formatCard,
   formatDate,
   formatNativeAmount,
   shortId,
 } from "#orck/admin/lib/format"
+
+// formatDay is a date without its time: "Dec 2, 2026".
+const formatDay = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" })
 
 import { ChangeSubscriptionDialog } from "#orck/admin/pages/subscriptions/change-subscription-dialog"
 import { dunningSummary } from "#orck/admin/pages/subscriptions/dunning"
@@ -68,13 +74,18 @@ export function SubscriptionDetailPage() {
   const canUpdate = useAdminUpdates()
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const { data: sub, isPending: loading } = useQuery(
-    adminQueries.subscription(id)
-  )
+  const {
+    data: sub,
+    isPending: loading,
+    error,
+  } = useQuery(adminQueries.subscription(id))
   const { data: paymentPage } = useQuery(
     adminQueries.payments({ subscription_id: id }, 20)
   )
   const payments = paymentPage?.data ?? []
+  const { data: customer } = useQuery(
+    adminQueries.customer(sub?.customer_id ?? "")
+  )
   if (loading)
     return (
       <p className="text-sm text-muted-foreground">
@@ -83,9 +94,12 @@ export function SubscriptionDetailPage() {
     )
   if (!sub)
     return (
-      <p className="text-sm text-muted-foreground">
-        <AdminMessage id={"Subscription not found."} />
-      </p>
+      <MissingRecord
+        title="Subscription not found"
+        error={error}
+        back="/subscriptions"
+        backLabel="Subscriptions"
+      />
     )
 
   const cancellable =
@@ -93,11 +107,12 @@ export function SubscriptionDetailPage() {
     sub.status === "past_due" ||
     sub.status === "awaiting_method" ||
     sub.status === "unverified"
-  const resumable = sub.status === "canceled" || sub.status === "past_due"
+  const customerLabel = customer ? customerName(customer) : undefined
+  const planName = sub.product?.display_name
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
           size="icon"
@@ -106,16 +121,18 @@ export function SubscriptionDetailPage() {
         >
           <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
         </Button>
-        <div>
-          <h2 className="flex items-center gap-2 text-sm">
-            {sub.id} <StatusBadge status={sub.status} />
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            {sub.rail} · {sub.rail_subscription_id || "no rail id"}
+        <div className="min-w-0">
+          <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">
+            {planName ?? adminText("Subscription")}
+            <StatusBadge status={sub.status} />
+          </h1>
+          <p className="text-xs [overflow-wrap:anywhere] text-muted-foreground">
+            {sub.id} · {sub.rail}
+            {sub.rail_subscription_id ? ` · ${sub.rail_subscription_id}` : ""}
           </p>
         </div>
-        <div className="ml-auto flex gap-2">
-          {canUpdate && resumable && (
+        <div className="flex flex-wrap gap-2 sm:ml-auto">
+          {canUpdate && sub.resumable && (
             <ResumeButton id={sub.id} customerId={sub.customer_id} />
           )}
           {canUpdate && (
@@ -141,19 +158,25 @@ export function SubscriptionDetailPage() {
             />
           )}
           {canUpdate && cancellable && (
-            <CancelDialog id={sub.id} customerId={sub.customer_id} />
+            <CancelDialog
+              id={sub.id}
+              customerId={sub.customer_id}
+              customer={customerLabel}
+              plan={planName}
+              periodEnd={sub.current_period_ends_at}
+            />
           )}
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={FACT_TILES}>
         <Fact label={adminText("Customer")}>
           {sub.customer_id ? (
             <Link
               className="text-xs underline-offset-2 hover:underline"
               to={`/customers/${sub.customer_id}`}
             >
-              {shortId(sub.customer_id, 13)}
+              {customerLabel ?? shortId(sub.customer_id, 13)}
             </Link>
           ) : (
             "—"
@@ -225,9 +248,18 @@ export function SubscriptionDetailPage() {
           {sub.dunning?.last_failure_reason ?? "—"}
         </Fact>
         <Fact label={adminText("Canceled")}>
-          {sub.canceled_at
-            ? `${formatDate(sub.canceled_at)} (${sub.cancel_type ?? "?"})`
-            : "—"}
+          {sub.canceled_at ? (
+            <>
+              {formatDate(sub.canceled_at)}
+              {sub.cancel_type && (
+                <span className="block text-xs text-muted-foreground">
+                  {adminText(cancelledBy[sub.cancel_type] ?? sub.cancel_type)}
+                </span>
+              )}
+            </>
+          ) : (
+            "—"
+          )}
         </Fact>
       </div>
 
@@ -252,13 +284,13 @@ export function SubscriptionDetailPage() {
                   <TableHead className="text-muted-foreground">
                     <AdminMessage id={"Status"} />
                   </TableHead>
-                  <TableHead className="text-muted-foreground">
+                  <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                     <AdminMessage id={"Kind"} />
                   </TableHead>
                   <TableHead className="text-muted-foreground">
                     <AdminMessage id={"Amount"} />
                   </TableHead>
-                  <TableHead className="text-muted-foreground">
+                  <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                     <AdminMessage id={"Created"} />
                   </TableHead>
                 </TableRow>
@@ -277,11 +309,15 @@ export function SubscriptionDetailPage() {
                     <TableCell>
                       <StatusBadge status={p.status} />
                     </TableCell>
-                    <TableCell>{p.kind}</TableCell>
+                    <TableCell className="@max-[36rem]/page:hidden">
+                      {p.kind}
+                    </TableCell>
                     <TableCell>
                       {formatNativeAmount(p.amount, p.currency)}
                     </TableCell>
-                    <TableCell>{formatDate(p.created_at)}</TableCell>
+                    <TableCell className="@max-[36rem]/page:hidden">
+                      {formatDate(p.created_at)}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -293,7 +329,28 @@ export function SubscriptionDetailPage() {
   )
 }
 
-function CancelDialog({ id, customerId }: { id: string; customerId?: string }) {
+// cancelledBy says who ended a subscription, by its cancel_type.
+const cancelledBy: Record<string, string> = {
+  user: "By the customer",
+  merchant: "By staff",
+  expired: "Renewal payment failed",
+  chargeback: "After a chargeback",
+  upgrade: "Replaced by an upgrade",
+}
+
+function CancelDialog({
+  id,
+  customerId,
+  customer,
+  plan,
+  periodEnd,
+}: {
+  id: string
+  customerId?: string
+  customer?: string
+  plan?: string
+  periodEnd: string | null
+}) {
   const { toast, toastApiError, adminMutations } = useAdminServices()
 
   const { text: adminText, id: adminId } = useAdminUI()
@@ -318,17 +375,23 @@ function CancelDialog({ id, customerId }: { id: string; customerId?: string }) {
   return (
     <>
       <Button variant="destructive" size="sm" onClick={() => setOpen(true)}>
-        <AdminMessage id={"Cancel subscription"} />
+        <AdminMessage id={"Cancel membership"} />
       </Button>
       <TypedConfirmDialog
         open={open}
         onOpenChange={handleOpenChange}
-        title={adminText("Cancel subscription")}
-        description={adminText(
-          "Terminal cancellation at the payment rail. This is a last resort. Dunning parks subscriptions as past_due without losing entitlements."
-        )}
+        title={adminText("Cancel this membership?")}
+        description={`${adminText(
+          "Renewal stops now and can't be restarted from here."
+        )} ${customer ?? adminText("The customer")} ${adminText("keeps")} ${
+          plan ?? adminText("their access")
+        } ${
+          periodEnd
+            ? `${adminText("until")} ${formatDay(periodEnd)}.`
+            : adminText("until the current period ends.")
+        }`}
         confirmationWord="CANCEL"
-        actionLabel="Cancel subscription"
+        actionLabel={adminText("Cancel membership")}
         onConfirm={async () => {
           try {
             await cancel.mutateAsync(form.state.values)
@@ -358,16 +421,17 @@ function CancelDialog({ id, customerId }: { id: string; customerId?: string }) {
           </form.Field>
           <form.Field name="revokeAccess">
             {(field) => (
-              <div className="flex items-center gap-2">
-                <Switch
-                  id={adminId("cancel-revoke")}
+              <Label className="flex min-h-10 items-center gap-2 font-normal">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-destructive"
                   checked={field.state.value}
-                  onCheckedChange={field.handleChange}
+                  onChange={(event) => field.handleChange(event.target.checked)}
                 />
-                <Label htmlFor={adminId("cancel-revoke")}>
-                  <AdminMessage id={"Also revoke access immediately"} />
-                </Label>
-              </div>
+                <AdminMessage
+                  id={"End access now instead (no refund is made)"}
+                />
+              </Label>
             )}
           </form.Field>
         </div>

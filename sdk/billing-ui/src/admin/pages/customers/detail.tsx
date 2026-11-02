@@ -1,10 +1,12 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { STAT_TILES_4 } from "#orck/admin/lib/tile-grids"
 import { useAdminContext, useAdminServices } from "#orck/admin/context"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Add01Icon,
   ArrowLeft01Icon,
   Delete02Icon,
+  Refresh01Icon,
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Link, useNavigate, useParams } from "#orck/admin/router"
@@ -59,6 +61,7 @@ import {
 import type { CustomerContact } from "#orck/client/generated/wire"
 
 import { DIALOG_FORM } from "#orck/admin/lib/dialog-width"
+import { cn } from "#orck/admin/lib/utils"
 
 import { CustomerInvoiceProfileSection } from "./invoice-profile"
 import { DefaultCardBadges } from "./default-card-badges"
@@ -72,8 +75,9 @@ import {
   type GrantDuration,
 } from "./grant-duration"
 import { dunningSummary } from "#orck/admin/pages/subscriptions/dunning"
-import { useAdminUpdates } from "#orck/admin/lib/capabilities"
+import { useAdminUpdates, useCatalogSells } from "#orck/admin/lib/capabilities"
 import { useConfirm } from "#orck/admin/lib/confirm"
+import { MissingRecord } from "#orck/admin/components/missing-record"
 
 export function CustomerDetailPage() {
   const { text: adminText } = useAdminUI()
@@ -82,11 +86,14 @@ export function CustomerDetailPage() {
   const { adminQueries } = useAdminServices()
 
   const canUpdate = useAdminUpdates()
+  const sells = useCatalogSells()
   const { customerId = "" } = useParams()
   const navigate = useNavigate()
-  const { data: customer, isPending: loading } = useQuery(
-    adminQueries.customer(customerId)
-  )
+  const {
+    data: customer,
+    isPending: loading,
+    error,
+  } = useQuery(adminQueries.customer(customerId))
 
   if (loading)
     return (
@@ -96,14 +103,17 @@ export function CustomerDetailPage() {
     )
   if (!customer)
     return (
-      <p className="text-sm text-muted-foreground">
-        <AdminMessage id={"Customer not found."} />
-      </p>
+      <MissingRecord
+        title="Customer not found"
+        error={error}
+        back="/customers"
+        backLabel="Customers"
+      />
     )
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
           size="icon"
@@ -112,11 +122,11 @@ export function CustomerDetailPage() {
         >
           <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
         </Button>
-        <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]">
             {customer.contact?.name || customer.contact?.email || "Customer"}
-          </h2>
-          <p className="truncate text-xs text-muted-foreground">
+          </h1>
+          <p className="text-xs [overflow-wrap:anywhere] text-muted-foreground">
             {customer.id}
             <AdminMessage id={" · since "} />
             {formatDate(customer.created_at)}
@@ -125,7 +135,7 @@ export function CustomerDetailPage() {
           </p>
         </div>
         {canUpdate && (
-          <div className="ml-auto flex gap-2">
+          <div className="flex gap-2 @max-[36rem]/page:w-full">
             <GrantProductAccessDialog customerId={customerId} />
           </div>
         )}
@@ -140,7 +150,7 @@ export function CustomerDetailPage() {
       {host.customerPanels?.(customer)}
 
       {customer.balances.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className={STAT_TILES_4}>
           {customer.balances.map((b) => (
             <Card key={b.currency}>
               <CardHeader className="pb-1">
@@ -176,14 +186,20 @@ export function CustomerDetailPage() {
         </p>
       )}
 
-      <CustomerCreditSupportSection
-        customerId={customerId}
-        currencies={customer.balances.map((balance) => balance.currency)}
-      />
-      <CustomerInvoiceProfileSection customerId={customerId} />
+      {/* Credits serve credit and usage products, the invoice profile usage
+          billing: a merchant selling neither sees neither. */}
+      {sells?.credit && (
+        <CustomerCreditSupportSection
+          customerId={customerId}
+          currencies={customer.balances.map((balance) => balance.currency)}
+        />
+      )}
+      {sells?.usage && (
+        <CustomerInvoiceProfileSection customerId={customerId} />
+      )}
 
-      <div className="grid gap-4 lg:grid-cols-3 lg:items-start">
-        <div className="grid gap-4 lg:col-span-2">
+      <div className="grid gap-4 @min-[56rem]/page:grid-cols-3 @min-[56rem]/page:items-start">
+        <div className="grid gap-4 @min-[56rem]/page:col-span-2">
           <CustomerSubscriptions customerId={customerId} />
           <CustomerPayments customerId={customerId} />
           <CustomerPaymentMethods customerId={customerId} />
@@ -227,13 +243,13 @@ function CustomerSubscriptions({ customerId }: { customerId: string }) {
                 <TableHead className="text-muted-foreground">
                   <AdminMessage id={"Status"} />
                 </TableHead>
-                <TableHead className="text-muted-foreground">
+                <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                   <AdminMessage id={"Rail"} />
                 </TableHead>
                 <TableHead className="text-muted-foreground">
                   <AdminMessage id={"Period ends"} />
                 </TableHead>
-                <TableHead className="text-muted-foreground">
+                <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                   <AdminMessage id={"Dunning"} />
                 </TableHead>
               </TableRow>
@@ -252,11 +268,13 @@ function CustomerSubscriptions({ customerId }: { customerId: string }) {
                   <TableCell>
                     <StatusBadge status={s.status} />
                   </TableCell>
-                  <TableCell>{s.rail}</TableCell>
-                  <TableCell className="tabular-nums">
+                  <TableCell className="@max-[36rem]/page:hidden">
+                    {s.rail}
+                  </TableCell>
+                  <TableCell className="tabular-nums @max-[36rem]/page:whitespace-normal">
                     {formatDate(s.current_period_ends_at)}
                   </TableCell>
-                  <TableCell className="text-xs">
+                  <TableCell className="text-xs @max-[36rem]/page:hidden">
                     {s.dunning ? dunningSummary(s.dunning) : "—"}
                   </TableCell>
                 </LinkedTableRow>
@@ -308,13 +326,13 @@ function CustomerPayments({ customerId }: { customerId: string }) {
                 <TableHead className="text-muted-foreground">
                   <AdminMessage id={"Amount"} />
                 </TableHead>
-                <TableHead className="text-muted-foreground">
+                <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                   <AdminMessage id={"Kind"} />
                 </TableHead>
-                <TableHead className="text-muted-foreground">
+                <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                   <AdminMessage id={"Rail"} />
                 </TableHead>
-                <TableHead className="text-muted-foreground">
+                <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                   <AdminMessage id={"Purchased"} />
                 </TableHead>
               </TableRow>
@@ -336,9 +354,13 @@ function CustomerPayments({ customerId }: { customerId: string }) {
                   <TableCell className="tabular-nums">
                     {formatNativeAmount(p.amount, p.currency)}
                   </TableCell>
-                  <TableCell>{p.kind}</TableCell>
-                  <TableCell>{p.rail ?? p.channel}</TableCell>
-                  <TableCell className="tabular-nums">
+                  <TableCell className="@max-[36rem]/page:hidden">
+                    {p.kind}
+                  </TableCell>
+                  <TableCell className="@max-[36rem]/page:hidden">
+                    {p.rail ?? p.channel}
+                  </TableCell>
+                  <TableCell className="tabular-nums @max-[36rem]/page:hidden">
                     {formatDate(p.created_at)}
                   </TableCell>
                 </LinkedTableRow>
@@ -362,8 +384,10 @@ function CustomerPaymentMethods({ customerId }: { customerId: string }) {
     adminQueries,
     queryKeys,
     deleteCustomerPaymentMethod,
+    toast,
     toastApiError,
   } = useAdminServices()
+  const { text: adminText } = useAdminUI()
   const canUpdate = useAdminUpdates()
   const confirm = useConfirm()
 
@@ -394,13 +418,19 @@ function CustomerPaymentMethods({ customerId }: { customerId: string }) {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() =>
-            void queryClient.invalidateQueries({
+          disabled={isFetching}
+          onClick={async () => {
+            await queryClient.invalidateQueries({
               queryKey: [...queryKeys.customer(customerId), "payment-methods"],
             })
-          }
+            toast.success(adminText("Payment methods are up to date"))
+          }}
         >
-          <AdminMessage id={"Refresh payment methods"} />
+          <HugeiconsIcon
+            icon={Refresh01Icon}
+            className={cn("size-3.5", isFetching && "animate-spin")}
+          />
+          {adminText(isFetching ? "Refreshing…" : "Refresh payment methods")}
         </Button>
       </CardHeader>
       <CardContent className="grid gap-3">
@@ -906,6 +936,7 @@ export function GrantProductAccessDialog({
 // CustomerContactCard is who the customer is, from the merchant's directory:
 // read live, or the copy its SCIM provisioning keeps.
 function CustomerContactCard({ contact }: { contact: CustomerContact | null }) {
+  const { text: adminText } = useAdminUI()
   return (
     <Card>
       <CardHeader className="pb-1">
@@ -947,10 +978,12 @@ function CustomerContactCard({ contact }: { contact: CustomerContact | null }) {
               </>
             )}
             <dt className="text-muted-foreground">
-              <AdminMessage id={"Synced"} />
+              <AdminMessage id={"Last updated"} />
             </dt>
             <dd className="tabular-nums">
-              {contact.synced_at ? formatDate(contact.synced_at) : "Live"}
+              {contact.synced_at
+                ? formatDate(contact.synced_at)
+                : adminText("Current, read from your directory")}
             </dd>
           </dl>
         )}

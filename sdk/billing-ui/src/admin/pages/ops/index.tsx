@@ -1,4 +1,5 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { STAT_TILES_4 } from "#orck/admin/lib/tile-grids"
 import { useAdminServices } from "#orck/admin/context"
 import * as React from "react"
 
@@ -33,8 +34,10 @@ import {
   TableRow,
 } from "#orck/admin/components/ui/table"
 import { Textarea } from "#orck/admin/components/ui/textarea"
-import type { Finding } from "#orck/client/generated/wire"
-import { DIALOG_FORM } from "#orck/admin/lib/dialog-width"
+import type { DestructiveHold, Finding } from "#orck/client/generated/wire"
+import { ApiError } from "#orck/admin/lib/api/client"
+import { DIALOG_CONFIRM, DIALOG_FORM } from "#orck/admin/lib/dialog-width"
+import { errorText } from "#orck/admin/lib/error-text"
 import { formatDate } from "#orck/admin/lib/format"
 
 import {
@@ -51,7 +54,7 @@ const severityTone: Record<string, string> = {
   critical: "bg-failed-surface text-failed",
   high: "bg-held-surface text-held",
   medium: "bg-held-surface text-held",
-  low: "bg-muted text-muted-foreground",
+  low: "bg-inactive-surface text-inactive",
 }
 
 function FindingsTab() {
@@ -74,8 +77,12 @@ function FindingsTab() {
 
   return (
     <div className="flex flex-col gap-4">
+      <h1 className="text-2xl font-semibold tracking-tight">
+        <AdminMessage id={"Findings"} />
+      </h1>
+      <DestructiveHolds canUpdate={canUpdate} />
       {metrics && gauges && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className={STAT_TILES_4}>
           {/* Each gauge says what is wrong with the MONEY, not what the check
               is called internally: a merchant reading "freeloaders" cannot tell
               whether that costs them anything. */}
@@ -145,14 +152,16 @@ function FindingsTab() {
                       {f.severity}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-xs">{f.finding_type}</TableCell>
+                  <TableCell className="min-w-40 text-xs [overflow-wrap:anywhere] whitespace-normal">
+                    {f.finding_type}
+                  </TableCell>
                   <TableCell className="max-w-52 truncate text-xs">
                     {f.subject_key}
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={f.status} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="min-w-64 [overflow-wrap:anywhere] whitespace-normal">
                     {f.recommendation?.action ?? f.recommended_action ?? "—"}
                   </TableCell>
                   <TableCell>{formatDate(f.last_seen_at)}</TableCell>
@@ -329,6 +338,13 @@ function ResolveFindingDialog({
           )}
         </form.Field>
         <DialogFooter>
+          <Button
+            variant="outline"
+            disabled={resolution.isPending}
+            onClick={onClose}
+          >
+            <AdminMessage id={"Cancel"} />
+          </Button>
           <form.Subscribe selector={(state) => state.values.notes}>
             {(notes) => (
               <Button
@@ -348,6 +364,159 @@ function ResolveFindingDialog({
               {resolution.isPending ? "Working…" : "Approve recommendation"}
             </Button>
           )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// DestructiveHolds lists the open holds the destructive-action limit put on
+// refunds, revokes and cancels, and lets a different person clear one.
+function DestructiveHolds({ canUpdate }: { canUpdate: boolean }) {
+  const { text: adminText } = useAdminUI()
+  const { adminQueries } = useAdminServices()
+  const { data } = useQuery(adminQueries.destructiveHolds())
+  const [clearing, setClearing] = React.useState<DestructiveHold | null>(null)
+  const open = data?.data.filter((hold) => !hold.cleared_at) ?? []
+  if (!open.length) return null
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">
+          <AdminMessage id={"Holds on refunds and cancels"} />
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {open.map((hold) => (
+          <div
+            key={hold.id}
+            className="flex flex-wrap items-center justify-between gap-3"
+          >
+            <div className="min-w-0 text-sm">
+              <p>
+                {adminText(
+                  hold.scope === "actor"
+                    ? "A staff member reached the limit of"
+                    : "Staff reached the limit of"
+                )}{" "}
+                {hold.ceiling}{" "}
+                {adminText(
+                  hold.window === "hour"
+                    ? "refunds, revokes or cancels in an hour. These are paused until someone clears the hold."
+                    : "refunds, revokes or cancels in a day. These are paused until someone clears the hold."
+                )}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                <AdminMessage id={"Held since"} /> {formatDate(hold.opened_at)}
+              </p>
+            </div>
+            {canUpdate && (
+              <Button variant="outline" onClick={() => setClearing(hold)}>
+                <AdminMessage id={"Clear hold"} />
+              </Button>
+            )}
+          </div>
+        ))}
+      </CardContent>
+      {clearing && (
+        <ClearHoldDialog hold={clearing} onClose={() => setClearing(null)} />
+      )}
+    </Card>
+  )
+}
+
+// clearRefusal says why a clear was refused. The server answers 403 both to
+// the person the hold stopped and to one without the unlock permission; only
+// its message tells them apart.
+function clearRefusal(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403)
+      return /trigger/i.test(error.message)
+        ? "A different person must clear this hold."
+        : "You don't have permission to clear holds."
+    if (error.code === "authorization_unavailable")
+      return "Billing couldn't check your permission to clear holds. Try again in a moment."
+    if (error.status === 404 || error.code === "resource_conflict")
+      return "This hold was already cleared or no longer exists."
+  }
+  return errorText(error).text
+}
+
+function ClearHoldDialog({
+  hold,
+  onClose,
+}: {
+  hold: DestructiveHold
+  onClose: () => void
+}) {
+  const { toast, adminMutations } = useAdminServices()
+  const { id: adminId, text: adminText } = useAdminUI()
+  const queryClient = useQueryClient()
+  const clear = useMutation(adminMutations.clearDestructiveHold(queryClient))
+  const [reason, setReason] = React.useState("")
+  const trimmed = reason.trim()
+  return (
+    <Dialog open onOpenChange={(o) => !o && !clear.isPending && onClose()}>
+      <DialogContent className={DIALOG_CONFIRM}>
+        <DialogHeader>
+          <DialogTitle>
+            <AdminMessage id={"Clear this hold?"} />
+          </DialogTitle>
+          <DialogDescription>
+            <AdminMessage
+              id={
+                "Refunds, revokes and cancels start working again for the people it held. Someone other than the person it stopped must clear it."
+              }
+            />
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          id={adminId("clear-hold")}
+          className="grid gap-1.5"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!trimmed) return
+            clear.mutate(
+              { id: hold.id, reason: trimmed },
+              {
+                onSuccess: () => {
+                  toast.success(adminText("Hold cleared"))
+                  onClose()
+                },
+              }
+            )
+          }}
+        >
+          <Label htmlFor={adminId("clear-hold-reason")}>
+            <AdminMessage id={"Reason (required)"} />
+          </Label>
+          <Textarea
+            id={adminId("clear-hold-reason")}
+            value={reason}
+            maxLength={2000}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </form>
+        {clear.error && (
+          <p role="alert" className="text-sm text-destructive">
+            {adminText(clearRefusal(clear.error))}
+          </p>
+        )}
+        <DialogFooter>
+          <Button
+            variant="outline"
+            disabled={clear.isPending}
+            onClick={onClose}
+          >
+            <AdminMessage id={"Cancel"} />
+          </Button>
+          <Button
+            type="submit"
+            form={adminId("clear-hold")}
+            disabled={!trimmed || clear.isPending}
+          >
+            {adminText(clear.isPending ? "Clearing…" : "Clear hold")}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

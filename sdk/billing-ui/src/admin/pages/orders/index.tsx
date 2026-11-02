@@ -7,6 +7,7 @@ import { Link, useSearchParams } from "#orck/admin/router"
 import type { ColumnDef } from "@tanstack/react-table"
 import { CursorPager } from "#orck/admin/components/cursor-pager"
 import { DataTable } from "#orck/admin/components/data-table"
+import { errorText } from "#orck/admin/lib/error-text"
 import { StatusBadge } from "#orck/admin/components/status-badge"
 import { Input } from "#orck/admin/components/ui/input"
 import { Label } from "#orck/admin/components/ui/label"
@@ -82,7 +83,7 @@ export function OrdersPage() {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h1 className="text-xl font-semibold">
+        <h1 className="text-2xl font-semibold tracking-tight">
           <AdminMessage id={"Orders"} />
         </h1>
         <p className="text-sm text-muted-foreground">
@@ -106,7 +107,7 @@ export function OrdersPage() {
       />
       {error ? (
         <p role="alert" className="text-destructive">
-          {error.message}
+          {errorText(error).text}
         </p>
       ) : (
         <>
@@ -142,7 +143,7 @@ function OrderFiltersForm({
     setDraft((old) => ({ ...old, [key]: value }))
   return (
     <form
-      className="grid gap-3 md:grid-cols-3"
+      className="grid gap-3 @min-[40rem]/page:grid-cols-3"
       onSubmit={(event) => {
         event.preventDefault()
         onApply(draft)
@@ -206,7 +207,7 @@ function OrderFiltersForm({
           ))}
         </select>
       </div>
-      <label className="flex items-center gap-2 text-sm md:col-span-3">
+      <label className="flex items-center gap-2 text-sm @min-[40rem]/page:col-span-3">
         <input
           type="checkbox"
           checked={draft.overdue === "true"}
@@ -214,7 +215,7 @@ function OrderFiltersForm({
         />
         <AdminMessage id={"Overdue only: still owed past the due date"} />
       </label>
-      <div className="flex gap-2 md:col-span-3">
+      <div className="flex flex-wrap gap-2 @min-[40rem]/page:col-span-3">
         <Button type="submit">
           <AdminMessage id={"Apply filters"} />
         </Button>

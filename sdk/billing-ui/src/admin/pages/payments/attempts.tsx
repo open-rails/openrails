@@ -1,4 +1,5 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { FACT_TILES } from "#orck/admin/lib/tile-grids"
 import { useAdminServices } from "#orck/admin/context"
 // Payments → Attempts and Renewals (#1117): the #1116 lists and details.
 // A list's filters are its URL's query parameters, as the API names them, so
@@ -230,7 +231,7 @@ export function AttemptDetailPage() {
           </p>
         </div>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={FACT_TILES}>
         <Fact label={adminText("Outcome")}>
           {a.category === "approved"
             ? "approved"
@@ -289,7 +290,7 @@ export function AttemptDetailPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+          <dl className="grid gap-x-6 gap-y-2 text-sm @min-[32rem]/page:grid-cols-2">
             {answer.map(([label, value]) => (
               <div key={label} className="flex gap-2">
                 <dt className="w-28 shrink-0 text-muted-foreground">{label}</dt>
@@ -409,7 +410,7 @@ export function CycleDetailPage() {
           </p>
         </div>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={FACT_TILES}>
         <Fact label={adminText("Amount")}>
           {formatNativeAmount(c.amount, c.currency)}
         </Fact>

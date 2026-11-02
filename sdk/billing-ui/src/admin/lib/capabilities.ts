@@ -45,6 +45,37 @@ export function useCatalogArea(): boolean {
   return level === "read" || level === "update"
 }
 
+// useCatalogSells reports what the catalog sells that a customer page's
+// sections serve: credit (a product that grants it, archived ones included,
+// since customers may still hold their grants) and usage (a meter priced by a
+// rate card). Undefined while the catalog loads. When the caller cannot read
+// the catalog, or the read fails, both are assumed: a section is hidden only
+// on evidence, never on a guess.
+export function useCatalogSells():
+  { credit: boolean; usage: boolean } | undefined {
+  const { adminQueries } = useAdminServices()
+  const readable = useCatalogArea()
+  const access = useAccess()
+  const products = useQuery({
+    ...adminQueries.allProducts(),
+    enabled: readable,
+  })
+  const meters = useQuery({
+    ...adminQueries.allUsageMeters(),
+    meta: undefined,
+    enabled: readable,
+  })
+  if (!access) return undefined
+  if (!readable || products.isError || meters.isError)
+    return { credit: true, usage: true }
+  if (!products.data || !meters.data) return undefined
+  const usage = meters.data.data.some((meter) => meter.rate_card !== null)
+  return {
+    credit: products.data.data.some((product) => product.credit_grant) || usage,
+    usage,
+  }
+}
+
 // useMerchantConfigEdits reports whether that configuration can change here:
 // Vault holds it. Read from a file it is read-only and its edit routes are not
 // mounted, so the console offers no edits.

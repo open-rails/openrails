@@ -1,4 +1,5 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { STAT_TILES_6 } from "#orck/admin/lib/tile-grids"
 import { useAdminServices } from "#orck/admin/context"
 // Payments → Health: decline and rebill-failure health from the metrics API.
 // Every tile and cell opens the matching attempt or cycle list.
@@ -134,7 +135,7 @@ export function PaymentHealthPage() {
       </div>
 
       <Tiles scope={scope} />
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 @min-[48rem]/page:grid-cols-2">
         <Trend
           title={adminText("New-card decline rate by week")}
           query={trendQueries(scope).newCard}
@@ -147,7 +148,7 @@ export function PaymentHealthPage() {
       <Reasons scope={scope} />
       <Checks scope={scope} />
       <Recovery scope={scope} />
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 @min-[48rem]/page:grid-cols-2">
         <Missed scope={scope} pspKey={pspKey} />
         <Coverage scope={scope} pspKey={pspKey} />
       </div>
@@ -218,7 +219,7 @@ function Empty({ label = "Nothing in this range." }: { label?: string }) {
 
 function Tiles({ scope }: { scope: Scope }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className={STAT_TILES_6}>
       {TILES.map((tile) => (
         <TileCard key={tile.id} tile={tile} scope={scope} />
       ))}
@@ -409,7 +410,7 @@ function Checks({ scope }: { scope: Scope }) {
 
   const queries = checkQueries(scope)
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4 @min-[48rem]/page:grid-cols-2">
       <CheckTable
         title={adminText("New cards by AVS result")}
         dimension="avs_result"
@@ -518,7 +519,7 @@ function Recovery({ scope }: { scope: Scope }) {
   const byDays = useQuery(metrics(q.byDays))
   const loading = rate.isPending || byAttempt.isPending || byDays.isPending
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4 @min-[48rem]/page:grid-cols-2">
       <Panel
         title={adminText("Dunning recovery by retry (share of failed cycles)")}
       >
@@ -784,10 +785,10 @@ function NMIHistory({ scope }: { scope: Scope }) {
             : "OpenRails recorded no NMI attempt in this range."}
         </p>
       </div>
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid gap-4 @min-[56rem]/page:grid-cols-3">
         <Panel
           title={adminText("Refusal rate by month")}
-          className="xl:col-span-2"
+          className="@min-[56rem]/page:col-span-2"
         >
           {months.isPending || recorded.isPending ? (
             <Loading />

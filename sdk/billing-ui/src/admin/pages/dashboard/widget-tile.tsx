@@ -24,6 +24,7 @@ import {
 } from "#orck/admin/components/ui/dropdown-menu"
 import { Skeleton } from "#orck/admin/components/ui/skeleton"
 import { ApiError } from "#orck/admin/lib/api/client"
+import { errorText } from "#orck/admin/lib/error-text"
 import { type MetricsResult, type Widget } from "#orck/admin/lib/api/metrics"
 
 import { cn } from "#orck/admin/lib/utils"
@@ -63,7 +64,7 @@ export function WidgetTile({
   const isStat = widget.viz === "stat"
 
   return (
-    <Card className="group/tile relative h-full gap-2">
+    <Card className="group/tile @container/tile relative h-full gap-2">
       <div className="absolute top-2 right-2 z-10 flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-card opacity-0 shadow-sm transition-opacity group-hover/tile:opacity-100 focus-within:opacity-100">
         {editable && (
           <HugeiconsIcon
@@ -125,7 +126,7 @@ export function WidgetTile({
       <CardContent className="flex min-h-0 flex-1 flex-col gap-2">
         <span
           className={cn(
-            "truncate",
+            "line-clamp-2",
             isStat
               ? "text-xs font-medium tracking-wider text-muted-foreground uppercase"
               : "text-sm font-medium"
@@ -168,11 +169,9 @@ function TileBody({
   }
   if (error) {
     const msg =
-      error instanceof ApiError
-        ? error.isPermissionDenied
-          ? "your role lacks metrics access"
-          : error.message
-        : "query failed"
+      error instanceof ApiError && error.isPermissionDenied
+        ? "Your role can't see metrics."
+        : errorText(error).text
     return (
       <div
         className="flex h-full items-center justify-center text-center text-xs text-destructive"
