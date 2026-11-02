@@ -308,10 +308,11 @@ OpenRails.
 4. **Operate.** Renewals arrive from NMI webhooks and from the refresh pull
    (each NMI transaction becomes one local payment); cancels delete the NMI
    schedule once; card updates repoint the schedule to the new vault; refunds
-   go to NMI, and a refund with `revoke_access` also ends the membership and
-   deletes its NMI schedule (refused with `provider_cancel_held` while
-   disarmed). The provider refresh runs every two hours, and NMI's own
-   subscription webhooks converge the schedule they name at once. To re-read
+   go to NMI; a refund with `revoke_access` ends the refunded payment's
+   access, and the NMI schedule keeps billing until the membership is canceled,
+   which deletes it (refused with `provider_cancel_held` while disarmed).
+   The provider refresh runs every two hours, and NMI's own subscription
+   webhooks converge the schedule they name at once. To re-read
    a PSP now, create a PSP import (`Client.CreatePSPImport`,
    `POST /v1/merchant/psp-imports`); its differences become proposals.
    Tier changes (same tier group,

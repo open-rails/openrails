@@ -4,7 +4,9 @@ package critical_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
+	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -179,6 +182,67 @@ func TestPublicEntitlements(t *testing.T) {
 				require.Len(t, p.effects(t), 2)
 			})
 		}
+		membershipPayment := func(t *testing.T, a *authorityWorld, sub *billing.Subscription) billing.PaymentID {
+			t.Helper()
+			paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+			require.NoError(t, err)
+			require.Len(t, paid.Items, 1)
+			return paid.Items[0].ID
+		}
+		member := func(t *testing.T, a *authorityWorld, sub *billing.Subscription) bool {
+			t.Helper()
+			access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"membership:paid"}})
+			require.NoError(t, err)
+			return access.Entitlements["membership:paid"]
+		}
+		t.Run("membership-renews-after-a-partial-or-kept-access-refund", func(t *testing.T) {
+			a, _, sub := purchasedMembership(t)
+			payment := membershipPayment(t, a, sub)
+			_, err := a.alpha.RefundPayment(t.Context(), payment, billing.RefundPaymentParams{Amount: 4_000_000, RevokeAccess: true, Reason: "Partial goodwill", IdempotencyKey: "membership-partial"})
+			require.NoError(t, err)
+			_, err = a.alpha.RefundPayment(t.Context(), payment, billing.RefundPaymentParams{Full: true, Reason: "Rest, access kept", IdempotencyKey: "membership-rest"})
+			require.NoError(t, err)
+			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+			require.NoError(t, err)
+			require.Equal(t, billing.SubscriptionActive, current.Status, "renewal stays scheduled")
+			require.Equal(t, *sub.CurrentPeriodEndsAt, *current.CurrentPeriodEndsAt)
+		})
+		t.Run("membership-full-refund-revoking-access-ends-it", func(t *testing.T) {
+			a, p, sub := purchasedMembership(t)
+			_, err := a.alpha.RefundPayment(t.Context(), membershipPayment(t, a, sub), billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund and end", IdempotencyKey: "membership-full"})
+			require.NoError(t, err)
+			ended, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+			require.NoError(t, err)
+			require.Equal(t, billing.SubscriptionStatus("canceled"), ended.Status, "the refunded membership renews no more")
+			require.NotNil(t, ended.EndedAt)
+			require.False(t, ended.EndedAt.After(a.clock.Now()), "it ends with the refund")
+			require.False(t, ended.Resumable)
+			require.False(t, member(t, a, sub))
+			// Nothing stands between the customer and buying it again.
+			token := p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
+			again := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: sub.PriceID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
+			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, again, map[string]string{"Idempotency-Key": "membership-again"})
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			var order billing.Order
+			require.NoError(t, json.Unmarshal(raw, &order))
+			require.Equal(t, billing.OrderComplete, order.Status)
+			require.True(t, member(t, a, sub))
+		})
+		t.Run("membership-full-refund-of-an-earlier-period-ends-it-at-period-end", func(t *testing.T) {
+			a, p, sub := purchasedMembership(t)
+			first := membershipPayment(t, a, sub)
+			due := *sub.CurrentPeriodEndsAt
+			a.clock.Advance(due.Sub(a.clock.Now()))
+			runRegistered(t, startFleet(t, a.world), "openrails.dunning", 1)
+			renewalSettled(t, a, p, sub, due)
+			_, err := a.alpha.RefundPayment(t.Context(), first, billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund the first period", IdempotencyKey: "membership-first"})
+			require.NoError(t, err)
+			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+			require.NoError(t, err)
+			require.Equal(t, billing.SubscriptionStatus("canceled"), current.Status, "renewal stops")
+			require.Equal(t, due.Add(due.Sub(*sub.CurrentPeriodStartsAt)), *current.CurrentPeriodEndsAt, "the newer paid period stays")
+			require.True(t, member(t, a, sub))
+		})
 	})
 }
 

@@ -330,10 +330,14 @@ Destructive semantics are deliberate: refunds and cancels require an explicit
 `revoke_access` decision — refunding money and revoking access are separate choices.
 For refunds, requested access revocation commits with successful local refund
 completion. Only the refunded payment's access and its renewal grace are removed;
-newer paid periods stay available, and renewal remains scheduled. Cancellation is
-a separate action. If a seat or plan change combined access from several payments,
+newer paid periods stay available. Once a refund that revokes access has returned
+the whole payment, a membership OpenRails renews is canceled with it: it ends now
+when the payment bought its latest period, else when its current period ends, and
+the customer can buy it again once it has ended. A partial refund, or one that
+keeps access, leaves renewal scheduled, and a membership its provider renews is
+canceled as a separate action. If a seat or plan change combined access from several payments,
 the refund completes and a `consistency.refund_access` finding requests review;
-access stays intact rather than removing another payment's entitlement. A queued or uncertain refund (HTTP 202) retains access until that
+access and renewal stay intact rather than removing another payment's entitlement. A queued or uncertain refund (HTTP 202) retains access until that
 completion. The amount, reason, and revocation choice are immutable for an
 `Idempotency-Key`; reusing that key resumes the same operation. A different key
 creates a new operation, including an equal-sized partial refund within the
