@@ -16,6 +16,16 @@ import (
 )
 
 func initialBill(ctx context.Context, d *db.DB, params *CreateMembershipParams, sub *models.Subscription, p *models.Payment, now time.Time) (observed.Result, error) {
+	// An accepted engine charge names the saved card it charged.
+	if p != nil && params.Prepared != nil && params.Prepared.PaymentMethodID != uuid.Nil {
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return observed.Result{}, err
+		}
+		if err := payments.SetMethodCard(ctx, d.Gen(ctx), mid.UUID(), params.Prepared.PaymentMethodID, p); err != nil {
+			return observed.Result{}, err
+		}
+	}
 	if params.ProviderBill != nil {
 		b := *params.ProviderBill
 		b.SubscriptionID = &sub.ID

@@ -150,6 +150,40 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled"}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, events.Events, 2)
+		upgraded, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: *changed.SubscriptionID})
+		require.NoError(t, err)
+		require.Len(t, upgraded.Items, 1)
+		require.NotNil(t, upgraded.Items[0].Card, "the upgrade charge names the card it charged")
+		require.Equal(t, "visa", *upgraded.Items[0].Card.Brand)
+		require.Equal(t, "4242", *upgraded.Items[0].Card.Last4)
+
+		// So does the charge for more seats.
+		w, provider := newPaymentWorld(t, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) })
+		seats, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "team", DisplayName: "Team", Entitlements: []string{"team:member"}})
+		require.NoError(t, err)
+		seat, err := w.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: seats.ID, Key: "team-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24), Quantity: &catalog.Quantity{Min: 1, Max: 5}})
+		require.NoError(t, err)
+		order := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: seat.ID, Quantity: ptr(1)}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
+			Payment: &billing.OrderPaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+		status, raw = w.request(t, http.MethodPost, "/v1/me/orders", w.aliceToken, order, map[string]string{"Idempotency-Key": "team-purchase"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var bought billing.Order
+		require.NoError(t, json.Unmarshal(raw, &bought))
+		require.Equal(t, billing.OrderComplete, bought.Status, string(raw))
+		team := *bought.Lines[0].SubscriptionID
+		w.clock.Advance(12 * time.Hour)
+		status, raw = w.request(t, http.MethodPost, "/v1/me/subscriptions/"+team.String()+"/change", w.aliceToken, map[string]any{"quantity": 2}, map[string]string{"Idempotency-Key": "more-seats"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var added billing.SubscriptionChange
+		require.NoError(t, json.Unmarshal(raw, &added))
+		require.Equal(t, "succeeded", added.Status, string(raw))
+		charged, err := w.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: team})
+		require.NoError(t, err)
+		require.Len(t, charged.Items, 2, "the purchase and the added seats")
+		for _, payment := range charged.Items {
+			require.NotNil(t, payment.Card, "each charge names the card it charged")
+			require.Equal(t, "4242", *payment.Card.Last4)
+		}
 	})
 	t.Run("OR-J18-S04/admitted-renewal-fences-concurrent-customer-upgrade", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t)

@@ -604,6 +604,7 @@ func (s *CCBillWebhookService) settleOrderSale(ctx context.Context, attemptID uu
 		SubscriptionID: strings.TrimSpace(data.SubscriptionID), TransactionID: strings.TrimSpace(data.TransactionID), Username: strings.TrimSpace(data.Username),
 		FlexID: strings.TrimSpace(data.FlexID), RecurringBillingOptionID: strings.TrimSpace(data.SubscriptionTypeID),
 		Currency: currency, InitialMinor: int64(initial), SoldAt: ccbillEventPurchasedAt(data.Timestamp),
+		Card: models.ParseCard(data.CardType, data.Last4, ""),
 	}
 	if strings.TrimSpace(data.BilledRecurringPrice) != "" {
 		recurring, err := parseCCBillAmountCents(currency, data.BilledRecurringPrice, "billedRecurringPrice", "billedRecurringPrice", false)
@@ -888,6 +889,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			PurchasedAt:    *purchasedAt,
 			CreatedAt:      now,
 		}
+		payments.SetCard(payment, models.ParseCard(data.CardType, data.Last4, ""))
 
 		bill := ccbillUpgradeBill(subscription, newPrice, &data, amount, currencyValue, *purchasedAt, *periodEnd)
 		bill.Payment = payment
@@ -1606,6 +1608,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		bill.Payment = &models.Payment{CustomerID: sub.CustomerID, SubscriptionID: &sub.ID, PspID: &sub.PspID, Rail: models.RailCCBill,
 			TransactionID: transactionID, Amount: amount, ListAmount: amount, Currency: currencyValue,
 			Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail, PurchasedAt: *at, CreatedAt: s.now()}
+		payments.SetCard(bill.Payment, models.ParseCard(data.CardType, data.Last4, ""))
 		bill.Settled, bill.SettlementSource = true, "cash"
 		// CCBill signs nothing: its announced date is the paid-through only
 		// within the verified cycle plus grace.

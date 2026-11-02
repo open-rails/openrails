@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -234,6 +235,15 @@ func (r CollectedReceipt) Validate(in gen.BillingProviderIntent) error {
 		}
 	}
 	return nil
+}
+
+// NMICard is the brand and last four of the card an NMI sale charged, as
+// its order search reported them.
+func (r CollectedReceipt) NMICard() models.Card {
+	if r.data.NMI == nil {
+		return models.Card{}
+	}
+	return models.ParseCard(r.data.NMI.CardBrand, r.data.NMI.CardLast4, "")
 }
 
 // NMICustomerVaultID is the vault an NMI sale charged, or created.

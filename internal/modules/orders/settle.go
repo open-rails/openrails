@@ -48,7 +48,7 @@ type Charge struct {
 	Currency        string
 	PaymentMethodID uuid.UUID
 	// Card is the card reported for a new card no method keeps (Stripe's,
-	// a Basis Theory collection's; NMI's sale reports none).
+	// a Basis Theory collection's, or the one NMI's sale names).
 	Card        models.Card
 	PurchasedAt time.Time
 	TokenType   string

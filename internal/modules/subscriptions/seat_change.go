@@ -99,6 +99,9 @@ func (s *SubscriptionLifecycleService) AddSeatsTx(ctx context.Context, txDB *db.
 			Metadata:    withPaidPeriod(staff.Metadata(map[string]any{"added_seats": added}), terms.PeriodStart),
 			PurchasedAt: terms.AcceptedAt, CreatedAt: s.now(),
 		}
+		if err := payments.SetMethodCard(ctx, txDB.Gen(ctx), sub.MerchantID, terms.PaymentMethodID, payment); err != nil {
+			return err
+		}
 	}
 	description := terms.ProductName
 	if description == "" {

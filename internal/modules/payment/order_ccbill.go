@@ -311,7 +311,7 @@ func (s *OrderAttemptService) SettleOrderCCBill(ctx context.Context, attemptID u
 			}
 		}
 		outcome, err := s.orders.Paid(ctx, d, order.ID, orders.Charge{PaymentID: paymentID, AttemptID: attemptID, PSPID: attempt.PspID,
-			Rail: string(models.RailCCBill), TransactionID: sale.TransactionID, Amount: order.Total, Currency: order.Currency, PurchasedAt: start,
+			Rail: string(models.RailCCBill), TransactionID: sale.TransactionID, Amount: order.Total, Currency: order.Currency, PurchasedAt: start, Card: sale.Card,
 			Metadata: map[string]any{"ccbill_subscription_id": sale.SubscriptionID, "ccbill_flex_id": sale.FlexID, "order_attempt_id": billing.OrderAttemptID(attemptID).String()},
 			Enrolled: &orders.Enrolled{RailSubscriptionID: sale.SubscriptionID, PeriodStart: start, PeriodEnd: end, PriceID: billedPrice}})
 		if subscriptions.IsMembershipSlotTaken(err) {
