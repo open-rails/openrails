@@ -588,9 +588,9 @@ export function createEndpoints(client: AdminClient) {
     })
 
   // listDestructiveHolds reads the holds the destructive-action limit opened.
-  const listDestructiveHolds = (signal?: AbortSignal) =>
+  const listDestructiveHolds = (cursor?: string, signal?: AbortSignal) =>
     api<ListPage<DestructiveHold>>("/merchant/destructive-holds", {
-      query: { limit: 100 },
+      query: { limit: 100, cursor },
       signal,
     })
 

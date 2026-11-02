@@ -49,7 +49,7 @@ test("console-pull-link-map-apply-lands-once", async ({ page }) => {
   await open(page, "/ops/imports")
   const row = page.locator("tr[data-import]")
   await expect(row).toHaveCount(1)
-  await expect(row).toContainText("pulling")
+  await expect(row).toContainText("Pulling")
   await expect(row).toContainText("Reading catalog and roster")
   await act(page, "start")
   // The list polls while the pull runs.
@@ -184,7 +184,7 @@ test("console-parked-signup-lands-after-mapping", async ({ page }) => {
   // Mapping wakes the parked subscription's converge; run it now.
   await act(page, "settle")
   await page.getByLabel("Show released").check()
-  await expect(park).toContainText("landed")
+  await expect(park).toContainText("Landed")
   await expect(park.getByRole("link")).toBeVisible()
 })
 
@@ -193,7 +193,7 @@ test("console-failed-pull-and-read-only-access", async ({ page }) => {
   await open(page, "/ops/imports", "reader")
   await expect(
     page.locator(`tr[data-import="${fx.stripeImport}"]`)
-  ).toContainText("failed")
+  ).toContainText("Failed")
   await expect(page.getByRole("button", { name: "Pull" })).toHaveCount(0)
   await expect(
     page.getByRole("button", { name: "Upload mappings" })

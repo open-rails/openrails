@@ -370,7 +370,7 @@ function CancelDialog({
   return (
     <>
       <Button variant="destructive" size="sm" onClick={() => setOpen(true)}>
-        <AdminMessage id={"Cancel subscription"} />
+        <AdminMessage id={"Cancel membership"} />
       </Button>
       <TypedConfirmDialog
         open={open}

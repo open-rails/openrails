@@ -455,7 +455,7 @@ function ClearHoldDialog({
   const [reason, setReason] = React.useState("")
   const trimmed = reason.trim()
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
+    <Dialog open onOpenChange={(o) => !o && !clear.isPending && onClose()}>
       <DialogContent className={DIALOG_CONFIRM}>
         <DialogHeader>
           <DialogTitle>

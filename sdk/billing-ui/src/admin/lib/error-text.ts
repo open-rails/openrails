@@ -29,11 +29,15 @@ export function errorText(error: unknown): { text: string; code?: string } {
       ),
     }
   const code = error.code
+  // The server's own message names the specific problem; the shared wording
+  // only stands in when it sent none.
   const known =
-    (code &&
-      (staffErrors[code] ?? (en.errors as Record<string, string>)[code])) ||
-    (error.status === 404 ? en.errors.resource_not_found : undefined) ||
-    (error.status === 403 ? staffErrors.permission_required : undefined)
+    (code && staffErrors[code]) ||
+    (error.message
+      ? undefined
+      : (code && (en.errors as Record<string, string>)[code]) ||
+        (error.status === 404 ? en.errors.resource_not_found : undefined) ||
+        (error.status === 403 ? staffErrors.permission_required : undefined))
   return {
     text: known ?? sentence(error.message || en.errors.generic),
     code,

@@ -443,7 +443,11 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
     destructiveHolds: (enabled = true) =>
       queryOptions({
         queryKey: [...queryKeys.ops(), "destructive-holds"],
-        queryFn: ({ signal }) => listDestructiveHolds(signal),
+        queryFn: ({ signal }) =>
+          collectPages(
+            (cursor, signal) => listDestructiveHolds(cursor, signal),
+            signal
+          ),
         enabled,
         meta: { errorAction: "Load holds" },
       }),

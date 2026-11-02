@@ -27,6 +27,7 @@ export function CustomerSearch({
   const [matches, setMatches] = React.useState<Customer[] | null>(null)
   const form = React.useRef<HTMLFormElement>(null)
   const first = React.useRef<HTMLButtonElement>(null)
+  const field = React.useRef<HTMLInputElement>(null)
 
   React.useEffect(() => {
     if (!matches) return
@@ -72,6 +73,7 @@ export function CustomerSearch({
         if (event.key === "Escape" && matches) {
           event.stopPropagation()
           setMatches(null)
+          field.current?.focus()
         }
       }}
     >
@@ -85,6 +87,7 @@ export function CustomerSearch({
           className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
         />
         <Input
+          ref={field}
           id={id("customer-search")}
           className="w-full pr-8 pl-8 sm:w-64"
           placeholder={text("Customer email, ref, or id")}
