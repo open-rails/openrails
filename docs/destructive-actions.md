@@ -27,11 +27,31 @@ already-started effect continue. A pending or uncertain action remains reserved,
 including after clearance, so clearing an incident cannot unleash an old queue
 alongside a new allowance.
 
-The fixed staff limits are 5 actions per actor per hour and 15 per day. Merchant
-limits are at least 15/hour and 25/day, increasing with active customers; deployment
-limits are at least 50/hour and 100/day. The limits count affected targets in a
-batch, not a single HTTP request. Replays and proven no-ops do not spend again.
-They are implementation constants rather than merchant configuration.
+By default staff may take 5 actions per actor per hour and 15 per day. Merchant
+limits are at least 15/hour and 25/day, deployment limits at least 50/hour and
+100/day; both rise by one per 400 (hour) and 100 (day) customers active in the
+last 30 days. The limits count affected targets in a batch, not a single HTTP
+request. Replays and proven no-ops do not spend again.
+
+A deployment sets them in `Config.DestructiveActionLimits`
+(`destructive_action_limits` in the standalone server's file); a field left
+zero keeps its default, and the merchant and deployment values are the floors
+the customer scaling starts from:
+
+```yaml
+destructive_action_limits:
+  actor_per_hour: 5
+  actor_per_day: 15
+  merchant_per_hour: 15
+  merchant_per_day: 25
+  deployment_per_hour: 50
+  deployment_per_day: 100
+```
+
+Startup refuses a negative limit, an hourly limit above its daily one, an actor
+limit above the merchant's, and a merchant limit above the deployment's. The
+limits apply to every merchant of the deployment; they are not merchant
+configuration.
 
 Creating a new catalog object is additive and spends nothing; changing, archiving
 or removing an existing product, price or meter's billable, access or routing

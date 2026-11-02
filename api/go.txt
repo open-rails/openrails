@@ -361,6 +361,7 @@ pkg openrails, type Config struct, CloudflareProxies []string `yaml:"cloudflare_
 pkg openrails, type Config struct, DB *config.DBConfig `yaml:"db" json:"db"`
 pkg openrails, type Config struct, DashboardBaseURL string `yaml:"dashboard_base_url" json:"dashboard_base_url"`
 pkg openrails, type Config struct, Database config.DatabaseConfig `yaml:"database" json:"database"`
+pkg openrails, type Config struct, DestructiveActionLimits config.DestructiveActionLimitsConfig `yaml:"destructive_action_limits" json:"destructive_action_limits"`
 pkg openrails, type Config struct, EngineAdmissionHold bool `yaml:"engine_admission_hold" json:"engine_admission_hold"`
 pkg openrails, type Config struct, EventRetention string `yaml:"event_retention" json:"event_retention"`
 pkg openrails, type Config struct, HyperSwitch *config.HyperSwitchConfig `yaml:"hyperswitch" json:"hyperswitch"`
@@ -437,6 +438,14 @@ pkg openrails, type Deps struct, Redis redis.UniversalClient
 pkg openrails, type Deps struct, StripeTransport http.RoundTripper
 pkg openrails, type Deps struct, UserInfo config.UserInfo
 pkg openrails, type Deps struct, Vault *api.Client
+pkg openrails, type DestructiveActionLimitsConfig = config.DestructiveActionLimitsConfig
+pkg openrails, type DestructiveActionLimitsConfig struct
+pkg openrails, type DestructiveActionLimitsConfig struct, ActorPerDay int64 `yaml:"actor_per_day" json:"actor_per_day"`
+pkg openrails, type DestructiveActionLimitsConfig struct, ActorPerHour int64 `yaml:"actor_per_hour" json:"actor_per_hour"`
+pkg openrails, type DestructiveActionLimitsConfig struct, DeploymentPerDay int64 `yaml:"deployment_per_day" json:"deployment_per_day"`
+pkg openrails, type DestructiveActionLimitsConfig struct, DeploymentPerHour int64 `yaml:"deployment_per_hour" json:"deployment_per_hour"`
+pkg openrails, type DestructiveActionLimitsConfig struct, MerchantPerDay int64 `yaml:"merchant_per_day" json:"merchant_per_day"`
+pkg openrails, type DestructiveActionLimitsConfig struct, MerchantPerHour int64 `yaml:"merchant_per_hour" json:"merchant_per_hour"`
 pkg openrails, type Email = config.Email
 pkg openrails, type Email struct
 pkg openrails, type Email struct, From config.EmailAddress

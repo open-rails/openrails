@@ -160,6 +160,16 @@ user_action_rate_limit:
   minimum_customers_per_day: 10
   paid_customers_per_daily_customer: 100
 
+# Staff refunds, revokes, cancels and other held destructive actions per
+# rolling hour/day (docs/destructive-actions.md). Shown are the defaults.
+# destructive_action_limits:
+#   actor_per_hour: 5
+#   actor_per_day: 15
+#   merchant_per_hour: 15
+#   merchant_per_day: 25
+#   deployment_per_hour: 50
+#   deployment_per_day: 100
+
 # Exact origins purchase success/cancel and billing-portal return URLs may
 # name. Empty allows only the origin of public_billing_base_url.
 # return_origins:

@@ -88,20 +88,21 @@ type fileConfig struct {
 	PublicBillingBaseURL string `koanf:"public_billing_base_url"`
 	DashboardBaseURL     string `koanf:"dashboard_base_url"`
 
-	Database            billing.DatabaseConfig            `koanf:"database"`
-	DB                  *billing.DBConfig                 `koanf:"db"`
-	Redis               *billing.RedisConfig              `koanf:"redis"`
-	Logger              *billing.LoggerConfig             `koanf:"logger"`
-	EmailSMTP           *smtpFile                         `koanf:"email_smtp"`
-	RateLimits          *billing.RateLimitsConfig         `koanf:"rate_limits"`
-	RateLimitsDisabled  bool                              `koanf:"rate_limits_disabled"`
-	UserActionRateLimit billing.UserActionRateLimitConfig `koanf:"user_action_rate_limit"`
-	Captcha             *billing.CaptchaConfig            `koanf:"captcha"`
-	Vault               *billing.VaultConfig              `koanf:"vault"`
-	AdminConsole        *ConsoleConfig                    `koanf:"admin_console"`
-	CheckoutOrigin      string                            `koanf:"checkout_origin"`
-	LLM                 *billing.LLMConfig                `koanf:"llm"`
-	RouteGroups         billing.RouteGroups               `koanf:"route_groups"`
+	Database                billing.DatabaseConfig                `koanf:"database"`
+	DB                      *billing.DBConfig                     `koanf:"db"`
+	Redis                   *billing.RedisConfig                  `koanf:"redis"`
+	Logger                  *billing.LoggerConfig                 `koanf:"logger"`
+	EmailSMTP               *smtpFile                             `koanf:"email_smtp"`
+	RateLimits              *billing.RateLimitsConfig             `koanf:"rate_limits"`
+	RateLimitsDisabled      bool                                  `koanf:"rate_limits_disabled"`
+	UserActionRateLimit     billing.UserActionRateLimitConfig     `koanf:"user_action_rate_limit"`
+	DestructiveActionLimits billing.DestructiveActionLimitsConfig `koanf:"destructive_action_limits"`
+	Captcha                 *billing.CaptchaConfig                `koanf:"captcha"`
+	Vault                   *billing.VaultConfig                  `koanf:"vault"`
+	AdminConsole            *ConsoleConfig                        `koanf:"admin_console"`
+	CheckoutOrigin          string                                `koanf:"checkout_origin"`
+	LLM                     *billing.LLMConfig                    `koanf:"llm"`
+	RouteGroups             billing.RouteGroups                   `koanf:"route_groups"`
 
 	MerchantManifestOverlays []string `koanf:"merchant_manifest_overlays"`
 
@@ -236,6 +237,7 @@ func (f *fileConfig) config() (*Config, error) {
 			RateLimits:               f.RateLimits,
 			RateLimitsDisabled:       f.RateLimitsDisabled,
 			UserActionRateLimit:      f.UserActionRateLimit,
+			DestructiveActionLimits:  f.DestructiveActionLimits,
 			Captcha:                  f.Captcha,
 			Vault:                    f.Vault,
 			LLM:                      f.LLM,

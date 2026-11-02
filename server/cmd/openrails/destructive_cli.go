@@ -28,7 +28,7 @@ func newDestructiveHoldsCmd() *cobra.Command {
 			}
 		}
 		return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
-			gate := destructive.NewAdmissions(database, nil, nil)
+			gate := destructive.NewAdmissions(database, nil, nil, config.DestructiveActionLimitsConfig{})
 			var cursor *uuid.UUID
 			if !id.IsZero() {
 				value := id.UUID()
