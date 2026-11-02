@@ -205,7 +205,11 @@ func RevokeCreditGrant(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	grant, err := svc.RevokeCreditGrant(r.Request.Context(), id, params.Reason)
+	var actor string
+	if admin, ok := r.Staff(); ok {
+		actor = admin.Subject
+	}
+	grant, err := svc.RevokeCreditGrant(r.Request.Context(), id, params.Reason, actor)
 	if err != nil {
 		writeMoneyError(r, err, "credit grant revocation failed")
 		return
