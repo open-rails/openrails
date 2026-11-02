@@ -117,6 +117,7 @@ function CreditSupport({
           </CardTitle>
           {canUpdate && (
             <Button
+              variant="outline"
               size="sm"
               disabled={decimals === undefined}
               onClick={() => setGranting(true)}

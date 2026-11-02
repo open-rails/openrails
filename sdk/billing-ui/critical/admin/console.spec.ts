@@ -333,7 +333,7 @@ test("console-proposals-group-approve-held-dismiss", async ({
   await expect(confirmDismiss).toBeDisabled()
   await dismiss.getByLabel("Notes (required)").fill("kept: the member paid us")
   await confirmDismiss.click()
-  await expect(row.getByTestId("outcome")).toContainText("dismissed")
+  await expect(row.getByTestId("outcome")).toContainText("Dismissed")
 
   const late = stale.locator("tr[data-proposal]")
   await late.getByRole("checkbox").check()
@@ -343,6 +343,6 @@ test("console-proposals-group-approve-held-dismiss", async ({
     .getByRole("dialog")
     .getByRole("button", { name: "Approve", exact: true })
     .click()
-  await expect(late.getByTestId("outcome")).toContainText("already_resolved")
+  await expect(late.getByTestId("outcome")).toContainText("Already resolved")
   await stale.close()
 })

@@ -259,6 +259,7 @@ export function PaymentsPage() {
             </SelectContent>
           </Select>
           <Button
+            variant="outline"
             size="sm"
             onClick={exportCsv}
             disabled={exportPayments.isPending || loading || !data?.data.length}

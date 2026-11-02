@@ -25,6 +25,8 @@
   --color-failed-surface: var(--failed-surface);
   --color-refunded: var(--refunded);
   --color-refunded-surface: var(--refunded-surface);
+  --color-inactive: var(--inactive);
+  --color-inactive-surface: var(--inactive-surface);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -90,6 +92,8 @@
   --failed-surface: oklch(0.955 0.022 27);
   --refunded: oklch(0.53 0.13 250);
   --refunded-surface: oklch(0.955 0.022 250);
+  --inactive: oklch(0.47 0.016 248);
+  --inactive-surface: oklch(0.945 0.006 248);
   --destructive: var(--failed);
   --border: oklch(0.905 0.008 248);
   --input: oklch(0.905 0.008 248);
@@ -142,6 +146,8 @@
   --failed-surface: oklch(0.25 0.05 25);
   --refunded: oklch(0.76 0.12 252);
   --refunded-surface: oklch(0.25 0.05 252);
+  --inactive: oklch(0.735 0.014 248);
+  --inactive-surface: oklch(0.245 0.011 248);
   --destructive: var(--failed);
   --border: oklch(0.315 0.013 248);
   --input: oklch(0.315 0.013 248);
@@ -159,6 +165,42 @@
   --sidebar-accent-foreground: oklch(0.965 0.004 248);
   --sidebar-border: oklch(0.315 0.013 248);
   --sidebar-ring: oklch(0.93 0.008 248);
+}
+
+/* Host theme: the host's surfaces, text and borders, but billing's own state
+   colours and action colours, so a status badge or a destructive button means
+   the same thing in every host whatever its accent is. The values are the
+   light and dark themes' own; a host's .dark picks the dark set. */
+.orck[data-orck-theme="inherit"] {
+  --primary: oklch(0.24 0.02 248);
+  --primary-foreground: oklch(0.99 0.005 248);
+  --settled: oklch(0.52 0.118 158);
+  --settled-surface: oklch(0.955 0.03 158);
+  --held: oklch(0.54 0.115 72);
+  --held-surface: oklch(0.96 0.03 72);
+  --failed: oklch(0.53 0.19 27);
+  --failed-surface: oklch(0.955 0.022 27);
+  --refunded: oklch(0.53 0.13 250);
+  --refunded-surface: oklch(0.955 0.022 250);
+  --inactive: oklch(0.47 0.016 248);
+  --inactive-surface: oklch(0.945 0.006 248);
+  --destructive: var(--failed);
+}
+
+.orck[data-orck-theme="inherit"]:where(.dark *) {
+  --primary: oklch(0.93 0.008 248);
+  --primary-foreground: oklch(0.19 0.018 248);
+  --settled: oklch(0.78 0.145 160);
+  --settled-surface: oklch(0.245 0.045 160);
+  --held: oklch(0.815 0.135 78);
+  --held-surface: oklch(0.25 0.05 78);
+  --failed: oklch(0.735 0.155 25);
+  --failed-surface: oklch(0.25 0.05 25);
+  --refunded: oklch(0.76 0.12 252);
+  --refunded-surface: oklch(0.25 0.05 252);
+  --inactive: oklch(0.735 0.014 248);
+  --inactive-surface: oklch(0.245 0.011 248);
+  --destructive: var(--failed);
 }
 
 @layer base {

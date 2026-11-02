@@ -51,7 +51,7 @@ const severityTone: Record<string, string> = {
   critical: "bg-failed-surface text-failed",
   high: "bg-held-surface text-held",
   medium: "bg-held-surface text-held",
-  low: "bg-muted text-muted-foreground",
+  low: "bg-inactive-surface text-inactive",
 }
 
 function FindingsTab() {

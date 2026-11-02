@@ -158,6 +158,7 @@ export function CustomersPage() {
             />
           </form>
           <Button
+            variant="outline"
             size="sm"
             onClick={exportCsv}
             disabled={

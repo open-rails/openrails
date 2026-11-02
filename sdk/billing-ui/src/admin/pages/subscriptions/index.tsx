@@ -256,6 +256,7 @@ export function SubscriptionsPage() {
             </SelectContent>
           </Select>
           <Button
+            variant="outline"
             size="sm"
             onClick={exportCsv}
             disabled={
