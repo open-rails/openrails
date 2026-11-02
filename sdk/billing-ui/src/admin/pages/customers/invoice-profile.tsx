@@ -20,6 +20,7 @@ import {
   type ProfileFormValues,
 } from "./invoice-profile-model"
 import { useAdminUpdates } from "#orck/admin/lib/capabilities"
+import { errorText } from "#orck/admin/lib/error-text"
 
 export function CustomerInvoiceProfileSection({
   customerId,
@@ -50,7 +51,7 @@ export function CustomerInvoiceProfileSection({
           </p>
         ) : query.error ? (
           <p role="alert" className="text-destructive">
-            {query.error.message}
+            {errorText(query.error).text}
           </p>
         ) : (
           <InvoiceProfileEditor

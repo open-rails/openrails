@@ -9,6 +9,7 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Fact } from "#orck/admin/components/fact-card"
+import { MissingRecord } from "#orck/admin/components/missing-record"
 import { FormFieldErrors } from "#orck/admin/components/form-field-errors"
 import { StatusBadge } from "#orck/admin/components/status-badge"
 import { Button } from "#orck/admin/components/ui/button"
@@ -60,9 +61,11 @@ export function PaymentDetailPage() {
   const canUpdate = useAdminUpdates()
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const { data: payment, isPending: loading } = useQuery(
-    adminQueries.payment(id)
-  )
+  const {
+    data: payment,
+    isPending: loading,
+    error,
+  } = useQuery(adminQueries.payment(id))
   const { data: customer } = useQuery(
     adminQueries.customer(payment?.customer_id ?? "")
   )
@@ -75,9 +78,12 @@ export function PaymentDetailPage() {
     )
   if (!payment)
     return (
-      <p className="text-sm text-muted-foreground">
-        <AdminMessage id={"Payment not found."} />
-      </p>
+      <MissingRecord
+        title="Payment not found"
+        error={error}
+        back="/payments"
+        backLabel="Payments"
+      />
     )
 
   const railRefunds = REFUNDABLE_RAILS.includes(payment.rail ?? "")

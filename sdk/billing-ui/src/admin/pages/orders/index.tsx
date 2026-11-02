@@ -7,6 +7,7 @@ import { Link, useSearchParams } from "#orck/admin/router"
 import type { ColumnDef } from "@tanstack/react-table"
 import { CursorPager } from "#orck/admin/components/cursor-pager"
 import { DataTable } from "#orck/admin/components/data-table"
+import { errorText } from "#orck/admin/lib/error-text"
 import { StatusBadge } from "#orck/admin/components/status-badge"
 import { Input } from "#orck/admin/components/ui/input"
 import { Label } from "#orck/admin/components/ui/label"
@@ -106,7 +107,7 @@ export function OrdersPage() {
       />
       {error ? (
         <p role="alert" className="text-destructive">
-          {error.message}
+          {errorText(error).text}
         </p>
       ) : (
         <>

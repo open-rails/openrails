@@ -45,9 +45,7 @@ import {
   TableRow,
 } from "#orck/admin/components/ui/table"
 import { useAdminUpdates } from "#orck/admin/lib/capabilities"
-
-const errorText = (error: unknown) =>
-  error instanceof Error ? error.message : "The request failed. Try again."
+import { errorText } from "#orck/admin/lib/error-text"
 
 export function CustomerCreditSupportSection({
   customerId,
@@ -168,7 +166,7 @@ function CreditSupport({
             </p>
           ) : grants.error ? (
             <p role="alert" className="text-sm text-destructive">
-              {errorText(grants.error)}
+              {errorText(grants.error).text}
             </p>
           ) : !grants.data?.data.length ? (
             <p className="text-sm text-muted-foreground">
@@ -271,7 +269,7 @@ function CreditSupport({
             </p>
           ) : ledger.error ? (
             <p role="alert" className="text-sm text-destructive">
-              {errorText(ledger.error)}
+              {errorText(ledger.error).text}
             </p>
           ) : !ledger.data?.data.length ? (
             <p className="text-sm text-muted-foreground">
@@ -402,7 +400,7 @@ function GrantCreditDialog({
               toast.success("Credit granted")
               onClose()
             } catch (error) {
-              setError(errorText(error))
+              setError(errorText(error).text)
             }
           }}
         >
@@ -524,7 +522,7 @@ function RevokeCreditDialog({
               )
               onClose()
             } catch (error) {
-              setError(errorText(error))
+              setError(errorText(error).text)
             }
           }}
         >

@@ -16,6 +16,7 @@ import { TooltipProvider } from "#orck/admin/components/ui/tooltip"
 import type { AdminAccess } from "#orck/client/generated/wire"
 import { useAuth } from "#orck/admin/lib/auth"
 import { hasAnyArea } from "#orck/admin/lib/capabilities"
+import { errorText } from "#orck/admin/lib/error-text"
 
 // Longest path first: the catalog sub-pages have to match before the section
 // they live under. A trail of more than one entry becomes a real breadcrumb.
@@ -23,6 +24,7 @@ const trails: [string, { label: string; to?: string }[]][] = [
   ["/customers", [{ label: "Customers" }]],
   ["/subscriptions", [{ label: "Subscriptions" }]],
   ["/payments", [{ label: "Payments" }]],
+  ["/orders", [{ label: "Orders" }]],
   [
     "/catalog/metering",
     [{ label: "Catalog", to: "/catalog" }, { label: "Metering" }],
@@ -100,7 +102,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   if (permission.error)
     return (
       <div role="alert" className="p-6">
-        <p>{permission.error.message}</p>
+        <p>{errorText(permission.error).text}</p>
         <button type="button" onClick={() => void permission.refetch()}>
           <AdminMessage id="Try again" />
         </button>

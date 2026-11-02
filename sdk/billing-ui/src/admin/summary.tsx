@@ -5,6 +5,7 @@ import type { AdminAccess } from "../client/generated/wire"
 import { ApiError, createAdminClient } from "./lib/api/client"
 import { createAdminAPI } from "./lib/api"
 import { formatNativeAmount } from "./lib/format"
+import { errorText } from "./lib/error-text"
 import type { BillingAdminProps } from "./types"
 import { useAdminTheme } from "./theme"
 
@@ -141,7 +142,7 @@ export function BillingCustomerSummary(props: BillingCustomerSummaryProps) {
         )}
         {error && !missingCustomer(error) && (
           <p role="alert">
-            {error.message}{" "}
+            {errorText(error).text}{" "}
             <button type="button" onClick={refetch}>
               <AdminMessage id={"Try again"} />
             </button>

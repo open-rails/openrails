@@ -74,6 +74,7 @@ import {
 import { dunningSummary } from "#orck/admin/pages/subscriptions/dunning"
 import { useAdminUpdates, useCatalogSells } from "#orck/admin/lib/capabilities"
 import { useConfirm } from "#orck/admin/lib/confirm"
+import { MissingRecord } from "#orck/admin/components/missing-record"
 
 export function CustomerDetailPage() {
   const { text: adminText } = useAdminUI()
@@ -85,9 +86,11 @@ export function CustomerDetailPage() {
   const sells = useCatalogSells()
   const { customerId = "" } = useParams()
   const navigate = useNavigate()
-  const { data: customer, isPending: loading } = useQuery(
-    adminQueries.customer(customerId)
-  )
+  const {
+    data: customer,
+    isPending: loading,
+    error,
+  } = useQuery(adminQueries.customer(customerId))
 
   if (loading)
     return (
@@ -97,9 +100,12 @@ export function CustomerDetailPage() {
     )
   if (!customer)
     return (
-      <p className="text-sm text-muted-foreground">
-        <AdminMessage id={"Customer not found."} />
-      </p>
+      <MissingRecord
+        title="Customer not found"
+        error={error}
+        back="/customers"
+        backLabel="Customers"
+      />
     )
 
   return (

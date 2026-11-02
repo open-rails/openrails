@@ -24,6 +24,7 @@ import {
 } from "#orck/admin/components/ui/dropdown-menu"
 import { Skeleton } from "#orck/admin/components/ui/skeleton"
 import { ApiError } from "#orck/admin/lib/api/client"
+import { errorText } from "#orck/admin/lib/error-text"
 import { type MetricsResult, type Widget } from "#orck/admin/lib/api/metrics"
 
 import { cn } from "#orck/admin/lib/utils"
@@ -168,11 +169,9 @@ function TileBody({
   }
   if (error) {
     const msg =
-      error instanceof ApiError
-        ? error.isPermissionDenied
-          ? "your role lacks metrics access"
-          : error.message
-        : "query failed"
+      error instanceof ApiError && error.isPermissionDenied
+        ? "Your role can't see metrics."
+        : errorText(error).text
     return (
       <div
         className="flex h-full items-center justify-center text-center text-xs text-destructive"

@@ -997,4 +997,17 @@ export const billingAdminMessages = {
   "Renewal payment failed": "Renewal payment failed",
   "After a chargeback": "After a chargeback",
   "Replaced by an upgrade": "Replaced by an upgrade",
+  "This page couldn't be loaded": "This page couldn't be loaded",
+  "It may have been removed, or the link may be wrong.":
+    "It may have been removed, or the link may be wrong.",
+  "Code:": "Code:",
+  "Subscription not found": "Subscription not found",
+  "Payment not found": "Payment not found",
+  "Order not found": "Order not found",
+  "Customer not found": "Customer not found",
+  "Refunds, revokes and cancels are paused for you after several in a short time. Someone else can clear the hold on the Ops page.":
+    "Refunds, revokes and cancels are paused for you after several in a short time. Someone else can clear the hold on the Ops page.",
+  "Billing couldn't check your permissions just now. Try again in a moment.":
+    "Billing couldn't check your permissions just now. Try again in a moment.",
+  "Your role doesn't allow this.": "Your role doesn't allow this.",
 } as const

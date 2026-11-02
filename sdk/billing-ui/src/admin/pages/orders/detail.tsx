@@ -8,6 +8,8 @@ import type { ColumnDef } from "@tanstack/react-table"
 import { CursorPager } from "#orck/admin/components/cursor-pager"
 import { DataTable } from "#orck/admin/components/data-table"
 import { StatusBadge } from "#orck/admin/components/status-badge"
+import { MissingRecord } from "#orck/admin/components/missing-record"
+import { errorText } from "#orck/admin/lib/error-text"
 import { Button } from "#orck/admin/components/ui/button"
 import { Input } from "#orck/admin/components/ui/input"
 import { Label } from "#orck/admin/components/ui/label"
@@ -79,17 +81,14 @@ export function OrderDetailPage() {
         <AdminMessage id={"Loading order…"} />
       </p>
     )
-  if (error)
-    return (
-      <p role="alert" className="text-destructive">
-        {error.message}
-      </p>
-    )
   if (!order)
     return (
-      <p>
-        <AdminMessage id={"Order not found."} />
-      </p>
+      <MissingRecord
+        title="Order not found"
+        error={error}
+        back="/orders"
+        backLabel="Orders"
+      />
     )
   return <OrderDetail key={order.id} order={order} />
 }
@@ -261,7 +260,7 @@ export function OrderDetail({ order }: { order: Order }) {
         <CardContent>
           {history.error ? (
             <p role="alert" className="text-destructive">
-              {history.error.message}
+              {errorText(history.error).text}
             </p>
           ) : (
             <>

@@ -9,6 +9,7 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Fact } from "#orck/admin/components/fact-card"
+import { MissingRecord } from "#orck/admin/components/missing-record"
 import { FormFieldErrors } from "#orck/admin/components/form-field-errors"
 import { StatusBadge } from "#orck/admin/components/status-badge"
 import { TypedConfirmDialog } from "#orck/admin/components/typed-confirm-dialog"
@@ -72,9 +73,11 @@ export function SubscriptionDetailPage() {
   const canUpdate = useAdminUpdates()
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const { data: sub, isPending: loading } = useQuery(
-    adminQueries.subscription(id)
-  )
+  const {
+    data: sub,
+    isPending: loading,
+    error,
+  } = useQuery(adminQueries.subscription(id))
   const { data: paymentPage } = useQuery(
     adminQueries.payments({ subscription_id: id }, 20)
   )
@@ -90,9 +93,12 @@ export function SubscriptionDetailPage() {
     )
   if (!sub)
     return (
-      <p className="text-sm text-muted-foreground">
-        <AdminMessage id={"Subscription not found."} />
-      </p>
+      <MissingRecord
+        title="Subscription not found"
+        error={error}
+        back="/subscriptions"
+        backLabel="Subscriptions"
+      />
     )
 
   const cancellable =
