@@ -1,4 +1,5 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { FACT_TILES } from "#orck/admin/lib/tile-grids"
 import { useAdminServices } from "#orck/admin/context"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { ArrowLeft01Icon, Undo02Icon } from "@hugeicons/core-free-icons"
@@ -9,6 +10,7 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Fact } from "#orck/admin/components/fact-card"
+import { MissingRecord } from "#orck/admin/components/missing-record"
 import { FormFieldErrors } from "#orck/admin/components/form-field-errors"
 import { StatusBadge } from "#orck/admin/components/status-badge"
 import { Button } from "#orck/admin/components/ui/button"
@@ -41,6 +43,7 @@ import { REFUNDABLE_RAILS } from "#orck/admin/lib/api/endpoints"
 import type { Payment } from "#orck/client/generated/wire"
 import { DIALOG_FORM } from "#orck/admin/lib/dialog-width"
 import {
+  customerName,
   formatCard,
   formatNativeAmount,
   formatDate,
@@ -59,8 +62,13 @@ export function PaymentDetailPage() {
   const canUpdate = useAdminUpdates()
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const { data: payment, isPending: loading } = useQuery(
-    adminQueries.payment(id)
+  const {
+    data: payment,
+    isPending: loading,
+    error,
+  } = useQuery(adminQueries.payment(id))
+  const { data: customer } = useQuery(
+    adminQueries.customer(payment?.customer_id ?? "")
   )
 
   if (loading)
@@ -71,9 +79,12 @@ export function PaymentDetailPage() {
     )
   if (!payment)
     return (
-      <p className="text-sm text-muted-foreground">
-        <AdminMessage id={"Payment not found."} />
-      </p>
+      <MissingRecord
+        title="Payment not found"
+        error={error}
+        back="/payments"
+        backLabel="Payments"
+      />
     )
 
   const railRefunds = REFUNDABLE_RAILS.includes(payment.rail ?? "")
@@ -90,7 +101,7 @@ export function PaymentDetailPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
           size="icon"
@@ -99,17 +110,18 @@ export function PaymentDetailPage() {
         >
           <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
         </Button>
-        <div>
-          <h2 className="flex items-center gap-2 text-sm">
-            {payment.id} <StatusBadge status={payment.status} />
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            {payment.kind} · {payment.rail ?? payment.channel}
+        <div className="min-w-0">
+          <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">
+            {customer ? customerName(customer) : adminText("Payment")}
+            <StatusBadge status={payment.status} />
+          </h1>
+          <p className="text-xs [overflow-wrap:anywhere] text-muted-foreground">
+            {payment.id} · {payment.kind} · {payment.rail ?? payment.channel}
             <AdminMessage id={" · txn"} /> {payment.transaction_id || "—"}
           </p>
         </div>
         {canUpdate && (
-          <div className="ml-auto">
+          <div className="sm:ml-auto">
             <RefundDialog
               payment={payment}
               disabled={!refundable}
@@ -119,7 +131,7 @@ export function PaymentDetailPage() {
         )}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={FACT_TILES}>
         <Fact label={adminText("Amount")}>
           {formatNativeAmount(payment.amount, payment.currency)}
         </Fact>
@@ -130,7 +142,9 @@ export function PaymentDetailPage() {
         </Fact>
         <Fact label={adminText("Customer")}>
           <Link className={link} to={`/customers/${payment.customer_id}`}>
-            {shortId(payment.customer_id, 16)}
+            {customer
+              ? customerName(customer)
+              : shortId(payment.customer_id, 16)}
           </Link>
         </Fact>
         <Fact label={adminText("Subscription")}>
@@ -150,7 +164,9 @@ export function PaymentDetailPage() {
             <Link className={link} to={`/orders/${payment.order_id}`}>
               {shortId(payment.order_id, 16)}
             </Link>
-          ) : "—"}
+          ) : (
+            "—"
+          )}
         </Fact>
         <Fact label={adminText("Card")}>{formatCard(payment.card)}</Fact>
         <Fact label={adminText("Channel")}>
@@ -204,7 +220,7 @@ export function PaymentDetailPage() {
                   <TableHead className="text-muted-foreground">
                     <AdminMessage id={"Amount"} />
                   </TableHead>
-                  <TableHead className="text-muted-foreground">
+                  <TableHead className="text-muted-foreground @max-[36rem]/page:hidden">
                     <AdminMessage id={"Created"} />
                   </TableHead>
                 </TableRow>
@@ -223,7 +239,9 @@ export function PaymentDetailPage() {
                     <TableCell>
                       {formatNativeAmount(r.amount, r.currency)}
                     </TableCell>
-                    <TableCell>{formatDate(r.created_at)}</TableCell>
+                    <TableCell className="@max-[36rem]/page:hidden">
+                      {formatDate(r.created_at)}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -246,7 +264,7 @@ function RefundDialog({
 }) {
   const { toast, toastApiError, adminMutations } = useAdminServices()
 
-  const { id: adminId } = useAdminUI()
+  const { id: adminId, text: adminText } = useAdminUI()
 
   const [open, setOpen] = React.useState(false)
   const remaining = (
@@ -324,10 +342,11 @@ function RefundDialog({
               <AdminMessage id={"Refund payment"} />
             </DialogTitle>
             <DialogDescription>
-              <AdminMessage id={"Executes the refund at the "} />
+              <AdminMessage id={"The money goes back through "} />
               {payment.rail}
-              <AdminMessage id={" rail. Remaining refundable: "} />
-              {formatNativeAmount(remaining, payment.currency)}.
+              <AdminMessage id={". Up to "} />
+              {formatNativeAmount(remaining, payment.currency)}
+              <AdminMessage id={" can still be refunded."} />
             </DialogDescription>
           </DialogHeader>
           <form
@@ -364,10 +383,11 @@ function RefundDialog({
                     </Label>
                     <Input
                       id={adminId("refund-amount")}
-                      type="number"
-                      step="any"
-                      min="0"
-                      max={nativeAmountToInput(remaining, payment.currency)}
+                      // Text, not number: a number field changes its value
+                      // under the scroll wheel and accepts exponents.
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
                       value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(event) =>
@@ -421,29 +441,39 @@ function RefundDialog({
                   ] as const
                 }
               >
-                {([amountInput, canSubmit, isSubmitting]) => (
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => handleOpenChange(false)}
-                      disabled={isSubmitting}
-                    >
-                      <AdminMessage id={"Close"} />
-                    </Button>
-                    <Button
-                      type="submit"
-                      variant="destructive"
-                      disabled={
-                        !nativeAmountFromInput(amountInput, payment.currency) ||
-                        !canSubmit ||
-                        isSubmitting
-                      }
-                    >
-                      {isSubmitting ? "Refunding…" : "Refund"}
-                    </Button>
-                  </>
-                )}
+                {([amountInput, canSubmit, isSubmitting]) => {
+                  const amount = nativeAmountFromInput(
+                    amountInput,
+                    payment.currency
+                  )
+                  const valid =
+                    amount !== null &&
+                    BigInt(amount) > 0n &&
+                    BigInt(amount) <= BigInt(remaining)
+                  return (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => handleOpenChange(false)}
+                        disabled={isSubmitting}
+                      >
+                        <AdminMessage id={"Close"} />
+                      </Button>
+                      <Button
+                        type="submit"
+                        variant="destructive"
+                        disabled={!amount || !canSubmit || isSubmitting}
+                      >
+                        {isSubmitting
+                          ? adminText("Refunding…")
+                          : valid
+                            ? `${adminText("Refund")} ${formatNativeAmount(amount, payment.currency)}`
+                            : adminText("Refund")}
+                      </Button>
+                    </>
+                  )
+                }}
               </form.Subscribe>
             </DialogFooter>
           </form>

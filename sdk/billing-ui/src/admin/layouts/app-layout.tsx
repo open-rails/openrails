@@ -16,6 +16,7 @@ import { TooltipProvider } from "#orck/admin/components/ui/tooltip"
 import type { AdminAccess } from "#orck/client/generated/wire"
 import { useAuth } from "#orck/admin/lib/auth"
 import { hasAnyArea } from "#orck/admin/lib/capabilities"
+import { errorText } from "#orck/admin/lib/error-text"
 
 // Longest path first: the catalog sub-pages have to match before the section
 // they live under. A trail of more than one entry becomes a real breadcrumb.
@@ -23,6 +24,7 @@ const trails: [string, { label: string; to?: string }[]][] = [
   ["/customers", [{ label: "Customers" }]],
   ["/subscriptions", [{ label: "Subscriptions" }]],
   ["/payments", [{ label: "Payments" }]],
+  ["/orders", [{ label: "Orders" }]],
   [
     "/catalog/metering",
     [{ label: "Catalog", to: "/catalog" }, { label: "Metering" }],
@@ -100,7 +102,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   if (permission.error)
     return (
       <div role="alert" className="p-6">
-        <p>{permission.error.message}</p>
+        <p>{errorText(permission.error).text}</p>
         <button type="button" onClick={() => void permission.refetch()}>
           <AdminMessage id="Try again" />
         </button>
@@ -118,9 +120,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
     )
   return (
     <TooltipProvider>
-      <SidebarProvider>
+      {/* Below 64rem the console opens with its sidebar folded to icons, so a
+          tablet keeps its width for the page; the inset may shrink below its
+          content so wide tables scroll inside their own containers instead
+          of pushing the page sideways. */}
+      <SidebarProvider
+        defaultOpen={window.matchMedia?.("(min-width: 64rem)").matches ?? true}
+      >
         <AppSidebar />
-        <SidebarInset>
+        <SidebarInset className="min-w-0">
           <SiteHeader trail={trail} />
           {/* A switch remounts the merchant's pages: nothing of the
               previous merchant's survives it. */}
@@ -128,7 +136,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             key={activeMerchant?.id || activeMerchant?.slug || ""}
             className="flex min-w-0 flex-1 flex-col p-4 md:p-8"
           >
-            <div className="mx-auto w-full max-w-7xl min-w-0">
+            <div className="@container/page mx-auto w-full max-w-7xl min-w-0">
               {access &&
               ((!hasAnyArea(access) && !hostSettings) ||
                 areaOf(pathname, access)?.allowed === false) ? (

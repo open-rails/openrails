@@ -21,8 +21,10 @@ export function createCreditQueries(client: AdminClient, api: AdminAPI) {
     revokeCreditGrant,
   } = api
 
+  // An embedded console with no merchant prop has the empty slug; it is still
+  // the selected merchant. Only a scope that changed underneath is refused.
   function assertMerchant(merchant: string) {
-    if (!merchant || selectedMerchant() !== merchant)
+    if (selectedMerchant() !== merchant)
       throw new Error(
         "The selected merchant changed. Reload this customer's credits."
       )
@@ -44,7 +46,7 @@ export function createCreditQueries(client: AdminClient, api: AdminAPI) {
           limit,
           cursor,
         ],
-        enabled: Boolean(merchant && customer && currency),
+        enabled: Boolean(customer && currency),
         queryFn: ({ signal }) => {
           assertMerchant(merchant)
           return listCreditGrants(customer, currency, limit, cursor, signal)
@@ -65,7 +67,7 @@ export function createCreditQueries(client: AdminClient, api: AdminAPI) {
           limit,
           cursor,
         ],
-        enabled: Boolean(merchant && customer && currency),
+        enabled: Boolean(customer && currency),
         queryFn: ({ signal }) => {
           assertMerchant(merchant)
           return listBalanceTransactions(

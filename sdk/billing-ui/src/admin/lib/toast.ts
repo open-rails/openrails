@@ -1,6 +1,7 @@
 import { toast as sonnerToast } from "sonner"
 
 import { ApiError } from "#orck/admin/lib/api/client"
+import { errorText } from "#orck/admin/lib/error-text"
 
 export function createAdminToast(namespace?: string) {
   const scoped =
@@ -38,19 +39,16 @@ export function createToastHandlers(
         })
         return
       }
-      if (err.isPermissionDenied) {
-        toast.error(`${action}: your role lacks permission`, {
-          description: err.message,
-        })
-        return
-      }
-      const label = err.code ? `${action} (${err.code})` : action
-      toast.error(label, { description: err.message })
-      return
     }
-    toast.error(action, {
-      description: err instanceof Error ? err.message : String(err),
-    })
+    // A plain sentence; the API's code stays in the secondary line for
+    // support, never in the title.
+    const { text, code } = errorText(err)
+    toast.error(
+      `Couldn't ${action.charAt(0).toLowerCase()}${action.slice(1)}`,
+      {
+        description: code ? `${text} Code: ${code}.` : text,
+      }
+    )
   }
 
   // toastStaleEdit answers an edit refused with revision_mismatch: the caller

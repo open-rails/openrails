@@ -1,37 +1,54 @@
 import { Badge } from "#orck/admin/components/ui/badge"
+import { useAdminUI } from "#orck/admin/ui-context"
+
+const settled = "bg-settled-surface text-settled"
+const held = "bg-held-surface text-held"
+const failed = "bg-failed-surface text-failed"
+const refunded = "bg-refunded-surface text-refunded"
+const inactive = "bg-inactive-surface text-inactive"
 
 const tones: Record<string, string> = {
-  active: "bg-settled-surface text-settled",
-  succeeded: "bg-settled-surface text-settled",
-  completed: "bg-settled-surface text-settled",
-  linked: "bg-settled-surface text-settled",
-  approved: "bg-settled-surface text-settled",
-  landed: "bg-settled-surface text-settled",
-  held: "bg-held-surface text-held",
-  dismissed: "bg-muted text-muted-foreground",
-  superseded: "bg-muted text-muted-foreground",
-  already_resolved: "bg-muted text-muted-foreground",
-  collected: "bg-settled-surface text-settled",
-  past_due: "bg-held-surface text-held",
-  grace: "bg-held-surface text-held",
-  delinquent: "bg-failed-surface text-failed",
-  current: "bg-settled-surface text-settled",
-  pending: "bg-held-surface text-held",
-  unknown: "bg-held-surface text-held",
-  open: "bg-held-surface text-held",
-  canceled: "bg-muted text-muted-foreground",
-  failed: "bg-failed-surface text-failed",
-  declined: "bg-failed-surface text-failed",
-  lost: "bg-failed-surface text-failed",
-  refunded: "bg-refunded-surface text-refunded",
-  partially_refunded: "bg-refunded-surface text-refunded",
+  active: settled,
+  succeeded: settled,
+  completed: settled,
+  complete: settled,
+  linked: settled,
+  approved: settled,
+  landed: settled,
+  collected: settled,
+  current: settled,
+  held,
+  past_due: held,
+  grace: held,
+  pending: held,
+  unknown: held,
+  open: held,
+  requires_review: held,
+  delinquent: failed,
+  failed,
+  declined: failed,
+  lost: failed,
+  refunded,
+  partially_refunded: refunded,
+  dismissed: inactive,
+  superseded: inactive,
+  already_resolved: inactive,
+  canceled: inactive,
+}
+
+// statusLabel is a wire status in plain words: partially_refunded reads
+// "Partially refunded".
+export function statusLabel(status: string): string {
+  const words = status.replaceAll("_", " ")
+  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
 export function StatusBadge({ status }: { status?: string }) {
+  const { text } = useAdminUI()
   if (!status) return <span className="text-muted-foreground">—</span>
   return (
-    <Badge variant="secondary" className={tones[status] ?? ""}>
-      {status}
+    <Badge variant="secondary" className={tones[status] ?? inactive}>
+      {text(statusLabel(status))}
     </Badge>
   )
 }

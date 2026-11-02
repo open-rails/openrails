@@ -138,9 +138,9 @@ export function CustomersPage() {
         <h1 className="text-2xl font-semibold tracking-tight">
           <AdminMessage id={"Customers"} />
         </h1>
-        <div className="flex items-center gap-3">
+        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
           <form
-            className="relative"
+            className="relative min-w-0 flex-1 sm:flex-none"
             onSubmit={(e) => {
               e.preventDefault()
               setParams(input ? { search: input } : {})
@@ -151,13 +151,14 @@ export function CustomersPage() {
               className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
             />
             <Input
-              className="w-64 pl-8"
+              className="w-full pl-8 sm:w-64"
               placeholder={adminText("Search email, username, name or id…")}
               value={input}
               onChange={(e) => setInput(e.target.value)}
             />
           </form>
           <Button
+            variant="outline"
             size="sm"
             onClick={exportCsv}
             disabled={

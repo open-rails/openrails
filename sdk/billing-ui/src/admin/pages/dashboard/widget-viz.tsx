@@ -30,6 +30,8 @@ import {
 } from "#orck/admin/components/ui/table"
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -103,9 +105,13 @@ function StatViz({
   const primary = idx.measures[0]
   if (!primary) return <Empty label={adminText("no measure")} />
   if (result.rows.length === 0) {
+    // No rows and no currency filter: a money total has no currency to be
+    // zero in, so it reads as no value rather than a sentence.
     return (
-      <div className="text-2xl font-semibold tabular-nums">
-        {formatMeasure(0, primary.unit, fallback)}
+      <div className="text-2xl font-semibold tabular-nums @min-[12rem]/tile:text-3xl">
+        {primary.unit === "money" && !fallback
+          ? "—"
+          : formatMeasure(0, primary.unit, fallback)}
       </div>
     )
   }
@@ -132,7 +138,11 @@ function StatViz({
             <span
               className={cn(
                 "font-semibold tabular-nums",
-                rows.length > 1 ? "text-lg" : "text-3xl"
+                // A narrow tile steps the figure down so a four-digit amount
+                // still fits on one line.
+                rows.length > 1
+                  ? "text-lg"
+                  : "text-2xl @min-[12rem]/tile:text-3xl"
               )}
             >
               {formatMeasure(row[primary.index], primary.unit, currency)}
@@ -168,6 +178,16 @@ function StatViz({
   )
 }
 
+// seriesLabel names a series for people: a bare measure key
+// (new_subscriptions) reads "New subscriptions"; a dimension value (a rail, a
+// currency) stays as it is.
+function seriesLabel(series?: PivotSeries): string | undefined {
+  if (!series) return undefined
+  return series.label === series.measure
+    ? humanizeColumn(series.label)
+    : series.label
+}
+
 // MetricTooltip formats a hovered value from the exact wire cell the series
 // row carries under exactKey (a money decimal string), falling back to the
 // plotted Number only for series that never had one. Exported for tests.
@@ -194,7 +214,8 @@ export function MetricTooltip({
         return (
           <div className="flex w-full items-center justify-between gap-3">
             <span className="text-muted-foreground">
-              {series.find((item) => item.key === String(name))?.label ?? name}
+              {seriesLabel(series.find((item) => item.key === String(name))) ??
+                name}
             </span>
             <span className="font-mono font-medium tabular-nums">
               {formatMeasure(cell, measure.unit, measure.currency)}
@@ -239,6 +260,10 @@ function TimeSeriesViz({
   )
 }
 
+// Recharts animates in script, out of reach of the reduced-motion CSS.
+const animate = () =>
+  !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+
 function TimeSeriesChart({
   viz,
   data,
@@ -246,7 +271,7 @@ function TimeSeriesChart({
 }: Pivoted & { viz: "line" | "area" | "bar" }) {
   const config: ChartConfig = {}
   series.forEach((s, i) => {
-    config[s.key] = { label: s.label, color: chartColor(i) }
+    config[s.key] = { label: seriesLabel(s), color: chartColor(i) }
   })
   const unit = series[0]?.unit
   const tickFormatter = (v: number) =>
@@ -267,16 +292,31 @@ function TimeSeriesChart({
         axisLine={false}
         width={unit === "money" ? 80 : 52}
         tickFormatter={tickFormatter}
+        // Counts are whole numbers; a rate never passes 100%, and an all-zero
+        // rate would otherwise get Recharts' default 0–4 (400%) scale.
+        allowDecimals={unit === "money" || unit === "ratio" || unit === "days"}
+        domain={
+          unit === "ratio"
+            ? [0, (max: number) => (max > 0 ? Math.min(1, max * 1.25) : 1)]
+            : undefined
+        }
       />
     </>
   )
   const tooltip = <ChartTooltip content={<MetricTooltip series={series} />} />
+  const legend =
+    series.length > 1 ? (
+      <ChartLegend
+        content={<ChartLegendContent className="flex-wrap gap-x-4 gap-y-1" />}
+      />
+    ) : null
   return (
     <ChartContainer config={config} className="h-full min-h-24 w-full">
       {viz === "line" ? (
         <LineChart {...chartProps}>
           {axes}
           {tooltip}
+          {legend}
           {series.map((s, i) => (
             <Line
               key={s.key}
@@ -286,6 +326,7 @@ function TimeSeriesChart({
               strokeWidth={2}
               // A rate's empty buckets are gaps; dots keep a lone value visible.
               connectNulls={s.unit === "ratio"}
+              isAnimationActive={animate()}
               dot={s.unit === "ratio" ? { r: 2.5 } : false}
             />
           ))}
@@ -294,6 +335,7 @@ function TimeSeriesChart({
         <AreaChart {...chartProps}>
           {axes}
           {tooltip}
+          {legend}
           {series.map((s, i) => (
             <Area
               key={s.key}
@@ -303,6 +345,7 @@ function TimeSeriesChart({
               stroke={chartColor(i)}
               fill={chartColor(i)}
               fillOpacity={0.35}
+              isAnimationActive={animate()}
             />
           ))}
         </AreaChart>
@@ -310,6 +353,7 @@ function TimeSeriesChart({
         <BarChart {...chartProps}>
           {axes}
           {tooltip}
+          {legend}
           {series.map((s, i) => (
             <Bar
               key={s.key}
@@ -317,6 +361,7 @@ function TimeSeriesChart({
               stackId={s.measure}
               fill={chartColor(i)}
               radius={2}
+              isAnimationActive={animate()}
             />
           ))}
         </BarChart>
@@ -365,11 +410,22 @@ function DonutViz({
             <ChartTooltip
               content={<MetricTooltip series={group.series} nameKey="key" />}
             />
+            {group.series.length > 1 && (
+              <ChartLegend
+                content={
+                  <ChartLegendContent
+                    nameKey="key"
+                    className="flex-wrap gap-x-4 gap-y-1"
+                  />
+                }
+              />
+            )}
             <Pie
               data={group.series}
               dataKey="value"
               nameKey="key"
               innerRadius="55%"
+              isAnimationActive={animate()}
               stroke="var(--card)"
               strokeWidth={2}
             >
