@@ -63,7 +63,7 @@ var catalogPerms = func() map[billing.Permission]iam.Perm {
 	out := map[billing.Permission]iam.Perm{}
 	for _, perm := range append(billing.Permissions(),
 		billing.RootMerchantsRead, billing.RootMerchantsDelete, billing.RootMerchantsRestore,
-		billing.RootWorkerHealthRead, billing.RootAdminRateLimitsUnlock) {
+		billing.RootWorkerHealthRead) {
 		persona := Roles.Root.PersonaDef
 		if perm.Persona() == billing.MerchantGroupPersona {
 			persona = merchantPersona
