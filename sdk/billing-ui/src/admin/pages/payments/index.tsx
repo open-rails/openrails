@@ -196,7 +196,7 @@ export function PaymentsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">
           <AdminMessage id={"Payments"} />
         </h1>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
           <CustomerSearch onPick={pickCustomer} />
           <Select
             items={[
@@ -235,7 +235,7 @@ export function PaymentsPage() {
       <Tabs value={kind} onValueChange={(v) => setParam("kind", v ?? "")}>
         <TabsList
           variant="line"
-          className="w-full justify-start gap-6 rounded-none p-0"
+          className="w-full justify-start gap-6 overflow-x-auto rounded-none p-0"
         >
           {KINDS.map(([value, label]) => (
             <TabsTrigger

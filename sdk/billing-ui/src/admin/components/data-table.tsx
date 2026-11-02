@@ -62,7 +62,9 @@ export function DataTable<TData>({
   return (
     <div className="flex flex-col gap-3">
       <div className="overflow-x-auto">
-        <Table>
+        {/* On a phone the table scrolls sideways with its first column held,
+            so every row stays named. */}
+        <Table className="max-md:[&_tr>*:first-child]:sticky max-md:[&_tr>*:first-child]:left-0 max-md:[&_tr>*:first-child]:z-10 max-md:[&_tr>*:first-child]:bg-background">
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="hover:bg-transparent">

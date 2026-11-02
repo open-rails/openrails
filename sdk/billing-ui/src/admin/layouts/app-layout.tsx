@@ -120,9 +120,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
     )
   return (
     <TooltipProvider>
-      <SidebarProvider>
+      {/* Below 64rem the console opens with its sidebar folded to icons, so a
+          tablet keeps its width for the page; the inset may shrink below its
+          content so wide tables scroll inside their own containers instead
+          of pushing the page sideways. */}
+      <SidebarProvider
+        defaultOpen={window.matchMedia?.("(min-width: 64rem)").matches ?? true}
+      >
         <AppSidebar />
-        <SidebarInset>
+        <SidebarInset className="min-w-0">
           <SiteHeader trail={trail} />
           {/* A switch remounts the merchant's pages: nothing of the
               previous merchant's survives it. */}

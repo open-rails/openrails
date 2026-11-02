@@ -45,6 +45,7 @@ import {
   TableRow,
 } from "#orck/admin/components/ui/table"
 import { useAdminUpdates } from "#orck/admin/lib/capabilities"
+import { DIALOG_FIT } from "#orck/admin/lib/dialog-width"
 import { errorText } from "#orck/admin/lib/error-text"
 
 export function CustomerCreditSupportSection({
@@ -371,7 +372,7 @@ function GrantCreditDialog({
         if (!open && !mutation.isPending) onClose()
       }}
     >
-      <DialogContent>
+      <DialogContent className={DIALOG_FIT}>
         <DialogHeader>
           <DialogTitle>
             <AdminMessage id={"Grant credit"} />
@@ -491,7 +492,7 @@ function RevokeCreditDialog({
         if (!open && !mutation.isPending) onClose()
       }}
     >
-      <DialogContent>
+      <DialogContent className={DIALOG_FIT}>
         <DialogHeader>
           <DialogTitle>
             <AdminMessage id={"Revoke remaining credit"} />

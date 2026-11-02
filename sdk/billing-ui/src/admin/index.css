@@ -272,3 +272,16 @@ select:not(:disabled),
     scroll-behavior: auto !important;
   }
 }
+
+/* Phones: controls are at least 40px in each direction, so they can be hit
+   with a thumb. */
+@media (max-width: 47.99rem) {
+  [data-slot="button"],
+  [data-slot="select-trigger"],
+  [data-slot="input"] {
+    min-height: 2.5rem;
+  }
+  [data-slot="button"] {
+    min-width: 2.5rem;
+  }
+}

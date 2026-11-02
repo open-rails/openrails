@@ -193,7 +193,7 @@ export function SubscriptionsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">
           <AdminMessage id={"Subscriptions"} />
         </h1>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
           <CustomerSearch onPick={pickCustomer} />
           <Select
             items={[
