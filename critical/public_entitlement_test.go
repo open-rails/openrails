@@ -74,6 +74,13 @@ func TestPublicEntitlements(t *testing.T) {
 		second := publicGrant(t, a, "surviving-source", 48)
 		a.clock.Advance(time.Hour)
 		require.NoError(t, a.alphaRemote.RevokeProductAccess(t.Context(), first.ID, billing.RevokeProductAccessParams{Reason: "One complimentary source ends"}))
+		var granter, revoker *string
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT g.actor, r.actor FROM "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" pa JOIN "+
+			pgx.Identifier{a.schema, "grants"}.Sanitize()+" g ON g.merchant_id = pa.merchant_id AND g.id = pa.grant_id JOIN "+
+			pgx.Identifier{a.schema, "grants"}.Sanitize()+" r ON r.merchant_id = g.merchant_id AND r.supersedes_id = g.id AND r.event = 'revoke' WHERE pa.merchant_id = $1 AND pa.id = $2",
+			a.alpha.MerchantID().UUID(), first.ID.UUID()).Scan(&granter, &revoker))
+		require.NotNil(t, granter)
+		require.Equal(t, granter, revoker, "the revoke names the staff member who made it, as the grant does")
 		publicAccess(t, a, a.clock.Now(), true)
 		publicAccess(t, a, first.StartsAt.Add(24*time.Hour), true)
 		publicAccess(t, a, *second.EndsAt, false)

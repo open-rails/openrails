@@ -233,7 +233,7 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 			changed = true
 			ledger := grants.New(q, mid.UUID())
 			ledger.SetClock(s.now)
-			if _, err := ledger.Revoke(ctx, grantID, reason); err != nil {
+			if _, err := ledger.Revoke(ctx, grantID, reason, ""); err != nil {
 				return err
 			}
 			if err := ledger.MaterializeGrant(ctx, original); err != nil {

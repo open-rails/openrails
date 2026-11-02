@@ -312,7 +312,11 @@ func RevokeProductAccess(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
 		return
 	}
-	found, err := svc.RevokeProductAccess(r.Request.Context(), id.UUID(), models.AccessRevokeReason(params.Reason))
+	var actor string
+	if admin, ok := r.Staff(); ok {
+		actor = admin.Subject
+	}
+	found, err := svc.RevokeProductAccess(r.Request.Context(), id.UUID(), models.AccessRevokeReason(params.Reason), actor)
 	if err != nil {
 		writeRefusal(r, err, "failed to revoke product access")
 		return
