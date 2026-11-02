@@ -125,7 +125,7 @@ export function WidgetTile({
       <CardContent className="flex min-h-0 flex-1 flex-col gap-2">
         <span
           className={cn(
-            "truncate",
+            "line-clamp-2",
             isStat
               ? "text-xs font-medium tracking-wider text-muted-foreground uppercase"
               : "text-sm font-medium"

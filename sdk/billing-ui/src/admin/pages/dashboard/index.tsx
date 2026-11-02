@@ -44,6 +44,22 @@ function useMeasuredWidth() {
   return { containerRef: setEl, width, mounted: width > 0 }
 }
 
+// useWide reports the md breakpoint (48rem), where the dashboard switches from
+// the stacked phone flow to the grid. Only one of the two is rendered, so no
+// hidden copy of every tile runs its query or measures a 0×0 chart.
+const wideQuery = "(min-width: 48rem)"
+function useWide() {
+  return React.useSyncExternalStore(
+    (notify) => {
+      const query = window.matchMedia(wideQuery)
+      query.addEventListener("change", notify)
+      return () => query.removeEventListener("change", notify)
+    },
+    () => window.matchMedia(wideQuery).matches,
+    () => true
+  )
+}
+
 // stackedWidgets orders widgets by their grid position (top-left first) for
 // the single-column mobile flow.
 function stackedWidgets<T extends { id: string }>(
@@ -90,6 +106,7 @@ function MetricsDashboard() {
   const [editorOpen, setEditorOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<Widget | null>(null)
   const { width, containerRef, mounted } = useMeasuredWidth()
+  const wide = useWide()
   const [range] = useDashboardRange()
   const confirm = useConfirm()
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -207,59 +224,54 @@ function MetricsDashboard() {
               <AdminMessage id={"No widgets yet"} />
             </p>
           </div>
-        ) : (
-          <>
-            <div className="grid gap-3 md:hidden">
-              {stackedWidgets(widgets, layout).map((w) => (
-                <div
-                  key={w.id}
-                  className={w.viz === "stat" ? "h-[124px]" : "h-64"}
-                >
-                  <WidgetTile
-                    widget={w}
-                    range={range}
-                    editable={editable}
-                    onEdit={() => {
-                      setEditing(w)
-                      setEditorOpen(true)
-                    }}
-                    onDelete={() => void removeWidget(w)}
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="hidden md:block">
-              {mounted ? (
-                <GridLayout
-                  layout={layout}
-                  width={width}
-                  gridConfig={{
-                    cols: COLS,
-                    rowHeight: ROW_HEIGHT,
-                    margin: [12, 12],
+        ) : !wide ? (
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
+            {stackedWidgets(widgets, layout).map((w) => (
+              <div
+                key={w.id}
+                className={w.viz === "stat" ? "h-[124px]" : "h-64"}
+              >
+                <WidgetTile
+                  widget={w}
+                  range={range}
+                  editable={editable}
+                  onEdit={() => {
+                    setEditing(w)
+                    setEditorOpen(true)
                   }}
-                  dragConfig={{ handle: ".widget-drag-handle" }}
-                  onLayoutChange={onLayoutChange}
-                >
-                  {widgets.map((w) => (
-                    <div key={w.id}>
-                      <WidgetTile
-                        widget={w}
-                        range={range}
-                        editable={editable}
-                        onEdit={() => {
-                          setEditing(w)
-                          setEditorOpen(true)
-                        }}
-                        onDelete={() => void removeWidget(w)}
-                      />
-                    </div>
-                  ))}
-                </GridLayout>
-              ) : null}
-            </div>
-          </>
-        )}
+                  onDelete={() => void removeWidget(w)}
+                />
+              </div>
+            ))}
+          </div>
+        ) : mounted ? (
+          <GridLayout
+            layout={layout}
+            width={width}
+            gridConfig={{
+              cols: COLS,
+              rowHeight: ROW_HEIGHT,
+              margin: [12, 12],
+            }}
+            dragConfig={{ handle: ".widget-drag-handle" }}
+            onLayoutChange={onLayoutChange}
+          >
+            {widgets.map((w) => (
+              <div key={w.id}>
+                <WidgetTile
+                  widget={w}
+                  range={range}
+                  editable={editable}
+                  onEdit={() => {
+                    setEditing(w)
+                    setEditorOpen(true)
+                  }}
+                  onDelete={() => void removeWidget(w)}
+                />
+              </div>
+            ))}
+          </GridLayout>
+        ) : null}
       </div>
 
       {editorOpen && editing ? (
