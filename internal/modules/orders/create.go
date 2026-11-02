@@ -92,21 +92,60 @@ func (e *staleOpenOrder) Error() string { return "orders: the open order of thes
 // FindOrCreate answers the customer's open, unexpired order of
 // in.LinesDigest's lines (found), else creates it as Create does. One
 // customer's orders are made one at a time, so two requests make one order.
+// The customer's open order of other lines that holds what these buy (another
+// price of the product, left unpaid after a decline) is canceled for this
+// one, so the customer pays the price they chose; an order whose payment is
+// in flight keeps the claim and the lines are refused.
 func (s *Service) FindOrCreate(ctx context.Context, in CreateInput) (*Order, bool, error) {
 	if len(in.LinesDigest) == 0 {
 		return nil, false, errors.New("orders: find-or-create needs the lines' digest")
 	}
-	for range 2 {
+	for range 3 {
 		order, found, err := s.create(ctx, in)
 		var stale *staleOpenOrder
-		if !errors.As(err, &stale) {
+		var refused *LineError
+		switch {
+		case errors.As(err, &stale):
+			err = s.close(ctx, in.CustomerID, stale.id, billing.OrderExpired)
+		case errors.As(err, &refused):
+			held, ok := refused.HeldBy()
+			if !ok {
+				return nil, false, err
+			}
+			replaced, rerr := s.replace(ctx, in.CustomerID, held)
+			if rerr != nil {
+				return nil, false, rerr
+			}
+			if !replaced {
+				return nil, false, err
+			}
+			err = nil
+		default:
 			return order, found, err
 		}
-		if err := s.close(ctx, in.CustomerID, stale.id, billing.OrderExpired); err != nil {
+		if err != nil {
 			return nil, false, err
 		}
 	}
 	return nil, false, errOpenOrderClosing
+}
+
+// replace cancels the customer's own open order held, reporting false when
+// it is not one of theirs that buys only what is being chosen again (another
+// origin's, a cart's other lines) or is no longer open (its payment started).
+func (s *Service) replace(ctx context.Context, customerID, held uuid.UUID) (bool, error) {
+	order, err := s.GetForCustomer(ctx, customerID, held)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil || order.Origin != string(billing.OrderOriginCustomer) || len(order.Lines) != 1 {
+		return false, err
+	}
+	err = s.close(ctx, customerID, held, billing.OrderCanceled)
+	if errors.Is(err, ErrNotCancelable) || errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 var errOpenOrderClosing = apperr.New(http.StatusConflict, billing.CodeResourceConflict, "The customer's open order of these lines is closing; try again.")

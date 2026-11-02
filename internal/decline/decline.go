@@ -121,8 +121,9 @@ func ReasonFor(rail, code string) string {
 }
 
 // ClassifyEvidence classifies a refusal with its AVS/CVV results: a security
-// code mismatch is the reason whatever the code said, and an address mismatch
-// explains a generic decline.
+// code mismatch is the reason whatever the code said, and a postal code that
+// did not match explains a generic decline. A postal code that matched is no
+// address failure: AVS answers a street it was never sent as unmatched.
 func ClassifyEvidence(e Evidence) Result {
 	r := lookup(e.Rail, e.Code, e.Text)
 	if r.Coverage != Mapped && strings.TrimSpace(e.FallbackCode) != "" {
@@ -139,8 +140,6 @@ func ClassifyEvidence(e Evidence) Result {
 		r = r.with(billing.DeclineIncorrectCVC)
 	case generic && zipMismatch(r.Rail, e.AVS):
 		r = r.with(billing.DeclineIncorrectZip)
-	case generic && addressMismatch(r.Rail, e.AVS):
-		r = r.with(billing.DeclineIncorrectAddress)
 	}
 	return r
 }

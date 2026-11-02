@@ -412,6 +412,8 @@ func (p *healthPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 
 	// life.provider_intent.abandoned — a desired provider action that will not
 	// auto-retry (ended failed or expired, or past its deadline) needs a human.
+	// A decline is not one: a customer leaving a declined card is ordinary, and
+	// the decline spike findings watch the rate.
 	// Surface-only; it closes once its operation is no longer abandoned.
 	abandoned, err := q.ListAbandonedProviderIntents(ctx, gen.ListAbandonedProviderIntentsParams{
 		MerchantID: mid, Since: now.Add(-abandonedLookback), Now: now,

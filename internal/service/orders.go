@@ -742,8 +742,18 @@ func (s *Service) orderOptions(ctx context.Context, customer uuid.UUID, prices [
 // orderPaymentUsable refuses, before an order exists, a saved card no PSP
 // that sells its lines can charge, or a new card's PSP that takes none.
 func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, pay orderPayment, customer billing.CustomerID) error {
-	if i := quote.Refused(); i >= 0 {
-		return &orders.LineError{Index: i, Refusal: *quote.Lines[i].Refusal}
+	for i := range quote.Lines {
+		l := &quote.Lines[i]
+		if l.Refusal == nil {
+			continue
+		}
+		refused := &orders.LineError{Index: i, Refusal: *l.Refusal}
+		if _, held := refused.HeldBy(); !held {
+			return refused
+		}
+		// The customer's own unpaid order holding the line is FindOrCreate's
+		// to answer or replace; the payment is checked for the line itself.
+		l.Refusal = nil
 	}
 	options, err := s.rt.OrderAttemptService.CustomerOrderOptions(ctx, customer.UUID(), quote.Prices(), quote.Products())
 	if err != nil {
