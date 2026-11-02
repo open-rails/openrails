@@ -6,6 +6,7 @@ import { ApiError, createAdminClient } from "./lib/api/client"
 import { createAdminAPI } from "./lib/api"
 import { formatNativeAmount } from "./lib/format"
 import { errorText } from "./lib/error-text"
+import { statusLabel } from "./components/status-badge"
 import type { BillingAdminProps } from "./types"
 import { useAdminTheme } from "./theme"
 
@@ -126,97 +127,113 @@ export function BillingCustomerSummary(props: BillingCustomerSummaryProps) {
       data-orba-theme={theme}
       style={appearanceStyle(props.appearance, "orba")}
     >
-      <div className="rounded-lg border p-4">
-        <h3 className="font-semibold">
-          <AdminMessage id={"Billing"} />
-        </h3>
-        {isPending && (
-          <p role="status">
-            <AdminMessage id={"Loading billing…"} />
-          </p>
-        )}
-        {error && missingCustomer(error) && (
-          <p>
-            <AdminMessage id={"No billing activity yet."} />
-          </p>
-        )}
-        {error && !missingCustomer(error) && (
-          <p role="alert">
-            {errorText(error).text}{" "}
-            <button type="button" onClick={refetch}>
-              <AdminMessage id={"Try again"} />
-            </button>
-          </p>
-        )}
-        {data && (
-          <>
-            <dl>
+      <div className="overflow-hidden rounded-xl bg-card text-sm text-card-foreground shadow-xs ring-1 ring-foreground/10">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-5 sm:px-6">
+          <h2 className="text-base leading-tight font-semibold">
+            <AdminMessage id={"Billing"} />
+          </h2>
+          {props.href && (
+            <a
+              className="inline-flex min-h-10 items-center text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:min-h-0"
+              href={props.href}
+            >
+              <AdminMessage id={"View billing details"} />
+            </a>
+          )}
+        </div>
+        <div className="px-5 py-4 sm:px-6">
+          {isPending && (
+            <p role="status" className="text-muted-foreground">
+              <AdminMessage id={"Loading billing…"} />
+            </p>
+          )}
+          {error && missingCustomer(error) && (
+            <p className="text-muted-foreground">
+              <AdminMessage id={"No billing activity yet."} />
+            </p>
+          )}
+          {error && !missingCustomer(error) && (
+            <p role="alert">
+              {errorText(error).text}{" "}
+              <button
+                type="button"
+                className="underline underline-offset-4"
+                onClick={refetch}
+              >
+                <AdminMessage id={"Try again"} />
+              </button>
+            </p>
+          )}
+          {data && (
+            <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-y-3">
               {data.customer.balances.map((balance) => (
-                <div key={balance.currency}>
-                  <dt>
-                    <AdminMessage id={"Available balance"} />
-                  </dt>
-                  <dd>
-                    {formatNativeAmount(
+                <SummaryRow
+                  key={balance.currency}
+                  label="Available balance"
+                  items={[
+                    formatNativeAmount(
                       balance.available_amount,
                       balance.currency
-                    )}
-                  </dd>
-                </div>
+                    ),
+                  ]}
+                />
               ))}
+              <SummaryRow
+                label="Active subscriptions"
+                items={data.subscriptions.data.map(
+                  (subscription) =>
+                    subscription.product?.display_name ?? subscription.id
+                )}
+              />
+              <SummaryRow
+                label="Entitlements"
+                items={data.entitlements.data.map(
+                  (entitlement) => entitlement.entitlement
+                )}
+              />
+              <SummaryRow
+                label="Product access"
+                items={data.access.data.map(
+                  (access) =>
+                    `${access.product_name} · ${statusLabel(access.status)}`
+                )}
+              />
+              <SummaryRow
+                label="Recent payments"
+                items={data.payments.data.map(
+                  (payment) =>
+                    `${formatNativeAmount(payment.amount, payment.currency)} · ${statusLabel(payment.status)}`
+                )}
+              />
             </dl>
-            <h4>
-              <AdminMessage id={"Active subscriptions"} />
-            </h4>
-            {data.subscriptions.data.length ? (
-              <ul>
-                {data.subscriptions.data.map((subscription) => (
-                  <li key={subscription.id}>{subscription.id}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>
-                <AdminMessage id={"No active subscriptions."} />
-              </p>
-            )}
-            <h4>
-              <AdminMessage id={"Entitlements"} />
-            </h4>
-            <ul>
-              {data.entitlements.data.map((entitlement) => (
-                <li key={entitlement.entitlement}>{entitlement.entitlement}</li>
-              ))}
-            </ul>
-            <h4>
-              <AdminMessage id={"Product access"} />
-            </h4>
-            <ul>
-              {data.access.data.map((access) => (
-                <li key={access.id}>
-                  {access.product_name} · {access.status}
-                </li>
-              ))}
-            </ul>
-            <h4>
-              <AdminMessage id={"Recent payments"} />
-            </h4>
-            <ul>
-              {data.payments.data.map((payment) => (
-                <li key={payment.id}>
-                  {formatNativeAmount(payment.amount, payment.currency)} ·{" "}
-                  {payment.status}
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-        {props.href && (
-          <a className="underline" href={props.href}>
-            <AdminMessage id={"View billing details"} />
-          </a>
-        )}
+          )}
+        </div>
       </div>
     </section>
+  )
+}
+
+// SummaryRow is one labelled list in the panel; an empty one says "None".
+function SummaryRow({ label, items }: { label: string; items: string[] }) {
+  return (
+    <>
+      <dt className="pt-2 text-muted-foreground first:pt-0 sm:pt-0">
+        <AdminMessage id={label} />
+      </dt>
+      <dd className="min-w-0">
+        {items.length ? (
+          <ul className="grid gap-0.5">
+            {items.map((item, index) => (
+              <li key={index}>{item}</li>
+            ))}
+          </ul>
+        ) : (
+          <span className="text-muted-foreground">
+            <AdminMessage id={"None"} />
+          </span>
+        )}
+      </dd>
+    </>
   )
 }
 
