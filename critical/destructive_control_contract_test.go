@@ -82,6 +82,28 @@ func TestDestructiveControls(t *testing.T) {
 		require.Contains(t, string(events.Events[0].Data), hold.ID.String())
 		public, _ := json.Marshal(findings.Items[0])
 		require.NotContains(t, string(public), "trigger_actor")
+
+		// A deployment's configured lower actor limit holds the third revoke.
+		low := newAuthorityWorld(t, func(w *world) {
+			w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{ActorPerHour: 2}
+		})
+		var few []billing.CreateCreditGrantParams
+		for i := range 3 {
+			few = append(few, billing.CreateCreditGrantParams{CustomerID: billing.CustomerID(uuid.MustParse(low.alice.ID)), Currency: "USD", Amount: 100, Source: "critical", SourceID: fmt.Sprintf("low-%d", i)})
+		}
+		lowGrants, err := low.alpha.CreateCreditGrants(t.Context(), few)
+		require.NoError(t, err)
+		for i := range 2 {
+			_, err := low.alphaRemote.RevokeCreditGrant(t.Context(), lowGrants[i].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+			require.NoError(t, err)
+		}
+		_, err = low.alphaRemote.RevokeCreditGrant(t.Context(), lowGrants[2].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+		require.Error(t, err)
+		lowHolds, err := low.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})
+		require.NoError(t, err)
+		require.Len(t, lowHolds.Items, 1)
+		require.Equal(t, "actor", lowHolds.Items[0].Scope)
+		require.EqualValues(t, 2, lowHolds.Items[0].Ceiling)
 	})
 	t.Run("OR-J34-S02/noninteractive-and-foreign-authority-cannot-clear-or-forge-actor", func(t *testing.T) {
 		a, grants, hold := hostHeldCredits(t)

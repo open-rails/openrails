@@ -248,8 +248,8 @@ func (l *Ledger) Revoke(ctx context.Context, grantID uuid.UUID, reason, actor st
 // RevokeAsOf is Revoke with an explicit effective instant (valid time) on the
 // termination's starts_at, so a converged revocation agrees with the
 // entitlement effect instead of stamping wall clock. Zero means now.
-func (l *Ledger) RevokeAsOf(ctx context.Context, grantID uuid.UUID, reason string, asOf time.Time) (gen.BillingGrant, error) {
-	return l.terminate(ctx, grantID, "revoke", reason, "", asOf)
+func (l *Ledger) RevokeAsOf(ctx context.Context, grantID uuid.UUID, reason, actor string, asOf time.Time) (gen.BillingGrant, error) {
+	return l.terminate(ctx, grantID, "revoke", reason, actor, asOf)
 }
 
 // terminate appends a termination event (revoke/expire) superseding the grant.
@@ -430,7 +430,7 @@ func (l *Ledger) RevokeBySourceAsOf(ctx context.Context, customer uuid.UUID, kin
 		return fmt.Errorf("grants: list grants for revoke-by-source: %w", err)
 	}
 	for _, g := range live {
-		if _, err := l.RevokeAsOf(ctx, g.ID, reason, asOf); err != nil {
+		if _, err := l.RevokeAsOf(ctx, g.ID, reason, "", asOf); err != nil {
 			return fmt.Errorf("grants: revoke %s by source: %w", g.ID, err)
 		}
 	}

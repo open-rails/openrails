@@ -586,14 +586,15 @@ func revokeAccessTx(ctx context.Context, tx pgx.Tx, mid billing.MerchantID, p Re
 	})
 }
 
-// RevokeGrantedAccess revokes one window. A free grant is revoked in the
-// grant ledger and its projection follows, so a future window of it does not
-// come back; a purchase or subscription window is revoked on its own. actor
-// is the staff subject the grant's revoke event names, "" for none.
-func (s *EntitlementService) RevokeGrantedAccess(ctx context.Context, access *models.ProductAccess, reason models.AccessRevokeReason, actor string) error {
+// RevokeGrantedAccess revokes one window, as of asOf (nil: now). A free
+// grant is revoked in the grant ledger and its projection follows, so a
+// future window of it does not come back; a purchase or subscription window
+// is revoked on its own. actor is the staff subject the grant's revoke event
+// names, "" for none.
+func (s *EntitlementService) RevokeGrantedAccess(ctx context.Context, access *models.ProductAccess, reason models.AccessRevokeReason, actor string, asOf *time.Time) error {
 	if access.SourceType != models.AccessSourceGrant {
 		id := access.ID
-		return s.RevokeAccess(ctx, RevokeAccessParams{AccessID: &id, Reason: reason})
+		return s.RevokeAccess(ctx, RevokeAccessParams{AccessID: &id, Reason: reason, AsOf: asOf})
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -614,7 +615,17 @@ func (s *EntitlementService) RevokeGrantedAccess(ctx context.Context, access *mo
 		}
 		l := s.ledger(q, mid.UUID())
 		if !terminated {
-			if _, err := l.Revoke(ctx, g.ID, string(reason), actor); err != nil {
+			var at time.Time
+			if asOf != nil {
+				at = *asOf
+			}
+			if _, err := l.RevokeAsOf(ctx, g.ID, string(reason), actor, at); err != nil {
+				return err
+			}
+		}
+		if asOf != nil {
+			// The window ends when the revocation takes effect, not now.
+			if _, err := q.RevokeProductAccessByGrant(ctx, gen.RevokeProductAccessByGrantParams{MerchantID: mid.UUID(), GrantID: g.ID, RevokedAt: *asOf, RevokeReason: "grant_revoked"}); err != nil {
 				return err
 			}
 		}

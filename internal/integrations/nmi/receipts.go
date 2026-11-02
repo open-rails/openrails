@@ -141,7 +141,8 @@ func (c *NMIClient) ConfirmRefund(ctx context.Context, originalTransactionID, re
 
 // SaleEvidence contains only facts read from the authenticated provider account.
 // The order search and exact transaction must identify the same successful sale.
-// No card data or arbitrary provider response is retained.
+// Of the card it keeps only the brand and last four the order search reports,
+// never its number; no arbitrary provider response is retained.
 type SaleEvidence struct {
 	// VaultBillingID is the sole billing entry from an authenticated vault read.
 	// It is not a field echoed by the transaction response.
@@ -152,6 +153,8 @@ type SaleEvidence struct {
 	Amount          moneyutil.Cents `json:"amount,string"`
 	Currency        string          `json:"currency"`
 	Approved        bool            `json:"approved"`
+	CardBrand       string          `json:"card_brand,omitempty"`
+	CardLast4       string          `json:"card_last4,omitempty"`
 }
 
 func (c *NMIClient) ReadSaleEvidence(ctx context.Context, orderReference, reference string) (SaleEvidence, bool, error) {
@@ -169,6 +172,7 @@ func (c *NMIClient) ReadSaleEvidence(ctx context.Context, orderReference, refere
 		return SaleEvidence{}, false, err
 	}
 	id := ""
+	var sale QueryTransaction
 	for _, txn := range query.Transactions {
 		for _, action := range txn.Actions {
 			if !action.Is("sale") || !action.Succeeded() {
@@ -180,7 +184,7 @@ func (c *NMIClient) ReadSaleEvidence(ctx context.Context, orderReference, refere
 			if id != "" && id != txn.TransactionID {
 				return SaleEvidence{}, false, receiptMismatch("order has multiple successful sales")
 			}
-			id = txn.TransactionID
+			id, sale = txn.TransactionID, txn
 		}
 	}
 	if id == "" {
@@ -213,5 +217,6 @@ func (c *NMIClient) ReadSaleEvidence(ctx context.Context, orderReference, refere
 	if amount <= 0 || strings.TrimSpace(txn.Currency) == "" {
 		return SaleEvidence{}, false, receiptMismatch("sale evidence is incomplete")
 	}
-	return SaleEvidence{TransactionID: id, OrderReference: orderReference, CustomerVaultID: strings.TrimSpace(txn.CustomerVaultID), Amount: amount, Currency: strings.ToUpper(strings.TrimSpace(txn.Currency)), Approved: true}, true, nil
+	return SaleEvidence{TransactionID: id, OrderReference: orderReference, CustomerVaultID: strings.TrimSpace(txn.CustomerVaultID), Amount: amount, Currency: strings.ToUpper(strings.TrimSpace(txn.Currency)), Approved: true,
+		CardBrand: cardBrand(sale.CCType, sale.CCNumber), CardLast4: last4Of(sale.CCNumber)}, true, nil
 }

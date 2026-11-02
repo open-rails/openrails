@@ -19,7 +19,9 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
+	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	"github.com/stretchr/testify/require"
 )
 
@@ -95,6 +97,41 @@ func TestPublicEntitlements(t *testing.T) {
 				require.Nil(t, row.RevokedAt)
 			}
 		}
+
+		// A dated revoke from an Ops finding also revokes the grant, names
+		// its staff member, and stays revoked through re-projection.
+		database, err := db.NewWithPGXPool(a.pool, a.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		asOf := second.StartsAt.Add(30 * time.Minute).UTC().Truncate(time.Second)
+		rec := recommend.RevokeProductAccessRec(second.ID.UUID().String(), asOf.Format(time.RFC3339), nil)
+		var finding reconcile.FindingRecord
+		require.NoError(t, database.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			finding, err = (&reconcile.PGStore{DB: database, Now: a.clock.Now}).RaiseFinding(ctx, reconcile.RaisedFinding{Type: reconcile.FindingAccessUnjustified,
+				SubjectKey: "product_access:" + second.ID.UUID().String(), Severity: reconcile.SeverityHigh, Evidence: map[string]any{recommend.EvidenceKey: rec.Map()}})
+			return err
+		}))
+		_, err = a.alphaRemote.ResolveFinding(t.Context(), billing.FindingID(finding.ID), billing.ResolveFindingParams{Outcome: billing.FindingApprove, Notes: "dated revoke"})
+		require.NoError(t, err)
+		datedRevoke := func() {
+			t.Helper()
+			var granter, revoker *string
+			var effective, revokedAt time.Time
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT g.actor, r.actor, r.starts_at, pa.revoked_at FROM "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" pa JOIN "+
+				pgx.Identifier{a.schema, "grants"}.Sanitize()+" g ON g.merchant_id = pa.merchant_id AND g.id = pa.grant_id JOIN "+
+				pgx.Identifier{a.schema, "grants"}.Sanitize()+" r ON r.merchant_id = g.merchant_id AND r.supersedes_id = g.id AND r.event = 'revoke' WHERE pa.merchant_id = $1 AND pa.id = $2",
+				a.alpha.MerchantID().UUID(), second.ID.UUID()).Scan(&granter, &revoker, &effective, &revokedAt))
+			require.NotNil(t, granter)
+			require.Equal(t, granter, revoker, "the dated revoke names the staff member who made it")
+			require.True(t, effective.Equal(asOf), "the grant's revoke takes effect at as_of: %s", effective)
+			require.True(t, revokedAt.Equal(asOf), "the window ends at as_of: %s", revokedAt)
+			publicAccess(t, a, a.clock.Now(), false)
+		}
+		datedRevoke()
+		customer := uuid.MustParse(a.alice.ID)
+		_, err = converge.NewConvergeEngine(database, a.clock).Converge(ctx, converge.Scope{Merchant: a.alpha.MerchantID(), Customer: &customer})
+		require.NoError(t, err)
+		datedRevoke()
 	})
 	t.Run("OR-J27-S03/exact-window-boundaries-and-historical-tenure", func(t *testing.T) {
 		a, _ := newPaymentWorld(t, func(w *world) { publicPastClock(w, 48*time.Hour) })
@@ -409,7 +446,7 @@ func TestSubscriptionAccessRepairTerminated(t *testing.T) {
 			if err := ledger.LockCustomer(ctx, sub.CustomerID.UUID()); err != nil {
 				return err
 			}
-			_, err := ledger.RevokeAsOf(ctx, window.GrantID, "chargeback", bound)
+			_, err := ledger.RevokeAsOf(ctx, window.GrantID, "chargeback", "", bound)
 			return err
 		})
 		require.NoError(t, err)

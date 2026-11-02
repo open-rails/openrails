@@ -75,6 +75,8 @@ type (
 	RateLimit = config.RateLimit
 	// UserActionRateLimitConfig sets the merchant-global rolling hour/day budget.
 	UserActionRateLimitConfig = config.UserActionRateLimitConfig
+	// DestructiveActionLimitsConfig sets the staff destructive-action limits.
+	DestructiveActionLimitsConfig = config.DestructiveActionLimitsConfig
 	// CaptchaConfig is Config.Captcha: the captcha account.
 	CaptchaConfig = config.CaptchaConfig
 	// VaultConfig is Config.Vault: the HashiCorp Vault connection OpenRails

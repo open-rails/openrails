@@ -79,6 +79,10 @@ type Config struct {
 	// across this merchant's users, actors and processes. Always enabled,
 	// including when the host owns ordinary HTTP rate limits.
 	UserActionRateLimit UserActionRateLimitConfig `yaml:"user_action_rate_limit" json:"user_action_rate_limit"`
+	// DestructiveActionLimits are the staff limits on refunds, revokes,
+	// cancels and the other held destructive actions. Zero fields keep the
+	// defaults.
+	DestructiveActionLimits DestructiveActionLimitsConfig `yaml:"destructive_action_limits" json:"destructive_action_limits"`
 	// Captcha challenges a client that keeps hitting a rate limit.
 	Captcha *CaptchaConfig `yaml:"captcha" json:"captcha"`
 	// Vault connects to HashiCorp Vault when Deps.Vault is nil, and names its
@@ -863,6 +867,46 @@ func NormalizeUserActionRateLimit(c UserActionRateLimitConfig) (UserActionRateLi
 	return c, nil
 }
 
+// DestructiveActionLimitsConfig is how many destructive actions staff may
+// take in a rolling hour and day before a hold stops them: each actor's, each
+// merchant's and the deployment's. The merchant and deployment limits are
+// floors that rise with active customers. Zero fields select the defaults
+// (actor 5/15, merchant 15/25, deployment 50/100).
+type DestructiveActionLimitsConfig struct {
+	ActorPerHour      int64 `yaml:"actor_per_hour" json:"actor_per_hour"`
+	ActorPerDay       int64 `yaml:"actor_per_day" json:"actor_per_day"`
+	MerchantPerHour   int64 `yaml:"merchant_per_hour" json:"merchant_per_hour"`
+	MerchantPerDay    int64 `yaml:"merchant_per_day" json:"merchant_per_day"`
+	DeploymentPerHour int64 `yaml:"deployment_per_hour" json:"deployment_per_hour"`
+	DeploymentPerDay  int64 `yaml:"deployment_per_day" json:"deployment_per_day"`
+}
+
+// NormalizeDestructiveActionLimits fills the defaults and refuses limits that
+// could never apply: a negative one, an hour above its day, an actor above
+// its merchant, or a merchant above the deployment.
+func NormalizeDestructiveActionLimits(c DestructiveActionLimitsConfig) (DestructiveActionLimitsConfig, error) {
+	for _, f := range []struct {
+		v   *int64
+		def int64
+	}{{&c.ActorPerHour, 5}, {&c.ActorPerDay, 15}, {&c.MerchantPerHour, 15}, {&c.MerchantPerDay, 25}, {&c.DeploymentPerHour, 50}, {&c.DeploymentPerDay, 100}} {
+		if *f.v == 0 {
+			*f.v = f.def
+		}
+		if *f.v < 0 {
+			return c, fmt.Errorf("destructive_action_limits fields must be positive")
+		}
+	}
+	switch {
+	case c.ActorPerHour > c.ActorPerDay || c.MerchantPerHour > c.MerchantPerDay || c.DeploymentPerHour > c.DeploymentPerDay:
+		return c, fmt.Errorf("destructive_action_limits: an hourly limit cannot exceed its daily limit")
+	case c.ActorPerHour > c.MerchantPerHour || c.ActorPerDay > c.MerchantPerDay:
+		return c, fmt.Errorf("destructive_action_limits: an actor limit cannot exceed the merchant limit")
+	case c.MerchantPerHour > c.DeploymentPerHour || c.MerchantPerDay > c.DeploymentPerDay:
+		return c, fmt.Errorf("destructive_action_limits: a merchant limit cannot exceed the deployment limit")
+	}
+	return c, nil
+}
+
 // RateLimitsConfig maps a feature bucket to its request limit.
 // A bucket left out is not limited; other routes never are (a
 // per-address ceiling belongs to the proxy in front of OpenRails).
@@ -985,6 +1029,9 @@ func CaptchaChallengeBuckets() []string {
 // setting is Degrade's: it is turned off with a reason, never refused.
 func Validate(cfg *Config) error {
 	if _, err := NormalizeUserActionRateLimit(cfg.UserActionRateLimit); err != nil {
+		return err
+	}
+	if _, err := NormalizeDestructiveActionLimits(cfg.DestructiveActionLimits); err != nil {
 		return err
 	}
 

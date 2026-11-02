@@ -186,12 +186,7 @@ func (s *Service) RevokeProductAccessAsOf(ctx context.Context, accessID uuid.UUI
 		if current.RevokedAt != nil || current.DeletedAt != nil || current.EndsAt != nil && !current.EndsAt.After(at) {
 			return false, nil
 		}
-		if asOf != nil {
-			err = local.RevokeAccess(ctx, entitlements.RevokeAccessParams{AccessID: &accessID, Reason: reason, AsOf: asOf})
-		} else {
-			err = local.RevokeGrantedAccess(ctx, current, reason, actor)
-		}
-		if err != nil {
+		if err := local.RevokeGrantedAccess(ctx, current, reason, actor, asOf); err != nil {
 			return true, err
 		}
 		return true, convergejob.Queue(ctx, txDB, billing.MerchantID(command.MerchantID), window.CustomerID)

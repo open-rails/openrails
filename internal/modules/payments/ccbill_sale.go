@@ -2,6 +2,8 @@ package payments
 
 import (
 	"time"
+
+	"github.com/open-rails/openrails/internal/db/models"
 )
 
 // CCBillSale is a CCBill NewSaleSuccess for an order attempt, as CCBill
@@ -19,6 +21,8 @@ type CCBillSale struct {
 	RecurringMinor *int64
 	SoldAt         *time.Time
 	NextRenewalAt  *time.Time
+	// Card is the brand and last four CCBill reports for the card it billed.
+	Card models.Card
 }
 
 // CCBillSaleUnhonored is a CCBill sale OpenRails keeps no record of: the

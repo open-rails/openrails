@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
@@ -80,5 +81,23 @@ func TestCheckout(t *testing.T) {
 		require.Equal(t, "mastercard", *money.Card.Brand)
 		require.Equal(t, "4444", *money.Card.Last4)
 		require.Empty(t, provider.core.Unexpected(), "every provider request must be explicitly modeled")
+		// So does an NMI card kept for one purchase: its sale's report names it.
+		nmi, journal := newNMIWorld(t)
+		nmiProduct, err := nmi.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-download", DisplayName: "NMI download", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"download:owned"}})
+		require.NoError(t, err)
+		nmiPrice, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: nmiProduct.ID, Key: "nmi-download", UnitAmount: 9_990_000, Currency: "USD"})
+		require.NoError(t, err)
+		input = billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: nmiPrice.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
+			Payment: &billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"})}}
+		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, input, map[string]string{"Idempotency-Key": "nmi-unkept-card"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var nmiOrder billing.Order
+		require.NoError(t, json.Unmarshal(raw, &nmiOrder))
+		require.Equal(t, billing.OrderComplete, nmiOrder.Status, string(raw))
+		money, err = nmi.alpha.GetPayment(t.Context(), *nmiOrder.Payment.PaymentID)
+		require.NoError(t, err)
+		require.NotNil(t, money.Card, "the NMI payment names the card it charged")
+		require.Equal(t, "mastercard", *money.Card.Brand)
+		require.Equal(t, "5454", *money.Card.Last4)
 	})
 }

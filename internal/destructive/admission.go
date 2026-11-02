@@ -12,6 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -20,20 +21,28 @@ import (
 // Admissions owns the durable admission boundary. The root pool is retained
 // independently of domain transaction rebindings; no provider call runs here.
 type Admissions struct {
-	db      *db.DB
-	clock   clockwork.Clock
-	project HoldProjector
+	db        *db.DB
+	clock     clockwork.Clock
+	project   HoldProjector
+	policy    config.DestructiveActionLimitsConfig
+	policyErr error
 }
 
-func NewAdmissions(database *db.DB, clock clockwork.Clock, project HoldProjector) *Admissions {
+// NewAdmissions admits under the deployment's limits; zero fields keep the
+// defaults.
+func NewAdmissions(database *db.DB, clock clockwork.Clock, project HoldProjector, limits config.DestructiveActionLimitsConfig) *Admissions {
 	if clock == nil {
 		clock = clockwork.NewRealClock()
 	}
-	return &Admissions{db: database, clock: clock, project: project}
+	policy, err := config.NormalizeDestructiveActionLimits(limits)
+	return &Admissions{db: database, clock: clock, project: project, policy: policy, policyErr: err}
 }
 func (a *Admissions) transaction(ctx context.Context, merchantID uuid.UUID, f func(context.Context, *gen.Queries, pgx.Tx) error) error {
 	if a == nil || a.db == nil || a.project == nil {
 		return errors.New("destructive admission and incident projector must be configured")
+	}
+	if a.policyErr != nil {
+		return a.policyErr
 	}
 	return a.db.DataPool().CommittedMerchantTx(ctx, billing.MerchantID(merchantID), func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
@@ -214,7 +223,7 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 			}
 			hourly, daily = n.Hourly, n.Daily
 		}
-		hourLimit, dayLimit := limits(scope, 0, 0)
+		hourLimit, dayLimit := a.limits(scope, 0)
 		if c.origin == "automation" {
 			hourLimit, dayLimit = 50, 25
 		}
@@ -236,7 +245,7 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 				if err != nil {
 					return nil, err
 				}
-				hourLimit, dayLimit = limits(scope, active, active)
+				hourLimit, dayLimit = a.limits(scope, active)
 				if c.origin == "automation" {
 					hourLimit, dayLimit = 50, max(int64(25), ceil(active, 100))
 				}
@@ -394,14 +403,19 @@ func (a *Admissions) GetAction(ctx context.Context, mid, id uuid.UUID) (Action, 
 	})
 	return out, err
 }
-func limits(scope Scope, merchant, all int64) (int64, int64) {
+
+// limits are a scope's hourly and daily limits: an actor's are fixed; a
+// merchant's and the deployment's rise by one per 400 (hour) and 100 (day)
+// customers active in it.
+func (a *Admissions) limits(scope Scope, active int64) (int64, int64) {
+	p := a.policy
 	switch scope {
 	case ScopeActor:
-		return 5, 15
+		return p.ActorPerHour, p.ActorPerDay
 	case ScopeMerchant:
-		return max(int64(15), ceil(merchant, 400)), max(int64(25), ceil(merchant, 100))
+		return max(p.MerchantPerHour, ceil(active, 400)), max(p.MerchantPerDay, ceil(active, 100))
 	default:
-		return max(int64(50), ceil(all, 400)), max(int64(100), ceil(all, 100))
+		return max(p.DeploymentPerHour, ceil(active, 400)), max(p.DeploymentPerDay, ceil(active, 100))
 	}
 }
 func ceil(n, d int64) int64 { return n/d + min(n%d, 1) }

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -37,7 +38,7 @@ const (
 // ccbillWebhookWorld is alpha with a sandbox CCBill account whose webhooks
 // come from loopback: CCBill signs nothing, so the source address is its
 // authentication.
-func ccbillWebhookWorld(t *testing.T) *authorityWorld {
+func ccbillWebhookWorld(t *testing.T, configure ...func(*world)) *authorityWorld {
 	t.Helper()
 	return newAuthorityWorld(t, func(w *world) {
 		w.cfg.CCBillWebhookIPAllowlist = []string{"127.0.0.1/32"}
@@ -45,6 +46,9 @@ func ccbillWebhookWorld(t *testing.T) *authorityWorld {
 		m.PSPs = openrails.PSPs{"ccbill": openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: openrails.EnvironmentSandbox,
 			Salt: "critical-ccbill-salt"}.PSPConfig()}
 		w.cfg.Merchants["alpha"] = m
+		for _, change := range configure {
+			change(w)
+		}
 	})
 }
 
@@ -100,6 +104,23 @@ func ccbillNotice(t *testing.T, a *authorityWorld, eventType string, fields map[
 	out, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	return response.StatusCode, string(out)
+}
+
+// requireCCBillCard: the customer's payment of the CCBill transaction names
+// the card CCBill reported.
+func requireCCBillCard(t *testing.T, client *openrails.Client, customer billing.CustomerID, transaction, brand, last4 string) {
+	t.Helper()
+	page, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
+	require.NoError(t, err)
+	for _, payment := range page.Items {
+		if payment.TransactionID == transaction {
+			require.NotNil(t, payment.Card, "the CCBill payment names its card")
+			require.Equal(t, brand, *payment.Card.Brand)
+			require.Equal(t, last4, *payment.Card.Last4)
+			return
+		}
+	}
+	t.Fatalf("no payment of CCBill transaction %s", transaction)
 }
 
 func onlySubscription(t *testing.T, client *openrails.Client, customer billing.CustomerID) billing.Subscription {
@@ -181,7 +202,8 @@ func TestCCBillIdentity(t *testing.T) {
 			require.True(t, onlySubscription(t, a.alpha, alice).CurrentPeriodEndsAt.Equal(due))
 			next := due.Add(720 * time.Hour)
 			status, body := ccbillNotice(t, a, "RenewalSuccess", map[string]any{"subscriptionId": ccbillProvider, "transactionId": "0912233445566778801",
-				"billedAmount": "10.00", "billedCurrencyCode": "840", "timestamp": at.Format(time.DateTime), "nextRenewalDate": next.Format(time.DateOnly)})
+				"billedAmount": "10.00", "billedCurrencyCode": "840", "timestamp": at.Format(time.DateTime), "nextRenewalDate": next.Format(time.DateOnly),
+				"cardType": "VISA", "last4": "1111"})
 			require.Equal(t, http.StatusOK, status, body)
 			sub := onlySubscription(t, a.alpha, alice)
 			require.Equal(t, ccbillProvider, *sub.RailSubscriptionID, "the provider's spelling wins")
@@ -189,6 +211,45 @@ func TestCCBillIdentity(t *testing.T) {
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(time.Date(next.Year(), next.Month(), next.Day(), 23, 59, 59, 0, time.UTC)), "paid through %s", sub.CurrentPeriodEndsAt)
 			require.True(t, entitledTo(t, a.alpha, alice, "ccbill:member"))
 			require.EqualValues(t, 10_000_000, ccbillPayments(t, a.world, alice)["0912233445566778801"])
+			requireCCBillCard(t, a.alpha, alice, "0912233445566778801", "visa", "1111")
+		})
+
+		t.Run("an-order-sale-names-the-card-ccbill-billed", func(t *testing.T) {
+			// Selling a FlexForm is a provider write.
+			a := ccbillWebhookWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
+			price := ccbillMemberPrice(t, a.alpha)
+			erin := authtest.NewUser(t, a.auth)
+			token := authtest.SignIn(t, a.auth, erin).AccessToken
+			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", token, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
+				Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}},
+				map[string]string{"Idempotency-Key": "ccbill-card-order"})
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			var order billing.Order
+			require.NoError(t, json.Unmarshal(raw, &order))
+			require.NotNil(t, order.Payment.NextAction, string(raw))
+			page, err := url.Parse(*order.Payment.NextAction.URL)
+			require.NoError(t, err)
+			next := a.clock.Now().UTC().Add(720 * time.Hour)
+			status, body := ccbillNotice(t, a, "NewSaleSuccess", map[string]any{"subscriptionId": "0556677889900112233", "transactionId": "0812233445566778809",
+				"reservationId": page.Query().Get("reservationId"), "flexId": "critical-flex", "username": erin.Username,
+				"billedInitialPrice": "10.00", "billedRecurringPrice": "10.00", "billedCurrencyCode": "840", "nextRenewalDate": next.Format(time.DateOnly),
+				"cardType": "MASTERCARD", "last4": "5100"})
+			require.Equal(t, http.StatusOK, status, body)
+			requireCCBillCard(t, a.alpha, customerOf(erin), "0812233445566778809", "mastercard", "5100")
+		})
+
+		t.Run("an-upgrade-names-the-card-ccbill-billed", func(t *testing.T) {
+			upper, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "ccbill-plus", DisplayName: "CCBill plus", Entitlements: []string{"ccbill:plus"}})
+			require.NoError(t, err)
+			_, err = a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: upper.ID, Key: "ccbill-plus-monthly", PSP: "ccbill", FlexID: "critical-plus-flex",
+				Currency: "USD", UnitAmount: ptr(int64(20_000_000)), BillingIntervalHours: ptr(720)})
+			require.NoError(t, err)
+			next := a.clock.Now().UTC().Add(720 * time.Hour)
+			status, body := ccbillNotice(t, a, "UpgradeSuccess", map[string]any{"originalSubscriptionId": "0223344556677889900", "subscriptionId": "0667788990011223344",
+				"transactionId": "0812233445566778810", "flexId": "critical-plus-flex", "billedInitialPrice": "20.00", "billedRecurringPrice": "20.00", "recurringPeriod": "30",
+				"billedCurrencyCode": "840", "nextRenewalDate": next.Format(time.DateOnly), "cardType": "AMEX", "last4": "0005"})
+			require.Equal(t, http.StatusOK, status, body)
+			requireCCBillCard(t, a.alpha, bob, "0812233445566778810", "amex", "0005")
 		})
 
 		t.Run("a-replayed-legacy-book-names-the-respelled-row", func(t *testing.T) {

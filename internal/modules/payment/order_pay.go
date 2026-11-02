@@ -1122,6 +1122,8 @@ func (h *NMISaleIntentHandler) completeOrder(ctx context.Context, d *db.DB, in g
 			paid.PaymentMethodID = *method
 		case p.Card != nil:
 			paid.Card = *p.Card
+		default:
+			paid.Card = receipt.NMICard()
 		}
 		if _, err := h.Sale.Orders.Paid(ctx, d, p.OrderID, paid); err != nil {
 			return err
