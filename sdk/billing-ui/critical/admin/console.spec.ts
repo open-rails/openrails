@@ -188,6 +188,42 @@ test("console-parked-signup-lands-after-mapping", async ({ page }) => {
   await expect(park.getByRole("link")).toBeVisible()
 })
 
+test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
+  page,
+}) => {
+  const fx = await fixture<{ subscription: string }>(page)
+  await open(page, `/subscriptions/${fx.subscription}`)
+  await expect(
+    page.getByRole("button", { name: "Change payment method" })
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Cancel membership" }).click()
+  const cancel = page.getByRole("dialog")
+  await expect(cancel).toContainText("keeps Membership until")
+  await cancel.getByLabel("End access now instead (no refund is made)").check()
+  await expect(cancel).toContainText("loses Membership now. No refund is made.")
+  await expect(cancel).not.toContainText("keeps")
+  await cancel.getByLabel(/to confirm/).fill("CANCEL")
+  await cancel
+    .getByRole("button", { name: "Cancel membership", exact: true })
+    .click()
+  await expect(page.getByText("Subscription canceled")).toBeVisible()
+  // Ended, it takes neither a plan nor a card.
+  await open(page, `/subscriptions/${fx.subscription}`)
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(
+    "Canceled"
+  )
+  for (const name of ["Change subscription", "Change payment method"])
+    await expect(page.getByRole("button", { name })).toHaveCount(0)
+
+  await open(page, "/ops")
+  await page.getByRole("button", { name: "Clear hold" }).click()
+  const clear = page.getByRole("dialog")
+  await clear.getByLabel("Reason (required)").fill("Reviewed the revokes")
+  await clear.getByRole("button", { name: "Clear hold" }).click()
+  await expect(page.getByText("Hold cleared")).toBeVisible()
+  await expect(page.getByText("Holds on refunds and cancels")).toHaveCount(0)
+})
+
 test("console-failed-pull-and-read-only-access", async ({ page }) => {
   const fx = await fixture<{ nmiImport: string; stripeImport: string }>(page)
   await open(page, "/ops/imports", "reader")

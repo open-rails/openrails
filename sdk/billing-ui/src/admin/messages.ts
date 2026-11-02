@@ -986,6 +986,8 @@ export const billingAdminMessages = {
     "Renewal stops now and can't be restarted from here.",
   "The customer": "The customer",
   "keeps": "keeps",
+  "loses": "loses",
+  "now. No refund is made.": "now. No refund is made.",
   "their access": "their access",
   "until": "until",
   "until the current period ends.": "until the current period ends.",

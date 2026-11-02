@@ -420,6 +420,38 @@ func TestMerchantConsole(t *testing.T) {
 		require.NotNil(t, tw.findings(t, "catalog.price.unmapped")["price_gold"].ResolvedAt)
 	})
 
+	t.Run("OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms", func(t *testing.T) {
+		a, _, sub := purchasedMembership(t)
+		var in []billing.CreateCreditGrantParams
+		for i := range 6 {
+			in = append(in, billing.CreateCreditGrantParams{CustomerID: sub.CustomerID, Currency: "USD", Amount: 100, Source: "critical", SourceID: fmt.Sprintf("console-hold-%d", i)})
+		}
+		grants, err := a.alpha.CreateCreditGrants(t.Context(), in)
+		require.NoError(t, err)
+		for _, grant := range grants {
+			_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), grant.ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+		}
+		require.Error(t, err, "the sixth revoke is held")
+		holds, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})
+		require.NoError(t, err)
+		require.Len(t, holds.Items, 1)
+		// Someone other than the held staff member, holding root's permissions.
+		authtest.GrantRole(t, a.auth, iam.RootGroup(), iam.UserSubject(a.alice.ID), iam.RootPersona().OwnerRole())
+
+		counts := consoleBrowser(t, a, map[string]any{"tokens": map[string]string{"staff": a.aliceToken}, "subscription": sub.ID.String()},
+			nil, "console-cancel-says-what-ends-and-a-cleared-hold-confirms")
+		require.Equal(t, 1, counts["POST /v1/admin/subscriptions/"+sub.ID.String()+"/cancel"])
+		require.Equal(t, 1, counts["POST /v1/merchant/destructive-holds/"+holds.Items[0].ID.String()+"/clear"])
+		ended, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionStatus("canceled"), ended.Status)
+		require.NotNil(t, ended.EndedAt)
+		require.False(t, ended.EndedAt.After(a.clock.Now()), "End access now ended it")
+		cleared, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{IDs: []billing.DestructiveHoldID{holds.Items[0].ID}})
+		require.NoError(t, err)
+		require.NotNil(t, cleared.Items[0].ClearedAt)
+	})
+
 	t.Run("OR-J38-S34/console-failed-pull-and-read-only-access", func(t *testing.T) {
 		iw := bootImportWorld(t, "nmi", "stripe")
 		iw.stripe.Intercept(func(r *http.Request) bool { return r.Header.Get("Authorization") == "Bearer sk_test_import" },

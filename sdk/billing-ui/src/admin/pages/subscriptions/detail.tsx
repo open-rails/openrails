@@ -6,7 +6,7 @@ import { ArrowLeft01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Link, useNavigate, useParams } from "#orck/admin/router"
 
-import { useForm } from "@tanstack/react-form"
+import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Fact } from "#orck/admin/components/fact-card"
@@ -107,6 +107,13 @@ export function SubscriptionDetailPage() {
     sub.status === "past_due" ||
     sub.status === "awaiting_method" ||
     sub.status === "unverified"
+  // What the server changes: the plan of an active or past-due subscription;
+  // the card of one still collecting, or of a renewal OpenRails can resume.
+  const changeable = sub.status === "active" || sub.status === "past_due"
+  const cardChangeable =
+    changeable ||
+    sub.status === "awaiting_method" ||
+    (sub.resumable && sub.collection_policy === "engine")
   const customerLabel = customer ? customerName(customer) : undefined
   const planName = sub.product?.display_name
 
@@ -135,7 +142,7 @@ export function SubscriptionDetailPage() {
           {canUpdate && sub.resumable && (
             <ResumeButton id={sub.id} customerId={sub.customer_id} />
           )}
-          {canUpdate && (
+          {canUpdate && changeable && (
             <ChangeSubscriptionDialog
               subscriptionId={sub.id}
               customerId={sub.customer_id}
@@ -149,7 +156,7 @@ export function SubscriptionDetailPage() {
               status={sub.status}
             />
           )}
-          {canUpdate && (
+          {canUpdate && cardChangeable && (
             <ChangePaymentMethodDialog
               subscriptionId={sub.id}
               customerId={sub.customer_id}
@@ -363,6 +370,12 @@ function CancelDialog({
   const form = useForm({
     defaultValues: { reason: "", revokeAccess: false },
   })
+  const revokeAccess = useStore(
+    form.store,
+    (state) => state.values.revokeAccess
+  )
+  const who = customer ?? adminText("The customer")
+  const access = plan ?? adminText("their access")
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
@@ -383,12 +396,14 @@ function CancelDialog({
         title={adminText("Cancel this membership?")}
         description={`${adminText(
           "Renewal stops now and can't be restarted from here."
-        )} ${customer ?? adminText("The customer")} ${adminText("keeps")} ${
-          plan ?? adminText("their access")
-        } ${
-          periodEnd
-            ? `${adminText("until")} ${formatDay(periodEnd)}.`
-            : adminText("until the current period ends.")
+        )} ${
+          revokeAccess
+            ? `${who} ${adminText("loses")} ${access} ${adminText("now. No refund is made.")}`
+            : `${who} ${adminText("keeps")} ${access} ${
+                periodEnd
+                  ? `${adminText("until")} ${formatDay(periodEnd)}.`
+                  : adminText("until the current period ends.")
+              }`
         }`}
         confirmationWord="CANCEL"
         actionLabel={adminText("Cancel membership")}
