@@ -114,6 +114,7 @@ export function createMutations(
     refundPayment,
     createPriceMigration,
     resolveFinding,
+    clearDestructiveHold,
     resumeSubscription,
     revokeProductAccess,
     updateCustomer,
@@ -215,6 +216,15 @@ export function createMutations(
           outcome: "approve" | "ignore"
           notes: string
         }) => resolveFinding(id, outcome, notes),
+        onSuccess: invalidateTreeOnSuccess(queryClient, opsKey),
+      })
+    },
+    clearDestructiveHold: (queryClient: QueryClient) => {
+      const opsKey = merchantQueryKeys().ops()
+      return mutationOptions({
+        mutationKey: [...opsKey, "destructive-holds", "clear"],
+        mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+          clearDestructiveHold(id, reason),
         onSuccess: invalidateTreeOnSuccess(queryClient, opsKey),
       })
     },

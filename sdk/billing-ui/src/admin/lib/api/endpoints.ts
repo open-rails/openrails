@@ -13,6 +13,7 @@ import type {
   CreatePriceParams,
   Customer,
   CustomerSettingsResult,
+  DestructiveHold,
   Finding,
   FindingResolution,
   ListPage,
@@ -586,6 +587,21 @@ export function createEndpoints(client: AdminClient) {
       body: { outcome, notes },
     })
 
+  // listDestructiveHolds reads the holds the destructive-action limit opened.
+  const listDestructiveHolds = (signal?: AbortSignal) =>
+    api<ListPage<DestructiveHold>>("/merchant/destructive-holds", {
+      query: { limit: 100 },
+      signal,
+    })
+
+  // clearDestructiveHold lifts a hold. The server requires a different person
+  // from the one the hold stopped, holding the unlock permission.
+  const clearDestructiveHold = (id: string, reason: string) =>
+    api<DestructiveHold>(
+      `/merchant/destructive-holds/${encodeURIComponent(id)}/clear`,
+      { method: "POST", body: { reason } }
+    )
+
   // --- Settings ---
 
   const getMerchantConfiguration = (signal?: AbortSignal) =>
@@ -729,6 +745,8 @@ export function createEndpoints(client: AdminClient) {
     listFindings,
     getFinding,
     resolveFinding,
+    listDestructiveHolds,
+    clearDestructiveHold,
     getMerchantConfiguration,
     updateMerchantConfiguration,
     listPSPs,

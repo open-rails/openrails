@@ -89,6 +89,7 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
     listCustomerProductAccess,
     listCustomers,
     listFindings,
+    listDestructiveHolds,
     listPaymentAttempts,
     listPSPs,
     listRails,
@@ -438,6 +439,13 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
         queryFn: ({ signal }) => listFindings({}, 100, signal),
         enabled,
         meta: { errorAction: "Load findings" },
+      }),
+    destructiveHolds: (enabled = true) =>
+      queryOptions({
+        queryKey: [...queryKeys.ops(), "destructive-holds"],
+        queryFn: ({ signal }) => listDestructiveHolds(signal),
+        enabled,
+        meta: { errorAction: "Load holds" },
       }),
     findingSummary: () =>
       queryOptions({

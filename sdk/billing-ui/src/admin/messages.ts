@@ -1019,4 +1019,27 @@ export const billingAdminMessages = {
   "More customers match. Choose one, or search for more of the name or email.":
     "More customers match. Choose one, or search for more of the name or email.",
   "customers match. Choose one.": "customers match. Choose one.",
+  "Holds on refunds and cancels": "Holds on refunds and cancels",
+  "A staff member reached the limit of": "A staff member reached the limit of",
+  "Staff reached the limit of": "Staff reached the limit of",
+  "refunds, revokes or cancels in an hour. These are paused until someone clears the hold.":
+    "refunds, revokes or cancels in an hour. These are paused until someone clears the hold.",
+  "refunds, revokes or cancels in a day. These are paused until someone clears the hold.":
+    "refunds, revokes or cancels in a day. These are paused until someone clears the hold.",
+  "Held since": "Held since",
+  "Clear hold": "Clear hold",
+  "Clear this hold?": "Clear this hold?",
+  "Refunds, revokes and cancels start working again for the people it held. Someone other than the person it stopped must clear it.":
+    "Refunds, revokes and cancels start working again for the people it held. Someone other than the person it stopped must clear it.",
+  "Reason (required)": "Reason (required)",
+  "Hold cleared": "Hold cleared",
+  "Clearing…": "Clearing…",
+  "A different person must clear this hold.":
+    "A different person must clear this hold.",
+  "You don't have permission to clear holds.":
+    "You don't have permission to clear holds.",
+  "Billing couldn't check your permission to clear holds. Try again in a moment.":
+    "Billing couldn't check your permission to clear holds. Try again in a moment.",
+  "This hold was already cleared or no longer exists.":
+    "This hold was already cleared or no longer exists.",
 } as const
