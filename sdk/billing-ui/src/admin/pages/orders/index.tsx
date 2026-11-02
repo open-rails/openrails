@@ -82,7 +82,7 @@ export function OrdersPage() {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h1 className="text-xl font-semibold">
+        <h1 className="text-2xl font-semibold tracking-tight">
           <AdminMessage id={"Orders"} />
         </h1>
         <p className="text-sm text-muted-foreground">

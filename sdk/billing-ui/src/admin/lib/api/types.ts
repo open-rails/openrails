@@ -44,7 +44,11 @@ export interface RawSubscription {
   cancel_type: string | null
   cancel_feedback: string | null
   canceled_at: string | null
+  // The server's resume gate (cancel_mode.go Resumable): false for a
+  // merchant's cancel, which is final.
+  resumable?: boolean
   price?: RawPrice
+  product?: import("#orck/client/generated/wire").ProductSummary
   created_at: string
   updated_at: string
 }

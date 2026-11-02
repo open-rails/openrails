@@ -113,9 +113,9 @@ export function CustomerDetailPage() {
           <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
         </Button>
         <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold">
+          <h1 className="truncate text-2xl font-semibold tracking-tight">
             {customer.contact?.name || customer.contact?.email || "Customer"}
-          </h2>
+          </h1>
           <p className="truncate text-xs text-muted-foreground">
             {customer.id}
             <AdminMessage id={" · since "} />

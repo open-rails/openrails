@@ -981,4 +981,20 @@ export const billingAdminMessages = {
   "Superseded": "Superseded",
   "Already resolved": "Already resolved",
   "Awaiting method": "Awaiting method",
+  "Cancel this membership?": "Cancel this membership?",
+  "Renewal stops now and can't be restarted from here.":
+    "Renewal stops now and can't be restarted from here.",
+  "The customer": "The customer",
+  "keeps": "keeps",
+  "their access": "their access",
+  "until": "until",
+  "until the current period ends.": "until the current period ends.",
+  "Cancel membership": "Cancel membership",
+  "End access now instead (no refund is made)":
+    "End access now instead (no refund is made)",
+  "By the customer": "By the customer",
+  "By staff": "By staff",
+  "Renewal payment failed": "Renewal payment failed",
+  "After a chargeback": "After a chargeback",
+  "Replaced by an upgrade": "Replaced by an upgrade",
 } as const

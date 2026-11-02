@@ -41,6 +41,7 @@ import { REFUNDABLE_RAILS } from "#orck/admin/lib/api/endpoints"
 import type { Payment } from "#orck/client/generated/wire"
 import { DIALOG_FORM } from "#orck/admin/lib/dialog-width"
 import {
+  customerName,
   formatCard,
   formatNativeAmount,
   formatDate,
@@ -61,6 +62,9 @@ export function PaymentDetailPage() {
   const navigate = useNavigate()
   const { data: payment, isPending: loading } = useQuery(
     adminQueries.payment(id)
+  )
+  const { data: customer } = useQuery(
+    adminQueries.customer(payment?.customer_id ?? "")
   )
 
   if (loading)
@@ -90,7 +94,7 @@ export function PaymentDetailPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
           size="icon"
@@ -99,17 +103,18 @@ export function PaymentDetailPage() {
         >
           <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
         </Button>
-        <div>
-          <h2 className="flex items-center gap-2 text-sm">
-            {payment.id} <StatusBadge status={payment.status} />
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            {payment.kind} · {payment.rail ?? payment.channel}
+        <div className="min-w-0">
+          <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">
+            {customer ? customerName(customer) : adminText("Payment")}
+            <StatusBadge status={payment.status} />
+          </h1>
+          <p className="text-xs break-all text-muted-foreground">
+            {payment.id} · {payment.kind} · {payment.rail ?? payment.channel}
             <AdminMessage id={" · txn"} /> {payment.transaction_id || "—"}
           </p>
         </div>
         {canUpdate && (
-          <div className="ml-auto">
+          <div className="sm:ml-auto">
             <RefundDialog
               payment={payment}
               disabled={!refundable}
@@ -130,7 +135,9 @@ export function PaymentDetailPage() {
         </Fact>
         <Fact label={adminText("Customer")}>
           <Link className={link} to={`/customers/${payment.customer_id}`}>
-            {shortId(payment.customer_id, 16)}
+            {customer
+              ? customerName(customer)
+              : shortId(payment.customer_id, 16)}
           </Link>
         </Fact>
         <Fact label={adminText("Subscription")}>
@@ -150,7 +157,9 @@ export function PaymentDetailPage() {
             <Link className={link} to={`/orders/${payment.order_id}`}>
               {shortId(payment.order_id, 16)}
             </Link>
-          ) : "—"}
+          ) : (
+            "—"
+          )}
         </Fact>
         <Fact label={adminText("Card")}>{formatCard(payment.card)}</Fact>
         <Fact label={adminText("Channel")}>
