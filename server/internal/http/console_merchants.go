@@ -126,10 +126,11 @@ func (s *Server) consoleMerchants(w http.ResponseWriter, r *http.Request) {
 // Only a permission the verified credential currently holds opens a staff
 // directory. Membership is a candidate list, never an authority bypass for a
 // scoped token or a key. Root grants follow the same credential ceilings.
+// Clearing destructive holds alone opens none.
 func (s *Server) consoleStaff(ctx context.Context, checker auth.PermissionChecker, scope auth.Scope, persona string) (bool, error) {
 	permissions := []string{}
 	for _, permission := range billing.Permissions() {
-		if strings.HasPrefix(string(permission), persona+":") {
+		if permission != billing.RootAdminRateLimitsUnlock && strings.HasPrefix(string(permission), persona+":") {
 			permissions = append(permissions, string(permission))
 		}
 	}
