@@ -463,6 +463,7 @@ export const billingAdminMessages = {
   "Loading order…": "Loading order…",
   "Loading products…": "Loading products…",
   "Loading transactions…": "Loading transactions…",
+  "Loading plans…": "Loading plans…",
   "Loading…": "Loading…",
   "Logo URL": "Logo URL",
   "Manual remittance": "Manual remittance",

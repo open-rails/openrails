@@ -149,14 +149,10 @@ export function SubscriptionDetailPage() {
             <ChangeSubscriptionDialog
               subscriptionId={sub.id}
               customerId={sub.customer_id}
-              productId={sub.product_id}
-              priceId={sub.price_id}
+              product={sub.product}
+              price={sub.price}
               quantity={sub.quantity}
-              currency={sub.price?.currency}
-              collectionPolicy={sub.collection_policy}
               scheduledChange={sub.scheduled_change}
-              rail={sub.rail}
-              status={sub.status}
             />
           )}
           {canUpdate && cardChangeable && (

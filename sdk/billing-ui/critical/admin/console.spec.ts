@@ -209,6 +209,13 @@ test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
   await expect(
     page.getByRole("button", { name: "Change payment method" })
   ).toBeVisible()
+  // No other plan qualifies: Change subscription says so instead of opening.
+  const changePlan = page.getByRole("button", { name: "Change subscription" })
+  await expect(changePlan).toHaveAttribute(
+    "title",
+    "No eligible recurring plans share this tier group and currency."
+  )
+  await expect(changePlan).toBeDisabled()
   await page.getByRole("button", { name: "Cancel membership" }).click()
   const cancel = page.getByRole("dialog")
   await expect(cancel).toContainText("keeps Membership until")

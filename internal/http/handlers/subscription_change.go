@@ -189,7 +189,7 @@ func SubscriptionChangeOptions(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeInternalError, "purchase service unavailable")
 		return
 	}
-	options, err := r.State.PurchaseService.SubscriptionChangeOptions(r.Request.Context(), id.UUID(), user)
+	options, err := r.State.PurchaseService.SubscriptionChangeOptions(r.Request.Context(), id.UUID(), user, false)
 	if err != nil {
 		writeChangeTierError(r, err)
 		return

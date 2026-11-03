@@ -94,6 +94,7 @@
       "func (c *Client) ListProvisioningTokens(ctx context.Context, params billing.ProvisioningTokenListParams, options ...RequestOption) (*billing.ListPage[billing.ProvisioningToken], error)",
       "func (c *Client) ListRenewals(ctx context.Context, filter billing.RenewalListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Renewal], error)",
       "func (c *Client) ListRunningCharges(ctx context.Context, params billing.RunningChargeListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.RunningCharge], error)",
+      "func (c *Client) ListSubscriptionChangeOptions(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.ListPage[billing.SubscriptionChangeOption], error)",
       "func (c *Client) ListSubscriptions(ctx context.Context, params billing.SubscriptionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Subscription], error)",
       "func (c *Client) ListUsageEvents(ctx context.Context, params billing.UsageEventListParams, options ...RequestOption) (*billing.ListPage[billing.UsageEvent], error)",
       "func (c *Client) MarkOrderUncollectible(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error)",

@@ -442,6 +442,7 @@ func TestMerchantConsole(t *testing.T) {
 		missing := map[string]string{"customer": billing.CustomerID(uuid.New()).String(), "subscription": billing.SubscriptionID(uuid.New()).String(), "payment": billing.PaymentID(uuid.New()).String()}
 		counts := consoleBrowser(t, a, map[string]any{"tokens": map[string]string{"staff": a.aliceToken}, "subscription": sub.ID.String(), "missing": missing},
 			nil, "console-cancel-says-what-ends-and-a-cleared-hold-confirms")
+		require.NotZero(t, counts["GET /v1/admin/subscriptions/"+sub.ID.String()+"/change/options"])
 		require.Equal(t, 1, counts["POST /v1/admin/subscriptions/"+sub.ID.String()+"/cancel"])
 		require.Equal(t, 1, counts["POST /v1/merchant/destructive-holds/"+holds.Items[0].ID.String()+"/clear"])
 		ended, err := a.alpha.GetSubscription(t.Context(), sub.ID)

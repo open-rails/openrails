@@ -206,6 +206,12 @@
       "feature": ""
     },
     {
+      "method": "GET",
+      "path": "/v1/admin/subscriptions/{id}/change/options",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
       "method": "POST",
       "path": "/v1/admin/subscriptions/{id}/change/preview",
       "auth": "merchant",

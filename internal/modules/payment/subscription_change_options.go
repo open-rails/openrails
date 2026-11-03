@@ -19,8 +19,9 @@ import (
 // change to now: the other products of its tier group, each with the change's
 // preview. A target the change would refuse is left out, so a page never
 // re-derives the tier rules; a subscription that cannot change at all answers
-// why.
-func (s *PurchaseService) SubscriptionChangeOptions(ctx context.Context, subscriptionID uuid.UUID, user *UserIdentity) ([]billing.SubscriptionChangeOption, error) {
+// why. Staff pass the subscription's customer as user, and every preview is
+// then a staff change: one that waits for the next renewal.
+func (s *PurchaseService) SubscriptionChangeOptions(ctx context.Context, subscriptionID uuid.UUID, user *UserIdentity, staff bool) ([]billing.SubscriptionChangeOption, error) {
 	if s.SubscriptionService == nil || s.ProductService == nil || s.PriceService == nil {
 		return nil, errors.New("subscription change services unavailable")
 	}
@@ -59,7 +60,14 @@ func (s *PurchaseService) SubscriptionChangeOptions(ctx context.Context, subscri
 	out := []billing.SubscriptionChangeOption{}
 	for _, product := range products.Items {
 		for _, price := range prices[product.ID] {
-			preview, err := s.PreviewSubscriptionChange(ctx, &SubscriptionChangeRequest{SubscriptionID: sub.ID, PriceID: price.PublicID.String()}, user)
+			req := &SubscriptionChangeRequest{SubscriptionID: sub.ID, PriceID: price.PublicID.String(), Staff: staff}
+			// A seat count the target can't take previews its fewest seats:
+			// the change can still pick a count it allows.
+			if bounds := price.Quantity; bounds != nil && sub.Quantity != nil && !bounds.Allows(*sub.Quantity) {
+				fewest := bounds.Min
+				req.Quantity = &fewest
+			}
+			preview, err := s.PreviewSubscriptionChange(ctx, req, user)
 			if isChangeRefusal(err) {
 				continue
 			}

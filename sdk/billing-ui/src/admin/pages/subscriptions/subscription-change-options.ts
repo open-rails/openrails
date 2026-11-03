@@ -1,8 +1,8 @@
-import type { Rail, SubscriptionStatus } from "#orck/admin/lib/api/types"
 import type {
   Price,
-  Product,
+  ProductSummary,
   ScheduledChange,
+  SubscriptionChangeOption as ListedChangeOption,
 } from "#orck/client/generated/wire"
 import { formatNativeAmount } from "#orck/admin/lib/format"
 import { priceIntervalLabel } from "#orck/admin/pages/catalog/price-format"
@@ -10,7 +10,7 @@ import { priceIntervalLabel } from "#orck/admin/pages/catalog/price-format"
 export interface SubscriptionChangeOption {
   direction: "current" | "upgrade" | "downgrade"
   price: Price
-  product: Product
+  product: ProductSummary
 }
 
 export function subscriptionChangeOptionLabel(
@@ -40,103 +40,32 @@ export function initialSeats(
   return bounds.min
 }
 
-export function adminSubscriptionChangeBlockReason({
-  rail,
-  status,
-  collectionPolicy,
-  scheduledChange,
-}: {
-  rail: Rail
-  status: SubscriptionStatus
-  collectionPolicy?: string
-  scheduledChange?: Pick<ScheduledChange, "source"> | null
-}): string | undefined {
-  if (status !== "active" && status !== "past_due") {
-    return "Only active or past-due subscriptions can change"
-  }
-  // OpenRails changes back only the scheduled change it bills itself.
-  if (scheduledChange && collectionPolicy !== "engine") {
-    return "Its provider already bills a scheduled change"
-  }
-  if (rail === "ccbill") return "CCBill changes require customer self-service"
-  if (rail === "solana") {
-    return "Solana changes require the customer's wallet signature"
-  }
-  return undefined
-}
-
 // The changes the console offers: the current price, for its seats or to
-// change back from a scheduled change, then, unless a price migration is
-// pending, live recurring prices of the tier group in the same currency.
+// change back from a scheduled change, then the prices OpenRails lists the
+// subscription can change to, in its order.
 export function subscriptionChangeOptions({
-  currentProduct,
-  currentPrice,
-  currentCurrency,
-  products,
-  prices,
+  product,
+  price,
   scheduledChange,
+  targets,
 }: {
-  currentProduct?: Product
-  currentPrice?: Price
-  currentCurrency?: string
-  products: Product[]
-  prices: Price[]
+  product?: ProductSummary
+  price?: Price
   scheduledChange?: Pick<ScheduledChange, "source"> | null
+  targets: ListedChangeOption[]
 }): SubscriptionChangeOption[] {
   const current: SubscriptionChangeOption[] =
-    currentProduct && currentPrice && (currentPrice.quantity || scheduledChange)
-      ? [{ direction: "current", price: currentPrice, product: currentProduct }]
+    product && price && (price.quantity || scheduledChange)
+      ? [{ direction: "current", price, product }]
       : []
-  const tierGroup = currentProduct?.tier_group?.trim()
-  const currency = currentCurrency?.trim().toLowerCase()
-  if (
-    !currentProduct ||
-    !tierGroup ||
-    !currency ||
-    scheduledChange?.source === "migration"
-  ) {
-    return current
-  }
-
-  const productsByID = new Map(
-    products
-      .filter(
-        (product) =>
-          !product.archived &&
-          product.id !== currentProduct.id &&
-          product.tier_group?.trim() === tierGroup
-      )
-      .map((product) => [product.id, product])
-  )
-
   return current.concat(
-    prices
-      .flatMap((price): SubscriptionChangeOption[] => {
-        const product = productsByID.get(price.product_id)
-        if (
-          !product ||
-          price.archived ||
-          !price.billing_interval_hours ||
-          price.currency.trim().toLowerCase() !== currency
-        ) {
-          return []
-        }
-        return [
-          {
-            direction:
-              product.tier_rank < currentProduct.tier_rank
-                ? "downgrade"
-                : "upgrade",
-            price,
-            product,
-          },
-        ]
-      })
-      .sort(
-        (left, right) =>
-          left.product.tier_rank - right.product.tier_rank ||
-          left.product.display_name.localeCompare(right.product.display_name) ||
-          left.price.id.localeCompare(right.price.id)
-      )
+    targets.map((target) => ({
+      direction:
+        product && target.product.tier_rank < product.tier_rank
+          ? "downgrade"
+          : "upgrade",
+      price: target.price,
+      product: target.product,
+    }))
   )
 }

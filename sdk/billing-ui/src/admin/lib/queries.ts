@@ -99,6 +99,7 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
     listProducts,
     listRenewals,
     listPriceMigrations,
+    listSubscriptionChangeOptions,
     listSubscriptions,
     listUsageMeters,
     getAdminAccess,
@@ -235,6 +236,16 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
         queryKey: queryKeys.subscription(id),
         queryFn: ({ signal }) => getSubscription(id, signal),
         enabled: Boolean(id),
+      }),
+    // The prices staff can change the subscription to; a refusal says why
+    // it cannot change.
+    subscriptionChangeOptions: (id: string) =>
+      queryOptions({
+        queryKey: [...queryKeys.subscription(id), "change-options"],
+        queryFn: ({ signal }) => listSubscriptionChangeOptions(id, signal),
+        // A change invalidates the subscription; a detail view re-read
+        // within a minute reuses the previews.
+        staleTime: 60_000,
       }),
     // Every saved method: pickers must offer all of them.
     customerPaymentMethods: (customerId?: string) =>

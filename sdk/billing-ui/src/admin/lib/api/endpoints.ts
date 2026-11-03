@@ -30,6 +30,7 @@ import type {
   RatePrice,
   Renewal,
   RefundPaymentParams,
+  SubscriptionChangeOption,
   UpdateAlertWebhookParams,
   UpdateCustomerParams,
   UpdateMerchantConfigurationParams,
@@ -300,6 +301,12 @@ export function createEndpoints(client: AdminClient) {
       method: "PUT",
       body: { payment_method_id: paymentMethodId },
     })
+
+  const listSubscriptionChangeOptions = (id: string, signal?: AbortSignal) =>
+    api<ListPage<SubscriptionChangeOption>>(
+      `/admin/subscriptions/${id}/change/options`,
+      { signal }
+    )
 
   const previewSubscriptionChange = (
     id: string,
@@ -714,6 +721,7 @@ export function createEndpoints(client: AdminClient) {
     cancelSubscription,
     resumeSubscription,
     changeSubscriptionPaymentMethod,
+    listSubscriptionChangeOptions,
     previewSubscriptionChange,
     changeSubscription,
     listPayments,

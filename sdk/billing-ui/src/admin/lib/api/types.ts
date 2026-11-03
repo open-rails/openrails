@@ -47,26 +47,10 @@ export interface RawSubscription {
   // The server's resume gate (cancel_mode.go Resumable): false for a
   // merchant's cancel, which is final.
   resumable?: boolean
-  price?: RawPrice
+  price?: import("#orck/client/generated/wire").Price
   product?: import("#orck/client/generated/wire").ProductSummary
   created_at: string
   updated_at: string
-}
-
-// RawPrice is the catalog Price embedded on subscription and payment
-// responses. Money is unit_amount, an exact decimal string.
-export interface RawPrice {
-  id: string
-  product_id?: string
-  unit_amount?: string
-  currency?: string
-  archived?: boolean
-  // Key (#774): the durable, movable-pointer handle for this price's
-  // version chain — see Price.key.
-  key?: string
-  access_duration_hours?: number
-  billing_interval_hours?: number
-  [k: string]: unknown
 }
 
 // A customer's keys are the keys of the products they hold; quantity is the

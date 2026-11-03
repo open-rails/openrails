@@ -36,6 +36,12 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		require.EqualValues(t, 0, preview.AmountDueNow)
 		require.EqualValues(t, 20_000_000, preview.NextChargeAmount)
 		require.Equal(t, sub.CurrentPeriodEndsAt, preview.NextChargeDate)
+		// Staff are offered the plan with the staff change's own preview.
+		options, err := a.alpha.ListSubscriptionChangeOptions(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Len(t, options.Items, 1)
+		require.Equal(t, price.ID, options.Items[0].Price.ID)
+		require.Equal(t, *preview, options.Items[0].Preview)
 		changed, err := a.alpha.ChangeSubscription(t.Context(), sub.ID, params)
 		require.NoError(t, err)
 		require.Equal(t, preview.Effective, changed.Effective)
