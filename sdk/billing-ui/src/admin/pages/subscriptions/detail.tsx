@@ -554,7 +554,7 @@ function ChangePaymentMethodDialog({
           <DialogDescription>
             <AdminMessage
               id={
-                "Points future renewals of this subscription at another of the customer&apos;s stored cards (same rail), or back at their default card for its currency."
+                "Points future renewals of this subscription at another of the customer's stored cards (same rail), or back at their default card for its currency."
               }
             />
           </DialogDescription>
@@ -594,7 +594,7 @@ function ChangePaymentMethodDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={FOLLOW_DEFAULT}>
-                      <AdminMessage id={"The customer&apos;s default card"} />
+                      <AdminMessage id={"The customer's default card"} />
                     </SelectItem>
                     {(pms ?? [])
                       .filter((pm) => pm.rail === rail)

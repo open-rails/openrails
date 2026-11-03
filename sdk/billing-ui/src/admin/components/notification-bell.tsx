@@ -98,7 +98,7 @@ export function NotificationBell() {
                 className="size-5 text-muted-foreground"
               />
               <p className="text-sm text-muted-foreground">
-                <AdminMessage id={"You&apos;re all caught up."} />
+                <AdminMessage id={"You're all caught up."} />
               </p>
             </div>
           ) : (

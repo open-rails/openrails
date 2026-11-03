@@ -490,8 +490,8 @@ export const billingAdminMessages = {
   "Must be at least ": "Must be at least ",
   "NMI history (before OpenRails recorded attempts)":
     "NMI history (before OpenRails recorded attempts)",
-  "NMI&apos;s own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI&apos;s own charges, each the first try of its period. Rates count authorizations, not buyers.":
-    "NMI&apos;s own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI&apos;s own charges, each the first try of its period. Rates count authorizations, not buyers.",
+  "NMI's own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI's own charges, each the first try of its period. Rates count authorizations, not buyers.":
+    "NMI's own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI's own charges, each the first try of its period. Rates count authorizations, not buyers.",
   "NMI-owned": "NMI-owned",
   "NMI-scheduled rebills": "NMI-scheduled rebills",
   Name: "Name",
@@ -522,8 +522,8 @@ export const billingAdminMessages = {
   "No NMI history yet: it is read daily.":
     "No NMI history yet: it is read daily.",
   "No PSPs configured.": "No PSPs configured.",
-  "No actions are available for your permissions and this order&apos;s state.":
-    "No actions are available for your permissions and this order&apos;s state.",
+  "No actions are available for your permissions and this order's state.":
+    "No actions are available for your permissions and this order's state.",
   "No active products are available.": "No active products are available.",
   "No active subscriptions.": "No active subscriptions.",
   "No allowance": "No allowance",
@@ -667,8 +667,8 @@ export const billingAdminMessages = {
   "Pick a stored payment method": "Pick a stored payment method",
   "Pinned to an archived (prior) version":
     "Pinned to an archived (prior) version",
-  "Points future renewals of this subscription at another of the customer&apos;s stored cards (same rail), or back at their default card for its currency.":
-    "Points future renewals of this subscription at another of the customer&apos;s stored cards (same rail), or back at their default card for its currency.",
+  "Points future renewals of this subscription at another of the customer's stored cards (same rail), or back at their default card for its currency.":
+    "Points future renewals of this subscription at another of the customer's stored cards (same rail), or back at their default card for its currency.",
   Preview: "Preview",
   "Previous page": "Previous page",
   "Previous period": "Previous period",
@@ -812,7 +812,7 @@ export const billingAdminMessages = {
     "The accounts this merchant takes payments through, one or more per rail.",
   "The customer loses its entitlements now. The grant stays on record with your reason.":
     "The customer loses its entitlements now. The grant stays on record with your reason.",
-  "The customer&apos;s default card": "The customer&apos;s default card",
+  "The customer's default card": "The customer's default card",
   "The daily report covers at most ": "The daily report covers at most ",
   "The keys of the products this customer holds now.":
     "The keys of the products this customer holds now.",
@@ -823,8 +823,8 @@ export const billingAdminMessages = {
   "Their reference": "Their reference",
   "There were no providers to consider.":
     "There were no providers to consider.",
-  "These are the customer&apos;s invoice profile when the order was billed. Editing the profile affects later orders.":
-    "These are the customer&apos;s invoice profile when the order was billed. Editing the profile affects later orders.",
+  "These are the customer's invoice profile when the order was billed. Editing the profile affects later orders.":
+    "These are the customer's invoice profile when the order was billed. Editing the profile affects later orders.",
   "These terms cannot be changed later. To charge a different amount, create another price and deactivate this one.":
     "These terms cannot be changed later. To charge a different amount, create another price and deactivate this one.",
   "This billing page does not exist.": "This billing page does not exist.",
@@ -885,7 +885,7 @@ export const billingAdminMessages = {
   "Why it was granted": "Why it was granted",
   "Widget menu": "Widget menu",
   "Widget title": "Widget title",
-  "You&apos;re all caught up.": "You&apos;re all caught up.",
+  "You're all caught up.": "You're all caught up.",
   "Your directory holds no contact for this customer.":
     "Your directory holds no contact for this customer.",
   "Your role does not have permission to read the merchant catalog.":

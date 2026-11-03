@@ -361,7 +361,7 @@ function UsageFacts({ usage }: { usage: OrderUsage }) {
         <p className="text-muted-foreground @min-[40rem]/page:col-span-2">
           <AdminMessage
             id={
-              "These are the customer&apos;s invoice profile when the order was billed. Editing the profile affects later orders."
+              "These are the customer's invoice profile when the order was billed. Editing the profile affects later orders."
             }
           />
         </p>
@@ -447,7 +447,7 @@ function UsageActions({ order }: { order: Order }) {
         <p className="text-muted-foreground">
           <AdminMessage
             id={
-              "No actions are available for your permissions and this order&apos;s state."
+              "No actions are available for your permissions and this order's state."
             }
           />
         </p>
