@@ -113,3 +113,37 @@ func TestNMISandboxProbeVoidOutlivesThePostureDeadline(t *testing.T) {
 		t.Fatal("the probe authorization was never voided")
 	}
 }
+
+func TestNMIGatewayTestModeAnswersClassify(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   providerposture.Verdict
+	}{
+		{"documented-answer", http.StatusOK, "<nm_response><test_mode_enabled>true</test_mode_enabled></nm_response>", providerposture.Simulated},
+		{"gateway-error-is-a-failed-read", http.StatusOK, "<nm_response><error_response>Temporary error</error_response></nm_response>", providerposture.Unknown},
+		{"rejected-credentials", http.StatusOK, "<nm_response><error_response>Authentication Failed</error_response></nm_response>", providerposture.Unknown},
+		{"extra-element", http.StatusOK, "<nm_response><test_mode_enabled>true</test_mode_enabled><note>x</note></nm_response>", providerposture.Unsupported},
+		{"unknown-value", http.StatusOK, "<nm_response><test_mode_enabled>maybe</test_mode_enabled></nm_response>", providerposture.Unsupported},
+		{"provider-unavailable", http.StatusServiceUnavailable, "", providerposture.Unknown},
+		{"unreadable", http.StatusOK, "<nm_response><test_mode", providerposture.Unknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(gateway.Close)
+			client := &nmi.NMIClient{SecurityKey: "test-fixture", Environment: config.EnvironmentTest, QueryURL: gateway.URL}
+			verdict, err := client.CheckPosture(t.Context())
+			require.Equal(t, tc.want, verdict, err)
+			if tc.want == providerposture.Unsupported {
+				require.ErrorContains(t, err, "unexpected test_mode_status answer")
+			}
+			if tc.name == "rejected-credentials" {
+				require.ErrorIs(t, err, nmi.ErrCredentialsRejected)
+			}
+		})
+	}
+}

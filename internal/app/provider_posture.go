@@ -220,6 +220,8 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 		log.WithContext(ctx).WithFields(fields).Info("provider posture: credentials verified; PSP armed")
 	case status.Verdict == providerposture.Unknown:
 		log.WithContext(ctx).WithError(status.Error()).WithFields(fields).Warn("provider posture: provider did not answer; PSP disarmed until it does, retrying in the background")
+	case status.Verdict == providerposture.Unsupported:
+		log.WithContext(ctx).WithError(status.Error()).WithFields(fields).Error("provider posture: provider's environment answer is not one OpenRails understands; PSP disarmed until its credentials are reloaded")
 	default:
 		log.WithContext(ctx).WithError(status.Error()).WithFields(fields).Error("provider posture: credentials not verified; PSP disarmed")
 	}
