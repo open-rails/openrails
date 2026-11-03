@@ -40,6 +40,39 @@ var ErrV5Missing = errors.New("nmi: resource missing")
 // ErrV5Refused marks any other v5 4xx: NMI answered and refused the request.
 var ErrV5Refused = errors.New("nmi v5 refused the request")
 
+// V5Error is a v5 4xx refusal with NMI's error envelope. Its Message is NMI's
+// own text, for server-side logs only; Error never carries it.
+type V5Error struct {
+	Status  int    `json:"-"`
+	Code    string `json:"error_code"`
+	Message string `json:"message"`
+	cause   error
+}
+
+func (e *V5Error) Error() string {
+	return fmt.Sprintf("%s: status %d %s", ErrV5Refused, e.Status, e.Code)
+}
+
+func (e *V5Error) Unwrap() []error {
+	if e.cause == nil {
+		return []error{ErrV5Refused}
+	}
+	return []error{ErrV5Refused, e.cause}
+}
+
+// RequestRejected reports a refusal of the request itself, not of the card:
+// a submission NMI found invalid (observed as E_INVALID_SUBMISSION), rejected
+// credentials, or a rate limit.
+func (e *V5Error) RequestRejected() bool {
+	return e.Code == "E_INVALID_SUBMISSION" || errors.Is(e.cause, ErrCredentialsRejected) || errors.Is(e.cause, transient.ErrUnavailable)
+}
+
+// CardRefused reports a refusal of the card: NMI answers a card it will not
+// accept with a 400 E_GENERIC_ERROR (observed for a card it refuses to vault).
+func (e *V5Error) CardRefused() bool {
+	return e.Status == http.StatusBadRequest && e.Code == "E_GENERIC_ERROR"
+}
+
 // centsJSONAmount renders integer cents as an exact two-decimal JSON number
 // (1099 -> 10.99), never via float: a money wire boundary.
 func centsJSONAmount(cents moneyutil.Cents) json.RawMessage {
@@ -131,13 +164,15 @@ func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body
 		if resp.StatusCode >= 500 {
 			return classify(fmt.Errorf("nmi v5 request failed: status %d: %w", resp.StatusCode, transient.ErrUnavailable))
 		}
-		if resp.StatusCode == http.StatusTooManyRequests {
-			return fmt.Errorf("%w: %w: status %d", ErrV5Refused, transient.ErrUnavailable, resp.StatusCode)
+		refusal := &V5Error{Status: resp.StatusCode}
+		_ = json.Unmarshal(raw, refusal) // a refusal without NMI's envelope keeps only its status
+		switch resp.StatusCode {
+		case http.StatusTooManyRequests:
+			refusal.cause = transient.ErrUnavailable
+		case http.StatusUnauthorized, http.StatusForbidden:
+			refusal.cause = ErrCredentialsRejected
 		}
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return fmt.Errorf("%w: %w: status %d", ErrV5Refused, ErrCredentialsRejected, resp.StatusCode)
-		}
-		return fmt.Errorf("%w: status %d", ErrV5Refused, resp.StatusCode)
+		return refusal
 	}
 
 	if out != nil && len(bytes.TrimSpace(raw)) > 0 {

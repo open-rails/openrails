@@ -5,6 +5,7 @@ package critical_test
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -21,6 +22,32 @@ func TestMerchantCardRemoval(t *testing.T) {
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
 		require.Len(t, psps.Items, 1)
+		// NMI's v5 refusals, as its sandbox answers them: a request it finds
+		// invalid is the provider's refusal, a card it will not take is the
+		// customer's decline. Neither shows NMI's own code or text.
+		for _, refusal := range []struct {
+			envelope, code, recorded string
+			status                   int
+		}{
+			{`{"type":"validationError","error_code":"E_INVALID_SUBMISSION","message":"The provided data is invalid."}`, billing.CodePaymentProviderRejected, "e_invalid_submission", http.StatusBadGateway},
+			{`{"type":"generalError","error_code":"E_GENERIC_ERROR","message":"Bad Request. Please use a valid test card or test ACH account from the documentation."}`, billing.CodeCardDeclined, "e_generic_error", http.StatusPaymentRequired},
+		} {
+			journal.core.Intercept(func(r *http.Request) bool {
+				return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/v5/customers")
+			},
+				func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+					return answer(r, http.StatusBadRequest, refusal.envelope), nil
+				})
+			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+			journal.core.ClearIntercepts()
+			require.Equal(t, refusal.status, status, string(raw))
+			require.Contains(t, string(raw), refusal.code)
+			require.NotContains(t, strings.ToLower(string(raw)), refusal.recorded)
+			require.NotContains(t, string(raw), "test card")
+			tried, err := a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{ResponseCode: []string{refusal.recorded}})
+			require.NoError(t, err)
+			require.Len(t, tried.Items, 1, "the attempt records NMI's error code")
+		}
 		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
 		require.Equal(t, 201, status, string(raw))
 		var method billing.PaymentMethod
