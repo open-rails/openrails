@@ -43,7 +43,9 @@ An empty NMI search after possible submission is never that proof: an NMI or
 custodian sale accepts `--not-executed` only when NMI shows a definitive
 decline as the one transaction under the sale's order, and a submitted order
 collection, rebill or tier-change proration refuses it. Custodian sale receipts
-converge only through the exact order search. Every resolution records actor and reason on the
+converge only through the exact order search. A submitted purchase sale reads its order itself once the
+five-minute observation delay has passed: that same definitive decline fails it and reopens its order, and
+anything else raises `life.sale.unresolved`, closed when the sale completes. Every resolution records actor and reason on the
 operation and in the mutation log. NMI subscription enrollment follows the
 upgrade rule: a roster row matching only vault and plan is surfaced as an
 operator candidate, not adopted.

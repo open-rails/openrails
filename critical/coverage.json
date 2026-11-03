@@ -219,6 +219,11 @@
       "name": "Rollback cannot produce successful response or financial event"
     },
     {
+      "id": "OR-J09-S05",
+      "journey": "J09",
+      "name": "A sale whose answer was lost settles from NMI: its decline reopens the order, a charge NMI can't show raises a high finding until the receipt appears, and nothing is resent"
+    },
+    {
       "id": "OR-J10-S01",
       "journey": "J10",
       "name": "Two concurrent same-key pay requests cause one economic debit"

@@ -311,7 +311,7 @@ var jsonRules = map[string]jsonRule{
 	}),
 	"provider_intents.nmi_sale.result_evidence": nullable(object(map[string]jsonRule{
 		"stripe_payment_intent_id": textValue, "authentication_required": booleanValue, "decline_code": textValue,
-		"qualified_receipt": collectedReceiptJSON, "sale_submitted": booleanValue, "transaction_id": textValue, "payment_id": uuidValue, "delayed_start": textValue,
+		"qualified_receipt": collectedReceiptJSON, "sale_submitted": booleanValue, "submitted_at": textValue, "transaction_id": textValue, "payment_id": uuidValue, "delayed_start": textValue,
 		"declined": booleanValue, "not_executed": booleanValue, "request_refused": booleanValue, "response_code": integerValue, "localization_id": textValue, "operator_resolution": operatorResolutionJSON,
 		"duplicate_refused": booleanValue, "failure_code": textValue, "resolved_absent": booleanValue,
 		"avs_response": textValue, "cvv_response": textValue, "decline_transaction_id": textValue,
