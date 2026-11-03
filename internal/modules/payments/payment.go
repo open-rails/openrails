@@ -648,5 +648,5 @@ func (s *PaymentService) ApplyRefundAccessPolicy(ctx context.Context, paymentID 
 	if err != nil || !revoke {
 		return err
 	}
-	return entitlements.NewEntitlementService(s.repo.db, s.clock).RevokeRefundedPaymentAccess(ctx, paymentID)
+	return entitlements.NewEntitlementService(s.repo.db, s.clock).RevokeRefundedPaymentAccess(ctx, paymentID, "")
 }

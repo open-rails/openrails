@@ -171,6 +171,14 @@ func TestPublicEntitlements(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, billing.PaymentSucceeded, refund.Status)
 				publicAccess(t, a, time.Time{}, !revoke)
+				if revoke {
+					var requester, revoker *string
+					require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT i.subject, r.actor FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+" i JOIN "+
+						pgx.Identifier{a.schema, "grants"}.Sanitize()+" r ON r.merchant_id = i.merchant_id AND r.event = 'revoke' AND r.reason = 'refund' WHERE i.merchant_id = $1 AND i.intent_type = 'stripe_refund'",
+						a.alpha.MerchantID().UUID()).Scan(&requester, &revoker))
+					require.NotNil(t, requester)
+					require.Equal(t, requester, revoker, "the access revoke names who asked for the refund")
+				}
 				retained, err := a.alphaRemote.GetOrder(t.Context(), order.ID)
 				require.NoError(t, err)
 				require.Equal(t, billing.OrderComplete, retained.Status)

@@ -128,8 +128,9 @@ func (r refundReservations) checkRelevance(ctx context.Context, intent gen.Billi
 // finalize completes the reservation with the provider refund id. Idempotent:
 // an already-completed reservation is left alone. Metadata is carried over
 // from the reservation (CompleteRefundReservation replaces it wholesale) with
-// the completion stamped in.
-func (r refundReservations) finalize(ctx context.Context, p RefundPayload, providerRefundID string) error {
+// the completion stamped in. The intent's subject (the staff member who
+// asked) is recorded as the actor on any access it revokes.
+func (r refundReservations) finalize(ctx context.Context, intent gen.BillingProviderIntent, p RefundPayload, providerRefundID string) error {
 	// Keep the exact successful response even if the local transaction fails or
 	// the caller is gone: it is the only safe automatic recovery evidence for
 	// non-idempotent rails.
@@ -149,7 +150,11 @@ func (r refundReservations) finalize(ctx context.Context, p RefundPayload, provi
 			return nil
 		}
 		if p.RevokeAccess {
-			if err := entitlements.NewEntitlementService(txDB, r.Clock).RevokeRefundedPaymentAccess(ctx, p.OriginalPaymentID); err != nil {
+			var actor string
+			if intent.Subject != nil {
+				actor = *intent.Subject
+			}
+			if err := entitlements.NewEntitlementService(txDB, r.Clock).RevokeRefundedPaymentAccess(ctx, p.OriginalPaymentID, actor); err != nil {
 				return err
 			}
 		}
@@ -257,14 +262,14 @@ func (r refundReservations) recoverReceipt(ctx context.Context, intent gen.Billi
 	if ref == "" {
 		return Ambiguous("refund response has no exact operation receipt; operator must review provider records, and unavailable evidence keeps the refund unresolved")
 	}
-	return r.settle(ctx, p, ref, map[string]any{"recovered_receipt": true})
+	return r.settle(ctx, intent, p, ref, map[string]any{"recovered_receipt": true})
 }
 
 // settle finalizes a refund the provider confirmed with the exact receipt ref.
 // A failed local finalize keeps ref on the ambiguous outcome's evidence, so the
 // unknown mark retains it even when the receipt write itself did not land.
-func (r refundReservations) settle(ctx context.Context, p RefundPayload, ref string, evidence map[string]any) Outcome {
-	if err := r.finalize(ctx, p, ref); err != nil {
+func (r refundReservations) settle(ctx context.Context, intent gen.BillingProviderIntent, p RefundPayload, ref string, evidence map[string]any) Outcome {
+	if err := r.finalize(ctx, intent, p, ref); err != nil {
 		return AmbiguousWithEvidence("provider refund "+ref+" succeeded, but local finalization failed: "+err.Error(), map[string]any{"provider_refund_id": ref})
 	}
 	evidence["provider_refund_id"] = ref
@@ -386,7 +391,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProvid
 		return Ambiguous("nmi refund outcome unknown: " + err.Error())
 	}
 
-	return h.settle(ctx, p, result.TransactionID, map[string]any{})
+	return h.settle(ctx, intent, p, result.TransactionID, map[string]any{})
 }
 
 // Verify resumes known successful responses. NMI does not expose a caller
@@ -429,7 +434,7 @@ func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.BillingProvid
 	if err := client.ConfirmRefund(ctx, p.ProviderTarget, resolution.ProviderReference, p.AmountCents, p.Currency); err != nil {
 		return Outcome{}, RejectResolution("%v", err)
 	}
-	if err := h.finalize(ctx, p, resolution.ProviderReference); err != nil {
+	if err := h.finalize(ctx, intent, p, resolution.ProviderReference); err != nil {
 		return AmbiguousWithEvidence("confirmed refund retained but local finalization failed: "+err.Error(), map[string]any{"provider_refund_id": resolution.ProviderReference}), nil
 	}
 	return Succeeded(map[string]any{"provider_refund_id": resolution.ProviderReference}), nil
@@ -532,7 +537,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.BillingPro
 	if !strings.EqualFold(result.Status, "succeeded") {
 		return Ambiguous("stripe refund has not succeeded: " + result.Status)
 	}
-	return h.settle(ctx, p, result.ID, map[string]any{"refund_status": result.Status})
+	return h.settle(ctx, intent, p, result.ID, map[string]any{"refund_status": result.Status})
 }
 
 func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
@@ -545,7 +550,7 @@ func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.BillingProv
 	// after the provider's idempotency window may have lapsed. An unreadable
 	// reservation proves nothing either way — the provider read below decides.
 	if ref, rerr := h.knownReceipt(ctx, intent, p); rerr == nil && ref != "" {
-		return h.settle(ctx, p, ref, map[string]any{"recovered_receipt": true})
+		return h.settle(ctx, intent, p, ref, map[string]any{"recovered_receipt": true})
 	}
 	result, found, err := h.Stripe.FindRefundByIdempotencyKey(ctx, p.ProviderTarget, intent.IdempotencyKey)
 	if err != nil {
@@ -563,7 +568,7 @@ func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.BillingProv
 	if !strings.EqualFold(result.Status, "succeeded") {
 		return Ambiguous("stripe refund has not succeeded: " + result.Status)
 	}
-	return h.settle(ctx, p, result.ID, map[string]any{"refund_status": result.Status, "verified_existing": true})
+	return h.settle(ctx, intent, p, result.ID, map[string]any{"refund_status": result.Status, "verified_existing": true})
 }
 
 // RefundIntentFor selects the rail while keeping one caller operation identity.

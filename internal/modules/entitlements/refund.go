@@ -13,8 +13,9 @@ import (
 )
 
 // RevokeRefundedPaymentAccess revokes the refunded payment's paid window and
-// its renewal grace. Cancellation is a separate decision.
-func (s *EntitlementService) RevokeRefundedPaymentAccess(ctx context.Context, paymentID uuid.UUID) error {
+// its renewal grace. Cancellation is a separate decision. actor is the staff
+// subject that asked for the refund; empty records the system.
+func (s *EntitlementService) RevokeRefundedPaymentAccess(ctx context.Context, paymentID uuid.UUID, actor string) error {
 	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		mid, err := merchant.Require(ctx)
@@ -69,7 +70,7 @@ func (s *EntitlementService) RevokeRefundedPaymentAccess(ctx context.Context, pa
 				return err
 			}
 			if !ended {
-				if _, err := ledger.Revoke(ctx, g.ID, string(models.AccessRevokeRefund), ""); err != nil {
+				if _, err := ledger.Revoke(ctx, g.ID, string(models.AccessRevokeRefund), actor); err != nil {
 					return err
 				}
 			}
