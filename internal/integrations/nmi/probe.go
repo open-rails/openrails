@@ -74,7 +74,9 @@ func (c *NMIClient) ProbeTestMode(ctx context.Context) (TestModeProbeResult, err
 	if !approved {
 		return ProbeLive, nil
 	}
-	c.voidProbe(ctx, txnID)
+	// The verdict does not wait on the void, and the void is not cut short by
+	// the posture check's deadline: it runs under its own mutation bound.
+	go c.voidProbe(context.WithoutCancel(ctx), txnID)
 	return ProbeSimulated, nil
 }
 
@@ -112,9 +114,10 @@ func (c *NMIClient) probeAuth(ctx context.Context, amount moneyutil.Cents) (appr
 	return txn.approved(), txn.ID, "", nil
 }
 
-// voidProbe best-effort voids an approved probe authorization. On a
-// simulating account the void is itself simulated; failures only get logged —
-// an unvoided test-card auth holds no real funds.
+// voidProbe best-effort voids an approved probe authorization, bounded by the
+// request's mutation deadline. On a simulating account the void is itself
+// simulated; failures only get logged — an unvoided test-card auth holds no
+// real funds.
 func (c *NMIClient) voidProbe(ctx context.Context, txnID string) {
 	if strings.TrimSpace(txnID) == "" {
 		return

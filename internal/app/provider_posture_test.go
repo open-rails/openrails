@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/providerposture"
 )
 
@@ -74,4 +79,37 @@ func TestPostureStateReadsArmingAtOnce(t *testing.T) {
 	err = r.postureState()
 	require.Error(t, err, "an answer that does not arm is never read as armed")
 	require.NotContains(t, err.Error(), "awaiting")
+}
+
+func TestNMISandboxProbeVoidOutlivesThePostureDeadline(t *testing.T) {
+	voided := make(chan error, 1)
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/payments/auth":
+			_, _ = w.Write([]byte(`{"object":"transaction","id":"probe-1","response":"1","response_code":"100","response_text":"SUCCESS"}`))
+		case "/payments/probe-1/void":
+			_, _ = io.Copy(io.Discard, r.Body) // lets the server see the caller hang up
+			time.Sleep(300 * time.Millisecond) // past the posture check's deadline
+			voided <- r.Context().Err()
+			_, _ = w.Write([]byte(`{"object":"transaction","id":"probe-1","response":"1","response_code":"100","response_text":"Transaction Void Successful"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(gateway.Close)
+	client := &nmi.NMIClient{SecurityKey: "sandbox-fixture", Environment: config.EnvironmentSandbox, V5BaseURL: gateway.URL}
+	registry := providerposture.NewRegistry(nil)
+	registry.Timeout = 100 * time.Millisecond
+
+	started := time.Now()
+	status := registry.Verify(t.Context(), client.PostureKey(), client.CheckPosture)
+	require.Equal(t, providerposture.Simulated, status.Verdict, status.Err)
+	require.Less(t, time.Since(started), 300*time.Millisecond, "the verdict does not wait for the void")
+	select {
+	case err := <-voided:
+		require.NoError(t, err, "the void is not cut short by the posture deadline")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the probe authorization was never voided")
+	}
 }
