@@ -108,12 +108,15 @@ export function SubscriptionDetailPage() {
     sub.status === "awaiting_method" ||
     sub.status === "unverified"
   // What the server changes: the plan of an active or past-due subscription;
-  // the card of one still collecting, or of a renewal OpenRails can resume.
+  // the card of one still collecting, or of a renewal OpenRails can resume,
+  // when OpenRails charges an NMI or Stripe card or NMI runs the schedule.
   const changeable = sub.status === "active" || sub.status === "past_due"
+  const collecting = changeable || sub.status === "awaiting_method"
   const cardChangeable =
-    changeable ||
-    sub.status === "awaiting_method" ||
-    (sub.resumable && sub.collection_policy === "engine")
+    sub.collection_policy === "engine"
+      ? (sub.rail === "nmi" || sub.rail === "stripe") &&
+        (collecting || sub.resumable)
+      : sub.rail === "nmi" && collecting
   const customerLabel = customer ? customerName(customer) : undefined
   const planName = sub.product?.display_name
 
@@ -161,7 +164,6 @@ export function SubscriptionDetailPage() {
               subscriptionId={sub.id}
               customerId={sub.customer_id}
               rail={sub.rail}
-              collectionPolicy={sub.collection_policy}
             />
           )}
           {canUpdate && cancellable && (
@@ -488,12 +490,10 @@ function ChangePaymentMethodDialog({
   subscriptionId,
   customerId,
   rail,
-  collectionPolicy,
 }: {
   subscriptionId: string
   customerId?: string
   rail: string
-  collectionPolicy?: string
 }) {
   const { toast, toastApiError, adminMutations, adminQueries } =
     useAdminServices()
@@ -537,25 +537,11 @@ function ChangePaymentMethodDialog({
     }
   }
 
-  // A card subscription OpenRails collects, or an NMI schedule; a provider
-  // that keeps the card (Stripe-owned, CCBill) or a wallet has none to change.
-  const supported =
-    rail !== "solana" &&
-    (collectionPolicy === "engine" || collectionPolicy === "nmi_schedule")
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!supported}
-            title={
-              supported
-                ? undefined
-                : `Payment-method change is not supported on ${rail}`
-            }
-          >
+          <Button variant="outline" size="sm">
             <AdminMessage id={"Change payment method"} />
           </Button>
         }

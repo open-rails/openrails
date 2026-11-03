@@ -186,6 +186,16 @@ test("console-parked-signup-lands-after-mapping", async ({ page }) => {
   await page.getByLabel("Show released").check()
   await expect(park).toContainText("Landed")
   await expect(park.getByRole("link")).toBeVisible()
+  // Stripe bills it and keeps the card: staff are offered no card change.
+  const landed = await park.getByRole("link").getAttribute("href")
+  await open(page, landed!.replace(/^\/console/, ""), "owner")
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Active")
+  await expect(
+    page.getByRole("button", { name: "Change subscription" })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Change payment method" })
+  ).toHaveCount(0)
 })
 
 test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({

@@ -400,7 +400,7 @@ func TestMerchantConsole(t *testing.T) {
 		product := tw.stripeProduct(t, "gold", "member:gold")
 
 		consoleBrowser(t, tw.authorityWorld,
-			map[string]any{"tokens": map[string]string{"staff": consoleOperator(t, tw.authorityWorld)}, "subscription": sub, "finding": finding.ID.String()},
+			map[string]any{"tokens": map[string]string{"staff": consoleOperator(t, tw.authorityWorld), "owner": tw.aliceToken}, "subscription": sub, "finding": finding.ID.String()},
 			map[string]consoleAction{"settle": func(ctx context.Context) (any, error) { return nil, settleJobs(ctx, tw.fleet, kindConverge) }},
 			"console-parked-signup-lands-after-mapping")
 
