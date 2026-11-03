@@ -203,6 +203,8 @@ test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
 }) => {
   const fx = await fixture<{
     subscription: string
+    customer: string
+    who: string
     missing: Record<"customer" | "subscription" | "payment", string>
   }>(page)
   // The dashboard at 1440 in a host's 1230px column: the one-rail donut
@@ -234,6 +236,20 @@ test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
       )
       .toBe(true)
   }
+
+  // Lists lead with who and what: the customer's contact and the plan, on
+  // the customer's page what each subscription and payment bought.
+  await open(page, "/subscriptions")
+  await expect(page.locator("tr", { hasText: fx.who })).toContainText(
+    "Membership"
+  )
+  await open(page, "/orders")
+  await expect(page.locator("tr", { hasText: fx.who })).toHaveCount(1)
+  await open(page, `/customers/${fx.customer}`)
+  for (const kind of ["subscriptions", "payments"])
+    await expect(
+      page.locator(`a[href*="/${kind}/"]`, { hasText: "Membership" })
+    ).toHaveCount(1)
 
   await open(page, `/subscriptions/${fx.subscription}`)
   await expect(

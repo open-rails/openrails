@@ -450,7 +450,7 @@ func ListPayments(r *httprequest.Request) {
 	if params.IDs, ok = listIDs(r, billing.ParsePaymentID); !ok {
 		return
 	}
-	writePaymentPage(r, params)
+	writePaymentPage(r, params, true)
 }
 
 // ListMyPayments (GET /me/payments) is one page of the caller's payments,
@@ -465,7 +465,7 @@ func ListMyPayments(r *httprequest.Request) {
 		return
 	}
 	params.CustomerID = billing.CustomerID(customer)
-	writePaymentPage(r, params)
+	writePaymentPage(r, params, false)
 }
 
 // paymentListParams reads the filters both payment lists share.
@@ -507,7 +507,9 @@ func paymentListParams(r *httprequest.Request) (billing.PaymentListParams, bool)
 	return params, true
 }
 
-func writePaymentPage(r *httprequest.Request, params billing.PaymentListParams) {
+// writePaymentPage answers one page of payments; a staff page names each
+// payment's customer.
+func writePaymentPage(r *httprequest.Request, params billing.PaymentListParams, staff bool) {
 	page, err := r.State.PaymentService.ListPage(r.Request.Context(), params)
 	if err != nil {
 		writeRefusal(r, err, "failed to list payments")
@@ -527,6 +529,16 @@ func writePaymentPage(r *httprequest.Request, params billing.PaymentListParams) 
 	out := billing.ListPage[billing.Payment]{Items: make([]billing.Payment, 0, len(page.Items)), Next: page.Next}
 	for _, p := range page.Items {
 		out.Items = append(out.Items, paymentView(p, refunded[p.ID]))
+	}
+	if staff {
+		customers := make([]billing.CustomerID, len(out.Items))
+		for i, p := range out.Items {
+			customers[i] = p.CustomerID
+		}
+		contacts := customerContacts(r, customers)
+		for i := range out.Items {
+			out.Items[i].CustomerContact = contacts[out.Items[i].CustomerID]
+		}
 	}
 	r.SuccessJSON(out)
 }

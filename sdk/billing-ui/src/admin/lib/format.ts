@@ -1,4 +1,5 @@
-import type { CardDetails } from "#orck/client/generated/wire"
+import type { CardDetails, CustomerContact } from "#orck/client/generated/wire"
+import { cardBrandLabel } from "#orck/lib/card-brands"
 import { OPENRAILS_CURRENCY_SCALES as currencyUnits } from "#orck/client/generated/currencies"
 
 // Money is an integer count of native units. A JSON number is exact only as a
@@ -166,7 +167,9 @@ export function formatDate(iso?: string | null): string {
 
 // formatCard names a card by brand and last four digits.
 export function formatCard(card?: CardDetails | null): string {
-  return card?.last4 ? `${card.brand ?? "card"} ••••${card.last4}` : "—"
+  return card?.last4
+    ? `${cardBrandLabel(card.brand) ?? "Card"} ••••${card.last4}`
+    : "—"
 }
 
 export function formatCardExpiry(card?: CardDetails | null): string {
@@ -183,6 +186,18 @@ export function customerName(c: {
   contact: { email: string | null; name: string | null } | null
 }): string {
   return c.contact?.name || c.contact?.email || shortId(c.id, 13)
+}
+
+// rowCustomer names a list row's customer by its directory contact, else its
+// id.
+export function rowCustomer(row: {
+  customer_id: string
+  customer_contact?: CustomerContact
+}): string {
+  return customerName({
+    id: row.customer_id,
+    contact: row.customer_contact ?? null,
+  })
 }
 
 // timeAgo renders a compact relative time ("3m", "2h", "5d") for feeds like the

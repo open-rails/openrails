@@ -37,6 +37,7 @@ import type { ProviderCatalogObject } from "#orck/client/generated/wire"
 import {
   selectClass,
   termsText,
+  pspOption,
   usePSPs,
 } from "#orck/admin/pages/imports/shared"
 import {
@@ -114,7 +115,7 @@ function ProviderPrices() {
           >
             {psps.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.key} ({p.rail})
+                {pspOption(p, true)}
               </option>
             ))}
           </select>

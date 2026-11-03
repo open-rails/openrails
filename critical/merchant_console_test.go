@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/authkit/userinfo"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/ccbillmock"
@@ -40,6 +42,19 @@ import (
 // consoleAction is a step the spec asks of the fixture between browser steps.
 // It runs on a request goroutine, so it fails by returning an error.
 type consoleAction func(ctx context.Context) (any, error)
+
+// switchedDirectory is the host's directory, which a test can take down.
+type switchedDirectory struct {
+	userinfo.Lookup
+	down atomic.Bool
+}
+
+func (d *switchedDirectory) Get(ctx context.Context, ids []string) (map[string]userinfo.User, error) {
+	if d.down.Load() {
+		return nil, errors.New("directory unavailable")
+	}
+	return d.Lookup.Get(ctx, ids)
+}
 
 // consoleStaff signs in a new person holding exactly perms in alpha's group,
 // through a custom role named name.
@@ -424,7 +439,44 @@ func TestMerchantConsole(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms", func(t *testing.T) {
-		a, _, sub := purchasedMembership(t)
+		directory := &switchedDirectory{}
+		a, _, sub := purchasedMembershipWith(t, 24, func(w *world) {
+			directory.Lookup = w.deps.UserInfo
+			w.deps.UserInfo = directory
+		})
+		// Staff lists name each row's customer; with the directory down they
+		// still list, by customer id.
+		contacts := func() []*billing.CustomerContact {
+			subs, err := a.alphaRemote.ListSubscriptions(t.Context(), billing.SubscriptionListParams{})
+			require.NoError(t, err)
+			orders, err := a.alphaRemote.ListOrders(t.Context(), billing.OrderListParams{})
+			require.NoError(t, err)
+			payments, err := a.alphaRemote.ListPayments(t.Context(), billing.PaymentListParams{})
+			require.NoError(t, err)
+			require.Len(t, subs.Items, 1)
+			require.Len(t, orders.Items, 1)
+			require.Len(t, payments.Items, 1)
+			return []*billing.CustomerContact{subs.Items[0].CustomerContact, orders.Items[0].CustomerContact, payments.Items[0].CustomerContact}
+		}
+		named := contacts()
+		for _, contact := range named {
+			require.NotNil(t, contact)
+			require.Equal(t, a.alice.Email, *contact.Email)
+		}
+		// The console names a customer by name, else email.
+		who := a.alice.Email
+		if named[0].Name != nil {
+			who = *named[0].Name
+		}
+		// The customer's own lists carry no contact.
+		for _, path := range []string{"/v1/me/subscriptions", "/v1/me/payments", "/v1/me/orders"} {
+			status, raw := a.request(t, http.MethodGet, path, a.aliceToken, nil)
+			require.Equal(t, http.StatusOK, status, string(raw))
+			require.NotContains(t, string(raw), "customer_contact", path)
+		}
+		directory.down.Store(true)
+		require.Equal(t, []*billing.CustomerContact{nil, nil, nil}, contacts())
+		directory.down.Store(false)
 		a.clock.Advance(time.Hour)
 		var in []billing.CreateCreditGrantParams
 		for i := range 6 {
@@ -452,7 +504,7 @@ func TestMerchantConsole(t *testing.T) {
 		authtest.GrantRole(t, a.auth, iam.RootGroup(), iam.UserSubject(a.alice.ID), iam.RootPersona().OwnerRole())
 
 		missing := map[string]string{"customer": billing.CustomerID(uuid.New()).String(), "subscription": billing.SubscriptionID(uuid.New()).String(), "payment": billing.PaymentID(uuid.New()).String()}
-		counts := consoleBrowser(t, a, map[string]any{"tokens": map[string]string{"staff": a.aliceToken}, "subscription": sub.ID.String(), "missing": missing},
+		counts := consoleBrowser(t, a, map[string]any{"tokens": map[string]string{"staff": a.aliceToken}, "subscription": sub.ID.String(), "customer": sub.CustomerID.String(), "who": who, "missing": missing},
 			nil, "console-cancel-says-what-ends-and-a-cleared-hold-confirms")
 		require.NotZero(t, counts["GET /v1/admin/subscriptions/"+sub.ID.String()+"/change/options"])
 		require.Equal(t, 1, counts["POST /v1/admin/subscriptions/"+sub.ID.String()+"/cancel"])

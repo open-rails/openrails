@@ -2660,6 +2660,7 @@ pkg openrails/billing, type Order struct, CollectionPSPID *PSPID `json:"collecti
 pkg openrails/billing, type Order struct, CompletedAt *time.Time `json:"completed_at"`
 pkg openrails/billing, type Order struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type Order struct, Currency string `json:"currency"`
+pkg openrails/billing, type Order struct, CustomerContact *CustomerContact `json:"customer_contact,omitempty"`
 pkg openrails/billing, type Order struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type Order struct, Embedded bool `json:"embedded"`
 pkg openrails/billing, type Order struct, ExpiredAt *time.Time `json:"expired_at"`
@@ -2996,6 +2997,7 @@ pkg openrails/billing, type Payment struct, Card *CardDetails `json:"card"`
 pkg openrails/billing, type Payment struct, Channel PaymentChannel `json:"channel"`
 pkg openrails/billing, type Payment struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type Payment struct, Currency string `json:"currency"`
+pkg openrails/billing, type Payment struct, CustomerContact *CustomerContact `json:"customer_contact,omitempty"`
 pkg openrails/billing, type Payment struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type Payment struct, Failure *PaymentFailure `json:"failure"`
 pkg openrails/billing, type Payment struct, ID PaymentID `json:"id"`
@@ -3584,6 +3586,7 @@ pkg openrails/billing, type Subscription struct, CollectionPolicy string `json:"
 pkg openrails/billing, type Subscription struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type Subscription struct, CurrentPeriodEndsAt *time.Time `json:"current_period_ends_at"`
 pkg openrails/billing, type Subscription struct, CurrentPeriodStartsAt *time.Time `json:"current_period_starts_at"`
+pkg openrails/billing, type Subscription struct, CustomerContact *CustomerContact `json:"customer_contact,omitempty"`
 pkg openrails/billing, type Subscription struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type Subscription struct, DeletionScheduledAt *time.Time `json:"deletion_scheduled_at,omitempty"`
 pkg openrails/billing, type Subscription struct, Dunning *SubscriptionDunning `json:"dunning"`

@@ -18168,6 +18168,9 @@
           "customer_id": {
             "type": "string"
           },
+          "customer_contact": {
+            "$ref": "#/components/schemas/CustomerContact"
+          },
           "origin": {
             "type": "string",
             "enum": [
@@ -20004,6 +20007,9 @@
           },
           "customer_id": {
             "type": "string"
+          },
+          "customer_contact": {
+            "$ref": "#/components/schemas/CustomerContact"
           },
           "subscription_id": {
             "oneOf": [
@@ -22896,6 +22902,9 @@
           },
           "customer_id": {
             "type": "string"
+          },
+          "customer_contact": {
+            "$ref": "#/components/schemas/CustomerContact"
           },
           "product_id": {
             "type": "string"

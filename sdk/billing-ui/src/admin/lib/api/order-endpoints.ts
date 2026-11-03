@@ -15,6 +15,9 @@ export interface OrderFilters {
   status?: string
   // overdue "true" keeps the open orders still owed past their due date.
   overdue?: string
+  // ids reads the orders of these ids, comma-separated, and takes no other
+  // filter or page.
+  ids?: string
 }
 
 // UsageAction is what staff do to an unpaid usage order.

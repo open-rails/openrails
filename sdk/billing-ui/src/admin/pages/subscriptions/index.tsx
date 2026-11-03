@@ -24,7 +24,12 @@ import type { SubscriptionFilters } from "#orck/admin/lib/api/endpoints"
 import type { AdminSubscription } from "#orck/admin/lib/api/types"
 import { downloadCsv } from "#orck/admin/lib/csv"
 import { useCursorPages } from "#orck/admin/lib/cursor-pages"
-import { customerName, formatDate, shortId } from "#orck/admin/lib/format"
+import {
+  customerName,
+  formatDate,
+  rowCustomer,
+  shortId,
+} from "#orck/admin/lib/format"
 
 import { dunningSummary } from "./dunning"
 import { isView, subscriptionViews, viewFilters } from "./views"
@@ -54,11 +59,7 @@ const canceledColumn: ColumnDef<AdminSubscription, unknown> = {
 const columns: ColumnDef<AdminSubscription, unknown>[] = [
   {
     header: "Customer",
-    cell: ({ row }) => (
-      <span className="font-mono text-xs">
-        {shortId(row.original.customer_id, 13)}
-      </span>
-    ),
+    cell: ({ row }) => rowCustomer(row.original),
   },
   {
     header: "Status",
@@ -67,11 +68,12 @@ const columns: ColumnDef<AdminSubscription, unknown>[] = [
   { header: "Rail", cell: ({ row }) => row.original.rail },
   {
     header: "Subscription",
-    cell: ({ row }) => (
-      <span className="text-xs text-muted-foreground">
-        {shortId(row.original.id, 13)}
-      </span>
-    ),
+    cell: ({ row }) =>
+      row.original.product?.display_name ?? (
+        <span className="text-xs text-muted-foreground">
+          {shortId(row.original.id, 13)}
+        </span>
+      ),
   },
   {
     header: "Started",

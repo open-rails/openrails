@@ -4,6 +4,7 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Add01Icon } from "@hugeicons/core-free-icons"
 import { CardBrandPlate } from "#orck/components/card-brands"
+import { cardBrandLabel } from "#orck/lib/card-brands"
 
 import { Label } from "#orck/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "#orck/components/ui/radio-group"
@@ -29,9 +30,7 @@ function brandPlate(brand?: string | null): string {
 
 // The plate is decorative; assistive tech gets the spoken brand instead.
 function brandName(brand?: string | null): string {
-  const value = brand?.trim()
-  if (!value) return "Card"
-  return value[0].toUpperCase() + value.slice(1)
+  return cardBrandLabel(brand) ?? "Card"
 }
 
 function expiryLabel(method: SavedPaymentMethod): string | undefined {
