@@ -439,7 +439,8 @@ func TestMerchantConsole(t *testing.T) {
 		// Someone other than the held staff member, holding root's permissions.
 		authtest.GrantRole(t, a.auth, iam.RootGroup(), iam.UserSubject(a.alice.ID), iam.RootPersona().OwnerRole())
 
-		counts := consoleBrowser(t, a, map[string]any{"tokens": map[string]string{"staff": a.aliceToken}, "subscription": sub.ID.String()},
+		missing := map[string]string{"customer": billing.CustomerID(uuid.New()).String(), "subscription": billing.SubscriptionID(uuid.New()).String(), "payment": billing.PaymentID(uuid.New()).String()}
+		counts := consoleBrowser(t, a, map[string]any{"tokens": map[string]string{"staff": a.aliceToken}, "subscription": sub.ID.String(), "missing": missing},
 			nil, "console-cancel-says-what-ends-and-a-cleared-hold-confirms")
 		require.Equal(t, 1, counts["POST /v1/admin/subscriptions/"+sub.ID.String()+"/cancel"])
 		require.Equal(t, 1, counts["POST /v1/merchant/destructive-holds/"+holds.Items[0].ID.String()+"/clear"])

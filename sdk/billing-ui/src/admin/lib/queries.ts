@@ -134,7 +134,6 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
         queryKey: queryKeys.customer(id),
         queryFn: ({ signal }) => getCustomer(id, signal),
         enabled: Boolean(id),
-        meta: { errorAction: "Load customer" },
       }),
     // One page of each of a customer's lists, for the customer page.
     customerSubscriptions: (id: string, limit: number, cursor: string) =>
@@ -236,7 +235,6 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
         queryKey: queryKeys.subscription(id),
         queryFn: ({ signal }) => getSubscription(id, signal),
         enabled: Boolean(id),
-        meta: { errorAction: "Load subscription" },
       }),
     // Every saved method: pickers must offer all of them.
     customerPaymentMethods: (customerId?: string) =>
@@ -270,7 +268,6 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
         queryKey: queryKeys.payment(id),
         queryFn: ({ signal }) => getPayment(id, signal),
         enabled: Boolean(id),
-        meta: { errorAction: "Load payment" },
       }),
     attempts: (filters: AttemptFilters, limit: number, cursor?: string) =>
       queryOptions({

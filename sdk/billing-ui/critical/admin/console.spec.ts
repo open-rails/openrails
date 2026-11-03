@@ -201,7 +201,10 @@ test("console-parked-signup-lands-after-mapping", async ({ page }) => {
 test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
   page,
 }) => {
-  const fx = await fixture<{ subscription: string }>(page)
+  const fx = await fixture<{
+    subscription: string
+    missing: Record<"customer" | "subscription" | "payment", string>
+  }>(page)
   await open(page, `/subscriptions/${fx.subscription}`)
   await expect(
     page.getByRole("button", { name: "Change payment method" })
@@ -232,6 +235,20 @@ test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
   await clear.getByRole("button", { name: "Clear hold" }).click()
   await expect(page.getByText("Hold cleared")).toBeVisible()
   await expect(page.getByText("Holds on refunds and cancels")).toHaveCount(0)
+
+  // A record that is not there is reported once, by its page: no toast too.
+  for (const [path, title] of [
+    [`/customers/${fx.missing.customer}`, "Customer not found"],
+    [`/subscriptions/${fx.missing.subscription}`, "Subscription not found"],
+    [`/payments/${fx.missing.payment}`, "Payment not found"],
+  ]) {
+    await open(page, path)
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(title)
+    // The query cache would have toasted in the same render; a toast
+    // dismisses itself, so this counts once rather than waiting for none.
+    await page.waitForTimeout(300)
+    expect(await page.getByText(/^Couldn't load/).count()).toBe(0)
+  }
 })
 
 test("console-failed-pull-and-read-only-access", async ({ page }) => {

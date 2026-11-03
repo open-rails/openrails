@@ -1146,7 +1146,7 @@
     {
       "id": "OR-J38-S41",
       "journey": "J38",
-      "name": "Ending a membership from the console says the customer loses access now once End access now is ticked; an ended membership offers no plan or card change; clearing a hold confirms it and drops it from Ops"
+      "name": "Ending a membership from the console says the customer loses access now once End access now is ticked; an ended membership offers no plan or card change; clearing a hold confirms it and drops it from Ops; a missing customer, subscription or payment is reported once, by its page"
     },
     {
       "id": "OR-J22-S06",
