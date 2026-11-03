@@ -65,6 +65,7 @@ export const billingAdminMessages = {
   ", an edit set": ", an edit set",
   ", before another action.": ", before another action.",
   ", deleted: ": ", deleted: ",
+  ".": ".",
   ". Active holds may prevent revocation. Payment refunds are managed separately.":
     ". Active holds may prevent revocation. Payment refunds are managed separately.",
   ". Currency and interval stay locked to the current price.":
@@ -817,6 +818,8 @@ export const billingAdminMessages = {
     "The keys of the products this customer holds now.",
   "The payment provider calculates the final prorated amount.":
     "The payment provider calculates the final prorated amount.",
+  "The payment provider hasn't confirmed this order's payment yet. It settles once the provider shows the result, or when it is resolved with ":
+    "The payment provider hasn't confirmed this order's payment yet. It settles once the provider shows the result, or when it is resolved with ",
   "Their reference": "Their reference",
   "There were no providers to consider.":
     "There were no providers to consider.",

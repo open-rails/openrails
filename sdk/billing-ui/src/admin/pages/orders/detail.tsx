@@ -249,6 +249,19 @@ export function OrderDetail({ order }: { order: Order }) {
             </p>
           )}
           {order.usage && <UsageActions order={order} />}
+          {!order.usage && order.status === "processing" && (
+            <p role="status">
+              <AdminMessage
+                id={
+                  "The payment provider hasn't confirmed this order's payment yet. It settles once the provider shows the result, or when it is resolved with "
+                }
+              />
+              <code>
+                <AdminMessage id={"openrails intents resolve"} />
+              </code>
+              <AdminMessage id={"."} />
+            </p>
+          )}
         </CardContent>
       </Card>
       <Card>
