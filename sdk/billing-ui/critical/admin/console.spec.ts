@@ -205,6 +205,36 @@ test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
     subscription: string
     missing: Record<"customer" | "subscription" | "payment", string>
   }>(page)
+  // The dashboard at 1440 in a host's 1230px column: the one-rail donut
+  // names its rail, and a PSP reads as its key.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await open(page, "/")
+  await page.addStyleTag({
+    content: "#app { max-width: 1230px; margin: auto }",
+  })
+  await expect(page.getByText("stripe · USD")).toBeVisible()
+  const health = page
+    .getByRole("table")
+    .filter({ hasText: "Attempt failure rate" })
+  await expect(health.getByRole("columnheader").first()).toHaveText("PSP")
+  await expect(health.getByRole("cell").first()).toHaveText("stripe")
+  // In a narrower or wider column every stat label still fits its two
+  // lines: a tile too narrow for one reflows the grid instead of clamping.
+  for (let width = 1000; width <= 1440; width += 40) {
+    await page.evaluate((w) => {
+      document.getElementById("app")!.style.maxWidth = `${w}px`
+    }, width)
+    await expect
+      .poll(() =>
+        page
+          .locator("span.uppercase.line-clamp-2[title]")
+          .evaluateAll((labels) =>
+            labels.every((el) => el.scrollHeight <= el.clientHeight)
+          )
+      )
+      .toBe(true)
+  }
+
   await open(page, `/subscriptions/${fx.subscription}`)
   await expect(
     page.getByRole("button", { name: "Change payment method" })

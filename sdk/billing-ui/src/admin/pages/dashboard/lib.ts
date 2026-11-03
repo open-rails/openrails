@@ -279,6 +279,29 @@ export function chartColor(i: number): string {
   return `var(--chart-${(i % 5) + 1})`
 }
 
+// Measures that are better lower: a fall reads as good news.
+export const LOWER_IS_BETTER = new Set([
+  "cancellations",
+  "churn_rate",
+  "failed_attempts",
+  "attempt_failure_rate",
+  "failed_purchases",
+  "purchase_failure_rate",
+  "chargebacks",
+  "chargeback_count",
+  "chargeback_rate",
+  "refunds",
+  "refund_count",
+  "rebill_first_failures",
+  "rebill_first_failure_rate",
+  "rebills_missed",
+  "rebill_missed_rate",
+  "rebills_lost",
+  "rebill_loss_rate",
+  "nmi_history_refused",
+  "nmi_history_refusal_rate",
+])
+
 // Decline, rebill-failure and NMI history measures open Payments → Health.
 const HEALTH_MEASURES = new Set([
   "attempts",

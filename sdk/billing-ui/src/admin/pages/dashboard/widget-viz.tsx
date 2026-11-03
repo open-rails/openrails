@@ -3,6 +3,7 @@ import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
 // recharts), donut, table. Input is the raw tabular metrics result; nothing
 // re-queries client-side.
 import type { ComponentProps } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { AnalyticsDownIcon, AnalyticsUpIcon } from "@hugeicons/core-free-icons"
 import {
@@ -42,6 +43,8 @@ import type {
   WidgetViz as VizType,
 } from "#orck/admin/lib/api/metrics"
 import { cn } from "#orck/admin/lib/utils"
+import { useAdminServices } from "#orck/admin/context"
+import { useMerchantConfig } from "#orck/admin/lib/capabilities"
 
 import {
   comparedWith,
@@ -50,6 +53,7 @@ import {
   exactKey,
   filteredCurrency,
   groupSeries,
+  LOWER_IS_BETTER,
   rowCurrency,
   statDelta,
   type PivotSeries,
@@ -123,6 +127,11 @@ function StatViz({
       {rows.map((row, i) => {
         const currency = rowCurrency(row, idx, fallback)
         const delta = statDelta(result, row, primary.index)
+        // Shown to one decimal: what rounds to 0.0% is no change.
+        const moved = delta !== null && Math.round(delta * 1000) !== 0
+        const better =
+          delta !== null &&
+          (LOWER_IS_BETTER.has(primary.name) ? delta < 0 : delta > 0)
         const dimLabel =
           rows.length > 1
             ? idx.dims
@@ -154,15 +163,22 @@ function StatViz({
               <span
                 className={cn(
                   "flex basis-full items-center gap-1 text-xs font-medium",
-                  delta >= 0 ? "text-settled" : "text-failed"
+                  !moved
+                    ? "text-muted-foreground"
+                    : better
+                      ? "text-settled"
+                      : "text-failed"
                 )}
               >
-                {delta >= 0 ? (
-                  <HugeiconsIcon icon={AnalyticsUpIcon} className="size-3" />
-                ) : (
-                  <HugeiconsIcon icon={AnalyticsDownIcon} className="size-3" />
+                {moved && (
+                  <HugeiconsIcon
+                    icon={delta > 0 ? AnalyticsUpIcon : AnalyticsDownIcon}
+                    className="size-3"
+                  />
                 )}
-                {`${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}% vs ${against}`}
+                {moved
+                  ? `${delta > 0 ? "+" : ""}${(delta * 100).toFixed(1)}% vs ${against}`
+                  : `0.0% vs ${against}`}
               </span>
             ) : null}
           </div>
@@ -225,6 +241,15 @@ export function MetricTooltip({
       }}
     />
   )
+}
+
+// rateAxisTop is a rate axis's top: a quarter above the highest value, up to
+// the next whole step of its leading digit (a 52% peak tops at 70%), never
+// past 100%.
+function rateAxisTop(max: number): number {
+  const raw = max * 1.25
+  const step = 10 ** Math.floor(Math.log10(raw))
+  return Math.min(1, Number((Math.ceil(raw / step) * step).toPrecision(12)))
 }
 
 function TimeSeriesViz({
@@ -297,7 +322,7 @@ function TimeSeriesChart({
         allowDecimals={unit === "money" || unit === "ratio" || unit === "days"}
         domain={
           unit === "ratio"
-            ? [0, (max: number) => (max > 0 ? Math.min(1, max * 1.25) : 1)]
+            ? [0, (max: number) => (max > 0 ? rateAxisTop(max) : 1)]
             : undefined
         }
       />
@@ -410,16 +435,14 @@ function DonutViz({
             <ChartTooltip
               content={<MetricTooltip series={group.series} nameKey="key" />}
             />
-            {group.series.length > 1 && (
-              <ChartLegend
-                content={
-                  <ChartLegendContent
-                    nameKey="key"
-                    className="flex-wrap gap-x-4 gap-y-1"
-                  />
-                }
-              />
-            )}
+            <ChartLegend
+              content={
+                <ChartLegendContent
+                  nameKey="key"
+                  className="flex-wrap gap-x-4 gap-y-1"
+                />
+              }
+            />
             <Pie
               data={group.series}
               dataKey="value"
@@ -446,6 +469,7 @@ function DonutViz({
 // humanizeColumn turns a result column name (first_failure_reason) into a
 // label (First failure reason).
 function humanizeColumn(name: string): string {
+  if (name === "psp") return "PSP"
   const words = name.replaceAll("_", " ").trim()
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
@@ -458,6 +482,15 @@ function TableViz({
   currency?: string
 }) {
   const { text: adminText } = useAdminUI()
+  const { adminQueries } = useAdminServices()
+  // A PSP reads as its key, for those who may read the PSPs.
+  const config = useMerchantConfig()
+  const psps = useQuery({
+    ...adminQueries.psps(),
+    // Unread PSPs leave their ids showing; the widget raises no toast.
+    meta: undefined,
+    enabled: config && result.columns.some((c) => c.name === "psp"),
+  }).data?.data
 
   const idx = indexColumns(result.columns)
   if (result.rows.length === 0)
@@ -491,7 +524,10 @@ function TableViz({
                 else if (c.kind === "measure") {
                   const currency = rowCurrency(row, idx, fallback)
                   rendered = formatMeasure(cell, c.unit, currency)
-                } else
+                } else if (c.name === "psp" && cell)
+                  rendered =
+                    psps?.find((p) => p.id === cell)?.key ?? String(cell)
+                else
                   rendered = cell === null || cell === "" ? "—" : String(cell)
                 return (
                   <TableCell
