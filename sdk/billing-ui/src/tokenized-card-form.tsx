@@ -1,9 +1,5 @@
 import * as React from "react"
-import {
-  appearanceStyle,
-  appearanceTheme,
-  type BillingAppearance,
-} from "./appearance"
+import type { BillingAppearance } from "./appearance"
 import { CardBillingFields } from "./components/billing-fields"
 import { CardFields } from "./components/card-fields"
 import { PayButton, TrustLine } from "./components/pay-button"
@@ -15,6 +11,7 @@ import {
 } from "./lib/billing"
 import { collectCardDisplay, useCollectJS } from "./lib/collect"
 import { cn } from "cn"
+import { useScopeProps } from "./scope-context"
 
 // Only tokenized billing details cross the iframe boundary. PAN/CVC are never
 // accepted by this component or handed to the host callback.
@@ -70,6 +67,9 @@ export function TokenizedCardForm({
   appearance,
   className,
 }: TokenizedCardFormProps) {
+  // Without its own appearance the form takes the provider's: the card
+  // fields' colors are read from this scope.
+  const scope = useScopeProps(appearance)
   const [keepCard, setKeepCard] = React.useState(false)
   const uid = React.useId().replace(/[^a-zA-Z0-9-]/g, "")
   const ids = React.useMemo(
@@ -160,9 +160,9 @@ export function TokenizedCardForm({
   }
   return (
     <div
-      className={cn("orck", className)}
-      data-orck-theme={appearanceTheme(appearance)}
-      style={appearanceStyle(appearance)}
+      className={cn(scope.className, className)}
+      data-orck-theme={scope["data-orck-theme"]}
+      style={scope.style}
     >
       <form
         aria-label="Secure card setup"

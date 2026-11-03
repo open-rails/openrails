@@ -1,10 +1,6 @@
 import * as React from "react"
 
-import {
-  appearanceStyle,
-  appearanceTheme,
-  type BillingAppearance,
-} from "./appearance"
+import type { BillingAppearance } from "./appearance"
 import { isBillingError } from "./client/errors"
 import { CardBillingFields } from "./components/billing-fields"
 import { PlatformCardForm } from "./components/platform-card-form"
@@ -29,6 +25,7 @@ import {
   type TokenizedCardData,
 } from "./tokenized-card-form"
 import { cn } from "cn"
+import { useScopeProps } from "./scope-context"
 
 export interface SavePaymentMethodProps {
   /** The PSP to save the card with, from OpenRails's payment config. */
@@ -49,6 +46,9 @@ export interface SavePaymentMethodProps {
  */
 export function SavePaymentMethod(props: SavePaymentMethodProps) {
   const { t } = useMessages()
+  // Without its own appearance the form takes the provider's, like the
+  // panel around it.
+  const scope = useScopeProps(props.appearance)
   const driver = cardSetupDriver(props.psp)
   if (!driver)
     return (
@@ -58,9 +58,9 @@ export function SavePaymentMethod(props: SavePaymentMethodProps) {
     )
   return (
     <div
-      className={cn("orck grid gap-4", props.className)}
-      data-orck-theme={appearanceTheme(props.appearance)}
-      style={appearanceStyle(props.appearance)}
+      className={cn(scope.className, "grid gap-4", props.className)}
+      data-orck-theme={scope["data-orck-theme"]}
+      style={scope.style}
     >
       <p className="text-sm text-muted-foreground">
         {t("paymentMethods.saveNotice")}
