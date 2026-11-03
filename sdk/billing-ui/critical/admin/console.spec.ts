@@ -236,6 +236,17 @@ test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
     await expect(page.getByRole("button", { name })).toHaveCount(0)
 
   await open(page, "/ops")
+  // At 1440, in the 1230px column a host mounts it in, the findings table
+  // fits: a long recommendation leaves Resolve on screen, not scrolled off.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.addStyleTag({
+    content: "#app { max-width: 1230px; margin: auto }",
+  })
+  await expect(
+    page
+      .getByRole("row", { name: /accounts\/nmi\/0000000/ })
+      .getByRole("button", { name: "Resolve" })
+  ).toBeInViewport({ ratio: 1 })
   await page.getByRole("button", { name: "Clear hold" }).click()
   const clear = page.getByRole("dialog")
   await clear.getByLabel("Reason (required)").fill("Reviewed the revokes")

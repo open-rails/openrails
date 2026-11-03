@@ -27,7 +27,10 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/ccbillmock"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -436,6 +439,15 @@ func TestMerchantConsole(t *testing.T) {
 		holds, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})
 		require.NoError(t, err)
 		require.Len(t, holds.Items, 1)
+		// An open finding with a long recommendation, as an undeclared PSP
+		// account raises.
+		database, err := db.NewWithPGXPool(a.pool, a.schema)
+		require.NoError(t, err)
+		require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+			_, err := (&reconcile.PGStore{DB: database, Now: a.clock.Now}).RaiseFinding(ctx, reconcile.RaisedFinding{Type: "consistency.merchant_config.undeclared_account", SubjectKey: "accounts/nmi/0000000", Severity: reconcile.SeverityHigh,
+				RecommendedAction: "accounts/nmi/0000000: nmi account 0000000 has no declared credentials but holds 2 cards in its vault, 0 subscriptions it bills itself and 0 subscriptions OpenRails renews on it; declare the account's credentials under any PSP key."})
+			return err
+		}))
 		// Someone other than the held staff member, holding root's permissions.
 		authtest.GrantRole(t, a.auth, iam.RootGroup(), iam.UserSubject(a.alice.ID), iam.RootPersona().OwnerRole())
 

@@ -152,7 +152,7 @@ function FindingsTab() {
                       {f.severity}
                     </Badge>
                   </TableCell>
-                  <TableCell className="min-w-40 text-xs [overflow-wrap:anywhere] whitespace-normal">
+                  <TableCell className="min-w-32 text-xs [overflow-wrap:anywhere] whitespace-normal">
                     {f.finding_type}
                   </TableCell>
                   <TableCell className="max-w-52 truncate text-xs">
@@ -161,10 +161,12 @@ function FindingsTab() {
                   <TableCell>
                     <StatusBadge status={f.status} />
                   </TableCell>
-                  <TableCell className="min-w-64 [overflow-wrap:anywhere] whitespace-normal">
+                  <TableCell className="min-w-48 [overflow-wrap:anywhere] whitespace-normal">
                     {f.recommendation?.action ?? f.recommended_action ?? "—"}
                   </TableCell>
-                  <TableCell>{formatDate(f.last_seen_at)}</TableCell>
+                  <TableCell className="min-w-24 whitespace-normal">
+                    {formatDate(f.last_seen_at)}
+                  </TableCell>
                   <TableCell className="text-right">
                     <FindingAction
                       finding={f}
