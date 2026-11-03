@@ -251,6 +251,16 @@ test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
       page.locator(`a[href*="/${kind}/"]`, { hasText: "Membership" })
     ).toHaveCount(1)
 
+  // Customer controls find the customer by name and offer its currencies.
+  await open(page, "/settings?tab=customer-controls")
+  await page.getByPlaceholder("Customer email, ref, or id").fill(fx.who)
+  await page.getByRole("button", { name: "Search", exact: true }).click()
+  await expect(page.getByRole("combobox", { name: "Currency" })).toContainText(
+    "USD"
+  )
+  await page.getByRole("button", { name: "Look up" }).click()
+  await expect(page.getByText("Credit and trust")).toBeVisible()
+
   await open(page, `/subscriptions/${fx.subscription}`)
   await expect(
     page.getByRole("button", { name: "Change payment method" })

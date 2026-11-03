@@ -1146,7 +1146,7 @@
     {
       "id": "OR-J38-S41",
       "journey": "J38",
-      "name": "The dashboard keeps every stat label within two lines at any column width, legends a one-rail donut and names PSPs by key; staff lists name the customer and plan, and still list by id with the directory down; a membership with no other plan offers Change subscription disabled, saying why; ending a membership from the console says the customer loses access now once End access now is ticked; an ended membership offers no plan or card change; clearing a hold confirms it and drops it from Ops; at 1440 the findings table shows Resolve unscrolled; a missing customer, subscription or payment is reported once, by its page"
+      "name": "The dashboard keeps every stat label within two lines at any column width, legends a one-rail donut and names PSPs by key; staff lists name the customer and plan, and still list by id with the directory down; customer controls find a customer by name and offer its currencies; a membership with no other plan offers Change subscription disabled, saying why; ending a membership from the console says the customer loses access now once End access now is ticked; an ended membership offers no plan or card change; clearing a hold confirms it and drops it from Ops; at 1440 the findings table shows Resolve unscrolled; a missing customer, subscription or payment is reported once, by its page"
     },
     {
       "id": "OR-J22-S06",
