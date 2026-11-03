@@ -36,6 +36,37 @@ func (s *Service) Preview(ctx context.Context, customerID uuid.UUID, lines []bil
 	return s.quote(ctx, s.DB.Gen(ctx), mid.UUID(), customerID, lines, uuid.Nil, s.now())
 }
 
+// PreviewToReplace prices the customer's own lines as FindOrCreate buys
+// them: the first refused line, when held by their open order that
+// FindOrCreate would cancel for this one, is priced as if that order were
+// gone.
+func (s *Service) PreviewToReplace(ctx context.Context, customerID uuid.UUID, lines []billing.OrderLineParams) (*Quote, error) {
+	quote, err := s.Preview(ctx, customerID, lines)
+	if err != nil {
+		return nil, err
+	}
+	i := quote.Refused()
+	if i < 0 {
+		return quote, nil
+	}
+	held, ok := (&LineError{Index: i, Refusal: *quote.Lines[i].Refusal}).HeldBy()
+	if !ok {
+		return quote, nil
+	}
+	replaceable, err := s.replaceable(ctx, customerID, held)
+	if err != nil {
+		return nil, err
+	}
+	if !replaceable {
+		return quote, nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.quote(ctx, s.DB.Gen(ctx), mid.UUID(), customerID, lines, held, s.now())
+}
+
 // CreateInput is a new order. IdempotencyKey is the request's scoped key,
 // kept on the order with the request's digest.
 type CreateInput struct {
@@ -130,15 +161,10 @@ func (s *Service) FindOrCreate(ctx context.Context, in CreateInput) (*Order, boo
 	return nil, false, errOpenOrderClosing
 }
 
-// replace cancels the customer's own open order held, reporting false when
-// it is not one of theirs that buys only what is being chosen again (another
-// origin's, a cart's other lines) or is no longer open (its payment started).
+// replace cancels the customer's own open order held when it is replaceable.
 func (s *Service) replace(ctx context.Context, customerID, held uuid.UUID) (bool, error) {
-	order, err := s.GetForCustomer(ctx, customerID, held)
-	if errors.Is(err, ErrNotFound) {
-		return false, nil
-	}
-	if err != nil || order.Origin != string(billing.OrderOriginCustomer) || len(order.Lines) != 1 {
+	replaceable, err := s.replaceable(ctx, customerID, held)
+	if err != nil || !replaceable {
 		return false, err
 	}
 	err = s.close(ctx, customerID, held, billing.OrderCanceled)
@@ -146,6 +172,22 @@ func (s *Service) replace(ctx context.Context, customerID, held uuid.UUID) (bool
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// replaceable reports whether held is the customer's own order that buys
+// only what is being chosen again and is still open for OpenRails to cancel:
+// not another origin's, a cart's other lines, or one whose payment started.
+// close rechecks it under the order's lock.
+func (s *Service) replaceable(ctx context.Context, customerID, held uuid.UUID) (bool, error) {
+	order, err := s.GetForCustomer(ctx, customerID, held)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return order.Origin == string(billing.OrderOriginCustomer) && len(order.Lines) == 1 &&
+		order.CollectionOwner == string(billing.OrderCollectionEngine) && order.Status == string(billing.OrderOpen), nil
 }
 
 var errOpenOrderClosing = apperr.New(http.StatusConflict, billing.CodeResourceConflict, "The customer's open order of these lines is closing; try again.")

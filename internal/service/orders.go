@@ -79,8 +79,16 @@ type OrderAnswer struct {
 	Replayed bool
 }
 
-// PreviewOrder prices lines for the customer without writing.
+// PreviewOrder prices lines for the customer without writing, as CreateOrder
+// would buy them: a line held by their own unpaid order that CreateOrder
+// replaces is priced as if that order were gone.
 func (s *Service) PreviewOrder(ctx context.Context, actor OrderActor, params billing.PreviewMyOrderParams) (*billing.OrderPreview, error) {
+	return s.previewOrder(ctx, actor.Customer, params, !params.Cart)
+}
+
+// previewOrder prices lines for customer; replacing prices them as
+// FindOrCreate buys them.
+func (s *Service) previewOrder(ctx context.Context, customer billing.CustomerID, params billing.PreviewMyOrderParams, replacing bool) (*billing.OrderPreview, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -90,15 +98,19 @@ func (s *Service) PreviewOrder(ctx context.Context, actor OrderActor, params bil
 	if err != nil {
 		return nil, err
 	}
-	lines, err := orderLinesOf(ctx, rt, actor.Customer, params.Lines, params.Cart)
+	lines, err := orderLinesOf(ctx, rt, customer, params.Lines, params.Cart)
 	if err != nil {
 		return nil, err
 	}
-	quote, err := rt.Orders.Preview(ctx, actor.Customer.UUID(), lines)
+	preview := rt.Orders.Preview
+	if replacing {
+		preview = rt.Orders.PreviewToReplace
+	}
+	quote, err := preview(ctx, customer.UUID(), lines)
 	if err != nil {
 		return nil, err
 	}
-	options, err := s.orderOptions(ctx, actor.Customer.UUID(), quote.Prices(), quote.Products())
+	options, err := s.orderOptions(ctx, customer.UUID(), quote.Prices(), quote.Products())
 	if err != nil {
 		return nil, err
 	}
@@ -874,7 +886,7 @@ func (s *Service) PreviewMerchantOrder(ctx context.Context, params billing.Previ
 	if params.CustomerID.IsZero() {
 		return nil, apperr.Invalidf("customer_id required").WithParam("customer_id")
 	}
-	return s.PreviewOrder(ctx, OrderActor{Customer: params.CustomerID}, billing.PreviewMyOrderParams{Lines: params.Lines})
+	return s.previewOrder(ctx, params.CustomerID, billing.PreviewMyOrderParams{Lines: params.Lines}, false)
 }
 
 // CreateMerchantOrder creates an unpaid order for a customer. key is the

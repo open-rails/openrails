@@ -114,6 +114,34 @@ func TestCheckoutBoundaries(t *testing.T) {
 		_, again := buy(cheap.ID, 500_000, declined, "nmi-decline-zip-unmatched")
 		require.Equal(t, first.ID, again.ID, "the same price pays the same order")
 		require.Equal(t, string(billing.DeclineIncorrectZip), again.Payment.LastPaymentError.Reason, "an unmatched ZIP is named")
+		// The preview agrees: the customer's unpaid order is no conflict for
+		// another price, but still one for the merchant, who replaces nothing.
+		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/preview", nmi.aliceToken, billing.PreviewMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: dear.ID}}})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var preview billing.OrderPreview
+		require.NoError(t, json.Unmarshal(raw, &preview))
+		require.Nil(t, preview.Lines[0].Refusal, "the unpaid order of the other price is replaced")
+		require.EqualValues(t, 23_000_000, preview.Total)
+		require.NotEmpty(t, preview.PaymentOptions)
+		aliceID := billing.CustomerID(uuid.MustParse(nmi.alice.ID))
+		merchantPreview, err := nmi.alphaRemote.PreviewOrder(t.Context(), billing.PreviewOrderParams{CustomerID: aliceID, Lines: []billing.OrderLineParams{{PriceID: dear.ID}}})
+		require.NoError(t, err)
+		require.NotNil(t, merchantPreview.Lines[0].Refusal)
+		require.Equal(t, "already_owned", merchantPreview.Lines[0].Refusal.Code)
+		// An order the merchant made is not the customer's to replace.
+		extra, err := nmi.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-extra", DisplayName: "NMI extra", Entitlements: []string{"extra:owned"}})
+		require.NoError(t, err)
+		extraA, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: extra.ID, Key: "nmi-extra-a", UnitAmount: 500_000, Currency: "USD"})
+		require.NoError(t, err)
+		extraB, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: extra.ID, Key: "nmi-extra-b", UnitAmount: 900_000, Currency: "USD"})
+		require.NoError(t, err)
+		_, err = nmi.alphaRemote.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: aliceID, Lines: []billing.OrderLineParams{{PriceID: extraA.ID}}, IdempotencyKey: "nmi-merchant-extra"})
+		require.NoError(t, err)
+		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/preview", nmi.aliceToken, billing.PreviewMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: extraB.ID}}})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.NoError(t, json.Unmarshal(raw, &preview))
+		require.NotNil(t, preview.Lines[0].Refusal, "the merchant's order still holds it")
+		require.Equal(t, "already_owned", preview.Lines[0].Refusal.Code)
 		// Another price, by BuyButton's two calls, then by one: each pays the
 		// price chosen and releases the unpaid order of the other.
 		_, other := buy(dear.ID, 23_000_000, declined, "nmi-other-price")
