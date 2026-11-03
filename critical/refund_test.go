@@ -7,7 +7,12 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,13 +32,31 @@ func TestRefunds(t *testing.T) {
 		require.Equal(t, billing.PaymentRefund, first.Kind)
 		require.EqualValues(t, -10_000_000, first.Amount)
 		require.Equal(t, paymentID, *first.RefundedPaymentID)
+		require.NotNil(t, first.Card, "a refund names the card it returns money to")
+		require.Equal(t, "visa", *first.Card.Brand)
+		require.Equal(t, "4242", *first.Card.Last4)
 		replay, err := a.alpha.RefundPayment(t.Context(), paymentID, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Partial customer refund", IdempotencyKey: "partial-refund"})
 		require.NoError(t, err)
 		require.Equal(t, first.ID, replay.ID)
+		// A charge whose card Stripe has not named yet: its refund learns the
+		// card with the charge.
+		paid, err := a.alpha.GetPayment(t.Context(), paymentID)
+		require.NoError(t, err)
+		_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "payments"}.Sanitize()+" SET card_brand = NULL, card_last4 = NULL WHERE merchant_id = $1 AND id = $2", a.alpha.MerchantID().UUID(), paymentID.UUID())
+		require.NoError(t, err)
 		final, err := a.alpha.RefundPayment(t.Context(), paymentID, billing.RefundPaymentParams{Full: true, Reason: "Refund remaining balance", IdempotencyKey: "final-refund"})
 		require.NoError(t, err)
 		require.Equal(t, billing.PaymentSucceeded, final.Status)
 		require.EqualValues(t, -20_000_000, final.Amount)
+		require.Nil(t, final.Card)
+		database, err := db.NewWithPGXPool(a.pool, a.schema)
+		require.NoError(t, err)
+		ctx := db.WithPSPID(merchant.WithID(t.Context(), a.alpha.MerchantID()), final.PSPID.UUID())
+		require.NoError(t, payments.SnapshotPaymentCard(ctx, database, []string{paid.TransactionID}, &models.Card{Brand: "visa", Last4: "4242"}))
+		final, err = a.alpha.GetPayment(t.Context(), final.ID)
+		require.NoError(t, err)
+		require.NotNil(t, final.Card, "the late card snapshot reaches the charge's refunds")
+		require.Equal(t, "4242", *final.Card.Last4)
 		charge, err := a.alpha.GetPayment(t.Context(), paymentID)
 		require.NoError(t, err)
 		require.Equal(t, billing.PaymentRefunded, charge.Status)

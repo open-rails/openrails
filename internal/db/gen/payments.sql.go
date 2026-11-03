@@ -1402,7 +1402,13 @@ SET card_brand = $1::text,
     card_last4 = $2::text
 WHERE merchant_id = $3::uuid AND psp_id = $4::uuid
   AND rail = 'stripe'
-  AND transaction_id = ANY($5::text[])
+  AND (transaction_id = ANY($5::text[])
+    OR refunded_payment_id IN (
+      SELECT charge.id FROM billing.payments charge
+      WHERE charge.merchant_id = $3::uuid AND charge.psp_id = $4::uuid
+        AND charge.rail = 'stripe'
+        AND charge.transaction_id = ANY($5::text[])
+        AND charge.deleted_at IS NULL))
   AND card_last4 IS NULL
   AND deleted_at IS NULL
 `
@@ -1415,7 +1421,8 @@ type SnapshotPaymentCardsParams struct {
 	TransactionIds []string
 }
 
-// Backfill a card snapshot onto Stripe payments that still lack one.
+// Fill a card snapshot onto Stripe payments, and the refunds of them, that
+// still lack one.
 func (q *Queries) SnapshotPaymentCards(ctx context.Context, arg SnapshotPaymentCardsParams) error {
 	_, err := q.db.Exec(ctx, snapshotPaymentCards,
 		arg.CardBrand,

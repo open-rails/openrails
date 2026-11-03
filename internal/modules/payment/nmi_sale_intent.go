@@ -194,6 +194,14 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 		} else if errors.As(callErr, &refusal) {
 			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse, "decline_transaction_id": refusal.TransactionID}
 			reason = "sale declined"
+			// A new card is known only to NMI: its report names the card tried.
+			if p.Token != "" && refusal.TransactionID != "" {
+				if brand, last4, err := client.TransactionCard(ctx, refusal.TransactionID); err != nil {
+					log.WithContext(ctx).WithError(err).WithField("transaction_id", refusal.TransactionID).Warn("read the declined new card")
+				} else {
+					evidence["card_brand"], evidence["card_last4"] = brand, last4
+				}
+			}
 			// A declined card is no stored credential: drop a vault the
 			// sale asked for and the gateway made anyway.
 			if params.SaveCard != nil && refusal.CustomerVaultID != "" {
@@ -601,7 +609,8 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 				avs, _ := evidence["avs_response"].(string)
 				cvv, _ := evidence["cvv_response"].(string)
 				transaction, _ := evidence["decline_transaction_id"].(string)
-				if err := recordSaleAttempt(ctx, d, in, p, customer, &p.PaymentMethodID, attempts.Attempt{Answer: decline.Evidence{Code: code, AVS: avs, CVV: cvv}, TransactionID: transaction}, now); err != nil {
+				answer := decline.Evidence{Code: code, AVS: avs, CVV: cvv, CardBrand: evidenceText(evidence, "card_brand"), CardLast4: evidenceText(evidence, "card_last4")}
+				if err := recordSaleAttempt(ctx, d, in, p, customer, &p.PaymentMethodID, attempts.Attempt{Answer: answer, TransactionID: transaction}, now); err != nil {
 					return err
 				}
 			}
@@ -673,7 +682,7 @@ func nmiSaleRefusal(ctx context.Context, client *nmi.NMIClient, orderID string) 
 
 // nmiSaleDeclineEvidence is a sale's refusal as NMI's order search shows it.
 func nmiSaleDeclineEvidence(order nmi.OrderAttempts) map[string]any {
-	return map[string]any{"declined": true, "response_code": order.DeclineCode, "localization_id": decline.NMILocalizationID(order.DeclineCode), "decline_transaction_id": order.DeclineTransactionID}
+	return map[string]any{"declined": true, "response_code": order.DeclineCode, "localization_id": decline.NMILocalizationID(order.DeclineCode), "decline_transaction_id": order.DeclineTransactionID, "card_brand": order.DeclineCardBrand, "card_last4": order.DeclineCardLast4}
 }
 
 // The persisted row retains custody. Runner diagnostics/pruning receive only

@@ -111,6 +111,12 @@ func TestCheckoutBoundaries(t *testing.T) {
 		declined.AVS = "Z" // the ZIP matched; no street was sent
 		_, first := buy(cheap.ID, 500_000, declined, "nmi-decline-zip-matched")
 		require.Equal(t, string(billing.DeclineGeneric), first.Payment.LastPaymentError.Reason, "a matched ZIP is no address fault")
+		tried, err := nmi.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{OrderID: first.ID})
+		require.NoError(t, err)
+		require.Len(t, tried.Items, 1)
+		require.NotNil(t, tried.Items[0].Card, "the declined new card is named from NMI's report")
+		require.Equal(t, "visa", *tried.Items[0].Card.Brand)
+		require.Equal(t, "1111", *tried.Items[0].Card.Last4)
 		declined.AVS = "N"
 		_, again := buy(cheap.ID, 500_000, declined, "nmi-decline-zip-unmatched")
 		require.Equal(t, first.ID, again.ID, "the same price pays the same order")
