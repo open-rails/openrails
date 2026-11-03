@@ -261,6 +261,10 @@ export const ko: BillingUiMessageBundle = {
       "결제 기능을 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.",
     internal_error: "시스템에 문제가 발생했습니다. 다시 시도하세요.",
     card_declined: "카드가 거절되었습니다.",
+    ccbill_email_required: "CCBill로 결제하려면 이메일을 인증하세요.",
+    ccbill_username_required: "CCBill로 결제하려면 사용자 이름을 설정하세요.",
+    customer_email_required:
+      "CCBill로 결제하려면 이메일을 인증하고 사용자 이름을 설정하세요.",
     payment_provider_rejected: "결제 대행사가 요청을 거절했습니다.",
     provider_outcome_unknown:
       "제공업체에서 결과를 확인하지 못했습니다. 잠시 후 다시 확인하세요.",

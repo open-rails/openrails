@@ -1479,6 +1479,7 @@ export type OrderPaymentOption = {
   rail: string
   accepts: string[]
   failed_attempts: number
+  requires?: string[]
 }
 
 export type OrderPaymentParams = {

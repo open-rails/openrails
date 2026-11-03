@@ -264,6 +264,10 @@ export const en = {
     service_unavailable: "Billing is temporarily unavailable. Try again soon.",
     internal_error: "Something went wrong on our side. Please try again.",
     card_declined: "The card was declined.",
+    ccbill_email_required: "Verify your email to pay with CCBill.",
+    ccbill_username_required: "Set a username to pay with CCBill.",
+    customer_email_required:
+      "Verify your email and set a username to pay with CCBill.",
     payment_provider_rejected: "The payment provider rejected the request.",
     provider_outcome_unknown:
       "We couldn't confirm the result with the provider. Check again shortly.",

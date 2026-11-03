@@ -83,12 +83,12 @@ type OrderAnswer struct {
 // would buy them: a line held by their own unpaid order that CreateOrder
 // replaces is priced as if that order were gone.
 func (s *Service) PreviewOrder(ctx context.Context, actor OrderActor, params billing.PreviewMyOrderParams) (*billing.OrderPreview, error) {
-	return s.previewOrder(ctx, actor.Customer, params, !params.Cart)
+	return s.previewOrder(ctx, actor.Customer, &actor, params, !params.Cart)
 }
 
 // previewOrder prices lines for customer; replacing prices them as
 // FindOrCreate buys them.
-func (s *Service) previewOrder(ctx context.Context, customer billing.CustomerID, params billing.PreviewMyOrderParams, replacing bool) (*billing.OrderPreview, error) {
+func (s *Service) previewOrder(ctx context.Context, customer billing.CustomerID, payer *OrderActor, params billing.PreviewMyOrderParams, replacing bool) (*billing.OrderPreview, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -110,7 +110,7 @@ func (s *Service) previewOrder(ctx context.Context, customer billing.CustomerID,
 	if err != nil {
 		return nil, err
 	}
-	options, err := s.orderOptions(ctx, customer.UUID(), quote.Prices(), quote.Products())
+	options, err := s.orderOptions(ctx, customer.UUID(), payer, quote.Prices(), quote.Products())
 	if err != nil {
 		return nil, err
 	}
@@ -665,7 +665,7 @@ func (s *Service) orderView(ctx context.Context, rt *orderRuntime, actor OrderAc
 			return nil, err
 		}
 	}
-	options, err := s.openOrderOptions(ctx, order)
+	options, err := s.openOrderOptions(ctx, order, &actor)
 	if err != nil {
 		return nil, err
 	}
@@ -675,7 +675,7 @@ func (s *Service) orderView(ctx context.Context, rt *orderRuntime, actor OrderAc
 
 // openOrderOptions are what can pay an open order, each with the order's
 // failed attempts through it; none for any other order.
-func (s *Service) openOrderOptions(ctx context.Context, order *orders.Order) ([]billing.OrderPaymentOption, error) {
+func (s *Service) openOrderOptions(ctx context.Context, order *orders.Order, payer *OrderActor) ([]billing.OrderPaymentOption, error) {
 	var options []billing.OrderPaymentOption
 	var err error
 	switch {
@@ -690,7 +690,7 @@ func (s *Service) openOrderOptions(ctx context.Context, order *orders.Order) ([]
 	default:
 		var quote frozenLines
 		if quote, err = s.frozenQuote(ctx, order); err == nil {
-			options, err = s.orderOptions(ctx, order.CustomerID, quote.prices, quote.products)
+			options, err = s.orderOptions(ctx, order.CustomerID, payer, quote.prices, quote.products)
 		}
 	}
 	if err != nil || len(options) == 0 {
@@ -731,8 +731,9 @@ func (s *Service) frozenQuote(ctx context.Context, order *orders.Order) (frozenL
 	return out, nil
 }
 
-// orderOptions are the PSPs that sell the lines.
-func (s *Service) orderOptions(ctx context.Context, customer uuid.UUID, prices []*models.Price, products []*models.Product) ([]billing.OrderPaymentOption, error) {
+// orderOptions are the PSPs that sell the lines. For payer, the customer
+// reading them, a CCBill option names what its page still needs (identify).
+func (s *Service) orderOptions(ctx context.Context, customer uuid.UUID, payer *OrderActor, prices []*models.Price, products []*models.Product) ([]billing.OrderPaymentOption, error) {
 	if page, ok := paymentpage.FromContext(ctx); ok && !page.SavedPaymentMethods {
 		customer = uuid.Nil
 	}
@@ -746,7 +747,18 @@ func (s *Service) orderOptions(ctx context.Context, customer uuid.UUID, prices [
 		for _, id := range o.SavedPaymentMethodIDs {
 			saved = append(saved, billing.PaymentMethodID(id))
 		}
-		out = append(out, billing.OrderPaymentOption{PSPID: billing.PSPID(o.PSPID), Rail: o.Rail, Accepts: o.Accepts(), SavedPaymentMethodIDs: saved})
+		option := billing.OrderPaymentOption{PSPID: billing.PSPID(o.PSPID), Rail: o.Rail, Accepts: o.Accepts(), SavedPaymentMethodIDs: saved}
+		if payer != nil && o.Rail == string(models.RailCCBill) {
+			// A hint only: paying checks again, so a directory outage
+			// leaves the option without it rather than failing the read.
+			user := &payment.UserIdentity{ID: payer.Customer.String()}
+			if err := s.identify(ctx, *payer, user); err != nil {
+				log.WithContext(ctx).WithError(err).WithField("customer_id", payer.Customer.String()).Warn("ccbill option: cannot read the customer's identity")
+			} else {
+				option.Requires = payment.CCBillIdentityMissing(user)
+			}
+		}
+		out = append(out, option)
 	}
 	return out, nil
 }
@@ -886,7 +898,7 @@ func (s *Service) PreviewMerchantOrder(ctx context.Context, params billing.Previ
 	if params.CustomerID.IsZero() {
 		return nil, apperr.Invalidf("customer_id required").WithParam("customer_id")
 	}
-	return s.previewOrder(ctx, params.CustomerID, billing.PreviewMyOrderParams{Lines: params.Lines}, false)
+	return s.previewOrder(ctx, params.CustomerID, nil, billing.PreviewMyOrderParams{Lines: params.Lines}, false)
 }
 
 // CreateMerchantOrder creates an unpaid order for a customer. key is the
@@ -1117,7 +1129,7 @@ func (s *Service) CancelMerchantOrder(ctx context.Context, id billing.OrderID) (
 // merchantOrderView is an order as the merchant reads it: what can pay it,
 // never a next action (only its customer pays).
 func (s *Service) merchantOrderView(ctx context.Context, order *orders.Order) (*billing.Order, error) {
-	options, err := s.openOrderOptions(ctx, order)
+	options, err := s.openOrderOptions(ctx, order, nil)
 	if err != nil {
 		return nil, err
 	}

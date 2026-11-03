@@ -272,6 +272,10 @@ export const es: BillingUiMessageBundle = {
       "La facturación no está disponible temporalmente. Inténtalo pronto.",
     internal_error: "Algo falló de nuestro lado. Inténtalo de nuevo.",
     card_declined: "La tarjeta fue rechazada.",
+    ccbill_email_required: "Verifica tu correo electrónico para pagar con CCBill.",
+    ccbill_username_required: "Elige un nombre de usuario para pagar con CCBill.",
+    customer_email_required:
+      "Verifica tu correo electrónico y elige un nombre de usuario para pagar con CCBill.",
     payment_provider_rejected: "El proveedor de pagos rechazó la solicitud.",
     provider_outcome_unknown:
       "No pudimos confirmar el resultado con el proveedor. Vuelve a comprobarlo en breve.",

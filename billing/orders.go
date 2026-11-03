@@ -316,6 +316,10 @@ type OrderPaymentOption struct {
 	Rail                  string            `json:"rail"`
 	Accepts               []string          `json:"accepts"`
 	FailedAttempts        int               `json:"failed_attempts"`
+	// Requires is what the customer must add before this PSP can take the
+	// order: "verified_email" and "username" for a CCBill page. Omitted when
+	// nothing is missing, and on the merchant's reads.
+	Requires []string `json:"requires,omitempty"`
 }
 
 // OrderPreview prices lines as an order would freeze them.

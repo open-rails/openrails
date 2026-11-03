@@ -18665,6 +18665,12 @@
           },
           "failed_attempts": {
             "type": "integer"
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [

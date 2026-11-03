@@ -385,6 +385,8 @@ export const orderSchema = z.object({
           .number()
           .nullish()
           .transform((v) => v ?? 0),
+        /** What the customer must add before the PSP takes the order. */
+        requires: z.array(z.string()).optional(),
       })
     )
     .nullish()

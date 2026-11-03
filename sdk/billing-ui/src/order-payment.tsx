@@ -705,22 +705,44 @@ export function OrderPayment({
               <p className="text-[13px] text-muted-foreground">
                 Card payment isn&apos;t working?
               </p>
-              {revealed.map((item) => (
-                <button
-                  key={item.psp_id}
-                  type="button"
-                  className="h-9 rounded-md border border-border text-sm"
-                  disabled={busy || !open || !!pendingSaved}
-                  onClick={() =>
-                    void pay(async () => ({
-                      return_url: returnUrl ?? window.location.href,
-                      psp_id: item.psp_id,
-                    }))
-                  }
-                >
-                  Pay with {item.display_name}
-                </button>
-              ))}
+              {revealed.map((item) => {
+                // A CCBill page names the customer; one it cannot name yet
+                // says what to add first.
+                const requires =
+                  options.find((option) => option.psp_id === item.psp_id)
+                    ?.requires ?? []
+                const blocked = requires.length > 0
+                const reason = `${item.psp_id}-requires`
+                return (
+                  <React.Fragment key={item.psp_id}>
+                    <button
+                      type="button"
+                      className="h-9 rounded-md border border-border text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={busy || !open || !!pendingSaved || blocked}
+                      aria-describedby={blocked ? reason : undefined}
+                      onClick={() =>
+                        void pay(async () => ({
+                          return_url: returnUrl ?? window.location.href,
+                          psp_id: item.psp_id,
+                        }))
+                      }
+                    >
+                      Pay with {item.display_name}
+                    </button>
+                    {blocked ? (
+                      <p id={reason} className="text-[13px] text-muted-foreground">
+                        {m.t(
+                          requires.length > 1
+                            ? "errors.customer_email_required"
+                            : requires[0] === "username"
+                              ? "errors.ccbill_username_required"
+                              : "errors.ccbill_email_required"
+                        )}
+                      </p>
+                    ) : null}
+                  </React.Fragment>
+                )
+              })}
             </div>
           ) : null}
           {solana && tokens.length > 0 ? (
