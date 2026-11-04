@@ -172,10 +172,13 @@ const (
 // Order is one bill with frozen lines and total. Its collection owner decides
 // how it is paid; its id is not a credential.
 type Order struct {
-	ID         OrderID     `json:"id"`
-	CustomerID CustomerID  `json:"customer_id"`
-	Origin     OrderOrigin `json:"origin"`
-	Status     OrderStatus `json:"status"`
+	ID         OrderID    `json:"id"`
+	CustomerID CustomerID `json:"customer_id"`
+	// CustomerContact is the customer's directory contact on a staff list;
+	// absent when the directory holds none or could not answer.
+	CustomerContact *CustomerContact `json:"customer_contact,omitempty"`
+	Origin          OrderOrigin      `json:"origin"`
+	Status          OrderStatus      `json:"status"`
 	// CollectionOwner is frozen when the bill is accepted. Only engine
 	// orders accept generic pay, confirm and remittance commands.
 	CollectionOwner OrderCollectionOwner `json:"collection_owner"`
@@ -316,6 +319,10 @@ type OrderPaymentOption struct {
 	Rail                  string            `json:"rail"`
 	Accepts               []string          `json:"accepts"`
 	FailedAttempts        int               `json:"failed_attempts"`
+	// Requires is what the customer must add before this PSP can take the
+	// order: "verified_email" and "username" for a CCBill page. Omitted when
+	// nothing is missing, and on the merchant's reads.
+	Requires []string `json:"requires,omitempty"`
 }
 
 // OrderPreview prices lines as an order would freeze them.

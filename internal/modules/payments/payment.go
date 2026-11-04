@@ -280,6 +280,8 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 		Amount:        -amount,
 		ListAmount:    orig.ListAmount,
 		Currency:      orig.Currency,
+		CardBrand:     orig.CardBrand,
+		CardLast4:     orig.CardLast4,
 		Status:        PaymentStatusSucceededValue,
 		ReversalKind:  &reversalKind,
 		// The reversal settled at the rail; the feed excludes it on
@@ -354,6 +356,8 @@ func (s *PaymentService) reserveRefundLocked(ctx context.Context, originalPaymen
 		Amount:        -amount,
 		ListAmount:    orig.ListAmount,
 		Currency:      orig.Currency,
+		CardBrand:     orig.CardBrand,
+		CardLast4:     orig.CardLast4,
 		Status:        PaymentStatusPendingValue,
 		ReversalKind:  &kind,
 		Metadata:      metadata,
@@ -648,5 +652,5 @@ func (s *PaymentService) ApplyRefundAccessPolicy(ctx context.Context, paymentID 
 	if err != nil || !revoke {
 		return err
 	}
-	return entitlements.NewEntitlementService(s.repo.db, s.clock).RevokeRefundedPaymentAccess(ctx, paymentID)
+	return entitlements.NewEntitlementService(s.repo.db, s.clock).RevokeRefundedPaymentAccess(ctx, paymentID, "")
 }

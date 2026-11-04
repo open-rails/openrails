@@ -42,14 +42,17 @@ const (
 // positive for a charge or dispute reversal, negative for a refund or
 // chargeback. Rail and PSPID are null off-rail.
 type Payment struct {
-	ID             PaymentID       `json:"id"`
-	Kind           PaymentKind     `json:"kind"`
-	Status         PaymentStatus   `json:"status"`
-	Amount         int64           `json:"amount,string"`
-	AmountRefunded int64           `json:"amount_refunded,string"`
-	Currency       string          `json:"currency"`
-	CustomerID     CustomerID      `json:"customer_id"`
-	SubscriptionID *SubscriptionID `json:"subscription_id"`
+	ID             PaymentID     `json:"id"`
+	Kind           PaymentKind   `json:"kind"`
+	Status         PaymentStatus `json:"status"`
+	Amount         int64         `json:"amount,string"`
+	AmountRefunded int64         `json:"amount_refunded,string"`
+	Currency       string        `json:"currency"`
+	CustomerID     CustomerID    `json:"customer_id"`
+	// CustomerContact is the customer's directory contact on a staff list;
+	// absent when the directory holds none or could not answer.
+	CustomerContact *CustomerContact `json:"customer_contact,omitempty"`
+	SubscriptionID  *SubscriptionID  `json:"subscription_id"`
 	// OrderID is the order the charge paid; its lines say what it bought.
 	OrderID *OrderID `json:"order_id"`
 	// Quantity is the seats a subscription payment billed; null on a payment

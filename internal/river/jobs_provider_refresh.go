@@ -89,8 +89,8 @@ type refreshJobInserter interface {
 
 // ProviderRefreshSchedulerWorker is the periodic umbrella: it enqueues one
 // refresh job per active merchant that has a PSP, spread evenly over Stagger.
-// River supplies per-merchant error isolation and retries; the bounded queue
-// caps refresh concurrency.
+// River supplies per-merchant error isolation; the next pass resumes a
+// merchant's incomplete refresh. The bounded queue caps refresh concurrency.
 type ProviderRefreshSchedulerWorker struct {
 	WorkerDefaults[ProviderRefreshArgs]
 	DB     *db.DB
@@ -332,15 +332,17 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	if stats.More {
 		return river.JobSnooze(time.Second)
 	}
-	if stats.ProviderErrors+stats.WatermarkErrors+stats.LaneErrors+stats.ConvergeErrors > 0 {
-		return fmt.Errorf("provider refresh incomplete: provider=%d watermark=%d lane=%d converge=%d",
-			stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors, stats.ConvergeErrors)
-	}
 	if stats.Held > 0 && stats.NewFindings > 0 {
 		// Findings this pass raised may be stale: a concurrent verifier or
 		// webhook can record the receipt after the read. One more pass tells
 		// them from findings that stand (it raises none new).
 		return river.JobSnooze(time.Second)
+	}
+	if stats.ProviderErrors+stats.WatermarkErrors+stats.LaneErrors+stats.ConvergeErrors > 0 {
+		// The next scheduled pass is the retry: watermarks resume the work, and
+		// a retrying job would hold the merchant's unique slot from it.
+		logger.Warn("Provider Refresh: pass incomplete; the next scheduled pass resumes it")
+		return nil
 	}
 	if stats.Held > 0 {
 		// Every read completed. Unresolved financial observations remain in

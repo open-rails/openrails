@@ -1,12 +1,45 @@
 package handlers
 
 import (
+	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
+
+// customerContacts are the directory contacts of a staff list's customers,
+// in one lookup. A directory that cannot answer leaves them out: the list
+// still loads, each row naming its customer by id.
+func customerContacts(r *httprequest.Request, customers []billing.CustomerID) map[billing.CustomerID]*billing.CustomerContact {
+	ctx := r.Request.Context()
+	mid, err := merchant.Require(ctx)
+	if r.State.Contacts == nil || len(customers) == 0 || err != nil {
+		return nil
+	}
+	seen := map[billing.CustomerID]bool{}
+	var ids []uuid.UUID
+	for _, id := range customers {
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id.UUID())
+		}
+	}
+	found, err := r.State.Contacts.Contacts(ctx, mid, ids)
+	if err != nil {
+		log.WithContext(ctx).WithError(err).Warn("list customer contacts unavailable")
+		return nil
+	}
+	out := make(map[billing.CustomerID]*billing.CustomerContact, len(found))
+	for id, contact := range found {
+		out[billing.CustomerID(id)] = contact.Customer()
+	}
+	return out
+}
 
 type adminSubscriptionPath struct {
 	SubscriptionID string `uri:"id" binding:"required"`
@@ -39,9 +72,18 @@ func GetAdminSubscriptions(r *httprequest.Request) {
 		return
 	}
 	now := r.Clock.Now()
-	writeSubscriptions(r, pagination.Map(subs, func(sub *subscriptions.AdminSubscriptionResponse) billing.Subscription {
+	out := pagination.Map(subs, func(sub *subscriptions.AdminSubscriptionResponse) billing.Subscription {
 		return subscriptionView(sub, now)
-	}))
+	})
+	customers := make([]billing.CustomerID, len(out.Items))
+	for i, sub := range out.Items {
+		customers[i] = sub.CustomerID
+	}
+	contacts := customerContacts(r, customers)
+	for i := range out.Items {
+		out.Items[i].CustomerContact = contacts[out.Items[i].CustomerID]
+	}
+	writeSubscriptions(r, out)
 }
 
 func GetAdminSubscription(r *httprequest.Request) {

@@ -2,6 +2,8 @@ import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
 import { useAdminContext } from "#orck/admin/context"
 import { useAdminServices } from "#orck/admin/context"
 import * as React from "react"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { Cancel01Icon } from "@hugeicons/core-free-icons"
 import { useSearchParams } from "#orck/admin/router"
 
 import { useForm } from "@tanstack/react-form"
@@ -45,6 +47,7 @@ import {
   TabsTrigger,
 } from "#orck/admin/components/ui/tabs"
 import type {
+  Customer,
   MerchantConfigurationState,
   PSP,
   PSPCredential,
@@ -53,10 +56,13 @@ import type {
 import {
   amountFromInput,
   currencyScale,
+  customerName,
   formatDate,
   formatNativeAmount,
 } from "#orck/admin/lib/format"
 import { DIALOG_FORM } from "#orck/admin/lib/dialog-width"
+import { CustomerSearch } from "#orck/admin/components/customer-search"
+import { OPENRAILS_CURRENCY_SCALES } from "#orck/client/generated/currencies"
 
 import { ApiError } from "#orck/admin/lib/api/client"
 
@@ -1347,7 +1353,8 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
 }
 
 function CustomerControlsTab() {
-  const { toast, toastApiError, adminMutations } = useAdminServices()
+  const { toast, toastApiError, adminMutations, adminQueries } =
+    useAdminServices()
 
   const { text: adminText, id: adminId } = useAdminUI()
 
@@ -1384,17 +1391,36 @@ function CustomerControlsTab() {
       }
     },
   })
+  // A customer is found by name or email. Its credit limit and trust level
+  // are per currency: those the merchant bills usage in, and those the
+  // customer already holds money or settings in; with neither yet, any
+  // registered currency, so a first limit can be set.
+  const [customer, setCustomer] = React.useState<Customer>()
+  const { data: configuration } = useQuery(adminQueries.merchantConfiguration())
+  const known = [
+    ...new Set(
+      [
+        ...(configuration?.usage_billing?.currencies ?? []),
+        ...(customer?.balances ?? []),
+        ...(customer?.settings.credit_limits ?? []),
+        ...(customer?.settings.trust_levels ?? []),
+      ].map((c) => c.currency.toUpperCase())
+    ),
+  ].sort()
+  const currencies = known.length
+    ? known
+    : Object.keys(OPENRAILS_CURRENCY_SCALES).sort()
   const lookupForm = useForm({
-    defaultValues: { customerID: "", currency: "usd" },
+    defaultValues: { currency: "" },
     onSubmit: async ({ value }) => {
-      const customerID = value.customerID.trim()
-      const currency = value.currency.trim().toLowerCase()
+      const currency = value.currency || currencies[0]
+      if (!customer || !currency) return
       try {
         const controls = await lookupControls.mutateAsync({
-          customerId: customerID,
+          customerId: customer.id,
           currency,
         })
-        setResult({ customerID, ...controls })
+        setResult({ customerID: customer.id, ...controls })
         creditForm.reset()
       } catch (err) {
         toastApiError(err, "Lookup customer controls")
@@ -1402,6 +1428,13 @@ function CustomerControlsTab() {
       }
     },
   })
+
+  // Another customer has other currencies: the choice starts over.
+  const pick = (next?: Customer) => {
+    setCustomer(next)
+    setResult(undefined)
+    lookupForm.reset()
+  }
 
   return (
     <div className="grid gap-10">
@@ -1411,91 +1444,90 @@ function CustomerControlsTab() {
             <AdminMessage id={"Customer lookup"} />
           </h2>
           <p className="text-sm text-muted-foreground">
-            <AdminMessage id={"Find a customer by ID and currency."} />
+            <AdminMessage
+              id={"Find a customer by name or email, then pick a currency."}
+            />
           </p>
         </div>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            void lookupForm.handleSubmit()
-          }}
-          className="grid gap-4 md:grid-cols-[minmax(0,1fr)_10rem_auto] md:items-end"
-        >
-          <lookupForm.Field
-            name="customerID"
-            validators={{
-              onChange: ({ value }) =>
-                value.trim() ? undefined : "Enter a customer ID",
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_10rem_auto] md:items-end">
+          <div className="grid gap-1.5">
+            <Label>
+              <AdminMessage id={"Customer"} />
+            </Label>
+            {customer ? (
+              <span className="inline-flex h-8 w-fit max-w-full items-center gap-1 rounded-md bg-muted pr-1 pl-2 text-sm font-medium">
+                <span className="truncate">{customerName(customer)}</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-5"
+                  aria-label={adminText("Clear customer")}
+                  onClick={() => pick(undefined)}
+                >
+                  <HugeiconsIcon icon={Cancel01Icon} className="size-3" />
+                </Button>
+              </span>
+            ) : (
+              <CustomerSearch onPick={pick} />
+            )}
+          </div>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              void lookupForm.handleSubmit()
             }}
+            className="contents"
           >
-            {(field) => (
-              <Field
-                label={adminText("Customer ID")}
-                id={"customer-controls-id"}
-              >
-                <Input
-                  id={adminId("customer-controls-id")}
-                  placeholder={adminText("Customer UUID")}
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  aria-invalid={field.state.meta.errors.length > 0}
-                />
-                <FormFieldErrors errors={field.state.meta.errors} />
-              </Field>
-            )}
-          </lookupForm.Field>
-          <lookupForm.Field
-            name="currency"
-            validators={{
-              onChange: ({ value }) =>
-                value.trim() ? undefined : "Enter a currency",
-            }}
-          >
-            {(field) => (
-              <Field
-                label={adminText("Currency")}
-                id={"customer-controls-currency"}
-              >
-                <Input
-                  id={adminId("customer-controls-currency")}
-                  placeholder={adminText("USD")}
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  aria-invalid={field.state.meta.errors.length > 0}
-                />
-                <FormFieldErrors errors={field.state.meta.errors} />
-              </Field>
-            )}
-          </lookupForm.Field>
-          <lookupForm.Subscribe
-            selector={(state) =>
-              [
-                state.values.customerID,
-                state.values.currency,
-                state.canSubmit,
-                state.isSubmitting,
-              ] as const
-            }
-          >
-            {([customerID, currency, canSubmit, isSubmitting]) => (
-              <Button
-                type="submit"
-                variant="outline"
-                disabled={
-                  !customerID.trim() ||
-                  !currency.trim() ||
-                  !canSubmit ||
-                  isSubmitting
-                }
-              >
-                {isSubmitting ? "Looking up…" : "Look up"}
-              </Button>
-            )}
-          </lookupForm.Subscribe>
-        </form>
+            <lookupForm.Field name="currency">
+              {(field) => (
+                <Field
+                  label={adminText("Currency")}
+                  id={"customer-controls-currency"}
+                >
+                  <Select
+                    items={currencies.map((code) => ({
+                      value: code,
+                      label: code,
+                    }))}
+                    value={field.state.value || currencies[0] || null}
+                    onValueChange={(value) => field.handleChange(value ?? "")}
+                  >
+                    <SelectTrigger
+                      id={adminId("customer-controls-currency")}
+                      className="w-full"
+                      disabled={currencies.length === 0}
+                    >
+                      <SelectValue
+                        placeholder={adminText(
+                          customer ? "No currency yet" : "Pick a customer first"
+                        )}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currencies.map((code) => (
+                        <SelectItem key={code} value={code}>
+                          {code}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+            </lookupForm.Field>
+            <lookupForm.Subscribe selector={(state) => state.isSubmitting}>
+              {(isSubmitting) => (
+                <Button
+                  type="submit"
+                  variant="outline"
+                  disabled={!customer || !currencies.length || isSubmitting}
+                >
+                  {isSubmitting ? "Looking up…" : "Look up"}
+                </Button>
+              )}
+            </lookupForm.Subscribe>
+          </form>
+        </div>
       </section>
 
       {result && (

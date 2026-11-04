@@ -124,6 +124,7 @@ pkg openrails, method (*Client) ListProviderCatalog(context.Context, billing.Pro
 pkg openrails, method (*Client) ListProvisioningTokens(context.Context, billing.ProvisioningTokenListParams, ...RequestOption) (*billing.ListPage[billing.ProvisioningToken], error)
 pkg openrails, method (*Client) ListRenewals(context.Context, billing.RenewalListParams, ...RequestOption) (*billing.ListPage[billing.Renewal], error)
 pkg openrails, method (*Client) ListRunningCharges(context.Context, billing.RunningChargeListParams, ...RequestOption) (*billing.ListPage[billing.RunningCharge], error)
+pkg openrails, method (*Client) ListSubscriptionChangeOptions(context.Context, billing.SubscriptionID, ...RequestOption) (*billing.ListPage[billing.SubscriptionChangeOption], error)
 pkg openrails, method (*Client) ListSubscriptions(context.Context, billing.SubscriptionListParams, ...RequestOption) (*billing.ListPage[billing.Subscription], error)
 pkg openrails, method (*Client) ListUsageEvents(context.Context, billing.UsageEventListParams, ...RequestOption) (*billing.ListPage[billing.UsageEvent], error)
 pkg openrails, method (*Client) MarkOrderUncollectible(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
@@ -276,6 +277,7 @@ pkg openrails, method (LocalClient) ListProviderCatalog(context.Context, billing
 pkg openrails, method (LocalClient) ListProvisioningTokens(context.Context, billing.ProvisioningTokenListParams, ...RequestOption) (*billing.ListPage[billing.ProvisioningToken], error)
 pkg openrails, method (LocalClient) ListRenewals(context.Context, billing.RenewalListParams, ...RequestOption) (*billing.ListPage[billing.Renewal], error)
 pkg openrails, method (LocalClient) ListRunningCharges(context.Context, billing.RunningChargeListParams, ...RequestOption) (*billing.ListPage[billing.RunningCharge], error)
+pkg openrails, method (LocalClient) ListSubscriptionChangeOptions(context.Context, billing.SubscriptionID, ...RequestOption) (*billing.ListPage[billing.SubscriptionChangeOption], error)
 pkg openrails, method (LocalClient) ListSubscriptions(context.Context, billing.SubscriptionListParams, ...RequestOption) (*billing.ListPage[billing.Subscription], error)
 pkg openrails, method (LocalClient) ListUsageEvents(context.Context, billing.UsageEventListParams, ...RequestOption) (*billing.ListPage[billing.UsageEvent], error)
 pkg openrails, method (LocalClient) MarkOrderUncollectible(context.Context, billing.OrderID, ...RequestOption) (*billing.Order, error)
@@ -2658,6 +2660,7 @@ pkg openrails/billing, type Order struct, CollectionPSPID *PSPID `json:"collecti
 pkg openrails/billing, type Order struct, CompletedAt *time.Time `json:"completed_at"`
 pkg openrails/billing, type Order struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type Order struct, Currency string `json:"currency"`
+pkg openrails/billing, type Order struct, CustomerContact *CustomerContact `json:"customer_contact,omitempty"`
 pkg openrails/billing, type Order struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type Order struct, Embedded bool `json:"embedded"`
 pkg openrails/billing, type Order struct, ExpiredAt *time.Time `json:"expired_at"`
@@ -2753,6 +2756,7 @@ pkg openrails/billing, type OrderPaymentOption struct, Accepts []string `json:"a
 pkg openrails/billing, type OrderPaymentOption struct, FailedAttempts int `json:"failed_attempts"`
 pkg openrails/billing, type OrderPaymentOption struct, PSPID PSPID `json:"psp_id"`
 pkg openrails/billing, type OrderPaymentOption struct, Rail string `json:"rail"`
+pkg openrails/billing, type OrderPaymentOption struct, Requires []string `json:"requires,omitempty"`
 pkg openrails/billing, type OrderPaymentOption struct, SavedPaymentMethodIDs []PaymentMethodID `json:"saved_payment_method_ids,omitempty"`
 pkg openrails/billing, type OrderPaymentParams struct
 pkg openrails/billing, type OrderPaymentParams struct, BillingDetails *BillingDetails `json:"billing_details,omitempty"`
@@ -2993,6 +2997,7 @@ pkg openrails/billing, type Payment struct, Card *CardDetails `json:"card"`
 pkg openrails/billing, type Payment struct, Channel PaymentChannel `json:"channel"`
 pkg openrails/billing, type Payment struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type Payment struct, Currency string `json:"currency"`
+pkg openrails/billing, type Payment struct, CustomerContact *CustomerContact `json:"customer_contact,omitempty"`
 pkg openrails/billing, type Payment struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type Payment struct, Failure *PaymentFailure `json:"failure"`
 pkg openrails/billing, type Payment struct, ID PaymentID `json:"id"`
@@ -3581,6 +3586,7 @@ pkg openrails/billing, type Subscription struct, CollectionPolicy string `json:"
 pkg openrails/billing, type Subscription struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type Subscription struct, CurrentPeriodEndsAt *time.Time `json:"current_period_ends_at"`
 pkg openrails/billing, type Subscription struct, CurrentPeriodStartsAt *time.Time `json:"current_period_starts_at"`
+pkg openrails/billing, type Subscription struct, CustomerContact *CustomerContact `json:"customer_contact,omitempty"`
 pkg openrails/billing, type Subscription struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type Subscription struct, DeletionScheduledAt *time.Time `json:"deletion_scheduled_at,omitempty"`
 pkg openrails/billing, type Subscription struct, Dunning *SubscriptionDunning `json:"dunning"`

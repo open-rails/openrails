@@ -1154,7 +1154,7 @@ func (h *NMISaleIntentHandler) completeOrder(ctx context.Context, d *db.DB, in g
 		if code == "" {
 			code = evidenceText(evidence, "decline_code")
 		}
-		answer := decline.Evidence{Code: code, AVS: evidenceText(evidence, "avs_response"), CVV: evidenceText(evidence, "cvv_response")}
+		answer := decline.Evidence{Code: code, AVS: evidenceText(evidence, "avs_response"), CVV: evidenceText(evidence, "cvv_response"), CardBrand: evidenceText(evidence, "card_brand"), CardLast4: evidenceText(evidence, "card_last4")}
 		if err := recordSaleAttempt(ctx, d, in, p, customer, method, attempts.Attempt{Answer: answer, TransactionID: evidenceText(evidence, "decline_transaction_id")}, now); err != nil {
 			return err
 		}

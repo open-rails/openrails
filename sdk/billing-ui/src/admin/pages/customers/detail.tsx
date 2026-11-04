@@ -262,7 +262,7 @@ function CustomerSubscriptions({ customerId }: { customerId: string }) {
                       className="text-xs underline-offset-2 hover:underline"
                       to={`/subscriptions/${s.id}`}
                     >
-                      {shortId(s.id, 13)}
+                      {s.product?.display_name ?? shortId(s.id, 13)}
                     </Link>
                   </TableCell>
                   <TableCell>
@@ -294,13 +294,21 @@ function CustomerSubscriptions({ customerId }: { customerId: string }) {
 }
 
 function CustomerPayments({ customerId }: { customerId: string }) {
-  const { adminQueries } = useAdminServices()
+  const { adminQueries, orderQueries } = useAdminServices()
 
   const pages = useCursorPages(customerId, 25)
   const { data, isFetching } = useQuery(
     adminQueries.customerPayments(customerId, pages.size, pages.cursor)
   )
   const payments = data?.data ?? []
+  // A payment is named by what its order bought: its first line.
+  const orderIds = [
+    ...new Set(payments.flatMap((p) => (p.order_id ? [p.order_id] : []))),
+  ]
+  const { data: orders } = useQuery(orderQueries.byIds(orderIds))
+  const bought = new Map(
+    (orders?.data ?? []).map((o) => [o.id, o.lines[0]?.description])
+  )
   return (
     <Card>
       <CardHeader>
@@ -345,7 +353,8 @@ function CustomerPayments({ customerId }: { customerId: string }) {
                       className="text-xs underline-offset-2 hover:underline"
                       to={`/payments/${p.id}`}
                     >
-                      {shortId(p.id, 13)}
+                      {(p.order_id && bought.get(p.order_id)) ||
+                        shortId(p.id, 13)}
                     </Link>
                   </TableCell>
                   <TableCell>

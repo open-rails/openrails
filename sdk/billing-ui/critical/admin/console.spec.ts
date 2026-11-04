@@ -201,11 +201,77 @@ test("console-parked-signup-lands-after-mapping", async ({ page }) => {
 test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
   page,
 }) => {
-  const fx = await fixture<{ subscription: string }>(page)
+  const fx = await fixture<{
+    subscription: string
+    customer: string
+    who: string
+    missing: Record<"customer" | "subscription" | "payment", string>
+  }>(page)
+  // The dashboard at 1440 in a host's 1230px column: the one-rail donut
+  // names its rail, and a PSP reads as its key.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await open(page, "/")
+  await page.addStyleTag({
+    content: "#app { max-width: 1230px; margin: auto }",
+  })
+  await expect(page.getByText("stripe · USD")).toBeVisible()
+  const health = page
+    .getByRole("table")
+    .filter({ hasText: "Attempt failure rate" })
+  await expect(health.getByRole("columnheader").first()).toHaveText("PSP")
+  await expect(health.getByRole("cell").first()).toHaveText("stripe")
+  // In a narrower or wider column every stat label still fits its two
+  // lines: a tile too narrow for one reflows the grid instead of clamping.
+  for (let width = 1000; width <= 1440; width += 40) {
+    await page.evaluate((w) => {
+      document.getElementById("app")!.style.maxWidth = `${w}px`
+    }, width)
+    await expect
+      .poll(() =>
+        page
+          .locator("span.uppercase.line-clamp-2[title]")
+          .evaluateAll((labels) =>
+            labels.every((el) => el.scrollHeight <= el.clientHeight)
+          )
+      )
+      .toBe(true)
+  }
+
+  // Lists lead with who and what: the customer's contact and the plan, on
+  // the customer's page what each subscription and payment bought.
+  await open(page, "/subscriptions")
+  await expect(page.locator("tr", { hasText: fx.who })).toContainText(
+    "Membership"
+  )
+  await open(page, "/orders")
+  await expect(page.locator("tr", { hasText: fx.who })).toHaveCount(1)
+  await open(page, `/customers/${fx.customer}`)
+  for (const kind of ["subscriptions", "payments"])
+    await expect(
+      page.locator(`a[href*="/${kind}/"]`, { hasText: "Membership" })
+    ).toHaveCount(1)
+
+  // Customer controls find the customer by name and offer its currencies.
+  await open(page, "/settings?tab=customer-controls")
+  await page.getByPlaceholder("Customer email, ref, or id").fill(fx.who)
+  await page.getByRole("button", { name: "Search", exact: true }).click()
+  await expect(page.getByRole("combobox", { name: "Currency" })).toContainText(
+    "USD"
+  )
+  await page.getByRole("button", { name: "Look up" }).click()
+  await expect(page.getByText("Credit and trust")).toBeVisible()
+
   await open(page, `/subscriptions/${fx.subscription}`)
   await expect(
     page.getByRole("button", { name: "Change payment method" })
   ).toBeVisible()
+  // No other plan qualifies: Change subscription says so instead of opening.
+  const changePlan = page.getByRole("button", { name: "Change subscription" })
+  await expect(changePlan).toHaveAttribute(
+    "title",
+    "No eligible recurring plans share this tier group and currency."
+  )
+  await expect(changePlan).toBeDisabled()
   await page.getByRole("button", { name: "Cancel membership" }).click()
   const cancel = page.getByRole("dialog")
   await expect(cancel).toContainText("keeps Membership until")
@@ -226,12 +292,37 @@ test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
     await expect(page.getByRole("button", { name })).toHaveCount(0)
 
   await open(page, "/ops")
+  // At 1440, in the 1230px column a host mounts it in, the findings table
+  // fits: a long recommendation leaves Resolve on screen, not scrolled off.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.addStyleTag({
+    content: "#app { max-width: 1230px; margin: auto }",
+  })
+  await expect(
+    page
+      .getByRole("row", { name: /accounts\/nmi\/0000000/ })
+      .getByRole("button", { name: "Resolve" })
+  ).toBeInViewport({ ratio: 1 })
   await page.getByRole("button", { name: "Clear hold" }).click()
   const clear = page.getByRole("dialog")
   await clear.getByLabel("Reason (required)").fill("Reviewed the revokes")
   await clear.getByRole("button", { name: "Clear hold" }).click()
   await expect(page.getByText("Hold cleared")).toBeVisible()
   await expect(page.getByText("Holds on refunds and cancels")).toHaveCount(0)
+
+  // A record that is not there is reported once, by its page: no toast too.
+  for (const [path, title] of [
+    [`/customers/${fx.missing.customer}`, "Customer not found"],
+    [`/subscriptions/${fx.missing.subscription}`, "Subscription not found"],
+    [`/payments/${fx.missing.payment}`, "Payment not found"],
+  ]) {
+    await open(page, path)
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(title)
+    // The query cache would have toasted in the same render; a toast
+    // dismisses itself, so this counts once rather than waiting for none.
+    await page.waitForTimeout(300)
+    expect(await page.getByText(/^Couldn't load/).count()).toBe(0)
+  }
 })
 
 test("console-failed-pull-and-read-only-access", async ({ page }) => {

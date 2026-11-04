@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
@@ -110,6 +111,12 @@ func TestCheckoutBoundaries(t *testing.T) {
 		declined.AVS = "Z" // the ZIP matched; no street was sent
 		_, first := buy(cheap.ID, 500_000, declined, "nmi-decline-zip-matched")
 		require.Equal(t, string(billing.DeclineGeneric), first.Payment.LastPaymentError.Reason, "a matched ZIP is no address fault")
+		tried, err := nmi.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{OrderID: first.ID})
+		require.NoError(t, err)
+		require.Len(t, tried.Items, 1)
+		require.NotNil(t, tried.Items[0].Card, "the declined new card is named from NMI's report")
+		require.Equal(t, "visa", *tried.Items[0].Card.Brand)
+		require.Equal(t, "1111", *tried.Items[0].Card.Last4)
 		declined.AVS = "N"
 		_, again := buy(cheap.ID, 500_000, declined, "nmi-decline-zip-unmatched")
 		require.Equal(t, first.ID, again.ID, "the same price pays the same order")
@@ -170,6 +177,104 @@ func TestCheckoutBoundaries(t *testing.T) {
 		abandoned, err := nmi.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.provider_intent.abandoned"})
 		require.NoError(t, err)
 		require.Empty(t, abandoned.Items, "a customer leaving a declined card is no operator incident")
+
+	})
+	t.Run("OR-J09-S05/lost-sale-answer-settles-from-the-provider", func(t *testing.T) {
+		// A sale whose answer is lost waits for NMI's own record: a decline
+		// there reopens the order for another card, and a charge NMI can't yet
+		// show stays unknown as an operator finding until its receipt appears.
+		nmi, journal := newNMIWorld(t)
+		fleet := hostFleet(t, nmi.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, nmi.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		lost, err := nmi.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-lost", DisplayName: "NMI lost", Entitlements: []string{"lost:owned"}})
+		require.NoError(t, err)
+		lostPrice, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: lost.ID, Key: "nmi-lost", UnitAmount: 700_000, Currency: "USD"})
+		require.NoError(t, err)
+		settle := func(order billing.OrderID, done func(billing.Order) bool) billing.Order {
+			t.Helper()
+			nmi.clock.Advance(6 * time.Minute)
+			var current *billing.Order
+			require.Eventually(t, func() bool {
+				wakeJobs(t, fleet, "openrails.provider_operation")
+				current, err = nmi.alpha.GetOrder(t.Context(), order)
+				return err == nil && done(*current)
+			}, 20*time.Second, 50*time.Millisecond)
+			return *current
+		}
+		unresolved := func(order billing.Order) []billing.Finding {
+			t.Helper()
+			findings, err := nmi.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.sale.unresolved"})
+			require.NoError(t, err)
+			var out []billing.Finding
+			for _, f := range findings.Items {
+				if f.Evidence["order_id"] == order.ID.String() {
+					out = append(out, f)
+				}
+			}
+			return out
+		}
+		buy := func(price billing.PriceID, total int64, card nmimock.Card, key string) (int, billing.Order) {
+			t.Helper()
+			status, raw := nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}})
+			require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
+			var order billing.Order
+			require.NoError(t, json.Unmarshal(raw, &order))
+			pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: journal.core.Tokenize(card)}, ExpectedTotal: total, Reusable: ptr(false)}
+			status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", nmi.aliceToken, pay, map[string]string{"Idempotency-Key": key})
+			require.Equal(t, http.StatusOK, status, string(raw))
+			current, err := nmi.alpha.GetOrder(t.Context(), order.ID)
+			require.NoError(t, err)
+			return status, *current
+		}
+		declined := nmimock.Card{Brand: "visa", Last4: "1111", AVS: "Z", CVV: "M", Decline: "200"}
+		journal.core.DropSaleResponses(1)
+		status, waiting := buy(lostPrice.ID, 700_000, declined, "nmi-lost-decline")
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, billing.OrderProcessing, waiting.Status)
+		status, raw := nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: lostPrice.ID}}})
+		require.Equal(t, http.StatusConflict, status, "the unknown sale still holds its order: %s", raw)
+		reopened := settle(waiting.ID, func(o billing.Order) bool { return o.Status == billing.OrderOpen })
+		require.NotNil(t, reopened.Payment.LastPaymentError)
+		require.Equal(t, string(billing.DeclineGeneric), reopened.Payment.LastPaymentError.Reason)
+		require.Empty(t, unresolved(waiting), "NMI's decline settles the sale; nobody has to")
+		journal.core.DropSaleResponses(1)
+		journal.core.HideSales(1)
+		status, waiting = buy(lostPrice.ID, 700_000, nmimock.Card{Brand: "visa", Last4: "4242", AVS: "Z", CVV: "M"}, "nmi-lost-charge")
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, waiting.ID, reopened.ID, "the declined order is paid again")
+		require.Equal(t, billing.OrderProcessing, waiting.Status)
+		settle(waiting.ID, func(o billing.Order) bool { return len(unresolved(o)) == 1 })
+		raised := unresolved(waiting)[0]
+		require.Equal(t, "high", raised.Severity)
+		require.Equal(t, billing.FindingStatus("requires_review"), raised.Status)
+		require.Contains(t, *raised.RecommendedAction, "openrails intents resolve")
+		current, err := nmi.alpha.GetOrder(t.Context(), waiting.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.OrderProcessing, current.Status, "a charge NMI can't show is never assumed absent")
+		journal.core.Reveal()
+		settle(waiting.ID, func(o billing.Order) bool { return o.Status == billing.OrderComplete })
+		require.Empty(t, unresolved(waiting), "the receipt closes the finding")
+		closed, err := nmi.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.sale.unresolved", Status: "fixed"})
+		require.NoError(t, err)
+		require.Len(t, closed.Items, 1)
+		require.Equal(t, raised.ID, closed.Items[0].ID)
+		// An answered sale NMI has yet to index waits out the delay quietly.
+		late, err := nmi.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-late", DisplayName: "NMI late", Entitlements: []string{"late:owned"}})
+		require.NoError(t, err)
+		latePrice, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: late.ID, Key: "nmi-late", UnitAmount: 700_000, Currency: "USD"})
+		require.NoError(t, err)
+		journal.core.HideSales(1)
+		status, waiting = buy(latePrice.ID, 700_000, nmimock.Card{Brand: "visa", Last4: "4242", AVS: "Z", CVV: "M"}, "nmi-late-receipt")
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, billing.OrderProcessing, waiting.Status)
+		wakeJobs(t, fleet, "openrails.provider_operation")
+		require.Never(t, func() bool { return len(unresolved(waiting)) > 0 }, time.Second, 100*time.Millisecond, "no finding inside the observation delay")
+		journal.core.Reveal()
+		settle(waiting.ID, func(o billing.Order) bool { return o.Status == billing.OrderComplete })
+		require.Empty(t, unresolved(waiting))
+		journal.money(t, 2, 140) // neither sale is ever resent
 	})
 	t.Run("OR-J10-S02/lost-client-response-replays-original-committed-result", func(t *testing.T) {
 		a, p := newPaymentWorld(t)

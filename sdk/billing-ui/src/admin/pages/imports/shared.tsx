@@ -253,6 +253,15 @@ export function Superseded({ by }: { by: PSPImport }) {
   )
 }
 
+// pspOption names a PSP in a filter, saying when it is archived: a PSP a
+// newer declaration superseded.
+export function pspOption(p: PSP, withRail = false) {
+  const notes = [withRail ? p.rail : "", p.archived ? "archived" : ""].filter(
+    Boolean
+  )
+  return notes.length ? `${p.key} (${notes.join(", ")})` : p.key
+}
+
 export function pspKey(byId: Map<string, PSP>, id: string) {
   return byId.get(id)?.key ?? id
 }

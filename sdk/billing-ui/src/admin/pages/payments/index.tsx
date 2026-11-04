@@ -26,6 +26,7 @@ import { downloadCsv } from "#orck/admin/lib/csv"
 import { useUrlCursor } from "#orck/admin/lib/cursor-pages"
 import {
   currencyScale,
+  formatCard,
   formatNativeAmount,
   formatDate,
   customerName,
@@ -167,6 +168,7 @@ export function PaymentsPage() {
           "amount_refunded",
           "currency",
           "rail",
+          "card",
           "customer_id",
           "transaction_id",
           "created_at",
@@ -180,6 +182,7 @@ export function PaymentsPage() {
           csvAmount(r.amount_refunded, r.currency),
           r.currency,
           r.rail,
+          r.card?.last4 ? formatCard(r.card) : "",
           r.customer_id,
           r.transaction_id,
           r.created_at,

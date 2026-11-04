@@ -276,6 +276,10 @@ export const de: BillingUiMessageBundle = {
     internal_error:
       "Bei uns ist etwas schiefgelaufen. Bitte versuche es erneut.",
     card_declined: "Die Karte wurde abgelehnt.",
+    ccbill_email_required: "Bestätige deine E-Mail-Adresse, um mit CCBill zu bezahlen.",
+    ccbill_username_required: "Lege einen Benutzernamen fest, um mit CCBill zu bezahlen.",
+    customer_email_required:
+      "Bestätige deine E-Mail-Adresse und lege einen Benutzernamen fest, um mit CCBill zu bezahlen.",
     payment_provider_rejected:
       "Der Zahlungsdienstleister hat die Anfrage abgelehnt.",
     provider_outcome_unknown:

@@ -715,6 +715,12 @@ func TestPSPReconcile(t *testing.T) {
 		before := iw.pulled(t, imp.ID)
 		require.Contains(t, before, string(billing.ChangeCorrectSubscription))
 
+		// A refresh the provider cuts short completes without retrying: the
+		// next scheduled pass resumes it, and a retrying job would hold the
+		// merchant's slot from that pass.
+		iw.nmi.QueryUnavailable(true)
+		refreshMerchant(t, iw.fleet, iw.alpha.MerchantID().UUID())
+		iw.nmi.QueryUnavailable(false)
 		// The legacy refresh reads the same PSP between the pull and Apply.
 		refreshMerchant(t, iw.fleet, iw.alpha.MerchantID().UUID())
 		require.Equal(t, before, iw.pulled(t, imp.ID), "the refresh leaves the pull's proposals")

@@ -65,8 +65,11 @@ type Subscription struct {
 	DeletionScheduledAt *time.Time           `json:"deletion_scheduled_at,omitempty"`
 	ID                  SubscriptionID       `json:"id"`
 	CustomerID          CustomerID           `json:"customer_id"`
-	ProductID           ProductID            `json:"product_id"`
-	PriceID             PriceID              `json:"price_id"`
+	// CustomerContact is the customer's directory contact on a staff list;
+	// absent when the directory holds none or could not answer.
+	CustomerContact *CustomerContact `json:"customer_contact,omitempty"`
+	ProductID       ProductID        `json:"product_id"`
+	PriceID         PriceID          `json:"price_id"`
 	// Quantity is the seats of a per-seat price: each period bills the unit
 	// amount times Quantity. Null unless the price is sold per seat.
 	Quantity           *int               `json:"quantity"`

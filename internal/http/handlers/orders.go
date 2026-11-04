@@ -352,6 +352,14 @@ func ListOrders(r *httprequest.Request) {
 		writeOrderError(r, err)
 		return
 	}
+	customers := make([]billing.CustomerID, len(out.Items))
+	for i, order := range out.Items {
+		customers[i] = order.CustomerID
+	}
+	contacts := customerContacts(r, customers)
+	for i := range out.Items {
+		out.Items[i].CustomerContact = contacts[out.Items[i].CustomerID]
+	}
 	r.SetHeader("Cache-Control", "no-store")
 	r.SuccessJSON(out)
 }

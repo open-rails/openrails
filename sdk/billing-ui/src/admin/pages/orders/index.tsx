@@ -15,7 +15,12 @@ import { Label } from "#orck/admin/components/ui/label"
 import type { Order } from "#orck/client/generated/wire"
 import type { OrderFilters } from "#orck/admin/lib/api/order-endpoints"
 import { useUrlCursor } from "#orck/admin/lib/cursor-pages"
-import { formatDate, formatNativeAmount, shortId } from "#orck/admin/lib/format"
+import {
+  formatDate,
+  formatNativeAmount,
+  rowCustomer,
+  shortId,
+} from "#orck/admin/lib/format"
 
 // dueAt is when an order is owed: a usage order's or a renewal's due date.
 const dueAt = (order: Order) =>
@@ -25,7 +30,9 @@ const columns: ColumnDef<Order, unknown>[] = [
     header: "Order",
     cell: ({ row }) => (
       <Link className="underline" to={`/orders/${row.original.id}`}>
-        {row.original.number != null ? `#${row.original.number}` : shortId(row.original.id)}
+        {row.original.number != null
+          ? `#${row.original.number}`
+          : row.original.lines[0]?.description || shortId(row.original.id)}
       </Link>
     ),
   },
@@ -33,7 +40,7 @@ const columns: ColumnDef<Order, unknown>[] = [
     header: "Customer",
     cell: ({ row }) => (
       <Link to={`/customers/${row.original.customer_id}`}>
-        {shortId(row.original.customer_id)}
+        {rowCustomer(row.original)}
       </Link>
     ),
   },

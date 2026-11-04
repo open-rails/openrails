@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 268,
+  "scenario_count": 269,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -217,6 +217,11 @@
       "id": "OR-J09-S04",
       "journey": "J09",
       "name": "Rollback cannot produce successful response or financial event"
+    },
+    {
+      "id": "OR-J09-S05",
+      "journey": "J09",
+      "name": "A sale whose answer was lost settles from NMI: its decline reopens the order, a charge NMI can't show raises a high finding until the receipt appears, and nothing is resent"
     },
     {
       "id": "OR-J10-S01",
@@ -1141,7 +1146,7 @@
     {
       "id": "OR-J38-S41",
       "journey": "J38",
-      "name": "Ending a membership from the console says the customer loses access now once End access now is ticked; an ended membership offers no plan or card change; clearing a hold confirms it and drops it from Ops"
+      "name": "The dashboard keeps every stat label within two lines at any column width, legends a one-rail donut and names PSPs by key; staff lists name the customer and plan, and still list by id with the directory down; customer controls find a customer by name and offer its currencies; a membership with no other plan offers Change subscription disabled, saying why; ending a membership from the console says the customer loses access now once End access now is ticked; an ended membership offers no plan or card change; clearing a hold confirms it and drops it from Ops; at 1440 the findings table shows Resolve unscrolled; a missing customer, subscription or payment is reported once, by its page"
     },
     {
       "id": "OR-J22-S06",

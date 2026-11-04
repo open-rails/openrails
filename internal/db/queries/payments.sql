@@ -297,13 +297,20 @@ ORDER BY ABS(EXTRACT(EPOCH FROM (p.purchased_at - sqlc.arg(target_at)::timestamp
 LIMIT 2;
 
 -- name: SnapshotPaymentCards :exec
--- Backfill a card snapshot onto Stripe payments that still lack one.
+-- Fill a card snapshot onto Stripe payments, and the refunds of them, that
+-- still lack one.
 UPDATE billing.payments
 SET card_brand = sqlc.arg(card_brand)::text,
     card_last4 = sqlc.arg(card_last4)::text
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail = 'stripe'
-  AND transaction_id = ANY(sqlc.arg(transaction_ids)::text[])
+  AND (transaction_id = ANY(sqlc.arg(transaction_ids)::text[])
+    OR refunded_payment_id IN (
+      SELECT charge.id FROM billing.payments charge
+      WHERE charge.merchant_id = sqlc.arg(merchant_id)::uuid AND charge.psp_id = sqlc.arg(psp_id)::uuid
+        AND charge.rail = 'stripe'
+        AND charge.transaction_id = ANY(sqlc.arg(transaction_ids)::text[])
+        AND charge.deleted_at IS NULL))
   AND card_last4 IS NULL
   AND deleted_at IS NULL;
 

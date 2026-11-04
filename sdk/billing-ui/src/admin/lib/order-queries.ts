@@ -36,6 +36,15 @@ export function createOrderQueries(
           orderAPI.listOrders(filters, { limit, cursor }, signal),
         placeholderData: keepPreviousData,
       }),
+    // The orders of ids in one request, for a page naming what its rows'
+    // orders bought.
+    byIds: (ids: string[]) =>
+      queryOptions({
+        queryKey: [...orderKeys.root(), "ids", ids],
+        queryFn: ({ signal }) =>
+          orderAPI.listOrders({ ids: ids.join(",") }, {}, signal),
+        enabled: ids.length > 0,
+      }),
     detail: (id: string) =>
       queryOptions({
         queryKey: orderKeys.detail(id),

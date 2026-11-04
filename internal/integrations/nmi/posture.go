@@ -64,6 +64,10 @@ func (c *NMIClient) CheckPosture(ctx context.Context) (providerposture.Verdict, 
 		result, err = c.readGatewayTestMode(ctx)
 	}
 	switch {
+	case errors.Is(err, errUnexpectedTestMode):
+		// The gateway answered, just not with the documented answer: asking
+		// again gets the same, so it never arms until its credentials reload.
+		return providerposture.Unsupported, err
 	case err != nil:
 		return providerposture.Unknown, err
 	case result == ProbeLive && c.Live():
@@ -114,8 +118,21 @@ func (c *NMIClient) readGatewayTestMode(ctx context.Context) (TestModeProbeResul
 	if err != nil {
 		return ProbeIndeterminate, err
 	}
+	// The gateway's error answer is a failed read, not an answer of an
+	// unknown shape: rejected credentials or a retryable error.
+	var refused struct {
+		XMLName       xml.Name `xml:"nm_response"`
+		ErrorResponse string   `xml:"error_response"`
+	}
+	if xml.Unmarshal([]byte(raw), &refused) == nil && strings.TrimSpace(refused.ErrorResponse) != "" {
+		return ProbeIndeterminate, queryError("test_mode_status", strings.TrimSpace(refused.ErrorResponse))
+	}
 	return parseGatewayTestMode(raw)
 }
+
+// errUnexpectedTestMode is a well-formed test_mode_status answer that is not
+// the documented one.
+var errUnexpectedTestMode = errors.New("unexpected test_mode_status answer")
 
 func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 	// Deliberately accept only the documented bounded response, not a substring
@@ -140,11 +157,11 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 			if depth == 1 {
 				roots++
 				if roots > 1 {
-					return ProbeIndeterminate, errors.New("multiple test-mode roots")
+					return ProbeIndeterminate, fmt.Errorf("%w: more than one root element", errUnexpectedTestMode)
 				}
 			}
 			if element.Name.Space != "" || len(element.Attr) != 0 || depth == 1 && element.Name.Local != "nm_response" || depth == 2 && element.Name.Local != "test_mode_enabled" || depth > 2 {
-				return ProbeIndeterminate, errors.New("unexpected test-mode response")
+				return ProbeIndeterminate, fmt.Errorf("%w: <%s> (namespace %q, %d attributes) at depth %d", errUnexpectedTestMode, element.Name.Local, element.Name.Space, len(element.Attr), depth)
 			}
 			if depth == 2 {
 				count++
@@ -156,14 +173,17 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 			if depth == 2 {
 				value += text
 			} else if text != "" {
-				return ProbeIndeterminate, errors.New("unexpected test-mode text")
+				return ProbeIndeterminate, fmt.Errorf("%w: text outside <test_mode_enabled>", errUnexpectedTestMode)
 			}
 		case xml.Directive:
-			return ProbeIndeterminate, errors.New("unsupported test-mode XML directive")
+			return ProbeIndeterminate, fmt.Errorf("%w: XML directive", errUnexpectedTestMode)
 		}
 	}
-	if depth != 0 || count != 1 || roots != 1 {
-		return ProbeIndeterminate, errors.New("missing or repeated test-mode result")
+	if depth != 0 || roots != 1 {
+		return ProbeIndeterminate, errors.New("incomplete test-mode response")
+	}
+	if count != 1 {
+		return ProbeIndeterminate, fmt.Errorf("%w: %d <test_mode_enabled> results", errUnexpectedTestMode, count)
 	}
 	switch value {
 	case "true":
@@ -171,7 +191,7 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 	case "false":
 		return ProbeLive, nil
 	default:
-		return ProbeIndeterminate, errors.New("unknown test-mode result")
+		return ProbeIndeterminate, fmt.Errorf("%w: <test_mode_enabled> is %q", errUnexpectedTestMode, value[:min(len(value), 32)])
 	}
 }
 

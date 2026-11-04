@@ -82,6 +82,9 @@ const settled = (order: Order) =>
 
 // How often a Solana order awaiting its wallet is read again.
 const SOLANA_POLL_MS = 3000
+// How often an order whose payment OpenRails is still confirming is read
+// again; a lost card answer takes minutes to settle from the provider.
+const PROCESSING_POLL_MS = 10000
 
 /** Pays one order. Requires `BillingProvider`. */
 export function OrderPayment({
@@ -161,6 +164,34 @@ export function OrderPayment({
     }, SOLANA_POLL_MS)
     return () => window.clearInterval(timer)
   }, [awaitingWallet, client, order])
+
+  // A processing order is confirmed later: show the decline or the receipt
+  // once OpenRails has it.
+  const confirming =
+    order?.collection_owner === "engine" && order.status === "processing"
+  React.useEffect(() => {
+    if (!confirming) return
+    const abort = new AbortController()
+    const timer = window.setInterval(() => {
+      client.getOrder(orderId, abort.signal).then(
+        (next) => {
+          if (next.status === "processing") return
+          setOrder(next)
+          // Declined after all: say why, and pay again under a new key.
+          if (next.status === "open") {
+            const failure = next.payment.last_payment_error?.message
+            if (failure) setError(failure)
+            setKey(crypto.randomUUID())
+          }
+        },
+        () => undefined
+      )
+    }, PROCESSING_POLL_MS)
+    return () => {
+      window.clearInterval(timer)
+      abort.abort()
+    }
+  }, [confirming, client, orderId])
 
   // What the order offers here, less the fallbacks still kept back.
   const offered = React.useMemo(
@@ -461,7 +492,8 @@ export function OrderPayment({
         </p>
       ) : order.status === "processing" ? (
         <p role="status" className="text-sm text-muted-foreground">
-          Your payment is processing.
+          We're confirming this payment with the payment provider. You won't be
+          charged twice, and this page updates once the provider answers.
         </p>
       ) : order.status !== "open" ? (
         <p role="status" className="text-sm text-muted-foreground">
@@ -673,22 +705,44 @@ export function OrderPayment({
               <p className="text-[13px] text-muted-foreground">
                 Card payment isn&apos;t working?
               </p>
-              {revealed.map((item) => (
-                <button
-                  key={item.psp_id}
-                  type="button"
-                  className="h-9 rounded-md border border-border text-sm"
-                  disabled={busy || !open || !!pendingSaved}
-                  onClick={() =>
-                    void pay(async () => ({
-                      return_url: returnUrl ?? window.location.href,
-                      psp_id: item.psp_id,
-                    }))
-                  }
-                >
-                  Pay with {item.display_name}
-                </button>
-              ))}
+              {revealed.map((item) => {
+                // A CCBill page names the customer; one it cannot name yet
+                // says what to add first.
+                const requires =
+                  options.find((option) => option.psp_id === item.psp_id)
+                    ?.requires ?? []
+                const blocked = requires.length > 0
+                const reason = `${item.psp_id}-requires`
+                return (
+                  <React.Fragment key={item.psp_id}>
+                    <button
+                      type="button"
+                      className="h-9 rounded-md border border-border text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={busy || !open || !!pendingSaved || blocked}
+                      aria-describedby={blocked ? reason : undefined}
+                      onClick={() =>
+                        void pay(async () => ({
+                          return_url: returnUrl ?? window.location.href,
+                          psp_id: item.psp_id,
+                        }))
+                      }
+                    >
+                      Pay with {item.display_name}
+                    </button>
+                    {blocked ? (
+                      <p id={reason} className="text-[13px] text-muted-foreground">
+                        {m.t(
+                          requires.length > 1
+                            ? "errors.customer_email_required"
+                            : requires[0] === "username"
+                              ? "errors.ccbill_username_required"
+                              : "errors.ccbill_email_required"
+                        )}
+                      </p>
+                    ) : null}
+                  </React.Fragment>
+                )
+              })}
             </div>
           ) : null}
           {solana && tokens.length > 0 ? (

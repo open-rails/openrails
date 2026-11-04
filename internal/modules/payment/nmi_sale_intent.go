@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -193,6 +194,14 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 		} else if errors.As(callErr, &refusal) {
 			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse, "decline_transaction_id": refusal.TransactionID}
 			reason = "sale declined"
+			// A new card is known only to NMI: its report names the card tried.
+			if p.Token != "" && refusal.TransactionID != "" {
+				if brand, last4, err := client.TransactionCard(ctx, refusal.TransactionID); err != nil {
+					log.WithContext(ctx).WithError(err).WithField("transaction_id", refusal.TransactionID).Warn("read the declined new card")
+				} else {
+					evidence["card_brand"], evidence["card_last4"] = brand, last4
+				}
+			}
 			// A declined card is no stored credential: drop a vault the
 			// sale asked for and the gateway made anyway.
 			if params.SaveCard != nil && refusal.CustomerVaultID != "" {
@@ -287,7 +296,15 @@ func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingProv
 	if err != nil {
 		return h.complete(ctx, in, nil, intents.TerminalWithEvidence("instrument changed before submission", map[string]any{"not_executed": true})), false
 	}
-	submitted, err := intents.NewStore(h.database()).RecordProgressIfAbsent(ctx, in.ID, "sale_submitted", true)
+	// An NMI sale's submission time starts its receipt observation delay. It
+	// is written before the fence, so a fenced sale always carries it.
+	store := intents.NewStore(h.database())
+	if in.Rail != string(models.RailStripe) {
+		if _, err := store.RecordProgressIfAbsent(ctx, in.ID, "submitted_at", h.Sale.Fulfillment.now().UTC().Format(time.RFC3339Nano)); err != nil {
+			return intents.Ambiguous("cannot retain sale submission time: " + err.Error()), false
+		}
+	}
+	submitted, err := store.RecordProgressIfAbsent(ctx, in.ID, "sale_submitted", true)
 	if err != nil {
 		return intents.Ambiguous("cannot retain sale submission fence: " + err.Error()), false
 	}
@@ -354,13 +371,80 @@ func (h *NMISaleIntentHandler) Verify(ctx context.Context, in gen.BillingProvide
 func (h *NMISaleIntentHandler) collect(ctx context.Context, in gen.BillingProviderIntent, client *nmi.NMIClient, reference string) intents.Outcome {
 	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, upgradeReceiptResolver{client}, reference)
 	if err != nil || !found {
-		return intents.Ambiguous("sale has no qualified exact payment receipt")
+		return h.absentSale(ctx, in, client, err)
 	}
 	receipt, err = intents.NewStore(h.database()).RetainCollectedReceipt(ctx, in, receipt)
 	if err != nil {
 		return intents.Ambiguous("cannot retain sale receipt: " + err.Error())
 	}
 	return h.complete(ctx, in, &receipt, intents.Succeeded(nil))
+}
+
+// SaleUnresolvedFinding is a submitted sale whose outcome NMI's reads cannot
+// settle. The order stays processing, and its customer cannot pay it again,
+// until the sale is resolved.
+const SaleUnresolvedFinding = "life.sale.unresolved"
+
+// absentSale settles a submitted sale without a qualified receipt. After the
+// observation delay, NMI's definitive decline as the one transaction under
+// the sale's order ends it, the same proof `intents resolve --not-executed`
+// takes. Anything else stays unknown: an empty search is not proof.
+func (h *NMISaleIntentHandler) absentSale(ctx context.Context, in gen.BillingProviderIntent, client *nmi.NMIClient, receiptErr error) intents.Outcome {
+	// The row as stored: a sale just sent holds the submission time its
+	// caller's copy predates.
+	in, err := intents.NewStore(h.database()).Get(ctx, in.ID)
+	if err != nil {
+		return intents.Ambiguous("cannot load submitted sale: " + err.Error())
+	}
+	if history, err := intents.LoadSubmissionHistory(in); err == nil && !history.Settled(h.Sale.Fulfillment.now()) {
+		if receiptErr != nil {
+			return intents.Ambiguous("sale receipt read failed: " + receiptErr.Error())
+		}
+		return intents.Ambiguous("sale receipt is not yet visible")
+	}
+	p, err := payments.DecodeNMISalePayload(in)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	order, err := client.ReadOrderAttempts(ctx, payments.NMISaleOrderReference(in.ID, p.E2ERunID))
+	switch {
+	case err != nil:
+		return h.unresolvedSale(ctx, in, p, "NMI's transaction search failed: "+err.Error())
+	case order.Declined:
+		evidence := nmiSaleDeclineEvidence(order)
+		if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, evidence); err != nil {
+			return intents.Ambiguous("cannot retain sale decline: " + err.Error())
+		}
+		return h.complete(ctx, in, nil, intents.TerminalWithEvidence("NMI declined this sale; nothing was charged", evidence))
+	case order.Transactions == 0:
+		return h.unresolvedSale(ctx, in, p, "NMI shows no transaction under the sale's order, which does not prove nothing was charged")
+	case receiptErr != nil:
+		return h.unresolvedSale(ctx, in, p, fmt.Sprintf("NMI holds %d transaction(s) under the sale's order but its receipt does not qualify: %v", order.Transactions, receiptErr))
+	default:
+		return h.unresolvedSale(ctx, in, p, fmt.Sprintf("NMI holds %d transaction(s) under the sale's order but none is an approved sale of the accepted terms", order.Transactions))
+	}
+}
+
+// unresolvedSale keeps the sale unknown as a standing operator finding,
+// closed when the sale completes.
+func (h *NMISaleIntentHandler) unresolvedSale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload, reason string) intents.Outcome {
+	reference := payments.NMISaleOrderReference(in.ID, p.E2ERunID)
+	evidence := map[string]any{"operation_id": in.ID.String(), "customer_id": p.UserID, "order_reference": reference, "reason": reason}
+	subject := "a card sale"
+	if p.OrderID != uuid.Nil {
+		order := billing.OrderID(p.OrderID).String()
+		evidence["order_id"] = order
+		subject = "the card sale for order " + order
+	}
+	raw, _ := json.Marshal(evidence)
+	action := fmt.Sprintf("NMI cannot confirm %s (customer %s): %s. Nothing is resent, and the customer cannot pay for it again while this stands. Look up order reference %s at NMI, then run `openrails intents resolve --intent %s --receipt <transaction id>` if it was charged; `--not-executed` is accepted only once NMI shows the sale declined.", subject, p.UserID, reason, reference, in.ID)
+	wctx, cancel := intents.LedgerWriteContext(ctx)
+	defer cancel()
+	if _, err := h.database().Gen(wctx).UpsertReconciliationFinding(wctx, gen.UpsertReconciliationFindingParams{MerchantID: in.MerchantID, FindingType: SaleUnresolvedFinding,
+		SubjectKey: in.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: raw}); err != nil {
+		log.WithContext(ctx).WithError(err).WithField("operation_id", in.ID).Error("nmi sale: could not record the unresolved-sale finding")
+	}
+	return intents.Ambiguous(reason)
 }
 
 func (h *NMISaleIntentHandler) Resolve(ctx context.Context, in gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
@@ -478,6 +562,9 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 		}
 		purchase := h.Sale.Fulfillment.transactionBound(d)
 		now := purchase.now().UTC()
+		if _, err := d.Gen(ctx).ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: in.MerchantID, FindingType: SaleUnresolvedFinding, SubjectKey: in.ID.String()}); err != nil {
+			return err
+		}
 		if p.OrderID != uuid.Nil {
 			if err := h.completeOrder(ctx, d, in, p, customer, receipt, success, evidence, outcome, now, saved); err != nil {
 				return err
@@ -522,7 +609,8 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 				avs, _ := evidence["avs_response"].(string)
 				cvv, _ := evidence["cvv_response"].(string)
 				transaction, _ := evidence["decline_transaction_id"].(string)
-				if err := recordSaleAttempt(ctx, d, in, p, customer, &p.PaymentMethodID, attempts.Attempt{Answer: decline.Evidence{Code: code, AVS: avs, CVV: cvv}, TransactionID: transaction}, now); err != nil {
+				answer := decline.Evidence{Code: code, AVS: avs, CVV: cvv, CardBrand: evidenceText(evidence, "card_brand"), CardLast4: evidenceText(evidence, "card_last4")}
+				if err := recordSaleAttempt(ctx, d, in, p, customer, &p.PaymentMethodID, attempts.Attempt{Answer: answer, TransactionID: transaction}, now); err != nil {
 					return err
 				}
 			}
@@ -589,7 +677,12 @@ func nmiSaleRefusal(ctx context.Context, client *nmi.NMIClient, orderID string) 
 	if !attempts.Declined {
 		return nil, intents.RejectResolution("NMI shows no definitive decline under order %s (%d transaction(s)); an empty search does not prove nothing was charged, so resolve with the sale's receipt", orderID, attempts.Transactions)
 	}
-	return map[string]any{"declined": true, "response_code": attempts.DeclineCode, "decline_transaction_id": attempts.DeclineTransactionID}, nil
+	return nmiSaleDeclineEvidence(attempts), nil
+}
+
+// nmiSaleDeclineEvidence is a sale's refusal as NMI's order search shows it.
+func nmiSaleDeclineEvidence(order nmi.OrderAttempts) map[string]any {
+	return map[string]any{"declined": true, "response_code": order.DeclineCode, "localization_id": decline.NMILocalizationID(order.DeclineCode), "decline_transaction_id": order.DeclineTransactionID, "card_brand": order.DeclineCardBrand, "card_last4": order.DeclineCardLast4}
 }
 
 // The persisted row retains custody. Runner diagnostics/pruning receive only

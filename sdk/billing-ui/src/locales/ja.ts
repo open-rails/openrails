@@ -269,6 +269,10 @@ export const ja: BillingUiMessageBundle = {
       "請求機能は一時的に利用できません。しばらくしてからお試しください。",
     internal_error: "システムで問題が発生しました。もう一度お試しください。",
     card_declined: "カードが拒否されました。",
+    ccbill_email_required: "CCBillで支払うには、メールアドレスを確認してください。",
+    ccbill_username_required: "CCBillで支払うには、ユーザー名を設定してください。",
+    customer_email_required:
+      "CCBillで支払うには、メールアドレスを確認し、ユーザー名を設定してください。",
     payment_provider_rejected: "決済代行会社がリクエストを拒否しました。",
     provider_outcome_unknown:
       "プロバイダーで結果を確認できませんでした。しばらくしてから確認してください。",

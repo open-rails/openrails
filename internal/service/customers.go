@@ -57,20 +57,10 @@ func (s *Service) customers(ctx context.Context, mid billing.MerchantID, rows []
 			Settings: settings[row.ID], Balances: m.Balances, DefaultPaymentMethods: m.Defaults,
 		}
 		if contact, ok := found[row.ID]; ok {
-			out[i].Contact = customerContact(contact)
+			out[i].Contact = contact.Customer()
 		}
 	}
 	return out, nil
-}
-
-func customerContact(c directory.Contact) *billing.CustomerContact {
-	text := func(v string) *string {
-		if v == "" {
-			return nil
-		}
-		return &v
-	}
-	return &billing.CustomerContact{Email: text(c.Email), Name: text(c.Name), Username: text(c.Username), Active: c.Active, SyncedAt: c.SyncedAt}
 }
 
 // GetCustomer reads one customer: its contact, its settings, and per currency

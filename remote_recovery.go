@@ -119,6 +119,21 @@ func (c *Client) subscriptionAction(ctx context.Context, method string, id billi
 	return &out, nil
 }
 
+// ListSubscriptionChangeOptions lists the prices staff can change a
+// subscription to, each with what the customer would pay from the next
+// renewal. A target the change would refuse is left out.
+func (c *Client) ListSubscriptionChangeOptions(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.ListPage[billing.SubscriptionChangeOption], error) {
+	path, err := subscriptionPath(id)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.ListPage[billing.SubscriptionChangeOption]
+	if err := c.do(ctx, http.MethodGet, path+"/change/options", nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // PreviewSubscriptionChange reports what changing a subscription's price or
 // seats would charge and when it would take effect, without changing
 // anything. A staff change charges nothing and waits for the next renewal.

@@ -131,6 +131,9 @@
     "OR-J09-S04": [
       "TestFinancialFailures/OR-J09-S04/database-abort-rolls-back-money-access-and-event-together"
     ],
+    "OR-J09-S05": [
+      "TestCheckoutBoundaries/OR-J09-S05/lost-sale-answer-settles-from-the-provider"
+    ],
     "OR-J10-S01": [
       "TestPaymentReplay/OR-J10-S01/concurrent-identical-purchase-has-one-economic-debit"
     ],

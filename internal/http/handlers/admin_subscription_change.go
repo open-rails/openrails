@@ -83,38 +83,66 @@ func adminChangeRequest(
 		return nil, nil, nil, false
 	}
 	req.Staff = true
+	user, subscription, ok := adminChangeCustomer(r, req.SubscriptionID)
+	return req, user, subscription, ok
+}
+
+// adminChangeCustomer reads the subscription a staff change names and the
+// customer it changes for, with the customer's email from the directory.
+func adminChangeCustomer(r *httprequest.Request, subscriptionID uuid.UUID) (*payment.UserIdentity, *models.Subscription, bool) {
 	if r.State.PurchaseService == nil || r.State.SubscriptionService == nil {
 		r.ErrorCode(billing.CodeInternalError, "subscription service unavailable")
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
-	subscription, err := r.State.SubscriptionService.GetByID(r.Request.Context(), req.SubscriptionID)
+	subscription, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
 		if db.IsNotFound(err) {
 			r.ErrorCode(billing.CodeResourceNotFound, "subscription not found")
-			return nil, nil, nil, false
+			return nil, nil, false
 		}
-		log.WithError(err).WithField("subscription_id", req.SubscriptionID).Error("admin subscription change: load subscription")
+		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin subscription change: load subscription")
 		r.ErrorCode(billing.CodeInternalError, "failed to retrieve subscription")
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 	if subscription.CustomerID == uuid.Nil {
-		log.WithField("subscription_id", req.SubscriptionID).Error("admin subscription change: subscription has no customer")
+		log.WithField("subscription_id", subscriptionID).Error("admin subscription change: subscription has no customer")
 		r.ErrorCode(billing.CodeInternalError, "subscription customer unavailable")
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 	user := &payment.UserIdentity{ID: subscription.CustomerID.String()}
 	if r.State.Contacts != nil {
 		found, err := r.State.Contacts.Contacts(r.Request.Context(), billing.MerchantID(subscription.MerchantID), []uuid.UUID{subscription.CustomerID})
 		if err != nil {
-			log.WithError(err).WithField("subscription_id", req.SubscriptionID).Error("admin subscription change: customer contact")
+			log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin subscription change: customer contact")
 			r.ErrorCode(billing.CodeServiceUnavailable, "the customer directory is unavailable")
-			return nil, nil, nil, false
+			return nil, nil, false
 		}
 		if email := found[subscription.CustomerID].Email; email != "" {
 			user.Email = &email
 		}
 	}
-	return req, user, subscription, true
+	return user, subscription, true
+}
+
+// AdminSubscriptionChangeOptions lists the prices staff can change the
+// subscription to, each with its preview: what the customer pays from the
+// next renewal. A subscription staff cannot change answers why.
+func AdminSubscriptionChangeOptions(r *httprequest.Request) {
+	id, err := billing.ParseSubscriptionID(r.Param("id"))
+	if err != nil || id.IsZero() {
+		r.ErrorCode(billing.CodeInvalidParam, "invalid subscription ID")
+		return
+	}
+	user, subscription, ok := adminChangeCustomer(r, id.UUID())
+	if !ok || !adminTierChangeAdmissible(r, subscription) {
+		return
+	}
+	options, err := r.State.PurchaseService.SubscriptionChangeOptions(r.Request.Context(), id.UUID(), user, true)
+	if err != nil {
+		writeChangeTierError(r, err)
+		return
+	}
+	r.SuccessJSON(billing.ListPage[billing.SubscriptionChangeOption]{Items: options})
 }
 
 // adminTierChangeAdmissible applies the operator-route guards to a new tier

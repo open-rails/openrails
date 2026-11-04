@@ -777,7 +777,7 @@ function NMIHistory({ scope }: { scope: Scope }) {
         <p className="max-w-4xl text-sm text-muted-foreground">
           <AdminMessage
             id={
-              "NMI&apos;s own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI&apos;s own charges, each the first try of its period. Rates count authorizations, not buyers."
+              "NMI's own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI's own charges, each the first try of its period. Rates count authorizations, not buyers."
             }
           />{" "}
           {since

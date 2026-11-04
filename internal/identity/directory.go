@@ -30,6 +30,17 @@ type Contact struct {
 	SyncedAt   *time.Time
 }
 
+// Customer is the contact as the API shows it: an empty field is absent.
+func (c Contact) Customer() *billing.CustomerContact {
+	text := func(v string) *string {
+		if v == "" {
+			return nil
+		}
+		return &v
+	}
+	return &billing.CustomerContact{Email: text(c.Email), Name: text(c.Name), Username: text(c.Username), Active: c.Active, SyncedAt: c.SyncedAt}
+}
+
 // Directory reads the merchant's customers' contacts. A customer it holds no
 // contact for is absent, never an error.
 type Directory interface {

@@ -144,10 +144,15 @@ type PaymentMethodError struct {
 
 // CardRefused reports whether the provider refused the card: a verification
 // decline or a refused vault entry. A request refused before any provider call,
-// or a transport failure, is not a refusal of the card.
+// a request NMI rejected as such, or a transport failure, is not a refusal of
+// the card.
 func CardRefused(err error) bool {
 	var pmErr *PaymentMethodError
-	return errors.As(err, &pmErr) || errors.Is(err, nmi.ErrV5Refused)
+	if errors.As(err, &pmErr) {
+		return true
+	}
+	var v5 *nmi.V5Error
+	return errors.As(err, &v5) && !v5.RequestRejected()
 }
 
 func (e *PaymentMethodError) Error() string {
@@ -266,13 +271,22 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	}
 	providerDuration = time.Since(providerStartedAt)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"user_id": userID}).Error("Failed to create vault in NMI")
+		fields := log.Fields{"user_id": userID}
+		var v5 *nmi.V5Error
+		if errors.As(err, &v5) {
+			fields["nmi_error_code"], fields["nmi_error_message"] = v5.Code, v5.Message
+		}
+		log.WithError(err).WithFields(fields).Error("Failed to create vault in NMI")
 		var refusal *PaymentMethodError
 		if errors.As(err, &refusal) {
 			return nil, err
 		}
-		if errors.Is(err, nmi.ErrV5Refused) {
-			s.recordVerification(ctx, userID, pspID, req, attempts.Attempt{Step: "vault"})
+		if v5 != nil {
+			answer := decline.Evidence{Rail: "nmi", Code: v5.Code}
+			s.recordVerification(ctx, userID, pspID, req, attempts.Attempt{Answer: answer, Step: "vault"})
+			if v5.CardRefused() {
+				return nil, &PaymentMethodError{Err: err, Message: "the payment provider refused the card", Rail: "nmi", Reason: billing.DeclineGeneric}
+			}
 		}
 		var nmiErr *nmi.CustomerVaultError
 		if errors.As(err, &nmiErr) {

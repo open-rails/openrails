@@ -25,16 +25,15 @@ import {
 } from "#orck/admin/components/ui/select"
 import type {
   ChangeSubscriptionParams,
-  Rail,
   ScheduledChange,
-  SubscriptionStatus,
 } from "#orck/admin/lib/api/types"
+import type { Price, ProductSummary } from "#orck/client/generated/wire"
 import { ApiError } from "#orck/admin/lib/api/client"
+import { errorText } from "#orck/admin/lib/error-text"
 import { DIALOG_WIDE } from "#orck/admin/lib/dialog-width"
 import { formatDate, formatNativeAmount } from "#orck/admin/lib/format"
 
 import {
-  adminSubscriptionChangeBlockReason,
   initialSeats,
   subscriptionChangeOptionLabel,
   subscriptionChangeOptions,
@@ -43,14 +42,10 @@ import {
 interface ChangeSubscriptionDialogProps {
   subscriptionId: string
   customerId?: string
-  productId: string
-  priceId: string
+  product?: ProductSummary
+  price?: Price
   quantity: number | null
-  currency?: string
-  collectionPolicy?: string
   scheduledChange?: ScheduledChange | null
-  rail: Rail
-  status: SubscriptionStatus
 }
 
 export function ChangeSubscriptionDialog(props: ChangeSubscriptionDialogProps) {
@@ -67,14 +62,10 @@ export function ChangeSubscriptionDialog(props: ChangeSubscriptionDialogProps) {
 function ChangeSubscriptionForm({
   subscriptionId,
   customerId,
-  productId,
-  priceId,
+  product,
+  price,
   quantity,
-  currency,
-  collectionPolicy,
   scheduledChange,
-  rail,
-  status,
 }: ChangeSubscriptionDialogProps) {
   const { toast, toastApiError, adminMutations, adminQueries } =
     useAdminServices()
@@ -103,26 +94,14 @@ function ChangeSubscriptionForm({
   const change = useMutation(
     adminMutations.changeSubscription(queryClient, subscriptionId, customerId)
   )
-  const productsQuery = useQuery({
-    ...adminQueries.allProducts({ errorAction: "Load subscription plans" }),
-    enabled: open,
-  })
-  const pricesQuery = useQuery({
-    ...adminQueries.allPrices({ errorAction: "Load subscription prices" }),
-    enabled: open,
-  })
-
-  const products = productsQuery.data?.data ?? []
-  const prices = pricesQuery.data?.data ?? []
-  const currentProduct = products.find((product) => product.id === productId)
-  const currentPrice = prices.find((price) => price.id === priceId)
+  const targets = useQuery(
+    adminQueries.subscriptionChangeOptions(subscriptionId)
+  )
   const options = subscriptionChangeOptions({
-    currentProduct,
-    currentPrice,
-    currentCurrency: currency ?? currentPrice?.currency,
-    products,
-    prices,
+    product,
+    price,
     scheduledChange,
+    targets: targets.data?.data ?? [],
   })
   const selected = options.find((option) => option.price.id === selectedPriceId)
   const bounds = selected?.price.quantity
@@ -147,12 +126,15 @@ function ChangeSubscriptionForm({
   const requestKey = request ? JSON.stringify(request) : ""
   const reviewed =
     requestKey && reviewedKey === requestKey ? preview.data : undefined
-  const blockReason = adminSubscriptionChangeBlockReason({
-    rail,
-    status,
-    collectionPolicy,
-    scheduledChange,
-  })
+  const blockReason = targets.isPending
+    ? adminText("Loading plans…")
+    : targets.isError
+      ? errorText(targets.error).text
+      : options.length === 0
+        ? adminText(
+            "No eligible recurring plans share this tier group and currency."
+          )
+        : undefined
 
   const handleOpenChange = (next: boolean) => {
     view.current++
@@ -218,13 +200,11 @@ function ChangeSubscriptionForm({
               <SelectTrigger
                 id={adminId("subscription-tier")}
                 className="w-full"
-                disabled={productsQuery.isPending || pricesQuery.isPending}
+                disabled={targets.isPending}
               >
                 <SelectValue
                   placeholder={
-                    productsQuery.isPending || pricesQuery.isPending
-                      ? "Loading plans…"
-                      : "Choose a plan"
+                    targets.isPending ? "Loading plans…" : "Choose a plan"
                   }
                 />
               </SelectTrigger>
@@ -236,20 +216,16 @@ function ChangeSubscriptionForm({
                 ))}
               </SelectContent>
             </Select>
-            {!productsQuery.isPending &&
-              !pricesQuery.isPending &&
-              !productsQuery.isError &&
-              !pricesQuery.isError &&
-              options.length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  <AdminMessage
-                    id={
-                      "No eligible recurring plans share this tier group and currency."
-                    }
-                  />
-                </p>
-              )}
-            {(productsQuery.isError || pricesQuery.isError) && (
+            {targets.isSuccess && options.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                <AdminMessage
+                  id={
+                    "No eligible recurring plans share this tier group and currency."
+                  }
+                />
+              </p>
+            )}
+            {targets.isError && (
               <p className="text-xs text-destructive" role="alert">
                 <AdminMessage id={"Could not load the available plans."} />
               </p>

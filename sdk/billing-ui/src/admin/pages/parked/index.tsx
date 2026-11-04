@@ -28,6 +28,7 @@ import {
   PullDialog,
   pspKey,
   selectClass,
+  pspOption,
   usePSPs,
 } from "#orck/admin/pages/imports/shared"
 import {
@@ -97,7 +98,7 @@ function Parked() {
             <option value="">{text("All PSPs")}</option>
             {psps.list.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.key}
+                {pspOption(p)}
               </option>
             ))}
           </select>

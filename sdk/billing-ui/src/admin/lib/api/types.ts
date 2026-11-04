@@ -20,6 +20,8 @@ export type Rail = "nmi" | "ccbill" | "solana" | "stripe" | string
 export interface RawSubscription {
   id: string // sub_...
   customer_id: string
+  // The customer's directory contact, on a list.
+  customer_contact?: import("#orck/client/generated/wire").CustomerContact
   psp_id?: string
   product_id: string // prod_...
   price_id: string // price_...
@@ -47,26 +49,10 @@ export interface RawSubscription {
   // The server's resume gate (cancel_mode.go Resumable): false for a
   // merchant's cancel, which is final.
   resumable?: boolean
-  price?: RawPrice
+  price?: import("#orck/client/generated/wire").Price
   product?: import("#orck/client/generated/wire").ProductSummary
   created_at: string
   updated_at: string
-}
-
-// RawPrice is the catalog Price embedded on subscription and payment
-// responses. Money is unit_amount, an exact decimal string.
-export interface RawPrice {
-  id: string
-  product_id?: string
-  unit_amount?: string
-  currency?: string
-  archived?: boolean
-  // Key (#774): the durable, movable-pointer handle for this price's
-  // version chain — see Price.key.
-  key?: string
-  access_duration_hours?: number
-  billing_interval_hours?: number
-  [k: string]: unknown
 }
 
 // A customer's keys are the keys of the products they hold; quantity is the

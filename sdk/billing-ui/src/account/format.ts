@@ -7,6 +7,7 @@ import type {
   Subscription,
 } from "../client/types"
 import type { Translator } from "../i18n/messages"
+import { cardBrandLabel } from "../lib/card-brands"
 import { formatAmount } from "../lib/money"
 import { accessLabel, everyLabel } from "../lib/period"
 
@@ -85,9 +86,7 @@ export function paymentItem(
 }
 
 export function brandName(brand: string | null | undefined, fallback: string) {
-  const value = brand?.trim()
-  if (!value) return fallback
-  return value[0].toUpperCase() + value.slice(1).toLowerCase()
+  return cardBrandLabel(brand) ?? fallback
 }
 
 /** "Visa •••• 4242 · 12/30"; the brand alone when no digits are known. */

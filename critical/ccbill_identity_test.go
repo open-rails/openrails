@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/authtest"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/ccbillmock"
@@ -220,7 +221,30 @@ func TestCCBillIdentity(t *testing.T) {
 			price := ccbillMemberPrice(t, a.alpha)
 			erin := authtest.NewUser(t, a.auth)
 			token := authtest.SignIn(t, a.auth, erin).AccessToken
-			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", token, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
+			// The page names the customer: the options say what it still needs,
+			// and paying without it is refused in the customer's words.
+			requires := func(token string) []string {
+				t.Helper()
+				status, raw := a.request(t, http.MethodPost, "/v1/me/orders/preview", token, billing.PreviewMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}})
+				require.Equal(t, http.StatusOK, status, string(raw))
+				var preview billing.OrderPreview
+				require.NoError(t, json.Unmarshal(raw, &preview))
+				require.Len(t, preview.PaymentOptions, 1)
+				require.Equal(t, "ccbill", preview.PaymentOptions[0].Rail)
+				return preview.PaymentOptions[0].Requires
+			}
+			require.Empty(t, requires(token), "a verified email and username name the customer")
+			unverified, err := a.auth.CreateUser(t.Context(), iam.NewUser{Email: "unverified-" + erin.Username + "@example.com", Username: "unverified" + erin.Username[4:], Password: authtest.Password})
+			require.NoError(t, err)
+			pending := authtest.SignIn(t, a.auth, authtest.User{User: unverified, Password: authtest.Password}).AccessToken
+			require.Equal(t, []string{"verified_email"}, requires(pending))
+			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", pending, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
+				Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}},
+				map[string]string{"Idempotency-Key": "ccbill-unverified-order"})
+			require.Equal(t, http.StatusBadRequest, status, string(raw))
+			require.Contains(t, string(raw), "customer_email_required")
+			require.Contains(t, string(raw), "Verify your email and set a username to pay with CCBill.")
+			status, raw = a.request(t, http.MethodPost, "/v1/me/orders", token, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
 				Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}},
 				map[string]string{"Idempotency-Key": "ccbill-card-order"})
 			require.Equal(t, http.StatusCreated, status, string(raw))

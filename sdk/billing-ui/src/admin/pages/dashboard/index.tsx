@@ -44,24 +44,32 @@ function useMeasuredWidth() {
   return { containerRef: setEl, width, mounted: width > 0, el }
 }
 
-// A stat tile's label is one uppercase line of 12px medium text at 0.05em
-// tracking, wrapping to two lines; it needs its widest word plus the tile's
-// 16px padding on each side. The saved grid is kept wherever every stat tile
-// has that room; narrower, the dashboard reflows instead of cutting labels.
+// A stat tile's label is uppercase 12px medium text at 0.05em tracking,
+// clamped to two lines; it needs its best two-line break (the split whose
+// longer line is shortest) plus the tile's 16px padding on each side. The
+// saved grid is kept wherever every stat tile has that room; narrower, the
+// dashboard reflows instead of cutting labels.
 const STAT_PADDING = 32
 const MARGIN = 12
 function labelRoom(widgets: Widget[], font: string): number {
   const context = document.createElement("canvas").getContext("2d")
   if (!context) return 0
   context.font = `500 12px ${font}`
+  const line = (words: string[]) => {
+    const text = words.join(" ")
+    return context.measureText(text).width + text.length * 0.6
+  }
   let widest = 0
   for (const widget of widgets) {
     if (widget.viz !== "stat") continue
-    for (const word of widget.title.toUpperCase().split(/\s+/))
-      widest = Math.max(
-        widest,
-        context.measureText(word).width + word.length * 0.6
+    const words = widget.title.toUpperCase().split(/\s+/).filter(Boolean)
+    let best = line(words)
+    for (let i = 1; i < words.length; i++)
+      best = Math.min(
+        best,
+        Math.max(line(words.slice(0, i)), line(words.slice(i)))
       )
+    widest = Math.max(widest, best)
   }
   return Math.ceil(widest) + STAT_PADDING
 }

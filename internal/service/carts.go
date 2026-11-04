@@ -50,7 +50,7 @@ func (s *Service) GetCart(ctx context.Context, actor OrderActor) (*billing.Cart,
 	if err != nil {
 		return nil, err
 	}
-	return s.cartView(ctx, rt, actor.Customer)
+	return s.cartView(ctx, rt, actor)
 }
 
 // SetCartLine puts a price in the customer's cart, changes its line, or
@@ -72,7 +72,7 @@ func (s *Service) SetCartLine(ctx context.Context, actor OrderActor, price billi
 	if err := rt.Orders.SetCartLine(ctx, actor.Customer.UUID(), resolved.ID, params.Quantity, params.Amount); err != nil {
 		return nil, err
 	}
-	return s.cartView(ctx, rt, actor.Customer)
+	return s.cartView(ctx, rt, actor)
 }
 
 // ClearCart empties the customer's cart.
@@ -91,7 +91,8 @@ func (s *Service) ClearCart(ctx context.Context, actor OrderActor) error {
 
 // cartView prices the customer's cart as an order preview; a line whose
 // price is gone keeps its price id, refused.
-func (s *Service) cartView(ctx context.Context, rt *orderRuntime, customer billing.CustomerID) (*billing.Cart, error) {
+func (s *Service) cartView(ctx context.Context, rt *orderRuntime, actor OrderActor) (*billing.Cart, error) {
+	customer := actor.Customer
 	cart, err := rt.Orders.Cart(ctx, customer.UUID())
 	if err != nil {
 		return nil, err
@@ -104,7 +105,7 @@ func (s *Service) cartView(ctx context.Context, rt *orderRuntime, customer billi
 	if err != nil {
 		return nil, err
 	}
-	options, err := s.orderOptions(ctx, customer.UUID(), quote.Prices(), quote.Products())
+	options, err := s.orderOptions(ctx, customer.UUID(), &actor, quote.Prices(), quote.Products())
 	if err != nil {
 		return nil, err
 	}

@@ -171,6 +171,20 @@ func (t QueryTransaction) Evidence(a QueryAction) decline.Evidence {
 	}
 }
 
+// TransactionCard is the brand and last four of the card one transaction
+// charged or tried, as the gateway's own report shows them.
+func (c *NMIClient) TransactionCard(ctx context.Context, transactionID string) (brand, last4 string, err error) {
+	report, err := c.scoped().TransactionReport(ctx, QueryFilter{TransactionID: transactionID})
+	if err != nil {
+		return "", "", err
+	}
+	if len(report.Transactions) != 1 || report.Transactions[0].TransactionID != transactionID {
+		return "", "", fmt.Errorf("transaction %s lookup is not exact", transactionID)
+	}
+	txn := report.Transactions[0]
+	return cardBrand(txn.CCType, txn.CCNumber), last4Of(txn.CCNumber), nil
+}
+
 // BINOf is the leading six digits of a masked card number; empty when the
 // mask hides them.
 func BINOf(masked string) string {

@@ -65,6 +65,7 @@ export const billingAdminMessages = {
   ", an edit set": ", an edit set",
   ", before another action.": ", before another action.",
   ", deleted: ": ", deleted: ",
+  ".": ".",
   ". Active holds may prevent revocation. Payment refunds are managed separately.":
     ". Active holds may prevent revocation. Payment refunds are managed separately.",
   ". Currency and interval stay locked to the current price.":
@@ -289,6 +290,7 @@ export const billingAdminMessages = {
   "Choose a method": "Choose a method",
   Churn: "Churn",
   "Clear all": "Clear all",
+  "Clear customer": "Clear customer",
   "Clear customer filter": "Clear customer filter",
   "Clear filters": "Clear filters",
   Close: "Close",
@@ -327,7 +329,6 @@ export const billingAdminMessages = {
   "Custom range": "Custom range",
   Customer: "Customer",
   "Customer ID": "Customer ID",
-  "Customer UUID": "Customer UUID",
   "Customer controls": "Customer controls",
   "Customer lookup": "Customer lookup",
   "Customer not found.": "Customer not found.",
@@ -402,7 +403,8 @@ export const billingAdminMessages = {
   Filter: "Filter",
   "Filter meters on this page": "Filter meters on this page",
   "Filter this page…": "Filter this page…",
-  "Find a customer by ID and currency.": "Find a customer by ID and currency.",
+  "Find a customer by name or email, then pick a currency.":
+    "Find a customer by name or email, then pick a currency.",
   "First outcome": "First outcome",
   "First page": "First page",
   "Fixed included units": "Fixed included units",
@@ -462,6 +464,7 @@ export const billingAdminMessages = {
   "Loading order…": "Loading order…",
   "Loading products…": "Loading products…",
   "Loading transactions…": "Loading transactions…",
+  "Loading plans…": "Loading plans…",
   "Loading…": "Loading…",
   "Logo URL": "Logo URL",
   "Manual remittance": "Manual remittance",
@@ -489,8 +492,8 @@ export const billingAdminMessages = {
   "Must be at least ": "Must be at least ",
   "NMI history (before OpenRails recorded attempts)":
     "NMI history (before OpenRails recorded attempts)",
-  "NMI&apos;s own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI&apos;s own charges, each the first try of its period. Rates count authorizations, not buyers.":
-    "NMI&apos;s own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI&apos;s own charges, each the first try of its period. Rates count authorizations, not buyers.",
+  "NMI's own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI's own charges, each the first try of its period. Rates count authorizations, not buyers.":
+    "NMI's own transaction history, read daily and kept 25 months. It counts every sender, OpenRails too once it started. One-off sales mix initial sales, upgrades and retries of declined rebills: the history cannot tell them apart. Scheduled rebills are NMI's own charges, each the first try of its period. Rates count authorizations, not buyers.",
   "NMI-owned": "NMI-owned",
   "NMI-scheduled rebills": "NMI-scheduled rebills",
   Name: "Name",
@@ -521,8 +524,8 @@ export const billingAdminMessages = {
   "No NMI history yet: it is read daily.":
     "No NMI history yet: it is read daily.",
   "No PSPs configured.": "No PSPs configured.",
-  "No actions are available for your permissions and this order&apos;s state.":
-    "No actions are available for your permissions and this order&apos;s state.",
+  "No actions are available for your permissions and this order's state.":
+    "No actions are available for your permissions and this order's state.",
   "No active products are available.": "No active products are available.",
   "No active subscriptions.": "No active subscriptions.",
   "No allowance": "No allowance",
@@ -556,6 +559,7 @@ export const billingAdminMessages = {
     "No saved payment methods. Add one on the customer page before retrying collection.",
   "No subscriptions.": "No subscriptions.",
   "No transactions in this currency.": "No transactions in this currency.",
+  "No currency yet": "No currency yet",
   "No usage meters yet": "No usage meters yet",
   "No webhooks configured.": "No webhooks configured.",
   "No widgets yet": "No widgets yet",
@@ -624,6 +628,7 @@ export const billingAdminMessages = {
   "Period maximum": "Period maximum",
   "Period: ": "Period: ",
   "Pick a later date.": "Pick a later date.",
+  "Pick a customer first": "Pick a customer first",
   "Pick a product": "Pick a product",
   "Pick a product…": "Pick a product…",
   "Pick a rail…": "Pick a rail…",
@@ -666,8 +671,8 @@ export const billingAdminMessages = {
   "Pick a stored payment method": "Pick a stored payment method",
   "Pinned to an archived (prior) version":
     "Pinned to an archived (prior) version",
-  "Points future renewals of this subscription at another of the customer&apos;s stored cards (same rail), or back at their default card for its currency.":
-    "Points future renewals of this subscription at another of the customer&apos;s stored cards (same rail), or back at their default card for its currency.",
+  "Points future renewals of this subscription at another of the customer's stored cards (same rail), or back at their default card for its currency.":
+    "Points future renewals of this subscription at another of the customer's stored cards (same rail), or back at their default card for its currency.",
   Preview: "Preview",
   "Previous page": "Previous page",
   "Previous period": "Previous period",
@@ -811,17 +816,19 @@ export const billingAdminMessages = {
     "The accounts this merchant takes payments through, one or more per rail.",
   "The customer loses its entitlements now. The grant stays on record with your reason.":
     "The customer loses its entitlements now. The grant stays on record with your reason.",
-  "The customer&apos;s default card": "The customer&apos;s default card",
+  "The customer's default card": "The customer's default card",
   "The daily report covers at most ": "The daily report covers at most ",
   "The keys of the products this customer holds now.":
     "The keys of the products this customer holds now.",
   "The payment provider calculates the final prorated amount.":
     "The payment provider calculates the final prorated amount.",
+  "The payment provider hasn't confirmed this order's payment yet. It settles once the provider shows the result, or when it is resolved with ":
+    "The payment provider hasn't confirmed this order's payment yet. It settles once the provider shows the result, or when it is resolved with ",
   "Their reference": "Their reference",
   "There were no providers to consider.":
     "There were no providers to consider.",
-  "These are the customer&apos;s invoice profile when the order was billed. Editing the profile affects later orders.":
-    "These are the customer&apos;s invoice profile when the order was billed. Editing the profile affects later orders.",
+  "These are the customer's invoice profile when the order was billed. Editing the profile affects later orders.":
+    "These are the customer's invoice profile when the order was billed. Editing the profile affects later orders.",
   "These terms cannot be changed later. To charge a different amount, create another price and deactivate this one.":
     "These terms cannot be changed later. To charge a different amount, create another price and deactivate this one.",
   "This billing page does not exist.": "This billing page does not exist.",
@@ -882,7 +889,7 @@ export const billingAdminMessages = {
   "Why it was granted": "Why it was granted",
   "Widget menu": "Widget menu",
   "Widget title": "Widget title",
-  "You&apos;re all caught up.": "You&apos;re all caught up.",
+  "You're all caught up.": "You're all caught up.",
   "Your directory holds no contact for this customer.":
     "Your directory holds no contact for this customer.",
   "Your role does not have permission to read the merchant catalog.":
@@ -962,34 +969,34 @@ export const billingAdminMessages = {
   "why is this being canceled?": "why is this being canceled?",
   "· owed ": "· owed ",
   "← Orders": "← Orders",
-  "Succeeded": "Succeeded",
-  "Completed": "Completed",
-  "Complete": "Complete",
-  "Linked": "Linked",
-  "Approved": "Approved",
-  "Landed": "Landed",
-  "Current": "Current",
-  "Held": "Held",
+  Succeeded: "Succeeded",
+  Completed: "Completed",
+  Complete: "Complete",
+  Linked: "Linked",
+  Approved: "Approved",
+  Landed: "Landed",
+  Current: "Current",
+  Held: "Held",
   "Past due": "Past due",
-  "Grace": "Grace",
-  "Unknown": "Unknown",
+  Grace: "Grace",
+  Unknown: "Unknown",
   "Requires review": "Requires review",
-  "Delinquent": "Delinquent",
-  "Lost": "Lost",
+  Delinquent: "Delinquent",
+  Lost: "Lost",
   "Partially refunded": "Partially refunded",
-  "Dismissed": "Dismissed",
-  "Superseded": "Superseded",
+  Dismissed: "Dismissed",
+  Superseded: "Superseded",
   "Already resolved": "Already resolved",
   "Awaiting method": "Awaiting method",
   "Cancel this membership?": "Cancel this membership?",
   "Renewal stops now and can't be restarted from here.":
     "Renewal stops now and can't be restarted from here.",
   "The customer": "The customer",
-  "keeps": "keeps",
-  "loses": "loses",
+  keeps: "keeps",
+  loses: "loses",
   "now. No refund is made.": "now. No refund is made.",
   "their access": "their access",
-  "until": "until",
+  until: "until",
   "until the current period ends.": "until the current period ends.",
   "Cancel membership": "Cancel membership",
   "End access now instead (no refund is made)":
@@ -1016,7 +1023,7 @@ export const billingAdminMessages = {
   "Customer email, ref, or id": "Customer email, ref, or id",
   "Clear search": "Clear search",
   "Searching…": "Searching…",
-  "Search": "Search",
+  Search: "Search",
   "No customer matches": "No customer matches",
   "More customers match. Choose one, or search for more of the name or email.":
     "More customers match. Choose one, or search for more of the name or email.",
@@ -1044,7 +1051,7 @@ export const billingAdminMessages = {
     "Billing couldn't check your permission to clear holds. Try again in a moment.",
   "This hold was already cleared or no longer exists.":
     "This hold was already cleared or no longer exists.",
-  "None": "None",
+  None: "None",
   "Payment methods are up to date": "Payment methods are up to date",
   "Refreshing…": "Refreshing…",
   "Last updated": "Last updated",
@@ -1053,15 +1060,15 @@ export const billingAdminMessages = {
   "The money goes back through ": "The money goes back through ",
   ". Up to ": ". Up to ",
   " can still be refunded.": " can still be refunded.",
-  "Pulling": "Pulling",
-  "Released": "Released",
-  "Resolved": "Resolved",
-  "Processing": "Processing",
+  Pulling: "Pulling",
+  Released: "Released",
+  Resolved: "Resolved",
+  Processing: "Processing",
   "Requires action": "Requires action",
-  "Void": "Void",
-  "Uncollectible": "Uncollectible",
-  "Converged": "Converged",
-  "Gone": "Gone",
-  "Ignored": "Ignored",
-  "Imported": "Imported",
+  Void: "Void",
+  Uncollectible: "Uncollectible",
+  Converged: "Converged",
+  Gone: "Gone",
+  Ignored: "Ignored",
+  Imported: "Imported",
 } as const

@@ -51,7 +51,20 @@ const ccbillPeriodSlack = 72 * time.Hour
 
 // ErrCCBillIdentityRequired: a FlexForm names the customer by their verified
 // email and username.
-var ErrCCBillIdentityRequired = apperr.New(http.StatusBadRequest, codeCustomerEmailRequired, "CCBill needs the customer's verified email and username.")
+var ErrCCBillIdentityRequired = apperr.New(http.StatusBadRequest, codeCustomerEmailRequired, "Verify your email and set a username to pay with CCBill.")
+
+// CCBillIdentityMissing is what a FlexForm still needs to name user:
+// "verified_email" and "username", each when absent. Empty when it can.
+func CCBillIdentityMissing(user *UserIdentity) []string {
+	var missing []string
+	if user.Email == nil || strings.TrimSpace(*user.Email) == "" {
+		missing = append(missing, "verified_email")
+	}
+	if strings.TrimSpace(user.Username) == "" {
+		missing = append(missing, "username")
+	}
+	return missing
+}
 
 // errCCBillSaleWaits: another payment on the order is unresolved; CCBill
 // redelivers the sale.
@@ -100,7 +113,7 @@ func (s *OrderAttemptService) payOrderCCBill(ctx context.Context, in OrderPayInp
 			return err
 		}
 	}
-	if in.User == nil || in.User.Email == nil || strings.TrimSpace(*in.User.Email) == "" || strings.TrimSpace(in.User.Username) == "" {
+	if in.User == nil || len(CCBillIdentityMissing(in.User)) > 0 {
 		return ErrCCBillIdentityRequired
 	}
 	purchase, ok := s.purchaseService.(*PurchaseService)

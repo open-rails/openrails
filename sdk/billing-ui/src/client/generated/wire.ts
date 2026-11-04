@@ -1387,6 +1387,7 @@ export type NextAction = {
 export type Order = {
   id: string
   customer_id: string
+  customer_contact?: CustomerContact
   origin: "customer" | "merchant" | "subscription" | "usage"
   status: "canceled" | "complete" | "expired" | "open" | "processing" | "uncollectible" | "void"
   collection_owner: "engine" | "nmi_schedule" | "provider"
@@ -1479,6 +1480,7 @@ export type OrderPaymentOption = {
   rail: string
   accepts: string[]
   failed_attempts: number
+  requires?: string[]
 }
 
 export type OrderPaymentParams = {
@@ -1735,6 +1737,7 @@ export type Payment = {
   amount_refunded: string
   currency: string
   customer_id: string
+  customer_contact?: CustomerContact
   subscription_id: string | null
   order_id: string | null
   quantity: number | null
@@ -2339,6 +2342,7 @@ export type Subscription = {
   deletion_scheduled_at?: string
   id: string
   customer_id: string
+  customer_contact?: CustomerContact
   product_id: string
   price_id: string
   quantity: number | null
