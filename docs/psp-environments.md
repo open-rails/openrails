@@ -63,9 +63,9 @@ Only the verdict the environment expects arms: `live` for a real-money PSP,
 any bytes are sent; reads work. The engine still starts and stays ready, and the
 `openrails_psp_posture` probe fails while a loaded PSP is unverified or
 disarmed. `unknown`, which includes a page that is not the provider's own
-response (maintenance, WAF), is verified again in the background and on the next
-mutation with capped backoff (at most 30 seconds). A disagreeing or `unsupported`
-answer holds until the PSP's configuration changes.
+response (maintenance, WAF), is verified again on the next mutation, with backoff
+capped at 30 seconds, and in the background, capped at 5 minutes. A disagreeing or
+`unsupported` answer holds until the PSP's configuration changes.
 
 ## Signals
 
