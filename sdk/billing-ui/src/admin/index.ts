@@ -1,6 +1,7 @@
 import "./index.css"
 
 export { BillingAdmin } from "./billing-admin"
+export { AdminConsole, type AdminConsoleProps } from "./console"
 export type {
   BillingAdminProps,
   BillingAdminAuth,

@@ -9,7 +9,7 @@ administration inside the host's application.
 | `@openrails/billing-ui/react`     | `BillingProvider` and headless hooks, without styles                               |
 | `@openrails/billing-ui`           | `BillingProvider`, styled purchase and account components, i18n                    |
 | `@openrails/billing-ui/locales/*` | `en de es ja ko zh` message bundles                                                |
-| `@openrails/billing-ui/admin`     | `BillingAdmin`, `BillingCustomerSummary`, access and confirmation helpers          |
+| `@openrails/billing-ui/admin`     | `AdminConsole`, `BillingAdmin`, `BillingCustomerSummary`, access and warning helpers |
 | `@openrails/billing-ui/admin.css` | Scoped staff administration styles                                                 |
 
 The purchase owns the browser payment flow, behind `<BuyButton>`, `<ProductList>`
@@ -253,6 +253,15 @@ then does not request them to load; a retry still reads the server's copy:
 ```
 
 ## Staff administration
+
+`AdminConsole` is the whole staff console, AuthKit's account administration and
+billing together, configured rather than composed (needs `@openrails/auth-ui`):
+
+```tsx
+<AdminConsole authBaseUrl="/api/v1" billingBaseUrl="/billing/v1" merchant={merchant} basePath="/admin" />
+```
+
+To compose your own pages instead:
 
 Install the admin entry's optional peer with `pnpm add @tanstack/react-query`.
 The host owns sign-in and passes its authenticated transport and router:

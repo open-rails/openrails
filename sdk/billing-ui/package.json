@@ -78,7 +78,8 @@
   "peerDependencies": {
     "react": ">=19 <20",
     "react-dom": ">=19 <20",
-    "@tanstack/react-query": ">=5 <6"
+    "@tanstack/react-query": ">=5 <6",
+    "@openrails/auth-ui": ">=1.34.1 <2"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -130,6 +131,9 @@
   },
   "peerDependenciesMeta": {
     "@tanstack/react-query": {
+      "optional": true
+    },
+    "@openrails/auth-ui": {
       "optional": true
     }
   }
