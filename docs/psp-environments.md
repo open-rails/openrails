@@ -62,9 +62,10 @@ Only the verdict the environment expects arms: `live` for a real-money PSP,
 `unsupported`, or the opposite verdict) disarms: mutations fail locally before
 any bytes are sent; reads work. The engine still starts and stays ready, and the
 `openrails_psp_posture` probe fails while a loaded PSP is unverified or
-disarmed. `unknown` is verified again in the background and on the next
-mutation with capped backoff (at most 30 seconds). A disagreeing answer holds
-until the PSP's configuration changes.
+disarmed. `unknown`, which includes a page that is not the provider's own
+response (maintenance, WAF), is verified again in the background and on the next
+mutation with capped backoff (at most 30 seconds). A disagreeing or `unsupported`
+answer holds until the PSP's configuration changes.
 
 ## Signals
 

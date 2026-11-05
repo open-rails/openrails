@@ -130,9 +130,13 @@ func (c *NMIClient) readGatewayTestMode(ctx context.Context) (TestModeProbeResul
 	return parseGatewayTestMode(raw)
 }
 
-// errUnexpectedTestMode is a well-formed test_mode_status answer that is not
-// the documented one.
+// errUnexpectedTestMode is the gateway's own response, a lone bare
+// <nm_response>, that does not hold the documented answer.
 var errUnexpectedTestMode = errors.New("unexpected test_mode_status answer")
+
+// errNotGatewayResponse is a body that is not a lone bare <nm_response>: a
+// maintenance or WAF page in front of the gateway, which says nothing about it.
+var errNotGatewayResponse = errors.New("test_mode_status response is not the gateway's")
 
 func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 	// Deliberately accept only the documented bounded response, not a substring
@@ -143,6 +147,8 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 	decoder := xml.NewDecoder(strings.NewReader(raw))
 	depth, count, roots := 0, 0, 0
 	value := ""
+	// Held until the whole body proves to be the gateway's response.
+	var unexpected error
 	for {
 		token, err := decoder.Token()
 		if errors.Is(err, io.EOF) {
@@ -154,33 +160,40 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 		switch element := token.(type) {
 		case xml.StartElement:
 			depth++
-			if depth == 1 {
+			bare := element.Name.Space == "" && len(element.Attr) == 0
+			switch {
+			case depth == 1:
 				roots++
-				if roots > 1 {
-					return ProbeIndeterminate, fmt.Errorf("%w: more than one root element", errUnexpectedTestMode)
+				if roots > 1 || !bare || element.Name.Local != "nm_response" {
+					return ProbeIndeterminate, errNotGatewayResponse
 				}
-			}
-			if element.Name.Space != "" || len(element.Attr) != 0 || depth == 1 && element.Name.Local != "nm_response" || depth == 2 && element.Name.Local != "test_mode_enabled" || depth > 2 {
-				return ProbeIndeterminate, fmt.Errorf("%w: <%s> (namespace %q, %d attributes) at depth %d", errUnexpectedTestMode, element.Name.Local, element.Name.Space, len(element.Attr), depth)
-			}
-			if depth == 2 {
+			case depth == 2 && bare && element.Name.Local == "test_mode_enabled":
 				count++
+			case unexpected == nil:
+				unexpected = fmt.Errorf("%w: <%s> (namespace %q, %d attributes) at depth %d", errUnexpectedTestMode, element.Name.Local, element.Name.Space, len(element.Attr), depth)
 			}
 		case xml.EndElement:
 			depth--
 		case xml.CharData:
 			text := strings.TrimSpace(string(element))
-			if depth == 2 {
+			switch {
+			case text == "":
+			case depth == 0:
+				return ProbeIndeterminate, errNotGatewayResponse
+			case depth == 2:
 				value += text
-			} else if text != "" {
-				return ProbeIndeterminate, fmt.Errorf("%w: text outside <test_mode_enabled>", errUnexpectedTestMode)
+			case unexpected == nil:
+				unexpected = fmt.Errorf("%w: text outside <test_mode_enabled>", errUnexpectedTestMode)
 			}
 		case xml.Directive:
-			return ProbeIndeterminate, fmt.Errorf("%w: XML directive", errUnexpectedTestMode)
+			return ProbeIndeterminate, errNotGatewayResponse
 		}
 	}
 	if depth != 0 || roots != 1 {
 		return ProbeIndeterminate, errors.New("incomplete test-mode response")
+	}
+	if unexpected != nil {
+		return ProbeIndeterminate, unexpected
 	}
 	if count != 1 {
 		return ProbeIndeterminate, fmt.Errorf("%w: %d <test_mode_enabled> results", errUnexpectedTestMode, count)

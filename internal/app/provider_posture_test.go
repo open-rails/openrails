@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -122,12 +123,34 @@ func TestNMIGatewayTestModeAnswersClassify(t *testing.T) {
 		want   providerposture.Verdict
 	}{
 		{"documented-answer", http.StatusOK, "<nm_response><test_mode_enabled>true</test_mode_enabled></nm_response>", providerposture.Simulated},
+		{"documented-answer-as-a-document", http.StatusOK, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<nm_response>\n  <test_mode_enabled>true</test_mode_enabled>\n</nm_response>\n", providerposture.Simulated},
 		{"gateway-error-is-a-failed-read", http.StatusOK, "<nm_response><error_response>Temporary error</error_response></nm_response>", providerposture.Unknown},
 		{"rejected-credentials", http.StatusOK, "<nm_response><error_response>Authentication Failed</error_response></nm_response>", providerposture.Unknown},
-		{"extra-element", http.StatusOK, "<nm_response><test_mode_enabled>true</test_mode_enabled><note>x</note></nm_response>", providerposture.Unsupported},
-		{"unknown-value", http.StatusOK, "<nm_response><test_mode_enabled>maybe</test_mode_enabled></nm_response>", providerposture.Unsupported},
 		{"provider-unavailable", http.StatusServiceUnavailable, "", providerposture.Unknown},
 		{"unreadable", http.StatusOK, "<nm_response><test_mode", providerposture.Unknown},
+		// The gateway's own response with an unexpected value: asking again gets the same.
+		{"extra-element", http.StatusOK, "<nm_response><test_mode_enabled>true</test_mode_enabled><note>x</note></nm_response>", providerposture.Unsupported},
+		{"unknown-value", http.StatusOK, "<nm_response><test_mode_enabled>maybe</test_mode_enabled></nm_response>", providerposture.Unsupported},
+		{"no-result", http.StatusOK, "<nm_response></nm_response>", providerposture.Unsupported},
+		{"two-results", http.StatusOK, "<nm_response><test_mode_enabled>true</test_mode_enabled><test_mode_enabled>true</test_mode_enabled></nm_response>", providerposture.Unsupported},
+		{"nested-result", http.StatusOK, "<nm_response><test_mode_enabled><test_mode_enabled>true</test_mode_enabled></test_mode_enabled></nm_response>", providerposture.Unsupported},
+		{"result-with-attribute", http.StatusOK, "<nm_response><test_mode_enabled a=\"1\">true</test_mode_enabled></nm_response>", providerposture.Unsupported},
+		{"text-beside-the-result", http.StatusOK, "<nm_response>note<test_mode_enabled>true</test_mode_enabled></nm_response>", providerposture.Unsupported},
+		// A body that is not the gateway's: something in front of it answered.
+		{"html-with-doctype", http.StatusOK, "<!DOCTYPE html><html><head><title>Maintenance</title></head><body>Back soon</body></html>", providerposture.Unknown},
+		{"html-with-lowercase-doctype", http.StatusOK, "<!doctype html>\n<html lang=\"en\"><body>Back soon</body></html>", providerposture.Unknown},
+		{"html-without-doctype", http.StatusOK, "<html><head><title>Maintenance</title></head><body>Back soon</body></html>", providerposture.Unknown},
+		{"another-root", http.StatusOK, "<response><test_mode_enabled>true</test_mode_enabled></response>", providerposture.Unknown},
+		{"not-xml", http.StatusOK, "Service temporarily unavailable", providerposture.Unknown},
+		{"json", http.StatusOK, "{\"status\":\"maintenance\"}", providerposture.Unknown},
+		{"empty", http.StatusOK, "", providerposture.Unknown},
+		{"doctype-before-the-gateway-root", http.StatusOK, "<!DOCTYPE nm_response><nm_response><test_mode_enabled>true</test_mode_enabled></nm_response>", providerposture.Unknown},
+		{"namespaced-root", http.StatusOK, "<nm_response xmlns=\"urn:edge\"><test_mode_enabled>true</test_mode_enabled></nm_response>", providerposture.Unknown},
+		{"root-with-attribute", http.StatusOK, "<nm_response id=\"1\"><test_mode_enabled>true</test_mode_enabled></nm_response>", providerposture.Unknown},
+		{"second-root", http.StatusOK, "<nm_response><test_mode_enabled>true</test_mode_enabled></nm_response><html></html>", providerposture.Unknown},
+		{"text-after-the-root", http.StatusOK, "<nm_response><test_mode_enabled>true</test_mode_enabled></nm_response>retry later", providerposture.Unknown},
+		{"second-root-after-an-unexpected-value", http.StatusOK, "<nm_response><note>x</note></nm_response><html></html>", providerposture.Unknown},
+		{"truncated-after-an-unexpected-value", http.StatusOK, "<nm_response><note>x", providerposture.Unknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -146,4 +169,22 @@ func TestNMIGatewayTestModeAnswersClassify(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A live PSP behind a maintenance page arms once the page lifts, without a
+// restart or a credential reload.
+func TestNMIMaintenancePageArmsOnceItLifts(t *testing.T) {
+	var body atomic.Value
+	body.Store("<!DOCTYPE html><html><body>Back soon</body></html>")
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, body.Load().(string))
+	}))
+	t.Cleanup(gateway.Close)
+	client := &nmi.NMIClient{SecurityKey: "test-fixture", Environment: config.EnvironmentLive, QueryURL: gateway.URL}
+	registry := providerposture.NewRegistry(func(int) time.Duration { return 0 })
+	require.Equal(t, providerposture.Unknown, registry.Verify(t.Context(), client.PostureKey(), client.CheckPosture).Verdict)
+	body.Store("<nm_response><test_mode_enabled>false</test_mode_enabled></nm_response>")
+	status := registry.Refresh(t.Context(), client.PostureKey(), client.CheckPosture)
+	require.Equal(t, providerposture.Live, status.Verdict, status.Err)
+	require.True(t, status.Armed())
 }
