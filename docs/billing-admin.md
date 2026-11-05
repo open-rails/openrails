@@ -32,6 +32,19 @@ read authority, model consent and the `catalog-ask` request limit. It serves an
 embedded host's BillingAdmin as well as the standalone console. Applying a
 draft remains a separate action requiring catalog manage authority.
 
+## The whole admin console
+
+`AdminConsole` is the staff console with no host screens: AuthKit's account administration (`AuthAdmin`: users with ban, delete and restore, members, roles, credentials) at `basePath`, and `BillingAdmin` at `basePath/billing`. Render it inside the host's AuthKit `AuthProvider`:
+
+```tsx
+import { AdminConsole } from "@openrails/billing-ui/admin"
+import "@openrails/billing-ui/admin.css"
+
+<AdminConsole authBaseUrl="/api/v1" billingBaseUrl="/billing/v1" merchant={merchant} basePath="/admin" />
+```
+
+It asks an anonymous visitor to sign in (`signInPath` sends them to the host's page with `?return_to=`), runs AuthKit's writes through a step-up dialog, shows each area only to whoever holds its permissions, puts the customer's `BillingCustomerSummary` on each user page, warns about ongoing subscriptions before a ban or delete, and links billing customers to their user pages. `navigation` is optional, as for `BillingAdmin`. `@openrails/auth-ui` is an optional peer, needed only for this component.
+
 ## Composition
 
 - `merchant` fixes the merchant, as an id or `{ id, slug, display_name? }`. `merchants` and `onMerchantChange` supply a switcher.
