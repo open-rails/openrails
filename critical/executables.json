@@ -467,6 +467,9 @@
     "OR-J31-S04": [
       "TestBillingArchive/OR-J31-S04/unresolved-operation-refuses-export-without-changing-custody"
     ],
+    "OR-J31-S06": [
+      "TestBillingArchive/OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book"
+    ],
     "OR-J32-S01": [
       "TestMerchantHost/OR-J32-S01/provision-find-list-rename-retains-identity"
     ],

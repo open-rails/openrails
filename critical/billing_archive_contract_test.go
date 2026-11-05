@@ -8,14 +8,18 @@ import (
 	"encoding/json"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"maps"
+	"net/http"
 	"net/url"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	notifypg "github.com/open-rails/authkit/notify/postgres"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -199,5 +203,48 @@ func TestBillingArchive(t *testing.T) {
 		balance(t, source.alpha, customer, 1000, 0, 1000)
 		require.NotEmpty(t, archiveBytes(t, source.alpha))
 	})
-
+	t.Run("OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book", func(t *testing.T) {
+		source, provider, customer := usageBillingWorld(t, true, false)
+		// A sale and a usage collection, each holding the receipt that names the card NMI reported.
+		product, err := source.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "archived-download", DisplayName: "Download", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"download:owned"}})
+		require.NoError(t, err)
+		price, err := source.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "archived-download", UnitAmount: 9_990_000, Currency: "USD"})
+		require.NoError(t, err)
+		sale := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
+			Payment: &billing.OrderPaymentParams{Token: provider.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"})}}
+		status, raw := source.request(t, http.MethodPost, "/v1/me/orders", source.aliceToken, sale, map[string]string{"Idempotency-Key": "archived-nmi-sale"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var paid billing.Order
+		require.NoError(t, json.Unmarshal(raw, &paid))
+		require.Equal(t, billing.OrderComplete, paid.Status, string(raw))
+		oneUsage(t, source.alpha, usageInput(customer, "archived-work", 3))
+		runUsageDue(t, startFleet(t, source.world))
+		require.Eventually(t, func() bool {
+			rows, err := source.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+			return err == nil && len(rows.Items) == 2 && rows.Items[0].Status == billing.OrderComplete && rows.Items[1].Status == billing.OrderComplete
+		}, 15*time.Second, 20*time.Millisecond)
+		cards := func(w *world) map[string]string {
+			rows, err := w.pool.Query(t.Context(), "SELECT intent_type, result_evidence#>>'{qualified_receipt,nmi,card_brand}', result_evidence#>>'{qualified_receipt,nmi,card_last4}' FROM "+pgx.Identifier{w.schema, "provider_intents"}.Sanitize()+" WHERE status = 'succeeded' AND result_evidence ? 'qualified_receipt'")
+			require.NoError(t, err)
+			defer rows.Close()
+			out := map[string]string{}
+			for rows.Next() {
+				var kind, brand, last4 string
+				require.NoError(t, rows.Scan(&kind, &brand, &last4))
+				out[kind] = brand + " " + last4
+			}
+			require.NoError(t, rows.Err())
+			return out
+		}
+		held := map[string]string{"nmi_sale": "mastercard 5454", "order_collection": "visa 4242"}
+		require.Equal(t, held, cards(source.world))
+		archive := archiveBytes(t, source.alpha)
+		target, client := archiveTarget(t, source.world, func(w *world) { w.deps.NMITransport = source.deps.NMITransport })
+		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+		require.Equal(t, held, cards(target))
+		payment, err := client.GetPayment(t.Context(), *paid.Payment.PaymentID)
+		require.NoError(t, err)
+		require.Equal(t, "5454", *payment.Card.Last4)
+	})
 }

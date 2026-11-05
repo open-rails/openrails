@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 270,
+  "scenario_count": 271,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -707,6 +707,11 @@
       "id": "OR-J31-S04",
       "journey": "J31",
       "name": "Unresolved operation refuses export without changing custody or source write posture"
+    },
+    {
+      "id": "OR-J31-S06",
+      "journey": "J31",
+      "name": "NMI receipts that name their card export and restore verbatim"
     },
     {
       "id": "OR-J32-S01",
