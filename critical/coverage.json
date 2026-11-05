@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 269,
+  "scenario_count": 270,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1342,6 +1342,11 @@
       "id": "OR-J29-S72",
       "journey": "J29",
       "name": "A timed window that lapses is told once by the hourly health pass"
+    },
+    {
+      "id": "OR-J29-S73",
+      "journey": "J29",
+      "name": "A provider operation that ended without an explicit decline stays an abandoned-operation finding; only a decline raises none and closes an open one"
     },
     {
       "id": "OR-J04-S70",

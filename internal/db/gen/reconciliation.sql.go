@@ -260,7 +260,7 @@ WHERE f.merchant_id = $1::uuid
       SELECT 1 FROM billing.provider_intents pi
       WHERE pi.merchant_id = f.merchant_id AND 'provider_intent:' || pi.id::text = f.subject_key
         AND ((pi.status IN ('failed_terminal', 'expired')
-              AND NOT (pi.status = 'failed_terminal' AND pi.result_evidence->>'declined' = 'true'))
+              AND NOT (pi.status = 'failed_terminal' AND pi.result_evidence->>'declined' IS NOT DISTINCT FROM 'true'))
              OR (pi.status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
                  AND pi.expires_at IS NOT NULL AND pi.expires_at < $2::timestamptz))
   )
@@ -913,7 +913,7 @@ SELECT id, intent_type, status, rail FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
   AND (
         (status IN ('failed_terminal', 'expired') AND updated_at > $2::timestamptz
-         AND NOT (status = 'failed_terminal' AND result_evidence->>'declined' = 'true'))
+         AND NOT (status = 'failed_terminal' AND result_evidence->>'declined' IS NOT DISTINCT FROM 'true'))
         OR (status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
             AND expires_at IS NOT NULL AND expires_at < $3::timestamptz)
       )

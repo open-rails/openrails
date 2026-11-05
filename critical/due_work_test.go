@@ -209,6 +209,78 @@ func TestDueWork(t *testing.T) {
 		runRegistered(t, fleet, "openrails.merchant_health", 1)
 		require.Equal(t, 1, accessEndedNotices(t, w, customer), "once")
 	})
+	t.Run("OR-J29-S73/only-an-explicit-decline-excuses-an-abandoned-operation", func(t *testing.T) {
+		a, _ := newPaymentWorld(t)
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		psp := psps.Items[0].ID.UUID()
+		intents := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		// What a terminal outcome leaves: Terminal(...) records no decline.
+		terminal := map[string]*string{"no-evidence": nil, "other-evidence": ptr(`{"reason":"gone"}`), "not-declined": ptr(`{"declined":false}`), "declined": ptr(`{"declined":true}`)}
+		seed := func(key, status string, expires *time.Time, evidence *string) string {
+			var id uuid.UUID
+			require.NoError(t, a.pool.QueryRow(t.Context(), "INSERT INTO "+intents+" (merchant_id, rail, intent_type, idempotency_key, status, next_attempt_at, origin, psp_id, expires_at, result_evidence) VALUES ($1, 'stripe', 'critical_operation', $2, $3, $4, 'system', $5, $6, $7::jsonb) RETURNING id",
+				a.alpha.MerchantID().UUID(), key, status, a.clock.Now().Add(24*time.Hour), psp, expires, evidence).Scan(&id))
+			return "provider_intent:" + id.String()
+		}
+		findings := func(status billing.FindingStatus) map[string]billing.Finding {
+			page, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.provider_intent.abandoned", Status: status})
+			require.NoError(t, err)
+			out := map[string]billing.Finding{}
+			for _, finding := range page.Items {
+				out[finding.SubjectKey] = finding
+			}
+			return out
+		}
+		requireOpen := func(subjects map[string]string, names ...string) {
+			t.Helper()
+			open := findings("")
+			for _, name := range names {
+				require.Contains(t, open, subjects[name], "%s is no decline: its operation stays abandoned", name)
+			}
+		}
+		undeclined := []string{"no-evidence", "other-evidence", "not-declined"}
+
+		// An operation that ended this way is reported, unless it was declined.
+		ended := map[string]string{}
+		for name, evidence := range terminal {
+			ended[name] = seed("ended-"+name, "failed_terminal", nil, evidence)
+		}
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		requireOpen(ended, undeclined...)
+		require.NotContains(t, findings(""), ended["declined"], "a decline is no abandoned operation")
+
+		// An open finding outlives its operation ending, unless it was declined.
+		past := a.clock.Now().Add(-time.Hour)
+		overdue := map[string]string{}
+		for name := range terminal {
+			overdue[name] = seed("overdue-"+name, "pending", &past, nil)
+		}
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		requireOpen(overdue, "no-evidence", "other-evidence", "not-declined", "declined")
+		for name, evidence := range terminal {
+			_, err := a.pool.Exec(t.Context(), "UPDATE "+intents+" SET status = 'failed_terminal', result_evidence = $1::jsonb WHERE idempotency_key = $2", evidence, "overdue-"+name)
+			require.NoError(t, err)
+		}
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		requireOpen(overdue, undeclined...)
+		closed := findings("fixed")
+		require.Contains(t, closed, overdue["declined"], "a declined operation is no longer abandoned")
+		require.Equal(t, "auto_vanished", *closed[overdue["declined"]].Resolution)
+		require.Len(t, closed, 1)
+
+		// Past the lookback the list no longer re-raises them: closing is the
+		// resolve query's call alone.
+		a.clock.Advance(26 * time.Hour)
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		requireOpen(ended, undeclined...)
+		requireOpen(overdue, undeclined...)
+		require.Len(t, findings("fixed"), 1)
+	})
 	t.Run("OR-J04-S70/the-hourly-health-pass-raises-held-renewals", func(t *testing.T) {
 		a, _, sub := purchasedMembership(t)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Add(3 * time.Hour).Sub(a.clock.Now()))

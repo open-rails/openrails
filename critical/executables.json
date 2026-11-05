@@ -835,6 +835,9 @@
     "OR-J29-S72": [
       "TestDueWork/OR-J29-S72/a-timed-window-that-lapses-is-told-by-the-health-pass"
     ],
+    "OR-J29-S73": [
+      "TestDueWork/OR-J29-S73/only-an-explicit-decline-excuses-an-abandoned-operation"
+    ],
     "OR-J04-S70": [
       "TestDueWork/OR-J04-S70/the-hourly-health-pass-raises-held-renewals"
     ],
