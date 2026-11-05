@@ -43,7 +43,7 @@ import "@openrails/billing-ui/admin.css"
 <AdminConsole authBaseUrl="/api/v1" billingBaseUrl="/billing/v1" merchant={merchant} basePath="/admin" />
 ```
 
-It asks an anonymous visitor to sign in (`signInPath` sends them to the host's page with `?return_to=`), runs AuthKit's writes through a step-up dialog, shows each area only to whoever holds its permissions, puts the customer's `BillingCustomerSummary` on each user page, warns about ongoing subscriptions before a ban or delete, and links billing customers to their user pages. `navigation` is optional, as for `BillingAdmin`. `@openrails/auth-ui` is an optional peer, needed only for this component.
+It asks an anonymous visitor to sign in (`signInPath` sends them to the host's page with `?return_to=`), runs AuthKit's writes through a step-up dialog, shows each area only to whoever holds its permissions, puts the customer's `BillingCustomerSummary` on each user page, warns about ongoing subscriptions before a ban or delete, and links billing customers to their user pages. `users` passes AuthKit's directory options (`tenantId`, `entitlements`, `languages`, and the host's own `userPanels` and `confirmWarnings`, shown after billing's); `acquireSolanaSigner` offers a wallet step-up. `navigation` is optional, as for `BillingAdmin`. `@openrails/auth-ui` is an optional peer, needed only for this component.
 
 ## Composition
 

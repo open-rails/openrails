@@ -1,5 +1,10 @@
 import { useEffect, type ReactNode } from "react"
-import { SignInPanel, StepUpProvider, useStepUpGuard } from "@openrails/auth-ui"
+import {
+  SignInPanel,
+  StepUpProvider,
+  useStepUpGuard,
+  type StepUpProviderProps,
+} from "@openrails/auth-ui"
 import { useAuthClient, useSession } from "@openrails/auth-ui/react"
 import {
   AuthAdmin,
@@ -7,6 +12,7 @@ import {
   useHistoryNavigation,
   useUsersAdminAccess,
   type AdminNavigation,
+  type AuthAdminProps,
 } from "@openrails/auth-ui/admin"
 import { appearanceStyle } from "../appearance"
 import { BillingAdmin } from "./billing-admin"
@@ -33,6 +39,10 @@ export interface AdminConsoleProps {
   appearance?: BillingAdminProps["appearance"]
   /** AuthKit's admin language; billing administration is English. */
   language?: string
+  /** The user directory's options: tenant, entitlements, languages, and the host's own panels and warnings after billing's. */
+  users?: Exclude<AuthAdminProps["users"], false | undefined>
+  /** Resolves the linked Solana wallet's signer for a wallet step-up. */
+  acquireSolanaSigner?: StepUpProviderProps["acquireSolanaSigner"]
   className?: string
 }
 
@@ -67,7 +77,10 @@ export function AdminConsole(props: AdminConsoleProps) {
     )
   else
     body = (
-      <StepUpProvider key={session.userId}>
+      <StepUpProvider
+        key={session.userId}
+        acquireSolanaSigner={props.acquireSolanaSigner}
+      >
         <Console {...props} navigation={navigation} theme={theme} />
       </StepUpProvider>
     )
@@ -103,11 +116,16 @@ function Console({
   navigation,
   appearance,
   language,
+  users: host = {},
   theme,
 }: AdminConsoleProps & { navigation: AdminNavigation; theme: string }) {
   const auth = useAuthClient()
   const guard = useStepUpGuard()
-  const users = useUsersAdminAccess({ auth, baseUrl: authBaseUrl })
+  const users = useUsersAdminAccess({
+    auth,
+    baseUrl: authBaseUrl,
+    tenantId: host.tenantId,
+  })
   const root = useGroupAdminAccess({
     auth,
     baseUrl: authBaseUrl,
@@ -233,22 +251,31 @@ function Console({
             users={
               customers
                 ? {
+                    ...host,
                     userPanels: (user) => (
-                      <BillingCustomerSummary
-                        {...connection}
-                        key={user.id}
-                        customer={user.id}
-                        appearance={appearance}
-                        href={`${base}/billing/customers/${encodeURIComponent(user.id)}`}
-                      />
+                      <>
+                        <BillingCustomerSummary
+                          {...connection}
+                          key={user.id}
+                          customer={user.id}
+                          appearance={appearance}
+                          href={`${base}/billing/customers/${encodeURIComponent(user.id)}`}
+                        />
+                        {host.userPanels?.(user)}
+                      </>
                     ),
-                    confirmWarnings: (user) =>
-                      loadBillingConfirmWarnings({
-                        ...connection,
-                        customer: user.id,
-                      }),
+                    confirmWarnings: async (user, action) => {
+                      const [billed, own] = await Promise.all([
+                        loadBillingConfirmWarnings({
+                          ...connection,
+                          customer: user.id,
+                        }),
+                        host.confirmWarnings?.(user, action),
+                      ])
+                      return [...billed, ...(own == null ? [] : [own].flat())]
+                    },
                   }
-                : {}
+                : host
             }
           />
         </div>
