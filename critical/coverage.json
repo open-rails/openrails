@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 271,
+  "scenario_count": 274,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1357,6 +1357,21 @@
       "id": "OR-J04-S70",
       "journey": "J04",
       "name": "The hourly health pass raises held engine renewals and closes them once attempted"
+    },
+    {
+      "id": "OR-J27-S10",
+      "journey": "J27",
+      "name": "Imported admin grant windows change at the evidence horizon and replay without extra history"
+    },
+    {
+      "id": "OR-J27-S11",
+      "journey": "J27",
+      "name": "Imported admin grant refusals preserve other book rows and host declarations restore staff-revoked access"
+    },
+    {
+      "id": "OR-J27-S12",
+      "journey": "J27",
+      "name": "Concurrent imported grant declarations and lost responses replay once"
     }
   ]
 }

@@ -387,15 +387,15 @@ func exportQuery(p contract.Profile) string {
 		order = strings.Join(parts, ",")
 	}
 	prefix := ""
-	parent := ""
+	parent, childParent := "", ""
 	if p.Name == "payments" {
-		parent = "refunded_payment_id"
+		parent, childParent = "refunded_payment_id", "c.refunded_payment_id"
 	}
 	if p.Name == "grants" {
-		parent = "supersedes_id"
+		parent, childParent = "COALESCE(import_root_id,supersedes_id)", "COALESCE(c.import_root_id,c.supersedes_id)"
 	}
 	if parent != "" {
-		prefix = "WITH RECURSIVE lineage AS (SELECT id,0 depth FROM billing." + p.Name + " WHERE merchant_id=$1 AND " + parent + " IS NULL UNION ALL SELECT c.id,l.depth+1 FROM billing." + p.Name + " c JOIN lineage l ON c." + parent + "=l.id WHERE c.merchant_id=$1) "
+		prefix = "WITH RECURSIVE lineage AS (SELECT id,0 depth FROM billing." + p.Name + " WHERE merchant_id=$1 AND " + parent + " IS NULL UNION ALL SELECT c.id,l.depth+1 FROM billing." + p.Name + " c JOIN lineage l ON " + childParent + "=l.id WHERE c.merchant_id=$1) "
 		from += " JOIN lineage l ON l.id=t.id"
 		order = "l.depth,t.id"
 	}

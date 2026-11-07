@@ -133,6 +133,7 @@ sql:
       - "internal/migrate/postgres/0191_provider_intents_comment.up.sql"
       - "internal/migrate/postgres/0200_explicit_psp_imports.up.sql"
       - "internal/migrate/postgres/0201_rail_subscription_key.up.sql"
+      - "internal/migrate/postgres/0202_imported_admin_grants.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

@@ -34,7 +34,37 @@ RETURNING *;
 -- name: GetAccessGrantByIdempotencyKey :one
 SELECT * FROM billing.grants
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind = 'access' AND event = 'grant'
-  AND source_type = 'grant' AND source_id = sqlc.arg(idempotency_key)::text AND grant_reason <> 'migration';
+  AND source_type = 'grant' AND source_id = sqlc.arg(idempotency_key)::text AND grant_reason <> 'migration'
+  AND import_root_id IS NULL;
+
+-- name: LockImportedGrantSource :exec
+SELECT pg_advisory_xact_lock(hashtextextended('imported-grant:' || sqlc.arg(merchant_id)::uuid::text || ':' || sqlc.arg(source_id)::text, 0));
+
+-- name: GetLatestImportedGrant :one
+SELECT * FROM billing.grants
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND source_type = 'grant'
+  AND source_id = sqlc.arg(source_id)::text AND kind = 'access' AND event = 'grant'
+  AND grant_reason = 'import' AND actor = 'import'
+ORDER BY import_as_of DESC NULLS LAST
+LIMIT 1;
+
+-- name: InsertImportedGrant :one
+INSERT INTO billing.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, event,
+    starts_at, ends_at, actor, grant_reason, import_as_of, import_root_id
+) VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(product_id)::uuid,
+    'access', 'grant', sqlc.arg(source_id)::text, 'grant',
+    sqlc.arg(starts_at)::timestamptz, sqlc.narg(ends_at)::timestamptz, 'import', 'import',
+    sqlc.arg(import_as_of)::timestamptz, sqlc.narg(import_root_id)::uuid
+)
+ON CONFLICT DO NOTHING
+RETURNING *;
+
+-- name: GetGrantTermination :one
+SELECT * FROM billing.grants
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND supersedes_id = sqlc.arg(grant_id)::uuid
+  AND event IN ('revoke', 'expire', 'supersede');
 
 -- name: GetAccessGrantByPurchase :one
 SELECT * FROM billing.grants
@@ -237,7 +267,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
         AND g.starts_at >= s.canceled_at
   )
   AND (
-    (g.kind = 'access' AND NOT EXISTS (
+    (g.kind = 'access' AND NOT (g.import_root_id IS NOT NULL AND g.ends_at IS NOT NULL AND g.ends_at <= g.import_as_of) AND NOT EXISTS (
         SELECT 1 FROM billing.product_access pa
         WHERE pa.merchant_id = g.merchant_id AND pa.grant_id = g.id AND pa.deleted_at IS NULL))
     OR
@@ -282,7 +312,13 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
     (g.kind = 'access' AND EXISTS (
         SELECT 1 FROM billing.product_access pa
         WHERE pa.merchant_id = g.merchant_id AND pa.grant_id = g.id
-          AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL))
+          AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM billing.grants t
+              WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+                AND t.event IN ('revoke', 'supersede') AND t.actor = 'import'
+                AND g.source_type = 'grant' AND g.grant_reason = 'import' AND g.actor = 'import'
+                AND pa.ends_at <= t.starts_at)))
     OR
     (g.kind = 'credit' AND (
         g.amount - COALESCE((

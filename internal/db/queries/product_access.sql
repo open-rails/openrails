@@ -326,3 +326,15 @@ WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
   AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
 ORDER BY pa.source_id, pa.ends_at DESC NULLS FIRST, pa.id;
+
+-- name: BoundImportedProductAccessByGrant :exec
+-- Import corrections preserve the window before their evidence horizon.
+UPDATE billing.product_access pa SET
+    ends_at = CASE WHEN pa.starts_at < sqlc.arg(as_of)::timestamptz
+        THEN LEAST(pa.ends_at, sqlc.arg(as_of)::timestamptz) ELSE pa.ends_at END,
+    deleted_at = CASE WHEN pa.starts_at >= sqlc.arg(as_of)::timestamptz
+        THEN sqlc.arg(as_of)::timestamptz ELSE pa.deleted_at END,
+    updated_at = sqlc.arg(as_of)::timestamptz
+WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.grant_id = sqlc.arg(grant_id)::uuid
+  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+  AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(as_of)::timestamptz);

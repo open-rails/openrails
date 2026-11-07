@@ -54,6 +54,22 @@ func TestBillingArchive(t *testing.T) {
 		grants, err := source.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 12345, Source: "critical", SourceID: "archive-credit"}})
 		require.NoError(t, err)
 		price := hostProduct(t, source.alpha, "archive-item")
+		product, err := source.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "archive-comp", DisplayName: "Archive comp", Entitlements: []string{"archive:comp"}})
+		require.NoError(t, err)
+		start := source.clock.Now().Add(-2 * time.Hour).UTC().Truncate(time.Microsecond)
+		book := billing.DeclaredBilling{AsOf: start, AdminGrants: []billing.DeclaredAdminGrant{{Customer: customer, Product: product.ID, SourceID: "archive-import", StartsAt: start, EndsAt: ptr(start.Add(time.Hour))}}}
+		_, err = source.alpha.ImportBilling(t.Context(), book)
+		require.NoError(t, err)
+		book.AsOf = start.Add(time.Hour)
+		book.AdminGrants[0].EndsAt = ptr(start.Add(24 * time.Hour))
+		_, err = source.alpha.ImportBilling(t.Context(), book)
+		require.NoError(t, err)
+		importedHistory := func(w *world) string {
+			t.Helper()
+			var state string
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT jsonb_agg(g ORDER BY id)::text FROM "+pgx.Identifier{w.schema, "grants"}.Sanitize()+" g WHERE merchant_id=$1 AND source_id='archive-import'", source.alpha.MerchantID().UUID()).Scan(&state))
+			return state
+		}
 		before, err := source.alpha.ListEvents(t.Context(), billing.EventQuery{Limit: 100})
 		require.NoError(t, err)
 		require.NotEmpty(t, before.Events)
@@ -66,6 +82,10 @@ func TestBillingArchive(t *testing.T) {
 		require.NotEmpty(t, receipt.Digest)
 		require.Positive(t, receipt.Rows)
 		require.False(t, receipt.AlreadyImported)
+		require.Equal(t, importedHistory(source), importedHistory(targetWorld), "imported roots, replacements and terminations restore with immediate foreign keys")
+		access, err := target.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"archive:comp"}})
+		require.NoError(t, err)
+		require.True(t, access.Entitlements["archive:comp"])
 		local, err := targetWorld.engine.LocalMerchant(target.MerchantID())
 		require.NoError(t, err)
 		_, err = local.ExportNotificationAdoption(t.Context())
