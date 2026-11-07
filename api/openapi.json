@@ -15836,6 +15836,9 @@
           "ends_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "removed": {
+            "type": "boolean"
           }
         }
       },

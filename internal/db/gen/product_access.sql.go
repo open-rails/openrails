@@ -23,6 +23,30 @@ func (q *Queries) AcquireAccessTimelineLock(ctx context.Context, key int64) erro
 	return err
 }
 
+const boundImportedProductAccessByGrant = `-- name: BoundImportedProductAccessByGrant :exec
+UPDATE billing.product_access pa SET
+    ends_at = CASE WHEN pa.starts_at < $1::timestamptz
+        THEN LEAST(pa.ends_at, $1::timestamptz) ELSE pa.ends_at END,
+    deleted_at = CASE WHEN pa.starts_at >= $1::timestamptz
+        THEN $1::timestamptz ELSE pa.deleted_at END,
+    updated_at = $1::timestamptz
+WHERE pa.merchant_id = $2::uuid AND pa.grant_id = $3::uuid
+  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+  AND (pa.ends_at IS NULL OR pa.ends_at > $1::timestamptz)
+`
+
+type BoundImportedProductAccessByGrantParams struct {
+	AsOf       time.Time
+	MerchantID uuid.UUID
+	GrantID    uuid.UUID
+}
+
+// Import corrections preserve the window before their evidence horizon.
+func (q *Queries) BoundImportedProductAccessByGrant(ctx context.Context, arg BoundImportedProductAccessByGrantParams) error {
+	_, err := q.db.Exec(ctx, boundImportedProductAccessByGrant, arg.AsOf, arg.MerchantID, arg.GrantID)
+	return err
+}
+
 const countLiveProductHolders = `-- name: CountLiveProductHolders :many
 SELECT candidate.product_id::uuid AS product_id, (
     SELECT count(DISTINCT pa.customer_id) FROM billing.product_access pa

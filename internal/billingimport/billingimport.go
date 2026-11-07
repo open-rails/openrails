@@ -483,7 +483,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				res.Reasons[src] = o.Reason
 			}
 		}
-		if err := importAdminGrants(ctx, q, merchantID.UUID(), opts.Book.AdminGrants, &res); err != nil {
+		if err := importAdminGrants(ctx, q, merchantID.UUID(), opts.Book.AdminGrants, asOf, &res); err != nil {
 			return err
 		}
 		// Access commits with the memberships it derives from: a converge
@@ -587,24 +587,42 @@ func nilIfEmpty(s string) *string {
 }
 
 // importAdminGrants records each comp as a free grant of its product,
-// idempotent by SourceID.
-func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, declared []DeclaredAdminGrant, res *Result) error {
+// reconciling explicit changes at the evidence horizon.
+func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, declared []DeclaredAdminGrant, asOf time.Time, res *Result) error {
 	if len(declared) == 0 {
 		return nil
 	}
 	ledger := grants.New(q, merchantID)
-	for _, g := range declared {
-		if g.Customer.IsZero() || g.Product.IsZero() || strings.TrimSpace(g.SourceID) == "" || g.StartsAt.IsZero() {
+	asOf = asOf.UTC().Truncate(time.Microsecond)
+	declared = slices.Clone(declared)
+	slices.SortFunc(declared, func(a, b DeclaredAdminGrant) int { return strings.Compare(a.SourceID, b.SourceID) })
+	for i, g := range declared {
+		if g.Customer.IsZero() || g.Product.IsZero() || strings.TrimSpace(g.SourceID) == "" || len(g.SourceID) > 255 || (!g.Removed && g.StartsAt.IsZero()) {
 			return apperr.Invalidf("declared admin grant requires customer, product, source_id and starts_at")
+		}
+		if i > 0 && declared[i-1].SourceID == g.SourceID {
+			return apperr.Invalidf("declared admin grant source_id must be unique in the book")
+		}
+		start := g.StartsAt.UTC().Truncate(time.Microsecond)
+		var end *time.Time
+		if !g.Removed && g.EndsAt != nil {
+			value := g.EndsAt.UTC().Truncate(time.Microsecond)
+			end = &value
+			if !end.After(start) {
+				return apperr.Invalidf("declared admin grant ends_at must be after starts_at")
+			}
 		}
 		if err := db.EnsureCustomerRowQ(ctx, q, merchantID, g.Customer.UUID()); err != nil {
 			return fmt.Errorf("ensure customer %s: %w", g.Customer, err)
 		}
-		_, created, err := ledger.GrantProduct(ctx, g.Customer.UUID(), g.Product.UUID(), g.SourceID, g.StartsAt.UTC(), g.EndsAt, "import", grants.ReasonImport, nil)
+		changed, blockedReason, err := ledger.ReconcileImportedProduct(ctx, g.Customer.UUID(), g.Product.UUID(), g.SourceID, start, end, g.Removed, asOf)
 		if err != nil {
 			return fmt.Errorf("import admin grant %s: %w", g.SourceID, err)
 		}
-		if created {
+		if blockedReason != "" {
+			res.Blocked = append(res.Blocked, g.SourceID)
+			res.Reasons[g.SourceID] = blockedReason
+		} else if changed {
 			res.Imported = append(res.Imported, g.SourceID)
 		} else {
 			res.Skipped = append(res.Skipped, g.SourceID)

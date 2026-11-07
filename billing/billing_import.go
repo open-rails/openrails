@@ -32,6 +32,7 @@ type DeclaredBilling struct {
 	Subscriptions []DeclaredSubscription `json:"subscriptions,omitempty"`
 	Transactions  []DeclaredTransaction  `json:"transactions,omitempty"`
 	// AdminGrants are comped access windows with no payment behind them.
+	// Re-declarations reconcile imported grants at AsOf; removal is explicit.
 	AdminGrants []DeclaredAdminGrant `json:"admin_grants,omitempty"`
 	// Purchases are settled one-off sales, each an order with its payment.
 	Purchases []DeclaredPurchase `json:"purchases,omitempty"`
@@ -249,13 +250,17 @@ type DeclaredProviderSchedule struct {
 }
 
 // DeclaredAdminGrant is a comped product window with no payment behind it,
-// idempotent by SourceID. A nil EndsAt is indefinite.
+// keyed by SourceID within the merchant. A changed window takes effect at
+// DeclaredBilling.AsOf; identical declarations are skipped. A nil EndsAt is
+// indefinite. Omitting a grant does not remove it.
 type DeclaredAdminGrant struct {
 	Customer CustomerID `json:"customer"`
 	Product  ProductID  `json:"product"`
 	SourceID string     `json:"source_id"`
 	StartsAt time.Time  `json:"starts_at"`
 	EndsAt   *time.Time `json:"ends_at,omitempty"`
+	// Removed ends an imported grant at AsOf. StartsAt and EndsAt are ignored.
+	Removed bool `json:"removed,omitempty"`
 }
 
 // BillingImportResult reports per-SourceID outcomes for subscriptions, admin

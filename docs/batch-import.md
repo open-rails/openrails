@@ -126,6 +126,34 @@ comps — access with no payment behind it — ride the same book as
 derives the windows. `Client.ImportBilling` posts the same book over
 `POST /v1/merchant/billing-import`.
 
+### Imported admin grant changes
+
+An `admin_grants` row (`billing.DeclaredAdminGrant`) permanently binds its
+`source_id` to one customer and product within the merchant. Re-declare it
+with changed `starts_at` / `ends_at` to replace its window at the book's
+`as_of`. A nil `ends_at` is indefinite. The first declaration retains its
+original start; replacement access starts no earlier than `as_of`. Earlier
+access remains recorded up to that horizon. A later end can revive an
+expired grant. Identical declarations report `skipped` without new history.
+
+Set `removed: true` to end an imported grant at `as_of`; only `customer`,
+`product` and `source_id` are required for removal. Omitting the row does
+nothing. Re-declaring its window at a later horizon restores access from
+that horizon. A staff revoke also yields to an identical re-declaration at a
+later horizon: the host's declaration re-grants access. Removing an unknown
+source is skipped.
+
+Only grants created by billing import are reconciled. A source id owned by
+staff, or re-used for another customer/product, is reported in `blocked`
+with a `reasons[source_id]` explanation; the rest of the book still applies.
+Purchase and subscription grants are untouched. Changes append immutable supersede/revoke
+and replacement events and project access in the same transaction. A changed
+state requires an `as_of` later than that source's last recorded change;
+conflicting equal or older horizons are also reported as blocked per source.
+Exact state replay remains a no-op even at a later horizon. Missing required
+fields, duplicate admin grant source ids, and an end not after its start make
+the book malformed and roll back its transaction.
+
 ### Declared purchases
 
 A `purchases` row (`DeclaredPurchase`) is a one-off sale the legacy system

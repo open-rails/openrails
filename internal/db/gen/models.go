@@ -516,6 +516,10 @@ type BillingGrant struct {
 	GrantReason *string
 	// Seats an access grant gives: its per-seat subscription's quantity; NULL otherwise.
 	Quantity *int32
+	// Evidence horizon of an imported admin grant declaration. NULL on grants recorded before import revisions were supported.
+	ImportAsOf *time.Time
+	// Original imported admin grant for a replacement window. Replacements take effect no earlier than import_as_of; the root retains the permanent source key.
+	ImportRootID *uuid.UUID
 }
 
 // Internal typed financial emission and deduplication journal; the public feed is event_log. Retention: rows are deleted after at least 90 days from recorded_at and never earlier than the configured event retention, independently of readers.

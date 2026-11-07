@@ -4,10 +4,12 @@ package critical_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,10 +18,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
@@ -977,4 +984,219 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func TestDeclaredAdminGrantImport(t *testing.T) {
+	t.Run("OR-J27-S11/imported-grant-ownership-and-atomicity", func(t *testing.T) {
+		a := newAuthorityWorld(t, func(w *world) {
+			declaration := w.cfg.Merchants["alpha"]
+			declaration.PSPs = openrails.PSPs{"ccbill": importCCBillPSP("0001", "critical-password")}
+			w.cfg.Merchants["alpha"] = declaration
+		})
+		customer := customerOf(a.alice)
+		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp", DisplayName: "Comp", Entitlements: []string{"comp:read"}})
+		require.NoError(t, err)
+		start := a.clock.Now().UTC().Truncate(time.Microsecond)
+		native, err := a.alpha.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: "native-staff", Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Reason: billing.GrantReasonStaff}}})
+		require.NoError(t, err)
+		require.Len(t, native, 1)
+		database, err := db.NewWithPGXPool(a.pool, a.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		// Purchase/subscription sources can share a textual id with a comp.
+		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			ledger := grants.New(database.NewWithPgxTx(tx).Gen(ctx), a.alpha.MerchantID().UUID())
+			for _, source := range []grants.SourceType{grants.Purchase, grants.Subscription} {
+				g, _, err := ledger.GrantAccessOnce(ctx, grants.GrantInput{Customer: customer.UUID(), Product: ptr(product.ID.UUID()), Source: source, SourceID: "legacy-comp", StartsAt: start})
+				if err != nil {
+					return err
+				}
+				if err := ledger.MaterializeGrant(ctx, g); err != nil {
+					return err
+				}
+			}
+			// A root made by the old importer has no import metadata.
+			_, _, err := ledger.GrantProduct(ctx, customer.UUID(), product.ID.UUID(), "old-import", start, ptr(start.Add(time.Hour)), "import", grants.ReasonImport, nil)
+			return err
+		}))
+		state := func(nativeOnly bool) string {
+			t.Helper()
+			var result string
+			filter := ""
+			if nativeOnly {
+				filter = " AND g.actor IS DISTINCT FROM 'import'"
+			}
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT COALESCE(jsonb_agg(jsonb_build_object('grant', g, 'access', pa) ORDER BY g.id), '[]')::text FROM "+pgx.Identifier{a.schema, "grants"}.Sanitize()+" g LEFT JOIN "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" pa ON pa.merchant_id=g.merchant_id AND pa.grant_id=g.id WHERE g.merchant_id=$1"+filter, a.alpha.MerchantID().UUID()).Scan(&result))
+			return result
+		}
+		nativeBefore := state(true)
+		decl := billing.DeclaredAdminGrant{Customer: customer, Product: product.ID, SourceID: "legacy-comp", StartsAt: start, EndsAt: ptr(start.Add(24 * time.Hour))}
+		book := billing.DeclaredBilling{AsOf: start.Add(2 * time.Hour), AdminGrants: []billing.DeclaredAdminGrant{decl}}
+		res, err := a.alphaRemote.ImportBilling(t.Context(), book)
+		require.NoError(t, err)
+		require.Equal(t, []string{decl.SourceID}, res.Imported)
+		// Removal travels through the public HTTP contract without a window.
+		book.AsOf = start.Add(3 * time.Hour)
+		book.AdminGrants[0] = billing.DeclaredAdminGrant{Customer: customer, Product: product.ID, SourceID: decl.SourceID, Removed: true}
+		_, err = a.alphaRemote.ImportBilling(t.Context(), book)
+		require.NoError(t, err)
+		require.Equal(t, nativeBefore, state(true), "staff, purchase and subscription grants and windows remain identical")
+		// An old-format imported grant can be extended after expiry.
+		decl.SourceID = "old-import"
+		book.AdminGrants[0] = decl
+		_, err = a.alphaRemote.ImportBilling(t.Context(), book)
+		require.NoError(t, err)
+		before := state(false)
+		for _, refused := range []billing.DeclaredAdminGrant{
+			{Customer: customer, Product: product.ID, SourceID: native[0].SourceID, Removed: true},
+			{Customer: customer, Product: product.ID, SourceID: native[0].SourceID, StartsAt: start},
+			{Customer: customerOf(a.bob), Product: product.ID, SourceID: "old-import", StartsAt: start},
+			{Customer: customer, Product: billing.ProductID(uuid.New()), SourceID: "old-import", StartsAt: start},
+		} {
+			res, err := a.alphaRemote.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: start.Add(4 * time.Hour), AdminGrants: []billing.DeclaredAdminGrant{refused}})
+			require.NoError(t, err)
+			require.Equal(t, []string{refused.SourceID}, res.Blocked)
+			require.NotEmpty(t, res.Reasons[refused.SourceID])
+			require.Empty(t, res.Imported)
+			require.Empty(t, res.Skipped)
+			require.Equal(t, before, state(false), "refusal changes neither the source nor its projection")
+		}
+		for _, invalid := range []billing.DeclaredAdminGrant{
+			{Customer: customer, Product: product.ID, SourceID: "invalid-window", StartsAt: start, EndsAt: &start},
+			{Customer: customer, Product: product.ID, SourceID: "missing-start"},
+			{Product: product.ID, SourceID: "removed-without-customer", Removed: true},
+			{Customer: customer, SourceID: "removed-without-product", Removed: true},
+			{Customer: customer, Product: product.ID, Removed: true},
+		} {
+			// A valid row sorts first: a malformed book rolls it back too.
+			valid := decl
+			valid.SourceID = "a-rolled-back"
+			_, err := a.alphaRemote.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: start.Add(4 * time.Hour), AdminGrants: []billing.DeclaredAdminGrant{valid, invalid}})
+			require.ErrorIs(t, err, billing.ErrInvalid)
+			require.Equal(t, before, state(false))
+		}
+		_, err = a.alphaRemote.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: start.Add(4 * time.Hour), AdminGrants: []billing.DeclaredAdminGrant{decl, decl}})
+		require.ErrorIs(t, err, billing.ErrInvalid)
+		require.Equal(t, before, state(false))
+		// Merchant scoping permits the same source id in another merchant.
+		otherProduct, err := a.beta.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp", DisplayName: "Comp"})
+		require.NoError(t, err)
+		other := decl
+		other.Product = otherProduct.ID
+		_, err = a.betaRemote.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: start, AdminGrants: []billing.DeclaredAdminGrant{other}})
+		require.NoError(t, err)
+		require.Equal(t, before, state(false))
+		// One refused source must not roll back a subscription or another comp.
+		price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "recurring-comp", PSP: "ccbill", FlexID: "681cb38f-afb9-4665-931f-2b896072178a", RecurringBillingOptionID: "0000000023", UnitAmount: ptr(int64(1_000_000)), Currency: "USD", BillingIntervalHours: ptr(24 * 30)})
+		require.NoError(t, err)
+		valid := decl
+		valid.SourceID = "a-valid-comp"
+		valid.Customer = customerOf(a.bob)
+		refused := decl
+		refused.SourceID = native[0].SourceID
+		mixed := billing.DeclaredBilling{AsOf: start.Add(4 * time.Hour), DefaultPSP: billing.PSPRef{Key: "ccbill"},
+			Subscriptions: []billing.DeclaredSubscription{{SourceID: "valid-subscription", Customer: customer, Price: price.ID, Rail: "ccbill", RailSubscriptionID: "0112233445", StartedAt: start, PaidThrough: ptr(start.Add(30 * 24 * time.Hour))}},
+			AdminGrants:   []billing.DeclaredAdminGrant{valid, refused}}
+		res, err = a.alphaRemote.ImportBilling(t.Context(), mixed)
+		require.NoError(t, err)
+		require.Equal(t, []string{valid.SourceID, "valid-subscription"}, res.Imported, "result: %+v", res)
+		require.Equal(t, []string{refused.SourceID}, res.Blocked)
+		require.Contains(t, res.Reasons[refused.SourceID], "non-import grant")
+		require.Empty(t, res.Skipped)
+		var subscriptions, compWindows, subscriptionWindows int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" WHERE merchant_id=$1 AND rail_subscription_id='0112233445'", a.alpha.MerchantID().UUID()).Scan(&subscriptions))
+		require.Equal(t, 1, subscriptions)
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE source_type='grant' AND source_id=$2), count(*) FILTER (WHERE source_type='subscription') FROM "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" WHERE merchant_id=$1 AND deleted_at IS NULL AND revoked_at IS NULL", a.alpha.MerchantID().UUID(), valid.SourceID).Scan(&compWindows, &subscriptionWindows))
+		require.Equal(t, 1, compWindows)
+		require.Equal(t, 2, subscriptionWindows, "the original synthetic window and the book's subscription both remain")
+		beforeReplay := state(false)
+		res, err = a.alphaRemote.ImportBilling(t.Context(), mixed)
+		require.NoError(t, err)
+		require.Empty(t, res.Imported)
+		require.Equal(t, []string{valid.SourceID, "valid-subscription"}, res.Skipped)
+		require.Equal(t, []string{refused.SourceID}, res.Blocked)
+		require.Equal(t, beforeReplay, state(false))
+
+		// The host's declaration wins over a staff revoke: even an identical
+		// window is re-granted at the later AsOf, then replays without new rows.
+		a.clock.Advance(5 * time.Hour)
+		access, err := a.alphaRemote.ListProductAccess(t.Context(), billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{valid.Customer}})
+		require.NoError(t, err)
+		require.Len(t, access.Items, 1)
+		require.NoError(t, a.alphaRemote.RevokeProductAccess(t.Context(), access.Items[0].ID, billing.RevokeProductAccessParams{Reason: "staff ended imported comp"}))
+		check := func(at time.Time, allowed bool) {
+			t.Helper()
+			got, err := a.alphaRemote.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: valid.Customer, Entitlements: []string{"comp:read"}, At: at})
+			require.NoError(t, err)
+			require.Equal(t, allowed, got.Entitlements["comp:read"])
+		}
+		check(start.Add(5*time.Hour+time.Minute), false)
+		redeclared := billing.DeclaredBilling{AsOf: start.Add(6 * time.Hour), AdminGrants: []billing.DeclaredAdminGrant{valid}}
+		res, err = a.alphaRemote.ImportBilling(t.Context(), redeclared)
+		require.NoError(t, err)
+		require.Equal(t, []string{valid.SourceID}, res.Imported)
+		require.Empty(t, res.Blocked)
+		check(start.Add(5*time.Hour+time.Minute), false)
+		check(redeclared.AsOf, true)
+		beforeReplay = state(false)
+		res, err = a.alphaRemote.ImportBilling(t.Context(), redeclared)
+		require.NoError(t, err)
+		require.Equal(t, []string{valid.SourceID}, res.Skipped)
+		require.Equal(t, beforeReplay, state(false))
+	})
+	t.Run("OR-J27-S12/imported-grant-concurrent-and-lost-response-replay", func(t *testing.T) {
+		w := newWorld(t)
+		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp", DisplayName: "Comp"})
+		require.NoError(t, err)
+		start := w.clock.Now().UTC().Truncate(time.Microsecond)
+		decl := billing.DeclaredAdminGrant{Customer: billing.CustomerID(uuid.New()), Product: product.ID, SourceID: "concurrent-comp", StartsAt: start, EndsAt: ptr(start.Add(time.Hour))}
+		book := billing.DeclaredBilling{AsOf: start, AdminGrants: []billing.DeclaredAdminGrant{decl}}
+		for round := range 2 {
+			if round == 1 {
+				book.AsOf = start.Add(time.Hour)
+				book.AdminGrants[0].EndsAt = ptr(start.Add(24 * time.Hour))
+			}
+			type outcome struct {
+				result *billing.BillingImportResult
+				err    error
+			}
+			out := make(chan outcome, 2)
+			ready := make(chan struct{})
+			for range 2 {
+				go func() { <-ready; result, err := w.alpha.ImportBilling(t.Context(), book); out <- outcome{result, err} }()
+			}
+			close(ready)
+			changed, skipped := 0, 0
+			for range 2 {
+				o := <-out
+				require.NoError(t, o.err)
+				changed += len(o.result.Imported)
+				skipped += len(o.result.Skipped)
+			}
+			require.Equal(t, 1, changed)
+			require.Equal(t, 1, skipped)
+		}
+		book.AsOf = start.Add(2 * time.Hour)
+		book.AdminGrants[0].Removed = true
+		lost := errors.New("lost import response")
+		remove := failpoint.Set(func(ctx context.Context, site failpoint.Site) error {
+			if site.Point == failpoint.Committed && site.Kind == "billing_import" {
+				return lost
+			}
+			return nil
+		})
+		t.Cleanup(remove)
+		_, err = w.alpha.ImportBilling(t.Context(), book)
+		var failure *billing.StatusError
+		require.ErrorAs(t, err, &failure)
+		require.Equal(t, http.StatusInternalServerError, failure.Status)
+		remove()
+		res, err := w.alpha.ImportBilling(t.Context(), book)
+		require.NoError(t, err)
+		require.Empty(t, res.Imported)
+		require.Equal(t, []string{decl.SourceID}, res.Skipped)
+		var count int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "grants"}.Sanitize()).Scan(&count))
+		require.Equal(t, 4, count, "one root, one supersede/replacement, one removal")
+	})
 }

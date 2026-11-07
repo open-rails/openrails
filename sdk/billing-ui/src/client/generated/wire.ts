@@ -818,6 +818,7 @@ export type DeclaredAdminGrant = {
   source_id?: string
   starts_at?: string
   ends_at?: string
+  removed?: boolean
 }
 
 export type DeclaredBilling = {

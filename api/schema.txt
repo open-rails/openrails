@@ -141,6 +141,7 @@ migration 0190_notifications_drop_email.up.sql sha256:3ccba1a268cf8e8214656f3044
 migration 0191_provider_intents_comment.up.sql sha256:fff345e0143e09a85fe52e54669da31fcac5eee10b79c4af8d76b94799b955e6
 migration 0200_explicit_psp_imports.up.sql sha256:44eefa51bbbe338d21941762c9b82da60c76a345ccc73d91e5e228de58ea176f
 migration 0201_rail_subscription_key.up.sql sha256:023a4c674fbffbd1cf9a944ee932e02ac815e408dfc48d49b09ee5220aadf11b
+migration 0202_imported_admin_grants.up.sql sha256:97caea3589f118cbcf284a2a4c662b7992da82056c00ac19bb3efc4b031ce2a4
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -783,6 +784,8 @@ table billing.grants
   column actor text
   column grant_reason text
   column quantity integer
+  column import_as_of timestamp with time zone
+  column import_root_id uuid
   constraint grants_access_grant_reason_check CHECK (((NOT ((kind = 'access'::text) AND (source_type = 'grant'::text) AND (event = 'grant'::text))) OR ((grant_reason IS NOT NULL) AND (actor IS NOT NULL))))
   constraint grants_access_product_check CHECK (((kind <> 'access'::text) OR ((product_id IS NOT NULL) AND (spec_snapshot IS NULL) AND (source_id IS NOT NULL))))
   constraint grants_actor_check CHECK (((actor IS NULL) OR ((octet_length(actor) >= 1) AND (octet_length(actor) <= 255))))
@@ -796,6 +799,8 @@ table billing.grants
   constraint grants_event_check CHECK ((event = ANY (ARRAY['grant'::text, 'revoke'::text, 'expire'::text, 'supersede'::text])))
   constraint grants_event_supersedes_check CHECK (((event = 'grant'::text) = (supersedes_id IS NULL)))
   constraint grants_grant_reason_check CHECK (((grant_reason IS NULL) OR ((grant_reason = ANY (ARRAY['comp'::text, 'staff'::text, 'import'::text, 'migration'::text])) AND (kind = 'access'::text) AND (source_type = 'grant'::text))))
+  constraint grants_import_metadata_check CHECK ((((import_as_of IS NULL) AND (import_root_id IS NULL)) OR ((import_as_of IS NOT NULL) AND (kind = 'access'::text) AND (event = 'grant'::text) AND (source_type = 'grant'::text) AND (grant_reason = 'import'::text) AND (actor = 'import'::text))))
+  constraint grants_import_root_id_fkey FOREIGN KEY (merchant_id, customer_id, import_root_id) REFERENCES billing.grants(merchant_id, customer_id, id)
   constraint grants_kind_check CHECK ((kind = ANY (ARRAY['entitlement'::text, 'ownership'::text, 'credit'::text, 'access'::text])))
   constraint grants_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint grants_pkey PRIMARY KEY (merchant_id, id)
@@ -805,8 +810,8 @@ table billing.grants
   constraint grants_source_type_check CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'admin'::text, 'grace'::text, 'grant'::text])))
   constraint grants_termination_no_window_check CHECK (((event = 'grant'::text) OR (ends_at IS NULL)))
   constraint grants_valid_window_check CHECK (((ends_at IS NULL) OR (starts_at < ends_at)))
-  index CREATE UNIQUE INDEX grants_access_idempotency_key ON billing.grants USING btree (merchant_id, source_id) WHERE ((kind = 'access'::text) AND (event = 'grant'::text) AND (source_type = 'grant'::text) AND (grant_reason <> 'migration'::text))
-  index CREATE UNIQUE INDEX grants_access_once_key ON billing.grants USING btree (merchant_id, customer_id, product_id, source_type, source_id, starts_at) WHERE ((kind = 'access'::text) AND (event = 'grant'::text) AND (source_type <> 'grace'::text))
+  index CREATE UNIQUE INDEX grants_access_idempotency_key ON billing.grants USING btree (merchant_id, source_id) WHERE ((kind = 'access'::text) AND (event = 'grant'::text) AND (source_type = 'grant'::text) AND (grant_reason <> 'migration'::text) AND (import_root_id IS NULL))
+  index CREATE UNIQUE INDEX grants_access_once_key ON billing.grants USING btree (merchant_id, customer_id, product_id, source_type, source_id, starts_at) WHERE ((kind = 'access'::text) AND (event = 'grant'::text) AND (source_type <> 'grace'::text) AND (import_root_id IS NULL))
   index CREATE UNIQUE INDEX grants_access_purchase_key ON billing.grants USING btree (merchant_id, payment_id, product_id) WHERE ((kind = 'access'::text) AND (event = 'grant'::text) AND (source_type = 'purchase'::text))
   index CREATE INDEX grants_created_at_idx ON billing.grants USING btree (merchant_id, created_at) WHERE (kind = 'credit'::text)
   index CREATE INDEX grants_customer_id_currency_starts_at_ends_at_idx ON billing.grants USING btree (merchant_id, customer_id, currency, starts_at, ends_at) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text))
@@ -814,6 +819,7 @@ table billing.grants
   index CREATE INDEX grants_customer_id_kind_idx ON billing.grants USING btree (merchant_id, customer_id, kind) WHERE (event = 'grant'::text)
   index CREATE UNIQUE INDEX grants_customer_id_source_id_key ON billing.grants USING btree (merchant_id, customer_id, source_id) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text) AND (source_id IS NOT NULL))
   index CREATE INDEX grants_ends_at_idx ON billing.grants USING btree (merchant_id, ends_at) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text) AND (ends_at IS NOT NULL))
+  index CREATE UNIQUE INDEX grants_import_revision_key ON billing.grants USING btree (merchant_id, source_id, import_as_of) WHERE (import_as_of IS NOT NULL)
   index CREATE INDEX grants_payment_id_idx ON billing.grants USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL)
   index CREATE UNIQUE INDEX grants_pkey ON billing.grants USING btree (merchant_id, id)
   index CREATE INDEX grants_product_id_idx ON billing.grants USING btree (merchant_id, product_id) WHERE (product_id IS NOT NULL)

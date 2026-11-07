@@ -872,6 +872,15 @@
     ],
     "OR-J38-S41": [
       "TestMerchantConsole/OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms"
+    ],
+    "OR-J27-S10": [
+      "TestImportedAdminGrants/OR-J27-S10/imported-window-changes-and-replay"
+    ],
+    "OR-J27-S11": [
+      "TestDeclaredAdminGrantImport/OR-J27-S11/imported-grant-ownership-and-atomicity"
+    ],
+    "OR-J27-S12": [
+      "TestDeclaredAdminGrantImport/OR-J27-S12/imported-grant-concurrent-and-lost-response-replay"
     ]
   },
   "suites": {

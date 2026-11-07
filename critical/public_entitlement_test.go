@@ -539,3 +539,125 @@ func TestSubscriptionAccessRepairTerminated(t *testing.T) {
 		}
 	})
 }
+
+func TestImportedAdminGrants(t *testing.T) {
+	t.Run("OR-J27-S10/imported-window-changes-and-replay", func(t *testing.T) {
+		w := newWorld(t)
+		customer := billing.CustomerID(uuid.New())
+		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "imported-comp", DisplayName: "Imported comp", Entitlements: []string{"comp:read"}})
+		require.NoError(t, err)
+		start := w.clock.Now().UTC().Truncate(time.Microsecond)
+		grant := billing.DeclaredAdminGrant{Customer: customer, Product: product.ID, SourceID: "legacy-comp", StartsAt: start, EndsAt: ptr(start.Add(24 * time.Hour))}
+		history := func() string {
+			t.Helper()
+			var state string
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT jsonb_build_object('grants', (SELECT jsonb_agg(g ORDER BY id) FROM "+pgx.Identifier{w.schema, "grants"}.Sanitize()+" g), 'access', (SELECT jsonb_agg(a ORDER BY id) FROM "+pgx.Identifier{w.schema, "product_access"}.Sanitize()+" a))::text").Scan(&state))
+			return state
+		}
+		apply := func(asOf time.Time, decl billing.DeclaredAdminGrant, changed bool) {
+			t.Helper()
+			book := billing.DeclaredBilling{AsOf: asOf, AdminGrants: []billing.DeclaredAdminGrant{decl}}
+			result, err := w.alpha.ImportBilling(t.Context(), book)
+			require.NoError(t, err)
+			if changed {
+				require.Equal(t, []string{decl.SourceID}, result.Imported)
+			} else {
+				require.Equal(t, []string{decl.SourceID}, result.Skipped)
+			}
+			before := history()
+			replay, err := w.alpha.ImportBilling(t.Context(), book)
+			require.NoError(t, err)
+			require.Empty(t, replay.Imported)
+			require.Equal(t, []string{decl.SourceID}, replay.Skipped)
+			require.Equal(t, before, history(), "replay changes neither the ledger nor its projection")
+		}
+		check := func(at time.Time, allowed bool) {
+			t.Helper()
+			got, err := w.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"comp:read"}, At: at})
+			require.NoError(t, err)
+			require.Equal(t, allowed, got.Entitlements["comp:read"], at.String())
+		}
+		apply(start, grant, true)
+		grant.EndsAt = ptr(start.Add(48 * time.Hour))
+		apply(start.Add(time.Hour), grant, true)
+		check(start.Add(36*time.Hour), true)
+		grant.EndsAt = ptr(start.Add(4 * time.Hour))
+		apply(start.Add(2*time.Hour), grant, true)
+		check(start.Add(3*time.Hour), true)
+		check(start.Add(4*time.Hour), false)
+		// The expired interval is revived by a later end.
+		grant.EndsAt = ptr(start.Add(72 * time.Hour))
+		apply(start.Add(5*time.Hour), grant, true)
+		check(start.Add(4*time.Hour), false)
+		check(start.Add(5*time.Hour), true)
+		removed := billing.DeclaredAdminGrant{Customer: customer, Product: product.ID, SourceID: grant.SourceID, Removed: true}
+		apply(start.Add(6*time.Hour), removed, true)
+		check(start.Add(6*time.Hour-time.Microsecond), true)
+		check(start.Add(6*time.Hour), false)
+		apply(start.Add(7*time.Hour), grant, true)
+		check(start.Add(6*time.Hour), false)
+		check(start.Add(7*time.Hour), true)
+		grant.StartsAt = start.Add(9 * time.Hour)
+		grant.EndsAt = nil
+		apply(start.Add(8*time.Hour), grant, true)
+		check(start.Add(8*time.Hour), false)
+		check(start.Add(9*time.Hour), true)
+		apply(start.Add(10*time.Hour), grant, false)
+		// Omission leaves the source's state alone.
+		_, err = w.alpha.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: start.Add(11 * time.Hour)})
+		require.NoError(t, err)
+		check(start.Add(12*time.Hour), true)
+		// Shortening to an end before AsOf grants no replacement interval.
+		grant.EndsAt = ptr(start.Add(9*time.Hour + 30*time.Minute))
+		apply(start.Add(12*time.Hour), grant, true)
+		check(start.Add(12*time.Hour), false)
+		check(start.Add(11*time.Hour), true)
+		check(start.Add(30*time.Minute), true)
+		before := history()
+		stale := grant
+		stale.EndsAt = nil
+		for _, horizon := range []time.Time{start.Add(11 * time.Hour), start.Add(12 * time.Hour)} {
+			result, err := w.alpha.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: horizon, AdminGrants: []billing.DeclaredAdminGrant{stale}})
+			require.NoError(t, err)
+			require.Equal(t, []string{stale.SourceID}, result.Blocked)
+			require.Contains(t, result.Reasons[stale.SourceID], "as_of later than its last change")
+			require.Empty(t, result.Imported)
+			require.Empty(t, result.Skipped)
+			require.Equal(t, before, history())
+		}
+		var events, roots, supersedes, revokes int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*), count(*) FILTER (WHERE event='grant'), count(*) FILTER (WHERE event='supersede'), count(*) FILTER (WHERE event='revoke') FROM "+pgx.Identifier{w.schema, "grants"}.Sanitize()).Scan(&events, &roots, &supersedes, &revokes))
+		require.Equal(t, 13, events)
+		require.Equal(t, 7, roots)
+		require.Equal(t, 5, supersedes)
+		require.Equal(t, 1, revokes)
+		// The ordinary module projection can replay every stored grant twice.
+		database, err := db.NewWithPGXPool(w.pool, w.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
+		for range 2 {
+			require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				q := database.NewWithPgxTx(tx).Gen(ctx)
+				ledger := grants.New(q, w.alpha.MerchantID().UUID())
+				stored, err := q.ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{MerchantID: w.alpha.MerchantID().UUID(), CustomerID: customer.UUID()})
+				if err != nil {
+					return err
+				}
+				for _, g := range stored {
+					if err := ledger.MaterializeGrant(ctx, g); err != nil {
+						return err
+					}
+				}
+				missing, err := ledger.MissingEffects(ctx, ptr(customer.UUID()))
+				require.NoError(t, err)
+				require.Empty(t, missing)
+				excess, err := ledger.UnretractedTerminations(ctx, ptr(customer.UUID()))
+				require.NoError(t, err)
+				require.Empty(t, excess)
+				return nil
+			}))
+			require.Equal(t, before, history())
+		}
+
+	})
+}

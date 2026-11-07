@@ -304,7 +304,29 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 
 	switch Kind(g.Kind) {
 	case Access:
-		if terminated {
+		start := g.StartsAt
+		if g.ImportRootID != nil && g.ImportAsOf != nil && g.ImportAsOf.After(start) {
+			start = *g.ImportAsOf
+		}
+		if g.EndsAt != nil && !g.EndsAt.After(start) {
+			return nil // A correction can end before its own effective instant.
+		}
+		var importTermination *gen.BillingGrant
+		if terminated && g.Actor != nil && *g.Actor == "import" && g.GrantReason != nil && *g.GrantReason == string(ReasonImport) {
+			t, err := l.q.GetGrantTermination(ctx, gen.GetGrantTerminationParams{MerchantID: l.merchant, GrantID: g.ID})
+			if err != nil {
+				return err
+			}
+			if t.Actor != nil && *t.Actor == "import" && (t.Event == "revoke" || t.Event == "supersede") {
+				importTermination = &t
+			}
+		}
+		if importTermination != nil && !importTermination.StartsAt.After(start) {
+			return l.q.BoundImportedProductAccessByGrant(ctx, gen.BoundImportedProductAccessByGrantParams{
+				MerchantID: l.merchant, GrantID: g.ID, AsOf: importTermination.StartsAt,
+			})
+		}
+		if terminated && importTermination == nil {
 			_, err := l.q.RevokeProductAccessByGrant(ctx, gen.RevokeProductAccessByGrantParams{
 				MerchantID: l.merchant, GrantID: g.ID, RevokedAt: l.now(), RevokeReason: "grant_revoked",
 			})
@@ -332,9 +354,14 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 		if err := l.q.MaterializeProductAccess(ctx, gen.MaterializeProductAccessParams{
 			MerchantID: l.merchant, CustomerID: g.CustomerID, ProductID: *g.ProductID, GrantID: g.ID,
 			SourceType: g.SourceType, SourceID: *g.SourceID, PaymentID: g.PaymentID,
-			StartsAt: g.StartsAt, EndsAt: g.EndsAt, Quantity: g.Quantity,
+			StartsAt: start, EndsAt: g.EndsAt, Quantity: g.Quantity,
 		}); err != nil {
 			return fmt.Errorf("grants: materialize product access: %w", err)
+		}
+		if importTermination != nil {
+			return l.q.BoundImportedProductAccessByGrant(ctx, gen.BoundImportedProductAccessByGrantParams{
+				MerchantID: l.merchant, GrantID: g.ID, AsOf: importTermination.StartsAt,
+			})
 		}
 		return nil
 
@@ -550,6 +577,80 @@ func (l *Ledger) GrantProduct(ctx context.Context, customer, product uuid.UUID, 
 		}
 	}
 	return g, created, nil
+}
+
+// ReconcileImportedProduct applies one source's declared comp inside an open
+// transaction. The original root permanently owns the key; corrections append
+// a termination and a replacement, preserving every declared window. A refusal
+// returns a reason without changing the source; errors abort the transaction.
+func (l *Ledger) ReconcileImportedProduct(ctx context.Context, customer, product uuid.UUID, source string, start time.Time, end *time.Time, removed bool, asOf time.Time) (changed bool, blockedReason string, err error) {
+	if err := l.q.LockImportedGrantSource(ctx, gen.LockImportedGrantSourceParams{MerchantID: l.merchant, SourceID: source}); err != nil {
+		return false, "", err
+	}
+	root, err := l.q.GetAccessGrantByIdempotencyKey(ctx, gen.GetAccessGrantByIdempotencyKeyParams{MerchantID: l.merchant, IdempotencyKey: source})
+	var rootID *uuid.UUID
+	if err == nil {
+		if root.Actor == nil || *root.Actor != "import" || root.GrantReason == nil || *root.GrantReason != string(ReasonImport) {
+			return false, "admin grant source_id is already owned by a non-import grant", nil
+		}
+		if root.CustomerID != customer || root.ProductID == nil || *root.ProductID != product {
+			return false, "admin grant source_id cannot change customer or product", nil
+		}
+		current, err := l.q.GetLatestImportedGrant(ctx, gen.GetLatestImportedGrantParams{MerchantID: l.merchant, SourceID: source})
+		if err != nil {
+			return false, "", err
+		}
+		termination, err := l.q.GetGrantTermination(ctx, gen.GetGrantTerminationParams{MerchantID: l.merchant, GrantID: current.ID})
+		terminated := err == nil
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return false, "", err
+		}
+		sameWindow := current.StartsAt.Equal(start) && ((current.EndsAt == nil && end == nil) || (current.EndsAt != nil && end != nil && current.EndsAt.Equal(*end)))
+		if (removed && terminated) || (!removed && !terminated && sameWindow) {
+			return false, "", nil
+		}
+		horizon := current.ImportAsOf
+		if terminated && (horizon == nil || termination.StartsAt.After(*horizon)) {
+			horizon = &termination.StartsAt
+		}
+		if horizon != nil && !asOf.After(*horizon) {
+			return false, "changed admin grant requires as_of later than its last change", nil
+		}
+		if !terminated {
+			event, reason := "supersede", "import window changed"
+			if removed {
+				event, reason = "revoke", "import removed"
+			}
+			if _, err := l.terminate(ctx, current.ID, event, reason, "import", asOf); err != nil {
+				return false, "", err
+			}
+			if err := l.MaterializeGrant(ctx, current); err != nil {
+				return false, "", err
+			}
+		}
+		if removed {
+			return true, "", nil
+		}
+		rootID = &root.ID
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return false, "", err
+	} else if removed {
+		return false, "", nil
+	}
+	g, err := l.q.InsertImportedGrant(ctx, gen.InsertImportedGrantParams{
+		MerchantID: l.merchant, CustomerID: customer, ProductID: product, SourceID: source,
+		StartsAt: start, EndsAt: end, ImportAsOf: asOf, ImportRootID: rootID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) && rootID == nil {
+		return false, "admin grant source_id is already in use", nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	if err := l.MaterializeGrant(ctx, g); err != nil {
+		return false, "", err
+	}
+	return true, "", nil
 }
 
 // customerWindow is one source's access window: the product for

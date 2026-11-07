@@ -1957,6 +1957,7 @@ pkg openrails/billing, type DeclaredAdminGrant struct
 pkg openrails/billing, type DeclaredAdminGrant struct, Customer CustomerID `json:"customer"`
 pkg openrails/billing, type DeclaredAdminGrant struct, EndsAt *time.Time `json:"ends_at,omitempty"`
 pkg openrails/billing, type DeclaredAdminGrant struct, Product ProductID `json:"product"`
+pkg openrails/billing, type DeclaredAdminGrant struct, Removed bool `json:"removed,omitempty"`
 pkg openrails/billing, type DeclaredAdminGrant struct, SourceID string `json:"source_id"`
 pkg openrails/billing, type DeclaredAdminGrant struct, StartsAt time.Time `json:"starts_at"`
 pkg openrails/billing, type DeclaredBilling struct
