@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
@@ -21,7 +22,11 @@ import (
 )
 
 const (
+	// solanaPayPollInterval floors a wait for a reference that is due but held by another
+	// replica's pass, so the poller never spins on it.
 	solanaPayPollInterval = 500 * time.Millisecond
+	// wakeChannel is where a reference added or rescheduled says so (migration 0203).
+	wakeChannel = "openrails_solana_pay:"
 	// pollBatch bounds one replica's claim per tick; pollLease is how long a
 	// claimed reference stays with this replica if it dies mid-read.
 	pollBatch = 100
@@ -59,7 +64,9 @@ type OrderSettler interface {
 var ErrSolanaSubscribePending = errors.New("solana: recurring subscribe pending subscribe step")
 
 // SolanaPayPoller reads the chain for every watched reference. Replicas share
-// the work through ClaimDue; all state is in PostgreSQL.
+// the work through ClaimDue; all state is in PostgreSQL. Between passes it sleeps
+// until the earliest next_poll_at, or until a reference is added or rescheduled
+// (wakeChannel); with none watched it does nothing.
 type SolanaPayPoller struct {
 	db         *db.DB
 	rpcBuilder *MerchantRPCBuilder
@@ -100,17 +107,95 @@ func (p *SolanaPayPoller) Start(ctx context.Context) {
 		p.mu.Unlock()
 	}()
 
-	ticker := time.NewTicker(solanaPayPollInterval)
-	defer ticker.Stop()
-	for {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-stop:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	wake := make(chan struct{}, 1)
+	go p.listen(ctx, wake)
+	for ctx.Err() == nil {
+		if err := p.PollOnce(ctx); err != nil && ctx.Err() == nil {
+			log.WithError(err).Warn("Solana Pay poll failed")
+		}
+		var timer clockwork.Timer
+		var due <-chan time.Time
+		if wait, ok := p.untilNext(ctx); ok {
+			timer = p.clock.NewTimer(max(wait, solanaPayPollInterval))
+			due = timer.Chan()
+		}
 		select {
 		case <-ctx.Done():
-			return
-		case <-stop:
-			return
-		case <-ticker.C:
-			if err := p.PollOnce(ctx); err != nil && ctx.Err() == nil {
-				log.WithError(err).Warn("Solana Pay poll failed")
+		case <-wake:
+		case <-due:
+		}
+		if timer != nil {
+			timer.Stop()
+		}
+	}
+}
+
+// untilNext is how long until a watched reference is due; false with none watched.
+func (p *SolanaPayPoller) untilNext(ctx context.Context) (time.Duration, bool) {
+	now := p.clock.Now()
+	next, err := p.db.GenDirectory().NextSolanaPayPoll(ctx, now)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false
+	}
+	if err != nil {
+		if ctx.Err() == nil {
+			log.WithError(err).Warn("Solana Pay: next poll unread; reading again later")
+		}
+		return errorRecheck, true
+	}
+	return next.Sub(now), true
+}
+
+// listen rings wake for each wakeChannel notification, and once on every (re)connect
+// for any it missed, until ctx ends. It holds one pool connection.
+func (p *SolanaPayPoller) listen(ctx context.Context, wake chan<- struct{}) {
+	pool := p.db.Pool()
+	if pool == nil {
+		return
+	}
+	channel := pgx.Identifier{wakeChannel + p.db.DataPool().Schema()}.Sanitize()
+	ring := func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+	for ctx.Err() == nil {
+		err := func() error {
+			conn, err := pool.Acquire(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() {
+				// A LISTENing session is never handed back to the pool.
+				_ = conn.Conn().Close(context.WithoutCancel(ctx))
+				conn.Release()
+			}()
+			if _, err := conn.Exec(ctx, "LISTEN "+channel); err != nil {
+				return err
+			}
+			ring()
+			for {
+				if _, err := conn.Conn().WaitForNotification(ctx); err != nil {
+					return err
+				}
+				ring()
+			}
+		}()
+		if err != nil && ctx.Err() == nil {
+			log.WithError(err).Warn("Solana Pay: wake notifications interrupted; reconnecting")
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Second):
 			}
 		}
 	}

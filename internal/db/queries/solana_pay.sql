@@ -30,6 +30,13 @@ FROM (
 WHERE r.merchant_id = due.merchant_id AND r.reference = due.reference
 RETURNING r.*;
 
+-- name: NextSolanaPayPoll :one
+-- When the poller next has a watched reference to read: the earliest next_poll_at. No row: none.
+SELECT d.next_poll_at FROM billing.solana_pay_references d
+WHERE d.status = 'pending' OR (d.kind = 'purchase' AND d.watch_ends_at > sqlc.arg(now)::timestamptz)
+ORDER BY d.next_poll_at
+LIMIT 1;
+
 -- name: ScheduleSolanaPayPoll :exec
 UPDATE billing.solana_pay_references SET next_poll_at = sqlc.arg(next_poll_at)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND reference = sqlc.arg(reference)::text;

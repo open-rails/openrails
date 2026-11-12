@@ -134,6 +134,8 @@ sql:
       - "internal/migrate/postgres/0200_explicit_psp_imports.up.sql"
       - "internal/migrate/postgres/0201_rail_subscription_key.up.sql"
       - "internal/migrate/postgres/0202_imported_admin_grants.up.sql"
+      - "internal/migrate/postgres/0203_solana_pay_wake.up.sql"
+      - "internal/migrate/postgres/0204_eventlog_notify.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

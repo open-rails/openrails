@@ -142,6 +142,8 @@ migration 0191_provider_intents_comment.up.sql sha256:fff345e0143e09a85fe52e5466
 migration 0200_explicit_psp_imports.up.sql sha256:44eefa51bbbe338d21941762c9b82da60c76a345ccc73d91e5e228de58ea176f
 migration 0201_rail_subscription_key.up.sql sha256:023a4c674fbffbd1cf9a944ee932e02ac815e408dfc48d49b09ee5220aadf11b
 migration 0202_imported_admin_grants.up.sql sha256:97caea3589f118cbcf284a2a4c662b7992da82056c00ac19bb3efc4b031ce2a4
+migration 0203_solana_pay_wake.up.sql sha256:a499ec3a2454bd5c967a3d9b123dc8afb8868511df5693c6cbda485fa0ab4fd5
+migration 0204_eventlog_notify.up.sql sha256:91a6970712b5bbe33cfd17780178d384b2a62cd41e67f12e8d4757c2094ee311
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2724,6 +2726,7 @@ table billing.solana_pay_references
   index CREATE UNIQUE INDEX solana_pay_references_order_attempt_id_key ON billing.solana_pay_references USING btree (merchant_id, order_attempt_id)
   index CREATE UNIQUE INDEX solana_pay_references_pkey ON billing.solana_pay_references USING btree (merchant_id, reference)
   index CREATE INDEX solana_pay_references_watch_ends_at_idx ON billing.solana_pay_references USING btree (watch_ends_at) WHERE (status <> 'pending'::text)
+  trigger CREATE TRIGGER solana_pay_references_wake AFTER INSERT OR UPDATE OF next_poll_at, status, watch_ends_at ON billing.solana_pay_references FOR EACH ROW EXECUTE FUNCTION billing.solana_pay_references_wake()
 
 table billing.solana_subscriptions
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3683,6 +3686,8 @@ function billing.eventlog_flush()
    LOOP
     INSERT INTO "billing".eventlog_streams(source,scope) VALUES(s.source,s.scope) ON CONFLICT DO NOTHING;
     PERFORM 1 FROM "billing".eventlog_streams WHERE source=s.source AND scope=s.scope FOR UPDATE;
+    -- Delivered at commit, so a LISTENing consumer reads when its stream has moved (version 2).
+    PERFORM pg_notify(TG_TABLE_SCHEMA || '.eventlog', s.source || ' ' || s.scope);
    END LOOP;
    FOR e IN SELECT * FROM "billing".eventlog_pending WHERE transaction_id=pg_current_xact_id() ORDER BY ordinal
    LOOP
@@ -4577,6 +4582,17 @@ function billing.running_charge_total(bigint,timestamp with time zone,timestamp 
    IMMUTABLE PARALLEL SAFE
   AS $function$
   SELECT div(p_rate_per_hour::numeric * greatest(floor(extract(epoch FROM p_at - p_started_at)), 0) * 2 + 3600, 7200)::bigint
+  $function$
+
+function billing.solana_pay_references_wake()
+  CREATE OR REPLACE FUNCTION billing.solana_pay_references_wake()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  BEGIN
+      PERFORM pg_notify('openrails_solana_pay:' || TG_TABLE_SCHEMA, '');
+      RETURN NULL;
+  END;
   $function$
 
 function billing.step_access_version()
