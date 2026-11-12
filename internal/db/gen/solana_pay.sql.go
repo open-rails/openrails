@@ -335,6 +335,21 @@ func (q *Queries) LockSolanaPayReference(ctx context.Context, arg LockSolanaPayR
 	return i, err
 }
 
+const nextSolanaPayPoll = `-- name: NextSolanaPayPoll :one
+SELECT d.next_poll_at FROM billing.solana_pay_references d
+WHERE d.status = 'pending' OR (d.kind = 'purchase' AND d.watch_ends_at > $1::timestamptz)
+ORDER BY d.next_poll_at
+LIMIT 1
+`
+
+// When the poller next has a watched reference to read: the earliest next_poll_at. No row: none.
+func (q *Queries) NextSolanaPayPoll(ctx context.Context, now time.Time) (time.Time, error) {
+	row := q.db.QueryRow(ctx, nextSolanaPayPoll, now)
+	var next_poll_at time.Time
+	err := row.Scan(&next_poll_at)
+	return next_poll_at, err
+}
+
 const registerSolanaPayReference = `-- name: RegisterSolanaPayReference :one
 INSERT INTO billing.solana_pay_references (merchant_id, reference, order_attempt_id, kind, status, expires_at, watch_ends_at, next_poll_at, created_at, updated_at)
 VALUES ($1::uuid, $2::text, $3::uuid, $4::text, 'pending',
