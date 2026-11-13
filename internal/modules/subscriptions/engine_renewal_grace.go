@@ -24,14 +24,14 @@ import (
 // The allowance is a bounded share of the period, never a fixed day (24h would
 // give an hourly member 24 free periods):
 //
-//	grace(period) = min(24h, max(5m, period/10))
+//	grace(period) = min(24h, max(2h, period/10))
 //
-// 10% caps unpaid access; 24h caps long periods; 5m is five per-minute due
-// passes, the least a renewal needs to be admitted and charged.
-// 1h -> 6m, 1d -> 2h24m, 7d -> 16h48m, 30d/90d/365d -> 24h.
+// 10% caps unpaid access; 24h caps long periods; 2h is two hourly billing
+// passes, the least a renewal waits to be admitted with one pass missed.
+// 1h -> 2h, 1d -> 2h24m, 7d -> 16h48m, 30d/90d/365d -> 24h.
 const (
 	engineGraceCap      = 24 * time.Hour
-	engineGraceFloor    = 5 * time.Minute
+	engineGraceFloor    = 2 * time.Hour
 	engineGraceFraction = 10
 )
 

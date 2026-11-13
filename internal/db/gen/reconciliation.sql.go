@@ -3463,7 +3463,7 @@ WHERE s.merchant_id = $2::uuid
   AND s.deleted_at IS NULL AND s.canceled_at IS NULL
   AND s.status = 'active' AND s.collection_policy = 'engine'
   AND s.current_period_ends_at > s.current_period_starts_at
-  AND s.current_period_ends_at + LEAST(interval '24 hours', GREATEST(interval '5 minutes',
+  AND s.current_period_ends_at + LEAST(interval '24 hours', GREATEST(interval '2 hours',
       (s.current_period_ends_at - s.current_period_starts_at) / 10)) <= $1::timestamptz
 `
 
@@ -3478,7 +3478,7 @@ type SummarizeHeldEngineRenewalsRow struct {
 }
 
 // LIFE life.renewal.held: engine renewals with no outcome past their allowance,
-// min(24h, max(5m, period/10)) after the paid period. Collection is stopped.
+// min(24h, max(2h, period/10)) after the paid period. Collection is stopped.
 func (q *Queries) SummarizeHeldEngineRenewals(ctx context.Context, arg SummarizeHeldEngineRenewalsParams) (SummarizeHeldEngineRenewalsRow, error) {
 	row := q.db.QueryRow(ctx, summarizeHeldEngineRenewals, arg.Now, arg.MerchantID)
 	var i SummarizeHeldEngineRenewalsRow

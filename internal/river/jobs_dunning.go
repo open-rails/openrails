@@ -36,9 +36,8 @@ const (
 	QueueBilling = "billing"
 	KindDunning  = "openrails.dunning"
 
-	// DuePassInterval is the due pass cadence: the bound on how long an
-	// engine renewal waits past its paid-period boundary.
-	DuePassInterval = time.Minute
+	// dueRecheckMin is the shortest wait of a row the pass left unchanged.
+	dueRecheckMin = time.Minute
 
 	// dunningMerchantBatch is one page of the merchants with due work. The
 	// work queue is indexed on the due-dunning predicate, so a pass costs its
@@ -80,8 +79,8 @@ type DunningArgs struct {
 func (DunningArgs) Kind() string { return KindDunning }
 
 // InsertOpts: a deployment-wide pass makes one attempt, so one merchant's
-// failure never holds back the next minute's pass; a merchant's wake is never
-// absorbed by a pass.
+// failure never holds back the next pass; a merchant's wake is never absorbed
+// by a pass.
 func (a DunningArgs) InsertOpts() river.InsertOpts {
 	if a.MerchantID != uuid.Nil {
 		return river.InsertOpts{Queue: QueueBilling}
@@ -147,12 +146,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	// scan and charge run inside each merchant's scope. w.now(), not SQL NOW(),
 	// so tests can mock time. Held admissions leave engine renewals unselected:
 	// they wait, untouched, until the hold lifts.
-	nmiRails := []string{string(models.RailNMI)}
-	if w.EngineCollections != nil {
-		nmiRails = append(nmiRails, string(models.RailStripe))
-	}
-	includeEngine := w.EngineCollections != nil
-	admitEngine := includeEngine && (w.Config == nil || !w.Config.EngineAdmissionHold)
+	nmiRails, includeEngine, admitEngine := w.dueScope()
 	now := w.now()
 	var merchantIDs []uuid.UUID
 	if job.Args.MerchantID != uuid.Nil {
@@ -286,6 +280,27 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	return workErr
 }
 
+// dueScope is what the pass selects: the rails it collects, and whether it
+// ends and admits engine renewals.
+func (w *DunningWorker) dueScope() (rails []string, includeEngine, admitEngine bool) {
+	rails = []string{string(models.RailNMI)}
+	if w.EngineCollections != nil {
+		rails = append(rails, string(models.RailStripe))
+	}
+	includeEngine = w.EngineCollections != nil
+	admitEngine = includeEngine && (w.Config == nil || !w.Config.EngineAdmissionHold)
+	return rails, includeEngine, admitEngine
+}
+
+// DueBy reports a subscription the pass would select at at.
+func (w *DunningWorker) DueBy(ctx context.Context, at time.Time) (bool, error) {
+	rails, includeEngine, admitEngine := w.dueScope()
+	ids, err := w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
+		Rails: rails, Now: at, MerchantLimit: 1, IncludeEngine: includeEngine, AdmitEngine: admitEngine, AfterMerchantID: uuid.Nil,
+	})
+	return len(ids) > 0, err
+}
+
 // FindingDuePassRefused is a subscription the due pass could not process.
 const FindingDuePassRefused = "life.due_pass.refused"
 
@@ -316,7 +331,7 @@ func (w *DunningWorker) deferDue(ctx context.Context, sub *models.Subscription, 
 	if due.IsZero() {
 		due = now
 	}
-	wait := min(max(now.Sub(due)/2, DuePassInterval), dueRecheckMax)
+	wait := min(max(now.Sub(due)/2, dueRecheckMin), dueRecheckMax)
 	return w.DB.Gen(ctx).DeferDueSubscription(ctx, gen.DeferDueSubscriptionParams{MerchantID: sub.MerchantID, ID: sub.ID, RecheckAt: now.Add(wait)})
 }
 

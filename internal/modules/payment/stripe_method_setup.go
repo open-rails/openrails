@@ -2,6 +2,7 @@ package payment
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -30,6 +31,18 @@ import (
 
 // SetupAbandonAfter is how long a card being saved waits for the customer.
 const SetupAbandonAfter = 24 * time.Hour
+
+// setupLapsed reports a card save waiting past its cutoff: SetupAbandonAfter
+// since it began, or its capture's own expiry.
+func setupLapsed(row gen.BillingPaymentMethod, now time.Time) bool {
+	if row.CreatedAt.Before(now.Add(-SetupAbandonAfter)) {
+		return true
+	}
+	var capture struct {
+		ExpiresAt *time.Time `json:"expires_at"`
+	}
+	return len(row.Capture) > 0 && json.Unmarshal(row.Capture, &capture) == nil && capture.ExpiresAt != nil && !capture.ExpiresAt.After(now)
+}
 
 // SavedCard is a saved card or the next action needed to finish storing it.
 type SavedCard struct {
@@ -176,6 +189,17 @@ func (s *PurchaseService) ConfirmStripeCard(ctx context.Context, methodID uuid.U
 	}
 	if row.Status != paymentmethods.StatusRequiresAction || row.Rail != string(models.RailStripe) || row.PspID == nil {
 		return SavedCard{Method: method}, nil
+	}
+	if now := s.now().UTC(); setupLapsed(row, now) {
+		// Waited past its cutoff: removed, as the expiry pass removes it.
+		if _, err := d.Gen(ctx).AbandonPaymentMethodSetup(ctx, gen.AbandonPaymentMethodSetupParams{MerchantID: mid.UUID(), ID: row.ID, Now: now}); err != nil {
+			return SavedCard{}, err
+		}
+		if row, err = d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: methodID}); err != nil {
+			return SavedCard{}, err
+		}
+		method, err = models.PaymentMethodFromGen(row)
+		return SavedCard{Method: method}, err
 	}
 	account, err := s.stripeCardAccount(ctx, *row.PspID, user, resolver)
 	if err != nil {

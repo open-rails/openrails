@@ -11,6 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/balancelook"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -19,11 +20,6 @@ import (
 
 const (
 	KindBalanceWatch = "openrails.balance_watch"
-
-	// BalanceWatchInterval is the watcher's cadence: how long a balance that
-	// ran out, went low, changed, held a lot that lapsed or crossed 00:00 UTC
-	// waits to be looked at.
-	BalanceWatchInterval = time.Minute
 
 	// balanceWatchBatch is how many due watches one read takes. The read is
 	// indexed on the due instant, so a pass costs what is due, never what is
@@ -51,6 +47,12 @@ type BalanceWatchWorker struct {
 }
 
 func (BalanceWatchWorker) Kind() string { return KindBalanceWatch }
+
+// DueBy reports a watch due since before at: a lapse, a running charge's
+// checkpoint or a crossing nothing looked at.
+func (w BalanceWatchWorker) DueBy(ctx context.Context, at time.Time) (bool, error) {
+	return w.DB.GenDirectory().BalanceWatchDueBefore(ctx, at)
+}
 
 func (w BalanceWatchWorker) Work(ctx context.Context, _ *river.Job[BalanceWatchArgs]) error {
 	now := w.Money.Clock().Now().UTC()
@@ -81,4 +83,33 @@ func (w BalanceWatchWorker) Work(ctx context.Context, _ *river.Job[BalanceWatchA
 		last := due[len(due)-1]
 		args.AfterAt, args.AfterMerchantID, args.AfterCustomerID, args.AfterCurrency = &last.NextCheckAt, &last.MerchantID, &last.CustomerID, &last.Currency
 	}
+}
+
+// BalanceLookWorker looks at one balance whose watch is due: a change crossed
+// one of its lines, or the instant its last look named came. A look for an
+// instant a later look moved is left alone.
+type BalanceLookWorker struct {
+	WorkerDefaults[balancelook.Args]
+	DB    *db.DB
+	Money *money.MoneyService
+}
+
+func (BalanceLookWorker) Kind() string { return balancelook.Kind }
+
+func (w BalanceLookWorker) Work(ctx context.Context, job *river.Job[balancelook.Args]) error {
+	a := job.Args
+	now := w.Money.Clock().Now().UTC()
+	return w.DB.RunInMerchantScope(ctx, billing.MerchantID(a.MerchantID), "balance look", func(ctx context.Context) error {
+		return w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			d := w.DB.NewWithPgxTx(tx)
+			watch, err := d.Gen(ctx).GetBalanceWatch(ctx, gen.GetBalanceWatchParams{MerchantID: a.MerchantID, CustomerID: a.CustomerID, Currency: a.Currency})
+			if errors.Is(err, pgx.ErrNoRows) || err == nil && (watch.NextCheckAt == nil || watch.NextCheckAt.After(now)) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			return w.Money.WatchBalanceInTx(ctx, d, identity.CustomerID(a.CustomerID), a.Currency)
+		})
+	})
 }

@@ -118,9 +118,10 @@ number of postings sums to `charged_amount`.
 OpenRails does not stop your work; it tells you when to. Each customer with a
 running charge has one watch: the earliest of the instant its balance goes
 under the low line, the instant its capacity reaches zero, and the next 00:00
-UTC. A deposit, a capture, a spend, a refund, an expiry or a new hold marks the
-watch due; every minute one job looks at the watches that are due, and at
-nothing else. Stopping the last charge of a prepaid customer keeps its watch.
+UTC. A deposit, a capture, a spend, a refund, an expiry or a new hold of a
+customer with a running charge queues a look at its balance in the same
+transaction, and each look queues the next for the instant it names; the
+hourly billing pass looks only at a watch whose look failed. Stopping the last charge of a prepaid customer keeps its watch.
 
 It reaches you two ways:
 

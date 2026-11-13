@@ -9,10 +9,13 @@ import (
 	"math/bits"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/balancelook"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -438,12 +441,60 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 		}
 		fundedAt = nil
 	}
-	return q.SetBalanceWatch(ctx, gen.SetBalanceWatchParams{
+	next := view.next(out, lowNotifiedAt == nil, depletedAt == nil)
+	low, floor := view.lines(out)
+	if err := q.SetBalanceWatch(ctx, gen.SetBalanceWatchParams{
 		MerchantID: key.MerchantID, CustomerID: key.CustomerID, Currency: key.Currency,
-		NextCheckAt: view.next(out, lowNotifiedAt == nil, depletedAt == nil), DepletesAt: out.depletesAt,
+		NextCheckAt: next, DepletesAt: out.depletesAt,
 		LowNotifiedAt: lowNotifiedAt, DepletedAt: depletedAt, FundedAt: fundedAt,
 		UsageRatePerHour: usageRate, RateSampledAt: &sampledAt, Now: bal.AsOf,
-	})
+		LowLineAmount: low, FloorAmount: floor, LookEachChange: view.moving(),
+	}); err != nil {
+		return err
+	}
+	return scheduleLook(ctx, q, key.MerchantID, key.CustomerID, currency, next)
+}
+
+// lines are what a change is judged against until the next look: the
+// available amount at or under which the balance is low (nil with no line),
+// and the one at which it is depleted.
+func (v balanceView) lines(p balanceProjection) (low, floor *int64) {
+	if p.line > 0 {
+		at := satAdd(v.spendFloor, p.line-1)
+		low = &at
+	}
+	return low, &v.floor
+}
+
+// moving reports a balance time moves: a running charge accrues, or a lot
+// lapses. A change moves its run-out, so each is looked at.
+func (v balanceView) moving() bool {
+	if v.accrualRate > 0 || v.lapsed > 0 {
+		return true
+	}
+	for _, lot := range v.lots {
+		if lot.remaining > 0 && lot.endsAt != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// scheduleLook queues the look for the instant a look said to look again, in
+// q's transaction. Without a River producer the billing pass looks at it.
+func scheduleLook(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, at *time.Time) error {
+	if at == nil {
+		return nil
+	}
+	when := at.UTC()
+	args := balancelook.Args{MerchantID: merchant, CustomerID: customer, Currency: currency, At: &when}
+	opts := args.InsertOpts()
+	opts.ScheduledAt = when
+	_, err := db.InsertRiverJobWith(ctx, q, args, &opts)
+	if errors.Is(err, db.ErrNoRiverProducer) {
+		return nil
+	}
+	return err
 }
 
 // watchBalance writes when a customer's balance is next looked at after a
@@ -484,10 +535,15 @@ func (s *MoneyService) watchBalance(ctx context.Context, q *gen.Queries, merchan
 	if view.checkpointDue || (watch.FundedAt != nil && (!lowArmed || !depletedArmed)) {
 		next = &bal.AsOf
 	}
-	return q.UpsertBalanceWatch(ctx, gen.UpsertBalanceWatchParams{
+	low, floor := view.lines(out)
+	if err := q.UpsertBalanceWatch(ctx, gen.UpsertBalanceWatchParams{
 		MerchantID: merchantID, CustomerID: customer, Currency: currency,
 		NextCheckAt: next, DepletesAt: out.depletesAt, Now: bal.AsOf,
-	})
+		LowLineAmount: low, FloorAmount: floor, LookEachChange: view.moving(),
+	}); err != nil {
+		return err
+	}
+	return scheduleLook(ctx, q, merchantID, customer, currency, next)
 }
 
 // LowBalanceLines are the effective low-balance lines of a customer's
@@ -558,7 +614,7 @@ func SetLowBalanceLineTx(ctx context.Context, q *gen.Queries, merchantID, custom
 	if err != nil {
 		return err
 	}
-	return q.WatchCustomerBalance(ctx, gen.WatchCustomerBalanceParams{MerchantID: merchantID, CustomerID: customer, Currency: line.Currency, RearmLow: true, Now: now})
+	return ledger.WatchCustomerBalance(ctx, q, gen.WatchCustomerBalanceParams{MerchantID: merchantID, CustomerID: customer, Currency: line.Currency, RearmLow: true, Now: now})
 }
 
 func equalPtr[T comparable](a, b *T) bool {

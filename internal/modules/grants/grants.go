@@ -103,6 +103,7 @@ func (l *Ledger) SetClock(now func() time.Time) {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	l.now = now
+	l.money.SetClock(now)
 }
 
 // GrantInput describes a new grant to append.
@@ -395,7 +396,7 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 		}
 		// A lot that lapses is expired by its balance's watch.
 		if g.EndsAt != nil {
-			if err := l.q.WatchLapsingCredit(ctx, gen.WatchLapsingCreditParams{MerchantID: l.merchant, CustomerID: g.CustomerID, Currency: *g.Currency, Now: l.now()}); err != nil {
+			if err := ledger.WatchLapsingCredit(ctx, l.q, gen.WatchLapsingCreditParams{MerchantID: l.merchant, CustomerID: g.CustomerID, Currency: *g.Currency, Now: l.now()}); err != nil {
 				return fmt.Errorf("grants: watch the lapsing lot: %w", err)
 			}
 		}

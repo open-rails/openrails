@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -30,11 +29,12 @@ func (r *Runtime) ListWorkerHealth(ctx context.Context) ([]billing.WorkerHealth,
 	return h.Kinds, err
 }
 
-// JobProgress is the openrails_job_progress verdict, a pure read: the fleet's
-// River has a leader, no OpenRails job runs past its timeout, and each
-// periodic pass this fleet queues completed within two periods and its
-// timeout (counted from the leader's election, which queues an overdue pass
-// at once). A pass whose live lease another fleet holds is that fleet's.
+// JobProgress is the openrails_job_progress verdict, a pure read of River's
+// tables: the fleet's River has a leader, no OpenRails job runs past its
+// timeout, and the billing pass ran to its end within a day and its timeout
+// (counted from the leader's election, which runs one at once) and found no
+// critical work a day overdue. A billing pass whose live lease another fleet
+// holds is that fleet's.
 func (r *Runtime) JobProgress(ctx context.Context) error {
 	h, err := r.JobHealth(ctx)
 	if err != nil {
@@ -44,35 +44,26 @@ func (r *Runtime) JobProgress(ctx context.Context) error {
 	if h.LeaderElectedAt == nil {
 		return fmt.Errorf("no River leader in schema %q: periodic passes and crash rescue are not running", schema)
 	}
-	var leased []string
-	for _, p := range riverjobs.Periodics {
-		if !p.PerFleet {
-			leased = append(leased, p.Args.Kind())
-		}
-	}
-	elsewhere, err := r.DB.GenDirectory().ListPeriodicLeasesHeldElsewhere(ctx, gen.ListPeriodicLeasesHeldElsewhereParams{Kinds: leased, Holder: schema})
-	if err != nil {
-		return fmt.Errorf("job health: periodic leases: %w", err)
-	}
-	byKind := map[string]billing.WorkerHealth{}
 	var stalled []string
 	for _, k := range h.Kinds {
-		byKind[k.Kind] = k
 		if k.Overrunning > 0 {
 			stalled = append(stalled, fmt.Sprintf("%s: %d running past its %s timeout", k.Kind, k.Overrunning, riverjobs.Timeout(k.Kind)))
 		}
 	}
-	for _, p := range riverjobs.Periodics {
-		kind := p.Args.Kind()
-		if !r.declares(p.Gate) || (!p.PerFleet && slices.Contains(elsewhere, kind)) {
-			continue
-		}
+	elsewhere, err := r.DB.GenDirectory().ListPeriodicLeasesHeldElsewhere(ctx, gen.ListPeriodicLeasesHeldElsewhereParams{Kinds: []string{riverjobs.KindBillingPass}, Holder: schema})
+	if err != nil {
+		return fmt.Errorf("job health: periodic leases: %w", err)
+	}
+	if len(elsewhere) == 0 {
 		since := *h.LeaderElectedAt
-		if last := byKind[kind].LastCompletedAt; last != nil && last.After(since) {
-			since = *last
+		if h.LastPass != nil && h.LastPass.FinishedAt.After(since) {
+			since = h.LastPass.FinishedAt
 		}
-		if h.CheckedAt.Sub(since) > 2*p.Every+riverjobs.Timeout(kind) {
-			stalled = append(stalled, fmt.Sprintf("%s has not completed since %s", kind, since.UTC().Format(time.RFC3339)))
+		if h.CheckedAt.Sub(since) > riverjobs.CriticalOverdue+riverjobs.Timeout(riverjobs.KindBillingPass) {
+			stalled = append(stalled, fmt.Sprintf("%s has not run to its end since %s", riverjobs.KindBillingPass, since.UTC().Format(time.RFC3339)))
+		}
+		if h.LastPass != nil && len(h.LastPass.Overdue) > 0 {
+			stalled = append(stalled, fmt.Sprintf("a day overdue at %s: %s", h.LastPass.FinishedAt.UTC().Format(time.RFC3339), strings.Join(h.LastPass.Overdue, ", ")))
 		}
 	}
 	if len(stalled) > 0 {

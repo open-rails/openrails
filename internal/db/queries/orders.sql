@@ -86,12 +86,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
   AND idempotency_key = sqlc.arg(idempotency_key)::text;
 
 -- name: ListOrdersPage :many
--- One page of orders, newest first; every filter is optional. price_id names
--- orders with a line on that price; overdue_at the open ones due before it.
+-- One page of orders, newest first; every filter is optional. status reads an
+-- open order past its expiry as expired; price_id names orders with a line on
+-- that price; overdue_at the open ones due before it.
 SELECT o.* FROM billing.orders o
 WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR o.customer_id = sqlc.narg(customer_id)::uuid)
-  AND (sqlc.narg(status)::text IS NULL OR o.status = sqlc.narg(status)::text)
+  AND (sqlc.narg(status)::text IS NULL OR sqlc.narg(status)::text = CASE
+        WHEN o.status = 'open' AND o.collection_owner = 'engine' AND o.expires_at <= sqlc.arg(now)::timestamptz THEN 'expired' ELSE o.status END)
   AND (sqlc.narg(origin)::text IS NULL OR o.origin = sqlc.narg(origin)::text)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR o.subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (sqlc.narg(overdue_at)::timestamptz IS NULL OR (o.status = 'open' AND o.due_at < sqlc.narg(overdue_at)::timestamptz))
@@ -187,10 +189,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND status IN ('canceled', 'expired') AND payment_id IS NULL;
 
 -- name: CloseOrder :execrows
+-- An order expires at its expires_at, however late the pass closes it.
 UPDATE billing.orders
 SET status = sqlc.arg(status)::text, payment_status = 'requires_payment_method',
     canceled_at = CASE WHEN sqlc.arg(status)::text = 'canceled' THEN sqlc.arg(now)::timestamptz ELSE canceled_at END,
-    expired_at = CASE WHEN sqlc.arg(status)::text = 'expired' THEN sqlc.arg(now)::timestamptz ELSE expired_at END,
+    expired_at = CASE WHEN sqlc.arg(status)::text = 'expired' THEN LEAST(COALESCE(expires_at, sqlc.arg(now)::timestamptz), sqlc.arg(now)::timestamptz) ELSE expired_at END,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND collection_owner = 'engine' AND status = 'open' AND sqlc.arg(status)::text IN ('canceled', 'expired');

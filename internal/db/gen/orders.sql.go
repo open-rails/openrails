@@ -45,7 +45,7 @@ const closeOrder = `-- name: CloseOrder :execrows
 UPDATE billing.orders
 SET status = $1::text, payment_status = 'requires_payment_method',
     canceled_at = CASE WHEN $1::text = 'canceled' THEN $2::timestamptz ELSE canceled_at END,
-    expired_at = CASE WHEN $1::text = 'expired' THEN $2::timestamptz ELSE expired_at END,
+    expired_at = CASE WHEN $1::text = 'expired' THEN LEAST(COALESCE(expires_at, $2::timestamptz), $2::timestamptz) ELSE expired_at END,
     updated_at = $2::timestamptz
 WHERE merchant_id = $3::uuid AND id = $4::uuid
   AND collection_owner = 'engine' AND status = 'open' AND $1::text IN ('canceled', 'expired')
@@ -58,6 +58,7 @@ type CloseOrderParams struct {
 	ID         uuid.UUID
 }
 
+// An order expires at its expires_at, however late the pass closes it.
 func (q *Queries) CloseOrder(ctx context.Context, arg CloseOrderParams) (int64, error) {
 	result, err := q.db.Exec(ctx, closeOrder,
 		arg.Status,
@@ -1156,23 +1157,25 @@ const listOrdersPage = `-- name: ListOrdersPage :many
 SELECT o.merchant_id, o.id, o.customer_id, o.origin, o.status, o.currency, o.total, o.number, o.idempotency_key, o.request_digest, o.payment_method_id, o.psp_id, o.attempt_id, o.payment_id, o.last_payment_error, o.expires_at, o.completed_at, o.canceled_at, o.expired_at, o.created_at, o.updated_at, o.payment_status, o.pay_url_secret_hash, o.pay_url_expires_at, o.success_url, o.cancel_url, o.saved_payment_methods, o.subscription_id, o.period_starts_at, o.period_ends_at, o.due_at, o.voided_at, o.amount_paid, o.uncollectible_at, o.collection_method, o.po_number, o.memo, o.tax, o.billing_contacts, o.collection_failure_count, o.collection_failed_at, o.next_collection_attempt_at, o.collection_owner, o.subscription_bill_kind, o.lines_digest, o.embedded FROM billing.orders o
 WHERE o.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR o.customer_id = $2::uuid)
-  AND ($3::text IS NULL OR o.status = $3::text)
-  AND ($4::text IS NULL OR o.origin = $4::text)
-  AND ($5::uuid IS NULL OR o.subscription_id = $5::uuid)
-  AND ($6::timestamptz IS NULL OR (o.status = 'open' AND o.due_at < $6::timestamptz))
-  AND ($7::uuid IS NULL OR EXISTS (
+  AND ($3::text IS NULL OR $3::text = CASE
+        WHEN o.status = 'open' AND o.collection_owner = 'engine' AND o.expires_at <= $4::timestamptz THEN 'expired' ELSE o.status END)
+  AND ($5::text IS NULL OR o.origin = $5::text)
+  AND ($6::uuid IS NULL OR o.subscription_id = $6::uuid)
+  AND ($7::timestamptz IS NULL OR (o.status = 'open' AND o.due_at < $7::timestamptz))
+  AND ($8::uuid IS NULL OR EXISTS (
         SELECT 1 FROM billing.order_lines l
-        WHERE l.merchant_id = o.merchant_id AND l.order_id = o.id AND l.price_id = $7::uuid))
-  AND ($8::timestamptz IS NULL
-       OR (o.created_at, o.id) < ($8::timestamptz, $9::uuid))
+        WHERE l.merchant_id = o.merchant_id AND l.order_id = o.id AND l.price_id = $8::uuid))
+  AND ($9::timestamptz IS NULL
+       OR (o.created_at, o.id) < ($9::timestamptz, $10::uuid))
 ORDER BY o.created_at DESC, o.id DESC
-LIMIT $10::int
+LIMIT $11::int
 `
 
 type ListOrdersPageParams struct {
 	MerchantID     uuid.UUID
 	CustomerID     *uuid.UUID
 	Status         *string
+	Now            time.Time
 	Origin         *string
 	SubscriptionID *uuid.UUID
 	OverdueAt      *time.Time
@@ -1182,13 +1185,15 @@ type ListOrdersPageParams struct {
 	RowLimit       int32
 }
 
-// One page of orders, newest first; every filter is optional. price_id names
-// orders with a line on that price; overdue_at the open ones due before it.
+// One page of orders, newest first; every filter is optional. status reads an
+// open order past its expiry as expired; price_id names orders with a line on
+// that price; overdue_at the open ones due before it.
 func (q *Queries) ListOrdersPage(ctx context.Context, arg ListOrdersPageParams) ([]BillingOrder, error) {
 	rows, err := q.db.Query(ctx, listOrdersPage,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Status,
+		arg.Now,
 		arg.Origin,
 		arg.SubscriptionID,
 		arg.OverdueAt,

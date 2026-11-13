@@ -19,11 +19,16 @@ that lapses. An arrears customer with neither is not watched: its limit is the
 credit line, refused at admission and covered by the
 [delinquency notices](arrears-delinquency.md).
 
-A watch costs nothing while nothing changes. A deposit, a credit grant, a
-spend, a capture, a hold, an expiry or a refund marks it due, and every
-minute one job looks at the due watches. A burst of spends is one look.
-Time alone moves a balance in two ways, and each look schedules both: a
-running charge's accrual, and a credit lot's lapse. The look at a lapse
+A watch costs nothing while nothing changes. Each look stores the lines it
+judged the balance against; a deposit, a credit grant, a spend, a capture, a
+hold, an expiry or a refund that takes the balance to or under a line whose
+notice is armed, or a funding that lifts it back over one whose notice was
+sent, queues a look in the same transaction, and the notice follows within
+seconds. Any other change queues nothing. A burst of spends is one look.
+Time alone moves a balance in two ways, and each look queues the next for
+its instant: a running charge's accrual, and a credit lot's lapse. While
+either moves a balance, each change of it is looked at. A look that fails is
+retried, then taken by the hourly billing pass. The look at a lapse
 expires the lot; a balance read leaves it out of `available_amount` from its
 lapse on, and an admission expires it before reading the balance.
 

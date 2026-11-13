@@ -57,12 +57,12 @@ type BillingAdmissionOperation struct {
 	RateCards []byte
 }
 
-// One row per prepaid customer balance, per customer and currency with a running charge and per balance holding a credit lot that lapses: when its balance is next looked at (a low line, the run-out, a credit lot's lapse or the next 00:00 UTC, whichever is first; null until a change marks it due) and what the last look found. The look at a lapse expires the lot. Derived from the balance, the running charges, the credit lots and the billing mode; an arrears customer with neither a running charge nor a lot that lapses has none.
+// One row per prepaid customer balance and per customer and currency with a running charge: when its balance is next looked at (a low line, the run-out, a credit lot lapse or the next 00:00 UTC, whichever is first) and what the last look found, including the lines a change is judged against. Its look job is queued by the change that crosses a line and for next_check_at; the billing pass looks at one whose job failed. Derived from the balance, the running charges and the billing mode; an arrears customer with no running charge has none.
 type BillingBalanceWatch struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
-	// When the balance is next looked at; to_timestamp(0) once a change marks it due, null with nothing scheduled.
+	// When the balance is next looked at; to_timestamp(0) once a change marks it due (updated_at is then when), null with nothing scheduled.
 	NextCheckAt *time.Time
 	// When the customer's capacity reaches zero at the rate of its running charges and the lapse of its credit lots, as last computed; in the past while it is at zero, null when nothing exact moves it.
 	DepletesAt *time.Time
@@ -77,6 +77,12 @@ type BillingBalanceWatch struct {
 	UsageRatePerHour int64
 	// The instant usage_rate_per_hour was sampled at; usage events dated before it are not read again.
 	RateSampledAt *time.Time
+	// The available amount (balance less held) at or under which the balance is low, as the last look found the line; null with no line.
+	LowLineAmount *int64
+	// The available amount at or under which the balance is depleted, as the last look found it; null before a look.
+	FloorAmount *int64
+	// Every change is looked at: a running charge or a lot that lapses moves the run-out, or no look has stored the lines yet.
+	LookEachChange bool
 }
 
 // Global by design, one row: the PostgreSQL cluster (system identifier), database and schema this billing book was armed in. Every provider write reads it; anywhere else the book is a copy and is readonly until `openrails book arm`. A promoted physical replica keeps all three; a physical clone does too, so rotate PSP credentials before running one.

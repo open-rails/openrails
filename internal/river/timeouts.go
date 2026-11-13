@@ -6,6 +6,8 @@ import (
 
 	"github.com/riverqueue/river"
 
+	"github.com/open-rails/openrails/internal/balancelook"
+
 	"github.com/open-rails/openrails/internal/convergejob"
 	"github.com/open-rails/openrails/internal/intents/wake"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -25,10 +27,12 @@ const RescueAfter = 10 * time.Minute
 
 // kinds are OpenRails' job kinds and their timeouts: an hour for the passes
 // that read every merchant's providers, and for the stored-card pass, whose
-// own budget is 10 minutes; two for a PSP import.
+// own budget is 10 minutes; two for a PSP import; every scan's for the billing
+// pass.
 var kinds = map[string]time.Duration{
 	KindDunning:                          DefaultTimeout,
 	KindBalanceWatch:                     DefaultTimeout,
+	balancelook.Kind:                     DefaultTimeout,
 	KindOrderExpiry:                      DefaultTimeout,
 	money.KindUsageOrders:                DefaultTimeout,
 	KindDelinquency:                      DefaultTimeout,
@@ -47,10 +51,9 @@ var kinds = map[string]time.Duration{
 	KindMerchantHealth:                   time.Hour,
 	KindRebillWatch:                      time.Hour,
 	reconcile.KindChargeAttributions:     time.Hour,
-	KindNMIHistory:                       time.Hour,
 	KindStripeWebhookReconcile:           DefaultTimeout,
 	KindConfigRealerts:                   DefaultTimeout,
-	KindOperationWakes:                   DefaultTimeout,
+	KindBillingPass:                      BillingPassTimeout(),
 	KindPSPImport:                        2 * time.Hour,
 }
 

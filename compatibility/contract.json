@@ -1458,6 +1458,9 @@
       "type Info struct {\n\tTenantID   string `json:\"tenant_id,omitempty\"`\n\tMerchantID string `json:\"merchant_id\"`\n\tDigest     string `json:\"digest\"`\n\tRows       int64  `json:\"rows\"`\n}",
       "type Record struct {\n\tKind   string    `json:\"kind\"`\n\tTable  string    `json:\"table,omitempty\"`\n\tValues []*string `json:\"values,omitempty\"`\n\tRows   *int64    `json:\"rows,omitempty\"`\n\tDigest string    `json:\"digest,omitempty\"`\n}"
     ],
+    "internal/balancelook": [
+      "type Args struct {\n\tMerchantID uuid.UUID  `json:\"merchant_id\" river:\"unique\"`\n\tCustomerID uuid.UUID  `json:\"customer_id\" river:\"unique\"`\n\tCurrency   string     `json:\"currency\" river:\"unique\"`\n\tAt         *time.Time `json:\"at,omitempty\" river:\"unique\"`\n}"
+    ],
     "internal/cardguard": [
       "func (Card) MarshalJSON() ([]byte, error) { return []byte(`\"` + Redacted + `\"`), nil }",
       "func (Card) MarshalText() ([]byte, error) { return []byte(Redacted), nil }",
@@ -1926,6 +1929,7 @@
       "type CleanupExpiredDataArgs struct {\n\tAfter *uuid.UUID `json:\"after,omitempty\"`\n}",
       "type DestructiveAlertArgs struct {\n\tMerchantID uuid.UUID            `json:\"merchant_id\"`\n\tHoldID     uuid.UUID            `json:\"hold_id\"`\n\tScope      string               `json:\"scope\"`\n\tOpenedAt   time.Time            `json:\"opened_at\"`\n\tChannel    *alerting.ChannelRef `json:\"channel,omitempty\"`\n}",
       "type DunningArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\"`\n}",
+      "type PassReport struct {\n\tOverdue []string `json:\"overdue\"`\n}",
       "type ProviderRefreshMerchantArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}",
       "type StripeWebhookReconcileArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\"`\n\tAccountID  string    `json:\"account_id,omitempty\"`\n}",
       "type accountUpdaterPayload struct {\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailMethodRef   string    `json:\"rail_method_ref\"`\n}"
@@ -2458,6 +2462,12 @@
       "json": "encoding/json",
       "regexp": "regexp",
       "sha256": "crypto/sha256"
+    },
+    "internal/balancelook/look.go": {
+      "river": "github.com/riverqueue/river",
+      "rivertype": "github.com/riverqueue/river/rivertype",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "internal/billingauth/contract.go": {
       "auth": "github.com/open-rails/authkit/auth",
@@ -3509,6 +3519,7 @@
       "fnv": "hash/fnv",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
+      "ledger": "github.com/open-rails/openrails/internal/modules/money/ledger",
       "math": "math",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "retention": "github.com/open-rails/openrails/internal/retention",
@@ -4735,6 +4746,17 @@
       "time": "time",
       "transient": "github.com/open-rails/openrails/internal/shared/transient",
       "url": "net/url"
+    },
+    "internal/river/jobs_billing_pass.go": {
+      "clockwork": "github.com/jonboulle/clockwork",
+      "context": "context",
+      "debug": "runtime/debug",
+      "errors": "errors",
+      "fmt": "fmt",
+      "log": "github.com/sirupsen/logrus",
+      "money": "github.com/open-rails/openrails/internal/modules/money",
+      "river": "github.com/riverqueue/river",
+      "time": "time"
     },
     "internal/river/jobs_cleanup.go": {
       "billing": "github.com/open-rails/openrails/billing",

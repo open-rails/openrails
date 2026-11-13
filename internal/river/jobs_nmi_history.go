@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -22,12 +21,12 @@ import (
 )
 
 const (
+	// KindNMIHistory names the scan in the billing pass.
 	KindNMIHistory = "openrails.nmi_history"
 
-	// NMIHistoryInterval is how often PSPs due a read are looked for. A PSP
-	// is read once a day; a failed read is tried again at the next tick.
-	NMIHistoryInterval = time.Hour
-	nmiHistoryEvery    = 24*time.Hour - NMIHistoryInterval
+	// nmiHistoryEvery: a PSP is read once a day, by the first billing pass
+	// past it; a failed read is tried again at the next pass.
+	nmiHistoryEvery = 24*time.Hour - BillingPassInterval
 	// NMIHistoryMonths is how far a PSP's first read reaches back, this
 	// month included: the attempt retention.
 	NMIHistoryMonths = 25
@@ -36,13 +35,6 @@ const (
 	nmiHistoryPSPBatch      = 100
 )
 
-// NMIHistoryArgs runs one pass of the NMI history read.
-type NMIHistoryArgs struct{}
-
-func (NMIHistoryArgs) Kind() string { return KindNMIHistory }
-
-func (NMIHistoryArgs) InsertOpts() river.InsertOpts { return periodPass(NMIHistoryInterval) }
-
 // NMIHistoryWorker keeps each NMI PSP's authorization history as monthly
 // aggregates: the decline report's numbers, through the same read. A PSP's
 // first read backfills NMIHistoryMonths; later ones, daily, re-read from the
@@ -50,15 +42,12 @@ func (NMIHistoryArgs) InsertOpts() river.InsertOpts { return periodPass(NMIHisto
 // transaction, so a rerun is idempotent and a failed read leaves the stored
 // months as they were. It only reads NMI.
 type NMIHistoryWorker struct {
-	WorkerDefaults[NMIHistoryArgs]
 	DB          *db.DB
 	Clock       clockwork.Clock
 	NMIResolver railresolve.NMIClientResolver
 }
 
-func (NMIHistoryWorker) Kind() string { return KindNMIHistory }
-
-func (w *NMIHistoryWorker) Work(ctx context.Context, _ *river.Job[NMIHistoryArgs]) error {
+func (w *NMIHistoryWorker) Pass(ctx context.Context) error {
 	if w.NMIResolver == nil {
 		return errors.New("nmi history: nmi resolver not wired")
 	}

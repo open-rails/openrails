@@ -206,6 +206,23 @@ func (d *DB) InsertRiverJob(ctx context.Context, args river.JobArgs, opts *river
 	return d.InsertRiverJobTx(ctx, d.pgtx, args, opts)
 }
 
+// InsertRiverJobWith enqueues args in the transaction q runs in. It is
+// ErrNoRiverProducer where q holds no transaction of a DB with a producer
+// bound.
+func InsertRiverJobWith(ctx context.Context, q *gen.Queries, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error) {
+	tx, ok := q.DBTX().(schemaTx)
+	if !ok || tx.river == nil {
+		return nil, ErrNoRiverProducer
+	}
+	tx.river.mu.RLock()
+	inserter := tx.river.inserter
+	tx.river.mu.RUnlock()
+	if inserter == nil {
+		return nil, ErrNoRiverProducer
+	}
+	return inserter.InsertTx(ctx, RiverTx(tx), args, opts)
+}
+
 // RetryRiverJob is RetryRiverJobTx in d's own transaction.
 func (d *DB) RetryRiverJob(ctx context.Context, id int64) error {
 	if d == nil || d.pgtx == nil {

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -153,11 +154,21 @@ var ErrInsufficientFunds = errors.New("ledger: transfer breaches the debit accou
 type Ledger struct {
 	q        *gen.Queries
 	merchant uuid.UUID
+	now      func() time.Time
 }
 
 // New binds a Ledger to a query handle and the merchant whose ledgers it serves.
 func New(q *gen.Queries, merchant uuid.UUID) *Ledger {
-	return &Ledger{q: q, merchant: merchant}
+	return &Ledger{q: q, merchant: merchant, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// SetClock sets the time a balance watch reads holds at; nil keeps the real
+// clock.
+func (l *Ledger) SetClock(now func() time.Time) *Ledger {
+	if now != nil {
+		l.now = now
+	}
+	return l
 }
 
 // EnsureSystemAccount get-or-creates the merchant's system account of the given
@@ -326,14 +337,12 @@ func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.Billin
 		OrderID:                t.Order,
 	})
 	if err == nil {
-		// A transfer that names a customer changes what it may spend: its
-		// balance watch, if it has one, is due, and a funding re-arms its
-		// notices.
+		// A transfer that names a customer changes what it may spend: one
+		// that crosses a line of its balance watch queues a look, and a
+		// funding re-arms its notices.
 		if t.Customer != nil {
-			if err := l.q.MarkBalanceWatchDue(ctx, gen.MarkBalanceWatchDueParams{
-				MerchantID: l.merchant, CustomerID: *t.Customer, Currency: t.Currency, Funded: fundingTransfers[t.Type],
-			}); err != nil {
-				return gen.BillingLedgerTransfer{}, false, fmt.Errorf("ledger: mark the balance watch due: %w", err)
+			if err := WatchChange(ctx, l.q, l.merchant, *t.Customer, t.Currency, fundingTransfers[t.Type], l.now()); err != nil {
+				return gen.BillingLedgerTransfer{}, false, fmt.Errorf("ledger: balance watch: %w", err)
 			}
 		}
 		return tr, true, nil

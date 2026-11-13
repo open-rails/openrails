@@ -414,7 +414,7 @@ This produces a reviewable finding instead of shifting the schedule or charging
 a backlog. Already submitted payments continue receipt recovery even after that
 boundary.
 
-Automatic usage billing checks per-account due records every five minutes and
+Automatic usage billing checks per-account due records in each hourly billing pass and
 catches up overdue work after a restart. A fixed account billing date and its
 minimum invoice amount decide when pending accruals become an invoice; threshold
 crossings also wake the same processor. Smaller balances carry forward without
@@ -796,8 +796,8 @@ Deadlines with no event:
 
 | Deadline | Picked up by | What happens |
 |---|---|---|
-| a provider-billed `past_due` row's grace ends with no retry scheduled | the due pass (every minute) | `unverified`: the provider is read by id, access kept |
-| a provider-billed renewal has no payment 48h after its period | the rebill watch (15 min) | `unverified`, as above |
+| a provider-billed `past_due` row's grace ends with no retry scheduled | the due pass (hourly billing pass) | `unverified`: the provider is read by id, access kept |
+| a provider-billed renewal has no payment 48h after its period | the rebill watch (hourly billing pass) | `unverified`, as above |
 | a timed access window lapses | the health pass (hourly) | the customer's access-ended notice |
 | an engine renewal past its allowance, an unverified row past 72h, a stuck or abandoned provider operation | the health pass | `life.renewal.held`, `life.unverified.unresolved`, `life.provider_intent.stuck` / `.abandoned` |
 
@@ -933,8 +933,9 @@ retry is scheduled: NMI's next scheduled charge is the retry. Provider-owned Str
 than Stripe's 8-retry default because each NMI decline costs a per-transaction
 fee.
 
-**The due pass** runs every minute and on start: it admits engine renewals at
-their paid-period boundary and queues retries whose `next_retry_at` has passed,
+**The due pass** runs in the hourly billing pass and on start: it admits engine
+renewals whose paid period has ended and queues retries whose `next_retry_at`
+has passed,
 each charged by its own provider operation. A subscription it cannot process
 raises a standing `life.due_pass.refused` finding (resolved automatically once
 it processes) and never fails the pass. One it leaves unchanged (refused, held
@@ -957,7 +958,7 @@ after its period; a Solana one, pulled a minute after it, 1h1m), with no
 collection in flight, reads as missed in `GET /v1/admin/renewals` and the
 `rebill_cycles` measures, with why (`method_unusable`, `refused` or
 `not_attempted`); `life.renewal.held` and `life.due_pass.refused` are its
-findings. Every 15 minutes the rebill watch reads an `nmi_schedule` renewal
+findings. Every hour the rebill watch reads an `nmi_schedule` renewal
 with no attempt 24h after its period from NMI's Query API and schedule, and
 raises one `life.rebill.missed` finding per cycle it proves missed. When NMI
 holds nothing for the cycle and its schedule has moved to the
@@ -988,8 +989,8 @@ one of these findings open, and keeps them open while their condition holds
 Payment attempts, rebill cycles and NMI history months are kept 25 months;
 the cleanup worker deletes older ones.
 
-**Engine outcomes.** A renewal allowance of min(24h, max(5m, period/10))
-follows each paid engine period (1h → 6m, 1d → 2h24m, 7d → 16h48m, 30d and
+**Engine outcomes.** A renewal allowance of min(24h, max(2h, period/10))
+follows each paid engine period (1h → 2h, 1d → 2h24m, 7d → 16h48m, 30d and
 longer → 24h), so unpaid access never exceeds a tenth of the period and a
 member keeps access until the renewal decides; a qualified renewal
 supersedes it, and a decline or cancellation revokes it. A card-fixable
@@ -1254,15 +1255,24 @@ coalesce merchant-wide passes when embedded fleets share a database.
 
 | Worker | Cadence |
 |---|---|
-| Balance watch (due customer watches only, credit lot lapses included); due renewals and retries; due arrears delinquency | 1 min |
-| Order expiry (abandoned card saves included) | 5 min |
-| Rebill watch; lost provider-operation wakes | 15 min |
-| Admission-denial flush (closed hours); due daily NMI history read; retention cleanup; undeclared-account re-alerts; merchant health (merchants with activity) | 1 h |
+| Billing pass (`openrails.billing_pass`): due renewals and retries, balance watches whose look failed, due arrears delinquency, order expiry (abandoned card saves included), automatic usage billing (opt-in), rebill watch, due daily NMI history read, undeclared-account re-alerts, stored card refresh ahead of renewal; each scan in turn | top of each UTC hour, and on start |
+| Retention cleanup; merchant health (merchants with activity); admission-denial flush (closed hours, fleets with Redis) | 1 h |
 | A customer's convergence | committed with each mutation that changed the customer |
+| A balance's look | committed with a change that crosses one of its lines, and for the instant its last look named |
 | Provider refresh scheduler (fans out per merchant) | 2 h |
-| Stored card refresh ahead of renewal | 6 h |
 | Stripe webhook endpoint backstop | 24 h |
-| Automatic usage billing (opt-in): due accounts billed, due collections queued | 5 min, plus threshold wakeups |
+
+The billing pass takes everything due by its start, so a pass that fails or
+does not run leaves its work to the next. One scan's failure never stops the
+others. Renewals and retries wait at most an hour past their instant; an engine
+renewal's access grace is at least two hours, so a member keeps access across
+one missed pass. A low or depleted balance is told within seconds: the change
+that crosses a line queues the balance's look in its own transaction, and each
+look queues the next at the instant it names (a lapse, a running charge's
+00:00 UTC checkpoint, a projected crossing). An order past its `expires_at` is
+expired for every read, payment, confirmation and claim at once; the pass only
+writes it, so its `order.expired` event can come up to an hour later. A card
+save past its 24-hour cutoff is removed when it is next confirmed.
 
 Other jobs are queued by the change that needs them, not by a clock: each
 provider operation (`openrails.provider_operation`, which sleeps to its next
@@ -1280,7 +1290,12 @@ creates and credit grants do not depend on it. See [usage billing](usage-billing
 Job health is a read of River's own tables (`openrails workers`, the server's
 `ListWorkerHealth`, `/metrics`, the `openrails_job_progress` probe): per kind,
 jobs running past their timeout, waiting to retry and discarded, a periodic
-kind's last completion and the newest error. OpenRails stores none of it.
+kind's last completion and the newest error. Each billing pass records, as its
+River output, the critical scans (renewals and retries, balance watches,
+delinquency, usage billing) still holding a row due since before the start of
+yesterday (UTC); `openrails_job_progress` fails while the last one named any,
+or when none ran to its end within a day and its timeout. OpenRails stores none
+of it.
 
 A pass bounded per job (retention cleanup's 200 merchants, a merchant's 200
 due usage accounts) continues in a new job after the last one it handled, so
@@ -1288,10 +1303,11 @@ each job stays short and the pass still reaches all of its work.
 
 Each OpenRails job runs under its kind's timeout: 10 minutes, an hour for
 the passes that read every merchant's providers (`cleanup_expired_data`,
-`provider_refresh_merchant`, `merchant_health`, `rebill_watch`,
-`nmi_history`) and an import's `charge_attributions` read, and for
-`stored_card_refresh_due` (which stops opening pages
-after 10 minutes), two for `psp_import`. River cancels a job past it. River's
+`provider_refresh_merchant`, `merchant_health`, `rebill_watch`) and an
+import's `charge_attributions` read, and for `stored_card_refresh_due` (which
+stops opening pages after 10 minutes), two for `psp_import`. The billing pass
+runs each scan under its own budget and takes their sum. River cancels a job
+past it. River's
 rescuer returns a job whose process died to work once it has run past both
 its timeout and `RescueStuckJobsAfter` (10 minutes unless the host sets it).
 

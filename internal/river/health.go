@@ -2,6 +2,8 @@ package riverjobs
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -20,12 +22,22 @@ type Health struct {
 	// holds the lease.
 	LeaderElectedAt *time.Time
 	Kinds           []billing.WorkerHealth
+	// LastPass is the newest billing pass that ran to its end; nil when none
+	// did.
+	LastPass *PassRun
+}
+
+// PassRun is one billing pass that ran to its end.
+type PassRun struct {
+	FinishedAt time.Time
+	PassReport
 }
 
 // ReadHealth reads every OpenRails job kind from River's tables in schema:
 // its jobs running past their timeout, waiting to retry or discarded, a
-// periodic kind's last completion and the newest error. It writes nothing.
-// River's tables are not in the sqlc schema, so the SQL is here.
+// periodic kind's last completion and the newest error, and the last billing
+// pass's report. It writes nothing. River's tables are not in the sqlc
+// schema, so the SQL is here.
 func ReadHealth(ctx context.Context, pool *pgxpool.Pool, schema string) (Health, error) {
 	if pool == nil {
 		return Health{}, fmt.Errorf("job health: no pool")
@@ -81,6 +93,21 @@ ORDER BY k.kind`, names, timeouts, periodic)
 	}
 	if err := rows.Err(); err != nil {
 		return Health{}, fmt.Errorf("job health: %w", err)
+	}
+	var run PassRun
+	var output []byte
+	err = pool.QueryRow(ctx, `SELECT j.finalized_at, j.metadata -> 'output' FROM `+jobs+` j
+WHERE j.kind = $1 AND j.state IN ('completed', 'discarded') AND j.metadata ? 'output'
+ORDER BY j.finalized_at DESC LIMIT 1`, KindBillingPass).Scan(&run.FinishedAt, &output)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return Health{}, fmt.Errorf("job health: last billing pass: %w", err)
+	default:
+		if err := json.Unmarshal(output, &run.PassReport); err != nil {
+			return Health{}, fmt.Errorf("job health: last billing pass report: %w", err)
+		}
+		h.LastPass = &run
 	}
 	return h, nil
 }

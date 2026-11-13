@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -271,7 +273,7 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 			return err
 		}
 		// It now spends only its balance, which is watched as a prepaid one.
-		if err := q.WatchCustomerBalance(ctx, gen.WatchCustomerBalanceParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: currency, Now: now}); err != nil {
+		if err := ledger.WatchCustomerBalance(ctx, q, gen.WatchCustomerBalanceParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: currency, Now: now}); err != nil {
 			return err
 		}
 		open, err := q.ListOpenUsageOrdersOfCurrency(ctx, gen.ListOpenUsageOrdersOfCurrencyParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: currency, RowLimit: openUsageOrderLimit})

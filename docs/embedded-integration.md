@@ -205,8 +205,9 @@ Composing `RiverJobs` into a fleet in another schema is refused. Once
 second `Start` is refused too. Cancelling `Start`'s context stops nothing:
 `Close` stops what `Start` started; close the engine before the pool. The
 `openrails_job_progress` probe reads River's tables: it fails while your River
-schema has no leader, an OpenRails job runs past its timeout, or a periodic
-pass your fleet queues has not completed within two periods and its timeout.
+schema has no leader, an OpenRails job runs past its timeout, or the hourly
+billing pass your fleet runs has not run to its end within a day and its
+timeout or last found critical work a day overdue.
 
 **Several hosts, one database.** Hosts that embed OpenRails on one database
 declare the same merchants in `Config.Merchants`: whichever host runs a pass

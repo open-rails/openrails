@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
@@ -323,7 +325,7 @@ func (s *SubscriptionLifecycleService) setDefault(ctx context.Context, tx pgx.Tx
 	if restored, err := q.RestoreMoneyCollection(ctx, gen.RestoreMoneyCollectionParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, Now: now}); err != nil {
 		return nil, nil, err
 	} else if restored > 0 {
-		if err := q.WatchCustomerBalance(ctx, gen.WatchCustomerBalanceParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, Now: now}); err != nil {
+		if err := ledger.WatchCustomerBalance(ctx, q, gen.WatchCustomerBalanceParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, Now: now}); err != nil {
 			return nil, nil, err
 		}
 	}

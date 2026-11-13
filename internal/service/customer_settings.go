@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -311,7 +313,7 @@ func (c customerSettingsChange) apply(ctx context.Context, q *gen.Queries, mid u
 		}
 		// A credit line moves what an arrears customer may spend, and may
 		// make it one: its watch follows, re-armed as by a funding.
-		if err := q.WatchCustomerBalance(ctx, gen.WatchCustomerBalanceParams{
+		if err := ledger.WatchCustomerBalance(ctx, q, gen.WatchCustomerBalanceParams{
 			MerchantID: mid, CustomerID: c.customer, Currency: limit.Currency, Funded: true, Now: now,
 		}); err != nil {
 			return err

@@ -148,6 +148,9 @@ var omittedColumns = map[string]string{
 	"customer_delinquency": "next_evaluation_at",
 	// When a usage account is next checked: restore schedules it again.
 	"money_settings": "usage_due_at",
+	// The lines the last look stored: a restored watch looks at each change
+	// until its next look stores them again.
+	"balance_watches": "low_line_amount floor_amount look_each_change",
 }
 
 func checkSchema(ctx context.Context, tx pgx.Tx) error {

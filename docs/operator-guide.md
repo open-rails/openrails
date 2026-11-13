@@ -273,9 +273,10 @@ Billing address country is still accepted for payments; it does not control rout
   waiting to retry and discarded, a periodic kind's last completion and the
   newest error (`--json` for the full text). The `openrails_job_progress`
   probe fails while the River schema has no leader, a job runs past its
-  timeout, or a periodic pass the fleet queues has not completed within two
-  periods and its timeout. Stalls are an operator signal, never a merchant
-  notification.
+  timeout, or the hourly billing pass the fleet runs has not run to its end
+  within a day and its timeout or last found renewals, retries, balance
+  watches, delinquency or usage billing a day overdue. Stalls are an operator
+  signal, never a merchant notification.
 - **Notifications**: reconciliation findings raise deduplicated console
   notifications and, by severity, outbound webhooks / the alert email
   ([merchant-notifications.md](merchant-notifications.md)).

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
@@ -18,14 +17,11 @@ import (
 
 const KindOrderExpiry = "openrails.order_expiry"
 
-// OrderExpiryInterval is the order expiry pass's cadence.
-const OrderExpiryInterval = 5 * time.Minute
-
 type OrderExpiryArgs struct{}
 
 func (OrderExpiryArgs) Kind() string { return KindOrderExpiry }
 
-func (OrderExpiryArgs) InsertOpts() river.InsertOpts { return periodPass(OrderExpiryInterval) }
+func (OrderExpiryArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
 
 // OrderExpiryWorker expires orders past their expiry, releasing their claims,
 // and the order attempts still waiting on their customer past theirs: it is

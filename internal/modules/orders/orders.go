@@ -131,7 +131,23 @@ type Order struct {
 
 // Payable reports an engine-collected open order not past its expiry.
 func Payable(o gen.BillingOrder, now time.Time) bool {
-	return o.CollectionOwner == string(billing.OrderCollectionEngine) && o.Status == string(billing.OrderOpen) && (o.ExpiresAt == nil || o.ExpiresAt.After(now))
+	return o.CollectionOwner == string(billing.OrderCollectionEngine) && o.Status == string(billing.OrderOpen) && !Expired(o, now)
+}
+
+// Expired reports an engine-collected open order past its expiry: closed,
+// whether or not the expiry pass has written it yet.
+func Expired(o gen.BillingOrder, now time.Time) bool {
+	return o.CollectionOwner == string(billing.OrderCollectionEngine) && o.Status == string(billing.OrderOpen) && o.ExpiresAt != nil && !o.ExpiresAt.After(now)
+}
+
+// AsOf is the order as read at now: one past its expiry reads as the expiry
+// pass leaves it.
+func (o *Order) AsOf(now time.Time) *Order {
+	if Expired(o.BillingOrder, now) {
+		at := *o.ExpiresAt
+		o.Status, o.PaymentStatus, o.ExpiredAt = string(billing.OrderExpired), string(billing.OrderPaymentRequiresPaymentMethod), &at
+	}
+	return o
 }
 
 // Live reports an order that may still take payment.

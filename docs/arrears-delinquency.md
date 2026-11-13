@@ -165,7 +165,7 @@ A customer is evaluated in the same transaction as every change to one of its
 usage orders: paying, voiding or writing one off clears it at once. Entering
 grace or delinquency has no event, so each customer stores the next instant
 time alone changes its state (an order falling due, a grace window running
-out), and a pass every minute evaluates the customers whose instant has passed.
+out), and the hourly billing pass evaluates the customers whose instant has passed.
 A change to the merchant's policy evaluates its customers in grace or
 delinquent again; a change to a customer's billing policy evaluates that
 customer. The pass never enumerates customers, and it runs in limited/readonly

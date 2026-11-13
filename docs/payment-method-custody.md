@@ -340,7 +340,7 @@ Consequences, all enforced rather than documented:
   number, so the vault must be asked whether a card was reissued; a PSP or
   HyperSwitch updates its cards in place. One card is refreshed at a time:
   * ahead of a renewal: a change to a subscription's period, status or card
-    marks its card, and a pass every 6 hours queues each marked card whose
+    marks its card, and the hourly billing pass queues each marked card whose
     next renewal (`active`, `past_due` or `awaiting_method`) is inside
     `account_updater_lookahead_days` (default 14) and that was not checked for
     it, spreading the requests over the following hour. A vault armed later is
@@ -420,7 +420,7 @@ order charges the card. If the instrument is already saved for this customer,
 confirmation returns that method and marks the pending resource as replaced.
 
 The SDK authorization is encrypted at rest and erased on confirmation or
-expiry. The order expiry job (every 5 minutes) removes a setup once its
+expiry. The hourly billing pass removes a setup once its
 session expires or 24 hours after it began. A captured card has
 no holding PSP (`psp_id: null`); its orders and recurring agreements select the
 processor that can reach its custodian.

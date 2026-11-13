@@ -328,8 +328,8 @@ func claimKeyOf(product uuid.UUID, tierGroup *string) string {
 }
 
 // refuseOwned refuses the unique lines the customer already holds: a live
-// subscription or never-ending access, a claim another order holds, or
-// another purchase whose payment is unresolved.
+// subscription or never-ending access, a claim another open order holds
+// before its expiry, or another purchase whose payment is unresolved.
 func (s *Service) refuseOwned(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, quote *Quote, exceptOrder uuid.UUID, at time.Time) error {
 	var productIDs []uuid.UUID
 	var groups, keys []string
@@ -350,6 +350,10 @@ func (s *Service) refuseOwned(ctx context.Context, q *gen.Queries, merchantID, c
 		return err
 	}
 	claims, err := q.ListOwnershipClaims(ctx, gen.ListOwnershipClaimsParams{MerchantID: merchantID, CustomerID: customerID, ClaimKeys: keys})
+	if err != nil {
+		return err
+	}
+	lapsed, err := lapsedHolders(ctx, q, merchantID, claims, at)
 	if err != nil {
 		return err
 	}
@@ -378,7 +382,7 @@ func (s *Service) refuseOwned(ctx context.Context, q *gen.Queries, merchantID, c
 			continue
 		}
 		for _, c := range claims {
-			if c.ClaimKey != l.ClaimKey || c.HolderType == "order" && c.OrderID == exceptOrder {
+			if c.ClaimKey != l.ClaimKey || c.HolderType == "order" && (c.OrderID == exceptOrder || lapsed[c.OrderID]) {
 				continue
 			}
 			l.Refusal = claimRefusal(c)
@@ -395,6 +399,29 @@ func (s *Service) refuseOwned(ctx context.Context, q *gen.Queries, merchantID, c
 		}
 	}
 	return nil
+}
+
+// lapsedHolders are the claims' holding orders past their expiry, whose
+// claims refuse nothing: a create expires them before it claims.
+func lapsedHolders(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, claims []gen.BillingOwnershipClaim, at time.Time) (map[uuid.UUID]bool, error) {
+	var ids []uuid.UUID
+	for _, c := range claims {
+		if c.HolderType == "order" {
+			ids = append(ids, c.OrderID)
+		}
+	}
+	out := map[uuid.UUID]bool{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := q.ListOrdersByIDs(ctx, gen.ListOrdersByIDsParams{MerchantID: merchantID, Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range rows {
+		out[o.ID] = Expired(o, at)
+	}
+	return out, nil
 }
 
 // pendingPurchase reports another purchase of the product or its tier group

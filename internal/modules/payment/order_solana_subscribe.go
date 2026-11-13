@@ -182,7 +182,7 @@ func (s *OrderAttemptService) enrollSolanaOrder(ctx context.Context, attempt *mo
 		if order.Status == string(billing.OrderComplete) && order.AttemptID != nil && *order.AttemptID == attempt.ID {
 			return nil
 		}
-		if live, err := solanaOrderLive(ctx, d, attempt); err != nil || !live {
+		if live, err := solanaOrderLive(ctx, d, attempt, s.now().UTC()); err != nil || !live {
 			return errors.Join(err, errSolanaOrderClosed)
 		}
 		// One landed payment settles one attempt, across merchants and PSPs.

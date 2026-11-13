@@ -958,6 +958,15 @@ func (s *OrderAttemptService) OrderNextAction(ctx context.Context, order *orders
 // customer acted: the verifier settles it, or it stays where it is. Failed
 // reports an attempt that ended without moving money.
 func (s *OrderAttemptService) ConfirmOrder(ctx context.Context, order *orders.Order, principal billingauth.Payer, signature string) (OrderCharge, error) {
+	if s.orders == nil {
+		return OrderCharge{}, errors.New("orders are unavailable")
+	}
+	// Past its expiry the order closes first, abandoning its challenge or
+	// settling money that already moved, as the expiry pass does.
+	order, err := s.orders.ExpireIfDue(ctx, order)
+	if err != nil {
+		return OrderCharge{}, err
+	}
 	// A settled order answers as it stands, whoever collects it now (a
 	// settled enrollment hands its order to the provider). Any other order
 	// is confirmed only while the engine collects it.

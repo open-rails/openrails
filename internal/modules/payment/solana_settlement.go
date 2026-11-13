@@ -60,7 +60,7 @@ func (s *OrderAttemptService) SettleSolanaTransfer(ctx context.Context, referenc
 		if open && session.OrderID != nil {
 			// A transfer pays the order only on its current attempt while it
 			// takes payment; any other is money to review.
-			if open, err = solanaOrderLive(ctx, d, session); err != nil {
+			if open, err = solanaOrderLive(ctx, d, session, now); err != nil {
 				return err
 			}
 		}
