@@ -218,6 +218,10 @@ func TestBillingPass(t *testing.T) {
 		lapse := due.Add(-30 * time.Minute)
 		lots, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "lapses-before-the-renewal", ExpiresAt: &lapse}})
 		require.NoError(t, err)
+		_, price := publicSale(t, a, "expires-before-the-renewal", 9_990_000, nil)
+		expires := due.Add(-20 * time.Minute)
+		order, err := a.alphaRemote.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: sub.CustomerID, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires, IdempotencyKey: "tidied-after-a-failed-scan"})
+		require.NoError(t, err)
 		fleet := quietFleet(t, a.world)
 		// The pass at the hour fails partway: the balance watch cannot post.
 		restore := storageFault(t, a.world, a.schema, "ledger_transfers", "NEW.transfer_type = 'credit_expire'")
@@ -226,6 +230,10 @@ func TestBillingPass(t *testing.T) {
 		require.True(t, runPass(t, fleet), "a scan that fails fails the pass")
 		renewalSettled(t, a, p, sub, due)
 		require.Zero(t, lotExpired(t, a.alpha, lots[0].ID))
+		tidied, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"order.expired"}, Limit: 10})
+		require.NoError(t, err)
+		require.Len(t, tidied.Events, 1, "the scans after the failed one still run")
+		require.Equal(t, order.ID.String(), tidied.Events[0].Subject.ID)
 		restore()
 		// The next hour's pass never runs; the one after takes what is due.
 		advanceTo(a.world, first.Add(2*time.Hour))
