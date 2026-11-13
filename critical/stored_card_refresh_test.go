@@ -204,7 +204,7 @@ func startVaultFleet(t *testing.T, v *vaultCards) *river.Client[pgx.Tx] {
 	t.Helper()
 	fleet := startFleet(t, v.world)
 	require.Eventually(t, func() bool {
-		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.stored_card_refresh_due").States(rivertype.JobStateCompleted).First(1))
+		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.billing_pass").States(rivertype.JobStateCompleted).First(1))
 		require.NoError(t, err)
 		return len(jobs.Jobs) == 1
 	}, 20*time.Second, 20*time.Millisecond)

@@ -455,9 +455,11 @@ func TestPSPControls(t *testing.T) {
 		require.NoError(t, fleet.Start(t.Context()))
 		// The daily backstop queues the PSP's pass.
 		runRegistered(t, fleet, "openrails.stripe_webhook_reconcile", 1)
+		// Adoption marks the endpoint, then sets its events: wait for both.
 		require.Eventually(t, func() bool {
 			endpoints := p.core.WebhookEndpoints("acct_e2e")
-			return len(endpoints) == 1 && endpoints[0]["metadata"].(map[string]string)["openrails_managed"] == "true"
+			return len(endpoints) == 1 && endpoints[0]["metadata"].(map[string]string)["openrails_managed"] == "true" &&
+				endpoints[0]["enabled_events"] == strings.Join(webhooks.HandledStripeEventTypes, ",")
 		}, 20*time.Second, 20*time.Millisecond)
 		endpoints := p.core.WebhookEndpoints("acct_e2e")
 		require.Len(t, endpoints, 1, "a file-declared PSP never mints an endpoint it cannot keep the secret of")
