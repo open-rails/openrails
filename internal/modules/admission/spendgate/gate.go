@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/retention"
 )
 
@@ -221,8 +222,9 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 	if err != nil {
 		return Decision{}, err
 	}
-	// A hold takes capacity from the customer's running charges.
-	if err := q.MarkBalanceWatchDue(ctx, gen.MarkBalanceWatchDueParams{MerchantID: mid.UUID(), CustomerID: in.Customer, Currency: in.Currency}); err != nil {
+	// A hold takes from what the customer may spend: one that crosses a line
+	// of its balance watch queues a look.
+	if err := ledger.WatchChange(ctx, q, mid.UUID(), in.Customer, in.Currency, false, now); err != nil {
 		return Decision{}, err
 	}
 	return Decision{Allowed: true, EstimatedAmount: row.EstimatedAmount, ExpiresAt: row.ExpiresAt, State: "open", AvailableAmount: row.AvailableAmount}, nil

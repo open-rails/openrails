@@ -58,7 +58,7 @@ limits during migration, including zero. Reads include `next_bill_at`.
 Each account stores when it is next due: its bill date, or at once when
 spending crosses its threshold, an admission asks to collect, or the
 merchant's usage terms change. A threshold crossing also queues a pass in the
-accrual transaction; otherwise one pass every five minutes reads the due
+accrual transaction; otherwise the hourly billing pass reads the due
 accounts across merchants, then the orders whose next charge is due, and
 queues each charge as an `order_collection` operation that its own job runs.
 An account with nothing pending has no bill date until it spends again. An
@@ -68,5 +68,5 @@ there are no per-account River timers and no once-per-thirty-day collection
 guard.
 
 Deployment order: deploy this code to every worker before enabling the feature.
-The usage pass is the `openrails.usage_orders` job kind; OpenRails schedules
-it, and a host never inserts it.
+The usage pass is the `openrails.usage_orders` job kind, run by the billing
+pass and by a threshold crossing; a host never inserts it.

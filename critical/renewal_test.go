@@ -53,7 +53,7 @@ func runRegistered(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copie
 	// River uses wall time while business time is advanced independently. Make
 	// newly accepted work available through River's host API; worker admission
 	// still checks its own persisted eligibility at the controlled clock.
-	if kind == "openrails.dunning" {
+	if kind == "openrails.dunning" || kind == "openrails.billing_pass" {
 		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
 		require.NoError(t, err)
 		for _, job := range jobs.Jobs {

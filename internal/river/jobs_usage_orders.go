@@ -46,6 +46,18 @@ func (w UsageOrderWorker) now() time.Time {
 	return time.Now().UTC()
 }
 
+// DueBy reports a usage account the pass would bill, or a collection it would
+// queue, at at.
+func (w UsageOrderWorker) DueBy(ctx context.Context, at time.Time) (bool, error) {
+	q := w.DB.GenDirectory()
+	accounts, err := q.ListDueUsageAccounts(ctx, gen.ListDueUsageAccountsParams{Now: at, RowLimit: 1})
+	if err != nil || len(accounts) > 0 || config.IsLimitedMode(w.Config) {
+		return len(accounts) > 0, err
+	}
+	orders, err := q.ListDueUsageCollections(ctx, gen.ListDueUsageCollectionsParams{Now: at, RowLimit: 1})
+	return len(orders) > 0, err
+}
+
 func (w UsageOrderWorker) Work(ctx context.Context, job *river.Job[money.UsageOrderArgs]) error {
 	if w.DB == nil || w.Money == nil || w.Config == nil || !w.Config.UsageBillingEnabled {
 		return nil

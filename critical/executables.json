@@ -799,9 +799,6 @@
     "OR-J37-S61": [
       "TestSolanaPulls/OR-J37-S61/a-pull-the-chain-refuses-before-its-period-end-is-retried-not-taken-as-paid"
     ],
-    "OR-J04-S60": [
-      "TestBackgroundJobs/OR-J04-S60/a-live-operation-whose-wake-was-lost-is-queued-again"
-    ],
     "OR-J21-S60": [
       "TestBackgroundJobs/OR-J21-S60/an-import-queues-the-read-of-the-charges-it-attributed"
     ],
@@ -881,6 +878,39 @@
     ],
     "OR-J27-S12": [
       "TestDeclaredAdminGrantImport/OR-J27-S12/imported-grant-concurrent-and-lost-response-replay"
+    ],
+    "OR-J04-S42": [
+      "TestBillingPass/OR-J04-S42/an-engine-renewal-waits-for-the-hourly-pass-with-access-unbroken"
+    ],
+    "OR-J04-S43": [
+      "TestBillingPass/OR-J04-S43/an-nmi-retry-is-queued-by-the-next-pass"
+    ],
+    "OR-J04-S44": [
+      "TestBillingPass/OR-J04-S44/a-credit-lot-lapses-at-00-00-utc-on-that-pass"
+    ],
+    "OR-J04-S45": [
+      "TestBillingPass/OR-J04-S45/a-delinquency-grace-ends-on-the-next-pass"
+    ],
+    "OR-J04-S46": [
+      "TestBillingPass/OR-J04-S46/an-order-past-its-expiry-is-tidied-by-the-next-pass"
+    ],
+    "OR-J04-S47": [
+      "TestBillingPass/OR-J04-S47/the-next-pass-takes-what-a-failed-or-missed-pass-left-due"
+    ],
+    "OR-J04-S48": [
+      "TestBillingPass/OR-J04-S48/job-progress-fails-a-day-overdue-and-clears-on-a-clean-pass"
+    ],
+    "OR-J25-S40": [
+      "TestBalanceLooks/OR-J25-S40",
+      "TestBalanceLooks/OR-J25-S40/a-hold-that-crosses-the-line-commits-its-look",
+      "TestBalanceLooks/OR-J25-S40/a-revocation-that-crosses-the-line-commits-its-look",
+      "TestBalanceLooks/OR-J25-S40/a-lapse-that-crosses-the-line-commits-its-look"
+    ],
+    "OR-J25-S41": [
+      "TestBalanceLooks/OR-J25-S41/a-debit-that-crosses-no-line-queues-nothing"
+    ],
+    "OR-J25-S42": [
+      "TestBalanceLooks/OR-J25-S42/a-look-that-fails-is-taken-by-the-next-billing-pass"
     ]
   },
   "suites": {

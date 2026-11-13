@@ -388,7 +388,7 @@ type DunningPolicy struct {
 	// AccessWhileRenewalHeld is DunningAccessKeep (default: a renewal with no
 	// outcome because collection is stopped keeps access until it is
 	// attempted) or DunningAccessSuspend (access ends at the renewal
-	// allowance, min(24h, max(5m, period/10)) past the paid period).
+	// allowance, min(24h, max(2h, period/10)) past the paid period).
 	AccessWhileRenewalHeld string `json:"access_while_renewal_held,omitempty"`
 }
 

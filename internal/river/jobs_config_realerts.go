@@ -19,8 +19,6 @@ import (
 
 const (
 	KindConfigRealerts = "openrails.config_realerts"
-	// ConfigRealertInterval is how often due re-alerts are looked for.
-	ConfigRealertInterval = time.Hour
 	// ConfigRealert is how long an unresolved undeclared account waits after
 	// its last alert before it alerts again.
 	ConfigRealert = 24 * time.Hour
@@ -33,7 +31,7 @@ type ConfigRealertArgs struct{}
 
 func (ConfigRealertArgs) Kind() string { return KindConfigRealerts }
 
-func (ConfigRealertArgs) InsertOpts() river.InsertOpts { return periodPass(ConfigRealertInterval) }
+func (ConfigRealertArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
 
 // ConfigRealertWorker alerts each merchant's operator again of every
 // undeclared account still unresolved ConfigRealert after its last alert. The

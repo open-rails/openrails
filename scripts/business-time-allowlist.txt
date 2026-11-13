@@ -28,6 +28,7 @@ internal/modules/delinquency/service.go|return time.Now().UTC()|business_time_bo
 internal/modules/entitlements/entitlement_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/grants/grants.go|now = func() time.Time { return time.Now().UTC() }|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/grants/grants.go|now:      func() time.Time { return time.Now().UTC() },|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/money/ledger/ledger.go|return &Ledger{q: q, merchant: merchant, now: func() time.Time { return time.Now().UTC() }}|business_time_boundary|Explicit default clock boundary for balance-watch holds; supplied business clock takes precedence|1
 internal/modules/metrics/validate.go|return ValidateAt(q, time.Now().UTC())|business_time_boundary|Standalone convenience validation; explicit-time API used by clock-aware services|1
 internal/modules/money/owed_items.go|now := time.Now().UTC()|db_audit_timestamp|Pending item created_at; accrued_at is required from the caller|1
 internal/modules/money/money_service.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1

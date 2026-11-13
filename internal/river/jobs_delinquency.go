@@ -18,10 +18,6 @@ import (
 
 const (
 	KindDelinquency = "openrails.delinquency"
-	// DelinquencyInterval bounds how long a payer whose usage order fell due,
-	// or whose grace ran out, waits to be evaluated: entering grace or
-	// delinquency has no event.
-	DelinquencyInterval = time.Minute
 
 	// delinquencyBatch is how many due payers one read takes. The read is
 	// indexed on the due instant, so a pass costs what is due.
@@ -33,7 +29,7 @@ type DelinquencyArgs struct{}
 
 func (DelinquencyArgs) Kind() string { return KindDelinquency }
 
-func (DelinquencyArgs) InsertOpts() river.InsertOpts { return periodPass(DelinquencyInterval) }
+func (DelinquencyArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
 
 // DelinquencyWorker evaluates the payers whose delinquency time alone changed
 // (customer_delinquency.next_evaluation_at): a usage order fell due or a grace
@@ -54,6 +50,12 @@ func (w DelinquencyWorker) now() time.Time {
 		return w.Clock.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+// DueBy reports a payer the pass would evaluate at at.
+func (w DelinquencyWorker) DueBy(ctx context.Context, at time.Time) (bool, error) {
+	due, err := w.DB.GenDirectory().ListDueDelinquency(ctx, gen.ListDueDelinquencyParams{Now: at, RowLimit: 1})
+	return len(due) > 0, err
 }
 
 func (w DelinquencyWorker) Work(ctx context.Context, _ *river.Job[DelinquencyArgs]) error {

@@ -29,11 +29,11 @@ const MerchantHealthInterval = time.Hour
 // Merchants with activity in these windows, or a deadline passed in them,
 // are looked at: a rate spike needs the last day's attempts, and a lapse or
 // an operation that changed since the pass before last, with room for an
-// outage. Engine renewals are held past an allowance of at least five
-// minutes; operations are stuck past two hours.
+// outage. Engine renewals are held past an allowance of at least two hours;
+// operations are stuck past two hours.
 const (
 	healthActiveWindow = 25 * time.Hour
-	heldAllowanceMin   = 5 * time.Minute
+	heldAllowanceMin   = 2 * time.Hour
 	stuckAgeMin        = 2 * time.Hour
 	healthMerchantPage = 500
 )

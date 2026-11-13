@@ -6,7 +6,6 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 )
 
@@ -17,6 +16,8 @@ const (
 	Always Gate = iota
 	// WithUsageBilling: on hosts that enable usage billing.
 	WithUsageBilling
+	// WithRedis: on fleets with their own Redis.
+	WithRedis
 )
 
 // Periodic is one recurring pass, queued by its Args' InsertOpts. Its kind is
@@ -24,7 +25,10 @@ const (
 type Periodic struct {
 	Args  river.JobArgs
 	Every time.Duration
-	Gate  Gate
+	// Hourly runs the pass at the top of each UTC hour instead of Every after
+	// the last one.
+	Hourly bool
+	Gate   Gate
 	// PerFleet passes tend the fleet's own state (its Redis): every fleet runs
 	// them. The others are leased, so one fleet sharing the database queues
 	// each pass.
@@ -33,35 +37,28 @@ type Periodic struct {
 
 // Periodics are OpenRails' recurring passes.
 var Periodics = []Periodic{
-	// Engine renewals at their paid-period boundary and due retries: the
-	// cadence bounds how long a paying member waits at the boundary.
-	{Args: DunningArgs{}, Every: DuePassInterval},
-	// Due balance watches, credit lot lapses included.
-	{Args: BalanceWatchArgs{}, Every: BalanceWatchInterval},
-	{Args: OrderExpiryArgs{}, Every: OrderExpiryInterval},
-	{Args: money.UsageOrderArgs{}, Every: money.UsageOrdersInterval, Gate: WithUsageBilling},
-	// Overdue NMI rebills are probed; provider-billed renewals unconfirmed
-	// past their grace are read by id.
-	{Args: RebillWatchArgs{}, Every: RebillWatchInterval},
-	{Args: DelinquencyArgs{}, Every: DelinquencyInterval},
+	// Every due scan, in turn: what is due by the pass is billed, retried,
+	// lapsed or expired by it.
+	{Args: BillingPassArgs{}, Every: BillingPassInterval, Hourly: true},
 	// Health findings and timed access lapses, for merchants with activity.
 	{Args: MerchantHealthArgs{}, Every: MerchantHealthInterval},
-	{Args: NMIHistoryArgs{}, Every: NMIHistoryInterval},
 	{Args: CleanupExpiredDataArgs{}, Every: CleanupInterval},
 	// Queues every Stripe PSP's endpoint pass: Stripe disables or deletes an
 	// endpoint without telling us.
 	{Args: StripeWebhookReconcileArgs{}, Every: StripeWebhookReconcileInterval},
-	// Undeclared accounts still unresolved a day after their last alert.
-	{Args: ConfigRealertArgs{}, Every: ConfigRealertInterval},
-	// Live provider operations whose River wake was lost.
-	{Args: OperationWakesArgs{}, Every: OperationWakesInterval},
 	// Each fleet flushes the closed hours of its own Redis's denial counters.
-	{Args: AdmissionDenialFlushArgs{}, Every: AdmissionDenialFlushInterval, PerFleet: true},
+	{Args: AdmissionDenialFlushArgs{}, Every: AdmissionDenialFlushInterval, Gate: WithRedis, PerFleet: true},
 	// Fans out one refresh job per merchant with a PSP.
 	{Args: ProviderRefreshArgs{}, Every: providerrecovery.RefreshInterval},
-	// Cards an armed vault must be asked about ahead of their renewal.
-	{Args: StoredCardRefreshDueArgs{}, Every: StoredCardRefreshDueInterval},
 }
+
+// topOfHour is the cron schedule 0 * * * * in UTC.
+type topOfHour struct{}
+
+func (topOfHour) Next(t time.Time) time.Time { return t.UTC().Truncate(time.Hour).Add(time.Hour) }
+
+// TopOfHour schedules a pass at the start of each UTC hour.
+var TopOfHour river.PeriodicSchedule = topOfHour{}
 
 // outstanding are a job's states before it finishes: a pass coalesces with
 // one queued, running or waiting to retry.

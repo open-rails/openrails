@@ -210,6 +210,7 @@ func TestBackgroundJobs(t *testing.T) {
 		insert("openrails.order_expiry", "state='running', attempted_at=now()-interval '11 minutes', attempted_by=ARRAY['stuck']")
 		insert("openrails.balance_watch", "state='discarded', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute', "+
 			"errors=ARRAY[jsonb_build_object('at', now(), 'attempt', 1, 'error', 'critical: the pass failed', 'trace', '')]")
+		insert("openrails.billing_pass", "state='completed', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute'")
 		insert("openrails.rebill_watch", "state='completed', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute'")
 
 		var kinds []billing.WorkerHealth
@@ -223,9 +224,12 @@ func TestBackgroundJobs(t *testing.T) {
 		require.EqualValues(t, 1, health["openrails.balance_watch"].Discarded)
 		require.NotNil(t, health["openrails.balance_watch"].LastError)
 		require.Equal(t, "critical: the pass failed", *health["openrails.balance_watch"].LastError)
-		require.NotNil(t, health["openrails.rebill_watch"].LastCompletedAt)
-		require.NotNil(t, health["openrails.rebill_watch"].PeriodSeconds)
-		require.EqualValues(t, 900, *health["openrails.rebill_watch"].PeriodSeconds)
+		require.NotNil(t, health["openrails.billing_pass"].LastCompletedAt)
+		require.NotNil(t, health["openrails.billing_pass"].PeriodSeconds)
+		require.EqualValues(t, 3600, *health["openrails.billing_pass"].PeriodSeconds)
+		require.Nil(t, health["openrails.rebill_watch"].PeriodSeconds, "a scan runs in the billing pass")
+		require.Nil(t, health["openrails.rebill_watch"].LastCompletedAt)
+		require.NotContains(t, health, "openrails.operation_wakes")
 		require.Contains(t, health, "openrails.provider_operation")
 		require.Nil(t, health["openrails.provider_operation"].PeriodSeconds, "an operation runs when queued")
 		require.Zero(t, health["openrails.cleanup_expired_data"].Overrunning)
@@ -239,33 +243,6 @@ func TestBackgroundJobs(t *testing.T) {
 		_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET state='completed', finalized_at=now() WHERE kind='openrails.order_expiry'")
 		require.NoError(t, err)
 		require.NoError(t, progress(t.Context()), "a fresh leader and no overrunning job")
-	})
-	t.Run("OR-J04-S60/a-live-operation-whose-wake-was-lost-is-queued-again", func(t *testing.T) {
-		s := newSolanaWorld(t, true)
-		_, sub := s.subscribe(t)
-		due := *sub.CurrentPeriodEndsAt
-		fleet := hostFleet(t, s.world)
-		fleet.PeriodicJobs().Clear()
-		require.NoError(t, s.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
-		require.NoError(t, fleet.Start(t.Context()))
-		settleOperations(t, fleet)
-		// The period's pull loses its wake: its River job is deleted.
-		jobs := operationJobs(t, fleet)
-		require.NotEmpty(t, jobs)
-		for _, job := range jobs {
-			_, err := fleet.JobDelete(t.Context(), job.ID)
-			require.NoError(t, err)
-		}
-		s.clock.Advance(due.Add(pullMargin + 5*time.Minute).Sub(s.clock.Now()))
-		runRegistered(t, fleet, "openrails.operation_wakes", 1)
-		require.Empty(t, operationJobs(t, fleet), "a wake only a few minutes late is not lost")
-		s.clock.Advance(10 * time.Minute)
-		landedAt := s.clock.Now()
-		runRegistered(t, fleet, "openrails.operation_wakes", 1)
-		s.renewed(t, sub, landedAt.Add(168*time.Hour))
-		settleOperations(t, fleet)
-		runRegistered(t, fleet, "openrails.operation_wakes", 1)
-		require.Len(t, operationJobs(t, fleet, rivertype.JobStateScheduled), 1, "a live operation with its wake is left alone")
 	})
 	t.Run("OR-J23-S06/denials-count-each-closed-hour-once", func(t *testing.T) {
 		w := newWorld(t, func(w *world) { w.deps.Redis = criticalRedis(t) })

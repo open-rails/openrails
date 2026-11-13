@@ -43,7 +43,7 @@ func (s *MoneyService) grantLedger(q *gen.Queries, tenantID uuid.UUID) *grants.L
 // moneyLedger binds the double-entry money ledger to the query handle +
 // merchant (for direct transfers like owed accrual/settlement).
 func (s *MoneyService) moneyLedger(q *gen.Queries, tenantID uuid.UUID) *ledger.Ledger {
-	return ledger.New(q, tenantID)
+	return ledger.New(q, tenantID).SetClock(s.now)
 }
 
 // depositSourceType maps a free-form deposit source label onto the grant

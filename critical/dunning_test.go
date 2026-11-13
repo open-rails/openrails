@@ -200,8 +200,8 @@ func TestDunning(t *testing.T) {
 		storageFault(t, a.world, a.schema, "provider_intents", fmt.Sprintf("NEW.subscription_id = '%s'", stuck.ID.UUID()))
 		storageFault(t, a.world, a.schema, "reconciliation_findings", fmt.Sprintf("NEW.subject_key = '%s'", stuck.ID.UUID()))
 		a.clock.Advance(stuckDue.Sub(a.clock.Now()))
-		// The fleet's own periodic schedule queues the passes: one on start,
-		// then one a minute.
+		// The fleet's own periodic schedule queues the billing pass on start;
+		// the next hour's is its retry.
 		fleet := hostFleet(t, a.world)
 		finished, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
 		defer unsubscribe()
@@ -211,7 +211,7 @@ func TestDunning(t *testing.T) {
 			var args struct {
 				MerchantID uuid.UUID `json:"merchant_id"`
 			}
-			return job.Kind == "openrails.dunning" && json.Unmarshal(job.EncodedArgs, &args) == nil && args.MerchantID == uuid.Nil
+			return job.Kind == "openrails.billing_pass" && json.Unmarshal(job.EncodedArgs, &args) == nil && args.MerchantID == uuid.Nil
 		}
 		pass := func(within time.Duration) *river.Event {
 			deadline := time.After(within)
@@ -222,13 +222,13 @@ func TestDunning(t *testing.T) {
 						return event
 					}
 				case <-deadline:
-					t.Fatal("no deployment-wide due pass finished")
+					t.Fatal("no billing pass finished")
 				}
 			}
 		}
 		// A pass waiting to retry is one not finished that has failed before.
 		retrying := func() (waiting []int64) {
-			jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.dunning"))
+			jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.billing_pass"))
 			require.NoError(t, err)
 			for _, job := range jobs.Jobs {
 				if global(job) && job.FinalizedAt == nil && len(job.Errors) > 0 {
@@ -241,15 +241,17 @@ func TestDunning(t *testing.T) {
 		require.Equal(t, river.EventKindJobFailed, first.Kind, "the pass reports the member it could not finish")
 		job, err := fleet.JobGet(t.Context(), first.Job.ID)
 		require.NoError(t, err)
-		require.Equal(t, rivertype.JobStateDiscarded, job.State, "a failed pass is not retried: the next minute's pass is its retry")
+		require.Equal(t, rivertype.JobStateDiscarded, job.State, "a failed pass is not retried: the next hour's pass is its retry")
 		require.Empty(t, retrying())
 		a.clock.Advance(memberDue.Sub(a.clock.Now()))
+		_, err = fleet.Insert(t.Context(), billingPass{}, nil)
+		require.NoError(t, err)
 		second := pass(90 * time.Second)
-		require.NotEqual(t, first.Job.ID, second.Job.ID, "the next minute's pass is queued, not absorbed")
+		require.NotEqual(t, first.Job.ID, second.Job.ID, "the next hour's pass is queued, not absorbed")
 		require.Eventually(t, func() bool {
 			current, err := a.beta.GetSubscription(t.Context(), member.ID)
 			return err == nil && current.CurrentPeriodStartsAt != nil && current.CurrentPeriodStartsAt.Equal(memberDue)
-		}, 30*time.Second, 50*time.Millisecond, "the other merchant's member renews on the next minute's pass")
+		}, 30*time.Second, 50*time.Millisecond, "the other merchant's member renews on the next hour's pass")
 		renewals, err := a.beta.ListRenewals(t.Context(), billing.RenewalListParams{SubscriptionID: member.ID})
 		require.NoError(t, err)
 		require.Len(t, renewals.Items, 1)

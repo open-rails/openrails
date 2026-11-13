@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 274,
+  "scenario_count": 283,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1304,11 +1304,6 @@
       "name": "An unresolved undeclared account alerts its operator again once a day"
     },
     {
-      "id": "OR-J04-S60",
-      "journey": "J04",
-      "name": "A live provider operation whose River wake was lost is queued again once overdue"
-    },
-    {
       "id": "OR-J06-S63",
       "journey": "J06",
       "name": "A Stripe PSP changed while its pass runs reaches Stripe without waiting for the backstop"
@@ -1372,6 +1367,56 @@
       "id": "OR-J27-S12",
       "journey": "J27",
       "name": "Concurrent imported grant declarations and lost responses replay once"
+    },
+    {
+      "id": "OR-J04-S42",
+      "journey": "J04",
+      "name": "An engine renewal is billed by the next hourly billing pass; its renewal grace reaches two passes past the due instant, so access holds across the gap"
+    },
+    {
+      "id": "OR-J04-S43",
+      "journey": "J04",
+      "name": "An NMI period its schedule skipped is collected and retried by the hourly billing passes the day it is found, with access kept"
+    },
+    {
+      "id": "OR-J04-S44",
+      "journey": "J04",
+      "name": "A credit lot lapsing at 00:00 UTC is never spent past it and is booked by that hour's billing pass"
+    },
+    {
+      "id": "OR-J04-S45",
+      "journey": "J04",
+      "name": "A delinquency grace end is evaluated by the next hourly billing pass, the same day"
+    },
+    {
+      "id": "OR-J04-S46",
+      "journey": "J04",
+      "name": "An order past its expiry is refused payment at once and tidied by the next hourly billing pass"
+    },
+    {
+      "id": "OR-J04-S47",
+      "journey": "J04",
+      "name": "A billing pass that fails partway runs its other scans, and the pass after a missed hour takes everything still due"
+    },
+    {
+      "id": "OR-J04-S48",
+      "journey": "J04",
+      "name": "Job progress fails once a billing pass records critical work a day overdue and clears after a clean pass"
+    },
+    {
+      "id": "OR-J25-S40",
+      "journey": "J25",
+      "name": "A hold, a revocation or a lapse that takes a balance to its line commits the balance's look and its notice lands within seconds"
+    },
+    {
+      "id": "OR-J25-S41",
+      "journey": "J25",
+      "name": "A hold or a capture that leaves a balance above its line queues no look"
+    },
+    {
+      "id": "OR-J25-S42",
+      "journey": "J25",
+      "name": "A balance look that fails leaves its watch due and the next billing pass delivers its notice"
     }
   ]
 }

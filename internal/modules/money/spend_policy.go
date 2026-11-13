@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
+
 	"github.com/jackc/pgx/v5"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -164,7 +166,7 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 		return nil, err
 	}
 	// The billing mode decides whether the balance is watched.
-	if err := s.db.Gen(ctx).WatchCustomerBalance(ctx, gen.WatchCustomerBalanceParams{
+	if err := ledger.WatchCustomerBalance(ctx, s.db.Gen(ctx), gen.WatchCustomerBalanceParams{
 		MerchantID: cur.MerchantID, CustomerID: cur.CustomerID, Currency: cur.Currency, Now: now,
 	}); err != nil {
 		return nil, err

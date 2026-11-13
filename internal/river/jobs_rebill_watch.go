@@ -30,8 +30,6 @@ import (
 const (
 	KindRebillWatch = "openrails.rebill_watch"
 
-	// RebillWatchInterval is how often overdue rebills are looked for.
-	RebillWatchInterval = 15 * time.Minute
 	// NMIRebillDeadline: NMI charges once on the schedule day, and its Query
 	// API indexes a charge with some lag.
 	NMIRebillDeadline = 24 * time.Hour
@@ -57,7 +55,7 @@ type RebillWatchArgs struct{}
 
 func (RebillWatchArgs) Kind() string { return KindRebillWatch }
 
-func (RebillWatchArgs) InsertOpts() river.InsertOpts { return periodPass(RebillWatchInterval) }
+func (RebillWatchArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
 
 // RebillWatchWorker looks at renewals whose confirming evidence is overdue.
 // An NMI schedule past its deadline with no attempt for the cycle is probed:

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -122,7 +124,7 @@ func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, 
 		return err
 	}
 	// No row was prepaid: an arrears customer's balance is not watched.
-	return q.WatchCustomerBalance(ctx, gen.WatchCustomerBalanceParams{MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency), Now: now})
+	return ledger.WatchCustomerBalance(ctx, q, gen.WatchCustomerBalanceParams{MerchantID: tenantID, CustomerID: payerID, Currency: normalizeCurrency(currency), Now: now})
 }
 
 // GetOutstandingOwed returns the payer's arrears exposure in currency, read
