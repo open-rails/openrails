@@ -324,7 +324,7 @@ func (s *OrderAttemptService) solanaOrderAttempt(ctx context.Context, orderID uu
 	if order.Status == string(billing.OrderComplete) {
 		return nil, gen.BillingOrderAttempt{}, ErrOrderAttemptAlreadyCompleted
 	}
-	if !order.AwaitsCustomer() || order.AttemptID == nil {
+	if !order.AwaitsCustomer() || order.AttemptID == nil || orders.Expired(order.BillingOrder, s.now().UTC()) {
 		return nil, gen.BillingOrderAttempt{}, orders.ErrNotPayable
 	}
 	attempt, err := s.db.Gen(ctx).GetOrderAttempt(ctx, gen.GetOrderAttemptParams{MerchantID: mid.UUID(), ID: *order.AttemptID})
@@ -337,9 +337,10 @@ func (s *OrderAttemptService) solanaOrderAttempt(ctx context.Context, orderID uu
 	return order, attempt, nil
 }
 
-// solanaOrderLive reports whether a transfer on session still pays its order:
-// the order takes payment and session is its current attempt.
-func solanaOrderLive(ctx context.Context, d *db.DB, session *models.OrderAttempt) (bool, error) {
+// solanaOrderLive reports whether a transfer on session still pays its order
+// at now: the order takes payment, not past its expiry, and session is its
+// current attempt.
+func solanaOrderLive(ctx context.Context, d *db.DB, session *models.OrderAttempt, now time.Time) (bool, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
@@ -348,7 +349,7 @@ func solanaOrderLive(ctx context.Context, d *db.DB, session *models.OrderAttempt
 	if err != nil {
 		return false, err
 	}
-	live := order.Status == string(billing.OrderOpen) || order.Status == string(billing.OrderProcessing)
+	live := order.Status == string(billing.OrderOpen) && !orders.Expired(order, now) || order.Status == string(billing.OrderProcessing)
 	return live && order.AttemptID != nil && *order.AttemptID == session.ID, nil
 }
 

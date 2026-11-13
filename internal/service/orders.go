@@ -357,7 +357,7 @@ func (s *Service) replayOrderAnswer(ctx context.Context, rt *orderRuntime, actor
 			return OrderAnswer{}, err
 		}
 		resolver, _ := s.rt.CollectionResolver.(intents.StripeEngineServiceResolver)
-		if result.Order.Payment.NextAction, err = rt.Attempts.OrderNextAction(ctx, order, actor.Principal, resolver); err != nil {
+		if result.Order.Payment.NextAction, err = rt.Attempts.OrderNextAction(ctx, order.AsOf(s.now()), actor.Principal, resolver); err != nil {
 			return OrderAnswer{}, err
 		}
 	}
@@ -583,7 +583,7 @@ func (s *Service) GetMerchantOrder(ctx context.Context, id billing.OrderID) (*bi
 	if err != nil {
 		return nil, err
 	}
-	view := order.View(nil, nil)
+	view := order.AsOf(s.now()).View(nil, nil)
 	return &view, s.markDelinquent(ctx, &view)
 }
 
@@ -609,7 +609,7 @@ func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams
 		out := billing.ListPage[billing.Order]{Items: make([]billing.Order, 0, len(rows))}
 		for _, o := range rows {
 			if params.CustomerID.IsZero() || o.CustomerID == params.CustomerID.UUID() {
-				out.Items = append(out.Items, o.View(nil, nil))
+				out.Items = append(out.Items, o.AsOf(s.now()).View(nil, nil))
 			}
 		}
 		return out, s.markDelinquentPage(ctx, out.Items)
@@ -646,7 +646,7 @@ func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams
 	}
 	out := billing.ListPage[billing.Order]{Items: make([]billing.Order, len(page.Items)), Next: page.Next}
 	for i, o := range page.Items {
-		out.Items[i] = o.View(nil, nil)
+		out.Items[i] = o.AsOf(s.now()).View(nil, nil)
 	}
 	return out, s.markDelinquentPage(ctx, out.Items)
 }
@@ -658,6 +658,7 @@ func (s *Service) orderView(ctx context.Context, rt *orderRuntime, actor OrderAc
 	if err != nil {
 		return nil, err
 	}
+	order.AsOf(s.now())
 	var next *billing.NextAction
 	if order.CollectionOwner == string(billing.OrderCollectionEngine) && order.AwaitsCustomer() {
 		resolver, _ := s.rt.CollectionResolver.(intents.StripeEngineServiceResolver)
@@ -1129,7 +1130,7 @@ func (s *Service) CancelMerchantOrder(ctx context.Context, id billing.OrderID) (
 // merchantOrderView is an order as the merchant reads it: what can pay it,
 // never a next action (only its customer pays).
 func (s *Service) merchantOrderView(ctx context.Context, order *orders.Order) (*billing.Order, error) {
-	options, err := s.openOrderOptions(ctx, order, nil)
+	options, err := s.openOrderOptions(ctx, order.AsOf(s.now()), nil)
 	if err != nil {
 		return nil, err
 	}

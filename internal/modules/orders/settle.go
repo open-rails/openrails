@@ -96,8 +96,8 @@ const (
 // Paid settles an order a charge paid, in d's transaction (the caller's
 // provider-intent completion): the payment, the number, the claims handed
 // to what the lines produce, fulfilment and the order.completed event. A charge
-// on a canceled or expired order revives it while its claims are free;
-// otherwise the payment is refunded with a finding.
+// on a canceled or expired order, or one past its expiry, revives it while its
+// claims are free; otherwise the payment is refunded with a finding.
 func (s *Service) Paid(ctx context.Context, d *db.DB, orderID uuid.UUID, charge Charge) (Outcome, error) {
 	if d == nil || d.Pool() != nil {
 		return "", errors.New("an order is settled in its charge's transaction")
@@ -130,6 +130,13 @@ func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Ch
 			}
 		}
 		return OutcomeComplete, nil
+	}
+	if Expired(order.BillingOrder, now) {
+		// Its expiry closed it before the money landed; the money moved, so
+		// nothing is left to abandon.
+		if _, err := s.closeLocked(ctx, d, order, billing.OrderExpired, now); err != nil {
+			return "", err
+		}
 	}
 	var payment *models.Payment
 	if charge != nil {

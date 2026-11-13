@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 283,
+  "scenario_count": 288,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1417,6 +1417,31 @@
       "id": "OR-J25-S42",
       "journey": "J25",
       "name": "A balance look that fails leaves its watch due and the next billing pass delivers its notice"
+    },
+    {
+      "id": "OR-J37-S70",
+      "journey": "J37",
+      "name": "A transfer landing after its order's expiry, before any expiry pass, is held for review as session_closed"
+    },
+    {
+      "id": "OR-J09-S70",
+      "journey": "J09",
+      "name": "A challenge or hosted-page confirm past the order's expiry closes it before any pass; money that moved after expiry settles the order it closed"
+    },
+    {
+      "id": "OR-J08-S70",
+      "journey": "J08",
+      "name": "An open order past its expiry claims nothing: preview, merchant and cart orders buy its lines before any pass"
+    },
+    {
+      "id": "OR-J08-S71",
+      "journey": "J08",
+      "name": "An open order past its expiry reads expired, without next action or payment options, in every read and list, and cannot be canceled"
+    },
+    {
+      "id": "OR-J12-S70",
+      "journey": "J12",
+      "name": "A card save confirmed or saved again past its 24-hour cutoff, before any pass, is removed"
     }
   ]
 }

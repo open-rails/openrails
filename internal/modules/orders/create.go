@@ -114,8 +114,8 @@ func LinesDigest(lines []LineKey) []byte {
 	return sum[:]
 }
 
-// staleOpenOrder is an open order of the lines past its expiry, which
-// FindOrCreate expires before it creates another.
+// staleOpenOrder is an open order past its expiry, of the lines or holding a
+// claim they take, which a create expires before it tries again.
 type staleOpenOrder struct{ id uuid.UUID }
 
 func (e *staleOpenOrder) Error() string { return "orders: the open order of these lines expired" }
@@ -196,8 +196,17 @@ var errOpenOrderClosing = apperr.New(http.StatusConflict, billing.CodeResourceCo
 // A refused line is a LineError; a total other than ExpectedTotal is
 // ErrTotalChanged. An order with nothing to pay is paid at once.
 func (s *Service) Create(ctx context.Context, in CreateInput) (*Order, error) {
-	order, _, err := s.create(ctx, in)
-	return order, err
+	for range 3 {
+		order, _, err := s.create(ctx, in)
+		var stale *staleOpenOrder
+		if !errors.As(err, &stale) {
+			return order, err
+		}
+		if err := s.close(ctx, in.CustomerID, stale.id, billing.OrderExpired); err != nil {
+			return nil, err
+		}
+	}
+	return nil, errOpenOrderClosing
 }
 
 func (s *Service) create(ctx context.Context, in CreateInput) (*Order, bool, error) {
@@ -312,6 +321,13 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Order, bool, err
 				if err != nil {
 					return err
 				}
+				gone, err := lapsedHolders(ctx, q, mid.UUID(), []gen.BillingOwnershipClaim{held}, now)
+				if err != nil {
+					return err
+				}
+				if gone[held.OrderID] {
+					return &staleOpenOrder{id: held.OrderID}
+				}
 				return &LineError{Index: i, Refusal: *claimRefusal(held)}
 			}
 		}
@@ -401,7 +417,7 @@ func (s *Service) List(ctx context.Context, filter ListFilter, page billing.Page
 		return billing.ListPage[*Order]{}, err
 	}
 	q := s.DB.Gen(ctx)
-	rows, err := q.ListOrdersPage(ctx, gen.ListOrdersPageParams{MerchantID: mid.UUID(), CustomerID: filter.CustomerID, PriceID: filter.PriceID, Status: filter.Status,
+	rows, err := q.ListOrdersPage(ctx, gen.ListOrdersPageParams{MerchantID: mid.UUID(), CustomerID: filter.CustomerID, PriceID: filter.PriceID, Status: filter.Status, Now: s.now(),
 		Origin: filter.Origin, SubscriptionID: filter.SubscriptionID, OverdueAt: filter.OverdueAt, AfterCreatedAt: at, AfterID: after, RowLimit: pagination.Fetch(limit)})
 	if err != nil {
 		return billing.ListPage[*Order]{}, err
@@ -512,10 +528,10 @@ func (s *Service) Cancel(ctx context.Context, customerID, id uuid.UUID) (*Order,
 }
 
 // ExpireIfDue materializes an order's elapsed expiry when a command replays
-// it. close rechecks under the order lock, so a concurrent payment that has
-// reached processing or completion keeps its order and ownership claims.
+// or confirms it. close rechecks under the order lock, so a concurrent payment
+// that has reached processing or completion keeps its order and claims.
 func (s *Service) ExpireIfDue(ctx context.Context, order *Order) (*Order, error) {
-	if order.Status != string(billing.OrderOpen) || order.ExpiresAt == nil || order.ExpiresAt.After(s.now()) {
+	if !Expired(order.BillingOrder, s.now()) {
 		return order, nil
 	}
 	if err := s.close(ctx, order.CustomerID, order.ID, billing.OrderExpired); err != nil {
@@ -532,9 +548,10 @@ func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status bi
 		return err
 	}
 	var awaiting *uuid.UUID
+	var refused error
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		order, err := s.load(ctx, q, mid.UUID(), id, true)
+		d := s.DB.NewWithPgxTx(tx)
+		order, err := s.load(ctx, d.Gen(ctx), mid.UUID(), id, true)
 		if err != nil {
 			return err
 		}
@@ -560,36 +577,51 @@ func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status bi
 			return ErrNotCancelable
 		}
 		now := s.now()
-		if status == billing.OrderExpired && (order.ExpiresAt == nil || order.ExpiresAt.After(now)) {
+		if status == billing.OrderExpired && !Expired(order.BillingOrder, now) {
 			return nil
 		}
-		if _, err := q.CloseOrder(ctx, gen.CloseOrderParams{MerchantID: mid.UUID(), ID: id, Status: string(status), Now: now}); err != nil {
-			return err
+		if status == billing.OrderCanceled && Expired(order.BillingOrder, now) {
+			// Its expiry closed it first.
+			status, refused = billing.OrderExpired, ErrNotCancelable
 		}
-		if order.AwaitsCustomer() {
-			awaiting = order.AttemptID
-		}
-		if order.AttemptID != nil {
-			if _, err := q.SetOrderAttemptStatus(ctx, gen.SetOrderAttemptStatusParams{MerchantID: mid.UUID(), ID: *order.AttemptID, Status: attemptClosed(status), Now: now}); err != nil {
-				return err
-			}
-		}
-		if _, err := q.ReleaseOrderClaims(ctx, gen.ReleaseOrderClaimsParams{MerchantID: mid.UUID(), CustomerID: order.CustomerID, OrderID: id}); err != nil {
-			return err
-		}
-		order.Status, order.PaymentStatus = string(status), string(billing.OrderPaymentRequiresPaymentMethod)
-		if err := s.event(ctx, q, &order.BillingOrder, "order."+string(status), now, nil); err != nil {
-			return err
-		}
-		return notificationinbox.WithdrawOrder(ctx, s.DB.NewWithPgxTx(tx), order.CustomerID, order.ID)
+		awaiting, err = s.closeLocked(ctx, d, order, status, now)
+		return err
 	})
-	if err != nil || awaiting == nil || s.Abandon == nil {
+	if err == nil && awaiting != nil && s.Abandon != nil {
+		if err := s.Abandon(ctx, *awaiting); err != nil {
+			log.WithContext(ctx).WithError(err).WithField("order_id", id).Warn("closed order's challenged payment is closed by its verifier later")
+		}
+	}
+	if err != nil {
 		return err
 	}
-	if err := s.Abandon(ctx, *awaiting); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("order_id", id).Warn("closed order's challenged payment is closed by its verifier later")
+	return refused
+}
+
+// closeLocked closes a locked open order in d's transaction, and reports the
+// attempt awaiting its customer, which the caller abandons once committed.
+func (s *Service) closeLocked(ctx context.Context, d *db.DB, order *Order, status billing.OrderStatus, now time.Time) (*uuid.UUID, error) {
+	q := d.Gen(ctx)
+	if _, err := q.CloseOrder(ctx, gen.CloseOrderParams{MerchantID: order.MerchantID, ID: order.ID, Status: string(status), Now: now}); err != nil {
+		return nil, err
 	}
-	return nil
+	var awaiting *uuid.UUID
+	if order.AwaitsCustomer() {
+		awaiting = order.AttemptID
+	}
+	if order.AttemptID != nil {
+		if _, err := q.SetOrderAttemptStatus(ctx, gen.SetOrderAttemptStatusParams{MerchantID: order.MerchantID, ID: *order.AttemptID, Status: attemptClosed(status), Now: now}); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := q.ReleaseOrderClaims(ctx, gen.ReleaseOrderClaimsParams{MerchantID: order.MerchantID, CustomerID: order.CustomerID, OrderID: order.ID}); err != nil {
+		return nil, err
+	}
+	order.Status, order.PaymentStatus = string(status), string(billing.OrderPaymentRequiresPaymentMethod)
+	if err := s.event(ctx, q, &order.BillingOrder, "order."+string(status), now, nil); err != nil {
+		return nil, err
+	}
+	return awaiting, notificationinbox.WithdrawOrder(ctx, d, order.CustomerID, order.ID)
 }
 
 func attemptClosed(status billing.OrderStatus) string {

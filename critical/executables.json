@@ -911,6 +911,21 @@
     ],
     "OR-J25-S42": [
       "TestBalanceLooks/OR-J25-S42/a-look-that-fails-is-taken-by-the-next-billing-pass"
+    ],
+    "OR-J37-S70": [
+      "TestOrderExpiryClock/OR-J37-S70/transfer-after-order-expiry-goes-to-review-before-the-pass"
+    ],
+    "OR-J09-S70": [
+      "TestOrderExpiryClock/OR-J09-S70/challenge-and-hosted-confirm-after-expiry-close-the-order-before-the-pass"
+    ],
+    "OR-J08-S70": [
+      "TestOrderExpiryClock/OR-J08-S70/expired-open-order-claims-nothing-before-the-pass"
+    ],
+    "OR-J08-S71": [
+      "TestOrderExpiryClock/OR-J08-S71/expired-open-order-reads-expired-everywhere-before-the-pass"
+    ],
+    "OR-J12-S70": [
+      "TestOrderExpiryClock/OR-J12-S70/card-save-past-its-cutoff-is-removed-before-the-pass"
     ]
   },
   "suites": {

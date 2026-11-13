@@ -1269,7 +1269,10 @@ renewal's access grace is at least two hours, so a member keeps access across
 one missed pass. A low or depleted balance is told within seconds: the change
 that crosses a line queues the balance's look in its own transaction, and each
 look queues the next at the instant it names (a lapse, a running charge's
-00:00 UTC checkpoint, a projected crossing).
+00:00 UTC checkpoint, a projected crossing). An order past its `expires_at` is
+expired for every read, payment, confirmation and claim at once; the pass only
+writes it, so its `order.expired` event can come up to an hour later. A card
+save past its 24-hour cutoff is removed when it is next confirmed.
 
 Other jobs are queued by the change that needs them, not by a clock: each
 provider operation (`openrails.provider_operation`, which sleeps to its next

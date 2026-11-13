@@ -144,6 +144,7 @@ migration 0201_rail_subscription_key.up.sql sha256:023a4c674fbffbd1cf9a944ee932e
 migration 0202_imported_admin_grants.up.sql sha256:97caea3589f118cbcf284a2a4c662b7992da82056c00ac19bb3efc4b031ce2a4
 migration 0203_solana_pay_wake.up.sql sha256:a499ec3a2454bd5c967a3d9b123dc8afb8868511df5693c6cbda485fa0ab4fd5
 migration 0204_eventlog_notify.up.sql sha256:91a6970712b5bbe33cfd17780178d384b2a62cd41e67f12e8d4757c2094ee311
+migration 0205_balance_looks.up.sql sha256:5f841bea6334f020e8f6a6d5e56fcf6ebc831afc9bc449923f907ee583e6145e
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -228,6 +229,9 @@ table billing.balance_watches
   column funded_at timestamp with time zone
   column usage_rate_per_hour bigint NOT NULL
   column rate_sampled_at timestamp with time zone
+  column low_line_amount bigint
+  column floor_amount bigint
+  column look_each_change boolean NOT NULL DEFAULT true
   constraint balance_watches_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint balance_watches_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT
   constraint balance_watches_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT

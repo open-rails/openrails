@@ -316,7 +316,7 @@ func (s *OrderAttemptService) SettleOrderCCBill(ctx context.Context, attemptID u
 			return unhonored("order_already_paid", "order %s is already paid", order.ID)
 		case !ours && (order.Status == string(billing.OrderProcessing) || order.PaymentStatus == string(billing.OrderPaymentRequiresAction)):
 			return errCCBillSaleWaits
-		case !ours && order.Status == string(billing.OrderOpen):
+		case !ours && order.Status == string(billing.OrderOpen) && !orders.Expired(order, now):
 			// The page lapsed or was declined, and nothing else is in flight:
 			// the sale pays the order.
 			if n, err := q.StartOrderAttempt(ctx, gen.StartOrderAttemptParams{MerchantID: mid.UUID(), ID: order.ID, AttemptID: attemptID, PspID: attempt.PspID, Now: now}); err != nil || n != 1 {
