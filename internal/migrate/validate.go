@@ -40,6 +40,9 @@ func Validate(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	if err != nil {
 		return err
 	}
+	if err := checkRetired(ctx, pool, schema, chain); err != nil {
+		return validationError(err)
+	}
 	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer sqlDB.Close()
 	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(schema)

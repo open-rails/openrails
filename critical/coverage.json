@@ -714,6 +714,11 @@
       "name": "NMI receipts that name their card export and restore verbatim"
     },
     {
+      "id": "OR-J31-S07",
+      "journey": "J31",
+      "name": "A database at the end of the replaced migration chain adopts the single baseline without re-running anything; one short of it is refused"
+    },
+    {
       "id": "OR-J32-S01",
       "journey": "J32",
       "name": "Provision find list and rename merchant retain stable identity"
@@ -832,11 +837,6 @@
       "id": "OR-J01-S16",
       "journey": "J01",
       "name": "Host customer admission policy preserves original proof and fixed billing scope ceilings"
-    },
-    {
-      "id": "OR-J31-S05",
-      "journey": "J31",
-      "name": "Hosted account removal refuses ambiguous or populated legacy state and preserves transferred reader progress"
     },
     {
       "id": "OR-J22-S05",
