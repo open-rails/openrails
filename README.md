@@ -1966,7 +1966,6 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses trusted issuers' access tokens.
 - [Products and prices through the Client](docs/catalog-client.md).
 - [Payment page](docs/payment-page.md) — a pay URL on OpenRails' own domain, or embedded on your site.
-- [Hosted customer accounts](docs/customer-network.md) — SaaS ownership, generic customer integration and the explicit migration boundary.
 - [PSP import](docs/psp-import.md) — onboarding a merchant's subscribers straight from its PSPs: a read-only pull, rules and mappings that link them to customers, and landing.
 - [Batch import / legacy migration](docs/batch-import.md) — moving an existing subscriber base onto OpenRails: the import surface, the phased playbook, and the limited-mode cutover.
 

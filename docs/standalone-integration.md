@@ -351,8 +351,8 @@ merchants:
   which defaults to `public_billing_base_url`.
 - OpenRails admin operations rely on the caller's permissions and do not
   require a recent sign-in. AuthKit's own API-key creation and role grants
-  retain their step-up checks. Sensitive customer-network operations also
-  retain their recent-sign-in policy.
+  retain their step-up checks. Sensitive host-mapped customer operations
+  ([host customer APIs](auth.md#host-customer-apis)) ask for a recent sign-in.
 - With AuthKit as the issuer, the browser gets these tokens by token exchange:
   register a public client with the token-exchange grant and the server as a
   resource, and give billing-ui a `fetch` that calls auth-ui's
@@ -370,8 +370,8 @@ merchants:
 - An application's token calls the programmatic routes, `/v1/app/*` with
   `route_groups.programmatic`, each holding its permission
   (`merchant:entitlements:read`, `merchant:catalog:read`,
-  `merchant:usage:read`, `merchant:usage:manage`, `merchant:events:read`, `merchant:orders:manage`,
-  `merchant:customers:read`); a
+  `merchant:usage:read`, `merchant:usage:manage`, `merchant:events:read`,
+  `merchant:orders:manage`); a
   person's token is refused there.
 - Refusals: `401 authentication_required` (an untrusted issuer, a bad
   signature, audience or lifetime), `401 credential_expired`,
@@ -386,13 +386,6 @@ implements. A token's `sub` is the subject (a user) and its invoker; a client
 acting for itself and an API key are an application subject. Customer routes
 take the customer only from the subject. Each merchant's scope is its AuthKit
 group, whose id is the merchant's.
-
-### The customer network
-
-With the `network-terms` agreement in `auth.agreements`, the server runs the
-openrails.dev customer network: one account per shopper, linked to merchants'
-customers, and merchants' clients signing their customers in with it
-([customer network](customer-network.md)).
 
 ### Webhooks
 

@@ -529,7 +529,7 @@ Rules:
   no rebind command.
 - **Identity is the PSP id, not its key.** Provider references (price links,
   vault references, webhook dedup) belong to the PSP's id, so renaming or
-  archiving a PSP moves nothing ([provider object identity](architecture/provider-object-identity.md)).
+  archiving a PSP moves nothing.
 - **Subscribers on an archived PSP stay there.** OpenRails never moves or
   cancels a working provider-owned subscription. An archived PSP takes no new
   purchases; its live subscriptions keep renewing on it and stay monitored. A

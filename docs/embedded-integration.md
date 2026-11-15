@@ -370,14 +370,14 @@ OpenRails asks it once per request and builds every gate from its answer, a
 | `Verified.Identity()` | who it is: a person or an application, acting itself or for someone |
 | `RootScope(ctx)` (`auth.Root`) | where your staff hold `root:` permissions; needed with any route group on |
 | `Verified.Can(scope, permission)` (`auth.PermissionChecker`) | on every staff and programmatic route, with the route's permission: its `merchant:` name in the merchant's own scope (`{Authority: RootScope's, ID: the merchant's id}`), else its `root:` name in `RootScope`, checked live; without it the request holds nothing |
-| `Verified.CheckRecentSignIn()` (`auth.RecentSignInChecker`) | on customer-network routes marked `sensitive` in [routes](api/routes.md). Staff routes do not request a recent sign-in, including when called with a personal API key |
+| `Verified.CheckRecentSignIn()` (`auth.RecentSignInChecker`) | on the sensitive operations `Engine.CustomerRoutes` mounts ([host customer APIs](auth.md#host-customer-apis)). Staff routes do not request a recent sign-in, including when called with a personal API key |
 
 OpenRails answers every refusal itself, with the status and challenge
 `auth.Refuse` gives every consumer: 401 with `WWW-Authenticate` for a missing,
 invalid, expired or revoked credential (your `auth.Challenge` headers win), 403
 for a permission not held, 503 `authentication_unavailable` or
 `authorization_unavailable` when your auth cannot answer. A sensitive
-customer-network route answers a stale sign-in with RFC 9470's step-up: 401 `step_up_required` with `WWW-Authenticate: Bearer
+host-mapped customer route answers a stale sign-in with RFC 9470's step-up: 401 `step_up_required` with `WWW-Authenticate: Bearer
 error="insufficient_user_authentication", max_age=...` and your challenge's
 metadata. An identity without a subject or invoker is refused, so an
 Authenticator that checks nothing admits no one. Each handler checks the
@@ -421,9 +421,7 @@ The programmatic routes your backend calls over HTTP (`/v1/app/*`,
 is, by its `Identity.SubjectKind`, holding the route's permission, and refuse
 a person: `root:entitlements:read` for the content gate, `root:usage:manage`
 for admissions, usage events and running charges, `root:events:read` for host
-events, `root:orders:manage` for orders
-(`root:customers:read` finds a customer by openrails.dev account, only where
-the [customer network](customer-network.md) runs). Give a program a role
+events, `root:orders:manage` for orders. Give a program a role
 holding only what its task needs.
 With any route group on, `Auth` is a authkit/auth `Root`, as
 `ak.Authenticator()` is: its `RootScope` is AuthKit's root group, and a

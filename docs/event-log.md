@@ -82,7 +82,7 @@ retention; their raw type and data are preserved.
 Moving the account reader requires an explicit offline transfer of both link
 proof and the exact source cursor/filter. New SaaS account facts use a distinct
 source. Do not splice cursor positions, acknowledge source events, or reset
-progress when changing ownership. See [the extraction plan](customer-network-removal-plan.md).
+progress when changing ownership.
 
 ### Shared implementation adoption
 
