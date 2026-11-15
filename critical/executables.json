@@ -301,6 +301,9 @@
     "OR-J20-S04": [
       "TestRefundBoundaryContract/OR-J20-S04/foreign-account-and-off-rail-refunds-have-no-effect"
     ],
+    "OR-J20-S05": [
+      "TestCCBillRefunds/OR-J20-S05/each-partial-refund-of-a-sale-is-booked-once"
+    ],
     "OR-J21-S01": [
       "TestExternalPayments/OR-J21-S01/record-confirmed-external-money-without-provider-charge"
     ],

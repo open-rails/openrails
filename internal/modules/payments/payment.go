@@ -534,15 +534,19 @@ func (s *PaymentService) ValidateRefund(ctx context.Context, orig *models.Paymen
 		return fmt.Errorf("failed to calculate refunded total: %w", err)
 	}
 	if amount > orig.Amount {
-		return errors.New("refund amount cannot exceed original payment amount")
+		return fmt.Errorf("%w: refund amount cannot exceed original payment amount", ErrRefundExceedsPayment)
 	}
 	if refundedTotal > 0 {
 		if amount+refundedTotal > orig.Amount {
-			return fmt.Errorf("refund total would exceed original payment (refunded %d of %d)", refundedTotal, orig.Amount)
+			return fmt.Errorf("%w: refund total would exceed original payment (refunded %d of %d)", ErrRefundExceedsPayment, refundedTotal, orig.Amount)
 		}
 	}
 	return nil
 }
+
+// ErrRefundExceedsPayment refuses a refund that would return more than its
+// charge took.
+var ErrRefundExceedsPayment = errors.New("refund exceeds the payment")
 
 func PaymentStatusSucceeded(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {

@@ -176,7 +176,8 @@ Consumed events: `NewSaleSuccess`, `NewSaleFailure`, `RenewalSuccess`,
 `RenewalFailure`, `UpgradeSuccess`, `UpgradeFailure`, `Cancellation`,
 `Expiration`, `BillingDateChange`, `CustomerDataUpdate`, `UserReactivation`,
 `Refund`, `Void`, `Chargeback`. Unknown event types are rejected as
-non-retryable. Events are deduplicated by transaction id / payload hash.
+non-retryable. Events are deduplicated by transaction id / payload hash; a
+`Refund` by its transaction id, timestamp and amount.
 
 ### Sandbox testing
 
@@ -221,10 +222,13 @@ PSP alone accepts nothing extra.
   for operator verification. Confirmed inbound refunds and manual accounting
   remain supported. A refund notification must identify its original payment;
   an unknown original raises a ledger-review finding without guessing the latest
-  charge. A matched refund follows the merchant's cumulative access policy and
-  does not cancel renewal. Separate provider cancellation events are still
-  mirrored. Distinct identities for repeated partial-refund notifications remain
-  unqualified. See [CCBill refunds](ccbill-refund-qualification.md).
+  charge. CCBill does not document whether a `Refund`'s `transactionId` is the
+  refund's or the refunded charge's, so each notice is identified by that id
+  with its timestamp and amount: every partial refund of a charge is booked
+  once, and one beyond what remains of the charge books nothing and raises a
+  ledger-review finding. A matched refund follows the merchant's cumulative
+  access policy and does not cancel renewal. Separate provider cancellation
+  events are still mirrored. See [CCBill refunds](ccbill-refund-qualification.md).
 - An imported CCBill charge names CCBill's transaction id, which is digits.
   One declared without an amount is kept as an attribution to its
   subscription. With DataLink credentials, the provider pull records it when it
