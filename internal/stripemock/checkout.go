@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -125,7 +126,10 @@ func (m *Mock) CompleteCheckoutSession(ctx context.Context, id string) (string, 
 	return m.SendEvent(ctx, "checkout.session.completed", session)
 }
 
-type webhookTarget struct{ url, secret string }
+type webhookTarget struct {
+	url, secret string
+	thin        bool
+}
 
 // Event is one webhook event Stripe sent.
 type Event struct {
@@ -142,21 +146,44 @@ func (m *Mock) SendWebhooksTo(endpoint, secret string) {
 	m.webhook = webhookTarget{url: endpoint, secret: secret}
 }
 
+// SendThinEventsTo names a thin event destination instead: each event arrives
+// as v1.<type> naming its object's URL, and the receiver reads the event
+// (GET /v2/core/events/{id}) and the object back.
+func (m *Mock) SendThinEventsTo(endpoint, secret string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.webhook = webhookTarget{url: endpoint, secret: secret, thin: true}
+}
+
 // SendEvent sends a new event of type kind about object, signed as Stripe
 // signs it, and returns its id. A refusal is an error; the event is kept for
 // Redeliver either way.
 func (m *Mock) SendEvent(ctx context.Context, kind string, object Object) (string, error) {
 	m.mu.Lock()
 	id := m.id("evt")
-	payload, err := json.Marshal(Object{"id": id, "object": "event", "type": kind, "created": m.now().Unix(), "livemode": false,
-		"api_version": stripeapi.APIVersion, "pending_webhooks": 1, "data": Object{"object": object}})
+	event := Object{"id": id, "object": "event", "type": kind, "created": m.now().Unix(), "livemode": false,
+		"api_version": stripeapi.APIVersion, "pending_webhooks": 1, "data": Object{"object": object}}
+	if m.webhook.thin {
+		event = thinEvent(id, kind, object, m.now())
+		m.thinEvents[id] = event
+	}
+	payload, err := json.Marshal(event)
 	if err != nil {
 		m.mu.Unlock()
 		return "", err
 	}
-	m.events = append(m.events, Event{ID: id, Type: kind, Payload: payload})
+	m.events = append(m.events, Event{ID: id, Type: event["type"].(string), Payload: payload})
 	m.mu.Unlock()
 	return id, m.deliver(ctx, payload)
+}
+
+// thinEvent carries no object, only its canonical URL (checkout.session is
+// /v1/checkout/sessions/{id}).
+func thinEvent(id, kind string, object Object, at time.Time) Object {
+	typ, _ := object["object"].(string)
+	objectID, _ := object["id"].(string)
+	return Object{"id": id, "object": "v2.core.event", "type": "v1." + kind, "created": at.UTC().Format(time.RFC3339Nano), "livemode": false,
+		"related_object": Object{"id": objectID, "type": typ, "url": "/v1/" + strings.ReplaceAll(typ, ".", "/") + "s/" + objectID}}
 }
 
 // Redeliver sends a sent event again, as Stripe retries one.

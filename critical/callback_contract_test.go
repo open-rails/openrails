@@ -304,4 +304,48 @@ func TestCallbackContracts(t *testing.T) {
 		}
 		require.Equal(t, settled.Payment.PaymentID, settledSale(t, a, p, order.ID).Payment.PaymentID)
 	})
+	t.Run("OR-J28-S06/a-thin-checkout-session-event-hydrates-and-settles-its-order", func(t *testing.T) {
+		a, p := newPaymentWorld(t, func(w *world) {
+			m := w.cfg.Merchants["alpha"]
+			psp := m.PSPs["stripe"]
+			psp.Secrets["webhook_signing_secret_thin"] = "whsec_critical_thin"
+			m.PSPs["stripe"] = psp
+			w.cfg.Merchants["alpha"] = m
+		})
+		// No pass runs: only the thin notice can settle the order.
+		passlessFleet(t, a.world)
+		p.core.SendThinEventsTo(a.server.URL+"/v1/webhooks/stripe/acct_e2e", "whsec_critical_thin")
+		sale := saleInput(t, a, p)
+		hosted := billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}}
+		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, hosted, map[string]string{"Idempotency-Key": "thin-hosted"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var order billing.Order
+		require.NoError(t, json.Unmarshal(raw, &order))
+		require.NotNil(t, order.Payment.NextAction)
+		require.Equal(t, "redirect_to_url", order.Payment.NextAction.Type)
+		session := strings.TrimPrefix(*order.Payment.NextAction.URL, stripemock.CheckoutURL)
+
+		event, err := p.core.CompleteCheckoutSession(t.Context(), session)
+		require.NoError(t, err, "the thin checkout.session.completed is read back from Stripe and acknowledged")
+		require.Equal(t, 1, p.core.Reads("/v2/core/events/"+event))
+		require.Positive(t, p.core.Reads("/v1/checkout/sessions/"+session), "the session is read at its canonical URL")
+		var settled *billing.Order
+		require.Eventually(t, func() bool {
+			settled, err = a.alpha.GetOrder(t.Context(), order.ID)
+			return err == nil && settled.Status == billing.OrderComplete
+		}, 20*time.Second, 20*time.Millisecond)
+		require.NotNil(t, settled.Payment.PaymentID)
+		payment, err := a.alpha.GetPayment(t.Context(), *settled.Payment.PaymentID)
+		require.NoError(t, err)
+		require.Equal(t, billing.PaymentSucceeded, payment.Status)
+		require.EqualValues(t, 30_000_000, payment.Amount)
+
+		require.NoError(t, p.core.Redeliver(t.Context(), event))
+		payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
+		require.NoError(t, err)
+		require.Len(t, payments.Items, 1, "a redelivered thin event settles nothing twice")
+		effects := p.effects(t)
+		require.Len(t, effects, 1)
+		require.EqualValues(t, 3000, effects[0].Amount)
+	})
 }

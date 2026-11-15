@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 288,
+  "scenario_count": 290,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -664,6 +664,11 @@
       "name": "Callback during active fetch causes a durable follow-up observation"
     },
     {
+      "id": "OR-J28-S06",
+      "journey": "J28",
+      "name": "A thin Stripe event is read back from Stripe at its object's canonical URL and settles once, like its snapshot"
+    },
+    {
       "id": "OR-J29-S01",
       "journey": "J29",
       "name": "Crash before provider submission resumes one authorized operation"
@@ -712,6 +717,11 @@
       "id": "OR-J31-S06",
       "journey": "J31",
       "name": "NMI receipts that name their card export and restore verbatim"
+    },
+    {
+      "id": "OR-J31-S07",
+      "journey": "J31",
+      "name": "A paid Stripe hosted-page order exports and restores with its attempt's Checkout Session state"
     },
     {
       "id": "OR-J32-S01",
