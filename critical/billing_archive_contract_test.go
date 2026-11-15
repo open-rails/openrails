@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -266,5 +267,34 @@ func TestBillingArchive(t *testing.T) {
 		payment, err := client.GetPayment(t.Context(), *paid.Payment.PaymentID)
 		require.NoError(t, err)
 		require.Equal(t, "5454", *payment.Card.Last4)
+	})
+	t.Run("OR-J31-S09/a-paid-stripe-hosted-page-order-moves-with-the-book", func(t *testing.T) {
+		source, provider := newPaymentWorld(t)
+		provider.core.SendWebhooksTo(source.server.URL+"/v1/webhooks/stripe/acct_e2e", "whsec_critical_fixture")
+		sale := saleInput(t, source, provider)
+		hosted := billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}}
+		status, raw := source.request(t, http.MethodPost, "/v1/me/orders", source.aliceToken, hosted, map[string]string{"Idempotency-Key": "archived-hosted"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var order billing.Order
+		require.NoError(t, json.Unmarshal(raw, &order))
+		require.NotNil(t, order.Payment.NextAction)
+		require.Equal(t, "redirect_to_url", order.Payment.NextAction.Type)
+		// The attempt keeps Stripe's page in its rail state: the session and its URL.
+		_, err := provider.core.CompleteCheckoutSession(t.Context(), strings.TrimPrefix(*order.Payment.NextAction.URL, stripemock.CheckoutURL))
+		require.NoError(t, err)
+		var paid *billing.Order
+		require.Eventually(t, func() bool {
+			paid, err = source.alpha.GetOrder(t.Context(), order.ID)
+			return err == nil && paid.Status == billing.OrderComplete
+		}, 20*time.Second, 20*time.Millisecond)
+		require.NotNil(t, paid.Payment.PaymentID)
+		archive := archiveBytes(t, source.alpha)
+		_, client := archiveTarget(t, source.world)
+		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+		restored, err := client.GetOrder(t.Context(), order.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.OrderComplete, restored.Status)
+		require.Equal(t, paid.Payment.PaymentID, restored.Payment.PaymentID)
 	})
 }

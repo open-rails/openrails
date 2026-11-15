@@ -97,6 +97,8 @@ type Mock struct {
 	webhookEndpoints map[string][]Object
 	webhook          webhookTarget
 	events           []Event
+	// thinEvents are the v2 events a thin destination was sent, by id.
+	thinEvents map[string]Object
 }
 
 // New starts a Mock on a loopback listener; see URL and Close.
@@ -115,7 +117,7 @@ func NewUnstarted(opts Options) *Mock {
 	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{},
 		intents: map[string]Object{}, charges: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
 		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{}, webhookEndpoints: map[string][]Object{},
-		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}}
+		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}, thinEvents: map[string]Object{}}
 }
 
 // URL is the loopback API root; OpenRails' provider_sandbox.stripe_api_url.
@@ -297,6 +299,11 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 		return 200, Object{"object": "account", "id": accountOf(r), "charges_enabled": true}
 	case p == "/v1/balance":
 		return 200, Object{"object": "balance", "livemode": false, "available": []any{}, "pending": []any{}}
+	case r.Method == http.MethodGet && strings.HasPrefix(p, "/v2/core/events/"):
+		if event, ok := m.thinEvents[strings.TrimPrefix(p, "/v2/core/events/")]; ok {
+			return 200, event
+		}
+		return 404, stripeErr("resource_missing")
 	case seg[0] == "products" || seg[0] == "prices":
 		if status, out, ok := m.catalogLocked(r, seg, q); ok {
 			return status, out

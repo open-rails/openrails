@@ -993,6 +993,12 @@
     ],
     "OR-J19-S07": [
       "TestPriceMigrationContracts/OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create"
+    ],
+    "OR-J28-S08": [
+      "TestCallbackContracts/OR-J28-S08/a-thin-checkout-session-event-hydrates-and-settles-its-order"
+    ],
+    "OR-J31-S09": [
+      "TestBillingArchive/OR-J31-S09/a-paid-stripe-hosted-page-order-moves-with-the-book"
     ]
   },
   "suites": {

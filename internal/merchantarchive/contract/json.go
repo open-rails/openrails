@@ -356,7 +356,7 @@ var jsonRules = map[string]jsonRule{
 	"order_attempts.metadata":    metadataJSON,
 	"order_attempts.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
 	"order_attempts.rail_state": nullable(object(map[string]jsonRule{
-		"operation_id": uuidValue, "flow": textValue, "return_url": textValue, "checkout_session_id": textValue, "purchase_url": textValue,
+		"operation_id": uuidValue, "flow": textValue, "return_url": textValue, "checkout_session_id": textValue, "checkout_url": textValue,
 		"token_symbol": textValue, "token_mint": textValue, "token_decimals": textValue, "recipient": textValue, "token_amount": moneyStringValue,
 		"token_price_usd": numberValue, "fx_rate": numberValue, "fx_currency": textValue, "quoted_at": textValue, "quote_expires_at": textValue,
 		"plan_id": textValue, "mint_symbol": textValue, "amount_base_units": moneyStringValue, "period_hours": textValue, "plan_created_at": textValue,
