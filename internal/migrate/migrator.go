@@ -58,9 +58,6 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if err := adoptBaseline(ctx, pool, schema, migrations); err != nil {
-		return err
-	}
 	// Own sessions, so the advisory lock never waits on the host pool.
 	m, err := migratekit.NewPostgresFromPGXPool(pool, config.MigratekitApp)
 	if err != nil {

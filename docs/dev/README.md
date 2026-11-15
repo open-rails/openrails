@@ -93,16 +93,12 @@ any v1 database in place, with its `api/schema.txt` diff in the same pull
 request.
 
 Before v1 a merged migration may be folded into the baseline: rebase, apply its
-effect where the objects it touches are defined, delete the numbered file, add
-its name to `internal/migrate/retired.txt` if a release shipped it, and prove
+effect where the objects it touches are defined, delete the numbered file and prove
 the result with `go run ./scripts/schemaproof` (the previous revision's chain
 and the tree's must dump identically, in the default schema and another).
 
-A database whose ledger holds the whole chain the baseline replaced
-(`internal/migrate/retired.txt`) is adopted on its next migrate: the ledger is
-rewritten to the baseline, audited in `public.migration_repairs`, and nothing
-runs. One that holds only part of that chain is refused; upgrade it with the
-release `retired.txt` names first. Any other database the boot refuses (an
+A database built by the numbered migrations the baseline replaced is not
+upgraded: recreate it. Any other database the boot refuses (an
 applied `0001` that differs and a schema that is not a fresh build of it) is
 wiped:
 

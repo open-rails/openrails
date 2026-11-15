@@ -559,9 +559,6 @@
     "OR-J01-S16": [
       "TestHostedOwnershipContracts/OR-J01-S16/host-admission-preserves-proof-and-billing-scope"
     ],
-    "OR-J31-S07": [
-      "TestBaselineAdoption/OR-J31-S07/replaced-chain-adopts-the-baseline-and-a-partial-one-is-refused"
-    ],
     "OR-J22-S05": [
       "TestRecurringCredits/OR-J22-S05/recurring-payment-grants-independent-service-credit"
     ],
