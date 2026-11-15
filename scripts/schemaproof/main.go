@@ -5,10 +5,13 @@
 // and data with privileges, without owners. pg_dump orders objects itself, so
 // the files' own layout does not matter.
 //
-//	go run ./scripts/schemaproof [-ref origin/master] [-dsn URL]
+//	go run ./scripts/schemaproof [-ref origin/master] [-dsn URL] [-pg-dump COMMAND]
 //
 // -dsn (or OPENRAILS_E2E_DSN) names a disposable PostgreSQL 18 server whose
-// role may create databases; pg_dump 18 must be on PATH.
+// role may create databases. -pg-dump (or PG_DUMP) is the pg_dump 18 command,
+// "pg_dump" on PATH by default; CI runs the server container's
+// ("docker exec critical-postgres pg_dump"), which must reach the server at
+// the DSN's address.
 package main
 
 import (
@@ -16,6 +19,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -46,12 +50,23 @@ func main() {
 	ref := flag.String("ref", "origin/master", "revision whose migration chain is the reference")
 	dsn := flag.String("dsn", os.Getenv(schemasnapshot.DSNEnv), "disposable PostgreSQL 18 server")
 	keep := flag.String("keep", "", "directory to keep the dumps in")
+	pgDumpCommand := "pg_dump"
+	if v := strings.TrimSpace(os.Getenv("PG_DUMP")); v != "" {
+		pgDumpCommand = v
+	}
+	flag.StringVar(&pgDumpCommand, "pg-dump", pgDumpCommand, "the pg_dump 18 command, split on spaces")
 	flag.Parse()
+	if pgDump = strings.Fields(pgDumpCommand); len(pgDump) == 0 {
+		pgDump = []string{"pg_dump"}
+	}
 	if err := run(context.Background(), *ref, strings.TrimSpace(*dsn), *keep); err != nil {
 		fmt.Fprintln(os.Stderr, "schemaproof:", err)
 		os.Exit(1)
 	}
 }
+
+// pgDump is the pg_dump command and its leading arguments.
+var pgDump []string
 
 func run(ctx context.Context, ref, dsn, keep string) error {
 	if dsn == "" {
@@ -174,9 +189,14 @@ func dump(ctx context.Context, dsn, schema string, chain fs.FS) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	raw, err := exec.CommandContext(ctx, "pg_dump", "--dbname="+target.String(), "--schema="+schema, "--no-owner").Output()
+	args := append(pgDump[1:len(pgDump):len(pgDump)], "--dbname="+target.String(), "--schema="+schema, "--no-owner")
+	raw, err := exec.CommandContext(ctx, pgDump[0], args...).Output()
 	if err != nil {
-		return nil, fmt.Errorf("pg_dump: %w", err)
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return nil, fmt.Errorf("%s: %w: %s", strings.Join(pgDump, " "), err, bytes.TrimSpace(exit.Stderr))
+		}
+		return nil, fmt.Errorf("%s: %w", strings.Join(pgDump, " "), err)
 	}
 	return normalise(raw, oids), nil
 }
