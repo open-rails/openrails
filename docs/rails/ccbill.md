@@ -118,14 +118,18 @@ be paid on CCBill:
   A redelivery changes nothing.
 - `NewSaleFailure` naming the attempt fails it: the order takes another
   payment with `last_payment_error`.
-- A sale the order no longer takes is never granted: the order was paid
-  otherwise, a second sale on the same page, the customer already holds the
-  membership, or the sale contradicts the attempt. It is refused
-  (`ccbill_sale_unhonored`) with a `consistency.ledger.unbooked` finding:
-  refund and cancel it at CCBill. A sale on a lapsed page still pays an order
-  nothing else paid. One for an order that closed meanwhile revives it, or,
-  when what it buys is held, is recorded for refund with a finding to cancel
-  it at CCBill.
+- A sale the order no longer takes is never granted. One for an order
+  another payment completed (a card or another page after this one lapsed,
+  or a second sale on the same page) is recorded against the order as a
+  payment held for refund: a `life.order.late_payment` finding to refund it
+  at CCBill and a `consistency.ledger.unbooked` finding to cancel its
+  subscription there; OpenRails does neither itself, and a redelivery
+  changes nothing. One whose customer already holds the membership, or
+  that contradicts the attempt, is refused (`ccbill_sale_unhonored`) with a
+  `consistency.ledger.unbooked` finding: refund and cancel it at CCBill. A
+  sale on a lapsed page still pays an order nothing else paid. One for an
+  order that closed meanwhile revives it, or, when what it buys is held, is
+  recorded for refund the same way.
 - A `NewSaleSuccess` no OpenRails attempt issued is refused
   (`ccbill_new_subscription_unsupported`) with the same finding.
 

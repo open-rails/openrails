@@ -507,7 +507,8 @@ const CCBillSaleUnhonored = "ccbill_sale_unhonored"
 // handleNewSaleSuccess settles the sale of the order attempt its
 // reservationId names: the order completes with the subscription CCBill
 // bills. A sale for a membership OpenRails holds is a replay and changes
-// nothing. A sale no attempt issued, or one its order no longer takes, is
+// nothing. One for an order another payment completed is held for refund. A
+// sale no attempt issued, or one its order otherwise no longer takes, is
 // refused with an operator repair alert: CCBill has taken money OpenRails
 // will not honour.
 func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
