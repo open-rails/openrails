@@ -31,17 +31,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	nmiSaleEvidenceTransactionID = "transaction_id"
-	nmiSaleEvidencePaymentID     = "payment_id"
-	nmiSaleEvidenceDelayedStart  = "delayed_start"
-)
-
 func NMISaleIdempotencyKey(key string) string {
 	return payments.TypeNMISale + ":" + strings.TrimSpace(key)
-}
-func nmiSaleIntentOrderID(id uuid.UUID, run string) string {
-	return payments.NMISaleOrderReference(id, run)
 }
 
 type NMISaleIntentHandler struct {

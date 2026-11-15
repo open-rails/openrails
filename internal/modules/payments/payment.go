@@ -105,18 +105,6 @@ func (s *PaymentService) GetByID(ctx context.Context, id uuid.UUID) (*models.Pay
 	return s.repo.GetByID(ctx, id)
 }
 
-// MatchesPrice verifies accepted commercial identity through the payment's
-// immutable order lines. It does not consult the subscription's current price.
-func (s *PaymentService) MatchesPrice(ctx context.Context, paymentID, priceID uuid.UUID) (bool, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return false, err
-	}
-	return s.repo.db.Gen(ctx).PaymentMatchesOrderPrice(ctx, gen.PaymentMatchesOrderPriceParams{
-		MerchantID: mid.UUID(), PaymentID: paymentID, PriceID: priceID,
-	})
-}
-
 // AttachRelations loads each payment's subscription.
 func (s *PaymentService) AttachRelations(ctx context.Context, payments ...*models.Payment) error {
 	return s.repo.AttachRelations(ctx, payments...)
@@ -136,14 +124,6 @@ func (s *PaymentService) GetByPSPTransactionID(ctx context.Context, rail models.
 
 func (s *PaymentService) GetManualByTransactionID(ctx context.Context, transactionID string) (*models.Payment, error) {
 	return s.repo.GetManualByTransactionID(ctx, transactionID)
-}
-
-func (s *PaymentService) Update(ctx context.Context, payment *models.Payment) error {
-	return errors.New("payments are immutable; updates are not supported")
-}
-
-func (s *PaymentService) Delete(ctx context.Context, id uuid.UUID) error {
-	return errors.New("payments cannot be deleted")
 }
 
 // Reversal kinds of the mirror rows Refund writes: a chargeback is recorded
@@ -444,39 +424,6 @@ func (s *PaymentService) syncPurchasedCreditRefund(ctx context.Context, paymentI
 		}
 	}
 	return nil
-}
-
-func (s *PaymentService) ReserveProviderAttempt(ctx context.Context, payment *models.Payment) (*models.Payment, error) {
-	if payment == nil {
-		return nil, errors.New("payment attempt is required")
-	}
-	if strings.TrimSpace(payment.TransactionID) == "" {
-		return nil, errors.New("payment attempt transaction id is required")
-	}
-	if payment.Amount <= 0 {
-		return nil, errors.New("payment attempt amount must be > 0")
-	}
-	now := s.now()
-	if payment.ID == uuid.Nil {
-		payment.ID = uuidutil.NewV7()
-	}
-	if payment.Status == "" {
-		payment.Status = PaymentStatusPendingValue
-	}
-	if payment.PurchasedAt.IsZero() {
-		payment.PurchasedAt = now
-	}
-	if payment.CreatedAt.IsZero() {
-		payment.CreatedAt = now
-	}
-	created, err := s.CreateIfNotExists(ctx, payment)
-	if err != nil {
-		return nil, err
-	}
-	if created {
-		return payment, nil
-	}
-	return s.GetByPSPTransactionID(ctx, payment.Rail, payment.TransactionID)
 }
 
 func (s *PaymentService) GetByNMISubscriptionOrder(ctx context.Context, orderID string) (*models.Payment, error) {

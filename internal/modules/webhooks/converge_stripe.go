@@ -26,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
@@ -280,33 +279,6 @@ func (s *StripeConvergeService) resolveFetchedPrice(ctx context.Context, rec sub
 		return price.ID, price, false, nil
 	}
 	return uuid.Nil, nil, false, fmt.Errorf("unable to resolve price from fetched subscription")
-}
-
-// validateStripeFetchedInvoicePrice checks the fetched invoice against the
-// price: same currency and exact list price, except proration invoices
-// (billing_reason=subscription_update, any positive amount) and settled
-// zero-amount invoices (trials).
-func validateStripeFetchedInvoicePrice(rec subscriptions.StripeLivenessRecord, price *models.Price) error {
-	if price == nil {
-		return fmt.Errorf("fetched invoice price is required for validation")
-	}
-	if !strings.EqualFold(strings.TrimSpace(rec.LatestInvoiceCurrency), strings.TrimSpace(price.Currency)) {
-		return fmt.Errorf("fetched invoice currency mismatch: got %s, want %s", rec.LatestInvoiceCurrency, price.Currency)
-	}
-	if strings.EqualFold(rec.LatestInvoiceBillingReason, "subscription_update") {
-		if rec.LatestInvoiceAmountPaid <= 0 {
-			return fmt.Errorf("fetched proration invoice has non-positive amount_paid: %d", rec.LatestInvoiceAmountPaid)
-		}
-		return nil
-	}
-	amountPaidMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(rec.LatestInvoiceAmountPaid)))
-	if amountPaidMicros != price.Amount {
-		if rec.LatestInvoiceAmountPaid == 0 {
-			return nil // settled zero-amount invoice (trial / no_payment_required)
-		}
-		return fmt.Errorf("fetched invoice amount mismatch: got %s, want %s", moneyutil.FormatAmount(amountPaidMicros, price.Currency), moneyutil.FormatAmount(price.Amount, price.Currency))
-	}
-	return nil
 }
 
 // recordFetchedBills walks the complete subscription history and fetches each

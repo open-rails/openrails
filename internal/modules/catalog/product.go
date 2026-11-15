@@ -181,31 +181,6 @@ func (s *ProductService) GetByID(ctx context.Context, id uuid.UUID) (*models.Pro
 	return s.db.ProductFromGen(ctx, row)
 }
 
-// GetByIDs loads the scoped products among ids in one query; absent IDs are
-// omitted from the result.
-func (s *ProductService) GetByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*models.Product, error) {
-	out := make(map[uuid.UUID]*models.Product, len(ids))
-	if len(ids) == 0 {
-		return out, nil
-	}
-	queryMerchant, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.db.Gen(ctx).ListProductsByIDs(ctx, gen.ListProductsByIDsParams{MerchantID: queryMerchant.UUID(), Ids: ids})
-	if err != nil {
-		return nil, err
-	}
-	products, err := s.db.ProductsFromGen(ctx, rows)
-	if err != nil {
-		return nil, err
-	}
-	for _, product := range products {
-		out[product.ID] = product
-	}
-	return out, nil
-}
-
 func (s *ProductService) GetActive(ctx context.Context) ([]*models.Product, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
@@ -213,19 +188,6 @@ func (s *ProductService) GetActive(ctx context.Context) ([]*models.Product, erro
 	}
 
 	rows, err := s.db.Gen(ctx).ListActiveProducts(ctx, queryMerchant.UUID())
-	if err != nil {
-		return nil, err
-	}
-	return s.db.ProductsFromGen(ctx, rows)
-}
-
-func (s *ProductService) GetAll(ctx context.Context) ([]*models.Product, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return nil, queryScopeErr
-	}
-
-	rows, err := s.db.Gen(ctx).ListAllProducts(ctx, queryMerchant.UUID())
 	if err != nil {
 		return nil, err
 	}
@@ -281,17 +243,6 @@ func (s *ProductService) List(ctx context.Context, filter ProductFilter, page bi
 	return pagination.Cut(products, limit, func(p *models.Product) any { return pagination.TimeID{At: p.CreatedAt, ID: p.ID} }), nil
 }
 
-// Update is not supported: products change only through the narrow update
-// methods.
-func (s *ProductService) Update(ctx context.Context, product *models.Product) error {
-	return errors.New("products are mostly immutable; use UpdateDisplayName(), UpdateDescription(), or Deactivate() for allowed changes")
-}
-
-// Delete is not supported: Deactivate archives a product, keeping its history.
-func (s *ProductService) Delete(ctx context.Context, id uuid.UUID) error {
-	return errors.New("products cannot be deleted; use Deactivate() instead to preserve historical data")
-}
-
 func (s *ProductService) GetByKey(ctx context.Context, key string) (*models.Product, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
@@ -320,18 +271,6 @@ func (s *ProductService) Activate(ctx context.Context, id uuid.UUID) error {
 // SetArchived sets the archived lifecycle flag on a product.
 func (s *ProductService) SetArchived(ctx context.Context, id uuid.UUID, archived bool) error {
 	_, _, err := s.UpdateDefinition(ctx, id, ProductDefinitionUpdateParams{Archived: &archived})
-	return err
-}
-
-// UpdateDisplayName changes only the display name.
-func (s *ProductService) UpdateDisplayName(ctx context.Context, id uuid.UUID, displayName string) error {
-	_, _, err := s.UpdateDefinition(ctx, id, ProductDefinitionUpdateParams{DisplayName: &displayName})
-	return err
-}
-
-// UpdateDescription changes only the description; empty clears it.
-func (s *ProductService) UpdateDescription(ctx context.Context, id uuid.UUID, description string) error {
-	_, _, err := s.UpdateDefinition(ctx, id, ProductDefinitionUpdateParams{Description: &description})
 	return err
 }
 

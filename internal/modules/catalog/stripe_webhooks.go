@@ -47,8 +47,8 @@ const maxManagedWebhookEndpoints = 4
 // Retire the superseded ones first.
 var ErrWebhookEndpointBudgetExhausted = errors.New("managed stripe webhook endpoint budget exhausted: retire superseded endpoints before rolling over again")
 
-// webhookPost POSTs a form and returns the full response body + status (unlike
-// stripePostForm, which parses only {id} — webhook create needs the `secret`).
+// webhookPost POSTs a form and returns the full response body + status:
+// webhook create needs the `secret`.
 // StripeMetadataOpenRailsManaged marks a Stripe object OpenRails owns.
 const StripeMetadataOpenRailsManaged = "openrails_managed"
 

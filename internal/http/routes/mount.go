@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -142,12 +141,6 @@ func external(pick func(*External) http.Handler) func(*Env) router.Handler {
 		}
 		return httprequest.FromHTTP(handler)
 	}
-}
-
-// gated binds a handler that asks whether its caller would pass another
-// route's permission.
-func gated(build func(httphandlers.StaffCan) func(*httprequest.Request)) func(*Env) router.Handler {
-	return func(e *Env) router.Handler { return router.Handler(build(e.staffCan)) }
 }
 
 // enabled reports whether the assembly's configuration mounts a feature.

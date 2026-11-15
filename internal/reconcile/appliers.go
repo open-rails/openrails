@@ -2,7 +2,6 @@ package reconcile
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -52,17 +51,6 @@ func (w *PGLocalWriter) now() time.Time {
 		return w.Now()
 	}
 	return time.Now().UTC()
-}
-
-func metadataJSON(m map[string]any) []byte {
-	if len(m) == 0 {
-		return nil
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return nil
-	}
-	return b
 }
 
 func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error) {
@@ -287,12 +275,4 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		res.PaymentBackfilled = backfilled
 	}
 	return res, nil
-}
-
-// uuidOrNil is an optional id: the zero id is none.
-func uuidOrNil(id uuid.UUID) *uuid.UUID {
-	if id == uuid.Nil {
-		return nil
-	}
-	return &id
 }

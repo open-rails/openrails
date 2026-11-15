@@ -125,17 +125,6 @@ func (e *TerminalTransitionBlockedError) Unwrap() error {
 	return ErrTerminalTransitionBlocked
 }
 
-func IsTerminalTransitionBlocked(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrTerminalTransitionBlocked) {
-		return true
-	}
-	var blockedErr *TerminalTransitionBlockedError
-	return errors.As(err, &blockedErr)
-}
-
 type CancelMembershipParams struct {
 	SubscriptionID     *uuid.UUID
 	Rail               *models.Rail

@@ -383,14 +383,6 @@ func NormalizeManifestRail(raw string) string {
 	return strings.ToLower(strings.TrimSpace(raw))
 }
 
-func StringPtrIfNotEmpty(v string) *string {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return nil
-	}
-	return &v
-}
-
 // ValidateMerchantDeclaration refuses a declaration any of whose documents
 // ScopeDeclaration would refuse: an operator command applies all of it or
 // nothing.

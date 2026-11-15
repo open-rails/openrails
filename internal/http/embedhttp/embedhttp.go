@@ -1,6 +1,6 @@
 // Package embedhttp assembles the embedded billing HTTP surface as a gin-free
 // net/http handler (issue #282/#285). It is the keystone that lets pkg/embedded
-// expose NewHTTPHandler without importing gin: route groups are registered via
+// expose its routes without importing gin: route groups are registered via
 // the neutral router.NewMux (request.NewHTTP backend), all wrapped with the
 // net/http base middleware stack (security headers, CORS, body limit).
 //
@@ -65,22 +65,6 @@ func FromApp(a *app.App) *Assembler {
 		CaptchaStore: a.Runtime.CaptchaStore,
 		AdminLimiter: middleware.NewAdminOperationLimiter(a.Runtime.AbuseState),
 	}
-}
-
-// NewHTTPHandler assembles the embedded billing surface as a gin-free
-// *http.ServeMux (issue #282). Route groups are registered via router.NewMux
-// (request.NewHTTP backend), and the captcha routes are plain net/http handlers.
-// The mux is wrapped with the net/http base middleware stack (security headers,
-// CORS, body limit) — the gin-free analogue of the global engine middleware. The returned handler imports zero gin on the request path.
-//
-// Rate-limiting + the captcha challenge flow ARE enforced here BY DEFAULT
-// (#742): embedded.New seeds config.Config.RateLimits/Captcha with the same
-// curated defaults config.Load applies whenever the host leaves them nil, so
-// an embedded host does not need to front billing with its own gateway unless
-// it explicitly opts out (config.Config.RateLimitsDisabled). It keys by
-// client IP: no route is authenticated before its own gate runs.
-func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
-	return s.NewRoutes(opts).Handler()
 }
 
 // NewRoutes records actual registrations, retaining each route's security chain.

@@ -36,18 +36,6 @@ type MerchantSecretReader interface {
 	Get(ctx context.Context, merchantID billing.MerchantID, name string) (Secret, error)
 }
 
-// SecretMap reads fixed credentials by name, the same for every merchant:
-// for tools and tests that have no merchant configuration.
-type SecretMap map[string]string
-
-func (m SecretMap) Get(_ context.Context, _ billing.MerchantID, name string) (Secret, error) {
-	name = cleanSecretName(name)
-	if v := strings.TrimSpace(m[name]); v != "" {
-		return Secret{Name: name, Value: v, Version: 1}, nil
-	}
-	return Secret{}, ErrSecretNotFound
-}
-
 // SecretRef names a credential slot. Retired reads as absent: nothing arms a
 // duplicate declaration.
 type SecretRef struct {

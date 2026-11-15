@@ -125,27 +125,3 @@ func (c *Client) CreateCryptogram(ctx context.Context, networkTokenID string) (*
 	}
 	return &out, nil
 }
-
-func (c *Client) SuspendNetworkToken(ctx context.Context, id string) error {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return errors.New("basistheory: network token id is required")
-	}
-	return c.doJSON(ctx, http.MethodPut, "/network-tokens/"+url.PathEscape(id)+"/suspend", nil, "", nil)
-}
-
-func (c *Client) ResumeNetworkToken(ctx context.Context, id string) error {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return errors.New("basistheory: network token id is required")
-	}
-	return c.doJSON(ctx, http.MethodPut, "/network-tokens/"+url.PathEscape(id)+"/resume", nil, "", nil)
-}
-
-func (c *Client) DeleteNetworkToken(ctx context.Context, id string) error {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return errors.New("basistheory: network token id is required")
-	}
-	return c.doJSON(ctx, http.MethodDelete, "/network-tokens/"+url.PathEscape(id), nil, "", nil)
-}

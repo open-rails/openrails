@@ -50,43 +50,6 @@ type SyncCatalogSidecarsRequest struct {
 // CatalogMutationOptions controls the private billing-definition merge.
 type CatalogMutationOptions struct{ Insert, Overwrite, Prune bool }
 
-func (s *Service) PlanCatalogBilling(ctx context.Context, desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) (bool, bool, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return false, false, err
-	}
-	defer release()
-	dbi, err := s.requireDB()
-	if err != nil {
-		return false, false, err
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return false, false, err
-	}
-	if err := normalizeCatalogBilling(&desired); err != nil {
-		return false, false, err
-	}
-	var current SyncCatalogSidecarsRequest
-	err = dbi.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if opts.Insert || opts.Overwrite || opts.Prune {
-			if _, err := gen.New(tx).LockMerchantSettings(ctx, tid.UUID()); err != nil {
-				return err
-			}
-		}
-		var err error
-		current, err = readCatalogBilling(ctx, tx, tid.UUID())
-		if err != nil {
-			return err
-		}
-		return checkCatalogBillingChanges(ctx, tx, tid.UUID(), current, mergeCatalogBilling(current, desired, opts))
-	})
-	if err != nil {
-		return false, false, err
-	}
-	return !reflect.DeepEqual(current.Meters, desired.Meters), !sameCatalogCards(current.RateCards, desired.RateCards), nil
-}
-
 func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) error {
 	_, err := catalogCommand(ctx, s, "catalog/billing", struct {
 		Desired SyncCatalogSidecarsRequest

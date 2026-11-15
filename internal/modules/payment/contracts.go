@@ -6,9 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/attempts"
 )
 
 type UserIdentity struct {
@@ -30,44 +28,6 @@ func customerIDFromUser(userID string) (uuid.UUID, error) {
 		return uuid.Nil, fmt.Errorf("payer subject %q is not a UUID: payable identities are UUID-only", userID)
 	}
 	return id.UUID(), nil
-}
-
-type PurchaseRequest struct {
-	// attempt places a new card's verification in its purchase.
-	attempt         cardAttempt
-	PriceID         string `json:"price_id"`
-	PriceKey        string `json:"price_key,omitempty"`
-	ProductKey      string `json:"product_key,omitempty"`
-	Amount          *int64 `json:"amount,string,omitempty"`
-	PaymentMethodID string `json:"payment_method_id,omitempty"`
-	PaymentToken    string `json:"payment_token,omitempty"`
-	// Card is a new card for a PSP whose card_entry is server.
-	Card *cardguard.Card `json:"-"`
-	// BTTokenIntentID is the Basis Theory token-intent id from BT Elements:
-	// the only card handle custodian-held-card purchase accepts (PAN firewall).
-	BTTokenIntentID string `json:"bt_token_intent_id,omitempty"`
-	Rail            string `json:"rail"`
-	SuccessURL      string `json:"success_url,omitempty"`
-	CancelURL       string `json:"cancel_url,omitempty"`
-
-	IdempotencyKey    string            `json:"-"`
-	OrderAttemptID    string            `json:"-"`
-	PurchaseStartedAt time.Time         `json:"-"`
-	Email             string            `json:"email,omitempty"`
-	NameOnCard        string            `json:"name_on_card,omitempty"`
-	FirstName         string            `json:"first_name,omitempty"`
-	LastName          string            `json:"last_name,omitempty"`
-	Address1          string            `json:"address1,omitempty"`
-	Address2          string            `json:"address2,omitempty"`
-	Phone             string            `json:"phone,omitempty"`
-	City              string            `json:"city,omitempty"`
-	State             string            `json:"state,omitempty"`
-	Zip               string            `json:"zip,omitempty"`
-	Country           string            `json:"country,omitempty"`
-	LastFour          string            `json:"last_four,omitempty"`
-	CardType          string            `json:"card_type,omitempty"`
-	ExpiryDate        string            `json:"expiry_date,omitempty"`
-	Metadata          map[string]string `json:"-"`
 }
 
 type PurchaseResponse struct {
@@ -107,10 +67,4 @@ type EligibilityResult struct {
 	Coverage             *CoverageInfo
 	ExistingSubscription *models.Subscription
 	ExistingProduct      *models.Product
-}
-
-// cardAttempt is the purchase a new card's verification belongs to.
-type cardAttempt struct {
-	target string
-	owner  attempts.Owner
 }

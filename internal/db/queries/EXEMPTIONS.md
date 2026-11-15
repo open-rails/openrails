@@ -95,10 +95,6 @@ Every sqlc query, and the SQL outside sqlc that runs against the same tables:
   attached to. Named `function.<fn>.<n>` or `trigger.<fn>.<table>.<n>`.
   Dynamic `EXECUTE` text is not planned; nothing touching a billing table may
   fail to bind silently.
-- **Metrics.** `metrics.AuditStatements` compiles every family bucketed by day
-  with all its dimensions, and as one total (`metrics.<family>.<shape>`).
-- **Archive.** `merchantarchive.AuditStatements` lists each table's export and
-  count and every preflight and reference refusal (`archive.<kind>.<table>`).
 
 `unbounded-many` applies to sqlc `:many` queries only; the plan rules apply to
 everything.

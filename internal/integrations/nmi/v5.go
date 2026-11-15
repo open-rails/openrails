@@ -249,14 +249,6 @@ type v5TxnAction struct {
 
 func (t *v5Transaction) approved() bool { return strings.TrimSpace(t.Response) == "1" }
 
-func (t *v5Transaction) resultCode() int {
-	code, _ := strconv.Atoi(strings.TrimSpace(t.ResponseCode))
-	if code == 0 && strings.TrimSpace(t.Response) == "2" {
-		return 200
-	}
-	return code
-}
-
 // newV5TransactionError maps a v5 decline (response=2, 2xx code) onto the
 // classic CustomerVaultError shape; any other outcome is ambiguous.
 func newV5TransactionError(prefix string, txn *v5Transaction) error {
@@ -561,45 +553,6 @@ func (c *NMIClient) GetPayment(ctx context.Context, transactionID string) (v5Tra
 		return txn, false, err
 	}
 	return txn, true, nil
-}
-
-// PaymentAction is one action on a payment (sale/refund/credit/void/...),
-// normalized for the refund verifier.
-type PaymentAction struct {
-	TransactionID string
-	Type          string
-	AmountCents   int64
-	Success       bool
-}
-
-// GetPaymentActions returns the actions recorded on a transaction. found=false
-// when the transaction id is unknown at NMI.
-func (c *NMIClient) GetPaymentActions(ctx context.Context, transactionID string) ([]PaymentAction, bool, error) {
-	txn, found, err := c.GetPayment(ctx, transactionID)
-	if err != nil || !found {
-		return nil, found, err
-	}
-	out := make([]PaymentAction, 0, len(txn.Actions))
-	for _, a := range txn.Actions {
-		cents, cerr := moneyutil.DecimalToRailMinor(txn.Currency, a.Amount)
-		if cerr != nil {
-			cents = 0
-		}
-		if cents < 0 {
-			cents = -cents
-		}
-		id := strings.TrimSpace(a.ID)
-		if id == "" {
-			id = strings.TrimSpace(txn.ID)
-		}
-		out = append(out, PaymentAction{
-			TransactionID: id,
-			Type:          strings.ToLower(strings.TrimSpace(a.Type)),
-			AmountCents:   int64(cents),
-			Success:       a.Success,
-		})
-	}
-	return out, true, nil
 }
 
 // PlanPage is one cursor page of the v5 plan list.

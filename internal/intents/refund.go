@@ -232,13 +232,6 @@ func endRefundedMembership(ctx context.Context, d *db.DB, clock clockwork.Clock,
 	return err
 }
 
-func (r refundReservations) now() time.Time {
-	if r.Clock != nil {
-		return r.Clock.Now().UTC()
-	}
-	return time.Now().UTC()
-}
-
 func (r refundReservations) recordReceipt(ctx context.Context, p RefundPayload, providerRefundID string) error {
 	if strings.TrimSpace(providerRefundID) == "" {
 		return errors.New("successful refund response has no transaction reference")

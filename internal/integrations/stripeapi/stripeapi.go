@@ -84,15 +84,6 @@ func (t *guardTransport) transport() http.RoundTripper {
 	return t.base
 }
 
-// Client returns the *http.Client all Stripe API calls must go through. Writes
-// (non-GET/HEAD) fail with ErrProviderReadOnly when
-// config.IsProviderReadOnly(cfg); reads always pass. A nil cfg fails closed
-// (read-only): a wiring bug must never unblock provider writes. timeout <= 0
-// selects DefaultTimeout.
-func Client(cfg *config.Config, timeout time.Duration) *http.Client {
-	return (*Factory)(nil).Client(cfg, timeout)
-}
-
 // ReadOnlyClient returns a Stripe client that blocks writes regardless of
 // mode, for read paths with no *config.Config at hand (reconciliation,
 // payment-state and liveness reads). A write sneaking onto such a path fails

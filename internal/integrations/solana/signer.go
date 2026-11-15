@@ -26,7 +26,7 @@ type Signer interface {
 }
 
 // blockhashProvider is the subset of *RPCClient the tx builder needs. Declared
-// as an interface so BuildSignSubmit is unit-testable without a live RPC.
+// as an interface so BuildSignSubmitPresubmit is unit-testable without a live RPC.
 type blockhashProvider interface {
 	// LatestBlockhash returns the blockhash with its chain terminal, so the
 	// confirmation watch ends on the chain's word.
@@ -35,25 +35,11 @@ type blockhashProvider interface {
 	SubmitAndConfirm(ctx context.Context, tx *solanago.Transaction, terminal ChainTerminal) (*TransactionOutcome, error)
 }
 
-// BuildSignSubmit assembles a single-signer transaction (the cranker is fee
-// payer and sole required signer), signs it and submits it: the shared path
-// for create_plan, update_plan and transfer_subscription.
-//
-// With one required signer, Signatures[0] is the fee payer's; a co-signer flow
-// must order signatures to match the message's required-signer list.
-func BuildSignSubmit(
-	ctx context.Context,
-	signer Signer,
-	rpc blockhashProvider,
-	instructions []solanago.Instruction,
-) (solanago.Signature, error) {
-	return BuildSignSubmitPresubmit(ctx, signer, rpc, instructions, nil)
-}
-
-// BuildSignSubmitPresubmit is BuildSignSubmit with a hook run after signing and
-// before submission: the caller durably records the signature so a crash
-// mid-submit resolves by a chain read, not a blind re-send. A presubmit error
-// aborts the submit (nothing was sent).
+// BuildSignSubmitPresubmit assembles a single-signer transaction (the cranker
+// is fee payer and sole required signer; Signatures[0] is its), signs it, runs
+// presubmit when set and submits it. In presubmit the caller durably records the
+// signature, so a crash mid-submit resolves by a chain read, not a blind
+// re-send. A presubmit error aborts the submit (nothing was sent).
 func BuildSignSubmitPresubmit(
 	ctx context.Context,
 	signer Signer,

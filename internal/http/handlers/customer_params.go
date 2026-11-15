@@ -1,10 +1,7 @@
 package handlers
 
 import (
-	"errors"
 	"strings"
-
-	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -31,19 +28,6 @@ func customerIDParam(raw string) billing.CustomerID {
 		return billing.CustomerID{}
 	}
 	return id
-}
-
-func parseServiceCustomerID(raw string) (*billingidentity.CustomerID, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, nil
-	}
-	id, err := uuid.Parse(raw)
-	if err != nil || id == uuid.Nil {
-		return nil, errors.New("invalid customer_id")
-	}
-	customer := billingidentity.CustomerID(id)
-	return &customer, nil
 }
 
 // serviceRequiredCurrency answers a missing currency; a present one is

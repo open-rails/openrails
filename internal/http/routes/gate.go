@@ -608,36 +608,6 @@ func inPerson(c billingauth.Identity) bool {
 	return billingauth.Interactive(c) || c.Issuer == billingauth.HostIssuer && c.Subject == hostSubject
 }
 
-// staffCan answers a handler that asks whether its caller would pass the
-// permission of another route, by key, on the merchant the route already
-// resolved.
-func (e *Env) staffCan(r *http.Request, routeKey string) error {
-	staff, ok := billingauth.StaffFromContext(r.Context())
-	v, verified := billingauth.VerifiedFrom(r.Context())
-	if !ok || !verified {
-		return billingauth.ErrUnauthenticated
-	}
-	var pair Pair
-	if route, ok := routeByKey(routeKey); ok && e.on(route) {
-		pair = asked(e.Auth, route.Needs())
-	}
-	if pair == (Pair{}) {
-		return billingauth.ErrForbidden
-	}
-	root, err := rootScope(r.Context(), e.Auth)
-	if err != nil {
-		return err
-	}
-	allowed, err := holds(r.Context(), v, root, staff.Merchant, pair)
-	switch {
-	case err != nil:
-		return err
-	case !allowed:
-		return billingauth.ErrForbidden
-	}
-	return nil
-}
-
 // routeByKey reads the catalog at request time: the catalog's declarations
 // refer to staffCan, so it cannot read the index statically.
 var routeByKey func(key string) (Route, bool)

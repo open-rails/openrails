@@ -1551,7 +1551,6 @@
     "internal/http/handlers": [
       "type CustomerCancelSubscriptionParams struct {\n\tReason        string `json:\"reason\"`\n\tRevokeOnChain bool   `json:\"revoke_on_chain\"`\n\tSignature     string `json:\"signature\"`\n}",
       "type CustomerChangeSubscriptionParams struct {\n\tPriceID   *billing.PriceID `json:\"price_id\"`\n\tQuantity  *int             `json:\"quantity\"`\n\tSignature string           `json:\"signature\"`\n}",
-      "type PaginatedResponse[T any] struct {\n\tItems  []T   `json:\"items\"`\n\tTotal  int64 `json:\"total\"`\n\tLimit  int   `json:\"limit\"`\n\tOffset int   `json:\"offset\"`\n}",
       "type PreviewSubscriptionChangeParams struct {\n\tPriceID  *billing.PriceID `json:\"price_id\"`\n\tQuantity *int             `json:\"quantity\"`\n}",
       "type SolanaPayGetResponse struct {\n\tLabel string `json:\"label\"`\n\tIcon  string `json:\"icon\"`\n}",
       "type SolanaPayPostRequest struct {\n\tAccount string `json:\"account\" binding:\"required\"`\n}",
@@ -1685,10 +1684,7 @@
       "type FieldError struct {\n\tParam   string   `json:\"param\"`\n\tCode    string   `json:\"code\"`\n\tMessage string   `json:\"message\"`\n\tValid   []string `json:\"valid,omitempty\"`\n}"
     ],
     "internal/modules/catalog": [
-      "type StripePrice struct {\n\tID         string            `json:\"id\"`\n\tProduct    string            `json:\"product\"`\n\tUnitAmount int64             `json:\"unit_amount\"`\n\tCurrency   string            `json:\"currency\"`\n\tNickname   string            `json:\"nickname\"`\n\tLookupKey  string            `json:\"lookup_key\"`\n\tActive     bool              `json:\"active\"`\n\tMetadata   map[string]string `json:\"metadata\"`\n\tRecurring  *struct {\n\t\tInterval string `json:\"interval\"`\n\t\tCount    int    `json:\"interval_count\"`\n\t} `json:\"recurring,omitempty\"`\n}",
-      "type StripeProduct struct {\n\tID          string            `json:\"id\"`\n\tName        string            `json:\"name\"`\n\tDescription string            `json:\"description\"`\n\tActive      bool              `json:\"active\"`\n\tMetadata    map[string]string `json:\"metadata\"`\n}",
-      "type StripeWebhookEndpoint struct {\n\tID            string            `json:\"id\"`\n\tURL           string            `json:\"url\"`\n\tStatus        string            `json:\"status\"`\n\tAPIVersion    string            `json:\"api_version\"`\n\tCreated       int64             `json:\"created\"`\n\tEnabledEvents []string          `json:\"enabled_events\"`\n\tMetadata      map[string]string `json:\"metadata\"`\n}",
-      "type stripeObject struct {\n\tID string `json:\"id\"`\n}"
+      "type StripeWebhookEndpoint struct {\n\tID            string            `json:\"id\"`\n\tURL           string            `json:\"url\"`\n\tStatus        string            `json:\"status\"`\n\tAPIVersion    string            `json:\"api_version\"`\n\tCreated       int64             `json:\"created\"`\n\tEnabledEvents []string          `json:\"enabled_events\"`\n\tMetadata      map[string]string `json:\"metadata\"`\n}"
     ],
     "internal/modules/catalog/providerobjects": [
       "type position struct {\n\tKind string `json:\"k\"`\n\tRef  string `json:\"r\"`\n}",
@@ -1747,14 +1743,12 @@
     ],
     "internal/modules/payment": [
       "func (p *StripeTierChangePayload) UnmarshalJSON(data []byte) error {\n\ttype plain StripeTierChangePayload\n\tvar decoded plain\n\tif err := json.Unmarshal(data, \u0026decoded); err != nil {\n\t\treturn err\n\t}\n\tvar fields map[string]json.RawMessage\n\tif err := json.Unmarshal(data, \u0026fields); err != nil {\n\t\treturn err\n\t}\n\tif _, present := fields[\"access_duration_hours\"]; !present {\n\t\thours := int(decoded.PeriodEnd.Sub(decoded.PeriodStart) / time.Hour)\n\t\tdecoded.AccessDurationHours = \u0026hours\n\t}\n\t*p = StripeTierChangePayload(decoded)\n\treturn nil\n}",
-      "type PurchaseRequest struct {\n\tPriceID         string `json:\"price_id\"`\n\tPriceKey        string `json:\"price_key,omitempty\"`\n\tProductKey      string `json:\"product_key,omitempty\"`\n\tAmount          *int64 `json:\"amount,string,omitempty\"`\n\tPaymentMethodID string `json:\"payment_method_id,omitempty\"`\n\tPaymentToken    string `json:\"payment_token,omitempty\"`\n\n\tCard *cardguard.Card `json:\"-\"`\n\n\tBTTokenIntentID string `json:\"bt_token_intent_id,omitempty\"`\n\tRail            string `json:\"rail\"`\n\tSuccessURL      string `json:\"success_url,omitempty\"`\n\tCancelURL       string `json:\"cancel_url,omitempty\"`\n\n\tIdempotencyKey    string            `json:\"-\"`\n\tOrderAttemptID    string            `json:\"-\"`\n\tPurchaseStartedAt time.Time         `json:\"-\"`\n\tEmail             string            `json:\"email,omitempty\"`\n\tNameOnCard        string            `json:\"name_on_card,omitempty\"`\n\tFirstName         string            `json:\"first_name,omitempty\"`\n\tLastName          string            `json:\"last_name,omitempty\"`\n\tAddress1          string            `json:\"address1,omitempty\"`\n\tAddress2          string            `json:\"address2,omitempty\"`\n\tPhone             string            `json:\"phone,omitempty\"`\n\tCity              string            `json:\"city,omitempty\"`\n\tState             string            `json:\"state,omitempty\"`\n\tZip               string            `json:\"zip,omitempty\"`\n\tCountry           string            `json:\"country,omitempty\"`\n\tLastFour          string            `json:\"last_four,omitempty\"`\n\tCardType          string            `json:\"card_type,omitempty\"`\n\tExpiryDate        string            `json:\"expiry_date,omitempty\"`\n\tMetadata          map[string]string `json:\"-\"`\n}",
       "type PurchaseResponse struct {\n\tStatus string `json:\"status\"`\n\tAction string `json:\"action,omitempty\"`\n\n\tCode           string     `json:\"code,omitempty\"`\n\tMessage        string     `json:\"message,omitempty\"`\n\tSubscriptionID *uuid.UUID `json:\"subscription_id,omitempty\"`\n\tPaymentID      *uuid.UUID `json:\"payment_id,omitempty\"`\n\tTransactionID  string     `json:\"transaction_id,omitempty\"`\n\tRedirectURL    string     `json:\"redirect_url,omitempty\"`\n\tDelayedStart   *time.Time `json:\"delayed_start,omitempty\"`\n}",
       "type RoutingCandidate struct {\n\tSelector string    `json:\"selector\"`\n\tRail     string    `json:\"rail,omitempty\"`\n\tPSPID    uuid.UUID `json:\"-\"`\n\n\tSkip string `json:\"skip,omitempty\"`\n}",
       "type StripeTierChangePayload struct {\n\tStaff                 *subscriptions.StaffChange `json:\"staff,omitempty\"`\n\tAccessDurationHours   *int                       `json:\"access_duration_hours\"`\n\tProviderAccessDefault bool                       `json:\"provider_access_default,omitempty\"`\n\tRequestedPrice        string                     `json:\"requested_price\"`\n\tUserID                string                     `json:\"user_id\"`\n\tSubscriptionID        uuid.UUID                  `json:\"subscription_id\"`\n\tStripeSubscriptionID  string                     `json:\"stripe_subscription_id\"`\n\tStripeItemID          string                     `json:\"stripe_item_id\"`\n\tAction                string                     `json:\"action\"`\n\tOldPriceID            uuid.UUID                  `json:\"old_price_id\"`\n\tOldStripePriceID      string                     `json:\"old_stripe_price_id\"`\n\tPriceID               uuid.UUID                  `json:\"price_id\"`\n\tProductID             uuid.UUID                  `json:\"product_id\"`\n\tProductName           string                     `json:\"product_name\"`\n\tStripePriceID         string                     `json:\"stripe_price_id\"`\n\tCurrency              string                     `json:\"currency\"`\n\tRecurringAmount       int64                      `json:\"recurring_amount\"`\n\n\tAmountDueNow       int64  `json:\"amount_due_now\"`\n\tProrationBehavior  string `json:\"proration_behavior\"`\n\tBillingCycleAnchor string `json:\"billing_cycle_anchor,omitempty\"`\n\n\tPaymentBehavior string `json:\"payment_behavior,omitempty\"`\n\n\tPeriodStart      time.Time `json:\"period_start\"`\n\tPeriodEnd        time.Time `json:\"period_end\"`\n\tBillingCycleDays *int      `json:\"billing_cycle_days,omitempty\"`\n}",
       "type nmiScheduleUpdate struct {\n\tAttempts  int    `json:\"attempts\"`\n\tLastError string `json:\"last_error,omitempty\"`\n\tDone      bool   `json:\"done,omitempty\"`\n}",
       "type nmiUpgradeProgress struct {\n\tProration *nmiUpgradeStep    `json:\"proration,omitempty\"`\n\tUpdate    *nmiScheduleUpdate `json:\"schedule_update,omitempty\"`\n}",
       "type nmiUpgradeStep struct {\n\tSubmittedAt time.Time         `json:\"submitted_at\"`\n\tSale        *nmi.SaleResponse `json:\"sale,omitempty\"`\n\tRefusal     string            `json:\"refusal,omitempty\"`\n\n\tRefusalCode   string `json:\"refusal_code,omitempty\"`\n\tRefusalStatus int    `json:\"refusal_status,omitempty\"`\n\n\tResolution map[string]any `json:\"resolution,omitempty\"`\n}",
-      "type saleIdempotencyResult struct {\n\tTransactionID string    `json:\"transaction_id\"`\n\tPaymentID     uuid.UUID `json:\"payment_id\"`\n\tDelayedStart  *string   `json:\"delayed_start,omitempty\"`\n}",
       "type stripeCheckoutSession struct {\n\tID            string `json:\"id\"`\n\tURL           string `json:\"url\"`\n\tStatus        string `json:\"status\"`\n\tPaymentStatus string `json:\"payment_status\"`\n\tPaymentIntent string `json:\"payment_intent\"`\n\tAmountTotal   int64  `json:\"amount_total\"`\n\tCurrency      string `json:\"currency\"`\n}",
       "type stripeTierChangeProgress struct {\n\tUpdate   *stripeTierChangeStep `json:\"update,omitempty\"`\n\tSchedule *stripeTierChangeStep `json:\"schedule,omitempty\"`\n\tPhases   *stripeTierChangeStep `json:\"phases,omitempty\"`\n}",
       "type stripeTierChangeStep struct {\n\tSubmittedAt   time.Time                              `json:\"submitted_at\"`\n\tSubscription  *subscriptions.StripeSubscriptionState `json:\"subscription,omitempty\"`\n\tSchedule      *subscriptions.StripeScheduleState     `json:\"schedule,omitempty\"`\n\tRefusal       string                                 `json:\"refusal,omitempty\"`\n\tRefusalCode   string                                 `json:\"refusal_code,omitempty\"`\n\tRefusalStatus int                                    `json:\"refusal_status,omitempty\"`\n\tResolution    map[string]any                         `json:\"resolution,omitempty\"`\n}"
@@ -1811,7 +1805,6 @@
       "type stripeSubscriptionScheduleResponse struct {\n\tID     string `json:\"id\"`\n\tPhases []struct {\n\t\tStartDate int64 `json:\"start_date\"`\n\t\tEndDate   int64 `json:\"end_date\"`\n\t\tItems     []struct {\n\t\t\tPrice    string `json:\"price\"`\n\t\t\tQuantity int64  `json:\"quantity\"`\n\t\t} `json:\"items\"`\n\t} `json:\"phases\"`\n}"
     ],
     "internal/modules/webhooks": [
-      "func (i *Intish) UnmarshalJSON(data []byte) error {\n\tif i == nil {\n\t\treturn errors.New(\"Intish: UnmarshalJSON on nil receiver\")\n\t}\n\ttrimmed := strings.TrimSpace(string(data))\n\tif trimmed == \"\" || trimmed == \"null\" {\n\t\t*i = 0\n\t\treturn nil\n\t}\n\tif trimmed[0] == '\"' {\n\t\tvar str string\n\t\tif err := json.Unmarshal(data, \u0026str); err != nil {\n\t\t\treturn err\n\t\t}\n\t\tstr = strings.TrimSpace(str)\n\t\tif str == \"\" {\n\t\t\t*i = 0\n\t\t\treturn nil\n\t\t}\n\t\tval, err := strconv.ParseInt(str, 10, 64)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"invalid Intish value %q: %w\", str, err)\n\t\t}\n\t\t*i = Intish(val)\n\t\treturn nil\n\t}\n\tval, err := strconv.ParseInt(trimmed, 10, 64)\n\tif err != nil {\n\t\treturn fmt.Errorf(\"invalid Intish value %q: %w\", trimmed, err)\n\t}\n\t*i = Intish(val)\n\treturn nil\n}",
       "func (s *Stringish) UnmarshalJSON(data []byte) error {\n\tif len(data) == 0 {\n\t\treturn nil\n\t}\n\tif string(data) == \"null\" {\n\t\t*s = \"\"\n\t\treturn nil\n\t}\n\tif data[0] == '\"' {\n\t\tvar str string\n\t\tif err := json.Unmarshal(data, \u0026str); err != nil {\n\t\t\treturn err\n\t\t}\n\t\t*s = Stringish(str)\n\t\treturn nil\n\t}\n\n\tdec := json.NewDecoder(strings.NewReader(string(data)))\n\tdec.UseNumber()\n\tvar raw any\n\tif err := dec.Decode(\u0026raw); err != nil {\n\t\treturn err\n\t}\n\tswitch v := raw.(type) {\n\tcase json.Number:\n\t\t*s = Stringish(trimTrailingZeroFraction(v.String()))\n\tcase bool:\n\t\t*s = Stringish(strconv.FormatBool(v))\n\tdefault:\n\t\t*s = Stringish(fmt.Sprint(v))\n\t}\n\treturn nil\n}",
       "type BillingError struct {\n\tType    string                 `json:\"type\"`\n\tMessage string                 `json:\"message\"`\n\tContext map[string]interface{} `json:\"context\"`\n\tErr     error                  `json:\"-\"`\n}",
       "type CCBillBillingDateChangeEvent struct {\n\tSubscriptionID  string `json:\"subscriptionId\" validate:\"required\"`\n\tClientAccnum    string `json:\"clientAccnum\" validate:\"required\"`\n\tClientSubacc    string `json:\"clientSubacc\" validate:\"required\"`\n\tTimestamp       string `json:\"timestamp\" validate:\"required\"`\n\tNextRenewalDate string `json:\"nextRenewalDate\" validate:\"required\"`\n}",
@@ -1874,9 +1867,6 @@
       "type subscriptionData struct {\n\tPlan           string     `json:\"plan,omitempty\"`\n\tAmount         int64      `json:\"amount,string\"`\n\tCurrency       string     `json:\"currency\"`\n\tIntervalHours  int        `json:\"interval_hours,omitempty\"`\n\tIntervalMonths int        `json:\"interval_months,omitempty\"`\n\tStartedAt      time.Time  `json:\"started_at\"`\n\tNextBillingAt  *time.Time `json:\"next_billing_at,omitempty\"`\n\tPaused         bool       `json:\"paused,omitempty\"`\n\n\tEnded        bool       `json:\"ended,omitempty\"`\n\tEndedAt      *time.Time `json:\"ended_at,omitempty\"`\n\tUserCanceled bool       `json:\"user_canceled,omitempty\"`\n\n\tMethodRef string          `json:\"method_ref,omitempty\"`\n\tEvidence  json.RawMessage `json:\"evidence,omitempty\"`\n\n\tRemote *reconcile.RemoteSubscription `json:\"remote,omitempty\"`\n}",
       "type transactionData struct {\n\tTransactionID         string    `json:\"transaction_id\"`\n\tOriginalTransactionID string    `json:\"original_transaction_id,omitempty\"`\n\tType                  string    `json:\"type\"`\n\tSuccess               bool      `json:\"success\"`\n\tAmount                int64     `json:\"amount,string\"`\n\tCurrency              string    `json:\"currency\"`\n\tOccurredAt            time.Time `json:\"occurred_at\"`\n\n\tDecimal string `json:\"decimal,omitempty\"`\n\n\tStripeInvoice *billing.DeclaredStripeInvoice `json:\"stripe_invoice,omitempty\"`\n\n\tRemote *reconcile.RemoteTransaction `json:\"remote,omitempty\"`\n}"
     ],
-    "internal/query": [
-      "type QueryOptions[T any] struct {\n\tPage       int    `form:\"page\" json:\"page\"`\n\tSortBy     string `form:\"sort_by\" json:\"sort_by\"`\n\tPageSize   int    `form:\"page_size\" json:\"page_size\"`\n\tLimit      int    `form:\"limit\" json:\"limit\"`\n\tOffset     int    `form:\"offset\" json:\"offset\"`\n\tTotalItems int64  `form:\"total_items\" json:\"total_items\"`\n\tAll        bool   `form:\"all\" json:\"all\"`\n\tFilters    T      `form:\",inline\"`\n}"
-    ],
     "internal/reconcile": [
       "func (k *TransitionKind) UnmarshalText(b []byte) error {\n\tfor _, v := range []TransitionKind{TransitionNone, TransitionRenew, TransitionAdoptPeriodEnd, TransitionPastDue, TransitionParkUnknown, TransitionCancel} {\n\t\tif v.String() == string(b) {\n\t\t\t*k = v\n\t\t\treturn nil\n\t\t}\n\t}\n\treturn fmt.Errorf(\"unknown transition %q\", b)\n}",
       "func (k TransitionKind) MarshalText() ([]byte, error) { return []byte(k.String()), nil }",
@@ -1899,7 +1889,6 @@
       "type RemoteSnapshot struct {\n\tBillsRecorded  bool                  `json:\"-\"`\n\tProvider       Provider              `json:\"provider\"`\n\tPspID          string                `json:\"psp_id,omitempty\"`\n\tFetchedAt      time.Time             `json:\"fetched_at\"`\n\tSubscriptions  []RemoteSubscription  `json:\"subscriptions\"`\n\tTransactions   []RemoteTransaction   `json:\"transactions\"`\n\tPaymentMethods []RemotePaymentMethod `json:\"vault_entries\"`\n\tCapabilities   Capabilities          `json:\"capabilities\"`\n\tCoverage       SnapshotCoverage      `json:\"coverage\"`\n}",
       "type RemoteSubscription struct {\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n\n\tStatus    SubscriptionStatus `json:\"status\"`\n\tRawStatus string             `json:\"raw_status,omitempty\"`\n\n\tCustomerID string `json:\"customer_id,omitempty\"`\n\n\tEmail    string `json:\"email,omitempty\"`\n\tUsername string `json:\"username,omitempty\"`\n\n\tPlanID string `json:\"plan_id,omitempty\"`\n\n\tNextBillingAt *time.Time `json:\"next_billing_at,omitempty\"`\n\tLastBilledAt  *time.Time `json:\"last_billed_at,omitempty\"`\n\n\tPeriodStart *time.Time `json:\"period_start,omitempty\"`\n\n\tPaused bool `json:\"paused,omitempty\"`\n\n\tAmountCents int64  `json:\"amount_cents\"`\n\tCurrency    string `json:\"currency,omitempty\"`\n\n\tAmount string `json:\"amount,omitempty\"`\n\n\tIntervalDays   int `json:\"interval_days,omitempty\"`\n\tIntervalMonths int `json:\"interval_months,omitempty\"`\n\n\tBookID    string    `json:\"book_id,omitempty\"`\n\tCreatedAt time.Time `json:\"created_at,omitzero\"`\n\n\tCanceledAt *time.Time `json:\"canceled_at,omitempty\"`\n\tCancelKind string     `json:\"cancel_kind,omitempty\"`\n\n\tRaw json.RawMessage `json:\"raw,omitempty\"`\n}",
       "type RemoteTransaction struct {\n\tObservedBill                   *observed.Bill            `json:\"-\"`\n\tStripeBill                     *subscriptions.StripeBill `json:\"stripe_bill,omitempty\"`\n\tNextBillingAt                  *time.Time                `json:\"next_billing_at,omitempty\"`\n\tBillPeriodStart, BillPeriodEnd *time.Time                `json:\"-\"`\n\n\tPaymentMetadata map[string]any `json:\"-\"`\n\n\tTransactionID string `json:\"transaction_id\"`\n\n\tOriginalTransactionID string `json:\"original_transaction_id,omitempty\"`\n\n\tSubscriptionID string `json:\"subscription_id,omitempty\"`\n\n\tBookID string `json:\"book_id,omitempty\"`\n\n\tOrderID     string          `json:\"order_id,omitempty\"`\n\tCustomerRef string          `json:\"customer_ref,omitempty\"`\n\tEmail       string          `json:\"email,omitempty\"`\n\tType        TransactionType `json:\"type\"`\n\tSuccess     bool            `json:\"success\"`\n\n\tAmountCents int64  `json:\"amount_cents\"`\n\tCurrency    string `json:\"currency,omitempty\"`\n\n\tAmount     string    `json:\"amount,omitempty\"`\n\tOccurredAt time.Time `json:\"occurred_at\"`\n\n\tDeclineReason string `json:\"decline_reason,omitempty\"`\n\n\tDeclineCode string `json:\"decline_code,omitempty\"`\n\n\tAnswer decline.Evidence `json:\"-\"`\n\tRaw    json.RawMessage  `json:\"raw,omitempty\"`\n}",
-      "type RunRecord struct {\n\tID             uuid.UUID       `json:\"id\"`\n\tMerchantID     uuid.UUID       `json:\"tenant_id\"`\n\tMode           Mode            `json:\"mode\"`\n\tProviders      []string        `json:\"providers\"`\n\tWindowStartsAt *time.Time      `json:\"window_starts_at,omitempty\"`\n\tWindowEndsAt   *time.Time      `json:\"window_ends_at,omitempty\"`\n\tStartedAt      time.Time       `json:\"started_at\"`\n\tFinishedAt     *time.Time      `json:\"finished_at,omitempty\"`\n\tStatus         string          `json:\"status\"`\n\tSummary        json.RawMessage `json:\"summary,omitempty\"`\n\tError          string          `json:\"error,omitempty\"`\n}",
       "type RunResult struct {\n\tRunID          uuid.UUID        `json:\"run_id\"`\n\tMode           Mode             `json:\"mode\"`\n\tStatus         string           `json:\"status\"`\n\tSummary        *RunSummary      `json:\"summary\"`\n\tFindings       []FindingRecord  `json:\"findings\"`\n\tPlannedChanges []MutationRecord `json:\"planned_changes,omitempty\"`\n\tAppliedChanges []MutationRecord `json:\"applied_changes,omitempty\"`\n}",
       "type RunSummary struct {\n\tMode      Mode                       `json:\"mode\"`\n\tProviders map[string]*ProviderReport `json:\"providers\"`\n\tTotals    SummaryTotals              `json:\"totals\"`\n}",
       "type SnapshotCoverage struct {\n\tSubscriptionsExhaustive       bool       `json:\"subscriptions_exhaustive,omitempty\"`\n\tTransactionsExhaustive        bool       `json:\"transactions_exhaustive,omitempty\"`\n\tTransactionsPaginatedComplete bool       `json:\"transactions_paginated_complete,omitempty\"`\n\tTransactionWindowSince        *time.Time `json:\"transaction_window_since,omitempty\"`\n\tTransactionWindowUntil        *time.Time `json:\"transaction_window_until,omitempty\"`\n}",
@@ -2448,7 +2437,6 @@
       "fmt": "fmt",
       "http": "net/http",
       "log": "github.com/sirupsen/logrus",
-      "sort": "sort",
       "sync": "sync"
     },
     "internal/archivewire/wire.go": {
@@ -2492,7 +2480,6 @@
     },
     "internal/config/config.go": {
       "cmp": "cmp",
-      "custodians": "github.com/open-rails/openrails/internal/custodians",
       "errors": "errors",
       "fmt": "fmt",
       "log": "github.com/sirupsen/logrus",
@@ -2816,15 +2803,6 @@
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
-    "internal/http/handlers/admin_catalog.go": {
-      "api": "github.com/open-rails/openrails/internal/api",
-      "billing": "github.com/open-rails/openrails/billing",
-      "billingservice": "github.com/open-rails/openrails/internal/service",
-      "http": "net/http",
-      "httprequest": "github.com/open-rails/openrails/internal/http/request",
-      "strconv": "strconv",
-      "strings": "strings"
-    },
     "internal/http/handlers/entitlements.go": {
       "api": "github.com/open-rails/openrails/internal/api",
       "billing": "github.com/open-rails/openrails/billing",
@@ -3102,7 +3080,6 @@
       "json": "encoding/json",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
-      "sha256": "crypto/sha256",
       "strings": "strings",
       "uuid": "github.com/google/uuid"
     },
@@ -3538,7 +3515,6 @@
     },
     "internal/modules/alerting/types.go": {
       "billing": "github.com/open-rails/openrails/billing",
-      "fmt": "fmt",
       "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid"
@@ -3570,21 +3546,6 @@
       "strconv": "strconv",
       "strings": "strings",
       "time": "time",
-      "url": "net/url"
-    },
-    "internal/modules/catalog/stripe_catalog.go": {
-      "config": "github.com/open-rails/openrails/internal/config",
-      "context": "context",
-      "errors": "errors",
-      "fmt": "fmt",
-      "http": "net/http",
-      "io": "io",
-      "json": "encoding/json",
-      "log": "github.com/sirupsen/logrus",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
-      "strings": "strings",
-      "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
       "url": "net/url"
     },
     "internal/modules/catalog/stripe_webhooks.go": {
@@ -3829,27 +3790,9 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/payment/contracts.go": {
-      "attempts": "github.com/open-rails/openrails/internal/modules/attempts",
-      "cardguard": "github.com/open-rails/openrails/internal/cardguard",
       "fmt": "fmt",
       "identity": "github.com/open-rails/openrails/internal/billingidentity",
       "models": "github.com/open-rails/openrails/internal/db/models",
-      "time": "time",
-      "uuid": "github.com/google/uuid"
-    },
-    "internal/modules/payment/nmi_sale_service.go": {
-      "config": "github.com/open-rails/openrails/internal/config",
-      "context": "context",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "intents": "github.com/open-rails/openrails/internal/intents",
-      "json": "encoding/json",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
-      "orders": "github.com/open-rails/openrails/internal/modules/orders",
-      "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
@@ -3907,7 +3850,6 @@
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "errors": "errors",
       "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
       "hex": "encoding/hex",
       "http": "net/http",
       "intents": "github.com/open-rails/openrails/internal/intents",
@@ -4417,7 +4359,6 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/webhooks/types.go": {
-      "errors": "errors",
       "fmt": "fmt",
       "json": "encoding/json",
       "strconv": "strconv",
@@ -4723,7 +4664,6 @@
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "models": "github.com/open-rails/openrails/internal/db/models",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "strings": "strings",
       "time": "time",
@@ -5254,8 +5194,7 @@
       "time": "time",
       "unicode": "unicode",
       "url": "net/url",
-      "utf8": "unicode/utf8",
-      "uuid": "github.com/google/uuid"
+      "utf8": "unicode/utf8"
     },
     "remote_entitlements.go": {
       "billing": "github.com/open-rails/openrails/billing",

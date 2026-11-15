@@ -12,8 +12,6 @@ scope. Test fixture SQL is allowed when it creates or mutates fixture state.
 
 - `internal/migrate/*`: migration driver, migration lock/tracking, schema
   bootstrap. Keep raw because it is DDL/control-plane migration plumbing.
-- `internal/dbtest/*`: creates/drops scratch databases, enables test roles,
-  seeds the canonical test merchant. Keep raw because it is test infrastructure.
 - `internal/db/sqlaudit/index_use_probe_test.go`: `TRUNCATE`, synthetic
   `INSERT ... SELECT`, `ANALYZE` and `EXPLAIN (GENERIC_PLAN)` for the index-use
   probe. Keep raw because these are harness operations, not application queries.
