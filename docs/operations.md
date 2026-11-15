@@ -1264,7 +1264,8 @@ coalesce merchant-wide passes when embedded fleets share a database.
 | Stripe webhook endpoint backstop | 24 h |
 
 The billing pass takes everything due by its start, so a pass that fails or
-does not run leaves its work to the next. One scan's failure never stops the
+does not run leaves its work to the next; one that starts while another still
+runs exits. One scan's failure never stops the
 others. Renewals and retries wait at most an hour past their instant; an engine
 renewal's access grace is at least two hours, so a member keeps access across
 one missed pass. A low or depleted balance is told within seconds: the change

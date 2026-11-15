@@ -927,6 +927,9 @@
     "OR-J12-S70": [
       "TestOrderExpiryClock/OR-J12-S70/card-save-past-its-cutoff-is-removed-before-the-pass"
     ],
+    "OR-J04-S38": [
+      "TestBillingPass/OR-J04-S38/a-pass-that-starts-while-one-runs-exits"
+    ],
     "OR-J29-S37": [
       "TestDueWork/OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck"
     ]

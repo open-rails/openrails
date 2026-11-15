@@ -70,6 +70,22 @@ func runPass(t *testing.T, fleet *river.Client[pgx.Tx]) bool {
 	}
 }
 
+// openOrders counts the orders still open in storage.
+func openOrders(t *testing.T, w *world) int {
+	t.Helper()
+	var n int
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "orders"}.Sanitize()+" WHERE status = 'open'").Scan(&n))
+	return n
+}
+
+// blockedBy counts the sessions waiting on a lock the holder session holds.
+func blockedBy(t *testing.T, w *world, holder int32) int {
+	t.Helper()
+	var n int
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))", holder).Scan(&n))
+	return n
+}
+
 // nextHour is the top of the UTC hour after at: the next pass.
 func nextHour(at time.Time) time.Time { return at.UTC().Truncate(time.Hour).Add(time.Hour) }
 
@@ -210,6 +226,49 @@ func TestBillingPass(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, billing.OrderExpired, expired.Status)
 		require.Empty(t, p.effects(t))
+	})
+	t.Run("OR-J04-S38/a-pass-that-starts-while-one-runs-exits", func(t *testing.T) {
+		a, _ := newPaymentWorld(t)
+		fleet := quietFleet(t, a.world)
+		_, price := publicSale(t, a, "overlapped-order", 9_990_000, nil)
+		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		expires := a.clock.Now().Add(time.Hour)
+		order, err := a.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires, IdempotencyKey: "overlapped"})
+		require.NoError(t, err)
+		advanceTo(a.world, nextHour(expires))
+		// The first pass reaches the order and waits on it.
+		conn, err := a.pool.Acquire(t.Context())
+		require.NoError(t, err)
+		defer conn.Release()
+		tx, err := conn.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		_, err = tx.Exec(t.Context(), "SELECT 1 FROM "+pgx.Identifier{a.schema, "orders"}.Sanitize()+" WHERE id = $1 FOR UPDATE", order.ID.UUID())
+		require.NoError(t, err)
+		var holder int32
+		require.NoError(t, tx.QueryRow(t.Context(), "SELECT pg_backend_pid()").Scan(&holder))
+		events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
+		defer unsubscribe()
+		first, err := fleet.Insert(t.Context(), billingPass{}, nil)
+		require.NoError(t, err)
+		require.Eventually(t, func() bool { return blockedBy(t, a.world, holder) > 0 }, 30*time.Second, 20*time.Millisecond)
+		require.False(t, runPass(t, fleet), "the second pass exits while the first runs")
+		require.Equal(t, 1, openOrders(t, a.world), "it ran no scan")
+		require.NoError(t, tx.Rollback(t.Context()))
+		deadline := time.NewTimer(60 * time.Second)
+		defer deadline.Stop()
+		for done := false; !done; {
+			select {
+			case event := <-events:
+				if event != nil && event.Job.ID == first.Job.ID {
+					require.Equal(t, river.EventKindJobCompleted, event.Kind)
+					done = true
+				}
+			case <-deadline.C:
+				t.Fatal("the first pass did not finish")
+			}
+		}
+		require.Zero(t, openOrders(t, a.world), "the first pass takes what is due")
 	})
 	t.Run("OR-J04-S47/the-next-pass-takes-what-a-failed-or-missed-pass-left-due", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t)

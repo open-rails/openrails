@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 289,
+  "scenario_count": 290,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1442,6 +1442,11 @@
       "id": "OR-J12-S70",
       "journey": "J12",
       "name": "A card save confirmed or saved again past its 24-hour cutoff, before any pass, is removed"
+    },
+    {
+      "id": "OR-J04-S38",
+      "journey": "J04",
+      "name": "A billing pass that starts while another still runs exits without running a scan; the running pass takes what is due"
     },
     {
       "id": "OR-J29-S37",

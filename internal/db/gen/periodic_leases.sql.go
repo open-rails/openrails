@@ -65,3 +65,16 @@ func (q *Queries) ListPeriodicLeasesHeldElsewhere(ctx context.Context, arg ListP
 	}
 	return items, nil
 }
+
+const tryLockPass = `-- name: TryLockPass :one
+SELECT pg_try_advisory_lock(hashtext(current_database()), hashtext($1::text))::boolean AS locked
+`
+
+// Held by the session running a pass for its whole run: a copy that starts
+// meanwhile, on this fleet or another, finds it taken.
+func (q *Queries) TryLockPass(ctx context.Context, passKey string) (bool, error) {
+	row := q.db.QueryRow(ctx, tryLockPass, passKey)
+	var locked bool
+	err := row.Scan(&locked)
+	return locked, err
+}
