@@ -169,6 +169,11 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 		if err != nil {
 			return err
 		}
+		if payer != uuid.Nil {
+			if err := intents.AdmitCustomerRetry(ctx, q, sub, method.ID); err != nil {
+				return err
+			}
+		}
 		terms, err := intents.PrepareEngineRenewalTerms(ctx, d, sub, admittedAt)
 		if err != nil {
 			return err

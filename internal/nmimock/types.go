@@ -105,8 +105,11 @@ type Sale struct {
 	// partial_payments=payment_in_full, so the sale never settles.
 	PartialBalance string
 	HeldInFull     bool
-	RefundedCents  int64
-	RefundIDs      []string
+	// IssuerCode replaces the processor_response_code the Query API reports
+	// behind a decline (05, or 51 behind 202).
+	IssuerCode    string
+	RefundedCents int64
+	RefundIDs     []string
 	// Voided sales never settle: no money moved.
 	Voided bool
 	At     time.Time

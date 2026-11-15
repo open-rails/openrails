@@ -250,7 +250,7 @@ var jsonRules = map[string]jsonRule{
 		"attempt":     integerValue, "failure_count": integerValue, "amount_minor": moneyStringValue, "order_reference": uuidValue, "order_id": uuidValue,
 	}),
 	"provider_intents.subscription_collection.result_evidence": nullable(object(map[string]jsonRule{
-		"stripe_recurring_decline": object(map[string]jsonRule{"decline_code": textValue, "binding": receiptBindingJSON, "failure_code": textValue, "payment_intent_id": textValue}),
+		"stripe_recurring_decline": object(map[string]jsonRule{"decline_code": textValue, "advice_code": textValue, "network_advice_code": textValue, "network_decline_code": textValue, "binding": receiptBindingJSON, "failure_code": textValue, "payment_intent_id": textValue}),
 		"failure_code":             textValue, "stripe_payment_intent_id": textValue, "authentication_required": booleanValue,
 		"qualified_receipt": collectedReceiptJSON, "transaction_id": textValue, "rail": textValue, "verified_existing": booleanValue,
 		"submitted_at": textValue, "declined": booleanValue, "response_code": integerValue, "not_executed": booleanValue, "not_executed_code": textValue,
@@ -272,7 +272,8 @@ var jsonRules = map[string]jsonRule{
 		"transaction_id":            textValue, "response_code": integerValue, "not_executed": booleanValue,
 	}),
 	"provider_intents.manual_rebill.payload": object(map[string]jsonRule{
-		"initiator": textValue, "requested_payment_method_id": uuidValue,
+		"order_captcha_subjects": array(textValue),
+		"initiator":              textValue, "requested_payment_method_id": uuidValue,
 		"renewal":           acceptedRenewalJSON,
 		"payment_method_id": uuidValue, "rail": textValue, "rail_subscription_id": textValue, "order_reference": uuidValue,
 		"attempt": integerValue, "failure_count": integerValue, "amount_minor": moneyStringValue,

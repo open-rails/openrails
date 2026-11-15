@@ -23,7 +23,7 @@ func ValidateSubscriptionCollectionTerminal(in gen.BillingProviderIntent) error 
 	if err != nil {
 		return err
 	}
-	stripeCode, stripePI, stripeDeclined, err := LoadStripeRecurringDecline(in)
+	stripeRefusal, stripeDeclined, err := LoadStripeRecurringDecline(in)
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func ValidateSubscriptionCollectionTerminal(in gen.BillingProviderIntent) error 
 		return err
 	}
 	if stripeDeclined {
-		if !result.Declined || result.NotExecuted || result.ResponseCode != 0 || EvidenceString(in, "failure_code") != stripeCode || EvidenceString(in, "stripe_payment_intent_id") != stripePI {
+		if !result.Declined || result.NotExecuted || result.ResponseCode != 0 || EvidenceString(in, "failure_code") != stripeRefusal.Code || EvidenceString(in, "stripe_payment_intent_id") != stripeRefusal.PaymentIntentID {
 			return errors.New("Stripe decline projection contradicts custody")
 		}
 		return nil

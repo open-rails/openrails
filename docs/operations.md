@@ -907,6 +907,27 @@ table, the same for every owner:
   dunning at the next due pass.
 - **Terminal at once:** stolen or fraudulent card, and "stop recurring" codes.
 
+The networks' advice comes before the rail's code. A decline that would be
+retried waits for a new card instead when it carries Stripe's `advice_code`
+`do_not_try_again` or `confirm_card_data`, a Mastercard Merchant Advice Code
+03, 21 or 01 (Stripe's `network_advice_code`), or an issuer response code
+after which Visa or Mastercard forbid another attempt on the card (04, 07,
+12, 14, 15, 41, 43, 46, 54, 57, R0, R1, R3: Stripe's `network_decline_code`,
+or NMI's `processor_response_code` when a Query API read of NMI's own
+scheduled charge supplies it). Advice never ends a subscription. NMI's Direct
+Post answer carries no issuer code, so a decline of OpenRails' own NMI charge
+is classified by its response code alone.
+
+A customer's own retry of the card (`retry-now`, or paying the renewal order
+with the subscription's card) is refused with no provider call while the
+subscription waits for a new card, unless the latest decline is one the
+cardholder can clear on that card: `authentication_required`,
+`incorrect_zip` or `incorrect_address`. In any state it is refused after a
+terminal decline held by the destructive switch, after an issuer code above,
+and after 3 declined customer attempts on the card for the same renewal.
+Another card is always admitted. Customer declines count toward the
+card-testing blocks.
+
 The staleness window ("never
 charge a months-old failure") derives from the case's schedule — last offset +
 min(24h, cycle/2) slack — so it cannot be misconfigured; anything older is

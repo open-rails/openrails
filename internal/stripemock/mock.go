@@ -63,6 +63,7 @@ type Mock struct {
 	setups          map[string]Object
 	methods         map[string]Object
 	declines        map[string]string
+	advice          map[string]Advice
 	intents         map[string]Object
 	order           []string
 	charges         map[string]Object
@@ -114,7 +115,7 @@ func NewUnstarted(opts Options) *Mock {
 	if opts.Clock == nil {
 		opts.Clock = time.Now
 	}
-	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{},
+	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{}, advice: map[string]Advice{},
 		intents: map[string]Object{}, charges: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
 		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{}, webhookEndpoints: map[string][]Object{},
 		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}, thinEvents: map[string]Object{}}
@@ -596,8 +597,12 @@ func (m *Mock) createIntent(form url.Values) (int, any) {
 		// Stripe detaches the refused method from the intent; it survives
 		// only on last_payment_error.
 		pi["status"], pi["payment_method"] = "requires_payment_method", nil
-		pi["last_payment_error"] = Object{"type": "card_error", "code": "card_declined", "decline_code": decline, "payment_method": Object{"id": pm, "object": "payment_method"}}
-		return 402, Object{"error": Object{"type": "card_error", "code": "card_declined", "decline_code": decline, "payment_intent": pi}}
+		refusal := Object{"type": "card_error", "code": "card_declined", "decline_code": decline, "payment_method": Object{"id": pm, "object": "payment_method"}}
+		m.advice[pm].on(refusal)
+		pi["last_payment_error"] = refusal
+		answer := Object{"type": "card_error", "code": "card_declined", "decline_code": decline, "payment_intent": pi}
+		m.advice[pm].on(answer)
+		return 402, Object{"error": answer}
 	}
 }
 

@@ -30,7 +30,9 @@ func (s *OrderAttemptService) SetCardFailureLedger(l *abuse.FailureLedger) {
 	}
 }
 
-func (s *OrderAttemptService) guardCardAttempt(ctx context.Context, user *UserIdentity) error {
+// GuardCardAttempt refuses a card attempt while the customer or their client
+// address is blocked by the card-testing ledger.
+func (s *OrderAttemptService) GuardCardAttempt(ctx context.Context, user *UserIdentity) error {
 	if s == nil || s.cardFailures == nil || user == nil {
 		return nil
 	}
@@ -44,9 +46,9 @@ func (s *OrderAttemptService) guardCardAttempt(ctx context.Context, user *UserId
 	return nil
 }
 
-// noteCardAttempt counts a declined card against the customer, their client
+// NoteCardAttempt counts a declined card against the customer, their client
 // address and the merchant.
-func (s *OrderAttemptService) noteCardAttempt(ctx context.Context, user *UserIdentity) {
+func (s *OrderAttemptService) NoteCardAttempt(ctx context.Context, user *UserIdentity) {
 	if s == nil || s.cardFailures == nil || user == nil {
 		return
 	}

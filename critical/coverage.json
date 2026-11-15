@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 310,
+  "scenario_count": 314,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1252,6 +1252,26 @@
       "id": "OR-J16-S32",
       "journey": "J16",
       "name": "Due pass queues an NMI retry and never waits on the gateway"
+    },
+    {
+      "id": "OR-J16-S40",
+      "journey": "J16",
+      "name": "A lost card's renewal refuses a same-card customer payment with no provider call and admits another card"
+    },
+    {
+      "id": "OR-J16-S41",
+      "journey": "J16",
+      "name": "An NMI decline whose issuer code forbids a reattempt waits for a new card, and retry-now on that card is refused with no provider call"
+    },
+    {
+      "id": "OR-J16-S42",
+      "journey": "J16",
+      "name": "Network do-not-retry advice on a generic decline stops dunning on the card"
+    },
+    {
+      "id": "OR-J16-S43",
+      "journey": "J16",
+      "name": "A decline the cardholder can clear is retried by the customer on the same card up to the cap"
     },
     {
       "id": "OR-J15-S30",

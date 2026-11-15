@@ -30,7 +30,7 @@
 //     subscription_id (comma list), action_type, start_date, end_date,
 //     result_limit, page_number; others are ignored. cc_bin defaults by brand;
 //     processor_response_code is "00" on approval, "51" behind 202 and "05"
-//     behind other declines. The recurring report carries subscription id,
+//     behind other declines, unless the sale names its IssuerCode. The recurring report carries subscription id,
 //     order, next charge date and plan id only. A refund is its own
 //     transaction.
 //   - Indexing lag: a sale is invisible to the Query API until Options.IndexLag
