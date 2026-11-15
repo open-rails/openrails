@@ -7,16 +7,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -88,7 +89,7 @@ func Webhook(r *httprequest.Request) {
 // openrails.merchant_id GUC) for the rest of the dispatch and returns the
 // release the caller must defer. A webhook resolves its merchant inside the
 // handler, so MerchantDBConnMW cannot have pinned it. Nested calls are a
-// no-op, so re-entering processResolvedMerchantWebhook is safe.
+// no-op.
 func pinWebhookMerchantConn(r *httprequest.Request, merchantID billing.MerchantID) (func(), bool) {
 	if r == nil || r.State == nil || r.State.DB == nil || merchantID.IsZero() {
 		return func() {}, true
@@ -104,108 +105,10 @@ func pinWebhookMerchantConn(r *httprequest.Request, merchantID billing.MerchantI
 	return release, true
 }
 
-func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID billing.MerchantID, accountID string) {
-	if strings.TrimSpace(accountID) == "" {
-		r.ErrorCode(billing.CodeInvalidParam, "Webhook account_id is required")
-		return
-	}
-	release, ok := pinWebhookMerchantConn(r, merchantID)
-	if !ok {
-		return
-	}
-	defer release()
-
-	if rails.IsNMI(models.Rail(provider)) {
-		if processMerchantNMIWebhook(r, provider, merchantID, accountID) {
-			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
-		}
-		return
-	}
-	if provider == string(models.EventSourceBasisTheory) {
-		if processMerchantBasisTheoryWebhook(r, merchantID, accountID) {
-			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
-		}
-		return
-	}
-	if provider == subscriptions.RailCCBill {
-		// Pin the routed PSP first, so a refused source counts against it.
-		if r.State.Merchants != nil {
-			pspID, found, err := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, provider, accountID)
-			if !bindResolvedWebhookPSP(r, pspID, found, err) {
-				return
-			}
-		}
-		clientIP := r.ClientIP()
-		if !ccbillWebhookIPAllowed(r, clientIP) {
-			r.State.WebhookHealth.Rejected(r.Request.Context())
-			r.ErrorCode(billing.CodeResourceAccessDenied, "Unauthorized webhook source")
-			return
-		}
-		if processMerchantCCBillWebhook(r, clientIP, accountID) {
-			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
-		}
-		return
-	}
-	if provider != subscriptions.RailStripe {
-		r.ErrorCode(billing.CodeInvalidParam, "Provider not supported on merchant webhook surface")
-		return
-	}
-
-	body, ok := readLimitedWebhookBody(r, maxStripeWebhookBytes)
-	if !ok {
-		return
-	}
-	var creds merchants.StripeCredentials
-	var err error
-	var found bool
-	creds, found, err = r.State.Merchants.LoadStripeCredentialsForAccount(r.Request.Context(), merchantID, accountID)
-	if err == nil && !found {
-		warnUndeclaredWebhook(provider, accountID)
-		rejectWebhook(r)
-		return
-	}
-	if err != nil {
-		if errors.Is(err, merchants.ErrConfigUnavailable) {
-			r.ErrorCode(billing.CodeServiceUnavailable, "Merchant configuration temporarily unavailable, retry")
-			return
-		}
-		log.WithError(err).Error("merchant webhook: load merchant credentials failed")
-		r.ErrorCode(billing.CodeInternalError, "Credential load failed")
-		return
-	}
-	pspID, found, resolveErr := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, provider, accountID)
-	if !bindResolvedWebhookPSP(r, pspID, found, resolveErr) {
-		return
-	}
-	var secrets []string
-	if s := strings.TrimSpace(creds.WebhookSigningSecret); s != "" {
-		secrets = append(secrets, s)
-	}
-	if s := strings.TrimSpace(creds.WebhookSigningThin); s != "" {
-		secrets = append(secrets, s)
-	}
-	// Through an api_version rollover the superseded endpoint keeps delivering
-	// with the previous secret; accepting it keeps the rollover gapless.
-	if s := strings.TrimSpace(creds.WebhookSigningPrevious); s != "" {
-		secrets = append(secrets, s)
-	}
-	if len(secrets) == 0 {
-		rejectWebhook(r)
-		return
-	}
-	prepared, err := prepareStripeMultiSecret(body, secrets, r.Header("Stripe-Signature"), 5*time.Minute)
-	if err != nil {
-		switch {
-		case errors.Is(err, webhookutil.ErrWebhookSignatureRequired),
-			errors.Is(err, webhookutil.ErrWebhookSignatureMissing),
-			errors.Is(err, webhookutil.ErrWebhookSignatureInvalid):
-			r.State.WebhookHealth.Rejected(r.Request.Context())
-			r.ErrorCode(billing.CodeAuthenticationRequired, "Invalid webhook signature")
-		default:
-			r.ErrorCode(billing.CodeInvalidParam, "Invalid webhook payload")
-		}
-		return
-	}
+// dispatchStripeWebhook dispatches a Stripe delivery verified for the pinned
+// PSP and writes its response.
+func dispatchStripeWebhook(r *httprequest.Request, signed stripeSigned, accountID string) {
+	prepared, creds := signed.prepared, signed.creds
 	// Stripe "thin" event destinations deliver a minimal payload without the
 	// object. Hydrate it with the MERCHANT's secret key into the classic
 	// {data:{object}} shape so dispatch only ever sees snapshot-style events.
@@ -219,6 +122,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		r.ErrorCode(billing.CodeServiceUnavailable, "the provider event could not be read; retry")
 		return
 	} else if hydrated != nil {
+		var err error
 		prepared.Body = hydrated
 		prepared.EventID, prepared.EventType, err = webhookutil.ParseStripeEventMeta(hydrated)
 		if err != nil {
@@ -282,12 +186,12 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 			r.ErrorCode(billing.CodeInvalidParam, "Webhook account does not match payload")
 			return true, false
 		}
-		account, release, ok := resolveWebhookPSP(r, string(models.RailNMI), accountID)
+		account, signed, release, ok := routeSignedWebhook(r, string(models.RailNMI), accountID, checkNMIWebhook(r, body), nil, refuseNMIWebhook(r))
 		if !ok {
 			return true, false
 		}
 		defer release()
-		return true, processMerchantNMIWebhookBody(r, string(models.RailNMI), account.MerchantID, account.AccountID, body)
+		return true, dispatchNMIWebhook(r, signed, account.AccountID)
 	case rail == subscriptions.RailCCBill:
 		body, ok := readLimitedWebhookBody(r, maxCCBillWebhookBytes)
 		if !ok {
@@ -301,7 +205,13 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 			r.ErrorCode(billing.CodeInvalidParam, "Webhook account does not match payload")
 			return true, false
 		}
-		account, release, ok := resolveWebhookPSP(r, subscriptions.RailCCBill, accountID)
+		// CCBill signs nothing (the source-IP allowlist authenticated the
+		// delivery), so a live and a non-live PSP of one account cannot be
+		// told apart.
+		unsigned := func(context.Context, merchants.PSPIdentity) (signedWebhook[struct{}], error) {
+			return signedWebhook[struct{}]{keyed: true}, nil
+		}
+		account, _, release, ok := routeSignedWebhook(r, subscriptions.RailCCBill, accountID, unsigned, nil, func(error) bool { rejectWebhook(r); return false })
 		if !ok {
 			return true, false
 		}
@@ -323,22 +233,26 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 		}
 		// A custodian event routes by the custodian's tenant identity: it
 		// resolves a custodian, not a PSP (one custodian may back several).
-		custodian, release, ok := resolveWebhookCustodianAccount(r, models.CustodianBasisTheory, tenantID)
+		custodian, release, ok := resolveWebhookCustodianAccount(r, models.CustodianBasisTheory, tenantID, body)
 		if !ok {
 			return true, false
 		}
 		defer release()
 		return true, processMerchantBasisTheoryWebhookBody(r, custodian.MerchantID, custodian.AccountID, custodian.Environment, body)
 	case rail == subscriptions.RailStripe && routeAccountID != "":
-		account, release, ok := resolveWebhookPSP(r, subscriptions.RailStripe, routeAccountID)
+		body, ok := readLimitedWebhookBody(r, maxStripeWebhookBytes)
+		if !ok {
+			return true, false
+		}
+		account, signed, release, ok := routeSignedWebhook(r, subscriptions.RailStripe, routeAccountID, checkStripeWebhook(r, body), stripeLivemodeMatches, refuseStripeWebhook(r))
 		if !ok {
 			return true, false
 		}
 		defer release()
-		// handled=true, accepted=false: processResolvedMerchantWebhook writes
-		// its own response (401 on a bad signature, 200 on success), so the
-		// caller must not write "accepted" on top of a refused forgery.
-		processResolvedMerchantWebhook(r, subscriptions.RailStripe, account.MerchantID, account.AccountID)
+		// handled=true, accepted=false: dispatchStripeWebhook writes its own
+		// response (200 on success), so the caller must not write "accepted"
+		// on top of it.
+		dispatchStripeWebhook(r, signed, account.AccountID)
 		return true, false
 	default:
 		return false, false
@@ -382,32 +296,142 @@ var livePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe {
 	}
 }
 
-// resolveWebhookPSP resolves the merchant + PSP a payload-identified
-// account belongs to, pins BOTH on the request (merchant id, psp id) and pins the
-// merchant's DB connection. The returned release must be deferred by the caller —
-// see pinWebhookMerchantConn for why the pin cannot live in middleware.
-func resolveWebhookPSP(r *httprequest.Request, rail, accountID string) (merchants.PSPIdentity, func(), bool) {
-	return pinWebhookAccount(r, rail, accountID, r.State.Merchants.ResolvePSPByAccount)
+// signedWebhook is what checking a delivery against one candidate PSP's
+// secrets found.
+type signedWebhook[T any] struct {
+	verified T
+	// keyed: the PSP declares a secret to check with. mismatch: only the
+	// signature failed, made with another secret.
+	keyed, mismatch bool
+	// err is why the delivery did not verify; nil when it did.
+	err error
+}
+
+// routeSignedWebhook resolves the PSP an account-routed delivery belongs to
+// and pins its merchant, its id and the merchant's DB connection; release
+// must be deferred (see pinWebhookMerchantConn). An account may be a live and
+// a non-live PSP (a Stripe acct_ is both), so the delivery belongs to the one
+// whose secrets verify it: every candidate is checked, one none verifies is
+// refused, and one both verify is attributed by tieBreak or not at all.
+// refuse answers a refused delivery and reports whether it failed
+// verification.
+func routeSignedWebhook[T any](r *httprequest.Request, rail, accountID string,
+	check func(context.Context, merchants.PSPIdentity) (signedWebhook[T], error),
+	tieBreak func(merchants.PSPIdentity, T) bool,
+	refuse func(error) bool,
+) (merchants.PSPIdentity, T, func(), bool) {
+	noop := func() {}
+	var none T
+	ctx := r.Request.Context()
+	fields := log.Fields{"rail": rail, "account_id": accountID}
+	candidates, err := r.State.Merchants.ResolvePSPsByAccount(ctx, rail, accountID)
+	if err != nil {
+		log.WithError(err).WithFields(fields).Error("webhook PSP resolution failed")
+		r.ErrorCode(billing.CodeInternalError, "PSP resolution failed")
+		return merchants.PSPIdentity{}, none, noop, false
+	}
+	if len(candidates) == 0 {
+		rejectWebhook(r)
+		return merchants.PSPIdentity{}, none, noop, false
+	}
+	checks := make([]signedWebhook[T], len(candidates))
+	var won []int
+	for i, psp := range candidates {
+		c, err := check(merchant.WithID(ctx, psp.MerchantID), psp)
+		if err != nil {
+			if errors.Is(err, merchants.ErrConfigUnavailable) {
+				r.ErrorCode(billing.CodeServiceUnavailable, "Merchant configuration temporarily unavailable, retry")
+			} else {
+				log.WithError(err).WithFields(fields).Error("merchant webhook: load PSP secrets failed")
+				r.ErrorCode(billing.CodeInternalError, "Credential load failed")
+			}
+			return merchants.PSPIdentity{}, none, noop, false
+		}
+		checks[i] = c
+		if c.err == nil {
+			won = append(won, i)
+		}
+	}
+	if len(won) > 1 && tieBreak != nil {
+		won = slices.DeleteFunc(won, func(i int) bool { return !tieBreak(candidates[i], checks[i].verified) })
+	}
+	switch len(won) {
+	case 1:
+		psp := candidates[won[0]]
+		r.Request = r.Request.WithContext(db.WithPSPID(merchant.WithID(ctx, psp.MerchantID), psp.ID))
+		release, ok := pinWebhookMerchantConn(r, psp.MerchantID)
+		if !ok {
+			return merchants.PSPIdentity{}, none, noop, false
+		}
+		return psp, checks[won[0]].verified, release, true
+	case 0:
+		report := -1
+		for i, c := range checks {
+			if c.keyed && (report < 0 || checks[report].mismatch && !c.mismatch) {
+				report = i
+			}
+		}
+		if report < 0 {
+			warnUndeclaredWebhook(rail, accountID)
+			report = 0
+		}
+		if refuse(checks[report].err) {
+			for _, psp := range candidates {
+				r.State.WebhookHealth.Rejected(db.WithPSPID(merchant.WithID(ctx, psp.MerchantID), psp.ID))
+			}
+		}
+		return merchants.PSPIdentity{}, none, noop, false
+	}
+	log.WithFields(fields).Error("webhook refused: the delivery verifies for both the live and the non-live PSP of the account, so it cannot be attributed to either")
+	r.ErrorCode(billing.CodeInternalError, "PSP resolution failed")
+	return merchants.PSPIdentity{}, none, noop, false
 }
 
 // resolveWebhookCustodianAccount resolves the custodian a tenant identity
 // belongs to and pins its merchant, but no PSP id: a custodian may back
-// several PSPs, and its event is about the instrument, not a gateway.
-func resolveWebhookCustodianAccount(r *httprequest.Request, kind, tenantID string) (merchants.CustodianIdentity, func(), bool) {
+// several PSPs, and its event is about the instrument, not a gateway. A tenant
+// that is a custodian in both money classes is the one whose class's key
+// verifies the event.
+func resolveWebhookCustodianAccount(r *httprequest.Request, kind, tenantID string, body []byte) (merchants.CustodianIdentity, func(), bool) {
 	noop := func() {}
-	custodian, ok, err := r.State.Merchants.ResolveCustodianByIdentity(r.Request.Context(), kind, tenantID)
+	ctx := r.Request.Context()
+	candidates, err := r.State.Merchants.ResolveCustodiansByIdentity(ctx, kind, tenantID)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"custodian": kind, "account_id": tenantID}).Error("webhook custodian resolution failed")
 		r.ErrorCode(billing.CodeInternalError, "Custodian resolution failed")
 		return merchants.CustodianIdentity{}, noop, false
 	}
-	if !ok {
+	if len(candidates) == 0 {
 		rejectWebhook(r)
 		return merchants.CustodianIdentity{}, noop, false
 	}
+	custodian := candidates[0]
+	if len(candidates) > 1 {
+		sig, version := r.Header(basistheory.SignatureHeader), r.Header(basistheory.SignatureVersionHeader)
+		var won []merchants.CustodianIdentity
+		for _, c := range candidates {
+			if basisTheoryVerifier(c.Environment).Verify(ctx, body, sig, version) == nil {
+				won = append(won, c)
+			}
+		}
+		switch len(won) {
+		case 1:
+			custodian = won[0]
+		case 0:
+			for _, c := range candidates {
+				r.State.WebhookHealth.Rejected(db.WithCustodianID(merchant.WithID(ctx, c.MerchantID), c.ID))
+			}
+			r.ErrorCode(billing.CodeAuthenticationRequired, "Invalid webhook signature")
+			return merchants.CustodianIdentity{}, noop, false
+		default:
+			log.WithFields(log.Fields{"custodian": kind, "account_id": tenantID}).Error("webhook refused: the event verifies for both money classes of the tenant")
+			r.ErrorCode(billing.CodeInternalError, "Custodian resolution failed")
+			return merchants.CustodianIdentity{}, noop, false
+		}
+	}
 	// Pin the custodian the event came from, as the PSP routes pin theirs, so
 	// anything enqueued here is custodian-addressed, never one of its PSPs.
-	ctx := merchant.WithID(r.Request.Context(), custodian.MerchantID)
+	ctx = merchant.WithID(ctx, custodian.MerchantID)
 	r.Request = r.Request.WithContext(db.WithCustodianID(ctx, custodian.ID))
 	release, ok := pinWebhookMerchantConn(r, custodian.MerchantID)
 	if !ok {
@@ -416,86 +440,52 @@ func resolveWebhookCustodianAccount(r *httprequest.Request, kind, tenantID strin
 	return custodian, release, true
 }
 
-func pinWebhookAccount(r *httprequest.Request, rail, accountID string,
-	resolve func(context.Context, string, string) (merchants.PSPIdentity, bool, error),
-) (merchants.PSPIdentity, func(), bool) {
-	noop := func() {}
-	account, ok, err := resolve(r.Request.Context(), rail, accountID)
-	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"rail": rail, "account_id": accountID}).Error("webhook PSP resolution failed")
-		r.ErrorCode(billing.CodeInternalError, "PSP resolution failed")
-		return merchants.PSPIdentity{}, noop, false
-	}
-	if !ok {
-		rejectWebhook(r)
-		return merchants.PSPIdentity{}, noop, false
-	}
-	ctx := merchant.WithID(r.Request.Context(), account.MerchantID)
-	ctx = db.WithPSPID(ctx, account.ID)
-	r.Request = r.Request.WithContext(ctx)
-	release, ok := pinWebhookMerchantConn(r, account.MerchantID)
-	if !ok {
-		return merchants.PSPIdentity{}, noop, false
-	}
-	return account, release, true
+// nmiSigned is an NMI delivery and the key that verified it.
+type nmiSigned struct {
+	prepared webhookutil.Prepared
+	key      string
 }
 
-func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchantID billing.MerchantID, accountID string) bool {
-	body, ok := readLimitedWebhookBody(r, maxNMIWebhookBytes)
-	if !ok {
-		return false
-	}
-	return processMerchantNMIWebhookBody(r, provider, merchantID, accountID, body)
-}
-
-func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merchantID billing.MerchantID, accountID string, body []byte) bool {
-	if strings.TrimSpace(accountID) == "" {
-		r.ErrorCode(billing.CodeInvalidParam, "Webhook account_id is required")
-		return false
-	}
-	var keys merchants.NMIWebhookSecrets
-	var err error
-	var found bool
-	keys, found, err = r.State.Merchants.LoadNMIWebhookSigningSecretForAccount(r.Request.Context(), merchantID, accountID)
-	if err == nil && !found {
-		warnUndeclaredWebhook(provider, accountID)
-		rejectWebhook(r)
-		return false
-	}
-	if err != nil {
-		if errors.Is(err, merchants.ErrConfigUnavailable) {
-			r.ErrorCode(billing.CodeServiceUnavailable, "Merchant configuration temporarily unavailable, retry")
-			return false
-		}
-		log.WithError(err).Error("merchant webhook: load nmi signing secret failed")
-		r.ErrorCode(billing.CodeInternalError, "Credential load failed")
-		return false
-	}
-	pspID, found, resolveErr := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, provider, accountID)
-	if !bindResolvedWebhookPSP(r, pspID, found, resolveErr) {
-		return false
-	}
+// checkNMIWebhook checks an NMI delivery against one PSP's secrets.
+func checkNMIWebhook(r *httprequest.Request, body []byte) func(context.Context, merchants.PSPIdentity) (signedWebhook[nmiSigned], error) {
 	// NMI sends one signature header, `Webhook-Signature: t=<ts>,s=<hex>`
 	// (docs/rails/nmi.md). No other spelling is accepted, so a forged
 	// signature has one header to aim at.
 	header := strings.TrimSpace(r.Request.Header.Get("Webhook-Signature"))
-	signingKey := keys.Current
-	prepared, err := webhookutil.PrepareNMI(provider, body, signingKey, header)
-	// The rotated-out secret verifies only inside its bounded overlap.
-	if errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid) && strings.TrimSpace(keys.Previous) != "" {
-		if again, againErr := webhookutil.PrepareNMI(provider, body, keys.Previous, header); againErr == nil {
-			prepared, err, signingKey = again, nil, keys.Previous
+	rail := string(models.RailNMI)
+	return func(ctx context.Context, psp merchants.PSPIdentity) (signedWebhook[nmiSigned], error) {
+		keys, err := r.State.Merchants.LoadNMIWebhookSecrets(ctx, psp.MerchantID, psp.ID)
+		if err != nil {
+			return signedWebhook[nmiSigned]{}, err
 		}
+		key := keys.Current
+		prepared, err := webhookutil.PrepareNMI(rail, body, key, header)
+		// The rotated-out secret verifies only inside its bounded overlap.
+		if errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid) && strings.TrimSpace(keys.Previous) != "" {
+			if again, againErr := webhookutil.PrepareNMI(rail, body, keys.Previous, header); againErr == nil {
+				prepared, err, key = again, nil, keys.Previous
+			}
+		}
+		return signedWebhook[nmiSigned]{
+			verified: nmiSigned{prepared: prepared, key: key},
+			keyed:    strings.TrimSpace(keys.Current) != "",
+			mismatch: errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid),
+			err:      err,
+		}, nil
 	}
-	if err != nil {
+}
+
+// refuseNMIWebhook answers an NMI delivery no PSP verified.
+func refuseNMIWebhook(r *httprequest.Request) func(error) bool {
+	return func(err error) bool {
 		switch {
 		case errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing),
 			errors.Is(err, webhookutil.ErrNMIWebhookSignatureMissing):
-			r.State.WebhookHealth.Rejected(r.Request.Context())
 			r.ErrorCode(billing.CodeAuthenticationRequired, "Missing webhook signature")
+			return true
 		case errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid):
-			r.State.WebhookHealth.Rejected(r.Request.Context())
 			r.ErrorCode(billing.CodeAuthenticationRequired, "Invalid webhook signature")
+			return true
 		case errors.Is(err, webhookutil.ErrWebhookPayloadInvalid):
 			r.ErrorCode(billing.CodeInvalidParam, "Invalid JSON data")
 		case errors.Is(err, webhookutil.ErrWebhookEventIDMissing):
@@ -505,10 +495,11 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		}
 		return false
 	}
-	if payloadAccount := nmiWebhookAccountID(body); payloadAccount != "" && payloadAccount != accountID {
-		r.ErrorCode(billing.CodeInvalidParam, "Webhook account does not match payload")
-		return false
-	}
+}
+
+// dispatchNMIWebhook dispatches an NMI delivery verified for the pinned PSP.
+func dispatchNMIWebhook(r *httprequest.Request, signed nmiSigned, accountID string) bool {
+	prepared := signed.prepared
 	r.State.WebhookHealth.Accepted(r.Request.Context())
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorCode(billing.CodeInternalError, "Webhook processing unavailable")
@@ -522,7 +513,7 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		Payload:        prepared.Body,
 		IPAddress:      r.ClientIP(),
 		Signature:      prepared.Signature,
-		SigningSecret:  signingKey,
+		SigningSecret:  signed.key,
 		SignatureValid: &signatureVerified,
 		ReceivedAt:     time.Now(),
 		PspID:          accountID,
@@ -538,50 +529,77 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 	return true
 }
 
-// Credentials alone do not identify the account that will own the receipt.
-// Every merchant-specific dispatcher must retain a concrete persisted PSP.
-func bindResolvedWebhookPSP(r *httprequest.Request, id uuid.UUID, found bool, err error) bool {
-	if err != nil {
-		r.ErrorCode(billing.CodeInternalError, "Webhook account resolution failed")
-		return false
-	}
-	if !found || id == uuid.Nil {
-		rejectWebhook(r)
-		return false
-	}
-	r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), id))
-	return true
+// stripeSigned is a Stripe delivery and the credentials of the PSP that
+// verified it.
+type stripeSigned struct {
+	prepared webhookutil.Prepared
+	creds    merchants.StripeCredentials
 }
 
-func processMerchantCCBillWebhook(r *httprequest.Request, clientIP, routeAccountID string) bool {
-	body, ok := readLimitedWebhookBody(r, maxCCBillWebhookBytes)
-	if !ok {
+var errStripeWebhookUnkeyed = errors.New("no webhook signing secret is declared")
+
+// checkStripeWebhook checks a Stripe delivery against one PSP's secrets.
+func checkStripeWebhook(r *httprequest.Request, body []byte) func(context.Context, merchants.PSPIdentity) (signedWebhook[stripeSigned], error) {
+	header := r.Header("Stripe-Signature")
+	return func(ctx context.Context, psp merchants.PSPIdentity) (signedWebhook[stripeSigned], error) {
+		creds, err := r.State.Merchants.LoadStripeCredentialsForPSP(ctx, psp.MerchantID, psp.ID)
+		if err != nil {
+			return signedWebhook[stripeSigned]{}, err
+		}
+		var secrets []string
+		if s := strings.TrimSpace(creds.WebhookSigningSecret); s != "" {
+			secrets = append(secrets, s)
+		}
+		if s := strings.TrimSpace(creds.WebhookSigningThin); s != "" {
+			secrets = append(secrets, s)
+		}
+		// Through an api_version rollover the superseded endpoint keeps
+		// delivering with the previous secret; accepting it keeps the rollover
+		// gapless.
+		if s := strings.TrimSpace(creds.WebhookSigningPrevious); s != "" {
+			secrets = append(secrets, s)
+		}
+		if len(secrets) == 0 {
+			return signedWebhook[stripeSigned]{err: errStripeWebhookUnkeyed}, nil
+		}
+		prepared, err := prepareStripeMultiSecret(body, secrets, header, 5*time.Minute)
+		return signedWebhook[stripeSigned]{
+			verified: stripeSigned{prepared: prepared, creds: creds},
+			keyed:    true,
+			mismatch: errors.Is(err, webhookutil.ErrWebhookSignatureInvalid),
+			err:      err,
+		}, nil
+	}
+}
+
+// refuseStripeWebhook answers a Stripe delivery no PSP verified.
+func refuseStripeWebhook(r *httprequest.Request) func(error) bool {
+	return func(err error) bool {
+		switch {
+		case errors.Is(err, errStripeWebhookUnkeyed):
+			rejectWebhook(r)
+		case errors.Is(err, webhookutil.ErrWebhookSignatureRequired),
+			errors.Is(err, webhookutil.ErrWebhookSignatureMissing),
+			errors.Is(err, webhookutil.ErrWebhookSignatureInvalid):
+			r.ErrorCode(billing.CodeAuthenticationRequired, "Invalid webhook signature")
+			return true
+		default:
+			r.ErrorCode(billing.CodeInvalidParam, "Invalid webhook payload")
+		}
 		return false
 	}
-	prepared, accountID, ok := prepareCCBillWebhookWithAccountID(r, body)
-	if !ok {
+}
+
+// stripeLivemodeMatches attributes a delivery both of an account's PSPs
+// verify: Stripe says in livemode which one it is.
+func stripeLivemodeMatches(psp merchants.PSPIdentity, signed stripeSigned) bool {
+	var event struct {
+		Livemode *bool `json:"livemode"`
+	}
+	if json.Unmarshal(signed.prepared.Body, &event) != nil || event.Livemode == nil {
 		return false
 	}
-	if accountID != routeAccountID {
-		r.ErrorCode(billing.CodeInvalidParam, "Webhook account does not match payload")
-		return false
-	}
-	mid, err := merchant.Require(r.Request.Context())
-	if err != nil || r.State.Merchants == nil {
-		r.ErrorCode(billing.CodeServiceUnavailable, "Merchant webhook routing is not configured")
-		return false
-	}
-	pspID, found, err := r.State.Merchants.ResolvePSPID(r.Request.Context(), mid, subscriptions.RailCCBill, routeAccountID)
-	if err != nil {
-		r.ErrorCode(billing.CodeInternalError, "Webhook account resolution failed")
-		return false
-	}
-	if !found {
-		rejectWebhook(r)
-		return false
-	}
-	r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), pspID))
-	return processMerchantCCBillWebhookPrepared(r, clientIP, prepared, accountID)
+	return *event.Livemode == config.LiveEnvironment(psp.Rail, psp.Environment)
 }
 
 func prepareCCBillWebhookWithAccountID(r *httprequest.Request, body []byte) (webhookutil.Prepared, string, bool) {
@@ -614,18 +632,9 @@ func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP strin
 		r.ErrorCode(billing.CodeInternalError, "Webhook processing unavailable")
 		return false
 	}
-	// Stamp the routed PSP so every row this event materialises is
-	// attributable: the caller usually pinned it, else the payload's account
-	// identity resolves it.
+	// The caller pinned the routed PSP, so every row this event materialises
+	// is attributable.
 	ctx := r.Request.Context()
-	if accountID != "" && r.State.Merchants != nil {
-		if mid, ok := merchant.FromContext(ctx); ok && !mid.IsZero() {
-			if pid, found, rerr := r.State.Merchants.ResolvePSPID(ctx, mid, subscriptions.RailCCBill, accountID); rerr == nil && found {
-				ctx = db.WithPSPID(ctx, pid)
-				r.Request = r.Request.WithContext(ctx)
-			}
-		}
-	}
 	msg := ccbillWebhookMessage(clientIP, prepared, accountID)
 	if err := r.State.WebhookDispatcher.Process(ctx, msg); err != nil {
 		if code := webhooks.WebhookRefusalCode(err); code != "" {

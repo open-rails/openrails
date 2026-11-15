@@ -354,6 +354,15 @@ must pass, and payload account identity must agree. Host headers and merchant
 slugs do not grant callback authority. The public billing base supplies only the
 external mount prefix; generated Stripe URLs use this same path.
 
+The path names no money class. A merchant may declare a live and a non-live PSP
+on one account (a Stripe `acct_…` is both): a delivery belongs to the one whose
+webhook signing secret verifies it, Stripe's `livemode` deciding one both
+verify. One neither verifies is refused, and so is one both verify on another
+rail: give them different secrets. CCBill signs nothing, so every delivery to a
+CCBill account declared in both classes is refused. Another merchant cannot
+claim an account one of its PSPs or custodians holds: in the same class ever,
+in the other class while that PSP or custodian is declared and not archived.
+
 ## What the admin API can change
 
 Merchant routes are scoped to the authenticated merchant; cross-merchant

@@ -9,7 +9,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
@@ -53,33 +52,6 @@ func basisTheoryWebhookTenantID(body []byte) string {
 		return ""
 	}
 	return strings.TrimSpace(evt.TenantID)
-}
-
-func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID billing.MerchantID, accountID string) bool {
-	body, ok := readLimitedWebhookBody(r, maxBTWebhookBytes)
-	if !ok {
-		return false
-	}
-	// Basis Theory's account segment is its custodian tenant ID, not a PSP ID.
-	if tenantID := basisTheoryWebhookTenantID(body); tenantID == "" || tenantID != accountID {
-		r.ErrorCode(billing.CodeInvalidParam, "Webhook account does not match payload")
-		return false
-	}
-	if r.State.Merchants == nil {
-		r.ErrorCode(billing.CodeServiceUnavailable, "Merchant webhook routing is not configured")
-		return false
-	}
-	custodian, found, err := r.State.Merchants.ResolveCustodianByIdentity(r.Request.Context(), models.CustodianBasisTheory, accountID)
-	if err != nil {
-		r.ErrorCode(billing.CodeInternalError, "Webhook account resolution failed")
-		return false
-	}
-	if !found || custodian.MerchantID != merchantID {
-		rejectWebhook(r)
-		return false
-	}
-	r.Request = r.Request.WithContext(db.WithCustodianID(r.Request.Context(), custodian.ID))
-	return processMerchantBasisTheoryWebhookBody(r, merchantID, accountID, custodian.Environment, body)
 }
 
 func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID billing.MerchantID, tenantID, environment string, body []byte) bool {

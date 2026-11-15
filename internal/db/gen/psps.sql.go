@@ -270,26 +270,6 @@ func (q *Queries) GetPSPForCutoverWrite(ctx context.Context, arg GetPSPForCutove
 	return i, err
 }
 
-const getPSPIDByRailAccount = `-- name: GetPSPIDByRailAccount :one
-SELECT id FROM billing.psps
-WHERE merchant_id = $1::uuid AND rail = lower($2::text)
-  AND account_id = $3::text
-LIMIT 1
-`
-
-type GetPSPIDByRailAccountParams struct {
-	MerchantID uuid.UUID
-	Rail       string
-	AccountID  string
-}
-
-func (q *Queries) GetPSPIDByRailAccount(ctx context.Context, arg GetPSPIDByRailAccountParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, getPSPIDByRailAccount, arg.MerchantID, arg.Rail, arg.AccountID)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
 const listPSPWebhookDigests = `-- name: ListPSPWebhookDigests :many
 SELECT account_id, webhook_digest FROM billing.psps
 WHERE merchant_id = $1::uuid AND rail = $2::text AND superseded_at IS NULL
@@ -615,7 +595,7 @@ func (q *Queries) RegisterPSP(ctx context.Context, arg RegisterPSPParams) (Billi
 }
 
 const resolvePSPOwnerByRailIdentity = `-- name: ResolvePSPOwnerByRailIdentity :one
-SELECT id, merchant_id, rail, environment, account_id
+SELECT id, merchant_id, key, rail, environment, account_id, superseded_at
 FROM billing.psps
 WHERE rail = lower($1::text)
   AND live = $2::bool
@@ -629,11 +609,13 @@ type ResolvePSPOwnerByRailIdentityParams struct {
 }
 
 type ResolvePSPOwnerByRailIdentityRow struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	Rail        string
-	Environment string
-	AccountID   string
+	ID           uuid.UUID
+	MerchantID   uuid.UUID
+	Key          string
+	Rail         string
+	Environment  string
+	AccountID    string
+	SupersededAt *time.Time
 }
 
 // CROSS-MERCHANT: PSP ownership by the global (rail, money class, account_id)
@@ -645,9 +627,11 @@ func (q *Queries) ResolvePSPOwnerByRailIdentity(ctx context.Context, arg Resolve
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
+		&i.Key,
 		&i.Rail,
 		&i.Environment,
 		&i.AccountID,
+		&i.SupersededAt,
 	)
 	return i, err
 }

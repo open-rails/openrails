@@ -441,6 +441,14 @@
     "OR-J28-S05": [
       "TestCallbackContracts/OR-J28-S05/callback-during-fetch-keeps-a-follow-up-until-new-evidence-is-read"
     ],
+    "OR-J28-S06": [
+      "TestWebhookAccountClasses/OR-J28-S06/another-merchants-claim-in-the-other-class-is-refused-and-the-owners-webhooks-keep-working"
+    ],
+    "OR-J28-S07": [
+      "TestWebhookAccountClasses/OR-J28-S07/one-merchants-live-and-test-psps-on-one-account-each-receive-their-own-events/stripe",
+      "TestWebhookAccountClasses/OR-J28-S07/one-merchants-live-and-test-psps-on-one-account-each-receive-their-own-events/nmi",
+      "TestWebhookAccountClasses/OR-J28-S07/one-merchants-live-and-test-psps-on-one-account-each-receive-their-own-events"
+    ],
     "OR-J29-S01": [
       "TestProcessRecovery/OR-J29-S01"
     ],
