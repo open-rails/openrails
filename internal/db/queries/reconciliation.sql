@@ -668,7 +668,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         OR (status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
             AND expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz)
       )
-ORDER BY created_at, id;
+ORDER BY created_at, id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- life.provider_intent.abandoned findings close subject-first once their
 -- operation is no longer abandoned (it ran after all, or is gone).
@@ -736,7 +737,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
              pa.starts_at < COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour'))
         AND (pa.ends_at IS NULL OR pa.ends_at > COALESCE(s.current_period_starts_at, s.started_at))
   )
-ORDER BY s.current_period_ends_at;
+ORDER BY s.current_period_ends_at, s.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- A chargeback revokes access. Ordinary cancellation only stops billing and
 -- leaves all previously purchased access windows intact, including indefinite

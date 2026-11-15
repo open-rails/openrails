@@ -39,11 +39,14 @@ JOIN LATERAL (SELECT line.product_id, prod.key::text AS product_key
     FROM billing.order_lines line JOIN billing.products prod ON prod.merchant_id=line.merchant_id AND prod.id=line.product_id
     WHERE line.merchant_id=$1::uuid AND line.order_id=e.order_id
     ORDER BY line.position LIMIT 1) l ON true
+ORDER BY e.first_date, e.order_id
+LIMIT $3::int
 `
 
 type ConDuplicateChargesSamePeriodParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
+	RowLimit   int32
 }
 
 type ConDuplicateChargesSamePeriodRow struct {
@@ -64,7 +67,7 @@ type ConDuplicateChargesSamePeriodRow struct {
 // excess net captured money against its frozen total, never infer duplicate
 // periods from current price cadence or receipt-time proximity.
 func (q *Queries) ConDuplicateChargesSamePeriod(ctx context.Context, arg ConDuplicateChargesSamePeriodParams) ([]ConDuplicateChargesSamePeriodRow, error) {
-	rows, err := q.db.Query(ctx, conDuplicateChargesSamePeriod, arg.MerchantID, arg.CustomerID)
+	rows, err := q.db.Query(ctx, conDuplicateChargesSamePeriod, arg.MerchantID, arg.CustomerID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -134,12 +137,15 @@ JOIN billing.products prod ON prod.id = lo.product_id
 WHERE prod.merchant_id = $1::uuid
 GROUP BY lo.customer_id, lo.product_id, prod.key
 HAVING COUNT(*) > 1
+ORDER BY lo.customer_id, lo.product_id
+LIMIT $4::int
 `
 
 type ConDuplicateOwnershipGrantsParams struct {
 	MerchantID uuid.UUID
 	Now        time.Time
 	CustomerID *uuid.UUID
+	RowLimit   int32
 }
 
 type ConDuplicateOwnershipGrantsRow struct {
@@ -156,7 +162,12 @@ type ConDuplicateOwnershipGrantsRow struct {
 // payment is refunded (status, or a linked refund row) drops out. Purchases are
 // a jsonb array, oldest first: the last is the default cancel/refund target.
 func (q *Queries) ConDuplicateOwnershipGrants(ctx context.Context, arg ConDuplicateOwnershipGrantsParams) ([]ConDuplicateOwnershipGrantsRow, error) {
-	rows, err := q.db.Query(ctx, conDuplicateOwnershipGrants, arg.MerchantID, arg.Now, arg.CustomerID)
+	rows, err := q.db.Query(ctx, conDuplicateOwnershipGrants,
+		arg.MerchantID,
+		arg.Now,
+		arg.CustomerID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -189,11 +200,14 @@ WHERE pa.merchant_id = $1::uuid AND pa.source_type = 'purchase'
   AND pa.deleted_at IS NULL
   AND purch.id IS NULL
   AND ($2::uuid IS NULL OR pa.customer_id = $2::uuid)
+ORDER BY pa.id
+LIMIT $3::int
 `
 
 type ConOrphanAccessPaymentSourceParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
+	RowLimit   int32
 }
 
 type ConOrphanAccessPaymentSourceRow struct {
@@ -205,7 +219,7 @@ type ConOrphanAccessPaymentSourceRow struct {
 }
 
 func (q *Queries) ConOrphanAccessPaymentSource(ctx context.Context, arg ConOrphanAccessPaymentSourceParams) ([]ConOrphanAccessPaymentSourceRow, error) {
-	rows, err := q.db.Query(ctx, conOrphanAccessPaymentSource, arg.MerchantID, arg.CustomerID)
+	rows, err := q.db.Query(ctx, conOrphanAccessPaymentSource, arg.MerchantID, arg.CustomerID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -242,12 +256,15 @@ WHERE pa.merchant_id = $1::uuid AND pa.source_type = 'subscription'
            AND pa.starts_at <= $2::timestamptz
            AND (pa.ends_at IS NULL OR pa.ends_at > $2::timestamptz))
   AND ($3::uuid IS NULL OR pa.customer_id = $3::uuid)
+ORDER BY pa.id
+LIMIT $4::int
 `
 
 type ConOrphanAccessSubscriptionSourceParams struct {
 	MerchantID uuid.UUID
 	Now        time.Time
 	CustomerID *uuid.UUID
+	RowLimit   int32
 }
 
 type ConOrphanAccessSubscriptionSourceRow struct {
@@ -263,7 +280,12 @@ type ConOrphanAccessSubscriptionSourceRow struct {
 // A live window with a dangling subscription source is derive.access.unjustified's;
 // this reports only non-live dangling references (revoked/expired rows).
 func (q *Queries) ConOrphanAccessSubscriptionSource(ctx context.Context, arg ConOrphanAccessSubscriptionSourceParams) ([]ConOrphanAccessSubscriptionSourceRow, error) {
-	rows, err := q.db.Query(ctx, conOrphanAccessSubscriptionSource, arg.MerchantID, arg.Now, arg.CustomerID)
+	rows, err := q.db.Query(ctx, conOrphanAccessSubscriptionSource,
+		arg.MerchantID,
+		arg.Now,
+		arg.CustomerID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

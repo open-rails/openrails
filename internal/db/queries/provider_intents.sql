@@ -271,7 +271,8 @@ SELECT * FROM billing.provider_intents
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(action_cutoff)::timestamptz
        AND NOT (intent_type = 'price_migration_push' AND status = 'pending' AND next_attempt_at > sqlc.arg(now)::timestamptz))
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= sqlc.arg(verify_cutoff)::timestamptz)
-) ORDER BY created_at, id;
+) ORDER BY created_at, id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetProviderIntent :one
 SELECT * FROM billing.provider_intents WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;

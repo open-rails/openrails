@@ -1935,6 +1935,7 @@ WHERE provider_intents.merchant_id = $1::uuid AND ( (status IN ('pending', 'fail
        AND NOT (intent_type = 'price_migration_push' AND status = 'pending' AND next_attempt_at > $3::timestamptz))
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $4::timestamptz)
 ) ORDER BY created_at, id
+LIMIT $5::int
 `
 
 type ListStuckProviderIntentsParams struct {
@@ -1942,6 +1943,7 @@ type ListStuckProviderIntentsParams struct {
 	ActionCutoff time.Time
 	Now          time.Time
 	VerifyCutoff time.Time
+	RowLimit     int32
 }
 
 // Non-terminal intents older than the converge engine's stuck thresholds:
@@ -1955,6 +1957,7 @@ func (q *Queries) ListStuckProviderIntents(ctx context.Context, arg ListStuckPro
 		arg.ActionCutoff,
 		arg.Now,
 		arg.VerifyCutoff,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err

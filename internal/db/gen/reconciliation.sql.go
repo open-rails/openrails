@@ -918,12 +918,14 @@ WHERE merchant_id = $1::uuid
             AND expires_at IS NOT NULL AND expires_at < $3::timestamptz)
       )
 ORDER BY created_at, id
+LIMIT $4::int
 `
 
 type ListAbandonedProviderIntentsParams struct {
 	MerchantID uuid.UUID
 	Since      time.Time
 	Now        time.Time
+	RowLimit   int32
 }
 
 type ListAbandonedProviderIntentsRow struct {
@@ -938,7 +940,12 @@ type ListAbandonedProviderIntentsRow struct {
 // A provider's decline is no abandoned action: nothing moved, and the order
 // or dunning that asked for it owns what follows.
 func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAbandonedProviderIntentsParams) ([]ListAbandonedProviderIntentsRow, error) {
-	rows, err := q.db.Query(ctx, listAbandonedProviderIntents, arg.MerchantID, arg.Since, arg.Now)
+	rows, err := q.db.Query(ctx, listAbandonedProviderIntents,
+		arg.MerchantID,
+		arg.Since,
+		arg.Now,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1078,13 +1085,15 @@ WHERE s.merchant_id = $1::uuid
              pa.starts_at < COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour'))
         AND (pa.ends_at IS NULL OR pa.ends_at > COALESCE(s.current_period_starts_at, s.started_at))
   )
-ORDER BY s.current_period_ends_at
+ORDER BY s.current_period_ends_at, s.id
+LIMIT $4::int
 `
 
 type ListActiveSubsMissingAccessProjectionParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	Now        time.Time
+	RowLimit   int32
 }
 
 type ListActiveSubsMissingAccessProjectionRow struct {
@@ -1106,7 +1115,12 @@ type ListActiveSubsMissingAccessProjectionRow struct {
 // re-granted. Subscriptions without a grant are derive.subscription.missing's.
 // NULL customer_id = merchant-wide.
 func (q *Queries) ListActiveSubsMissingAccessProjection(ctx context.Context, arg ListActiveSubsMissingAccessProjectionParams) ([]ListActiveSubsMissingAccessProjectionRow, error) {
-	rows, err := q.db.Query(ctx, listActiveSubsMissingAccessProjection, arg.MerchantID, arg.CustomerID, arg.Now)
+	rows, err := q.db.Query(ctx, listActiveSubsMissingAccessProjection,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"testing"
 	"time"
@@ -648,10 +649,10 @@ func TestImportedAdminGrants(t *testing.T) {
 						return err
 					}
 				}
-				missing, err := ledger.MissingEffects(ctx, ptr(customer.UUID()))
+				missing, err := ledger.MissingEffects(ctx, ptr(customer.UUID()), math.MaxInt32)
 				require.NoError(t, err)
 				require.Empty(t, missing)
-				excess, err := ledger.UnretractedTerminations(ctx, ptr(customer.UUID()))
+				excess, err := ledger.UnretractedTerminations(ctx, ptr(customer.UUID()), math.MaxInt32)
 				require.NoError(t, err)
 				require.Empty(t, excess)
 				return nil

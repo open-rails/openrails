@@ -218,7 +218,8 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
         AND (g.payment_id = p.id OR g.source_id = p.id::text)
   )
-ORDER BY p.id;
+ORDER BY p.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- derive.grant.excess: live grants whose payment was refunded. Surface-only: a
 -- goodwill refund may keep access, so an operator decides. NULL customer_id =
@@ -245,7 +246,8 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.deleted_at IS NULL
         AND (p.status = 'refunded' OR refund.settled)
   )
-ORDER BY g.id;
+ORDER BY g.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- derive.grant_effect.missing: live access/credit grants without their effect:
 -- access has no window (revoked windows count), credit has no deposit transfer.
@@ -275,7 +277,8 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
         SELECT 1 FROM billing.ledger_transfers lt
         WHERE lt.merchant_id = g.merchant_id AND lt.transfer_type = 'deposit' AND lt.grant_id = g.id))
   )
-ORDER BY g.created_at;
+ORDER BY g.created_at, g.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: AccessGrantPastChargebackBoundary :one
 -- Recheck after the customer lock: a missing-effect finding may predate the
@@ -327,7 +330,8 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
               AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_revoke', 'credit_refund', 'credit_refund_restore')
         ), 0)) > 0)
   )
-ORDER BY g.created_at;
+ORDER BY g.created_at, g.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- derive.subscription.missing: subscriptions in an access-granting state with no
 -- subscription-sourced grant; derive-1 materializes the grant and its window
@@ -354,7 +358,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE g.merchant_id = s.merchant_id AND g.event = 'grant'
         AND g.source_type = 'subscription' AND g.source_id = s.id::text
   )
-ORDER BY COALESCE(s.current_period_starts_at, s.started_at);
+ORDER BY COALESCE(s.current_period_starts_at, s.started_at), s.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- derive.wallet.missing: succeeded Solana wallet payments with a stored access
 -- window (metadata.expiration_rfc3339) and no grant. The stored expiry makes the
@@ -381,7 +386,8 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
         AND ((g.source_type = 'purchase' AND g.source_id = p.id::text) OR g.payment_id = p.id)
   )
-ORDER BY p.purchased_at;
+ORDER BY p.purchased_at, p.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- An access window is a distinct fact even when it overlaps another paid
 -- window or has no expiry. A replay must not reinstate a revoked grant.
