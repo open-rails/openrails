@@ -26,14 +26,14 @@ type MintDecimalsSource interface {
 // sound only because decimals are immutable; mutable accounts (balances, plan
 // state) are re-read, slot-gated after our own confirmed writes.
 type MintDecimals struct {
-	reader solanarpc.MintAccountReader
+	reader solanarpc.ChainReader
 
 	mu    sync.RWMutex
 	cache map[string]int
 }
 
 // NewMintDecimals wires a cached mint-decimals resolver over a chain reader.
-func NewMintDecimals(reader solanarpc.MintAccountReader) *MintDecimals {
+func NewMintDecimals(reader solanarpc.ChainReader) *MintDecimals {
 	return &MintDecimals{reader: reader, cache: make(map[string]int)}
 }
 

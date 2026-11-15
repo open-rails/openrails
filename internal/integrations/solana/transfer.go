@@ -213,7 +213,7 @@ func buildTransferInstructions(req TransferRequest, fromWallet, toWallet solanag
 
 // GetMintInfo reads a mint's owning token program and decimals.
 func (c *RPCClient) GetMintInfo(ctx context.Context, mint solanago.PublicKey) (*MintInfo, error) {
-	owner, data, err := c.fallback.GetAccountOwnerAndData(ctx, mint)
+	owner, data, err := c.getAccountOwnerAndData(ctx, mint)
 	if err != nil {
 		return nil, fmt.Errorf("solana: read mint %s: %w", mint, err)
 	}
@@ -233,7 +233,7 @@ func (c *RPCClient) GetMintInfo(ctx context.Context, mint solanago.PublicKey) (*
 	}
 	info := &MintInfo{Mint: mint, Program: owner, Decimals: d}
 	if owner.Equals(Token2022ProgramID) {
-		epoch, err := c.fallback.GetEpoch(ctx)
+		epoch, err := c.getEpoch(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("solana: read epoch: %w", err)
 		}
@@ -291,7 +291,7 @@ func (c *RPCClient) fetchLandedTransaction(ctx context.Context, signature string
 	}
 	var txResult *rpc.GetTransactionResult
 	for attempt := 0; attempt < 5; attempt++ {
-		txResult, err = c.fallback.GetTransactionAt(ctx, sig, commitment)
+		txResult, err = c.getTransactionAt(ctx, sig, commitment)
 		if err == nil && txResult != nil || err != nil && !isNotFoundError(err) {
 			break
 		}

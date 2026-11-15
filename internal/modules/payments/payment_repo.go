@@ -20,13 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-type PaymentRepo struct {
-	db *db.DB
-}
-
 const internalNMISubscriptionAttemptMetadataKey = "nmi_subscription_order_id"
-
-func NewPaymentRepo(d *db.DB) *PaymentRepo { return &PaymentRepo{db: d} }
 
 // IsSettlementCandidate reports whether this row will land as a completed,
 // positive, non-reversal charge — the shape the host settlement feed's enqueue
@@ -139,8 +133,8 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 	}, nil
 }
 
-func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error {
-	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.CustomerID); err != nil {
+func (s *PaymentService) insert(ctx context.Context, payment *models.Payment) error {
+	if err := db.EnsureCustomerRow(ctx, s.db.Qx(ctx), uuid.Nil, payment.CustomerID); err != nil {
 		return err
 	}
 	params, err := paymentInsertParams(payment)
@@ -160,18 +154,18 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 		}
 		params.PspID = &psp
 	}
-	rows, err := r.db.Gen(ctx).CreatePayment(ctx, params)
+	rows, err := s.db.Gen(ctx).CreatePayment(ctx, params)
 	if err != nil {
 		return err
 	}
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
-	return convergejob.Queue(ctx, r.db, tid, payment.CustomerID)
+	return convergejob.Queue(ctx, s.db, tid, payment.CustomerID)
 }
 
-func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
-	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.CustomerID); err != nil {
+func (s *PaymentService) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
+	if err := db.EnsureCustomerRow(ctx, s.db.Qx(ctx), uuid.Nil, payment.CustomerID); err != nil {
 		return false, err
 	}
 	params, err := paymentInsertParams(payment)
@@ -191,20 +185,20 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 		}
 		params.PspID = &psp
 	}
-	rows, err := r.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
+	rows, err := s.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
 	if err != nil || rows == 0 {
 		return false, err
 	}
-	return true, convergejob.Queue(ctx, r.db, tid, payment.CustomerID)
+	return true, convergejob.Queue(ctx, s.db, tid, payment.CustomerID)
 }
 
-func (r *PaymentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Payment, error) {
+func (s *PaymentService) GetByID(ctx context.Context, id uuid.UUID) (*models.Payment, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
 
-	row, err := r.db.Gen(ctx).GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
+	row, err := s.db.Gen(ctx).GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
@@ -212,13 +206,13 @@ func (r *PaymentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Paymen
 }
 
 // GetByIDWithDetails fetches a payment, its subscription and refunds.
-func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*models.Payment, []*models.Payment, error) {
+func (s *PaymentService) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*models.Payment, []*models.Payment, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, nil, queryScopeErr
 	}
 
-	q := r.db.Gen(ctx)
+	q := s.db.Gen(ctx)
 	row, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return nil, nil, err
@@ -228,7 +222,7 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 		return nil, nil, err
 	}
 	// An order's payment names no price.
-	if err := r.attachPaymentRelations(ctx, []*models.Payment{payment}); err != nil {
+	if err := s.attachPaymentRelations(ctx, []*models.Payment{payment}); err != nil {
 		return nil, nil, err
 	}
 
@@ -240,18 +234,18 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := r.attachPaymentRelations(ctx, refunds); err != nil {
+	if err := s.attachPaymentRelations(ctx, refunds); err != nil {
 		return nil, nil, err
 	}
 	return payment, refunds, nil
 }
 
 // AttachRelations loads each payment's subscription.
-func (r *PaymentRepo) AttachRelations(ctx context.Context, payments ...*models.Payment) error {
-	return r.attachPaymentRelations(ctx, payments)
+func (s *PaymentService) AttachRelations(ctx context.Context, payments ...*models.Payment) error {
+	return s.attachPaymentRelations(ctx, payments)
 }
 
-func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
+func (s *PaymentService) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -260,24 +254,24 @@ func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListPaymentsByCustomer(ctx, gen.ListPaymentsByCustomerParams{MerchantID: tid.UUID(), CustomerID: tsid})
+	rows, err := s.db.Gen(ctx).ListPaymentsByCustomer(ctx, gen.ListPaymentsByCustomerParams{MerchantID: tid.UUID(), CustomerID: tsid})
 	if err != nil {
 		return nil, err
 	}
 	return models.PaymentsFromGen(rows)
 }
 
-func (r *PaymentRepo) GetByPSPTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error) {
-	return r.getByTransactionID(ctx, models.ChannelRail, rail, transactionID)
+func (s *PaymentService) GetByPSPTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error) {
+	return s.getByTransactionID(ctx, models.ChannelRail, rail, transactionID)
 }
 
 // GetManualByTransactionID reads a manual payment by the reference the
 // merchant recorded it under.
-func (r *PaymentRepo) GetManualByTransactionID(ctx context.Context, transactionID string) (*models.Payment, error) {
-	return r.getByTransactionID(ctx, models.ChannelManual, "", transactionID)
+func (s *PaymentService) GetManualByTransactionID(ctx context.Context, transactionID string) (*models.Payment, error) {
+	return s.getByTransactionID(ctx, models.ChannelManual, "", transactionID)
 }
 
-func (r *PaymentRepo) getByTransactionID(ctx context.Context, channel models.Channel, rail models.Rail, transactionID string) (*models.Payment, error) {
+func (s *PaymentService) getByTransactionID(ctx context.Context, channel models.Channel, rail models.Rail, transactionID string) (*models.Payment, error) {
 	transactionID = strings.TrimSpace(transactionID)
 	if transactionID == "" {
 		return nil, errors.New("provider transaction reference is required")
@@ -294,49 +288,33 @@ func (r *PaymentRepo) getByTransactionID(ctx context.Context, channel models.Cha
 		}
 		params.PspID, params.Rail = &id, new(string(rail))
 	}
-	row, err := r.db.Gen(ctx).GetPaymentByPSPTransactionID(ctx, params)
+	row, err := s.db.Gen(ctx).GetPaymentByPSPTransactionID(ctx, params)
 	if err != nil {
 		return nil, err
 	}
 	return models.PaymentFromGen(row)
 }
 
-func (r *PaymentRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return queryScopeErr
-	}
-
-	rows, err := r.db.Gen(ctx).DeletePayment(ctx, gen.DeletePaymentParams{MerchantID: queryMerchant.UUID(), ID: id})
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return errors.New("no rows affected")
-	}
-	return nil
-}
-
 // ListRefunds returns every reversal row linked to paymentID, pending ones included.
-func (r *PaymentRepo) ListRefunds(ctx context.Context, paymentID uuid.UUID) ([]*models.Payment, error) {
+func (s *PaymentService) ListRefunds(ctx context.Context, paymentID uuid.UUID) ([]*models.Payment, error) {
 	queryMerchant, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListRefundsForPayment(ctx, gen.ListRefundsForPaymentParams{MerchantID: queryMerchant.UUID(), RefundedPaymentID: &paymentID})
+	rows, err := s.db.Gen(ctx).ListRefundsForPayment(ctx, gen.ListRefundsForPaymentParams{MerchantID: queryMerchant.UUID(), RefundedPaymentID: &paymentID})
 	if err != nil {
 		return nil, err
 	}
 	return models.PaymentsFromGen(rows)
 }
 
-func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID uuid.UUID) (int64, error) {
+func (s *PaymentService) GetRefundTotalByPaymentID(ctx context.Context, paymentID uuid.UUID) (int64, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return 0, queryScopeErr
 	}
 
-	rows, err := r.db.Gen(ctx).ListRefundRowsForTotal(ctx, gen.ListRefundRowsForTotalParams{MerchantID: queryMerchant.UUID(), RefundedPaymentID: &paymentID})
+	rows, err := s.db.Gen(ctx).ListRefundRowsForTotal(ctx, gen.ListRefundRowsForTotalParams{MerchantID: queryMerchant.UUID(), RefundedPaymentID: &paymentID})
 	if err != nil {
 		return 0, err
 	}
@@ -350,7 +328,7 @@ func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID u
 // RefundTotals reports the completed refunds against each listed charge,
 // including refunds outside the page the charges came from. Reservation totals
 // have a different contract.
-func (r *PaymentRepo) RefundTotals(ctx context.Context, paymentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+func (s *PaymentService) RefundTotals(ctx context.Context, paymentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -359,7 +337,7 @@ func (r *PaymentRepo) RefundTotals(ctx context.Context, paymentIDs []uuid.UUID) 
 	if len(paymentIDs) == 0 {
 		return totals, nil
 	}
-	rows, err := r.db.Gen(ctx).GetPaymentRefundTotals(ctx, gen.GetPaymentRefundTotalsParams{MerchantID: mid.UUID(), PaymentIds: paymentIDs})
+	rows, err := s.db.Gen(ctx).GetPaymentRefundTotals(ctx, gen.GetPaymentRefundTotalsParams{MerchantID: mid.UUID(), PaymentIds: paymentIDs})
 	if err != nil {
 		return nil, err
 	}
@@ -369,13 +347,13 @@ func (r *PaymentRepo) RefundTotals(ctx context.Context, paymentIDs []uuid.UUID) 
 	return totals, nil
 }
 
-func (r *PaymentRepo) LinkRefundedPayment(ctx context.Context, paymentID, originalPaymentID uuid.UUID) error {
+func (s *PaymentService) linkRefundedPayment(ctx context.Context, paymentID, originalPaymentID uuid.UUID) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return queryScopeErr
 	}
 
-	rows, err := r.db.Gen(ctx).LinkRefundedPayment(ctx, gen.LinkRefundedPaymentParams{MerchantID: queryMerchant.UUID(),
+	rows, err := s.db.Gen(ctx).LinkRefundedPayment(ctx, gen.LinkRefundedPaymentParams{MerchantID: queryMerchant.UUID(),
 		ID:                paymentID,
 		RefundedPaymentID: &originalPaymentID,
 	})
@@ -416,13 +394,13 @@ func RefundStatusCountsTowardTotal(status string) bool {
 	}
 }
 
-func (r *PaymentRepo) GetRefundByAdminIdempotencyKey(ctx context.Context, originalPaymentID uuid.UUID, key string) (*models.Payment, error) {
+func (s *PaymentService) GetRefundByAdminIdempotencyKey(ctx context.Context, originalPaymentID uuid.UUID, key string) (*models.Payment, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
 
-	row, err := r.db.Gen(ctx).GetRefundByAdminIdempotencyKey(ctx, gen.GetRefundByAdminIdempotencyKeyParams{MerchantID: queryMerchant.UUID(),
+	row, err := s.db.Gen(ctx).GetRefundByAdminIdempotencyKey(ctx, gen.GetRefundByAdminIdempotencyKeyParams{MerchantID: queryMerchant.UUID(),
 		RefundedPaymentID: &originalPaymentID,
 		IdemKey:           strings.TrimSpace(key),
 	})
@@ -432,7 +410,7 @@ func (r *PaymentRepo) GetRefundByAdminIdempotencyKey(ctx context.Context, origin
 	return models.PaymentFromGen(row)
 }
 
-func (r *PaymentRepo) CompleteRefundReservation(ctx context.Context, reservationID uuid.UUID, refundTransactionID string, metadata map[string]any) error {
+func (s *PaymentService) completeRefundReservation(ctx context.Context, reservationID uuid.UUID, refundTransactionID string, metadata map[string]any) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return queryScopeErr
@@ -442,7 +420,7 @@ func (r *PaymentRepo) CompleteRefundReservation(ctx context.Context, reservation
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).CompleteRefundReservation(ctx, gen.CompleteRefundReservationParams{MerchantID: queryMerchant.UUID(),
+	rows, err := s.db.Gen(ctx).CompleteRefundReservation(ctx, gen.CompleteRefundReservationParams{MerchantID: queryMerchant.UUID(),
 		ID:            reservationID,
 		TransactionID: refundTransactionID,
 		Metadata:      meta,
@@ -458,12 +436,12 @@ func (r *PaymentRepo) CompleteRefundReservation(ctx context.Context, reservation
 
 // GetByNMISubscriptionOrder reads the attempt an NMI subscription order
 // reference names.
-func (r *PaymentRepo) GetByNMISubscriptionOrder(ctx context.Context, orderID string) (*models.Payment, error) {
-	mid, pspID, err := r.pspScope(ctx)
+func (s *PaymentService) GetByNMISubscriptionOrder(ctx context.Context, orderID string) (*models.Payment, error) {
+	mid, pspID, err := s.pspScope(ctx)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetPaymentByNMISubscriptionOrder(ctx, gen.GetPaymentByNMISubscriptionOrderParams{MerchantID: mid, PspID: pspID, OrderID: strings.TrimSpace(orderID)})
+	row, err := s.db.Gen(ctx).GetPaymentByNMISubscriptionOrder(ctx, gen.GetPaymentByNMISubscriptionOrderParams{MerchantID: mid, PspID: pspID, OrderID: strings.TrimSpace(orderID)})
 	if err != nil {
 		return nil, err
 	}
@@ -471,19 +449,19 @@ func (r *PaymentRepo) GetByNMISubscriptionOrder(ctx context.Context, orderID str
 }
 
 // GetByStripeInvoice reads the payment a Stripe invoice settled.
-func (r *PaymentRepo) GetByStripeInvoice(ctx context.Context, invoiceID string) (*models.Payment, error) {
-	mid, pspID, err := r.pspScope(ctx)
+func (s *PaymentService) GetByStripeInvoice(ctx context.Context, invoiceID string) (*models.Payment, error) {
+	mid, pspID, err := s.pspScope(ctx)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetPaymentByStripeInvoice(ctx, gen.GetPaymentByStripeInvoiceParams{MerchantID: mid, PspID: pspID, InvoiceID: strings.TrimSpace(invoiceID)})
+	row, err := s.db.Gen(ctx).GetPaymentByStripeInvoice(ctx, gen.GetPaymentByStripeInvoiceParams{MerchantID: mid, PspID: pspID, InvoiceID: strings.TrimSpace(invoiceID)})
 	if err != nil {
 		return nil, err
 	}
 	return models.PaymentFromGen(row)
 }
 
-func (r *PaymentRepo) pspScope(ctx context.Context) (uuid.UUID, uuid.UUID, error) {
+func (s *PaymentService) pspScope(ctx context.Context) (uuid.UUID, uuid.UUID, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return uuid.Nil, uuid.Nil, err
@@ -492,7 +470,7 @@ func (r *PaymentRepo) pspScope(ctx context.Context) (uuid.UUID, uuid.UUID, error
 	return mid.UUID(), pspID, err
 }
 
-func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) error {
+func (s *PaymentService) completeProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return queryScopeErr
@@ -502,7 +480,7 @@ func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uui
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).CompleteProviderAttempt(ctx, gen.CompleteProviderAttemptParams{MerchantID: queryMerchant.UUID(),
+	rows, err := s.db.Gen(ctx).CompleteProviderAttempt(ctx, gen.CompleteProviderAttemptParams{MerchantID: queryMerchant.UUID(),
 		ID:            attemptID,
 		TransactionID: strings.TrimSpace(providerTransactionID),
 		Metadata:      meta,
@@ -516,7 +494,7 @@ func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uui
 	return nil
 }
 
-func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemptID uuid.UUID, metadata map[string]any) error {
+func (s *PaymentService) completeProviderAttemptInPlace(ctx context.Context, attemptID uuid.UUID, metadata map[string]any) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return queryScopeErr
@@ -526,7 +504,7 @@ func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemp
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).CompleteProviderAttemptInPlace(ctx, gen.CompleteProviderAttemptInPlaceParams{MerchantID: queryMerchant.UUID(),
+	rows, err := s.db.Gen(ctx).CompleteProviderAttemptInPlace(ctx, gen.CompleteProviderAttemptInPlaceParams{MerchantID: queryMerchant.UUID(),
 		ID:       attemptID,
 		Metadata: meta,
 	})
@@ -540,21 +518,21 @@ func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemp
 }
 
 // ListPage is one page of payments, newest first.
-func (r *PaymentRepo) ListPage(ctx context.Context, p billing.PaymentListParams) (billing.ListPage[*models.Payment], error) {
+func (s *PaymentService) ListPage(ctx context.Context, p billing.PaymentListParams) (billing.ListPage[*models.Payment], error) {
 	var out billing.ListPage[*models.Payment]
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return out, err
 	}
 	if p.IDs != nil {
-		rows, err := r.db.Gen(ctx).ListPaymentsByIDs(ctx, gen.ListPaymentsByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(p.IDs)})
+		rows, err := s.db.Gen(ctx).ListPaymentsByIDs(ctx, gen.ListPaymentsByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(p.IDs)})
 		if err != nil {
 			return out, err
 		}
 		if out.Items, err = models.PaymentsFromGen(rows); err != nil {
 			return out, err
 		}
-		return out, r.attachPaymentRelations(ctx, out.Items)
+		return out, s.attachPaymentRelations(ctx, out.Items)
 	}
 	limit, err := pagination.Limit(p.PageRequest)
 	if err != nil {
@@ -591,7 +569,7 @@ func (r *PaymentRepo) ListPage(ctx context.Context, p billing.PaymentListParams)
 		kind := string(p.Kind)
 		params.Kind = &kind
 	}
-	rows, err := r.db.Gen(ctx).ListPaymentsPage(ctx, params)
+	rows, err := s.db.Gen(ctx).ListPaymentsPage(ctx, params)
 	if err != nil {
 		return out, err
 	}
@@ -600,12 +578,12 @@ func (r *PaymentRepo) ListPage(ctx context.Context, p billing.PaymentListParams)
 		return out, err
 	}
 	out = pagination.Cut(payments, limit, func(p *models.Payment) any { return pagination.TimeID{At: p.CreatedAt, ID: p.ID} })
-	return out, r.attachPaymentRelations(ctx, out.Items)
+	return out, s.attachPaymentRelations(ctx, out.Items)
 }
 
 // attachPaymentRelations attaches subscriptions in one batched lookup.
 // Purchased terms belong to order lines, not to a payment-wide price.
-func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*models.Payment) error {
+func (s *PaymentService) attachPaymentRelations(ctx context.Context, payments []*models.Payment) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return queryScopeErr
@@ -623,7 +601,7 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 		}
 	}
 
-	q := r.db.Gen(ctx)
+	q := s.db.Gen(ctx)
 	subs := map[uuid.UUID]*models.Subscription{}
 	if len(subIDs) > 0 {
 		rows, err := q.ListSubscriptionsByIDs(ctx, gen.ListSubscriptionsByIDsParams{MerchantID: queryMerchant.UUID(), Ids: subIDs})
@@ -646,13 +624,13 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 	return nil
 }
 
-func (r *PaymentRepo) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
+func (s *PaymentService) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
 
-	row, err := r.db.Gen(ctx).GetLatestChargeBySubscriptionID(ctx, gen.GetLatestChargeBySubscriptionIDParams{MerchantID: queryMerchant.UUID(), SubscriptionID: &subscriptionID})
+	row, err := s.db.Gen(ctx).GetLatestChargeBySubscriptionID(ctx, gen.GetLatestChargeBySubscriptionIDParams{MerchantID: queryMerchant.UUID(), SubscriptionID: &subscriptionID})
 	if err != nil {
 		return nil, err
 	}
@@ -661,7 +639,7 @@ func (r *PaymentRepo) GetLatestChargeBySubscriptionID(ctx context.Context, subsc
 
 // GetSolanaPeriodPaidAmount reads real charges for this subscription's paid period.
 // A no-transfer period has no charge rows and returns zero, never a list price.
-func (r *PaymentRepo) GetSolanaPeriodPaidAmount(ctx context.Context, subscriptionID uuid.UUID, periodStart time.Time, currency string) (int64, error) {
+func (s *PaymentService) GetSolanaPeriodPaidAmount(ctx context.Context, subscriptionID uuid.UUID, periodStart time.Time, currency string) (int64, error) {
 	queryMerchant, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
@@ -670,17 +648,17 @@ func (r *PaymentRepo) GetSolanaPeriodPaidAmount(ctx context.Context, subscriptio
 	if err != nil {
 		return 0, err
 	}
-	return r.db.Gen(ctx).GetSolanaPeriodPaidAmount(ctx, gen.GetSolanaPeriodPaidAmountParams{
+	return s.db.Gen(ctx).GetSolanaPeriodPaidAmount(ctx, gen.GetSolanaPeriodPaidAmountParams{
 		MerchantID: queryMerchant.UUID(), PspID: pspID, SubscriptionID: subscriptionID,
 		PeriodStart: periodStart.UTC().Format(time.RFC3339), Currency: moneyutil.NormalizeCurrency(currency),
 	})
 }
 
-func (r *PaymentRepo) MarkFailed(ctx context.Context, id uuid.UUID) error {
+func (s *PaymentService) markFailed(ctx context.Context, id uuid.UUID) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return queryScopeErr
 	}
 
-	return r.db.Gen(ctx).MarkPaymentFailed(ctx, gen.MarkPaymentFailedParams{MerchantID: queryMerchant.UUID(), ID: id})
+	return s.db.Gen(ctx).MarkPaymentFailed(ctx, gen.MarkPaymentFailedParams{MerchantID: queryMerchant.UUID(), ID: id})
 }

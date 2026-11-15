@@ -32,7 +32,7 @@ func (c *BalanceCache) Read(ctx context.Context, rpc *RPCClient, merchantID, psp
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	provider := rpc.fallback.PostureKey()
+	provider := rpc.postureKey()
 	provider.MerchantID, provider.PSPID = merchantID, pspID
 	key := balanceKey{provider: provider, wallet: wallet}
 	c.mu.Lock()

@@ -36,13 +36,6 @@ type Payload struct {
 	solanasubs.PullEpisode
 }
 
-// ChainReader is the chain-read surface the verify leg needs (satisfied by
-// *solana.RPCClient).
-type ChainReader interface {
-	GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error)
-	NeverLanded(ctx context.Context, signature solanago.Signature, terminal solanaint.ChainTerminal) (bool, error)
-}
-
 // Handler executes the recurring pull intent: it freezes the accepted
 // agreement, records the signature before sending, repairs landed pulls, and
 // only retries a recorded transaction after proving that it reverted or
@@ -53,7 +46,7 @@ type Handler struct {
 	Cranker   *recurring.CrankService                     // nil parks every pull
 	Lifecycle *subscriptions.SubscriptionLifecycleService // nil parks every pull
 	Store     *intents.Store                              // pre-submit signature write-ahead
-	Chain     ChainReader                                 // nil leaves recorded transactions unresolved
+	Chain     solanaint.ChainReader                       // nil leaves recorded transactions unresolved
 	Policy    intents.BackoffPolicy
 	// Gas checks the merchant's cranker wallets after a pull it signed paid
 	// its fee: a low one raises its finding, a funded one resolves it.
@@ -429,7 +422,7 @@ func (h *Handler) checkSignature(ctx context.Context, signature string) (*rpc.Ge
 	return checkSolanaSignature(ctx, h.Chain, signature)
 }
 
-func checkSolanaSignature(ctx context.Context, chain ChainReader, signature string) (*rpc.GetTransactionResult, sigVerdict) {
+func checkSolanaSignature(ctx context.Context, chain solanaint.ChainReader, signature string) (*rpc.GetTransactionResult, sigVerdict) {
 	if chain == nil {
 		return nil, sigVerdictUnknown
 	}

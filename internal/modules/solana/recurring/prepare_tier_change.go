@@ -13,14 +13,6 @@ import (
 
 const tierChangeQuotePrefix = "openrails:tier-change:1:"
 
-// tierChangeRPC reads the SubscriptionAuthority, the subscriber's balance and a
-// recent blockhash.
-type tierChangeRPC interface {
-	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
-	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
-	GetTokenBalanceForMint(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey) (uint64, error)
-}
-
 // PrepareTierChangeService builds the single atomic tier-change transaction.
 // Plan terms are immutable and a subscription binds one plan, so a tier change
 // is cancel-old + subscribe-new in one all-or-nothing tx:
@@ -35,12 +27,12 @@ type tierChangeRPC interface {
 // no init step.
 type PrepareTierChangeService struct {
 	submitter Submitter // the new plan owner's cranker co-signs upgrades
-	rpc       tierChangeRPC
+	rpc       solanaint.ChainReader
 	tokens    Tokens
 }
 
 // NewPrepareTierChangeService builds a PrepareTierChangeService.
-func NewPrepareTierChangeService(submitter Submitter, rpc tierChangeRPC, tokens Tokens) *PrepareTierChangeService {
+func NewPrepareTierChangeService(submitter Submitter, rpc solanaint.ChainReader, tokens Tokens) *PrepareTierChangeService {
 	return &PrepareTierChangeService{submitter: submitter, rpc: rpc, tokens: tokens}
 }
 
@@ -262,7 +254,7 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 
 // buildTierChangeUnsignedTxBase64 assembles an unsigned transaction (payer signs + sends)
 // with a recent blockhash, base64-encoded. Shared by the downgrade path.
-func buildTierChangeUnsignedTxBase64(ctx context.Context, rpc tierChangeRPC, payer solanago.PublicKey, ixs []solanago.Instruction) (string, error) {
+func buildTierChangeUnsignedTxBase64(ctx context.Context, rpc solanaint.ChainReader, payer solanago.PublicKey, ixs []solanago.Instruction) (string, error) {
 	blockhash, err := rpc.GetLatestBlockhash(ctx)
 	if err != nil {
 		return "", fmt.Errorf("recurring: get recent blockhash: %w", err)

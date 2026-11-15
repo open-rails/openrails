@@ -1,11 +1,6 @@
-// Package embedhttp assembles the embedded billing HTTP surface as a gin-free
-// net/http handler (issue #282/#285). It is the keystone that lets pkg/embedded
-// expose its routes without importing gin: route groups are registered via
-// the neutral router.NewMux (request.NewHTTP backend), all wrapped with the
+// Package embedhttp assembles the embedded billing HTTP surface as a net/http
+// handler: route groups are registered via router.NewMux, all wrapped with the
 // net/http base middleware stack (security headers, CORS, body limit).
-//
-// The gin Server (internal/http) and standalone cmd/ keep gin; this package is
-// the gin-free analogue of the embedded assembly that used to live there.
 package embedhttp
 
 import (

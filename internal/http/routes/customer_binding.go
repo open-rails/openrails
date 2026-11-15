@@ -20,7 +20,7 @@ import (
 
 // RegisterMappedCustomerRoutes reuses the explicitly classified customer
 // operations. New operations are not exposed with an implicit sensitivity.
-func RegisterMappedCustomerRoutes(rr router.Router, rt *app.Runtime, m CustomerMount, resolve func(*http.Request, auth.Verified) (config.CustomerBinding, error)) {
+func RegisterMappedCustomerRoutes(rr *router.Router, rt *app.Runtime, m CustomerMount, resolve func(*http.Request, auth.Verified) (config.CustomerBinding, error)) {
 	env := customerEnv(rt, m)
 	env.resolveCustomer = resolve
 	for _, route := range Catalog() {

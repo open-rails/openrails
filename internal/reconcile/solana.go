@@ -93,14 +93,6 @@ type SolanaLocalRecord struct {
 // (nil, nil) = no local record with that id exists.
 type SolanaLocalRecordResolver func(ctx context.Context, localID uuid.UUID) (*SolanaLocalRecord, error)
 
-// solanaRPC is the read slice of *solanaint.RPCClient the fetcher uses.
-type solanaRPC interface {
-	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
-	GetSignaturesForAddressPage(ctx context.Context, address, before string, limit int) ([]solanaint.SignatureInfo, error)
-	GetTransaction(ctx context.Context, signature solanago.Signature) (*solrpc.GetTransactionResult, error)
-	GetProgramAccounts(ctx context.Context, program solanago.PublicKey, filters []solanaint.ProgramAccountFilter) ([]solanaint.ProgramAccount, error)
-}
-
 // SolanaFetcher reports the on-chain state of the merchant's Solana rail:
 // subscriptions and transactions only (no refunds, chargebacks or vault).
 // Three lanes:
@@ -137,7 +129,7 @@ type solanaRPC interface {
 //   - These are bulk point-in-time reads, not post-tx reads, so plain reads
 //     (no *AtSlot / ReadUntilConsistent) are correct.
 type SolanaFetcher struct {
-	RPC    solanaRPC
+	RPC    *solanaint.RPCClient
 	Source SolanaSubscriptionSource
 	// Plans feeds the per-plan subscription enumeration, which runs on a slow
 	// cadence (planDiscoveryDue). Nil disables it.

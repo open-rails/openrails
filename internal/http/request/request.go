@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"io"
 	"mime"
-	"mime/multipart"
-	"net"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -35,41 +33,20 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
-// Transport is the backend behind a Request: in production only the net/http
-// one (NewHTTP); the interface keeps handlers framework-agnostic.
-type Transport interface {
-	WriteJSON(code int, body any)
-	AbortJSON(code int, body any)
-	Bind(data any) error
-	BindJSON(data any) error
-	PeekJSON(data any) error
-	BindQuery(data any) error
-	BindURI(data any) error
-	Param(key string) string
-	Query(key string) string
-	Get(key string) (any, bool)
-	Set(key string, value any)
-	Next()
-	Header(key string) string
-	SetHeader(key, value string)
-	Redirect(code int, location string)
-	PostForm(key string) string
-	FormFile(key string) (multipart.File, *multipart.FileHeader, error)
-}
-
+// Request is the HTTP request a route handler answers and its response
+// writer.
 type Request struct {
 	State   *app.Runtime
 	Request *http.Request
 	Clock   clockwork.Clock
 
-	t Transport
-
+	w         http.ResponseWriter
+	wrote     bool
 	requestID string
 }
 
-// NewWithTransport builds a Request over an arbitrary Transport (test seam);
-// production uses NewHTTP.
-func NewWithTransport(runtime *app.Runtime, r *http.Request, t Transport) *Request {
+// New builds the Request a route handler answers.
+func New(w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request {
 	var clock clockwork.Clock
 	if runtime != nil {
 		clock = runtime.Clock
@@ -78,19 +55,8 @@ func NewWithTransport(runtime *app.Runtime, r *http.Request, t Transport) *Reque
 		State:   runtime,
 		Request: r,
 		Clock:   timeutil.FirstClock(clock),
-		t:       t,
+		w:       w,
 	}
-}
-
-// NewHTTP builds a net/http-backed Request.
-func NewHTTP(w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request {
-	return NewWithTransport(runtime, r, newHTTPTransport(w, r))
-}
-
-// writeDeadliner is implemented by transports that own a connection whose
-// write deadline a route budget must lift (the net/http one).
-type writeDeadliner interface {
-	SetWriteDeadline(deadline time.Time) error
 }
 
 // Budget bounds the handler's own work by d, the route's declared budget, and
@@ -100,10 +66,9 @@ type writeDeadliner interface {
 // budget. Response bodies are small JSON, so no second clock is needed after
 // the budget ends.
 func (r *Request) Budget(d time.Duration) (context.Context, context.CancelFunc) {
-	if wd, ok := r.t.(writeDeadliner); ok {
-		if err := wd.SetWriteDeadline(time.Time{}); err != nil {
-			logrus.WithError(err).WithField("request_id", r.RequestID()).Debug("route budget: connection write deadline could not be lifted")
-		}
+	// ResponseController unwraps the middleware writers via their Unwrap.
+	if err := http.NewResponseController(r.w).SetWriteDeadline(time.Time{}); err != nil {
+		logrus.WithError(err).WithField("request_id", r.RequestID()).Debug("route budget: connection write deadline could not be lifted")
 	}
 	return context.WithTimeout(r.Request.Context(), d)
 }
@@ -134,27 +99,25 @@ func (r *Request) InternalError(msg string, cause error) {
 	logrus.WithError(cause).WithField("request_id", requestID).Error(msg)
 	response := api.SimpleErrorResponse(http.StatusInternalServerError, msg)
 	response.Error.RequestID = requestID
-	r.t.WriteJSON(http.StatusInternalServerError, response)
+	r.writeJSON(http.StatusInternalServerError, response)
 }
 
 // Through runs net/http middleware (the host's auth) inside the route chain:
 // next sees the request and writer the middleware passed on, and does not
 // run when the middleware answers the request itself.
 func (r *Request) Through(mw func(http.Handler) http.Handler, next func(*Request)) {
-	t, ok := r.t.(*httpTransport)
-	if !ok || mw == nil {
-		r.InternalError("auth middleware unavailable", errors.New("request: Through needs the net/http transport and a middleware"))
+	if mw == nil {
+		r.InternalError("auth middleware unavailable", errors.New("request: Through needs a middleware"))
 		return
 	}
-	outer := t.w
+	outer := r.w
 	mw(http.HandlerFunc(func(w http.ResponseWriter, passed *http.Request) {
-		if passed == nil {
-			passed = r.Request
+		if passed != nil {
+			r.Request = passed
 		}
-		r.Request, t.r = passed, passed
 		if w != nil {
-			t.w = w
-			defer func() { t.w = outer }()
+			r.w = w
+			defer func() { r.w = outer }()
 		}
 		next(r)
 	})).ServeHTTP(outer, r.Request)
@@ -164,24 +127,9 @@ func (r *Request) Through(mw func(http.Handler) http.Handler, next func(*Request
 // whose handler an assembly builds outside the handlers package.
 func FromHTTP(h http.Handler) func(*Request) {
 	return func(r *Request) {
-		t, ok := r.t.(*httpTransport)
-		if !ok {
-			r.InternalError("route handler unavailable", errors.New("request: FromHTTP needs the net/http transport"))
-			return
-		}
-		t.wrote = true
-		h.ServeHTTP(t.w, r.Request)
+		r.wrote = true
+		h.ServeHTTP(r.w, r.Request)
 	}
-}
-
-// AbortGate answers a Gate or authenticator refusal with its code.
-func (r *Request) AbortGate(err error) {
-	var refusal billingauth.GateError
-	if !errors.As(err, &refusal) {
-		r.AbortAPIError(api.Coded(billing.CodeInternalError, "authorization unavailable"))
-		return
-	}
-	r.AbortAPIError(billingauth.RefusalError(refusal))
 }
 
 // AbortCode stops the chain with a registered error code; an empty message
@@ -200,7 +148,7 @@ func (r *Request) ErrorCode(code, message string) {
 func (r *Request) AbortAPIError(err *api.APIError) {
 	err.WithRequestID(r.RequestID())
 	r.logRefusal(err.HTTPStatus, logrus.Fields{"type": err.Type, "code": err.Code, "param": paramValue(err.Param)}, err.Message)
-	r.t.AbortJSON(err.HTTPStatus, err.ToResponse())
+	r.writeJSON(err.HTTPStatus, err.ToResponse())
 }
 
 // paramValue logs a refusal's param, not its pointer.
@@ -218,7 +166,7 @@ func (r *Request) APIError(err *api.APIError) {
 		fields[logrus.ErrorKey] = cause
 	}
 	r.logRefusal(err.HTTPStatus, fields, err.Message)
-	r.t.WriteJSON(err.HTTPStatus, err.ToResponse())
+	r.writeJSON(err.HTTPStatus, err.ToResponse())
 }
 
 const maxRequestIDLength = 128
@@ -248,11 +196,7 @@ func (r *Request) RequestID() string {
 }
 
 func (r *Request) SuccessJSON(data any) {
-	r.t.WriteJSON(http.StatusOK, data)
-}
-
-func (r *Request) Bind(data any) error {
-	return r.t.Bind(data)
+	r.writeJSON(http.StatusOK, data)
 }
 
 // BindJSON is the one request-body decoder: exactly one JSON value, no field
@@ -260,7 +204,7 @@ func (r *Request) Bind(data any) error {
 // answered here (unknown_field with param, unsupported_media_type,
 // request_body_too_large, or invalid_param) and BindJSON returns false.
 func (r *Request) BindJSON(data any) bool {
-	if err := r.t.BindJSON(data); err != nil {
+	if err := r.decodeBody(data); err != nil {
 		r.APIError(BindError(err))
 		return false
 	}
@@ -270,7 +214,7 @@ func (r *Request) BindJSON(data any) bool {
 // BindOptionalJSON is BindJSON for a route whose body may be absent: an empty
 // body leaves data untouched.
 func (r *Request) BindOptionalJSON(data any) bool {
-	err := r.t.BindJSON(data)
+	err := r.decodeBody(data)
 	if err == nil || errors.Is(err, io.EOF) {
 		return true
 	}
@@ -280,15 +224,16 @@ func (r *Request) BindOptionalJSON(data any) bool {
 
 // PeekJSON decodes the JSON body into data and leaves the body for the
 // handler's BindJSON. Middleware uses it to size a request before it runs.
-func (r *Request) PeekJSON(data any) error { return r.t.PeekJSON(data) }
-
-// DecodeJSON is BindJSON for a handler that answers a refusal itself: the
-// error is the refusal BindJSON would have written.
-func (r *Request) DecodeJSON(data any) error {
-	if err := r.t.BindJSON(data); err != nil {
-		return BindError(err)
+func (r *Request) PeekJSON(data any) error {
+	if r.Request.Body == nil {
+		return io.EOF
 	}
-	return nil
+	raw, err := io.ReadAll(r.Request.Body)
+	if err != nil {
+		return err
+	}
+	r.Request.Body = io.NopCloser(bytes.NewReader(raw))
+	return json.Unmarshal(raw, data)
 }
 
 // Page reads a list route's ?limit= and ?cursor=: the page size
@@ -314,16 +259,12 @@ func (r *Request) PageOf(size pagination.Size) (billing.PageRequest, bool) {
 // BindQuery reads the query string into data's `form` fields. A value that
 // does not parse as its field's type is 400 invalid_query on that parameter.
 func (r *Request) BindQuery(data any) bool {
-	if err := r.t.BindQuery(data); err != nil {
-		r.APIError(QueryError(err))
-		return false
+	err := decodeTaggedValues(data, "form", func(k string) string { return r.Request.URL.Query().Get(k) })
+	if err == nil {
+		err = validateBinding(data)
 	}
-	return true
-}
-
-func (r *Request) BindURI(data any) bool {
-	if err := r.t.BindURI(data); err != nil {
-		r.ErrorCode(billing.CodeInvalidParam, normaliseBindError(err))
+	if err != nil {
+		r.APIError(QueryError(err))
 		return false
 	}
 	return true
@@ -331,12 +272,12 @@ func (r *Request) BindURI(data any) bool {
 
 // JSON writes a JSON response with the given status code.
 func (r *Request) JSON(code int, body any) {
-	r.t.WriteJSON(code, body)
+	r.writeJSON(code, body)
 }
 
 // Status writes an HTTP status with no response body.
 func (r *Request) Status(code int) {
-	r.t.WriteJSON(code, nil)
+	r.writeJSON(code, nil)
 }
 
 // NoContent answers 204: a DELETE that removed its resource.
@@ -345,52 +286,21 @@ func (r *Request) NoContent() { r.Status(http.StatusNoContent) }
 // ShouldBindURI binds path parameters into data and returns the error WITHOUT
 // writing a response.
 func (r *Request) ShouldBindURI(data any) error {
-	return r.t.BindURI(data)
+	if err := decodeTaggedValues(data, "uri", r.Request.PathValue); err != nil {
+		return err
+	}
+	return validateBinding(data)
 }
 
-// ShouldBindQuery binds query parameters into data and returns the error
-// WITHOUT writing a response.
-func (r *Request) ShouldBindQuery(data any) error {
-	return r.t.BindQuery(data)
-}
+func (r *Request) Param(key string) string { return r.Request.PathValue(key) }
 
-func (r *Request) Param(key string) string {
-	return r.t.Param(key)
-}
-
-func (r *Request) Query(key string) string {
-	return r.t.Query(key)
-}
+func (r *Request) Query(key string) string { return r.Request.URL.Query().Get(key) }
 
 // Header returns a request header value.
-func (r *Request) Header(key string) string {
-	return r.t.Header(key)
-}
+func (r *Request) Header(key string) string { return r.Request.Header.Get(key) }
 
 // SetHeader sets a response header.
-func (r *Request) SetHeader(key, value string) {
-	r.t.SetHeader(key, value)
-}
-
-func (r *Request) Next() {
-	r.t.Next()
-}
-
-func (r *Request) Get(key string) (any, bool) {
-	return r.t.Get(key)
-}
-
-func (r *Request) MustGet(key string) any {
-	v, ok := r.t.Get(key)
-	if !ok {
-		panic("request: key " + key + " does not exist")
-	}
-	return v
-}
-
-func (r *Request) Set(key string, value any) {
-	r.t.Set(key, value)
-}
+func (r *Request) SetHeader(key, value string) { r.w.Header().Set(key, value) }
 
 // GetUser is a customer route's admitted customer, as the purchase services
 // take it: from the route gate only, never the request's path, query or body.
@@ -427,11 +337,6 @@ func (r *Request) Staff() (billingauth.Staff, bool) {
 	return billingauth.StaffFromContext(r.Request.Context())
 }
 
-// ClientIP is the request's client IP: the socket peer, or, when that peer is
-// inside a configured trusted_proxies CIDR, the first untrusted address
-// walking X-Forwarded-For right to left. Rate limits, abuse tracking, webhook
-// IP recording and the CCBill allowlist all resolve through it, so proxy trust
-// is enforced identically everywhere.
 // ClientCountry is the client's country as a trusted proxy reports it, or "".
 func (r *Request) ClientCountry() string {
 	if r.Request == nil || r.State == nil {
@@ -440,6 +345,11 @@ func (r *Request) ClientCountry() string {
 	return r.State.TrustedProxies.Country(r.Request)
 }
 
+// ClientIP is the request's client IP: the socket peer, or, when that peer is
+// inside a configured trusted_proxies CIDR, the first untrusted address
+// walking X-Forwarded-For right to left. Rate limits, abuse tracking, webhook
+// IP recording and the CCBill allowlist all resolve through it, so proxy trust
+// is enforced identically everywhere.
 func (r *Request) ClientIP() string {
 	if r.Request == nil {
 		return ""
@@ -465,33 +375,6 @@ func (r *Request) SecureTransport() bool {
 		resolver = r.State.TrustedProxies
 	}
 	return resolver.ForwardedHTTPS(r.Request)
-}
-
-func (r *Request) GetRemoteIP() string {
-	if r.Request == nil {
-		return ""
-	}
-	ip, _, err := net.SplitHostPort(r.Request.RemoteAddr)
-	if err != nil {
-		return r.Request.RemoteAddr
-	}
-	return ip
-}
-
-func (r *Request) Redirect(code int, location string) {
-	r.t.Redirect(code, location)
-}
-
-func (r *Request) FormValue(key string) string {
-	return r.t.PostForm(key)
-}
-
-func (r *Request) FormFile(key string) (multipart.File, *multipart.FileHeader, error) {
-	return r.t.FormFile(key)
-}
-
-func (r *Request) GetState() *app.Runtime {
-	return r.State
 }
 
 // errTrailingJSON is a body holding more than one JSON value.
@@ -592,55 +475,24 @@ func isRequestBodyTooLarge(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "request body too large")
 }
 
-type httpTransport struct {
-	w     http.ResponseWriter
-	r     *http.Request
-	kv    map[string]any
-	wrote bool
-}
-
-func newHTTPTransport(w http.ResponseWriter, r *http.Request) *httpTransport {
-	return &httpTransport{w: w, r: r, kv: map[string]any{}}
-}
-
-// SetWriteDeadline reaches the connection through net/http's
-// ResponseController, which unwraps the middleware writers via their Unwrap.
-func (h *httpTransport) SetWriteDeadline(deadline time.Time) error {
-	return http.NewResponseController(h.w).SetWriteDeadline(deadline)
-}
-
-func (h *httpTransport) WriteJSON(code int, body any) {
-	if h.wrote {
+// writeJSON writes the response once; later writes are dropped.
+func (r *Request) writeJSON(code int, body any) {
+	if r.wrote {
 		return
 	}
-	h.wrote = true
+	r.wrote = true
 	if body == nil {
-		h.w.WriteHeader(code)
+		r.w.WriteHeader(code)
 		return
 	}
-	h.w.Header().Set("Content-Type", "application/json")
-	h.w.WriteHeader(code)
-	_ = json.NewEncoder(h.w).Encode(wireform.Of(body))
+	r.w.Header().Set("Content-Type", "application/json")
+	r.w.WriteHeader(code)
+	_ = json.NewEncoder(r.w).Encode(wireform.Of(body))
 }
 
-func (h *httpTransport) AbortJSON(code int, body any) { h.WriteJSON(code, body) }
-
-func (h *httpTransport) Bind(data any) error { return h.BindJSON(data) }
-
-func (h *httpTransport) PeekJSON(data any) error {
-	if h.r.Body == nil {
-		return io.EOF
-	}
-	raw, err := io.ReadAll(h.r.Body)
-	if err != nil {
-		return err
-	}
-	h.r.Body = io.NopCloser(bytes.NewReader(raw))
-	return json.Unmarshal(raw, data)
-}
-
-func (h *httpTransport) BindJSON(data any) error {
-	raw, err := io.ReadAll(h.r.Body)
+// decodeBody is BindJSON's decoder, returning the refusal's cause.
+func (r *Request) decodeBody(data any) error {
+	raw, err := io.ReadAll(r.Request.Body)
 	if err != nil {
 		return err
 	}
@@ -650,7 +502,7 @@ func (h *httpTransport) BindJSON(data any) error {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return io.EOF
 	}
-	if !jsonBody(h.r) {
+	if !jsonBody(r.Request) {
 		return errMediaType
 	}
 	if err := DecodeStrict(raw, data); err != nil {
@@ -668,35 +520,6 @@ func jsonBody(r *http.Request) bool {
 	}
 	mediaType, _, err := mime.ParseMediaType(declared)
 	return err == nil && (mediaType == "application/json" || strings.HasSuffix(mediaType, "+json"))
-}
-
-func (h *httpTransport) BindQuery(data any) error {
-	if err := decodeTaggedValues(data, "form", func(k string) string { return h.r.URL.Query().Get(k) }); err != nil {
-		return err
-	}
-	return validateBinding(data)
-}
-
-func (h *httpTransport) BindURI(data any) error {
-	if err := decodeTaggedValues(data, "uri", func(k string) string { return h.r.PathValue(k) }); err != nil {
-		return err
-	}
-	return validateBinding(data)
-}
-
-func (h *httpTransport) Param(key string) string     { return h.r.PathValue(key) }
-func (h *httpTransport) Query(key string) string     { return h.r.URL.Query().Get(key) }
-func (h *httpTransport) Get(key string) (any, bool)  { v, ok := h.kv[key]; return v, ok }
-func (h *httpTransport) Set(key string, value any)   { h.kv[key] = value }
-func (h *httpTransport) Next()                       {}
-func (h *httpTransport) Header(key string) string    { return h.r.Header.Get(key) }
-func (h *httpTransport) SetHeader(key, value string) { h.w.Header().Set(key, value) }
-func (h *httpTransport) Redirect(code int, location string) {
-	http.Redirect(h.w, h.r, location, code)
-}
-func (h *httpTransport) PostForm(key string) string { return h.r.PostFormValue(key) }
-func (h *httpTransport) FormFile(key string) (multipart.File, *multipart.FileHeader, error) {
-	return h.r.FormFile(key)
 }
 
 // bindingValidator reads the `binding:"..."` struct tag with the

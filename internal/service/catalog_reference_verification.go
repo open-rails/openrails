@@ -9,6 +9,7 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/merchant"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
@@ -33,14 +34,10 @@ func catalogReferenceKeys(link map[string]string, allowed ...string) error {
 	return nil
 }
 
-type catalogReferenceChainReader interface {
-	GetAccountData(context.Context, solanago.PublicKey) ([]byte, error)
-}
-
 // verifySolanaCatalogReference reads a published plan back on-chain: it must
 // be the cranker's plan at its program address, pay the merchant's treasury
 // and match the price's period and amount. It returns the stored reference.
-func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanService, reader catalogReferenceChainReader, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
+func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanService, reader solanaint.ChainReader, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
 	if err := catalogReferenceKeys(link, solanaKeyPlanPDA, solanaKeyPlanID, solanaKeyMint, solanaKeyToken, solanaKeyMintSymbol, solanaKeyAmountBaseUnits, solanaKeyPeriodHours, solanaKeyCreatedAt, solanaKeyMerchant, solanaKeyTreasury); err != nil {
 		return nil, err
 	}

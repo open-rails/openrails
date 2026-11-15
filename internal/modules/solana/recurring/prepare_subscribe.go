@@ -50,23 +50,6 @@ const (
 	defaultAuthorityReadBackoff = time.Second
 )
 
-// prepareRPC reads account state, a recent blockhash and the subscriber's token
-// balance for the pre-flight check.
-type prepareRPC interface {
-	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
-	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
-	// GetTokenBalanceForMint returns the SPL token balance (base units) for the
-	// owner's ATA of mint; 0 when the ATA does not exist.
-	GetTokenBalanceForMint(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey) (uint64, error)
-}
-
-// accountDataReader is the narrow read surface readAuthorityInitID needs (shared
-// by both the subscribe + tier-change prepare paths). Kept separate from
-// prepareRPC so the tier-change RPC (which has no balance read) still satisfies it.
-type accountDataReader interface {
-	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
-}
-
 // PrepareSubscribeService builds the transaction the subscriber's wallet signs
 // to start a recurring subscription. All instruction encoding stays here; the
 // frontend only signs, sends and confirms.
@@ -75,7 +58,7 @@ type PrepareSubscribeService struct {
 	// slot of the atomic [subscribe + transfer_subscription] bundle while the
 	// wallet completes the fee-payer slot.
 	submitter Submitter
-	rpc       prepareRPC
+	rpc       solanaint.ChainReader
 	tokens    Tokens
 	// authorityReadBackoff shortens the retry only in package tests; zero keeps
 	// the production default.
@@ -83,7 +66,7 @@ type PrepareSubscribeService struct {
 }
 
 // NewPrepareSubscribeService builds a PrepareSubscribeService.
-func NewPrepareSubscribeService(submitter Submitter, rpc prepareRPC, tokens Tokens) *PrepareSubscribeService {
+func NewPrepareSubscribeService(submitter Submitter, rpc solanaint.ChainReader, tokens Tokens) *PrepareSubscribeService {
 	return &PrepareSubscribeService{submitter: submitter, rpc: rpc, tokens: tokens}
 }
 
@@ -363,14 +346,14 @@ func readInitID(data []byte) (int64, error) {
 // bound because a node may lag a just-landed write. It returns (initId, true,
 // nil) when readable; (0, false, nil) when empty on every attempt (first-time
 // subscriber); an error on an RPC failure or an account that stayed too short.
-func readAuthorityInitID(ctx context.Context, rpc accountDataReader, saPDA solanago.PublicKey) (int64, bool, error) {
+func readAuthorityInitID(ctx context.Context, rpc solanaint.ChainReader, saPDA solanago.PublicKey) (int64, bool, error) {
 	return readAuthorityInitIDWithBackoff(ctx, defaultAuthorityReadBackoff, rpc, saPDA)
 }
 
 func readAuthorityInitIDWithBackoff(
 	ctx context.Context,
 	backoff time.Duration,
-	rpc accountDataReader,
+	rpc solanaint.ChainReader,
 	saPDA solanago.PublicKey,
 ) (int64, bool, error) {
 	var lastShort int

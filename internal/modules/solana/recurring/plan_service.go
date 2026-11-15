@@ -107,18 +107,11 @@ func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID bill
 	return signature, nil
 }
 
-// planReader reads the Plan PDA back before create_plan for PublishPlan's
-// idempotent re-publish guard. Optional: without it create_plan is submitted
-// directly and the program rejects a duplicate PDA.
-type planReader interface {
-	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
-}
-
 // PlanService publishes recurring Solana plans on-chain: owned by the
 // deployment's first cranker, paying into the merchant's treasury.
 type PlanService struct {
 	submitter Submitter
-	reader    planReader // optional; enables the idempotent re-publish guard
+	reader    solanaint.ChainReader // optional; enables the idempotent re-publish guard
 	tokens    Tokens
 	treasury  Treasury
 	now       func() time.Time
@@ -128,7 +121,7 @@ type PlanService struct {
 // before submitting create_plan, so a re-publish with MATCHING terms is an
 // idempotent no-op and a re-publish with DIFFERING terms is rejected (plans are
 // immutable on-chain — see PublishPlan).
-func NewPlanServiceWithReader(submitter Submitter, reader planReader, tokens Tokens, treasury Treasury) *PlanService {
+func NewPlanServiceWithReader(submitter Submitter, reader solanaint.ChainReader, tokens Tokens, treasury Treasury) *PlanService {
 	return &PlanService{submitter: submitter, reader: reader, tokens: tokens, treasury: treasury, now: time.Now}
 }
 
