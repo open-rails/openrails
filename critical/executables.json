@@ -1059,6 +1059,9 @@
     ],
     "OR-J31-S08": [
       "TestBillingArchive/OR-J31-S08/an-archive-carrying-the-dropped-custody-migration-record-restores"
+    ],
+    "OR-J31-S11": [
+      "TestBillingArchive/OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores"
     ]
   },
   "suites": {

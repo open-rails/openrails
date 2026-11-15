@@ -351,8 +351,7 @@ Fallback is availability-only and pre-charge (`not_armed`,
 `credentials_missing`, `link_missing`, `mode_unsupported`,
 `service_unavailable`, `ambiguous_selector`, `unknown_selector`,
 `resolve_failed`): a decline never moves to a second processor.
-`order_attempts.routing_reason` records the decision;
-`POST /v1/merchant/psps/routing-preview` returns it without charging.
+`POST /v1/merchant/psps/routing-preview` returns the decision without charging.
 
 ## Convergence
 
@@ -581,7 +580,8 @@ headers.
 Periods are constants in `internal/retention`, the same for every merchant,
 except the event log's `event_retention`. Each table's comment states its class:
 **permanent** (the ledger, grants, payments, owed usage, receipts, operation
-authorizations, refusals, running charges, destructive runs and before-images),
+authorizations, refusals, running charges, maintenance runs and the before-images of
+destructive runs),
 **partitioned** (monthly partitions dropped whole), **rows** (deleted by the
 hourly cleanup) or **state** (one row per thing that exists).
 
@@ -592,11 +592,9 @@ hourly cleanup) or **state** (one row per thing that exists).
 | `subscription_status_transitions`, `subscription_billing_changes`, `provider_mutation_logs`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `provider_intents` | instruction-only intents (cancel, payment-method and source update, card vault, network token, catalog archive, account-updater request) 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
-| `maintenance_runs` | reconciliation runs no finding names, 12 months; other kinds permanent |
 | `order_attempts`; `orders`, `order_lines` | attempts that never reached a provider, 90 days after `expires_at`; unpaid closed orders with no attempt, 90 days |
 | `parked_provider_subscriptions` | 90 days after release |
 | `carts` | 30 days after `last_changed_at` |
-| `notifications` | 90 days once read, 180 if never |
 | `notification_events`, `host_outbox`, the event log | 90 days, never before `event_retention` (90 days by default) |
 | `webhook_events` | 90 days after completion |
 | `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
@@ -610,8 +608,7 @@ An order attempt that reached a provider is permanent, and so is a cost
 observation while its operation is open. The cleanup job creates partitions two
 months ahead and drops expired ones (giving up after 2 s rather than queue behind
 a long reader), then deletes 1,000 rows per statement and at most 50,000 per
-merchant per pass. `subscription_status_transitions` and reconciliation runs
-refuse other deletes (`billing.guard_retention_delete`, keyed on the
+merchant per pass. `subscription_status_transitions` refuses other deletes (`billing.guard_retention_delete`, keyed on the
 `openrails.retention_table` setting).
 
 What integrators see: a usage event may be up to 35 days old, and its `source` /

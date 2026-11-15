@@ -18,19 +18,16 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	// skipped and refused with rows, and the tables usage orders renamed.
 	invoices, preUsage := false, false
 	// An archive from before rating at ingest (migration 66) carries the
-	// period sweep's watermarks in place of the meter quantities: skipped.
-	watermarks := false
-	// One from before migration 208 carries the custody migration record,
-	// which nothing reads: skipped.
-	custody := false
+	// period sweep's watermarks in place of the meter quantities, one from
+	// before migration 207 the custody migration record, and one from before
+	// migration 208 the usage collection cadence: skipped.
+	watermarks, custody, cadence := false, false, false
 	info, err := archivewire.Read(src, header, func(r archivewire.Record) error {
 		if r.Kind == "table" {
-			if invoices = r.Table == "invoices"; invoices {
-				preUsage = true
-				// One preceding invoice cadence retains no completed scan.
-				if table+1 < len(Profiles) && Profiles[table+1].Name == "usage_collection_cadence" {
-					table++
-				}
+			invoices = r.Table == "invoices"
+			cadence = r.Table == "usage_collection_cadence" || r.Table == "invoice_collection_cadence"
+			if invoices || cadence {
+				preUsage = preUsage || r.Table != "usage_collection_cadence"
 				return nil
 			}
 			if custody = r.Table == "custody_migrations"; custody {
@@ -54,10 +51,13 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if invoices {
 			return errArchivedInvoices
 		}
-		if watermarks || custody {
+		if watermarks || custody || cadence {
 			return nil
 		}
 		p := Profiles[table]
+		if err := dropUnreadColumns(p, &r.Values); err != nil {
+			return err
+		}
 		// Older exports always carried an explicit credit limit, including
 		// zero. Preserve that meaning; no schedule existed before #1289.
 		if p.Name == "money_settings" && len(r.Values) == len(p.Columns)-5 {
@@ -85,10 +85,6 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		// Admissions before usage estimates held host-stated estimates only.
 		if p.Name == "admission_operations" && len(r.Values) == len(p.Columns)-2 {
 			r.Values = append(r.Values, nil, nil)
-		}
-		// Payment methods before card saves awaited the customer had no setup.
-		if p.Name == "payment_methods" && len(r.Values) == len(p.Columns)-1 {
-			r.Values = append(r.Values, nil)
 		}
 		// Orders before usage orders had none of their columns; before
 		// embedded pay URLs hosted ones only; before renewals none of their
@@ -194,7 +190,35 @@ func embeddedFromUIMode(p Profile, values []*string) {
 }
 
 // usageRenames are the tables usage orders renamed.
-var usageRenames = map[string]string{"invoice_collection_cadence": "usage_collection_cadence", "invoice_items": "owed_items"}
+var usageRenames = map[string]string{"invoice_items": "owed_items"}
+
+// dropUnreadColumns removes from a row exported before migration 208 the
+// values of the columns it dropped, each of which an archive held empty.
+func dropUnreadColumns(p Profile, values *[]*string) error {
+	var empty map[int]*string
+	switch {
+	case p.Name == "maintenance_runs" && len(*values) == len(p.Columns)+5:
+		// mode, rails, window_starts_at, window_ends_at; dry_run.
+		empty = map[int]*string{5: nil, 6: new("{}"), 7: nil, 8: nil, 12: new("false")}
+	case p.Name == "order_attempts" && len(*values) == len(p.Columns)+1:
+		empty = map[int]*string{len(p.Columns) - 1: nil} // routing_reason
+	case p.Name == "payment_methods" && len(*values) == len(p.Columns)+1:
+		empty = map[int]*string{len(p.Columns): nil} // wallet_card_id
+	default:
+		return nil
+	}
+	kept := make([]*string, 0, len(p.Columns))
+	for i, v := range *values {
+		want, dropped := empty[i]
+		if !dropped {
+			kept = append(kept, v)
+		} else if (v == nil) != (want == nil) || v != nil && *v != *want {
+			return fmt.Errorf("archive %s carries a value in a dropped column", p.Name)
+		}
+	}
+	*values = kept
+	return nil
+}
 
 var errArchivedInvoices = fmt.Errorf("an archive with invoices: restore it on a release before usage orders, then export it again")
 

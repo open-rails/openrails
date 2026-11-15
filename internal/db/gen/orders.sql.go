@@ -494,7 +494,7 @@ func (q *Queries) GetOrder(ctx context.Context, arg GetOrderParams) (BillingOrde
 }
 
 const getOrderAttempt = `-- name: GetOrderAttempt :one
-SELECT id, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason, order_id FROM billing.order_attempts
+SELECT id, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, order_id FROM billing.order_attempts
 WHERE merchant_id = $1::uuid AND id = $2::uuid AND order_id IS NOT NULL AND deleted_at IS NULL
 `
 
@@ -528,7 +528,6 @@ func (q *Queries) GetOrderAttempt(ctx context.Context, arg GetOrderAttemptParams
 		&i.DeletedAt,
 		&i.DestructiveRunID,
 		&i.DestructiveRunClass,
-		&i.RoutingReason,
 		&i.OrderID,
 	)
 	return i, err

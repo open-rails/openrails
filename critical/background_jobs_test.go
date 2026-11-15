@@ -359,17 +359,17 @@ func TestBackgroundJobs(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
-		notifications := pgx.Identifier{w.schema, "notifications"}.Sanitize()
-		// More merchants than one job's batch each hold a notification past
-		// its retention.
+		findings := pgx.Identifier{w.schema, "reconciliation_findings"}.Sanitize()
+		// More merchants than one job's batch each hold a resolved finding
+		// past its retention.
 		_, err := w.pool.Exec(t.Context(), `WITH m AS (INSERT INTO `+pgx.Identifier{w.schema, "merchants"}.Sanitize()+` (slug, status)
 			SELECT 'retention-' || g, 'active' FROM generate_series(1, 201) g RETURNING id)
-			INSERT INTO `+notifications+` (merchant_id, event_type, data, recipient_kind, severity, title, body, created_at)
-			SELECT id, 'operator.alert', '{}', 'merchant', 'info', 'Old', 'Past its retention', now() - interval '200 days' FROM m`)
+			INSERT INTO `+findings+` (merchant_id, finding_type, subject_key, severity, status, resolution, resolved_at, last_seen_at)
+			SELECT id, 'consistency.retention_fixture', 'old', 'low', 'ignored', 'ignored', now() - interval '400 days', now() - interval '400 days' FROM m`)
 		require.NoError(t, err)
 		expired := func() int {
 			var n int
-			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+notifications+" WHERE created_at < now() - interval '199 days'").Scan(&n))
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+findings+" WHERE resolved_at < now() - interval '399 days'").Scan(&n))
 			return n
 		}
 		require.Equal(t, 201, expired())

@@ -1,23 +1,6 @@
--- Reconciliation runs and findings, the engine's local-state reads, and the
+-- Reconciliation findings, the engine's local-state reads, and the
 -- enforce appliers' idempotent local writes. Statements that read
 -- billing.current_merchant_id() need a merchant-pinned connection.
-
--- name: CreateReconciliationRun :one
-INSERT INTO billing.maintenance_runs (
-    merchant_id, kind, mode, rails, window_starts_at, window_ends_at, started_at, status
-) VALUES (
-    sqlc.arg(merchant_id), 'reconciliation', sqlc.arg(mode)::text, sqlc.arg(rails),
-    sqlc.narg(window_starts_at), sqlc.narg(window_ends_at), now(), 'running'
-)
-RETURNING *;
-
--- name: FinishReconciliationRun :execrows
-UPDATE billing.maintenance_runs
-SET status = sqlc.arg(status),
-    summary = sqlc.narg(summary),
-    error = sqlc.narg(error),
-    finished_at = now()
-WHERE id = sqlc.arg(id) AND kind='reconciliation' AND merchant_id=billing.current_merchant_id() AND status = 'running';
 
 -- Re-runs UPDATE the standing finding for (merchant, finding_type, subject_key).
 -- A previously resolved finding that reappears is REOPENED with the freshly

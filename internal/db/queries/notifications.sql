@@ -35,12 +35,6 @@ FROM (
 SELECT EXISTS(SELECT 1 FROM billing.notification_events WHERE merchant_id=sqlc.arg(merchant_id)::uuid
 AND customer_id=sqlc.arg(customer_id)::uuid AND event_type='premium_ended' AND created_at>=sqlc.arg(since)::timestamptz)::boolean AS found;
 
--- Legacy merchant alerts retain their existing retention, outside customer facts.
--- name: DeleteSeenNotificationsBefore :execrows
-DELETE FROM billing.notifications WHERE ctid IN (SELECT ctid FROM billing.notifications WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND read_at IS NOT NULL AND created_at<sqlc.arg(cutoff)::timestamptz LIMIT sqlc.arg(row_limit)::int);
--- name: DeleteNotificationsBefore :execrows
-DELETE FROM billing.notifications WHERE ctid IN (SELECT ctid FROM billing.notifications WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND created_at<sqlc.arg(cutoff)::timestamptz LIMIT sqlc.arg(row_limit)::int);
-
 -- One merchant's account-notification ordering. Producers share it until they
 -- commit; an adoption export or ordering restore holds it alone.
 -- name: ShareNotificationOrdering :exec

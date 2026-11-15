@@ -52,9 +52,8 @@ merchants:
     # does not name cannot be routed to, which is how you pin a product to one
     # rail. Candidates that cannot serve the price right now (unarmed,
     # archived, credentials missing, no price link, mode unsupported) are
-    # skipped; the skipped set and its reasons land on the session's
-    # routing_reason. Entries are PSP keys, or a rail kind where exactly one
-    # PSP is armed on it.
+    # skipped (the routing preview lists them with their reasons). Entries are
+    # PSP keys, or a rail kind where exactly one PSP is armed on it.
     #
     # Omit it for the built-in order (stripe, nmi, ccbill, solana), the right
     # answer for a merchant with one PSP per rail. A declared list REPLACES

@@ -72,8 +72,6 @@ func (r FindingRecord) Quiet() bool {
 // Store is the engine-facing persistence surface. The pg implementation runs
 // merchant-scoped; the unit-test fake is in-memory.
 type Store interface {
-	CreateRun(ctx context.Context, mode Mode, providers []Provider, since, until *time.Time) (uuid.UUID, error)
-	FinishRun(ctx context.Context, runID uuid.UUID, status string, summary []byte, runErr string) error
 	UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding) (FindingRecord, error)
 	// ListActionablePullFindings and AutoResolveVanished cover the pull
 	// findings of one PSP: a pass over one PSP proves nothing about another.
@@ -86,7 +84,7 @@ type Store interface {
 	MarkFindingNotified(ctx context.Context, id uuid.UUID, at time.Time, severity Severity) error
 }
 
-// PGStore persists runs + findings via the sqlc layer on a merchant-pinned
+// PGStore persists findings via the sqlc layer on a merchant-pinned
 // connection.
 type PGStore struct {
 	DB  *db.DB
@@ -146,55 +144,6 @@ func nestedEvidence(evidence map[string]any, key string) map[string]any {
 	}
 	nested, _ := evidence[key].(map[string]any)
 	return nested
-}
-
-// CreateRun starts a run. A started create is bookkeeping a canceled pass
-// must not interrupt, as FinishRun is: an abandoned insert can still commit,
-// leaving a running run nothing finishes, which the merchant archive refuses.
-func (s *PGStore) CreateRun(ctx context.Context, mode Mode, providers []Provider, since, until *time.Time) (uuid.UUID, error) {
-	if err := ctx.Err(); err != nil {
-		return uuid.Nil, err
-	}
-	names := make([]string, 0, len(providers))
-	for _, p := range providers {
-		names = append(names, string(p))
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	ctx, cancel := db.DetachedWriteContext(ctx, 5*time.Second)
-	defer cancel()
-	row, err := s.DB.Gen(ctx).CreateReconciliationRun(ctx, gen.CreateReconciliationRunParams{
-		MerchantID:     tid.UUID(),
-		Mode:           string(mode),
-		Rails:          names,
-		WindowStartsAt: since,
-		WindowEndsAt:   until,
-	})
-	if err != nil {
-		return uuid.Nil, err
-	}
-	return row.ID, nil
-}
-
-func (s *PGStore) FinishRun(ctx context.Context, runID uuid.UUID, status string, summary []byte, runErr string) error {
-	// Ending a canceled pass is bookkeeping about work already attempted.
-	// Preserve its merchant scope and recover a pin closed by cancellation;
-	// never leave an orderly shutdown looking like a still-running writer.
-	ctx, cancel := db.DetachedWriteContext(ctx, 5*time.Second)
-	defer cancel()
-	var errPtr *string
-	if runErr != "" {
-		errPtr = &runErr
-	}
-	_, err := s.DB.Gen(ctx).FinishReconciliationRun(ctx, gen.FinishReconciliationRunParams{
-		ID:      runID,
-		Status:  status,
-		Summary: summary,
-		Error:   errPtr,
-	})
-	return err
 }
 
 func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding) (FindingRecord, error) {

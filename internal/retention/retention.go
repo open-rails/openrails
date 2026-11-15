@@ -75,12 +75,6 @@ const (
 	ResolvedFindings = 366 * Day
 	// ReleasedParks keeps a released park 90 days past its release.
 	ReleasedParks = 90 * Day
-	// ReconciliationRuns keeps a reconciliation run 12 months.
-	ReconciliationRuns = 366 * Day
-	// NotificationsRead and NotificationsUnread keep a notification 90 days
-	// once read, 180 days if never read.
-	NotificationsRead   = 90 * Day
-	NotificationsUnread = 180 * Day
 )
 
 // Days is a period as the whole days the sweep statements take.

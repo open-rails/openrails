@@ -69,12 +69,6 @@ DELETE FROM billing.solana_pay_references WHERE merchant_id = $1;
 
 
 
--- name: CountMerchantRowsNotificationQueue :one
-SELECT count(*) FROM billing.notifications WHERE merchant_id = $1;
-
--- name: PurgeMerchantRowsNotificationQueue :exec
-DELETE FROM billing.notifications WHERE merchant_id = $1;
-
 -- name: CountMerchantRowsRailCustomers :one
 SELECT count(*) FROM billing.psp_customers WHERE merchant_id = $1;
 

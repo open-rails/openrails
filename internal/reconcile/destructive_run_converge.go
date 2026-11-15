@@ -88,7 +88,7 @@ func (r *PGDestructiveRunRecorder) Open(ctx context.Context, params OpenDestruct
 	}
 	if _, err := r.DB.Gen(ctx).CreateDestructiveRun(ctx, gen.CreateDestructiveRunParams{
 		ID: runID, MerchantID: mid, PspID: params.PspID, Kind: params.Kind,
-		Actor: actor, DryRun: false, Coverage: coverage, ExpectedRows: &expected, Note: note,
+		Actor: actor, Coverage: coverage, ExpectedRows: &expected, Note: note,
 	}); err != nil {
 		return uuid.Nil, fmt.Errorf("open destructive run: %w", err)
 	}

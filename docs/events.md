@@ -122,4 +122,3 @@ Webhook destinations are merchant-scoped, encrypted and write-only; the settings
 page adds, rotates (keeping the identity) and deletes them. Generic JSON carries
 `title`, `severity`, `summary`, `fired_at` and an optional `dashboard_link`;
 Discord and Slack get their native format. Delivery has SSRF protection.
-Notifications are kept 90 days once read, 180 if never read.
