@@ -49,7 +49,6 @@ internal/modules/solana/solanasubs/subscription_repo.go|now := time.Now().UTC()|
 internal/modules/solana/transaction.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/subscriptions/admin_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/subscriptions/lifecycle_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/modules/subscriptions/stripe_service.go|startDate = time.Now().UTC().Unix()|external_protocol_time|Default provider event search window uses physical time|1
 internal/modules/subscriptions/subscription.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/subscriptions/subscription_repo.go|now = time.Now()|business_time_boundary|Standalone repository convenience defaults; services use explicit-time variants|2
 internal/modules/subscriptions/subscription_repo.go|return r.GetActiveSubscriptionAt(ctx, userID, time.Now())|business_time_boundary|Standalone repository convenience defaults; services use explicit-time variants|1

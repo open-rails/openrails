@@ -126,7 +126,8 @@ func (s *RailCustomerService) GetCustomerID(ctx context.Context, userID, rail st
 }
 
 // GetAccountIDForPSP returns the exact PSP-owned remote customer id for a
-// payable merchant subject. Webhook repair paths use it when an event omits the
+// payable merchant subject on the PSP pinned on ctx: what a charge on that
+// account names, and what webhook repair paths use when an event omits the
 // former customer id but the local payment-method evidence still identifies
 // the subject.
 func (s *RailCustomerService) GetAccountIDForPSP(ctx context.Context, customerID uuid.UUID, rail string) (string, error) {

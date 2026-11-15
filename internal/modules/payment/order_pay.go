@@ -405,12 +405,12 @@ func (s *OrderAttemptService) PayOrder(ctx context.Context, in OrderPayInput) (O
 	case in.Hosted != nil:
 		return s.payOrderHosted(ctx, in)
 	}
-	if err := s.guardCardAttempt(ctx, in.User); err != nil {
+	if err := s.GuardCardAttempt(ctx, in.User); err != nil {
 		return OrderCharge{}, err
 	}
 	out, err := s.payOrder(ctx, in)
 	if out.Declined || err != nil && cardAttemptFailed(err) {
-		s.noteCardAttempt(ctx, in.User)
+		s.NoteCardAttempt(ctx, in.User)
 	}
 	return out, err
 }
@@ -782,7 +782,7 @@ func (s *OrderAttemptService) prepareNewCard(ctx context.Context, purchase *Purc
 	if method == nil || method.Card == nil {
 		return nil, fmt.Errorf("%w: Stripe has no card %s", ErrPaymentMethodStale, token)
 	}
-	customerRef, err := resolveStripeCustomerWith(db.WithPSPID(ctx, psp), purchase.customerStore(), service, in.User)
+	customerRef, err := resolveStripeCustomerWith(ctx, purchase.customerStore(), service, in.User)
 	if err != nil {
 		return nil, err
 	}

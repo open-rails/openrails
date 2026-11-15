@@ -72,9 +72,3 @@ var outstanding = []rivertype.JobState{
 func periodPass(every time.Duration) river.InsertOpts {
 	return river.InsertOpts{Queue: QueueBilling, MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByPeriod: every}}
 }
-
-// coalescedPass queues a pass whose retry is the next one: one attempt, and an
-// insert while a pass is queued or running joins it, so passes never stack.
-func coalescedPass() river.InsertOpts {
-	return river.InsertOpts{Queue: QueueBilling, MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByState: outstanding}}
-}

@@ -1265,4 +1265,102 @@ func TestPSPImport(t *testing.T) {
 		require.Len(t, iw.jobs(t, id), 1)
 		require.NoError(t, iw.api.DeletePSPImport(t.Context(), id), "a failed import can be deleted")
 	})
+
+	t.Run("OR-J38-S42/nmi-amounts-land-in-the-mapped-price-currency", func(t *testing.T) {
+		iw := newImportWorld(t, "nmi")
+		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
+		next := start.AddDate(0, 0, 30)
+		// NMI states plan and schedule amounts as bare decimals; only its
+		// transaction report names a currency.
+		iw.nmi.AddPlan(nmimock.Plan{ID: "yen", Name: "Yen", Amount: "1000.00", Days: 30})
+		iw.nmi.AddPlan(nmimock.Plan{ID: "euro", Name: "Euro", Amount: "12.50", Days: 30})
+		iw.nmi.AddPlan(nmimock.Plan{ID: "won", Name: "Won", Amount: "9900", Days: 30})
+		carol, dave := authtest.NewUser(t, iw.auth), authtest.NewUser(t, iw.auth)
+		member := func(email, plan, amount, currency string) string {
+			vault := iw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
+			iw.nmi.EditVault(vault, func(v *nmimock.Vault) { v.Email = email })
+			order := "order-" + plan + "-" + vault
+			id := iw.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: plan, Amount: amount, Days: 30, Created: start, NextBilling: next, Order: order})
+			if currency != "" {
+				iw.nmi.AddSale(nmimock.Sale{Vault: vault, Amount: amount, Currency: currency, OrderID: order, ScheduleID: id, At: start})
+			}
+			return id
+		}
+		yen := member(iw.alice.Email, "yen", "1000.00", "JPY")
+		euro := member(iw.bob.Email, "euro", "12.50", "EUR")
+		odd := member(carol.Email, "yen", "1000.50", "")
+		won := member(dave.Email, "won", "9900", "")
+		since := start.Add(-24 * time.Hour)
+		imp := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}, HistorySince: &since})
+
+		prices := map[string]*billing.Price{}
+		for plan, currency := range map[string]string{"yen": "JPY", "euro": "EUR"} {
+			_, err := iw.api.CreateProduct(t.Context(), billing.CreateProductParams{Key: plan, DisplayName: plan, Entitlements: []string{"member:" + plan}})
+			require.NoError(t, err)
+			prices[plan], err = iw.api.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductKey: plan, Key: "nmi-" + plan, PSP: "nmi", PlanID: plan, Currency: currency})
+			require.NoError(t, err)
+		}
+		// Native units: JPY has four decimals, EUR six.
+		require.Equal(t, "JPY", prices["yen"].Currency)
+		require.EqualValues(t, 10_000_000, prices["yen"].UnitAmount)
+		require.Equal(t, "EUR", prices["euro"].Currency)
+		require.EqualValues(t, 12_500_000, prices["euro"].UnitAmount)
+		require.NoError(t, iw.link(t, imp.ID, billing.LinkPSPImportParams{}))
+		recs := iw.apply(t, imp.ID)
+
+		accepted := func(ref string) (string, int64) {
+			t.Helper()
+			var currency string
+			var total int64
+			require.NoError(t, iw.pool.QueryRow(t.Context(), `SELECT ps.accepted_bill->>'Currency', (ps.accepted_bill->>'Total')::bigint FROM `+iw.table("provider_schedules")+` ps
+				JOIN `+iw.table("subscriptions")+` s ON s.merchant_id = ps.merchant_id AND s.id = ps.subscription_id
+				WHERE s.merchant_id = $1 AND s.rail_subscription_id = $2 AND s.deleted_at IS NULL ORDER BY ps.accepted_version DESC LIMIT 1`,
+				iw.alpha.MerchantID().UUID(), ref).Scan(&currency, &total))
+			return currency, total
+		}
+		for ref, want := range map[string]struct {
+			customer billing.CustomerID
+			plan     string
+			currency string
+			amount   int64
+		}{
+			yen:  {customerOf(iw.alice), "yen", "JPY", 10_000_000},
+			euro: {customerOf(iw.bob), "euro", "EUR", 12_500_000},
+		} {
+			require.Equal(t, billing.PSPImportImported, recs[ref].State, "%s: %v", want.plan, recs[ref].Reason)
+			subs := iw.subscriptions(t, want.customer)
+			require.Len(t, subs, 1)
+			require.Equal(t, prices[want.plan].ID, subs[0].PriceID)
+			currency, total := accepted(ref)
+			require.Equal(t, want.currency, currency, "%s: the schedule bills its price's currency", want.plan)
+			require.Equal(t, want.amount, total, "%s: NMI's decimal read in that currency", want.plan)
+			payments, err := iw.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: want.customer})
+			require.NoError(t, err)
+			require.Len(t, payments.Items, 1)
+			require.Equal(t, want.currency, payments.Items[0].Currency)
+			require.Equal(t, want.amount, payments.Items[0].Amount)
+		}
+		require.Equal(t, billing.PSPImportBlocked, recs[odd].State)
+		require.Contains(t, *recs[odd].Reason, `its amount "1000.50" is not exact in JPY`)
+		require.Empty(t, iw.subscriptions(t, customerOf(carol)))
+		require.Equal(t, billing.PSPImportBlocked, recs[won].State)
+		require.Contains(t, *recs[won].Reason, `plan "won" is unmapped`)
+		require.Empty(t, iw.subscriptions(t, customerOf(dave)), "no price, no currency: nothing lands")
+
+		// A book's schedule in another currency than its price's is refused.
+		book := func(currency string, amount int64) billing.BillingImportResult {
+			t.Helper()
+			return iw.hostBook(t, iw.clock.Now(), billing.DeclaredSubscription{SourceID: "dave-yen", Customer: customerOf(dave), Price: prices["yen"].ID, Rail: "nmi", RailSubscriptionID: "host-yen",
+				StartedAt: start, PaidThrough: &next, AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: "host-yen", Amount: amount, Currency: currency, IntervalHours: 720, FirstDueAt: next}})
+		}
+		res := book("USD", 1_000_000_000)
+		require.Equal(t, []string{"dave-yen"}, res.Blocked)
+		require.Equal(t, "accepted_schedule is in USD; its price is in JPY", res.Reasons["dave-yen"])
+		require.Empty(t, iw.subscriptions(t, customerOf(dave)))
+		res = book("JPY", 10_000_000)
+		require.Equal(t, []string{"dave-yen"}, res.Imported, "%v", res.Reasons)
+		currency, total := accepted("host-yen")
+		require.Equal(t, "JPY", currency)
+		require.EqualValues(t, 10_000_000, total)
+	})
 }

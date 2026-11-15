@@ -286,7 +286,7 @@ var preflightChecks = []rowCheck{
 	{"solana_pay_references", "status='pending'"},
 	{"solana_pay_receipts", "review_reason IS NOT NULL AND disposition <> 'duplicate' AND resolved_at IS NULL"},
 	// A Solana pull scheduled ahead and never attempted moves with its
-	// subscription; the destination's lost-wake pass queues it.
+	// subscription; restore queues its wake.
 	{"provider_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable') AND NOT (intent_type='solana_pull' AND status='pending' AND attempts=0 AND result_evidence IS NULL)"},
 	{"payments", "status='pending'"},
 	{"admission_operations", "state='open'"},

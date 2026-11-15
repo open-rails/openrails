@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/convergejob"
 	"github.com/open-rails/openrails/internal/intents/wake"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -26,33 +27,25 @@ const DefaultTimeout = 10 * time.Minute
 const RescueAfter = 10 * time.Minute
 
 // kinds are OpenRails' job kinds and their timeouts: an hour for the passes
-// that read every merchant's providers, and for the stored-card pass, whose
-// own budget is 10 minutes; two for a PSP import; every scan's for the billing
-// pass.
+// that read every merchant's providers; two for a PSP import; every scan's for
+// the billing pass.
 var kinds = map[string]time.Duration{
-	KindDunning:                          DefaultTimeout,
-	KindBalanceWatch:                     DefaultTimeout,
 	balancelook.Kind:                     DefaultTimeout,
-	KindOrderExpiry:                      DefaultTimeout,
 	money.KindUsageOrders:                DefaultTimeout,
-	KindDelinquency:                      DefaultTimeout,
 	KindAdmissionDenialFlush:             DefaultTimeout,
 	KindProviderRefresh:                  DefaultTimeout,
 	KindSubscriptionConverge:             DefaultTimeout,
 	KindProviderObjectObserve:            DefaultTimeout,
 	convergejob.Kind:                     DefaultTimeout,
-	DestructiveAlertArgs{}.Kind():        DefaultTimeout,
+	alerting.DeliveryKind:                DefaultTimeout,
 	wake.Kind:                            DefaultTimeout,
 	paymentmethods.KindStoredCardRefresh: DefaultTimeout,
 	merchants.SecretCleanupArgs{}.Kind(): DefaultTimeout,
-	KindStoredCardRefreshDue:             time.Hour,
 	KindCleanupExpiredData:               time.Hour,
 	KindProviderRefreshMerchant:          time.Hour,
 	KindMerchantHealth:                   time.Hour,
-	KindRebillWatch:                      time.Hour,
 	reconcile.KindChargeAttributions:     time.Hour,
 	KindStripeWebhookReconcile:           DefaultTimeout,
-	KindConfigRealerts:                   DefaultTimeout,
 	KindBillingPass:                      BillingPassTimeout(),
 	KindPSPImport:                        2 * time.Hour,
 }

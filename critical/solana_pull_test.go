@@ -123,6 +123,48 @@ func TestSolanaPulls(t *testing.T) {
 		require.Equal(t, sends+1, s.wire.sends())
 		require.EqualValues(t, 20_000_000, s.node.Balance(s.treasury.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))
 	})
+	t.Run("OR-J37-S62/a-dropped-pull-is-signed-again-only-once-it-provably-never-landed", func(t *testing.T) {
+		s := newSolanaWorld(t, true)
+		_, sub := s.subscribe(t)
+		due := *sub.CurrentPeriodEndsAt
+		fleet := startFleet(t, s.world)
+		settleOperations(t, fleet)
+		// The leader drops the period's pull: the node acknowledges it and it
+		// never lands.
+		s.node.Drop(1)
+		sends := s.wire.sends()
+		s.clock.Advance(due.Add(pullMargin).Sub(s.clock.Now()))
+		wakeOperations(t, fleet)
+		require.Eventually(t, func() bool { return s.wire.sends() > sends }, 20*time.Second, 20*time.Millisecond, "the due pull is signed and sent")
+		// The cluster moves past the last block height that could include it.
+		s.node.AdvanceBlocks(200)
+		settleOperations(t, fleet)
+		require.Equal(t, sends+1, s.wire.sends(), "an unseen pull is not re-sent before its expiry is proven")
+		current, err := s.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionActive, current.Status, "a dropped pull is no subscriber decline")
+		require.Equal(t, due, *current.CurrentPeriodEndsAt)
+
+		// The verifier proves it never landed: finalized past its last valid
+		// height, unknown to a history search. That proof sends nothing.
+		s.clock.Advance(2 * time.Minute)
+		wakeOperations(t, fleet)
+		settleOperations(t, fleet)
+		require.Equal(t, sends+1, s.wire.sends())
+
+		// The next attempt signs the pull again; it lands once.
+		s.clock.Advance(5 * time.Minute)
+		landedAt := s.clock.Now()
+		wakeOperations(t, fleet)
+		s.renewed(t, sub, landedAt.Add(168*time.Hour))
+		require.Equal(t, sends+2, s.wire.sends())
+		settleOperations(t, fleet)
+		s.clock.Advance(5 * time.Minute)
+		wakeOperations(t, fleet)
+		settleOperations(t, fleet)
+		require.Equal(t, sends+2, s.wire.sends(), "a pull that landed is never repeated")
+		s.renewed(t, sub, landedAt.Add(168*time.Hour))
+	})
 	t.Run("OR-J37-S09/low-cranker-gas-after-a-signed-pull-is-a-finding-until-funded", func(t *testing.T) {
 		s := newSolanaWorld(t, true)
 		_, sub := s.subscribe(t)

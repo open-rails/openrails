@@ -54,6 +54,10 @@ func (s *Service) payRenewal(ctx context.Context, actor OrderActor, order *order
 	if err != nil {
 		return payment.OrderCharge{}, false, err
 	}
+	user := &payment.UserIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
+	if err := rt.OrderAttemptService.GuardCardAttempt(ctx, user); err != nil {
+		return payment.OrderCharge{}, false, err
+	}
 	customer := actor.Customer.UUID()
 	admitKey := orderPayKey(order.ID, key)
 	if err := s.reconsentPaying(ctx, customer, pay.method, admitKey); err != nil {
@@ -92,6 +96,9 @@ func (s *Service) payRenewal(ctx context.Context, actor OrderActor, order *order
 		Declined bool `json:"declined"`
 	}
 	_ = json.Unmarshal(result.ResultEvidence, &evidence)
+	if evidence.Declined && !replayed {
+		rt.OrderAttemptService.NoteCardAttempt(ctx, user)
+	}
 	return payment.OrderCharge{Failed: true, Declined: evidence.Declined}, replayed, nil
 }
 
@@ -111,6 +118,8 @@ func renewalRefusal(err error) error {
 		return orders.ErrInProgress
 	case errors.Is(err, intents.ErrRebillKeyConflict):
 		return errOrderKeyReused
+	case errors.Is(err, intents.ErrRetryNeedsNewMethod):
+		return apperr.New(http.StatusConflict, billing.CodeOrderNotPayable, "This card is not charged again for this renewal: pay it with another card.")
 	case errors.Is(err, money.ErrEngineMethodUnusable):
 		return fmt.Errorf("%w: %w", payment.ErrPaymentMethodStale, err)
 	case errors.Is(err, money.ErrEngineCollectionNotDue), errors.Is(err, intents.ErrRebillNotRetryable), errors.Is(err, intents.ErrRebillUnsupported):

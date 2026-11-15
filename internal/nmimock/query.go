@@ -25,8 +25,7 @@ func (m *Mock) query(rec *httptest.ResponseRecorder, form url.Values) {
 		}
 		_, _ = rec.WriteString(m.search(form))
 	case "test_mode_status":
-		// A gateway account in test mode, as test_mode_status reports it.
-		_, _ = rec.WriteString("<nm_response><test_mode_enabled>true</test_mode_enabled></nm_response>")
+		_, _ = rec.WriteString("<nm_response><test_mode_enabled>" + strconv.FormatBool(!m.liveMode) + "</test_mode_enabled></nm_response>")
 	default:
 		m.odd = append(m.odd, "POST query.php report_type="+form.Get("report_type"))
 		_, _ = rec.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n<nm_response><error_response>Invalid report_type</error_response></nm_response>")
@@ -59,6 +58,7 @@ type xmlTransaction struct {
 	CCType                string   `xml:"cc_type"`
 	AVSResponse           string   `xml:"avs_response"`
 	CSCResponse           string   `xml:"csc_response"`
+	PartialPaymentBalance string   `xml:"partial_payment_balance"`
 	CustomerVaultID       string   `xml:"customer_vault_id"`
 	// CustomerID is the vault as live reports name it.
 	CustomerID string `xml:"customerid"`
@@ -167,7 +167,11 @@ func (m *Mock) search(form url.Values) string {
 		txn := cardTransaction(s.TransactionID, condition, s.OrderID, s.Vault, s.Currency, s.Card, xmlAction{Amount: s.Amount, ActionType: "sale", Date: s.At.UTC().Format(queryTime),
 			Success: success, Source: source, ResponseText: text, ResponseCode: code})
 		txn.OrderDescription = s.OrderDescription
+		txn.PartialPaymentBalance = s.PartialBalance
 		txn.MDF = bookField(s.Book)
+		if s.Declined != "" && s.IssuerCode != "" {
+			txn.Action.ProcessorResponseCode, txn.Action.ProcessorResponseText = s.IssuerCode, "DECLINE"
+		}
 		if v := m.vaults[s.Vault]; v != nil {
 			txn.Email = v.Email
 		}

@@ -271,13 +271,15 @@ whether they move money; NMI's own answer must agree before the PSP arms:
 ```
 
 Verification runs once per loaded credential set (startup, credential
-create/rotate), bound to merchant + PSP + environment + endpoint + credential
-fingerprint. Every NMI client (purchase, card save, rebills, refunds, pulls,
-custodian proxies) is built from that same PSP scope, so all of them share the
-one verdict; see [PSP environments](../psp-environments.md). A disagreeing,
-unknown or unavailable verdict disarms the PSP: every NMI mutation is refused
-before anything is sent, reads still work, and the `openrails_psp_posture`
-probe fails until a background retry succeeds.
+create/rotate), and again before the first mutation after the verdict is an
+hour old (test mode is a dashboard toggle). It is bound to merchant + PSP +
+environment + endpoint + credential fingerprint. Every NMI client (purchase,
+card save, rebills, refunds, pulls, custodian proxies) is built from that same
+PSP scope, so all of them share the one verdict; see
+[PSP environments](../psp-environments.md). A disagreeing, unknown or
+unavailable verdict disarms the PSP: every NMI mutation is refused before
+anything is sent, reads still work, and the `openrails_psp_posture` probe
+fails until a retry succeeds.
 
 Sandbox test card: `4111 1111 1111 1111`, expiry `10/29`. Enter it
 only into Collect.js fields. Sandboxes generally cannot advance time, so
@@ -362,6 +364,18 @@ unknown and is never re-sent. An engine renewal completes if its own order shows
 otherwise it raises `life.submission.unresolved`, naming the vault's matching
 charges under other orders. A recovery waits for the operator
 (`openrails intents resolve`).
+
+### Partial approvals
+
+On an account with partial approvals enabled, an issuer may approve less than a
+sale's amount. Every sale OpenRails sends carries
+`partial_payments=payment_in_full`, so NMI settles a partial approval only once
+it is collected in full, which OpenRails never does. An answer whose
+`amount_authorized` differs from the sale's amount, or with a nonzero
+`partial_payment_balance`, is not a payment: the operation stays unknown for
+the operator (a one-off sale raises `life.sale.unresolved`) and nothing is
+re-sent. A receipt whose order search shows a `partial_payment_balance` never
+qualifies.
 
 ### Exactly-once renewals
 

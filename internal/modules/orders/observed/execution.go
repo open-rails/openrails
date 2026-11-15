@@ -21,6 +21,9 @@ type Execution struct {
 	ClaimAttempt int32     `json:"claim_attempt"`
 	Signature    string    `json:"signature"`
 	SubmittedAt  time.Time `json:"submitted_at"`
+	// LastValidBlockHeight is the last block height that can include the
+	// signed transaction; past it, an unseen transaction never landed.
+	LastValidBlockHeight uint64 `json:"last_valid_block_height,omitempty"`
 }
 
 func verifyExecution(ctx context.Context, q *gen.Queries, mid uuid.UUID, b Bill) error {

@@ -4,7 +4,11 @@ package critical_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -94,7 +98,7 @@ func TestPriceMigrationContracts(t *testing.T) {
 				fleet := startFleet(t, a.world)
 				if profile == "already-applied" {
 					a.clock.Advance(alice.CurrentPeriodEndsAt.Sub(a.clock.Now()))
-					runRegistered(t, fleet, "openrails.dunning", 2)
+					runRegistered(t, fleet, "openrails.billing_pass", 2)
 					require.Eventually(t, func() bool {
 						current, err := a.alpha.GetPriceMigration(t.Context(), migration.ID)
 						return err == nil && current.Applied == 1
@@ -109,7 +113,7 @@ func TestPriceMigrationContracts(t *testing.T) {
 					require.Zero(t, canceled.Canceled)
 					require.Equal(t, 1, canceled.PriceMigration.Applied)
 				}
-				runRegistered(t, fleet, "openrails.dunning", 2)
+				runRegistered(t, fleet, "openrails.billing_pass", 2)
 				alicePrice := alice.PriceID
 				aliceAmount := int64(1000)
 				if profile == "already-applied" {
@@ -147,7 +151,7 @@ func TestPriceMigrationContracts(t *testing.T) {
 		defer gate.unblock()
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		select {
 		case <-gate.arrived:
 		case <-time.After(15 * time.Second):
@@ -193,10 +197,10 @@ func TestPriceMigrationContracts(t *testing.T) {
 		require.Equal(t, migration.ID, *before.ScheduledChange.PriceMigrationID)
 		fleet := startFleet(t, a.world)
 		a.clock.Advance(alice.CurrentPeriodEndsAt.Sub(a.clock.Now()) - time.Microsecond)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		require.Len(t, p.effects(t), 2, "migration cannot collect early")
 		a.clock.Advance(time.Microsecond)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		for _, expected := range []struct {
 			sub   *billing.Subscription
 			price billing.PriceID
@@ -216,7 +220,7 @@ func TestPriceMigrationContracts(t *testing.T) {
 			amounts = append(amounts, effect.Amount)
 		}
 		require.ElementsMatch(t, []int64{1000, 1000, 2000, 3000}, amounts)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		require.Len(t, p.effects(t), 4)
 	})
 	t.Run("OR-J19-S05/move-that-no-longer-applies-is-skipped-and-settles-its-migration", func(t *testing.T) {
@@ -246,6 +250,124 @@ func TestPriceMigrationContracts(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, sub.PriceID, current.PriceID)
 		require.Nil(t, current.ScheduledChange)
+	})
+	t.Run("OR-J19-S06/notice-follows-cost-per-unit-of-time", func(t *testing.T) {
+		// 10.00 per 24 hours, no seats, inside the default notice window.
+		a, p, sub := purchasedMembership(t)
+		price := func(key string, amount int64, hours *int, seats *catalog.Quantity) billing.PriceID {
+			access := ptr(24)
+			if hours != nil {
+				access = hours
+			}
+			created, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: sub.ProductID, Key: key, UnitAmount: amount, Currency: "USD", BillingIntervalHours: hours, AccessDurationHours: access, Quantity: seats})
+			require.NoError(t, err)
+			return created.ID
+		}
+		halfDay := price("half-day", 9_000_000, ptr(12), nil)
+		cheaperDay := price("cheaper-day", 9_000_000, ptr(24), nil)
+		for _, c := range []struct {
+			name   string
+			to     billing.PriceID
+			notice bool
+		}{
+			{"lower-amount-shorter-cadence", halfDay, true},
+			{"seat-minimum", price("team-day", 5_000_000, ptr(24), &catalog.Quantity{Min: 3, Max: 10}), true},
+			{"lower-amount", cheaperDay, false},
+			{"equal-cost-per-hour", price("three-days", 30_000_000, ptr(72), nil), false},
+			{"higher-amount-lower-cost-per-hour", price("week", 60_000_000, ptr(168), nil), false},
+		} {
+			preview, err := a.alpha.PreviewPriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: c.to})
+			require.NoError(t, err, c.name)
+			require.Len(t, preview.Outcomes, 1, c.name)
+			if !c.notice {
+				require.Equal(t, billing.MigrationScheduled, preview.Outcomes[0].Disposition, c.name)
+				continue
+			}
+			require.Equal(t, billing.MigrationSkipped, preview.Outcomes[0].Disposition, c.name)
+			require.Contains(t, *preview.Outcomes[0].Reason, "notice window", c.name)
+		}
+
+		oneTime := price("one-time", 1_000_000, nil, nil)
+		for _, create := range []bool{false, true} {
+			params := billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: oneTime, AcknowledgeShortNotice: true}
+			var err error
+			if create {
+				_, err = a.alpha.CreatePriceMigration(t.Context(), params)
+			} else {
+				_, err = a.alpha.PreviewPriceMigration(t.Context(), params)
+			}
+			var refusal *billing.StatusError
+			require.ErrorAs(t, err, &refusal)
+			require.Equal(t, http.StatusBadRequest, refusal.Status)
+			require.Equal(t, billing.CodeInvalidParam, refusal.Code)
+		}
+
+		refused, err := a.alpha.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: halfDay, ArchiveSource: ptr(false)})
+		require.NoError(t, err)
+		require.Equal(t, 1, refused.Skipped)
+		require.Zero(t, refused.Scheduled)
+		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Nil(t, current.ScheduledChange)
+
+		moved, err := a.alpha.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: cheaperDay})
+		require.NoError(t, err)
+		require.Equal(t, 1, moved.Scheduled)
+		current, err = a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.NotNil(t, current.ScheduledChange)
+		require.Equal(t, cheaperDay, current.ScheduledChange.PriceID)
+		require.Len(t, p.effects(t), 1, "a migration charges nothing")
+	})
+	t.Run("OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create", func(t *testing.T) {
+		s := stripeSeatMembership(t)
+		s.stripe.AddPrice(stripemock.Price{ID: "price_gold_v2", Product: "prod_gold", Amount: 2500, Interval: "month"})
+		target, err := s.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: s.gold.ProductID, Key: "stripe-gold-v2", PSP: "seats", PriceID: "price_gold_v2"})
+		require.NoError(t, err)
+		// Stripe attaches the first schedule, then its answer is lost.
+		var lost atomic.Bool
+		s.stripe.Intercept(func(r *http.Request) bool {
+			return r.Method == http.MethodPost && r.URL.Path == "/v1/subscription_schedules" && !lost.Load()
+		}, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
+			serve()
+			lost.Store(true)
+			return nil, errors.New("stripe attached the schedule; its answer was lost")
+		})
+		migration, err := s.alpha.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: s.gold.ID, ToPriceID: target.ID, AcknowledgeShortNotice: true})
+		require.NoError(t, err)
+		require.Equal(t, 1, migration.Scheduled)
+		remote := *s.sub.RailSubscriptionID
+		fleet := manualFleet(t, s.world)
+		require.Eventually(t, func() bool {
+			wakeOperations(t, fleet)
+			return lost.Load()
+		}, 20*time.Second, 50*time.Millisecond)
+		// The clock moves only once the push has recorded its retry, if any.
+		require.Eventually(t, func() bool { return operationsIdle(t, fleet) }, 20*time.Second, 50*time.Millisecond)
+		s.clock.Advance(time.Hour)
+		var schedule string
+		require.Eventually(t, func() bool {
+			wakeOperations(t, fleet)
+			schedule, _ = s.stripe.Subscription(remote)["schedule"].(string)
+			return schedule != "" && len(s.stripe.Mutations("/v1/subscription_schedules/"+schedule)) > 0
+		}, 20*time.Second, 50*time.Millisecond, "the retried push replays the attached schedule and writes its phases")
+		creates := s.stripe.Submitted("/v1/subscription_schedules")
+		require.Len(t, creates, 2, "the lost create and its replay")
+		key, ok := strings.CutSuffix(creates[0].IdempotencyKey, ":schedule")
+		require.True(t, ok, creates[0].IdempotencyKey)
+		for _, create := range creates {
+			require.Equal(t, key+":schedule", create.IdempotencyKey)
+			require.Equal(t, url.Values{"from_subscription": {remote}}, create.Form)
+		}
+		writes := s.stripe.Submitted("/v1/subscription_schedules/" + schedule)
+		require.Len(t, writes, 1)
+		require.Equal(t, key+":phases", writes[0].IdempotencyKey)
+		require.Equal(t, s.phasesForm("price_gold_v2", nil), writes[0].Form, "the new price bills the same three seats from the switch")
+		require.Len(t, s.stripe.Mutations("/v1/subscription_schedules"), 2, "Stripe attached one schedule and wrote its phases once")
+		result, err := s.alpha.GetPriceMigration(t.Context(), migration.ID)
+		require.NoError(t, err)
+		require.Zero(t, result.Blocked)
+		require.Equal(t, 1, result.Scheduled, "the move waits for Stripe's switch")
 	})
 }
 

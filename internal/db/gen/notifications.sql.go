@@ -108,6 +108,15 @@ func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, arg DeleteS
 	return result.RowsAffected(), nil
 }
 
+const lockNotificationOrdering = `-- name: LockNotificationOrdering :exec
+SELECT pg_advisory_xact_lock(hashtextextended('openrails.notification_ordering:' || $1::uuid::text, 0))
+`
+
+func (q *Queries) LockNotificationOrdering(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockNotificationOrdering, merchantID)
+	return err
+}
+
 const premiumEndedNotificationExistsSince = `-- name: PremiumEndedNotificationExistsSince :one
 SELECT EXISTS(SELECT 1 FROM billing.notification_events WHERE merchant_id=$1::uuid
 AND customer_id=$2::uuid AND event_type='premium_ended' AND created_at>=$3::timestamptz)::boolean AS found
@@ -124,6 +133,17 @@ func (q *Queries) PremiumEndedNotificationExistsSince(ctx context.Context, arg P
 	var found bool
 	err := row.Scan(&found)
 	return found, err
+}
+
+const shareNotificationOrdering = `-- name: ShareNotificationOrdering :exec
+SELECT pg_advisory_xact_lock_shared(hashtextextended('openrails.notification_ordering:' || $1::uuid::text, 0))
+`
+
+// One merchant's account-notification ordering. Producers share it until they
+// commit; an adoption export or ordering restore holds it alone.
+func (q *Queries) ShareNotificationOrdering(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, shareNotificationOrdering, merchantID)
+	return err
 }
 
 const subscriptionNotificationAccess = `-- name: SubscriptionNotificationAccess :one

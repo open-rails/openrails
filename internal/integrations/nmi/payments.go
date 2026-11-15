@@ -132,19 +132,13 @@ func (c *NMIClient) runClassicSale(ctx context.Context, params SaleParams, curre
 		values.Set("orderid", params.OrderID)
 	}
 	params.StoredCredential.ApplyToForm(values)
+	SettleOnlyInFull(values)
 
 	response, err := c.sendDirectRequest(ctx, values)
 	if err != nil {
 		return nil, err
 	}
-	output, err := parseDirectResponse(response)
-	if err != nil {
-		return nil, err
-	}
-	if !isDirectResponseApproved(output) {
-		return nil, newSaleError(response, output)
-	}
-	return saleResponse(output, response), nil
+	return ParseSaleResponse(response, params.Amount, currency)
 }
 
 // Refund reverses a settled transaction via POST /v5/payments/{id}/refund.

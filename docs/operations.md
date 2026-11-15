@@ -184,9 +184,9 @@ is a file or Vault, cached per instance. Per-instance caches:
 |---|---|
 | Merchant configuration | an edit through OpenRails: at once (`NOTIFY`); one made in Vault directly: within 30 seconds of the merchant's next use; a file: the instance's next start |
 | A Solana Transit cranker's public key | 60 seconds |
-| FX rates | the instance's next refresh (every 2 hours); a rate published 48 hours ago is never quoted |
+| FX rates | the instance's next refresh (every 2 hours); a rate published 48 hours ago is never quoted, and one more than 1.25 times (either way) the rate it replaces is held back until a later day's publication repeats it |
 | `GET /v1/config` in browsers and CDNs | 5 minutes (`Cache-Control`) |
-| PSP posture verdicts | at once, when the PSP's configuration changes |
+| PSP posture verdicts | at once, when the PSP's configuration changes; an arming verdict an hour old is checked again before the next provider write |
 
 ### What scales
 
@@ -797,7 +797,7 @@ Deadlines with no event:
 | Deadline | Picked up by | What happens |
 |---|---|---|
 | a provider-billed `past_due` row's grace ends with no retry scheduled | the due pass (hourly billing pass) | `unverified`: the provider is read by id, access kept |
-| a provider-billed renewal has no payment 48h after its period | the rebill watch (hourly billing pass) | `unverified`, as above |
+| a provider-billed renewal has no payment 48h after its period | the due pass (hourly billing pass) | `unverified`, as above |
 | a timed access window lapses | the health pass (hourly) | the customer's access-ended notice |
 | an engine renewal past its allowance, an unverified row past 72h, a stuck or abandoned provider operation | the health pass | `life.renewal.held`, `life.unverified.unresolved`, `life.provider_intent.stuck` / `.abandoned` |
 
@@ -846,12 +846,13 @@ disappears. Two safety doctrines matter operationally:
   the local DB" is not absence — it usually means *not imported yet*. Held
   repairs stay `reconcile_required` with the unproven domain in evidence.
 - **Stuck intents** (`life.provider_intent.stuck`): the health pass flags provider
-  intents sitting non-terminal too long — `pending`/`failed_retryable` older
-  than 24h, `in_flight`/`unknown_needs_verify` older than 2h; thresholds are
-  hardcoded. Mode-parked intents are informational (that wait is by design);
-  everything else is `requires_review` — provider failures, bad credentials,
-  or a dead worker. The engine never touches intent rows (the
-  executor/verifier own them); findings auto-resolve on recovery.
+  intents sitting non-terminal too long — `pending` 24h past its next attempt
+  (one scheduled ahead or deferred waits for its instant), parked `pending` or
+  `failed_retryable` older than 24h, `in_flight`/`unknown_needs_verify` older
+  than 2h; thresholds are hardcoded. Mode-parked intents are informational
+  (that wait is by design); everything else is `requires_review` — provider
+  failures, bad credentials, or a dead worker. The engine never touches intent
+  rows (the executor/verifier own them); findings auto-resolve on recovery.
 - **Operational problems** outside the engine are findings too:
   `consistency.ledger.unbooked` (a provider event OpenRails could not book; the
   merchant repairs the ledger and resolves the finding) and
@@ -906,6 +907,27 @@ table, the same for every owner:
   card (transaction not allowed, lost or picked-up card). A new card resumes
   dunning at the next due pass.
 - **Terminal at once:** stolen or fraudulent card, and "stop recurring" codes.
+
+The networks' advice comes before the rail's code. A decline that would be
+retried waits for a new card instead when it carries Stripe's `advice_code`
+`do_not_try_again` or `confirm_card_data`, a Mastercard Merchant Advice Code
+03, 21 or 01 (Stripe's `network_advice_code`), or an issuer response code
+after which Visa or Mastercard forbid another attempt on the card (04, 07,
+12, 14, 15, 41, 43, 46, 54, 57, R0, R1, R3: Stripe's `network_decline_code`,
+or NMI's `processor_response_code` when a Query API read of NMI's own
+scheduled charge supplies it). Advice never ends a subscription. NMI's Direct
+Post answer carries no issuer code, so a decline of OpenRails' own NMI charge
+is classified by its response code alone.
+
+A customer's own retry of the card (`retry-now`, or paying the renewal order
+with the subscription's card) is refused with no provider call while the
+subscription waits for a new card, unless the latest decline is one the
+cardholder can clear on that card: `authentication_required`,
+`incorrect_zip` or `incorrect_address`. In any state it is refused after a
+terminal decline held by the destructive switch, after an issuer code above,
+and after 3 declined customer attempts on the card for the same renewal.
+Another card is always admitted. Customer declines count toward the
+card-testing blocks.
 
 The staleness window ("never
 charge a months-old failure") derives from the case's schedule — last offset +
@@ -1036,7 +1058,7 @@ the same idempotent reconciliation writers the pull uses, then runs scoped
 convergence. It never mutates a provider and **never charges** — charging
 stays inside dunning. Dunning owns `past_due` (we SAW the failure); the
 **silence cohort** — lapsed subscriptions with NO webhook either way — is
-parked as `unverified` by the rebill watch and the due pass, and resolved by the Unknown-cohort lane
+parked as `unverified` by the due pass, and resolved by the Unknown-cohort lane
 against ONE verdict set:
 
 | Provider evidence | Resolution |
@@ -1194,7 +1216,8 @@ What an integrator sees:
 
 - A usage event's `occurred_at` may be up to 35 days in the past and not in the
   future; its `source` and `source_id` are honoured as its idempotency key for
-  those 35 days. A priced event's ledger debit is idempotent for good.
+  those 35 days. A charged failed event's key is honoured for good: its ledger
+  debit carries it, and a later retry charges nothing.
 - An admission's hold deadline, as admitted or as extended, is at most 30 days
   past the admission, and a spend window is at most 31 days. After 61 days a
   request id reads as never admitted.
@@ -1255,7 +1278,7 @@ coalesce merchant-wide passes when embedded fleets share a database.
 
 | Worker | Cadence |
 |---|---|
-| Billing pass (`openrails.billing_pass`): due renewals and retries, balance watches whose look failed, due arrears delinquency, order expiry (abandoned card saves included), automatic usage billing (opt-in), rebill watch, due daily NMI history read, undeclared-account re-alerts, stored card refresh ahead of renewal; each scan in turn | top of each UTC hour, and on start |
+| Billing pass (`openrails.billing_pass`): due renewals and retries, balance watches whose look failed, due arrears delinquency, order expiry (abandoned card saves included), automatic usage billing (opt-in), rebill watch, due daily NMI history read, undeclared-account re-alerts, stored card refresh ahead of renewal, provider operations an hour past due whose wake was lost; each scan in turn | top of each UTC hour, and on start |
 | Retention cleanup; merchant health (merchants with activity); admission-denial flush (closed hours, fleets with Redis) | 1 h |
 | A customer's convergence | committed with each mutation that changed the customer |
 | A balance's look | committed with a change that crosses one of its lines, and for the instant its last look named |
@@ -1263,7 +1286,8 @@ coalesce merchant-wide passes when embedded fleets share a database.
 | Stripe webhook endpoint backstop | 24 h |
 
 The billing pass takes everything due by its start, so a pass that fails or
-does not run leaves its work to the next. One scan's failure never stops the
+does not run leaves its work to the next; one that starts while another still
+runs exits. One scan's failure never stops the
 others. Renewals and retries wait at most an hour past their instant; an engine
 renewal's access grace is at least two hours, so a member keeps access across
 one missed pass. A low or depleted balance is told within seconds: the change
@@ -1279,7 +1303,10 @@ provider operation (`openrails.provider_operation`, which sleeps to its next
 attempt; a Solana pull is one, scheduled for its period), a customer's
 convergence (`openrails.customer_converge`), a PSP import and its
 charge-attribution read, a merchant purge's Vault cleanup, a Stripe PSP's
-webhook pass when it is declared or changed.
+webhook pass when it is declared or changed. The billing pass queues a wake
+again for a live provider operation more than an hour past its due time, whose
+wake may be lost (its River job deleted, its River schema reset, its fleet
+stopped); such an operation gains at most one extra wake.
 
 Automatic usage billing is enabled by the host's `usage_billing_enabled` option.
 It is not scheduled by subscription-only hosts. Merchants configure their
@@ -1292,10 +1319,10 @@ Job health is a read of River's own tables (`openrails workers`, the server's
 jobs running past their timeout, waiting to retry and discarded, a periodic
 kind's last completion and the newest error. Each billing pass records, as its
 River output, the critical scans (renewals and retries, balance watches,
-delinquency, usage billing) still holding a row due since before the start of
-yesterday (UTC); `openrails_job_progress` fails while the last one named any,
-or when none ran to its end within a day and its timeout. OpenRails stores none
-of it.
+delinquency, order expiry, usage billing) still holding a row due since before
+the start of yesterday (UTC); `openrails_job_progress` fails while the last one
+named any, or when none ran to its end within a day and its timeout. OpenRails
+stores none of it.
 
 A pass bounded per job (retention cleanup's 200 merchants, a merchant's 200
 due usage accounts) continues in a new job after the last one it handled, so
@@ -1303,11 +1330,11 @@ each job stays short and the pass still reaches all of its work.
 
 Each OpenRails job runs under its kind's timeout: 10 minutes, an hour for
 the passes that read every merchant's providers (`cleanup_expired_data`,
-`provider_refresh_merchant`, `merchant_health`, `rebill_watch`) and an
-import's `charge_attributions` read, and for `stored_card_refresh_due` (which
-stops opening pages after 10 minutes), two for `psp_import`. The billing pass
-runs each scan under its own budget and takes their sum. River cancels a job
-past it. River's
+`provider_refresh_merchant`, `merchant_health`) and an import's
+`charge_attributions` read, two for `psp_import`. The billing pass runs each
+scan under its own budget, 10 minutes or an hour for the rebill watch, the NMI
+history read and stored card refresh (which stops opening pages after 10
+minutes), and takes their sum. River cancels a job past it. River's
 rescuer returns a job whose process died to work once it has run past both
 its timeout and `RescueStuckJobsAfter` (10 minutes unless the host sets it).
 
@@ -1343,7 +1370,7 @@ trusted issuers' JWKS URIs, `llm.base_url`), the server calls:
 
 | Destination | What for |
 |---|---|
-| `latest.currency-api.pages.dev`, then `cdn.jsdelivr.net` | FX rates for cross-currency quotes, held in each instance's memory: each instance reads 34 files, one per currency (the fallback mirror when the primary fails), every 2 hours from its first cross-currency quote, and a quote reads the one file it finds missing or stale. An instance that never quotes across currencies never calls them. Boot never waits for them: a failed read is retried at the next refresh or quote, and a rate it cannot fetch fails only the quote that needed it. |
+| `latest.currency-api.pages.dev`, then `cdn.jsdelivr.net` | FX rates for cross-currency quotes, held in each instance's memory: each instance reads 34 files, one per currency (the fallback mirror when the primary fails), every 2 hours from its first cross-currency quote, and a quote reads the one file it finds missing or stale. An instance that never quotes across currencies never calls them. Boot never waits for them: a failed read is retried at the next refresh or quote, and a rate it cannot fetch fails only the quote that needed it. Both hosts serve one publisher's files, so neither checks the other; a rate is checked only against the one the instance already holds. |
 | `hermes.pyth.network` | Solana token prices, when a Solana rail quotes a token. |
 | `api.stripe.com` | Stripe PSPs. |
 | `secure.nmi.com`, `sandbox.nmi.com` | NMI PSPs, by each PSP's `environment`. |

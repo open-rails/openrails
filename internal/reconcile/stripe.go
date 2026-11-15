@@ -66,6 +66,9 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		FetchedAt:    fetchObservedAt(params),
 		Capabilities: f.Capabilities(),
 	}
+	if params.Reversals {
+		return f.fetchReversals(ctx, params, snap)
+	}
 	snap.Coverage.TransactionsExhaustive = true
 	snap.Coverage.TransactionsPaginatedComplete = true
 	snap.Coverage.TransactionWindowSince = timePtrIfSet(params.Since)
@@ -137,6 +140,41 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		snap.Transactions = append(snap.Transactions, normalizeStripeDispute(obj))
 	}
 
+	return snap, nil
+}
+
+// fetchReversals reads the window's refunds and disputes, and the charge each
+// names so the diff checks it against its PaymentIntent as a full read does.
+// It reads no roster, vault or bills and claims no coverage.
+func (f *StripeFetcher) fetchReversals(ctx context.Context, params FetchParams, snap *RemoteSnapshot) (*RemoteSnapshot, error) {
+	snap.Capabilities.Subscriptions, snap.Capabilities.Vault = false, false
+	refunds, err := f.listRaw(ctx, "/v1/refunds", FetchParams{Since: params.Since, Until: params.Until}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("stripe refunds: %w", err)
+	}
+	for _, obj := range refunds {
+		snap.Transactions = append(snap.Transactions, normalizeStripeRefund(obj))
+	}
+	disputes, err := f.listRaw(ctx, "/v1/disputes", FetchParams{Since: params.Since, Until: params.Until}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("stripe disputes: %w", err)
+	}
+	for _, obj := range disputes {
+		snap.Transactions = append(snap.Transactions, normalizeStripeDispute(obj))
+	}
+	read := map[string]bool{}
+	for _, t := range snap.Transactions {
+		charge := decodeBreadcrumbs(t.Raw).Charge
+		if charge == "" || read[charge] {
+			continue
+		}
+		read[charge] = true
+		body, err := f.get(ctx, "/v1/charges/"+url.PathEscape(charge))
+		if err != nil {
+			return nil, fmt.Errorf("stripe charge %s: %w", charge, err)
+		}
+		snap.Transactions = append(snap.Transactions, normalizeStripeCharge(body))
+	}
 	return snap, nil
 }
 

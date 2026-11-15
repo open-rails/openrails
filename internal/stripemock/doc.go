@@ -4,8 +4,9 @@
 // Serve it over loopback (New, then point Config.ProviderSandbox.StripeAPIURL
 // at URL) or in process (NewUnstarted as Deps.StripeTransport); either way
 // OpenRails' Stripe client, read-only guard and pinned API version stand in
-// front of it. Webhooks go, signed, where SendWebhooksTo says. Time comes
-// from Options.Clock. Only tests and sandbox commands may import it.
+// front of it. Webhooks go, signed, where SendWebhooksTo (snapshot events)
+// or SendThinEventsTo (thin events) says. Time comes from Options.Clock.
+// Only tests and sandbox commands may import it.
 //
 // # Known differences from real Stripe
 //
@@ -28,6 +29,7 @@
 //     Only a payment-mode session completes, paid by a visa
 //     ending 4242; a guest gets no customer; the only event sent is
 //     checkout.session.completed.
+//   - A thin event's v2 event has no data, context or snapshot_event.
 //   - Subscriptions bill only when a test plays Stripe's renewal; periods are
 //     30 days; currency is usd.
 package stripemock

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 288,
+  "scenario_count": 328,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -224,6 +224,11 @@
       "name": "A sale whose answer was lost settles from NMI: its decline reopens the order, a charge NMI can't show raises a high finding until the receipt appears, and nothing is resent"
     },
     {
+      "id": "OR-J09-S06",
+      "journey": "J09",
+      "name": "An NMI sale the issuer approves for part of its amount asks NMI to settle only in full, never pays the order, raises a high finding, and is never resent"
+    },
+    {
       "id": "OR-J10-S01",
       "journey": "J10",
       "name": "Two concurrent same-key pay requests cause one economic debit"
@@ -329,6 +334,11 @@
       "name": "Committed renewal payment/event and period survive process death before River acknowledgement"
     },
     {
+      "id": "OR-J14-S06",
+      "journey": "J14",
+      "name": "An order's sale, a renewal's collection and an upgrade's membership each authorize one renewal; two agreements at one boundary refuse"
+    },
+    {
       "id": "OR-J15-S01",
       "journey": "J15",
       "name": "Missing callback is repaired from authoritative provider evidence"
@@ -409,6 +419,11 @@
       "name": "Cancellation after boundary follows irreversible rail policy"
     },
     {
+      "id": "OR-J17-S06",
+      "journey": "J17",
+      "name": "Cancel, resume and cancel again inside the paid period never extends access past it"
+    },
+    {
       "id": "OR-J18-S01",
       "journey": "J18",
       "name": "Known price or seat change preview and confirmation agree"
@@ -427,6 +442,11 @@
       "id": "OR-J18-S04",
       "journey": "J18",
       "name": "Concurrent renewal and change retain one financial agreement"
+    },
+    {
+      "id": "OR-J18-S05",
+      "journey": "J18",
+      "name": "An in-place upgrade late in the period holds the new tier only to the paid boundary"
     },
     {
       "id": "OR-J19-S01",
@@ -467,6 +487,16 @@
       "id": "OR-J20-S04",
       "journey": "J20",
       "name": "Foreign merchant and unsupported refund are refused with original currency and account intact"
+    },
+    {
+      "id": "OR-J20-S70",
+      "journey": "J20",
+      "name": "A dashboard refund lands from the reversals read while the full provider read cannot finish, and once"
+    },
+    {
+      "id": "OR-J20-S05",
+      "journey": "J20",
+      "name": "Two partial CCBill refunds naming one sale are booked as two reversals, an exact replay of either books nothing, and a refund beyond what remains of the sale books nothing and raises a ledger finding naming it"
     },
     {
       "id": "OR-J21-S01",
@@ -552,6 +582,11 @@
       "id": "OR-J24-S04",
       "journey": "J24",
       "name": "Known usage group and pagination returns exact seeded totals"
+    },
+    {
+      "id": "OR-J24-S05",
+      "journey": "J24",
+      "name": "Charged failed usage replayed past its key window is charged once"
     },
     {
       "id": "OR-J25-S01",
@@ -664,6 +699,21 @@
       "name": "Callback during active fetch causes a durable follow-up observation"
     },
     {
+      "id": "OR-J28-S08",
+      "journey": "J28",
+      "name": "A thin Stripe event is read back from Stripe at its object's canonical URL and settles once, like its snapshot"
+    },
+    {
+      "id": "OR-J28-S06",
+      "journey": "J28",
+      "name": "Another merchant's claim of a PSP or custodian account in the other money class is refused, by file or by declaration, and the owner's webhooks keep working"
+    },
+    {
+      "id": "OR-J28-S07",
+      "journey": "J28",
+      "name": "One merchant's live and test PSPs on one account each receive the events their own secret verifies; Stripe's livemode attributes one both verify; one neither verifies is refused"
+    },
+    {
       "id": "OR-J29-S01",
       "journey": "J29",
       "name": "Crash before provider submission resumes one authorized operation"
@@ -712,6 +762,21 @@
       "id": "OR-J31-S06",
       "journey": "J31",
       "name": "NMI receipts that name their card export and restore verbatim"
+    },
+    {
+      "id": "OR-J31-S10",
+      "journey": "J31",
+      "name": "A Solana pull scheduled ahead and restored with its merchant runs on the destination at its due time"
+    },
+    {
+      "id": "OR-J31-S40",
+      "journey": "J31",
+      "name": "A merchant's notification adoption export holds back no other merchant and its own producers commit after its snapshot"
+    },
+    {
+      "id": "OR-J31-S09",
+      "journey": "J31",
+      "name": "A paid Stripe hosted-page order exports and restores with its attempt's Checkout Session state"
     },
     {
       "id": "OR-J32-S01",
@@ -894,6 +959,11 @@
       "name": "PSP import and its queued job commit together"
     },
     {
+      "id": "OR-J06-S08",
+      "journey": "J06",
+      "name": "A PSP's environment proof expires after an hour and is proven again before the next write; an account that changed environment is refused"
+    },
+    {
       "id": "OR-J12-S08",
       "journey": "J12",
       "name": "Expired vault card is updated at its Account Updater, as a new token or a new expiry, and its renewal retries on it"
@@ -972,6 +1042,11 @@
       "id": "OR-J38-S13",
       "journey": "J38",
       "name": "A provider answer no attempt can read fails the import after five attempts with its error, deletable"
+    },
+    {
+      "id": "OR-J38-S42",
+      "journey": "J38",
+      "name": "An NMI import lands each schedule in its mapped price's currency, NMI's decimal read exactly (1000.00 as 1000 JPY, 12.50 as 12.50 EUR); an amount not exact in that currency or a plan with no price stays blocked; a book's schedule in another currency than its price's is refused"
     },
     {
       "id": "OR-J38-S30",
@@ -1149,6 +1224,11 @@
       "name": "A CCBill pull that may not write the mirror, advisory or enforce without inserts, matches a zero-dropped legacy row by identity against a complete roster: nothing reads as missing, gone or canceled, and the row keeps its spelling"
     },
     {
+      "id": "OR-J38-S43",
+      "journey": "J38",
+      "name": "A CCBill sale that arrives after its lapsed page's order was paid by card is recorded once against the order as a payment held for refund, with a late-payment finding to refund it at CCBill and a repair to cancel its CCBill subscription; it grants nothing, the card keeps paying the order, the card is never refunded, and a replay changes nothing"
+    },
+    {
       "id": "OR-J38-S41",
       "journey": "J38",
       "name": "The dashboard keeps every stat label within two lines at any column width, legends a one-rail donut and names PSPs by key; staff lists name the customer and plan, and still list by id with the directory down; customer controls find a customer by name and offer its currencies; a membership with no other plan offers Change subscription disabled, saying why; ending a membership from the console says the customer loses access now once End access now is ticked; an ended membership offers no plan or card change; clearing a hold confirms it and drops it from Ops; at 1440 the findings table shows Resolve unscrolled; a missing customer, subscription or payment is reported once, by its page"
@@ -1167,6 +1247,11 @@
       "id": "OR-J19-S05",
       "journey": "J19",
       "name": "A migration move that no longer applies is skipped, terminally, and its migration settles"
+    },
+    {
+      "id": "OR-J19-S06",
+      "journey": "J19",
+      "name": "A migration needs notice when what the customer pays per unit of time rises, at the seats its renewal bills; a one-time target is refused"
     },
     {
       "id": "OR-J34-S30",
@@ -1189,6 +1274,26 @@
       "name": "Due pass queues an NMI retry and never waits on the gateway"
     },
     {
+      "id": "OR-J16-S40",
+      "journey": "J16",
+      "name": "A lost card's renewal refuses a same-card customer payment with no provider call and admits another card"
+    },
+    {
+      "id": "OR-J16-S41",
+      "journey": "J16",
+      "name": "An NMI decline whose issuer code forbids a reattempt waits for a new card, and retry-now on that card is refused with no provider call"
+    },
+    {
+      "id": "OR-J16-S42",
+      "journey": "J16",
+      "name": "Network do-not-retry advice on a generic decline stops dunning on the card"
+    },
+    {
+      "id": "OR-J16-S43",
+      "journey": "J16",
+      "name": "A decline the cardholder can clear is retried by the customer on the same card up to the cap"
+    },
+    {
       "id": "OR-J15-S30",
       "journey": "J15",
       "name": "Rebill watch backs off a failing provider probe"
@@ -1207,6 +1312,11 @@
       "id": "OR-J12-S12",
       "journey": "J12",
       "name": "Mastercard 51 through 55 uses 16 digits; other supported cards and formatted values remain blocked"
+    },
+    {
+      "id": "OR-J12-S13",
+      "journey": "J12",
+      "name": "Each Stripe account charges and saves cards on its own customer; another account's customer is never reused or overwritten"
     },
     {
       "id": "OR-J06-S30",
@@ -1284,6 +1394,16 @@
       "name": "A pull the chain refuses before its period end is retried, not taken as already paid"
     },
     {
+      "id": "OR-J37-S62",
+      "journey": "J37",
+      "name": "A dropped Solana pull is signed again only once it provably never landed, and a landed pull is never repeated"
+    },
+    {
+      "id": "OR-J37-S63",
+      "journey": "J37",
+      "name": "A wallet that is the plan's cranker is refused a co-signed subscribe; the cranker signs nothing for it"
+    },
+    {
       "id": "OR-J21-S60",
       "journey": "J21",
       "name": "An import queues, with its own commit, the one read of the charges it attributed"
@@ -1309,6 +1429,16 @@
       "name": "A Stripe PSP changed while its pass runs reaches Stripe without waiting for the backstop"
     },
     {
+      "id": "OR-J06-S64",
+      "journey": "J06",
+      "name": "A finding alert whose first delivery fails is delivered by its job's retry, once"
+    },
+    {
+      "id": "OR-J06-S65",
+      "journey": "J06",
+      "name": "A PSP whose webhooks went silent while pulls find its charges raises a finding; one with no charges or no webhooks does not, and it clears when webhooks resume"
+    },
+    {
       "id": "OR-J14-S70",
       "journey": "J14",
       "name": "An engine renewal nothing attempted by its deadline reads as missed without a recorded miss"
@@ -1319,9 +1449,19 @@
       "name": "A provider-billed grace that ends unanswered is read by id from the due pass"
     },
     {
+      "id": "OR-J16-S71",
+      "journey": "J16",
+      "name": "An overdue provider-billed renewal is asked by id from the due pass before the rebill watch reads NMI"
+    },
+    {
       "id": "OR-J15-S70",
       "journey": "J15",
       "name": "An NMI renewal the probe cannot settle is read by id once its grace passes"
+    },
+    {
+      "id": "OR-J15-S72",
+      "journey": "J15",
+      "name": "A complete provider refresh queues no due work: the hourly billing pass takes it"
     },
     {
       "id": "OR-J15-S71",
@@ -1352,6 +1492,11 @@
       "id": "OR-J04-S70",
       "journey": "J04",
       "name": "The hourly health pass raises held engine renewals and closes them once attempted"
+    },
+    {
+      "id": "OR-J04-S71",
+      "journey": "J04",
+      "name": "An NMI history read that fails fails the billing pass; the next pass reads it"
     },
     {
       "id": "OR-J27-S10",
@@ -1404,6 +1549,11 @@
       "name": "Job progress fails once a billing pass records critical work a day overdue and clears after a clean pass"
     },
     {
+      "id": "OR-J04-S60",
+      "journey": "J04",
+      "name": "A live provider operation whose River wake was lost is queued again by the first billing pass an hour past its due time"
+    },
+    {
       "id": "OR-J25-S40",
       "journey": "J25",
       "name": "A hold, a revocation or a lapse that takes a balance to its line commits the balance's look and its notice lands within seconds"
@@ -1442,6 +1592,56 @@
       "id": "OR-J12-S70",
       "journey": "J12",
       "name": "A card save confirmed or saved again past its 24-hour cutoff, before any pass, is removed"
+    },
+    {
+      "id": "OR-J04-S37",
+      "journey": "J04",
+      "name": "An order expiry backlog past one batch is expired by one billing pass"
+    },
+    {
+      "id": "OR-J04-S38",
+      "journey": "J04",
+      "name": "A billing pass that starts while another still runs exits without running a scan; the running pass takes what is due"
+    },
+    {
+      "id": "OR-J25-S37",
+      "journey": "J25",
+      "name": "A billing pass that waited behind a balance's look leaves the watch that look moved on"
+    },
+    {
+      "id": "OR-J29-S37",
+      "journey": "J29",
+      "name": "A provider operation scheduled ahead is no stuck finding however long ago it was queued; one a day past its attempt, or parked or failing for a day, is"
+    },
+    {
+      "id": "OR-J18-S06",
+      "journey": "J18",
+      "name": "A Stripe downgrade schedules the new price for the subscription's seats"
+    },
+    {
+      "id": "OR-J19-S07",
+      "journey": "J19",
+      "name": "A Stripe migration push keeps the subscription's seats, and a retry after a lost schedule create replays it"
+    },
+    {
+      "id": "OR-J37-S10",
+      "journey": "J37",
+      "name": "A published FX rate far from the one held is refused: once the held rate is stale, a euro price gets no Solana quote"
+    },
+    {
+      "id": "OR-J22-S07",
+      "journey": "J22",
+      "name": "A pending refund of a mixed order's credit line holds the line's whole credit lot until it settles"
+    },
+    {
+      "id": "OR-J22-S08",
+      "journey": "J22",
+      "name": "Refunds and chargebacks of a mixed order reverse the credit line first, then the rest, and a won dispute restores what it took"
+    },
+    {
+      "id": "OR-J22-S09",
+      "journey": "J22",
+      "name": "Credit a won dispute restores goes at once to an earlier refund that found the mixed order's credit line already returned"
     }
   ]
 }

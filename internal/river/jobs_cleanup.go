@@ -112,9 +112,10 @@ type CleanupExpiredDataArgs struct {
 
 func (CleanupExpiredDataArgs) Kind() string { return KindCleanupExpiredData }
 
-// InsertOpts runs each job of a pass once per period.
+// InsertOpts runs each job of a pass once per period, in one attempt: the
+// next period's pass retries what it left.
 func (CleanupExpiredDataArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: CleanupInterval}}
+	return river.InsertOpts{Queue: QueueBilling, MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: CleanupInterval}}
 }
 
 type CleanupExpiredDataWorker struct {

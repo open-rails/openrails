@@ -125,6 +125,13 @@ func (m *Mock) AddSubscription(customer, method, price string, amount int64, sta
 	return id
 }
 
+// SetQuantity sets a subscription's seats: its item's quantity.
+func (m *Mock) SetQuantity(sub string, quantity int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.subs[sub]["items"].(Object)["data"].([]Object)[0]["quantity"] = quantity
+}
+
 // invoiceLocked cuts the subscription's latest invoice; paid moves money.
 func (m *Mock) invoiceLocked(sub string, amount int64, paid bool) Object {
 	inv := m.newInvoiceLocked(sub, amount)

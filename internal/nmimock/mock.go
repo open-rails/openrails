@@ -57,6 +57,7 @@ type Mock struct {
 	reads       map[string]int
 	odd         []string
 	recent      []recentCharge
+	partials    map[string]string
 
 	refusedSaves              int
 	declineValid              int
@@ -69,6 +70,7 @@ type Mock struct {
 	failUpdates               int
 	hide                      int
 	queryDown                 bool
+	liveMode                  bool
 	unsupportedDuplicateCheck bool
 	failures                  []*failure
 	intercepts                []*intercept
@@ -88,7 +90,7 @@ func NewUnstarted(opts Options) *Mock {
 		opts.Clock = time.Now
 	}
 	return &Mock{opts: opts, tokens: map[string]Card{}, issued: map[string]Card{}, numbers: map[string]*Card{}, vaults: map[string]*Vault{}, plans: map[string]*Plan{},
-		schedules: map[string]*Schedule{}, reads: map[string]int{}, probes: map[string]bool{}}
+		schedules: map[string]*Schedule{}, reads: map[string]int{}, probes: map[string]bool{}, partials: map[string]string{}}
 }
 
 // URL is the loopback gateway root; OpenRails' provider_sandbox.nmi_gateway_url.

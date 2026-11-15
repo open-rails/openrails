@@ -339,8 +339,8 @@ func later(a, b time.Time) time.Time {
 // lapsed credit lots, posts each running charge through the last 00:00 UTC,
 // samples the usage rate, tells the host and the customer of a low or
 // depleted balance once per crossing, and writes when to look next. A
-// customer with no watch is left alone; an arrears one with no running charge
-// and no lot that lapses loses its watch.
+// customer with no watch, or one not due, is left alone; an arrears one with
+// no running charge and no lot that lapses loses its watch.
 func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, customer identity.CustomerID, currency string) error {
 	if s == nil || txDB == nil {
 		return fmt.Errorf("balance watch requires a bound transaction")
@@ -363,6 +363,10 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 		return err
 	}
 	now := instant(txSvc.now())
+	// A look that ran while this one waited for the lock moved the watch on.
+	if watch.NextCheckAt == nil || watch.NextCheckAt.After(now) {
+		return nil
+	}
 	// Lots that lapsed are settled in the order they lapsed; each posting
 	// stops at every 00:00 UTC on its way.
 	if _, err := txSvc.grantLedger(q, key.MerchantID).ExpireLapsedBy(ctx, key.CustomerID, currency, now); err != nil {

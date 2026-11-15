@@ -2,14 +2,14 @@
 
 -- name: ListNMIHistoryDuePSPs :many
 -- Of the merchant's live NMI PSPs (psp_ids), those never read, or last read
--- before due_before, with that read.
+-- before due_before, with that read; the stalest first.
 SELECT p.id, r.read_at
 FROM billing.psps p
 LEFT JOIN billing.nmi_history_reads r ON r.merchant_id = p.merchant_id AND r.psp_id = p.id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND p.rail = 'nmi' AND p.id = ANY(sqlc.arg(psp_ids)::uuid[])
   AND (r.read_at IS NULL OR r.read_at < sqlc.arg(due_before)::timestamptz)
-ORDER BY p.id
+ORDER BY r.read_at NULLS FIRST, p.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: DeleteNMIHistoryMonthsFrom :exec

@@ -3,12 +3,14 @@
 package critical_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -189,5 +191,49 @@ func TestBalanceLooks(t *testing.T) {
 		advanceTo(w, nextHour(w.clock.Now()))
 		require.False(t, runPass(t, fleet))
 		notified(t, w, customer)
+	})
+	t.Run("OR-J25-S37/a-pass-that-waited-behind-a-look-leaves-the-watch-it-moved", func(t *testing.T) {
+		w, fleet := setup(t)
+		lapse := w.clock.Now().Add(time.Hour)
+		customer, _ := watchedCustomer(t, w, fleet, 1000, &lapse)
+		watches := pgx.Identifier{w.schema, "balance_watches"}.Sanitize()
+		advanceTo(w, lapse.Add(time.Minute))
+		// The pass reads the watch due, then waits for the customer a look holds.
+		conn, err := w.pool.Acquire(t.Context())
+		require.NoError(t, err)
+		defer conn.Release()
+		tx, err := conn.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		_, err = tx.Exec(t.Context(), "SELECT 1 FROM "+pgx.Identifier{w.schema, "customers"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2 FOR UPDATE", w.alpha.MerchantID().UUID(), customer.UUID())
+		require.NoError(t, err)
+		var holder int32
+		require.NoError(t, tx.QueryRow(t.Context(), "SELECT pg_backend_pid()").Scan(&holder))
+		events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
+		defer unsubscribe()
+		pass, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.billing_pass"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		require.NoError(t, err)
+		require.Eventually(t, func() bool { return blockedBy(t, w, holder) > 0 }, 30*time.Second, 20*time.Millisecond)
+		// That look commits the next instant it names.
+		next := lapse.Add(30 * 24 * time.Hour).Truncate(time.Second)
+		_, err = tx.Exec(t.Context(), "UPDATE "+watches+" SET next_check_at = $1 WHERE merchant_id = $2 AND customer_id = $3", next, w.alpha.MerchantID().UUID(), customer.UUID())
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit(t.Context()))
+		deadline := time.NewTimer(30 * time.Second)
+		defer deadline.Stop()
+		for done := false; !done; {
+			select {
+			case event := <-events:
+				if event != nil && event.Job.ID == pass.Job.ID {
+					require.Equal(t, river.EventKindJobCompleted, event.Kind)
+					done = true
+				}
+			case <-deadline.C:
+				t.Fatal("the billing pass did not finish")
+			}
+		}
+		var stored time.Time
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT next_check_at FROM "+watches+" WHERE customer_id = $1", customer.UUID()).Scan(&stored))
+		require.True(t, next.Equal(stored), "the pass looks no further at a watch no longer due: %s", stored)
 	})
 }

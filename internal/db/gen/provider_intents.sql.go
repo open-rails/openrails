@@ -1505,24 +1505,155 @@ func (q *Queries) ListCompletedManualRebillPaymentCoverage(ctx context.Context, 
 	return items, nil
 }
 
+const listLiveProviderOperations = `-- name: ListLiveProviderOperations :many
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
+WHERE merchant_id = $1::uuid
+  AND id > $2::uuid
+  AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+  AND intent_type <> ALL($3::text[])
+ORDER BY id
+LIMIT $4::int
+`
+
+type ListLiveProviderOperationsParams struct {
+	MerchantID       uuid.UUID
+	AfterID          uuid.UUID
+	RequestOnlyTypes []string
+	RowLimit         int32
+}
+
+// One merchant's live operations a wake runs, in id order after a cursor.
+func (q *Queries) ListLiveProviderOperations(ctx context.Context, arg ListLiveProviderOperationsParams) ([]BillingProviderIntent, error) {
+	rows, err := q.db.Query(ctx, listLiveProviderOperations,
+		arg.MerchantID,
+		arg.AfterID,
+		arg.RequestOnlyTypes,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingProviderIntent
+	for rows.Next() {
+		var i BillingProviderIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.LeaseExpiresAt,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+			&i.Subject,
+			&i.Credential,
+			&i.DestructiveActionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOverdueProviderOperations = `-- name: ListOverdueProviderOperations :many
+SELECT merchant_id, id, next_attempt_at FROM billing.provider_intents
+WHERE status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+  AND next_attempt_at < $1::timestamptz
+  AND (next_attempt_at, id) > ($2::timestamptz, $3::uuid)
+  AND (lease_expires_at IS NULL OR lease_expires_at < $1::timestamptz)
+  AND intent_type <> ALL($4::text[])
+ORDER BY next_attempt_at, id
+LIMIT $5::int
+`
+
+type ListOverdueProviderOperationsParams struct {
+	Before           time.Time
+	AfterAt          time.Time
+	AfterID          uuid.UUID
+	RequestOnlyTypes []string
+	RowLimit         int32
+}
+
+type ListOverdueProviderOperationsRow struct {
+	MerchantID    uuid.UUID
+	ID            uuid.UUID
+	NextAttemptAt time.Time
+}
+
+// CROSS-MERCHANT: live operations whose next attempt, and any lease, ended
+// before before, oldest first from the (after_at, after_id) cursor: each one's
+// wake should have run it by then. Request-only operations have no wake.
+func (q *Queries) ListOverdueProviderOperations(ctx context.Context, arg ListOverdueProviderOperationsParams) ([]ListOverdueProviderOperationsRow, error) {
+	rows, err := q.db.Query(ctx, listOverdueProviderOperations,
+		arg.Before,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RequestOnlyTypes,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOverdueProviderOperationsRow
+	for rows.Next() {
+		var i ListOverdueProviderOperationsRow
+		if err := rows.Scan(&i.MerchantID, &i.ID, &i.NextAttemptAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPaidEngineAgreementsAtBoundary = `-- name: ListPaidEngineAgreementsAtBoundary :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
-WHERE merchant_id=$1::uuid AND status='succeeded'
-  AND ((intent_type='initial_membership'
-        AND payload->'terms'->>'subscription_id'=$2::uuid::text
-        AND (payload->'terms'->>'period_end')::timestamptz=$3::timestamptz
-        -- A seat increase changes the agreement's seats, not its price.
-        AND NOT payload->'terms' ? 'adds')
-    OR (intent_type='subscription_collection'
-        AND subscription_id=$2::uuid
-        AND (payload->'renewal'->>'period_end')::timestamptz=$3::timestamptz)
+WHERE merchant_id=$1::uuid AND id IN (
+    SELECT i.id FROM billing.provider_intents i
+    WHERE i.merchant_id=$1::uuid AND i.status='succeeded' AND i.intent_type='initial_membership'
+      AND i.payload->'terms'->>'subscription_id'=$2::uuid::text
+      AND (i.payload->'terms'->>'period_end')::timestamptz=$3::timestamptz
+      -- A seat increase changes the agreement's seats, not its price.
+      AND NOT i.payload->'terms' ? 'adds'
+    UNION ALL
+    SELECT i.id FROM billing.provider_intents i
+    WHERE i.merchant_id=$1::uuid AND i.status='succeeded' AND i.intent_type='subscription_collection'
+      AND i.subscription_id=$2::uuid
+      AND (i.payload->'renewal'->>'period_end')::timestamptz=$3::timestamptz
+    UNION ALL
     -- An order's sale paid the first period of the subscription its line made.
-    OR (intent_type='nmi_sale' AND payload ? 'order_id' AND EXISTS (
-        SELECT 1 FROM billing.order_lines l
-        JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
-        WHERE l.merchant_id = provider_intents.merchant_id AND l.subscription_id = $2::uuid
-          AND o.id::text = provider_intents.payload->>'order_id' AND o.status = 'complete'
-          AND o.completed_at + make_interval(hours => l.billing_interval_hours) = $3::timestamptz)))
+    SELECT i.id FROM billing.order_lines l
+    JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
+    JOIN billing.provider_intents i ON i.merchant_id = o.merchant_id AND i.payload->>'order_id' = o.id::text
+    WHERE l.merchant_id=$1::uuid AND l.subscription_id=$2::uuid
+      AND o.status='complete' AND o.completed_at + make_interval(hours => l.billing_interval_hours)=$3::timestamptz
+      AND i.status='succeeded' AND i.intent_type='nmi_sale' AND i.payload ? 'order_id')
 ORDER BY id LIMIT 2
 `
 
@@ -1534,6 +1665,7 @@ type ListPaidEngineAgreementsAtBoundaryParams struct {
 
 // Select by obligation identity and boundary, not mutable catalog/account
 // filters: an ambiguous or mismatched retained owner must fail qualification.
+// Each source is its own index read, so a renewal never scans past sales.
 func (q *Queries) ListPaidEngineAgreementsAtBoundary(ctx context.Context, arg ListPaidEngineAgreementsAtBoundaryParams) ([]BillingProviderIntent, error) {
 	rows, err := q.db.Query(ctx, listPaidEngineAgreementsAtBoundary, arg.MerchantID, arg.SubscriptionID, arg.PeriodEnd)
 	if err != nil {
@@ -1931,30 +2063,32 @@ func (q *Queries) ListRetainedSubscriptionCollectionsForArchive(ctx context.Cont
 
 const listStuckProviderIntents = `-- name: ListStuckProviderIntents :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
-WHERE provider_intents.merchant_id = $1::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= $2::timestamptz
-       AND NOT (intent_type = 'price_migration_push' AND status = 'pending' AND next_attempt_at > $3::timestamptz))
-   OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $4::timestamptz)
+WHERE provider_intents.merchant_id = $1::uuid AND ( (status = 'pending' AND last_failure_reason IS NULL AND next_attempt_at <= $2::timestamptz)
+   OR ((status = 'failed_retryable' OR status = 'pending' AND last_failure_reason IS NOT NULL) AND created_at <= $2::timestamptz)
+   OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $3::timestamptz)
 ) ORDER BY created_at, id
+LIMIT $4::int
 `
 
 type ListStuckProviderIntentsParams struct {
 	MerchantID   uuid.UUID
 	ActionCutoff time.Time
-	Now          time.Time
 	VerifyCutoff time.Time
+	RowLimit     int32
 }
 
-// Non-terminal intents older than the converge engine's stuck thresholds:
-// pending/failed_retryable before action_cutoff, in_flight/unknown_needs_verify
-// before verify_cutoff (a healthy verifier resolves unknowns in minutes).
-// A price migration's push waits for its subscription's last period before
-// the move: pending and not yet due, it is scheduled, not stuck.
+// Non-terminal intents past the converge engine's stuck thresholds: pending
+// with no failure due before action_cutoff (scheduled ahead or deferred, it
+// waits for its instant), pending parked or failed_retryable created before
+// action_cutoff (each re-park or backoff keeps the next attempt near),
+// in_flight/unknown_needs_verify created before verify_cutoff (a healthy
+// verifier resolves unknowns in minutes).
 func (q *Queries) ListStuckProviderIntents(ctx context.Context, arg ListStuckProviderIntentsParams) ([]BillingProviderIntent, error) {
 	rows, err := q.db.Query(ctx, listStuckProviderIntents,
 		arg.MerchantID,
 		arg.ActionCutoff,
-		arg.Now,
 		arg.VerifyCutoff,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err

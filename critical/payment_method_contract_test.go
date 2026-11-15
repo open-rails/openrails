@@ -159,7 +159,7 @@ func TestPaymentMethodContracts(t *testing.T) {
 		defer gate.unblock()
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		select {
 		case <-gate.arrived:
 		case <-time.After(15 * time.Second):

@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
 )
@@ -125,11 +126,18 @@ func (p *nmiJournal) money(t *testing.T, transactions int, net int64) {
 
 func nmiMembership(t *testing.T, configure ...func(*nmimock.Schedule)) (*authorityWorld, *nmiJournal, *billing.Subscription) {
 	t.Helper()
+	return nmiMembershipWithAccess(t, catalog.Field[int]{}, configure...)
+}
+
+// nmiMembershipWithAccess is nmiMembership on a price with this access
+// duration; unset keeps the provider's default.
+func nmiMembershipWithAccess(t *testing.T, access catalog.Field[int], configure ...func(*nmimock.Schedule)) (*authorityWorld, *nmiJournal, *billing.Subscription) {
+	t.Helper()
 	a, p := newNMIWorld(t)
 	p.core.AddPlan(nmimock.Plan{ID: "weekly", Name: "Weekly", Amount: "10.00", Days: 7})
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-membership", DisplayName: "NMI membership", Entitlements: []string{"nmi:member"}})
 	require.NoError(t, err)
-	price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-weekly", PSP: "nmi", PlanID: "weekly", Currency: "USD"})
+	price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-weekly", PSP: "nmi", PlanID: "weekly", Currency: "USD", AccessDurationHours: access})
 	require.NoError(t, err)
 	// NMI-owned prices are retained legacy schedules, not new checkout
 	// products. Construct real external receipts and import their accepted
@@ -208,9 +216,9 @@ func TestNMIRecovery(t *testing.T) {
 		require.NoError(t, p.persist(t.Context()))
 		a.clock.Advance(due.Sub(a.clock.Now()) + 25*time.Hour)
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.rebill_watch", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		nmiRenewalReadback(t, a, p, sub)
-		runRegistered(t, fleet, "openrails.rebill_watch", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		nmiRenewalReadback(t, a, p, sub)
 		// The renewal's attempt carries the card the provider's report names,
 		// recorded with it: no later pass fills it.
@@ -243,7 +251,12 @@ func TestNMIRecovery(t *testing.T) {
 				fleet.PeriodicJobs().Clear()
 				require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 				require.NoError(t, fleet.Start(t.Context()))
-				runRegistered(t, fleet, "openrails.rebill_watch", 2)
+				if profile == "unavailable-query" {
+					// The outage also fails the history read, and with it the pass.
+					runPassFailing(t, fleet, 2, "openrails.nmi_history")
+				} else {
+					runRegistered(t, fleet, "openrails.billing_pass", 2)
+				}
 				p.money(t, 2, 2000)
 				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 				require.NoError(t, err)
@@ -254,7 +267,7 @@ func TestNMIRecovery(t *testing.T) {
 				if profile == "unavailable-query" {
 					// A failed look waits out its backoff, then reads the charge.
 					a.clock.Advance(15 * time.Minute)
-					runRegistered(t, fleet, "openrails.rebill_watch", 2)
+					runRegistered(t, fleet, "openrails.billing_pass", 2)
 				} else {
 					// The look found nothing and parked the row for verification; NMI's
 					// notice of the moved schedule is what reads the charge again.
@@ -270,10 +283,10 @@ func TestNMIRecovery(t *testing.T) {
 		p.core.EditSchedule(*sub.RailSubscriptionID, func(s *nmimock.Schedule) { s.NextBilling = due.Add(7 * 24 * time.Hour) })
 		a.clock.Advance(due.Sub(a.clock.Now()) + 25*time.Hour)
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.rebill_watch", 2)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		nmiRenewalReadback(t, a, p, sub)
-		runRegistered(t, fleet, "openrails.rebill_watch", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		nmiRenewalReadback(t, a, p, sub)
 	})
 	t.Run("OR-J15-S04", func(t *testing.T) {
@@ -295,8 +308,8 @@ func TestNMIRecovery(t *testing.T) {
 				p.core.EditSchedule(*sub.RailSubscriptionID, func(s *nmimock.Schedule) { s.NextBilling = due.Add(7 * 24 * time.Hour) })
 				a.clock.Advance(due.Sub(a.clock.Now()) + 25*time.Hour)
 				fleet := startFleet(t, a.world)
-				runRegistered(t, fleet, "openrails.rebill_watch", 2)
-				runRegistered(t, fleet, "openrails.dunning", 2)
+				runRegistered(t, fleet, "openrails.billing_pass", 2)
+				runRegistered(t, fleet, "openrails.billing_pass", 2)
 				p.money(t, 2, net)
 				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 				require.NoError(t, err)

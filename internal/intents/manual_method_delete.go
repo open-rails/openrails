@@ -3,6 +3,7 @@ package intents
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -26,8 +27,14 @@ func ManualPaymentMethodDelete(in gen.BillingProviderIntent) bool {
 	return manualMethodDeleteType(in.IntentType)
 }
 
+// ManualPaymentMethodDeleteTypes are the request-only operation types: no
+// wake runs them.
+func ManualPaymentMethodDeleteTypes() []string {
+	return []string{TypeNMIPaymentMethodDelete, TypePlatformMethodDelete, TypeHyperSwitchMethodDelete}
+}
+
 func manualMethodDeleteType(kind string) bool {
-	return kind == TypeNMIPaymentMethodDelete || kind == TypePlatformMethodDelete || kind == TypeHyperSwitchMethodDelete
+	return slices.Contains(ManualPaymentMethodDeleteTypes(), kind)
 }
 
 func manualMethodDeleteKey(kind string, id uuid.UUID) string {

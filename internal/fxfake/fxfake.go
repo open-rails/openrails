@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,11 +35,12 @@ type Server struct {
 	seen      map[string]int // host/base
 	down      map[string]bool
 	dates     map[string]string
+	rates     map[string]float64 // host/base/target
 }
 
 // New starts a Server; Close stops it.
 func New() *Server {
-	s := &Server{seen: map[string]int{}, down: map[string]bool{}, dates: map[string]string{}}
+	s := &Server{seen: map[string]int{}, down: map[string]bool{}, dates: map[string]string{}, rates: map[string]float64{}}
 	codes := moneyutil.CurrencyCodes()
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := r.Header.Get(hostHeader)
@@ -46,6 +48,18 @@ func New() *Server {
 		s.mu.Lock()
 		s.seen[host+"/"+base]++
 		down, date := s.down[host+"/"+base], s.dates[base]
+		rates := make([]string, 0, len(codes))
+		for i, code := range codes {
+			c := strings.ToLower(code)
+			if c == base {
+				continue
+			}
+			value := strconv.Itoa(i+1) + ".5"
+			if set, ok := s.rates[host+"/"+base+"/"+c]; ok {
+				value = strconv.FormatFloat(set, 'f', -1, 64)
+			}
+			rates = append(rates, strconv.Quote(c)+":"+value)
+		}
 		s.mu.Unlock()
 		if down {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -53,12 +67,6 @@ func New() *Server {
 		}
 		if date == "" {
 			date = time.Now().UTC().Format(time.DateOnly)
-		}
-		rates := make([]string, 0, len(codes))
-		for i, code := range codes {
-			if c := strings.ToLower(code); c != base {
-				rates = append(rates, fmt.Sprintf("%q:%d.5", c, i+1))
-			}
 		}
 		_, _ = fmt.Fprintf(w, `{"date":%q,%q:{%s}}`, date, base, strings.Join(rates, ","))
 	}))
@@ -98,6 +106,13 @@ func (s *Server) Requests(host, base string) int {
 func (s *Server) Fail(host, base string) {
 	s.mu.Lock()
 	s.down[host+"/"+base] = true
+	s.mu.Unlock()
+}
+
+// Rate makes host publish value as base's rate to target (both lower case).
+func (s *Server) Rate(host, base, target string, value float64) {
+	s.mu.Lock()
+	s.rates[host+"/"+base+"/"+target] = value
 	s.mu.Unlock()
 }
 

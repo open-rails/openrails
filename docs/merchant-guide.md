@@ -268,8 +268,11 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
   replaces the subscription with a successor on the new price; nothing changes if it
   is declined. On NMI-billed (legacy) subscriptions the member's NMI schedule is
   changed in place and keeps its billing date: an upgrade charges the prorated
-  difference now, a downgrade takes effect at the next NMI renewal; only prices of
-  the same billing cycle qualify. CCBill upgrades redirect
+  difference now and moves access to the new tier, never past that date; a
+  downgrade takes effect at the next NMI renewal; only prices of the same billing
+  cycle qualify. Resuming a provider-billed subscription inside its paid period
+  buys nothing: access returns until the period's end, then renewal grace as
+  before the cancel. CCBill upgrades redirect
   to a FlexForm; a Solana tier change is signed in the customer's wallet.
 - Staff changes through `POST /v1/admin/subscriptions/{id}/change` schedule
   engine-billed price or seat changes at the next renewal, including upgrades
@@ -342,6 +345,13 @@ completion. The amount, reason, and revocation choice are immutable for an
 `Idempotency-Key`; reusing that key resumes the same operation. A different key
 creates a new operation, including an equal-sized partial refund within the
 remaining balance or a retry after a definitive refusal.
+
+A refund or chargeback of a payment that bought credit returns the order's
+credit line first, up to that line's amount; only that part withdraws credit.
+For 25 credits at $10 beside a $90 product, a $5 refund withdraws 12.5 credits;
+once $10 is refunded all 25 are gone, and the remaining $90 withdraws none.
+OpenRails issues no refund whose credit is spent or held. A pending refund holds
+its credit, and a won dispute restores what its chargeback withdrew.
 
 For NMI and CCBill, a lost response without an exact captured operation receipt
 requires operator verification. The system retains the reservation and never

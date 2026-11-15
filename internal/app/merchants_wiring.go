@@ -306,7 +306,7 @@ func (r *Runtime) recordRefusedDocuments(ctx context.Context, id billing.Merchan
 		return
 	}
 	if len(opened) > 0 {
-		// Deliveries retry over the network: never inside a configuration load.
+		// Each alert's claim is its own transaction, after the load's.
 		r.Go("configuration alerts", func(bg context.Context) { r.alertConfigFindings(merchant.WithID(bg, id), opened) })
 	}
 }

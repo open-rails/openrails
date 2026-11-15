@@ -1,9 +1,10 @@
 // Package providerposture records whether a PSP credential set loaded under
 // a non-live PSP is proven to simulate money. A credential set is verified
-// once when it is loaded (runtime startup, credential create/rotate, or the
-// first time a process loads a credential it has not seen); every provider
-// mutation consults the cached verdict. Anything but a proven simulated verdict
-// disarms the PSP: mutations are refused with ErrDisarmed, reads still work.
+// when it is loaded (runtime startup, credential create/rotate, or the first
+// time a process loads a credential it has not seen); every provider mutation
+// consults the cached verdict, proving it again once it is VerdictTTL old.
+// Anything but the verdict the PSP expects disarms it: mutations are refused
+// with ErrDisarmed, reads still work.
 package providerposture
 
 import (
@@ -14,6 +15,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -128,20 +130,27 @@ type entry struct {
 	flight chan struct{}
 }
 
+// VerdictTTL is how long an arming verdict stands. An account's environment
+// can change after it was proven (NMI's test mode is a dashboard toggle), so
+// the first mutation after it proves it again; there is no sweep.
+const VerdictTTL = time.Hour
+
 // DefaultTimeout bounds one posture check, whatever the provider client's own
 // timeout: a purchase waiting on it must not hang.
 const DefaultTimeout = 5 * time.Second
 
 // Registry is a concurrency-safe verdict cache. One check runs per key at a
 // time, bounded by Timeout; every caller waits for it only as long as its own
-// context allows. An Unknown verdict (the provider did not answer) is retried
-// after Backoff(consecutive unknowns); live and unsupported verdicts stay
-// disarmed until an explicit Verify (credential reload) replaces them.
+// context allows. An arming verdict is checked again once it is VerdictTTL
+// old, and never used past it: a check that does not answer leaves the key
+// Unknown. An Unknown verdict (the provider did not answer) is retried after
+// Backoff(consecutive unknowns); a disarming verdict stays until an explicit
+// Verify (credential reload) replaces it.
 type Registry struct {
 	Timeout time.Duration
 	Backoff func(attempt int) time.Duration
-	Now     func() time.Time
 
+	clock   atomic.Pointer[func() time.Time]
 	mu      sync.Mutex
 	entries map[Key]*entry
 }
@@ -157,9 +166,20 @@ var process = NewRegistry(func(attempt int) time.Duration { return retry.Backoff
 // Verdicts are facts about external credentials, not about one runtime.
 func Process() *Registry { return process }
 
+// SetClock replaces the registry's time source (nil is the wall clock) and
+// returns a func that restores the previous one.
+func (r *Registry) SetClock(now func() time.Time) (restore func()) {
+	var next *func() time.Time
+	if now != nil {
+		next = &now
+	}
+	prev := r.clock.Swap(next)
+	return func() { r.clock.Store(prev) }
+}
+
 func (r *Registry) now() time.Time {
-	if r.Now != nil {
-		return r.Now()
+	if now := r.clock.Load(); now != nil {
+		return (*now)()
 	}
 	return time.Now()
 }
@@ -184,19 +204,31 @@ func (r *Registry) Verify(ctx context.Context, k Key, check Check) Status {
 	return r.resolve(ctx, k, check, true)
 }
 
-// Require returns nil only for an armed key. An unseen key is verified once;
-// an Unknown verdict is re-verified once its backoff has elapsed.
+// Require returns nil only for an armed key. An unseen key is verified, an
+// arming verdict again once it is VerdictTTL old, and an Unknown verdict once
+// its backoff has elapsed.
 func (r *Registry) Require(ctx context.Context, k Key, check Check) error {
 	return r.resolve(ctx, k, check, false).Error()
 }
 
-// Refresh re-verifies k only when its Unknown verdict is due for retry.
+// Refresh re-verifies k only when Require would.
 func (r *Registry) Refresh(ctx context.Context, k Key, check Check) Status {
 	return r.resolve(ctx, k, check, false)
 }
 
+// settled reports whether e's verdict stands without asking the provider.
 func (r *Registry) settled(e *entry) bool {
-	return e.done && (e.status.Verdict != Unknown || r.now().Before(e.retryAt))
+	if !e.done {
+		return false
+	}
+	switch now := r.now(); {
+	case e.status.Verdict == Unknown:
+		return now.Before(e.retryAt)
+	case e.status.Armed():
+		return now.Before(e.status.CheckedAt.Add(VerdictTTL))
+	default:
+		return true
+	}
 }
 
 func (r *Registry) resolve(ctx context.Context, k Key, check Check, force bool) Status {

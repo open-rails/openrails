@@ -25,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -89,7 +90,7 @@ const (
 type StripePusher interface {
 	GetSubscriptionItemID(ctx context.Context, subscriptionID string) (string, error)
 	UpdateSubscriptionPrice(ctx context.Context, subscriptionID, itemID, newPriceID, internalPriceID, prorationBehavior, billingAnchor string) error
-	ScheduleSubscriptionPriceChange(ctx context.Context, subscriptionID, currentPriceID, newPriceID string, currentPeriodStart, currentPeriodEnd time.Time, billingCycleDays *int) (string, error)
+	ScheduleSubscriptionPriceChange(ctx context.Context, key, subscriptionID, currentPriceID, newPriceID string, currentPeriodStart, currentPeriodEnd time.Time, billingCycleDays *int) error
 }
 
 // MigrationPushes records a move's provider push as a durable operation in
@@ -176,6 +177,9 @@ func (s *PriceMigrationService) resolve(ctx context.Context, p billing.CreatePri
 		}
 		if plan.target.Archived {
 			return nil, ErrPriceTargetArchived
+		}
+		if !plan.target.IsRecurring() {
+			return nil, apperr.Invalidf("to_price_id must be a recurring price")
 		}
 	}
 	if !byKey {
@@ -290,10 +294,55 @@ func railMinorRepresentable(currency string, amountNative int64) bool {
 	return err == nil
 }
 
-// noticeViolated: a price increase whose effective_at is inside the
-// merchant's notice window. Decreases never are.
-func (s *PriceMigrationService) noticeViolated(ctx context.Context, from, to *models.Price, effectiveAt time.Time) (bool, error) {
-	if to.Amount <= from.Amount {
+// Bounds of a calendar month, in hours.
+const (
+	monthMinHours = 28 * 24
+	monthMaxHours = 31 * 24
+)
+
+// cadence is a recurring price's billing interval: hours, else months.
+func cadence(p *models.Price) (n int64, months, ok bool) {
+	switch {
+	case p.BillingIntervalHours != nil && *p.BillingIntervalHours > 0:
+		return int64(*p.BillingIntervalHours), false, true
+	case p.BillingIntervalMonths != nil && *p.BillingIntervalMonths > 0:
+		return int64(*p.BillingIntervalMonths), true, true
+	}
+	return 0, false, false
+}
+
+// costRises reports whether a renewal at to bills sub more per unit of time
+// than one at from: amount × the seats each renewal bills, over its cadence,
+// compared exactly. Hours against months take a month at its least
+// favourable length; a price without a cadence counts as a rise.
+func costRises(sub *models.Subscription, from, to *models.Price) bool {
+	fromN, fromMonths, ok := cadence(from)
+	toN, toMonths, toOK := cadence(to)
+	if !ok || !toOK {
+		return true
+	}
+	fromHi, toLo := big.NewInt(fromN), big.NewInt(toN)
+	if fromMonths != toMonths {
+		if fromMonths {
+			fromHi.Mul(fromHi, big.NewInt(monthMaxHours))
+		}
+		if toMonths {
+			toLo.Mul(toLo, big.NewInt(monthMinHours))
+		}
+	}
+	cost := func(p *models.Price) *big.Int {
+		seats := SeatCount(renewalQuantity(sub, p, sub.Quantity))
+		return new(big.Int).Mul(big.NewInt(p.Amount), big.NewInt(int64(seats)))
+	}
+	// to/toLo > from/fromHi, cross-multiplied.
+	return new(big.Int).Mul(cost(to), fromHi).Cmp(new(big.Int).Mul(cost(from), toLo)) > 0
+}
+
+// noticeViolated: a move that raises what sub pays per unit of time, with
+// effective_at inside the merchant's notice window. Equal or lower cost
+// never is.
+func (s *PriceMigrationService) noticeViolated(ctx context.Context, sub *models.Subscription, from, to *models.Price, effectiveAt time.Time) (bool, error) {
+	if !costRises(sub, from, to) {
 		return false, nil
 	}
 	days := DefaultPriceIncreaseNoticeDays
@@ -359,7 +408,7 @@ func (s *PriceMigrationService) classify(ctx context.Context, plan *migrationPla
 		case c.capability == capabilityAutoStripe && (!stripeMapped(c.from) || !stripeMapped(plan.target)):
 			block(migrationBlockedMissingRailPrice)
 		default:
-			violated, err := s.noticeViolated(ctx, c.from, plan.target, plan.effectiveAt)
+			violated, err := s.noticeViolated(ctx, sub, c.from, plan.target, plan.effectiveAt)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -572,7 +621,7 @@ func (s *PriceMigrationService) push(ctx context.Context, capability migrationCa
 	case capabilityEngine:
 		return nil
 	case capabilityAutoStripe:
-		return s.pushStripe(ctx, sub, source, target, change.EffectiveAt)
+		return s.pushStripe(ctx, sub, source, target, change)
 	case capabilityAutoNMI:
 		return s.pushNMI(ctx, sub, target, targetProduct, change)
 	default:
@@ -609,9 +658,9 @@ func (s *PriceMigrationService) pushNMI(ctx context.Context, sub *models.Subscri
 }
 
 // pushStripe plants a Stripe subscription schedule flipping at the current
-// period end (no proration, no anchor move); converge applies the change
-// from Stripe's truth.
-func (s *PriceMigrationService) pushStripe(ctx context.Context, sub *models.Subscription, source, target *models.Price, effectiveAt time.Time) error {
+// period end (no proration, no anchor move, same seats), idempotent on the
+// move; converge applies the change from Stripe's truth.
+func (s *PriceMigrationService) pushStripe(ctx context.Context, sub *models.Subscription, source, target *models.Price, change *models.ScheduledChange) error {
 	if s.stripe == nil {
 		return fmt.Errorf("stripe pusher not configured")
 	}
@@ -630,15 +679,14 @@ func (s *PriceMigrationService) pushStripe(ctx context.Context, sub *models.Subs
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
 		return fmt.Errorf("%w: subscription missing current period end", errPushRefused)
 	}
-	if deferredPushRequired(effectiveAt, sub) {
-		return fmt.Errorf("stripe_deferred_push_required: effective_at %s is beyond the current period end %s", effectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
+	if deferredPushRequired(change.EffectiveAt, sub) {
+		return fmt.Errorf("stripe_deferred_push_required: effective_at %s is beyond the current period end %s", change.EffectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
 	}
 	periodStart := sub.StartedAt
 	if sub.CurrentPeriodStartsAt != nil && !sub.CurrentPeriodStartsAt.IsZero() {
 		periodStart = *sub.CurrentPeriodStartsAt
 	}
-	_, err := s.stripe.ScheduleSubscriptionPriceChange(ctx, railSubID, sourceStripeID, targetStripeID, periodStart, *sub.CurrentPeriodEndsAt, target.RecurringCycleDays())
-	return err
+	return s.stripe.ScheduleSubscriptionPriceChange(ctx, change.ID.String(), railSubID, sourceStripeID, targetStripeID, periodStart, *sub.CurrentPeriodEndsAt, target.RecurringCycleDays())
 }
 
 // applyNow moves the subscription to the target now and marks the change

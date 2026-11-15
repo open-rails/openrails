@@ -1,6 +1,7 @@
 // Package merchantarchive moves a retained billing book between deployments.
-// It never resolves provider clients, invokes lifecycle services, or schedules
-// work. The source's writers must remain stopped during the final cutover.
+// It never resolves provider clients or invokes lifecycle services; a restore
+// queues only the wakes of the operations it moves. The source's writers must
+// remain stopped during the final cutover.
 package merchantarchive
 
 import (
@@ -11,12 +12,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/intents/wake"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/internal/retention"
@@ -296,6 +300,10 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		if err := q.RebuildUsageDue(ctx, gen.RebuildUsageDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err
 		}
+		// The source's wakes stay in its River schema.
+		if err := queueWakes(ctx, database, tx, q, id); err != nil {
+			return err
+		}
 		if err := landReadonly(ctx, q, id, restoreNow); err != nil {
 			return err
 		}
@@ -309,6 +317,31 @@ VALUES($1,true) ON CONFLICT(merchant_id) DO UPDATE SET restore_required=true`, i
 		return Result{}, classify(err)
 	}
 	return result, nil
+}
+
+const wakeBatch = 500
+
+// queueWakes queues each restored live operation's wake for its due time, in
+// the restore's transaction.
+func queueWakes(ctx context.Context, database *db.DB, tx pgx.Tx, q *gen.Queries, id billing.MerchantID) error {
+	after := uuid.Nil
+	for {
+		ops, err := q.ListLiveProviderOperations(ctx, gen.ListLiveProviderOperationsParams{
+			MerchantID: id.UUID(), AfterID: after, RequestOnlyTypes: intents.ManualPaymentMethodDeleteTypes(), RowLimit: wakeBatch,
+		})
+		if err != nil {
+			return err
+		}
+		for _, op := range ops {
+			if err := wake.Queue(ctx, database, tx, op); err != nil {
+				return err
+			}
+		}
+		if len(ops) < wakeBatch {
+			return nil
+		}
+		after = ops[len(ops)-1].ID
+	}
 }
 
 func scope(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {

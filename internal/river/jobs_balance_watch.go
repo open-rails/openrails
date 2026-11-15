@@ -27,13 +27,6 @@ const (
 	balanceWatchBatch = 200
 )
 
-// BalanceWatchArgs triggers one pass over the balance watches that are due.
-type BalanceWatchArgs struct{}
-
-func (BalanceWatchArgs) Kind() string { return KindBalanceWatch }
-
-func (BalanceWatchArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
-
 // BalanceWatchWorker looks at every customer whose balance watch is due: it
 // expires the credit lots that lapsed, posts the daily checkpoint of its
 // running charges, tells the host and the customer of a low or depleted
@@ -41,12 +34,9 @@ func (BalanceWatchArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
 // service's clock. An idle pass reads no row. A failed look stays due and
 // fails the pass once the others are done.
 type BalanceWatchWorker struct {
-	WorkerDefaults[BalanceWatchArgs]
 	DB    *db.DB
 	Money *money.MoneyService
 }
-
-func (BalanceWatchWorker) Kind() string { return KindBalanceWatch }
 
 // DueBy reports a watch due since before at: a lapse, a running charge's
 // checkpoint or a crossing nothing looked at.
@@ -54,7 +44,7 @@ func (w BalanceWatchWorker) DueBy(ctx context.Context, at time.Time) (bool, erro
 	return w.DB.GenDirectory().BalanceWatchDueBefore(ctx, at)
 }
 
-func (w BalanceWatchWorker) Work(ctx context.Context, _ *river.Job[BalanceWatchArgs]) error {
+func (w BalanceWatchWorker) Pass(ctx context.Context) error {
 	now := w.Money.Clock().Now().UTC()
 	logger := log.WithContext(ctx).WithField("worker", KindBalanceWatch)
 	args := gen.ListDueBalanceWatchesParams{Now: now, RowLimit: balanceWatchBatch}

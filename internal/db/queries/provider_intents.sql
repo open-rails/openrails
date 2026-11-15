@@ -261,17 +261,19 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type
   AND NOT (intent_type='initial_membership' AND coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted')
   AND intent_type <> 'subscription_collection';
 
--- Non-terminal intents older than the converge engine's stuck thresholds:
--- pending/failed_retryable before action_cutoff, in_flight/unknown_needs_verify
--- before verify_cutoff (a healthy verifier resolves unknowns in minutes).
--- A price migration's push waits for its subscription's last period before
--- the move: pending and not yet due, it is scheduled, not stuck.
+-- Non-terminal intents past the converge engine's stuck thresholds: pending
+-- with no failure due before action_cutoff (scheduled ahead or deferred, it
+-- waits for its instant), pending parked or failed_retryable created before
+-- action_cutoff (each re-park or backoff keeps the next attempt near),
+-- in_flight/unknown_needs_verify created before verify_cutoff (a healthy
+-- verifier resolves unknowns in minutes).
 -- name: ListStuckProviderIntents :many
 SELECT * FROM billing.provider_intents
-WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(action_cutoff)::timestamptz
-       AND NOT (intent_type = 'price_migration_push' AND status = 'pending' AND next_attempt_at > sqlc.arg(now)::timestamptz))
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status = 'pending' AND last_failure_reason IS NULL AND next_attempt_at <= sqlc.arg(action_cutoff)::timestamptz)
+   OR ((status = 'failed_retryable' OR status = 'pending' AND last_failure_reason IS NOT NULL) AND created_at <= sqlc.arg(action_cutoff)::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= sqlc.arg(verify_cutoff)::timestamptz)
-) ORDER BY created_at, id;
+) ORDER BY created_at, id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetProviderIntent :one
 SELECT * FROM billing.provider_intents WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
@@ -662,23 +664,28 @@ ORDER BY id LIMIT sqlc.arg(page_size)::int;
 -- name: ListPaidEngineAgreementsAtBoundary :many
 -- Select by obligation identity and boundary, not mutable catalog/account
 -- filters: an ambiguous or mismatched retained owner must fail qualification.
+-- Each source is its own index read, so a renewal never scans past sales.
 SELECT * FROM billing.provider_intents
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND status='succeeded'
-  AND ((intent_type='initial_membership'
-        AND payload->'terms'->>'subscription_id'=sqlc.arg(subscription_id)::uuid::text
-        AND (payload->'terms'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz
-        -- A seat increase changes the agreement's seats, not its price.
-        AND NOT payload->'terms' ? 'adds')
-    OR (intent_type='subscription_collection'
-        AND subscription_id=sqlc.arg(subscription_id)::uuid
-        AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz)
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id IN (
+    SELECT i.id FROM billing.provider_intents i
+    WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND i.status='succeeded' AND i.intent_type='initial_membership'
+      AND i.payload->'terms'->>'subscription_id'=sqlc.arg(subscription_id)::uuid::text
+      AND (i.payload->'terms'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz
+      -- A seat increase changes the agreement's seats, not its price.
+      AND NOT i.payload->'terms' ? 'adds'
+    UNION ALL
+    SELECT i.id FROM billing.provider_intents i
+    WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND i.status='succeeded' AND i.intent_type='subscription_collection'
+      AND i.subscription_id=sqlc.arg(subscription_id)::uuid
+      AND (i.payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz
+    UNION ALL
     -- An order's sale paid the first period of the subscription its line made.
-    OR (intent_type='nmi_sale' AND payload ? 'order_id' AND EXISTS (
-        SELECT 1 FROM billing.order_lines l
-        JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
-        WHERE l.merchant_id = provider_intents.merchant_id AND l.subscription_id = sqlc.arg(subscription_id)::uuid
-          AND o.id::text = provider_intents.payload->>'order_id' AND o.status = 'complete'
-          AND o.completed_at + make_interval(hours => l.billing_interval_hours) = sqlc.arg(period_end)::timestamptz)))
+    SELECT i.id FROM billing.order_lines l
+    JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
+    JOIN billing.provider_intents i ON i.merchant_id = o.merchant_id AND i.payload->>'order_id' = o.id::text
+    WHERE l.merchant_id=sqlc.arg(merchant_id)::uuid AND l.subscription_id=sqlc.arg(subscription_id)::uuid
+      AND o.status='complete' AND o.completed_at + make_interval(hours => l.billing_interval_hours)=sqlc.arg(period_end)::timestamptz
+      AND i.status='succeeded' AND i.intent_type='nmi_sale' AND i.payload ? 'order_id')
 ORDER BY id LIMIT 2;
 -- name: ExpireProviderIntentByID :execrows
 UPDATE billing.provider_intents pi
@@ -860,3 +867,26 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND lease_expires_at > sqlc.arg(now)::timestamptz
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'transaction_id')
        OR result_evidence->>'transaction_id' = result_evidence->>'reverted_transaction_id');
+
+-- name: ListOverdueProviderOperations :many
+-- CROSS-MERCHANT: live operations whose next attempt, and any lease, ended
+-- before before, oldest first from the (after_at, after_id) cursor: each one's
+-- wake should have run it by then. Request-only operations have no wake.
+SELECT merchant_id, id, next_attempt_at FROM billing.provider_intents
+WHERE status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+  AND next_attempt_at < sqlc.arg(before)::timestamptz
+  AND (next_attempt_at, id) > (sqlc.arg(after_at)::timestamptz, sqlc.arg(after_id)::uuid)
+  AND (lease_expires_at IS NULL OR lease_expires_at < sqlc.arg(before)::timestamptz)
+  AND intent_type <> ALL(sqlc.arg(request_only_types)::text[])
+ORDER BY next_attempt_at, id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListLiveProviderOperations :many
+-- One merchant's live operations a wake runs, in id order after a cursor.
+SELECT * FROM billing.provider_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id > sqlc.arg(after_id)::uuid
+  AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+  AND intent_type <> ALL(sqlc.arg(request_only_types)::text[])
+ORDER BY id
+LIMIT sqlc.arg(row_limit)::int;

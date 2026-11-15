@@ -101,6 +101,14 @@ func (s *MerchantsSource) scope(ctx context.Context, rail, accountID string) (bi
 		return billing.MerchantID{}, merchants.PSPScope{}, false, fmt.Errorf("resolve rail %s: %w", rail, err)
 	}
 	if accountID = strings.TrimSpace(accountID); accountID != "" {
+		// A live and a non-live PSP may share the account: the pinned one is
+		// the PSP meant.
+		if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
+			scope, ok, err := svc.PSPScopeByID(ctx, mid, pspID)
+			if err != nil || ok && scope.Rail == rail && scope.AccountID == accountID {
+				return mid, scope, ok, err
+			}
+		}
 		scope, ok, err := svc.PSPScopeByAccountID(ctx, mid, rail, accountID)
 		return mid, scope, ok, err
 	}

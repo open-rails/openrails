@@ -121,7 +121,7 @@ func TestEnrollmentContracts(t *testing.T) {
 				require.NoError(t, p.persist(t.Context()))
 				a.clock.Advance(due.Sub(a.clock.Now()) + 25*time.Hour)
 				fleet := startFleet(t, a.world)
-				runRegistered(t, fleet, "openrails.rebill_watch", 2)
+				runRegistered(t, fleet, "openrails.billing_pass", 2)
 				observed, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 				require.NoError(t, err)
 				require.Equal(t, due, *observed.CurrentPeriodStartsAt)

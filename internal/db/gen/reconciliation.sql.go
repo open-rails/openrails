@@ -295,16 +295,15 @@ WHERE f.merchant_id = $1::uuid
       SELECT 1 FROM billing.provider_intents pi
       WHERE pi.merchant_id = f.merchant_id
         AND pi.id::text = f.subject_key
-        AND ((pi.status IN ('pending', 'failed_retryable') AND pi.created_at <= $2::timestamptz
-              AND NOT (pi.intent_type = 'price_migration_push' AND pi.status = 'pending' AND pi.next_attempt_at > $3::timestamptz))
-          OR (pi.status IN ('in_flight', 'unknown_needs_verify') AND pi.created_at <= $4::timestamptz))
+        AND ((pi.status = 'pending' AND pi.last_failure_reason IS NULL AND pi.next_attempt_at <= $2::timestamptz)
+          OR ((pi.status = 'failed_retryable' OR pi.status = 'pending' AND pi.last_failure_reason IS NOT NULL) AND pi.created_at <= $2::timestamptz)
+          OR (pi.status IN ('in_flight', 'unknown_needs_verify') AND pi.created_at <= $3::timestamptz))
   )
 `
 
 type AutoResolveRecoveredStuckIntentFindingsParams struct {
 	MerchantID   uuid.UUID
 	ActionCutoff time.Time
-	Now          time.Time
 	VerifyCutoff time.Time
 }
 
@@ -313,12 +312,7 @@ type AutoResolveRecoveredStuckIntentFindingsParams struct {
 // re-scheduled) auto-resolves on the next LIFE pass. Cutoffs mirror the
 // detection (ListStuckProviderIntents) exactly — edit together.
 func (q *Queries) AutoResolveRecoveredStuckIntentFindings(ctx context.Context, arg AutoResolveRecoveredStuckIntentFindingsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, autoResolveRecoveredStuckIntentFindings,
-		arg.MerchantID,
-		arg.ActionCutoff,
-		arg.Now,
-		arg.VerifyCutoff,
-	)
+	result, err := q.db.Exec(ctx, autoResolveRecoveredStuckIntentFindings, arg.MerchantID, arg.ActionCutoff, arg.VerifyCutoff)
 	if err != nil {
 		return 0, err
 	}
@@ -918,12 +912,14 @@ WHERE merchant_id = $1::uuid
             AND expires_at IS NOT NULL AND expires_at < $3::timestamptz)
       )
 ORDER BY created_at, id
+LIMIT $4::int
 `
 
 type ListAbandonedProviderIntentsParams struct {
 	MerchantID uuid.UUID
 	Since      time.Time
 	Now        time.Time
+	RowLimit   int32
 }
 
 type ListAbandonedProviderIntentsRow struct {
@@ -938,7 +934,12 @@ type ListAbandonedProviderIntentsRow struct {
 // A provider's decline is no abandoned action: nothing moved, and the order
 // or dunning that asked for it owns what follows.
 func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAbandonedProviderIntentsParams) ([]ListAbandonedProviderIntentsRow, error) {
-	rows, err := q.db.Query(ctx, listAbandonedProviderIntents, arg.MerchantID, arg.Since, arg.Now)
+	rows, err := q.db.Query(ctx, listAbandonedProviderIntents,
+		arg.MerchantID,
+		arg.Since,
+		arg.Now,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1078,13 +1079,15 @@ WHERE s.merchant_id = $1::uuid
              pa.starts_at < COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour'))
         AND (pa.ends_at IS NULL OR pa.ends_at > COALESCE(s.current_period_starts_at, s.started_at))
   )
-ORDER BY s.current_period_ends_at
+ORDER BY s.current_period_ends_at, s.id
+LIMIT $4::int
 `
 
 type ListActiveSubsMissingAccessProjectionParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	Now        time.Time
+	RowLimit   int32
 }
 
 type ListActiveSubsMissingAccessProjectionRow struct {
@@ -1106,7 +1109,12 @@ type ListActiveSubsMissingAccessProjectionRow struct {
 // re-granted. Subscriptions without a grant are derive.subscription.missing's.
 // NULL customer_id = merchant-wide.
 func (q *Queries) ListActiveSubsMissingAccessProjection(ctx context.Context, arg ListActiveSubsMissingAccessProjectionParams) ([]ListActiveSubsMissingAccessProjectionRow, error) {
-	rows, err := q.db.Query(ctx, listActiveSubsMissingAccessProjection, arg.MerchantID, arg.CustomerID, arg.Now)
+	rows, err := q.db.Query(ctx, listActiveSubsMissingAccessProjection,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1284,7 +1292,8 @@ WHERE m.status = 'active' AND m.deleted_at IS NULL AND m.id > $1::uuid
                AND s.status IN ('active', 'past_due') AND s.deleted_at IS NULL AND s.current_period_ends_at <= $4::timestamptz)
     OR EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id = m.id AND i.updated_at > $2::timestamptz)
     OR EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id = m.id
-               AND i.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify') AND i.created_at <= $5::timestamptz)
+               AND i.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+               AND CASE WHEN i.status = 'pending' AND i.last_failure_reason IS NULL THEN i.next_attempt_at ELSE i.created_at END <= $5::timestamptz)
     OR EXISTS (SELECT 1 FROM billing.product_access e WHERE e.merchant_id = m.id AND e.deleted_at IS NULL
                AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > $6::timestamptz
                AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= $7::timestamptz))
@@ -1419,7 +1428,7 @@ type ListOverdueRenewalsRow struct {
 }
 
 // An active provider-billed subscription whose paid period ended before
-// overdue_before with no renewal payment. A clock reading only: rebill watch
+// overdue_before with no renewal payment. A clock reading only: the due pass
 // asks the provider (RenewalOverdue -> unverified). Oldest lapse first, a page
 // after the (period end, id) cursor.
 func (q *Queries) ListOverdueRenewals(ctx context.Context, arg ListOverdueRenewalsParams) ([]ListOverdueRenewalsRow, error) {

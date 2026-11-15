@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
@@ -72,7 +73,7 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		enableLifecycleMaintenance(t, a)
 		a.clock.Advance(20 * time.Minute)
 		third := startWorkerProcess(t, a.world, nil)
-		_, err = queue.Insert(t.Context(), registeredJob{KindName: "openrails.dunning"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		_, err = queue.Insert(t.Context(), registeredJob{KindName: "openrails.billing_pass"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		for _, original := range jobs.Jobs {
 			for range 2 {
@@ -117,7 +118,7 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		}
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) + time.Hour)
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 		require.NoError(t, err)
 		require.Equal(t, billing.SubscriptionCanceled, current.Status)
@@ -142,7 +143,7 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		status, raw = a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/resume", a.aliceToken, nil)
 		require.Equal(t, http.StatusBadRequest, status, string(raw))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 		require.NoError(t, err)
 		require.Equal(t, billing.SubscriptionCanceled, current.Status)
@@ -151,5 +152,46 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, access.Entitlements["membership:paid"])
 		require.Len(t, p.effects(t), 1)
+	})
+	t.Run("OR-J17-S06/resume-inside-the-paid-period-never-extends-access-past-it", func(t *testing.T) {
+		a, p, sub := nmiMembershipWithAccess(t, catalog.Value(168))
+		enableLifecycleMaintenance(t, a)
+		due := *sub.CurrentPeriodEndsAt
+		path := "/v1/me/subscriptions/" + sub.ID.String()
+		cancel := func(reason string) {
+			t.Helper()
+			status, raw := a.request(t, http.MethodPost, path+"/cancel", a.aliceToken, map[string]any{"reason": reason})
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var canceled billing.Subscription
+			require.NoError(t, json.Unmarshal(raw, &canceled))
+			require.Equal(t, billing.SubscriptionCanceled, canceled.Status)
+			require.True(t, canceled.Resumable, "the NMI delete is deferred inside the paid period")
+			require.Equal(t, due, *canceled.CurrentPeriodEndsAt)
+		}
+		a.clock.Advance(4 * 24 * time.Hour)
+		cancel("Pause renewal")
+		a.clock.Advance(time.Hour)
+		status, raw := a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		resumed, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionActive, resumed.Status)
+		require.Equal(t, due, *resumed.CurrentPeriodEndsAt)
+		require.Equal(t, *sub.CurrentPeriodStartsAt, *resumed.CurrentPeriodStartsAt, "a resume buys no period")
+		held, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:member"}, At: due})
+		require.NoError(t, err)
+		require.True(t, held.Entitlements["nmi:member"], "renewal grace returns at the paid boundary")
+		resumedAt := a.clock.Now()
+		a.clock.Advance(time.Hour)
+		cancel("Pause renewal again")
+		for _, sample := range []struct {
+			at      time.Time
+			allowed bool
+		}{{a.clock.Now(), true}, {due.Add(-time.Microsecond), true}, {due, false}, {resumedAt.Add(167 * time.Hour), false}} {
+			access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:member"}, At: sample.at})
+			require.NoError(t, err)
+			require.Equal(t, sample.allowed, access.Entitlements["nmi:member"], sample.at.String())
+		}
+		p.money(t, 1, 1000)
 	})
 }

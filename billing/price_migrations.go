@@ -106,13 +106,16 @@ type CreatePriceMigrationParams struct {
 	// ToPriceID.
 	ProductKey string `json:"product_key,omitempty"`
 	PriceKey   string `json:"price_key,omitempty"`
-	// ToPriceID is required to create. A preview by key may omit it: it then
-	// counts the key's subscribers before the version they move to exists.
+	// ToPriceID, a recurring price, is required to create. A preview by key
+	// may omit it: it then counts the key's subscribers before the version
+	// they move to exists.
 	ToPriceID PriceID `json:"to_price_id,omitzero"`
 	// EffectiveAt omitted moves each subscription at its next renewal.
 	EffectiveAt time.Time `json:"effective_at,omitzero"`
-	// AcknowledgeShortNotice moves a subscription whose price rises inside
-	// the merchant's notice window; without it that subscription is skipped.
+	// AcknowledgeShortNotice moves a subscription whose cost per unit of
+	// time (amount × the seats its renewal bills, over the cadence) rises
+	// inside the merchant's notice window; without it that subscription is
+	// skipped.
 	AcknowledgeShortNotice bool              `json:"acknowledge_short_notice,omitempty"`
 	FallbackPolicy         MigrationFallback `json:"fallback_policy,omitempty"`
 	// ArchiveSource archives FromPriceID (or the key's current version, when

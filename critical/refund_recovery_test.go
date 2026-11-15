@@ -127,4 +127,38 @@ func TestRefundRecovery(t *testing.T) {
 		require.Len(t, read.Refunds, 1)
 		require.Len(t, p.effects(t), 2, "recovery and caller replay cannot refund twice")
 	})
+	t.Run("OR-J20-S70/a-dashboard-refund-lands-while-the-roster-cannot-be-read", func(t *testing.T) {
+		a, p, order := purchasedSale(t)
+		payment := *order.Payment.PaymentID
+		var charge string
+		for _, effect := range p.effects(t) {
+			if effect.Kind == "charge" {
+				charge = effect.ID
+			}
+		}
+		require.NotEmpty(t, charge)
+		// A book too large to read in one pass: the full read never gets past
+		// the subscription roster.
+		p.core.Intercept(func(r *http.Request) bool { return r.Method == http.MethodGet && r.URL.Path == "/v1/subscriptions" },
+			func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+				return answer(r, http.StatusServiceUnavailable, `{"error":{"type":"api_error","message":"roster unavailable"}}`), nil
+			})
+		_, err := p.core.Refund(charge, 1000)
+		require.NoError(t, err)
+		a.clock.Advance(10 * time.Minute)
+		fleet := quietFleet(t, a.world)
+		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
+		read, err := a.alpha.GetPayment(t.Context(), payment)
+		require.NoError(t, err)
+		require.EqualValues(t, 10_000_000, read.AmountRefunded, "the reversals read records a refund the full read never reaches")
+		require.Len(t, read.Refunds, 1)
+		// The roster reads again: the full read finds the refund already recorded.
+		p.core.ClearIntercepts()
+		a.clock.Advance(10 * time.Minute)
+		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
+		read, err = a.alpha.GetPayment(t.Context(), payment)
+		require.NoError(t, err)
+		require.EqualValues(t, 10_000_000, read.AmountRefunded, "both reads record the refund once")
+		require.Len(t, read.Refunds, 1)
+	})
 }

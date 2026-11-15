@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"testing"
 	"time"
@@ -242,7 +243,7 @@ func TestPublicEntitlements(t *testing.T) {
 			first := membershipPayment(t, a, sub)
 			due := *sub.CurrentPeriodEndsAt
 			a.clock.Advance(due.Sub(a.clock.Now()))
-			runRegistered(t, startFleet(t, a.world), "openrails.dunning", 1)
+			runRegistered(t, startFleet(t, a.world), "openrails.billing_pass", 1)
 			renewalSettled(t, a, p, sub, due)
 			_, err := a.alpha.RefundPayment(t.Context(), first, billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund the first period", IdempotencyKey: "membership-first"})
 			require.NoError(t, err)
@@ -648,10 +649,10 @@ func TestImportedAdminGrants(t *testing.T) {
 						return err
 					}
 				}
-				missing, err := ledger.MissingEffects(ctx, ptr(customer.UUID()))
+				missing, err := ledger.MissingEffects(ctx, ptr(customer.UUID()), math.MaxInt32)
 				require.NoError(t, err)
 				require.Empty(t, missing)
-				excess, err := ledger.UnretractedTerminations(ctx, ptr(customer.UUID()))
+				excess, err := ledger.UnretractedTerminations(ctx, ptr(customer.UUID()), math.MaxInt32)
 				require.NoError(t, err)
 				require.Empty(t, excess)
 				return nil

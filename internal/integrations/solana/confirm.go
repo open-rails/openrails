@@ -158,6 +158,32 @@ func (c *RPCClient) watchOnce(ctx context.Context, sig solanago.Signature, commi
 	return nil, nil
 }
 
+// NeverLanded reports whether sig provably never landed and never will. The
+// finalized block height must be past the last valid height of the blockhash
+// sig was signed over, so every block that could hold it is finalized. A
+// history-searching status read made after that, by a node that has processed
+// at least that far, must not know it. false is "not proven", never "landed".
+func (c *RPCClient) NeverLanded(ctx context.Context, sig solanago.Signature, terminal ChainTerminal) (bool, error) {
+	if terminal.LastValidBlockHeight == 0 {
+		return false, nil
+	}
+	finalized, err := c.fallback.GetEpochInfo(ctx, rpc.CommitmentFinalized)
+	if err != nil {
+		return false, err
+	}
+	if finalized.BlockHeight <= terminal.LastValidBlockHeight {
+		return false, nil
+	}
+	st, err := c.fallback.GetSignatureStatuses(ctx, true, sig)
+	if err != nil {
+		return false, err
+	}
+	if st == nil || st.Context.Slot < finalized.AbsoluteSlot || len(st.Value) != 1 {
+		return false, nil
+	}
+	return st.Value[0] == nil, nil
+}
+
 // SubmitAndConfirm submits a signed transaction and watches it to Confirmed.
 // The error covers submission/watch failures only (RPC down, expired
 // blockhash, ctx ended); a landed revert is in Outcome.Err. terminal comes from

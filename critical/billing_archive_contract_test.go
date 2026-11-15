@@ -10,9 +10,11 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	notifypg "github.com/open-rails/authkit/notify/postgres"
@@ -20,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/stretchr/testify/require"
 )
 
@@ -266,5 +269,89 @@ func TestBillingArchive(t *testing.T) {
 		payment, err := client.GetPayment(t.Context(), *paid.Payment.PaymentID)
 		require.NoError(t, err)
 		require.Equal(t, "5454", *payment.Card.Last4)
+	})
+	t.Run("OR-J31-S09/a-paid-stripe-hosted-page-order-moves-with-the-book", func(t *testing.T) {
+		source, provider := newPaymentWorld(t)
+		provider.core.SendWebhooksTo(source.server.URL+"/v1/webhooks/stripe/acct_e2e", "whsec_critical_fixture")
+		sale := saleInput(t, source, provider)
+		hosted := billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}}
+		status, raw := source.request(t, http.MethodPost, "/v1/me/orders", source.aliceToken, hosted, map[string]string{"Idempotency-Key": "archived-hosted"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var order billing.Order
+		require.NoError(t, json.Unmarshal(raw, &order))
+		require.NotNil(t, order.Payment.NextAction)
+		require.Equal(t, "redirect_to_url", order.Payment.NextAction.Type)
+		// The attempt keeps Stripe's page in its rail state: the session and its URL.
+		_, err := provider.core.CompleteCheckoutSession(t.Context(), strings.TrimPrefix(*order.Payment.NextAction.URL, stripemock.CheckoutURL))
+		require.NoError(t, err)
+		var paid *billing.Order
+		require.Eventually(t, func() bool {
+			paid, err = source.alpha.GetOrder(t.Context(), order.ID)
+			return err == nil && paid.Status == billing.OrderComplete
+		}, 20*time.Second, 20*time.Millisecond)
+		require.NotNil(t, paid.Payment.PaymentID)
+		archive := archiveBytes(t, source.alpha)
+		_, client := archiveTarget(t, source.world)
+		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+		restored, err := client.GetOrder(t.Context(), order.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.OrderComplete, restored.Status)
+		require.Equal(t, paid.Payment.PaymentID, restored.Payment.PaymentID)
+	})
+	t.Run("OR-J31-S10/a-restored-solana-pull-runs-at-its-due-time", func(t *testing.T) {
+		s := newSolanaWorld(t, true)
+		_, sub := s.subscribe(t)
+		due := *sub.CurrentPeriodEndsAt
+		// The source's poller settles the subscribe's reference: a pending one
+		// stays with the deployment that watches the chain.
+		quietFleet(t, s.world)
+		require.Eventually(t, func() bool {
+			s.clock.Advance(time.Second)
+			var pending int
+			err := s.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{s.schema, "solana_pay_references"}.Sanitize()+" WHERE status = 'pending'").Scan(&pending)
+			return err == nil && pending == 0
+		}, 20*time.Second, 100*time.Millisecond, "the poller confirms the landed subscribe")
+		archive := archiveBytes(t, s.alpha)
+		target, client := archiveTarget(t, s.world, func(w *world) {
+			w.clock.Advance(s.clock.Now().Sub(w.clock.Now()))
+			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: s.wire.server.URL}
+			w.cfg.Solana = &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: s.cranker.PrivateKey.String()}}}
+		})
+		s.node.SetClock(target.clock.Now)
+		_, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+		// The merchant's configuration names the same treasury.
+		require.NoError(t, target.engine.Close(t.Context()))
+		cfg := target.cfg
+		cfg.Merchants = maps.Clone(target.cfg.Merchants)
+		cfg.Merchants["restored-source"] = openrails.MerchantDeclaration{DisplayName: "Restored", PSPs: openrails.PSPs{"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}}
+		target.engine, err = openrails.New(t.Context(), cfg, target.deps)
+		require.NoError(t, err)
+		client, err = target.engine.Merchant(s.alpha.MerchantID())
+		require.NoError(t, err)
+		require.NoError(t, s.engine.Close(context.Background()))
+		fleet := quietFleet(t, target)
+		require.NotEmpty(t, operationJobs(t, fleet), "the restore queues the pull's wake")
+		settleOperations(t, fleet)
+		sends := s.wire.sends()
+		advanceTo(target, due.Add(pullMargin))
+		wakeOperations(t, fleet)
+		settleOperations(t, fleet)
+		require.Equal(t, sends, s.wire.sends(), "a restored pull sends nothing before the operator arms")
+		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
+		// The held pull is looked at again after its park interval.
+		target.clock.Advance(5 * time.Minute)
+		landedAt := target.clock.Now()
+		wakeOperations(t, fleet)
+		require.Eventually(t, func() bool {
+			current, err := client.GetSubscription(t.Context(), sub.ID)
+			return err == nil && current.CurrentPeriodEndsAt != nil && current.CurrentPeriodEndsAt.Equal(landedAt.Add(168*time.Hour))
+		}, 20*time.Second, 20*time.Millisecond, "the restored pull renews the period at its due time")
+		require.Equal(t, sends+1, s.wire.sends())
+		payments, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
+		require.NoError(t, err)
+		require.Len(t, payments.Items, 2, "the restored subscribe payment and one renewal")
+		require.EqualValues(t, 20_000_000, s.node.Balance(s.treasury.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))
 	})
 }

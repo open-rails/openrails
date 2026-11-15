@@ -52,7 +52,7 @@ type Deps struct {
 	// Test seams, refused beside a live PSP. StripeTransport and
 	// NMITransport replace the provider wires; FXTransport replaces the FX
 	// source's, which each process reads its rates from into memory; Clock
-	// drives renewal dates, retries and entitlement windows.
+	// drives renewal dates, retries, entitlement windows and FX rate freshness.
 	StripeTransport http.RoundTripper
 	// BasisTheoryTransport substitutes the Basis Theory wire; test custody only.
 	BasisTheoryTransport http.RoundTripper

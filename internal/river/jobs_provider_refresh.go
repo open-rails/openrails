@@ -25,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/providerrecovery"
@@ -33,7 +32,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/cadence"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const (
@@ -586,6 +584,9 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		Since:       since,
 		Until:       until,
 	}
+	if provider == reconcile.ProviderStripe {
+		w.runReversals(ctx, engine, params, provider, pspID, horizon, now, &out)
+	}
 	applied := func() bool {
 		res, err := engine.Run(ctx, params)
 		if err != nil {
@@ -649,14 +650,6 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			log.WithContext(ctx).WithError(err).WithField("psp_id", pspID).Warn("Provider Refresh: read open financial findings failed")
 		} else if conflicts {
 			out.Held++
-		} else {
-			more, err := w.completeObservation(ctx, mid, pspID, horizon)
-			if err != nil {
-				out.WatermarkErrors++
-				log.WithContext(ctx).WithError(err).WithField("psp_id", pspID).Warn("Provider Refresh: completion and recovery wakeups failed")
-			} else {
-				out.More = more
-			}
 		}
 	}
 	// Advance the pull watermark after the pass so the next pass's drift gate
@@ -669,38 +662,32 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	return out
 }
 
-// Complete coverage records reporting progress; it never grants write permission. Scans use the
-// existing collection policy/cadence; refresh never invokes a provider writer.
-func (w *ProviderRefreshWorker) completeObservation(ctx context.Context, mid, psp uuid.UUID, horizon time.Time) (bool, error) {
-	const batch = 100
-	more := false
-	err := w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := w.DB.NewWithPgxTx(tx)
-		changed, err := d.Gen(ctx).UpsertPSPCompletedRefreshWatermark(ctx, gen.UpsertPSPCompletedRefreshWatermarkParams{MerchantID: mid, PspID: psp, WatermarkAt: horizon})
-		if err != nil {
-			return err
+// runReversals reads the PSP's refunds and disputes before its full read, which
+// a large book may never finish. It moves no watermark: while the full read
+// is stuck, every pass re-reads the last batch up to the horizon.
+func (w *ProviderRefreshWorker) runReversals(ctx context.Context, engine *reconcile.Engine, params reconcile.RunParams, provider reconcile.Provider, pspID uuid.UUID, horizon, now time.Time, out *providerRefreshProviderResult) {
+	params.Reversals = true
+	if floor := horizon.Add(-w.batch()); params.Since.Before(floor) {
+		params.Since = floor
+	}
+	params.Until = horizon
+	res, err := engine.Run(ctx, params)
+	if err != nil {
+		out.LaneErrors++
+		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: reversals read failed; the full read still runs")
+		return
+	}
+	if rep := res.Summary.Providers[string(provider)]; rep != nil {
+		out.NewFindings += rep.NewFindings
+		out.UpdatedFindings += rep.UpdatedFindings
+	}
+	if n := len(res.AppliedChanges); n > 0 {
+		out.AppliedChanges += n
+		out.Changed = true
+		if _, err := webhookhealth.Drift(ctx, w.DB, pspID, now, n); err != nil {
+			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: record webhook drift failed")
 		}
-		if (writeposture.View{Config: w.Config, DB: d}).Posture(ctx, mid).Limited() {
-			return nil
-		}
-		if changed == 0 {
-			return nil
-		}
-		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}}
-		if w.Config != nil && w.Config.UsageBillingEnabled {
-			jobs = append(jobs, money.UsageOrderArgs{})
-		}
-		for _, args := range jobs {
-			// A merchant's wake is never absorbed by a scan sleeping on an
-			// earlier outage. Canonical usage/renewal admission and durable
-			// cadence own money.
-			if _, err := w.DB.InsertRiverJobTx(ctx, tx, args, nil); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	return more, err
+	}
 }
 
 func (w *ProviderRefreshWorker) loadAppliedWatermark(ctx context.Context, mid, psp uuid.UUID) (time.Time, error) {
@@ -777,6 +764,7 @@ func (s *providerRefreshStats) add(r providerRefreshMerchantResult) {
 	s.UpdatedFindings += r.UpdatedFindings
 	s.WatermarkErrors += r.WatermarkErrors
 	s.ProviderErrors += r.ProviderErrors
+	s.LaneErrors += r.LaneErrors
 	s.Held += r.Held
 }
 
@@ -793,6 +781,7 @@ func (r *providerRefreshMerchantResult) add(p providerRefreshProviderResult) {
 	r.UpdatedFindings += p.UpdatedFindings
 	r.WatermarkErrors += p.WatermarkErrors
 	r.ProviderErrors += p.ProviderErrors
+	r.LaneErrors += p.LaneErrors
 	r.Held += p.Held
 	r.Changed = r.Changed || p.Changed
 	if len(p.Proofs) > 0 {
@@ -812,8 +801,10 @@ type providerRefreshProviderResult struct {
 	UpdatedFindings int
 	WatermarkErrors int
 	ProviderErrors  int
-	Held            int
-	Changed         bool
+	// LaneErrors counts a failed reversals read; the full read still ran.
+	LaneErrors int
+	Held       int
+	Changed    bool
 	// Proofs carries the completed pull's coverage for the confirmed-absence gate.
 	Proofs reconcile.PullProofs
 }

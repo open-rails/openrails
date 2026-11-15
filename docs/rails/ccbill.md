@@ -118,14 +118,18 @@ be paid on CCBill:
   A redelivery changes nothing.
 - `NewSaleFailure` naming the attempt fails it: the order takes another
   payment with `last_payment_error`.
-- A sale the order no longer takes is never granted: the order was paid
-  otherwise, a second sale on the same page, the customer already holds the
-  membership, or the sale contradicts the attempt. It is refused
-  (`ccbill_sale_unhonored`) with a `consistency.ledger.unbooked` finding:
-  refund and cancel it at CCBill. A sale on a lapsed page still pays an order
-  nothing else paid. One for an order that closed meanwhile revives it, or,
-  when what it buys is held, is recorded for refund with a finding to cancel
-  it at CCBill.
+- A sale the order no longer takes is never granted. One for an order
+  another payment completed (a card or another page after this one lapsed,
+  or a second sale on the same page) is recorded against the order as a
+  payment held for refund: a `life.order.late_payment` finding to refund it
+  at CCBill and a `consistency.ledger.unbooked` finding to cancel its
+  subscription there; OpenRails does neither itself, and a redelivery
+  changes nothing. One whose customer already holds the membership, or
+  that contradicts the attempt, is refused (`ccbill_sale_unhonored`) with a
+  `consistency.ledger.unbooked` finding: refund and cancel it at CCBill. A
+  sale on a lapsed page still pays an order nothing else paid. One for an
+  order that closed meanwhile revives it, or, when what it buys is held, is
+  recorded for refund the same way.
 - A `NewSaleSuccess` no OpenRails attempt issued is refused
   (`ccbill_new_subscription_unsupported`) with the same finding.
 
@@ -176,7 +180,8 @@ Consumed events: `NewSaleSuccess`, `NewSaleFailure`, `RenewalSuccess`,
 `RenewalFailure`, `UpgradeSuccess`, `UpgradeFailure`, `Cancellation`,
 `Expiration`, `BillingDateChange`, `CustomerDataUpdate`, `UserReactivation`,
 `Refund`, `Void`, `Chargeback`. Unknown event types are rejected as
-non-retryable. Events are deduplicated by transaction id / payload hash.
+non-retryable. Events are deduplicated by transaction id / payload hash; a
+`Refund` by its transaction id, timestamp and amount.
 
 ### Sandbox testing
 
@@ -221,10 +226,13 @@ PSP alone accepts nothing extra.
   for operator verification. Confirmed inbound refunds and manual accounting
   remain supported. A refund notification must identify its original payment;
   an unknown original raises a ledger-review finding without guessing the latest
-  charge. A matched refund follows the merchant's cumulative access policy and
-  does not cancel renewal. Separate provider cancellation events are still
-  mirrored. Distinct identities for repeated partial-refund notifications remain
-  unqualified. See [CCBill refunds](ccbill-refund-qualification.md).
+  charge. CCBill does not document whether a `Refund`'s `transactionId` is the
+  refund's or the refunded charge's, so each notice is identified by that id
+  with its timestamp and amount: every partial refund of a charge is booked
+  once, and one beyond what remains of the charge books nothing and raises a
+  ledger-review finding. A matched refund follows the merchant's cumulative
+  access policy and does not cancel renewal. Separate provider cancellation
+  events are still mirrored. See [CCBill refunds](ccbill-refund-qualification.md).
 - An imported CCBill charge names CCBill's transaction id, which is digits.
   One declared without an amount is kept as an attribution to its
   subscription. With DataLink credentials, the provider pull records it when it

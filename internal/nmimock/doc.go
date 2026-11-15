@@ -18,13 +18,19 @@
 //     refused when stored; type=validate approves funds declines 202 and 203.
 //     A card stored by number must pass Luhn and carry an MMYY expiry; its
 //     brand comes from its first digits and its cvv is not checked.
+//   - Partial approvals: ApprovePartially approves at most an amount of a
+//     sale and answers amount_authorized and partial_payment_balance. NMI
+//     does not document which amount its reports give such a sale; here they
+//     keep the requested amount and carry the balance. Sent
+//     partial_payments=payment_in_full, it never settles; otherwise the
+//     approved amount does.
 //   - Duplicate checks: Options.DuplicateWindow matches brand, last four and
 //     amount gateway-wide; dup_seconds the same within one vault.
 //   - Query API filters: order_id, transaction_id, customer_vault_id,
 //     subscription_id (comma list), action_type, start_date, end_date,
 //     result_limit, page_number; others are ignored. cc_bin defaults by brand;
 //     processor_response_code is "00" on approval, "51" behind 202 and "05"
-//     behind other declines. The recurring report carries subscription id,
+//     behind other declines, unless the sale names its IssuerCode. The recurring report carries subscription id,
 //     order, next charge date and plan id only. A refund is its own
 //     transaction.
 //   - Indexing lag: a sale is invisible to the Query API until Options.IndexLag

@@ -5,6 +5,7 @@ package critical_test
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,19 @@ func startFleet(t *testing.T, w *world) *river.Client[pgx.Tx] {
 // completion. This drives a due pass; it makes no claim about scheduler cadence.
 func runRegistered(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copies int) {
 	t.Helper()
+	runRegisteredFailing(t, fleet, kind, copies, "")
+}
+
+// runPassFailing drives billing passes while one scan cannot finish: a pass
+// that ran its scans fails with that scan's error alone, and at least one did.
+func runPassFailing(t *testing.T, fleet *river.Client[pgx.Tx], copies int, scan string) {
+	t.Helper()
+	runRegisteredFailing(t, fleet, "openrails.billing_pass", copies, scan)
+}
+
+func runRegisteredFailing(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copies int, scan string) {
+	t.Helper()
+	failed := 0
 	events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
 	defer unsubscribe()
 	waiting := map[int64]bool{}
@@ -43,17 +57,28 @@ func runRegistered(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copie
 		select {
 		case event := <-events:
 			if event != nil && waiting[event.Job.ID] {
-				require.Equal(t, river.EventKindJobCompleted, event.Kind, "%s: %+v", kind, event.Job.Errors)
+				if scan == "" || event.Kind != river.EventKindJobFailed {
+					require.Equal(t, river.EventKindJobCompleted, event.Kind, "%s: %+v", kind, event.Job.Errors)
+				} else {
+					failed++
+					require.NotEmpty(t, event.Job.Errors)
+					for _, line := range strings.Split(event.Job.Errors[len(event.Job.Errors)-1].Error, "\n") {
+						require.True(t, strings.HasPrefix(line, scan+": "), "only %s may fail the pass: %s", scan, line)
+					}
+				}
 				delete(waiting, event.Job.ID)
 			}
 		case <-deadline.C:
 			t.Fatalf("registered %s jobs did not complete: %v", kind, waiting)
 		}
 	}
+	if scan != "" {
+		require.Positive(t, failed, "a pass whose %s cannot finish fails", scan)
+	}
 	// River uses wall time while business time is advanced independently. Make
 	// newly accepted work available through River's host API; worker admission
 	// still checks its own persisted eligibility at the controlled clock.
-	if kind == "openrails.dunning" || kind == "openrails.billing_pass" {
+	if kind == "openrails.billing_pass" {
 		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
 		require.NoError(t, err)
 		for _, job := range jobs.Jobs {
@@ -107,7 +132,7 @@ func TestRenewal(t *testing.T) {
 		a, p, sub := purchasedMembership(t)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) - time.Microsecond)
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 		require.NoError(t, err)
 		require.Equal(t, *sub.CurrentPeriodEndsAt, *current.CurrentPeriodEndsAt)
@@ -121,9 +146,9 @@ func TestRenewal(t *testing.T) {
 		due := *sub.CurrentPeriodEndsAt
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		renewalSettled(t, a, p, sub, due)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		renewalSettled(t, a, p, sub, due)
 		paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
 		require.NoError(t, err)
@@ -145,7 +170,7 @@ func TestRenewal(t *testing.T) {
 		a.alpha, err = a.engine.MerchantBySlug("alpha")
 		require.NoError(t, err)
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		renewalSettled(t, a, p, sub, due)
 	})
 	t.Run("OR-J14-S04/admitted-renewal-keeps-terms-after-price-replacement", func(t *testing.T) {
@@ -155,7 +180,7 @@ func TestRenewal(t *testing.T) {
 		defer hold.Release()
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		select {
 		case <-hold.Arrived():
 		case <-time.After(10 * time.Second):

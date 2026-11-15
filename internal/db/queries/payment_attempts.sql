@@ -107,3 +107,19 @@ SELECT * FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = sqlc.arg(order_id)::uuid
 ORDER BY attempted_at DESC, id DESC
 LIMIT 1;
+
+-- name: GetCycleCardStanding :one
+-- The declines of the renewal due at due_at on one card: how many, how many
+-- the customer made, and the latest one's reason, action and issuer code.
+SELECT count(*)::int AS declines,
+       count(*) FILTER (WHERE pa.kind = 'customer_retry')::int AS customer_declines,
+       coalesce((array_agg(pa.reason ORDER BY pa.attempted_at DESC, pa.id DESC))[1], '')::text AS reason,
+       coalesce((array_agg(pa.action ORDER BY pa.attempted_at DESC, pa.id DESC))[1], '')::text AS action,
+       coalesce((array_agg(pa.issuer_code ORDER BY pa.attempted_at DESC, pa.id DESC))[1], '')::text AS issuer_code
+FROM billing.rebill_cycles c
+JOIN billing.payment_attempts pa ON pa.merchant_id = c.merchant_id AND pa.cycle_id = c.id
+WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND c.subscription_id = sqlc.arg(subscription_id)::uuid
+  AND c.due_at = sqlc.arg(due_at)::timestamptz
+  AND pa.category <> 'approved'
+  AND pa.payment_method_id = sqlc.arg(payment_method_id)::uuid;

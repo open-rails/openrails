@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/failpoint"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -29,11 +30,11 @@ import (
 )
 
 // Cranker signs and sends a pull (satisfied by *recurring.CrankService):
-// presubmit(sig) persists the signed tx signature before submission, and
-// memoLocalID (the durable pull-intent id) is stamped on the pull tx as its
-// self-recognition memo.
+// presubmit(sig, terminal) persists the signed tx signature and when it stops
+// being landable before submission, and memoLocalID (the durable pull-intent
+// id) is stamped on the pull tx as its self-recognition memo.
 type Cranker interface {
-	CrankWithPresubmit(ctx context.Context, merchantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string) error) (string, error)
+	CrankWithPresubmit(ctx context.Context, merchantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string, terminal solanaint.ChainTerminal) error) (string, error)
 }
 
 // Lifecycle is the membership surface a pull drives (satisfied by
@@ -108,7 +109,7 @@ type crankOutcome struct {
 // record. An error means the pull is unresolved (operational failure, or a
 // landed pull whose local finalize failed; the recorded signature tells them
 // apart); nil means the period resolved (see crankKind).
-func (h *Handler) crankOne(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription, plan resolvedPlan, memoLocalID uuid.UUID, presubmit func(signature string) error) (crankOutcome, error) {
+func (h *Handler) crankOne(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription, plan resolvedPlan, memoLocalID uuid.UUID, presubmit func(signature string, terminal solanaint.ChainTerminal) error) (crankOutcome, error) {
 	merchantID := billing.MerchantID(row.MerchantID)
 
 	amountBaseUnits := plan.amountBaseUnits
@@ -133,8 +134,8 @@ func (h *Handler) crankOne(ctx context.Context, repo solanaSubStore, row *models
 		return crankOutcome{}, errors.New("Solana pull requires its durable submission fence")
 	}
 	var submitted string
-	sig, crankErr := h.Cranker.CrankWithPresubmit(ctx, merchantID, row, amountBaseUnits, memoLocalID, func(signature string) error {
-		err := presubmit(signature)
+	sig, crankErr := h.Cranker.CrankWithPresubmit(ctx, merchantID, row, amountBaseUnits, memoLocalID, func(signature string, terminal solanaint.ChainTerminal) error {
+		err := presubmit(signature, terminal)
 		if err == nil {
 			submitted = signature
 		}
@@ -171,9 +172,10 @@ func (h *Handler) crankOne(ctx context.Context, repo solanaSubStore, row *models
 		})
 		switch cf.Category {
 		case recurring.Operational:
-			// RPC/network or the cranker wallet out of SOL gas: retry next run, NEVER
-			// dun — a shared outage would wrongly past-due a merchant's whole book.
-			// Leave next_pull_at unchanged so it stays due.
+			// RPC/network, the cranker wallet out of SOL gas, or a dropped
+			// transaction: retry next run, NEVER dun — a shared outage would
+			// wrongly past-due a merchant's whole book. Leave next_pull_at
+			// unchanged so it stays due.
 			llog.Warn("Solana cranker: operational pull failure; retry next run (no dunning)")
 			return crankOutcome{}, crankErr
 		case recurring.AlreadyPaid:

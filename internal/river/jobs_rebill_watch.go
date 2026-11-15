@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -50,23 +49,13 @@ const (
 	rebillWatchMerchantBatch = 500
 )
 
-// RebillWatchArgs runs one pass of the missed-rebill watch.
-type RebillWatchArgs struct{}
-
-func (RebillWatchArgs) Kind() string { return KindRebillWatch }
-
-func (RebillWatchArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
-
-// RebillWatchWorker looks at renewals whose confirming evidence is overdue.
-// An NMI schedule past its deadline with no attempt for the cycle is probed:
-// the Query API is the backstop for a lost webhook, so a charge found there
-// is recorded and converged, and only a proven absence is a miss; a period
-// NMI's schedule skipped is then collected by OpenRails. Any provider-billed
-// renewal still unconfirmed reconcile.PeriodGrace after its period is moved
-// to unverified, so the provider is asked by id; access is kept. Engine
-// renewals the due pass never attempted are read as missed, not recorded.
+// RebillWatchWorker probes each NMI schedule past its deadline with no
+// attempt for the cycle: the Query API is the backstop for a lost webhook, so
+// a charge found there is recorded and converged, and only a proven absence
+// is a miss; a period NMI's schedule skipped is then collected by OpenRails.
+// Engine renewals the due pass never attempted are read as missed, not
+// recorded.
 type RebillWatchWorker struct {
-	WorkerDefaults[RebillWatchArgs]
 	DB          *db.DB
 	Config      *config.Config
 	Clock       clockwork.Clock
@@ -74,11 +63,8 @@ type RebillWatchWorker struct {
 	Lifecycle   *subscriptions.SubscriptionLifecycleService
 }
 
-func (RebillWatchWorker) Kind() string { return KindRebillWatch }
-
-func (w *RebillWatchWorker) Work(ctx context.Context, _ *river.Job[RebillWatchArgs]) error {
-	now := w.Clock.Now().UTC()
-	return errors.Join(w.watchNMI(ctx, now), w.overdueRenewals(ctx, now))
+func (w *RebillWatchWorker) Pass(ctx context.Context) error {
+	return w.watchNMI(ctx, w.Clock.Now().UTC())
 }
 
 // watchNMI decides every merchant's overdue NMI cycles.
@@ -134,65 +120,6 @@ func (w *RebillWatchWorker) watchMerchant(ctx context.Context, cutoff, now time.
 		}
 		last := subs[len(subs)-1]
 		after = subscriptions.DueDunningCursor{DueAt: *last.CurrentPeriodEndsAt, ID: last.ID}
-	}
-}
-
-// overdueRenewals moves each provider-billed renewal still unconfirmed
-// reconcile.PeriodGrace after its period to unverified: a clock reading is
-// not evidence, so it only asks the provider. The row leaves the due set.
-func (w *RebillWatchWorker) overdueRenewals(ctx context.Context, now time.Time) error {
-	if w.Lifecycle == nil {
-		return errors.New("rebill watch: lifecycle not wired")
-	}
-	before := now.Add(-reconcile.PeriodGrace)
-	postures := writeposture.View{Config: w.Config, DB: w.DB}
-	var workErr error
-	after := uuid.Nil
-	for {
-		merchantIDs, err := w.DB.GenDirectory().ListOverdueRenewalMerchants(ctx, gen.ListOverdueRenewalMerchantsParams{
-			OverdueBefore: before, AfterMerchantID: after, MerchantLimit: rebillWatchMerchantBatch,
-		})
-		if err != nil {
-			return errors.Join(workErr, fmt.Errorf("rebill watch: list merchants with overdue renewals: %w", err))
-		}
-		for _, mid := range merchantIDs {
-			if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "overdue renewals", func(ctx context.Context) error {
-				if p := postures.Posture(ctx, mid); p.ReadOnly() {
-					return nil
-				}
-				return w.overdueMerchantRenewals(ctx, mid, before)
-			}); err != nil {
-				workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
-			}
-		}
-		if len(merchantIDs) < rebillWatchMerchantBatch {
-			return workErr
-		}
-		after = merchantIDs[len(merchantIDs)-1]
-	}
-}
-
-func (w *RebillWatchWorker) overdueMerchantRenewals(ctx context.Context, mid uuid.UUID, before time.Time) error {
-	var merchantErr error
-	var afterAt time.Time
-	afterID := uuid.Nil
-	for {
-		rows, err := w.DB.Gen(ctx).ListOverdueRenewals(ctx, gen.ListOverdueRenewalsParams{
-			MerchantID: mid, OverdueBefore: before, AfterDueAt: afterAt, AfterID: afterID, RowLimit: subscriptions.DueDunningBatch,
-		})
-		if err != nil {
-			return errors.Join(merchantErr, err)
-		}
-		for _, row := range rows {
-			if _, err := w.Lifecycle.AskProviderOverdueRenewal(ctx, w.DB, row.ID, *row.CurrentPeriodEndsAt); err != nil {
-				merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", row.ID, err))
-			}
-		}
-		if len(rows) < subscriptions.DueDunningBatch {
-			return merchantErr
-		}
-		last := rows[len(rows)-1]
-		afterAt, afterID = *last.CurrentPeriodEndsAt, last.ID
 	}
 }
 

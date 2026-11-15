@@ -294,6 +294,10 @@ func ImportDeclaredSubscriptions(
 				block("accepted_schedule requires verified reference, amount, currency, cadence and first renewal boundary")
 				continue
 			}
+			if currency := moneyutil.NormalizeCurrency(schedule.Currency); currency != price.Currency {
+				block(fmt.Sprintf("accepted_schedule is in %s; its price is in %s", currency, price.Currency))
+				continue
+			}
 		}
 
 		// Period pair from facts + catalog: the paid period is one billing cycle

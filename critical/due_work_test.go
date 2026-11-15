@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
@@ -124,7 +125,7 @@ func TestDueWork(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
-		runRegistered(t, fleet, "openrails.dunning", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		remote := *sub.RailSubscriptionID
 		require.Eventually(t, func() bool { return accounts.read("sk_test_old", "/v1/subscriptions/"+remote) }, 20*time.Second, 20*time.Millisecond,
 			"a grace that ended with no word from the provider is a question to it, by id")
@@ -145,14 +146,51 @@ func TestDueWork(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
-		runRegistered(t, fleet, "openrails.rebill_watch", 1)
+		// The same outage fails the history read, and with it the pass; the
+		// scans beside it ran.
+		runPassFailing(t, fleet, 1, "openrails.nmi_history")
 		subscriptionState(t, a, sub.ID, "active")
 		a.clock.Advance(24 * time.Hour)
-		runRegistered(t, fleet, "openrails.rebill_watch", 1)
+		runPassFailing(t, fleet, 1, "openrails.nmi_history")
 		subscriptionState(t, a, sub.ID, "unverified")
 		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:member"}})
 		require.NoError(t, err)
 		require.True(t, access.Entitlements["nmi:member"], "unverified keeps access")
+	})
+	t.Run("OR-J16-S71/an-overdue-renewal-is-asked-before-the-rebill-watch-reads-nmi", func(t *testing.T) {
+		a, p, sub := nmiMembership(t)
+		// NMI's Query API stops answering a probe of this subscription's sales.
+		hold := p.core.Hold(func(r *http.Request) bool {
+			if !strings.HasSuffix(r.URL.Path, "/query.php") {
+				return false
+			}
+			_ = r.ParseForm()
+			return r.Form.Get("order_id") == sub.ID.UUID().String()
+		}, nmimock.HoldRequest)
+		defer hold.Release()
+		a.clock.Advance(sub.CurrentPeriodEndsAt.Add(49 * time.Hour).Sub(a.clock.Now()))
+		fleet := quietFleet(t, a.world)
+		_, err := fleet.Insert(t.Context(), billingPass{}, nil)
+		require.NoError(t, err)
+		select {
+		case <-hold.Arrived():
+		case <-time.After(20 * time.Second):
+			t.Fatal("the rebill watch never probed NMI")
+		}
+		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionStatus("unverified"), current.Status, "the due pass asked about the overdue renewal before NMI was read")
+		hold.Release()
+		require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:member"), "unverified keeps access")
+	})
+	t.Run("OR-J15-S72/a-complete-provider-refresh-queues-no-due-work", func(t *testing.T) {
+		a, _ := newNMIWorld(t)
+		fleet := quietFleet(t, a.world)
+		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
+		var queued int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "river_job"}.Sanitize()+
+			" WHERE kind IN ('openrails.dunning', 'openrails.usage_orders', 'openrails.billing_pass')").Scan(&queued))
+		require.Zero(t, queued, "what falls due waits for the hourly billing pass; a refresh queues none of it")
 	})
 	t.Run("OR-J29-S70/a-grant-commits-with-its-customers-convergence", func(t *testing.T) {
 		w := newWorld(t)
@@ -281,6 +319,52 @@ func TestDueWork(t *testing.T) {
 		requireOpen(overdue, undeclined...)
 		require.Len(t, findings("fixed"), 1)
 	})
+	t.Run("OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck", func(t *testing.T) {
+		a, _ := newPaymentWorld(t)
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		psp := psps.Items[0].ID.UUID()
+		intents := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		now := a.clock.Now()
+		// Each was queued two days ago, and nothing runs it.
+		seed := func(key, status string, attempts int, next time.Time, failure *string) string {
+			var id uuid.UUID
+			require.NoError(t, a.pool.QueryRow(t.Context(), "INSERT INTO "+intents+" (merchant_id, rail, intent_type, idempotency_key, status, attempts, next_attempt_at, last_failure_reason, origin, psp_id, created_at) VALUES ($1, 'stripe', 'critical_operation', $2, $3, $4, $5, $6, 'system', $7, $8) RETURNING id",
+				a.alpha.MerchantID().UUID(), key, status, attempts, next, failure, psp, now.Add(-48*time.Hour)).Scan(&id))
+			return id.String()
+		}
+		stuck := func() map[string]bool {
+			page, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.provider_intent.stuck"})
+			require.NoError(t, err)
+			out := map[string]bool{}
+			for _, finding := range page.Items {
+				out[finding.SubjectKey] = true
+			}
+			return out
+		}
+		scheduled := seed("scheduled-a-week-ahead", "pending", 0, now.Add(7*24*time.Hour), nil)
+		recent := seed("due-an-hour-ago", "pending", 0, now.Add(-time.Hour), nil)
+		lost := seed("due-a-day-ago", "pending", 0, now.Add(-25*time.Hour), nil)
+		failing := seed("failing-for-two-days", "failed_retryable", 12, now.Add(time.Hour), ptr("provider unavailable"))
+		// Each re-park moves its next attempt five minutes on.
+		parked := seed("parked-for-two-days", "pending", 0, now.Add(5*time.Minute), ptr("no handler registered for intent type critical_operation"))
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		open := stuck()
+		require.False(t, open[scheduled], "an operation scheduled ahead waits for its instant")
+		require.False(t, open[recent], "an hour past its attempt is not stuck")
+		require.True(t, open[lost], "a day past its attempt with nothing running it is stuck")
+		require.True(t, open[failing], "an operation failing for a day is stuck")
+		require.True(t, open[parked], "an operation parked for a day is stuck")
+
+		// A day past its instant, the scheduled one is stuck too.
+		a.clock.Advance(8 * 24 * time.Hour)
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		require.True(t, stuck()[scheduled])
+	})
 	t.Run("OR-J04-S70/the-hourly-health-pass-raises-held-renewals", func(t *testing.T) {
 		a, _, sub := purchasedMembership(t)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Add(3 * time.Hour).Sub(a.clock.Now()))
@@ -296,12 +380,84 @@ func TestDueWork(t *testing.T) {
 		require.Empty(t, held())
 		runRegistered(t, fleet, "openrails.merchant_health", 1)
 		require.Len(t, held(), 1, "an engine renewal past its allowance with no outcome is held")
-		runRegistered(t, fleet, "openrails.dunning", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Eventually(t, func() bool {
 			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 			return err == nil && current.CurrentPeriodStartsAt.Equal(*sub.CurrentPeriodEndsAt)
 		}, 20*time.Second, 20*time.Millisecond)
 		runRegistered(t, fleet, "openrails.merchant_health", 1)
 		require.Empty(t, held(), "the finding closes once the renewal is attempted")
+	})
+	t.Run("OR-J06-S65/a-psp-whose-webhooks-went-silent-while-pulls-find-its-charges-raises-a-finding", func(t *testing.T) {
+		w := newWorld(t, func(w *world) {
+			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+			m := w.cfg.Merchants["alpha"]
+			m.PSPs = openrails.PSPs{}
+			for key, subacc := range map[string]string{"silent": "0001", "quiet": "0002", "pulled": "0003"} {
+				m.PSPs[key] = openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: subacc, Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
+			}
+			w.cfg.Merchants["alpha"] = m
+		})
+		listed, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		psps := map[string]billing.PSP{}
+		for _, psp := range listed.Items {
+			psps[psp.Key] = psp
+		}
+		require.Len(t, psps, 3)
+		merchantID, customer := w.alpha.MerchantID().UUID(), uuid.New()
+		_, err = w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "customers"}.Sanitize()+" (id, merchant_id) VALUES ($1, $2)", customer, merchantID)
+		require.NoError(t, err)
+		// A provider-scheduled charge of key's PSP that OpenRails learned of via.
+		charge := func(key, via string, at time.Time) {
+			t.Helper()
+			_, err := w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "payment_attempts"}.Sanitize()+
+				` (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, amount, currency, attempted_at, step)
+				VALUES ($1, $2, $3, $4, 'initial', 'provider', 'saved', 'provider_schedule', $5, 'approved', 10000000, 'USD', $6, '')`,
+				merchantID, customer, psps[key].ID.UUID(), string(psps[key].Rail), via, at)
+			require.NoError(t, err)
+		}
+		now := w.clock.Now()
+		for day := range 10 {
+			at := now.Add(-time.Duration(day+2) * 24 * time.Hour)
+			charge("silent", "webhook", at)
+			charge("quiet", "webhook", at)
+			charge("pulled", "pull", at)
+		}
+		// In the last day neither webhook-fed PSP sent one; pulls found the
+		// silent PSP's charges and the pull-only PSP's, the quiet PSP had none.
+		for hour := range 3 {
+			at := now.Add(-time.Duration(hour+1) * time.Hour)
+			charge("silent", "pull", at)
+			charge("pulled", "pull", at)
+		}
+		fleet := hostFleet(t, w)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		silence := func(status billing.FindingStatus) map[string]billing.Finding {
+			page, err := w.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.webhooks.silent", Status: status})
+			require.NoError(t, err)
+			out := map[string]billing.Finding{}
+			for _, finding := range page.Items {
+				out[finding.SubjectKey] = finding
+			}
+			return out
+		}
+		subject := "psp:" + psps["silent"].ID.String()
+
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		open := silence("")
+		require.Len(t, open, 1, "a PSP with no charges, or one that never sent webhooks, is not silent")
+		require.Contains(t, open, subject, "the PSP whose webhooks stopped while pulls find its charges is silent")
+		require.Equal(t, billing.FindingStatus("requires_review"), open[subject].Status)
+		require.Equal(t, "high", open[subject].Severity)
+
+		charge("silent", "webhook", now.Add(-30*time.Minute))
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		require.Empty(t, silence(""), "the finding clears once its webhooks resume")
+		closed := silence("fixed")
+		require.Contains(t, closed, subject)
+		require.Equal(t, "auto_vanished", *closed[subject].Resolution)
 	})
 }

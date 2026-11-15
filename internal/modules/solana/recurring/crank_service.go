@@ -19,10 +19,11 @@ type CrankService struct {
 	submitter Submitter
 }
 
-// presubmitSubmitter persists the signed signature via the caller's hook
-// before submission, so a crash mid-submit is resolvable by a chain read.
+// presubmitSubmitter persists the signed signature and its chain terminal via
+// the caller's hook before submission, so a crash mid-submit is resolvable by
+// a chain read.
 type presubmitSubmitter interface {
-	SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, owner solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
+	SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, owner solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature, solanaint.ChainTerminal) error) (solanago.Signature, error)
 }
 
 // NewCrankService builds a CrankService over the cranker's Submitter.
@@ -31,11 +32,12 @@ func NewCrankService(submitter Submitter) *CrankService {
 }
 
 // CrankWithPresubmit pulls amountBaseUnits for one subscription with a
-// signature write-ahead: presubmit(sig) runs after signing, before submission.
+// signature write-ahead: presubmit(sig, terminal) runs after signing, before
+// submission; terminal is when the signed transaction stops being landable.
 // An underfunded pull reverts atomically (no partial charge); the caller
 // classifies the error. A non-Nil memoLocalID (the durable pull-intent id)
 // stamps an SPL Memo before the transfer: a discovery hint, never money truth.
-func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string) error) (string, error) {
+func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string, terminal solanaint.ChainTerminal) error) (string, error) {
 	if sub == nil {
 		return "", fmt.Errorf("recurring: nil subscription")
 	}
@@ -112,7 +114,9 @@ func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.
 		memoIx := solanaint.NewMemoInstruction(solanaint.PurchaseMemo(memoLocalID))
 		instructions = []solanago.Instruction{memoIx, ix}
 	}
-	sig, err := ps.SubmitWithPresubmit(ctx, tenantID, owner, instructions, func(sig solanago.Signature) error { return presubmit(sig.String()) })
+	sig, err := ps.SubmitWithPresubmit(ctx, tenantID, owner, instructions, func(sig solanago.Signature, terminal solanaint.ChainTerminal) error {
+		return presubmit(sig.String(), terminal)
+	})
 	if err != nil {
 		return "", err
 	}

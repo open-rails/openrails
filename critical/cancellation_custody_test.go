@@ -22,7 +22,7 @@ func TestCancellationCustody(t *testing.T) {
 		defer gate.unblock()
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		select {
 		case <-gate.arrived:
 		case <-time.After(15 * time.Second):
@@ -43,7 +43,7 @@ func TestCancellationCustody(t *testing.T) {
 		require.Equal(t, billing.SubscriptionCanceled, canceled.Status)
 		require.Equal(t, due.Add(24*time.Hour), *canceled.CurrentPeriodEndsAt)
 		a.clock.Advance(25 * time.Hour)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		require.Len(t, p.effects(t), 2, "cancellation stops future work without losing the accepted payment")
 		payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
 		require.NoError(t, err)

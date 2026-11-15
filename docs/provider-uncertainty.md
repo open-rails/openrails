@@ -175,7 +175,8 @@ idempotency key rooted in the operation id and stamps it on the object
 is the subscription (or schedule) Stripe answers with or that the verifier
 reads back by exact id, and it must match the frozen facts — the operation
 key, the frozen Stripe price, the frozen local price (and for a downgrade
-the frozen switch date) — before the local subscription changes; a 2xx
+the frozen switch date and the subscription's seats, which the new phase
+keeps) — before the local subscription changes; a 2xx
 object that does not match commits nothing. The update also carries
 `payment_behavior=error_if_incomplete`, so a 2xx receipt means the change
 applied with its invoice paid and a 402 that nothing changed. A lost response

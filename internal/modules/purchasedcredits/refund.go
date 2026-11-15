@@ -48,8 +48,26 @@ func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, addit
 		if err != nil {
 			return err
 		}
-		if additional <= 0 || additional > paid {
+		if additional <= 0 {
 			return fmt.Errorf("invalid credit refund amount: %w", billing.ErrInvalid)
+		}
+		net, err := q.GetPurchasedCreditRefundState(ctx, gen.GetPurchasedCreditRefundStateParams{MerchantID: mid.UUID(), GrantID: grant.ID})
+		if err != nil {
+			return err
+		}
+		pending, err := q.GetPurchasedCreditPendingRefunds(ctx, gen.GetPurchasedCreditPendingRefundsParams{MerchantID: mid.UUID(), PaymentID: paymentID})
+		if err != nil {
+			return err
+		}
+		open, err := openCreditCash(paid, net.Cash)
+		if err != nil {
+			return err
+		}
+		// Pending refunds settle against the credit line first, as this one does.
+		reservedCash := min(pending, open)
+		requestedCash := min(additional, open-reservedCash)
+		if requestedCash == 0 {
+			return nil
 		}
 		terminated, err := q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: mid.UUID(), GrantID: grant.ID})
 		if err != nil {
@@ -62,15 +80,8 @@ func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, addit
 		if err != nil {
 			return err
 		}
-		pending, err := q.GetPurchasedCreditPendingRefunds(ctx, gen.GetPurchasedCreditPendingRefundsParams{MerchantID: mid.UUID(), PaymentID: paymentID})
-		if err != nil {
-			return err
-		}
-		if pending > paid-additional {
-			return fmt.Errorf("pending refunds exceed purchased credit funding: %w", billing.ErrConflict)
-		}
-		reserved := proportional(intValue(grant.Amount), pending, paid, true)
-		requested := proportional(intValue(grant.Amount), additional, paid, true)
+		reserved := proportional(intValue(grant.Amount), reservedCash, paid, true)
+		requested := proportional(intValue(grant.Amount), requestedCash, paid, true)
 		if requested > remaining-reserved || requested > balance-held {
 			return fmt.Errorf("refund requires unused and unreserved purchased credit: %w", billing.ErrConflict)
 		}
@@ -81,12 +92,17 @@ func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, addit
 // ApplyReversal posts one completed negative payment, or a positive recovery
 // explicitly linked to that reversal. Keeping this identity prevents a dispute
 // win from restoring credits withdrawn by an unrelated voluntary refund.
-func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.UUID, reversesID *uuid.UUID) error {
+//
+// A reversal returns the credit line's money first; the rest of an order's
+// payment bought no credit. posted reports whether it touched the lot: one
+// that did not is evaluated again by the next call.
+func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.UUID, reversesID *uuid.UUID) (posted bool, err error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		posted = false
 		q := gen.New(tx)
 		g, err := q.GetPurchasedCreditGrant(ctx, gen.GetPurchasedCreditGrantParams{MerchantID: mid.UUID(), PaymentID: paymentID})
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -118,6 +134,51 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		if err != nil {
 			return err
 		}
+		restoring := reversal.Amount > 0
+		// cashDelta is the credit line's part of the reversal.
+		var cashDelta int64
+		var origin gen.GetPurchasedCreditReversalStateRow
+		var recovered int64
+		if !restoring {
+			if reversesID != nil || reversal.Amount == (-1<<63) {
+				return fmt.Errorf("invalid negative credit reversal")
+			}
+			open, err := openCreditCash(paid, net.Cash)
+			if err != nil {
+				return err
+			}
+			cashDelta = min(-reversal.Amount, open)
+		} else {
+			if reversesID == nil {
+				return fmt.Errorf("purchased credit recovery must identify the reversed payment")
+			}
+			original, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid.UUID(), ID: *reversesID})
+			if err != nil {
+				return err
+			}
+			if original.Amount >= 0 || original.CustomerID != g.CustomerID || original.RefundedPaymentID == nil || *original.RefundedPaymentID != paymentID || original.Currency != currency {
+				return fmt.Errorf("credit recovery does not reference this purchase's reversal")
+			}
+			if reversal.Amount > -original.Amount {
+				return fmt.Errorf("credit recovery exceeds its recorded reversal")
+			}
+			if origin, err = q.GetPurchasedCreditReversalState(ctx, gen.GetPurchasedCreditReversalStateParams{MerchantID: mid.UUID(), GrantID: g.ID, ReversalID: reversesID.String()}); err != nil {
+				return err
+			}
+			if recovered, err = q.GetPurchasedCreditRecoveryTotal(ctx, gen.GetPurchasedCreditRecoveryTotalParams{MerchantID: mid.UUID(), GrantID: g.ID, ReversalID: reversesID.String()}); err != nil {
+				return err
+			}
+			if origin.Cash < 0 || recovered < 0 || recovered > origin.Cash {
+				return fmt.Errorf("credit recovery exceeds its recorded reversal")
+			}
+			// A recovery restores what its reversal took from the credit line
+			// first: a reversal that took none restores none.
+			cashDelta = min(reversal.Amount, origin.Cash-recovered)
+		}
+		if cashDelta == 0 {
+			return nil
+		}
+		posted = true
 		// Finalization must not leave the unrefunded remainder of an expired
 		// source available until the next sweep. Retired balances remain bound
 		// to the same grant and can fund this refund below.
@@ -135,21 +196,12 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			return err
 		}
 		face := intValue(g.Amount)
-		restoring := reversal.Amount > 0
-		cashDelta := reversal.Amount
 		var faceDelta, withdrawn, retired, expired, revoked, repaid int64
 		retiredAccount := ledger.RevokedCredits
 		source := "credit"
 		cashSource := "cash"
 		lossSource := "consumed_credit"
 		if !restoring {
-			if reversesID != nil || cashDelta == (-1<<63) {
-				return fmt.Errorf("invalid negative credit reversal")
-			}
-			cashDelta = -cashDelta
-			if cashDelta > paid-net.Cash {
-				return fmt.Errorf("credit refunds exceed original payment")
-			}
 			faceDelta = proportional(face, net.Cash+cashDelta, paid, false) - proportional(face, net.Cash, paid, false)
 			withdrawn = min(max(remaining, 0), faceDelta)
 			retiredBalance, err := q.GetPurchasedCreditRetiredBalance(ctx, gen.GetPurchasedCreditRetiredBalanceParams{MerchantID: mid.UUID(), GrantID: g.ID})
@@ -165,27 +217,6 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			}
 			repaid = min(max(standing, 0), faceDelta-withdrawn-expired-revoked)
 		} else {
-			if reversesID == nil {
-				return fmt.Errorf("purchased credit recovery must identify the reversed payment")
-			}
-			original, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid.UUID(), ID: *reversesID})
-			if err != nil {
-				return err
-			}
-			if original.Amount >= 0 || original.CustomerID != g.CustomerID || original.RefundedPaymentID == nil || *original.RefundedPaymentID != paymentID || original.Currency != currency {
-				return fmt.Errorf("credit recovery does not reference this purchase's reversal")
-			}
-			origin, err := q.GetPurchasedCreditReversalState(ctx, gen.GetPurchasedCreditReversalStateParams{MerchantID: mid.UUID(), GrantID: g.ID, ReversalID: reversesID.String()})
-			if err != nil {
-				return err
-			}
-			recovered, err := q.GetPurchasedCreditRecoveryTotal(ctx, gen.GetPurchasedCreditRecoveryTotalParams{MerchantID: mid.UUID(), GrantID: g.ID, ReversalID: reversesID.String()})
-			if err != nil {
-				return err
-			}
-			if origin.Cash <= 0 || cashDelta > origin.Cash-recovered {
-				return fmt.Errorf("credit recovery exceeds its recorded reversal")
-			}
 			before := proportional(origin.Face, recovered, origin.Cash, false)
 			after := proportional(origin.Face, recovered+cashDelta, origin.Cash, false)
 			faceDelta = after - before
@@ -280,6 +311,15 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		}
 		return post(ledger.PlatformRevenue, cashDelta-faceDelta, ledger.CreditRefundFunding, !restoring, "revenue")
 	})
+	return posted && err == nil, err
+}
+
+// openCreditCash is what of the credit line's payment no reversal has returned.
+func openCreditCash(paid, reversed int64) (int64, error) {
+	if reversed < 0 || reversed > paid {
+		return 0, fmt.Errorf("credit refunds exceed original payment")
+	}
+	return paid - reversed, nil
 }
 
 func fundingAmount(g gen.BillingGrant) (int64, error) {

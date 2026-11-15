@@ -418,32 +418,44 @@ func (s *PaymentService) syncPurchasedCreditRefund(ctx context.Context, paymentI
 	credits := purchasedcredits.New(s.repo.db, s.clock)
 	// ListRefunds is newest first. Apply negative events oldest first, then
 	// their positive recoveries, so every recovery finds its exact effect.
-	for i := len(rows) - 1; i >= 0; i-- {
-		row := rows[i]
-		if PaymentStatusSucceeded(row.Status) && row.Amount < 0 {
-			if err := credits.ApplyReversal(ctx, paymentID, row.ID, nil); err != nil {
+	// A reversal that took no credit is applied again on every pass: passes
+	// repeat until none posts, so credit a recovery reopens is settled now,
+	// not by whichever later event syncs next.
+	for {
+		posted := false
+		for i := len(rows) - 1; i >= 0; i-- {
+			row := rows[i]
+			if PaymentStatusSucceeded(row.Status) && row.Amount < 0 {
+				p, err := credits.ApplyReversal(ctx, paymentID, row.ID, nil)
+				if err != nil {
+					return err
+				}
+				posted = posted || p
+			}
+		}
+		for i := len(rows) - 1; i >= 0; i-- {
+			row := rows[i]
+			if !PaymentStatusSucceeded(row.Status) || row.Amount <= 0 {
+				continue
+			}
+			var reversed *uuid.UUID
+			if raw, ok := row.Metadata["reverses_payment_id"].(string); ok {
+				id, err := uuid.Parse(raw)
+				if err != nil || id == uuid.Nil {
+					return errors.New("dispute recovery has invalid reversal identity")
+				}
+				reversed = &id
+			}
+			p, err := credits.ApplyReversal(ctx, paymentID, row.ID, reversed)
+			if err != nil {
 				return err
 			}
+			posted = posted || p
+		}
+		if !posted {
+			return nil
 		}
 	}
-	for i := len(rows) - 1; i >= 0; i-- {
-		row := rows[i]
-		if !PaymentStatusSucceeded(row.Status) || row.Amount <= 0 {
-			continue
-		}
-		var reversed *uuid.UUID
-		if raw, ok := row.Metadata["reverses_payment_id"].(string); ok {
-			id, err := uuid.Parse(raw)
-			if err != nil || id == uuid.Nil {
-				return errors.New("dispute recovery has invalid reversal identity")
-			}
-			reversed = &id
-		}
-		if err := credits.ApplyReversal(ctx, paymentID, row.ID, reversed); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *PaymentService) ReserveProviderAttempt(ctx context.Context, payment *models.Payment) (*models.Payment, error) {
@@ -534,15 +546,19 @@ func (s *PaymentService) ValidateRefund(ctx context.Context, orig *models.Paymen
 		return fmt.Errorf("failed to calculate refunded total: %w", err)
 	}
 	if amount > orig.Amount {
-		return errors.New("refund amount cannot exceed original payment amount")
+		return fmt.Errorf("%w: refund amount cannot exceed original payment amount", ErrRefundExceedsPayment)
 	}
 	if refundedTotal > 0 {
 		if amount+refundedTotal > orig.Amount {
-			return fmt.Errorf("refund total would exceed original payment (refunded %d of %d)", refundedTotal, orig.Amount)
+			return fmt.Errorf("%w: refund total would exceed original payment (refunded %d of %d)", ErrRefundExceedsPayment, refundedTotal, orig.Amount)
 		}
 	}
 	return nil
 }
+
+// ErrRefundExceedsPayment refuses a refund that would return more than its
+// charge took.
+var ErrRefundExceedsPayment = errors.New("refund exceeds the payment")
 
 func PaymentStatusSucceeded(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {

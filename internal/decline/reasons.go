@@ -14,9 +14,9 @@ type reasonSpec struct {
 // the reason (billing.DeclineReason.Failure). Actions:
 //   - retry: issuer soft/generic declines (Visa category 2/4) and our or the
 //     gateway's errors;
-//   - fix_payment_method: bad card data, and codes that forbid re-attempts on
-//     the same card number (Visa category 1, Mastercard MAC 03/21); a new card
-//     from the customer or the account updater resumes dunning;
+//   - fix_payment_method: bad card data, codes that forbid re-attempts on the
+//     same card number, and a retry the networks' advice stops (advice.go); a
+//     new card from the customer or the account updater resumes dunning;
 //   - non_recoverable: stolen, fraud, and a revoked recurring mandate.
 //
 // Pick-up and lost cards (250/251) wait for a new card: losing a wallet must

@@ -58,15 +58,22 @@ func (w UsageOrderWorker) DueBy(ctx context.Context, at time.Time) (bool, error)
 	return len(orders) > 0, err
 }
 
+// Pass is the billing pass's usage scan: its first page.
+func (w UsageOrderWorker) Pass(ctx context.Context) error { return w.run(ctx, money.UsageOrderArgs{}) }
+
 func (w UsageOrderWorker) Work(ctx context.Context, job *river.Job[money.UsageOrderArgs]) error {
+	return w.run(ctx, job.Args)
+}
+
+func (w UsageOrderWorker) run(ctx context.Context, page money.UsageOrderArgs) error {
 	if w.DB == nil || w.Money == nil || w.Config == nil || !w.Config.UsageBillingEnabled {
 		return nil
 	}
 	logger := log.WithContext(ctx).WithField("worker", money.KindUsageOrders)
 	now := w.now()
 	var failed error
-	if job.Args.Collect == nil {
-		next, err := w.bill(ctx, logger, now, job.Args.Bill)
+	if page.Collect == nil {
+		next, err := w.bill(ctx, logger, now, page.Bill)
 		failed = err
 		if next != nil {
 			return errors.Join(failed, continuePass(ctx, money.UsageOrderArgs{Bill: next}))
@@ -75,7 +82,7 @@ func (w UsageOrderWorker) Work(ctx context.Context, job *river.Job[money.UsageOr
 	if config.IsLimitedMode(w.Config) {
 		return failed
 	}
-	next, err := w.collect(ctx, logger, now, job.Args.Collect)
+	next, err := w.collect(ctx, logger, now, page.Collect)
 	failed = errors.Join(failed, err)
 	if next != nil {
 		return errors.Join(failed, continuePass(ctx, money.UsageOrderArgs{Collect: next}))

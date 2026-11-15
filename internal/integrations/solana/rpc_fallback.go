@@ -495,6 +495,24 @@ func (c *RPCFallbackClient) GetEpoch(ctx context.Context) (uint64, error) {
 	return epoch, err
 }
 
+// GetEpochInfo returns one node's slot and block height at commitment, with
+// automatic failover.
+func (c *RPCFallbackClient) GetEpochInfo(ctx context.Context, commitment rpc.CommitmentType) (*rpc.GetEpochInfoResult, error) {
+	var info *rpc.GetEpochInfoResult
+	err := c.withFallback(ctx, "GetEpochInfo", func(client *rpc.Client) error {
+		out, err := client.GetEpochInfo(ctx, commitment)
+		if err != nil {
+			return err
+		}
+		if out == nil {
+			return errors.New("solana: empty epoch info")
+		}
+		info = out
+		return nil
+	})
+	return info, err
+}
+
 // GetBlockHeight returns the cluster's current block height at the given
 // commitment, with automatic failover.
 func (c *RPCFallbackClient) GetBlockHeight(ctx context.Context, commitment rpc.CommitmentType) (uint64, error) {

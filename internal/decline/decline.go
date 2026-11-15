@@ -82,6 +82,9 @@ type Result struct {
 	Action    Action
 	Transient bool
 	Coverage  Coverage
+	// NoReattempt: the network or issuer forbids charging this card again
+	// (advice.go).
+	NoReattempt bool
 }
 
 // NeedsMapping reports a code the rail's table does not know.
@@ -101,9 +104,12 @@ type Evidence struct {
 	AVS, CVV string
 	// Text is the gateway's response text.
 	Text string
-	// IssuerCode and IssuerText are the issuer's raw answer (NMI
-	// processor_response_code/text).
+	// IssuerCode and IssuerText are the issuer's raw answer: NMI's
+	// processor_response_code/text (Query API), Stripe's network_decline_code.
 	IssuerCode, IssuerText string
+	// Advice is Stripe's advice_code; NetworkAdvice the network's advice code
+	// (Mastercard's Merchant Advice Code, Stripe's network_advice_code).
+	Advice, NetworkAdvice string
 	// The card the PSP reports: BIN, brand, last four, and whether a network
 	// token stood in for the card number.
 	CardBIN, CardBrand, CardLast4 string
@@ -120,10 +126,11 @@ func ReasonFor(rail, code string) string {
 	return string(Classify(rail, code).Reason)
 }
 
-// ClassifyEvidence classifies a refusal with its AVS/CVV results: a security
-// code mismatch is the reason whatever the code said, and a postal code that
-// did not match explains a generic decline. A postal code that matched is no
-// address failure: AVS answers a street it was never sent as unmatched.
+// ClassifyEvidence classifies a refusal with its AVS/CVV results and the
+// networks' advice: a security code mismatch is the reason whatever the code
+// said, and a postal code that did not match explains a generic decline. A
+// postal code that matched is no address failure: AVS answers a street it was
+// never sent as unmatched. Advice then stops a retry (advised).
 func ClassifyEvidence(e Evidence) Result {
 	r := lookup(e.Rail, e.Code, e.Text)
 	if r.Coverage != Mapped && strings.TrimSpace(e.FallbackCode) != "" {
@@ -131,17 +138,16 @@ func ClassifyEvidence(e Evidence) Result {
 			r = fb
 		}
 	}
-	if r.Reason.FraudSignal() {
-		return r
+	if !r.Reason.FraudSignal() {
+		generic := r.Reason == billing.DeclineGeneric || r.Reason == billing.DeclineDoNotHonor || r.Reason == billing.DeclineIncorrectNumber || r.Coverage != Mapped
+		switch {
+		case cvvMismatch(r.Rail, e.CVV):
+			r = r.with(billing.DeclineIncorrectCVC)
+		case generic && zipMismatch(r.Rail, e.AVS):
+			r = r.with(billing.DeclineIncorrectZip)
+		}
 	}
-	generic := r.Reason == billing.DeclineGeneric || r.Reason == billing.DeclineDoNotHonor || r.Reason == billing.DeclineIncorrectNumber || r.Coverage != Mapped
-	switch {
-	case cvvMismatch(r.Rail, e.CVV):
-		r = r.with(billing.DeclineIncorrectCVC)
-	case generic && zipMismatch(r.Rail, e.AVS):
-		r = r.with(billing.DeclineIncorrectZip)
-	}
-	return r
+	return r.advised(e)
 }
 
 func (r Result) with(reason billing.DeclineReason) Result {

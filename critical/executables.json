@@ -134,6 +134,9 @@
     "OR-J09-S05": [
       "TestCheckoutBoundaries/OR-J09-S05/lost-sale-answer-settles-from-the-provider"
     ],
+    "OR-J09-S06": [
+      "TestCheckoutBoundaries/OR-J09-S06/partial-approval-never-pays-the-order"
+    ],
     "OR-J10-S01": [
       "TestPaymentReplay/OR-J10-S01/concurrent-identical-purchase-has-one-economic-debit"
     ],
@@ -199,6 +202,9 @@
     "OR-J14-S05": [
       "TestProcessRecovery/OR-J14-S05/settled-renewal-survives-death-before-queue-ack"
     ],
+    "OR-J14-S06": [
+      "TestRenewalAgreements/OR-J14-S06/each-paid-agreement-renews-once-and-two-refuse"
+    ],
     "OR-J15-S01": [
       "TestNMIRecovery/OR-J15-S01/missing-callback-is-repaired-from-provider-query"
     ],
@@ -248,6 +254,21 @@
     "OR-J16-S32": [
       "TestDunning/OR-J16-S32/due-pass-queues-an-nmi-retry-without-waiting-on-the-gateway"
     ],
+    "OR-J16-S40": [
+      "TestDoNotRetry/OR-J16-S40/a-lost-card-renewal-refuses-the-same-card-and-admits-another"
+    ],
+    "OR-J16-S41": [
+      "TestDoNotRetry/OR-J16-S41/an-nmi-decline-with-a-never-retry-issuer-code-waits-for-a-new-card"
+    ],
+    "OR-J16-S42": [
+      "TestDoNotRetry/OR-J16-S42/network-do-not-retry-advice-stops-dunning-on-the-card",
+      "TestDoNotRetry/OR-J16-S42/network-do-not-retry-advice-stops-dunning-on-the-card/stripe-do-not-try-again",
+      "TestDoNotRetry/OR-J16-S42/network-do-not-retry-advice-stops-dunning-on-the-card/mastercard-advice-03",
+      "TestDoNotRetry/OR-J16-S42/network-do-not-retry-advice-stops-dunning-on-the-card/visa-category-1-closed-account"
+    ],
+    "OR-J16-S43": [
+      "TestDoNotRetry/OR-J16-S43/a-decline-the-cardholder-can-clear-is-retried-on-the-card-up-to-the-cap"
+    ],
     "OR-J17-S01": [
       "TestSubscriptions/OR-J17-S01/cancel-resume-keeps-the-purchased-window"
     ],
@@ -263,6 +284,9 @@
     "OR-J17-S05": [
       "TestCancellationRecoveryContracts/OR-J17-S05/cancel-after-paid-boundary-has-no-resume-or-new-charge"
     ],
+    "OR-J17-S06": [
+      "TestCancellationRecoveryContracts/OR-J17-S06/resume-inside-the-paid-period-never-extends-access-past-it"
+    ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
     ],
@@ -274,6 +298,9 @@
     ],
     "OR-J18-S04": [
       "TestSubscriptionChangeContracts/OR-J18-S04/admitted-renewal-fences-concurrent-customer-upgrade"
+    ],
+    "OR-J18-S05": [
+      "TestSubscriptionChangeContracts/OR-J18-S05/late-in-place-upgrade-holds-the-new-tier-only-to-the-paid-boundary"
     ],
     "OR-J19-S01": [
       "TestPriceMigrationContracts/OR-J19-S01/only-eligible-subscription-moves-at-the-paid-boundary"
@@ -300,6 +327,9 @@
     ],
     "OR-J20-S04": [
       "TestRefundBoundaryContract/OR-J20-S04/foreign-account-and-off-rail-refunds-have-no-effect"
+    ],
+    "OR-J20-S05": [
+      "TestCCBillRefunds/OR-J20-S05/each-partial-refund-of-a-sale-is-booked-once"
     ],
     "OR-J21-S01": [
       "TestExternalPayments/OR-J21-S01/record-confirmed-external-money-without-provider-charge"
@@ -352,6 +382,9 @@
     ],
     "OR-J24-S04": [
       "TestUsageContracts/OR-J24-S04/grouped-pagination-retains-exact-customer-totals"
+    ],
+    "OR-J24-S05": [
+      "TestUsageContracts/OR-J24-S05/charged-failure-replayed-past-its-key-window-charges-once"
     ],
     "OR-J25-S01": [
       "TestRunningChargeContracts/OR-J25-S01/whole-seconds-post-once-at-explicit-stop"
@@ -435,6 +468,14 @@
     "OR-J28-S05": [
       "TestCallbackContracts/OR-J28-S05/callback-during-fetch-keeps-a-follow-up-until-new-evidence-is-read"
     ],
+    "OR-J28-S06": [
+      "TestWebhookAccountClasses/OR-J28-S06/another-merchants-claim-in-the-other-class-is-refused-and-the-owners-webhooks-keep-working"
+    ],
+    "OR-J28-S07": [
+      "TestWebhookAccountClasses/OR-J28-S07/one-merchants-live-and-test-psps-on-one-account-each-receive-their-own-events/stripe",
+      "TestWebhookAccountClasses/OR-J28-S07/one-merchants-live-and-test-psps-on-one-account-each-receive-their-own-events/nmi",
+      "TestWebhookAccountClasses/OR-J28-S07/one-merchants-live-and-test-psps-on-one-account-each-receive-their-own-events"
+    ],
     "OR-J29-S01": [
       "TestProcessRecovery/OR-J29-S01"
     ],
@@ -469,6 +510,9 @@
     ],
     "OR-J31-S06": [
       "TestBillingArchive/OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book"
+    ],
+    "OR-J31-S40": [
+      "TestNotificationAdoptionExport/OR-J31-S40/export-holds-back-no-other-merchant-and-orders-its-own-producers"
     ],
     "OR-J32-S01": [
       "TestMerchantHost/OR-J32-S01/provision-find-list-rename-retains-identity"
@@ -598,6 +642,11 @@
     "OR-J06-S07": [
       "TestBackgroundJobs/OR-J06-S07/psp-import-commits-with-its-job"
     ],
+    "OR-J06-S08": [
+      "TestPSPPostureExpiry/OR-J06-S08/an-armed-verdict-expires-and-is-proven-again-before-the-next-write",
+      "TestPSPPostureExpiry/OR-J06-S08/an-armed-verdict-expires-and-is-proven-again-before-the-next-write/test-account-leaves-test-mode",
+      "TestPSPPostureExpiry/OR-J06-S08/an-armed-verdict-expires-and-is-proven-again-before-the-next-write/live-account-enters-test-mode"
+    ],
     "OR-J06-S30": [
       "TestPSPControls/OR-J06-S30/a-declared-stripe-psp-registers-its-webhook-endpoint"
     ],
@@ -654,6 +703,9 @@
     ],
     "OR-J38-S13": [
       "TestPSPImport/OR-J38-S13/unreadable-answer-fails-visibly"
+    ],
+    "OR-J38-S42": [
+      "TestPSPImport/OR-J38-S42/nmi-amounts-land-in-the-mapped-price-currency"
     ],
     "OR-J38-S30": [
       "TestMerchantConsole/OR-J38-S30/console-pull-link-map-apply-lands-once"
@@ -754,6 +806,9 @@
     "OR-J19-S05": [
       "TestPriceMigrationContracts/OR-J19-S05/move-that-no-longer-applies-is-skipped-and-settles-its-migration"
     ],
+    "OR-J19-S06": [
+      "TestPriceMigrationContracts/OR-J19-S06/notice-follows-cost-per-unit-of-time"
+    ],
     "OR-J12-S30": [
       "TestStoredCardRefresh/OR-J12-S30/marked-cards-never-starve-a-planned-check"
     ],
@@ -799,6 +854,12 @@
     "OR-J37-S61": [
       "TestSolanaPulls/OR-J37-S61/a-pull-the-chain-refuses-before-its-period-end-is-retried-not-taken-as-paid"
     ],
+    "OR-J37-S62": [
+      "TestSolanaPulls/OR-J37-S62/a-dropped-pull-is-signed-again-only-once-it-provably-never-landed"
+    ],
+    "OR-J37-S63": [
+      "TestSolanaContracts/OR-J37-S63/a-wallet-that-is-the-plans-cranker-is-refused-a-co-signed-subscribe"
+    ],
     "OR-J21-S60": [
       "TestBackgroundJobs/OR-J21-S60/an-import-queues-the-read-of-the-charges-it-attributed"
     ],
@@ -814,14 +875,26 @@
     "OR-J06-S63": [
       "TestStripeWebhookDueWork/OR-J06-S63/a-psp-change-while-its-pass-runs-reaches-stripe-without-the-backstop"
     ],
+    "OR-J06-S64": [
+      "TestStripeWebhookDueWork/OR-J06-S64/a-finding-alert-whose-delivery-fails-is-delivered-on-retry-once"
+    ],
+    "OR-J06-S65": [
+      "TestDueWork/OR-J06-S65/a-psp-whose-webhooks-went-silent-while-pulls-find-its-charges-raises-a-finding"
+    ],
     "OR-J14-S70": [
       "TestDueWork/OR-J14-S70/an-engine-renewal-nothing-attempted-reads-as-missed"
     ],
     "OR-J16-S70": [
       "TestDueWork/OR-J16-S70/a-provider-billed-grace-that-ends-unanswered-is-read-by-the-due-pass"
     ],
+    "OR-J16-S71": [
+      "TestDueWork/OR-J16-S71/an-overdue-renewal-is-asked-before-the-rebill-watch-reads-nmi"
+    ],
     "OR-J15-S70": [
       "TestDueWork/OR-J15-S70/an-nmi-renewal-the-probe-cannot-settle-is-read-by-id-after-its-grace"
+    ],
+    "OR-J15-S72": [
+      "TestDueWork/OR-J15-S72/a-complete-provider-refresh-queues-no-due-work"
     ],
     "OR-J15-S71": [
       "TestNMIRoster/OR-J15-S71/a-truncated-roster-page-resolves-nothing"
@@ -843,6 +916,9 @@
     ],
     "OR-J12-S12": [
       "TestCardGuard/OR-J12-S12/mastercard-length-rule-keeps-real-cards-blocked"
+    ],
+    "OR-J12-S13": [
+      "TestStripeCustomerPerAccount/OR-J12-S13/each-stripe-account-resolves-its-own-customer"
     ],
     "OR-J38-S36": [
       "TestCardGuard/OR-J38-S36/ccbill-references-import-and-export-unchanged"
@@ -866,6 +942,9 @@
       "TestCCBillIdentity/OR-J38-S40",
       "TestCCBillIdentity/OR-J38-S40/advisory-matches-by-identity",
       "TestCCBillIdentity/OR-J38-S40/enforce-without-insert-matches-by-identity"
+    ],
+    "OR-J38-S43": [
+      "TestCCBillIdentity/OR-J38-S43/a-late-sale-on-an-order-paid-by-card-is-kept-for-refund"
     ],
     "OR-J38-S41": [
       "TestMerchantConsole/OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms"
@@ -926,6 +1005,57 @@
     ],
     "OR-J12-S70": [
       "TestOrderExpiryClock/OR-J12-S70/card-save-past-its-cutoff-is-removed-before-the-pass"
+    ],
+    "OR-J22-S07": [
+      "TestMixedOrderCreditRefunds/OR-J22-S07/pending-credit-line-refund-holds-the-whole-lot"
+    ],
+    "OR-J22-S08": [
+      "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/full-refund",
+      "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/credit-line-first-then-the-rest",
+      "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/chargeback-then-won-dispute",
+      "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first"
+    ],
+    "OR-J22-S09": [
+      "TestMixedOrderCreditRefunds/OR-J22-S09/won-dispute-credit-goes-to-a-refund-that-found-none"
+    ],
+    "OR-J37-S10": [
+      "TestFXRates/OR-J37-S10/a-published-rate-far-from-the-held-one-prices-nothing"
+    ],
+    "OR-J18-S06": [
+      "TestSubscriptionChangeContracts/OR-J18-S06/stripe-downgrade-keeps-the-subscriptions-seats"
+    ],
+    "OR-J19-S07": [
+      "TestPriceMigrationContracts/OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create"
+    ],
+    "OR-J28-S08": [
+      "TestCallbackContracts/OR-J28-S08/a-thin-checkout-session-event-hydrates-and-settles-its-order"
+    ],
+    "OR-J31-S09": [
+      "TestBillingArchive/OR-J31-S09/a-paid-stripe-hosted-page-order-moves-with-the-book"
+    ],
+    "OR-J04-S37": [
+      "TestBillingPass/OR-J04-S37/an-order-expiry-backlog-past-one-batch-drains-in-one-pass"
+    ],
+    "OR-J04-S38": [
+      "TestBillingPass/OR-J04-S38/a-pass-that-starts-while-one-runs-exits"
+    ],
+    "OR-J25-S37": [
+      "TestBalanceLooks/OR-J25-S37/a-pass-that-waited-behind-a-look-leaves-the-watch-it-moved"
+    ],
+    "OR-J29-S37": [
+      "TestDueWork/OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck"
+    ],
+    "OR-J31-S10": [
+      "TestBillingArchive/OR-J31-S10/a-restored-solana-pull-runs-at-its-due-time"
+    ],
+    "OR-J04-S60": [
+      "TestBillingPass/OR-J04-S60/a-live-operation-whose-wake-was-lost-is-queued-again-an-hour-past-due"
+    ],
+    "OR-J20-S70": [
+      "TestRefundRecovery/OR-J20-S70/a-dashboard-refund-lands-while-the-roster-cannot-be-read"
+    ],
+    "OR-J04-S71": [
+      "TestBillingPass/OR-J04-S71/a-failed-nmi-history-read-fails-the-pass-and-the-next-reads-it"
     ]
   },
   "suites": {

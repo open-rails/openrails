@@ -150,7 +150,9 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 // that moved since the decision, is ignored.
 func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision) (bool, error) {
 	code := normalize.Trim(d.Decline.DeclineCode)
-	action := decline.Classify(string(sub.Rail), code).Action
+	// The issuer's own code (NMI's Query API) may forbid a retry the rail's
+	// catch-all code would allow.
+	action := decline.ClassifyEvidence(decline.Evidence{Rail: string(sub.Rail), Code: code, IssuerCode: d.Decline.Answer.IssuerCode}).Action
 	certainty, blocked := "", ""
 	if action == decline.NonRecoverable {
 		// The same certainty leg and kill switch OpenRails' own rebills use.

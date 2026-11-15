@@ -88,9 +88,9 @@ func (s *signerSubmitter) Submit(ctx context.Context, tenantID billing.MerchantI
 	return s.SubmitWithPresubmit(ctx, tenantID, owner, instructions, nil)
 }
 
-// SubmitWithPresubmit persists the signed tx signature via presubmit before
-// submission.
-func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, owner solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
+// SubmitWithPresubmit persists the signed tx signature and its blockhash's
+// chain terminal via presubmit before submission.
+func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, owner solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature, solanaint.ChainTerminal) error) (solanago.Signature, error) {
 	signer, err := s.crankers.Owner(ctx, owner)
 	if err != nil {
 		return solanago.Signature{}, err

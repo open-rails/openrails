@@ -49,6 +49,14 @@ func writeCardAttemptsBlocked(r *httprequest.Request, wait time.Duration) {
 		"Too many declined card attempts. Try again later."))
 }
 
+// noteCardDecline counts a customer's refused card in the failure ledger; the
+// operation's runner counts its captcha subjects.
+func noteCardDecline(r *httprequest.Request, customerID string) {
+	if ledger, merchantID, ok := cardAttemptLedger(r); ok {
+		ledger.Record(r.Request.Context(), merchantID, abuse.CustomerSubject(customerID), abuse.AddressSubject(r.ClientIP()), abuse.MerchantSubject)
+	}
+}
+
 // recordCardFailure counts one card the provider refused: against subjects in
 // the ledger, then against this request's captcha subjects, with the ledger's
 // attack verdict.

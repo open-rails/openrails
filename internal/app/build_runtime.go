@@ -265,7 +265,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if overrides != nil {
 		fxTransport = overrides.FXTransport
 	}
-	fxRates := fx.NewRates(fx.NewSource(fxTransport))
+	fxRates := fx.NewRates(fx.NewSource(fxTransport), clock.Now)
 	serviceInstances, err := createServices(database, leaseDB, cfg, railConfigs, collectionResolver, solanaRPCResolver, fxRates, clock, solanaPriceProvider, customers, stripeClients)
 	if err != nil {
 		return nil, err

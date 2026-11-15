@@ -67,6 +67,12 @@ failures retain the standard processor error mapping). Replaying the same key
 returns that original refusal even if a later attempt has recovered the
 account.
 `payment_in_progress` and `payment_idempotency_conflict` are 409 refusals.
+A retry of the card the subscription waits to have replaced, or one past the
+retry limit (see [dunning](../operations.md#dunning)), is refused before any
+provider call: `retry-now` answers `payment_not_retryable` and the recovery
+reads `blocked_reason: payment_method_update_required`; a renewal order paid
+with that card answers `order_not_payable`. Another card is admitted. A
+customer the card-testing ledger blocks gets `429 card_attempts_blocked`.
 A caller should retain its key through network uncertainty and read the existing
 resource before starting a different action.
 
