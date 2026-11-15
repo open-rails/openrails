@@ -128,3 +128,20 @@ The environment equivalent is `ADMIN_CONSOLE_DISABLED=true`; in Go, use `server.
 `admin_console.enabled` and `admin_console.path` are refused with migration instructions; singular `admin_console.issuer` is replaced by the keyed map. With the console enabled but neither app nor local sign-in configured, the page explains how to declare one and the server still boots.
 
 `task admin-build` builds billing-ui and the standalone app into `server/web/console/dist`; release archives and Docker images embed it. A source-only Go build without frontend assets still starts; the enabled console answers 503 with the build instruction. A malformed supplied build is a startup error only when the console is enabled. Pass a supplied build as `server.Deps.ConsoleAssets`, rooted at `index.html` with the build's `<base href="/admin/">` placeholder. Disabling the console does not remove assets already compiled into a release binary.
+
+## Catalog copilot
+
+With `llm.catalog_copilot_enabled`, the catalog page answers questions over
+products, prices, subscriber counts and pending migrations
+(`POST /v1/console/catalog/ask`, catalog read permission, the `catalog-ask` rate
+limit). With `llm.catalog_drafting_enabled` it can also draft a price change or
+tier into the wizard's review step; nothing changes until a person confirms. It is
+not part of the Go `Client`.
+
+## Browser support
+
+The console formats amounts exactly from their decimal strings: that needs
+Chrome/Edge 106, Firefox 116 or Safari 15.4. The bundle targets
+`baseline-widely-available` (Chrome/Edge 111, Firefox 114, Safari 16.4); on
+Firefox 114–115 amounts under 10^15 native units still render exactly and larger
+ones say they exceed the browser's exact range rather than round.

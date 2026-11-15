@@ -1,7 +1,6 @@
 # Stripe
 
-> Which flows are supported on this rail, and how well each one is verified:
-> [rail certification matrix](certification-matrix.md).
+> What each rail supports: [rails](README.md).
 
 Connect a Stripe account to OpenRails as a PSP on the `stripe` rail. Stripe is a
 reserved gateway: the PSP name is `stripe` (a sandbox account is conventionally

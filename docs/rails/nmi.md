@@ -1,7 +1,6 @@
 # NMI (high-risk gateway) setup
 
-> Which flows are supported on this rail, and how well each one is verified:
-> [rail certification matrix](certification-matrix.md).
+> What each rail supports: [rails](README.md).
 
 ### What NMI is, and where your ISO fits
 

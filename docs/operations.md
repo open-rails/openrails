@@ -1,1622 +1,629 @@
-# OpenRails Operations Manual
+# Operations
 
-The deep day-2 reference: how OpenRails stays consistent with the payment
-rails, what to run when it isn't, and the safety levers for doing any of this
-against production credentials. [operator-guide.md](operator-guide.md) is the
-orientation layer over this manual.
+Running an OpenRails deployment: what it needs, the safety levers, what runs by
+itself, what to do when it drifts, and how long it keeps what.
+[Dunning](dunning.md), [provider uncertainty](provider-uncertainty.md),
+[destructive-action limits](destructive-actions.md) and [Vault](vault.md) have
+their own pages.
 
-## The ownership model
+## Requirements
 
-Three facts decide every consistency mechanism: **OpenRails owns the
-catalog** (products + prices; providers hold copies); **the provider owns
-money state** (is a subscription alive, what was charged; OpenRails holds
-copies); **OpenRails owns entitlements — but they are derived**,
-deterministically, from catalog + money state + free product grants: a
-customer holds the current keys of the products they hold. So there are
-exactly four ways the system diverges, each with its own mechanism:
-
-| # | Divergence | Direction | Mechanism |
+| Service | Needed | Holds | Losing it |
 |---|---|---|---|
-| 1 | Catalog wrong at the provider | separate provider workflow | `catalog apply` commits local catalog changes and read-verifies existing provider bindings. Its one provider write publishes the on-chain plan of a recurring Solana price declared without one, before the local commit ([Solana](rails/solana.md)); it updates no provider object and queues no provider work. Other changes requiring provider writes fail before local mutation. OpenRails owns the catalog: nothing watches provider catalogs for drift, and catalog prune never deletes provider extras |
-| 2 | Money state wrong locally | pull (provider → OpenRails) | webhooks in real time; **Provider Refresh** as the always-on scheduled read; a manual PSP import (`POST /v1/merchant/psp-imports`) re-reads a PSP on demand, its differences becoming proposals |
-| 3 | Outbound action never executed | (intent, not sync) | **durable intent + replay** — see "Durability model"; the Convergence Engine's stuck-intent check is its detector |
-| 4 | Entitlements inconsistent | derived | the **Convergence Engine** re-derives them once 1–3 are true |
+| PostgreSQL 18+ | yes | everything: the ledger, grants, subscriptions, access, catalog, provider intents and River's queue. It can share an instance with the host app; OpenRails owns one schema (`billing`) and its River schema (`billing_river`). | data loss. Provider-owned facts can be re-read with a PSP import; the ledger, credits, access and catalog exist nowhere else. |
+| Redis (or Garnet) | for more than one instance | rate limits, admin lockouts, captcha challenges, card-testing declines, spent DPoP proofs and admission-denial counters | without it these live in each process's memory, right for one instance only. No money path needs Redis. |
+| Vault | optional | with `vault.kv_mount`, every merchant's configuration, credentials included; a Transit mount signs for Solana | without a KV mount the merchant manifest is the configuration, read-only. With one, startup needs Vault; afterwards each replica rides out an outage from its cache. |
 
-## One authoritative billing database
+The standalone server's signing keys are `keys.json` in `auth.keys.path`
+(`AUTH_KEYS_PATH`, file-watched) or `AUTHKIT_ACTIVE_KEY_ID` /
+`AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` / `AUTHKIT_PUBLIC_KEYS`. The same directory
+holds `totp.key`; boot refuses a control plane with neither `totp.key` nor an
+email or SMS sender, because the root owner needs a second factor.
 
-All active replicas for a merchant's billing book must share one PostgreSQL
-database with one writable primary. Database admission locks, unique operation
-keys and executor claims coordinate those replicas. Independently writable
-copies of that database using the same payment-provider account are unsupported:
-each copy can acquire its own locks and try to collect the same renewal.
+There is no row-level security: every tenant query carries its `merchant_id`
+(or `psp_id`) predicate, backed by composite foreign keys. Run migrations and
+the server as one role, which owns what it creates; two apps sharing a schema
+connect as that role or `SET ROLE` to it. Locally, `task docker-up` starts
+PostgreSQL, Redis and the server on `:3053` (`task docker-down`,
+`task docker-reset`).
 
-Provider idempotency supplements database coordination within each provider's
-documented limits; it does not make independent copies safe for active-active
-billing. A provider lookup followed by a charge is not an atomic lock.
+## Who owns what
 
-Two fences keep a copy from billing:
+OpenRails owns the catalog; the provider owns money state (is a subscription
+alive, what was charged); access is derived from both. So there are four ways to
+diverge:
 
-- **The book's identity.** `billing.book_identity` records the PostgreSQL
-  cluster, database and schema the book was armed in. Anywhere else (a dump
-  restored into another database or schema, a major-version upgrade that
-  re-initializes the cluster) every provider write is readonly, startup logs
-  an error, and `openrails book status` says so. Once every other copy is
-  stopped, `openrails book arm --by NAME` arms this one. A promoted physical
-  replica keeps the identity, so failover needs nothing; a physical clone (a
-  disk snapshot, a base backup started as a second server) keeps it too, so
-  rotate the PSP credentials before running one.
-- **The merchant's write posture.** `billing.merchant_write_posture` can
-  lower one merchant below `provider_write_mode`: the effective mode is the
-  lower of the two. A billing export leaves its source readonly and an import
-  lands readonly, so a moved merchant bills from neither copy until
-  `openrails merchant arm --merchant NAME --by NAME` arms the one that stays.
+| Divergence | Mechanism |
+|---|---|
+| Catalog wrong at the provider | none needed: `catalog apply` only reads existing provider bindings (and may publish a recurring Solana price's on-chain plan). Nothing watches provider catalogs. |
+| Money state wrong locally | webhooks; [Provider Refresh](#provider-refresh) every 2 h; a manual PSP import (`POST /v1/merchant/psp-imports`) whose differences become proposals |
+| Outbound action never executed | the [provider intent ledger](#provider-intents) |
+| Access inconsistent | the [Convergence Engine](#convergence) re-derives it |
+
+## One billing database
+
+All replicas serving a book share one PostgreSQL database with one writable
+primary; locks, unique operation keys and executor claims coordinate them.
+Independently writable copies using the same PSP accounts are unsupported: each
+would take its own locks and collect the same renewal. Provider idempotency
+does not make them safe, and a provider lookup followed by a charge is not a
+lock. Keep replicas NTP-synchronized; leases and provider deadlines need it.
+
+Two fences stop a copy from billing:
+
+- **Book identity.** `billing.book_identity` records the cluster, database and
+  schema the book was armed in. Anywhere else (a dump restored elsewhere, a
+  re-initialized cluster) every provider write is readonly and
+  `openrails book status` says so. `openrails book arm --by NAME` arms it once
+  every other copy is stopped. A promoted physical replica keeps the identity,
+  and so does a physical clone: rotate the PSP credentials before running one.
+- **Merchant write posture.** `billing.merchant_write_posture` lowers one
+  merchant below `provider_write_mode`. A billing export leaves its source
+  readonly and an import lands readonly, until
+  `openrails merchant arm --merchant NAME --by NAME`;
   `openrails merchant hold --mode readonly|limited` holds one merchant.
 
-Follow the [offline merchant transfer procedure](merchant-portability.md) when
-moving a book: stop and drain source writers, disable automatic restarts, keep
-destination writers stopped during restore, then activate only the destination.
-Once destination billing starts, rollback requires another controlled transfer
-of current state. Never restart the stale source snapshot as a rollback.
-
-`provider_write_mode: readonly` blocks provider mutations, but still permits
-verified local receipt recovery, additive provider reconciliation and webhook
-ingestion. It does not make a running source
-quiescent. Where supported, revoking separately scoped source credentials at the
-provider offers stronger protection against accidentally restarting an old copy.
-
-Provider coverage and unresolved findings are observations, not global write
-gates. Each operation still verifies its own target, ownership and payment
-evidence under the configured write mode. See [provider recovery](provider-recovery.md)
-for the observation scope and limits.
-
-## Running several instances
-
-Several instances can serve one billing book: replicas of a host app that each
-call `openrails.New` and `Start` (embedded), or several `openrails run-server`
-and `run-worker` processes (standalone). They need the database and Redis, and
-nothing from each other: there is no instance count to configure, no primary
-instance and no sticky session. Without Redis, run one instance.
-
-### What they share
-
-- **PostgreSQL**, one writable primary (above): every record, River's queue and
-  its leader election (in the River schema), request idempotency claims,
-  webhook deduplication, provider intents, and the locks that admit a charge.
-- **Redis**, named by `Config.Redis` (an address or a `redis://` or `rediss://`
-  URL, with an ACL user and TLS as needed) or `Deps.Redis`, any
-  `redis.UniversalClient`: one node, Sentinel failover or a cluster. Rate-limit windows,
-  admin lockouts, captcha challenges and card-testing declines are counted
-  there, once for the whole fleet. Without Redis they live in each process's memory, which is right for
-  one instance only: several would each allow the full limit, and a lockout or
-  challenge set on one would not hold on another. They are never in
-  PostgreSQL. A declared Redis that stops answering costs sharing, not service:
-  each instance keeps them in its own memory meanwhile, logs an error,
-  counts `openrails_abuse_state_fallbacks_total` and reports Redis degraded in
-  readiness without failing it. When it answers again each instance returns to
-  it, and what its memory counted or held meanwhile still counts: an outage
-  never resets a limit, a lockout or a card-testing block. Redis also carries
-  the admission-denial statistics, which are not recorded while it is down.
-- The standalone server's AuthKit counts its rate limits and records spent
-  single-use proofs in Redis, or without it in the process's memory: several
-  instances need Redis. While a declared Redis fails, each instance keeps its
-  own.
-
-### What must be identical
-
-- **Configuration**: the schemas, `ProviderWriteMode`, the
-  merchant's configuration (`Config.Merchants` with its PSPs and secrets, or the
-  same Vault KV mount), `Config.RateLimits`, `Config.Captcha`,
-  `Config.TrustedProxies` and `Config.ReturnOrigins`. Every start applies the
-  declaration (never a catalog, which an operator applies once for all
-  instances): instances
-  declaring different SCIM tokens replace each other's token at each start.
-- **Routes**: every instance mounts the same `openrails.Routes` (prefix,
-  permission bundles, admin console). A load balancer sends any request to any
-  instance, so a route mounted on some instances is a 404 on the others.
-- **Keys**: the standalone signing key (`AUTHKIT_ACTIVE_KEY_ID` and
-  `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM`, or `keys.json` in `auth.keys.path`) and the
-  `totp.key` beside it, since a token one instance signs is refused by another
-  (`auth.keys.allow_ephemeral_dev_keys` makes a key per process: one instance
-  only); the captcha secret.
-- **Version**, except during a rolling upgrade.
-
-### Ledger diagnostics and worker retirement
-
-Ledger integrity is checked during export and before a restored transaction can
-commit. Ordinary transfers maintain account counters atomically. Run
-`openrails ledger-audit --merchant=id:<uuid>` for an explicit diagnostic; a
-finding makes the command exit non-zero. There is no recurring ledger audit or
-automatic ledger finding producer. Privileged corruption and future defects are
-therefore detected by explicit diagnostics, not a daily scan.
-
-When adopting the version that removes `openrails.ledger_integrity`, stop the old
-worker fleet first. Let any running audit finish, then cancel only its waiting
-reporting jobs in that fleet's configured River schema before starting the new
-fleet. These jobs have no business effects to transfer. With `psql`'s
-`river_schema` variable set to that exact schema:
-
-```sql
-SELECT id, state FROM :"river_schema".river_job
-WHERE kind = 'openrails.ledger_integrity'
-  AND state IN ('available', 'pending', 'retryable', 'scheduled', 'running');
-
-UPDATE :"river_schema".river_job
-SET state = 'cancelled', finalized_at = now()
-WHERE kind = 'openrails.ledger_integrity'
-  AND state IN ('available', 'pending', 'retryable', 'scheduled');
-```
-
-Keep terminal job history and existing findings. Review existing ledger findings
-with `ledger-audit`; removal does not resolve or erase them. Apply the normal
-forward migrations, which preserve the deferred restore constraint and move
-inconsistent-ledger rejection to transaction commit.
-
-### Background work and leadership
-
-Every instance that calls `Start` (or runs `run-server` without `--no-workers`,
-or `run-worker`) works River jobs; River hands each job to one instance. River's
-rescuer returns a job whose instance died to work once it has run past its
-timeout (10 minutes for most kinds, see below). Periodic work is scheduled by River's leader alone: the first instance
-to start leads, an instance that closes resigns and another takes over at once,
-and a crashed leader is replaced within about 20 seconds. Periodic deadlines
-survive leadership changes and restarts through retained River job history. Startup recovery catches up an overdue pass; it does not
-repeat a pass whose interval has not elapsed. A new leader preserves the next
-deadline rather than delaying it by another interval. Job history is retained
-for at least the longest configured interval (30 days for usage collection);
-operators may retain it longer. A host fleet (`openrails.WithRiverClient`)
-follows the same rules, and every replica's fleet in that River schema must carry OpenRails' jobs:
-whichever replica leads schedules them.
-
-Outside River, every instance runs the Solana Pay poller, which shares
-references through leased claims, and verifies its own PSP credentials at
-start and whenever a PSP's configuration changes. From its first cross-currency
-quote until it closes, an instance reads FX rates into its own memory every 2
-hours, whether or not it calls `Start`.
-
-### Caches
-
-Catalog, merchant lookups, write posture, the kill switch and entitlements are
-read from PostgreSQL per request: an edit through one instance is read by every
-other on its next request. Merchant configuration (settings, PSPs, credentials)
-is a file or Vault, cached per instance. Per-instance caches:
-
-| Cache | An edit elsewhere shows after |
-|---|---|
-| Merchant configuration | an edit through OpenRails: at once (`NOTIFY`); one made in Vault directly: within 30 seconds of the merchant's next use; a file: the instance's next start |
-| A Solana Transit cranker's public key | 60 seconds |
-| FX rates | the instance's next refresh (every 2 hours); a rate published 48 hours ago is never quoted |
-| `GET /v1/config` in browsers and CDNs | 5 minutes (`Cache-Control`) |
-| PSP posture verdicts | at once, when the PSP's configuration changes |
-
-### What scales
-
-- **HTTP**: any instance serves any request: payment pages, webhooks, the
-  admin console and its API.
-- **Webhooks**: one effect per provider event however many instances receive
-  it. A copy arriving while the first is applied waits up to 10 seconds, then
-  answers 500 so the provider retries.
-- **Idempotent requests**: one execution per key; a retry on another instance
-  replays the result, or answers 409 while the first still runs.
-- **Money**: one charge per renewal and retry slot, one payment per provider
-  transaction, one grant, one ledger posting and one email per notification.
-- **Workers**: each standalone instance works up to 20 billing jobs at once,
-  so instances add throughput. Readiness needs the instance's own workers, so
-  every `run-server` instance runs them (`--no-workers` is never ready); add
-  `run-worker` instances for background work that serves no HTTP.
-- PostgreSQL is the limit: size `max_connections` for every instance's pool,
-  plus one connection per instance whose merchant configuration is in Vault (it
-  listens for edits).
-
-### Rolling upgrades
-
-`New` and `run-server` migrate before serving, under an advisory lock: the first
-instance migrates, the others wait for it, and none fails or applies a
-migration twice. Migrations are additive, so instances of the previous build
-keep running on the migrated schema and a rollback to it is safe; the newer
-migration stays. Before v1 a release whose notes name a breaking migration is
-the exception: no rollback past it, and hosts sharing the schema upgrade
-together. `openrails migrate up` can run first as a deploy step
-instead. During the rollout a browser may load the admin console from a new
-instance and its assets from an old one; a reload fixes it once the rollout
-ends.
-
-## Mutation Flags
-
-`push-merchant-config` is create-only: bare, it only reports what the manifest
-declares; `--insert` (or `--seed`) creates its missing merchants. `--overwrite`
-and `--prune` are refused as retired: a merchant's configuration changes at its
-revision (`PATCH /v1/merchant/configuration`, the PSP routes). Catalog
-application instead carries optional `prune` in its document; it has no
-insert/overwrite flags. Each canonical catalog content hash is remembered
-permanently, so replaying an old document never rolls back later edits.
-
-### CLI inventory
-
-Global flags on every command: `--config/-c` (default `config.yaml`) and
-`--provider-write-mode` (flag beats env beats yaml).
-
-One-off commands open only their required resources and print their result,
-useful progress and actionable errors. They do not start the HTTP server or a
-worker fleet. JSON/YAML exports keep standard output suitable for parsing.
-Database connection setup is bounded; a long-running operation keeps its own
-context after connecting. `run-server` and `run-worker` retain normal startup
-and operational logging.
-
-| Command | Purpose |
-|---|---|
-| `run-server [--no-workers]` / `run-worker` | serve the public API (+ workers unless disabled; `--no-workers` remains live but not ready) / workers only |
-| `migrate up` / `migrate pg` | apply OpenRails' and River's migrations ahead of a rollout; the server applies them, and AuthKit's, at boot |
-| `migrate status [--json]` | compare embedded OpenRails migrations with the applied ledger; non-zero unless names and hashes match exactly |
-| `access-cutover preflight [--approve NAME] [--json]` | list every customer and key the cutover to product access changes; `--approve` records them so the cutover migration applies exactly that list — see "Cutover to product access" |
-| `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
-| `push-merchant-config [--file] --insert` | initialize missing merchant identities and snapshot metadata; existing metadata is preserved |
-| `get-merchant-config` / `apply-merchant-config --merchant NAME --file PATH` | read or apply metadata using stable application ID and revision; local, or a `--server-url` remote Client acting on its token's merchant (no `--merchant`) |
-| `catalog apply PATH --merchant NAME [--force-conflicts]` | apply a catalog document and print what changed: each product, price and meter applies whole unless an edit set a field it names differently, which is skipped, listed, and exits non-zero (`--force-conflicts` overwrites it); a refused document exits non-zero. A document that applied whole replays by content hash; omission is preserved unless `prune: true` ([catalog ownership](catalog-ownership.md)). Starting the server never applies a catalog |
-| `catalog export --merchant UUID --out PATH` / `catalog import --merchant UUID --in PATH` | [full catalog YAML snapshot](catalog-export.md), preserving archived rows, original IDs and retained history; restore requires an empty catalog |
-| `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / [active catalog YAML](catalog-export.md); full billing history uses `billing export` |
-| `prune --merchant NAME [--psp ID\|KEY] [--expect-rows N]` | soft-delete a PSP's local subscriptions and payments its provider no longer lists; plan-only without `--expect-rows` — see "Prune" |
-| `proposals list\|show\|approve\|dismiss\|foreign\|runs` | review the changes provider reads propose; approve, dismiss or close them as foreign; list approval runs — see "Proposals" |
-| `prune list` | list the merchant's destructive runs (prunes, approvals), newest first |
-| `undo-run --run <id>` | plan or apply the reversal of one destructive run, whatever kind — see "Reversing a destructive run" |
-| `intents` / `intents-log` | read-only intent-ledger views — see "Inspecting the ledger" |
-| `book status` / `book arm --by NAME` | report whether this database is the billing book's armed copy / arm it once every other copy is stopped |
-| `merchant arm` / `merchant hold --mode readonly\|limited` (`--merchant NAME --by NAME`) | restore or hold one merchant's provider writes; export and import leave it readonly |
-| `merchant purge --merchant NAME --by NAME [--inventory RUN --expect-rows N --confirm PHRASE]` | alone, record and print a purge inventory; with its `id`, `total_rows` and `confirm_phrase` typed back, permanently delete the merchant's rows (the destructive-action switch must be on). A job queued with the purge deletes its Vault configuration ([vault.md](vault.md#merchant-purge)) |
-
-The `push-*` commands push declared file state outward; `prune` reads a
-provider and never writes one.
-
-### Merchant secrets
-
-A PSP's secrets are part of the merchant's configuration: the manifest's
-`merchants.<slug>.psps.<psp-key>.secrets` (secret overlays:
-`merchant_manifest_overlays`) without Vault, the PSP's Vault document with it
-([vault.md](vault.md)). The retired anchors (`accounts`,
-`rail_merchant_accounts`, `provider_accounts`) fail loudly with a rename
-error. Purchase, webhooks, tokenization, provider intents and pulls all arm
-per PSP from it.
-
-## Private Standalone First Run
-
-On an empty private standalone install, run the file-backed push commands as
-an init job or manual operation:
-
-```bash
-openrails push-auth-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
-openrails push-merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml --insert
-openrails catalog apply /run/openrails/catalog.yaml --merchant your-merchant --config /etc/openrails/config.yaml
-```
-
-`push-auth-bootstrap` runs first because it creates the initial AuthKit root
-operator; merchant config then creates OpenRails merchant groups, PSP rows,
-and secrets. A server started with `--merchant-manifest` (or a mounted
-`/etc/openrails/merchants.yaml`) does the merchant step itself at every boot:
-it creates what is missing and preserves later API edits. Restarts never
-apply catalog files. With people signing in at a trusted issuer,
-`push-auth-bootstrap` has nothing to do. If `/etc/openrails/bootstrap.yaml`
-is mounted, startup bootstrap is first-run only and limited to AuthKit
-authority.
-
-## Durability model
-
-**Outbound — durability is OUR job.** Every mutation OpenRails wants to make
-against a provider must survive failure of the attempt. The mechanism is the
-**provider intent ledger** (`billing.provider_intents`): every outbound
-mutation is durably recorded with an idempotency key (re-enqueues dedupe), an
-origin (`user`/`admin`/`system`), the PSP row it was produced against, and a
-relevance window. Each intent but a manual card removal (below) has its own
-River job (`openrails.provider_operation`), queued in the transaction that
-records it.
-The job claims the intent under a lease, checks relevance, gates on operating
-mode × origin, executes and classifies the outcome; an `unknown_needs_verify`
-outcome is resolved by provider READS before any retry. Until the intent is
-final, the job sleeps to its next attempt.
-
-Statuses: `pending`, `in_flight`, `succeeded`, `failed_retryable`,
-`failed_terminal`, `unknown_needs_verify`, `superseded`, `expired`. Failure
-reasons — provider down, `readonly`/`limited` mode, unarmable credentials —
-are not errors; they are reasons an intent stays pending, recorded on the
-row. When the blocker lifts, the queue drains. Intents that outlive their
-relevance window (a delete after the subscription resumed; a rebill past the
-dunning window) are superseded or expire instead of firing stale. The mode ×
-origin gate: nothing writes under `readonly`; `limited` blocks system-origin
-intents (dunning charges, proactive deletes) while user/admin intents
-execute; `full` executes everything; an unrecognized origin parks.
-
-Every outbound provider mutation flows through the ledger: deferred NMI
-deletes, NMI/Stripe refunds, dunning `manual_rebill` charges, CCBill
-cancels, payment-method swaps, vault deletes, purchase NMI sales, Solana
-recurring pulls and the payment page's Stripe payment-method domain
-registrations.
-
-Manual card removals also retain their target and receipt in this ledger, but
-never create an automatic job. Only an explicit request can execute or retry
-them, and HTTP success requires confirmed removal. After a timeout, the next
-manual request verifies the prior result; qualified native custodian DELETE
-contracts may instead safely repeat the exact accepted target. Local removed
-rows preserve order and card-version history while remaining unchargeable and
-hidden from customer card lists.
-
-Execution is **effectively-once**, never assumed exactly-once. Per class:
-money-movers park ambiguous outcomes as `unknown_needs_verify` and are
-resolved by *reading* the provider before any retry — a charge is never
-blind-retried; deletes/cancels are verify-then-execute (already-deleted =
-success); creates are content-addressed find-or-create. Stripe ops
-additionally send `Idempotency-Key`. Every attempt/outcome is appended to
-`billing.provider_mutation_logs`.
-
-**Several replicas.** Hosts may run any number of processes against one
-authoritative database and River schema. Rebilling coordination uses the
-database: admission locks the customer and subscription
-rows; unique indexes allow one unresolved charge operation per subscription
-and one engine operation per (period, attempt) slot; the write-once submission
-fence admits one sender per charge; completion re-reads the operation under the
-same locks. A pass that finds its membership already settled by another replica
-does nothing. Lease checks and provider-call deadlines require synchronized
-instance clocks; keep replicas NTP-synchronized. A known failure before dispatch
-retains proof that permits another attempt. A crashed sender cannot supply that
-proof merely because a provider lookup is empty.
-Database claims are not a provider-enforced fence against an arbitrarily paused
-sender or an independently writable database copy.
-
-**Renewal deduplication.** New engine renewal operations have a deterministic
-identity for the merchant, PSP, subscription, original period boundary and
-attempt. A network retry keeps that identity. A new payment attempt follows only
-a conclusively closed earlier attempt; a changed card or amount is not an excuse
-to generate a different identity for the same attempt. Already accepted
-operations retain their original IDs.
-
-Stripe PaymentIntents retain the renewal obligation, attempt and accepted-term
-binding in metadata. Before submission, OpenRails lists the customer's provider
-payments and checks that metadata, then reads any matching payment by ID. An
-existing matching payment is recovered; conflicting terms or another executable
-or paid attempt require reconciliation. This uses customer listing rather than
-Stripe's [eventually consistent Search API](https://docs.stripe.com/api/payment_intents/search).
-Native NMI saved-card renewals use the persistent obligation
-order reference and check for a qualified existing payment even before the
-first local attempt. The `order_description` identifies the exact operation
-(`OpenRails renewal <operation UUID>`), so a previous attempt's decline cannot
-release a newer uncertain payment. Decline recovery also checks the frozen
-instrument, amount and currency. These lookups can find charges after a
-provider's duplicate window has elapsed, but a lookup and a subsequent charge
-are not atomic.
-
-[Stripe may discard idempotency keys after 24 hours](https://docs.stripe.com/api/idempotent_requests).
-Automatic resubmission of an
-uncertain Stripe renewal therefore stops before that deadline, with clock and
-provider-call margins measured from its original submission fence. Reads of the
-existing payment continue. An empty or unavailable lookup after that deadline
-leaves an unresolved-submission finding; it does not authorize another charge.
-Provider receipts and operator reconciliation must resolve that uncertainty.
-NMI duplicate-check behavior depends on the account/processor; an order reference
-is a lookup key, not a provider-enforced uniqueness constraint. Once an NMI
-submission may have reached the gateway, OpenRails only reads its outcome and
-never automatically submits it again. Empty Query API results have no documented
-visibility deadline. An unknown outcome keeps its durable claim and raises
-`life.submission.unresolved`; a later matching receipt completes it. If the
-request actually never arrived but its sender crashed after the submission
-fence, operator/provider reconciliation is necessary. NMI cannot provide both
-unconditional automatic recovery and a guarantee against duplicate charges in
-that ambiguous window.
-
-**Outages within a billing period.** After a five-day outage of a monthly book,
-startup's normal due passes and River's rescuer recover queued work and overdue renewals.
-The payment covers the original due period and preserves its next billing date.
-Fresh collection is refused once the entire next renewal period has elapsed;
-an accepted but never-submitted operation also expires at its frozen period end.
-This produces a reviewable finding instead of shifting the schedule or charging
-a backlog. Already submitted payments continue receipt recovery even after that
-boundary.
-
-Automatic usage billing checks per-account due records in each hourly billing pass and
-catches up overdue work after a restart. A fixed account billing date and its
-minimum invoice amount decide when pending accruals become an invoice; threshold
-crossings also wake the same processor. Smaller balances carry forward without
-creating an invoice, and threshold payments never move the monthly billing date.
-There is no global thirty-day collection slot. Existing payment operations retain
-their claims, retries and uncertain-result recovery. Subscription-only hosts keep
-`usage_billing_enabled: false`. See [usage billing](usage-billing.md).
-
-**Inbound — durability is the PROVIDER's job.** NMI, CCBill and Stripe
-deliver webhooks at-least-once and retry from their end; our handlers are
-idempotent for exactly that reason. **There is deliberately no local inbound
-queue** — it would share fate with the database it protects. The backstop for
-an outage that exhausts the provider's webhook retries is Provider Refresh's
-watermarked event backfill (and, on demand, a manual PSP import).
-
-### Inspecting the ledger
-
-`openrails intents [--status=…] [--rail=…] [--type=…] [--merchant=…]
-[--format table|json] [--limit N]` lists the queued outbound mutations
-read-only. The default `--status=active` view is the live working set
-(`pending`, `in_flight`, `failed_retryable`, `unknown`); `succeeded`,
-`failed`, `superseded`, `expired`, and `all` are queryable explicitly. Each
-row reports `executes_under` (derived from its origin) and the footer prints
-the drain forecast: "N execute under mode=limited (or full), M require
-mode=full; nothing executes under readonly." Under `limited`/`readonly` this
-doubles as the dry-run view of a cutover.
-
-`openrails intents-log [--rail=…] [--intent=…] [--psp=…]
-[--phase=attempting|succeeded|failed|unknown|parked]` renders the append-only
-mutation-attempt log — the executor's audit trail.
-
-### Materialized backlog under mode=limited
-
-The dunning worker's scan runs under `limited` and records its decisions
-instead of skipping: window-expired `past_due` subscriptions (a freshly
-migrated backlog's bulk) are parked as unknown for provider verification,
-and in-window charges enqueue as PARKED system-origin
-`manual_rebill` intents — bounded by `expires_at` = the dunning window, so
-one can never fire stale after the mode lifts; the handler re-checks
-relevance (still past_due, same period) at execution. Materialize never
-claims the subscription (claiming writes `last_retry_at`, which is
-dunning-forensics evidence imported from legacy) and never applies failure
-policy or local terminal cancellation. `readonly` holds new provider writes and policy-held local cancellations;
-provider reads and verified local financial recovery continue. NMI/Stripe
-freshness checks also hold destructive decisions until the account catches up.
-
-### PSP binding and credential rotation
-
-`billing.psps` is an **operator-declared** catalog: one row per merchant
-PSP account on a rail, with an opaque declared `account_id`, never derived
-from a credential. A Stripe key is checked against it: the posture probe and
-each thin webhook read `GET /v1/account`, and a key of another account is
-`mismatched` and never armed. On the other rails the declaration is trusted.
-
-One local check stands: two live PSPs on a rail holding the same account
-credential (NMI `security_key`, Stripe `secret_key`) are one gateway account
-declared twice. The later one stays disarmed — its credentials read as absent,
-so its intents park and purchase never offers it — and a
-`consistency.duplicate_gateway_account` finding names it. With the
-configuration in a file its PSPs are compared at startup; with Vault each
-stores `psps.credential_fingerprint`, an HMAC of the credential under a random
-key Vault holds. Archiving the duplicate, or giving it its own credential,
-clears it.
-
-A PSP is its account (rail, money class, `account_id`); its key is only the
-label the configuration and the catalog name it by. Renaming the key keeps the
-PSP. Declaring the key with another account registers that account as a new
-PSP for new sales, and price bindings follow the key on the next catalog
-apply; the account it named keeps every record and, undeclared, has no
-credentials: whatever needs them (a renewal on a card in its vault, a refund
-of a payment it captured) fails on its own, naming it, and its webhooks are
-refused with a warning. While it holds cards in its vault or subscriptions it
-bills, readiness and `openrails_configuration` report it and a
-`consistency.merchant_config.undeclared_account` finding stays open; holding
-only history it is informational. Declaring the account again, under any
-key, re-arms it.
-
-Adding or changing a PSP pulls nothing: a person [pulls it](psp-import.md#pulling)
-with `CreatePSPImport`. When the provider refuses its credentials, that
-import fails with `psp_credentials_rejected`; correct them and create another.
-
-Every provider intent is stamped at enqueue with the `psp_id` it was produced
-against, and the executor/verifier arm the rail client for **that** PSP row
-from its scoped secrets at drain time. A PSP whose credentials cannot be
-armed fails closed: its intents park (never execute against a different
-account) until the credentials return or the intent expires/supersedes.
-Rules:
-
-- **Rotating a credential within the SAME PSP**: replace the
-  secret under the same PSP row — intents arm with the new value
-  transparently. `PATCH /v1/merchant/psps/{id}` (and the console's
-  **Rotate** action) is atomic in the way that matters:
-  - the **new** credential is live-probed against the provider *before*
-    anything is written (NMI and CCBill today). A probe failure fails the whole
-    request — no secret is stored, no watermark moves, and the **old credential
-    keeps serving**, unchanged, everywhere.
-  - a committed rotation rewrites the PSP's Vault document alone, and every
-    replica reloads the merchant at once (Postgres `NOTIFY`); no restart or
-    cache flush is part of the procedure. Name the PSP's `expected_revision`
-    and a concurrent edit is refused (`409 revision_mismatch`).
-  - omit a credential from the request to leave it (and its watermark) alone;
-    re-submitting an identical value is a no-op, not a rotation.
-- **Moving to a DIFFERENT PSP**: never repoint an existing PSP
-  row's credentials (OpenRails cannot detect the swap — the declared
-  `account_id` would silently lie). Arm a NEW PSP and archive
-  the old one; `archived` is drain-only — no new purchase/pull work selects
-  it, but it remains addressable for existing obligations and inbound events.
-  `PATCH /v1/merchant/psps/{id}` with `{archived: true}` makes no provider call, so it
-  works when the old provider is terminated or unreachable.
-- **Pending intents stamped with the old PSP do not follow** a credential
-  move: keep (or restore) the old PSP's credentials until its queue drains,
-  or let stale intents expire/supersede via their relevance windows. There is
-  no rebind command.
-- **Identity is the PSP id, not its key.** Provider references (price links,
-  vault references, webhook dedup) belong to the PSP's id, so renaming or
-  archiving a PSP moves nothing.
-- **Subscribers on an archived PSP stay there.** OpenRails never moves or
-  cancels a working provider-owned subscription. An archived PSP takes no new
-  purchases; its live subscriptions keep renewing on it and stay monitored. A
-  subscriber leaves it only when their card lapses and they buy again with a
-  new card, which lands on an active PSP.
-
-### Custodians
-
-`billing.custodians` is the same kind of catalog, one axis over: a row is
-one merchant-owned account with a third-party card CUSTODIAN (Basis Theory
-today). A PSP names it by key in its configuration (`custodian: <key>`), so
-one custodian can back several gateways — its tenant id and its private
-application key exist once, not once per PSP.
-
-Custodial credentials are scoped by the custodian's own identity,
-`custodians/<kind>/<environment>/<account_id>/<key>`, exactly as PSP
-credentials are scoped by theirs. Rotation and archival follow the PSP rules
-above verbatim: rotate in place under the same row; to move to a different
-custodian account, declare a NEW one and archive the old one for drain — an
-instrument the old custodian holds is never re-vaulted or destroyed.
-
-Inbound custodian webhooks route by the global `(kind, environment,
-account_id)` key. They resolve the
-CUSTODIAN, not a PSP: the event is about the stored instrument, and asking
-which of several referencing PSPs it belongs to has no answer.
-
-## Prune
-
-Manual-only — **never scheduled**. It reads a provider and never writes one.
-
-```
-openrails prune          --merchant=<slug> [--psp=<id|key>] [--rail=nmi,stripe,…]
-                         [--since=… --until=…] [--manifest=…] [--format table|json]
-                         [--log-dir=…] [--expect-rows=N]
-openrails prune list     --merchant=<slug> [--limit=N] [--format table|json]
-openrails proposals runs --merchant=<slug> [--limit=N] [--format table|json]
-openrails undo-run       --merchant=<slug> --run=<id> [--apply --expect-rows=N] [--format table|json]
-```
-
-A prune reads a PSP's roster and transactions and retires the local
-subscriptions and payments attributed to that PSP that the provider no longer
-lists. `--psp` names one PSP by id (archived ones included) or key; without it,
-each armed rail's PSP is read, narrowed by `--rail`. Payments prune only inside
-a `--since`/`--until` window the provider listed completely. `--manifest` arms
-mode-1 credentials from a merchant manifest. A prune waits for the merchant's
-pull lock, so it never runs beside a scheduled refresh; an applied one then
-runs `Converge(merchant)`. Each prune writes a log to `--log-dir`.
-
-To re-read a PSP without removing anything, create a manual PSP import
-(`POST /v1/merchant/psp-imports`); its differences become proposals.
-
-### Proposals
-
-Every difference a provider read finds that OpenRails could apply is a
-proposal: a `pull.*` finding carrying a `change` (its kind, subject, from and
-to, effects, the basis it was computed against and the provider evidence). A
-person approves or dismisses it:
-
-```
-openrails proposals list    --merchant=<slug> [--psp=KEY] [--pull=pim_…] [--kind=K] [--source=pull|verification]
-openrails proposals show    --merchant=<slug> <fnd_id>
-openrails proposals approve --merchant=<slug> <fnd_id>… [--notes=N]
-openrails proposals approve --merchant=<slug> --psp=KEY --kind=record_charge --expect=N [--notes=N]
-openrails proposals dismiss --merchant=<slug> <fnd_id>… --notes=N
-openrails proposals foreign --merchant=<slug> <fnd_id>… --notes=N
-openrails proposals runs    --merchant=<slug>
-```
-
-- Each id applies in its own transaction, through the lifecycle decider; a
-  call is 1 to 100 ids. A filtered set prints itself and applies only when
-  `--expect` equals its size.
-- An id whose basis moved (the subscription changed, the charge or card was
-  recorded since) is `superseded`, as is an end of access whose evidence is
-  older than 7 days. Nothing applies.
-- The kill switch holds changes that end access or write to a provider, and a
-  readonly write posture holds changes that move money or write to a provider:
-  they are `held` and stay open.
-- One approve call is one `approval` run on the maintenance ledger, recording
-  who approved; `undo-run --run <id>` reverses its lifecycle and access
-  changes. Recorded money facts and provider writes already sent stay.
-- A dismissed proposal comes back only when a read yields other provider
-  evidence. Dismissing silences it; a financial `pull.*` finding still holds
-  [provider recovery](provider-recovery.md).
-- `foreign` closes a `pull.subscription.missing` schedule that is not this
-  merchant's obligation, such as another environment's on a shared gateway.
-  It is refused while a subscription of the PSP has the schedule's id, a
-  payment method or PSP customer of the PSP has its customer reference, or
-  the read matched it to a customer by email. It applies to an open finding
-  and to a dismissed one, which still holds recovery; the dismissal is kept
-  in the finding's evidence. A foreign schedule no longer holds provider
-  recovery, and a second `foreign` answers `already_resolved`.
-
-Over HTTP the same calls are `ListProposals`, `ApproveProposals` and
-`DismissProposals` (`/v1/merchant/proposals`); approving and dismissing take a
-person signed in or the in-process host, never an API key
-(`person_required`). Applying a PSP import approves its corrections, the
-proposals that keep or extend access, under one approval run in the name of
-the person who applied it ([PSP import](psp-import.md#reconcile)).
-
-`ResolveFinding` refuses a `pull.*` finding (`finding_requires_merchant_config`).
-
-### Foreign provider objects
-
-A gateway shared with another deployment shows its sales and schedules. A pull
-raises findings about an unknown object only at full severity when the object
-carries this book's id (see [provider recovery](provider-recovery.md)); otherwise
-the finding is low, `evidence.quiet_foreign` is true, and it neither alerts nor
-holds recovery.
-
-### A prune is reversible, and refuses uncertainty
-
-A prune acts on ABSENCE — "the provider did not list this row" — the weakest
-evidence there is. So it is built to be undone and hard to fire by accident:
-
-- **Nothing is deleted.** Eligible rows are soft-deleted (`deleted_at`) and
-  stamped with a destructive-run id. They vanish from every live read; the data
-  stays.
-- **Without `--expect-rows` a prune is a plan.** It reports what it would
-  retire and writes nothing. Applying needs `--expect-rows N`, and N must equal
-  the number the plan reported — an operator who miscounts is stopped, not
-  obeyed. It applies to one PSP at a time.
-- **An empty provider roster refuses outright.** A successful-but-empty pull is
-  indistinguishable from a misdeclared `account_id`, a credential rotated onto a
-  sibling sub-account, or a provider incident. It never means "prune everything".
-- **Grant-entangled rows are skipped**, as before: retraction goes through
-  convergence, never removal.
-
-### An enforcing pull is reversible too
-
-A prune retires rows; an **enforcing** pull (the scheduled refresh) overwrites
-them — the measured incident is a bad NMI roster cancelling 40/40 subscriptions,
-which changed `status`, `ended_at`, `canceled_at`, the grace/retry schedule and
-the period bounds, and queued deferred NMI vault deletes behind them. Tombstones
-cannot undo that, so an enforcing pass records what it is about to overwrite:
-
-- it opens a `maintenance_runs` record — merchant-scoped, PSP-bound when the pass
-  is account-bound, carrying the coverage proof that authorised it;
-- it captures a **before-image** of each subscription (and of the entitlement
-  windows the transition closes) *before* writing. If the capture fails, the
-  transition is not applied;
-- it stamps the provider intents it queues with the run id.
-
-A pass with no way to record its undo refuses to run rather than doing
-irreversible damage.
-
-### Reversing a destructive run
-
-One verb reverses any of them. A prune destroys rows and reverses by clearing
-tombstones; an enforcing pass destroys row VALUES and reverses from the captured
-before-images — but `undo-run` reads the kind from the ledger and dispatches, so
-nobody can reverse the wrong way round and be told it worked.
-
-```
-openrails prune list --merchant=<slug>            # or `proposals runs`: find the run id
-openrails undo-run   --merchant=<slug> --run=<id>                        # PLAN — changes nothing
-openrails undo-run   --merchant=<slug> --run=<id> --apply --expect-rows=N
-```
-
-**Dry run is the default.** With no `--apply` the command prints what it would
-restore, the provider writes it would supersede, the ones that already fired and
-cannot be undone, plus the coverage proof that every live provider row is
-PSP-attributed (a non-zero count refuses the undo outright).
-Applying additionally requires `--expect-rows` to match that plan: an undo is
-itself a mass mutation of the live book, at the worst possible moment to be
-wrong.
-
-**Scope is a property of the run, not a flag.** The ledger row carries the
-merchant and — when the pass was account-bound — the PSP, and every restore
-predicate is keyed on the run id inside a merchant-scoped connection. Reversing
-one PSP's bad run cannot reach a sibling PSP's book, and cannot reach another
-merchant at all. There is no widening knob.
-
-An apply runs five steps in a fixed order:
-
-1. **Quiesce** — clears the merchant's first-enforce arming and trips its
-   destructive stop, so nothing re-cancels what is about to be restored.
-2. **Supersede the unfired intents FIRST**, before any row is restored. This is
-   the only step racing a live actor: the intent runner may claim a queued NMI
-   vault delete at any moment, and `superseded` is an ordinary forward status, so
-   neutralising a queued provider write is a lifecycle transition, not a rewrite
-   of the intent log. Only `pending`/`failed_retryable` count as unfired.
-3. **Restore** the rows, in one transaction with step 2 — a reversal that
-   superseded the intents but failed to restore the rows would leave the operator
-   worse off than before. A subscription a renewal, cancel or payment moved after
-   the run keeps that newer state: rewriting it could make a paid period due
-   again. The plan counts those rows as `subscriptions_changed`.
-4. **Invalidate and re-derive.** The product-access windows the run closed are
-   soft-deleted, never replayed, and `Converge` rebuilds them from the
-   append-only grant log the rollback never touched. The proven source-domain
-   flags are reset to unproven, because the post-rollback book is definitionally
-   incomplete and a stale `true` would license a mass retraction against it.
-5. **Report** — rows restored, intents superseded, and what could NOT be undone.
-
-What it never does: restore an entitlement directly (a restored effect can
-silently disagree with its grant; a re-derived one cannot), touch the ledger,
-grants, status transitions, or the intent/webhook/findings logs, resurrect a row
-some other run deliberately removed, or count a provider write that already fired
-as undone. Those are reported as **irreversible divergence**, with the
-provider-side consequence spelled out per intent type ("the NMI vault entry is
-gone; the customer must re-enter a card"); an `in_flight` or
-`unknown_needs_verify` intent is reported as **ambiguous** and left to its
-executor's lease. Resubscribe and card re-entry are operator and customer work,
-never an automatic provider re-write.
-
-Some kinds are refused by name rather than half-reversed: a `merchant_delete`
-run hard-DELETEs append-only rows nothing local restores (recovery there is a
-cluster PITR or a snapshot taken beforehand), and a kind that exists in the
-ledger but has not been made reversible yet says so instead of marking itself
-reversed.
-
-The final read is not optional. A rollback restores local state to before the
-run while the provider has moved on; `rollback → read → converge` is the
-complete operation. Re-read the PSP with a manual PSP import and review its
-proposals; the scheduled refresh runs **advisory** until an operator re-arms
-enforcement by hand.
-
-A pull is authoritative only for the `(merchant, rail, psp)` it actually
-queried; mirror reads/writes are scoped to that PSP row, and historical rows
-with NULL PSP attribution are never used as proof for destructive absence
-handling. NMI safety: canceled subscriptions *vanish* from NMI's recurring
-report rather than changing status, so a circuit breaker refuses
-absence-based conclusions when the remote active set is implausibly small
-versus local (protection against mass-cancellation from a bad fetch). Every
-local write a mutating run applies is logged (finding id, type, subject,
-evidence) and persisted as the finding's resolution evidence, so a run is
-fully reconstructable.
-
-**Materialize.** `pull.subscription.missing` findings (the rail bills a
-subscription OpenRails does not know) are auto-created locally **only when
-both halves resolve unambiguously**: identity through the engine's matcher (a
-single vault/email match — zero or multiple candidates never guess) and plan
-through the catalog's PSP links. A materialized subscription adopts the
-remote status and period, snapshots the product's entitlement spec like a
-normal signup, gets the latest successful charge backfilled as a payment, and
-grants entitlements through the ordinary path. Anything unresolvable stays in
-the admin queue with the blocker documented.
-
-**Dunning forensics — three evidence sources**, each timeline entry tagged:
-**provider** (the rail's own charge-attempt timeline, declines included —
-NMI transaction search, Stripe charges, CCBill exports); **local** (the
-retry fields on the subscription row — `last_retry_at` / `retry_attempts` /
-`next_retry_at` — preserved verbatim by legacy import); **history**
-(retained failed-payment receipts). Legacy retry-detail artifacts stay with
-the importing host; core does not store arbitrary imported dunning reports. Aggregates report per-source and combined
-last-action, never-attempted vs attempted-and-exhausted counts, and a
-decline-reason histogram; an unavailable history source degrades to a note,
-never an error.
-
-## The Convergence Engine
-
-The internal-repair half of the system (the pull feeds it). One idempotent
-**`Converge(scope)`**, for one customer or a whole merchant, runs: for a
-**customer**, in a job committed with each mutation that changed it (a
-lifecycle decision, a payment or refund recorded, a free grant or a revoke);
-merchant-wide **after every applied `prune`** and on the
-operator's `openrails converge`. Writers commit a change and its effects in
-one transaction, so there is no routine sweep: deadlines no event marks are
-indexed due work (below), and the health findings come from an hourly pass
-over the merchants with activity.
-
-Deadlines with no event:
-
-| Deadline | Picked up by | What happens |
-|---|---|---|
-| a provider-billed `past_due` row's grace ends with no retry scheduled | the due pass (hourly billing pass) | `unverified`: the provider is read by id, access kept |
-| a provider-billed renewal has no payment 48h after its period | the rebill watch (hourly billing pass) | `unverified`, as above |
-| a timed access window lapses | the health pass (hourly) | the customer's access-ended notice |
-| an engine renewal past its allowance, an unverified row past 72h, a stuck or abandoned provider operation | the health pass | `life.renewal.held`, `life.unverified.unresolved`, `life.provider_intent.stuck` / `.abandoned` |
-
-A clean scope is **zero writes** — the second run of anything is a no-op. The
-engine is the single writer of grants and grant effects, so each invariant
-has exactly one implementation. Doctrine, in brief: repairs **converge to the
-correct current state, never replay side effects** (three months of missed
-dunning becomes one terminal transition, not three charge attempts); grant
-effects (entitlements, credits, access) ARE replayable and are reconstructed
-anchored to source-event time; destructive repairs are gated — see below.
-
-### The finding taxonomy — four planes
-
-Every finding gets one self-describing qualified type,
-`<plane>.<subject>.<shape-or-condition>`, stored in
-`billing.reconciliation_findings.finding_type`:
-
-| Plane | The fact checked | Authority | Repaired by |
+Move a book only by the [offline transfer procedure](merchant-portability.md).
+Never restart a stale source as a rollback.
+
+## Several instances
+
+Any number of instances can serve one book: host replicas that each call
+`openrails.New` and `Start`, or `openrails run-server` and `run-worker`
+processes. There is no instance count, primary or sticky session.
+
+- **Shared:** PostgreSQL holds every record, River's queue and leader election,
+  idempotency claims, webhook deduplication and charge admission. Redis
+  (`Config.Redis`, an address or `redis://`/`rediss://` URL, or `Deps.Redis`,
+  any `redis.UniversalClient`) holds the abuse state above, never PostgreSQL. A
+  declared Redis that stops answering costs sharing, not service: each instance
+  falls back to memory, logs, counts `openrails_abuse_state_fallbacks_total`
+  and reports Redis degraded; what it counted meanwhile still counts when Redis
+  returns.
+- **Identical everywhere:** schemas, `ProviderWriteMode`, merchant
+  configuration (the same `Config.Merchants` or Vault mount), `RateLimits`,
+  `Captcha`, `TrustedProxies`, `ReturnOrigins`, the mounted `Routes` (a route
+  some instances lack is a 404 on them), the standalone signing key and
+  `totp.key` (`auth.keys.allow_ephemeral_dev_keys` is one instance only), the
+  captcha secret, and the version outside a rolling upgrade.
+- **Background work:** every instance that runs workers takes River jobs, each
+  job on one instance. River's leader alone schedules periodic work; a crashed
+  leader is replaced within about 20 seconds, and deadlines survive leadership
+  changes and restarts. A host fleet (`openrails.WithRiverClient`) must carry
+  OpenRails' jobs on every replica. Outside River, every instance runs the
+  Solana Pay poller (leased claims), checks its PSP credentials at start and on
+  change, and refreshes FX rates every 2 hours from its first cross-currency
+  quote.
+- **Caches:** catalog, merchants, write posture, the kill switch and access are
+  read per request. Merchant configuration is cached per instance: an edit
+  through OpenRails shows everywhere at once (`NOTIFY`), one made in Vault
+  directly within 30 seconds, a file at the next start. `GET /v1/config` is
+  cacheable for 5 minutes.
+- **Scaling:** webhooks take effect once per provider event (a concurrent copy
+  waits up to 10 s, then answers 500 so the provider retries); an idempotent
+  request runs once per key (a retry elsewhere replays or answers 409). Each
+  standalone instance works up to 20 billing jobs at once. Size PostgreSQL
+  `max_connections` for every pool, plus one connection per instance with Vault
+  configuration (it listens for edits).
+- **Upgrades:** `New` and `run-server` migrate under an advisory lock before
+  serving: one instance migrates, the rest wait. Migrations are additive, so the
+  previous build runs on the migrated schema. `openrails migrate up` can run
+  first as a deploy step; `openrails migrate status` compares the applied ledger
+  with the binary's. From v1 every release upgrades any earlier v1 database in
+  place ([compatibility](compatibility.md)).
+
+## Safety levers
+
+Declare `provider_write_mode` (`PROVIDER_WRITE_MODE`, `--provider-write-mode`)
+explicitly; unset, it fails closed to `readonly`. Flags beat the environment,
+which beats YAML. Every PSP declares an `environment`
+([PSP environments](psp-environments.md)); omitted means its rail's real-money
+one. The provider must agree before the PSP is used. A merchant may mix live and
+test PSPs; test seams (`provider_sandbox`, `Deps` fakes) are refused beside a
+live PSP. A non-live PSP relaxes no issuer, signing, storage or proxy
+protection.
+
+| Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|
-| `pull.*` | local mirror row (charge, subscription, refund, dispute, vault) | the provider | the pull overwrites local |
-| `derive.*` | a grant effect (entitlement / credit / access) vs its source event | the source ledger, via the grants layer | replay / retract the grant effect |
-| `life.*` | a record's state vs where the clock + state machine say it should be | time | converge the record forward |
-| `consistency.*` | duplicates, amount mismatches, unresolved references | the internal consistency condition | fix the data / surface review |
-
-Each finding also has a **shape** (`missing` → materialize, `excess` →
-retract, `mismatch` → adjust) and a **remediation class**: AUTO (idempotent
-local write, applied immediately), ADMIN (queued for human approval),
-OPERATOR (surfaced with a runbook; never auto-fires). Representative types:
-`pull.charge.missing`, `pull.subscription.duplicate`, `derive.grant.missing`,
-`life.renewal.held`, `life.provider_intent.stuck`,
-`consistency.duplicate.provider_charge`.
-
-Finding states: `reconcile_required` (open, engine may still converge it —
-including *held* destructive repairs), `requires_review` (the ADMIN/OPERATOR
-queue), `auto_fixed`, `fixed` (operator-acked or the drift vanished),
-`ignored` (silenced identity; re-runs refresh but never reopen). Findings
-have stable identity across runs and auto-resolve when the divergence
-disappears. Two safety doctrines matter operationally:
-
-- **Confirmed-absence gate**: a pull's `excess`/retract repairs (revoking
-  access, cancelling) do not auto-fire until the relevant source domain
-  (subscriptions / payments / grants) is marked *fully reconciled* for the
-  merchant — flipped automatically after a completed mutating pull whose
-  fetcher proved exhaustive coverage across every declared PSP
-  (`billing.reconciliation_state`, a ratchet). During an import, "not in
-  the local DB" is not absence — it usually means *not imported yet*. Held
-  repairs stay `reconcile_required` with the unproven domain in evidence.
-- **Stuck intents** (`life.provider_intent.stuck`): the health pass flags provider
-  intents sitting non-terminal too long — `pending`/`failed_retryable` older
-  than 24h, `in_flight`/`unknown_needs_verify` older than 2h; thresholds are
-  hardcoded. Mode-parked intents are informational (that wait is by design);
-  everything else is `requires_review` — provider failures, bad credentials,
-  or a dead worker. The engine never touches intent rows (the
-  executor/verifier own them); findings auto-resolve on recovery.
-- **Operational problems** outside the engine are findings too:
-  `consistency.ledger.unbooked` (a provider event OpenRails could not book; the
-  merchant repairs the ledger and resolves the finding) and
-  `life.solana.cranker_low_gas` (a crank
-  pass that signed found its cranker wallet below 0.05 SOL; the next signing
-  pass that finds it funded resolves it). The findings queue is the one merchant
-  inbox, and its counts are metrics measures (`open_findings`,
-  `orphaned_members`, `freeloaders`, `duplicate_coverage`,
-  `verification_pressure`).
-- **Live provider subscriptions OpenRails cannot land** park instead of
-  retrying (`GET /v1/merchant/parked-subscriptions`). Both findings name the PSP
-  they were seen on:
-  - `catalog.price.unmapped` (subject: the provider price or plan): high while
-    a parked subscription bills it, its evidence counting them; medium when a
-    Stripe event first shows a live price no provider price maps. It resolves
-    when the price is mapped, or retired with nothing parked on it. Ignoring it
-    means "not ours": it stays ignored and its parks stay listed.
-  - `life.subscription.unattributed` (subject: the provider subscription),
-    high: its provider customer is linked to no customer, or the customer
-    already holds the product. It resolves when the park closes. An NMI
-    schedule naming no plan raises it without a park (evidence `reason:
-    plan_missing`); it resolves when the schedule lands or NMI deletes it.
-  Mapping the price or linking the customer wakes the park's converge; the
-  park closes once the subscription lands by any path. Released parks are
-  deleted 90 days after release.
-
-## Dunning
-
-The built-in schedule is a function of the price's billing cycle — the retry
-span always stays well inside one cycle. A merchant may replace it with its
-`dunning_policy` setting; a case runs under the policy in force at its first
-decline. Retries are OFFSETS from the initial failure (progressive,
-front-loading where transient declines clear). The built-in schedule:
-
-| Cycle | Retry offsets | Failures to terminal | Derived staleness window |
-|---|---|---|---|
-| < 4 days | none | 1 (first failure is terminal) | min(24h, cycle/2) |
-| 4–27 days ("weekly") | +1d, +2d | 3 | 3 days |
-| ≥ 28 days ("monthly+", capped) | +2d, +5d, +9d, +13d | 5 | 14 days |
-
-The window always ends inside one cycle (1h → 30m, 1d → 12h). An unknown
-cycle (≤ 0, e.g. a one-time price behind a membership) is never given a
-schedule: collection refuses to charge, retry or end it and raises
-`life.cadence.unknown` for the operator. What a decline does comes from one
-table, the same for every owner:
-
-- **Retry on the schedule:** issuer soft and generic declines (insufficient
-  funds, over limit, do-not-honor, call issuer, retry later) and gateway,
-  processor or configuration errors.
-- **Wait for a new card** (`awaiting_method`): bad card data (expired, wrong
-  number or security code) and codes the networks forbid retrying on the same
-  card (transaction not allowed, lost or picked-up card). A new card resumes
-  dunning at the next due pass.
-- **Terminal at once:** stolen or fraudulent card, and "stop recurring" codes.
-
-The staleness window ("never
-charge a months-old failure") derives from the case's schedule — last offset +
-min(24h, cycle/2) slack — so it cannot be misconfigured; anything older is
-skipped WITHOUT a charge and parked `unverified` (access intact) for provider
-verification. Terminal failure = cancel + revoke entitlements + rail-side
-delete via the intent ledger's deferred-delete mechanism.
-
-An engine membership's renewal is an order (`origin: subscription`), one per
-period: every try above is an attempt on it, and between tries it is `open`
-with the decline, overdue past its `due_at` (`GET /v1/admin/orders?overdue=true`).
-The member can pay it themselves at any point, with the card they choose.
-Ending the subscription voids an unpaid renewal.
-
-This schedule governs every subscription OpenRails collects itself: engine
-memberships on Stripe and NMI, Solana pulls, and every NMI schedule
-(`nmi_schedule`). NMI
-never retries a declined scheduled charge, so on `nmi_schedule` the provider's
-decline is the schedule's first failure (first retry at the first offset, never
-at once). Retries count from when the decline happened, not when OpenRails saw
-it: a decline found late by a provider read keeps the same retry days, and a
-retry already past runs at the next due pass. A past_due `nmi_schedule` row left with no retry scheduled resumes at
-its next step after the last attempt, clamped to grace. Below 96h cycles no
-retry is scheduled: NMI's next scheduled charge is the retry. Provider-owned Stripe subscriptions use Stripe's own dunning. Ours is sparser
-than Stripe's 8-retry default because each NMI decline costs a per-transaction
-fee.
-
-**The due pass** runs in the hourly billing pass and on start: it admits engine
-renewals whose paid period has ended and queues retries whose `next_retry_at`
-has passed,
-each charged by its own provider operation. A subscription it cannot process
-raises a standing `life.due_pass.refused` finding (resolved automatically once
-it processes) and never fails the pass. One it leaves unchanged (refused, held
-by the kill switch or a limited posture, an unarmed PSP, an unknown cycle) is
-looked at again after half the time it has been due: at least a minute, at
-most an hour, so enabling the switch or fixing the cause takes effect within
-the hour.
-
-**Reading a case.** `GET /v1/admin/subscriptions?dunning=true` lists the open
-cases, `past_due` and `awaiting_method`, each with its `dunning`: `attempts`
-(declined charges so far), `retries_left` and `final_retry_at` (from the policy
-the case opened under), `next_retry_at`, `waiting_for_new_card` (canceled at
-`final_retry_at` unless a card arrives) and `last_failure_reason`. A
-provider-owned subscription carries no `retries_left` or `final_retry_at`: the
-provider runs its own retries, and `next_retry_at` is its next attempt when
-OpenRails knows it (CCBill reports it; Stripe's is not stored). A case leaves the list when it is paid or its retries give up.
-
-**Missed rebills.** An engine renewal nothing attempted by its deadline (1h
-after its period; a Solana one, pulled a minute after it, 1h1m), with no
-collection in flight, reads as missed in `GET /v1/admin/renewals` and the
-`rebill_cycles` measures, with why (`method_unusable`, `refused` or
-`not_attempted`); `life.renewal.held` and `life.due_pass.refused` are its
-findings. Every hour the rebill watch reads an `nmi_schedule` renewal
-with no attempt 24h after its period from NMI's Query API and schedule, and
-raises one `life.rebill.missed` finding per cycle it proves missed. When NMI
-holds nothing for the cycle and its schedule has moved to the
-next period (`provider_skipped`), OpenRails charges the period itself, then duns
-a decline on the same schedule. "Nothing" means no transaction of any kind or
-outcome since the period's midpoint under the schedule, the subscription's order
-reference or the card's vault. A sale NMI voided or refunded in full
-(`provider_reversed`), or any other transaction no attempt records
-(`provider_unrecorded`), is never charged again: the finding lists the
-transactions for review. A stalled or deleted NMI schedule only raises the
-finding: NMI may still bill it. A cycle whose look fails (NMI unreachable, a
-transaction no attempt records) is looked at again after 15 minutes, the wait
-doubling to at most a day.
-
-**Payment health alerts.** The hourly health pass reads the decline measures
-per PSP account and owner, for each merchant with attempts in the last day or
-one of these findings open, and keeps them open while their condition holds
-(one notification per episode):
-
-| Finding | Fires when |
-|---|---|
-| `life.payments.new_card_decline_spike` | the last 24h's new-card decline rate is 10 points above the 28 days before, with 50 attempts on each side |
-| `life.payments.rebill_failure_spike` | the last 24h's rebill first-attempt failure rate is 10 points above that baseline, or above 25%, over 50 cycles |
-| `life.payments.system_errors` | system errors are over 2% of the last hour's attempts (at least 20); critical at once on NMI 410/411 (our account refused) |
-| `life.decline.unmapped` | a decline code of the last 30 days that no table maps, per rail and code |
-| `life.webhooks.silent` | a PSP account whose provider charges came by webhook (at least 10 in the 28 days before) sent none in the last 24h while pulls found at least 3; per PSP account |
-
-Payment attempts, rebill cycles and NMI history months are kept 25 months;
-the cleanup worker deletes older ones.
-
-**Engine outcomes.** A renewal allowance of min(24h, max(2h, period/10))
-follows each paid engine period (1h → 2h, 1d → 2h24m, 7d → 16h48m, 30d and
-longer → 24h), so unpaid access never exceeds a tenth of the period and a
-member keeps access until the renewal decides; a qualified renewal
-supersedes it, and a decline or cancellation revokes it. A card-fixable
-decline, or a stored method that is gone, parked or no longer qualified, moves
-the membership to `awaiting_method`: the customer is asked for a new card,
-access follows the dunning access policy, and the wait ends (canceled, access
-ended) when the cycle's dunning window does, unless the destructive switch is
-off. A new card retries at the next due pass. A terminal outcome while the
-destructive switch is off leaves the membership `past_due`.
-
-**Held renewals.** A renewal with no outcome past its allowance is held:
-collection is stopped (fleet halted, `engine_admission_hold`, breaker,
-readonly, kill switch). A refusal only the member can fix is not held (see
-above). By default the member keeps access until the renewal is attempted
-(`dunning_policy.access_while_renewal_held`: `keep`, or `suspend` to end access
-at the allowance). While any are held, `life.renewal.held` reports their count
-and the oldest held age; when collection resumes they are charged normally, a
-decline enters dunning, and the finding resolves. Issuer authentication a customer never completes is closed after one
-hour for a first payment and after the renewal period's allowance for a
-renewal. A
-renewal with an unknown NMI submission is never automatically sent again:
-provider records may lag even when its charge succeeded. Stripe alone can replay
-its original idempotency key after a five-minute observation delay, at most
-twice and only inside the key retention window. Unresolved outcomes raise
-`life.submission.unresolved` (docs/provider-uncertainty.md).
-
-## Provider Refresh and the unknown cohort
-
-**Provider Refresh** is the always-on provider-read system: a 2-hourly scheduler (RunOnStart, so startup
-after a stale dump or outage does not wait for the tick) fans out one
-per-merchant refresh job — staggered, unique per merchant, on a bounded
-queue, skipping merchants with no declared PSPs. Two lanes:
-
-| Lane | Purpose |
-|---|---|
-| Provider Event Refresh | bounded missed-event backfill for NMI, Stripe, CCBill (its DataLink roster and transaction exports) using durable per-PSP watermarks (`billing.psp_refresh_watermarks`) |
-| Unknown-cohort Reconcile | resolves `unverified` subscriptions against provider truth, each with the PSP that owns it (archived ones included): one windowed bulk pull per PSP + targeted per-subscription probes for rows the bulk pull can't decide |
-
-A watermark advances only after its provider/window completes successfully;
-errors, missing credentials, or partial reads leave it unchanged and the next
-pass retries the same bounded window. Refresh writes only local truth through
-the same idempotent reconciliation writers the pull uses, then runs scoped
-convergence. It never mutates a provider and **never charges** — charging
-stays inside dunning. Dunning owns `past_due` (we SAW the failure); the
-**silence cohort** — lapsed subscriptions with NO webhook either way — is
-parked as `unverified` by the rebill watch and the due pass, and resolved by the Unknown-cohort lane
-against ONE verdict set:
-
-| Provider evidence | Resolution |
-|---|---|
-| verified renewal charge | renewed — period advanced, the charge backfilled exactly once, never a second charge |
-| declined / roster stalled, within the dunning window | `past_due` — dunning owns it from here |
-| declined / stalled, beyond the window | canceled; the remote record may still exist, so the deferred rail-side delete is queued |
-| no charge, remote alive with future next-billing | adopt the remote period end (clock misalignment); never for a `past_due` row |
-| remote absent/terminal | cancel locally + revoke entitlements (no remote delete — it's already gone) |
-| no conclusive evidence / rail unreachable | stays `unverified`; the next pass re-derives the cohort and retries |
-
-Mode gating: Provider Refresh reads in every write mode. Overwriting local rows,
-convergence and the Unknown-cohort lane wait until the merchant is armed for
-enforcing pulls, the kill switch allows them and its posture is not `readonly`.
-Each pass logs a heartbeat plus a per-merchant summary
-(`renewed/adopted/past_due/canceled/still_unknown/probed/backfilled/rail_errors`).
-
-**Access during silence — standing access.** There is no timed grace
-window. An auto-renew
-subscription's product-access window is **standing (open-ended) from creation**
-and closes only on proven events: terminal dunning failure,
-provider-confirmed death, or an explicit cancel (access then ends at period
-end, as the user expects). A subscription parked `unverified` keeps access —
-entitlements are never lost to our own uncertainty.
-
-Note: NMI charge detection correlates by the order reference OpenRails stamps
-at signup; legacy-imported subscriptions whose NMI `orderid` predates
-OpenRails won't match the per-subscription probe — the Event Refresh lane's
-watermarked backfill catches their provider events.
-
-## Solana Pay settlement
-
-Solana Pay state is in PostgreSQL. An order's Solana attempt has one reference in
-`billing.solana_pay_references` (`pending` → `confirmed` | `expired`). Every
-replica's poller claims due references with `SKIP LOCKED` and walks each
-reference's whole finalized signature history, oldest first, resuming from a
-stored cursor, so no number of transactions naming a reference can hide a
-payment. Each new signature goes to one settlement transaction under the
-reference's row lock and is recorded once in `billing.solana_pay_receipts`;
-a transfer to one recipient in one mint is credited or reviewed at most once
-across all references.
-
-- The amount is the recipient's balance change in the quoted mint, including
-  Token-2022 mints, split transfers, transfers made inside another program and
-  any token account the recipient owns. Only finalized transactions credit; a
-  page confirm waits up to 60 s, then answers `processing` and the poller
-  credits it.
-- A Token-2022 transfer fee is priced in at quote time: the request asks for
-  the gross that delivers the quoted amount, and a built transaction asserts
-  the fee on-chain. A fee raised after the quote leaves the merchant short and
-  is recorded as `underpaid`. Mints with a transfer hook are refused.
-- The first transfer of at least the quoted amount that lands by quote expiry
-  + 30 min is credited; an excess is credited and flagged `overpaid`.
-- Anything else is recorded with `disposition = 'review'` and a
-  critical `consistency.ledger.unbooked` finding
-  (`solana_pay_<reason>`):
-  `already_paid`, `late`, `underpaid`, `session_closed`, `wrong_asset`,
-  `unreadable`, `settle_failed`. Nothing is refunded automatically, and
-  underpayments are not added together. A transfer that already settled another
-  purchase is recorded as `duplicate`.
-- Unresolved reviews and pending references refuse the billing archive. After
-  refunding, close a review with `openrails solana-pay resolve --merchant …
-  --signature … --resolution …`.
-- A paid or expired reference stays watched for 7 days so later transfers are
-  recorded; the GC job then deletes it. Credited, review and duplicate
-  receipts are kept.
-
-## Data retention
-
-Retention periods are constants, the same for every merchant, and not
-configuration (`internal/retention`), except the event log's `event_retention`.
-Every table has one class, which its table comment states.
-
-| Class | What it means |
-|---|---|
-| Permanent | Never pruned: the ledger, grants, payments, owed usage items and the usage collection cadence, receipts (catalog applications, credited and review Solana Pay receipts), operation authorizations and their cost qualifications, refusals and resolutions, running charges, metered rating watermarks, destructive runs and their before-images. |
-| Partitioned | Monthly partitions, created ahead and dropped whole by the calendar. No row is read to prune them. |
-| Rows | Rows past a period are deleted by the hourly cleanup job, oldest first. |
-| State | Configuration and entities (merchants, PSPs, catalog with its price keys and field owners, customers, subscriptions, payment methods, cursors, the balance watch of each customer with a running charge): one row per thing that exists. |
-
-Partitioned tables:
-
-| Table | Key | Dropped |
-|---|---|---|
-| `usage_events` | `occurred_at` | 24 months after the month's usage was billed. A month is billed by the end of the next one, so a month goes 26 months after it began. |
-| `admission_operations` | `admitted_at` | Once older than 61 days: the longest spend window (31 days) plus 30. |
-
-Row retention:
-
-| Table | Deleted |
-|---|---|
-| `subscription_status_transitions`, `subscription_billing_changes` | 25 months (761 days) after `occurred_at` |
-| `provider_intents` | finished intents that only instructed a provider (subscription cancel, payment-method and source update, card vault, network token, catalog archive, account-updater request), 25 months after they last changed |
-| `provider_mutation_logs` | 25 months after `created_at` |
-| `reconciliation_findings` | resolved findings, 12 months (366 days) after they were resolved and last seen |
-| `maintenance_runs` | reconciliation runs no finding names, 12 months after they started; every other kind is permanent |
-| `order_attempts` | attempts that expired without reaching a provider, 90 days after `expires_at` |
-| `orders`, `order_lines` | unpaid canceled and expired orders that never started a payment attempt, 90 days after they closed |
-| `parked_provider_subscriptions` | released parks, 90 days after `released_at` |
-| `carts` | 30 days after `last_changed_at` |
-| `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
-| `notifications` (merchant alerts) | 90 days once read, 180 days if never read |
-| `notification_events` | 90 days after `inserted_at`, and never before `event_retention` |
-| the event log | after `event_retention` (90 days by default) |
-| `webhook_events` | 90 days after completion |
-| `host_outbox` | 90 days after `recorded_at`, and never before the configured event retention |
-| `idempotency_keys`, `solana_pay_references` | at expiry, and after the 7-day watch window |
-| `user_destructive_reservations` | 24 hours after `reserved_at`; the card, subscription and operation history stay intact |
-| `failed_usage_windows` | once the window has ended |
-| `meter_period_quantities` | 100 days after `period_starts_at` |
-| `admission_denials_hourly`, `webhook_health_daily` | 13 months (397 days) after the hour or day |
-| `periodic_leases` | a kind no fleet has scheduled for 30 days |
-
-What is kept on purpose:
-
-- **A provider intent that is the record of something is permanent.** Collections,
-  sales, enrollments, rebills, tier changes, refunds and Solana pulls (succeeded
-  or refused) are what grants, payments and orders are checked against, a
-  card erasure is the proof the card is gone, and a Stripe payment-method
-  domain registration (one per PSP and checkout origin) is the record that the
-  host is registered. Only the instruction-only types
-  above age out. The list is in the retention code and in the partial index
-  `provider_intents_updated_at_idx` the cleanup job reads.
-- **A order attempt that reached a provider is permanent**, expired or not:
-  one with a payment, a subscription or a provider transaction, or that a
-  provider intent or a Solana Pay reference or receipt names.
-- **A cost observation outlives its operation.** While the operation is open its
-  observations stay however old, because settlement is authored from them.
-- **A resolved finding that is still being seen stays**, so an ignored drift that
-  persists does not come back as new.
-
-How it runs:
-
-- The cleanup job (hourly) is the one owner of row retention. It creates the
-  partitions rows can be written into plus two months ahead, drops the months
-  past retention, deletes the deployment-wide rows due, then deletes rows for
-  the merchants that have any due, 1,000 rows per statement and at most 50,000 rows
-  per merchant per pass. A backlog drains over the following passes. Partitions
-  are also ensured at migration and by the first write a process makes in a new
-  month, so writes never wait for the job.
-- A partition belongs to the role that creates it, the one OpenRails runs as.
-  Writers that cross into a new month together all create its partitions;
-  the first wins and the rest find it there.
-- Creating a partition attaches a table built beside the parent, so reads and
-  writes carry on. Dropping one locks the table briefly; it gives up after two
-  seconds rather than queue writers behind a long reader (a logical backup, a
-  merchant archive export) and the next pass tries again.
-- `subscription_status_transitions` and reconciliation runs refuse every other
-  `DELETE`: `billing.guard_retention_delete` lets one through
-  only when the transaction names the table in the `openrails.retention_table`
-  setting and the row is older than the period the trigger declares. `usage_events` and
-  `admission_operations` rows leave only with their partition.
-
-What an integrator sees:
-
-- A usage event's `occurred_at` may be up to 35 days in the past and not in the
-  future; its `source` and `source_id` are honoured as its idempotency key for
-  those 35 days. A priced event's ledger debit is idempotent for good.
-- An admission's hold deadline, as admitted or as extended, is at most 30 days
-  past the admission, and a spend window is at most 31 days. After 61 days a
-  request id reads as never admitted.
-- Usage reports reach back about 26 months, subscription transition metrics 25.
-- A merchant archive restore does not bring back `usage_events` or
-  `admission_operations` rows already past their retention.
-
-## Cutover to product access
-
-Before product access, each customer held per-key entitlement windows. The
-cutover migration converts them to windows of the products that grant the keys,
-then drops them. From then on, a customer holds a product's current keys. If
-the products changed their keys after a sale, the customer gains or loses them
-at the cutover, and the migration refuses until an operator approves every such
-change:
-
-1. Stop the old version: the cutover migration drops a column it reads. The new
-   version migrates as it boots, so do not start it yet.
-2. Run `openrails access-cutover preflight` with the new binary. It applies the
-   migrations before the cutover and dry-runs the conversion for every
-   merchant. It lists each customer and key the conversion **lost** or
-   **gained**, the windows it cannot carry (`unmapped`, e.g. a manual key grant no product matches), and
-   purchases whose keys had different durations (`mixed_duration`: they keep
-   the longest).
-3. Fix what should not change (give a key a product, adjust a product), and
-   rerun the preflight.
-4. Run `openrails access-cutover preflight --approve <your name>` to record
-   the list, and only then start the new version; its boot runs the cutover
-   migration. The migration refuses any change that is not on the approved
-   list, and the version's boot fails until it is approved.
-
-A host that embeds OpenRails runs the same steps from its own binary, built
-with the new version, before starting it: `openrails.AccessCutoverPreflight`
-takes the host's pool and `Config.Database` and returns the report the command
-prints (`billing.AccessCutoverReport`). An empty `approvedBy` is the dry run of
-step 2; a name approves the list as in step 4, and `openrails.New` then boots.
-
-A billing archive exported before the cutover restores through the same
-conversion. It is refused (`unsupported_state`, table `entitlements`) if the
-conversion would change anyone's access; cut over the source first.
-
-### Heavy buyers
-
-A customer holding at least 500 products gets a cached key set
-(`customer_entitlement_cache`). It is rebuilt when a check finds it stale, and
-it answers only while the merchant's key generation and the customer's access
-version match the ones it was built from. A stale cache is never used.
-
-## Background worker schedule
-
-Everything runs under River once `run-server` (or `run-worker`) is up.
-Every interval catches up on startup when its last retained periodic run is
-older than the interval or no retained run exists. A quick restart does not enqueue another run. Queued
-and retrying work keeps its normal retry behavior; explicit
-user-triggered work does not wait for a periodic deadline. Each River schema
-has one scheduling leader, and OpenRails' cross-fleet leases additionally
-coalesce merchant-wide passes when embedded fleets share a database.
-
-| Worker | Cadence |
-|---|---|
-| Billing pass (`openrails.billing_pass`): due renewals and retries, balance watches whose look failed, due arrears delinquency, order expiry (abandoned card saves included), automatic usage billing (opt-in), rebill watch, due daily NMI history read, undeclared-account re-alerts, stored card refresh ahead of renewal; each scan in turn | top of each UTC hour, and on start |
-| Retention cleanup; merchant health (merchants with activity); admission-denial flush (closed hours, fleets with Redis) | 1 h |
-| A customer's convergence | committed with each mutation that changed the customer |
-| A balance's look | committed with a change that crosses one of its lines, and for the instant its last look named |
-| Provider refresh scheduler (fans out per merchant) | 2 h |
-| Stripe webhook endpoint backstop | 24 h |
-
-The billing pass takes everything due by its start, so a pass that fails or
-does not run leaves its work to the next. One scan's failure never stops the
-others. Renewals and retries wait at most an hour past their instant; an engine
-renewal's access grace is at least two hours, so a member keeps access across
-one missed pass. A low or depleted balance is told within seconds: the change
-that crosses a line queues the balance's look in its own transaction, and each
-look queues the next at the instant it names (a lapse, a running charge's
-00:00 UTC checkpoint, a projected crossing). An order past its `expires_at` is
-expired for every read, payment, confirmation and claim at once; the pass only
-writes it, so its `order.expired` event can come up to an hour later. A card
-save past its 24-hour cutoff is removed when it is next confirmed.
-
-Other jobs are queued by the change that needs them, not by a clock: each
-provider operation (`openrails.provider_operation`, which sleeps to its next
-attempt; a Solana pull is one, scheduled for its period), a customer's
-convergence (`openrails.customer_converge`), a PSP import and its
-charge-attribution read, a merchant purge's Vault cleanup, a Stripe PSP's
-webhook pass when it is declared or changed.
-
-Automatic usage billing is enabled by the host's `usage_billing_enabled` option.
-It is not scheduled by subscription-only hosts. Merchants configure their
-`usage_billing` defaults; each customer's due record preserves its fixed billing
-date across restarts and supports minimum-amount carryover. Orders a host
-creates and credit grants do not depend on it. See [usage billing](usage-billing.md).
-
-Job health is a read of River's own tables (`openrails workers`, the server's
-`ListWorkerHealth`, `/metrics`, the `openrails_job_progress` probe): per kind,
-jobs running past their timeout, waiting to retry and discarded, a periodic
-kind's last completion and the newest error. Each billing pass records, as its
-River output, the critical scans (renewals and retries, balance watches,
-delinquency, usage billing) still holding a row due since before the start of
-yesterday (UTC); `openrails_job_progress` fails while the last one named any,
-or when none ran to its end within a day and its timeout. OpenRails stores none
-of it.
-
-A pass bounded per job (retention cleanup's 200 merchants, a merchant's 200
-due usage accounts) continues in a new job after the last one it handled, so
-each job stays short and the pass still reaches all of its work.
-
-Each OpenRails job runs under its kind's timeout: 10 minutes, an hour for
-the passes that read every merchant's providers (`cleanup_expired_data`,
-`provider_refresh_merchant`, `merchant_health`, `rebill_watch`) and an
-import's `charge_attributions` read, and for `stored_card_refresh_due` (which
-stops opening pages after 10 minutes), two for `psp_import`. The billing pass
-runs each scan under its own budget and takes their sum. River cancels a job
-past it. River's
-rescuer returns a job whose process died to work once it has run past both
-its timeout and `RescueStuckJobsAfter` (10 minutes unless the host sets it).
-
-### Health endpoints
-
-`GET /health/live` (liveness) and `GET /health/ready` (readiness). Both are
-public and carry no dependency detail: a failing check is logged and answers
-503 `service_unavailable`. There is no `/health`, `/healthz` or `/readyz`. Embedded hosts wire the same checks into
-their own handler. Readiness requires Postgres, the merchants service, the River producer and a
-locally managed River worker consumer; Redis, Vault, PSP posture and
-`configuration` (every setting, merchant or merchant document boot refused
-instead of failing, with why) are reported as degraded and never fail it; `run-server --no-workers` is therefore live but not ready. An
-embedded host's own River fleet (`WithRiverClient`) is outside that
-local-process check and is observed through the `openrails_job_progress` probe
-(the engine's `Probes`).
-
-On SIGTERM or SIGINT the server drains: readiness answers 503 at once, while
-the listener keeps serving for `drain_delay` (default 5s), so load balancers
-and Kubernetes endpoints drop the instance before it stops accepting. Then it
-finishes in-flight requests and stops its workers within `shutdown_timeout`
-(default 20s). Keep their sum under the orchestrator's grace period
-(Kubernetes' `terminationGracePeriodSeconds`, 30s by default).
-
-`GET /metrics` exports `openrails_dependency_up{dependency,class}` for every
-dependency readiness reports, optional ones included. The authenticated
-`/v1/metrics` query and schema routes expose merchant business
-analytics, not Go/process telemetry.
-
-## Network egress
-
-Besides what its configuration names (Postgres, Redis, Vault, the SMTP host,
-trusted issuers' JWKS URIs, `llm.base_url`), the server calls:
-
-| Destination | What for |
-|---|---|
-| `latest.currency-api.pages.dev`, then `cdn.jsdelivr.net` | FX rates for cross-currency quotes, held in each instance's memory: each instance reads 34 files, one per currency (the fallback mirror when the primary fails), every 2 hours from its first cross-currency quote, and a quote reads the one file it finds missing or stale. An instance that never quotes across currencies never calls them. Boot never waits for them: a failed read is retried at the next refresh or quote, and a rate it cannot fetch fails only the quote that needed it. |
-| `hermes.pyth.network` | Solana token prices, when a Solana rail quotes a token. |
-| `api.stripe.com` | Stripe PSPs. |
-| `secure.nmi.com`, `sandbox.nmi.com` | NMI PSPs, by each PSP's `environment`. |
-| `api.ccbill.com`, `sandbox-api.ccbill.com`, `datalink.ccbill.com` | CCBill PSPs. |
-| `api.basistheory.com`, `cdn.basistheory.com` | Basis Theory custodians. |
-| `api.mainnet-beta.solana.com`, `api.devnet.solana.com`, `*.helius-rpc.com` | Solana PSPs' RPC (`provider_sandbox.solana_rpc_url` replaces it). |
-| `challenges.cloudflare.com`, `www.google.com`, `hcaptcha.com` | Captcha verification, when `captcha` is set. |
-| `api.anthropic.com`, `api.openai.com` | LLM features, when `llm.api_key` is set and no `llm.base_url`. |
-
-An egress policy that allows only these keeps every feature; one that blocks
-the FX hosts leaves cross-currency quotes failing and nothing else.
-
-## Operating modes (the safety levers)
-
-Security defaults are independent of the PSPs' environments. Declare
-`provider_write_mode` (`full`, `limited`, `readonly`) explicitly, and every
-PSP's `environment` (`live`, `test`, `sandbox`) in the merchant configuration.
-CLI flags override environment variables, which override YAML. An unset write
-policy fails closed to `readonly` wherever it is consulted; constructor
-validation requires an explicit policy. A non-live PSP never relaxes issuer,
-signing, storage or proxy protections.
-
-Narrow local exceptions are configured explicitly in the server's AuthKit (for
-example `auth.registration.allow_missing_senders`, `auth.http.direct_peer_ip`).
-`public_billing_base_url` is only the public callback/link mount base;
-`auth.token.issuer`, `auth.resource.public_url`, remote Client server URL and
-`dashboard_base_url` are independent.
+| Customer purchase, card save, tier change, resume, refund | yes | yes | refused |
+| Customer or staff cancel, and its provider delete | yes | yes | intent parks |
+| Dunning charges and window-expiry cancellations | yes | intents park | no |
+| Usage-order collection, Solana pulls | yes | no | no |
+| `catalog apply` publishing a recurring Solana plan | yes | binds an existing plan, else refuses the price | same as `limited` |
+| `catalog apply` local changes, provider reads, webhooks | yes | yes | yes |
+
+`limited` stops what the system initiates; `readonly` stops the wire, enforced in
+each rail's transport. Verified receipt recovery runs in every mode. The lower
+of `provider_write_mode`, the merchant's posture and the book identity applies.
+`engine_admission_hold: true` additionally pauses admission and first submission
+of new engine payments; already-submitted ones are still verified.
 
 Every subscription has one collector, fixed when it is created or imported
 (`subscriptions.collection_policy`):
 
-| Policy | Who charges | Who retries a decline |
+| Policy | Charges | Retries a decline |
 |---|---|---|
-| `engine` | OpenRails, on a saved card (NMI, Stripe) or by on-chain pull (Solana) | OpenRails ([dunning](#dunning)) |
-| `nmi_schedule` | NMI, on its own schedule | OpenRails |
-| `provider` | the provider (Stripe, CCBill) | the provider |
+| `engine` | OpenRails: a saved card (NMI, Stripe) or an on-chain pull (Solana) | OpenRails ([dunning](dunning.md)) |
+| `nmi_schedule` | NMI, on its schedule | OpenRails |
+| `provider` | Stripe or CCBill | the provider |
 
-New subscriptions are `engine`: they need no provider catalog link, and a rail
-or term OpenRails cannot collect (CCBill, a trial first phase) is refused
-before payment. Imported subscriptions keep the collector their rail implies;
-it is never inferred from a saved card, and sharing or replacing a card does
-not change it. Configuration never transfers a subscription or starts a second
-collector.
+New subscriptions are `engine`; a rail or term OpenRails cannot collect (CCBill,
+a trial phase) is refused before payment. Configuration never moves a
+subscription to another collector.
 
-`engine_admission_hold: true` pauses the admission and first submission of new
-engine payments (initial and renewal). Operations that may already have been
-submitted are still verified, and webhooks are still handled. It changes no
-stored ownership; `provider_write_mode` remains a separate gate.
+### Booting against production credentials
 
-A merchant's write posture and the book's identity can lower the mode for one
-merchant or the whole book (see above); the lower mode applies.
+Set the mode before the first start: imported `past_due` subscriptions are due
+at once. For a cutover that needs review first:
 
-What each provider write mode permits (PSP environments apply orthogonally: a
-test or sandbox PSP moves no real money in any mode):
+1. Boot `limited` (the site works; system writes park) or `readonly`.
+2. Let provider reads catch up. Dunning materializes in-window charges as parked
+   `manual_rebill` intents, bounded by the dunning window, and parks
+   window-expired cases `unverified`. It cancels nothing in this mode.
+3. `openrails intents --merchant=<slug>` prints the drain forecast ("N execute
+   under limited, M require full"). Resolve what should not fire.
+4. Review `GET /v1/merchant/findings` and `openrails proposals list`. Raising
+   the mode never touches findings.
+5. Set `full`. Missed whole periods are never back-billed: stale dunning parks
+   for verification, and a Solana subscription that skipped periods gets one
+   pull.
 
-| Operation | `full` | `limited` | `readonly` |
-|---|---|---|---|
-| User purchase / charge | yes | yes | no — refused |
-| Card/vault save, tier change, resume, refund | yes | yes | no |
-| User/admin cancel → rail-side delete | yes | yes | no — intent parks for replay |
-| Dunning charges + window-expiry cancellations | yes | no — runs dry, intents park | no |
-| Usage order collection, Solana pulls | yes | no | no |
-| `catalog apply` local changes + existing binding verification | yes | yes | yes |
-| `catalog apply` publishing a recurring Solana plan | yes | no — binds a plan already on chain, else refuses the price | no — same |
-| Provider reads (query APIs, catalog verification) | yes | yes | yes |
-| Webhook ingestion + local serving | yes | yes | yes |
+## The kill switch
 
-`limited` draws the line at *who initiates* (the system initiates nothing;
-humans get everything), `readonly` at *the wire* (nothing writes to a
-provider, not even a customer clicking buy — enforced at the transport on
-every rail: NMI direct-post gate, Stripe transport gate, CCBill DataLink
-read-only flag, Solana submission gate). Typical uses: `limited` = migration
-cutover with the site fully usable; `readonly` = reconciliation/forensics
-boots that may recover local records without initiating provider writes.
-Provider receipt recovery runs in every mode. Bulk reconciliation findings and
-observation freshness are reports, not an additional write gate; see
-[provider recovery](provider-recovery.md).
-
-### PSP environments — real money or not
-
-Every PSP's `environment` is one of its rail's (omitted: its real-money one),
-and the provider's own
-answer must agree before the PSP is used
-([PSP environments](psp-environments.md)): a Stripe key's prefix matches it;
-each NMI account answers the read-only `test_mode_status` query (a live PSP
-must not be in test mode, a test PSP must be) or, on sandbox.nmi.com, one auth
-on the canonical non-issued test PAN (only a simulator approves it); a sandbox
-CCBill PSP uses the sandbox API host and its mutations are refused; a Solana
-PSP's every RPC endpoint reports its network (mainnet, devnet or testnet). Each NMI arm requires a fresh
-check (manifest reconciliation and the provider API alike); unavailable,
-indeterminate or disagreeing answers refuse the arm, and an update that omits
-credentials re-checks the stored key.
-
-A merchant mixes live and test PSPs freely. Fake providers
-(`provider_sandbox`, `Deps` test seams) are refused beside a live PSP.
-
-### Cutover: booting against production credentials
-
-Set the mode **before first start**. Imported `past_due` subscriptions are
-immediately due for evaluation. With `full`, eligible collection runs under
-operation-specific ownership and receipt checks. Bulk provider observation is
-separate and does not postpone normal work. Follow the controlled transfer
-procedure above before activating an independent copy.
-
-For a cutover that needs a manual review before collection, use
-`PROVIDER_WRITE_MODE=limited` (customer writes permitted, system-origin writes
-parked), or `readonly` (provider writes blocked, verified local recovery
-continues). Neither explicit mode is automatically raised to `full`.
-
-Before raising the mode to `full`, check the two places deferred work
-accumulates:
-
-1. **The provider intent ledger** — fires automatically when the mode is
-   raised. `openrails intents --merchant=<slug>` shows pending rows + the
-   drain forecast ("N execute under limited, M require full"). If the
-   forecast shows something you do NOT want to fire, resolve it first.
-2. **The admin findings queue** — never fires automatically.
-   `GET /v1/merchant/findings` and `openrails proposals list --merchant=<slug>`
-   show findings requiring a human; raising the mode does nothing to this queue by design.
-
-The sequence: boot `limited` → the first dunning cycle materializes the
-backlog → `openrails intents` shows the real drain forecast → review (and
-fix PSP declarations if credentials moved — see "PSP binding and credential
-rotation") → `PROVIDER_WRITE_MODE=full` resumes eligible work after its current
-policy and freshness checks pass. Paused
-work is delayed, not lost; the workers are state-scan loops, so the first
-enabled run processes whatever is outstanding. Missed billing periods are
-never back-billed: dunning past the staleness window parks for verification instead of
-charging, and a Solana subscription that skipped whole periods gets exactly
-one pull anchored at the pull moment.
-
-## The destructive-action kill switch and first-enforce gate
-
-The kill switch is a development safeguard: it stops a dev instance from
-corrupting a production database, and production does not run with it engaged.
-It is a single DB row, read before each destructive act, so one `UPDATE`
-reaches every node at its next gate check.
-
-**It ships OFF** (engaged): a fresh deployment makes no cancellation,
-revocation, provider delete or pull overwrite until an operator enables it.
-Detection, findings and their alerts, additive repairs and access-ended notices
-run either way. A retraction any convergence holds (a customer's, the one after
-a provider pull, or the operator's converge and prune commands) stays
-`reconcile_required`, with `held_by: kill_switch` and the reason in its
-evidence, until a convergence of that scope after the switch is enabled. A provider-confirmed cancel the switch holds (read
-by a webhook, a rebill or a verification) parks the subscription `unverified`
-with access kept; the first Provider Refresh after the switch is enabled reads
-it again with its own PSP and applies it.
-
-### Stop everything, now
+`billing.destructive_action_switch` is one row read before every destructive
+act, so one `UPDATE` reaches every node at its next check. It ships off: a fresh
+deployment makes no cancellation, revocation, provider delete or pull overwrite
+until enabled. Detection, findings, additive repairs and notices run either way.
+A held retraction stays `reconcile_required` with `held_by: kill_switch`; a
+provider-confirmed cancel it holds parks the subscription `unverified` with access
+kept, and the first Provider Refresh after enabling applies it.
 
 ```sql
+-- stop everything now; parked intents resume when it is enabled again
 UPDATE billing.destructive_action_switch SET enabled = false,
        updated_by = 'you', reason = 'incident: mass cancellation observed';
-```
 
-No restart, no deploy, no scaling workers to zero. In-flight destructive intents
-**park** (they are not failed), so flipping it back resumes them where they
-stopped.
-
-### Confirm it stopped
-
-```sql
--- 1. the switch itself
+-- confirm
 SELECT enabled, updated_by, reason, updated_at FROM billing.destructive_action_switch;
-
--- 2. nothing has been canceled since the flip
 SELECT count(*) FROM billing.subscriptions
  WHERE canceled_at > (SELECT updated_at FROM billing.destructive_action_switch);
-
--- 3. no product access has been revoked since the flip
-SELECT count(*) FROM billing.product_access
- WHERE revoked_at > (SELECT updated_at FROM billing.destructive_action_switch);
-
--- 4. destructive provider intents are parked, not executing
 SELECT status, count(*) FROM billing.provider_intents
  WHERE intent_type = 'nmi_delete_subscription' GROUP BY status;
 ```
 
-Worker logs name the gate explicitly: `retractions held — instance kill switch
-is OFF`.
+Workers log `retractions held — instance kill switch is OFF`.
 
-### Arming a merchant (the first-enforce gate)
-
-A merchant with no `billing.merchant_destructive_policy` row — or one with
-`enforce_armed_at IS NULL` — pulls in **advisory** mode: findings are persisted,
-nothing is mutated, no source domain is proven, and `first_pull_completed_at` is
-stamped so you know the survey is ready.
+**First-enforce gate.** A merchant with no `billing.merchant_destructive_policy`
+row, or `enforce_armed_at IS NULL`, pulls in advisory mode: findings are stored,
+nothing is changed, and `first_pull_completed_at` marks the survey ready. Review
+it, then arm both halves:
 
 ```sql
--- what did the first pull find?
 SELECT finding_type, status, count(*) FROM billing.reconciliation_findings
  WHERE merchant_id = :merchant GROUP BY 1, 2 ORDER BY 3 DESC;
 
--- happy with it? arm the merchant for enforcing pulls
 INSERT INTO billing.merchant_destructive_policy
        (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason)
 VALUES (:merchant, true, now(), 'you', 'reviewed first-pull findings')
 ON CONFLICT (merchant_id) DO UPDATE
    SET enforce_armed_at = now(), destructive_actions_enabled = true;
-
--- and the instance switch (once, per deployment)
 UPDATE billing.destructive_action_switch SET enabled = true, updated_by = 'you';
 ```
 
-Both halves must be on: the instance switch gates the fleet, the merchant row
-gates one merchant. Disabling either stops that merchant.
+**Cancellation caps.** A pull-plane pass (pull, verification, unknown cohort)
+may cancel at most `min(25, max(3, 5% of the PSP's live linked book))`
+subscriptions per PSP, or the whole book when it has at most 5. Over that it
+cancels **none**, halts the merchant's pass and raises
+`pull.cancellation.capped`. The usual causes are a misdeclared `account_id`, a
+credential rotated onto a sibling sub-account, or a provider returning a short
+page.
 
-### Cancellation caps
+## Commands
 
-Every convergence cancel, whatever its rail or what read it (a pull, a
-verification read, a webhook or rebill read), waits for the switch, read again
-for each cancel. A pull-plane pass (the pull, verification, the unknown cohort)
-also needs the merchant armed, and is capped per PSP: one pass may cancel at most
-`min(25, max(3, 5% of the PSP's live linked book))` subscriptions, or the
-whole book when it holds at most 5 live subscriptions (a tiny book whose
-schedules the provider ended must converge; no larger book is ever canceled
-entirely by one pass). Over
-that, **none** of its cancellations are applied (a pull also halts the
-merchant's pass), and a `pull.cancellation.capped` finding lands in the review
-queue. It is all-or-
-nothing on purpose: a pass that wants to cancel 850 customers is not a pass that
-should cancel the first 25 of them.
+Every command takes `--config/-c` (default `config.yaml`) and
+`--provider-write-mode`. One-off commands open only what they need, start no
+server or workers, and keep standard output parseable.
 
-```sql
-SELECT subject_key, recommended_action, updated_at
-  FROM billing.reconciliation_findings
- WHERE finding_type = 'pull.cancellation.capped' AND status = 'requires_review';
+| Command | Does |
+|---|---|
+| `run-server [--no-workers]` / `run-worker` | serve the API and work jobs (`--no-workers` is live but never ready) / jobs only |
+| `migrate up`, `migrate pg`, `migrate status [--json]` | apply OpenRails' and River's migrations / report the applied ledger (non-zero on any mismatch) |
+| `push-auth-bootstrap [--file] [--dry-run]` | create AuthKit root authority from a bootstrap manifest; first-run only |
+| `push-merchant-config [--file] --insert` | create missing merchants from a manifest; bare, it only reports. `--overwrite`/`--prune` are refused |
+| `get-merchant-config`, `apply-merchant-config --merchant NAME --file PATH` | read or apply merchant metadata by revision ([merchant configuration](merchant-configuration.md)) |
+| `dump-merchant-config --slug`, `dump-merchant-catalog --slug` | export configuration / the active catalog as YAML |
+| `catalog apply FILE --merchant NAME [--force-conflicts]` | apply a catalog document ([catalog](catalog.md)); startup never does |
+| `catalog export` / `catalog import` | full catalog snapshot, IDs and history kept ([catalog export](catalog-export.md)) |
+| `billing export` / `import` / `prepare-target` | move one merchant's billing ([portability](merchant-portability.md)) |
+| `merchants list\|get\|create\|rename\|delete\|restore` | the merchant directory; delete is soft |
+| `merchant arm`, `merchant hold`, `book status`, `book arm` | write posture and book identity (above) |
+| `merchant purge --merchant NAME --by NAME [--inventory RUN --expect-rows N --confirm PHRASE]` | alone, record a purge inventory; with it typed back, delete the merchant's rows permanently (the kill switch must be on) |
+| `admin-lockouts unlock <user-id>` | clear an administrator lockout |
+| `destructive-holds list`, `destructive-holds clear` | review destructive-action incidents ([limits](destructive-actions.md)) |
+| `intents`, `intents-log`, `intents resolve` | the provider intent ledger (below) |
+| `prune`, `prune list`, `proposals …`, `undo-run` | [drift tools](#drift) |
+| `ledger-audit --merchant=id:<uuid>` | check ledger conservation and counters; non-zero on a finding. There is no scheduled audit |
+| `nmi decline-report --merchant --since [--until] [--psp]` | read-only NMI decline baseline by month and reason |
+| `solana-pay resolve --merchant --signature --resolution` | close a reviewed Solana Pay receipt |
+| `access-cutover preflight [--approve NAME]` | list and approve the access changes the product-access cutover migration makes |
+| `workers [--json]` | job health from River's tables |
+
+A private standalone first run, as an init job:
+
+```bash
+openrails push-auth-bootstrap --file /run/openrails/bootstrap.yaml
+openrails push-merchant-config --file /run/openrails/merchants.yaml --insert
+openrails catalog apply /run/openrails/catalog.yaml --merchant your-merchant
 ```
 
-Investigate the roster before clearing it. The usual causes are a misdeclared
-`psps.account_id`, a credential rotated onto a sibling sub-account, or a
-provider incident returning a short page — never 850 customers all leaving.
+A server started with `--merchant-manifest` does the merchant step at every boot,
+creating what is missing and keeping later API edits. With people signing in at
+a trusted issuer, `push-auth-bootstrap` has nothing to do.
 
-## One API host + browser CORS
+## Provider intents
 
-A server answers every merchant on one API host: a request's Host names no
-merchant. A credentialed request's merchant is its credential's; a Solana Pay
-request, which takes none, names its order. No public route reads the
-catalog. Browser CORS
-is a **separate, fixed, engine-wide policy**, not a per-merchant setting.
+Every outbound provider mutation is first a row in `billing.provider_intents`:
+an idempotency key, an origin (`user`, `admin`, `system`), the PSP it targets and
+a relevance window. Its own River job (`openrails.provider_operation`) claims it
+under a lease, rechecks relevance, gates on mode × origin, executes and
+classifies the outcome. Every attempt is appended to
+`billing.provider_mutation_logs`. Covered: NMI deletes, NMI and Stripe refunds,
+dunning `manual_rebill` charges, CCBill cancels, payment-method swaps, vault
+deletes, NMI sales, Solana pulls and Stripe payment-method domain registrations.
+A manual card removal is recorded too but never runs by itself: the person
+retries it.
 
-- **Reserved names**: `billing.ReservedMerchantSlugs` is the advisory list
-  a hosted product should refuse to let a merchant self-provision as a slug;
-  the engine doesn't enforce it — the host does.
-- **Webhook surface**: `<prefix>/v1/webhooks/{rail}/{account_id}` in embedded and
-  standalone deployments. The provider account resolves its merchant in the
-  configured environment.
-  Provider signature/source verification and matching payload identity remain
-  required. Host headers do not choose callback authority.
-- **One merchant per credential**: a request acts on the merchant its
-  credential is bound to (an API key's group, a trusted issuer's group, a
-  token exchanged for a group, the issuer a merchant declares); nothing in the
-  request names one, and a credential bound to none is `403
-  merchant_unresolved` ([merchant binding](merchant-binding.md)).
+Statuses: `pending`, `in_flight`, `succeeded`, `failed_retryable`,
+`failed_terminal`, `unknown_needs_verify`, `superseded`, `expired`. A blocked
+intent (provider down, mode, unarmable credentials) stays pending with its
+reason and drains when the blocker lifts; one past its relevance window is
+superseded or expires instead of firing stale. Execution is effectively-once:
+an ambiguous money movement is resolved by reading the provider before any
+retry, deletes verify then execute, Stripe calls send `Idempotency-Key`.
+Renewal identities are deterministic per merchant, PSP, subscription, period and
+attempt; how each rail recovers an uncertain submission is in
+[provider uncertainty](provider-uncertainty.md).
 
-### Browser CORS doctrine
+```
+openrails intents [--status=active|succeeded|failed|superseded|expired|all] [--rail] [--type] [--merchant] [--format table|json]
+openrails intents-log [--rail] [--intent] [--psp] [--phase=attempting|succeeded|failed|unknown|parked]
+openrails intents resolve --merchant --intent [--step] (--receipt=<provider id> | --not-executed) --actor --reason
+```
 
-CORS protects requests authorized by an ambient credential (a cookie the
-browser attaches automatically). OpenRails never issues cookies: every
-browser-tier request carries an explicit bearer JWT placed by the page's own
-JS, which a different origin's script cannot read; an unauthenticated
-cross-origin call just 401s; a stolen token is replayed from `curl`, where
-CORS doesn't exist. So a per-merchant origin allowlist would protect nothing.
-The engine answers a **static, non-configurable** policy, by
-route tier:
+`intents` shows each row's `executes_under` mode and the drain forecast.
+`resolve` closes an `unknown_needs_verify` operation from an exact provider
+receipt, or from provider-supported non-execution (an empty NMI search is never
+enough); it never resends.
 
-- **The standalone server's API routes** (catalog, purchase, `/v1/me/*`, the
-  admin API, `/v1/app/*`) and an embedded host's purchase and self-service
-  routes answer every preflight and response with
-  `Access-Control-Allow-Origin: *`, the methods and headers those routes need
-  plus the headers the mount's Authenticator advertises, `WWW-Authenticate`
-  exposed, and a 12h `Access-Control-Max-Age` — from ANY origin, zero
-  configuration; `Access-Control-Allow-Credentials` is NEVER set.
-- **Every other surface** (the admin console, inbound webhooks, the
-  server's AuthKit routes, an embedded host's staff routes) emits NO CORS
-  headers at all.
-- This is engine code, not a database column or config key: OpenRails' CORS
-  posture is not configurable.
+Inbound durability is the provider's: webhooks are at-least-once and handlers
+idempotent. There is no local inbound queue; Provider Refresh backfills what a
+long outage loses.
 
-## Payment-method update notices
+### PSPs and credentials
 
-A recoverable stored-card failure sends one `payment_method_update_required` customer notice and parks collection until the method is fixed; any follow-up is the host's. Retry/dunning, provider verification, stored-card account updates and paid-period access continue unchanged.
+`billing.psps` is operator-declared: one row per merchant account on a rail,
+with an opaque `account_id`. A Stripe key is checked against it
+(`GET /v1/account` in the posture probe and thin webhooks); a key of another
+account is `mismatched` and never armed. Two live PSPs on a rail with the same
+credential are one account declared twice: the later stays disarmed and
+`consistency.duplicate_gateway_account` names it.
+
+- **Rotate within a PSP:** `PATCH /v1/merchant/psps/{id}` (console **Rotate**)
+  probes the new credential first (NMI, CCBill); a failure stores nothing and the
+  old one keeps serving. A committed rotation reloads every replica at once.
+  `expected_revision` refuses a concurrent edit (`409 revision_mismatch`). With a
+  manifest, edit the file and restart.
+- **Move to another account:** never repoint a PSP. Declare a new one and archive
+  the old (`{archived: true}`, no provider call). An archived PSP takes no new
+  sales; its subscriptions keep renewing there until they lapse.
+- **Intents follow the PSP id, not its key.** Queued intents never execute
+  against another account: they wait for the old PSP's credentials or expire.
+  Renaming a key keeps the PSP. A key redeclared with another account registers
+  a new PSP; the undeclared one keeps its records, its webhooks are refused, and
+  while it holds cards or live subscriptions readiness reports it and
+  `consistency.merchant_config.undeclared_account` stays open.
+- **Custodians** (`billing.custodians`, Basis Theory) follow the same rules one
+  axis over; a PSP names one with `custodian: <key>`
+  ([payment-method custody](payment-method-custody.md)).
+
+Adding or changing a PSP pulls nothing: [pull it](psp-import.md#pulling) with a
+PSP import.
+
+### Processor routing
+
+Purchase picks one PSP before the attempt exists. A request naming `payment.psp`
+gets it; otherwise the `psp_routing` setting decides (ordered rules, first match
+wins, conditions `currency`, `product`, `price`, `mode`; a rule's `prefer` list
+is ranking and allowlist; a rule with no conditions is the catch-all and comes
+last). Without it: stripe, nmi, ccbill, solana, the first that can serve the
+price. Country conditions are refused.
+
+```yaml
+psp_routing:
+  - match: { currency: EUR, mode: subscription }
+    prefer: [ccbill, nmi-main]
+  - prefer: [nmi-main, ccbill, solana]
+```
+
+Fallback is availability-only and pre-charge (`not_armed`,
+`credentials_missing`, `link_missing`, `mode_unsupported`,
+`service_unavailable`, `ambiguous_selector`, `unknown_selector`,
+`resolve_failed`): a decline never moves to a second processor.
+`order_attempts.routing_reason` records the decision;
+`POST /v1/merchant/psps/routing-preview` returns it without charging.
+
+## Convergence
+
+`Converge(scope)` re-derives one customer, in a job committed with each mutation
+that changed them, or a whole merchant after an applied prune. Writers commit a
+change and its effects together, so there is no sweep; deadlines with no event
+are indexed due work:
+
+| Deadline | Picked up by | Result |
+|---|---|---|
+| a provider-billed `past_due` grace ends with no retry | hourly billing pass | `unverified`; the provider is read, access kept |
+| a provider-billed renewal has no payment 48 h after its period | rebill watch | `unverified` |
+| a timed access window lapses | hourly health pass | access-ended notice |
+| an engine renewal past its allowance, `unverified` past 72 h, a stuck or abandoned provider operation | health pass | `life.renewal.held`, `life.unverified.unresolved`, `life.provider_intent.stuck` / `.abandoned` |
+
+A clean scope writes nothing. Repairs converge to the current state and never
+replay side effects (three missed dunning months become one transition), while
+grant effects are rebuilt from the grant log.
+
+Findings are `<plane>.<subject>.<condition>` in
+`billing.reconciliation_findings`:
+
+| Plane | Checks | Repaired by |
+|---|---|---|
+| `pull.*` | a local mirror row against the provider | an approved proposal |
+| `derive.*` | a grant effect against its source | replay or retract |
+| `life.*` | a record against its clock and state machine | converge forward |
+| `consistency.*` | duplicates, mismatches, unbooked events | data fix or review |
+
+States: `reconcile_required`, `requires_review`, `auto_fixed`, `fixed`,
+`ignored`. Identity is stable across runs and a finding resolves itself when the
+divergence goes.
+
+- **Confirmed absence.** Retractions from a pull wait until the domain
+  (subscriptions, payments, grants) is proven fully reconciled for the merchant
+  (`billing.reconciliation_state`, set after a complete mutating pull). During an
+  import, "not local" means "not imported yet".
+- **Stuck intents:** `pending`/`failed_retryable` over 24 h, `in_flight` /
+  `unknown_needs_verify` over 2 h. Mode-parked ones are informational.
+- **Unlandable provider subscriptions** park (`GET /v1/merchant/parked-subscriptions`)
+  with `catalog.price.unmapped` (map or retire the price) or
+  `life.subscription.unattributed` (link the customer). Mapping or linking wakes
+  the park; released parks are deleted after 90 days.
+- `consistency.ledger.unbooked` is a provider event OpenRails could not book;
+  `life.solana.cranker_low_gas` a cranker below 0.05 SOL.
+
+Findings raise console notifications and alerts ([events](events.md)).
+
+## Provider Refresh
+
+Every 2 hours (and on start) one refresh job per merchant with PSPs reads each
+PSP in bounded windows from its watermark (`billing.psp_refresh_watermarks`) to
+five minutes ago; NMI and Stripe start 24 hours early for late indexing. A
+watermark advances only after a complete read. Refresh records qualified
+payments, refunds and provider-owned records, never writes to a provider and
+never charges. Its unknown-cohort lane resolves `unverified` subscriptions with
+the PSP that owns them:
+
+| Provider evidence | Resolution |
+|---|---|
+| verified renewal charge | renewed; the charge recorded once |
+| declined or stalled, inside the dunning window | `past_due`; dunning takes it |
+| declined or stalled, past the window | canceled; the provider delete queued |
+| no charge, remote alive with a future billing date | adopt the remote period end (never for `past_due`) |
+| remote absent or terminal | canceled locally, access revoked |
+| inconclusive or unreachable | stays `unverified` |
+
+Reads run in every mode; overwrites, convergence and the cohort lane need the
+merchant armed, the switch on and a posture above `readonly`. An auto-renewing
+subscription's access is open-ended from creation and closes only on evidence; an
+`unverified` one keeps access. Findings and refresh age report; they never gate
+an operation, which still proves its own authority. NMI merchant-defined field 20
+and Stripe `openrails_book` mark this book's objects: an unknown object without
+the mark is a quiet, low finding (`evidence.quiet_foreign`).
+
+## Drift
+
+All manual, read-only or plan-only by default.
+
+**Proposals.** Every difference a provider read could apply is a `pull.*`
+finding with a `change`:
+
+```
+openrails proposals list    --merchant=<slug> [--psp=KEY] [--pull=pim_…] [--kind=K] [--source=pull|verification]
+openrails proposals show    --merchant=<slug> <fnd_id>
+openrails proposals approve --merchant=<slug> <fnd_id>… | --psp=KEY --kind=K --expect=N
+openrails proposals dismiss|foreign --merchant=<slug> <fnd_id>… --notes=N
+openrails proposals runs    --merchant=<slug>
+```
+
+Each id applies in its own transaction (1–100 per call; a filtered set needs
+`--expect` equal to its size). One whose basis moved, or an end of access on
+evidence older than 7 days, is `superseded`. The kill switch holds changes that
+end access or write to a provider; a readonly posture holds those that move money
+or write to a provider. A dismissed proposal returns only with new evidence.
+`foreign` closes a `pull.subscription.missing` schedule that is not this
+merchant's, refused while any local record links to it. Over HTTP:
+`/v1/merchant/proposals`; approving and dismissing need a person or the in-process
+host (`person_required`).
+
+**Prune** retires the local subscriptions and payments a PSP no longer lists:
+
+```
+openrails prune --merchant=<slug> [--psp=<id|key>] [--rail=…] [--since … --until …] [--log-dir=…] [--expect-rows=N]
+```
+
+Without `--expect-rows` it is a plan; applying needs N equal to the plan, one PSP
+at a time. Rows are soft-deleted and stamped with the run. An empty roster is
+refused outright, grant-entangled rows are skipped, and NMI absence conclusions
+are refused when the remote active set is implausibly small. It waits for the
+merchant's pull lock and then converges the merchant.
+
+**Undo.** `prune` and `approval` runs (approvals capture before-images) reverse
+with one command; a `merchant_purge` run is refused by name:
+
+```
+openrails prune list --merchant=<slug>                                    # or proposals runs
+openrails undo-run --merchant=<slug> --run=<id>                           # plan
+openrails undo-run --merchant=<slug> --run=<id> --apply --expect-rows=N
+```
+
+An apply quiesces the merchant, supersedes the unfired intents the run queued,
+restores the rows in the same transaction (a row changed since keeps its newer
+state), soft-deletes the access windows the run closed and lets `Converge`
+rebuild them, resets the proven-domain flags, and reports what it could not undo:
+provider writes already sent, and in-flight ones left to their executor. It never
+touches the ledger, grants or logs. Then re-read the PSP with an import; the
+refresh stays advisory until the merchant is armed again.
+
+## Background jobs
+
+Everything runs under River once a server or worker is up. A periodic pass
+catches up at start when its last retained run is older than its interval.
+
+| Job | When |
+|---|---|
+| `openrails.billing_pass`: due renewals and retries, failed balance looks, arrears delinquency, order expiry, automatic usage billing (opt-in), rebill watch, the daily NMI history read, undeclared-account re-alerts, stored-card refresh before renewal | top of each UTC hour, and on start |
+| retention cleanup; merchant health; admission-denial flush (with Redis) | hourly |
+| provider refresh (one job per merchant) | 2 h |
+| Stripe webhook endpoint backstop | 24 h |
+| a provider operation (`openrails.provider_operation`) | queued with its intent, sleeping to each attempt |
+| a customer's convergence (`openrails.customer_converge`) | committed with the change |
+| a balance's look | committed with a change crossing one of its lines, and at the instant its last look named |
+| a PSP import, its charge attribution, a purge's Vault cleanup, a Stripe PSP's webhook setup | queued by that action |
+
+The billing pass takes everything due by its start; one scan's failure never stops
+another, and renewals wait at most an hour (an engine renewal's allowance is at
+least two). An expired order is expired for every read at once; the pass writes
+it, so `order.expired` may follow up to an hour later. Jobs time out after 10
+minutes, an hour for `cleanup_expired_data`, `provider_refresh_merchant`,
+`merchant_health`, `rebill_watch`, `stored_card_refresh_due` and an import's
+charge attribution, two for `psp_import`. River's rescuer returns a job whose
+process died once it passes its timeout and `RescueStuckJobsAfter` (10 minutes).
+Passes bounded per job (cleanup's 200 merchants, 200 usage accounts) continue in a
+new job.
+
+## Health and observability
+
+- `GET /health/live` and `GET /health/ready`, public and detail-free (a failure is
+  logged and answers 503). Readiness needs PostgreSQL, the merchants service, the
+  River producer and a local River consumer; Redis, Vault, PSP posture and refused
+  configuration are degraded, never failing. Embedded hosts use `Ready(ctx)` and
+  register `Probes()`.
+- On SIGTERM the server fails readiness at once, keeps serving for `drain_delay`
+  (5 s), then stops within `shutdown_timeout` (20 s). Keep the sum under the
+  orchestrator's grace period.
+- `GET /metrics` on the private listener (`private_port`, or mount
+  `PrivateHandler`): `openrails_dependency_up{dependency,class}` and, per job
+  kind, `openrails_job_overrunning`, `_retryable`, `_discarded` and
+  `_last_completed_timestamp_seconds`. `/v1/metrics` is merchant business
+  analytics ([metrics](metrics-for-llms.md)).
+- `openrails workers` and the `openrails_job_progress` probe read River's tables:
+  the probe fails with no leader, an overrunning job, or a billing pass that has
+  not finished within a day or left critical work overdue since yesterday.
+- Logs are structured to stdout (`logger.level`). Healthy is a near-empty
+  `openrails intents`, no open findings and no overrunning or discarded jobs.
+
+### Network egress
+
+Besides configured hosts (database, Redis, Vault, SMTP, trusted issuers' JWKS,
+`llm.base_url`):
+
+| Destination | For |
+|---|---|
+| `latest.currency-api.pages.dev`, then `cdn.jsdelivr.net` | FX rates, every 2 h from an instance's first cross-currency quote; a failure fails only that quote |
+| `hermes.pyth.network` | Solana token prices |
+| `api.stripe.com`; `secure.nmi.com`, `sandbox.nmi.com`; `api.ccbill.com`, `sandbox-api.ccbill.com`, `datalink.ccbill.com` | PSPs |
+| `api.basistheory.com`, `cdn.basistheory.com` | Basis Theory custodians |
+| `api.mainnet-beta.solana.com`, `api.devnet.solana.com`, `*.helius-rpc.com` | Solana RPC (`provider_sandbox.solana_rpc_url` replaces it) |
+| `challenges.cloudflare.com`, `www.google.com`, `hcaptcha.com` | captcha, when set |
+| `api.anthropic.com`, `api.openai.com` | LLM features, with `llm.api_key` and no `llm.base_url` |
+
+### One API host and CORS
+
+One API host serves every merchant: a credentialed request acts for its
+credential's merchant ([auth](auth.md#merchant-binding)), a Solana Pay request
+names its order, and provider callbacks land on
+`<prefix>/v1/webhooks/{rail}/{account_id}`. `billing.ReservedMerchantSlugs` is an
+advisory list for hosted products. OpenRails sets no cookies, so CORS is fixed
+and not configurable: the standalone API routes and an embedded host's purchase
+and self-service routes answer any origin (`Access-Control-Allow-Origin: *`,
+`WWW-Authenticate` exposed, 12 h max-age, never credentials); the console,
+webhooks, the server's AuthKit routes and embedded staff routes send no CORS
+headers.
+
+## Data retention
+
+Periods are constants in `internal/retention`, the same for every merchant,
+except the event log's `event_retention`. Each table's comment states its class:
+**permanent** (the ledger, grants, payments, owed usage, receipts, operation
+authorizations, refusals, running charges, destructive runs and before-images),
+**partitioned** (monthly partitions dropped whole), **rows** (deleted by the
+hourly cleanup) or **state** (one row per thing that exists).
+
+| Table | Deleted |
+|---|---|
+| `usage_events` (by `occurred_at`) | partition dropped 24 months after its usage was billed, about 26 months after the month began |
+| `admission_operations` (by `admitted_at`) | partition dropped after 61 days |
+| `subscription_status_transitions`, `subscription_billing_changes`, `provider_mutation_logs`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
+| `provider_intents` | instruction-only intents (cancel, payment-method and source update, card vault, network token, catalog archive, account-updater request) 25 months after they last changed; the rest are permanent |
+| `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
+| `maintenance_runs` | reconciliation runs no finding names, 12 months; other kinds permanent |
+| `order_attempts`; `orders`, `order_lines` | attempts that never reached a provider, 90 days after `expires_at`; unpaid closed orders with no attempt, 90 days |
+| `parked_provider_subscriptions` | 90 days after release |
+| `carts` | 30 days after `last_changed_at` |
+| `notifications` | 90 days once read, 180 if never |
+| `notification_events`, `host_outbox`, the event log | 90 days, never before `event_retention` (90 days by default) |
+| `webhook_events` | 90 days after completion |
+| `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
+| `user_destructive_reservations` | 24 hours |
+| `failed_usage_windows` | when the window ends |
+| `meter_period_quantities` | 100 days after `period_starts_at` |
+| `admission_denials_hourly`, `webhook_health_daily` | 13 months |
+| `periodic_leases` | a kind unscheduled for 30 days |
+
+An order attempt that reached a provider is permanent, and so is a cost
+observation while its operation is open. The cleanup job creates partitions two
+months ahead and drops expired ones (giving up after 2 s rather than queue behind
+a long reader), then deletes 1,000 rows per statement and at most 50,000 per
+merchant per pass. `subscription_status_transitions` and reconciliation runs
+refuse other deletes (`billing.guard_retention_delete`, keyed on the
+`openrails.retention_table` setting).
+
+What integrators see: a usage event may be up to 35 days old, and its `source` /
+`source_id` key holds for those 35 days; a hold lasts at most 30 days and a spend
+window 31; after 61 days a request id reads as never admitted; usage reports reach
+back about 26 months.
+
+## Backup and recovery
+
+Back up two things: PostgreSQL, and the merchant configuration (Vault with its
+`credential_fingerprint_key`, or the manifest). PostgreSQL holds no credential, so
+a database alone cannot charge anyone.
+
+Turn on point-in-time recovery (`wal_level = replica`, `archive_mode = on`, an
+off-host `archive_command`, periodic base backups); managed providers expose it,
+but check the retention. PITR is whole-cluster: right for disaster, wrong for one
+damaged merchant. A restore never undoes what happened at a provider (a charge, a
+deleted vault, a cancel); it creates divergence that convergence then repairs.
+Money is reversed by compensating entries, never deletion. The append-only tables
+(`ledger_transfers`, `ledger_accounts`, `grants`, the status, billing-change and
+mutation logs, `webhook_events`, findings) are restored whole or not at all;
+access and balances are recomputed from the grant log.
+
+1. Stop and drain the source writers and disable their restart.
+2. Restore PostgreSQL; make the configuration available.
+3. Start it. A restore into another cluster, database or schema stays readonly
+   until `openrails book arm`, once the source is gone for good. Start in
+   `readonly` to inspect first.
+4. Review unresolved findings; ignoring one does not settle it.
+
+Not backups: the purge inventory (counts and document names only,
+`"is_backup": false`; after a purge, PITR is the only way back), a provider pull
+(providers hold no access, grants or ledger) and `undo-run` (one operation).
+Drill restores into a scratch instance: migrations current, PSPs arm, a pull
+produces sane findings.
