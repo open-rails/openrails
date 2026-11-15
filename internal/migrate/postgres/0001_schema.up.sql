@@ -625,14 +625,9 @@ CREATE TABLE billing.maintenance_runs (
     kind text NOT NULL,
     actor text CHECK (actor <> ''),
     psp_id uuid,
-    mode text,
-    rails text[] NOT NULL DEFAULT '{}',
-    window_starts_at timestamptz,
-    window_ends_at timestamptz,
     started_at timestamptz NOT NULL DEFAULT now(),
     finished_at timestamptz,
     status text NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed', 'reversed')),
-    dry_run boolean NOT NULL DEFAULT false,
     coverage jsonb,
     expected_rows bigint CHECK (expected_rows IS NULL OR expected_rows >= 0),
     affected jsonb,
@@ -640,20 +635,37 @@ CREATE TABLE billing.maintenance_runs (
     reversed_by text,
     note text,
     summary jsonb,
-    error text,
     inventory_manifest jsonb,
     inventory_total_rows bigint,
-    run_class text NOT NULL GENERATED ALWAYS AS (CASE WHEN kind = 'reconciliation' THEN 'observation' WHEN kind = 'purge_inventory' THEN 'inventory' WHEN kind = 'billing_restore' THEN 'restore' ELSE 'destructive' END) STORED,
+    run_class text NOT NULL GENERATED ALWAYS AS (CASE WHEN kind = 'purge_inventory' THEN 'inventory' WHEN kind = 'billing_restore' THEN 'restore' ELSE 'destructive' END) STORED,
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT maintenance_runs_id_run_class_key UNIQUE (merchant_id, id, run_class),
     CONSTRAINT maintenance_runs_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps (merchant_id, id) ON DELETE RESTRICT,
-    CONSTRAINT maintenance_runs_kind_check CHECK (((kind = 'reconciliation' AND mode IN ('advisory', 'enforce') AND status IN ('running', 'completed', 'failed') AND psp_id IS NULL AND NOT dry_run AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL AND reversed_at IS NULL AND reversed_by IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL) OR (kind IN ('prune', 'approval', 'merchant_purge') AND btrim(actor) <> '' AND mode IS NULL AND cardinality(rails) = 0 AND window_starts_at IS NULL AND window_ends_at IS NULL AND summary IS NULL AND error IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL) OR (kind = 'billing_restore' AND actor = 'merchantarchive' AND status IN ('running', 'completed') AND mode IS NULL AND cardinality(rails) = 0 AND psp_id IS NULL AND NOT dry_run AND window_starts_at IS NULL AND window_ends_at IS NULL AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL AND reversed_at IS NULL AND reversed_by IS NULL AND note IS NULL AND error IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL AND ((status = 'running' AND finished_at IS NULL AND summary IS NULL) OR (status = 'completed' AND finished_at IS NOT NULL AND jsonb_typeof(summary) = 'object' AND summary ?& ARRAY['digest', 'rows'] AND jsonb_typeof((summary -> 'digest')) = 'string' AND jsonb_typeof((summary -> 'rows')) = 'number' AND (summary ->> 'digest') ~ '^[0-9a-f]{64}$' AND ((summary ->> 'rows'))::bigint >= 0))) OR (kind = 'purge_inventory' AND status = 'completed' AND finished_at IS NOT NULL AND mode IS NULL AND cardinality(rails) = 0 AND psp_id IS NULL AND window_starts_at IS NULL AND window_ends_at IS NULL AND NOT dry_run AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL AND reversed_at IS NULL AND reversed_by IS NULL AND summary IS NULL AND error IS NULL AND inventory_manifest IS NOT NULL AND jsonb_typeof(inventory_manifest) = 'object' AND jsonb_typeof((inventory_manifest -> 'total_rows')) = 'number' AND inventory_total_rows IS NOT NULL AND inventory_total_rows >= 0 AND inventory_total_rows = ((inventory_manifest ->> 'total_rows'))::bigint)) IS TRUE)
+    CONSTRAINT maintenance_runs_kind_check CHECK ((
+        (kind IN ('prune', 'approval', 'merchant_purge') AND btrim(actor) <> ''
+         AND summary IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL)
+        OR (kind = 'billing_restore' AND actor = 'merchantarchive' AND status IN ('running', 'completed')
+         AND psp_id IS NULL AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL
+         AND reversed_at IS NULL AND reversed_by IS NULL AND note IS NULL
+         AND inventory_manifest IS NULL AND inventory_total_rows IS NULL
+         AND ((status = 'running' AND finished_at IS NULL AND summary IS NULL)
+              OR (status = 'completed' AND finished_at IS NOT NULL AND jsonb_typeof(summary) = 'object'
+                  AND summary ?& ARRAY['digest', 'rows'] AND jsonb_typeof(summary -> 'digest') = 'string'
+                  AND jsonb_typeof(summary -> 'rows') = 'number' AND (summary ->> 'digest') ~ '^[0-9a-f]{64}$' AND (summary ->> 'rows')::bigint >= 0)))
+        OR (kind = 'purge_inventory' AND status = 'completed' AND finished_at IS NOT NULL AND psp_id IS NULL
+         AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL
+         AND reversed_at IS NULL AND reversed_by IS NULL AND summary IS NULL
+         AND inventory_manifest IS NOT NULL AND jsonb_typeof(inventory_manifest) = 'object'
+         AND jsonb_typeof(inventory_manifest -> 'total_rows') = 'number'
+         AND inventory_total_rows IS NOT NULL AND inventory_total_rows >= 0
+         AND inventory_total_rows = (inventory_manifest ->> 'total_rows')::bigint)
+    ) IS TRUE)
 );
-COMMENT ON TABLE billing.maintenance_runs IS 'Typed maintenance run headers: reconciliation observations, reversible destructive work, and immutable purge inventories. Each kind has explicit columns and constraints; before-images remain in destructive_run_before_images. Retention: reconciliation runs no finding refers to are deleted 12 months (366 days) after they started, by the cleanup job only; every other kind is permanent.';
+COMMENT ON TABLE billing.maintenance_runs IS 'Typed maintenance run headers: reversible destructive work, billing restore receipts and immutable purge inventories. Each kind has explicit columns and constraints; before-images remain in destructive_run_before_images. Retention: permanent, never pruned.';
 COMMENT ON COLUMN billing.maintenance_runs.coverage IS 'The coverage proof authorizing a destructive run, retained unchanged for audit and undo.';
 COMMENT ON COLUMN billing.maintenance_runs.expected_rows IS 'The operator-confirmed or planned affected row count.';
 COMMENT ON COLUMN billing.maintenance_runs.inventory_manifest IS 'Purge row counts, secret names, and omitted resources. Not a backup and never an undo image.';
-COMMENT ON COLUMN billing.maintenance_runs.run_class IS 'Derived from the immutable kind. Child foreign keys include it, so findings can reference only observation runs and stamped rows, intents and before-images only destructive runs.';
+COMMENT ON COLUMN billing.maintenance_runs.run_class IS 'Derived from the immutable kind. Child foreign keys include it, so stamped rows, intents and before-images reference only destructive runs.';
 
 CREATE INDEX maintenance_runs_kind_started_at_idx ON billing.maintenance_runs (merchant_id, kind, started_at DESC);
 -- One receipt, on the maintenance ledger, protects the narrow
@@ -701,7 +713,6 @@ BEGIN
                   'catalog_rate_cards',
                   'catalog_restore_receipts',
                   'custodians',
-                  'custody_migrations',
                   'customer_delinquency',
                   'customer_entitlement_cache',
                   'customer_entitlement_cache_stamps',
@@ -728,7 +739,6 @@ BEGIN
                   'nmi_history_months',
                   'nmi_history_reads',
                   'notification_events',
-                  'notifications',
                   'order_attempts',
                   'order_lines',
                   'orders',
@@ -768,7 +778,6 @@ BEGIN
                   'subscription_billing_changes',
                   'subscription_verifications',
                   'subscriptions',
-                  'usage_collection_cadence',
                   'usage_events',
                   'webhook_events',
                   'webhook_health',
@@ -813,17 +822,13 @@ $$;
 CREATE TRIGGER guard_billing_restore_receipt BEFORE INSERT OR DELETE OR UPDATE ON billing.maintenance_runs
     FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_restore_receipt();
 CREATE TRIGGER immutable_maintenance_run_facts BEFORE UPDATE ON billing.maintenance_runs
-    FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('finished_at', 'status', 'summary', 'error', 'affected', 'reversed_at', 'reversed_by', 'note', 'run_class');
+    FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('finished_at', 'status', 'summary', 'affected', 'reversed_at', 'reversed_by', 'note', 'run_class');
 CREATE TRIGGER immutable_maintenance_runs_delete BEFORE DELETE ON billing.maintenance_runs
-    FOR EACH ROW WHEN (old.kind <> 'reconciliation') EXECUTE FUNCTION billing.reject_immutable_billing_fact();
+    FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
 CREATE TRIGGER immutable_maintenance_runs_truncate BEFORE TRUNCATE ON billing.maintenance_runs
     FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact();
 CREATE CONSTRAINT TRIGGER require_finished_billing_restore AFTER INSERT OR UPDATE ON billing.maintenance_runs DEFERRABLE INITIALLY DEFERRED
     FOR EACH ROW EXECUTE FUNCTION billing.require_finished_billing_restore();
--- Only reconciliation runs age out; destructive runs, purge inventories and
--- restore receipts are permanent.
-CREATE TRIGGER retained_reconciliation_runs BEFORE DELETE ON billing.maintenance_runs
-    FOR EACH ROW WHEN (old.kind = 'reconciliation') EXECUTE FUNCTION billing.guard_retention_delete('started_at', '366 days');
 
 CREATE FUNCTION billing.begin_billing_restore(p_merchant uuid) RETURNS uuid
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
@@ -1014,7 +1019,6 @@ COMMENT ON TABLE billing.destructive_holds IS 'Deployment-authoritative destruct
 
 CREATE INDEX destructive_holds_epoch_idx ON billing.destructive_holds (scope_key, cleared_at DESC)
     WHERE cleared_at IS NOT NULL;
-CREATE INDEX destructive_holds_merchant_idx ON billing.destructive_holds (merchant_id, id);
 CREATE UNIQUE INDEX destructive_holds_open_scope_key ON billing.destructive_holds (scope_key)
     WHERE cleared_at IS NULL;
 
@@ -1510,7 +1514,6 @@ COMMENT ON COLUMN billing.prices.sell_via IS 'The methods one of our prices sell
 
 CREATE INDEX prices_archived_created_at_id_idx ON billing.prices (merchant_id, archived, created_at DESC, id DESC);
 CREATE INDEX prices_created_at_id_idx ON billing.prices (merchant_id, created_at DESC, id DESC);
-CREATE INDEX prices_key_idx ON billing.prices (merchant_id, product_id, key);
 CREATE UNIQUE INDEX prices_key_key ON billing.prices (merchant_id, product_id, key) WHERE NOT archived;
 CREATE INDEX prices_public_id_idx ON billing.prices (merchant_id, sha256(public_id::bytea));
 
@@ -1873,7 +1876,6 @@ CREATE TABLE billing.payment_methods (
     contact_cardholder_at timestamptz,
     setup_ref text,
     capture jsonb,
-    wallet_card_id uuid,
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT payment_methods_customer_id_id_key UNIQUE (merchant_id, customer_id, id),
     CONSTRAINT payment_methods_custodian_id_custodian_fkey FOREIGN KEY (merchant_id, custodian_id, custodian) REFERENCES billing.custodians (merchant_id, id, kind) ON DELETE RESTRICT,
@@ -1917,7 +1919,6 @@ COMMENT ON COLUMN billing.payment_methods.replaced_by_id IS 'The method that rep
 COMMENT ON COLUMN billing.payment_methods.contact_cardholder_at IS 'When the issuer last asked for the cardholder to be contacted; cleared by the next change to the card.';
 COMMENT ON COLUMN billing.payment_methods.setup_ref IS 'The provider''s setup awaiting the customer (a Stripe SetupIntent) while status is requires_action.';
 COMMENT ON COLUMN billing.payment_methods.capture IS 'Private accepted custodian card-save binding, encrypted SDK authorization until completion, then token hash and canonical method identity. Never payment authority.';
-COMMENT ON COLUMN billing.payment_methods.wallet_card_id IS 'The wallet card this merchant copy was made from (lineage); NULL for a card given to the merchant.';
 
 CREATE INDEX payment_methods_custodian_id_network_token_id_idx ON billing.payment_methods (merchant_id, custodian_id, network_token_id)
     WHERE custodian <> 'psp' AND network_token_id IS NOT NULL;
@@ -2068,44 +2069,6 @@ SELECT pm.merchant_id, pm.id, '-infinity' FROM billing.payment_methods pm
    AND pm.custodian IN ('basis_theory', 'platform') AND pm.status = 'active'
 ON CONFLICT (merchant_id, payment_method_id) DO UPDATE SET due_at = '-infinity';
 $$;
-
-CREATE TABLE billing.custody_migrations (
-    id uuid NOT NULL DEFAULT uuidv7(),
-    merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
-    batch_id uuid NOT NULL,
-    payment_method_id uuid NOT NULL,
-    rail text NOT NULL,
-    from_custodian text NOT NULL,
-    from_custodian_id uuid,
-    from_rail_customer_ref text CHECK (from_rail_customer_ref <> ''),
-    from_rail_method_ref text CHECK (from_rail_method_ref <> ''),
-    from_psp_id uuid,
-    to_custodian text NOT NULL,
-    to_custodian_id uuid NOT NULL,
-    to_rail_method_ref text NOT NULL,
-    to_psp_id uuid,
-    exported_at timestamptz,
-    outcome text NOT NULL CHECK (outcome IN ('remapped', 'created')),
-    reason text CHECK (reason <> ''),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (merchant_id, id),
-    CONSTRAINT custody_migrations_from_custodian_id_fkey FOREIGN KEY (merchant_id, from_custodian_id) REFERENCES billing.custodians (merchant_id, id) ON DELETE RESTRICT,
-    CONSTRAINT custody_migrations_from_psp_id_fkey FOREIGN KEY (merchant_id, from_psp_id) REFERENCES billing.psps (merchant_id, id) ON DELETE RESTRICT,
-    CONSTRAINT custody_migrations_payment_method_id_fkey FOREIGN KEY (merchant_id, payment_method_id) REFERENCES billing.payment_methods (merchant_id, id) ON DELETE CASCADE,
-    CONSTRAINT custody_migrations_to_custodian_id_fkey FOREIGN KEY (merchant_id, to_custodian_id) REFERENCES billing.custodians (merchant_id, id) ON DELETE RESTRICT,
-    CONSTRAINT custody_migrations_to_psp_id_fkey FOREIGN KEY (merchant_id, to_psp_id) REFERENCES billing.psps (merchant_id, id) ON DELETE RESTRICT,
-    CONSTRAINT custody_migrations_target_check CHECK (btrim(to_rail_method_ref) <> '' AND btrim(to_custodian) <> '')
-);
-COMMENT ON TABLE billing.custody_migrations IS 'One row per instrument whose CUSTODY changed — the durable memory of a vault-export remap. Records where the card used to live (the PSP vault handle the processor holds) and where it lives now (the custodian token), on an unchanged payment_method_id so subscriptions never move. Reversible in RECORD, never in custody: the fields to re-point an instrument back are all here, but a processor that deleted the vault entry or terminated the merchant cannot be undone by a row. Retention: permanent, never pruned.';
-COMMENT ON COLUMN billing.custody_migrations.batch_id IS 'The operator run that produced this row. A dry-run plan writes nothing; an applied run stamps every flip with one batch id so the report and the audit agree.';
-COMMENT ON COLUMN billing.custody_migrations.from_rail_customer_ref IS 'The PSP-scope vault handle the instrument had BEFORE the flip (NMI customer_vault_id). Retained on the payment_methods row too — this is the copy that survives a later re-remap.';
-COMMENT ON COLUMN billing.custody_migrations.from_rail_method_ref IS 'The instrument-scope handle before the flip (NMI billing_id; empty for the one-vault-per-card default).';
-COMMENT ON COLUMN billing.custody_migrations.to_rail_method_ref IS 'The custodian token id the instrument now charges through — payment_methods.rail_method_ref after the flip.';
-COMMENT ON COLUMN billing.custody_migrations.exported_at IS 'The declared horizon of the custodian''s ingest of the vault export — when the token set was true.';
-COMMENT ON COLUMN billing.custody_migrations.outcome IS 'remapped = an existing instrument changed custody (same payment_method_id, subscriptions untouched); created = the export carried a card with no local instrument and the operator declared its customer.';
-
-CREATE INDEX custody_migrations_batch_id_created_at_idx ON billing.custody_migrations (merchant_id, batch_id, created_at);
-CREATE UNIQUE INDEX custody_migrations_payment_method_id_to_rail_method_ref_key ON billing.custody_migrations (merchant_id, payment_method_id, to_rail_method_ref);
 
 CREATE TABLE billing.money_settings (
     merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
@@ -3084,7 +3047,6 @@ CREATE INDEX orders_created_at_id_idx ON billing.orders (merchant_id, created_at
 CREATE INDEX orders_customer_id_created_at_id_idx ON billing.orders (merchant_id, customer_id, created_at DESC, id DESC);
 CREATE INDEX orders_due_at_open_idx ON billing.orders (merchant_id, due_at)
     WHERE status = 'open' AND due_at IS NOT NULL;
-CREATE INDEX orders_embedded_idx ON billing.orders (id) WHERE embedded;
 CREATE INDEX orders_expires_at_live_idx ON billing.orders (merchant_id, expires_at) WHERE status = 'open';
 CREATE INDEX orders_id_idx ON billing.orders (id);
 CREATE UNIQUE INDEX orders_idempotency_key_key ON billing.orders (merchant_id, customer_id, idempotency_key)
@@ -3255,7 +3217,6 @@ CREATE TABLE billing.order_attempts (
     deleted_at timestamptz,
     destructive_run_id uuid,
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' ELSE NULL END) STORED,
-    routing_reason jsonb,
     order_id uuid,
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT order_attempts_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps (merchant_id, id, rail) ON DELETE RESTRICT,
@@ -3269,7 +3230,6 @@ CREATE TABLE billing.order_attempts (
 COMMENT ON TABLE billing.order_attempts IS 'An order payment attempt: provider execution and any customer action are tied to the order. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.';
 COMMENT ON COLUMN billing.order_attempts.psp_id IS 'PSP selected for this attempt. Required.';
 COMMENT ON COLUMN billing.order_attempts.deleted_at IS 'Soft delete: set, the row is invisible to every live read. Only `openrails prune` sets it, and `openrails undo-run` clears it.';
-COMMENT ON COLUMN billing.order_attempts.routing_reason IS 'Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.';
 COMMENT ON COLUMN billing.order_attempts.order_id IS 'The order this payment attempt pays.';
 
 CREATE INDEX order_attempts_customer_id_idx ON billing.order_attempts (merchant_id, customer_id);
@@ -3388,10 +3348,8 @@ CREATE UNIQUE INDEX grants_purchased_credit_payment_key ON billing.grants (merch
     WHERE kind = 'credit' AND event = 'grant' AND payment_id IS NOT NULL AND ((spec_snapshot -> 'deposit') -> 'paid_amount') IS NOT NULL;
 CREATE INDEX grants_source_type_source_id_idx ON billing.grants (merchant_id, source_type, source_id)
     WHERE source_id IS NOT NULL;
-CREATE INDEX grants_supersedes_id_idx ON billing.grants (merchant_id, supersedes_id)
-    WHERE supersedes_id IS NOT NULL;
 CREATE UNIQUE INDEX grants_supersedes_id_key ON billing.grants (merchant_id, supersedes_id)
-    WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede');
+    WHERE supersedes_id IS NOT NULL;
 
 CREATE TRIGGER immutable_grants BEFORE DELETE OR UPDATE ON billing.grants
     FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
@@ -3977,6 +3935,10 @@ CREATE UNIQUE INDEX provider_intents_open_subscription_collection_key ON billing
     WHERE intent_type = 'subscription_collection' AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
 CREATE INDEX provider_intents_order_attempt_idx ON billing.provider_intents (merchant_id, (payload ->> 'order_attempt_id'::text))
     WHERE payload ? 'order_attempt_id';
+-- An engine renewal finds the sale that paid an order's first period by the
+-- order it paid: one index read, not every past sale of the merchant.
+CREATE INDEX provider_intents_order_sale_idx ON billing.provider_intents (merchant_id, (payload ->> 'order_id'::text))
+    WHERE intent_type = 'nmi_sale' AND status = 'succeeded' AND payload ? 'order_id';
 CREATE INDEX provider_intents_origin_created_at_intent_type_idx ON billing.provider_intents (merchant_id, origin, created_at, intent_type);
 CREATE INDEX provider_intents_psp_id_idx ON billing.provider_intents (merchant_id, psp_id)
     WHERE psp_id IS NOT NULL;
@@ -4618,16 +4580,6 @@ SELECT billing.ensure_month_partitions('usage_events', now() - interval '35 days
 ALTER TABLE billing.usage_events ADD CONSTRAINT usage_events_failed_stated_amount_check
     CHECK (outcome = 'succeeded' OR stated_amount IS NOT NULL) NOT VALID;
 
-CREATE TABLE billing.usage_collection_cadence (
-    merchant_id uuid CONSTRAINT invoice_collection_cadence_merchant_id_not_null NOT NULL,
-    monthly_period_started_at timestamptz CONSTRAINT invoice_collection_cadence_monthly_period_started_at_not_null NOT NULL,
-    completed_at timestamptz CONSTRAINT invoice_collection_cadence_completed_at_not_null NOT NULL,
-    CONSTRAINT invoice_collection_cadence_pkey PRIMARY KEY (merchant_id),
-    CONSTRAINT invoice_collection_cadence_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants (id) ON DELETE CASCADE,
-    CONSTRAINT invoice_collection_cadence_check CHECK (completed_at >= monthly_period_started_at)
-);
-COMMENT ON TABLE billing.usage_collection_cadence IS 'Last fully scanned thirty-day usage collection period per merchant. Advancing this marker requires successful admission of the whole eligible scan; accepted operations recover independently. Included in merchant archives. Retention: permanent, never pruned.';
-
 CREATE TABLE billing.meter_period_quantities (
     merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
     customer_id uuid NOT NULL,
@@ -4859,35 +4811,6 @@ LANGUAGE sql IMMUTABLE PARALLEL SAFE SET search_path TO 'pg_catalog', 'billing',
       WHEN 'subscription' THEN 'sub_' WHEN 'order' THEN 'ord_'
       WHEN 'mandate' THEN 'mdt_' WHEN 'destructive_hold' THEN 'dsh_' ELSE '' END || id::text END
 $$;
-
-CREATE TABLE billing.notifications (
-    id uuid NOT NULL DEFAULT uuidv7(),
-    event_type text NOT NULL,
-    data jsonb NOT NULL,
-    recipient_kind text NOT NULL DEFAULT 'customer',
-    read_at timestamptz,
-    severity text CHECK (severity <> ''),
-    title text CHECK (title <> ''),
-    body text CHECK (body <> ''),
-    link text CHECK (link <> ''),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
-    customer_id uuid,
-    PRIMARY KEY (merchant_id, id),
-    CONSTRAINT notifications_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
-    CONSTRAINT notifications_recipient_check CHECK (
-        (recipient_kind = 'customer' AND customer_id IS NOT NULL AND severity IS NULL AND title IS NULL AND body IS NULL AND link IS NULL)
-        OR (recipient_kind = 'merchant' AND customer_id IS NULL AND event_type = 'operator.alert' AND severity IS NOT NULL AND title IS NOT NULL AND body IS NOT NULL)
-    ),
-    CONSTRAINT notifications_operator_only CHECK (recipient_kind = 'merchant')
-);
-COMMENT ON TABLE billing.notifications IS 'Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox. Retention: rows are deleted 90 days after created_at once read, 180 days if never read.';
-
-CREATE INDEX notifications_created_at_idx ON billing.notifications (merchant_id, created_at);
-CREATE INDEX notifications_customer_id_idx ON billing.notifications (merchant_id, customer_id)
-    WHERE customer_id IS NOT NULL;
-CREATE INDEX notifications_event_type_idx ON billing.notifications (event_type);
-CREATE INDEX notifications_recipient_kind_customer_id_read_at_created_at_idx ON billing.notifications (merchant_id, recipient_kind, customer_id, read_at, created_at DESC);
 
 CREATE TABLE billing.notification_events (
     merchant_id uuid NOT NULL REFERENCES billing.merchants (id),
@@ -5141,16 +5064,6 @@ $$;
 
 CREATE TRIGGER update_legacy_eventlog_stream INSTEAD OF UPDATE ON billing.event_log_streams FOR EACH ROW EXECUTE FUNCTION billing.update_legacy_eventlog_stream();
 
-CREATE FUNCTION billing.guard_event_log_fact() RETURNS trigger
-LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-BEGIN
-    IF to_jsonb(OLD) IS DISTINCT FROM to_jsonb(NEW) THEN
-        RAISE EXCEPTION 'event log facts are immutable' USING ERRCODE='23514';
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
 CREATE TABLE billing.eventlog_pending (
     ordinal bigint NOT NULL GENERATED ALWAYS AS IDENTITY,
     transaction_id xid8 NOT NULL DEFAULT pg_current_xact_id(),
@@ -5266,7 +5179,6 @@ CREATE TABLE billing.reconciliation_findings (
     resolved_by text,
     notified_at timestamptz,
     notified_severity text,
-    seen_run_class text GENERATED ALWAYS AS (CASE WHEN first_seen_run IS NOT NULL OR last_seen_run IS NOT NULL THEN 'observation' ELSE NULL END) STORED,
     change jsonb,
     source text,
     evidence_digest text,
@@ -5275,8 +5187,6 @@ CREATE TABLE billing.reconciliation_findings (
     dismissed_at timestamptz,
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT reconciliation_findings_approval_run_id_fkey FOREIGN KEY (merchant_id, approval_run_id) REFERENCES billing.maintenance_runs (merchant_id, id) ON DELETE RESTRICT,
-    CONSTRAINT reconciliation_findings_first_seen_run_seen_run_class_fkey FOREIGN KEY (merchant_id, first_seen_run, seen_run_class) REFERENCES billing.maintenance_runs (merchant_id, id, run_class) ON DELETE RESTRICT,
-    CONSTRAINT reconciliation_findings_last_seen_run_seen_run_class_fkey FOREIGN KEY (merchant_id, last_seen_run, seen_run_class) REFERENCES billing.maintenance_runs (merchant_id, id, run_class) ON DELETE RESTRICT,
     CONSTRAINT reconciliation_findings_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps (merchant_id, id, rail) ON DELETE RESTRICT,
     CONSTRAINT reconciliation_findings_pull_id_fkey FOREIGN KEY (merchant_id, pull_id) REFERENCES billing.psp_imports (merchant_id, id) ON DELETE SET NULL (pull_id),
     CONSTRAINT reconciliation_findings_change_check CHECK (
@@ -5316,7 +5226,8 @@ CREATE TABLE billing.reconciliation_findings (
 COMMENT ON TABLE billing.reconciliation_findings IS 'Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, psp_id, subject_key): pull.*, catalog.price.unmapped and life.subscription.unattributed findings name the PSP whose read raised them. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored. Retention: resolved findings are deleted 12 months (366 days) after they were resolved and last seen.';
 COMMENT ON COLUMN billing.reconciliation_findings.psp_id IS 'pull.*, catalog.price.unmapped and life.subscription.unattributed findings: the PSP whose read raised the finding. Part of the identity; absence can be proven only by a complete read of this PSP.';
 COMMENT ON COLUMN billing.reconciliation_findings.subject_key IS 'Stable identity of the drifted subject within (provider, finding_type): rail subscription id, transaction id, local subscription/payment-method uuid, or customer uuid depending on the check.';
-COMMENT ON COLUMN billing.reconciliation_findings.first_seen_run IS 'Reconciliation run that first observed this finding; NULL when raised outside a run (e.g. the intents volume breaker).';
+COMMENT ON COLUMN billing.reconciliation_findings.first_seen_run IS 'The reconciliation pass that first saw this finding, an id naming no row; NULL when raised outside a pass (e.g. the intents volume breaker).';
+COMMENT ON COLUMN billing.reconciliation_findings.last_seen_run IS 'The reconciliation pass that last saw this finding; a pass resolves the findings it did not see again.';
 COMMENT ON COLUMN billing.reconciliation_findings.operator_notes IS 'Operator-entered notes attached when a finding is fixed or ignored manually.';
 COMMENT ON COLUMN billing.reconciliation_findings.evidence IS 'Machine-readable finding evidence. Optional nested keys: provider, local, remote, intent, resolution.';
 COMMENT ON COLUMN billing.reconciliation_findings.resolved_by IS 'Authenticated admin identity stamped on manual resolution (approve/ignore via the findings queue); NULL for automatic resolutions.';
@@ -5334,10 +5245,6 @@ CREATE INDEX reconciliation_findings_approval_run_id_idx ON billing.reconciliati
 CREATE INDEX reconciliation_findings_finding_type_idx ON billing.reconciliation_findings (finding_type)
     WHERE status IN ('reconcile_required', 'requires_review');
 CREATE UNIQUE INDEX reconciliation_findings_finding_type_psp_id_subject_key_key ON billing.reconciliation_findings (merchant_id, finding_type, psp_id, subject_key) NULLS NOT DISTINCT;
-CREATE INDEX reconciliation_findings_first_seen_run_idx ON billing.reconciliation_findings (merchant_id, first_seen_run)
-    WHERE first_seen_run IS NOT NULL;
-CREATE INDEX reconciliation_findings_last_seen_run_idx ON billing.reconciliation_findings (merchant_id, last_seen_run)
-    WHERE last_seen_run IS NOT NULL;
 CREATE INDEX reconciliation_findings_proposals_idx ON billing.reconciliation_findings (merchant_id, status, source, psp_id)
     WHERE finding_type ~~ 'pull.%';
 CREATE INDEX reconciliation_findings_pull_id_idx ON billing.reconciliation_findings (merchant_id, pull_id)
