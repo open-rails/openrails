@@ -18,26 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 )
 
-// ledger is the Store surface the Runner drives (interface for unit tests).
-type ledger interface {
-	Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error)
-	Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error)
-	ClaimFirstByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
-	ClaimDueByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
-	ClaimNowByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
-	ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
-	ReleaseUnknownClaim(ctx context.Context, id uuid.UUID) (bool, error)
-	RenewClaim(ctx context.Context, id uuid.UUID, status string, attempts int32, now, leaseUntil time.Time) (bool, error)
-	MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error
-	PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error
-	PruneTerminalPayload(ctx context.Context, id uuid.UUID) error
-	MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
-	MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, evidence map[string]any) error
-	MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error
-	Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
-	MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error
-}
-
 const (
 	// DefaultLease is the silence an executor is allowed before its claim is
 	// treated as abandoned, not how long a handler may run: the claim is
@@ -78,8 +58,7 @@ type Runner struct {
 	CardAbuseGuard    *abuse.CardAbuseGuard
 	CardFailureLedger *abuse.FailureLedger
 
-	Store    ledger
-	Logger   MutationLogger
+	Store    *Store
 	Registry *Registry
 	// Config gates execution by origin x operating mode. nil fails closed:
 	// every intent parks, since a runner that cannot tell its mode must not
@@ -445,14 +424,12 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 			applied = OutcomeAmbiguous
 		} else {
 			if unsent, _ := outcome.Evidence["destructive_before_effect"].(bool); unsent {
-				if store, ok := r.Store.(*Store); ok {
-					if err := store.park(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason, []byte(`{"destructive_before_effect":true}`)); err != nil {
-						logEntry.WithError(err).Error("cannot persist unsent destructive operation")
-					} else {
-						stats.Parked++
-					}
-					return
+				if err := r.Store.park(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason, []byte(`{"destructive_before_effect":true}`)); err != nil {
+					logEntry.WithError(err).Error("cannot persist unsent destructive operation")
+				} else {
+					stats.Parked++
 				}
+				return
 			}
 			r.park(ctx, logEntry, stats, intent.ID, now, outcome)
 			return
@@ -553,16 +530,7 @@ func (r *Runner) supersede(ctx context.Context, logEntry *log.Entry, stats *Stat
 }
 
 func (r *Runner) logExternalMutation(ctx context.Context, intent gen.BillingProviderIntent, phase MutationLogPhase, reason string, evidence map[string]any) error {
-	logger := r.Logger
-	if logger == nil {
-		if fallback, ok := r.Store.(MutationLogger); ok {
-			logger = fallback
-		}
-	}
-	if logger == nil {
-		return nil
-	}
-	return logger.LogExternalMutation(ctx, r.mutationLogParams(intent, phase, reason, evidence))
+	return r.Store.LogExternalMutation(ctx, r.mutationLogParams(intent, phase, reason, evidence))
 }
 
 func (r *Runner) mutationLogParams(intent gen.BillingProviderIntent, phase MutationLogPhase, reason string, evidence map[string]any) MutationLogParams {

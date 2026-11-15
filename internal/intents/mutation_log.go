@@ -37,10 +37,6 @@ type MutationLogParams struct {
 	Evidence         map[string]any
 }
 
-type MutationLogger interface {
-	LogExternalMutation(ctx context.Context, p MutationLogParams) error
-}
-
 var (
 	sensitiveMutationKey = regexp.MustCompile(`(?i)(authorization|api[_-]?key|security[_-]?key|secret|password|private[_-]?key|card|pan|cvv|cvc|token)`)
 	sensitiveAssignment  = regexp.MustCompile(`(?i)\b(authorization|api[_-]?key|security[_-]?key|secret|password|private[_-]?key|card[_-]?number|pan|cvv|cvc|token)\s*[:=]\s*[^,\s&]+`)

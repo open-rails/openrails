@@ -520,7 +520,7 @@ func (t *PaymentSourceUpdateThrough) EnqueueSwap(ctx context.Context, tx pgx.Tx,
 		return uuid.Nil, err
 	}
 	store := NewStore(d)
-	if gated, ok := t.Runner.Store.(*Store); ok {
+	if gated := t.Runner.Store; gated != nil {
 		store = gated.withTxDB(d)
 	}
 	params.Inline = true

@@ -46,8 +46,8 @@ func methodDeleteKeyMatches(kind, key string, id uuid.UUID) bool {
 // A previous ambiguous attempt is read back first; it is never blindly sent
 // again. A fresh ambiguous response gets one readback before returning an error.
 func (t *PaymentMethodDeleteThrough) executeManual(ctx context.Context, in gen.BillingProviderIntent) (gen.BillingProviderIntent, error) {
-	store, ok := t.Runner.Store.(*Store)
-	if !ok || !ManualPaymentMethodDelete(in) {
+	store := t.Runner.Store
+	if store == nil || !ManualPaymentMethodDelete(in) {
 		return in, errors.New("manual payment-method deletion store unavailable")
 	}
 	ctx = context.WithValue(ctx, manualDeleteContextKey{}, in.ID)
