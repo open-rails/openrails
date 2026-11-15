@@ -91,14 +91,6 @@ type Alert struct {
 	FiredAt       time.Time `json:"fired_at"`
 }
 
-// DeliveryResult records the outcome of one external delivery.
-type DeliveryResult struct {
-	Channel  string `json:"channel"`
-	OK       bool   `json:"ok"`
-	Detail   string `json:"detail,omitempty"`
-	Attempts int    `json:"attempts,omitempty"`
-}
-
 // FieldError is one corrective validation failure (LLM-legibility house style:
 // name the bad param, why, and the valid set / bounds).
 type FieldError struct {

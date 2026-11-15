@@ -814,6 +814,9 @@
     "OR-J06-S63": [
       "TestStripeWebhookDueWork/OR-J06-S63/a-psp-change-while-its-pass-runs-reaches-stripe-without-the-backstop"
     ],
+    "OR-J06-S64": [
+      "TestStripeWebhookDueWork/OR-J06-S64/a-finding-alert-whose-delivery-fails-is-delivered-on-retry-once"
+    ],
     "OR-J14-S70": [
       "TestDueWork/OR-J14-S70/an-engine-renewal-nothing-attempted-reads-as-missed"
     ],

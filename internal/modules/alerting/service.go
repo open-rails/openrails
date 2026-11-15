@@ -22,8 +22,8 @@ import (
 // Deps wires the alerting service.
 type Deps struct {
 	DB *db.DB
-	// Email is the outbound alert-email sender seam (may be nil — email channel
-	// then fails soft with a note in the delivery record).
+	// Email is the outbound alert-email sender seam (may be nil: email
+	// deliveries then stay retryable).
 	Email EmailSender
 	// Outbound is the SSRF policy for merchant-supplied webhook sinks (#SEC-21).
 	// The zero value is the strict production policy: publicly routable
@@ -33,8 +33,6 @@ type Deps struct {
 	// DashboardBaseURL prefixes alert dashboard deep links (may be empty → the
 	// link is a relative path the console resolves).
 	DashboardBaseURL string
-	// WebhookBackoff is the base delay between webhook retry attempts.
-	WebhookBackoff time.Duration
 }
 
 // Service owns merchant notifications and the merchant's alert webhooks.
@@ -57,7 +55,7 @@ func NewService(deps Deps) *Service {
 	return &Service{
 		db:               deps.DB,
 		store:            st,
-		deliverer:        newDeliverer(deps.DB, st, deps.Email, deps.Outbound, deps.WebhookBackoff),
+		deliverer:        newDeliverer(deps.DB, deps.Email, deps.Outbound),
 		clock:            clock,
 		dashboardBaseURL: strings.TrimRight(deps.DashboardBaseURL, "/"),
 		outbound:         deps.Outbound,
@@ -70,15 +68,6 @@ func (s *Service) SetMerchantConfig(config *merchantdocs.Cache) {
 }
 
 func (s *Service) now() time.Time { return s.clock.Now().UTC() }
-
-// defaultChannels selects external email delivery after the console notification
-// is durable. Enabled webhooks are added by the finding notification path.
-func defaultChannels(sev Severity) []ChannelRef {
-	if sev == SeverityCritical {
-		return []ChannelRef{{Type: ChannelEmail}}
-	}
-	return nil
-}
 
 // --- webhook CRUD ------------------------------------------------------------
 

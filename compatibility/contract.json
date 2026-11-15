@@ -1681,8 +1681,10 @@
     "internal/modules/alerting": [
       "type Alert struct {\n\tTitle         string    `json:\"title\"`\n\tSeverity      Severity  `json:\"severity\"`\n\tSummary       string    `json:\"summary\"`\n\tDashboardLink string    `json:\"dashboard_link,omitempty\"`\n\tFiredAt       time.Time `json:\"fired_at\"`\n}",
       "type ChannelRef struct {\n\tType      ChannelType `json:\"type\"`\n\tWebhookID *uuid.UUID  `json:\"webhook_id,omitempty\"`\n}",
-      "type DeliveryResult struct {\n\tChannel  string `json:\"channel\"`\n\tOK       bool   `json:\"ok\"`\n\tDetail   string `json:\"detail,omitempty\"`\n\tAttempts int    `json:\"attempts,omitempty\"`\n}",
-      "type FieldError struct {\n\tParam   string   `json:\"param\"`\n\tCode    string   `json:\"code\"`\n\tMessage string   `json:\"message\"`\n\tValid   []string `json:\"valid,omitempty\"`\n}"
+      "type DeliveryArgs struct {\n\tMerchantID uuid.UUID     `json:\"merchant_id\"`\n\tHold       *HoldAlert    `json:\"hold,omitempty\"`\n\tFinding    *FindingAlert `json:\"finding,omitempty\"`\n\tChannel    *ChannelRef   `json:\"channel,omitempty\"`\n}",
+      "type FieldError struct {\n\tParam   string   `json:\"param\"`\n\tCode    string   `json:\"code\"`\n\tMessage string   `json:\"message\"`\n\tValid   []string `json:\"valid,omitempty\"`\n}",
+      "type FindingAlert struct {\n\tID         uuid.UUID `json:\"id\"`\n\tNotifiedAt time.Time `json:\"notified_at\"`\n}",
+      "type HoldAlert struct {\n\tID       uuid.UUID `json:\"id\"`\n\tScope    string    `json:\"scope\"`\n\tOpenedAt time.Time `json:\"opened_at\"`\n}"
     ],
     "internal/modules/catalog": [
       "type StripePrice struct {\n\tID         string            `json:\"id\"`\n\tProduct    string            `json:\"product\"`\n\tUnitAmount int64             `json:\"unit_amount\"`\n\tCurrency   string            `json:\"currency\"`\n\tNickname   string            `json:\"nickname\"`\n\tLookupKey  string            `json:\"lookup_key\"`\n\tActive     bool              `json:\"active\"`\n\tMetadata   map[string]string `json:\"metadata\"`\n\tRecurring  *struct {\n\t\tInterval string `json:\"interval\"`\n\t\tCount    int    `json:\"interval_count\"`\n\t} `json:\"recurring,omitempty\"`\n}",
@@ -1927,7 +1929,6 @@
     ],
     "internal/river": [
       "type CleanupExpiredDataArgs struct {\n\tAfter *uuid.UUID `json:\"after,omitempty\"`\n}",
-      "type DestructiveAlertArgs struct {\n\tMerchantID uuid.UUID            `json:\"merchant_id\"`\n\tHoldID     uuid.UUID            `json:\"hold_id\"`\n\tScope      string               `json:\"scope\"`\n\tOpenedAt   time.Time            `json:\"opened_at\"`\n\tChannel    *alerting.ChannelRef `json:\"channel,omitempty\"`\n}",
       "type DunningArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\"`\n}",
       "type PassReport struct {\n\tOverdue []string `json:\"overdue\"`\n}",
       "type ProviderRefreshMerchantArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}",
@@ -3536,6 +3537,20 @@
       "sha256": "crypto/sha256",
       "time": "time"
     },
+    "internal/modules/alerting/delivery.go": {
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "reconcile": "github.com/open-rails/openrails/internal/reconcile",
+      "river": "github.com/riverqueue/river",
+      "rivertype": "github.com/riverqueue/river/rivertype",
+      "strconv": "strconv",
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "internal/modules/alerting/types.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "fmt": "fmt",
@@ -4780,19 +4795,6 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5",
       "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks"
-    },
-    "internal/river/jobs_destructive_alert.go": {
-      "alerting": "github.com/open-rails/openrails/internal/modules/alerting",
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "fmt": "fmt",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "river": "github.com/riverqueue/river",
-      "rivertype": "github.com/riverqueue/river/rivertype",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/river/jobs_dunning.go": {
       "billing": "github.com/open-rails/openrails/billing",

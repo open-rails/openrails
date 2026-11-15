@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/httpx"
@@ -21,155 +19,38 @@ import (
 
 // EmailSender is the config/host seam for outbound alert email.
 // subscriptions.EmailService satisfies it; a host can inject its own.
-// A nil sender or one that IsEnabled()==false fails soft (the delivery record
-// notes the skip and the dev path logs loudly).
+// An email delivery without an enabled sender stays retryable.
 type EmailSender interface {
 	SendEmail(ctx context.Context, to, subject, htmlContent, plainContent string) error
 	IsEnabled() bool
 }
 
-// deliverer sends immediate notifications to the selected destinations.
+// deliverer sends one alert attempt to a destination.
 type deliverer struct {
-	store       *store
-	cfgStore    *merchantconfig.Store
-	email       EmailSender
-	outbound    httpx.Policy
-	http        *http.Client
-	backoff     time.Duration
-	maxAttempts int
+	cfgStore *merchantconfig.Store
+	email    EmailSender
+	http     *http.Client
 }
 
-func newDeliverer(database *db.DB, st *store, email EmailSender, outbound httpx.Policy, backoff time.Duration) *deliverer {
-	if backoff <= 0 {
-		backoff = 500 * time.Millisecond
-	}
+func newDeliverer(database *db.DB, email EmailSender, outbound httpx.Policy) *deliverer {
 	return &deliverer{
-		store:    st,
 		cfgStore: merchantconfig.NewStore(database),
 		email:    email,
-		outbound: outbound,
 		// #SEC-21: the delivery client is address-guarded at the DIALER, so a
-		// sink whose DNS flips between the 3 retries still cannot reach an
-		// internal address, and redirects are re-validated per hop.
-		http:        outbound.Client(10 * time.Second),
-		backoff:     backoff,
-		maxAttempts: 3,
+		// sink whose DNS flips between retries still cannot reach an internal
+		// address, and redirects are re-validated per hop.
+		http: outbound.Client(10 * time.Second),
 	}
 }
 
-// dispatchFinding delivers an immediate reconciliation notification.
-func (d *deliverer) dispatchFinding(ctx context.Context, channels []ChannelRef, alert Alert) []DeliveryResult {
-	return d.dispatchChannels(ctx, channels, alert)
-}
-
-func (d *deliverer) dispatchChannels(ctx context.Context, channels []ChannelRef, alert Alert) []DeliveryResult {
-	results := make([]DeliveryResult, 0, len(channels))
-	for _, ch := range channels {
-		switch ch.Type {
-		case ChannelEmail:
-			results = append(results, d.deliverEmail(ctx, alert))
-		case ChannelWebhook:
-			results = append(results, d.deliverWebhook(ctx, ch, alert))
-		default:
-			results = append(results, DeliveryResult{Channel: string(ch.Type), OK: false, Detail: "unknown channel type"})
-		}
-	}
-	return results
-}
-
-func (d *deliverer) deliverEmail(ctx context.Context, alert Alert) DeliveryResult {
-	to := d.resolveAlertEmail(ctx)
-	if to == "" {
-		return DeliveryResult{Channel: string(ChannelEmail), OK: false, Detail: "no alert_email configured (fail-soft skip)"}
-	}
-	if d.email == nil || !d.email.IsEnabled() {
-		// Dev fallback: log loudly so the alert is not lost silently.
-		log.WithContext(ctx).WithField("alert", alert.Summary).
-			Warn("alerting: email channel selected but no email sender is configured; skipping (would send to " + to + ")")
-		return DeliveryResult{Channel: string(ChannelEmail), OK: false, Detail: "email sender not configured (logged; fail-soft skip)"}
-	}
-	subject := alertTitle(alert)
-	html, plain := renderEmail(alert)
-	if err := d.email.SendEmail(ctx, to, subject, html, plain); err != nil {
-		return DeliveryResult{Channel: string(ChannelEmail), OK: false, Detail: err.Error()}
-	}
-	return DeliveryResult{Channel: string(ChannelEmail), OK: true}
-}
-
-func (d *deliverer) deliverWebhook(ctx context.Context, ch ChannelRef, alert Alert) DeliveryResult {
-	label := string(ChannelWebhook)
-	if ch.WebhookID == nil {
-		return DeliveryResult{Channel: label, OK: false, Detail: "webhook channel missing webhook_id"}
-	}
-	label = "webhook:" + ch.WebhookID.String()
-	wh, err := d.store.getWebhook(ctx, *ch.WebhookID)
-	if err != nil {
-		return DeliveryResult{Channel: label, OK: false, Detail: "webhook not found"}
-	}
-	if !wh.Enabled {
-		return DeliveryResult{Channel: label, OK: false, Detail: "webhook disabled"}
-	}
-	destination := wh.url
-	body, err := shapeWebhookBody(wh.Format, alert)
-	if err != nil {
-		return DeliveryResult{Channel: label, OK: false, Detail: err.Error()}
-	}
-	// Re-validate at delivery: a sink stored before the policy tightened, or
-	// one whose scheme/host was edited out of band, never gets fetched (#SEC-21).
-	if err := d.outbound.ValidateURL(destination); err != nil {
-		return DeliveryResult{Channel: label, OK: false, Detail: httpx.FailureDetail(err)}
-	}
-	attempts, err := d.postWithRetry(ctx, destination, body)
-	res := DeliveryResult{Channel: label, Attempts: attempts, OK: err == nil}
-	if err != nil {
-		// #SEC-21: the raw dial error/status is an internal-network oracle —
-		// a tenant-driven port scanner. Log it, return a fixed message.
-		log.WithContext(ctx).WithField("reason", httpx.FailureDetail(err)).WithField("webhook_id", ch.WebhookID.String()).
-			Warn("alerting: webhook delivery failed")
-		res.Detail = httpx.FailureDetail(err)
-	}
-	return res
-}
-
-// postWithRetry POSTs the shaped body with modest exponential backoff. Success
-// is any 2xx; the last error is returned after maxAttempts.
-func (d *deliverer) postWithRetry(ctx context.Context, url string, body []byte) (int, error) {
-	var lastErr error
-	for attempt := 1; attempt <= d.maxAttempts; attempt++ {
-		if attempt > 1 {
-			delay := d.backoff * time.Duration(1<<(attempt-2))
-			select {
-			case <-ctx.Done():
-				return attempt - 1, ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-		status, err := d.postOnce(ctx, url, body)
-		if err == nil && status >= 200 && status < 300 {
-			return attempt, nil
-		}
-		if err != nil {
-			lastErr = err
-		} else {
-			lastErr = fmt.Errorf("webhook POST returned status %d", status)
-		}
-	}
-	return d.maxAttempts, lastErr
-}
-
-func (d *deliverer) postOnce(ctx context.Context, url string, body []byte) (int, error) {
-	return d.postOnceWithKey(ctx, url, body, "")
-}
-
-func (d *deliverer) postOnceWithKey(ctx context.Context, url string, body []byte, key string) (int, error) {
+// post POSTs body once with its idempotency key and returns the status.
+func (d *deliverer) post(ctx context.Context, url string, body []byte, key string) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if key != "" {
-		req.Header.Set("Idempotency-Key", key)
-	}
+	req.Header.Set("Idempotency-Key", key)
 	resp, err := d.http.Do(req)
 	if err != nil {
 		return 0, err
@@ -179,18 +60,6 @@ func (d *deliverer) postOnceWithKey(ctx context.Context, url string, body []byte
 		_ = resp.Body.Close()
 	}()
 	return resp.StatusCode, nil
-}
-
-func (d *deliverer) resolveAlertEmail(ctx context.Context) string {
-	if d.cfgStore == nil {
-		return ""
-	}
-	cfg, _, err := d.cfgStore.Get(ctx)
-	if err != nil {
-		log.WithContext(ctx).WithError(err).Warn("alerting: could not read merchant config for alert_email")
-		return ""
-	}
-	return strings.TrimSpace(cfg.AlertEmail)
 }
 
 // shapeWebhookBody renders the alert per the webhook format: generic=our alert

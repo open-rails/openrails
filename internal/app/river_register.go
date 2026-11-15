@@ -46,8 +46,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// One registry feeds every worker that runs intents; IntentRunner builds
 	// the same set, so per-type semantics never diverge.
-	if err := addWorker(workers, &riverjobs.DestructiveAlertWorker{DB: r.DB, Alerts: r.AlertService}); err != nil {
-		return fmt.Errorf("add destructive alert worker: %w", err)
+	if err := addWorker(workers, &riverjobs.OperatorAlertWorker{DB: r.DB, Alerts: r.AlertService}); err != nil {
+		return fmt.Errorf("add operator alert worker: %w", err)
 	}
 	intentRegistry := r.buildIntentRegistry(clock)
 	dunning := &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService}

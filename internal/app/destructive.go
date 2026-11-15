@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchantdocs"
-	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 )
 
 // NewDestructiveAdmissions is the shared admission owner, projecting its
@@ -59,8 +59,8 @@ func (r *Runtime) projectDestructiveHold(ctx context.Context, tx pgx.Tx, hold de
 		if _, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: hold.MerchantID, FindingType: "life.destructive.hold", SubjectKey: hold.ID.String(), Severity: "critical", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
 			return fmt.Errorf("project destructive finding: %w", err)
 		}
-		args := riverjobs.DestructiveAlertArgs{MerchantID: hold.MerchantID, HoldID: hold.ID, Scope: string(hold.Scope), OpenedAt: hold.OpenedAt}
-		if _, err = r.DB.InsertRiverJobTx(ctx, tx, args, riverjobs.DestructiveAlertOptions()); err != nil {
+		args := alerting.DeliveryArgs{MerchantID: hold.MerchantID, Hold: &alerting.HoldAlert{ID: hold.ID, Scope: string(hold.Scope), OpenedAt: hold.OpenedAt}}
+		if _, err = r.DB.InsertRiverJobTx(ctx, tx, args, nil); err != nil {
 			return fmt.Errorf("queue destructive incident alert: %w", err)
 		}
 	} else {

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 288,
+  "scenario_count": 289,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1307,6 +1307,11 @@
       "id": "OR-J06-S63",
       "journey": "J06",
       "name": "A Stripe PSP changed while its pass runs reaches Stripe without waiting for the backstop"
+    },
+    {
+      "id": "OR-J06-S64",
+      "journey": "J06",
+      "name": "A finding alert whose first delivery fails is delivered by its job's retry, once"
     },
     {
       "id": "OR-J14-S70",
