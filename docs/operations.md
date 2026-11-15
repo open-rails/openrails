@@ -846,12 +846,13 @@ disappears. Two safety doctrines matter operationally:
   the local DB" is not absence — it usually means *not imported yet*. Held
   repairs stay `reconcile_required` with the unproven domain in evidence.
 - **Stuck intents** (`life.provider_intent.stuck`): the health pass flags provider
-  intents sitting non-terminal too long — `pending`/`failed_retryable` older
-  than 24h, `in_flight`/`unknown_needs_verify` older than 2h; thresholds are
-  hardcoded. Mode-parked intents are informational (that wait is by design);
-  everything else is `requires_review` — provider failures, bad credentials,
-  or a dead worker. The engine never touches intent rows (the
-  executor/verifier own them); findings auto-resolve on recovery.
+  intents sitting non-terminal too long — `pending` 24h past its next attempt
+  (one scheduled ahead or deferred waits for its instant), parked `pending` or
+  `failed_retryable` older than 24h, `in_flight`/`unknown_needs_verify` older
+  than 2h; thresholds are hardcoded. Mode-parked intents are informational
+  (that wait is by design); everything else is `requires_review` — provider
+  failures, bad credentials, or a dead worker. The engine never touches intent
+  rows (the executor/verifier own them); findings auto-resolve on recovery.
 - **Operational problems** outside the engine are findings too:
   `consistency.ledger.unbooked` (a provider event OpenRails could not book; the
   merchant repairs the ledger and resolves the finding) and
@@ -1285,7 +1286,8 @@ coalesce merchant-wide passes when embedded fleets share a database.
 | Stripe webhook endpoint backstop | 24 h |
 
 The billing pass takes everything due by its start, so a pass that fails or
-does not run leaves its work to the next. One scan's failure never stops the
+does not run leaves its work to the next; one that starts while another still
+runs exits. One scan's failure never stops the
 others. Renewals and retries wait at most an hour past their instant; an engine
 renewal's access grace is at least two hours, so a member keeps access across
 one missed pass. A low or depleted balance is told within seconds: the change
@@ -1314,10 +1316,10 @@ Job health is a read of River's own tables (`openrails workers`, the server's
 jobs running past their timeout, waiting to retry and discarded, a periodic
 kind's last completion and the newest error. Each billing pass records, as its
 River output, the critical scans (renewals and retries, balance watches,
-delinquency, usage billing) still holding a row due since before the start of
-yesterday (UTC); `openrails_job_progress` fails while the last one named any,
-or when none ran to its end within a day and its timeout. OpenRails stores none
-of it.
+delinquency, order expiry, usage billing) still holding a row due since before
+the start of yesterday (UTC); `openrails_job_progress` fails while the last one
+named any, or when none ran to its end within a day and its timeout. OpenRails
+stores none of it.
 
 A pass bounded per job (retention cleanup's 200 merchants, a merchant's 200
 due usage accounts) continues in a new job after the last one it handled, so

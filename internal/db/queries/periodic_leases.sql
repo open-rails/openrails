@@ -13,3 +13,8 @@ WHERE billing.periodic_leases.holder = EXCLUDED.holder OR billing.periodic_lease
 -- The kinds whose live lease another fleet holds.
 SELECT kind FROM billing.periodic_leases
 WHERE kind = ANY(sqlc.arg(kinds)::text[]) AND holder <> sqlc.arg(holder)::text AND expires_at > now();
+
+-- name: TryLockPass :one
+-- Held by the session running a pass for its whole run: a copy that starts
+-- meanwhile, on this fleet or another, finds it taken.
+SELECT pg_try_advisory_lock(hashtext(current_database()), hashtext(sqlc.arg(pass_key)::text))::boolean AS locked;

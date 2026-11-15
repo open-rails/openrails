@@ -212,8 +212,8 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
       SELECT 1 FROM billing.provider_intents pi
       WHERE pi.merchant_id = f.merchant_id
         AND pi.id::text = f.subject_key
-        AND ((pi.status IN ('pending', 'failed_retryable') AND pi.created_at <= sqlc.arg(action_cutoff)::timestamptz
-              AND NOT (pi.intent_type = 'price_migration_push' AND pi.status = 'pending' AND pi.next_attempt_at > sqlc.arg(now)::timestamptz))
+        AND ((pi.status = 'pending' AND pi.last_failure_reason IS NULL AND pi.next_attempt_at <= sqlc.arg(action_cutoff)::timestamptz)
+          OR ((pi.status = 'failed_retryable' OR pi.status = 'pending' AND pi.last_failure_reason IS NOT NULL) AND pi.created_at <= sqlc.arg(action_cutoff)::timestamptz)
           OR (pi.status IN ('in_flight', 'unknown_needs_verify') AND pi.created_at <= sqlc.arg(verify_cutoff)::timestamptz))
   );
 
@@ -935,7 +935,8 @@ WHERE m.status = 'active' AND m.deleted_at IS NULL AND m.id > sqlc.arg(after_mer
                AND s.status IN ('active', 'past_due') AND s.deleted_at IS NULL AND s.current_period_ends_at <= sqlc.arg(held_before)::timestamptz)
     OR EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id = m.id AND i.updated_at > sqlc.arg(active_since)::timestamptz)
     OR EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id = m.id
-               AND i.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify') AND i.created_at <= sqlc.arg(stuck_before)::timestamptz)
+               AND i.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+               AND CASE WHEN i.status = 'pending' AND i.last_failure_reason IS NULL THEN i.next_attempt_at ELSE i.created_at END <= sqlc.arg(stuck_before)::timestamptz)
     OR EXISTS (SELECT 1 FROM billing.product_access e WHERE e.merchant_id = m.id AND e.deleted_at IS NULL
                AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > sqlc.arg(lapsed_since)::timestamptz
                AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= sqlc.arg(now)::timestamptz))

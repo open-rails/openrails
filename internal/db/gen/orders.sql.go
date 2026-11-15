@@ -877,32 +877,48 @@ func (q *Queries) HandOverOwnershipClaim(ctx context.Context, arg HandOverOwners
 }
 
 const listExpiredOrders = `-- name: ListExpiredOrders :many
-SELECT id FROM billing.orders
+SELECT id, expires_at::timestamptz AS expires_at FROM billing.orders
 WHERE merchant_id = $1::uuid AND collection_owner = 'engine' AND status = 'open'
   AND expires_at <= $2::timestamptz
-ORDER BY expires_at
-LIMIT $3::int
+  AND ($3::timestamptz IS NULL
+       OR (expires_at, id) > ($3::timestamptz, $4::uuid))
+ORDER BY expires_at, id
+LIMIT $5::int
 `
 
 type ListExpiredOrdersParams struct {
-	MerchantID uuid.UUID
-	Now        time.Time
-	RowLimit   int32
+	MerchantID     uuid.UUID
+	Now            time.Time
+	AfterExpiresAt *time.Time
+	AfterID        *uuid.UUID
+	RowLimit       int32
 }
 
-func (q *Queries) ListExpiredOrders(ctx context.Context, arg ListExpiredOrdersParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listExpiredOrders, arg.MerchantID, arg.Now, arg.RowLimit)
+type ListExpiredOrdersRow struct {
+	ID        uuid.UUID
+	ExpiresAt time.Time
+}
+
+// A merchant's live orders past their expiry, in expiry order after a cursor.
+func (q *Queries) ListExpiredOrders(ctx context.Context, arg ListExpiredOrdersParams) ([]ListExpiredOrdersRow, error) {
+	rows, err := q.db.Query(ctx, listExpiredOrders,
+		arg.MerchantID,
+		arg.Now,
+		arg.AfterExpiresAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []ListExpiredOrdersRow
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i ListExpiredOrdersRow
+		if err := rows.Scan(&i.ID, &i.ExpiresAt); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -984,24 +1000,27 @@ const listOrderExpiryMerchants = `-- name: ListOrderExpiryMerchants :many
 SELECT merchant_id FROM (
     SELECT merchant_id FROM billing.orders
     WHERE collection_owner = 'engine' AND status = 'open' AND expires_at <= $1::timestamptz
+      AND merchant_id > $2::uuid
     UNION
     SELECT merchant_id FROM billing.order_attempts
     WHERE expires_at IS NOT NULL AND expires_at < $1::timestamptz
       AND deleted_at IS NULL AND status IN ('created', 'requires_action')
+      AND merchant_id > $2::uuid
 ) due
 ORDER BY merchant_id
-LIMIT $2::int
+LIMIT $3::int
 `
 
 type ListOrderExpiryMerchantsParams struct {
-	Now           time.Time
-	MerchantLimit int32
+	Now             time.Time
+	AfterMerchantID uuid.UUID
+	MerchantLimit   int32
 }
 
 // The expiry's work queue: merchants with a live order or an order attempt
-// waiting on its customer past its expiry.
+// waiting on its customer past its expiry, in id order after a cursor.
 func (q *Queries) ListOrderExpiryMerchants(ctx context.Context, arg ListOrderExpiryMerchantsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listOrderExpiryMerchants, arg.Now, arg.MerchantLimit)
+	rows, err := q.db.Query(ctx, listOrderExpiryMerchants, arg.Now, arg.AfterMerchantID, arg.MerchantLimit)
 	if err != nil {
 		return nil, err
 	}

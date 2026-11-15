@@ -375,6 +375,11 @@ func TestBackgroundJobs(t *testing.T) {
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		require.Eventually(t, func() bool { return expired() == 0 }, 30*time.Second, 50*time.Millisecond,
 			"the pass continues in a new job after its first 200 merchants")
+		rows, err := w.pool.Query(t.Context(), "SELECT max_attempts FROM "+pgx.Identifier{w.schema, "river_job"}.Sanitize()+" WHERE kind = 'openrails.cleanup_expired_data' AND args ? 'after'")
+		require.NoError(t, err)
+		attempts, err := pgx.CollectRows(rows, pgx.RowTo[int])
+		require.NoError(t, err)
+		require.Equal(t, []int{1}, attempts, "the continuation makes one attempt; the next period's pass retries what it left")
 	})
 	t.Run("OR-J37-S06/a-solana-renewal-whose-pull-is-still-owed-is-not-a-missed-rebill", func(t *testing.T) {
 		s := newSolanaWorld(t, true)

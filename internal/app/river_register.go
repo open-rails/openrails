@@ -256,7 +256,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		{Kind: riverjobs.KindDunning, Run: scanOf[riverjobs.DunningArgs](dunning), DueBy: dunning.DueBy},
 		{Kind: riverjobs.KindBalanceWatch, Run: scanOf[riverjobs.BalanceWatchArgs](balances), DueBy: balances.DueBy},
 		{Kind: riverjobs.KindDelinquency, Run: scanOf[riverjobs.DelinquencyArgs](delinquency), DueBy: delinquency.DueBy},
-		{Kind: riverjobs.KindOrderExpiry, Run: scanOf[riverjobs.OrderExpiryArgs](expiry)},
+		{Kind: riverjobs.KindOrderExpiry, Run: scanOf[riverjobs.OrderExpiryArgs](expiry), DueBy: expiry.DueBy},
 	}
 	if r.declares(riverjobs.WithUsageBilling) {
 		scans = append(scans, riverjobs.Scan{Kind: money.KindUsageOrders, Run: scanOf[money.UsageOrderArgs](usage), DueBy: usage.DueBy})
@@ -270,7 +270,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	for i := range scans {
 		scans[i].Timeout = riverjobs.ScanBudget(scans[i].Kind)
 	}
-	if err := addWorker(workers, &riverjobs.BillingPassWorker{Scans: scans, Clock: clock}); err != nil {
+	if err := addWorker(workers, &riverjobs.BillingPassWorker{DB: r.DB, Scans: scans, Clock: clock}); err != nil {
 		return fmt.Errorf("add billing pass worker: %w", err)
 	}
 	return nil

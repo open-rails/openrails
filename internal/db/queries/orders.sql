@@ -200,23 +200,28 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 
 -- name: ListOrderExpiryMerchants :many
 -- The expiry's work queue: merchants with a live order or an order attempt
--- waiting on its customer past its expiry.
+-- waiting on its customer past its expiry, in id order after a cursor.
 SELECT merchant_id FROM (
     SELECT merchant_id FROM billing.orders
     WHERE collection_owner = 'engine' AND status = 'open' AND expires_at <= sqlc.arg(now)::timestamptz
+      AND merchant_id > sqlc.arg(after_merchant_id)::uuid
     UNION
     SELECT merchant_id FROM billing.order_attempts
     WHERE expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
       AND deleted_at IS NULL AND status IN ('created', 'requires_action')
+      AND merchant_id > sqlc.arg(after_merchant_id)::uuid
 ) due
 ORDER BY merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListExpiredOrders :many
-SELECT id FROM billing.orders
+-- A merchant's live orders past their expiry, in expiry order after a cursor.
+SELECT id, expires_at::timestamptz AS expires_at FROM billing.orders
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND collection_owner = 'engine' AND status = 'open'
   AND expires_at <= sqlc.arg(now)::timestamptz
-ORDER BY expires_at
+  AND (sqlc.narg(after_expires_at)::timestamptz IS NULL
+       OR (expires_at, id) > (sqlc.narg(after_expires_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY expires_at, id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: DeleteClosedUnpaidOrders :execrows

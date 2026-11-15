@@ -438,13 +438,15 @@ func (p *healthPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	}
 
 	// life.provider_intent.stuck — a rail intent sitting non-terminal beyond
-	// the stuck thresholds. Mode/kill-switch parks are informational (the
+	// the stuck thresholds; a pending one counts from its next attempt until it
+	// is parked, so one scheduled ahead or deferred is not stuck, and from its
+	// creation once parked. Mode/kill-switch parks are informational (the
 	// intent's job runs it once the blocker lifts); anything else means
 	// provider failures, bad credentials or a lost job. Never repaired here:
 	// the intent's job owns it.
 	actionCutoff, verifyCutoff := now.Add(-stuckActionableAge), now.Add(-stuckVerifyAge)
 	stuck, err := q.ListStuckProviderIntents(ctx, gen.ListStuckProviderIntentsParams{
-		MerchantID: mid, ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff, Now: now,
+		MerchantID: mid, ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("health: scan stuck rail intents: %w", err)
@@ -455,7 +457,7 @@ func (p *healthPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	// Stuck findings close subject-first once their intent no longer meets
 	// the stuck criteria.
 	if _, err := q.AutoResolveRecoveredStuckIntentFindings(ctx, gen.AutoResolveRecoveredStuckIntentFindingsParams{
-		MerchantID: mid, ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff, Now: now,
+		MerchantID: mid, ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff,
 	}); err != nil {
 		return nil, fmt.Errorf("health: resolve recovered stuck-intent findings: %w", err)
 	}
@@ -463,10 +465,10 @@ func (p *healthPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 }
 
 // Stuck-intent thresholds — HARDCODED (no-knobs policy): each intent's job
-// wakes at its next attempt, so a day-old actionable intent means provider
-// failures, bad credentials, a lost job — or a deliberate park; a healthy job
-// resolves an unknown in minutes, and an in_flight lease outliving hours
-// means its job died.
+// wakes at its next attempt, so a pending intent a day past it means a lost
+// job, and one parked or failing for a day a blocker, provider failures or bad
+// credentials; a healthy job resolves an unknown in minutes, and an in_flight
+// lease outliving hours means its job died.
 const (
 	stuckActionableAge = 24 * time.Hour // pending / failed_retryable
 	stuckVerifyAge     = 2 * time.Hour  // in_flight / unknown_needs_verify

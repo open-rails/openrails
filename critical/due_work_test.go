@@ -281,6 +281,52 @@ func TestDueWork(t *testing.T) {
 		requireOpen(overdue, undeclined...)
 		require.Len(t, findings("fixed"), 1)
 	})
+	t.Run("OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck", func(t *testing.T) {
+		a, _ := newPaymentWorld(t)
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		psp := psps.Items[0].ID.UUID()
+		intents := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		now := a.clock.Now()
+		// Each was queued two days ago, and nothing runs it.
+		seed := func(key, status string, attempts int, next time.Time, failure *string) string {
+			var id uuid.UUID
+			require.NoError(t, a.pool.QueryRow(t.Context(), "INSERT INTO "+intents+" (merchant_id, rail, intent_type, idempotency_key, status, attempts, next_attempt_at, last_failure_reason, origin, psp_id, created_at) VALUES ($1, 'stripe', 'critical_operation', $2, $3, $4, $5, $6, 'system', $7, $8) RETURNING id",
+				a.alpha.MerchantID().UUID(), key, status, attempts, next, failure, psp, now.Add(-48*time.Hour)).Scan(&id))
+			return id.String()
+		}
+		stuck := func() map[string]bool {
+			page, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.provider_intent.stuck"})
+			require.NoError(t, err)
+			out := map[string]bool{}
+			for _, finding := range page.Items {
+				out[finding.SubjectKey] = true
+			}
+			return out
+		}
+		scheduled := seed("scheduled-a-week-ahead", "pending", 0, now.Add(7*24*time.Hour), nil)
+		recent := seed("due-an-hour-ago", "pending", 0, now.Add(-time.Hour), nil)
+		lost := seed("due-a-day-ago", "pending", 0, now.Add(-25*time.Hour), nil)
+		failing := seed("failing-for-two-days", "failed_retryable", 12, now.Add(time.Hour), ptr("provider unavailable"))
+		// Each re-park moves its next attempt five minutes on.
+		parked := seed("parked-for-two-days", "pending", 0, now.Add(5*time.Minute), ptr("no handler registered for intent type critical_operation"))
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		open := stuck()
+		require.False(t, open[scheduled], "an operation scheduled ahead waits for its instant")
+		require.False(t, open[recent], "an hour past its attempt is not stuck")
+		require.True(t, open[lost], "a day past its attempt with nothing running it is stuck")
+		require.True(t, open[failing], "an operation failing for a day is stuck")
+		require.True(t, open[parked], "an operation parked for a day is stuck")
+
+		// A day past its instant, the scheduled one is stuck too.
+		a.clock.Advance(8 * 24 * time.Hour)
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		require.True(t, stuck()[scheduled])
+	})
 	t.Run("OR-J04-S70/the-hourly-health-pass-raises-held-renewals", func(t *testing.T) {
 		a, _, sub := purchasedMembership(t)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Add(3 * time.Hour).Sub(a.clock.Now()))

@@ -1014,6 +1014,18 @@
     ],
     "OR-J31-S09": [
       "TestBillingArchive/OR-J31-S09/a-paid-stripe-hosted-page-order-moves-with-the-book"
+    ],
+    "OR-J04-S37": [
+      "TestBillingPass/OR-J04-S37/an-order-expiry-backlog-past-one-batch-drains-in-one-pass"
+    ],
+    "OR-J04-S38": [
+      "TestBillingPass/OR-J04-S38/a-pass-that-starts-while-one-runs-exits"
+    ],
+    "OR-J25-S37": [
+      "TestBalanceLooks/OR-J25-S37/a-pass-that-waited-behind-a-look-leaves-the-watch-it-moved"
+    ],
+    "OR-J29-S37": [
+      "TestDueWork/OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck"
     ]
   },
   "suites": {

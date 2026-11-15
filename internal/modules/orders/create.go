@@ -642,30 +642,42 @@ func orderEvent(ctx context.Context, q *gen.Queries, order *gen.BillingOrder, ki
 	return orderevent.Enqueue(ctx, q, order, kind, at, extra)
 }
 
-// ExpireDue expires the merchant's live orders past their expiry, at most
-// limit.
-func (s *Service) ExpireDue(ctx context.Context, limit int32) (int, error) {
+// ExpireDue expires every live order of the merchant past its expiry, a page
+// of batch at a time, until none is left or ctx ends.
+func (s *Service) ExpireDue(ctx context.Context, batch int32) (int, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
 	}
 	now := s.now()
-	ids, err := s.DB.Gen(ctx).ListExpiredOrders(ctx, gen.ListExpiredOrdersParams{MerchantID: mid.UUID(), Now: now, RowLimit: limit})
-	if err != nil {
-		return 0, err
-	}
-	for _, id := range ids {
-		if err := s.close(ctx, uuid.Nil, id, billing.OrderExpired); err != nil {
-			return 0, fmt.Errorf("expire order %s: %w", id, err)
+	args := gen.ListExpiredOrdersParams{MerchantID: mid.UUID(), Now: now, RowLimit: batch}
+	expired := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return expired, err
 		}
+		rows, err := s.DB.Gen(ctx).ListExpiredOrders(ctx, args)
+		if err != nil {
+			return expired, err
+		}
+		for _, row := range rows {
+			if err := s.close(ctx, uuid.Nil, row.ID, billing.OrderExpired); err != nil {
+				return expired, fmt.Errorf("expire order %s: %w", row.ID, err)
+			}
+			expired++
+		}
+		if len(rows) < int(batch) {
+			return expired, nil
+		}
+		last := rows[len(rows)-1]
+		args.AfterExpiresAt, args.AfterID = &last.ExpiresAt, &last.ID
 	}
-	return len(ids), nil
 }
 
-// ExpiryMerchants lists merchants with a live order or an order attempt
-// waiting on its customer past its expiry.
-func ExpiryMerchants(ctx context.Context, database *db.DB, now time.Time, limit int32) ([]uuid.UUID, error) {
-	return database.GenDirectory().ListOrderExpiryMerchants(ctx, gen.ListOrderExpiryMerchantsParams{Now: now, MerchantLimit: limit})
+// ExpiryMerchants lists merchants after the cursor with a live order or an
+// order attempt waiting on its customer past its expiry.
+func ExpiryMerchants(ctx context.Context, database *db.DB, now time.Time, after uuid.UUID, limit int32) ([]uuid.UUID, error) {
+	return database.GenDirectory().ListOrderExpiryMerchants(ctx, gen.ListOrderExpiryMerchantsParams{Now: now, AfterMerchantID: after, MerchantLimit: limit})
 }
 
 func orderPriceReferences(ctx context.Context, q *gen.Queries, lines []gen.BillingOrderLine) (map[uuid.UUID]billing.PriceID, error) {

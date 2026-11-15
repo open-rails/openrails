@@ -1350,18 +1350,27 @@ func (q *Queries) ListPaymentMethodsByRails(ctx context.Context, arg ListPayment
 const listStaleSetupMerchants = `-- name: ListStaleSetupMerchants :many
 SELECT DISTINCT merchant_id FROM billing.payment_methods
 WHERE status = 'requires_action' AND (created_at < $1::timestamptz OR (capture->>'expires_at')::timestamptz <= $2::timestamptz)
-LIMIT $3::int
+  AND merchant_id > $3::uuid
+ORDER BY merchant_id
+LIMIT $4::int
 `
 
 type ListStaleSetupMerchantsParams struct {
-	Before        time.Time
-	Now           time.Time
-	MerchantLimit int32
+	Before          time.Time
+	Now             time.Time
+	AfterMerchantID uuid.UUID
+	MerchantLimit   int32
 }
 
-// The sweep's work queue: merchants with a card save waiting past the cutoff.
+// The sweep's work queue: merchants with a card save waiting past the cutoff,
+// in id order after a cursor.
 func (q *Queries) ListStaleSetupMerchants(ctx context.Context, arg ListStaleSetupMerchantsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listStaleSetupMerchants, arg.Before, arg.Now, arg.MerchantLimit)
+	rows, err := q.db.Query(ctx, listStaleSetupMerchants,
+		arg.Before,
+		arg.Now,
+		arg.AfterMerchantID,
+		arg.MerchantLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

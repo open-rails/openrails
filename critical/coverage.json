@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 314,
+  "scenario_count": 318,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1542,6 +1542,26 @@
       "id": "OR-J12-S70",
       "journey": "J12",
       "name": "A card save confirmed or saved again past its 24-hour cutoff, before any pass, is removed"
+    },
+    {
+      "id": "OR-J04-S37",
+      "journey": "J04",
+      "name": "An order expiry backlog past one batch is expired by one billing pass"
+    },
+    {
+      "id": "OR-J04-S38",
+      "journey": "J04",
+      "name": "A billing pass that starts while another still runs exits without running a scan; the running pass takes what is due"
+    },
+    {
+      "id": "OR-J25-S37",
+      "journey": "J25",
+      "name": "A billing pass that waited behind a balance's look leaves the watch that look moved on"
+    },
+    {
+      "id": "OR-J29-S37",
+      "journey": "J29",
+      "name": "A provider operation scheduled ahead is no stuck finding however long ago it was queued; one a day past its attempt, or parked or failing for a day, is"
     },
     {
       "id": "OR-J18-S06",
