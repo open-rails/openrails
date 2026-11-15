@@ -41,8 +41,8 @@ Pass the returned cursor unchanged for the same subscription. Payment event
 time may precede the time OpenRails recorded it; refresh the first page to
 discover late observations. Paging is not a frozen snapshot.
 
-`coverage` states the sources and historical gaps. Richer recording begins
-with migration 0108; older events are not backfilled. Direct writes without
+`coverage` states the sources and historical gaps. Richer recording began
+in v0.259.0; older events are not backfilled. Direct writes without
 admitted attribution retain unknown actors. Card/retry history and lifecycle
 attribution are portable in merchant archives; operation logs remain excluded
 from those archives under their existing policy. The 761-day retention policy is not a guarantee that

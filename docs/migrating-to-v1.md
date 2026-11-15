@@ -58,8 +58,8 @@ checking alone cannot prevent an already-executed write on those servers.
 
 ## Price-ID cutover
 
-For an existing database on the current migration chain, migration 0074 replaces
-public `price_<uuid>` spellings with `product-key:price-key:v1` spellings. Private
+A database upgraded through v0.243.0 had its public `price_<uuid>` spellings
+replaced with `product-key:price-key:v1` spellings. Private
 database foreign keys and immutable financial terms stay unchanged. This is
 separate from importing a historical v0 baseline described above.
 

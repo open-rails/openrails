@@ -216,7 +216,16 @@ keep running on the migrated schema and a rollback to it is safe; the newer
 migration stays. Before v1 a release whose notes name a breaking migration is
 the exception: no rollback past it, and hosts sharing the schema upgrade
 together. `openrails migrate up` can run first as a deploy step
-instead. During the rollout a browser may load the admin console from a new
+instead.
+
+The schema is one baseline migration that replaced a chain of 144, last
+shipped in v0.279.0. A database that applied all of that chain is adopted on
+its first migrate by this build: the ledger is rewritten to the baseline (each
+change audited in `public.migration_repairs`, verb `convert`) and no schema
+object changes. A database that applied only part of it is refused with the
+missing migrations named; migrate it with v0.279.0 first. Startup validation
+without migrating (`SkipMigrations`) refuses an unadopted database until
+`openrails migrate up` or `openrails.Migrate` runs once. During the rollout a browser may load the admin console from a new
 instance and its assets from an old one; a reload fixes it once the rollout
 ends.
 

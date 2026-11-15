@@ -116,8 +116,8 @@ func typedDimValue(parse func(string) (fmt.Stringer, error)) func(string) (strin
 }
 
 const (
-	// monthlyNormExpr and billingCycleExpr are the schema's shared definitions
-	// (migration 0004), also used by fleet MRR.
+	// monthlyNormExpr and billingCycleExpr are the schema's shared definitions,
+	// also used by fleet MRR.
 	monthlyNormExpr  = `billing.monthly_normalized_amount(pr.amount, pr.billing_interval_hours)`
 	billingCycleExpr = `billing.billing_cycle_label(pr.billing_interval_hours)`
 
@@ -541,8 +541,7 @@ const purchasesFrom = `(SELECT a.merchant_id, a.purchase_id,
 // purchaseSettled: approved, or quiet for an hour before the query's end.
 const purchaseSettled = `(ck.approved OR ck.last_at < @to - interval '1 hour')`
 
-// #1116: rebill cycles as migration 0033's view derives them. Closed states
-// are as of the query's range end.
+// Rebill cycle states; closed states are as of the query's range end.
 const (
 	cycleClosed = `(cy.closed_at <= @to)`
 	cycleLost   = `(cy.won_at IS NULL AND cy.closed_at <= @to)`
