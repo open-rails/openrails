@@ -81,7 +81,7 @@ reservations; carts, idempotency keys and Solana Pay references; abandoned perio
 leases; payment attempts, rebill cycles and NMI history aggregates; subscription
 transitions/billing-change history; eligible expired order attempts and unpaid
 closed orders; failed usage windows and old meter-period quantities; admission
-denial/webhook-health counters; resolved findings, reconciliation runs and released
+denial/webhook-health counters; resolved findings and released
 parks; eligible finished instruction-only provider intents and mutation logs.
 
 It also creates monthly `usage_events` and `admission_operations` partitions two

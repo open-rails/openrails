@@ -53,10 +53,6 @@ type OrderAttempt struct {
 	RailFields map[string]any `json:"rail_fields,omitempty"`
 	RailState  map[string]any `json:"rail_state,omitempty"`
 
-	// RoutingReason is the decision trace that picked this attempt's PSP,
-	// written once at creation and never rewritten.
-	RoutingReason *PSPRoutingReason `json:"routing_reason,omitempty"`
-
 	// IdempotencyKey is request-scoped; the row has no such column.
 	IdempotencyKey *string `json:"idempotency_key,omitempty"`
 	// PspID is the PSP selected for this checkout, so provider sessions are
@@ -125,30 +121,6 @@ const (
 	// all (backend error). Fail closed: skip, never guess.
 	PSPRoutingSkipResolveFailed = "resolve_failed"
 )
-
-// PSPRoutingReason is the compact decision trace persisted on
-// order_attempts.routing_reason.
-type PSPRoutingReason struct {
-	// Policy is who decided: explicit | merchant | default.
-	Policy string `json:"policy"`
-	// Rule is the matched merchant-rule index (0-based). Merchant policy only.
-	Rule *int `json:"rule,omitempty"`
-	// Selected is the winning purchase selector (the PSP key), and Rail its kind.
-	Selected string `json:"selected"`
-	Rail     string `json:"rail"`
-	// Fallbacks are the remaining ELIGIBLE selectors, still ranked — what the
-	// next session would get if the winner went away.
-	Fallbacks []string `json:"fallbacks,omitempty"`
-	// Skipped names every candidate passed over ahead of the winner, with its
-	// class.
-	Skipped []PSPRoutingSkip `json:"skipped,omitempty"`
-}
-
-// PSPRoutingSkip is one passed-over candidate and its class.
-type PSPRoutingSkip struct {
-	Selector string `json:"selector"`
-	Reason   string `json:"reason"`
-}
 
 // ValidateTerms checks the order's frozen payment amount and currency.
 func (s *OrderAttempt) ValidateTerms() error {

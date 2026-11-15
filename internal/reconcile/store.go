@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 )
@@ -70,26 +69,9 @@ func (r FindingRecord) Quiet() bool {
 	return quiet
 }
 
-// RunRecord is a persisted reconciliation run.
-type RunRecord struct {
-	ID             uuid.UUID       `json:"id"`
-	MerchantID     uuid.UUID       `json:"tenant_id"`
-	Mode           Mode            `json:"mode"`
-	Providers      []string        `json:"providers"`
-	WindowStartsAt *time.Time      `json:"window_starts_at,omitempty"`
-	WindowEndsAt   *time.Time      `json:"window_ends_at,omitempty"`
-	StartedAt      time.Time       `json:"started_at"`
-	FinishedAt     *time.Time      `json:"finished_at,omitempty"`
-	Status         string          `json:"status"`
-	Summary        json.RawMessage `json:"summary,omitempty"`
-	Error          string          `json:"error,omitempty"`
-}
-
 // Store is the engine-facing persistence surface. The pg implementation runs
 // merchant-scoped; the unit-test fake is in-memory.
 type Store interface {
-	CreateRun(ctx context.Context, mode Mode, providers []Provider, since, until *time.Time) (uuid.UUID, error)
-	FinishRun(ctx context.Context, runID uuid.UUID, status string, summary []byte, runErr string) error
 	UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding) (FindingRecord, error)
 	// ListActionablePullFindings and AutoResolveVanished cover the pull
 	// findings of one PSP: a pass over one PSP proves nothing about another.
@@ -102,7 +84,7 @@ type Store interface {
 	MarkFindingNotified(ctx context.Context, id uuid.UUID, at time.Time, severity Severity) error
 }
 
-// PGStore persists runs + findings via the sqlc layer on a merchant-pinned
+// PGStore persists findings via the sqlc layer on a merchant-pinned
 // connection.
 type PGStore struct {
 	DB  *db.DB
@@ -169,55 +151,6 @@ func nestedEvidence(evidence map[string]any, key string) map[string]any {
 	}
 	nested, _ := evidence[key].(map[string]any)
 	return nested
-}
-
-// CreateRun starts a run. A started create is bookkeeping a canceled pass
-// must not interrupt, as FinishRun is: an abandoned insert can still commit,
-// leaving a running run nothing finishes, which the merchant archive refuses.
-func (s *PGStore) CreateRun(ctx context.Context, mode Mode, providers []Provider, since, until *time.Time) (uuid.UUID, error) {
-	if err := ctx.Err(); err != nil {
-		return uuid.Nil, err
-	}
-	names := make([]string, 0, len(providers))
-	for _, p := range providers {
-		names = append(names, string(p))
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	ctx, cancel := db.DetachedWriteContext(ctx, 5*time.Second)
-	defer cancel()
-	row, err := s.DB.Gen(ctx).CreateReconciliationRun(ctx, gen.CreateReconciliationRunParams{
-		MerchantID:     tid.UUID(),
-		Mode:           string(mode),
-		Rails:          names,
-		WindowStartsAt: since,
-		WindowEndsAt:   until,
-	})
-	if err != nil {
-		return uuid.Nil, err
-	}
-	return row.ID, nil
-}
-
-func (s *PGStore) FinishRun(ctx context.Context, runID uuid.UUID, status string, summary []byte, runErr string) error {
-	// Ending a canceled pass is bookkeeping about work already attempted.
-	// Preserve its merchant scope and recover a pin closed by cancellation;
-	// never leave an orderly shutdown looking like a still-running writer.
-	ctx, cancel := db.DetachedWriteContext(ctx, 5*time.Second)
-	defer cancel()
-	var errPtr *string
-	if runErr != "" {
-		errPtr = &runErr
-	}
-	_, err := s.DB.Gen(ctx).FinishReconciliationRun(ctx, gen.FinishReconciliationRunParams{
-		ID:      runID,
-		Status:  status,
-		Summary: summary,
-		Error:   errPtr,
-	})
-	return err
 }
 
 func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding) (FindingRecord, error) {
@@ -392,24 +325,6 @@ func (s *PGStore) MarkFindingNotified(ctx context.Context, id uuid.UUID, at time
 		ID:         id, NotifiedAt: at, Severity: string(severity),
 	})
 	return err
-}
-
-func (s *PGStore) ListRuns(ctx context.Context, limit, offset int) ([]RunRecord, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := s.DB.Gen(ctx).ListReconciliationRuns(ctx, gen.ListReconciliationRunsParams{
-		PageLimit:  int64(limit),
-		PageOffset: int64(offset),
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]RunRecord, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, runRecordFromRow(row))
-	}
-	return out, nil
 }
 
 func (s *PGStore) GetFinding(ctx context.Context, id uuid.UUID) (FindingRecord, error) {
@@ -705,25 +620,6 @@ func FindingRecordFromRow(row gen.BillingReconciliationFinding) FindingRecord {
 	}
 	if change, err := DecodeChange(row.Change); err == nil {
 		rec.Change = change
-	}
-	return rec
-}
-
-func runRecordFromRow(row gen.BillingMaintenanceRun) RunRecord {
-	rec := RunRecord{
-		ID:             row.ID,
-		MerchantID:     row.MerchantID,
-		Mode:           Mode(models.DerefStr(row.Mode)),
-		Providers:      row.Rails,
-		WindowStartsAt: row.WindowStartsAt,
-		WindowEndsAt:   row.WindowEndsAt,
-		StartedAt:      row.StartedAt,
-		FinishedAt:     row.FinishedAt,
-		Status:         row.Status,
-		Summary:        row.Summary,
-	}
-	if row.Error != nil {
-		rec.Error = *row.Error
 	}
 	return rec
 }

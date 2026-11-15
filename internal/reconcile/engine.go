@@ -264,7 +264,7 @@ func traitsFor(p Provider) providerTraits {
 }
 
 // Run executes one reconcile run: fetch + diff (+ apply in enforce mode) for
-// every requested provider, persisting findings and the run summary.
+// every requested provider, persisting findings.
 func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) {
 	if params.Mode != ModeAdvisory && params.Mode != ModeEnforce {
 		return nil, fmt.Errorf("reconcile: invalid mode %q", params.Mode)
@@ -287,21 +287,12 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 		}
 	}
 
-	var sincePtr, untilPtr *time.Time
-	if !params.Since.IsZero() {
-		t := params.Since.UTC()
-		sincePtr = &t
+	if _, err := merchant.Require(ctx); err != nil {
+		return nil, fmt.Errorf("reconcile: %w", err)
 	}
-	if !params.Until.IsZero() {
-		t := params.Until.UTC()
-		untilPtr = &t
-	}
-
-	runID, err := e.Store.CreateRun(ctx, params.Mode, providers, sincePtr, untilPtr)
-	if err != nil {
-		return nil, fmt.Errorf("reconcile: create run: %w", err)
-	}
-
+	// The run id correlates the pass's findings: a finding it did not see
+	// again is resolved as vanished.
+	runID := uuid.Must(uuid.NewV7())
 	summary := &RunSummary{Mode: params.Mode, Providers: map[string]*ProviderReport{}}
 	result := &RunResult{RunID: runID, Mode: params.Mode, Summary: summary}
 	var providerErrs []string
@@ -331,14 +322,6 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 		runErr = strings.Join(providerErrs, "; ")
 	}
 	result.Status = status
-
-	summaryJSON, err := json.Marshal(summary)
-	if err != nil {
-		summaryJSON = nil
-	}
-	if err := e.Store.FinishRun(ctx, runID, status, summaryJSON, runErr); err != nil {
-		return result, fmt.Errorf("reconcile: finish run: %w", err)
-	}
 	if runErr != "" {
 		return result, fmt.Errorf("reconcile run %s finished with provider errors: %s", runID, runErr)
 	}

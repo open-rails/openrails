@@ -255,35 +255,6 @@ func (q *Queries) DeleteProviderMutationLogsBefore(ctx context.Context, arg Dele
 	return result.RowsAffected(), nil
 }
 
-const deleteReconciliationRunsPastRetention = `-- name: DeleteReconciliationRunsPastRetention :execrows
-DELETE FROM billing.maintenance_runs
-WHERE merchant_id = $1::uuid
-  AND id IN (
-    SELECT mr.id FROM billing.maintenance_runs mr
-    WHERE mr.merchant_id = $1::uuid
-      AND mr.kind = 'reconciliation'
-      AND mr.started_at < now() - make_interval(days => $2::int)
-      AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.first_seen_run = mr.id)
-      AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.last_seen_run = mr.id)
-    ORDER BY mr.started_at
-    LIMIT $3::int
-)
-`
-
-type DeleteReconciliationRunsPastRetentionParams struct {
-	MerchantID    uuid.UUID
-	RetentionDays int32
-	RowLimit      int32
-}
-
-func (q *Queries) DeleteReconciliationRunsPastRetention(ctx context.Context, arg DeleteReconciliationRunsPastRetentionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteReconciliationRunsPastRetention, arg.MerchantID, arg.RetentionDays, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteReleasedParksBefore = `-- name: DeleteReleasedParksBefore :execrows
 DELETE FROM billing.parked_provider_subscriptions
 WHERE merchant_id = $1::uuid
@@ -484,114 +455,95 @@ const listRetentionWorkMerchants = `-- name: ListRetentionWorkMerchants :many
 
 SELECT q.mid AS merchant_id
 FROM (
-    (SELECT DISTINCT nq.merchant_id AS mid
-       FROM billing.notifications nq
-      WHERE ($1::uuid IS NULL OR nq.merchant_id > $1::uuid)
-        -- The GREATEST bound is implied by both arms and lets created_at drive the index.
-        AND nq.created_at < GREATEST($2::timestamptz, $3::timestamptz)
-        AND (nq.created_at < $2::timestamptz
-             OR (nq.read_at IS NOT NULL AND nq.created_at < $3::timestamptz))
-      ORDER BY 1 LIMIT $4::int)
-    UNION
     (SELECT DISTINCT we.merchant_id AS mid
        FROM billing.webhook_events we
       WHERE ($1::uuid IS NULL OR we.merchant_id > $1::uuid)
-        AND we.completed_at < $5::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND we.completed_at < $2::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT ho.merchant_id AS mid
        FROM billing.host_outbox ho
       WHERE ($1::uuid IS NULL OR ho.merchant_id > $1::uuid)
-        AND ho.recorded_at < $6::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND ho.recorded_at < $4::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT pa.merchant_id AS mid
        FROM billing.payment_attempts pa
       WHERE ($1::uuid IS NULL OR pa.merchant_id > $1::uuid)
-        AND pa.attempted_at < $7::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND pa.attempted_at < $5::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT rc.merchant_id AS mid
        FROM billing.rebill_cycles rc
       WHERE ($1::uuid IS NULL OR rc.merchant_id > $1::uuid)
-        AND rc.due_at < $7::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND rc.due_at < $5::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT nh.merchant_id AS mid
        FROM billing.nmi_history_months nh
       WHERE ($1::uuid IS NULL OR nh.merchant_id > $1::uuid)
-        AND nh.month_at < $7::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND nh.month_at < $5::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT st.merchant_id AS mid
        FROM billing.subscription_status_transitions st
       WHERE ($1::uuid IS NULL OR st.merchant_id > $1::uuid)
-        AND st.occurred_at < $8::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND st.occurred_at < $6::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT st.merchant_id AS mid FROM billing.subscription_billing_changes st
       WHERE ($1::uuid IS NULL OR st.merchant_id > $1::uuid)
-        AND st.occurred_at < $8::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND st.occurred_at < $6::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT ca.merchant_id AS mid
        FROM billing.order_attempts ca
       WHERE ($1::uuid IS NULL OR ca.merchant_id > $1::uuid)
         AND ca.status = 'expired' AND ca.deleted_at IS NULL
         AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
-        AND ca.expires_at < $9::timestamptz
+        AND ca.expires_at < $7::timestamptz
         AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.order_attempt_id = ca.id)
         AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.order_attempt_id = ca.id)
         AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'order_attempt_id' AND pi.payload->>'order_attempt_id' = ca.id::text)
-      ORDER BY 1 LIMIT $4::int)
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT o.merchant_id AS mid
        FROM billing.orders o
       WHERE ($1::uuid IS NULL OR o.merchant_id > $1::uuid)
         AND o.collection_owner = 'engine' AND o.status IN ('canceled', 'expired') AND o.payment_id IS NULL AND o.attempt_id IS NULL
-        AND COALESCE(o.canceled_at, o.expired_at) < $10::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND COALESCE(o.canceled_at, o.expired_at) < $8::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT fw.merchant_id AS mid
        FROM billing.failed_usage_windows fw
       WHERE ($1::uuid IS NULL OR fw.merchant_id > $1::uuid)
-        AND fw.window_end <= $11::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND fw.window_end <= $9::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT mq.merchant_id AS mid
        FROM billing.meter_period_quantities mq
       WHERE ($1::uuid IS NULL OR mq.merchant_id > $1::uuid)
-        AND mq.period_starts_at < $12::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND mq.period_starts_at < $10::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT ad.merchant_id AS mid
        FROM billing.admission_denials_hourly ad
       WHERE ($1::uuid IS NULL OR ad.merchant_id > $1::uuid)
-        AND ad.hour_at < $13::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND ad.hour_at < $11::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT wh.merchant_id AS mid
        FROM billing.webhook_health_daily wh
       WHERE ($1::uuid IS NULL OR wh.merchant_id > $1::uuid)
-        AND wh.day_at < $13::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND wh.day_at < $11::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT rf.merchant_id AS mid
        FROM billing.reconciliation_findings rf
       WHERE ($1::uuid IS NULL OR rf.merchant_id > $1::uuid)
         AND rf.resolved_at IS NOT NULL
-        AND GREATEST(rf.resolved_at, rf.last_seen_at) < $14::timestamptz
-      ORDER BY 1 LIMIT $4::int)
-    UNION
-    -- A run a finding still names is not due: counting it would revisit its
-    -- merchant every pass to delete nothing.
-    (SELECT DISTINCT mr.merchant_id AS mid
-       FROM billing.maintenance_runs mr
-      WHERE ($1::uuid IS NULL OR mr.merchant_id > $1::uuid)
-        AND mr.kind = 'reconciliation' AND mr.started_at < $15::timestamptz
-        AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.first_seen_run = mr.id)
-        AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.last_seen_run = mr.id)
-      ORDER BY 1 LIMIT $4::int)
+        AND GREATEST(rf.resolved_at, rf.last_seen_at) < $12::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT pi.merchant_id AS mid
        FROM billing.provider_intents pi
@@ -599,43 +551,40 @@ FROM (
         AND pi.status IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
         AND pi.destructive_run_id IS NULL
         AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'account_updater')
-        AND pi.updated_at < $16::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND pi.updated_at < $13::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT ml.merchant_id AS mid
        FROM billing.provider_mutation_logs ml
       WHERE ($1::uuid IS NULL OR ml.merchant_id > $1::uuid)
-        AND ml.created_at < $16::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND ml.created_at < $13::timestamptz
+      ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT pk.merchant_id AS mid
        FROM billing.parked_provider_subscriptions pk
       WHERE ($1::uuid IS NULL OR pk.merchant_id > $1::uuid)
-        AND pk.released_at < $17::timestamptz
-      ORDER BY 1 LIMIT $4::int)
+        AND pk.released_at < $14::timestamptz
+      ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
-LIMIT $4::int
+LIMIT $3::int
 `
 
 type ListRetentionWorkMerchantsParams struct {
-	After                  *uuid.UUID
-	NotificationCutoff     time.Time
-	NotificationSeenCutoff time.Time
-	MerchantLimit          int32
-	WebhookCutoff          time.Time
-	OutboxCutoff           time.Time
-	AttemptCutoff          time.Time
-	TransitionCutoff       time.Time
-	OrderAttemptCutoff     time.Time
-	UnpaidOrderCutoff      time.Time
-	Now                    time.Time
-	MeterCutoff            time.Time
-	CounterCutoff          time.Time
-	FindingCutoff          time.Time
-	RunCutoff              time.Time
-	ProviderWriteCutoff    time.Time
-	ParkCutoff             time.Time
+	After               *uuid.UUID
+	WebhookCutoff       time.Time
+	MerchantLimit       int32
+	OutboxCutoff        time.Time
+	AttemptCutoff       time.Time
+	TransitionCutoff    time.Time
+	OrderAttemptCutoff  time.Time
+	UnpaidOrderCutoff   time.Time
+	Now                 time.Time
+	MeterCutoff         time.Time
+	CounterCutoff       time.Time
+	FindingCutoff       time.Time
+	ProviderWriteCutoff time.Time
+	ParkCutoff          time.Time
 }
 
 // Retention sweep: due-work discovery.
@@ -645,10 +594,8 @@ type ListRetentionWorkMerchantsParams struct {
 func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetentionWorkMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listRetentionWorkMerchants,
 		arg.After,
-		arg.NotificationCutoff,
-		arg.NotificationSeenCutoff,
-		arg.MerchantLimit,
 		arg.WebhookCutoff,
+		arg.MerchantLimit,
 		arg.OutboxCutoff,
 		arg.AttemptCutoff,
 		arg.TransitionCutoff,
@@ -658,7 +605,6 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.MeterCutoff,
 		arg.CounterCutoff,
 		arg.FindingCutoff,
-		arg.RunCutoff,
 		arg.ProviderWriteCutoff,
 		arg.ParkCutoff,
 	)

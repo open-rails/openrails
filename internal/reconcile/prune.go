@@ -257,7 +257,7 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 	note := fmt.Sprintf("openrails prune %s account %s", provider, binding.AccountID)
 	if _, err := q.CreateDestructiveRun(ctx, gen.CreateDestructiveRunParams{
 		ID: runID, MerchantID: mid, PspID: &pspID, Kind: DestructiveRunKindPrune,
-		Actor: actor, DryRun: false, Coverage: coverage, ExpectedRows: &expected, Note: &note,
+		Actor: actor, Coverage: coverage, ExpectedRows: &expected, Note: &note,
 	}); err != nil {
 		return res, fmt.Errorf("open destructive run: %w", err)
 	}

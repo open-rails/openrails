@@ -36,7 +36,7 @@ const DestructiveRunKindMerchantPurge = "merchant_purge"
 // SQL assembly). existingMerchantTables preserves this order.
 var merchantOwnedTables = []string{
 	"notification_events",
-	"customer_entitlement_cache", "customer_entitlement_cache_stamps", "notifications", "payment_attempts", "rebill_cycles", "payment_method_versions", "mandates", "nmi_history_months",
+	"customer_entitlement_cache", "customer_entitlement_cache_stamps", "payment_attempts", "rebill_cycles", "payment_method_versions", "mandates", "nmi_history_months",
 	"solana_pay_receipts", "solana_pay_references",
 	"provider_mutation_logs", "provider_intents",
 	"order_attempts", "product_access", "payments", "subscriptions",
@@ -80,8 +80,6 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsSolanaPayReceipts(ctx, id)
 	case "solana_pay_references":
 		return q.CountMerchantRowsSolanaPayReferences(ctx, id)
-	case "notifications":
-		return q.CountMerchantRowsNotificationQueue(ctx, id)
 	case "psp_customers":
 		return q.CountMerchantRowsRailCustomers(ctx, id)
 	case "order_attempts":
@@ -128,8 +126,6 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsSolanaPayReceipts(ctx, id)
 	case "solana_pay_references":
 		return q.PurgeMerchantRowsSolanaPayReferences(ctx, id)
-	case "notifications":
-		return q.PurgeMerchantRowsNotificationQueue(ctx, id)
 	case "psp_customers":
 		return q.PurgeMerchantRowsRailCustomers(ctx, id)
 	case "order_attempts":
@@ -451,7 +447,7 @@ func (s *Service) Purge(ctx context.Context, id billing.MerchantID, params billi
 
 		if _, err := txq.CreateDestructiveRun(ctx, gen.CreateDestructiveRunParams{
 			ID: runID, MerchantID: id.UUID(), Kind: DestructiveRunKindMerchantPurge,
-			Actor: actor, DryRun: false, Coverage: inventoryProof,
+			Actor: actor, Coverage: inventoryProof,
 			ExpectedRows: &expected, Note: &note,
 		}); err != nil {
 			return fmt.Errorf("merchants: open destructive run: %w", err)

@@ -3,7 +3,6 @@ package converge
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -210,34 +209,9 @@ func (e *ConvergeEngine) run(ctx context.Context, scope Scope, collect func(cont
 	}
 
 	q := e.DB.Gen(ctx)
-	// A run stamps first_seen_run/last_seen_run on the findings (and drives
-	// auto-vanish). Created lazily — only when there is something to persist.
+	// A run id stamps first_seen_run/last_seen_run on the findings, minted
+	// only when there is something to persist.
 	var runID *uuid.UUID
-	completed := false
-	defer func() {
-		if runID == nil {
-			return
-		}
-		// Error, cancellation, and panic paths retain a failed run. Only the
-		// fully completed pass may certify completion; cleanup grants no work.
-		status, reason := "failed", "convergence interrupted before completion"
-		if runErr == nil && ctx.Err() != nil {
-			runErr = ctx.Err()
-		}
-		if runErr != nil {
-			reason = runErr.Error()
-		} else if completed {
-			status, reason = "completed", ""
-		}
-		summary, _ := json.Marshal(map[string]any{
-			"findings": res.Findings, "auto_fixed": res.AutoFixed,
-			"reconcile_required": res.ReconcileRequired, "requires_review": res.RequiresReview, "operator": res.Operator,
-			"held": res.Held,
-		})
-		if err := (&reconcile.PGStore{DB: e.DB}).FinishRun(ctx, *runID, status, summary, reason); err != nil {
-			runErr = errors.Join(runErr, fmt.Errorf("converge: finish run: %w", err))
-		}
-	}()
 	// Every retraction (cancel, revoke, close) asks the destructive gate; one
 	// it refuses stays reconcile_required, the reason in evidence.
 	hold := &retractionHold{merchant: scope.Merchant.UUID(), gate: destructive.New(e.DB)}
@@ -246,10 +220,7 @@ func (e *ConvergeEngine) run(ctx context.Context, scope Scope, collect func(cont
 			return nil
 		}
 		if runID == nil {
-			run, err := (&reconcile.PGStore{DB: e.DB}).CreateRun(ctx, reconcile.ModeEnforce, []reconcile.Provider{"self"}, nil, nil)
-			if err != nil {
-				return fmt.Errorf("converge: create run: %w", err)
-			}
+			run := uuid.Must(uuid.NewV7())
 			runID = &run
 			res.RunID = runID
 		}
@@ -305,7 +276,6 @@ func (e *ConvergeEngine) run(ctx context.Context, scope Scope, collect func(cont
 		return res, err
 	}
 
-	completed = true
 	return res, nil
 }
 

@@ -1112,7 +1112,7 @@ Every table has one class, which its table comment states.
 
 | Class | What it means |
 |---|---|
-| Permanent | Never pruned: the ledger, grants, payments, owed usage items and the usage collection cadence, receipts (catalog applications, credited and review Solana Pay receipts), operation authorizations and their cost qualifications, refusals and resolutions, running charges, metered rating watermarks, destructive runs and their before-images. |
+| Permanent | Never pruned: the ledger, grants, payments, owed usage items, receipts (catalog applications, credited and review Solana Pay receipts), operation authorizations and their cost qualifications, refusals and resolutions, running charges, metered rating watermarks, maintenance runs and the before-images of destructive runs. |
 | Partitioned | Monthly partitions, created ahead and dropped whole by the calendar. No row is read to prune them. |
 | Rows | Rows past a period are deleted by the hourly cleanup job, oldest first. |
 | State | Configuration and entities (merchants, PSPs, catalog with its price keys and field owners, customers, subscriptions, payment methods, cursors, the balance watch of each customer with a running charge): one row per thing that exists. |
@@ -1132,13 +1132,11 @@ Row retention:
 | `provider_intents` | finished intents that only instructed a provider (subscription cancel, payment-method and source update, card vault, network token, catalog archive, account-updater request), 25 months after they last changed |
 | `provider_mutation_logs` | 25 months after `created_at` |
 | `reconciliation_findings` | resolved findings, 12 months (366 days) after they were resolved and last seen |
-| `maintenance_runs` | reconciliation runs no finding names, 12 months after they started; every other kind is permanent |
 | `order_attempts` | attempts that expired without reaching a provider, 90 days after `expires_at` |
 | `orders`, `order_lines` | unpaid canceled and expired orders that never started a payment attempt, 90 days after they closed |
 | `parked_provider_subscriptions` | released parks, 90 days after `released_at` |
 | `carts` | 30 days after `last_changed_at` |
 | `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
-| `notifications` (merchant alerts) | 90 days once read, 180 days if never read |
 | `notification_events` | 90 days after `inserted_at`, and never before `event_retention` |
 | the event log | after `event_retention` (90 days by default) |
 | `webhook_events` | 90 days after completion |
@@ -1184,7 +1182,7 @@ How it runs:
   writes carry on. Dropping one locks the table briefly; it gives up after two
   seconds rather than queue writers behind a long reader (a logical backup, a
   merchant archive export) and the next pass tries again.
-- `subscription_status_transitions` and reconciliation runs refuse every other
+- `subscription_status_transitions` refuses every other
   `DELETE`: `billing.guard_retention_delete` lets one through
   only when the transaction names the table in the `openrails.retention_table`
   setting and the row is older than the period the trigger declares. `usage_events` and

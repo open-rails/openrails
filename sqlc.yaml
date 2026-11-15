@@ -137,6 +137,7 @@ sql:
       - "internal/migrate/postgres/0203_solana_pay_wake.up.sql"
       - "internal/migrate/postgres/0204_eventlog_notify.up.sql"
       - "internal/migrate/postgres/0205_balance_looks.up.sql"
+      - "internal/migrate/postgres/0207_drop_unread_schema.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

@@ -289,11 +289,9 @@ name in one visible input with `autocomplete="cc-name"`; OpenRails projects it
 onto provider-specific first and last name fields only at the rail boundary. A
 field the route does not declare is refused (`unknown_field`).
 
-The chosen PSP and the reason for it are recorded on the order's attempt
-(`order_attempts.routing_reason`). Merchants can preview a decision without
-creating anything: `POST /v1/merchant/psps/routing-preview`
-(`Client.PreviewPSPRouting`) with `{"price_id": "..."}`
-returns the winner, the ranked fallbacks, and every skipped candidate with its
+Merchants can preview a routing decision without creating anything:
+`POST /v1/merchant/psps/routing-preview` (`Client.PreviewPSPRouting`) with
+`{"price_id": "..."}` returns the winner, the ranked fallbacks, and every skipped candidate with its
 reason. Country routing is unsupported; supplying `country` to the preview is
 rejected. This does not affect the country in `billing_details.address`.
 

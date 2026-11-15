@@ -134,10 +134,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.ar
 
 -- name: CreateDestructiveRun :one
 INSERT INTO billing.maintenance_runs (
-    id, merchant_id, psp_id, kind, actor, dry_run, coverage, expected_rows, note
+    id, merchant_id, psp_id, kind, actor, coverage, expected_rows, note
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.narg(psp_id)::uuid,
-    sqlc.arg(kind)::text, sqlc.arg(actor)::text, sqlc.arg(dry_run)::boolean,
+    sqlc.arg(kind)::text, sqlc.arg(actor)::text,
     sqlc.narg(coverage)::jsonb, sqlc.narg(expected_rows)::bigint, sqlc.narg(note)::text
 )
 RETURNING *;

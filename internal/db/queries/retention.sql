@@ -6,15 +6,6 @@
 -- name: ListRetentionWorkMerchants :many
 SELECT q.mid AS merchant_id
 FROM (
-    (SELECT DISTINCT nq.merchant_id AS mid
-       FROM billing.notifications nq
-      WHERE (sqlc.narg(after)::uuid IS NULL OR nq.merchant_id > sqlc.narg(after)::uuid)
-        -- The GREATEST bound is implied by both arms and lets created_at drive the index.
-        AND nq.created_at < GREATEST(sqlc.arg(notification_cutoff)::timestamptz, sqlc.arg(notification_seen_cutoff)::timestamptz)
-        AND (nq.created_at < sqlc.arg(notification_cutoff)::timestamptz
-             OR (nq.read_at IS NOT NULL AND nq.created_at < sqlc.arg(notification_seen_cutoff)::timestamptz))
-      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
-    UNION
     (SELECT DISTINCT we.merchant_id AS mid
        FROM billing.webhook_events we
       WHERE (sqlc.narg(after)::uuid IS NULL OR we.merchant_id > sqlc.narg(after)::uuid)
@@ -105,16 +96,6 @@ FROM (
         AND GREATEST(rf.resolved_at, rf.last_seen_at) < sqlc.arg(finding_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
-    -- A run a finding still names is not due: counting it would revisit its
-    -- merchant every pass to delete nothing.
-    (SELECT DISTINCT mr.merchant_id AS mid
-       FROM billing.maintenance_runs mr
-      WHERE (sqlc.narg(after)::uuid IS NULL OR mr.merchant_id > sqlc.narg(after)::uuid)
-        AND mr.kind = 'reconciliation' AND mr.started_at < sqlc.arg(run_cutoff)::timestamptz
-        AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.first_seen_run = mr.id)
-        AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.last_seen_run = mr.id)
-      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
-    UNION
     (SELECT DISTINCT pi.merchant_id AS mid
        FROM billing.provider_intents pi
       WHERE (sqlc.narg(after)::uuid IS NULL OR pi.merchant_id > sqlc.narg(after)::uuid)
@@ -168,20 +149,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
     WHERE st.merchant_id = sqlc.arg(merchant_id)::uuid
       AND st.occurred_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
     ORDER BY st.occurred_at
-    LIMIT sqlc.arg(row_limit)::int
-);
-
--- name: DeleteReconciliationRunsPastRetention :execrows
-DELETE FROM billing.maintenance_runs
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND id IN (
-    SELECT mr.id FROM billing.maintenance_runs mr
-    WHERE mr.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND mr.kind = 'reconciliation'
-      AND mr.started_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
-      AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.first_seen_run = mr.id)
-      AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.last_seen_run = mr.id)
-    ORDER BY mr.started_at
     LIMIT sqlc.arg(row_limit)::int
 );
 

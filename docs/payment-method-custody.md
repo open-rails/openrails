@@ -272,9 +272,6 @@ Local provider fakes verify the request/receipt contract, not live vendor
 qualification. Sandbox qualification of application permissions, iframe
 collection, proxy approval/decline, and conversion recovery remains required.
 
-`payment_methods.wallet_card_id` names the customer wallet card a merchant's
-copy was made from; it is NULL for a card given to the merchant.
-
 ## Declaring a custodian
 
 A custodian is an account the merchant holds with a third party, exactly like a

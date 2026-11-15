@@ -71,43 +71,6 @@ func (q *Queries) CreateNotificationIfAbsent(ctx context.Context, arg CreateNoti
 	return err
 }
 
-const deleteNotificationsBefore = `-- name: DeleteNotificationsBefore :execrows
-DELETE FROM billing.notifications WHERE ctid IN (SELECT ctid FROM billing.notifications WHERE merchant_id=$1::uuid AND created_at<$2::timestamptz LIMIT $3::int)
-`
-
-type DeleteNotificationsBeforeParams struct {
-	MerchantID uuid.UUID
-	Cutoff     time.Time
-	RowLimit   int32
-}
-
-func (q *Queries) DeleteNotificationsBefore(ctx context.Context, arg DeleteNotificationsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteNotificationsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const deleteSeenNotificationsBefore = `-- name: DeleteSeenNotificationsBefore :execrows
-DELETE FROM billing.notifications WHERE ctid IN (SELECT ctid FROM billing.notifications WHERE merchant_id=$1::uuid AND read_at IS NOT NULL AND created_at<$2::timestamptz LIMIT $3::int)
-`
-
-type DeleteSeenNotificationsBeforeParams struct {
-	MerchantID uuid.UUID
-	Cutoff     time.Time
-	RowLimit   int32
-}
-
-// Legacy merchant alerts retain their existing retention, outside customer facts.
-func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, arg DeleteSeenNotificationsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteSeenNotificationsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const premiumEndedNotificationExistsSince = `-- name: PremiumEndedNotificationExistsSince :one
 SELECT EXISTS(SELECT 1 FROM billing.notification_events WHERE merchant_id=$1::uuid
 AND customer_id=$2::uuid AND event_type='premium_ended' AND created_at>=$3::timestamptz)::boolean AS found
