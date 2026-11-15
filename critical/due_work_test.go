@@ -146,10 +146,12 @@ func TestDueWork(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
-		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		// The same outage fails the history read, and with it the pass; the
+		// scans beside it ran.
+		runPassFailing(t, fleet, 1, "openrails.nmi_history")
 		subscriptionState(t, a, sub.ID, "active")
 		a.clock.Advance(24 * time.Hour)
-		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		runPassFailing(t, fleet, 1, "openrails.nmi_history")
 		subscriptionState(t, a, sub.ID, "unverified")
 		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:member"}})
 		require.NoError(t, err)

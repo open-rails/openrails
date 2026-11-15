@@ -251,7 +251,12 @@ func TestNMIRecovery(t *testing.T) {
 				fleet.PeriodicJobs().Clear()
 				require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 				require.NoError(t, fleet.Start(t.Context()))
-				runRegistered(t, fleet, "openrails.billing_pass", 2)
+				if profile == "unavailable-query" {
+					// The outage also fails the history read, and with it the pass.
+					runPassFailing(t, fleet, 2, "openrails.nmi_history")
+				} else {
+					runRegistered(t, fleet, "openrails.billing_pass", 2)
+				}
 				p.money(t, 2, 2000)
 				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 				require.NoError(t, err)
