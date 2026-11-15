@@ -35,9 +35,6 @@ import (
 
 const (
 	defaultOrderAttemptTTL = 15 * time.Minute
-	// solanaFinalizeWait bounds how long a page confirm waits for a transfer
-	// to finalize (~13 s normally) before answering "processing".
-	solanaFinalizeWait = 60 * time.Second
 )
 
 // IdempotencyLease is how long a silent purchase request keeps its claim.
@@ -679,20 +676,6 @@ func (s *OrderAttemptService) buildSolanaSubscribeTransaction(ctx context.Contex
 		TransactionBase64: res.Transactions[0],
 		Message:           "Sign to start your subscription",
 	}, nil
-}
-
-// pollerConfirmContext prepares the context for a confirm driven by the Solana
-// Pay poller rather than an HTTP request. or#893/#704: such a context carries no
-// request-scoped PSP, yet every provider-bound row the confirm writes
-// (membership, payment, mirror) must be attributable to the account the session
-// was minted against — exactly what the HTTP confirm path pins — or the repos
-// refuse the write (db.ErrNoPSPInContext) and the landed payment is never
-// enrolled.
-func (s *OrderAttemptService) pollerConfirmContext(ctx context.Context, session *models.OrderAttempt) context.Context {
-	if session == nil {
-		return ctx
-	}
-	return db.WithPSPID(ctx, session.PspID)
 }
 
 // ConfirmSolanaSubscribeSession enrolls an order's Solana subscription from a

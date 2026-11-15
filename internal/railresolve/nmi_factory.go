@@ -27,11 +27,6 @@ type NMIFactory struct {
 	Transport http.RoundTripper
 }
 
-// LoopbackNMIEndpoints routes every NMI API to one loopback fake gateway.
-func LoopbackNMIEndpoints(url string) NMIEndpoints {
-	return NMIEndpoints{V5BaseURL: url, DirectPostURL: url, QueryURL: url}
-}
-
 func (f *NMIFactory) endpoints() NMIEndpoints {
 	if f == nil {
 		return NMIEndpoints{}

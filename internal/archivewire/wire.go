@@ -236,14 +236,6 @@ type Writer struct {
 	merchantID string
 }
 
-func NewWriter(w io.Writer, merchantID string, catalogRevision ...int64) (*Writer, error) {
-	var revision int64
-	if len(catalogRevision) > 0 {
-		revision = catalogRevision[0]
-	}
-	return NewWriterWithTenant(w, merchantID, "", revision)
-}
-
 // NewWriterWithTenant preserves the explicit tenant ownership in the archive
 // header. An empty tenant retains the legacy unbound format.
 func NewWriterWithTenant(w io.Writer, merchantID, tenantID string, catalogRevision int64) (*Writer, error) {

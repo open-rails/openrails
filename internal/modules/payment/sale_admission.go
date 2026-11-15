@@ -1,11 +1,8 @@
 package payment
 
 import (
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
@@ -22,17 +19,6 @@ func (s *FulfillmentService) transactionBound(d *db.DB) *FulfillmentService {
 		out.SubscriptionService = subscriptions.NewSubscriptionService(d, out.PriceService, out.ProductService, nil, s.clock)
 	}
 	return out
-}
-
-func saleRequestFingerprint(req *PurchaseRequest, user *UserIdentity, price uuid.UUID, target railTarget) string {
-	raw, _ := json.Marshal(struct {
-		Customer string
-		Price    uuid.UUID
-		PSP      string
-		Request  *PurchaseRequest
-	}{user.ID, price, target.PSP, req})
-	digest := sha256.Sum256(raw)
-	return fmt.Sprintf("%x", digest)
 }
 
 func saleReplayParams(in gen.BillingProviderIntent) intents.EnqueueParams {

@@ -47,24 +47,6 @@ func (q *Queries) GetRunningChargeByReference(ctx context.Context, arg GetRunnin
 	return i, err
 }
 
-const getRunningChargeTotal = `-- name: GetRunningChargeTotal :one
-SELECT billing.running_charge_total($1::bigint, $2::timestamptz, $3::timestamptz)::bigint AS total
-`
-
-type GetRunningChargeTotalParams struct {
-	RatePerHour int64
-	StartedAt   time.Time
-	At          time.Time
-}
-
-// running_charge_total, for the callers that hold it against the Go rule.
-func (q *Queries) GetRunningChargeTotal(ctx context.Context, arg GetRunningChargeTotalParams) (int64, error) {
-	row := q.db.QueryRow(ctx, getRunningChargeTotal, arg.RatePerHour, arg.StartedAt, arg.At)
-	var total int64
-	err := row.Scan(&total)
-	return total, err
-}
-
 const insertRunningCharge = `-- name: InsertRunningCharge :one
 INSERT INTO billing.running_charges (
     merchant_id, reference, customer_id, currency, rate_per_hour, overdraft_amount,

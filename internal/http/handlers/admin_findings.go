@@ -37,13 +37,6 @@ func findingsStore(r *httprequest.Request) (*reconcile.PGStore, bool) {
 // findingView is a finding as the admin API answers it.
 func findingView(rec reconcile.FindingRecord) billing.Finding { return rec.View() }
 
-func optional(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
 // FindingsQuery is the findings list's filters. Type is one finding type or a
 // prefix ending in ".*" (pull.*: the pull's proposals).
 type FindingsQuery struct {

@@ -2,12 +2,9 @@ package payment
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -17,12 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 )
-
-type saleIdempotencyResult struct {
-	TransactionID string    `json:"transaction_id"`
-	PaymentID     uuid.UUID `json:"payment_id"`
-	DelayedStart  *string   `json:"delayed_start,omitempty"`
-}
 
 // intentExecutor is the write-through provider-intents surface:
 // EnqueueAndExecute posts the durable intent and executes it inline; anything
@@ -41,7 +32,6 @@ var ErrPurchaseProcessing = errors.New("payment is processing; retry with the sa
 
 type NMISaleService struct {
 	Fulfillment              *FulfillmentService
-	PaymentMethodResolver    *PaymentMethodResolver
 	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	// ResolveNMIClient arms the ctx merchant's NMI client from the armed rail
 	// state: the only client source; nil fails closed.
@@ -63,80 +53,12 @@ type NMISaleService struct {
 
 func NewNMISaleService(
 	fulfillment *FulfillmentService,
-	pmResolver *PaymentMethodResolver,
 	railPMService *paymentmethods.RailPaymentMethodService,
 ) *NMISaleService {
 	return &NMISaleService{
 		Fulfillment:              fulfillment,
-		PaymentMethodResolver:    pmResolver,
 		RailPaymentMethodService: railPMService,
 	}
-}
-
-func renderSaleOperation(intent gen.BillingProviderIntent) (*PurchaseResponse, error) {
-	switch intent.Status {
-	case intents.StatusSucceeded:
-		cached, derr := saleResultFromIntent(intent)
-		if derr != nil {
-			return nil, fmt.Errorf("sale succeeded but evidence unreadable: %w", derr)
-		}
-
-		return saleResponse(cached, "Purchase completed successfully"), nil
-	case intents.StatusFailedTerminal:
-		return nil, terminalPurchaseError(intent, "payment failed")
-	default:
-		return nil, ErrPurchaseProcessing
-	}
-
-}
-
-// saleResultFromIntent reads the producer-facing evidence off a succeeded
-// sale intent.
-func saleResultFromIntent(intent gen.BillingProviderIntent) (saleIdempotencyResult, error) {
-	var out saleIdempotencyResult
-	var evidence struct {
-		TransactionID string `json:"transaction_id"`
-		PaymentID     string `json:"payment_id"`
-		DelayedStart  string `json:"delayed_start"`
-	}
-	if len(intent.ResultEvidence) == 0 {
-		return out, errors.New("no result evidence")
-	}
-	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
-		return out, err
-	}
-	out.TransactionID = evidence.TransactionID
-	if evidence.PaymentID != "" {
-		if id, err := uuid.Parse(evidence.PaymentID); err == nil {
-			out.PaymentID = id
-		}
-	}
-	if evidence.DelayedStart != "" {
-		ds := evidence.DelayedStart
-		out.DelayedStart = &ds
-	}
-	return out, nil
-}
-
-func saleResponse(cached saleIdempotencyResult, message string) *PurchaseResponse {
-	var delayedStart *time.Time
-	if cached.DelayedStart != nil {
-		if t, err := time.Parse(time.RFC3339, *cached.DelayedStart); err == nil {
-			delayedStart = &t
-		}
-	}
-	resp := &PurchaseResponse{
-		Status:        "success",
-		Action:        "new",
-		Message:       message,
-		TransactionID: cached.TransactionID,
-		DelayedStart:  delayedStart,
-	}
-	if cached.PaymentID != uuid.Nil {
-		id := cached.PaymentID
-		resp.PaymentID = &id
-	}
-	return resp
 }
 
 func (s *NMISaleService) requireArmed(ctx context.Context, target railTarget) error {

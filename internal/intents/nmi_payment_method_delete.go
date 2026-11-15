@@ -43,12 +43,6 @@ import (
 // The value is persisted in provider_intents.intent_type, so it never changes.
 const TypeNMIPaymentMethodDelete = "nmi_vault_delete"
 
-// NMIPaymentMethodDeleteIdempotencyKey is the logical identity of "the delete of this
-// stored payment method": repeated delete requests map onto one intent.
-func NMIPaymentMethodDeleteIdempotencyKey(paymentMethodID uuid.UUID) string {
-	return TypeNMIPaymentMethodDelete + ":" + paymentMethodID.String()
-}
-
 // NMIPaymentMethodDeletePayload freezes the owned target and deletion scope.
 // Recovery re-reads the accepted local fence before verifying this exact target.
 type NMIPaymentMethodDeletePayload struct {

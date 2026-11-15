@@ -35,7 +35,8 @@ type Submitter interface {
 type RPCResolver func(ctx context.Context, merchantID billing.MerchantID) (*solanaint.RPCClient, error)
 
 // signerSubmitter is the production Submitter: the crankers over
-// solana.BuildSignSubmit, on the RPC of the merchant whose work they sign.
+// solana.BuildSignSubmitPresubmit, on the RPC of the merchant whose work they
+// sign.
 type signerSubmitter struct {
 	crankers *Crankers
 	resolve  RPCResolver

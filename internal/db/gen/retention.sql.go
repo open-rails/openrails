@@ -449,37 +449,6 @@ func (q *Queries) EnsureMonthPartitions(ctx context.Context, arg EnsureMonthPart
 	return created, err
 }
 
-const listMonthPartitions = `-- name: ListMonthPartitions :many
-SELECT m.partition::text AS partition, m.range_from::timestamptz AS range_from, m.range_to::timestamptz AS range_to
-FROM billing.month_partitions($1::name) m
-`
-
-type ListMonthPartitionsRow struct {
-	Partition string
-	RangeFrom time.Time
-	RangeTo   time.Time
-}
-
-func (q *Queries) ListMonthPartitions(ctx context.Context, tableName string) ([]ListMonthPartitionsRow, error) {
-	rows, err := q.db.Query(ctx, listMonthPartitions, tableName)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListMonthPartitionsRow
-	for rows.Next() {
-		var i ListMonthPartitionsRow
-		if err := rows.Scan(&i.Partition, &i.RangeFrom, &i.RangeTo); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listRetentionWorkMerchants = `-- name: ListRetentionWorkMerchants :many
 
 SELECT q.mid AS merchant_id

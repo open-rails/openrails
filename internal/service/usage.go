@@ -16,23 +16,16 @@ import (
 // usage event.
 type UsageIdempotencyKey = money.IdempotencyKey
 
-// NewUsageIdempotencyKey builds a usage key whose operation is bound to
-// eventType. source and sourceID must identify the same logical event across
-// retries.
-func NewUsageIdempotencyKey(eventType, source, sourceID string) (UsageIdempotencyKey, error) {
-	return money.NewIdempotencyKey(money.UsageOperation(eventType), source, sourceID)
-}
-
 // RecordUsageInput is one host-reported metered usage event.
 //
 // Key is required: the idempotency coordinate within (merchant, payer,
 // currency), claimed under the payer's spend lock over the ingest window and,
 // for a charged failed event, permanently by the ledger. Build it with
-// NewUsageIdempotencyKey(EventType, source, sourceID); its operation must match
-// EventType, so two event types at one (source, source_id) are two charges,
-// not a collision. Both halves must be reproducible across retries of the same
-// logical event: a value minted per attempt passes every check and guarantees
-// nothing.
+// money.NewIdempotencyKey(money.UsageOperation(EventType), source, sourceID);
+// its operation must match EventType, so two event types at one (source,
+// source_id) are two charges, not a collision. Both halves must be
+// reproducible across retries of the same logical event: a value minted per
+// attempt passes every check and guarantees nothing.
 //
 // A replay with the same Amount succeeds without re-recording or re-charging;
 // a different Amount is refused with money.ErrIdempotencyKeyReused, so a

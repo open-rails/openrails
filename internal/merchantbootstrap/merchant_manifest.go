@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -26,19 +27,19 @@ import (
 
 const DefaultMerchantConfigManifestPath = "/etc/openrails/merchants.yaml"
 
-type BillingConfig struct {
-	Version   int                                   `yaml:"version" koanf:"version"`
-	Merchants map[string]config.MerchantDeclaration `yaml:"merchants" koanf:"merchants"`
+// Manifest is a merchant config manifest. M is its entry: the engine's
+// declaration, or one embedding it with keys only its reader takes.
+type Manifest[M any] struct {
+	Version   int          `yaml:"version" koanf:"version"`
+	Merchants map[string]M `yaml:"merchants" koanf:"merchants"`
 }
 
-// LoadMerchantConfigManifest reads and validates a merchant config manifest.
-func LoadMerchantConfigManifest(path string) (*BillingConfig, error) {
-	return LoadMerchantConfigManifestFiles(path)
-}
+// BillingConfig is the manifest as the engine reads it.
+type BillingConfig = Manifest[config.MerchantDeclaration]
 
-// LoadMerchantConfigManifestFiles loads a merchant config YAML file plus optional
-// structured YAML overlays through koanf, then validates the merged tree.
-func LoadMerchantConfigManifestFiles(path string, overlays ...string) (*BillingConfig, error) {
+// LoadManifestFiles loads a merchant config YAML file plus optional
+// structured YAML overlays (LoadManifest).
+func LoadManifestFiles[M any](path string, overlays []string, check func(slug string, entry M) error) (*Manifest[M], error) {
 	docs := make([][]byte, 0, 1+len(overlays))
 	for _, p := range append([]string{path}, overlays...) {
 		p = strings.TrimSpace(p)
@@ -54,11 +55,11 @@ func LoadMerchantConfigManifestFiles(path string, overlays ...string) (*BillingC
 	if len(docs) == 0 {
 		return nil, fmt.Errorf("read merchant config manifest: no path given")
 	}
-	return LoadMerchantConfigManifestWithOverlays(docs[0], docs[1:]...)
+	return LoadManifest(docs[0], docs[1:], check)
 }
 
 // ReadMerchantManifestOverlays reads operator-mounted overlay files for
-// LoadMerchantConfigManifestWithOverlays. Every listed path must exist.
+// LoadManifest. Every listed path must exist.
 func ReadMerchantManifestOverlays(paths []string) ([][]byte, error) {
 	out := make([][]byte, 0, len(paths))
 	for _, p := range paths {
@@ -75,10 +76,11 @@ func ReadMerchantManifestOverlays(paths []string) ([][]byte, error) {
 	return out, nil
 }
 
-// LoadMerchantConfigManifestWithOverlays merges the manifest with structured YAML
-// overlays (later wins) and validates the result. Overlays are the caller's
-// concern (a host's mounted secret files); the engine reads no env or files.
-func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*BillingConfig, error) {
+// LoadManifest merges the manifest with structured YAML overlays (later wins)
+// and strict-parses the result; check vets each entry under its normalized
+// slug. Overlays are the caller's concern (a host's mounted secret files);
+// the engine reads no env or files.
+func LoadManifest[M any](raw []byte, overlays [][]byte, check func(slug string, entry M) error) (*Manifest[M], error) {
 	k := koanf.New(".")
 	for i, doc := range append([][]byte{raw}, overlays...) {
 		if len(strings.TrimSpace(string(doc))) == 0 {
@@ -108,7 +110,7 @@ func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*Bi
 	if err != nil {
 		return nil, fmt.Errorf("merge merchant config manifest: %w", err)
 	}
-	return ParseMerchantConfigManifest(merged)
+	return parseManifest(merged, check)
 }
 
 // ValidateMerchantSecretOverlay limits operator-mounted overlays to secret
@@ -179,22 +181,30 @@ func ValidateMerchantSecretOverlay(raw []byte) error {
 	return nil
 }
 
-// ParseMerchantConfigManifest parses the merchant config manifest consumed by
-// push-merchant-config. Bootstrap authority and catalog state are intentionally
-// rejected by the strict YAML decoder.
-func ParseMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
+// parseManifest parses a merchant config manifest. Bootstrap authority and
+// catalog state are intentionally rejected by the strict YAML decoder.
+func parseManifest[M any](raw []byte, check func(slug string, entry M) error) (*Manifest[M], error) {
 	if err := RejectMisplacedMerchantConfigKeys(raw); err != nil {
 		return nil, fmt.Errorf("parse merchant config manifest: %w", err)
 	}
-	var manifest BillingConfig
+	var manifest Manifest[M]
 	if err := yaml.UnmarshalWithOptions(raw, &manifest, yaml.DisallowUnknownField()); err != nil {
 		return nil, fmt.Errorf("parse merchant config manifest: %w", err)
 	}
 	if len(manifest.Merchants) == 0 {
 		return nil, fmt.Errorf("merchant config manifest must declare at least one merchant")
 	}
-	if err := validateMerchantManifestShape(&manifest); err != nil {
-		return nil, err
+	if manifest.Version != BootstrapManifestVersion {
+		return nil, fmt.Errorf("merchant bootstrap: manifest version must be %d", BootstrapManifestVersion)
+	}
+	for _, rawSlug := range slices.Sorted(maps.Keys(manifest.Merchants)) {
+		slug := strings.ToLower(strings.TrimSpace(rawSlug))
+		if slug == "" {
+			return nil, fmt.Errorf("merchant key is required")
+		}
+		if err := check(slug, manifest.Merchants[rawSlug]); err != nil {
+			return nil, err
+		}
 	}
 	return &manifest, nil
 }
@@ -225,120 +235,6 @@ func RejectMisplacedMerchantConfigKeys(raw []byte) error {
 		}
 	}
 	return nil
-}
-
-func mergeMerchantConfigManifest(dst, src *BillingConfig) {
-	if dst == nil || src == nil {
-		return
-	}
-	if src.Version != 0 {
-		dst.Version = src.Version
-	}
-	if len(src.Merchants) == 0 {
-		return
-	}
-	if dst.Merchants == nil {
-		dst.Merchants = map[string]config.MerchantDeclaration{}
-	}
-	for slug, srcMerchant := range src.Merchants {
-		dstMerchant := dst.Merchants[slug]
-		MergeMerchantConfig(&dstMerchant, srcMerchant)
-		dst.Merchants[slug] = dstMerchant
-	}
-}
-
-func MergeMerchantConfig(dst *config.MerchantDeclaration, src config.MerchantDeclaration) {
-	if strings.TrimSpace(src.DisplayName) != "" {
-		dst.DisplayName = src.DisplayName
-	}
-	if strings.TrimSpace(src.Secrets.SCIMToken) != "" {
-		dst.Secrets.SCIMToken = src.Secrets.SCIMToken
-	}
-	if len(src.Custodians) > 0 {
-		if dst.Custodians == nil {
-			dst.Custodians = map[string]config.CustodianConfig{}
-		}
-		for key, srcEntry := range src.Custodians {
-			dstEntry := dst.Custodians[key]
-			MergeCustodianConfig(&dstEntry, srcEntry)
-			dst.Custodians[key] = dstEntry
-		}
-	}
-	if len(src.PSPs) > 0 {
-		if dst.PSPs == nil {
-			dst.PSPs = map[string]config.PSPConfig{}
-		}
-		for key, srcAccount := range src.PSPs {
-			dstAccount := dst.PSPs[key]
-			MergePSPConfig(&dstAccount, srcAccount)
-			dst.PSPs[key] = dstAccount
-		}
-	}
-}
-
-func MergeCustodianConfig(dst *config.CustodianConfig, src config.CustodianConfig) {
-	if strings.TrimSpace(src.Kind) != "" {
-		dst.Kind = src.Kind
-	}
-	if strings.TrimSpace(src.Environment) != "" {
-		dst.Environment = src.Environment
-	}
-	if strings.TrimSpace(src.AccountID) != "" {
-		dst.AccountID = src.AccountID
-	}
-	if src.Archived {
-		dst.Archived = true
-	}
-	if len(src.Secrets) > 0 {
-		if dst.Secrets == nil {
-			dst.Secrets = map[string]string{}
-		}
-		for key, value := range src.Secrets {
-			dst.Secrets[key] = value
-		}
-	}
-	if len(src.Settings) > 0 {
-		if dst.Settings == nil {
-			dst.Settings = map[string]any{}
-		}
-		for key, value := range src.Settings {
-			dst.Settings[key] = value
-		}
-	}
-}
-
-func MergePSPConfig(dst *config.PSPConfig, src config.PSPConfig) {
-	if strings.TrimSpace(string(src.Rail)) != "" {
-		dst.Rail = src.Rail
-	}
-	if strings.TrimSpace(src.Environment) != "" {
-		dst.Environment = src.Environment
-	}
-	if strings.TrimSpace(src.AccountID) != "" {
-		dst.AccountID = src.AccountID
-	}
-	if strings.TrimSpace(src.Custodian) != "" {
-		dst.Custodian = src.Custodian
-	}
-	if src.Archived {
-		dst.Archived = true
-	}
-	if len(src.Secrets) > 0 {
-		if dst.Secrets == nil {
-			dst.Secrets = map[string]string{}
-		}
-		for key, value := range src.Secrets {
-			dst.Secrets[key] = value
-		}
-	}
-	if len(src.Settings) > 0 {
-		if dst.Settings == nil {
-			dst.Settings = map[string]any{}
-		}
-		for key, value := range src.Settings {
-			dst.Settings[key] = value
-		}
-	}
 }
 
 // ProvisionMerchantParams provisions one declared merchant (#527). Standalone
@@ -485,14 +381,6 @@ func rejected(why map[string]string) error {
 
 func NormalizeManifestRail(raw string) string {
 	return strings.ToLower(strings.TrimSpace(raw))
-}
-
-func StringPtrIfNotEmpty(v string) *string {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return nil
-	}
-	return &v
 }
 
 // ValidateMerchantDeclaration refuses a declaration any of whose documents

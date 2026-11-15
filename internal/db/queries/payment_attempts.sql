@@ -101,13 +101,6 @@ WHERE id IN (
     LIMIT sqlc.arg(row_limit)::int
 );
 
--- name: LatestOrderAttempt :one
--- The newest answer to an order's payment: its standing.
-SELECT * FROM billing.payment_attempts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = sqlc.arg(order_id)::uuid
-ORDER BY attempted_at DESC, id DESC
-LIMIT 1;
-
 -- name: GetCycleCardStanding :one
 -- The declines of the renewal due at due_at on one card: how many, how many
 -- the customer made, and the latest one's reason, action and issuer code.

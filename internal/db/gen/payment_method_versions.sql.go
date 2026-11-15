@@ -111,60 +111,6 @@ func (q *Queries) LatestPaymentMethodVersionID(ctx context.Context, arg LatestPa
 	return id, err
 }
 
-const listPaymentMethodVersions = `-- name: ListPaymentMethodVersions :many
-SELECT id, merchant_id, customer_id, payment_method_id, source, kind, event_ref, psp_id, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, fingerprint, network_token_id, network_token_status, network_token_par, effective_at, created_at FROM billing.payment_method_versions
-WHERE merchant_id = $1::uuid AND payment_method_id = $2::uuid
-ORDER BY effective_at, id
-`
-
-type ListPaymentMethodVersionsParams struct {
-	MerchantID      uuid.UUID
-	PaymentMethodID uuid.UUID
-}
-
-// A method's history, oldest first.
-func (q *Queries) ListPaymentMethodVersions(ctx context.Context, arg ListPaymentMethodVersionsParams) ([]BillingPaymentMethodVersion, error) {
-	rows, err := q.db.Query(ctx, listPaymentMethodVersions, arg.MerchantID, arg.PaymentMethodID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingPaymentMethodVersion
-	for rows.Next() {
-		var i BillingPaymentMethodVersion
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.PaymentMethodID,
-			&i.Source,
-			&i.Kind,
-			&i.EventRef,
-			&i.PspID,
-			&i.CustodianID,
-			&i.RailCustomerRef,
-			&i.RailMethodRef,
-			&i.CardBrand,
-			&i.CardLast4,
-			&i.CardExpMonth,
-			&i.CardExpYear,
-			&i.Fingerprint,
-			&i.NetworkTokenID,
-			&i.NetworkTokenStatus,
-			&i.NetworkTokenPar,
-			&i.EffectiveAt,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPaymentMethodsByCustodianRef = `-- name: ListPaymentMethodsByCustodianRef :many
 SELECT id FROM billing.payment_methods
 WHERE merchant_id = $1::uuid AND custodian <> 'psp'

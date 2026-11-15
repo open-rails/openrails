@@ -236,7 +236,7 @@ billing data over this seam:
    `source_id` so re-runs are exact and results are auditable per row. Declare
    admin/manual comps as `admin_grants` in the same book.
 5. **Access is derived by the import itself** for the book's customers; no
-   merchant-wide `ConvergeMerchant` is required.
+   merchant-wide convergence pass is required.
 6. **Boot with `PROVIDER_WRITE_MODE=limited` — set before first start.**
    Imported stale `past_due` rows are immediately "due"; a full-behavior boot
    would start charging them within hours.

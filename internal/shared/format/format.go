@@ -6,11 +6,6 @@ import (
 	"strings"
 )
 
-// BillingCycleHoursToInterval formats billing cycle hours as an OpenRails duration.
-func BillingCycleHoursToInterval(hours int) string {
-	return strconv.Itoa(hours) + "h"
-}
-
 // BillingCycleDaysToStripeRecurring converts billing cycle days to Stripe's
 // recurring interval shape.
 func BillingCycleDaysToStripeRecurring(days int) (string, int) {

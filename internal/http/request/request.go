@@ -726,7 +726,7 @@ func validateBinding(data any) error {
 
 // decodeTaggedValues populates dst's fields from get(), matched by the given
 // struct tag ("form" for query, "uri" for path). It recurses into nested and
-// embedded struct fields (e.g. query.QueryOptions[T]'s Filters), parses
+// embedded struct fields, parses
 // time.Time by its `time_format` tag (default RFC 3339), and decodes
 // encoding.TextUnmarshaler fields (uuid.UUID etc.).
 func decodeTaggedValues(dst any, tag string, get func(string) string) error {

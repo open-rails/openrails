@@ -52,23 +52,3 @@ func (b *backgroundTasks) stop() {
 	}
 	b.wg.Wait()
 }
-
-// dependencyState is a cached up/down observation of an optional provider.
-type dependencyState struct {
-	mu  sync.Mutex
-	set bool
-	err error
-}
-
-func (d *dependencyState) record(err error) {
-	d.mu.Lock()
-	d.set, d.err = true, err
-	d.mu.Unlock()
-}
-
-// observed returns whether there has been an observation, and the last one.
-func (d *dependencyState) observed() (bool, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.set, d.err
-}

@@ -36,16 +36,9 @@ func (e ErrTokenNotRecurringEligible) Error() string {
 		e.Symbol, strings.Join(RecurringStablecoins, ", "))
 }
 
-// ResolveRecurringMint returns an allowlisted symbol's mint on network,
-// failing closed on an ineligible token or one the network lacks. Decimals
-// come from the mint on-chain.
-func ResolveRecurringMint(symbol, network string) (mint string, err error) {
-	return ResolveRecurringMintFromTokens(symbol, solanatokens.Accepted(network))
-}
-
-// ResolveRecurringMintFromTokens is ResolveRecurringMint against the runtime
-// token config, the source of truth for production; the built-in network
-// defaults serve tests only.
+// ResolveRecurringMintFromTokens returns an allowlisted symbol's mint from the
+// runtime token config, failing closed on an ineligible token or one the
+// config lacks. Decimals come from the mint on-chain.
 func ResolveRecurringMintFromTokens(symbol string, tokens map[string]config.TokenConfig) (mint string, err error) {
 	sym := strings.ToUpper(strings.TrimSpace(symbol))
 	if sym == "" {

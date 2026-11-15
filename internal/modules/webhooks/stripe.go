@@ -100,15 +100,6 @@ type stripeInvoiceLineItem struct {
 	} `json:"pricing"`
 }
 
-// priceID returns the Stripe price id for the line item, tolerating both the
-// legacy `price.id` shape and the preview `pricing.price_details.price` shape.
-func (li stripeInvoiceLineItem) priceID() string {
-	if id := strings.TrimSpace(li.Price.ID); id != "" {
-		return id
-	}
-	return strings.TrimSpace(li.Pricing.PriceDetails.Price)
-}
-
 type stripeInvoice struct {
 	ID string `json:"id"`
 	// Created is the invoice's creation time (Unix sec): the provider's
@@ -843,17 +834,6 @@ func parseOrderAttemptID(metadata map[string]string) uuid.UUID {
 	return id.UUID()
 }
 
-// Stripe invoice amounts are cents on the wire; payment rows store micros.
-// Success rows record amount_paid (what settled); failed rows record
-// amount_due (what was attempted). Wire-pinned in TestStripeInvoiceWireShapes.
-func stripeInvoicePaidAmountMicros(inv stripeInvoice) int64 {
-	return int64(moneyutil.CentsToMicros(moneyutil.Cents(inv.AmountPaid)))
-}
-
-func stripeInvoiceFailedAmountMicros(inv stripeInvoice) int64 {
-	return int64(moneyutil.CentsToMicros(moneyutil.Cents(inv.AmountDue)))
-}
-
 func (s *StripeWebhookService) handleRefund(ctx context.Context, obj json.RawMessage) error {
 	var refund stripeRefund
 	if err := json.Unmarshal(obj, &refund); err != nil {
@@ -1269,23 +1249,4 @@ func (s *StripeWebhookService) lookupStripeOriginalPayment(ctx context.Context, 
 		}
 	}
 	return nil, errStripeOriginalUnknown
-}
-
-func (s *StripeWebhookService) resolvePriceFromMetadata(ctx context.Context, metadata map[string]string, lines []stripeInvoiceLineItem) (uuid.UUID, *models.Price, error) {
-	if idStr := normalize.FirstNonEmpty(metadata["internal_price_id"], metadata["price_id"]); idStr != "" {
-		priceID, err := uuid.Parse(idStr)
-		if err == nil {
-			return priceID, nil, nil
-		}
-	}
-	if len(lines) > 0 {
-		if stripePriceID := lines[0].priceID(); stripePriceID != "" {
-			price, err := s.PriceService.GetByStripePriceID(ctx, stripePriceID)
-			if err != nil {
-				return uuid.Nil, nil, fmt.Errorf("stripe price not mapped")
-			}
-			return price.ID, price, nil
-		}
-	}
-	return uuid.Nil, nil, fmt.Errorf("unable to resolve price")
 }

@@ -60,20 +60,6 @@ SELECT * FROM billing.prices price
 WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.product_id = $1 AND NOT price.archived
 ORDER BY price.amount ASC;
 
--- name: ListAllActivePricesWithProduct :many
-SELECT sqlc.embed(price), sqlc.embed(prod)
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
-WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND NOT price.archived
-ORDER BY price.amount ASC;
-
--- name: ListAllPricesWithProduct :many
-SELECT sqlc.embed(price), sqlc.embed(prod)
-FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
-WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND price.deleted_at IS NULL
-ORDER BY price.amount ASC;
-
 -- name: ListPricesFiltered :many
 -- One keyset page, newest first: rows after (after_at, after_id).
 SELECT sqlc.embed(price), sqlc.embed(prod)

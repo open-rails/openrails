@@ -20,7 +20,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -57,7 +56,6 @@ type PurchaseService struct {
 	PaymentService           *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
 	Fulfillment              *FulfillmentService
-	PaymentMethodResolver    *PaymentMethodResolver
 	NMISaleService           *NMISaleService
 	CustodianSaleService     *CustodianSaleService
 	PaymentMethodService     *paymentmethods.PaymentMethodService
@@ -135,7 +133,6 @@ func NewPurchaseService(
 		PaymentService:           paymentService,
 		EntitlementService:       entitlementService,
 		Fulfillment:              NewFulfillmentService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
-		PaymentMethodResolver:    NewPaymentMethodResolver(paymentMethodService, railPMService),
 		PaymentMethodService:     paymentMethodService,
 		RailPaymentMethodService: railPMService,
 		RailCustomerService:      railCustomerService,
@@ -144,7 +141,7 @@ func NewPurchaseService(
 		Config:                   cfg,
 		Rails:                    railSet,
 	}
-	service.NMISaleService = NewNMISaleService(service.Fulfillment, service.PaymentMethodResolver, railPMService)
+	service.NMISaleService = NewNMISaleService(service.Fulfillment, railPMService)
 	// The scoped resolver is the only NMI client source; armed once
 	// SetMerchantSecretStore wires the merchant secret store.
 	service.NMISaleService.ResolveNMIClient = service.resolveNMIClient
@@ -174,19 +171,6 @@ func (s *PurchaseService) GetUserProductCoverage(ctx context.Context, userID str
 		return nil, errors.New("purchase service unavailable")
 	}
 	return s.Fulfillment.GetUserProductCoverage(ctx, userID, product)
-}
-
-// processSubscription handles subscription purchases
-func (s *PurchaseService) processSubscription(
-	ctx context.Context,
-	req *PurchaseRequest,
-	user *UserIdentity,
-	price *models.Price,
-	product *models.Product,
-	coverage *CoverageInfo,
-	rail string,
-) (*PurchaseResponse, error) {
-	return nil, errors.New("new engine subscriptions require a saved-method order attempt and explicit agreement confirmation")
 }
 
 // processCCBillUpgrade handles CCBill subscription upgrades
@@ -252,66 +236,6 @@ func (s *PurchaseService) processCCBillUpgrade(
 		RedirectURL:    response.RedirectURL,
 		SubscriptionID: &existingSub.ID,
 	}, nil
-}
-
-// initialMembershipResponseFromIntent rebuilds the purchase response from a
-// succeeded create intent's evidence.
-func initialMembershipResponseFromIntent(intent gen.BillingProviderIntent) (*PurchaseResponse, error) {
-	if intent.Status == intents.StatusSucceeded {
-		if err := intents.ValidateInitialMembershipTerminal(intent); err != nil {
-			return nil, err
-		}
-	}
-	if intent.Status == intents.StatusFailedTerminal {
-		return nil, terminalPurchaseError(intent, "initial enrollment refused")
-	}
-	if intent.Status != intents.StatusSucceeded {
-		return nil, ErrPurchaseProcessing
-	}
-
-	var evidence struct {
-		SubscriptionID string `json:"subscription_id"`
-		TransactionID  string `json:"transaction_id"`
-		DelayedStart   string `json:"delayed_start"`
-		Status         string `json:"status"`
-		Message        string `json:"message"`
-	}
-	if len(intent.ResultEvidence) == 0 {
-		return nil, errors.New("subscription created but evidence unreadable")
-	}
-	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
-		return nil, fmt.Errorf("subscription created but evidence unreadable: %w", err)
-	}
-	accepted, err := subscriptions.DecodeInitialMembershipPayload(intent)
-	if err != nil {
-		return nil, err
-	}
-	resp := &PurchaseResponse{
-		Status:        evidence.Status,
-		Action:        "new",
-		Message:       evidence.Message,
-		TransactionID: evidence.TransactionID,
-	}
-	if accepted.Terms.PaymentID != uuid.Nil {
-		resp.PaymentID = &accepted.Terms.PaymentID
-	}
-	if resp.Status == "" {
-		resp.Status = "success"
-	}
-	if resp.Message == "" {
-		resp.Message = "Subscription created successfully"
-	}
-	if evidence.SubscriptionID != "" {
-		if id, err := uuid.Parse(evidence.SubscriptionID); err == nil {
-			resp.SubscriptionID = &id
-		}
-	}
-	if evidence.DelayedStart != "" {
-		if t, err := time.Parse(time.RFC3339, evidence.DelayedStart); err == nil {
-			resp.DelayedStart = &t
-		}
-	}
-	return resp, nil
 }
 
 // railCustomerStore is the slice of RailCustomerService used for
@@ -527,10 +451,6 @@ func parseStripeError(body []byte) string {
 		return ""
 	}
 	return strings.TrimSpace(out.Error.Message)
-}
-
-func timePtr(t time.Time) *time.Time {
-	return &t
 }
 
 // RegisterPurchase records a confirmed one-time purchase and grants its

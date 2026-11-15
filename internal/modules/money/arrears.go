@@ -154,14 +154,6 @@ func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.Cu
 	return owed, err
 }
 
-func optionalRail(rail string) *string {
-	rail = normalizeRail(rail)
-	if rail == "" {
-		return nil
-	}
-	return &rail
-}
-
 func optionalString(v string) *string {
 	v = strings.TrimSpace(v)
 	if v == "" {

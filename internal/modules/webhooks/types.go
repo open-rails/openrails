@@ -2,7 +2,6 @@ package webhooks
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -76,49 +75,6 @@ func (s Stringish) Trimmed() string {
 // IsEmpty reports whether the value is blank after trimming.
 func (s Stringish) IsEmpty() bool {
 	return strings.TrimSpace(string(s)) == ""
-}
-
-// Intish models integer-like fields that may arrive as strings or numbers.
-type Intish int
-
-// UnmarshalJSON normalises string/number/null payloads into Intish.
-func (i *Intish) UnmarshalJSON(data []byte) error {
-	if i == nil {
-		return errors.New("Intish: UnmarshalJSON on nil receiver")
-	}
-	trimmed := strings.TrimSpace(string(data))
-	if trimmed == "" || trimmed == "null" {
-		*i = 0
-		return nil
-	}
-	if trimmed[0] == '"' {
-		var str string
-		if err := json.Unmarshal(data, &str); err != nil {
-			return err
-		}
-		str = strings.TrimSpace(str)
-		if str == "" {
-			*i = 0
-			return nil
-		}
-		val, err := strconv.ParseInt(str, 10, 64)
-		if err != nil {
-			return fmt.Errorf("invalid Intish value %q: %w", str, err)
-		}
-		*i = Intish(val)
-		return nil
-	}
-	val, err := strconv.ParseInt(trimmed, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid Intish value %q: %w", trimmed, err)
-	}
-	*i = Intish(val)
-	return nil
-}
-
-// Int returns the native int value.
-func (i Intish) Int() int {
-	return int(i)
 }
 
 type NMIWebhookEvent struct {

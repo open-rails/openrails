@@ -37,43 +37,6 @@ func (q *Queries) GetCustodian(ctx context.Context, arg GetCustodianParams) (Bil
 	return i, err
 }
 
-const getCustodianByIdentity = `-- name: GetCustodianByIdentity :one
-SELECT id, merchant_id, key, kind, environment, account_id, created_at, updated_at FROM billing.custodians
-WHERE merchant_id = $1::uuid
-  AND kind = lower($2::text)
-  AND environment = COALESCE($3::text, 'live')
-  AND account_id = $4::text
-LIMIT 1
-`
-
-type GetCustodianByIdentityParams struct {
-	MerchantID  uuid.UUID
-	Kind        string
-	Environment *string
-	AccountID   string
-}
-
-func (q *Queries) GetCustodianByIdentity(ctx context.Context, arg GetCustodianByIdentityParams) (BillingCustodian, error) {
-	row := q.db.QueryRow(ctx, getCustodianByIdentity,
-		arg.MerchantID,
-		arg.Kind,
-		arg.Environment,
-		arg.AccountID,
-	)
-	var i BillingCustodian
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Key,
-		&i.Kind,
-		&i.Environment,
-		&i.AccountID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getCustodianByKey = `-- name: GetCustodianByKey :one
 SELECT id, merchant_id, key, kind, environment, account_id, created_at, updated_at FROM billing.custodians
 WHERE merchant_id = $1::uuid

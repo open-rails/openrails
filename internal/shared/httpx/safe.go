@@ -72,9 +72,6 @@ func IsBlockedIP(ip net.IP) bool {
 // at their own loopback server without disabling the policy for anything else.
 type AllowFunc func(net.IP) bool
 
-// AllowLoopback is the test escape hatch: loopback only, nothing else.
-func AllowLoopback(ip net.IP) bool { return ip != nil && ip.IsLoopback() }
-
 // Policy is the outbound-fetch guard. The zero value is the strict production
 // policy (public unicast destinations only).
 type Policy struct{ Allow AllowFunc }

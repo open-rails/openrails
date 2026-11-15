@@ -44,4 +44,3 @@ SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings f
      'pull.subscription.facts')
    AND f.resolution IS DISTINCT FROM 'foreign'
    AND NOT COALESCE(f.evidence @> '{"quiet_foreign":true}', false))::boolean;
-

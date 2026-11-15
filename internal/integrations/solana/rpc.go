@@ -9,7 +9,6 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/providerposture"
 )
@@ -54,46 +53,6 @@ func (c *RPCClient) GetBalanceAtSlot(ctx context.Context, address solanago.Publi
 	return c.fallback.GetBalanceAtSlot(ctx, address, minSlot)
 }
 
-// GetTokenBalance returns the balance of an SPL token account.
-func (c *RPCClient) GetTokenBalance(ctx context.Context, tokenAccount solanago.PublicKey) (*rpc.UiTokenAmount, error) {
-	resp, err := c.fallback.GetTokenAccountBalance(ctx, tokenAccount)
-	if err != nil {
-		return nil, err
-	}
-	return resp.Value, nil
-}
-
-// GetTokenBalanceForMintAtSlot is GetTokenBalanceForMint gated on minSlot: the
-// ATA balance is read only against a node that has reached minSlot (the slot a
-// preceding write — e.g. a pull/crank — confirmed at), so a lagging node returns
-// a retryable error instead of a stale balance. minSlot == 0 behaves exactly like
-// GetTokenBalanceForMint. Returns 0 when the ATA does not exist.
-func (c *RPCClient) GetTokenBalanceForMintAtSlot(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey, minSlot uint64) (uint64, error) {
-	if minSlot == 0 {
-		return c.GetTokenBalanceForMint(ctx, owner, mint)
-	}
-	ata, _, err := solanago.FindAssociatedTokenAddress(owner, mint)
-	if err != nil {
-		return 0, fmt.Errorf("failed to derive ATA for mint %s: %w", mint.String(), err)
-	}
-	resp, err := c.fallback.GetTokenAccountBalanceAtSlot(ctx, ata, minSlot)
-	if err != nil {
-		if strings.Contains(err.Error(), "could not find account") ||
-			strings.Contains(err.Error(), "Invalid param") {
-			return 0, nil
-		}
-		return 0, fmt.Errorf("failed to get token balance: %w", err)
-	}
-	if resp.Value == nil {
-		return 0, nil
-	}
-	balance, err := strconv.ParseUint(resp.Value.Amount, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse token balance %q: %w", resp.Value.Amount, err)
-	}
-	return balance, nil
-}
-
 // SimulateTransaction simulates a transaction to check if it would succeed
 func (c *RPCClient) SimulateTransaction(ctx context.Context, tx *solanago.Transaction) (*rpc.SimulateTransactionResponse, error) {
 	return c.fallback.SimulateTransaction(ctx, tx)
@@ -107,26 +66,6 @@ func (c *RPCClient) SendTransaction(ctx context.Context, tx *solanago.Transactio
 // GetTransaction retrieves transaction details by signature
 func (c *RPCClient) GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error) {
 	return c.fallback.GetTransaction(ctx, signature)
-}
-
-func (c *RPCClient) GetTransactionWithRetry(ctx context.Context, signature solanago.Signature, attempts int, delay time.Duration) (*rpc.GetTransactionResult, error) {
-	var lastErr error
-	for i := 0; i < attempts; i++ {
-		resp, err := c.GetTransaction(ctx, signature)
-		if err == nil {
-			return resp, nil
-		}
-		lastErr = err
-		if !isNotFoundError(err) {
-			return nil, err
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(delay):
-		}
-	}
-	return nil, lastErr
 }
 
 func isNotFoundError(err error) bool {
@@ -342,12 +281,6 @@ func (c *RPCClient) GetProgramAccounts(ctx context.Context, program solanago.Pub
 	return out, nil
 }
 
-// TokenAccountInfo represents an SPL token account balance for a specific mint.
-type TokenAccountInfo struct {
-	Mint    string
-	Balance uint64
-}
-
 // GetTokenBalanceForMint returns the SPL token balance for a specific mint owned by a wallet.
 // It derives the Associated Token Account (ATA) address and queries its balance.
 // Returns 0 if the account doesn't exist or has no balance.
@@ -376,32 +309,6 @@ func (c *RPCClient) GetTokenBalanceForMint(ctx context.Context, owner solanago.P
 		return 0, fmt.Errorf("failed to parse token balance %q: %w", resp.Value.Amount, err)
 	}
 	return balance, nil
-}
-
-// GetTokenBalances returns token balances for multiple mints owned by a wallet.
-// Mints that don't exist or have zero balance are included with Balance=0.
-func (c *RPCClient) GetTokenBalances(ctx context.Context, owner solanago.PublicKey, mints []string) ([]TokenAccountInfo, error) {
-	if len(mints) == 0 {
-		return nil, nil
-	}
-	accounts := make([]TokenAccountInfo, 0, len(mints))
-	for _, mintStr := range mints {
-		mint, err := solanago.PublicKeyFromBase58(mintStr)
-		if err != nil {
-			log.WithError(err).WithField("mint", mintStr).Debug("Failed to parse token mint")
-			continue
-		}
-
-		balance, err := c.GetTokenBalanceForMint(ctx, owner, mint)
-		if err != nil {
-			log.WithError(err).WithField("mint", mintStr).Debug("Failed to get token balance")
-			continue
-		}
-
-		accounts = append(accounts, TokenAccountInfo{Mint: mintStr, Balance: balance})
-	}
-
-	return accounts, nil
 }
 
 // PrimaryCredentialFingerprint exposes the armed-credential fingerprint of the

@@ -178,9 +178,6 @@ type Param struct {
 func text(name string) Param    { return Param{Name: name, Kind: "string"} }
 func integer(name string) Param { return Param{Name: name, Kind: "integer", Checked: true} }
 
-// required is p, which its route refuses a request without.
-func required(p Param) Param { p.Required = true; return p }
-
 // repeated is a parameter given once per value, for values that may hold a
 // comma.
 func repeated(name string) Param { return Param{Name: name, Kind: "strings"} }
@@ -362,12 +359,6 @@ func h(fn func(r *httprequest.Request)) router.Handler { return router.Handler(f
 // can mount, in a stable order. It needs no database.
 func Catalog() []Route { return allRoutes }
 
-// Lookup returns the catalog's route for a method and path.
-func Lookup(method, path string) (Route, bool) {
-	r, ok := index[method+" "+path]
-	return r, ok
-}
-
 var allRoutes, index = func() ([]Route, map[string]Route) {
 	var all []Route
 	for _, resource := range [][]Route{
@@ -507,28 +498,4 @@ func ErrorSet(name string) []string {
 		return TierErrors(Tier(tier))
 	}
 	return nil
-}
-
-// AllErrors is every code the route can answer.
-func (r Route) AllErrors() []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, list := range append([][]string{r.Errors}, mapSets(r.ErrorSets())...) {
-		for _, code := range list {
-			if !seen[code] {
-				seen[code] = true
-				out = append(out, code)
-			}
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-func mapSets(names []string) [][]string {
-	out := make([][]string, len(names))
-	for i, name := range names {
-		out[i] = ErrorSet(name)
-	}
-	return out
 }

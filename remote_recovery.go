@@ -47,14 +47,6 @@ func subscriptionPath(id billing.SubscriptionID) (string, error) {
 	return "/v1/admin/subscriptions/" + subscription, nil
 }
 
-func customerPath(customerID string) (string, error) {
-	customer, err := requireCustomerID(customerID)
-	if err != nil {
-		return "", err
-	}
-	return "/v1/admin/customers/" + customer, nil
-}
-
 // GetSubscription reads one subscription.
 func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.Subscription, error) {
 	path, err := subscriptionPath(id)

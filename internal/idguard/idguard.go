@@ -26,15 +26,6 @@ func Require(field string, id uuid.UUID) error {
 	return nil
 }
 
-// RequireOptional refuses a supplied-but-zero UUID. A nil pointer is genuinely
-// "not supplied" and passes.
-func RequireOptional(field string, id *uuid.UUID) error {
-	if id == nil {
-		return nil
-	}
-	return Require(field, *id)
-}
-
 // RequireMerchant refuses a missing or zero merchant scope.
 func RequireMerchant(field string, id billing.MerchantID) error {
 	if id.IsZero() {

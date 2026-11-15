@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 )
@@ -70,21 +69,6 @@ func (r FindingRecord) Quiet() bool {
 	return quiet
 }
 
-// RunRecord is a persisted reconciliation run.
-type RunRecord struct {
-	ID             uuid.UUID       `json:"id"`
-	MerchantID     uuid.UUID       `json:"tenant_id"`
-	Mode           Mode            `json:"mode"`
-	Providers      []string        `json:"providers"`
-	WindowStartsAt *time.Time      `json:"window_starts_at,omitempty"`
-	WindowEndsAt   *time.Time      `json:"window_ends_at,omitempty"`
-	StartedAt      time.Time       `json:"started_at"`
-	FinishedAt     *time.Time      `json:"finished_at,omitempty"`
-	Status         string          `json:"status"`
-	Summary        json.RawMessage `json:"summary,omitempty"`
-	Error          string          `json:"error,omitempty"`
-}
-
 // Store is the engine-facing persistence surface. The pg implementation runs
 // merchant-scoped; the unit-test fake is in-memory.
 type Store interface {
@@ -110,13 +94,6 @@ type PGStore struct {
 }
 
 var _ Store = (*PGStore)(nil)
-
-func (s *PGStore) now() time.Time {
-	if s.Now != nil {
-		return s.Now().UTC()
-	}
-	return time.Now().UTC()
-}
 
 func marshalEvidence(m map[string]any) []byte {
 	if len(m) == 0 {
@@ -394,60 +371,12 @@ func (s *PGStore) MarkFindingNotified(ctx context.Context, id uuid.UUID, at time
 	return err
 }
 
-func (s *PGStore) ListRuns(ctx context.Context, limit, offset int) ([]RunRecord, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := s.DB.Gen(ctx).ListReconciliationRuns(ctx, gen.ListReconciliationRunsParams{
-		PageLimit:  int64(limit),
-		PageOffset: int64(offset),
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]RunRecord, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, runRecordFromRow(row))
-	}
-	return out, nil
-}
-
 func (s *PGStore) GetFinding(ctx context.Context, id uuid.UUID) (FindingRecord, error) {
 	row, err := s.DB.Gen(ctx).GetReconciliationFinding(ctx, id)
 	if err != nil {
 		return FindingRecord{}, err
 	}
 	return FindingRecordFromRow(row), nil
-}
-
-// AckFinding resolves a finding as admin-acknowledged. Returns false when the
-// finding was not in an ackable state.
-func (s *PGStore) AckFinding(ctx context.Context, id uuid.UUID, notes string) (bool, error) {
-	var notesPtr *string
-	if notes != "" {
-		notesPtr = &notes
-	}
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return false, scopeErr
-	}
-	n, err := s.DB.Gen(ctx).AckReconciliationFinding(ctx, gen.AckReconciliationFindingParams{MerchantID: scopeMerchantID.UUID(), ID: id, OperatorNotes: notesPtr})
-	return n > 0, err
-}
-
-// DismissFinding marks a finding ignored; ignored identities stay
-// ignored across re-runs.
-func (s *PGStore) DismissFinding(ctx context.Context, id uuid.UUID, notes string) (bool, error) {
-	var notesPtr *string
-	if notes != "" {
-		notesPtr = &notes
-	}
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return false, scopeErr
-	}
-	n, err := s.DB.Gen(ctx).DismissReconciliationFinding(ctx, gen.DismissReconciliationFindingParams{MerchantID: scopeMerchantID.UUID(), ID: id, OperatorNotes: notesPtr})
-	return n > 0, err
 }
 
 // Gauge type sets: named counts over open findings, one per error category.
@@ -705,25 +634,6 @@ func FindingRecordFromRow(row gen.BillingReconciliationFinding) FindingRecord {
 	}
 	if change, err := DecodeChange(row.Change); err == nil {
 		rec.Change = change
-	}
-	return rec
-}
-
-func runRecordFromRow(row gen.BillingMaintenanceRun) RunRecord {
-	rec := RunRecord{
-		ID:             row.ID,
-		MerchantID:     row.MerchantID,
-		Mode:           Mode(models.DerefStr(row.Mode)),
-		Providers:      row.Rails,
-		WindowStartsAt: row.WindowStartsAt,
-		WindowEndsAt:   row.WindowEndsAt,
-		StartedAt:      row.StartedAt,
-		FinishedAt:     row.FinishedAt,
-		Status:         row.Status,
-		Summary:        row.Summary,
-	}
-	if row.Error != nil {
-		rec.Error = *row.Error
 	}
 	return rec
 }

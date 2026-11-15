@@ -114,31 +114,6 @@ func ParsePSPSecretName(name string) (rail, environment, accountID, key string, 
 	return rail, environment, accountID, key, true, nil
 }
 
-// SecretWritable reports whether a merchant operator may write the secret name.
-// Only PSP-scoped and custodian-scoped names qualify (#884/or#880): a retired
-// flat name parses as unscoped and is refused.
-func SecretWritable(name string) bool {
-	if kind, _, _, key, ok, err := ParseCustodianSecretName(name); ok {
-		if err != nil {
-			return false
-		}
-		d, derr := custodians.Require(kind)
-		if derr != nil {
-			return false
-		}
-		slot, known := d.Secret(key)
-		return known && slot.MerchantWritable
-	}
-	rail, _, _, key, ok, err := ParsePSPSecretName(name)
-	if !ok || err != nil {
-		return false
-	}
-	// Registry-backed (#669): operator-only slots (solana private_key) are not
-	// merchant-writable.
-	k, known := rails.CredentialKeyFor(models.Rail(rail), key)
-	return known && k.MerchantWritable
-}
-
 // NormalizePSPSecretKey canonicalizes manifest/admin secret keys for
 // a PSP against the rail's registry-declared slots (#669). It
 // deliberately returns key fragments, not legacy broad merchant secret names.

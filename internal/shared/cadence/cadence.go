@@ -41,27 +41,6 @@ func Same(aHours, bHours *int) bool {
 	return *aHours == *bHours
 }
 
-// ShortPeriod is the period length below which an instant is shown with its
-// time of day.
-const ShortPeriod = 48 * time.Hour
-
-// FormatInstant renders a period boundary: the date alone for long periods,
-// date, time and zone (UTC) when the period is shorter than two days.
-func FormatInstant(t time.Time, period time.Duration) string {
-	if period > 0 && period < ShortPeriod {
-		return t.UTC().Format("Jan 2, 2006 15:04 MST")
-	}
-	return t.UTC().Format("Jan 2, 2006")
-}
-
-// Period is end − start, or zero when either bound is unknown.
-func Period(start, end *time.Time) time.Duration {
-	if start == nil || end == nil {
-		return 0
-	}
-	return end.Sub(*start)
-}
-
 // FormatRemaining renders a time until an event: whole days from one day up,
 // hours below that and minutes below an hour.
 func FormatRemaining(d time.Duration) string {

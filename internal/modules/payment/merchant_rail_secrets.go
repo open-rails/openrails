@@ -268,23 +268,6 @@ func (s *PurchaseService) resolveRailTargetForPSP(ctx context.Context, rail stri
 	return railTarget{}, fmt.Errorf("payment provider account %s is not armed on rail %q", pspID, rail)
 }
 
-// RailUsable reports whether a wire payment.rail selector (a PSP key,
-// or an unambiguous rail kind) lands on an armed PSP for the ctx merchant.
-// nil means usable; the error carries the reject reason. Fail closed.
-func (s *PurchaseService) RailUsable(ctx context.Context, selector string) error {
-	if s == nil {
-		return errors.New("unsupported rail")
-	}
-	target, err := s.resolveRailTarget(ctx, selector)
-	if err != nil {
-		return err
-	}
-	if target.Scope == nil {
-		return errors.New("unsupported rail")
-	}
-	return nil
-}
-
 // ResolvePSPID resolves the PSP for new work on the given provider/rail name,
 // for provenance stamping. uuid.Nil when no resolver is wired or nothing is
 // armed: provenance is never invented. The caller decides what an unresolved
@@ -420,13 +403,6 @@ func (s *PurchaseService) resolveScopedCCBillConfig(ctx context.Context, base *c
 		return nil, ccbill.ErrMissingSalt
 	}
 	return cfg, nil
-}
-
-// custodianHeld reports whether the resolved PSP's instruments are held by a
-// third-party custodian: the axis that picks a purchase's charge transport,
-// orthogonal to the rail that charges.
-func custodianHeld(target railTarget) bool {
-	return target.Scope != nil && target.Scope.CustodianID != nil
 }
 
 // pspKeyArchived reports whether selector names a declared-but-archived PSP.

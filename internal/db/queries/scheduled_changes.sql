@@ -53,13 +53,6 @@ UPDATE billing.scheduled_changes SET status = 'applied', applied_at = sqlc.arg(n
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'scheduled'
 RETURNING *;
 
--- A provider (Stripe) moved the subscription to price_id: the change that
--- asked for it is applied.
--- name: ApplyPendingScheduledChangeAtPrice :execrows
-UPDATE billing.scheduled_changes SET status = 'applied', applied_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
-  AND price_id = sqlc.arg(price_id)::uuid AND status = 'scheduled';
-
 -- A migration's move its provider refused: terminal.
 -- name: BlockScheduledChange :one
 UPDATE billing.scheduled_changes SET status = 'blocked', blocked_reason = sqlc.arg(reason)::text

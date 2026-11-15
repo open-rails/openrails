@@ -22,10 +22,6 @@ func ParseDateUTC(value string) (time.Time, error) {
 	return parsed.UTC(), nil
 }
 
-func ParseDateOrRFC3339UTC(value string) (time.Time, error) {
-	return ParseFirstUTC(strings.TrimSpace(value), time.RFC3339, "2006-01-02")
-}
-
 func ParseFirstUTC(value string, layouts ...string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {

@@ -580,13 +580,6 @@ func deriveImportedAccess(ctx context.Context, q *gen.Queries, merchantID billin
 	return nil
 }
 
-func nilIfEmpty(s string) *string {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	return &s
-}
-
 // importAdminGrants records each comp as a free grant of its product,
 // reconciling explicit changes at the evidence horizon.
 func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, declared []DeclaredAdminGrant, asOf time.Time, res *Result) error {

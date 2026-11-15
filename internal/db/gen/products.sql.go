@@ -195,47 +195,6 @@ func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) 
 	return items, nil
 }
 
-const listAllProducts = `-- name: ListAllProducts :many
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership, deleted_at, required_entitlements FROM billing.products
-WHERE products.merchant_id = $1::uuid AND deleted_at IS NULL
-`
-
-func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]BillingProduct, error) {
-	rows, err := q.db.Query(ctx, listAllProducts, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingProduct
-	for rows.Next() {
-		var i BillingProduct
-		if err := rows.Scan(
-			&i.ID,
-			&i.Key,
-			&i.DisplayName,
-			&i.Description,
-			&i.TierGroup,
-			&i.TierRank,
-			&i.Archived,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.MerchantID,
-			&i.Revision,
-			&i.CreditGrant,
-			&i.Ownership,
-			&i.DeletedAt,
-			&i.RequiredEntitlements,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listProductsByIDs = `-- name: ListProductsByIDs :many
 SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership, deleted_at, required_entitlements FROM billing.products WHERE products.merchant_id = $1::uuid AND id = ANY($2::uuid[]) AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC

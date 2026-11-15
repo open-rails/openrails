@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	log "github.com/sirupsen/logrus"
@@ -513,7 +512,7 @@ type ResolvedPSP struct {
 	// AccountID is this account's rail-native identity (#641/#655): NMI
 	// gateway-id, Stripe acct_…, CCBill clientAccnum-clientSubacc (dash-joined,
 	// e.g. 999999-0000, #697), or a Solana PSP's treasury.
-	// REQUIRED — ValidateRailSet rejects an empty one.
+	// REQUIRED — ValidatePSPAccount rejects an empty one.
 	AccountID string
 	// Archived keeps an account addressable for existing obligations and inbound
 	// provider events, but excludes it from new purchase/subscription work.
@@ -622,7 +621,7 @@ func (p *ResolvedPSP) EffectiveRail(name string) models.Rail {
 }
 
 // EffectiveAccountID is the account's operator-declared rail-native identity
-// (#641). ValidateRailSet requires account_id — there is NO fallback to the
+// (#641). ValidatePSPAccount requires account_id — there is NO fallback to the
 // config map name (an account is never indexed by a name we made up).
 func (p *ResolvedPSP) EffectiveAccountID() string {
 	if p == nil {
@@ -666,85 +665,9 @@ func ValidatePSPAccount(psp, rail, account string) error {
 	return nil
 }
 
-func (p *ResolvedPSP) normalizeTypedBlock(name string) error {
-	if p == nil {
-		return nil
-	}
-	effectiveType := p.EffectiveRail(name)
-	blockCount := 0
-	if p.NMI != nil {
-		blockCount++
-	}
-	if p.CCBill != nil {
-		blockCount++
-	}
-	if p.Stripe != nil {
-		blockCount++
-	}
-	if p.Solana != nil {
-		blockCount++
-	}
-	if blockCount == 0 {
-		return nil
-	}
-	if blockCount > 1 {
-		return fmt.Errorf("rail '%s' must set exactly one provider block matching type %q", name, effectiveType)
-	}
-	switch effectiveType {
-	case models.RailNMI:
-		if p.NMI == nil {
-			return fmt.Errorf("rail '%s' type nmi must use nmi block", name)
-		}
-	case models.RailCCBill:
-		if p.CCBill == nil {
-			return fmt.Errorf("rail '%s' type ccbill must use ccbill block", name)
-		}
-	case models.RailStripe:
-		if p.Stripe == nil {
-			return fmt.Errorf("rail '%s' type stripe must use stripe block", name)
-		}
-	case models.RailSolana:
-		if p.Solana == nil {
-			return fmt.Errorf("rail '%s' type solana must use solana block", name)
-		}
-	default:
-		return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
-	}
-	return nil
-}
-
 // IsNMI returns true if this rail config is for an NMI-backed rail.
 func (p *ResolvedPSP) IsNMI(name string) bool {
 	return p.EffectiveRail(name) == models.RailNMI
-}
-
-// IsCCBill returns true if this rail config is for CCBill.
-func (p *ResolvedPSP) IsCCBill(name string) bool {
-	return p.EffectiveRail(name) == models.RailCCBill
-}
-
-// IsStripe returns true if this rail config is for Stripe.
-func (p *ResolvedPSP) IsStripe(name string) bool {
-	return p.EffectiveRail(name) == models.RailStripe
-}
-
-// IsSolana returns true if this rail config is for Solana.
-func (p *ResolvedPSP) IsSolana(name string) bool {
-	return p.EffectiveRail(name) == models.RailSolana
-}
-
-// HasThirdPartyCustody reports whether a custodian other than the PSP holds
-// the instruments charged through this PSP (or#879).
-func (p *ResolvedPSP) HasThirdPartyCustody() bool {
-	return p != nil && p.Custody != nil && p.Custody.Custodian != "" && p.Custody.Custodian != models.CustodianPSP
-}
-
-// CustodianKey is the declared custodian reference for this PSP, normalized.
-func (p *ResolvedPSP) CustodianKey() string {
-	if p == nil {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSpace(p.Custodian))
 }
 
 // ToNMIProviderSettings converts the rail config to NMI client settings.
@@ -771,7 +694,7 @@ func SplitCCBillAccountID(accountID string) (accNum, subAcc string, err error) {
 
 // ToCCBillConfig converts the rail config to the CCBill client config. Only
 // valid for CCBill-type rails. A malformed account leaves the pair empty and
-// is rejected by validateCCBillRail.
+// is rejected by ValidatePSPAccount.
 func (p *ResolvedPSP) ToCCBillConfig() *CCBillConfig {
 	c := &CCBillConfig{Sandbox: p.Environment == EnvironmentSandbox}
 	if acc, sub, err := SplitCCBillAccountID(p.EffectiveAccountID()); err == nil {
@@ -1133,26 +1056,6 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 	return nil
 }
 
-// ValidateRailSet checks every declared rail and each Stripe key against its
-// PSP's environment.
-func ValidateRailSet(cfg *Config, rails PSPSet) error {
-	if len(rails) == 0 {
-		return nil
-	}
-	if err := validateRails(cfg, rails); err != nil {
-		return fmt.Errorf("rails validation failed: %w", err)
-	}
-	for name, p := range rails {
-		if p == nil || p.EffectiveRail(name) != models.RailStripe || p.Stripe == nil {
-			continue
-		}
-		if err := ValidateStripeSecretKeyEnvironment(p.Environment, p.Stripe.SecretKey); err != nil {
-			return fmt.Errorf("stripe rail %q: %w", strings.ToLower(strings.TrimSpace(name)), err)
-		}
-	}
-	return nil
-}
-
 // ValidateStripeSecretKeyEnvironment refuses a Stripe key that disagrees with
 // its PSP's declared environment: a live key moves real money, a test key
 // never does. Stripe's key prefix is the provider's own answer.
@@ -1185,140 +1088,6 @@ func ValidateStripePublishableKeyEnvironment(environment, key string) error {
 	}
 	if live != LiveEnvironment("stripe", environment) {
 		return fmt.Errorf("publishable key %s… disagrees with the PSP's environment %q", key[:len("pk_test_")], environment)
-	}
-	return nil
-}
-
-// validateRails validates all rails in the new Rails map
-func validateRails(cfg *Config, rails PSPSet) error {
-	// Count accounts per rail: with more than one, each must declare its
-	// account (the made-up map name can't be the provider identity, #641).
-	countByRail := map[models.Rail]int{}
-	for name, proc := range rails {
-		if proc != nil {
-			countByRail[proc.EffectiveRail(name)]++
-		}
-	}
-	for name, proc := range rails {
-		if proc == nil {
-			continue
-		}
-		if err := proc.normalizeTypedBlock(name); err != nil {
-			return err
-		}
-
-		effectiveType := proc.EffectiveRail(name)
-		// #641: with multiple accounts on a rail, the made-up map name can't serve
-		// as the provider identity — each must declare its real account (a
-		// Solana PSP's treasury).
-		if countByRail[effectiveType] > 1 && strings.TrimSpace(proc.AccountID) == "" {
-			return fmt.Errorf("rail '%s' shares rail %q with another account, so it must declare its account (no name fallback)", name, effectiveType)
-		}
-		switch effectiveType {
-		case models.RailNMI:
-			if err := validateNMIRail(name, proc); err != nil {
-				return err
-			}
-		case models.RailCCBill:
-			if err := validateCCBillRail(name, proc); err != nil {
-				return err
-			}
-		case models.RailStripe:
-			if err := validateStripeRail(name, proc); err != nil {
-				return err
-			}
-		case models.RailSolana:
-		default:
-			return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
-		}
-		if err := validateCustody(name, proc); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// validateNMIRail validates an NMI-type rail
-func validateNMIRail(name string, proc *ResolvedPSP) error {
-	nmi := proc.NMI
-	if nmi == nil {
-		return fmt.Errorf("rail '%s' (nmi): nmi block is required", name)
-	}
-
-	if strings.TrimSpace(nmi.SecurityKey) == "" {
-		return fmt.Errorf("rail '%s' (nmi): security_key is required", name)
-	}
-
-	if strings.TrimSpace(nmi.WebhookSigningSecret) == "" {
-		return fmt.Errorf("rail '%s' (nmi): webhook_signing_secret is required (signature verification cannot be disabled)", name)
-	}
-
-	return nil
-}
-
-// validateCCBillRail validates a CCBill-type rail
-func validateCCBillRail(name string, proc *ResolvedPSP) error {
-	if _, _, err := SplitCCBillAccountID(proc.EffectiveAccountID()); err != nil {
-		return fmt.Errorf("rail '%s' (ccbill): %w", name, err)
-	}
-	ccbill := proc.CCBill
-	if ccbill == nil {
-		return fmt.Errorf("rail '%s' (ccbill): ccbill block is required", name)
-	}
-	if strings.TrimSpace(ccbill.Salt) == "" {
-		return fmt.Errorf("rail '%s' (ccbill): salt is required to sign FlexForm links", name)
-	}
-
-	hasUsername := strings.TrimSpace(ccbill.DataLinkUsername) != ""
-	hasPassword := strings.TrimSpace(ccbill.DataLinkPassword) != ""
-	if hasUsername != hasPassword {
-		return fmt.Errorf("rail '%s' (ccbill): both datalink_username and datalink_password must be provided when configuring DataLink", name)
-	}
-
-	return nil
-}
-
-// validateStripeRail validates a Stripe-type rail
-func validateStripeRail(name string, proc *ResolvedPSP) error {
-	stripe := proc.Stripe
-	if stripe == nil {
-		return fmt.Errorf("rail '%s' (stripe): stripe block is required", name)
-	}
-	if strings.TrimSpace(stripe.SecretKey) == "" {
-		log.Warnf("rail '%s' (stripe): secret_key not configured; purchase unavailable", name)
-	}
-
-	if strings.TrimSpace(stripe.WebhookSigningSecret) == "" {
-		return fmt.Errorf("rail '%s' (stripe): webhook_signing_secret is required", name)
-	}
-
-	return nil
-}
-
-// validateCustody validates a PSP's third-party custody arrangement
-// (or#879/or#880). Custody is a MODIFIER on a rail, so it is checked for every
-// rail: only rails the custodian's registry entry names as proxy rails may
-// reference it, and a referenced custodian must be fully armed or the purchase
-// it backs is silently dead.
-func validateCustody(name string, proc *ResolvedPSP) error {
-	if !proc.HasThirdPartyCustody() {
-		return nil
-	}
-	d, err := custodians.Require(proc.Custody.Custodian)
-	if err != nil {
-		return fmt.Errorf("rail '%s': %w", name, err)
-	}
-	rail := proc.EffectiveRail(name)
-	if !d.SupportsRail(rail) {
-		return fmt.Errorf("rail '%s' (%s): custodian %q is not supported on this rail — it can only be charged through %s, which has a detokenizing proxy path", name, rail, d.Kind, d.RailNames())
-	}
-	if strings.TrimSpace(proc.Custody.AccountID) == "" {
-		return fmt.Errorf("rail '%s': custodian %q requires account_id (the custodian-native tenant id)", name, d.Kind)
-	}
-	for _, slot := range d.Secrets {
-		if slot.Required && slot.Name == custodians.SecretAPIKey && strings.TrimSpace(proc.Custody.APIKey) == "" {
-			return fmt.Errorf("rail '%s': custodian %q requires the %s secret (its private application key)", name, d.Kind, slot.Name)
-		}
 	}
 	return nil
 }
@@ -1357,44 +1126,6 @@ func (set PSPSet) ActiveRailByType(rail models.Rail) (string, *ResolvedPSP, erro
 		return key, proc, nil
 	}
 	return "", nil, nil
-}
-
-// ActiveRailKeysByType returns the sorted names of non-archived accounts on a rail.
-func (set PSPSet) ActiveRailKeysByType(rail models.Rail) []string {
-	var out []string
-	for _, key := range set.RailKeysByType(rail) {
-		if !set[key].Archived {
-			out = append(out, key)
-		}
-	}
-	return out
-}
-
-// FindByAccountID returns the configured account on a rail whose EffectiveAccountID
-// matches accountID (#641), used to target a specific PSP.
-func (set PSPSet) FindByAccountID(rail models.Rail, accountID string) (*ResolvedPSP, bool) {
-	accountID = strings.TrimSpace(accountID)
-	if accountID == "" {
-		return nil, false
-	}
-	for _, key := range set.RailKeysByType(rail) {
-		if set[key].EffectiveAccountID() == accountID {
-			return set[key], true
-		}
-	}
-	return nil, false
-}
-
-// GetStripeRail returns the configured active Stripe rail.
-func (set PSPSet) GetStripeRail() *ResolvedPSP {
-	_, proc, _ := set.ActiveRailByType(models.RailStripe)
-	return proc
-}
-
-// GetSolanaRail returns the configured active Solana rail.
-func (set PSPSet) GetSolanaRail() *ResolvedPSP {
-	_, proc, _ := set.ActiveRailByType(models.RailSolana)
-	return proc
 }
 
 func (cfg *Config) normalizedProviderWriteMode() string {

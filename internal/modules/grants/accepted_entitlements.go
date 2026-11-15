@@ -41,15 +41,6 @@ func DecodeAcceptedEntitlements(raw json.RawMessage, retained map[string]*int) (
 	return names, retained, nil
 }
 
-// AcceptedEntitlementValue is used only to reproduce an admitted provider or
-// quote fingerprint. Current catalog terms always select the list shape.
-func AcceptedEntitlementValue(names []string, historical map[string]*int) any {
-	if historical != nil {
-		return historical
-	}
-	return names
-}
-
 // AcceptedEntitlementsValue reproduces the keys an operation admitted before
 // product access, in the shape its fingerprint hashed. nil: the operation
 // admitted none, and its fingerprint omits them.

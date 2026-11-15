@@ -100,34 +100,6 @@ func capCCBillRetryAt(nextRetryAt, paidTermEnd *time.Time) *time.Time {
 	return &candidate
 }
 
-// boundCCBillPeriodEnd caps a CCBill-announced period end at one billing
-// cycle plus ccbillGraceCap past the later of the current paid end and now:
-// CCBill signs nothing, so one posted date must never buy years. An unknown
-// cycle fails closed.
-func boundCCBillPeriodEnd(candidate *time.Time, sub *models.Subscription, now time.Time) (*time.Time, error) {
-	if candidate == nil {
-		return nil, nil
-	}
-	if sub == nil || sub.Price == nil {
-		return nil, MarkWebhookErrorNonRetryable(fmt.Errorf("ccbill period end requires the subscription price cycle"))
-	}
-	hours := sub.Price.RecurringCycleHours()
-	if hours == nil || *hours <= 0 {
-		return nil, MarkWebhookErrorNonRetryable(fmt.Errorf("ccbill period end refused: price %s has no billing cycle", sub.Price.ID))
-	}
-	anchor := now.UTC()
-	if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(anchor) {
-		anchor = sub.CurrentPeriodEndsAt.UTC()
-	}
-	limit := anchor.Add(time.Duration(*hours)*time.Hour + ccbillGraceCap)
-	if candidate.After(limit) {
-		log.WithFields(log.Fields{"subscription_id": sub.ID, "announced": candidate, "bounded": limit}).
-			Warn("CCBill announced a period end beyond one billing cycle; bounded")
-		return &limit, nil
-	}
-	return candidate, nil
-}
-
 func parseCCBillPositiveAmountCents(currency, rawAmount, parseFieldName, invalidFieldName string) (moneyutil.Cents, error) {
 	return parseCCBillAmountCents(currency, rawAmount, parseFieldName, invalidFieldName, false)
 }
@@ -157,47 +129,6 @@ func ccbillInitialChargeAmount(price *models.Price) moneyutil.Micros {
 	return moneyutil.Micros(price.Amount)
 }
 
-func validateCCBillBilledAmount(ctx context.Context, svc *CCBillWebhookService, currency string, billedAmountCents moneyutil.Cents, expectedAmountMicros moneyutil.Micros, contextFields map[string]interface{}, logFields log.Fields) error {
-	expectedAmountCents, err := moneyutil.NativeToRailMinorExact(currency, int64(expectedAmountMicros))
-	if err != nil {
-		return err
-	}
-	tolerance := expectedAmountCents * 2 / 100 // 2% tolerance, integer-only
-	if billedAmountCents >= expectedAmountCents-tolerance && billedAmountCents <= expectedAmountCents+tolerance {
-		return nil
-	}
-
-	billingErr := newBillingError(ErrorTypeAmount,
-		"Billed amount does not match expected price",
-		map[string]interface{}{
-			"expected_amount": moneyutil.FormatRailMinor(expectedAmountCents, currency),
-			"billed_amount":   moneyutil.FormatRailMinor(billedAmountCents, currency),
-			"tolerance":       moneyutil.FormatRailMinor(tolerance, currency),
-		}, nil)
-	for key, value := range contextFields {
-		billingErr.Context[key] = value
-	}
-	if svc != nil {
-		svc.logBillingError(ctx, billingErr, logFields)
-		// Amount mismatches ACK as non-retryable, so a >2% drifted real charge
-		// needs a durable operator trace, not just a log line.
-		txnID, _ := billingErr.Context["transaction_id"].(string)
-		if txnID == "" {
-			txnID, _ = logFields["transaction_id"].(string)
-		}
-		if alertErr := alerting.RecordLedgerRepair(ctx, svc.DB, svc.now(), alerting.LedgerRepair{
-			Provider:      string(models.RailCCBill),
-			Operation:     "amount_mismatch",
-			TransactionID: txnID,
-			Err:           billingErr,
-			Metadata:      billingErr.Context,
-		}); alertErr != nil {
-			return fmt.Errorf("record CCBill amount mismatch repair alert: %w", alertErr)
-		}
-	}
-	return billingErr
-}
-
 // requireCCBillCurrency is the CCBill currency ingestion boundary: its result
 // is written to a payments row, so it returns the canonical upper-case code.
 // CCBill sends the ISO-4217 numeric code; an alpha code is upper-cased.
@@ -218,22 +149,6 @@ func requireCCBillCurrency(currencyCode Stringish, fieldName string) (string, er
 		return currency, nil
 	}
 	return normalized, nil
-}
-
-func validateCCBillCurrencyMatches(actualCurrency, expectedCurrency string, contextFields map[string]interface{}) error {
-	actual := money.NormalizeCurrency(actualCurrency)
-	expected := money.NormalizeCurrency(expectedCurrency)
-	if expected == "" || actual == expected {
-		return nil
-	}
-	billingErr := newBillingError(ErrorTypeValidation, "Billed currency does not match expected price", map[string]interface{}{
-		"billed_currency":   actual,
-		"expected_currency": expected,
-	}, nil)
-	for key, value := range contextFields {
-		billingErr.Context[key] = value
-	}
-	return billingErr
 }
 
 func ccbillPriceLookupID(rboID, flexID string) string {
@@ -354,8 +269,6 @@ func ccbillRefundID(data *CCBillRefundEvent) (string, bool) {
 }
 
 type CCBillWebhookEventType = string
-
-const CCBillRail models.Rail = "ccbill"
 
 const (
 	EventTypeNewSaleSuccess     CCBillWebhookEventType = "NewSaleSuccess"

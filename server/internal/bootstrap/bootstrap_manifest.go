@@ -8,48 +8,21 @@ import (
 	"github.com/open-rails/authkit/keys"
 
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
-	"github.com/open-rails/openrails/internal/service"
 )
 
-const (
-	// DefaultBootstrapManifestPath is the conventional mounted AuthKit authority
-	// bootstrap file location for standalone containers and Linux deployments.
-	DefaultBootstrapManifestPath = "/etc/openrails/bootstrap.yaml"
-	BootstrapManifestVersion     = 1
-)
+// DefaultBootstrapManifestPath is the conventional mounted AuthKit authority
+// bootstrap file location for standalone containers and Linux deployments.
+const DefaultBootstrapManifestPath = "/etc/openrails/bootstrap.yaml"
 
-func validateMerchantManifestShape(m *BillingConfig) error {
-	if m == nil {
-		return fmt.Errorf("merchant manifest is required")
-	}
-	if m.Version != BootstrapManifestVersion {
-		return fmt.Errorf("merchant bootstrap: manifest version must be %d", BootstrapManifestVersion)
-	}
-	for _, rawSlug := range sortedMerchantKeys(m.Merchants) {
-		t := m.Merchants[rawSlug]
-		slug := strings.ToLower(strings.TrimSpace(rawSlug))
-		if slug == "" {
-			return fmt.Errorf("merchant key is required")
-		}
-		if t.RemoteApplication != nil {
-			if err := validateManifestRemoteApplication(slug, t.RemoteApplication); err != nil {
-				return err
-			}
-		}
-		// The configuration API's own validator: a manifest cannot declare
-		// settings the API would refuse.
-		if err := service.ValidateMerchantSettings(t.MerchantSettings); err != nil {
-			return fmt.Errorf("merchant %q settings: %w", slug, err)
-		}
-		for key, account := range t.PSPs {
-			normalized, err := normalizeManifestPSP(slug, key, account)
-			if err != nil {
-				return err
-			}
-			t.PSPs[key] = normalized
+// checkManifestEntry vets a manifest entry: its remote_application, then its
+// declaration.
+func checkManifestEntry(slug string, t MerchantConfig) error {
+	if t.RemoteApplication != nil {
+		if err := validateManifestRemoteApplication(slug, t.RemoteApplication); err != nil {
+			return err
 		}
 	}
-	return nil
+	return merchantbootstrap.CheckManifestDeclaration(slug, t.MerchantDeclaration)
 }
 
 // validateManifestRemoteApplication checks the per-merchant host-app
@@ -90,8 +63,6 @@ func validateManifestRemoteApplication(merchantSlug string, app *RemoteApplicati
 	}
 	return nil
 }
-
-var normalizeManifestPSP = merchantbootstrap.NormalizeManifestPSP
 
 func validHTTPURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
