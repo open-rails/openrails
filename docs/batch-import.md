@@ -88,7 +88,7 @@ classification evaluates against it, never wall-clock.
 covers the merchant's entire book — it MUST be false for batched imports.
 
 Every live NMI schedule is dunned by OpenRails (NMI never retries a declined
-renewal), whatever `collection_policy` the book declares. Its recurring
+renewal). Its recurring
 stored-card anchor is the method's `recurring_transaction_id` when declared,
 otherwise the schedule's first approved sale in the book's transactions: the
 customer's recurring signup. A schedule with neither stays provider-collected
@@ -284,8 +284,9 @@ import](psp-import.md#provider-facts-outrank-a-hosts-book)).
 - **Dates stay faithful.** `canceled_at`/`ended_at` come from the declared
   evidence, not import wall-clock; grace = missed period end + the grace
   window; a re-import never regresses them.
-- **Money is micros locally, cents on the wire.** `amount_cents: 2300` lands
-  as `23,000,000` micros. Don't pre-convert.
+- **Amounts are native units.** Every `amount` is a decimal string in the
+  currency's native units, micros for USD (`"23000000"` is $23). There is no
+  cents field.
 
 ### Verifying success
 
@@ -310,8 +311,8 @@ never takes them over: NMI keeps billing them. New purchases are billed by
 OpenRails.
 
 1. **Import.** Declare the book (customers, vault cards, subscriptions with
-   `collection_policy` empty = NMI-owned, and the charge history including
-   declines) at a fixed `as_of`. Declare `recurring_transaction_id` on a card
+   their NMI schedules, and the charge history including declines) at a fixed
+   `as_of`. Declare `recurring_transaction_id` on a card
    only when legacy evidence proves the recurring stored-card agreement. A paused NMI schedule is declared as
    `cancel: {kind: user_canceled, at: <pause time>}`: access runs to the paid
    date and OpenRails never deletes the paused schedule. A card reference the

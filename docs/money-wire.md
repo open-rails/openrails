@@ -85,20 +85,6 @@ recommendation params and notification data are wire too and spell money the
 same way; stored event payloads, row metadata and River job arguments are
 internal records and keep integers.
 
-`testdata/wire/*.json` are the canonical success, error, null, empty-list, list,
-time and int64-boundary fixtures; Go (`wire_fixtures_test.go`) and the admin UI
-(`sdk/billing-ui/src/admin/lib/money.test.ts`) both decode them.
-`wire_money_guard_test.go` walks the root package, `billing`, `catalog`
-and `internal` (all but SQLC output) and fails when a
-monetary field (any integer, float or untyped `any`/`map[string]any`/
-`json.RawMessage` whose JSON name names money) is not an int64/uint64 with
-`,string`, when a `map[string]any` literal or `m["amount"] = v` assignment
-carries a monetary key whose value is not spelled as a string, and when a
-custom `MarshalJSON` is not pinned to the test that proves its encoding —
-unless the site is listed with its reason (storage row, provider wire, job
-args, stored metadata, log context, page size, count). Listed entries can only
-shrink; `TestWireMoneyGuardDetects` proves each rule fires.
-
 ## Admin console browser support
 
 The exact display path (`sdk/billing-ui/src/admin/lib/format.ts`) depends on:
@@ -122,7 +108,5 @@ formatting (Firefox 114–115), `format` coerces the string through `Number`.
 formatting `2^53 + 1`). On such an engine amounts below 10^15 native units are
 still rendered, because a `Number` rounds back to those digits at every registry
 scale, and larger amounts render as `<currency> amount exceeds this browser's
-exact display range` instead of a silently rounded figure.
-`src/lib/format-legacy-intl.test.ts` proves both halves against a coercing
-`Intl.NumberFormat`. Without `BigInt` the bundle does not parse; without
+exact display range` instead of a silently rounded figure. Without `BigInt` the bundle does not parse; without
 `Object.hasOwn` the registry lookup throws — neither shows a wrong amount.

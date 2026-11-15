@@ -293,7 +293,7 @@ jobs:
         run: |
           gosec_bin="$(scripts/ci-install-tool.sh gosec)"
           for module in . server adapters/authkit examples; do
-            (cd "$module" && "$gosec_bin" -severity high -confidence medium -exclude-dir=.agents ./...)
+            (cd "$module" && "$gosec_bin" -severity high -confidence medium ./...)
           done
       - name: Go vulnerability analysis
         run: |

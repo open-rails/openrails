@@ -95,8 +95,9 @@ name held at the merchant, or the `root:` name held in the root scope
 ([auth](../auth.md#permissions)). On the standalone server an API key carries its role's, a trusted issuer's token
 the `permissions` it asserts within its ceiling, and a user session the user's
 role in the merchant's group. Admin operations do not require a recent
-sign-in. Customer-network routes marked `sensitive` retain their
-recent-sign-in policy. A `/v1/app` route refuses a person
+sign-in; the sensitive operations a host maps with `Engine.CustomerRoutes`
+ask for one ([host customer APIs](../auth.md#host-customer-apis)). A
+`/v1/app` route refuses a person
 (`403 application_required`). Programmatic writes use their documented durable
 identity, with the same replay behavior as embedded calls.
 
@@ -109,7 +110,7 @@ credential binding, a mismatch returns `412 merchant_mismatch` before the
 operation runs. It never selects or grants access to a merchant. The Go
 client sends it whenever its handle knows its merchant.
 
-Browser-facing routes (the public catalog, purchase, `/v1/me`) answer
+Browser-facing routes (public, purchase, `/v1/me`) answer
 `Access-Control-Allow-Origin: *` and never set credentials; every other route
 sends no CORS headers.
 
@@ -154,8 +155,6 @@ know about the deployment, and names no merchant:
   token_header}`: load `script_url`, solve with `site_key` and `action`, and
   resend the request with the token in `token_header`. Null when the
   deployment challenges nobody.
-- `network`: the payment page's sign-in to the customer network, null without
-  the network or a payment page.
 
 `GET /v1/me/config` is a merchant's part, answered only to a credential bound
 to that merchant: a customer's token, or a pay URL's secret on the
@@ -248,13 +247,12 @@ subscription to another price of its tier group, to other seats, or both:
   pending change and charges nothing.
 - **Staff** change a subscription at the customer's request through
   `POST /v1/admin/subscriptions/{id}/change`, which needs the staff write
-  permission and a `reason`. It behaves as the customer's own change: an upgrade or more
-  seats is charged now, merchant-initiated under the card's recurring
-  agreement (`409 stored_credential_required` when the card has none
-  active), and fewer seats or a downgrade wait for the renewal. The reason and
-  the staff member are kept with the change and its payment (the payment's
-  `reason`), and the customer gets a `subscription_changed` notice. Staff
-  cannot charge a subscription its provider bills
+  permission and a `reason`. A staff change never charges: on a subscription
+  OpenRails bills, every change, an upgrade included, is scheduled for the
+  next renewal and shown as its `scheduled_change`. The reason and the staff
+  member are kept with the change, and the customer gets a
+  `subscription_changed` notice. Staff cannot upgrade a subscription its
+  provider bills or change a CCBill or Solana one
   (`403 customer_action_required`), and a staff change back also cancels a
   pending price migration for that subscription.
 - **Refusals.** `409 subscription_change_renewal_due` while the period has

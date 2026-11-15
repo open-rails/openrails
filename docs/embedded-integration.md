@@ -108,8 +108,8 @@ field. Construction refuses to boot unless the write mode is explicit:
 |---|---|---|
 | `ProviderWriteMode` | yes | `ProviderWritesFull`, `ProviderWritesLimited` (renewals and retries wait) or `ProviderWritesReadOnly` (never charges). |
 | `Database` | default `billing` | `Schema`: the Postgres schema of OpenRails' tables. `RiverSchema` (default `Schema` + `_river`): where OpenRails' River jobs live; `Start` runs them there, on its own client or the host's fleet (section 4). `New` creates or upgrades both. |
-| `Merchant` | no | The merchant this engine serves (section 5). |
-| `Vault` | no | The Vault connection (or `Deps.Vault`). Its `KVMount` makes Vault the home of the merchant's configuration; without one, `Merchant` is. |
+| `Merchants` | no | The merchants this engine declares, keyed by slug (section 5). |
+| `Vault` | no | The Vault connection (or `Deps.Vault`). Its `KVMount` makes Vault the home of each merchant's configuration; without one, its declaration is. |
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
 | `SMTP` | no | The built-in email sender: any SMTP server (`Host`, `Port`: 465 implicit TLS, else STARTTLS, 0 is 587; `Username`, `Password`; the deployment's `From`). SendGrid is `smtp.sendgrid.net` with username `apikey` and an API key as the password. Billing mail is sent from the merchant's profile `from_email` when it has one. Without it or `Deps.Email`, OpenRails sends no email. |
 
@@ -120,7 +120,7 @@ field. Construction refuses to boot unless the write mode is explicit:
 | `Vault` | A borrowed Vault client. PSP secrets come from a declared merchant's PSPs or the secret store. |
 | `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SMTP` (set one). An empty `From` is the deployment's own mail. |
 | `UserInfo` | Your directory (AuthKit's `ak.UserInfo()`, or your own `openrails.UserInfo`): who each customer is, asked whenever OpenRails emails or shows one. See [customer contacts](customer-contacts.md). |
-| `StripeTransport`, `NMITransport`, `FXTransport`, `Clock` | Test seams, refused beside a live PSP. |
+| `StripeTransport`, `NMITransport`, `BasisTheoryTransport`, `FXTransport`, `Clock` | Test seams, refused beside a live PSP. |
 
 `Deps` holds no auth: the engine authenticates nobody. Your auth guards the
 routes you mount (section 6) and decides who may sign in; OpenRails keeps no
@@ -128,9 +128,10 @@ blocked list. A customer is your user's id; its email, username and name come
 from `Deps.UserInfo`, or from your directory's SCIM pushes with
 `RouteGroups.Programmatic`.
 
-Under `Sandbox` every rail routes to its test environment and live credentials
-refuse to boot. NMI accounts get an arm-time probe that refuses a conclusively
-live gateway. See [operations.md](operations.md).
+Each PSP declares its `environment`; omitted is the rail's real-money one.
+OpenRails checks it with the provider before the PSP is used, and a test seam
+(a `Deps` transport or `Clock`, a `ProviderSandbox` URL) refuses to boot
+beside a live PSP ([PSP environments](psp-environments.md)).
 
 **Rate limiting is on by default**: a nil `RateLimits` gets the built-in limits
 on purchase, card and subscription writes and webhooks (tight on purchase to
@@ -146,14 +147,14 @@ or set `RateLimitsDisabled` if your own gateway fronts billing. See
 bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool})
 if err != nil { return err }
 defer bill.Close(ctx)
-client, err := bill.MerchantBySlug(cfg.Merchant.Slug) // your merchant's handle: every billing operation
+client, err := bill.MerchantBySlug("myapp") // your merchant's handle: every billing operation
 if err != nil { return err }
 ```
 
 `New` fails only on what the engine cannot serve without: Postgres and the
 migrations it applies first, an unset or unknown `ProviderWriteMode`, an
-invalid River schema, and money safety (live PSPs beside non-live ones or
-beside a test seam). It starts no workers and never changes the catalog.
+invalid River schema, and money safety (a test seam beside a live PSP). It
+starts no workers and never changes the catalog.
 Anything else that cannot be served is refused alone and the rest serves: an
 optional setting (Redis, captcha, LLM, SMTP, a trusted proxy, ...) is turned off;
 a merchant whose slug is invalid is not provisioned; one PSP, custodian or
@@ -237,17 +238,15 @@ long pass is never rescued while it runs inside its budget.
 
 Each entry of `Config.Merchants`, keyed by slug, is create-if-missing,
 reconcile-if-present on every boot, before routes or workers can observe it.
-`Issuer` and `Catalog` are set in your code, never in a merchant file: an
-issuer belongs to one merchant of an engine, and `New` refuses one declared
-twice. The fields are the merchant manifest's
+`Issuer` is set in your code, never in a merchant file: an issuer belongs to
+one merchant of an engine, and `New` refuses one declared twice. The fields are the merchant manifest's
 (same shape as `config/merchants_config.example.yaml`). It embeds
 `billing.MerchantSettings`, the document the configuration API reads and
 applies: one shape, one validator, in YAML and over the API.
 
 ```go
-cfg.Merchants["myapp"] = openrails.MerchantDeclaration{
+cfg.Merchants = map[string]openrails.MerchantDeclaration{"myapp": {
     DisplayName: "My App",
-    Sandbox:     true, // its PSPs move no money
     MerchantSettings: billing.MerchantSettings{
         Profile:                &billing.MerchantProfile{FromEmail: "billing@myapp.example", SupportURL: "https://myapp.example/support"},
         BillingPeriodBoundary:  "calendar_month",
@@ -261,7 +260,7 @@ cfg.Merchants["myapp"] = openrails.MerchantDeclaration{
             WebhookSigningSecret: "placeholder-webhook-secret",
         }.PSPConfig(),
     },
-}
+}}
 ```
 
 `client.MerchantID()` is the declared merchant's ID (`client` is its handle,
@@ -370,14 +369,14 @@ OpenRails asks it once per request and builds every gate from its answer, a
 | `Verified.Identity()` | who it is: a person or an application, acting itself or for someone |
 | `RootScope(ctx)` (`auth.Root`) | where your staff hold `root:` permissions; needed with any route group on |
 | `Verified.Can(scope, permission)` (`auth.PermissionChecker`) | on every staff and programmatic route, with the route's permission: its `merchant:` name in the merchant's own scope (`{Authority: RootScope's, ID: the merchant's id}`), else its `root:` name in `RootScope`, checked live; without it the request holds nothing |
-| `Verified.CheckRecentSignIn()` (`auth.RecentSignInChecker`) | on customer-network routes marked `sensitive` in [routes](api/routes.md). Staff routes do not request a recent sign-in, including when called with a personal API key |
+| `Verified.CheckRecentSignIn()` (`auth.RecentSignInChecker`) | on the sensitive operations `Engine.CustomerRoutes` mounts ([host customer APIs](auth.md#host-customer-apis)). Staff routes do not request a recent sign-in, including when called with a personal API key |
 
 OpenRails answers every refusal itself, with the status and challenge
 `auth.Refuse` gives every consumer: 401 with `WWW-Authenticate` for a missing,
 invalid, expired or revoked credential (your `auth.Challenge` headers win), 403
 for a permission not held, 503 `authentication_unavailable` or
 `authorization_unavailable` when your auth cannot answer. A sensitive
-customer-network route answers a stale sign-in with RFC 9470's step-up: 401 `step_up_required` with `WWW-Authenticate: Bearer
+host-mapped customer route answers a stale sign-in with RFC 9470's step-up: 401 `step_up_required` with `WWW-Authenticate: Bearer
 error="insufficient_user_authentication", max_age=...` and your challenge's
 metadata. An identity without a subject or invoker is refused, so an
 Authenticator that checks nothing admits no one. Each handler checks the
@@ -421,9 +420,7 @@ The programmatic routes your backend calls over HTTP (`/v1/app/*`,
 is, by its `Identity.SubjectKind`, holding the route's permission, and refuse
 a person: `root:entitlements:read` for the content gate, `root:usage:manage`
 for admissions, usage events and running charges, `root:events:read` for host
-events, `root:orders:manage` for orders
-(`root:customers:read` finds a customer by openrails.dev account, only where
-the [customer network](customer-network.md) runs). Give a program a role
+events, `root:orders:manage` for orders. Give a program a role
 holding only what its task needs.
 With any route group on, `Auth` is a authkit/auth `Root`, as
 `ak.Authenticator()` is: its `RootScope` is AuthKit's root group, and a
@@ -465,10 +462,10 @@ page](payment-page.md#embedded-applications).
 | `Routes` | Exposed surface |
 |---|---|
 | `Prefix` | Where the API lives: `/billing` serves `/billing/v1/*`; empty is the root |
-| (always) | The public configuration (`GET /v1/config`: what this mount serves and the currency registry), the public catalog (`?merchant=<merchant id>`), Solana Pay, the customer routes (`/v1/me/*` at the customer's merchant, orders and the merchant's payment setup included) and signature-checked provider callbacks |
+| (always) | The public configuration (`GET /v1/config`: what this mount serves and the currency registry), Solana Pay, the customer routes (`/v1/me/*` at the customer's merchant, orders and the merchant's payment setup included) and signature-checked provider callbacks |
 | `Auth` | Your auth (above); required. An order is read and paid only by its own customer, admitted by it |
 | `RouteGroups.Admin` | Customer support (`/v1/admin/*`) at the credential's merchant: payments and refunds, subscriptions, orders, credits, access, usage; reads need `root:customer:read`, updates `root:customer:manage` |
-| `RouteGroups.Catalog` (`/v1/catalog`, `/v1/catalog/price-migrations`) | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; reads need `root:catalog:read`, edits `root:catalog:manage`. With a declared merchant's `Catalog`, the file skips what an edit changed |
+| `RouteGroups.Catalog` (`/v1/catalog`, `/v1/catalog/price-migrations`) | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; reads need `root:catalog:read`, edits `root:catalog:manage`. An applied document skips what an edit changed |
 | `RouteGroups.MerchantConfig` (`/v1/merchant`) | The merchant's own configuration: PSPs and their imports (a manual `CreatePSPImport` re-reads a PSP; its differences become proposals), reading and resolving findings, settings, billing import and export, the dashboard layout; reads need `root:config:read`, edits and billing-archive export `root:config:manage` |
 | `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `root:metrics:read` |
 | `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, usage events and admissions, running charges, host events and SCIM provisioning. They refuse a person; each needs its own permission (`root:entitlements:read`, `root:usage:read` or `root:usage:manage`, `root:events:read`, `root:orders:manage`; SCIM needs none); each write uses its operation's durable identity (`request_id`, source identity, `reference`, or an order's `Idempotency-Key`), identically in process and remotely |

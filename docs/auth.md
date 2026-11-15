@@ -12,7 +12,8 @@ it. Every gated route asks an `openrails.Authenticator`, given at `Mount` as
 `Routes.Auth`, who the request is (`Authenticate`, once per request), and
 builds its gate from the answer: its `Identity`, its `Can(scope, permission)`
 for a staff or programmatic route's permission. Admin operations require no
-recent sign-in; sensitive customer-network operations retain that check
+recent sign-in; the sensitive operations of
+[host-mapped customer routes](#host-customer-apis) keep that check
 (authkit/auth `RecentSignInChecker`). The host names no
 permission and no scope: the names are OpenRails' own ([below](#permissions)),
 and the scopes come from the Authenticator's `RootScope` (authkit/auth `Root`).
@@ -46,11 +47,11 @@ status and challenge `auth.Refuse` gives: 401 with `WWW-Authenticate`
 (`authentication_required`, `credential_expired`, `credential_revoked`, with
 the provider's own challenge headers passed through unread), 403
 (`permission_required`, `application_required`, `invoker_scoped_principal`,
-`step_up_unavailable` on sensitive customer-network routes for a credential
+`step_up_unavailable` on a sensitive host-mapped customer route for a credential
 without a sign-in of its own),
 503 when the host's auth cannot answer (`authentication_unavailable`,
-`authorization_unavailable`, or a panic). On sensitive customer-network
-routes a stale sign-in is RFC 9470's step-up:
+`authorization_unavailable`, or a panic). On those sensitive routes a stale
+sign-in is RFC 9470's step-up:
 401 `step_up_required` with `WWW-Authenticate: Bearer
 error="insufficient_user_authentication", max_age="900"` and the provider's
 challenge as the error's metadata. A Verified without `Can` holds nothing; an
@@ -99,7 +100,7 @@ than the actor whose action was held.
 | `/v1/app` | `billing.MerchantUsageManage` | `billing.RootUsageManage` | admissions, usage events and running charges |
 | `/v1/app` | `billing.MerchantEventsRead` | `billing.RootEventsRead` | host events |
 | `/v1/app` | `billing.MerchantOrdersManage` | `billing.RootOrdersManage` | merchant orders: `POST /v1/app/orders` (`CreateOrder`), `/preview`, `/{id}/cancel` |
-| `/v1/app` | `billing.MerchantCustomersRead` | `billing.RootCustomersRead` | `GET /v1/app/customers`: a customer by openrails.dev account, where the [customer network](customer-network.md) runs |
+| none | `billing.MerchantCustomersRead` | `billing.RootCustomersRead` | declared, but no route checks it |
 | merchant config | none | `billing.RootAdminRateLimitsUnlock` | `POST /v1/merchant/destructive-holds/{id}/clear`, with `billing.RootConfigManage` or `billing.MerchantConfigManage` |
 
 A route group that is on mounts all its routes; what a caller may use is its
@@ -169,7 +170,7 @@ for its merchant, and the page shows the root group alone.
 ## Your own auth
 
 A host without AuthKit implements the same contract over its own users and
-roles: [examples/own-auth](../examples/own-auth) is one, with its tests.
+roles: [examples/own-auth](../examples/own-auth) is one.
 `authkit/auth` defines the contract and uses only the standard library. It is
 versioned with AuthKit but imports no AuthKit runtime, so a host implements it
 without running AuthKit:
@@ -192,7 +193,7 @@ without running AuthKit:
   merchant's scope, a root role's `root:` names in the root scope. A
   credential bound to one merchant holds nothing at another; a person keeps
   their root roles.
-- Customer-network operations marked `sensitive` ask the recent-sign-in
+- Host-mapped customer operations marked sensitive ask the recent-sign-in
   check (authkit/auth `RecentSignInChecker`): nil within your step-up window,
   else an `auth.Challenge` with `ErrStepUpRequired` and the window as
   `MaxAge`. Admin operations never ask it.
@@ -217,8 +218,8 @@ An identity has three parts:
   it: its id, as `issuer|id` when another issuer vouches for it.
 - the **credential**: how it was proven (session, device key, API key, signed
   token or access token). Only a user acting in person pays with their own
-  saved card. A recent-sign-in check is limited to the customer-network
-  operations marked `sensitive`.
+  saved card. A recent-sign-in check is limited to the sensitive host-mapped
+  customer operations.
 
 Provider writes record all three: the subject, the invoker and the
 credential (`kind:id`).
@@ -349,6 +350,43 @@ arbitrary database or JWKS discovery.
 Cookie origins use canonical browser spelling: lowercase host, no wildcard,
 userinfo, path, query, fragment, or explicit default port. HTTPS is required;
 HTTP is allowed for explicit localhost/loopback development origins.
+
+## Host customer APIs
+
+A host that keeps its own account relationships, such as a hosted product
+linking its accounts to merchants' customers, reuses OpenRails' customer checks
+while OpenRails stores no relationship. Neither API adds an HTTP route.
+
+- `Engine.ResolveCustomer(ctx, authority, verified)` returns a `CustomerProof`
+  for the existing customer the original request proves: its merchant, its
+  customer and a copy of the stored `Issuer` (nil is the merchant's native
+  namespace and proves no platform account). `authority` and `verified` are the
+  trusted Authenticator and the request's original Verified; it never
+  authenticates again. The caller is a user acting itself, in person, not with
+  a personal access token, and a token carrying scopes holds `openrails:self`.
+  The merchant comes from the credential exactly as on `/v1/me`, then its
+  issuer and tenant checks apply. It creates, admits and changes nothing. The
+  Verified must implement authkit/auth `CredentialChecker`, checked before the
+  first read and after the last; one that does not is refused. A missing
+  customer is `billing.ErrNotFound`; other refusals keep their billing error
+  codes or AuthKit's error classes.
+- `Engine.CustomerRoutes(selection)` returns customer operations under the
+  `openrails.CustomerRoutes`'s `Prefix` (default `/v1/me`, whole-segment
+  parameters such as `/account/links/{link_id}` allowed). `Auth` verifies the
+  request once; `Resolve` maps it to one existing `CustomerBinding` and returns
+  `billing.ErrNotFound` to hide a relationship. Only a user acting itself in
+  person passes; the merchant must be live and the customer exist. The
+  operations are config, payments, entitlements, orders (list, detail,
+  payment attempt, pay, confirm), subscriptions (list, detail, cancel, resume,
+  payment method), payment methods (list, add, confirm, delete) and agreements
+  (list, revoke). Every mutation is sensitive and asks the original credential
+  for a recent sign-in; reads do not. Order creation is not mapped.
+- On the standalone server, `server.Deps.CustomerAdmissionPolicy` may refuse an
+  ordinary `/v1/me` request after its identity, merchant and issuer checks and
+  before the customer is admitted, so no row is created. Return an AuthKit
+  refusal (`auth.ErrForbidden`, expired, revoked, unavailable) for the usual
+  HTTP error; any other error fails closed. It does not run on staff, AuthKit,
+  host-mapped or pay URL routes.
 
 ## Customer portal membership
 

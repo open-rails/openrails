@@ -222,24 +222,18 @@ ends.
 
 ## Mutation Flags
 
-Merchant-configuration commands use mutation flags. Catalog
+`push-merchant-config` is create-only: bare, it only reports what the manifest
+declares; `--insert` (or `--seed`) creates its missing merchants. `--overwrite`
+and `--prune` are refused as retired: a merchant's configuration changes at its
+revision (`PATCH /v1/merchant/configuration`, the PSP routes). Catalog
 application instead carries optional `prune` in its document; it has no
 insert/overwrite flags. Each canonical catalog content hash is remembered
-permanently, so replaying an old document never rolls back later edits. For
-commands that use mutation flags:
-
-- no mutation flags: plan/report only
-- `--insert`: create records or provider objects missing from the target
-- `--overwrite`: update existing target records or mutable provider-owned fields
-- `--prune`: disable, archive, delete, or tombstone target extras absent from the source
-
-The flags compose; full reconciliation to the source of truth is
-`--insert --overwrite --prune`.
+permanently, so replaying an old document never rolls back later edits.
 
 ### CLI inventory
 
-Global flags on every command: `--config/-c` (default `config.yaml`),
-`--provider-write-mode`, `--test-mode` (flag beats env beats yaml).
+Global flags on every command: `--config/-c` (default `config.yaml`) and
+`--provider-write-mode` (flag beats env beats yaml).
 
 One-off commands open only their required resources and print their result,
 useful progress and actionable errors. They do not start the HTTP server or a
@@ -464,9 +458,10 @@ freshness checks also hold destructive decisions until the account catches up.
 ### PSP binding and credential rotation
 
 `billing.psps` is an **operator-declared** catalog: one row per merchant
-PSP account on a rail, with an opaque declared `account_id`. There is NO
-runtime "whoami"/identity resolution — OpenRails never fetches or verifies
-the account identity behind a credential; the declaration is trusted.
+PSP account on a rail, with an opaque declared `account_id`, never derived
+from a credential. A Stripe key is checked against it: the posture probe and
+each thin webhook read `GET /v1/account`, and a key of another account is
+`mismatched` and never armed. On the other rails the declaration is trusted.
 
 One local check stands: two live PSPs on a rail holding the same account
 credential (NMI `security_key`, Stripe `secret_key`) are one gateway account
@@ -529,7 +524,7 @@ Rules:
   no rebind command.
 - **Identity is the PSP id, not its key.** Provider references (price links,
   vault references, webhook dedup) belong to the PSP's id, so renaming or
-  archiving a PSP moves nothing ([provider object identity](architecture/provider-object-identity.md)).
+  archiving a PSP moves nothing.
 - **Subscribers on an archived PSP stay there.** OpenRails never moves or
   cancels a working provider-owned subscription. An archived PSP takes no new
   purchases; its live subscriptions keep renewing on it and stay monitored. A
@@ -540,15 +535,13 @@ Rules:
 
 `billing.custodians` is the same kind of catalog, one axis over: a row is
 one merchant-owned account with a third-party card CUSTODIAN (Basis Theory
-today). A PSP references it by `psps.custodian_id`, so one custodian can back
-several gateways — its tenant id and its private application key exist once,
-not once per PSP.
+today). A PSP names it by key in its configuration (`custodian: <key>`), so
+one custodian can back several gateways — its tenant id and its private
+application key exist once, not once per PSP.
 
 Custodial credentials are scoped by the custodian's own identity,
 `custodians/<kind>/<environment>/<account_id>/<key>`, exactly as PSP
-credentials are scoped by theirs, and are read through the same rotation
-version floor — recorded on `custodians.credential_versions` rather
-than on a PSP row. Rotation and archival follow the PSP rules
+credentials are scoped by theirs. Rotation and archival follow the PSP rules
 above verbatim: rotate in place under the same row; to move to a different
 custodian account, declare a NEW one and archive the old one for drain — an
 instrument the old custodian holds is never re-vaulted or destroyed.
@@ -1608,9 +1601,9 @@ provider incident returning a short page — never 850 customers all leaving.
 ## One API host + browser CORS
 
 A server answers every merchant on one API host: a request's Host names no
-merchant. A credentialed request's merchant is its credential's, and the
-public routes name theirs in the request: the catalog its merchant
-(`?merchant=<merchant id>`) and a Solana Pay request its order. Browser CORS
+merchant. A credentialed request's merchant is its credential's; a Solana Pay
+request, which takes none, names its order. No public route reads the
+catalog. Browser CORS
 is a **separate, fixed, engine-wide policy**, not a per-merchant setting.
 
 - **Reserved names**: `billing.ReservedMerchantSlugs` is the advisory list

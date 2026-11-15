@@ -19,8 +19,9 @@ the doc map. Follow it top to bottom.
   ([docs/rails/nmi.md](rails/nmi.md)), which puts the deployment in SAQ D; never
   enable it on your own.
 - **Non-live first.** All development declares every PSP `environment: test` or
-  `sandbox`; OpenRails verifies each with its provider and refuses a live PSP
-  beside them. Do not touch live credentials until the full flow is proven.
+  `sandbox`; OpenRails verifies each with its provider. An omitted
+  `environment` is the rail's real-money one. Do not touch live credentials
+  until the full flow is proven.
 - **Vocabulary:** a *rail* is the gateway kind (`nmi`/`ccbill`/`stripe`/`solana`); a
   *PSP* is the merchant's account on a rail (manifest key `psps:`). Config keys named
   `accounts:`/`rail_merchant_accounts` are retired and fail loudly.
@@ -102,7 +103,6 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
 | Catalog authoring (products/prices/entitlements) | [merchant-guide.md](merchant-guide.md) |
 | API conventions and behavior | [api/endpoints.md](api/endpoints.md) |
 | Every HTTP route | [api/routes.md](api/routes.md), `api/openapi.json` |
-| Moving from v0 | [migrating-to-v1.md](migrating-to-v1.md) |
 | Migrating an existing subscriber base in | [batch-import.md](batch-import.md) |
 | Admin console on/off + usage | [billing-admin.md](billing-admin.md) |
 | Day-2 ops, safety levers, cutover | [operator-guide.md](operator-guide.md), [operations.md](operations.md) |
@@ -118,8 +118,8 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
   browser-direct with access tokens.
 - Purchase endpoints are tightly rate-limited by design; retry loops in tests will
   hit 429 — back off, don't raise limits.
-- Embedded config is programmatic: no file or environment is read, so nothing is
-  defaulted for you; a PSP without an `environment` refusing to boot is the
-  designed behavior.
+- Embedded config is programmatic: no file or environment is read. A PSP
+  without an `environment` is live (the rail's real-money one), so declare
+  `test` or `sandbox` explicitly.
 - Catalog amounts are integers in native units (`12_000_000` = $12). No dollar
   strings in the catalog document.

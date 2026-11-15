@@ -57,7 +57,7 @@ read them, and a request a rail cannot serve is refused, never dropped.
 | Merchant cancel | yes | yes | yes | yes; stops OpenRails pulls |
 | Tier change | upgrade now with proration, downgrade at period end | upgrade now with proration, downgrade at period end | upgrade by redirect; no downgrade | signed by the customer's wallet |
 | Refund through the rail | yes | yes | no (`refund_unsupported`) | no (`refund_unsupported`) |
-| Catalog push | recurring plans, find-or-create | products, prices and features, find-or-create | link only: the operator supplies `flex_id` and `recurring_billing_option_id` | plans, find-or-create |
+| Catalog objects | existing plans mirrored read-only; never created | existing products and prices mirrored read-only; never created | link only: the operator supplies `flex_id` and `recurring_billing_option_id` | a recurring price's plan, published on catalog apply |
 | Events | signed webhooks | signed webhooks | webhooks from CCBill's address ranges | chain polling |
 
 Per-rail setup and caveats: [NMI](nmi.md), [Stripe](stripe.md),

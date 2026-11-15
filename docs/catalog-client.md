@@ -69,8 +69,8 @@ OpenRails includes current prices by default. Like
 lookups filtered by product. Shopify's
 [product model](https://shopify.dev/docs/api/admin-graphql/latest/objects/ProductVariant)
 exposes priced variants; OpenRails keeps its existing price records rather
-than introducing variants. Public browser lookups remain bounded to named
-product keys and redact provider-private price fields.
+than introducing variants. No public route reads the catalog: a host's server
+reads it with the Client and shows products in its own pages.
 
 ## Reads served from memory
 
@@ -161,7 +161,4 @@ omitting `Archived` includes historical versions.
 Database UUIDs remain private foreign keys so upgrades preserve accepted
 financial facts, provider identities, and historical references. Migration
 0074 derives public IDs from existing immutable keys and the stored revision.
-It does not reprice existing purchases or contact payment providers. Existing
-applications must migrate their own stored price IDs along with the client and
-server. See the [price-ID cutover](migrating-to-v1.md#price-id-cutover) for mapping
-old references, including archived prices.
+It does not reprice existing purchases or contact payment providers.

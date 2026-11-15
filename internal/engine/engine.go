@@ -80,11 +80,10 @@ func Graph(client any) *app.App {
 // Database.SkipMigrations validates existing schemas instead of
 // applying startup schema, partition or River changes. ctx bounds the
 // database; nothing else does. Only the database, an unknown provider write
-// mode, an invalid River schema and money-safety refusals (live beside
-// non-live PSPs, a test seam beside a live PSP) fail construction. Anything
-// else that cannot be served is refused alone and reported (Ready, Probes'
-// openrails_configuration): an optional setting, a declared merchant, one of
-// its documents. Vault login, PSP posture and Redis recover in the
+// mode, an invalid River schema and the money-safety refusal (a test seam
+// beside a live PSP) fail construction. Anything else that cannot be served
+// is refused alone and reported (Ready, Probes' openrails_configuration): an
+// optional setting, a declared merchant, one of its documents. Vault login, PSP posture and Redis recover in the
 // background. It never changes a catalog: a catalog document applies by an
 // explicit ApplyCatalog.
 func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, error) {
