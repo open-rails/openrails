@@ -209,66 +209,6 @@ func (q *Queries) InsertPaymentAttempt(ctx context.Context, arg InsertPaymentAtt
 	return result.RowsAffected(), nil
 }
 
-const latestOrderAttempt = `-- name: LatestOrderAttempt :one
-SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id FROM billing.payment_attempts
-WHERE merchant_id = $1::uuid AND order_id = $2::uuid
-ORDER BY attempted_at DESC, id DESC
-LIMIT 1
-`
-
-type LatestOrderAttemptParams struct {
-	MerchantID uuid.UUID
-	OrderID    uuid.UUID
-}
-
-// The newest answer to an order's payment: its standing.
-func (q *Queries) LatestOrderAttempt(ctx context.Context, arg LatestOrderAttemptParams) (BillingPaymentAttempt, error) {
-	row := q.db.QueryRow(ctx, latestOrderAttempt, arg.MerchantID, arg.OrderID)
-	var i BillingPaymentAttempt
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.PspID,
-		&i.Rail,
-		&i.Kind,
-		&i.Owner,
-		&i.CardEntry,
-		&i.Source,
-		&i.ObservedVia,
-		&i.Category,
-		&i.Reason,
-		&i.Action,
-		&i.ResponseCode,
-		&i.ResponseText,
-		&i.TransactionID,
-		&i.AvsResult,
-		&i.CvvResult,
-		&i.CardBrand,
-		&i.CardLast4,
-		&i.TokenType,
-		&i.Amount,
-		&i.Currency,
-		&i.AttemptedAt,
-		&i.PurchaseID,
-		&i.PurchaseTarget,
-		&i.SubscriptionID,
-		&i.PaymentMethodID,
-		&i.PaymentID,
-		&i.ProviderIntentID,
-		&i.Step,
-		&i.CreatedAt,
-		&i.CycleID,
-		&i.CardBin,
-		&i.IssuerCode,
-		&i.IssuerText,
-		&i.MandateID,
-		&i.SentInitialTransactionID,
-		&i.OrderID,
-	)
-	return i, err
-}
-
 const latestPaymentOrderAttempt = `-- name: LatestPaymentOrderAttempt :one
 SELECT purchase_id::uuid AS purchase_id, kind, category
 FROM billing.payment_attempts

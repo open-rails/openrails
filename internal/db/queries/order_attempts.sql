@@ -51,12 +51,6 @@ WHERE order_attempts.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg
   AND deleted_at IS NULL
   AND (transaction_id IS NULL OR transaction_id = sqlc.arg(signature)::text);
 
--- name: GetOrderAttemptByReference :one
-SELECT * FROM billing.order_attempts cs
-WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.reference = $1
-  AND cs.deleted_at IS NULL
-LIMIT 1;
-
 -- name: ExpireOrderAttempts :execrows
 -- The order expiry's: attempts still waiting on their customer past their
 -- expiry, a bounded batch.

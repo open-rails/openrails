@@ -12,34 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const applyPendingScheduledChangeAtPrice = `-- name: ApplyPendingScheduledChangeAtPrice :execrows
-UPDATE billing.scheduled_changes SET status = 'applied', applied_at = $1::timestamptz
-WHERE merchant_id = $2::uuid AND subscription_id = $3::uuid
-  AND price_id = $4::uuid AND status = 'scheduled'
-`
-
-type ApplyPendingScheduledChangeAtPriceParams struct {
-	Now            time.Time
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
-	PriceID        uuid.UUID
-}
-
-// A provider (Stripe) moved the subscription to price_id: the change that
-// asked for it is applied.
-func (q *Queries) ApplyPendingScheduledChangeAtPrice(ctx context.Context, arg ApplyPendingScheduledChangeAtPriceParams) (int64, error) {
-	result, err := q.db.Exec(ctx, applyPendingScheduledChangeAtPrice,
-		arg.Now,
-		arg.MerchantID,
-		arg.SubscriptionID,
-		arg.PriceID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const applyScheduledChange = `-- name: ApplyScheduledChange :one
 UPDATE billing.scheduled_changes SET status = 'applied', applied_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND id = $3::uuid AND status = 'scheduled'

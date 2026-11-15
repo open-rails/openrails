@@ -97,19 +97,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY created_at ASC
 LIMIT 1;
 
--- ListLiveGrantsByCustomer: grant-events not terminated by a later revoke/expire/
--- supersede event. The fold's input.
--- name: ListLiveGrantsByCustomer :many
-SELECT g.* FROM billing.grants g
-WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND g.customer_id = sqlc.arg(customer_id)::uuid
-  AND g.event = 'grant'
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.grants t
-      WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
-  )
-ORDER BY g.created_at;
-
 -- ListGrantsByCustomer: every grant-event for the customer (live or terminated),
 -- the full input to a customer-scoped re-derive.
 -- name: ListGrantsByCustomer :many

@@ -46,25 +46,12 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 SELECT * FROM billing.psps
 WHERE psps.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
--- name: GetPSPByIdentity :one
-SELECT * FROM billing.psps
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND rail = lower(sqlc.arg(rail)::text)
-  AND live = sqlc.arg(live)::bool
-  AND account_id = sqlc.arg(account_id)::text
-LIMIT 1;
-
 -- name: ListPSPsForMerchant :many
 -- Every PSP identity of the merchant, both environments and superseded ones
 -- included, oldest first.
 SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY created_at, id;
-
--- name: ListPSPsByIDs :many
-SELECT * FROM billing.psps
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
-ORDER BY created_at DESC, id DESC;
 
 -- CROSS-MERCHANT: PSP ownership by the global (rail, money class, account_id)
 -- natural key, for webhook routing and the uniqueness preflight, both of which
@@ -115,10 +102,6 @@ SELECT id FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = lower(sqlc.arg(rail)::text)
   AND account_id = sqlc.arg(account_id)::text
 LIMIT 1;
-
--- name: GetPSPEnvironmentForRail :one
-SELECT environment FROM billing.psps
-WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND rail = sqlc.arg(rail)::text;
 
 -- name: CountPSPOpenObligations :many
 SELECT psp.id AS psp_id,

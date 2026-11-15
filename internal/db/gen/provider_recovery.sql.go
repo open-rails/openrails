@@ -30,24 +30,6 @@ func (q *Queries) GetPSPAppliedRefreshWatermark(ctx context.Context, arg GetPSPA
 	return watermark_at, err
 }
 
-const getPSPCompletedRefreshWatermark = `-- name: GetPSPCompletedRefreshWatermark :one
-SELECT watermark_at FROM billing.psp_refresh_watermarks
-WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
-  AND event_domain='completed_events'
-`
-
-type GetPSPCompletedRefreshWatermarkParams struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-}
-
-func (q *Queries) GetPSPCompletedRefreshWatermark(ctx context.Context, arg GetPSPCompletedRefreshWatermarkParams) (time.Time, error) {
-	row := q.db.QueryRow(ctx, getPSPCompletedRefreshWatermark, arg.MerchantID, arg.PspID)
-	var watermark_at time.Time
-	err := row.Scan(&watermark_at)
-	return watermark_at, err
-}
-
 const pSPHasUnresolvedFinancialFindings = `-- name: PSPHasUnresolvedFinancialFindings :one
 SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings f
  WHERE f.merchant_id=$1::uuid AND f.psp_id=$2::uuid

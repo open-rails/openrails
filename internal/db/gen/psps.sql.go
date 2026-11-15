@@ -174,68 +174,6 @@ func (q *Queries) GetPSP(ctx context.Context, arg GetPSPParams) (BillingPsp, err
 	return i, err
 }
 
-const getPSPByIdentity = `-- name: GetPSPByIdentity :one
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest FROM billing.psps
-WHERE merchant_id = $1::uuid
-  AND rail = lower($2::text)
-  AND live = $3::bool
-  AND account_id = $4::text
-LIMIT 1
-`
-
-type GetPSPByIdentityParams struct {
-	MerchantID uuid.UUID
-	Rail       string
-	Live       bool
-	AccountID  string
-}
-
-func (q *Queries) GetPSPByIdentity(ctx context.Context, arg GetPSPByIdentityParams) (BillingPsp, error) {
-	row := q.db.QueryRow(ctx, getPSPByIdentity,
-		arg.MerchantID,
-		arg.Rail,
-		arg.Live,
-		arg.AccountID,
-	)
-	var i BillingPsp
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Key,
-		&i.Rail,
-		&i.Environment,
-		&i.AccountID,
-		&i.CredentialsValidatedAt,
-		&i.WebhookEndpointID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.CredentialFingerprint,
-		&i.CredentialDuplicateAt,
-		&i.SupersededAt,
-		&i.Live,
-		&i.WebhookDigest,
-	)
-	return i, err
-}
-
-const getPSPEnvironmentForRail = `-- name: GetPSPEnvironmentForRail :one
-SELECT environment FROM billing.psps
-WHERE id = $1::uuid AND merchant_id = $2::uuid AND rail = $3::text
-`
-
-type GetPSPEnvironmentForRailParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Rail       string
-}
-
-func (q *Queries) GetPSPEnvironmentForRail(ctx context.Context, arg GetPSPEnvironmentForRailParams) (string, error) {
-	row := q.db.QueryRow(ctx, getPSPEnvironmentForRail, arg.ID, arg.MerchantID, arg.Rail)
-	var environment string
-	err := row.Scan(&environment)
-	return environment, err
-}
-
 const getPSPForCutoverWrite = `-- name: GetPSPForCutoverWrite :one
 SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest FROM billing.psps
 WHERE id = $1::uuid AND merchant_id = $2::uuid
@@ -317,53 +255,6 @@ func (q *Queries) ListPSPWebhookDigests(ctx context.Context, arg ListPSPWebhookD
 	for rows.Next() {
 		var i ListPSPWebhookDigestsRow
 		if err := rows.Scan(&i.AccountID, &i.WebhookDigest); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPSPsByIDs = `-- name: ListPSPsByIDs :many
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest FROM billing.psps
-WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
-ORDER BY created_at DESC, id DESC
-`
-
-type ListPSPsByIDsParams struct {
-	MerchantID uuid.UUID
-	Ids        []uuid.UUID
-}
-
-func (q *Queries) ListPSPsByIDs(ctx context.Context, arg ListPSPsByIDsParams) ([]BillingPsp, error) {
-	rows, err := q.db.Query(ctx, listPSPsByIDs, arg.MerchantID, arg.Ids)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingPsp
-	for rows.Next() {
-		var i BillingPsp
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Key,
-			&i.Rail,
-			&i.Environment,
-			&i.AccountID,
-			&i.CredentialsValidatedAt,
-			&i.WebhookEndpointID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.CredentialFingerprint,
-			&i.CredentialDuplicateAt,
-			&i.SupersededAt,
-			&i.Live,
-			&i.WebhookDigest,
-		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

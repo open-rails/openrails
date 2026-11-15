@@ -100,14 +100,3 @@ JOIN LATERAL (SELECT line.product_id, prod.key::text AS product_key
     FROM billing.order_lines line JOIN billing.products prod ON prod.merchant_id=line.merchant_id AND prod.id=line.product_id
     WHERE line.merchant_id=sqlc.arg(merchant_id)::uuid AND line.order_id=e.order_id
     ORDER BY line.position LIMIT 1) l ON true;
-
--- name: ResolveVanishedFindings :execrows
--- Open findings of one type under a subject prefix that the latest full scan
--- no longer reports close themselves.
-UPDATE billing.reconciliation_findings
-   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
- WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-   AND finding_type = sqlc.arg(finding_type)::text
-   AND subject_key LIKE sqlc.arg(subject_prefix)::text || '%'
-   AND NOT (subject_key = ANY(sqlc.arg(keep_subjects)::text[]))
-   AND status IN ('reconcile_required', 'requires_review');

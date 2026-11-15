@@ -100,10 +100,3 @@ WHERE id IN (
       AND a.attempted_at < sqlc.arg(cutoff)::timestamptz
     LIMIT sqlc.arg(row_limit)::int
 );
-
--- name: LatestOrderAttempt :one
--- The newest answer to an order's payment: its standing.
-SELECT * FROM billing.payment_attempts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = sqlc.arg(order_id)::uuid
-ORDER BY attempted_at DESC, id DESC
-LIMIT 1;

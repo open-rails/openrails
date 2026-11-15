@@ -287,35 +287,3 @@ func (q *Queries) ConOrphanAccessSubscriptionSource(ctx context.Context, arg Con
 	}
 	return items, nil
 }
-
-const resolveVanishedFindings = `-- name: ResolveVanishedFindings :execrows
-UPDATE billing.reconciliation_findings
-   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
- WHERE merchant_id = $1::uuid
-   AND finding_type = $2::text
-   AND subject_key LIKE $3::text || '%'
-   AND NOT (subject_key = ANY($4::text[]))
-   AND status IN ('reconcile_required', 'requires_review')
-`
-
-type ResolveVanishedFindingsParams struct {
-	MerchantID    uuid.UUID
-	FindingType   string
-	SubjectPrefix string
-	KeepSubjects  []string
-}
-
-// Open findings of one type under a subject prefix that the latest full scan
-// no longer reports close themselves.
-func (q *Queries) ResolveVanishedFindings(ctx context.Context, arg ResolveVanishedFindingsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, resolveVanishedFindings,
-		arg.MerchantID,
-		arg.FindingType,
-		arg.SubjectPrefix,
-		arg.KeepSubjects,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}

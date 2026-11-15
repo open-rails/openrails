@@ -134,26 +134,6 @@ func (q *Queries) CustodianMethodDeletionState(ctx context.Context, arg Custodia
 	return i, err
 }
 
-const deleteFencedPaymentMethod = `-- name: DeleteFencedPaymentMethod :execrows
-DELETE FROM billing.payment_methods
-WHERE merchant_id = $1::uuid AND id = $2::uuid
-  AND park_reason = 'delete:' || $3::uuid::text
-`
-
-type DeleteFencedPaymentMethodParams struct {
-	MerchantID  uuid.UUID
-	ID          uuid.UUID
-	OperationID uuid.UUID
-}
-
-func (q *Queries) DeleteFencedPaymentMethod(ctx context.Context, arg DeleteFencedPaymentMethodParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteFencedPaymentMethod, arg.MerchantID, arg.ID, arg.OperationID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const fencePaymentMethodDeletion = `-- name: FencePaymentMethodDeletion :execrows
 UPDATE billing.payment_methods
 SET park_reason = 'delete:' || $1::uuid::text,
@@ -180,70 +160,6 @@ func (q *Queries) FencePaymentMethodDeletion(ctx context.Context, arg FencePayme
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const listMethodDeletesForArchive = `-- name: ListMethodDeletesForArchive :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
-WHERE merchant_id = $1::uuid AND status = 'succeeded'
-  AND idempotency_key IN ('hyperswitch_method_delete:' || $2::uuid::text,
-                          'nmi_vault_delete:' || $2::uuid::text)
-  AND NOT EXISTS (SELECT 1 FROM billing.payment_methods m
-                  WHERE m.merchant_id=$1::uuid AND m.id=$2::uuid)
-`
-
-type ListMethodDeletesForArchiveParams struct {
-	MerchantID      uuid.UUID
-	PaymentMethodID uuid.UUID
-}
-
-func (q *Queries) ListMethodDeletesForArchive(ctx context.Context, arg ListMethodDeletesForArchiveParams) ([]BillingProviderIntent, error) {
-	rows, err := q.db.Query(ctx, listMethodDeletesForArchive, arg.MerchantID, arg.PaymentMethodID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingProviderIntent
-	for rows.Next() {
-		var i BillingProviderIntent
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Rail,
-			&i.IntentType,
-			&i.SubscriptionID,
-			&i.PaymentID,
-			&i.PriceID,
-			&i.Payload,
-			&i.IdempotencyKey,
-			&i.Status,
-			&i.Attempts,
-			&i.NextAttemptAt,
-			&i.LeaseExpiresAt,
-			&i.Origin,
-			&i.OriginReason,
-			&i.Actor,
-			&i.LastFailureReason,
-			&i.ExpiresAt,
-			&i.ResultEvidence,
-			&i.CreatedAt,
-			&i.ExecutedAt,
-			&i.UpdatedAt,
-			&i.PspID,
-			&i.DestructiveRunID,
-			&i.DestructiveRunClass,
-			&i.CustodianID,
-			&i.Subject,
-			&i.Credential,
-			&i.DestructiveActionID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const lockCustodianDeletionAccount = `-- name: LockCustodianDeletionAccount :one

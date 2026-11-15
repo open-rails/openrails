@@ -245,42 +245,6 @@ func (q *Queries) ListProvisionedContacts(ctx context.Context, arg ListProvision
 	return items, nil
 }
 
-const recordContactClaims = `-- name: RecordContactClaims :exec
-INSERT INTO billing.customer_contacts AS c (merchant_id, customer_id, email, display_name, user_name, directory_updated_at)
-VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)
-ON CONFLICT (merchant_id, customer_id) DO UPDATE SET
-  email = COALESCE(EXCLUDED.email, c.email), display_name = COALESCE(EXCLUDED.display_name, c.display_name),
-  user_name = COALESCE(EXCLUDED.user_name, c.user_name), directory_updated_at = EXCLUDED.directory_updated_at, updated_at = now()
-WHERE EXCLUDED.directory_updated_at IS NOT NULL
-  AND (c.directory_updated_at IS NULL OR c.directory_updated_at < EXCLUDED.directory_updated_at)
-  AND (c.email, c.display_name, c.user_name) IS DISTINCT FROM
-      (COALESCE(EXCLUDED.email, c.email), COALESCE(EXCLUDED.display_name, c.display_name), COALESCE(EXCLUDED.user_name, c.user_name))
-`
-
-type RecordContactClaimsParams struct {
-	MerchantID      uuid.UUID
-	CustomerID      uuid.UUID
-	Email           *string
-	DisplayName     *string
-	UserName        *string
-	ClaimsUpdatedAt *time.Time
-}
-
-// A verified token's claims, in one statement that writes nothing when
-// nothing changed: a new contact takes them; a known one only when they are
-// dated and newer than what it holds. An absent claim keeps its value.
-func (q *Queries) RecordContactClaims(ctx context.Context, arg RecordContactClaimsParams) error {
-	_, err := q.db.Exec(ctx, recordContactClaims,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Email,
-		arg.DisplayName,
-		arg.UserName,
-		arg.ClaimsUpdatedAt,
-	)
-	return err
-}
-
 const searchCustomerContacts = `-- name: SearchCustomerContacts :many
 SELECT merchant_id, customer_id, email, display_name, user_name, active, provisioned_at, directory_updated_at, created_at, updated_at FROM billing.customer_contacts c
 WHERE c.merchant_id = $1::uuid

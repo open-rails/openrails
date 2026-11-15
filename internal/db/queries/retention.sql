@@ -146,10 +146,6 @@ SELECT billing.ensure_month_partitions(sqlc.arg(table_name)::name, sqlc.arg(from
 -- name: DropMonthPartitions :one
 SELECT billing.drop_month_partitions(sqlc.arg(table_name)::name, sqlc.arg(before)::timestamptz)::int AS dropped;
 
--- name: ListMonthPartitions :many
-SELECT m.partition::text AS partition, m.range_from::timestamptz AS range_from, m.range_to::timestamptz AS range_to
-FROM billing.month_partitions(sqlc.arg(table_name)::name) m;
-
 -- Row retention. Each statement deletes one bounded batch, oldest first, of
 -- one merchant's rows past their period; the cleanup worker loops.
 

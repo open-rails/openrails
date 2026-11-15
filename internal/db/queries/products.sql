@@ -32,10 +32,6 @@ ORDER BY created_at DESC, id DESC;
 -- name: ListActiveProducts :many
 SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND NOT archived;
 
--- name: ListAllProducts :many
-SELECT * FROM billing.products
-WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL;
-
 -- name: ListProductsFiltered :many
 -- One keyset page, newest first: rows after (after_at, after_id).
 SELECT * FROM billing.products

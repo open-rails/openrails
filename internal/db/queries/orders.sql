@@ -71,10 +71,6 @@ INSERT INTO billing.order_lines (
 SELECT * FROM billing.orders
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
--- name: GetCustomerOrder :one
-SELECT * FROM billing.orders
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND id = sqlc.arg(id)::uuid;
-
 -- name: LockOrder :one
 SELECT * FROM billing.orders
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
