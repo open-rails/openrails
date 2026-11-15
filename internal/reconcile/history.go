@@ -31,18 +31,6 @@ type HistoryEvent struct {
 	OccurredAt   time.Time
 }
 
-// HistoryEventSource supplies the history evidence for the dunning forensics.
-// Implementations must be read-only and FAIL SOFT: the engine turns any error
-// into a note in the report, never a run failure.
-type HistoryEventSource interface {
-	// Configured reports whether the source can be queried at all.
-	// Unconfigured sources are noted in the report and skipped.
-	Configured() bool
-	// ListEvents returns the merchant's events for the given local rail
-	// names, oldest first. Zero since/until = unbounded on that side.
-	ListEvents(ctx context.Context, railNames []string, since, until time.Time) ([]HistoryEvent, error)
-}
-
 // historyEventLimit bounds one forensics read; deep history is the point, so
 // the cap is generous but finite.
 const historyEventLimit = 100000
@@ -54,7 +42,7 @@ type PGHistorySource struct {
 }
 
 // NewPGHistorySource wraps the Postgres dunning-history reader.
-func NewPGHistorySource(d *db.DB) HistoryEventSource {
+func NewPGHistorySource(d *db.DB) *PGHistorySource {
 	return &PGHistorySource{DB: d}
 }
 

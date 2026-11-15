@@ -78,11 +78,6 @@ func chargeAttributions(ctx context.Context, q *gen.Queries, merchantID, pspID u
 	return out, nil
 }
 
-// AttributionReader reads provider transactions by id.
-type AttributionReader interface {
-	TransactionReport(ctx context.Context, filter nmi.QueryFilter) (nmi.TransactionReport, error)
-}
-
 // AttributionResult counts one read of attributions.
 type AttributionResult struct{ Resolved, Unresolvable, Deferred int }
 
@@ -142,7 +137,7 @@ func PendingChargeAttributions(ctx context.Context, q *gen.Queries, merchantID u
 // Another rail's charge is left to a provider pull that reads it, and becomes
 // a finding once that pull has read past it, or at once when none does. A
 // failed read defers the PSP's rows with backoff.
-func ResolveChargeAttributions(ctx context.Context, database *db.DB, merchantID uuid.UUID, rows []gen.BillingProviderChargeAttribution, reader func(context.Context, uuid.UUID) (AttributionReader, error), pulled AttributionPull, now time.Time) (AttributionResult, error) {
+func ResolveChargeAttributions(ctx context.Context, database *db.DB, merchantID uuid.UUID, rows []gen.BillingProviderChargeAttribution, reader func(context.Context, uuid.UUID) (*nmi.NMIClient, error), pulled AttributionPull, now time.Time) (AttributionResult, error) {
 	var res AttributionResult
 	q := database.Gen(ctx)
 	psps, err := q.ListPSPsForMerchant(ctx, merchantID)

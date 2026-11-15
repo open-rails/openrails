@@ -11,15 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
-// ccbillDataLink is the slice of *ccbill.DataLinkClient the fetcher uses. Both
-// methods are DataLink batch READS (POST form to /data/main.cgi returning
-// CSV); DataLink has no mutation endpoints, so the fetcher is read-only by
-// construction.
-type ccbillDataLink interface {
-	FetchActiveMembers(ctx context.Context) ([]ccbill.CCBillRecord, error)
-	FetchTransactionExport(ctx context.Context, start, end time.Time, types []ccbill.DataLinkTxnType) ([]ccbill.DataLinkExportRow, error)
-}
-
 // CCBillFetcher pulls CCBill via DataLink batch exports: the ACTIVEMEMBERS
 // roster, and REBILL/CANCELLATION/EXPIRE/REFUND/CHARGEBACK over [Since,Until].
 // It has no vault read. A termination appears only inside its window, so
@@ -27,7 +18,7 @@ type ccbillDataLink interface {
 // no currency: the matched local record denominates them, never a default. The
 // roster has no server-side filter, so SubscriptionID narrows here.
 type CCBillFetcher struct {
-	DataLink ccbillDataLink
+	DataLink *ccbill.DataLinkClient
 }
 
 // NewCCBillFetcher builds a fetcher over an existing DataLink client.

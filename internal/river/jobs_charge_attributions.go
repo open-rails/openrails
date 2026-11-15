@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
@@ -58,7 +59,7 @@ func (w *ChargeAttributionWorker) Work(ctx context.Context, job *river.Job[recon
 			}
 		}
 		if len(due) > 0 {
-			if _, err := reconcile.ResolveChargeAttributions(ctx, w.DB, mid, due, func(ctx context.Context, psp uuid.UUID) (reconcile.AttributionReader, error) {
+			if _, err := reconcile.ResolveChargeAttributions(ctx, w.DB, mid, due, func(ctx context.Context, psp uuid.UUID) (*nmi.NMIClient, error) {
 				client, ok, err := w.NMIResolver.ResolveNMIClient(ctx, mid, &psp)
 				if err != nil || !ok || client == nil {
 					return nil, fmt.Errorf("psp %s: nmi client unavailable: %v", psp, err)

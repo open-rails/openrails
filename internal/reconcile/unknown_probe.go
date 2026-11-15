@@ -266,16 +266,10 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 	return snap
 }
 
-// CCBillStatusReader is the one SMS read the CCBill prober needs
-// (*ccbill.DataLinkClient satisfies it).
-type CCBillStatusReader interface {
-	ViewSubscriptionStatus(ctx context.Context, subscriptionID string) (ccbill.SubscriptionStatusResult, error)
-}
-
 // CCBillSubscriptionProber probes one CCBill subscription via DataLink's
 // per-record viewSubscriptionStatus. Read-only by construction.
 type CCBillSubscriptionProber struct {
-	Client CCBillStatusReader
+	Client *ccbill.DataLinkClient
 }
 
 func (p *CCBillSubscriptionProber) ProbeSubscription(ctx context.Context, subj ProbeSubject) (*RemoteSnapshot, error) {

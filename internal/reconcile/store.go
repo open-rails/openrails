@@ -85,31 +85,12 @@ type RunRecord struct {
 	Error          string          `json:"error,omitempty"`
 }
 
-// Store is the engine-facing persistence surface. The pg implementation runs
-// merchant-scoped; the unit-test fake is in-memory.
-type Store interface {
-	CreateRun(ctx context.Context, mode Mode, providers []Provider, since, until *time.Time) (uuid.UUID, error)
-	FinishRun(ctx context.Context, runID uuid.UUID, status string, summary []byte, runErr string) error
-	UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding) (FindingRecord, error)
-	// ListActionablePullFindings and AutoResolveVanished cover the pull
-	// findings of one PSP: a pass over one PSP proves nothing about another.
-	ListActionablePullFindings(ctx context.Context, pspID uuid.UUID) ([]FindingRecord, error)
-	AutoResolveVanished(ctx context.Context, pspID uuid.UUID, runID uuid.UUID, types []FindingType) (int64, error)
-	MarkFindingVanished(ctx context.Context, id uuid.UUID) error
-	MarkFindingAutoFixed(ctx context.Context, id uuid.UUID, resolutionEvidence map[string]any) error
-	// MarkFindingNotified stamps the dedupe linkage after a FindingNotifier
-	// pushes an operator notification for an open finding.
-	MarkFindingNotified(ctx context.Context, id uuid.UUID, at time.Time, severity Severity) error
-}
-
 // PGStore persists runs + findings via the sqlc layer on a merchant-pinned
 // connection.
 type PGStore struct {
 	DB  *db.DB
 	Now func() time.Time
 }
-
-var _ Store = (*PGStore)(nil)
 
 func (s *PGStore) now() time.Time {
 	if s.Now != nil {
