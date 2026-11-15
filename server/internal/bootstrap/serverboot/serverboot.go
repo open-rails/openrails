@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
 	"github.com/open-rails/openrails/server/internal/controlplane"
@@ -134,7 +135,7 @@ func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 		return nil, fmt.Errorf("read merchant manifest %s: %w", path, err)
 	}
 
-	overlays, err := bootstrap.ReadMerchantManifestOverlays(overlayPaths)
+	overlays, err := merchantbootstrap.ReadMerchantManifestOverlays(overlayPaths)
 	if err != nil {
 		return nil, err
 	}

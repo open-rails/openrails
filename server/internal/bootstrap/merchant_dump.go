@@ -51,7 +51,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	if err != nil {
 		return nil, err
 	}
-	return &BillingConfig{Version: BootstrapManifestVersion, Merchants: map[string]MerchantConfig{
+	return &BillingConfig{Version: merchantbootstrap.BootstrapManifestVersion, Merchants: map[string]MerchantConfig{
 		selected.Slug: {MerchantDeclaration: dumpDeclaration(set, selected.Slug)},
 	}}, nil
 }

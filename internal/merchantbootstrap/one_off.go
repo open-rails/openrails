@@ -126,7 +126,7 @@ func manifestEntry(ctx context.Context, directory *merchants.Service, merchantID
 		if err != nil {
 			return nil, err
 		}
-		if manifest, err = LoadMerchantConfigManifestWithOverlays(raw, overlays...); err != nil {
+		if manifest, err = LoadManifest(raw, overlays, CheckManifestDeclaration); err != nil {
 			return nil, fmt.Errorf("merchant manifest %s: %w", path, err)
 		}
 	}
