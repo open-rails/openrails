@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 288,
+  "scenario_count": 289,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -467,6 +467,11 @@
       "id": "OR-J20-S04",
       "journey": "J20",
       "name": "Foreign merchant and unsupported refund are refused with original currency and account intact"
+    },
+    {
+      "id": "OR-J20-S70",
+      "journey": "J20",
+      "name": "A dashboard refund lands from the reversals read while the full provider read cannot finish, and once"
     },
     {
       "id": "OR-J21-S01",

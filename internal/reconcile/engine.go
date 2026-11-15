@@ -107,6 +107,10 @@ type RunParams struct {
 	// Since/Until bound the transaction window passed to the fetchers.
 	Since time.Time
 	Until time.Time
+	// Reversals runs the reversals lane: only the window's refunds, voids and
+	// disputes are diffed. It proves no coverage and resolves only reversal
+	// findings it read again.
+	Reversals bool
 }
 
 // LocalMutationPolicy limits a pull's local mirror writes by mutation class.
@@ -448,11 +452,15 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		PspID:      binding.ID.String(),
 		Rail:       binding.Rail,
 		AccountID:  binding.AccountID,
+		Reversals:  params.Reversals,
 	})
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("fetch: %w", err)
 	}
 	snap.PspID = binding.ID.String()
+	if params.Reversals {
+		narrowToReversals(snap)
+	}
 	// Strip the absence proof when the pass did not read every active PSP on
 	// the rail, or a merchant with two NMI PSPs would have the unread one's
 	// whole book canceled as "absent from an exhaustive roster".
@@ -539,7 +547,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		}
 	}
 	recoveryErrors := map[string]error{}
-	if provider == ProviderNMI && params.Mode == ModeEnforce && params.Mutations.allowsInsert() && e.RecoverUsagePayment != nil {
+	if provider == ProviderNMI && params.Mode == ModeEnforce && params.Mutations.allowsInsert() && e.RecoverUsagePayment != nil && !params.Reversals {
 		known := make(map[string]bool, len(localPayments))
 		for _, payment := range localPayments {
 			known[payment.TransactionID] = true
@@ -585,7 +593,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	bindApplyActions(findings, binding.ID, runID)
 	findings = e.classifyProvenance(ctx, binding.ID, snap, findings)
 
-	if snap.Capabilities.Transactions {
+	if snap.Capabilities.Transactions && !params.Reversals {
 		history, historyNote := e.fetchHistory(ctx, provider, params)
 		rep.Dunning = computeDunningForensics(provider, snap, local, history, historyNote, now)
 	}
@@ -750,16 +758,21 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	// Auto-resolve: state-roster findings absent from this completed run
-	// vanished on their own.
-	resolvable := []FindingType{FindingPaymentMethodMismatch}
+	// vanished on their own. Card findings only when the vault was read.
+	var resolvable []FindingType
+	if snap.Capabilities.Vault {
+		resolvable = []FindingType{FindingPaymentMethodMismatch}
+	}
 	if snap.Coverage.SubscriptionsExhaustive {
 		resolvable = stateRosterFindingTypes
 	}
-	resolved, err := e.Store.AutoResolveVanished(ctx, binding.ID, runID, resolvable)
-	if err != nil {
-		return rep, records, planned, appliedChanges, fmt.Errorf("auto-resolve vanished findings: %w", err)
+	if len(resolvable) > 0 {
+		resolved, err := e.Store.AutoResolveVanished(ctx, binding.ID, runID, resolvable)
+		if err != nil {
+			return rep, records, planned, appliedChanges, fmt.Errorf("auto-resolve vanished findings: %w", err)
+		}
+		rep.AutoResolved = resolved
 	}
-	rep.AutoResolved = resolved
 
 	// Transaction windows may be keyed by provider modification time (NMI),
 	// not occurrence time. Only an actually returned transaction can qualify
@@ -777,7 +790,12 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			continue
 		}
 		switch rec.Type {
-		case FindingChargeMissingLocal, FindingRefundUnrecorded, FindingChargebackActiveSub, FindingReversalUnlinked:
+		case FindingRefundUnrecorded, FindingChargebackActiveSub, FindingReversalUnlinked:
+		case FindingChargeMissingLocal:
+			// A reversals read saw no sale: an NMI refund carries its sale's id.
+			if params.Reversals {
+				continue
+			}
 		default:
 			continue
 		}
@@ -796,6 +814,31 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	return rep, records, planned, appliedChanges, nil
+}
+
+// narrowToReversals makes a snapshot a reversals-lane read whatever its
+// fetcher returned: refunds, voids and disputes, with the sales they name kept
+// only as context for the alias check, no roster or vault, and no coverage
+// claim.
+func narrowToReversals(snap *RemoteSnapshot) {
+	named := map[string]bool{}
+	for _, t := range snap.Transactions {
+		if t.isReversal() {
+			named[decodeBreadcrumbs(t.Raw).Charge] = true
+			named[t.OriginalTransactionID] = true
+		}
+	}
+	delete(named, "")
+	var kept []RemoteTransaction
+	for _, t := range snap.Transactions {
+		if t.isReversal() || (t.Type == TransactionTypeSale && named[t.TransactionID]) {
+			kept = append(kept, t)
+		}
+	}
+	snap.Transactions, snap.ReversalsOnly = kept, true
+	snap.Subscriptions, snap.PaymentMethods = nil, nil
+	snap.Capabilities.Subscriptions, snap.Capabilities.Vault = false, false
+	snap.Coverage = SnapshotCoverage{}
 }
 
 // countStateOverwrites is how many of this pass's applies would OVERWRITE

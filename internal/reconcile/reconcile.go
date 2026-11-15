@@ -212,7 +212,10 @@ type RemotePaymentMethod struct {
 type RemoteSnapshot struct {
 	// BillsRecorded marks already committed invoice/settlement observations.
 	// Lifecycle-only evidence must never be written again as synthetic cash.
-	BillsRecorded  bool                  `json:"-"`
+	BillsRecorded bool `json:"-"`
+	// ReversalsOnly marks a reversals-lane read: its sales are context for
+	// the reversals, never diffed as receipts.
+	ReversalsOnly  bool                  `json:"-"`
 	Provider       Provider              `json:"provider"`
 	PspID          string                `json:"psp_id,omitempty"`
 	FetchedAt      time.Time             `json:"fetched_at"`
@@ -266,6 +269,20 @@ type FetchParams struct {
 	PspID     string
 	Rail      string
 	AccountID string
+	// Reversals reads only the window's refunds, voids and disputes: no
+	// roster, vault, charges or bills. A fetcher that cannot narrow may read
+	// more; the engine keeps only the reversals.
+	Reversals bool
+}
+
+// isReversal is a refund, void or dispute: money going back, which no
+// deadline probe backstops.
+func (t *RemoteTransaction) isReversal() bool {
+	switch t.Type {
+	case TransactionTypeRefund, TransactionTypeVoid, TransactionTypeChargeback:
+		return true
+	}
+	return false
 }
 
 func fetchObservedAt(params FetchParams) time.Time {
