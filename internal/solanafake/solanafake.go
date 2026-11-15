@@ -70,6 +70,8 @@ type Node struct {
 	token2022 map[string]*extensions
 	// forgotten signatures this node answers as unknown, for so many reads.
 	forgotten map[string]int
+	// drops is how many sent transactions this node acknowledges and drops.
+	drops int
 	// gate stalls every answer until it closes (Hold); stalled names each
 	// stalled method.
 	gate    chan struct{}
@@ -220,6 +222,29 @@ func (n *Node) Forget(sig string, reads int) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.forgotten[sig] = reads
+}
+
+// Drop makes the node acknowledge the next count sent transactions without
+// landing them, as a congested leader drops them. AdvanceBlocks expires them.
+func (n *Node) Drop(count int) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.drops = count
+}
+
+// dropped acknowledges a sent transaction the node drops.
+func (n *Node) dropped(encoded string) (solanago.Signature, bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.drops == 0 {
+		return solanago.Signature{}, false
+	}
+	tx, err := solanago.TransactionFromBase64(encoded)
+	if err != nil || len(tx.Signatures) == 0 || tx.VerifySignatures() != nil {
+		return solanago.Signature{}, false
+	}
+	n.drops--
+	return tx.Signatures[0], true
 }
 
 // forgets consumes one forgotten read of sig; n.mu held.
@@ -956,7 +981,9 @@ func (n *Node) serve(w http.ResponseWriter, r *http.Request) {
 		if len(req.Params) > 0 {
 			_ = json.Unmarshal(req.Params[0], &encoded)
 		}
-		if sig, err := n.send(encoded); err != nil {
+		if sig, ok := n.dropped(encoded); ok {
+			reply["result"] = sig.String()
+		} else if sig, err := n.send(encoded); err != nil {
 			reply["error"] = map[string]any{"code": -32002, "message": err.Error()}
 		} else {
 			reply["result"] = sig.String()

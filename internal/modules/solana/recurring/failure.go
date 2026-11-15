@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 )
 
 // operationalSignatures are case-insensitive substrings of crank errors that are
@@ -52,9 +54,9 @@ func IsOperationalFailure(err error) bool {
 		return true
 	}
 	// A pull no listed cranker can sign is the deployment's problem, never
-	// the subscriber's.
+	// the subscriber's. So is one the cluster dropped: it expired unseen.
 	var changed *CrankerKeyChangedError
-	if errors.Is(err, ErrUnheldPlan) || errors.Is(err, ErrNoCranker) || errors.As(err, &changed) {
+	if errors.Is(err, ErrUnheldPlan) || errors.Is(err, ErrNoCranker) || errors.As(err, &changed) || errors.Is(err, solanaint.ErrTransactionExpired) {
 		return true
 	}
 	msg := strings.ToLower(crankErrorCause(err).Error())

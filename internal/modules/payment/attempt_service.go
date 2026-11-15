@@ -657,6 +657,9 @@ func (s *OrderAttemptService) buildSolanaSubscribeTransaction(ctx context.Contex
 		Treasury:         getStringField(session.RailState, "treasury"),
 		Reference:        reference,
 	})
+	if errors.Is(err, solana.ErrCosignerPays) {
+		return nil, fmt.Errorf("%w: %v", ErrOrderAttemptValidation, err)
+	}
 	if err != nil {
 		return nil, err
 	}
