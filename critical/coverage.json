@@ -714,7 +714,7 @@
       "name": "NMI receipts that name their card export and restore verbatim"
     },
     {
-      "id": "OR-J31-S07",
+      "id": "OR-J31-S11",
       "journey": "J31",
       "name": "An archive written before the unread tables and columns were dropped still restores"
     },

@@ -315,7 +315,7 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "5454", *payment.Card.Last4)
 	})
-	t.Run("OR-J31-S07/an-archive-written-before-the-unread-schema-was-dropped-restores", func(t *testing.T) {
+	t.Run("OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores", func(t *testing.T) {
 		actor, provider := newPaymentWorld(t)
 		source := actor.world
 		status, raw := actor.request(t, "POST", "/v1/me/orders", actor.aliceToken, saleInput(t, actor, provider), map[string]string{"Idempotency-Key": "archive-before-drops"})

@@ -470,8 +470,8 @@
     "OR-J31-S06": [
       "TestBillingArchive/OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book"
     ],
-    "OR-J31-S07": [
-      "TestBillingArchive/OR-J31-S07/an-archive-written-before-the-unread-schema-was-dropped-restores"
+    "OR-J31-S11": [
+      "TestBillingArchive/OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores"
     ],
     "OR-J32-S01": [
       "TestMerchantHost/OR-J32-S01/provision-find-list-rename-retains-identity"
