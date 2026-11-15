@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 293,
+  "scenario_count": 294,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -982,6 +982,11 @@
       "id": "OR-J38-S13",
       "journey": "J38",
       "name": "A provider answer no attempt can read fails the import after five attempts with its error, deletable"
+    },
+    {
+      "id": "OR-J38-S42",
+      "journey": "J38",
+      "name": "An NMI import lands each schedule in its mapped price's currency, NMI's decimal read exactly (1000.00 as 1000 JPY, 12.50 as 12.50 EUR); an amount not exact in that currency or a plan with no price stays blocked; a book's schedule in another currency than its price's is refused"
     },
     {
       "id": "OR-J38-S30",
