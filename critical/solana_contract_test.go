@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
@@ -396,6 +398,31 @@ func TestSolanaContracts(t *testing.T) {
 			require.NoError(t, err)
 		}
 		require.Eventually(t, func() bool { return s.wire.read(sig) }, 20*time.Second, 20*time.Millisecond, "replacement must know the exact signature written before the original send")
+		// The read is seen on arrival. The verdict schedules the next read from
+		// the clock at the instant it is recorded, so it is recorded before the
+		// transaction lands and the clock moves.
+		operations := pgx.Identifier{s.schema, "provider_intents"}.Sanitize()
+		t.Cleanup(func() {
+			if !t.Failed() {
+				return
+			}
+			var state string
+			err := s.pool.QueryRow(context.Background(), "SELECT format('status=%s attempts=%s next_attempt_at=%s lease_expires_at=%s reason=%s', status, attempts, next_attempt_at, lease_expires_at, last_failure_reason) FROM "+operations+" WHERE intent_type = 'solana_pull' ORDER BY created_at, id LIMIT 1").Scan(&state)
+			t.Logf("pull operation at %s: %s (%v)", s.clock.Now().UTC().Format(time.RFC3339), state, err)
+			wakes, err := queue.JobList(context.Background(), river.NewJobListParams().Kinds("openrails.provider_operation").First(100))
+			if err != nil {
+				t.Logf("pull operation jobs: %v", err)
+				return
+			}
+			for _, job := range wakes.Jobs {
+				t.Logf("pull operation job %d: state=%s attempt=%d scheduled_at=%s", job.ID, job.State, job.Attempt, job.ScheduledAt.UTC().Format(time.RFC3339))
+			}
+		})
+		require.Eventually(t, func() bool {
+			var unresolved bool
+			err := s.pool.QueryRow(t.Context(), "SELECT status = 'unknown_needs_verify' AND lease_expires_at IS NULL AND last_failure_reason = 'recorded pull signature still unresolved' FROM "+operations+" WHERE intent_type = 'solana_pull' ORDER BY created_at, id LIMIT 1").Scan(&unresolved)
+			return err == nil && unresolved
+		}, 20*time.Second, 20*time.Millisecond, "replacement must record the unresolved signature before it lands")
 		require.Equal(t, beforeSends+1, s.wire.sends(), "unknown signature is not permission to submit another pull")
 		landedAt := s.clock.Now()
 		landed, err := s.node.Land(tx, landedAt)
