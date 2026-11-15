@@ -664,7 +664,7 @@
       "name": "Callback during active fetch causes a durable follow-up observation"
     },
     {
-      "id": "OR-J28-S06",
+      "id": "OR-J28-S08",
       "journey": "J28",
       "name": "A thin Stripe event is read back from Stripe at its object's canonical URL and settles once, like its snapshot"
     },
@@ -719,7 +719,7 @@
       "name": "NMI receipts that name their card export and restore verbatim"
     },
     {
-      "id": "OR-J31-S07",
+      "id": "OR-J31-S09",
       "journey": "J31",
       "name": "A paid Stripe hosted-page order exports and restores with its attempt's Checkout Session state"
     },

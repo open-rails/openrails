@@ -435,8 +435,8 @@
     "OR-J28-S05": [
       "TestCallbackContracts/OR-J28-S05/callback-during-fetch-keeps-a-follow-up-until-new-evidence-is-read"
     ],
-    "OR-J28-S06": [
-      "TestCallbackContracts/OR-J28-S06/a-thin-checkout-session-event-hydrates-and-settles-its-order"
+    "OR-J28-S08": [
+      "TestCallbackContracts/OR-J28-S08/a-thin-checkout-session-event-hydrates-and-settles-its-order"
     ],
     "OR-J29-S01": [
       "TestProcessRecovery/OR-J29-S01"
@@ -473,8 +473,8 @@
     "OR-J31-S06": [
       "TestBillingArchive/OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book"
     ],
-    "OR-J31-S07": [
-      "TestBillingArchive/OR-J31-S07/a-paid-stripe-hosted-page-order-moves-with-the-book"
+    "OR-J31-S09": [
+      "TestBillingArchive/OR-J31-S09/a-paid-stripe-hosted-page-order-moves-with-the-book"
     ],
     "OR-J32-S01": [
       "TestMerchantHost/OR-J32-S01/provision-find-list-rename-retains-identity"

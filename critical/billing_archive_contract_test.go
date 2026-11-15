@@ -268,7 +268,7 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "5454", *payment.Card.Last4)
 	})
-	t.Run("OR-J31-S07/a-paid-stripe-hosted-page-order-moves-with-the-book", func(t *testing.T) {
+	t.Run("OR-J31-S09/a-paid-stripe-hosted-page-order-moves-with-the-book", func(t *testing.T) {
 		source, provider := newPaymentWorld(t)
 		provider.core.SendWebhooksTo(source.server.URL+"/v1/webhooks/stripe/acct_e2e", "whsec_critical_fixture")
 		sale := saleInput(t, source, provider)

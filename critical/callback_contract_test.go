@@ -304,7 +304,7 @@ func TestCallbackContracts(t *testing.T) {
 		}
 		require.Equal(t, settled.Payment.PaymentID, settledSale(t, a, p, order.ID).Payment.PaymentID)
 	})
-	t.Run("OR-J28-S06/a-thin-checkout-session-event-hydrates-and-settles-its-order", func(t *testing.T) {
+	t.Run("OR-J28-S08/a-thin-checkout-session-event-hydrates-and-settles-its-order", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) {
 			m := w.cfg.Merchants["alpha"]
 			psp := m.PSPs["stripe"]
