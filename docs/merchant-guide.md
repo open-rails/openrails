@@ -343,6 +343,13 @@ completion. The amount, reason, and revocation choice are immutable for an
 creates a new operation, including an equal-sized partial refund within the
 remaining balance or a retry after a definitive refusal.
 
+A refund or chargeback of a payment that bought credit returns the order's
+credit line first, up to that line's amount; only that part withdraws credit.
+For 25 credits at $10 beside a $90 product, a $5 refund withdraws 12.5 credits;
+once $10 is refunded all 25 are gone, and the remaining $90 withdraws none.
+OpenRails issues no refund whose credit is spent or held. A pending refund holds
+its credit, and a won dispute restores what its chargeback withdrew.
+
 For NMI and CCBill, a lost response without an exact captured operation receipt
 requires operator verification. The system retains the reservation and never
 infers success from an equal refund amount or subscription counters. Check the

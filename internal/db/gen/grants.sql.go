@@ -1337,7 +1337,7 @@ SELECT g.id, g.amount, g.ends_at,
         WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
           AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_refund', 'credit_refund_restore')
     ), 0) - COALESCE((
-        SELECT ceil(g.amount::numeric * sum(-refund.amount) / payment.amount)
+        SELECT ceil(g.amount::numeric * LEAST(sum(-refund.amount), (g.spec_snapshot->'deposit'->>'paid_amount')::numeric) / (g.spec_snapshot->'deposit'->>'paid_amount')::numeric)
         FROM billing.payments refund JOIN billing.payments payment
           ON payment.merchant_id=g.merchant_id AND payment.id=g.payment_id AND payment.deleted_at IS NULL
         WHERE refund.merchant_id=g.merchant_id AND refund.customer_id=g.customer_id
@@ -1374,7 +1374,8 @@ type ListSpendableCreditLotsRow struct {
 }
 
 // ListSpendableCreditLots: live (started, unexpired, non-terminated) credit lots
-// with their remainder, less the share a pending refund reserves. FIFO:
+// with their remainder, less the share a pending refund reserves: refunds
+// return the credit line's paid amount first. FIFO:
 // soonest expiry first. A running charge's posting through an instant draws
 // the lots that had not lapsed just before it (live_at).
 func (q *Queries) ListSpendableCreditLots(ctx context.Context, arg ListSpendableCreditLotsParams) ([]ListSpendableCreditLotsRow, error) {
