@@ -449,7 +449,7 @@ func PspID(rail, environment, accountID string) uuid.UUID {
 // good. A merchant's own live and non-live PSPs may share an account.
 //
 // #824: the ownership question is global by definition, so it goes through the
-// cross-merchant directory function (migration 0016). Reading psps directly on
+// cross-merchant directory lookup (resolvePSPOwner). Reading psps directly on
 // q could only ever see the caller's OWN merchant, which made this assertion
 // pass unconditionally — the only thing still catching a hijack was UpsertPSP's
 // `ON CONFLICT … WHERE psps.merchant_id = EXCLUDED.merchant_id`, and it reports

@@ -309,7 +309,7 @@ type BillingDashboardConfig struct {
 type BillingDestructiveAction struct {
 	MerchantID        uuid.UUID
 	ID                uuid.UUID
-	AdmissionSequence *int64
+	AdmissionSequence int64
 	Kind              string
 	Target            string
 	ActionKey         string
@@ -374,6 +374,8 @@ type BillingDestructiveRunBeforeImage struct {
 	// When the reverse replayed this image. NULL after a completed reversal means the image was captured as evidence but deliberately never replayed: entitlement rows are RECOMPUTED from the append-only grant log by Converge, never restored. Restoring one directly could make it disagree with its grant, which recomputation cannot.
 	RestoredAt          *time.Time
 	DestructiveRunClass string
+	// The subscription's lifecycle_rev right after the run's write. The reverse restores the row only while lifecycle_rev still equals it; NULL (an access image, or a write the run never sealed) is never restored.
+	AfterLifecycleRev *int64
 }
 
 type BillingEventLog struct {
@@ -763,6 +765,12 @@ type BillingNmiHistoryRead struct {
 	ReadAt     time.Time
 }
 
+// Financial archive restore blocks inbox publication until explicit notification ordering-state adoption. No implicit revision reset.
+type BillingNotificationChannelState struct {
+	MerchantID      uuid.UUID
+	RestoreRequired bool
+}
+
 // Internal notification emission and deduplication journal; the public feed is event_log. Retention: rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers.
 type BillingNotificationEvent struct {
 	MerchantID uuid.UUID
@@ -772,6 +780,16 @@ type BillingNotificationEvent struct {
 	Data       []byte
 	CreatedAt  time.Time
 	InsertedAt time.Time
+}
+
+// Producer ordering for exact account-notification identities. No inbox payload, read state, event cursor, or delivery queue. Retained until customer deletion so delayed publication cannot revive resolved issues.
+type BillingNotificationIssueRevision struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	IssueKey    string
+	Revision    int64
+	Withdrawn   bool
+	SourceEvent *uuid.UUID
 }
 
 // One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from order_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
@@ -1834,7 +1852,8 @@ type BillingSubscription struct {
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 	// Copied from products.tier_group by trg_subscriptions_set_tier_group. Backs subscriptions_customer_id_tier_group_key: one live subscription per (customer, tier group). Regrouping is refused while the product has a live plan change.
-	TierGroup           *string
+	TierGroup *string
+	// Set while the provider schedule of a canceled subscription may still bill: from the local cancel until its stop intent verifies the schedule gone. Holds the customer's product and tier-group slot. On NMI it is also when the deferred delete runs.
 	DeletionScheduledAt *time.Time
 	MerchantID          uuid.UUID
 	CustomerID          uuid.UUID

@@ -9,14 +9,9 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 )
 
-// AccessCutoverPreflight is the review step of the cutover from per-key
-// entitlement windows to product access. New refuses to boot while the cutover
-// would change a customer's access no one approved, so a host runs this first.
-// It applies the earlier migrations through db, dry-runs the cutover for every
-// merchant in database.Schema and reports each customer's keys lost or gained,
-// unmapped windows and mixed-duration purchases. An empty approvedBy is a dry
-// run; otherwise the listed changes are approved by that name and the cutover
-// applies exactly them. It fails once the cutover has run.
+// AccessCutoverPreflight reviewed the cutover from per-key entitlement windows
+// to product access. The baseline schema already holds product access, so it
+// always fails, saying so.
 func AccessCutoverPreflight(ctx context.Context, db *pgxpool.Pool, database DatabaseConfig, approvedBy string) (*billing.AccessCutoverReport, error) {
 	report, err := engine.AccessCutoverPreflight(ctx, db, Config{Database: database}, approvedBy)
 	if err != nil {

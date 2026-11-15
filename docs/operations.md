@@ -111,8 +111,10 @@ processes. There is no instance count, primary or sticky session.
   serving: one instance migrates, the rest wait. Migrations are additive, so the
   previous build runs on the migrated schema. `openrails migrate up` can run
   first as a deploy step; `openrails migrate status` compares the applied ledger
-  with the binary's. From v1 every release upgrades any earlier v1 database in
-  place ([compatibility](compatibility.md)).
+  with the binary's. The schema is one baseline migration: a database built by
+  an earlier release's numbered migrations is not upgraded, recreate it. From v1
+  every release upgrades any earlier v1 database in place
+  ([compatibility](compatibility.md)).
 
 ## Safety levers
 
@@ -247,7 +249,6 @@ server or workers, and keep standard output parseable.
 | `ledger-audit --merchant=id:<uuid>` | check ledger conservation and counters; non-zero on a finding. There is no scheduled audit |
 | `nmi decline-report --merchant --since [--until] [--psp]` | read-only NMI decline baseline by month and reason |
 | `solana-pay resolve --merchant --signature --resolution` | close a reviewed Solana Pay receipt |
-| `access-cutover preflight [--approve NAME]` | list and approve the access changes the product-access cutover migration makes |
 | `workers [--json]` | job health from River's tables |
 
 A private standalone first run, as an init job:

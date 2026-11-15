@@ -55,11 +55,24 @@ schema matches the migrations: `SQLC_DATABASE_URL`, or `task sqlc` creates a
 throwaway `openrails_sqlc_vet` database on the local stack
 (`SQLC_ADMIN_DATABASE_URL`, `POSTGRES_HOST_PORT`, `SQLC_VET_DB` override it).
 
-`0001_schema.up.sql` is the baseline; a schema change is a new numbered migration
-with its `api/schema.txt` diff. A database the current chain does not match is
-refused at boot: recreate it (`task docker-reset`; `DROP DATABASE` elsewhere; for
-an embedded host, drop the schema and delete its rows from `public.migrations`
-where `app = 'openrails'`).
+`internal/migrate/postgres/0001_schema.up.sql` is the whole schema, written by
+hand: tables in foreign-key order, each followed by its comments, indexes,
+triggers and the trigger functions only it uses. After v1.0.0 it does not
+change: a schema change is a new numbered migration (`0002_…`) with its
+`api/schema.txt` diff.
+
+Before v1 a merged migration is folded into the baseline: apply its effect where
+the objects it touches are defined, delete the numbered file and take it out of
+`sqlc.yaml`. CI's "SQL bindings and query audit" job proves the fold: when a
+pull request changes or removes a migration of its base, `go run
+./scripts/schemaproof` applies the base's chain and the tree's to empty
+databases and fails unless they dump identically (`pg_dump` 18), in `billing`
+and in another schema.
+
+A database the current chain does not match is refused at boot, one built by
+the numbered migrations the baseline replaced included: recreate it
+(`task docker-reset`; `DROP DATABASE` elsewhere; for an embedded host, drop the
+schema and delete its rows from `public.migrations` where `app = 'openrails'`).
 
 ## Contracts
 

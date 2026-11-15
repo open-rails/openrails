@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 335,
+  "scenario_count": 334,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -907,11 +907,6 @@
       "id": "OR-J01-S16",
       "journey": "J01",
       "name": "Host customer admission policy preserves original proof and fixed billing scope ceilings"
-    },
-    {
-      "id": "OR-J31-S05",
-      "journey": "J31",
-      "name": "Hosted account removal refuses ambiguous or populated legacy state and preserves transferred reader progress"
     },
     {
       "id": "OR-J22-S05",

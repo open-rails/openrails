@@ -230,6 +230,25 @@ jobs:
         with:
           name: regenerated-contracts
           path: ${{ runner.temp }}/regenerated-contracts.patch
+      # A pull request that rewrites the migrations (a fold into the baseline)
+      # must build the database its base's chain builds: identical pg_dump
+      # output in billing and in a relocated schema. pg_dump 18 is the server
+      # container's.
+      - name: Rewritten migrations build the base's schema
+        if: ${{ !cancelled() && needs.scope.outputs.base_sha != '' }}
+        env:
+          BASE_SHA: ${{ needs.scope.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          # Only added files: the chain grew, and nothing applied was rewritten.
+          if [[ -z "$(git diff --name-only --diff-filter=a "$BASE_SHA" HEAD -- internal/migrate/postgres)" ]]; then
+            echo 'No migration of the base was changed or removed.'
+            exit 0
+          fi
+          go run ./scripts/schemaproof -ref "$BASE_SHA" \
+            -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' \
+            -pg-dump 'docker exec critical-postgres pg_dump'
 
   # The light tier's browser check; the full tier builds these inside critical.
   browser:

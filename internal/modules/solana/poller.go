@@ -25,7 +25,7 @@ const (
 	// solanaPayPollInterval floors a wait for a reference that is due but held by another
 	// replica's pass, so the poller never spins on it.
 	solanaPayPollInterval = 500 * time.Millisecond
-	// wakeChannel is where a reference added or rescheduled says so (migration 0203).
+	// wakeChannel is where a reference added or rescheduled says so (trigger solana_pay_references_wake).
 	wakeChannel = "openrails_solana_pay:"
 	// pollBatch bounds one replica's claim per tick; pollLease is how long a
 	// claimed reference stays with this replica if it dies mid-read.
