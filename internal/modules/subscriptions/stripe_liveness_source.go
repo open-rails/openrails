@@ -74,8 +74,6 @@ type StripeLivenessProber interface {
 type HTTPStripeLivenessProber struct {
 	SecretKey  string
 	HTTPClient *http.Client
-	// BaseURL overrides https://api.stripe.com for tests.
-	BaseURL string
 }
 
 // NewStripeLivenessProber builds a prober from the ctx merchant's armed
@@ -232,15 +230,11 @@ func (p *HTTPStripeLivenessProber) ProbeSubscription(ctx context.Context, railSu
 		// keeps any future mutation on this path failing loudly at the choke.
 		client = stripeapi.ReadOnlyClient(30 * time.Second)
 	}
-	base := strings.TrimRight(p.BaseURL, "/")
-	if base == "" {
-		base = "https://api.stripe.com"
-	}
 
 	values := url.Values{}
 	values.Add("expand[]", "latest_invoice")
 	values.Add("expand[]", "latest_invoice.payments")
-	reqURL := base + "/v1/subscriptions/" + url.PathEscape(id) + "?" + values.Encode()
+	reqURL := stripeapi.APIBase + "/v1/subscriptions/" + url.PathEscape(id) + "?" + values.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return StripeLivenessRecord{}, err

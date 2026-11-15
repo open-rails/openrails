@@ -31,8 +31,6 @@ import (
 // default_payment_method, not an N+1 /v1/payment_methods sweep.
 type StripeFetcher struct {
 	SecretKey string
-	// BaseURL defaults to https://api.stripe.com; overridable for tests.
-	BaseURL string
 	// HTTPClient defaults to stripeapi.ReadOnlyClient.
 	HTTPClient *http.Client
 	// PageLimit is the per-page list size (default and Stripe max: 100).
@@ -99,7 +97,7 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		snap.Transactions = append(snap.Transactions, normalizeStripeCharge(obj))
 	}
 
-	reader := &subscriptions.HTTPStripeLivenessProber{SecretKey: f.SecretKey, BaseURL: f.BaseURL, HTTPClient: f.client()}
+	reader := &subscriptions.HTTPStripeLivenessProber{SecretKey: f.SecretKey, HTTPClient: f.client()}
 	for _, subscription := range snap.Subscriptions {
 		if err := reader.VisitSubscriptionBills(ctx, subscription.RailSubscriptionID, func(bill subscriptions.StripeBill) error {
 			if bill.CustomerID != subscription.CustomerID {
@@ -138,13 +136,6 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 	}
 
 	return snap, nil
-}
-
-func (f *StripeFetcher) baseURL() string {
-	if f.BaseURL != "" {
-		return strings.TrimRight(f.BaseURL, "/")
-	}
-	return "https://api.stripe.com"
 }
 
 func (f *StripeFetcher) client() *http.Client {
@@ -268,7 +259,7 @@ func (f *StripeFetcher) StripeGet(ctx context.Context, path string) (json.RawMes
 }
 
 func (f *StripeFetcher) getStatus(ctx context.Context, pathAndQuery string) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.baseURL()+pathAndQuery, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stripeapi.APIBase+pathAndQuery, nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -594,5 +585,5 @@ func StripeCharges(charges, refunds []json.RawMessage) []RemoteTransaction {
 
 // Bills is the fetcher's invoice reader.
 func (f *StripeFetcher) Bills() *subscriptions.HTTPStripeLivenessProber {
-	return &subscriptions.HTTPStripeLivenessProber{SecretKey: f.SecretKey, BaseURL: f.BaseURL, HTTPClient: f.client()}
+	return &subscriptions.HTTPStripeLivenessProber{SecretKey: f.SecretKey, HTTPClient: f.client()}
 }

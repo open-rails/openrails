@@ -220,7 +220,7 @@ func (s *StripeService) CreateEnginePayment(ctx context.Context, p StripeEngineP
 	for key, value := range p.metadata() {
 		v.Set("metadata["+key+"]", value)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, scoped.stripeBaseURL()+"/v1/payment_intents", strings.NewReader(v.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stripeapi.APIBase+"/v1/payment_intents", strings.NewReader(v.Encode()))
 	if err != nil {
 		return StripeEnginePaymentResult{}, fmt.Errorf("%w: %v", charge.ErrNotDispatched, err)
 	}

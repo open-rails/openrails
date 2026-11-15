@@ -91,9 +91,6 @@ type WebhookDispatcher struct {
 	// ObserveEnqueuer schedules the read of a catalog object a Stripe
 	// product.* or price.* event names.
 	ObserveEnqueuer ProviderObjectObserveEnqueuer
-	// StripePaymentStateReaderFactory is a test seam for exact-account provider
-	// reads. Production leaves it nil and uses the HTTP reader.
-	StripePaymentStateReaderFactory func(secretKey string) payments.StripePaymentStateReader
 }
 
 // webhookRegistry resolves WebhookHandlers by rail: adding a rail means
@@ -213,18 +210,9 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		if proc == nil || proc.Stripe == nil || strings.TrimSpace(proc.Stripe.SecretKey) == "" {
 			return fmt.Errorf("stripe webhook rejected: routed account %q has no secret key", event.PspID)
 		}
-		factory := d.StripePaymentStateReaderFactory
-		if factory == nil {
-			factory = func(secretKey string) payments.StripePaymentStateReader {
-				reader := payments.NewHTTPStripePaymentStateReader(secretKey)
-				reader.HTTPClient = d.StripeClients.ReadOnlyClient(0)
-				return reader
-			}
-		}
-		paymentState = factory(proc.Stripe.SecretKey)
-		if paymentState == nil {
-			return fmt.Errorf("stripe webhook rejected: payment-state reader is not configured")
-		}
+		reader := payments.NewHTTPStripePaymentStateReader(proc.Stripe.SecretKey)
+		reader.HTTPClient = d.StripeClients.ReadOnlyClient(0)
+		paymentState = reader
 	}
 	service := StripeWebhookService{
 		DB:                           d.DB,

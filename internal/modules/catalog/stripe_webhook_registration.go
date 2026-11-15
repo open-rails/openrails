@@ -35,7 +35,6 @@ type ManagedStripeWebhookParams struct {
 	PspID               string
 	SecretKey           string
 	EnabledEvents       []string
-	StripeBaseURL       string
 	// Now overrides the rollover clock (tests). Zero = time.Now().
 	Now time.Time
 	// AllowRetire lets this pass DELETE endpoints that a successor replaced
@@ -164,7 +163,7 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 	}
 
 	rails := railresolve.FixedSet{"stripe": &config.ResolvedPSP{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
-	svc := &StripeCatalogService{StripeClients: p.StripeClients, Config: p.Config, Rails: rails, BaseURL: p.StripeBaseURL}
+	svc := &StripeCatalogService{StripeClients: p.StripeClients, Config: p.Config, Rails: rails}
 	var publish func(context.Context, string, string) error
 	if writable {
 		publish = p.Publication.Publish

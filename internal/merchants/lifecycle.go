@@ -92,15 +92,6 @@ type Service struct {
 	// fakeProviders are the fake providers wired beside this deployment's
 	// PSPs: with any, a live PSP is refused.
 	fakeProviders []string
-	// nmiProbeV5BaseURL is a test-only seam: overrides the base URL the
-	// arm-time environment probe (verifyNMIEnvironment) hits, so tests can
-	// point it at a fake gateway instead of the real NMI API. Empty in
-	// production — the probe uses nmi.NewClient's documented default.
-	nmiProbeV5BaseURL string
-	// Credential-probe endpoint overrides are test-only seams for the
-	// read-only NMI Query API and CCBill DataLink checks.
-	nmiCredentialProbeQueryURL   string
-	ccbillCredentialProbeBaseURL string
 	// nmiWire points credential probes at the runtime's NMI gateway and
 	// transport, as every NMI client it builds.
 	nmiWire func(*nmi.NMIClient)

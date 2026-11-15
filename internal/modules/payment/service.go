@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -82,9 +81,6 @@ type PurchaseService struct {
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
 	// one from Config.
 	NMIClients *railresolve.NMIFactory
-	// ResolveNMIClientOverride replaces the store-armed NMI client resolution
-	// entirely (test seam; nil = the scoped resolution).
-	ResolveNMIClientOverride func(context.Context, string) (*nmi.NMIClient, error)
 	// StripeEngines reads a Stripe engine payment's issuer challenge for the
 	// customer's next action.
 	StripeEngines intents.StripeEngineServiceResolver

@@ -37,18 +37,6 @@ type CollectionAdapterResolver interface {
 	ResolveCollectionAdapter(ctx context.Context, method gen.BillingPaymentMethod, psp uuid.UUID) (CollectionAdapter, bool, error)
 }
 
-// CollectionEndpoints overrides provider base URLs on store-armed collection
-// clients — a test seam for fake provider HTTP servers. Zero value = real.
-type CollectionEndpoints struct {
-	StripeBaseURL string
-	NMIV5BaseURL  string
-	// Classic NMI endpoints (manual-rebill leg: Direct Post + Query API).
-	NMIDirectPostURL string
-	NMIQueryURL      string
-	// BTBaseURL points store-armed Basis Theory clients at a fake server.
-	BTBaseURL string
-}
-
 // CollectionPlane is the runtime-facing per-merchant credential resolver
 // surface: store-armed collection adapters, raw NMI clients and the
 // reconciliation reads for in-doubt collection operations.
@@ -79,9 +67,8 @@ type MerchantCollectionAdapterBuilder struct {
 	Config               *config.Config
 	DB                   *db.DB
 	MerchantsFn          func() *merchants.Service
-	Endpoints            CollectionEndpoints
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
-	// one from Config and Endpoints.
+	// one from Config.
 	NMIClients *railresolve.NMIFactory
 }
 
@@ -103,18 +90,12 @@ func (b *MerchantCollectionAdapterBuilder) nmiArmer() *railresolve.NMIArmer {
 	return &railresolve.NMIArmer{Config: b.Config, DB: b.DB, MerchantsFn: b.MerchantsFn, Factory: b.nmiFactory()}
 }
 
-// nmiFactory is the runtime's shared factory; this builder's own endpoint
-// overrides (test seams) bind a copy with the same wire.
+// nmiFactory is the runtime's shared factory.
 func (b *MerchantCollectionAdapterBuilder) nmiFactory() *railresolve.NMIFactory {
-	endpoints := railresolve.NMIEndpoints{V5BaseURL: b.Endpoints.NMIV5BaseURL, DirectPostURL: b.Endpoints.NMIDirectPostURL, QueryURL: b.Endpoints.NMIQueryURL}
-	if b.NMIClients != nil && endpoints == (railresolve.NMIEndpoints{}) {
+	if b.NMIClients != nil {
 		return b.NMIClients
 	}
-	factory := &railresolve.NMIFactory{Config: b.Config, Endpoints: endpoints}
-	if b.NMIClients != nil {
-		factory.Transport = b.NMIClients.Transport
-	}
-	return factory
+	return &railresolve.NMIFactory{Config: b.Config}
 }
 
 // nmiProxyPosture is the posture identity of scope's gateway credential
@@ -252,9 +233,6 @@ func (b *MerchantCollectionAdapterBuilder) stripeService(ctx context.Context, sv
 	}
 	service := subscriptions.NewAccountStripeService(b.Config, mid.UUID(), scope.ID, scope.AccountID, secretKey)
 	service.StripeClients = b.StripeClients
-	if b.Endpoints.StripeBaseURL != "" {
-		service.SetBaseURLForTest(b.Endpoints.StripeBaseURL)
-	}
 	return service, nil
 }
 

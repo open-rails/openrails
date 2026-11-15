@@ -187,9 +187,6 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 		if client.LoopbackFixture && !client.Live() {
 			return true
 		}
-		if r.NMIPostureV5BaseURL != "" {
-			client.V5BaseURL = r.NMIPostureV5BaseURL
-		}
 		status, check = client.VerifyPosture(ctx), client.PostureCheck()
 	case string(models.RailStripe):
 		secret, err := pspSecret(ctx, svc, mid, scope, "secret_key")

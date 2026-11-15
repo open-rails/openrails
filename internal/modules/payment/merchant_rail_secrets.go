@@ -318,9 +318,6 @@ func (s *PurchaseService) stampPSP(ctx context.Context, name string) context.Con
 // name (account key or bare rail): the resolved account's security_key. Fail
 // closed — a missing scope/secret errors; there is no boot-config fallback.
 func (s *PurchaseService) resolveNMIClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
-	if s.ResolveNMIClientOverride != nil {
-		return s.ResolveNMIClientOverride(ctx, provider)
-	}
 	if !s.scopedProviderSecretsEnabled() {
 		return nil, fmt.Errorf("merchant rail resolution is not configured")
 	}

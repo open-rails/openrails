@@ -41,13 +41,11 @@ type RailPaymentMethodService struct {
 	MerchantSecrets      merchants.MerchantSecretReader
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
 	// one from Config.
-	NMIClients *railresolve.NMIFactory
-	// BTBaseURLOverride redirects platform card removal to a test server.
-	BTBaseURLOverride string
-	ProviderSecrets   merchants.PSPSecretResolver
-	ProviderScopes    merchants.PSPScopeResolver
-	Config            *config.Config
-	DB                *db.DB
+	NMIClients      *railresolve.NMIFactory
+	ProviderSecrets merchants.PSPSecretResolver
+	ProviderScopes  merchants.PSPScopeResolver
+	Config          *config.Config
+	DB              *db.DB
 	// DeleteIntents routes DeletePaymentMethod through the durable nmi_vault_delete
 	// provider intent (#674 tail); wired at runtime assembly.
 	DeleteIntents PaymentMethodDeleteExecutor

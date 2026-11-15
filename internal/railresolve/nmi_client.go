@@ -25,14 +25,6 @@ type NMIClientResolver interface {
 	ResolveNMIClient(ctx context.Context, merchantID uuid.UUID, stampedAccountID *uuid.UUID) (*nmi.NMIClient, bool, error)
 }
 
-// NMIEndpoints overrides NMI base URLs on store-armed clients (a test seam
-// for loopback fake gateways only). Zero value = real endpoints.
-type NMIEndpoints struct {
-	V5BaseURL     string
-	DirectPostURL string
-	QueryURL      string
-}
-
 // NMIArmer is the store-armed NMIClientResolver: per merchant, at decision
 // time, from the armed rail state. Nothing is cached, so a rotated credential
 // takes effect on the next call. MerchantsFn is late-bound.
@@ -40,9 +32,8 @@ type NMIArmer struct {
 	Config      *config.Config
 	DB          *db.DB
 	MerchantsFn func() *merchants.Service
-	Endpoints   NMIEndpoints
 	// Factory, when set, is the runtime's shared NMI factory (it carries the
-	// runtime's seams); otherwise one is built from Config and Endpoints.
+	// runtime's seams); otherwise one is built from Config.
 	Factory *NMIFactory
 }
 
@@ -112,7 +103,7 @@ func (a *NMIArmer) factory() *NMIFactory {
 	if a.Factory != nil {
 		return a.Factory
 	}
-	return &NMIFactory{Config: a.Config, Endpoints: a.Endpoints}
+	return &NMIFactory{Config: a.Config}
 }
 
 // Secret loads one scoped secret honouring the PSP row's rotation floor.

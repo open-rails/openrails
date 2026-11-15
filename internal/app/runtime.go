@@ -74,8 +74,6 @@ type Runtime struct {
 	// postureWait is what StartProviderPosture's last pass left unknown; Ready
 	// counts a waiting PSP only while the registry holds no verdict for it.
 	postureWait atomic.Pointer[postureWait]
-	// NMIPostureV5BaseURL is a test-only seam for the startup sandbox probe.
-	NMIPostureV5BaseURL string
 	// NMIClients is the single PSP-scoped NMI client factory (#1055).
 	NMIClients *railresolve.NMIFactory
 

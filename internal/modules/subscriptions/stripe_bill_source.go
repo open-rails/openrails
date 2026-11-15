@@ -353,14 +353,10 @@ func (p *HTTPStripeLivenessProber) billGet(ctx context.Context, path string, que
 	if strings.TrimSpace(p.SecretKey) == "" {
 		return nil, fmt.Errorf("Stripe secret key is required")
 	}
-	base := strings.TrimRight(p.BaseURL, "/")
-	if base == "" {
-		base = "https://api.stripe.com"
-	}
 	if len(query) != 0 {
 		path += "?" + query.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stripeapi.APIBase+path, nil)
 	if err != nil {
 		return nil, err
 	}

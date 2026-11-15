@@ -29,10 +29,9 @@ import (
 // provision is refused alone (Runtime.Refusals) and retried in the
 // background; a document a merchant cannot serve is refused alone. With
 // Vault holding merchant configuration, it is served once Vault answers.
-// Posture is verified in the background;
-// nmiProbeV5BaseURL is the test-only posture probe seam. overlays are files in
-// the manifest's shape merged over it in order.
-func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, cp *controlplane.ControlPlane, path string, overlays []string, nmiProbeV5BaseURL string) error {
+// Posture is verified in the background. overlays are files in the manifest's
+// shape merged over it in order.
+func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, cp *controlplane.ControlPlane, path string, overlays []string) error {
 	rt := application.Runtime
 	if rt == nil {
 		return fmt.Errorf("merchant startup requires a runtime")
@@ -79,7 +78,6 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 			rt.NameMerchant(m.ID, slug)
 		}
 	}
-	rt.NMIPostureV5BaseURL = nmiProbeV5BaseURL
 	rt.CheckBookIdentity(ctx)
 	rt.PreloadMerchantConfig(declared...)
 	rt.StartProviderPosture(declared...)

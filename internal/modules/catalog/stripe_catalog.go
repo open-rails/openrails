@@ -23,17 +23,6 @@ type StripeCatalogService struct {
 	Config        *config.Config
 	// Rails resolves the ctx merchant's armed Stripe account.
 	Rails railresolve.Source
-	// BaseURL overrides the Stripe API root; tests point it at an httptest
-	// server.
-	BaseURL string
-}
-
-// baseURL returns the Stripe API root, honoring the test override.
-func (s *StripeCatalogService) baseURL() string {
-	if s != nil && strings.TrimSpace(s.BaseURL) != "" {
-		return strings.TrimRight(strings.TrimSpace(s.BaseURL), "/")
-	}
-	return "https://api.stripe.com"
 }
 
 // stripeRail resolves the ctx merchant's armed Stripe credentials. nil (not

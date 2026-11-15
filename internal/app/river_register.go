@@ -67,8 +67,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if r.Verifier == nil {
 		r.Verifier = &reconcile.Verifier{
 			DB: r.DB, Clock: clock, DeferDelete: r.DeferredDeletes, Notifications: r.NotificationService,
-			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients,
-				Endpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)}},
+			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients},
 		}
 		r.Verifier.Start()
 	}
@@ -85,7 +84,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Contacts:      r.Contacts,
 		Alerts:        r.AlertService, // requires_review findings -> operator notifications
 		NMIClients:    r.NMIClients,
-		PullEndpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)},
 		Verifier:      r.Verifier,
 		RecoverUsagePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
 			mid, err := merchant.Require(ctx)
