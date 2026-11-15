@@ -247,6 +247,74 @@ func TestPriceMigrationContracts(t *testing.T) {
 		require.Equal(t, sub.PriceID, current.PriceID)
 		require.Nil(t, current.ScheduledChange)
 	})
+	t.Run("OR-J19-S06/notice-follows-cost-per-unit-of-time", func(t *testing.T) {
+		// 10.00 per 24 hours, no seats, inside the default notice window.
+		a, p, sub := purchasedMembership(t)
+		price := func(key string, amount int64, hours *int, seats *catalog.Quantity) billing.PriceID {
+			access := ptr(24)
+			if hours != nil {
+				access = hours
+			}
+			created, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: sub.ProductID, Key: key, UnitAmount: amount, Currency: "USD", BillingIntervalHours: hours, AccessDurationHours: access, Quantity: seats})
+			require.NoError(t, err)
+			return created.ID
+		}
+		halfDay := price("half-day", 9_000_000, ptr(12), nil)
+		cheaperDay := price("cheaper-day", 9_000_000, ptr(24), nil)
+		for _, c := range []struct {
+			name   string
+			to     billing.PriceID
+			notice bool
+		}{
+			{"lower-amount-shorter-cadence", halfDay, true},
+			{"seat-minimum", price("team-day", 5_000_000, ptr(24), &catalog.Quantity{Min: 3, Max: 10}), true},
+			{"lower-amount", cheaperDay, false},
+			{"equal-cost-per-hour", price("three-days", 30_000_000, ptr(72), nil), false},
+			{"higher-amount-lower-cost-per-hour", price("week", 60_000_000, ptr(168), nil), false},
+		} {
+			preview, err := a.alpha.PreviewPriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: c.to})
+			require.NoError(t, err, c.name)
+			require.Len(t, preview.Outcomes, 1, c.name)
+			if !c.notice {
+				require.Equal(t, billing.MigrationScheduled, preview.Outcomes[0].Disposition, c.name)
+				continue
+			}
+			require.Equal(t, billing.MigrationSkipped, preview.Outcomes[0].Disposition, c.name)
+			require.Contains(t, *preview.Outcomes[0].Reason, "notice window", c.name)
+		}
+
+		oneTime := price("one-time", 1_000_000, nil, nil)
+		for _, create := range []bool{false, true} {
+			params := billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: oneTime, AcknowledgeShortNotice: true}
+			var err error
+			if create {
+				_, err = a.alpha.CreatePriceMigration(t.Context(), params)
+			} else {
+				_, err = a.alpha.PreviewPriceMigration(t.Context(), params)
+			}
+			var refusal *billing.StatusError
+			require.ErrorAs(t, err, &refusal)
+			require.Equal(t, http.StatusBadRequest, refusal.Status)
+			require.Equal(t, billing.CodeInvalidParam, refusal.Code)
+		}
+
+		refused, err := a.alpha.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: halfDay, ArchiveSource: ptr(false)})
+		require.NoError(t, err)
+		require.Equal(t, 1, refused.Skipped)
+		require.Zero(t, refused.Scheduled)
+		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Nil(t, current.ScheduledChange)
+
+		moved, err := a.alpha.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: cheaperDay})
+		require.NoError(t, err)
+		require.Equal(t, 1, moved.Scheduled)
+		current, err = a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.NotNil(t, current.ScheduledChange)
+		require.Equal(t, cheaperDay, current.ScheduledChange.PriceID)
+		require.Len(t, p.effects(t), 1, "a migration charges nothing")
+	})
 }
 
 // manualFleet runs registered workers with no periodic pass.
