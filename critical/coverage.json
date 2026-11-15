@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 301,
+  "scenario_count": 302,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -567,6 +567,11 @@
       "id": "OR-J24-S04",
       "journey": "J24",
       "name": "Known usage group and pagination returns exact seeded totals"
+    },
+    {
+      "id": "OR-J24-S05",
+      "journey": "J24",
+      "name": "Charged failed usage replayed past its key window is charged once"
     },
     {
       "id": "OR-J25-S01",

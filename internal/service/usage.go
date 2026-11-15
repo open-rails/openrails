@@ -27,7 +27,7 @@ func NewUsageIdempotencyKey(eventType, source, sourceID string) (UsageIdempotenc
 //
 // Key is required: the idempotency coordinate within (merchant, payer,
 // currency), claimed under the payer's spend lock over the ingest window and,
-// for a priced event, permanently by the ledger. Build it with
+// for a charged failed event, permanently by the ledger. Build it with
 // NewUsageIdempotencyKey(EventType, source, sourceID); its operation must match
 // EventType, so two event types at one (source, source_id) are two charges,
 // not a collision. Both halves must be reproducible across retries of the same
