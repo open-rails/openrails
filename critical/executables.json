@@ -932,6 +932,18 @@
     ],
     "OR-J12-S70": [
       "TestOrderExpiryClock/OR-J12-S70/card-save-past-its-cutoff-is-removed-before-the-pass"
+    ],
+    "OR-J22-S07": [
+      "TestMixedOrderCreditRefunds/OR-J22-S07/pending-credit-line-refund-holds-the-whole-lot"
+    ],
+    "OR-J22-S08": [
+      "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/full-refund",
+      "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/credit-line-first-then-the-rest",
+      "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/chargeback-then-won-dispute",
+      "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first"
+    ],
+    "OR-J22-S09": [
+      "TestMixedOrderCreditRefunds/OR-J22-S09/won-dispute-credit-goes-to-a-refund-that-found-none"
     ]
   },
   "suites": {

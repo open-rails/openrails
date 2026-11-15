@@ -24,8 +24,10 @@ SELECT
      -- Retired credit funds its refund from the retired account. Only value
      -- still in customer_balance remains reserved here; an unswept expired
      -- source is entirely unavailable, including its unrefunded remainder.
+     -- A refund returns the credit line's money first, so a pending refund
+     -- holds its share of the line's paid amount, not of the whole payment.
      + COALESCE((SELECT sum(CASE WHEN g.ends_at <= $2::timestamptz
-         THEN lot.remaining ELSE LEAST(ceil(g.amount::numeric * r.pending / p.amount),lot.remaining) END)
+         THEN lot.remaining ELSE LEAST(ceil(g.amount::numeric * LEAST(r.pending,(g.spec_snapshot->'deposit'->>'paid_amount')::numeric) / (g.spec_snapshot->'deposit'->>'paid_amount')::numeric),lot.remaining) END)
        FROM (SELECT refunded_payment_id, sum(-refund.amount)::numeric AS pending
          FROM billing.payments refund WHERE refund.merchant_id=a.merchant_id
            AND refund.customer_id=a.customer_id AND refund.currency=a.currency

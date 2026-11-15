@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 290,
+  "scenario_count": 293,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1452,6 +1452,21 @@
       "id": "OR-J12-S70",
       "journey": "J12",
       "name": "A card save confirmed or saved again past its 24-hour cutoff, before any pass, is removed"
+    },
+    {
+      "id": "OR-J22-S07",
+      "journey": "J22",
+      "name": "A pending refund of a mixed order's credit line holds the line's whole credit lot until it settles"
+    },
+    {
+      "id": "OR-J22-S08",
+      "journey": "J22",
+      "name": "Refunds and chargebacks of a mixed order reverse the credit line first, then the rest, and a won dispute restores what it took"
+    },
+    {
+      "id": "OR-J22-S09",
+      "journey": "J22",
+      "name": "Credit a won dispute restores goes at once to an earlier refund that found the mixed order's credit line already returned"
     }
   ]
 }
