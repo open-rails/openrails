@@ -662,23 +662,28 @@ ORDER BY id LIMIT sqlc.arg(page_size)::int;
 -- name: ListPaidEngineAgreementsAtBoundary :many
 -- Select by obligation identity and boundary, not mutable catalog/account
 -- filters: an ambiguous or mismatched retained owner must fail qualification.
+-- Each source is its own index read, so a renewal never scans past sales.
 SELECT * FROM billing.provider_intents
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND status='succeeded'
-  AND ((intent_type='initial_membership'
-        AND payload->'terms'->>'subscription_id'=sqlc.arg(subscription_id)::uuid::text
-        AND (payload->'terms'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz
-        -- A seat increase changes the agreement's seats, not its price.
-        AND NOT payload->'terms' ? 'adds')
-    OR (intent_type='subscription_collection'
-        AND subscription_id=sqlc.arg(subscription_id)::uuid
-        AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz)
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id IN (
+    SELECT i.id FROM billing.provider_intents i
+    WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND i.status='succeeded' AND i.intent_type='initial_membership'
+      AND i.payload->'terms'->>'subscription_id'=sqlc.arg(subscription_id)::uuid::text
+      AND (i.payload->'terms'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz
+      -- A seat increase changes the agreement's seats, not its price.
+      AND NOT i.payload->'terms' ? 'adds'
+    UNION ALL
+    SELECT i.id FROM billing.provider_intents i
+    WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND i.status='succeeded' AND i.intent_type='subscription_collection'
+      AND i.subscription_id=sqlc.arg(subscription_id)::uuid
+      AND (i.payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz
+    UNION ALL
     -- An order's sale paid the first period of the subscription its line made.
-    OR (intent_type='nmi_sale' AND payload ? 'order_id' AND EXISTS (
-        SELECT 1 FROM billing.order_lines l
-        JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
-        WHERE l.merchant_id = provider_intents.merchant_id AND l.subscription_id = sqlc.arg(subscription_id)::uuid
-          AND o.id::text = provider_intents.payload->>'order_id' AND o.status = 'complete'
-          AND o.completed_at + make_interval(hours => l.billing_interval_hours) = sqlc.arg(period_end)::timestamptz)))
+    SELECT i.id FROM billing.order_lines l
+    JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
+    JOIN billing.provider_intents i ON i.merchant_id = o.merchant_id AND i.payload->>'order_id' = o.id::text
+    WHERE l.merchant_id=sqlc.arg(merchant_id)::uuid AND l.subscription_id=sqlc.arg(subscription_id)::uuid
+      AND o.status='complete' AND o.completed_at + make_interval(hours => l.billing_interval_hours)=sqlc.arg(period_end)::timestamptz
+      AND i.status='succeeded' AND i.intent_type='nmi_sale' AND i.payload ? 'order_id')
 ORDER BY id LIMIT 2;
 -- name: ExpireProviderIntentByID :execrows
 UPDATE billing.provider_intents pi

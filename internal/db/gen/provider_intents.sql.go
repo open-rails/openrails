@@ -1507,22 +1507,26 @@ func (q *Queries) ListCompletedManualRebillPaymentCoverage(ctx context.Context, 
 
 const listPaidEngineAgreementsAtBoundary = `-- name: ListPaidEngineAgreementsAtBoundary :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
-WHERE merchant_id=$1::uuid AND status='succeeded'
-  AND ((intent_type='initial_membership'
-        AND payload->'terms'->>'subscription_id'=$2::uuid::text
-        AND (payload->'terms'->>'period_end')::timestamptz=$3::timestamptz
-        -- A seat increase changes the agreement's seats, not its price.
-        AND NOT payload->'terms' ? 'adds')
-    OR (intent_type='subscription_collection'
-        AND subscription_id=$2::uuid
-        AND (payload->'renewal'->>'period_end')::timestamptz=$3::timestamptz)
+WHERE merchant_id=$1::uuid AND id IN (
+    SELECT i.id FROM billing.provider_intents i
+    WHERE i.merchant_id=$1::uuid AND i.status='succeeded' AND i.intent_type='initial_membership'
+      AND i.payload->'terms'->>'subscription_id'=$2::uuid::text
+      AND (i.payload->'terms'->>'period_end')::timestamptz=$3::timestamptz
+      -- A seat increase changes the agreement's seats, not its price.
+      AND NOT i.payload->'terms' ? 'adds'
+    UNION ALL
+    SELECT i.id FROM billing.provider_intents i
+    WHERE i.merchant_id=$1::uuid AND i.status='succeeded' AND i.intent_type='subscription_collection'
+      AND i.subscription_id=$2::uuid
+      AND (i.payload->'renewal'->>'period_end')::timestamptz=$3::timestamptz
+    UNION ALL
     -- An order's sale paid the first period of the subscription its line made.
-    OR (intent_type='nmi_sale' AND payload ? 'order_id' AND EXISTS (
-        SELECT 1 FROM billing.order_lines l
-        JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
-        WHERE l.merchant_id = provider_intents.merchant_id AND l.subscription_id = $2::uuid
-          AND o.id::text = provider_intents.payload->>'order_id' AND o.status = 'complete'
-          AND o.completed_at + make_interval(hours => l.billing_interval_hours) = $3::timestamptz)))
+    SELECT i.id FROM billing.order_lines l
+    JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
+    JOIN billing.provider_intents i ON i.merchant_id = o.merchant_id AND i.payload->>'order_id' = o.id::text
+    WHERE l.merchant_id=$1::uuid AND l.subscription_id=$2::uuid
+      AND o.status='complete' AND o.completed_at + make_interval(hours => l.billing_interval_hours)=$3::timestamptz
+      AND i.status='succeeded' AND i.intent_type='nmi_sale' AND i.payload ? 'order_id')
 ORDER BY id LIMIT 2
 `
 
@@ -1534,6 +1538,7 @@ type ListPaidEngineAgreementsAtBoundaryParams struct {
 
 // Select by obligation identity and boundary, not mutable catalog/account
 // filters: an ambiguous or mismatched retained owner must fail qualification.
+// Each source is its own index read, so a renewal never scans past sales.
 func (q *Queries) ListPaidEngineAgreementsAtBoundary(ctx context.Context, arg ListPaidEngineAgreementsAtBoundaryParams) ([]BillingProviderIntent, error) {
 	rows, err := q.db.Query(ctx, listPaidEngineAgreementsAtBoundary, arg.MerchantID, arg.SubscriptionID, arg.PeriodEnd)
 	if err != nil {
