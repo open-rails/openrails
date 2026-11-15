@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 296,
+  "scenario_count": 297,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1172,6 +1172,11 @@
       "id": "OR-J38-S40",
       "journey": "J38",
       "name": "A CCBill pull that may not write the mirror, advisory or enforce without inserts, matches a zero-dropped legacy row by identity against a complete roster: nothing reads as missing, gone or canceled, and the row keeps its spelling"
+    },
+    {
+      "id": "OR-J38-S43",
+      "journey": "J38",
+      "name": "A CCBill sale that arrives after its lapsed page's order was paid by card is recorded once against the order as a payment held for refund, with a late-payment finding to refund it at CCBill and a repair to cancel its CCBill subscription; it grants nothing, the card keeps paying the order, the card is never refunded, and a replay changes nothing"
     },
     {
       "id": "OR-J38-S41",

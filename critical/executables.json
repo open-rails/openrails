@@ -884,6 +884,9 @@
       "TestCCBillIdentity/OR-J38-S40/advisory-matches-by-identity",
       "TestCCBillIdentity/OR-J38-S40/enforce-without-insert-matches-by-identity"
     ],
+    "OR-J38-S43": [
+      "TestCCBillIdentity/OR-J38-S43/a-late-sale-on-an-order-paid-by-card-is-kept-for-refund"
+    ],
     "OR-J38-S41": [
       "TestMerchantConsole/OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms"
     ],
