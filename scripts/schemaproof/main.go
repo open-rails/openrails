@@ -72,7 +72,7 @@ func run(ctx context.Context, ref, dsn, keep string) error {
 	if dsn == "" {
 		return fmt.Errorf("-dsn or %s must name a disposable PostgreSQL server", schemasnapshot.DSNEnv)
 	}
-	old, oldCount, err := chainAt(ref)
+	old, oldCount, err := chainAt(ctx, ref)
 	if err != nil {
 		return err
 	}
@@ -101,14 +101,14 @@ func run(ctx context.Context, ref, dsn, keep string) error {
 			return fmt.Errorf("working tree in %s: %w", schema, err)
 		}
 		wantFile, gotFile := filepath.Join(out, schema+".reference.sql"), filepath.Join(out, schema+".candidate.sql")
-		if err := os.WriteFile(wantFile, want, 0o644); err != nil {
+		if err := os.WriteFile(wantFile, want, 0o644); err != nil { // #nosec G703 -- the operator's -keep directory
 			return err
 		}
-		if err := os.WriteFile(gotFile, got, 0o644); err != nil {
+		if err := os.WriteFile(gotFile, got, 0o644); err != nil { // #nosec G703 -- the operator's -keep directory
 			return err
 		}
 		if !bytes.Equal(want, got) {
-			diff, _ := exec.Command("diff", "-u", wantFile, gotFile).CombinedOutput()
+			diff, _ := exec.CommandContext(ctx, "diff", "-u", wantFile, gotFile).CombinedOutput()
 			os.Stdout.Write(diff)
 			return fmt.Errorf("schema %s: the dumps differ", schema)
 		}
@@ -130,8 +130,8 @@ var (
 )
 
 // chainAt reads ref's migration files from git.
-func chainAt(ref string) (fs.FS, int, error) {
-	list, err := exec.Command("git", "ls-tree", "--name-only", ref, dir+"/").Output()
+func chainAt(ctx context.Context, ref string) (fs.FS, int, error) {
+	list, err := exec.CommandContext(ctx, "git", "ls-tree", "--name-only", ref, dir+"/").Output()
 	if err != nil {
 		return nil, 0, fmt.Errorf("list %s at %s: %w", dir, ref, err)
 	}
@@ -140,7 +140,7 @@ func chainAt(ref string) (fs.FS, int, error) {
 		if !strings.HasSuffix(name, ".up.sql") {
 			continue
 		}
-		body, err := exec.Command("git", "show", ref+":"+name).Output()
+		body, err := exec.CommandContext(ctx, "git", "show", ref+":"+name).Output()
 		if err != nil {
 			return nil, 0, fmt.Errorf("read %s at %s: %w", name, ref, err)
 		}
@@ -190,7 +190,7 @@ func dump(ctx context.Context, dsn, schema string, chain fs.FS) ([]byte, error) 
 		return nil, err
 	}
 	args := append(pgDump[1:len(pgDump):len(pgDump)], "--dbname="+target.String(), "--schema="+schema, "--no-owner")
-	raw, err := exec.CommandContext(ctx, pgDump[0], args...).Output()
+	raw, err := exec.CommandContext(ctx, pgDump[0], args...).Output() // #nosec G702 -- the operator's -pg-dump command
 	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
