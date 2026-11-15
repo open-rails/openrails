@@ -860,3 +860,26 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND lease_expires_at > sqlc.arg(now)::timestamptz
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'transaction_id')
        OR result_evidence->>'transaction_id' = result_evidence->>'reverted_transaction_id');
+
+-- name: ListOverdueProviderOperations :many
+-- CROSS-MERCHANT: live operations whose next attempt, and any lease, ended
+-- before before, oldest first from the (after_at, after_id) cursor: each one's
+-- wake should have run it by then. Request-only operations have no wake.
+SELECT merchant_id, id, next_attempt_at FROM billing.provider_intents
+WHERE status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+  AND next_attempt_at < sqlc.arg(before)::timestamptz
+  AND (next_attempt_at, id) > (sqlc.arg(after_at)::timestamptz, sqlc.arg(after_id)::uuid)
+  AND (lease_expires_at IS NULL OR lease_expires_at < sqlc.arg(before)::timestamptz)
+  AND intent_type <> ALL(sqlc.arg(request_only_types)::text[])
+ORDER BY next_attempt_at, id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListLiveProviderOperations :many
+-- One merchant's live operations a wake runs, in id order after a cursor.
+SELECT * FROM billing.provider_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id > sqlc.arg(after_id)::uuid
+  AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+  AND intent_type <> ALL(sqlc.arg(request_only_types)::text[])
+ORDER BY id
+LIMIT sqlc.arg(row_limit)::int;

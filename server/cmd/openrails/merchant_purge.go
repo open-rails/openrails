@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/billing"
@@ -79,15 +77,9 @@ func newMerchantPurgeCmd() *cobra.Command {
 func withPurgeMerchants(cmd *cobra.Command, run func(context.Context, *db.DB, *merchants.Service) error) error {
 	return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
 		cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
-		schema := config.RiverSchemaName(cfg)
-		producer, err := river.NewClient(riverpgxv5.New(database.Pool()), &river.Config{Schema: schema, SkipUnknownJobCheck: true})
-		if err != nil {
-			return fmt.Errorf("River producer: %w", err)
+		if err := bindCLIRiverProducer(ctx, cfg, database); err != nil {
+			return err
 		}
-		if err := database.ValidateRiverJobBinding(ctx, database.Pool(), schema); err != nil {
-			return fmt.Errorf("River producer: %w", err)
-		}
-		database.SetRiverJobInserter(producer)
 		opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database)
 		if err != nil {
 			return err

@@ -266,6 +266,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		riverjobs.Scan{Kind: riverjobs.KindNMIHistory, Run: nmiHistory.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindConfigRealerts, Run: scanOf[riverjobs.ConfigRealertArgs](realerts)},
 		riverjobs.Scan{Kind: riverjobs.KindStoredCardRefreshDue, Run: scanOf[riverjobs.StoredCardRefreshDueArgs](storedCards)},
+		riverjobs.Scan{Kind: riverjobs.KindOperationWakes, Run: (&riverjobs.OperationWakes{DB: r.DB, Clock: clock}).Pass},
 	)
 	for i := range scans {
 		scans[i].Timeout = riverjobs.ScanBudget(scans[i].Kind)

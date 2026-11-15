@@ -5,8 +5,8 @@ Source snapshot: `origin/master` at `88a70db5ac000a8d27802bbe806ab7ca0eec9cda`
 jobs currently present in any deployed database.
 
 The inventory contains **25 registered core River job kinds**, **6 core periodic
-declarations**, **9 scans inside the hourly billing pass** (one is not a River
-job), **22 provider-operation types**, **16 host event types**, and **21 customer
+declarations**, **10 scans inside the hourly billing pass** (two are not River
+jobs), **22 provider-operation types**, **16 host event types**, and **21 customer
 notification types**. It also covers incoming provider events, the standalone
 server's AuthKit jobs, and background activity outside River.
 
@@ -66,7 +66,7 @@ the pass to run. See [periodics](../internal/river/periodic.go) and
 
 | Job kind | Schedule / gate | What it does and changes | Worker source |
 | --- | --- | --- | --- |
-| `openrails.billing_pass` | Top of every UTC hour (`0 * * * *`), plus startup catch-up. | Runs all nine due scans in section 2 in order. Each scan has its own timeout; an error or panic in one does not stop later scans. Records critical work left a day overdue in River output. Can cause charges, renewals, access changes and notifications through those scans. | [billing pass](../internal/river/jobs_billing_pass.go) |
+| `openrails.billing_pass` | Top of every UTC hour (`0 * * * *`), plus startup catch-up. | Runs all ten due scans in section 2 in order. Each scan has its own timeout; an error or panic in one does not stop later scans. Records critical work left a day overdue in River output. Can cause charges, renewals, access changes and notifications through those scans. | [billing pass](../internal/river/jobs_billing_pass.go) |
 | `openrails.merchant_health` | Every hour. | Evaluates recovery/payment health, held renewals, unverified backlog, stuck/abandoned provider operations, and timed access lapses. Selects merchants with recent activity, open findings or deadlines; updates findings/access effects and can alert operators. Skips readonly merchants. | [merchant health](../internal/river/jobs_merchant_health.go) |
 | `openrails.cleanup_expired_data` | Every hour; additional jobs continue a large pass. | Permanently deletes expired operational data and drops old monthly partitions. Creates partitions ahead of time. Full deletion scope is listed below. | [cleanup](../internal/river/jobs_cleanup.go) |
 | `openrails.stripe_webhook_reconcile` | Every 24 hours, plus PSP/configuration changes and endpoint-retirement deadlines. | The empty-argument pass queues one pass per armed Stripe PSP. A targeted pass creates/patches/rolls over its managed Stripe webhook endpoint, retires superseded endpoints after overlap, records configuration digest and opens/closes endpoint findings. **Writes to Stripe.** | [Stripe endpoints](../internal/river/jobs_stripe_webhooks.go), [boot/config trigger](../internal/app/stripe_webhook_follow.go) |
@@ -96,12 +96,12 @@ records and money-moving intent receipts are not a general cleanup target.
 See [retention constants and instruction-only intent list](../internal/retention/retention.go),
 [table rules](../internal/retention/tables.go), and [operations](operations.md).
 
-## 2. Hourly billing-pass scans: all nine, in execution order
+## 2. Hourly billing-pass scans: all ten, in execution order
 
 Eight scans below also have registered River workers, but **none has its own
 periodic declaration**. Their ordinary timer is the enclosing
-`openrails.billing_pass`; some also have immediate wake-ups. NMI history is the
-one function-only scan, explicitly identified below.
+`openrails.billing_pass`; some also have immediate wake-ups. NMI history and
+operation wakes are the two function-only scans, explicitly identified below.
 
 | Scan / job kind | What selects work or wakes it | What it does / consequence | Source |
 | --- | --- | --- | --- |
@@ -114,6 +114,7 @@ one function-only scan, explicitly identified below.
 | `openrails.nmi_history` **(scan only; no registered River kind/args)** | Active NMI PSPs whose history read is due. Checked hourly; eligible again 23 hours after the last read, giving roughly daily reads. | Reads NMI authorization/decline history into monthly aggregates for reporting. First read reaches back 25 months; subsequent reads overlap the month before the last read. Replaces covered aggregates atomically; reads providers without charging them. | [history scan](../internal/river/jobs_nmi_history.go) |
 | `openrails.config_realerts` | An unresolved undeclared-account finding was last notified at least 24 hours ago. | Reloads merchant configuration first, resolves corrected findings, claims still-due findings and alerts the operator again. No alert service means no claimed/delivered re-alerts. | [configuration alerts](../internal/river/jobs_config_realerts.go) |
 | `openrails.stored_card_refresh_due` | `stored_card_checks` marks a card due or its next renewal enters its vault's lookahead window. | Plans or queues one-card refresh jobs for armed account-updater vaults. Spreads requests over the following hour; rechecks an unanswered queued card after 24 hours. The scan itself stops opening new pages after ten minutes. | [card refresh planner](../internal/river/jobs_stored_card_refresh.go) |
+| `openrails.operation_wakes` **(scan only; no registered River kind/args)** | Live provider operations whose next attempt, and any lease, ended more than an hour ago, on the `next_attempt_at` index; request-only card removals excluded. | Queues each one's `provider_operation` wake again: its River job was deleted, its schema reset or its fleet stopped. The wake is unique while waiting, so an operation held past due gains at most one. Moves no money itself. | [operation wakes](../internal/river/jobs_operation_wakes.go) |
 
 The billing pass flags dunning, balance watches, delinquency and enabled usage
 billing as critical overdue work. Its other scans do not have `DueBy` reporting.
@@ -143,7 +144,7 @@ create their work.
 
 | Cause | How future work is represented |
 | --- | --- |
-| Financial operation retry/verification | `provider_operation` runs at the ledger's `next_attempt_at` or relevant lease deadline. Waiting uses River snooze or a committed successor. Infrastructure errors/panics retain the operation with a one-minute snooze; ordinary handler backoff defaults to 2m, 4m, 8m, capped at 2h, with handler-specific policies where supplied. |
+| Financial operation retry/verification | `provider_operation` runs at the ledger's `next_attempt_at` or relevant lease deadline. Waiting uses River snooze or a committed successor; the billing pass queues a wake again for an operation more than an hour past due. Infrastructure errors/panics retain the operation with a one-minute snooze; ordinary handler backoff defaults to 2m, 4m, 8m, capped at 2h, with handler-specific policies where supplied. |
 | Exact balance depletion / credit expiry / checkpoint | `balance_look` gets `ScheduledAt` from the next balance-watch instant. Its identities include the instant so a later scheduled look is distinct. |
 | Provider refresh fanout | Scheduler assigns per-merchant `ScheduledAt` slots across 30 minutes. |
 | Webhook event bursts | `subscription_converge` and `provider_object_observe` schedule a 5-second debounce; an in-flight predecessor can cause a snoozing follow-up. |
@@ -179,8 +180,8 @@ All core jobs have a **10-minute timeout**, with these overrides:
 - **1 hour:** `stored_card_refresh_due`, `cleanup_expired_data`,
   `provider_refresh_merchant`, `merchant_health`, `rebill_watch`, `charge_attributions`.
 - **2 hours:** `psp_import`.
-- **4 hours:** `billing_pass`, the sum of all nine scan budgets (including usage
-  even when disabled). Inside it, six scans have 10 minutes each; rebill watch,
+- **4 hours 10 minutes:** `billing_pass`, the sum of all ten scan budgets (including usage
+  even when disabled). Inside it, seven scans have 10 minutes each; rebill watch,
   NMI history and card-refresh planning have an hour each. Card planning also has
   its own shorter ten-minute page-opening bound.
 
@@ -426,8 +427,9 @@ business job kinds. Their effective configuration belongs to the fleet owner.
 - **Actual schedule beats an unused constant:** `money.UsageOrdersInterval` still
   says five minutes, but it is not in `Periodics`; current registration runs usage
   inside the hourly billing pass. Threshold-triggered wakes remain immediate.
-- **Kind-looking names are not always jobs:** `openrails.nmi_history` labels a
-  billing scan and has no `JobArgs.Kind()`, registered worker or kind timeout.
+- **Kind-looking names are not always jobs:** `openrails.nmi_history` and
+  `openrails.operation_wakes` label billing scans and have no `JobArgs.Kind()`,
+  registered worker or kind timeout.
 - **Separate observation from execution:** provider refresh reads and records
   provider truth; any admitted charge/cancel is executed through its own
   authorized provider-operation path. Stripe endpoint reconciliation itself does

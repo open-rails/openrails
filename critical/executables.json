@@ -470,6 +470,9 @@
     "OR-J31-S06": [
       "TestBillingArchive/OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book"
     ],
+    "OR-J31-S07": [
+      "TestBillingArchive/OR-J31-S07/a-restored-solana-pull-runs-at-its-due-time"
+    ],
     "OR-J32-S01": [
       "TestMerchantHost/OR-J32-S01/provision-find-list-rename-retains-identity"
     ],
@@ -899,6 +902,9 @@
     ],
     "OR-J04-S48": [
       "TestBillingPass/OR-J04-S48/job-progress-fails-a-day-overdue-and-clears-on-a-clean-pass"
+    ],
+    "OR-J04-S60": [
+      "TestBillingPass/OR-J04-S60/a-live-operation-whose-wake-was-lost-is-queued-again-an-hour-past-due"
     ],
     "OR-J25-S40": [
       "TestBalanceLooks/OR-J25-S40",

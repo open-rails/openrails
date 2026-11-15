@@ -1255,7 +1255,7 @@ coalesce merchant-wide passes when embedded fleets share a database.
 
 | Worker | Cadence |
 |---|---|
-| Billing pass (`openrails.billing_pass`): due renewals and retries, balance watches whose look failed, due arrears delinquency, order expiry (abandoned card saves included), automatic usage billing (opt-in), rebill watch, due daily NMI history read, undeclared-account re-alerts, stored card refresh ahead of renewal; each scan in turn | top of each UTC hour, and on start |
+| Billing pass (`openrails.billing_pass`): due renewals and retries, balance watches whose look failed, due arrears delinquency, order expiry (abandoned card saves included), automatic usage billing (opt-in), rebill watch, due daily NMI history read, undeclared-account re-alerts, stored card refresh ahead of renewal, provider operations an hour past due whose wake was lost; each scan in turn | top of each UTC hour, and on start |
 | Retention cleanup; merchant health (merchants with activity); admission-denial flush (closed hours, fleets with Redis) | 1 h |
 | A customer's convergence | committed with each mutation that changed the customer |
 | A balance's look | committed with a change that crosses one of its lines, and for the instant its last look named |
@@ -1279,7 +1279,10 @@ provider operation (`openrails.provider_operation`, which sleeps to its next
 attempt; a Solana pull is one, scheduled for its period), a customer's
 convergence (`openrails.customer_converge`), a PSP import and its
 charge-attribution read, a merchant purge's Vault cleanup, a Stripe PSP's
-webhook pass when it is declared or changed.
+webhook pass when it is declared or changed. The billing pass queues a wake
+again for a live provider operation more than an hour past its due time, whose
+wake may be lost (its River job deleted, its River schema reset, its fleet
+stopped); such an operation gains at most one extra wake.
 
 Automatic usage billing is enabled by the host's `usage_billing_enabled` option.
 It is not scheduled by subscription-only hosts. Merchants configure their
