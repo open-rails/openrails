@@ -191,4 +191,48 @@ func TestUsageContracts(t *testing.T) {
 		require.Equal(t, "foreign", scoped.Rows[0].Key)
 		require.EqualValues(t, 900, scoped.Rows[0].Amount)
 	})
+	t.Run("OR-J24-S05/charged-failure-replayed-past-its-key-window-charges-once", func(t *testing.T) {
+		w := newWorld(t, func(w *world) {
+			m := w.cfg.Merchants["alpha"]
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "grace", Kind: "outstanding_cap", BadSpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 100, Currency: "USD"}}}}
+			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "grace"}}
+			w.cfg.Merchants["alpha"] = m
+		})
+		customer := billing.CustomerID(uuid.New())
+		grant := func(id string, amount int64) {
+			_, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: amount, Source: "critical", SourceID: id}})
+			require.NoError(t, err)
+		}
+		failed := func(id string, amount int64) billing.RecordUsageParams {
+			v := usageInput(customer, id, 0)
+			v.Outcome, v.Amount = billing.UsageFailed, ptr(amount)
+			return v
+		}
+		grant("lot-a", 300)
+		first := oneUsage(t, w.alpha, failed("failed-once", 400))
+		require.EqualValues(t, 300, first.Amount)
+		require.EqualValues(t, 100, first.ForgivenAmount)
+		balance(t, w.alpha, customer, 0, 0, 0)
+
+		// Past the key window lot A is empty and lot B funds the customer.
+		w.clock.Advance(36 * 24 * time.Hour)
+		grant("lot-b", 1000)
+		refused, err := w.alpha.RecordUsage(t.Context(), []billing.RecordUsageParams{failed("failed-once", 500)})
+		require.NoError(t, err)
+		require.ErrorIs(t, refused[0].Err(), billing.ErrIdempotencyKeyReused)
+		replay, err := w.alpha.RecordUsage(t.Context(), []billing.RecordUsageParams{failed("failed-once", 400)})
+		require.NoError(t, err)
+		require.NoError(t, replay[0].Err())
+		require.Equal(t, http.StatusOK, replay[0].Status)
+		require.True(t, replay[0].Event.Replayed)
+		require.Equal(t, first.ID, replay[0].Event.ID)
+		require.EqualValues(t, 300, replay[0].Event.Amount)
+		balance(t, w.alpha, customer, 1000, 0, 1000)
+
+		// The replay counted nothing toward this window's grace.
+		next := oneUsage(t, w.alpha, failed("failed-next", 100))
+		require.EqualValues(t, 0, next.Amount)
+		require.EqualValues(t, 100, next.ForgivenAmount)
+		balance(t, w.alpha, customer, 1000, 0, 1000)
+	})
 }

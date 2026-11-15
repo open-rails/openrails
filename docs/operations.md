@@ -1194,7 +1194,8 @@ What an integrator sees:
 
 - A usage event's `occurred_at` may be up to 35 days in the past and not in the
   future; its `source` and `source_id` are honoured as its idempotency key for
-  those 35 days. A priced event's ledger debit is idempotent for good.
+  those 35 days. A charged failed event's key is honoured for good: its ledger
+  debit carries it, and a later retry charges nothing.
 - An admission's hold deadline, as admitted or as extended, is at most 30 days
   past the admission, and a spend window is at most 31 days. After 61 days a
   request id reads as never admitted.
