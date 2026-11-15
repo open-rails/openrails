@@ -226,6 +226,7 @@ action being authorized, rather than claiming every configured host executes it.
 | `nmi_card_vault` | Creates/updates the NMI vault representation needed for an accepted stored-card flow. [Handler](../internal/intents/nmi_card_vault.go). |
 | `account_updater` | Billed vault account-updater request for one card; may return a replacement/token or closed-card result. Expires after the vault's 24-hour idempotency window. [Handler](../internal/river/jobs_stored_card_refresh.go). |
 | `solana_pull` | Executes a due recurring Solana pull, records the signature before sending, verifies on-chain results and applies confirmed outcomes. Missing cranker/chain wiring parks or leaves the operation unresolved. [Handler](../internal/modules/solana/pull/pull.go). |
+| `solana_tier_change` | A Solana plan change awaiting the transaction the subscriber's wallet signs. Sends nothing: reads the chain for the change's reference, qualifies and records the landed change, and ends once the transaction provably never landed. [Handler](../internal/modules/solana/change/change.go). |
 
 ## 6. Business events emitted by OpenRails
 

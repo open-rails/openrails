@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
@@ -182,6 +183,43 @@ func (c *RPCClient) NeverLanded(ctx context.Context, sig solanago.Signature, ter
 		return false, nil
 	}
 	return st.Value[0] == nil, nil
+}
+
+// referenceHistoryPage is the most signatures one history read returns.
+const referenceHistoryPage = 1000
+
+// ReferenceHistory lists the finalized transactions naming reference, newest
+// first. closed reports that the list is final for a transaction built on
+// terminal's blockhash: the finalized block height is past its last valid
+// height, so every block that could hold one is finalized, and the node that
+// listed them had finalized that far. Not closed is "not proven", never "none".
+func (c *RPCClient) ReferenceHistory(ctx context.Context, reference string, terminal ChainTerminal) ([]SignatureInfo, bool, error) {
+	key, err := solanago.PublicKeyFromBase58(strings.TrimSpace(reference))
+	if err != nil {
+		return nil, false, fmt.Errorf("invalid reference: %w", err)
+	}
+	finalized, err := c.fallback.GetEpochInfo(ctx, rpc.CommitmentFinalized)
+	if err != nil {
+		return nil, false, err
+	}
+	limit, slot := referenceHistoryPage, finalized.AbsoluteSlot
+	page, err := c.fallback.GetSignaturesForAddressWithOpts(ctx, key, &rpc.GetSignaturesForAddressOpts{
+		Commitment: rpc.CommitmentFinalized, Limit: &limit, MinContextSlot: &slot,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("read the history of reference %s: %w", key, err)
+	}
+	out := make([]SignatureInfo, 0, len(page))
+	for _, sig := range page {
+		info := SignatureInfo{Signature: sig.Signature.String(), HasError: sig.Err != nil}
+		if sig.BlockTime != nil {
+			t := sig.BlockTime.Time().UTC()
+			info.BlockTime = &t
+		}
+		out = append(out, info)
+	}
+	closed := terminal.LastValidBlockHeight != 0 && finalized.BlockHeight > terminal.LastValidBlockHeight && len(page) < referenceHistoryPage
+	return out, closed, nil
 }
 
 // SubmitAndConfirm submits a signed transaction and watches it to Confirmed.

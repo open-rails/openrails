@@ -73,6 +73,14 @@ func integerValue(v any) bool {
 	_, err := strconv.ParseInt(n.String(), 10, 64)
 	return err == nil
 }
+func unsignedValue(v any) bool {
+	n, ok := v.(json.Number)
+	if !ok {
+		return false
+	}
+	_, err := strconv.ParseUint(n.String(), 10, 64)
+	return err == nil
+}
 func moneyStringValue(v any) bool {
 	s, ok := v.(string)
 	if !ok {
@@ -377,6 +385,16 @@ var jsonRules = map[string]jsonRule{
 	"admission_operations.capture_terms":   nullable(object(map[string]jsonRule{"event_type": textValue, "resource": textValue, "metadata": metadataJSON, "source": textValue, "source_id": textValue, "dimensions": dictionary(integerValue), "amount": moneyStringValue})),
 	"admission_operations.estimate_usage":  nullable(object(map[string]jsonRule{"amount": moneyStringValue, "event_type": textValue, "dimensions": dictionary(integerValue), "metadata": metadataJSON})),
 	"admission_operations.rate_cards":      nullable(array(pinnedRateCardJSON)),
+	// A Solana plan change's frozen agreement, and how its chain outcome ended.
+	"provider_intents.solana_tier_change.payload": object(map[string]jsonRule{
+		"reference": textValue, "last_valid_block_height": unsignedValue, "old_subscription_id": uuidValue, "customer_id": uuidValue, "old_period_ends_at": nullable(textValue),
+		"price_id": uuidValue, "product_id": uuidValue, "new_subscription_pda": textValue, "plan_owner": textValue, "treasury": textValue,
+		"plan_id": unsignedValue, "mint_symbol": textValue, "amount_base_units": unsignedValue, "period_hours": unsignedValue, "plan_created_at": integerValue,
+		"amount": integerValue, "currency": textValue, "upgrade": booleanValue, "first_charge_base_units": unsignedValue, "first_charge_micros": integerValue, "prepared_at": textValue,
+	}),
+	"provider_intents.solana_tier_change.result_evidence": nullable(object(map[string]jsonRule{
+		"transaction_id": textValue, "never_landed": textValue,
+	})),
 }
 
 func validateJSON(field, raw string) error {

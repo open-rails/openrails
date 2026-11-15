@@ -8,12 +8,15 @@ import (
 	"strings"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/solana/change"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 )
@@ -58,6 +61,21 @@ func (r *Runtime) ArmSolanaRecurringServices(transit solanaint.TransitClient) {
 	}
 	prepare := recurring.NewPrepareSubscribeService(submitter, chainReader, tokens)
 	r.OrderAttemptService.SetSolanaRecurring(prepare, enroll)
+}
+
+// SolanaPlanChanges records Solana plan changes from the chain: the
+// solana_tier_change operation, and what the change route records and hints
+// through. It needs no cranker; without a chain reader or lifecycle it parks.
+func (r *Runtime) SolanaPlanChanges(clock clockwork.Clock) *change.Handler {
+	h := &change.Handler{DB: r.DB, Clock: clock, Store: intents.NewStore(r.DB)}
+	if r.SubscriptionLifecycleService != nil {
+		h.Lifecycle = r.SubscriptionLifecycleService
+	}
+	if r.SolanaRPCResolver != nil {
+		h.Chain = r.SolanaRPCResolver.ChainReader()
+		h.Tokens = recurring.Tokens(r.SolanaRPCResolver.RecurringTokens)
+	}
+	return h
 }
 
 // CrankerPins pins each listed cranker in billing.solana_crankers.
