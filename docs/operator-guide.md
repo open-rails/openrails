@@ -40,8 +40,7 @@ Postgres specifics worth knowing:
   `openrails migrate status` reports the ledger against the embedded chain.
   An older release boots against a database a newer one migrated.
   Every v1.x release upgrades a database of any earlier v1 release in place
-  ([compatibility](compatibility.md#database-schema)); a pre-v1 database is not
-  upgraded ([migrating to v1](migrating-to-v1.md)).
+  ([compatibility](compatibility.md#database-schema)).
 - Two apps sharing one billing schema connect as one role, or `SET ROLE` to a
   shared one on every connection: that role owns every object.
 - Local zero-config stack: `task docker-up` (Postgres 18 + Redis + OpenRails on

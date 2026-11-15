@@ -1975,7 +1975,6 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [API guide](docs/api/endpoints.md) — conventions and behavior; [every route](docs/api/routes.md); [every error code](docs/api/error-codes.md); [`api/openapi.json`](api/openapi.json).
 - [Purchase](docs/api/commerce.md), [errors](docs/api/errors.md) and [money, ids and times on the wire](docs/money-wire.md).
 - [Compatibility](docs/compatibility.md) — what v1 freezes and what counts as additive.
-- [Migrating to v1](docs/migrating-to-v1.md) — everything a v0 host changes.
 
 **Payment rails** — per-rail setup: credentials, the manifest entry, webhooks, sandbox testing:
 

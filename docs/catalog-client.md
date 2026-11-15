@@ -161,7 +161,4 @@ omitting `Archived` includes historical versions.
 Database UUIDs remain private foreign keys so upgrades preserve accepted
 financial facts, provider identities, and historical references. Migration
 0074 derives public IDs from existing immutable keys and the stored revision.
-It does not reprice existing purchases or contact payment providers. Existing
-applications must migrate their own stored price IDs along with the client and
-server. See the [price-ID cutover](migrating-to-v1.md#price-id-cutover) for mapping
-old references, including archived prices.
+It does not reprice existing purchases or contact payment providers.
