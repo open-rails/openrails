@@ -14,6 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/providerposture"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -52,10 +54,20 @@ func TestNMICollectionRefusal(t *testing.T) {
 				runUsageDue(t, fleet)
 				var state string
 				var evidence []byte
+				// A refused collection leaves the order due at once, so each
+				// usage scan that finds it open queues another. Every scan has
+				// run once the fleet's start-up pass ends, and the order is
+				// open again once none of their collections is running.
+				operations := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
 				require.Eventually(t, func() bool {
-					err := a.pool.QueryRow(t.Context(), "SELECT status,result_evidence FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+" WHERE merchant_id=$1 AND intent_type=$2 ORDER BY created_at,id LIMIT 1", a.alpha.MerchantID().UUID(), intents.TypeOrderCollection).Scan(&state, &evidence)
-					return err == nil && state != intents.StatusPending && state != intents.StatusInFlight
-				}, 15*time.Second, 20*time.Millisecond, "the registered worker must finish its first collection")
+					passes, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.billing_pass").States(rivertype.JobStateCompleted, rivertype.JobStateDiscarded).First(1))
+					if err != nil || len(passes.Jobs) == 0 {
+						return false
+					}
+					var running int
+					err = a.pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM "+operations+" WHERE merchant_id=$1 AND intent_type=$2 AND status IN ('pending','in_flight')),status,result_evidence FROM "+operations+" WHERE merchant_id=$1 AND intent_type=$2 ORDER BY created_at,id LIMIT 1", a.alpha.MerchantID().UUID(), intents.TypeOrderCollection).Scan(&running, &state, &evidence)
+					return err == nil && running == 0
+				}, 20*time.Second, 20*time.Millisecond, "the registered worker must finish its first collection")
 				p.money(t, 0, 0)
 				var proof struct {
 					NotExecuted bool   `json:"not_executed"`
