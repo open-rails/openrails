@@ -1,38 +1,6 @@
--- Reconciliation runs and findings, the engine's local-state reads, and the
+-- Reconciliation findings, the engine's local-state reads, and the
 -- enforce appliers' idempotent local writes. Statements that read
 -- billing.current_merchant_id() need a merchant-pinned connection.
-
--- name: CreateReconciliationRun :one
-INSERT INTO billing.maintenance_runs (
-    merchant_id, kind, mode, rails, window_starts_at, window_ends_at, started_at, status
-) VALUES (
-    sqlc.arg(merchant_id), 'reconciliation', sqlc.arg(mode)::text, sqlc.arg(rails),
-    sqlc.narg(window_starts_at), sqlc.narg(window_ends_at), now(), 'running'
-)
-RETURNING *;
-
--- name: FinishReconciliationRun :execrows
-UPDATE billing.maintenance_runs
-SET status = sqlc.arg(status),
-    summary = sqlc.narg(summary),
-    error = sqlc.narg(error),
-    finished_at = now()
-WHERE id = sqlc.arg(id) AND kind='reconciliation' AND merchant_id=billing.current_merchant_id() AND status = 'running';
-
--- name: GetReconciliationRun :one
-SELECT * FROM billing.maintenance_runs WHERE id = $1 AND kind='reconciliation' AND merchant_id=billing.current_merchant_id();
-
--- name: GetLatestReconciliationRun :one
-SELECT * FROM billing.maintenance_runs
-WHERE kind='reconciliation' AND merchant_id=billing.current_merchant_id()
-ORDER BY started_at DESC
-LIMIT 1;
-
--- name: ListReconciliationRuns :many
-SELECT * FROM billing.maintenance_runs
-WHERE kind='reconciliation' AND merchant_id=billing.current_merchant_id()
-ORDER BY started_at DESC
-LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- Re-runs UPDATE the standing finding for (merchant, finding_type, subject_key).
 -- A previously resolved finding that reappears is REOPENED with the freshly
@@ -236,26 +204,6 @@ SET status = 'auto_fixed',
     updated_at = now()
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
 
--- name: AckReconciliationFinding :execrows
-UPDATE billing.reconciliation_findings
-SET status = 'fixed',
-    resolution = 'admin_fixed',
-    operator_notes = sqlc.narg(operator_notes),
-    resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
-    updated_at = now()
-WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed');
-
--- name: DismissReconciliationFinding :execrows
-UPDATE billing.reconciliation_findings
-SET status = 'ignored',
-    resolution = 'ignored',
-    operator_notes = sqlc.narg(operator_notes),
-    resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
-    updated_at = now()
-WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed');
-
 -- The operator work list: open findings unless a status filter is given,
 -- critical first, then oldest first; keyset-paged.
 -- name: AdminListReconciliationFindings :many
@@ -454,11 +402,6 @@ SELECT id FROM billing.payments
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
   AND transaction_id = sqlc.arg(transaction_id)::text AND deleted_at IS NULL;
 
--- name: ListApprovalRunFindings :many
-SELECT * FROM billing.reconciliation_findings
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND approval_run_id = sqlc.arg(run_id)::uuid
-ORDER BY resolved_at, id;
-
 -- name: ReconcileListSubscriptionsByRails :many
 SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subscriptions.product_id,
        subscriptions.row_version, subscriptions.status, subscriptions.rail, subscriptions.collection_policy, subscriptions.rail_subscription_id,
@@ -540,13 +483,6 @@ WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM
 -- Enforce appliers: idempotent local writes only, never a provider call.
 -- Subscription state transitions go through reconcile.Decide and
 -- reconcile.ApplyDecision instead.
-
--- Backfills a rail charge that has no local payment record, deduped on
--- payments_psp_id_transaction_id_key.
--- name: ReconcileMarkPaymentRefunded :execrows
-UPDATE billing.payments
-SET status = 'refunded'
-WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status <> 'refunded' AND deleted_at IS NULL;
 
 -- Materialization (--materialize): creates the local subscription for a rail
 -- subscription resolved unambiguously to an identity and a price; access
@@ -1078,14 +1014,6 @@ SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text
   AND subject_key = sqlc.arg(subject_key)::text
   AND status IN ('reconcile_required', 'requires_review');
-
--- name: AutoResolveReviewFindingsByType :exec
-UPDATE billing.reconciliation_findings
-SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, updated_at = now()
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = ANY(sqlc.arg(finding_types)::text[])
-  AND status = 'requires_review';
-
 
 -- The PSP's subscriptions whose imported provider schedule is unresolved,
 -- each named by its open life.import.schedule_unresolved finding; keyset

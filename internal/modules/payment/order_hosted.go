@@ -75,8 +75,8 @@ func (s *OrderAttemptService) payOrderHosted(ctx context.Context, in OrderPayInp
 	if err := moneyutil.RequireFiatCurrency(order.Currency); err != nil {
 		return OrderCharge{}, fmt.Errorf("%w: %v", ErrOrderAttemptValidation, err)
 	}
-	purchase, ok := s.purchaseService.(*PurchaseService)
-	if !ok {
+	purchase := s.purchaseService
+	if purchase == nil {
 		return OrderCharge{}, errors.New("hosted order payment is unavailable")
 	}
 	options, err := s.OrderOptions(ctx, in.Prices, in.Products)
@@ -297,8 +297,8 @@ func (s *OrderAttemptService) CloseOrderHosted(ctx context.Context, attemptID uu
 // stripeCheckoutSession reads (or, with expire, expires) a Checkout Session
 // on the context's Stripe PSP.
 func (s *OrderAttemptService) stripeCheckoutSession(ctx context.Context, id string, expire bool) (stripeCheckoutSession, error) {
-	purchase, ok := s.purchaseService.(*PurchaseService)
-	if !ok || purchase.StripeClients == nil {
+	purchase := s.purchaseService
+	if purchase == nil || purchase.StripeClients == nil {
 		return stripeCheckoutSession{}, errors.New("stripe is unavailable")
 	}
 	_, secret, err := subscriptions.RequireStripeSecretKey(ctx, purchase.Rails)

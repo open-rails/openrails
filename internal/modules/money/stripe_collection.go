@@ -58,7 +58,7 @@ func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.Billin
 		OpenRailsMerchantID: method.MerchantID.String(),
 		OpenRailsCustomerID: method.CustomerID.String(),
 	}
-	return PreparedChargeFunc(func(ctx context.Context) (ChargeResult, error) {
+	return PreparedCharge(func(ctx context.Context) (ChargeResult, error) {
 		result, err := a.Service.CollectInvoice(ctx, params)
 		if err != nil {
 			refused, ok := stripeDefinitiveRefusal(err)

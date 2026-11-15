@@ -201,39 +201,3 @@ func normalizePolicyCurrency(label, field, value string) (string, error) {
 	}
 	return value, nil
 }
-
-// BillingPolicyBindingRung identifies which rung a binding sits on.
-type BillingPolicyBindingRung string
-
-const (
-	// BindingRungDefault is the merchant-wide fallback (no customer, no tier).
-	BindingRungDefault BillingPolicyBindingRung = "default"
-	// BindingRungTier applies to every payer at one trust tier.
-	BindingRungTier BillingPolicyBindingRung = "tier"
-	// BindingRungCustomer applies to exactly one payer and beats the other two.
-	BindingRungCustomer BillingPolicyBindingRung = "customer"
-)
-
-// NormalizeBillingPolicyBinding validates one binding's rung and returns the
-// canonical policy name, tier and rung. customerSet reports whether a customer
-// id was supplied; the caller owns parsing it, since the two transports carry
-// it differently (uuid on the wire, typed id in-process).
-func NormalizeBillingPolicyBinding(policyName, tier string, customerSet bool) (name string, canonicalTier string, rung BillingPolicyBindingRung, err error) {
-	name, err = NormalizeBillingPolicyName(policyName)
-	if err != nil {
-		return "", "", "", err
-	}
-	canonicalTier = strings.TrimSpace(tier)
-	switch {
-	case customerSet && canonicalTier != "":
-		// Most-specific-wins cannot rank a binding that is both, so the shape
-		// forbids it rather than silently preferring one.
-		return "", "", "", fmt.Errorf("billing policy binding %q: bind to a customer OR a tier, not both", name)
-	case customerSet:
-		return name, "", BindingRungCustomer, nil
-	case canonicalTier != "":
-		return name, canonicalTier, BindingRungTier, nil
-	default:
-		return name, "", BindingRungDefault, nil
-	}
-}

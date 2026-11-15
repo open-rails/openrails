@@ -140,14 +140,8 @@ func settingText(settings map[string]any, key string) string {
 	}
 }
 
-// ActivePSPSecretName resolves the active PSP for a merchant rail and returns
-// that account's credential name for key.
-func (s *Service) ActivePSPSecretName(ctx context.Context, id billing.MerchantID, rail, key string) (string, bool, error) {
-	ref, ok, err := s.ActivePSPSecretRef(ctx, id, rail, key)
-	return ref.Name, ok, err
-}
-
-// ActivePSPSecretRef is ActivePSPSecretName as a SecretRef.
+// ActivePSPSecretRef resolves the active PSP for a merchant rail and returns
+// that account's credential reference for key.
 func (s *Service) ActivePSPSecretRef(ctx context.Context, id billing.MerchantID, rail, key string) (SecretRef, bool, error) {
 	scope, ok, err := s.ActivePSPScope(ctx, id, rail)
 	if err != nil || !ok {

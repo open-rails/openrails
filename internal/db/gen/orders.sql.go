@@ -336,71 +336,6 @@ func (q *Queries) EnqueueOrderHostEvent(ctx context.Context, arg EnqueueOrderHos
 	return result.RowsAffected(), nil
 }
 
-const getCustomerOrder = `-- name: GetCustomerOrder :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded FROM billing.orders
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND id = $3::uuid
-`
-
-type GetCustomerOrderParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	ID         uuid.UUID
-}
-
-func (q *Queries) GetCustomerOrder(ctx context.Context, arg GetCustomerOrderParams) (BillingOrder, error) {
-	row := q.db.QueryRow(ctx, getCustomerOrder, arg.MerchantID, arg.CustomerID, arg.ID)
-	var i BillingOrder
-	err := row.Scan(
-		&i.MerchantID,
-		&i.ID,
-		&i.CustomerID,
-		&i.Origin,
-		&i.Status,
-		&i.Currency,
-		&i.Total,
-		&i.Number,
-		&i.IdempotencyKey,
-		&i.RequestDigest,
-		&i.PaymentMethodID,
-		&i.PspID,
-		&i.AttemptID,
-		&i.PaymentID,
-		&i.LastPaymentError,
-		&i.ExpiresAt,
-		&i.CompletedAt,
-		&i.CanceledAt,
-		&i.ExpiredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PaymentStatus,
-		&i.PayUrlSecretHash,
-		&i.PayUrlExpiresAt,
-		&i.SuccessUrl,
-		&i.CancelUrl,
-		&i.SavedPaymentMethods,
-		&i.SubscriptionID,
-		&i.PeriodStartsAt,
-		&i.PeriodEndsAt,
-		&i.DueAt,
-		&i.VoidedAt,
-		&i.AmountPaid,
-		&i.UncollectibleAt,
-		&i.CollectionMethod,
-		&i.PoNumber,
-		&i.Memo,
-		&i.Tax,
-		&i.BillingContacts,
-		&i.CollectionFailureCount,
-		&i.CollectionFailedAt,
-		&i.NextCollectionAttemptAt,
-		&i.CollectionOwner,
-		&i.SubscriptionBillKind,
-		&i.LinesDigest,
-		&i.Embedded,
-	)
-	return i, err
-}
-
 const getOpenOrderByLines = `-- name: GetOpenOrderByLines :one
 SELECT id, expires_at FROM billing.orders
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
@@ -559,7 +494,7 @@ func (q *Queries) GetOrder(ctx context.Context, arg GetOrderParams) (BillingOrde
 }
 
 const getOrderAttempt = `-- name: GetOrderAttempt :one
-SELECT id, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason, order_id FROM billing.order_attempts
+SELECT id, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, order_id FROM billing.order_attempts
 WHERE merchant_id = $1::uuid AND id = $2::uuid AND order_id IS NOT NULL AND deleted_at IS NULL
 `
 
@@ -593,7 +528,6 @@ func (q *Queries) GetOrderAttempt(ctx context.Context, arg GetOrderAttemptParams
 		&i.DeletedAt,
 		&i.DestructiveRunID,
 		&i.DestructiveRunClass,
-		&i.RoutingReason,
 		&i.OrderID,
 	)
 	return i, err

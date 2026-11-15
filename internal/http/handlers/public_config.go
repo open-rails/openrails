@@ -28,9 +28,8 @@ import (
 const publicConfigMaxAge = "public, max-age=300"
 
 // GetPublicConfig serves GET /v1/config, without a credential: what the
-// mount serves, the currency and rail registries, the captcha and the
-// customer network's sign-in. It names no merchant, so every caller reads
-// the same document and a cache may share it.
+// mount serves, the currency and rail registries and the captcha. It names no
+// merchant, so every caller reads the same document and a cache may share it.
 func GetPublicConfig(capabilities billing.Capabilities) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
 		doc := PublicConfigDocument(r.State, capabilities)

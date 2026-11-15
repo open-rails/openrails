@@ -32,14 +32,6 @@ func CentsToMicros(cents Cents) Micros {
 	return Micros(int64(cents) * MicrosPerCent)
 }
 
-func FormatMicrosDecimal(micros Micros) string {
-	return formatDecimal(int64(micros), MicrosPerMajorUnit, 6)
-}
-
-func FormatCentsDecimal(cents Cents) string {
-	return formatDecimal(int64(cents), CentsPerMajorUnit, 2)
-}
-
 func formatDecimal(amount, scale int64, width int) string {
 	// Never negate amount: -MinInt64 overflows. |amount%scale| < scale always
 	// fits, and FormatInt renders the quotient's magnitude exactly.
@@ -54,12 +46,4 @@ func formatDecimal(amount, scale int64, width int) string {
 		return sign + whole
 	}
 	return fmt.Sprintf("%s%s.%0*d", sign, whole, width, minor)
-}
-
-func FormatUSD(micros Micros) string {
-	amount := FormatMicrosDecimal(micros)
-	if strings.HasPrefix(amount, "-") {
-		return "-$" + strings.TrimPrefix(amount, "-")
-	}
-	return "$" + amount
 }

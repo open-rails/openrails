@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 )
 
 // Stripe engine charges may retry the original idempotency key after a settle
@@ -130,7 +131,7 @@ func (s *Store) BeginLostSubmissionResend(ctx context.Context, in gen.BillingPro
 
 // ReadNMIOrderAttempts reads this attempt's transactions under the
 // obligation's shared order from its accepted account.
-func ReadNMIOrderAttempts(ctx context.Context, in gen.BillingProviderIntent, resolver NMIClientResolver) (nmi.OrderAttempts, error) {
+func ReadNMIOrderAttempts(ctx context.Context, in gen.BillingProviderIntent, resolver railresolve.NMIClientResolver) (nmi.OrderAttempts, error) {
 	p, err := decodeCollectedTerms(in)
 	if err != nil {
 		return nmi.OrderAttempts{}, err
@@ -152,7 +153,7 @@ func ReadNMIOrderAttempts(ctx context.Context, in gen.BillingProviderIntent, res
 
 // ReadNMIVaultTransactions reads every transaction on the operation's frozen
 // vault since since, of any order and outcome.
-func ReadNMIVaultTransactions(ctx context.Context, in gen.BillingProviderIntent, resolver NMIClientResolver, since time.Time) ([]nmi.VaultTransaction, error) {
+func ReadNMIVaultTransactions(ctx context.Context, in gen.BillingProviderIntent, resolver railresolve.NMIClientResolver, since time.Time) ([]nmi.VaultTransaction, error) {
 	p, err := decodeCollectedTerms(in)
 	if err != nil {
 		return nil, err

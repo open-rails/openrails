@@ -28,7 +28,7 @@ type hyperSwitchCollectionAdapter struct {
 // without invoking usage order preparation or choosing an unscheduled agreement.
 // The caller rechecks method ownership against its frozen instrument and owns
 // the durable submission fence. This helper compares the retained HS binding.
-func PrepareHyperSwitchCharge(ctx context.Context, resolver CollectionAdapterResolver, method gen.BillingPaymentMethod, psp uuid.UUID, accepted charge.HyperSwitchBinding) (*hscharge.Charger, error) {
+func PrepareHyperSwitchCharge(ctx context.Context, resolver *MerchantCollectionAdapterBuilder, method gen.BillingPaymentMethod, psp uuid.UUID, accepted charge.HyperSwitchBinding) (*hscharge.Charger, error) {
 	if resolver == nil || method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil {
 		return nil, charge.ErrInstrumentChanged
 	}

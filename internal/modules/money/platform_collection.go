@@ -49,11 +49,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveBasisTheoryNMICharge(ctx conte
 	if custody.Custodian != method.Custodian || b.BasisTheoryTransport != nil && custody.Environment != config.ClassTest {
 		return nil, charge.ErrInstrumentChanged
 	}
-	base := custody.APIBaseURL
-	if b.Endpoints.BTBaseURL != "" {
-		base = b.Endpoints.BTBaseURL
-	}
-	bt, err := basistheory.New(basistheory.Config{APIKey: custody.APIKey, BaseURL: base, Transport: b.BasisTheoryTransport})
+	bt, err := basistheory.New(basistheory.Config{APIKey: custody.APIKey, BaseURL: custody.APIBaseURL, Transport: b.BasisTheoryTransport})
 	if err != nil {
 		return nil, err
 	}

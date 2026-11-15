@@ -22,7 +22,7 @@ import (
 // routes: permissive CORS, body limits, credential admission and the rate
 // limiter. Each route's own gate runs inside it.
 func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, credentials billingauth.Authenticator) *router.Table {
-	// OpenRails-native rate-limiting + captcha, matching the base NewHTTPHandler
+	// OpenRails-native rate-limiting + captcha, matching the base NewRoutes
 	// chain. IP-keyed: the delegated principal is pinned per-route inside the mux,
 	// after this outer chain — exactly like the standalone self surface.
 	var rateLimits *config.RateLimitsConfig

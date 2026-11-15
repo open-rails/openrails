@@ -6,20 +6,10 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db/models"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 )
-
-// solanaSubscriptionReader loads a lifecycle subscription's stored on-chain
-// identifiers.
-type solanaSubscriptionReader interface {
-	GetBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.SolanaSubscription, error)
-}
-
-// cancelPrepareRPC supplies a recent blockhash for the unsigned transaction.
-type cancelPrepareRPC interface {
-	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
-}
 
 // PrepareCancelService builds the unsigned cancel_subscription transaction the
 // subscriber's wallet signs; ConfirmCancelService mirrors it once landed. It
@@ -27,12 +17,12 @@ type cancelPrepareRPC interface {
 // (SubscriptionAuthority) is per user+mint, so revoking it would end every
 // subscription on that mint.
 type PrepareCancelService struct {
-	repo solanaSubscriptionReader
-	rpc  cancelPrepareRPC
+	repo *solanasubs.SolanaSubscriptionRepo
+	rpc  solanaint.ChainReader
 }
 
 // NewPrepareCancelService builds a PrepareCancelService.
-func NewPrepareCancelService(repo solanaSubscriptionReader, rpc cancelPrepareRPC) *PrepareCancelService {
+func NewPrepareCancelService(repo *solanasubs.SolanaSubscriptionRepo, rpc solanaint.ChainReader) *PrepareCancelService {
 	return &PrepareCancelService{repo: repo, rpc: rpc}
 }
 

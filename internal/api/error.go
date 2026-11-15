@@ -3,7 +3,6 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"sort"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
@@ -192,17 +191,11 @@ func (e *APIError) WithMetadata(metadata map[string]any) *APIError {
 	return e
 }
 
-// ConflictError creates an error for resource conflicts.
-func ConflictError(message string) *APIError {
-	return NewAPIError(http.StatusConflict, ErrorTypeInvalidRequest, CodeResourceConflict, message)
-}
-
 // violations are the answered codes billing's registry does not hold, by code.
 var violations sync.Map
 
 // observe records a code answered outside the registry: unregistered, or
-// under another status than the registry's. It is logged once; the e2e suites
-// fail on any (CodeViolations).
+// under another status than the registry's. It is logged once.
 func observe(status int, code string) {
 	if code == "" {
 		return
@@ -219,15 +212,4 @@ func observe(status int, code string) {
 	if _, seen := violations.LoadOrStore(problem, struct{}{}); !seen {
 		log.Error(problem)
 	}
-}
-
-// CodeViolations lists every code this process answered outside the registry.
-func CodeViolations() []string {
-	var out []string
-	violations.Range(func(key, _ any) bool {
-		out = append(out, key.(string))
-		return true
-	})
-	sort.Strings(out)
-	return out
 }

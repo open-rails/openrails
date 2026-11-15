@@ -934,68 +934,6 @@ func (q *Queries) ListLapsedCreditLots(ctx context.Context, arg ListLapsedCredit
 	return items, nil
 }
 
-const listLiveGrantsByCustomer = `-- name: ListLiveGrantsByCustomer :many
-SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason, g.quantity, g.import_as_of, g.import_root_id FROM billing.grants g
-WHERE g.merchant_id = $1::uuid
-  AND g.customer_id = $2::uuid
-  AND g.event = 'grant'
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.grants t
-      WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
-  )
-ORDER BY g.created_at
-`
-
-type ListLiveGrantsByCustomerParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-}
-
-// ListLiveGrantsByCustomer: grant-events not terminated by a later revoke/expire/
-// supersede event. The fold's input.
-func (q *Queries) ListLiveGrantsByCustomer(ctx context.Context, arg ListLiveGrantsByCustomerParams) ([]BillingGrant, error) {
-	rows, err := q.db.Query(ctx, listLiveGrantsByCustomer, arg.MerchantID, arg.CustomerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingGrant
-	for rows.Next() {
-		var i BillingGrant
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.ProductID,
-			&i.Kind,
-			&i.SourceType,
-			&i.SourceID,
-			&i.PaymentID,
-			&i.Event,
-			&i.SupersedesID,
-			&i.SpecSnapshot,
-			&i.StartsAt,
-			&i.EndsAt,
-			&i.Amount,
-			&i.Currency,
-			&i.Reason,
-			&i.CreatedAt,
-			&i.Actor,
-			&i.GrantReason,
-			&i.Quantity,
-			&i.ImportAsOf,
-			&i.ImportRootID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listLiveGrantsBySource = `-- name: ListLiveGrantsBySource :many
 SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason, g.quantity, g.import_as_of, g.import_root_id FROM billing.grants g
 WHERE g.merchant_id = $1::uuid AND g.customer_id = $2::uuid

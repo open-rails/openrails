@@ -145,14 +145,13 @@ func (b *MerchantRPCBuilder) Treasury(ctx context.Context, mid billing.MerchantI
 	return solanago.PublicKeyFromBase58(scope.AccountID)
 }
 
-// ChainReader adapts the builder to the intent verify leg's chain reads: the
-// merchant comes off the intent runner's merchant-scoped ctx. Satisfies
-// pull.ChainReader.
+// ChainReader is the solana.ChainReader that reads with the ctx merchant's
+// client (the intent runner's merchant-scoped ctx, or a merchant request's).
 func (b *MerchantRPCBuilder) ChainReader() *MerchantChainReader {
 	return &MerchantChainReader{builder: b}
 }
 
-// MerchantChainReader is a merchant-resolving GetTransaction surface.
+// MerchantChainReader resolves the ctx merchant's RPC client per call.
 type MerchantChainReader struct {
 	builder *MerchantRPCBuilder
 }

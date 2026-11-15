@@ -27,12 +27,16 @@ type CollectionAdapter interface {
 	Prepare(ctx context.Context, method gen.BillingPaymentMethod, req ChargeRequest) (PreparedCharge, error)
 }
 
-// ScopedCharger validates merchant/customer/payment-method scope and resolves
-// the store-armed adapter before an off-session usage order charge.
+// ScopedCharger arms an off-session (merchant-initiated) charge of a saved
+// payment method in two phases: Prepare validates merchant/customer/payment-
+// method scope, resolves the store-armed adapter and does read-only
+// qualification; Submit is the one provider submission. The collection intent
+// fences between the two, so a Prepare failure never consumes an attempt and
+// every Submit error is a possible submission.
 type ScopedCharger struct {
 	db       *db.DB
 	adapters map[string]CollectionAdapter
-	resolver CollectionAdapterResolver
+	resolver *MerchantCollectionAdapterBuilder
 }
 
 func NewScopedCharger(database *db.DB, adapters map[string]CollectionAdapter) *ScopedCharger {
@@ -50,7 +54,7 @@ func NewScopedCharger(database *db.DB, adapters map[string]CollectionAdapter) *S
 // SetAdapterResolver arms per-merchant store resolution (#725/#788). Once
 // armed it is the ONLY source of collection adapters: a merchant with no
 // declared account on the rail has nothing to charge with (or#893).
-func (c *ScopedCharger) SetAdapterResolver(r CollectionAdapterResolver) {
+func (c *ScopedCharger) SetAdapterResolver(r *MerchantCollectionAdapterBuilder) {
 	if c != nil {
 		c.resolver = r
 	}
@@ -147,7 +151,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if err != nil {
 		return nil, err
 	}
-	return PreparedChargeFunc(func(ctx context.Context) (ChargeResult, error) {
+	return PreparedCharge(func(ctx context.Context) (ChargeResult, error) {
 		// Admission freezes under the same customer/method order as deletion.
 		// Recheck immediately before first send; after this transaction the
 		// unresolved accepted intent pins the method against supported removal

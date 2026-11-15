@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -70,18 +69,4 @@ func (d *DB) LoadProductEntitlements(ctx context.Context, products ...*models.Pr
 		}
 	}
 	return nil
-}
-
-// LiveProductEntitlementsJSON is one product's current keys as a sorted JSON
-// list, the shape accepted snapshots record.
-func LiveProductEntitlementsJSON(ctx context.Context, q *gen.Queries, merchantID, productID uuid.UUID) ([]byte, error) {
-	rows, err := q.ListLiveProductEntitlements(ctx, gen.ListLiveProductEntitlementsParams{MerchantID: merchantID, ProductIds: []uuid.UUID{productID}})
-	if err != nil {
-		return nil, err
-	}
-	keys := make([]string, 0, len(rows))
-	for _, row := range rows {
-		keys = append(keys, row.Entitlement)
-	}
-	return json.Marshal(keys)
 }

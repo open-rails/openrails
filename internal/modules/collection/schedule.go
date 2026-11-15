@@ -54,13 +54,9 @@ func (e *UnknownCycleError) Is(target error) bool { return target == ErrUnknownC
 // FindingUnknownCycle is a collection that refused to run for want of a cycle.
 const FindingUnknownCycle = "life.cadence.unknown"
 
-type findingWriter interface {
-	UpsertReconciliationFinding(context.Context, gen.UpsertReconciliationFindingParams) (gen.BillingReconciliationFinding, error)
-}
-
 // RecordUnknownCycle raises the operator finding for subject (a subscription
 // or usage order id) that collection refused because its cycle is unknown.
-func RecordUnknownCycle(ctx context.Context, q findingWriter, merchantID uuid.UUID, subject, consumer string, cause error) error {
+func RecordUnknownCycle(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, subject, consumer string, cause error) error {
 	evidence, _ := json.Marshal(map[string]any{"subject": subject, "consumer": consumer, "error": cause.Error()})
 	action := fmt.Sprintf("%s %s has no billing cycle, so collection refuses to charge, retry or end it (%v). Give its price a recurring cadence or resolve it by hand", consumer, subject, cause)
 	_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
@@ -86,38 +82,6 @@ var (
 // Empty means no retries. Callers must not mutate the returned slice.
 func RetryOffsets(cycleHours int) ([]time.Duration, error) {
 	return DefaultPolicy.RetryOffsets(cycleHours)
-}
-
-// MaxFailures returns how many consecutive failures (counting the initial
-// one) a billing cycle tolerates before collection goes terminal.
-func MaxFailures(cycleHours int) (int, error) {
-	return DefaultPolicy.MaxFailures(cycleHours)
-}
-
-// NextRetryIn returns how long after the failures-th consecutive failure
-// (1-based) the next retry runs, or 0 when that failure is terminal. It is
-// relative to the failure just made, so a late worker never schedules into the
-// past.
-func NextRetryIn(cycleHours, failures int) (time.Duration, error) {
-	return DefaultPolicy.NextRetryIn(cycleHours, failures)
-}
-
-// NextAttemptAt is the schedule's next attempt after the failures-th
-// consecutive failure (1-based) made at lastAttempt. ok is false when that
-// failure spent the schedule. Every consumer takes retry times from here.
-func NextAttemptAt(cycleHours, failures int, lastAttempt time.Time) (next time.Time, ok bool, err error) {
-	return DefaultPolicy.NextAttemptAt(cycleHours, failures, lastAttempt)
-}
-
-// Window returns the derived staleness window: how long past the missed charge
-// collection may still attempt it. Past it the charge is skipped (no surprise
-// catch-up charge) and the row parks for provider verification; expiry alone is
-// never terminal.
-//
-// window = last retry offset + min(24h, cycle/2), so a 0-retry cycle still gets
-// the slack and Window(cycle) < cycle for every known cycle.
-func Window(cycleHours int) (time.Duration, error) {
-	return DefaultPolicy.Window(cycleHours)
 }
 
 func windowSlack(cycle time.Duration) time.Duration {
@@ -151,9 +115,3 @@ func CycleHoursBetween(from, to time.Time) int {
 // minutes after the attempt, bounded, and not counted as dunning failures.
 // After it, the answer counts as an ordinary decline on the cycle schedule.
 var TransientLadder = []time.Duration{5 * time.Minute, 30 * time.Minute}
-
-// NextTransientAttempt is when the used+1-th transient retry runs, or false
-// when the ladder is spent.
-func NextTransientAttempt(used int, at time.Time) (time.Time, bool) {
-	return DefaultPolicy.NextTransientAttempt(used, at)
-}

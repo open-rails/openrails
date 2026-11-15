@@ -31,9 +31,10 @@ file only after that verification succeeds.
 
 ## Archive format and metadata
 
-Exports and imports use archive format **v2**. The importer maps earlier v2 row
-layouts to the current schema, preserving private identities and financial facts.
-A v1 or draft archive is refused: restore it on an earlier release, then export it again.
+Exports and imports use archive format **v3**, the only one import reads. A v2
+archive predates price ownership: restore it with OpenRails v0.255.0, then
+upgrade and export it again. An older archive is refused the same way: restore
+it on an earlier release, then export it again.
 
 Application metadata is preserved as stored, including arbitrary keys, nested
 JSON values and exact numbers. Export does not sanitize or redact that metadata.
@@ -279,16 +280,14 @@ readiness must be qualified before live operation.
 
 ## Qualification boundary
 
-The core `TestOfflineBillingHandoff` runs the normal CLI against two independent
-PostgreSQL databases. It prepares the destination through `prepare-target`, checks
-both stop attestations, rejects an interrupted import without retained billing
-rows, and retries the same completed import. It then starts the destination with
-separately supplied provider credentials, renews the retained subscription once,
-and cancels/refunds through the ordinary embedded or HTTP Client. NMI and Stripe
-use local provider fixtures; no live provider is qualified by this test.
-`TestBillingRestoreTargetUsesDestinationAuthority` checks the group-bound
-operator preparation against real AuthKit, including wrong-owner and conflicting
-binding refusals.
+The critical `TestBillingArchive` scenarios (OR-J31) export from one engine and
+restore into another on its own PostgreSQL database, prepared with
+`billing prepare-target`: an empty-target restore preserves identities and
+totals; a wrong merchant, corrupt archive or occupied target is refused
+atomically; restored custody cannot charge before an explicit arm; an
+unresolved operation refuses export; NMI receipts naming their card restore
+verbatim. NMI and Stripe use local provider fixtures; no live provider is
+qualified.
 
 These core checks are not a test of the separately deployed OpenRails SaaS
 application. Before declaring SaaS-to-self-hosted or the reverse complete, run the

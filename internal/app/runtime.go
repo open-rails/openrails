@@ -74,8 +74,6 @@ type Runtime struct {
 	// postureWait is what StartProviderPosture's last pass left unknown; Ready
 	// counts a waiting PSP only while the registry holds no verdict for it.
 	postureWait atomic.Pointer[postureWait]
-	// NMIPostureV5BaseURL is a test-only seam for the startup sandbox probe.
-	NMIPostureV5BaseURL string
 	// NMIClients is the single PSP-scoped NMI client factory (#1055).
 	NMIClients *railresolve.NMIFactory
 
@@ -154,7 +152,7 @@ type Runtime struct {
 	// ingest verify seam (#786). Nil-safe: recording never fails a webhook.
 	WebhookHealth *webhookhealth.Recorder
 
-	MoneyCharger        money.Charger
+	MoneyCharger        *money.ScopedCharger
 	RailCustomerService *payments.RailCustomerService
 	Merchants           *merchants.Service
 	// Vault is the runtime's Vault connection: the merchant configuration
@@ -170,7 +168,7 @@ type Runtime struct {
 	// CollectionResolver is the ONE #725/#788 store-armed per-merchant
 	// credential resolver (invoice collection adapters + NMI clients for rebills,
 	// cancels, refunds and admin actions).
-	CollectionResolver money.CollectionPlane
+	CollectionResolver *money.MerchantCollectionAdapterBuilder
 	// RailConfigs is the ONE Layer-C rail resolution seam (#788): every
 	// decision-time rail credential/armed-state read resolves the ctx
 	// merchant's psps row + scoped secrets through it.
@@ -190,7 +188,7 @@ type Runtime struct {
 	// here. Armed over SolanaRPCResolver's merchant-scoped chain reader.
 	SolanaMintDecimals  *solanamodule.MintDecimals
 	SolanaPriceProvider solanamodule.TokenPriceProvider
-	FXProvider          fx.Provider
+	FXProvider          *fx.Rates
 	// FXRates is FXProvider: rates held in memory, refreshed from the
 	// process's first cross-currency quote until Close.
 	FXRates *fx.Rates

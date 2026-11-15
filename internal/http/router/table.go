@@ -45,10 +45,10 @@ func (t *Table) Handler() http.Handler {
 		mux.ServeHTTP(probe, r)
 		if probe.status == http.StatusMethodNotAllowed {
 			w.Header().Set("Allow", probe.header.Get("Allow"))
-			request.NewHTTP(w, r, nil).AbortCode(billing.CodeMethodNotAllowed, "")
+			request.New(w, r, nil).AbortCode(billing.CodeMethodNotAllowed, "")
 			return
 		}
-		request.NewHTTP(w, r, nil).AbortCode(billing.CodeRouteNotFound, "")
+		request.New(w, r, nil).AbortCode(billing.CodeRouteNotFound, "")
 	})
 }
 

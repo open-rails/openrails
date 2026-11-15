@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 333,
+  "scenario_count": 335,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -762,6 +762,16 @@
       "id": "OR-J31-S06",
       "journey": "J31",
       "name": "NMI receipts that name their card export and restore verbatim"
+    },
+    {
+      "id": "OR-J31-S11",
+      "journey": "J31",
+      "name": "An archive written before the unread tables and columns were dropped still restores"
+    },
+    {
+      "id": "OR-J31-S08",
+      "journey": "J31",
+      "name": "An archive written before the custody migration record was dropped still restores"
     },
     {
       "id": "OR-J31-S10",

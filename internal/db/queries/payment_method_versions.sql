@@ -33,12 +33,6 @@ SELECT EXISTS (
       AND source = sqlc.arg(source)::text AND event_ref = sqlc.arg(event_ref)::text
 );
 
--- name: ListPaymentMethodVersions :many
--- A method's history, oldest first.
-SELECT * FROM billing.payment_method_versions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_method_id = sqlc.arg(payment_method_id)::uuid
-ORDER BY effective_at, id;
-
 -- name: SetPaymentMethodCard :execrows
 -- The one write of a method's card, holder handles and standing: the caller
 -- locked the row and records the version in the same transaction.

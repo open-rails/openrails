@@ -1,7 +1,6 @@
 # NMI (high-risk gateway) setup
 
-> Which flows are supported on this rail, and how well each one is verified:
-> [rail certification matrix](certification-matrix.md).
+> What each rail supports: [rails](README.md).
 
 ### What NMI is, and where your ISO fits
 
@@ -325,10 +324,7 @@ doesn't surprise you:
   and a usage order's collection stops with failure code
   `stored_credential_required`. Saving a card verifies it for reuse without
   `billing_method`; moving a subscription onto a card without a recurring
-  agreement verifies one first. A custody migration leaves a card's mandates
-  with the account that made them. If the card is then charged through a
-  different account, collection there stops the same way until the customer
-  pays with a card on that account and names it as their default.
+  agreement verifies one first.
 - **Confirm recurring classification per processor.** OpenRails sends
   `billing_method=recurring` on the initial recurring CIT and later recurring
   charges, matching NMI's Credential on File guide. The Classic API reference
@@ -424,7 +420,7 @@ nothing:
 
 A payment renews exactly the periods it paid, a decline enters dunning, and a
 schedule NMI ended is canceled, subject to the
-[cancel gate](../operations.md#cancellation-caps). A row with no evidence stays
+[cancel gate](../operations.md#the-kill-switch). A row with no evidence stays
 `unverified`. The
 `life.unverified.backlog` finding reports each account's count and oldest age;
 a row still unverified after three days raises `life.unverified.unresolved` for

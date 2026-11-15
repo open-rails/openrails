@@ -13,14 +13,6 @@ import (
 
 const tierChangeQuotePrefix = "openrails:tier-change:1:"
 
-// tierChangeRPC reads the SubscriptionAuthority, the subscriber's balance and a
-// recent blockhash with the height it stops being landable at.
-type tierChangeRPC interface {
-	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
-	LatestBlockhash(ctx context.Context) (solanaint.RecentBlockhash, error)
-	GetTokenBalanceForMint(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey) (uint64, error)
-}
-
 // PrepareTierChangeService builds the single atomic tier-change transaction.
 // Plan terms are immutable and a subscription binds one plan, so a tier change
 // is cancel-old + subscribe-new in one all-or-nothing tx:
@@ -39,12 +31,12 @@ type tierChangeRPC interface {
 // no init step.
 type PrepareTierChangeService struct {
 	submitter Submitter // the new plan owner's cranker co-signs upgrades
-	rpc       tierChangeRPC
+	rpc       solanaint.ChainReader
 	tokens    Tokens
 }
 
 // NewPrepareTierChangeService builds a PrepareTierChangeService.
-func NewPrepareTierChangeService(submitter Submitter, rpc tierChangeRPC, tokens Tokens) *PrepareTierChangeService {
+func NewPrepareTierChangeService(submitter Submitter, rpc solanaint.ChainReader, tokens Tokens) *PrepareTierChangeService {
 	return &PrepareTierChangeService{submitter: submitter, rpc: rpc, tokens: tokens}
 }
 

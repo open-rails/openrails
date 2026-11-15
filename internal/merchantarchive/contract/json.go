@@ -371,7 +371,6 @@ var jsonRules = map[string]jsonRule{
 		"plan_id": textValue, "mint_symbol": textValue, "amount_base_units": moneyStringValue, "period_hours": textValue, "plan_created_at": textValue,
 		"payer": textValue, "subscriber_wallet": textValue, "subscription_pda": textValue, "plan_owner": textValue, "treasury": textValue,
 	})),
-	"order_attempts.routing_reason": nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
 	"host_outbox.data": object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_orders": integerValue, "entered_at": textValue, "evaluated_at": textValue,
 		// An order's transition: its statuses, number, payment and decline reason.
 		"status": textValue, "payment_status": textValue, "number": integerValue, "payment_id": uuidValue, "reason": textValue, "settlement_source": textValue,

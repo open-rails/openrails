@@ -356,16 +356,6 @@ func newPriceID(productID uuid.UUID, key string, req billing.CreatePriceParams) 
 	return id
 }
 
-// priceRequestCycleDays returns the billing cadence in days, independently of
-// the access window. A nil interval means a one-time price.
-func priceRequestCycleDays(req billing.CreatePriceParams) *int {
-	if req.BillingIntervalHours == nil {
-		return nil
-	}
-	days := *req.BillingIntervalHours / 24
-	return &days
-}
-
 func (s *Service) CreatePrice(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
 	return catalogCommand(ctx, s, "price/create", req, "", createPricePlan(req), func(ctx context.Context, s *Service) (*billing.Price, error) { return s.createPriceCommand(ctx, req) })
 }
@@ -743,6 +733,3 @@ func samePriceTerms(p billing.Price, req billing.CreatePriceParams) bool {
 		reflect.DeepEqual(p.TrialUnitAmount, req.TrialUnitAmount) && reflect.DeepEqual(p.TrialDurationHours, req.TrialDurationHours) && reflect.DeepEqual(p.CustomerAmount, req.CustomerAmount) &&
 		reflect.DeepEqual(p.Quantity, req.Quantity)
 }
-
-// errQuantityRail refuses a per-seat price on a rail that cannot bill seats.
-const errQuantityRail = "quantity requires Stripe or NMI billed by OpenRails, without provider catalog links: provider schedules, CCBill and Solana bill one amount per period"

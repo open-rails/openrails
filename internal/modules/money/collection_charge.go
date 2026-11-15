@@ -51,7 +51,7 @@ func prepareUnscheduledCollection(method gen.BillingPaymentMethod, req ChargeReq
 		OrderRef:    strings.TrimSpace(req.IdempotencyKey),
 		Context:     posture,
 	}
-	return PreparedChargeFunc(func(ctx context.Context) (ChargeResult, error) {
+	return PreparedCharge(func(ctx context.Context) (ChargeResult, error) {
 		res, err := charger.Charge(ctx, request)
 		if err != nil {
 			return ChargeResult{}, err

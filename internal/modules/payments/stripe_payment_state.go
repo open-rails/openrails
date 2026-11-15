@@ -16,8 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
-const stripeRESTBaseURL = "https://api.stripe.com"
-
 // ErrStripeObjectNotFound reports provider truth that no longer has the object.
 var ErrStripeObjectNotFound = errors.New("stripe object not found")
 
@@ -46,18 +44,10 @@ type StripeCustomerPaymentState struct {
 	Subscriptions []StripeSubscriptionPaymentState
 }
 
-// StripePaymentStateReader fetches current state from one exact Stripe account.
-type StripePaymentStateReader interface {
-	PaymentMethod(ctx context.Context, paymentMethodID string) (*StripePaymentMethodState, error)
-	CustomerPaymentState(ctx context.Context, customerID string) (*StripeCustomerPaymentState, error)
-}
-
 // HTTPStripePaymentStateReader reads Stripe state through the read-only Stripe
-// transport. BaseURL and HTTPClient are test seams; production leaves both
-// empty and uses the pinned Stripe API transport.
+// transport.
 type HTTPStripePaymentStateReader struct {
 	SecretKey  string
-	BaseURL    string
 	HTTPClient *http.Client
 	PageLimit  int
 }
@@ -262,7 +252,7 @@ func stripeObjectID(raw json.RawMessage) string {
 }
 
 func (r *HTTPStripePaymentStateReader) get(ctx context.Context, path string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.baseURL()+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stripeapi.APIBase+path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -283,13 +273,6 @@ func (r *HTTPStripePaymentStateReader) get(ctx context.Context, path string) ([]
 		return nil, fmt.Errorf("stripe API error (%d)", resp.StatusCode)
 	}
 	return body, nil
-}
-
-func (r *HTTPStripePaymentStateReader) baseURL() string {
-	if base := strings.TrimSpace(r.BaseURL); base != "" {
-		return strings.TrimRight(base, "/")
-	}
-	return stripeRESTBaseURL
 }
 
 func (r *HTTPStripePaymentStateReader) client() *http.Client {

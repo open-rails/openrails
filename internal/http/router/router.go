@@ -1,42 +1,22 @@
-// Package router is the framework-neutral routing abstraction that lets the
-// embedded billing surface be assembled on net/http (gin-free) while the
-// standalone server keeps using gin (issue #282).
-//
-// Route registration code (internal/http/routes) targets the neutral Router +
-// Middleware below instead of *gin.RouterGroup. Two adapters implement Router:
-//   - ginRouter, over *gin.RouterGroup (standalone — keeps gin).
-//   - muxRouter, over *http.ServeMux (embedded — imports zero gin).
-//
-// Handlers and middleware both operate on *request.Request, which already has
-// gin and net/http backends, so neither sees the underlying framework.
+// Package router registers route handlers on a net/http ServeMux. Handlers
+// and middleware operate on *request.Request.
 package router
 
 import (
+	"net/http"
+
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/request"
 )
 
-// Handler is a framework-neutral route handler. It mirrors the existing handler
-// signature func(*request.Request).
+// Handler is a route handler.
 type Handler func(*request.Request)
 
 // Middleware wraps a Handler with around-the-handler behavior: it may run logic
 // before calling next, short-circuit (e.g. AbortCode + return without calling
 // next), and run deferred cleanup after next returns (e.g. release a pinned DB
-// connection). It is the neutral analogue of a gin.HandlerFunc that calls
-// c.Next().
+// connection).
 type Middleware func(next Handler) Handler
-
-// Router is the framework-neutral registration surface. Paths use gin-style
-// params (":id"); the muxRouter adapter converts them to Go 1.22 ServeMux
-// patterns ("{id}").
-type Router interface {
-	// Handle registers h for method+path, wrapped by mw in order (mw[0] is the
-	// outermost wrapper, runs first).
-	Handle(method, path string, h Handler, mw ...Middleware)
-	// Group returns a child Router rooted at prefix with mw applied to every
-	// route registered through it (in addition to the parent's middleware).
-	Group(prefix string, mw ...Middleware) Router
-}
 
 // Chain composes mw around h so that mw[0] runs first (outermost).
 func Chain(h Handler, mw []Middleware) Handler {
@@ -44,4 +24,42 @@ func Chain(h Handler, mw []Middleware) Handler {
 		h = mw[i](h)
 	}
 	return h
+}
+
+type Registrar interface{ Handle(string, http.Handler) }
+
+// Router registers handlers on a ServeMux under a path prefix. Paths are Go
+// 1.22 ServeMux patterns ("/v1/me/orders/{id}").
+type Router struct {
+	mux    Registrar
+	rt     *app.Runtime
+	prefix string
+	record func(pattern string)
+}
+
+// NewMux builds a Router over mux rooted at prefix (e.g. "/v1"), which is
+// prepended to every registered path.
+func NewMux(mux Registrar, prefix string, rt *app.Runtime) *Router {
+	return &Router{mux: mux, rt: rt, prefix: prefix}
+}
+
+// NewMuxRecorded is NewMux plus a recorder invoked with each final ServeMux
+// pattern ("GET /v1/me/balance"), for an assembly that exposes its route
+// table.
+func NewMuxRecorded(mux Registrar, prefix string, rt *app.Runtime, record func(pattern string)) *Router {
+	return &Router{mux: mux, rt: rt, prefix: prefix, record: record}
+}
+
+// Handle registers h for method+path, wrapped by mw in order (mw[0] is the
+// outermost wrapper, runs first).
+func (m *Router) Handle(method, path string, h Handler, mw ...Middleware) {
+	final := Chain(h, mw)
+	pattern := method + " " + m.prefix + path
+	if m.record != nil {
+		m.record(pattern)
+	}
+	rt := m.rt
+	m.mux.Handle(pattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		final(request.New(w, r, rt))
+	}))
 }

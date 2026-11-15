@@ -57,7 +57,7 @@ func (h *PlatformMethodDeleteHandler) admit(ctx context.Context, store *Store, p
 		if err != nil {
 			return err
 		}
-		if !sameDeletionTarget(current, pm) || current.NetworkTokenID != nil || current.WalletCardID != nil || current.ChargeVia != "pan_proxy" || !slices.Contains([]string{"active", "closed", "replaced", "removed"}, current.Status) {
+		if !sameDeletionTarget(current, pm) || current.NetworkTokenID != nil || current.ChargeVia != "pan_proxy" || !slices.Contains([]string{"active", "closed", "replaced", "removed"}, current.Status) {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, mid.UUID(), handle); err != nil {
@@ -127,7 +127,7 @@ func (h *PlatformMethodDeleteHandler) checkFence(ctx context.Context, in gen.Bil
 		if err != nil {
 			return err
 		}
-		if row.CustomerID != p.CustomerID || models.DerefStr(row.ParkReason) != "delete:"+in.ID.String() || p.Instrument.Matches(row) != nil || row.NetworkTokenID != nil || row.WalletCardID != nil || row.ChargeVia != "pan_proxy" {
+		if row.CustomerID != p.CustomerID || models.DerefStr(row.ParkReason) != "delete:"+in.ID.String() || p.Instrument.Matches(row) != nil || row.NetworkTokenID != nil || row.ChargeVia != "pan_proxy" {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		aliases, err := q.CountCustodianMethodAliases(ctx, gen.CountCustodianMethodAliasesParams{MerchantID: in.MerchantID, CustodianID: *in.CustodianID, MethodRef: p.Instrument.RailMethodRef, CustomerID: p.CustomerID})

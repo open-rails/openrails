@@ -1,9 +1,7 @@
 # CCBill
 
-> Which flows are supported on this rail, and how well each one is verified:
-> [rail certification matrix](certification-matrix.md). Read it before relying on
-> CCBill operations. Automatic refunds are unavailable; see the
-> [CCBill refunds](ccbill-refund-qualification.md).
+> What each rail supports: [rails](README.md). Automatic CCBill refunds are
+> unavailable; see [refunds](#refunds).
 
 CCBill is a payment-page payment processor commonly used by high-risk and
 adult/subscription businesses. In OpenRails it is a **reserved gateway**: the
@@ -232,7 +230,7 @@ PSP alone accepts nothing extra.
   once, and one beyond what remains of the charge books nothing and raises a
   ledger-review finding. A matched refund follows the merchant's cumulative
   access policy and does not cancel renewal. Separate provider cancellation
-  events are still mirrored. See [CCBill refunds](ccbill-refund-qualification.md).
+  events are still mirrored. See [refunds](#refunds).
 - An imported CCBill charge names CCBill's transaction id, which is digits.
   One declared without an amount is kept as an attribution to its
   subscription. With DataLink credentials, the provider pull records it when it
@@ -242,3 +240,18 @@ PSP alone accepts nothing extra.
   closes the finding.
 - CCBill subscriptions cannot be reassigned to another payment method;
   payment-method changes go through a new purchase.
+
+### Refunds
+
+Full, partial and cancel-and-refund requests are refused
+(`400 refund_unsupported`) before any reservation or intent, with no override; the
+admin UI does not offer them. Refund in CCBill's admin: OpenRails ingests the
+`Refund` webhook and applies `provider_refund_access`. Cancel-only requests work.
+
+CCBill's documented calls cannot refund one charge for an exact amount and prove
+the outcome: [`refundTransaction`](https://ccbill.com/doc/ccbill-api-guide) takes
+a decimal amount (omitted: the initial transaction's full amount) and also cancels
+the subscription, `voidOrRefundTransaction` may void the whole transaction, neither
+takes a transaction id, success code `1` does not confirm the amount, and
+[`-7`](https://ccbill.com/doc/ccbill-api-7-error-explained) does not prove nothing
+happened. There is no documented DataLink refund sandbox.

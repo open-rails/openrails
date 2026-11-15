@@ -1,6 +1,6 @@
 // Types mirror the Go handlers' JSON shapes exactly (see internal/http/handlers).
 // Money is native units at the currency registry scale; exact wires send int64
-// decimal strings (docs/money-wire.md).
+// decimal strings (docs/api/conventions.md).
 
 import type { SubscriptionDunning } from "#orck/client/generated/wire"
 

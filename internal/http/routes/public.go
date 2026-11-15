@@ -63,5 +63,4 @@ func (e *Env) merchantByOrder(route Route) router.Middleware {
 // pinPublic binds the merchant a public request named as the one it reads.
 func pinPublic(r *httprequest.Request, id billing.MerchantID) {
 	r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), id))
-	r.Set("openrails.merchant_id", id)
 }

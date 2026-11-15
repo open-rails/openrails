@@ -61,21 +61,21 @@ provider requests. Existing unfinished-operation refusals still apply.
 - Running charges are retained as they stand, running ones included; their
   balance watches are derived and excluded, and restore watches every running
   charge again.
-- Maintenance history retains every prune/converge-enforce/merchant-purge row,
+- Maintenance history retains every prune/approval/merchant-purge row,
   including unreferenced runs. Nonempty coverage, affected, summary or inventory
-  fields refuse. Reconciliation runs are diagnostic and excluded. Other run
-  kinds refuse. The local billing-restore receipt is excluded from re-export.
-- Maintenance note/error text is diagnostic and excluded. Generated entitlement
+  fields refuse. Other run kinds refuse. The local billing-restore receipt is
+  excluded from re-export.
+- Maintenance note text is diagnostic and excluded. Generated entitlement
   periods, generated run-class columns and price-key revisions (`price_keys`)
   are reconstructed by PostgreSQL. Catalog field owners are retained.
 - PSP settings, signer references and declared public configuration are retained.
   Source diagnostic labels, credential-version/validation markers, known API-key
   material and RPC API keys are excluded. Unknown evidence keys refuse. Custodian
   credential-version floors are deployment credential state and are excluded.
-- Webhook health/daily counts, admission-denial counts, dashboard layouts,
-  notifications, rail mutation logs and reconciliation findings are diagnostic
-  exclusions. DEKs, merchant secrets, webhook destinations and destructive policy
-  are deployment configuration. Every excluded table's reviewed columns are
+- Webhook health/daily counts, admission-denial counts, dashboard layouts, rail
+  mutation logs and reconciliation findings are diagnostic exclusions. DEKs,
+  merchant secrets, webhook destinations and destructive policy are deployment
+  configuration. Every excluded table's reviewed columns are
   enumerated in `checks.go`; newly added columns refuse.
 - Merchant directory, global worker health/fair-sweep cursors, and the global
   destructive-action switch belong to the destination deployment.

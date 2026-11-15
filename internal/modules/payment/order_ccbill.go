@@ -117,8 +117,8 @@ func (s *OrderAttemptService) payOrderCCBill(ctx context.Context, in OrderPayInp
 	if in.User == nil || len(CCBillIdentityMissing(in.User)) > 0 {
 		return ErrCCBillIdentityRequired
 	}
-	purchase, ok := s.purchaseService.(*PurchaseService)
-	if !ok {
+	purchase := s.purchaseService
+	if purchase == nil {
 		return errors.New("CCBill order payment is unavailable")
 	}
 	client, err := purchase.resolveCCBillClient(db.WithPSPID(ctx, option.PSPID))

@@ -22,4 +22,6 @@ To avoid repeated standalone compilation, build `critical/server-fixture` once w
 
 `OPENRAILS_CRITICAL_REPORT_DIR` retains structured Go results and browser evidence. Fixture state remains separate per case, even when immutable binaries and bundles are reused. The required run fails on missing/skipped cases, package failure, duplicate owners or unmapped cases.
 
+CI (`Validate`) runs on ready pull requests into `master` or `release/**` and on manual dispatch; a draft PR runs nothing. `scripts/ci-scope.py` selects the suites from the changed paths: shared, unknown, dependency or deleted inputs select everything, and isolated documentation, UI or chart changes skip unrelated suites. `scripts/check-ci-policy.py` tests that selection. `CI Gate` passes once every selected job has passed and the target branch has not moved since.
+
 `task sqlc-check` retains SQL generation and real PostgreSQL preparation. `go run ./scripts/contracts -dsn <disposable PostgreSQL 18>` checks the reviewed contracts ([compatibility](../compatibility.md)). `scripts/check_business_time.sh` runs the retained physical-clock source guard directly, and `scripts/check-embedded-auth-boundary.sh` compiles an independent host without linking AuthKit's runtime. These are static/compile checks, separate from behavioral coverage; CI's "SQL bindings and query audit" job runs sqlc and the contracts.

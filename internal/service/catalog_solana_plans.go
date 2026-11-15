@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/merchant"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
@@ -176,7 +177,7 @@ func (s *Service) solanaPlanLink(ctx context.Context, account solanaAccount, req
 	if err != nil {
 		return nil, err
 	}
-	var reader catalogReferenceChainReader
+	var reader solanaint.ChainReader
 	if s.rt.SolanaRPCResolver != nil {
 		reader = s.rt.SolanaRPCResolver.ChainReader()
 	}

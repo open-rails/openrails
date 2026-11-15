@@ -12,7 +12,3 @@ RETURNING id;
 -- name: GetMerchantDirectoryByID :one
 SELECT id,slug,status,permission_group_id
 FROM billing.merchants WHERE id=sqlc.arg(id)::uuid AND deleted_at IS NULL;
-
--- name: BindUnboundMerchantGroup :execrows
-UPDATE billing.merchants SET permission_group_id=sqlc.arg(group_id)::text,updated_at=now()
-WHERE id=sqlc.arg(id)::uuid AND permission_group_id IS NULL AND deleted_at IS NULL;

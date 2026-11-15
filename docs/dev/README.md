@@ -1,137 +1,79 @@
-# Contributor guide
+# Contributing
 
-Docs for people hacking on OpenRails itself. Audience-facing docs (integrators,
-operators, merchants) live one level up in `docs/`.
+For people working on OpenRails itself. [Testing](testing.md),
+[compatibility](../compatibility.md), [local webhooks](local-webhooks.md), the
+[injected-code scan](injection-scan.md).
 
-- [testing.md](testing.md) — package tests, the end-to-end suite, business time / test clocks
-- [compatibility](../compatibility.md) — the three frozen contracts and their snapshots
-- [local-webhooks.md](local-webhooks.md) — deterministic public webhook URLs for local dev (cloudflared)
+## Tasks
 
-## Task targets
+Routine work goes through [Task](https://taskfile.dev) (`Taskfile.yaml`):
 
-Everything routine goes through [Task](https://taskfile.dev) (`Taskfile.yaml`):
-
-| Target | What it does |
+| Target | Does |
 |---|---|
-| `task build` | Build `bin/openrails` from `server/cmd/openrails` (embeds `server/web/console/dist` if built) |
-| `task run` | Build + run the server |
-| `task dev` | Hot-reload dev server (Air, `.air.toml`) |
-| `task docker-up` / `task docker-down` | Start/stop the local compose stack (openrails + Postgres + Garnet) |
-| `task docker-reset` | Recreate the stack from empty — deletes the Postgres volume, then re-migrates ([why you'd need this](#migrations)) |
-| `task docker-logs` | Tail the openrails container |
-| `task sqlc` / `task sqlc-check` | Regenerate + vet `internal/db/gen` (see below); `sqlc-check` includes the local staleness gate |
-| `task test` | Source guardrails + unit tests (`-race`) + focused e2e contracts (requires `OPENRAILS_E2E_DSN`) |
-| `task ci-local` | Run the same compact checks and e2e contracts as CI |
-| `task admin-build` | Build the admin console SPA into `server/web/console/dist` (gitignored) |
-| `task build-console-binary` | `admin-build` + `build`: the binary with the console embedded |
-| `task fmt` / `task clean` | `go fmt` + `goimports` / remove build artifacts |
+| `task build`, `task run`, `task dev` | build `bin/openrails` (embedding `server/web/console/dist` if built), run it, hot-reload it (Air) |
+| `task docker-up`, `docker-down`, `docker-reset`, `docker-logs` | the local stack (server, PostgreSQL, Garnet); `docker-reset` deletes the database volume |
+| `task sqlc`, `task sqlc-check` | regenerate `internal/db/gen`; check it is current and prepare every query |
+| `task test`, `task ci-local` | `scripts/check.sh all` against owned disposable services |
+| `task admin-build`, `payment-page-build`, `build-console-binary` | the console and payment page builds; the binary with the console embedded |
+| `task lint`, `task fmt`, `task clean` | |
 
-Local provider-development helpers (`tunnel-webhooks`, `verify-webhook-tunnel`,
-`mint-jwt`, `nmi-query`, `e2e-dump-local`, `docker-up-e2e-sandbox`) remain
-available for explicitly scoped operator work. See
-[local-webhooks.md](local-webhooks.md); these helpers are not merge gates.
+`tunnel-webhooks`, `verify-webhook-tunnel`, `mint-jwt`, `nmi-query` and
+`docker-up-e2e-sandbox` help with provider work ([local webhooks](local-webhooks.md));
+none is a merge gate.
 
-## Database role in local dev
+## Modules
 
-One role, `app` (the Compose Postgres user), runs the server (which migrates at
-boot), the workers and the CLI. It owns every object it creates; OpenRails
-creates no roles and issues no grants.
+Four Go modules, each checked alone (`GOWORK=off`; `scripts/check.sh build` builds
+all):
 
-There is no row-level security, so the login does not isolate merchants:
-every tenant query must carry its own `merchant_id` (or `psp_id`) predicate,
-backed by composite foreign keys. A query that forgets it reads across
-merchants.
+- `.`: the embedded library. It imports only AuthKit's standard-library contracts;
+  `scripts/check-embedded-auth-boundary.sh` rejects AuthKit's runtime.
+- `server/`: package `server`, the binary `server/cmd/openrails` and the
+  AuthKit-backed packages under `server/internal/`. It builds against the root's
+  source (`replace … => ../`).
+- `adapters/authkit` and `examples/`.
 
-## sqlc workflow
+In the root: the package `openrails` (`embedded.go`, `remote.go`, …), `billing/`
+(the API vocabulary), `catalog/`, `adapters/{http,gin,fiber}/`, `openrailstest/`
+(with `nmimock`, `stripemock`), and `internal/` for everything else (`internal/engine`, `internal/modules`,
+`internal/db`, `internal/river`, `internal/integrations`, the route catalog in
+`internal/http/routes`).
+`api/` holds the contract snapshots, `critical/` the scenario suite,
+`internal/migrate/postgres/` the migrations. Only those public packages,
+`server/web/console` and `server` are importable; another changes
+`compatibility/contract.json`.
 
-SQL is hand-written in `internal/db/queries/*.sql` and compiled to
-`internal/db/gen` by sqlc (version pinned in `Taskfile.yaml`; config in
-`sqlc.yaml`). Never edit `internal/db/gen` by hand.
+## Database
 
-Both `generate` (database-backed analyzer) and `vet` (the `sqlc/db-prepare`
-rule PREPAREs every query) need a live Postgres whose schema matches
-`internal/migrate/postgres/`, via `SQLC_DATABASE_URL`. `task sqlc` resolves it:
+One role runs the server, workers and CLI, and owns every object; there are no
+grants and no row-level security, so every tenant query carries its own
+`merchant_id` (or `psp_id`) predicate.
 
-- If `SQLC_DATABASE_URL` is set, it is used as-is.
-- Otherwise `scripts/sqlc-vet-db.sh` drops/creates a throwaway vet DB
-  (`openrails_sqlc_vet`) on the local compose Postgres (default
-  `127.0.0.1:5434`; override via `SQLC_ADMIN_DATABASE_URL`,
-  `SQLC_POSTGRES_HOST`, `POSTGRES_HOST_PORT`, `SQLC_VET_DB`) and applies
-  the authored baseline through migratekit in `billing`, the schema all SQL is
-  authored in, so vet prepares exactly what a default deployment runs. AuthKit
-  tables and migrations are outside this query catalog.
+SQL is hand-written in `internal/db/queries/*.sql` and compiled by sqlc into
+`internal/db/gen` (never edit it). `generate` and `vet` need a PostgreSQL whose
+schema matches the migrations: `SQLC_DATABASE_URL`, or `task sqlc` creates a
+throwaway `openrails_sqlc_vet` database on the local stack
+(`SQLC_ADMIN_DATABASE_URL`, `POSTGRES_HOST_PORT`, `SQLC_VET_DB` override it).
 
-So the usual loop: `task docker-up`, edit queries or migrations, `task sqlc`,
-commit the regenerated `internal/db/gen`. `task sqlc-check` checks generated
-code and prepares every query locally; CI's "SQL bindings and query audit" job
-does the same against a disposable migrated PostgreSQL database, then checks
-the contracts below.
+`0001_schema.up.sql` is the baseline; a schema change is a new numbered migration
+with its `api/schema.txt` diff. A database the current chain does not match is
+refused at boot: recreate it (`task docker-reset`; `DROP DATABASE` elsewhere; for
+an embedded host, drop the schema and delete its rows from `public.migrations`
+where `app = 'openrails'`).
 
-## Frozen contracts
+## Contracts
 
-The Go API, the HTTP API and the database schema are frozen from v1.0.0
-([compatibility](../compatibility.md)). Each has a generated snapshot under
-`api/`; a change to one regenerates its snapshot in the same pull request:
+The Go API, HTTP API and schema have generated snapshots under `api/`
+([compatibility](../compatibility.md)). A change regenerates them in the same pull
+request, against a disposable PostgreSQL 18:
 
 ```sh
-OPENRAILS_E2E_DSN=postgres://postgres:postgres@127.0.0.1:5432/postgres \
-  go run ./scripts/contracts -write
+OPENRAILS_E2E_DSN=postgres://…/postgres go run ./scripts/contracts -write
 ```
 
-That rewrites `api/go.txt`, `api/openapi.json` with the generated TypeScript
-wire types and the tables under `docs/api`, `compatibility/contract.json`, and
-`api/schema.txt` (read from the PostgreSQL 18 the DSN names). Without `-write`
-it checks them, as CI does. Never hand-merge a generated file: regenerate it.
-
-## Migrations
-
-`internal/migrate/postgres/0001_schema.up.sql` is the v1 baseline and does not
-change. A schema change is a new numbered migration (`0002_…`) that upgrades
-any v1 database in place, with its `api/schema.txt` diff in the same pull
-request.
-
-A database built before v1.0.0 is not upgraded: the boot refuses it
-(migratekit strict integrity: the applied `0001` differs and the schema is not
-a fresh build of it). Wipe it:
-
-| Database | How |
-|---|---|
-| Local compose stack | `task docker-reset` — `down -v` (deletes the `postgres_data` volume) then `docker-up`, whose server migrates the empty database at boot. Plain `task docker-down` keeps the volume and therefore keeps the stale ledger. |
-| A dev/staging server you can't drop the volume of | `DROP DATABASE` + `CREATE DATABASE`, then restart the server (or run `openrails migrate up`). |
-| A hand-rolled test pool | Provision a new disposable database. The e2e suite creates a fresh schema per test. Never clear another library's shared ledger rows. |
-| An EMBEDDED host's database (one schema inside the host's DB) | Stop the host, then `DROP SCHEMA billing CASCADE; DELETE FROM public.migrations WHERE app = 'openrails' AND schema = 'billing';` (use the configured schema). Restart the host so it re-applies the chain. |
-
-## Repo layout
-
-Three Go modules, each checked on its own (`GOWORK=off`):
-
-- `.` — `github.com/open-rails/openrails`, the embedded library. Its go.mod
-  imports only AuthKit's standard-library-only contract packages;
-  `scripts/check-embedded-auth-boundary.sh` rejects its runtime implementation.
-- `server/` — `github.com/open-rails/openrails/server`: package `server`, the
-  binary `server/cmd/openrails` and the AuthKit-backed packages under
-  `server/internal/` (control plane, operator, host configuration). Released
-  with the root under the same version; in the repository it builds against
-  the root's source (`replace … => ../`).
-- `examples/` — the runnable examples, a host's view of both.
-
-In the root module:
-
-- `embedded.go`, `remote.go`, … — root package `openrails`: the SDK surface, the `*Engine` (`New`), the `*Remote` (`NewRemote`) and one concrete `*Client`, a merchant's handle from either; `Config`/`Deps` named from `internal/config`
-- `billing/` — the API vocabulary: request/response types, IDs, errors and codes, permission names
-- `catalog/` — the catalog document (`catalog.Application`) and its charge-model types
-- `adapters/{http,gin,fiber}/` — router adapters for the engine's `Routes`
-- `internal/engine/` — the in-process engine behind `openrails.New` (lifecycle, routes, River, the opt-in control plane)
-- `internal/` — everything else: `modules/` (domain), `db/` (queries/gen/models), `river/` (jobs), `integrations/` (nmi, stripeapi, solana, …), `http/` (the route catalog in `http/routes`)
-- `internal/migrate/postgres/` — the authored PostgreSQL migration baseline
-- `api/` — the frozen-contract snapshots: `go.txt`, `openapi.json`, `schema.txt`
-- `critical/` — the selected public-client journeys with isolated real services, independent provider evidence and exact required executable accounting
-- `scripts/` — Task-target implementations
-- `server/web/console/` — admin console SPA source; `embed.go` embeds its `dist/` build
-
-The root, `billing`, `catalog`, the adapters, `openrailstest` (and its
-`nmimock` and `stripemock`), `server/web/console` and `server` are the only importable non-`main` packages;
-another one changes `compatibility/contract.json`, which the contract check holds to its snapshot.
+That rewrites `api/go.txt`, `api/openapi.json`, `api/schema.txt`,
+`compatibility/contract.json`, the TypeScript wire types and `docs/api/routes.md`
+and `error-codes.md`. Without `-write` it checks them. Never hand-merge them.
 
 ## Branches
 
@@ -142,18 +84,12 @@ release candidate and the release PR below. [docs/ci.md](../ci.md) has the rules
 ## Releases
 
 ```sh
-scripts/release prepare vX.Y.Z [rc/<name>]  # opens the release PR from origin/master, or from the open RC
+scripts/release prepare vX.Y.Z [rc/<name>]  # opens chore/release-vX.Y.Z from master, or from the open RC, pinning server and adapter to the root
 scripts/release publish vX.Y.Z ["note"]     # once that PR's checks pass
 ```
 
-The root, server and optional AuthKit adapter modules release together. Master accepts only commits
-whose checks passed, so `prepare` pins their requirements of the root
-to `vX.Y.Z` on a `chore/release-vX.Y.Z` branch and opens its PR into master; `publish`
-fast-forwards master to the green PR head and pushes it with the signed,
-annotated `vX.Y.Z`, `server/vX.Y.Z` and `adapters/authkit/vX.Y.Z` tags in one atomic push. `vX.Y.Z` runs `release.yaml` (GoReleaser builds the binary from the
-server module: binaries, checksums, SBOMs, generated notes, build
-provenance; then `@openrails/billing-ui@X.Y.Z` on npm) and
-`docker-publish.yaml` (`vX.Y.Z`, `X.Y`, `latest` on Docker Hub and GHCR, one
-manifest for linux/amd64 and linux/arm64). Edit the generated notes on the
-release page if needed. Dry run:
-`goreleaser release --snapshot --clean --skip=publish,sign`.
+`publish` fast-forwards master to the green PR and pushes the signed `vX.Y.Z`,
+`server/vX.Y.Z` and `adapters/authkit/vX.Y.Z` tags atomically. The tag runs
+GoReleaser (binaries, checksums, SBOMs, provenance, then `@openrails/billing-ui` on
+npm) and the image build (`vX.Y.Z`, `X.Y`, `latest` on Docker Hub and GHCR,
+amd64 and arm64). Dry run: `goreleaser release --snapshot --clean --skip=publish,sign`.

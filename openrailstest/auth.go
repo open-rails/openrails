@@ -57,7 +57,7 @@ func CheckAuth(t testing.TB, routes openrails.Routes, c authtest.Cases) {
 }
 
 // rootPermissions are the root: permissions of the routes g turns on, once
-// each. The customer network's routes are the standalone server's alone.
+// each.
 func rootPermissions(g openrails.RouteGroups) []string {
 	var out []string
 	for _, r := range httproutes.Catalog() {

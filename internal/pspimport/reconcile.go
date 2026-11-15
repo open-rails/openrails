@@ -234,20 +234,7 @@ func (im *Importer) propose(ctx context.Context, row gen.BillingPspImport, scope
 		basis[b.SubscriptionID] = b.RowVersion
 	}
 	store := &reconcile.PGStore{DB: im.DB, Now: im.now}
-	run, err := store.CreateRun(ctx, reconcile.ModeAdvisory, []reconcile.Provider{provider}, nil, nil)
-	if err != nil {
-		return err
-	}
-	finish := func(err error) error {
-		status, msg := "completed", ""
-		if err != nil {
-			status, msg = "failed", err.Error()
-		}
-		if ferr := store.FinishRun(ctx, run, status, nil, msg); err == nil {
-			err = ferr
-		}
-		return err
-	}
+	run := uuid.Must(uuid.NewV7())
 	binding := reconcile.PSPBinding{ID: scope.ID, Rail: scope.Rail, AccountID: scope.AccountID}
 	page := func(ids []uuid.UUID) error {
 		recs, err := q.ListPSPImportHeldRecords(ctx, gen.ListPSPImportHeldRecordsParams{MerchantID: row.MerchantID, ImportID: row.ID, CustomerIds: ids})
@@ -268,31 +255,31 @@ func (im *Importer) propose(ctx context.Context, row gen.BillingPspImport, scope
 	if customers != nil {
 		for start := 0; start < len(customers); start += proposeCustomers {
 			if err := page(customers[start:min(start+proposeCustomers, len(customers))]); err != nil {
-				return finish(err)
+				return err
 			}
 		}
-		return finish(nil)
+		return nil
 	}
 	for after := uuid.Nil; ; {
 		ids, err := q.ListPSPImportProposeCustomers(ctx, gen.ListPSPImportProposeCustomersParams{MerchantID: row.MerchantID, PspID: row.PspID, ImportID: row.ID,
 			AfterCustomerID: after, RowLimit: proposeCustomers})
 		if err != nil {
-			return finish(err)
+			return err
 		}
 		if len(ids) == 0 {
 			break
 		}
 		if err := page(ids); err != nil {
-			return finish(err)
+			return err
 		}
 		after = ids[len(ids)-1]
 	}
 	if exhaustive && resolve {
 		if _, err := store.AutoResolveVanishedPull(ctx, scope.ID, run, reconcile.StateRosterFindingTypes()); err != nil {
-			return finish(err)
+			return err
 		}
 	}
-	return finish(nil)
+	return nil
 }
 
 // plausibleRoster is whether a pull's roster may prove absence: it lists a

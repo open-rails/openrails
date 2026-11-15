@@ -20,12 +20,6 @@ import (
 // moved past.
 var ErrRevisionMismatch = merchants.ErrRevisionMismatch
 
-// ValidateMerchantSettings checks a settings document as an edit would.
-func ValidateMerchantSettings(in billing.MerchantSettings) error {
-	_, err := merchantconfig.Normalize("", in)
-	return err
-}
-
 func (s *Service) merchantConfig() (*merchantdocs.Cache, error) {
 	if s == nil || s.rt == nil || s.rt.MerchantConfig == nil {
 		return nil, errors.New("merchant configuration is not wired")

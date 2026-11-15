@@ -1,9 +1,5 @@
 package subscriptions
 
-import (
-	"strings"
-)
-
 type PremiumEndReason string
 
 const (
@@ -24,26 +20,3 @@ const (
 	PremiumEndReasonNonRecoverable PremiumEndReason = "non_recoverable"
 	PremiumEndReasonUnknown        PremiumEndReason = "unknown"
 )
-
-func ParsePremiumEndReason(value string) PremiumEndReason {
-	switch strings.ToLower(value) {
-	case string(PremiumEndReasonUserCancel):
-		return PremiumEndReasonUserCancel
-	case string(PremiumEndReasonExpired):
-		return PremiumEndReasonExpired
-	case string(PremiumEndReasonChargeback):
-		return PremiumEndReasonChargeback
-	case string(PremiumEndReasonRefund):
-		return PremiumEndReasonRefund
-	case string(PremiumEndReasonAdmin):
-		return PremiumEndReasonAdmin
-	case string(PremiumEndReasonRail):
-		return PremiumEndReasonRail
-	case string(PremiumEndReasonAccessEnded):
-		return PremiumEndReasonAccessEnded
-	case string(PremiumEndReasonNonRecoverable):
-		return PremiumEndReasonNonRecoverable
-	default:
-		return PremiumEndReasonUnknown
-	}
-}

@@ -613,14 +613,6 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='nmi_sale'
   AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid)
 ORDER BY id LIMIT sqlc.arg(page_size)::int;
 
--- name: GetUnresolvedInitialEnrollmentForCustomerProduct :one
-SELECT * FROM billing.provider_intents
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='initial_membership'
-  AND payload->'terms'->>'customer_id'=sqlc.arg(customer_id)::text
-  AND payload->'terms'->>'product_id'=sqlc.arg(product_id)::text
-  AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
-ORDER BY created_at LIMIT 1;
-
 -- name: LockProviderIntentForInitialEnrollmentCompletion :one
 SELECT * FROM billing.provider_intents
 WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='initial_membership'
@@ -795,13 +787,6 @@ SELECT EXISTS (
       AND lease_expires_at > sqlc.arg(held_until)::timestamptz
 );
 
--- name: GetLatestProviderIntentIDForSubscription :one
-SELECT id FROM billing.provider_intents
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type = sqlc.arg(intent_type)::text
-  AND subscription_id = sqlc.arg(subscription_id)::uuid
-ORDER BY created_at DESC, id DESC
-LIMIT 1;
-
 -- The current claim clears a prior proven-unsent marker before any new wire
 -- call. A crash after this fence is uncertain and must verify before retrying.
 -- name: FenceDestructiveProviderSend :execrows
@@ -811,15 +796,6 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
  AND destructive_action_id=sqlc.arg(destructive_action_id)::uuid
  AND status='in_flight' AND attempts=sqlc.arg(attempts)::int
  AND lease_expires_at>sqlc.arg(now)::timestamptz;
-
--- name: SupersedePendingNMIDeleteActions :many
-UPDATE billing.provider_intents
-SET status='superseded', last_failure_reason=sqlc.arg(reason), updated_at=now()
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid
-  AND (idempotency_key=sqlc.arg(idempotency_key)::text
-       OR idempotency_key=sqlc.arg(idempotency_key)::text || ':action:' || destructive_action_id::text)
-  AND intent_type='nmi_delete_subscription'
-  AND (status='failed_retryable' OR (status='pending' AND attempts=0)) RETURNING *;
 
 -- The subscription row is locked by cancellation and the pull's pre-submit
 -- fence. A signed transaction remains an unresolved charge until reconciled.

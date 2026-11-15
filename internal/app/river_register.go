@@ -63,8 +63,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if r.Verifier == nil {
 		r.Verifier = &reconcile.Verifier{
 			DB: r.DB, Clock: clock, DeferDelete: r.DeferredDeletes, Notifications: r.NotificationService,
-			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients,
-				Endpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)}},
+			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients},
 		}
 		r.Verifier.Start()
 	}
@@ -81,7 +80,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Contacts:      r.Contacts,
 		Alerts:        r.AlertService, // requires_review findings -> operator notifications
 		NMIClients:    r.NMIClients,
-		PullEndpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)},
 		Verifier:      r.Verifier,
 		RecoverUsagePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
 			mid, err := merchant.Require(ctx)
@@ -119,7 +117,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// Stored cards a vault must be asked about: one refresh per card, queued on
 	// an expired or reissued decline and ahead of each renewal.
-	updaters, _ := r.CollectionResolver.(paymentmethods.AccountUpdaters)
+	var updaters paymentmethods.AccountUpdaters
+	if r.CollectionResolver != nil {
+		updaters = r.CollectionResolver
+	}
 	if err := addWorker(workers, &riverjobs.StoredCardRefreshWorker{DB: r.DB, Clock: clock, Updaters: updaters, Intents: r.intentRunner(intentRegistry, clock), Lifecycle: r.SubscriptionLifecycleService}); err != nil {
 		return fmt.Errorf("add stored card refresh worker: %w", err)
 	}
@@ -306,8 +307,8 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewNMICardVaultHandler(r.DB, r.RailPaymentMethodService, intents.NewStore(r.DB), r.Posture(), clock),
 	)
 	// An account-updater request is billed and may mint a vault token.
-	if updaters, ok := r.CollectionResolver.(paymentmethods.AccountUpdaters); ok {
-		registry.Register(&riverjobs.AccountUpdaterHandler{DB: r.DB, Clock: clock, Updaters: updaters, Lifecycle: r.SubscriptionLifecycleService, Policy: intents.DefaultBackoff})
+	if r.CollectionResolver != nil {
+		registry.Register(&riverjobs.AccountUpdaterHandler{DB: r.DB, Clock: clock, Updaters: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService, Policy: intents.DefaultBackoff})
 	}
 	// Solana recurring pull: signature write-ahead before the send, chain-read
 	// verification after it. The verify leg reads the chain with the intent's
@@ -345,6 +346,15 @@ func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock
 		Config:      r.Posture(),
 	}
 	return runner
+}
+
+// StripeEngines is the collection resolver as the Stripe engine reads it; nil
+// when the runtime has none.
+func (r *Runtime) StripeEngines() intents.StripeEngineServiceResolver {
+	if r.CollectionResolver == nil {
+		return nil
+	}
+	return r.CollectionResolver
 }
 
 // Posture reads merchants' provider write postures.

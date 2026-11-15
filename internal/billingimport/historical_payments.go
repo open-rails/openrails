@@ -201,7 +201,7 @@ func recordHistoricalRefunds(ctx context.Context, d *db.DB, merchantID uuid.UUID
 	if _, err := d.Gen(ctx).LockPaymentForRefund(ctx, gen.LockPaymentForRefundParams{MerchantID: merchantID, PaymentID: original.ID}); err != nil {
 		return false, err
 	}
-	existing, err := payments.NewPaymentRepo(d).ListRefunds(ctx, original.ID)
+	existing, err := payments.NewPaymentService(d).ListRefunds(ctx, original.ID)
 	if err != nil {
 		return false, err
 	}

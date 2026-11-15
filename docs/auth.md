@@ -1,114 +1,111 @@
-# Authentication and request authority
+# Authentication and authority
 
-OpenRails keeps billing identity merchant-scoped. A customer belongs to one
-merchant; a future SaaS consumer account may explicitly link separate merchant
-customer records. Shared wallets and cross-merchant account linking belong to
-OpenRails-SaaS, not the engine.
+OpenRails authenticates nobody and the host writes no middleware for it. Every
+gated route asks an `openrails.Authenticator` (`authkit/auth`), given at `Mount`
+as `Routes.Auth`, who the request is, once per request, and builds its gate from
+the answer. AuthKit provides one as `ak.Authenticator()`; a host without AuthKit
+writes [its own](#your-own-auth). The standalone server mounts its routes with
+its own AuthKit's, like any host. Billing identity is merchant-scoped: a customer
+belongs to one merchant.
 
-## Who is calling: one contract
-
-OpenRails authenticates nobody itself, and the host writes no middleware for
-it. Every gated route asks an `openrails.Authenticator`, given at `Mount` as
-`Routes.Auth`, who the request is (`Authenticate`, once per request), and
-builds its gate from the answer: its `Identity`, its `Can(scope, permission)`
-for a staff or programmatic route's permission. Admin operations require no
-recent sign-in; sensitive customer-network operations retain that check
-(authkit/auth `RecentSignInChecker`). The host names no
-permission and no scope: the names are OpenRails' own ([below](#permissions)),
-and the scopes come from the Authenticator's `RootScope` (authkit/auth `Root`).
-AuthKit provides one as `ak.Authenticator()`; a host without AuthKit writes
-its own ([below](#your-own-auth)). The standalone server mounts its routes
-with its own AuthKit's, exactly like an embedded host, and the in-process Go
-client brings its own host authority: its subject is the host application, and
-`openrails.WithInvoker` names the signed-in person a call acts for as its
-invoker ([destructive actions](destructive-actions.md)).
-
-| Route tier | What OpenRails asks | Who it admits |
-| --- | --- | --- |
+| Route tier | OpenRails asks | Admits |
+|---|---|---|
 | public, provider callbacks | nothing (a callback checks its provider's signature) | anyone |
-| customer (`/v1/me`) | `Authenticate` | a user subject acting itself, the customer; an invoker acting for someone else, or an application, is refused |
-| merchant (`/v1/admin`, `/v1/catalog`, `/v1/merchant`, `/v1/metrics`) | `Authenticate`, `Can` for the route's permission (its `merchant:` name in the merchant's scope, else its `root:` name in the root scope) | a person or an application holding that permission, without a recent-sign-in check |
-| access (`GET /v1/admin/access`) | `Authenticate`, then `Can` for each mounted group's permission | any person or application; it answers what they hold |
-| application (`/v1/app`) | `Authenticate`, then `Can` for the route's permission, as a merchant route does | an application (its `Identity.SubjectKind`) holding that permission, never a person |
+| customer `/v1/me` | `Authenticate` | a user acting itself: the customer |
+| merchant `/v1/admin`, `/v1/catalog`, `/v1/merchant`, `/v1/metrics` | `Authenticate`, then `Can` for the route's permission | a person or application holding it, with no recent-sign-in check |
+| access `GET /v1/admin/access` | `Authenticate`, then `Can` per mounted group | anyone; it answers what they hold |
+| application `/v1/app` | `Authenticate`, then `Can` | an application (`Identity.SubjectKind`) holding the permission, never a person |
 
-Every gated route acts on the merchant the credential is bound to
-([merchant binding](merchant-binding.md)), read once right after
-`Authenticate`: the merchant whose scope its `BoundScope` is (the
-group id being the merchant's id, in the `RootScope`'s authority), else the
-merchant that declares the identity's issuer (`MerchantDeclaration.Issuer`),
-else, for OpenRails' own credentials (a pay URL's secret, a provisioning
-token, the in-process handle), the merchant of their row. Nothing in the
-request names it. A credential bound to none, or to a scope that is not a live
-merchant's, is `403 merchant_unresolved`.
+The in-process Go client brings its own authority: its subject is the host
+application, and `openrails.WithInvoker` names the person a call acts for
+([destructive actions](destructive-actions.md)).
 
-OpenRails answers every refusal itself, the same for every host, with the
-status and challenge `auth.Refuse` gives: 401 with `WWW-Authenticate`
-(`authentication_required`, `credential_expired`, `credential_revoked`, with
-the provider's own challenge headers passed through unread), 403
+OpenRails answers every refusal itself, as `auth.Refuse` gives it: 401 with
+`WWW-Authenticate` (`authentication_required`, `credential_expired`,
+`credential_revoked`; your challenge headers pass through), 403
 (`permission_required`, `application_required`, `invoker_scoped_principal`,
-`step_up_unavailable` on sensitive customer-network routes for a credential
-without a sign-in of its own),
-503 when the host's auth cannot answer (`authentication_unavailable`,
-`authorization_unavailable`, or a panic). On sensitive customer-network
-routes a stale sign-in is RFC 9470's step-up:
+`step_up_unavailable`), 503 when your auth cannot answer
+(`authentication_unavailable`, `authorization_unavailable`). A stale sign-in on a
+sensitive [host-mapped customer route](#host-customer-apis) is RFC 9470 step-up:
 401 `step_up_required` with `WWW-Authenticate: Bearer
-error="insufficient_user_authentication", max_age="900"` and the provider's
-challenge as the error's metadata. A Verified without `Can` holds nothing; an
-identity without a subject or invoker is refused, so an Authenticator that
-checks nothing admits no one; each handler checks the verdict again before it
-runs. A route group never mounts without `Auth`, behind an `Auth` that is not
-a authkit/auth `Root`, or with a route neither of whose permissions the `Auth`
-knows (authkit/auth `PermissionCatalog`); a name it does not know is never
-asked. `openrailstest.CheckAuth` checks an Authenticator against this contract
-in the host's CI, with the route groups' `root:` permissions.
+error="insufficient_user_authentication", max_age="900"`. An identity without a
+subject or invoker is refused, so an Authenticator that checks nothing admits no
+one. A route group never mounts without `Auth`, behind an `Auth` that is not an
+`auth.Root`, or with a route neither of whose permissions the `Auth` knows
+(`auth.PermissionCatalog`). `openrailstest.CheckAuth(t, routes, authtest.Cases{…})`
+checks an Authenticator against this contract in CI.
+
+## Merchant binding
+
+A request acts on the merchant its credential is bound to. Nothing in the request
+selects it (not the Host, a header, the path, the query or the body), and no
+default fills in. Right after `Authenticate`, OpenRails takes the first that
+applies:
+
+| Binding | The merchant is | Credentials |
+|---|---|---|
+| Scope | the one whose scope is the credential's `BoundScope` (`{Authority: RootScope's, ID: the merchant's id}`); a scope of no live merchant is refused, never passed to the next rule | an API key of the merchant's group, a merchant application's or trusted issuer's token, a customer token minted for it, a console token exchanged for it, a host session bound to it |
+| Issuer | the one whose `MerchantDeclaration.Issuer` is the credential's issuer (one merchant per issuer per engine) | a single-merchant host's own sign-ins |
+| Object | the merchant of the row an OpenRails secret opens | a pay URL's secret, a webhook signature, a provisioning token, the in-process handle |
+
+`403 merchant_unresolved` means a valid credential bound to no live merchant: a
+person's own sign-in where no merchant declares its issuer, a scope that is no
+merchant's (or a deleted one's), an unknown in-process handle
+(`billing.ErrMerchantUnresolved`). Fix the credential; no parameter changes it.
+Merchant-bound answers carry `OpenRails-Bound-Merchant`.
+
+Getting a bound credential:
+
+- **A backend** in process uses the handle (`bill.Merchant(id)`,
+  `bill.MerchantBySlug`). Over HTTP, `openrails.NewRemoteMerchant` takes the
+  merchant's API key or application token; `openrails.NewRemote` takes one
+  credential per merchant (`RemoteOptions`) and hands out `Merchant(id)`. Handles
+  send `OpenRails-Expected-Merchant` once they know their merchant (a mismatch is
+  `412 merchant_mismatch` before the operation) and check the bound header
+  (`openrails.BoundMerchantError`). `NewRemote` with a known id guards the first
+  write too.
+- **A browser** on `/v1/me`: embedded with one merchant, the host's own sign-in
+  (bound by issuer); with several, the session bound to the store (AuthKit's
+  `MintAccessToken` with `Group`, or your own `BoundScope`). Standalone or hosted,
+  the merchant's backend mints `Client.CustomerToken` (an RFC 7523 assertion
+  redeemed at the server's token endpoint, 15 minutes) or `Client.CustomerAssertion`
+  for the browser to redeem with its own DPoP key; billing-ui's `tokenSource`
+  refreshes it.
+- **The admin console** exchanges the person's token for one bound to the chosen
+  merchant (RFC 8693 with `group_id`, through the server's `openrails-console`
+  client), refused where they hold no role.
+
+The binding picks the merchant; permissions pick the routes.
 
 ## Permissions
 
-A permission is `persona:resource:action`, with AuthKit's actions `read` and
-`manage`. The names are OpenRails' own: the `billing.Permission` constants,
-listed by `billing.Permissions()`. A host declares them in its auth and grants
-them in its roles from the constants, so a renamed one fails its build.
+A permission is `persona:resource:action` (`read`, `manage`): the
+`billing.Permission` constants, listed by `billing.Permissions()`. Build roles
+from the constants so a renamed one fails your build. Each permission has two
+names: a route acting on merchant M admits the `merchant:` name held in M's scope
+(with AuthKit, the group whose id is M's) or the `root:` name held in the
+`RootScope` (every merchant). Each route's pair is in [routes](api/routes.md).
 
-Every permission but one has two names, the persona being where it is held. A
-route acting on merchant M admits a caller holding either:
+| Routes | `merchant:` / `root:` | Covers |
+|---|---|---|
+| admin reads | `MerchantCustomerRead` / `RootCustomerRead` | customer support's reads |
+| admin changes | `MerchantCustomerManage` / `RootCustomerManage` | refunds, cancellations, credits |
+| catalog reads | `MerchantCatalogRead` / `RootCatalogRead` | products, prices, meters, price migrations |
+| catalog edits | `MerchantCatalogManage` / `RootCatalogManage` | edits, documents, migrations |
+| merchant config | `MerchantConfigRead`, `MerchantConfigManage` / `RootConfig…` | PSPs, imports, findings, settings, billing export |
+| metrics | `MerchantMetricsRead` / `RootMetricsRead` | metrics and dashboards |
+| `/v1/app` | `MerchantEntitlementsRead` / `RootEntitlementsRead` | `POST /v1/app/entitlements/check` |
+| `/v1/app` | `MerchantUsageRead`, `MerchantUsageManage` / `RootUsage…` | admissions, usage events, running charges |
+| `/v1/app` | `MerchantEventsRead` / `RootEventsRead` | the event log |
+| `/v1/app` | `MerchantOrdersManage` / `RootOrdersManage` | merchant orders |
+| none | `MerchantCustomersRead` / `RootCustomersRead` | declared; no route checks it |
+| standalone server | — / `RootMerchantsRead`, `RootMerchantsDelete`, `RootMerchantsRestore`, `RootWorkerHealthRead` | the server's merchant directory and worker health, root only |
 
-- the `merchant:` name in M's own scope: `{Authority: RootScope's, ID: M's
-  id}`, with AuthKit the group whose id is the merchant's;
-- the `root:` name in the Authenticator's `RootScope`, with AuthKit the root
-  group. It reaches every merchant.
-
-Grants are ordinary per-user roles, embedded and standalone alike: a person
-holding a role in one merchant's group acts at that merchant, one holding a
-root role at all of them.
-
-The exception is `root:admin-rate-limits:unlock`
-(`billing.RootAdminRateLimitsUnlock`): it has no `merchant:` name and is held
-on root alone. Clearing a [destructive hold](destructive-actions.md#review-and-clear)
-needs it besides the merchant configuration permission, from a person other
-than the actor whose action was held.
-
-| Routes | `merchant:` | `root:` | Covers |
-|---|---|---|---|
-| admin, reads | `billing.MerchantCustomerRead` | `billing.RootCustomerRead` | customer support's reads |
-| admin, changes | `billing.MerchantCustomerManage` | `billing.RootCustomerManage` | refunds, cancellations, credits |
-| catalog | `billing.MerchantCatalogManage` | `billing.RootCatalogManage` | the catalog and its edits |
-| merchant config | `billing.MerchantConfigManage` | `billing.RootConfigManage` | PSPs and their refresh, settings |
-| metrics | `billing.MerchantMetricsRead` | `billing.RootMetricsRead` | metrics and their assistants |
-| `/v1/app` | `billing.MerchantEntitlementsRead` | `billing.RootEntitlementsRead` | `POST /v1/app/entitlements/check` |
-| Catalog reads | `billing.MerchantCatalogRead` | `billing.RootCatalogRead` | Product, price, meter and price-migration reads |
-| `/v1/app` | `billing.MerchantUsageManage` | `billing.RootUsageManage` | admissions, usage events and running charges |
-| `/v1/app` | `billing.MerchantEventsRead` | `billing.RootEventsRead` | host events |
-| `/v1/app` | `billing.MerchantOrdersManage` | `billing.RootOrdersManage` | merchant orders: `POST /v1/app/orders` (`CreateOrder`), `/preview`, `/{id}/cancel` |
-| `/v1/app` | `billing.MerchantCustomersRead` | `billing.RootCustomersRead` | `GET /v1/app/customers`: a customer by openrails.dev account, where the [customer network](customer-network.md) runs |
-| merchant config | none | `billing.RootAdminRateLimitsUnlock` | `POST /v1/merchant/destructive-holds/{id}/clear`, with `billing.RootConfigManage` or `billing.MerchantConfigManage` |
-
-A route group that is on mounts all its routes; what a caller may use is its
-roles. Each `/v1/app` route has its own permission, so a program's role grants
-only what its task needs. The names are `merchant:customer:read`,
-`root:customer:read` and so on: each route's pair is in
-[api/routes.md](api/routes.md).
-
-With AuthKit, declare each name on its persona and build roles from them:
+`root:admin-rate-limits:unlock` (`billing.RootAdminRateLimitsUnlock`) has no
+`merchant:` name: with the config manage permission it clears a
+[destructive hold](destructive-actions.md#review-and-clear), from a person other
+than the one held. A group that is on mounts all its routes; roles decide what a
+caller may use.
 
 ```go
 rbac := authkit.NewRoles()
@@ -122,244 +119,140 @@ for _, p := range billing.Permissions() {
 }
 ```
 
-A host that grants only root roles declares the `root:` names alone; `Mount`
-needs one known name per route.
+A host granting only root roles declares the `root:` names alone.
 
-### Roles
-
-Permissions are held through roles. On the standalone server a merchant's team
-members and API keys hold a declared role (`server.MerchantRoles`: `viewer`,
-`support`, `owner`) or one the merchant defines: a custom role,
-`merchant:custom-<name>`, holding any of the `merchant:` permissions above.
-There are no preset program roles; a merchant composes what each program
-needs. A storefront's key holding `billing.MerchantCatalogRead` and
-`billing.MerchantEntitlementsRead` reads the catalog and checks entitlements;
-it cannot edit the catalog or customers' billing. The server declares the `root:` names on root too;
-its root owner holds them all.
-
-- Custom roles are AuthKit's (the merchant persona's `CustomRoles`), in the
-  merchant's group. Defining, changing and deleting one takes
-  `server.MerchantRolesManage`, reading what roles grant
-  `server.MerchantRolesRead`; the owner holds both. A role grants only
-  permissions its editor holds.
-- Checks read a role live: an edit applies to every holder on the next
-  request. Deleting one takes it from every teammate and revokes the API keys
-  and invitations carrying it.
-- The server's AuthKit API serves them for the merchant's group, whose id is
-  the merchant's: `GET` and `POST /groups/{group_id}/roles`, `GET`, `PATCH`
-  and `DELETE /groups/{group_id}/roles/{role}`. Its team
-  (`/groups/{group_id}/members`) and API key (`/groups/{group_id}/api-keys`)
-  routes take a custom role like a declared one. In Go: `ak.ListGroupRoles`,
-  `ak.CreateGroupRole`, `ak.UpdateGroupRole`, `ak.DeleteGroupRole`; a hosted
-  product resolves a role named on its own wire with
-  `server.MerchantRole("custom-storefront")`.
-- The admin console manages them in Settings, Roles: shown with
-  `server.MerchantRolesRead`, editable with `server.MerchantRolesManage`.
-
-Embedded, the host's AuthKit and roles are its own and OpenRails changes
-nothing. A host lets its staff define roles by opting in the persona they hold
-their permissions in: `authkit.NewRoles(authkit.CustomRoles)` for the root
-group, `rbac.Persona(billing.MerchantGroupPersona, authkit.CustomRoles)` for a
-merchant's own. The console's Roles page, where its `auth_base_url` serves
-AuthKit's group routes, then shows the root group's roles and their holders as
-all-merchants staff, and the merchant's group's, each to those holding its
-persona's `roles:read` there. A host that grants only root roles has no group
-for its merchant, and the page shows the root group alone.
+**Roles on the standalone server.** Team members and API keys hold a declared
+role (`server.MerchantRoles`: `viewer`, `support`, `owner`) or a custom one,
+`merchant:custom-<name>`, holding any `merchant:` permissions (a storefront key
+with `MerchantCatalogRead` and `MerchantEntitlementsRead` reads the catalog and
+checks entitlements, nothing more). Custom roles are AuthKit's, in the merchant's
+group: managing them takes `server.MerchantRolesManage`, reading
+`server.MerchantRolesRead`, and an editor grants only what they hold. Checks read
+roles live; deleting one revokes the keys and invitations carrying it. The
+server's AuthKit serves `/groups/{group_id}/roles`, `/members` and `/api-keys`;
+the console manages them in Settings, Roles. Embedded, roles are the host's; a
+host opts its staff into defining roles with `authkit.NewRoles(authkit.CustomRoles)`
+or `rbac.Persona(billing.MerchantGroupPersona, authkit.CustomRoles)`.
 
 ## Your own auth
 
-A host without AuthKit implements the same contract over its own users and
-roles: [examples/own-auth](../examples/own-auth) is one, with its tests.
-`authkit/auth` defines the contract and uses only the standard library. It is
-versioned with AuthKit but imports no AuthKit runtime, so a host implements it
-without running AuthKit:
+`authkit/auth` is standard-library only and versioned with AuthKit; implementing
+it runs no AuthKit. [`examples/own-auth`](../examples/own-auth) is a complete one.
 
-- `Authenticate(r)` reads the request's credential, live: `ErrUnauthenticated`
-  for none or an unknown one (joined with `ErrRevoked` once signed out),
-  `ErrUnavailable` when your store cannot answer. OpenRails passes it no
-  cookies: a browser sends the credential in `Authorization`.
-- `Identity()` names your issuer, the user's UUID as the subject (it is the
-  customer's id), the user as its own invoker, and the credential.
-- `RootScope` is a `Scope{Authority, ID}` naming your root group, where staff
-  of every merchant hold the `root:` names. A merchant's scope is
-  `{Authority: the same, ID: the merchant's id}`: your own name for that
-  merchant's staff group. OpenRails builds it from the merchant's id and keeps
-  no list of scopes.
-- `BoundScope` is the merchant the credential acts at, from your own record
-  (the merchant a session chose), never a request field; zero for none.
-- `Can(ctx, scope, permission)` answers exactly that `billing.Permission` in
-  exactly that scope, read live: a merchant role's `merchant:` names in its
-  merchant's scope, a root role's `root:` names in the root scope. A
-  credential bound to one merchant holds nothing at another; a person keeps
-  their root roles.
-- Customer-network operations marked `sensitive` ask the recent-sign-in
-  check (authkit/auth `RecentSignInChecker`): nil within your step-up window,
-  else an `auth.Challenge` with `ErrStepUpRequired` and the window as
-  `MaxAge`. Admin operations never ask it.
-- `KnownPermission` knows `billing.Permissions()`, so `Mount` checks every
-  route's names.
+- `Authenticate(r)` reads the credential live: `ErrUnauthenticated` for none or
+  unknown (with `ErrRevoked` once signed out), `ErrUnavailable` when your store is
+  down. OpenRails passes no cookies; browsers send `Authorization`.
+- `Identity()` names your issuer, the user's UUID as subject (the customer id),
+  the user as its own invoker, and the credential.
+- `RootScope` is `Scope{Authority, ID}` for your all-merchants staff group; a
+  merchant's scope is `{the same Authority, the merchant's id}`.
+- `BoundScope` is the merchant the credential acts at, from your own records; zero
+  for none (and for a single merchant that declares your issuer).
+- `Can(ctx, scope, permission)` answers exactly that permission in exactly that
+  scope, live. A credential bound to one merchant holds nothing at another.
+- `CheckRecentSignIn` (`auth.RecentSignInChecker`) is asked only by sensitive
+  host-mapped customer operations: nil inside your window, else an
+  `auth.Challenge` with `ErrStepUpRequired` and `MaxAge`.
+- `KnownPermission` knows `billing.Permissions()`.
 
-A host serving one merchant declares its issuer on that merchant
-(`MerchantDeclaration.Issuer`) and returns a zero `BoundScope`.
-`openrailstest.CheckAuth` checks the result in CI. A host's directory is
-`Deps.UserInfo` (`Get` and `Search` over its users).
+Your directory is `Deps.UserInfo` (`Get` and `Search`).
 
 ## Identities
 
-An identity has three parts:
+- **Subject:** the native account acted as, a user (`SubjectUser`) or application
+  (`SubjectApplication`). Its money and authority are used. A customer is a
+  canonical UUID, the same on every credential.
+- **Invoker:** the party actually acting, the subject or someone on its behalf,
+  possibly another issuer's user. Spend limits, delegations, staff rate limits
+  and the destructive ceiling key on it (`issuer|id` when another issuer vouches).
+  An invoker acting for someone else, or an application, calls no `/v1/me` route.
+- **Credential:** how it was proven (`CredentialSession`, `CredentialDeviceKey`,
+  `CredentialAPIKey`, `CredentialSignedToken`, `CredentialAccessToken`). Only a user
+  acting in person pays with their own saved card.
 
-- the **subject**: the native account acted as, a user or an application.
-  Its money and authority are used: a customer route's customer, a staff
-  permission's holder. A user is the same subject on every credential.
-- the **invoker**: the party actually acting, the subject itself or someone
-  acting on its behalf, possibly another issuer's user. Spend limits, spend
-  delegations, staff rate limits and the destructive-operation ceiling key on
-  it: its id, as `issuer|id` when another issuer vouches for it.
-- the **credential**: how it was proven (session, device key, API key, signed
-  token or access token). Only a user acting in person pays with their own
-  saved card. A recent-sign-in check is limited to the customer-network
-  operations marked `sensitive`.
-
-Provider writes record all three: the subject, the invoker and the
-credential (`kind:id`).
-
-The standalone server (package `server`) runs its own AuthKit, configured by
-its `auth:` section in AuthKit's own keys, with closed registration unless it
-says otherwise. Its own sign-in (password, passwordless, registration) is
-opt-in (`server.Config.LocalSignIn`, `local_sign_in`); without it people sign in
-at a trusted issuer. Identity and contact attributes confer no authorization.
+Provider writes record all three.
 
 ## The standalone server
 
-The server's AuthKit decides who every request is. OpenRails maps merchants to
-AuthKit groups and nothing more:
+The server runs its own AuthKit (its `auth:` section, [configuration](configuration.md#the-servers-authkit)),
+with closed registration and local sign-in off unless `local_sign_in` says
+otherwise; without it people sign in at a trusted issuer.
 
-- **A merchant's scope is its AuthKit group**, whose id is the merchant's id
-  (`Server.MerchantScope`). Staff routes ask `Can` for the `merchant:` name
-  there, else for the `root:` name in the root group.
-- **The merchant a request is for** is the AuthKit group its credential is
-  bound to: an API key's group, a trusted issuer's group, a token exchanged for
-  a group. A person's own sign-in is bound to none and reaches no merchant:
-  the admin console exchanges it for a token bound to the merchant chosen
-  (RFC 8693 with `group_id`, through the `openrails-console` client the server
-  declares), and holding a role in one merchant never picks it.
-- **Customer (`/v1/me`) and programmatic (`/v1/app`) credentials are bound** to
-  their merchant: a trusted issuer's token, a customer token minted for a
-  merchant's backend, or an API key of the merchant's group.
-- **A customer is its issuer's subject** (OIDC Core §5.7): the customer id is
-  the token's `sub`, and `billing.customers` records the issuer that made it.
-  Another issuer's credential with the same `sub` is refused
-  (`403 customer_issuer_mismatch`). A customer with no recorded issuer is the
-  merchant's own: one made through the Go API or the admin API, one its own
-  backend names in a customer token (RFC 7523), a user of the issuer it
-  declares. No foreign trusted issuer reaches it, so let a foreign issuer's
-  customer make itself with its first request.
+- **A merchant's scope is its AuthKit group**, whose id is the merchant's
+  (`Server.MerchantScope`). A person's own sign-in is bound to no merchant; holding
+  a role in one never picks it.
+- **A customer is its issuer's subject** (OIDC Core §5.7): `billing.customers`
+  records the issuer, and another issuer's credential with the same `sub` is
+  `403 customer_issuer_mismatch`. A customer with no recorded issuer is the
+  merchant's own (made through the APIs, a customer token, or the declared issuer).
+  For a tenant-bound merchant the credential's tenant is checked too.
 
-## Standalone account directory
+### Standalone account directory
 
-The standalone server requires `auth.default_tenant_id`
-(`AUTH_DEFAULT_TENANT_ID`), a UUID generated once for its platform/operator
-account directory and retained in deployment configuration. It is not inferred
-from a merchant, a token issuer or a request. Merchant ownership and external
-customer directories remain separate, even when one deployment hosts both.
+`auth.default_tenant_id` (`AUTH_DEFAULT_TENANT_ID`) is a UUID generated once for
+the server's own operator account directory and kept in configuration; it is never
+inferred. `openrails migrate up` migrates OpenRails and AuthKit and passes it as
+AuthKit's adoption target for existing accounts, keeping their ids: review that
+mapping before migrating a populated database.
 
-`openrails migrate up` (or `migrate pg`) explicitly migrates both OpenRails and
-AuthKit. It passes this configured ID as AuthKit's legacy-directory adoption
-target, preserving existing account and credential IDs. Review that mapping
-before migrating a populated database; every subsequent boot and replica uses
-the same value. Database-only inspection commands require no account tenant.
+### Trusted issuers
 
-For an explicitly tenant-bound merchant, the customer gate also checks the
-verified credential's tenant. A foreign issuer's subject keeps that issuer in
-the billing customer row: a matching UUID or tenant never turns it into a
-native account or lets it claim an existing native customer's row.
-
-## Trusted issuers
-
-With `auth.resource.id` set, the server's AuthKit is an OAuth 2.0 resource
-server: it accepts RFC 9068 access tokens (`typ: at+jwt`) minted for that
-resource by its trusted issuers. A trusted issuer is an AuthKit remote
-application in a merchant's group: the merchant manifest's
-`remote_application` (holding the merchant's owner role), or one registered at
-run time through AuthKit. One issuer acts for one merchant. Its tokens'
-permissions count within its application's role and the token's scopes:
-`openrails:merchant` grants the merchant permissions, `openrails:self` none (a
+With `auth.resource.id` set, the server accepts RFC 9068 access tokens
+(`typ: at+jwt`) minted for that resource by its trusted issuers: AuthKit remote
+applications in a merchant's group, from the manifest's `remote_application`
+(holding the merchant's owner role) or registered at run time. One issuer acts for
+one merchant. A token's permissions count within its application's role and its
+scopes: `openrails:merchant` grants merchant permissions, `openrails:self` none (a
 customer's own billing). A token whose `sub` equals its `client_id` is a client
-acting for itself.
+acting for itself. An application without an authorization server mints customer
+tokens at the server's token endpoint with an RFC 7523 assertion. Verification,
+role mapping and DPoP are AuthKit's
+([resource server](https://github.com/open-rails/authkit/blob/master/docs/resource-server.md)).
+OpenRails cannot see an issuer's bans or revocations: the token's lifetime bounds
+the exposure.
 
-A trusted application without an authorization server mints its customer a
-token at the server's own token endpoint with an RFC 7523 assertion. How
-AuthKit verifies tokens, maps an issuer's roles and handles sender-constrained
-tokens is AuthKit's: see its
-[resource server](https://github.com/open-rails/authkit/blob/master/docs/resource-server.md)
-and [DPoP](https://github.com/open-rails/authkit/blob/master/docs/resource-server.md#dpop)
-documentation. `auth.sign_in.dpop` sets how the server's AuthKit issues tokens
-to its own users; it never changes how tokens are validated.
+### Sessions and proxies
 
-Every API route answers CORS for any origin, without credentials mode; the
-header lists add the ones the mount's Authenticator advertises. Origin is
-transport metadata, not identity.
+Billing mounts strip ambient cookies. The server's own console session keeps its
+access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt`
+on HTTPS, `authkit_rt` on allowed plain-HTTP development); `POST /auth/v1/token`
+restores it on reload, and logout revokes it. Every permission check acts as the
+token's own sign-in, so a revoked session answers 401 `credential_revoked` at
+once. Every attempt authenticates and authorizes again; nothing is memoized.
 
-OpenRails cannot see an issuer's end-user ban or session revocation: the
-issuer stops minting, and the access token's lifetime bounds the exposure.
+Set `trusted_proxies` to the real proxy CIDRs or `auth.http.direct_peer_ip: true`
+(mutually exclusive); Cloudflare headers are trusted only from
+`cloudflare_proxies`. Embedded hosts set `Config.TrustedProxies` and
+`Config.CloudflareProxies`.
 
-## Cookies and local account admission
+## Host customer APIs
 
-Billing HTTP mounts strip ambient cookies: a browser call carries its
-credential in a header. AuthKit's own `/auth` transport keeps its separate
-session/refresh/CSRF cookie protocol.
+A host that keeps its own account relationships (a hosted product linking its
+accounts to merchants' customers) reuses OpenRails' customer checks while
+OpenRails stores no relationship. Neither adds an HTTP route.
 
-The control plane enables AuthKit's browser refresh transport: access tokens
-stay in memory, while the rotating refresh credential is an HttpOnly,
-SameSite=Lax cookie (`__Host-authkit_rt` on HTTPS; `authkit_rt` on explicitly
-allowed plain-HTTP development deployments). Auth responses contain no refresh
-token for JavaScript storage. A page reload restores the session with
-`POST /auth/v1/token` and the cookie; body refresh tokens, duplicate cookies and
-cross-origin consumption are refused. Logout clears the cookie and revokes its
-server-side session. Go AuthKit calls retain their own explicit token results.
+- `Engine.ResolveCustomer(ctx, authority, verified)` returns a `CustomerProof` for
+  the existing customer the original request proves: its merchant, customer and
+  stored `Issuer` (nil is the merchant's native namespace). It never
+  authenticates again, admits a user acting in person (not a personal access
+  token; a scoped token needs `openrails:self`), binds the merchant exactly as
+  `/v1/me` does and changes nothing. The Verified must implement
+  `auth.CredentialChecker`. A missing customer is `billing.ErrNotFound`.
+- `Engine.CustomerRoutes(selection)` returns customer operations under its
+  `Prefix` (default `/v1/me`; whole-segment parameters allowed). `Auth` verifies
+  once; `Resolve` maps the request to one existing `CustomerBinding`, returning
+  `billing.ErrNotFound` to hide a relationship. Operations: config, payments,
+  entitlements, orders (list, detail, payment attempt, pay, confirm),
+  subscriptions (list, detail, cancel, resume, payment method), payment methods
+  (list, add, confirm, delete) and agreements (list, revoke). Every mutation asks
+  for a recent sign-in; order creation is not mapped.
+- Standalone, `server.Deps.CustomerAdmissionPolicy` may refuse an ordinary
+  `/v1/me` request after identity, merchant and issuer checks and before the
+  customer is admitted. Return an AuthKit refusal for the usual HTTP error; any
+  other error fails closed. It does not run on staff, AuthKit, host-mapped or pay
+  URL routes.
 
-Privileged local users pass AuthKit request verification and live account
-admission. Enrollment-only tokens remain restricted after enrollment completes;
-clients obtain a new normal token. Every permission check acts as the token's
-own sign-in (`verify.ActorFromClaims`): once that session is revoked (logout,
-revoke-all, password change, ban, deletion) the check answers 401
-`credential_revoked`, whatever time the token has left. Routes that only
-authenticate, with no permission check, accept the token until it expires.
-
-Every HTTP attempt authenticates and authorizes again: the route gate asks
-the Authenticator once per request. Documented financial operations own durable
-idempotency receipts; there is no generic response replay cache. Permission
-checks are not memoized.
-
-## Operational configuration
-
-Configure `trusted_proxies` with actual proxy CIDRs or set
-`auth.http.direct_peer_ip: true` for direct client connections. Cloudflare-specific
-headers are trusted only from declared `cloudflare_proxies`; generic proxy
-trust does not confer that authority. Embedded hosts set the same on
-`Config.TrustedProxies` and `Config.CloudflareProxies`. Direct-peer and proxy
-declarations are mutually exclusive.
-
-Development signing keys persist under `auth.keys.path`; production supplies
-its managed keys. AuthKit reads a signing application's registration on every
-verification, so registration, key changes and disablement apply to the next
-request, wherever they were made. Unverified token issuers never trigger
-arbitrary database or JWKS discovery.
-
-Cookie origins use canonical browser spelling: lowercase host, no wildcard,
-userinfo, path, query, fragment, or explicit default port. HTTPS is required;
-HTTP is allowed for explicit localhost/loopback development origins.
-
-## Customer portal membership
-
-Billing customer records are merchant-scoped and
-do not create AuthKit customer groups as a side effect. Hosts such as
-OpenRails-SaaS explicitly call `EnsureCustomerPermissionGroup` when a user
-creates a portal account. The group's id is the customer's user id:
-`CustomerGroup(customerID)` addresses it and `CustomerType` is its persona.
-
-Customer groups do not issue API keys or register signing applications: those
-credentials have no supported customer authentication path. Their
-seven generated credential routes are absent. Merchant API keys and registered
-merchant applications remain supported. Existing generated customer member,
-role, invite and descriptor routes require an explicitly created group.
+Customer records create no AuthKit groups. A hosted product calls
+`Server.EnsureCustomerPermissionGroup` when a user creates a portal account; the
+group's id is the customer's id, and it issues no API keys or signing
+applications.

@@ -222,9 +222,3 @@ func (p *Pool) Ping(ctx context.Context) error { return p.raw.Ping(ctx) }
 func (p *Pool) Stat() *pgxpool.Stat { return p.raw.Stat() }
 
 func (p *Pool) Close() { p.raw.Close() }
-
-// RewriteDBTX applies the same relocation as DB.Qx to a raw pool,
-// connection, or transaction. Use it when constructing sqlc queries without DB.
-func RewriteDBTX(inner gen.DBTX, schema string) gen.DBTX {
-	return newSchemaRewriter(schema).wrapDBTX(inner)
-}

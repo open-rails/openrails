@@ -19,14 +19,6 @@ func (r *Runtime) riverConfigurableLocked() error {
 	}
 	return nil
 }
-func (r *Runtime) CheckRiverConfigurable() error {
-	if r == nil {
-		return fmt.Errorf("runtime is nil")
-	}
-	r.riverCompositionMu.Lock()
-	defer r.riverCompositionMu.Unlock()
-	return r.riverConfigurableLocked()
-}
 
 // RiverJobs seals the attached component set before handing it to the host's
 // fleet; OpenRails' own River is then refused. Request it only after optional

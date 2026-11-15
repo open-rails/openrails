@@ -1034,11 +1034,3 @@ type funnelStates struct {
 	AwaitingMethod int64 `json:"awaiting_method"`
 	Unverified     int64 `json:"unverified"`
 }
-
-// samePeriod reports whether the locked row is still on the scanned period.
-func samePeriod(current, scanned *time.Time) bool {
-	if current == nil || scanned == nil {
-		return current == scanned
-	}
-	return current.Equal(*scanned)
-}

@@ -23,7 +23,7 @@ func QuoteSolanaUpgrade(ctx context.Context, database *db.DB, sub *models.Subscr
 		return ModelBUpgradeQuote{}, ErrTierChangePeriodUnknown
 	}
 	ctx = db.WithPSPID(ctx, sub.PspID)
-	paid, err := payments.NewPaymentRepo(database).GetSolanaPeriodPaidAmount(ctx, sub.ID, *sub.CurrentPeriodStartsAt, current.Currency)
+	paid, err := payments.NewPaymentService(database).GetSolanaPeriodPaidAmount(ctx, sub.ID, *sub.CurrentPeriodStartsAt, current.Currency)
 	if err != nil {
 		return ModelBUpgradeQuote{}, fmt.Errorf("read Solana paid period: %w", err)
 	}

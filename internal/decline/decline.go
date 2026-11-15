@@ -5,7 +5,6 @@ package decline
 
 import (
 	"context"
-	"strconv"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -185,12 +184,4 @@ func AlertUnmapped(ctx context.Context, r Result) {
 	}
 	log.WithContext(ctx).WithFields(log.Fields{"rail": r.Rail, "failure_code": r.Code}).
 		Error("UNMAPPED decline code: retried by doctrine. Map it in internal/decline")
-}
-
-// NMIResponseCode is the numeric NMI code of any recorded form (225,
-// nmi_response_225, invalid_card_security_code, nmi_invalid_card_security_code),
-// or 0.
-func NMIResponseCode(code string) int {
-	n, _ := strconv.Atoi(rails["nmi"].canonical(code))
-	return n
 }

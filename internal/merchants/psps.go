@@ -822,9 +822,6 @@ func (s *Service) verifyNMIEnvironment(ctx context.Context, id billing.MerchantI
 	if s.nmiWire != nil {
 		s.nmiWire(client)
 	}
-	if s.nmiProbeV5BaseURL != "" {
-		client.V5BaseURL = s.nmiProbeV5BaseURL
-	}
 	if err := nmi.CheckEnvironmentArm(ctx, client); err != nil {
 		return providerCredentialError(fmt.Errorf("merchants: rail %q account %q: %w", p.Rail, p.AccountID, err))
 	}

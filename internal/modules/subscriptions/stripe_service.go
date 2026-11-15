@@ -59,18 +59,6 @@ type StripeService struct {
 	accountSecret     string
 	Config            *config.Config
 	Rails             railresolve.Source
-
-	// baseURL overrides the Stripe API root. Empty means the production Stripe
-	// API (https://api.stripe.com). Tests set this to an httptest server.
-	baseURL string
-}
-
-// stripeBaseURL returns the Stripe API root, honoring the test override.
-func (s *StripeService) stripeBaseURL() string {
-	if s != nil && strings.TrimSpace(s.baseURL) != "" {
-		return strings.TrimRight(strings.TrimSpace(s.baseURL), "/")
-	}
-	return "https://api.stripe.com"
 }
 
 // CreateCustomer creates a Stripe Customer for the given app user, tagging it
@@ -92,7 +80,7 @@ func (s *StripeService) CreateCustomer(ctx context.Context, email, appUserID str
 	}
 	values.Set("metadata[app_user_id]", appUserID)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.stripeBaseURL()+"/v1/customers", strings.NewReader(values.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stripeapi.APIBase+"/v1/customers", strings.NewReader(values.Encode()))
 	if err != nil {
 		return "", err
 	}
@@ -147,7 +135,7 @@ func (s *StripeService) FindCustomerIDByAppUserID(ctx context.Context, appUserID
 	query.Set("query", fmt.Sprintf("metadata['app_user_id']:'%s'", appUserID))
 	query.Set("limit", "1")
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.stripeBaseURL()+"/v1/customers/search?"+query.Encode(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stripeapi.APIBase+"/v1/customers/search?"+query.Encode(), nil)
 	if err != nil {
 		return "", err
 	}
@@ -214,7 +202,7 @@ func (s *StripeService) ListActiveSubscriptionsForCustomer(ctx context.Context, 
 		query.Set("status", status)
 		query.Set("limit", "100")
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.stripeBaseURL()+"/v1/subscriptions?"+query.Encode(), nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, stripeapi.APIBase+"/v1/subscriptions?"+query.Encode(), nil)
 		if err != nil {
 			return nil, err
 		}
@@ -263,13 +251,6 @@ func (s *StripeService) ListActiveSubscriptionsForCustomer(ctx context.Context, 
 		}
 	}
 	return summaries, nil
-}
-
-// SetBaseURLForTest overrides the Stripe API root. Test-only.
-func (s *StripeService) SetBaseURLForTest(baseURL string) {
-	if s != nil {
-		s.baseURL = baseURL
-	}
 }
 
 func (s *StripeService) GetSubscriptionItemID(ctx context.Context, subscriptionID string) (string, error) {
@@ -352,7 +333,7 @@ func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptio
 		values.Set("billing_cycle_anchor", billingAnchor)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.stripeBaseURL()+"/v1/subscriptions/"+subscriptionID, strings.NewReader(values.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stripeapi.APIBase+"/v1/subscriptions/"+subscriptionID, strings.NewReader(values.Encode()))
 	if err != nil {
 		return err
 	}

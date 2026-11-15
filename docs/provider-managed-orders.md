@@ -3,7 +3,7 @@
 An order records what is owed. Its payments record money that actually moved.
 That relationship is the same when OpenRails collects, when an NMI recurring
 schedule collects, and when Stripe Billing or CCBill manages billing and retries.
-[Usage orders](usage-orders.md) already use this model; provider-managed orders
+[Usage orders](usage-billing.md#usage-orders) already use this model; provider-managed orders
 add no second usage-pricing engine.
 
 A provider renewal, an initial enrollment, and a separate adjustment are distinct

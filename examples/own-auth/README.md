@@ -36,20 +36,3 @@ constants; the persona is where the role is held. `directory` is
 A shop serving one merchant needs no binding: declare its issuer on the
 merchant (`MerchantDeclaration{Issuer: "https://shop.example"}`) and return a
 zero `BoundScope`. Every session then acts at that merchant.
-
-## Tests
-
-`go test ./own-auth/` checks the example imports only AuthKit's contract packages,
-with no AuthKit server or database implementation. The end-to-end
-tests need a PostgreSQL 18 server:
-
-```sh
-OPENRAILS_E2E_DSN=postgres://… go test -tags e2e,integration ./own-auth/
-```
-
-`TestOwnAuthConforms` runs `openrailstest.CheckAuth` against the real
-tables; `TestOwnAuthGates` drives the mounted engine over HTTP: switching
-merchants, a merchant's support refused another merchant and the catalog,
-`merchant_unresolved`, a stale staff session admitted to the refund handler,
-a signed-out session, and a
-shopper who sees only their store's merchant.

@@ -73,7 +73,7 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 				return nil, fmt.Errorf("end access %s: %w", sub.ID, err)
 			}
 			if sub.Rail == models.RailSolana {
-				if err := s.cancelSolanaSubscriptionForLifecycle(ctx, d, sub.ID); err != nil {
+				if err := cancelSolanaSubscriptionCascade(ctx, d, sub.ID); err != nil {
 					return nil, fmt.Errorf("end access %s: cancel Solana subscription: %w", sub.ID, err)
 				}
 			}

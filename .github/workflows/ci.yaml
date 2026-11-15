@@ -219,6 +219,17 @@ jobs:
       # the schema list is read from a database migrated on this server.
       - name: Reviewed contracts are current
         run: go run ./scripts/contracts -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable'
+      # Snapshots are written against a database; a drifted run offers them as a patch to review and commit.
+      - name: Regenerate the drifted contracts as a patch
+        if: ${{ failure() }}
+        run: |
+          go run ./scripts/contracts -write -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable'
+          git add -A && git diff --cached --binary > "$RUNNER_TEMP/regenerated-contracts.patch"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() }}
+        with:
+          name: regenerated-contracts
+          path: ${{ runner.temp }}/regenerated-contracts.patch
 
   # The light tier's browser check; the full tier builds these inside critical.
   browser:
@@ -341,7 +352,7 @@ jobs:
         run: |
           gosec_bin="$(scripts/ci-install-tool.sh gosec)"
           for module in . server adapters/authkit examples; do
-            (cd "$module" && "$gosec_bin" -severity high -confidence medium -exclude-dir=.agents ./...)
+            (cd "$module" && "$gosec_bin" -severity high -confidence medium ./...)
           done
       - name: Go vulnerability analysis
         run: |

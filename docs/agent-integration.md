@@ -8,7 +8,7 @@ the doc map. Follow it top to bottom.
 
 - **Money is an integer in the currency's native units** — micros for USD, per the
   registry in `GET /v1/config` — sent as a decimal string on the wire
-  ([money-wire.md](money-wire.md)). Never pass cents or dollars to an API that
+  ([api/conventions.md](api/conventions.md#money-ids-and-times)). Never pass cents or dollars to an API that
   takes an amount.
 - **Entitlements are the access truth.** The host app gates features on active
   entitlements, never by inspecting subscription rows. See
@@ -19,8 +19,9 @@ the doc map. Follow it top to bottom.
   ([docs/rails/nmi.md](rails/nmi.md)), which puts the deployment in SAQ D; never
   enable it on your own.
 - **Non-live first.** All development declares every PSP `environment: test` or
-  `sandbox`; OpenRails verifies each with its provider and refuses a live PSP
-  beside them. Do not touch live credentials until the full flow is proven.
+  `sandbox`; OpenRails verifies each with its provider. An omitted
+  `environment` is the rail's real-money one. Do not touch live credentials
+  until the full flow is proven.
 - **Vocabulary:** a *rail* is the gateway kind (`nmi`/`ccbill`/`stripe`/`solana`); a
   *PSP* is the merchant's account on a rail (manifest key `psps:`). Config keys named
   `accounts:`/`rail_merchant_accounts` are retired and fail loudly.
@@ -41,7 +42,7 @@ Do not guess these; ask:
 
 ## Plan A — embedded (Go host)
 
-Follow [embedded-integration.md](embedded-integration.md) section by section. The
+Follow [embedded.md](embedded.md) section by section. The
 milestone order, each verifiable before the next:
 
 1. **Boot.** `openrails.Config` (explicit `ProviderWriteMode`),
@@ -52,7 +53,7 @@ milestone order, each verifiable before the next:
 2. **Merchant + rails.** Set `Config.Merchants` with the user's non-live PSP
    entries, each declaring its `environment` (per-rail setup: [rails/](rails/)).
    Verify: boot logs show the rail armed; for NMI the environment check passes.
-3. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);
+3. **Catalog.** Author products/prices per [catalog.md](catalog.md);
    apply it with a host command calling `client.ApplyCatalog`, run once and on
    each change, never at boot. Verify: catalog list routes return the products.
 4. **Mount routes.** Pass the host's auth as `Auth` in an `openrails.Routes`
@@ -65,27 +66,27 @@ milestone order, each verifiable before the next:
 5. **Backend calls.** Use the Client where the host needs admission/holds, usage,
    or entitlement reads. Verify: `Admit` + `CaptureAdmissions` round-trip in a test.
 6. **Purchase end-to-end.** Frontend work per
-   [frontend-integration.md](frontend-integration.md). Verify: sandbox purchase →
+   [frontend.md](frontend.md). Verify: sandbox purchase →
    webhook (use [dev/local-webhooks.md](dev/local-webhooks.md) for a public URL) →
    entitlement active → host feature unlocks. Then verify cancel.
 
 ## Plan B — standalone (any host language)
 
-Follow [standalone-integration.md](standalone-integration.md). Milestones:
+Follow [standalone.md](standalone.md). Milestones:
 
-1. **Deploy.** Compose stack (or real infra per [operator-guide.md](operator-guide.md)).
+1. **Deploy.** Compose stack (or real infra per [operations.md](operations.md)).
    Verify: `GET /health/ready` (note: there is no `/health`).
 2. **Provision.** Manifest with merchant + sandbox PSPs; `push-auth-bootstrap` →
    `push-merchant-config --insert` → `catalog apply PATH --merchant NAME`.
    Register your backend as a client at the merchant's trusted issuer. Verify: its
    client-credentials token works via `client.GetMerchantConfiguration(ctx)` (Go) or an
    authenticated `GET /v1/merchant/configuration` call.
-3. **Backend.** Each credential acts at its one merchant ([merchant-binding.md](merchant-binding.md)).
+3. **Backend.** Each credential acts at its one merchant ([auth.md](auth.md#merchant-binding)).
    Go hosts: root SDK `openrails.NewRemoteMerchant` with a `RemoteCredential`. Other stacks:
-   plain HTTP per [api/endpoints.md](api/endpoints.md) and [api/routes.md](api/routes.md).
+   plain HTTP per [api/conventions.md](api/conventions.md) and [api/routes.md](api/routes.md).
 4. **Frontend.** Access tokens: your identity provider mints
    `openrails:self` tokens for OpenRails (code flow or token exchange) per
-   [frontend-integration.md](frontend-integration.md) / [auth.md](auth.md).
+   [frontend.md](frontend.md) / [auth.md](auth.md).
    Never send the host's own session tokens to OpenRails.
 5. **Webhooks + end-to-end.** Rails point directly at OpenRails. Verify the same
    purchase → webhook → entitlement loop as Plan A step 6.
@@ -94,18 +95,17 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
 
 | Need | Doc |
 |---|---|
-| Full embedded guide | [embedded-integration.md](embedded-integration.md) |
-| Full standalone guide | [standalone-integration.md](standalone-integration.md) |
-| Browser/UI work | [frontend-integration.md](frontend-integration.md) |
+| Full embedded guide | [embedded.md](embedded.md) |
+| Full standalone guide | [standalone.md](standalone.md) |
+| Browser/UI work | [frontend.md](frontend.md) |
 | Why the auth model is shaped this way | [auth.md](auth.md) |
 | Per-rail credentials/webhooks/sandbox | [rails/nmi.md](rails/nmi.md), [rails/stripe.md](rails/stripe.md), [rails/ccbill.md](rails/ccbill.md), [rails/solana.md](rails/solana.md) |
-| Catalog authoring (products/prices/entitlements) | [merchant-guide.md](merchant-guide.md) |
-| API conventions and behavior | [api/endpoints.md](api/endpoints.md) |
+| Catalog authoring (products/prices/entitlements) | [catalog.md](catalog.md) |
+| API conventions and behavior | [api/conventions.md](api/conventions.md) |
 | Every HTTP route | [api/routes.md](api/routes.md), `api/openapi.json` |
-| Moving from v0 | [migrating-to-v1.md](migrating-to-v1.md) |
 | Migrating an existing subscriber base in | [batch-import.md](batch-import.md) |
 | Admin console on/off + usage | [billing-admin.md](billing-admin.md) |
-| Day-2 ops, safety levers, cutover | [operator-guide.md](operator-guide.md), [operations.md](operations.md) |
+| Day-2 ops, safety levers, cutover | [operations.md](operations.md) |
 | Vocabulary | [glossary.md](glossary.md) |
 
 ## Pitfalls that waste agent time
@@ -118,8 +118,8 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
   browser-direct with access tokens.
 - Purchase endpoints are tightly rate-limited by design; retry loops in tests will
   hit 429 — back off, don't raise limits.
-- Embedded config is programmatic: no file or environment is read, so nothing is
-  defaulted for you; a PSP without an `environment` refusing to boot is the
-  designed behavior.
+- Embedded config is programmatic: no file or environment is read. A PSP
+  without an `environment` is live (the rail's real-money one), so declare
+  `test` or `sandbox` explicitly.
 - Catalog amounts are integers in native units (`12_000_000` = $12). No dollar
   strings in the catalog document.

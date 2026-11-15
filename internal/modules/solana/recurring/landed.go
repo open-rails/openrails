@@ -14,12 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 )
 
-// landedTxReader reads a transaction at confirmed commitment (satisfied by the
-// merchant chain reader and *solanaint.RPCClient).
-type landedTxReader interface {
-	GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error)
-}
-
 var (
 	// ErrPaymentNotLanded: the signature is not (yet) a confirmed transaction.
 	// Retryable: the wallet may have just sent it.
@@ -51,7 +45,7 @@ type landedTx struct {
 
 // fetchLanded reads the signature's transaction from the chain. The signature
 // names the transaction; nothing else the caller supplies is trusted.
-func fetchLanded(ctx context.Context, chain landedTxReader, signature string) (*landedTx, error) {
+func fetchLanded(ctx context.Context, chain solanaint.ChainReader, signature string) (*landedTx, error) {
 	sig, err := solanago.SignatureFromBase58(strings.TrimSpace(signature))
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid signature", ErrPaymentUnverified)

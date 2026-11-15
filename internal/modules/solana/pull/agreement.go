@@ -60,15 +60,14 @@ func (a *Agreement) validate(in gen.BillingProviderIntent, p Payload) error {
 }
 
 func (h *Handler) acceptPull(ctx context.Context, row *models.SolanaSubscription, plan resolvedPlan) (*Agreement, error) {
-	reader, ok := h.Chain.(solanaint.MintAccountReader)
-	if !ok {
+	if h.Chain == nil {
 		return nil, errors.New("Solana pull requires authoritative mint metadata")
 	}
 	mint, err := solanago.PublicKeyFromBase58(row.Mint)
 	if err != nil {
 		return nil, err
 	}
-	decimals, err := solanaint.ReadMintDecimals(ctx, reader, mint)
+	decimals, err := solanaint.ReadMintDecimals(ctx, h.Chain, mint)
 	if err != nil {
 		return nil, err
 	}

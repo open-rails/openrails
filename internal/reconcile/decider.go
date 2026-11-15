@@ -730,14 +730,8 @@ func subscriptionBackfill(txns []RemoteTransaction, since time.Time) []RemoteTra
 	return out
 }
 
-// DecisionApplier applies decider transitions for the pull engine's enforce
-// path. Fakeable for unit tests.
-type DecisionApplier interface {
-	ApplyDecision(ctx context.Context, subscriptionID uuid.UUID, d Decision) (bool, error)
-}
-
-// LifecycleDecisionApplier is the production DecisionApplier: load the row,
-// route through ApplyDecision on the same merchant-scoped handle.
+// LifecycleDecisionApplier applies decider transitions for the pull engine:
+// load the row, route through ApplyDecision on the same merchant-scoped handle.
 type LifecycleDecisionApplier struct {
 	DB    *db.DB
 	LC    *subscriptions.SubscriptionLifecycleService

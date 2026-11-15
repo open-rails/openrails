@@ -49,10 +49,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: GetRunningChargeTotal :one
--- running_charge_total, for the callers that hold it against the Go rule.
-SELECT billing.running_charge_total(sqlc.arg(rate_per_hour)::bigint, sqlc.arg(started_at)::timestamptz, sqlc.arg(at)::timestamptz)::bigint AS total;
-
 -- name: ListDepletedRunningCharges :many
 -- The running charges of customers whose capacity has run out: the stored
 -- run-out instant has passed. Newest first.

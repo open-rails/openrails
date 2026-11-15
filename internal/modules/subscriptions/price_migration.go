@@ -86,13 +86,6 @@ const (
 	migrationBlockedNMISubCentAmount = "nmi_amount_not_cent_representable"
 )
 
-// StripePusher pushes a migration to Stripe (*StripeService; faked in tests).
-type StripePusher interface {
-	GetSubscriptionItemID(ctx context.Context, subscriptionID string) (string, error)
-	UpdateSubscriptionPrice(ctx context.Context, subscriptionID, itemID, newPriceID, internalPriceID, prorationBehavior, billingAnchor string) error
-	ScheduleSubscriptionPriceChange(ctx context.Context, key, subscriptionID, currentPriceID, newPriceID string, currentPeriodStart, currentPeriodEnd time.Time, billingCycleDays *int) error
-}
-
 // MigrationPushes records a move's provider push as a durable operation in
 // the caller's transaction, first tried at notBefore.
 type MigrationPushes interface {
@@ -106,14 +99,14 @@ type PriceMigrationService struct {
 	prices        *catalog.PriceService
 	subscriptions *SubscriptionService
 	config        *merchantconfig.Store
-	stripe        StripePusher
-	nmi           NMIPusher
+	stripe        *StripeService
+	nmi           *NMIPlanPusher
 	pushes        MigrationPushes
 	clock         clockwork.Clock
 	admissions    *destructive.Admissions
 }
 
-func NewPriceMigrationService(d *db.DB, prices *catalog.PriceService, subscriptions *SubscriptionService, config *merchantconfig.Store, stripe StripePusher, nmi NMIPusher, clock clockwork.Clock) *PriceMigrationService {
+func NewPriceMigrationService(d *db.DB, prices *catalog.PriceService, subscriptions *SubscriptionService, config *merchantconfig.Store, stripe *StripeService, nmi *NMIPlanPusher, clock clockwork.Clock) *PriceMigrationService {
 	return &PriceMigrationService{db: d, prices: prices, subscriptions: subscriptions, config: config, stripe: stripe, nmi: nmi, clock: timeutil.FirstClock(clock)}
 }
 

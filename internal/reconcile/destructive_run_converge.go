@@ -24,27 +24,6 @@ const DestructiveRunKindApproval = "approval"
 // supersededByReverseReason is stamped on every intent the reverse neutralises.
 const supersededByReverseReason = "superseded by destructive-run reversal"
 
-// DestructiveRunRecorder makes an enforce pass reversible: without one, a pass
-// that would overwrite subscription state refuses rather than do undoable
-// damage. Every production path gets the DB-backed recorder from NewEngine; it
-// is an interface because unit tests build the engine by literal.
-type DestructiveRunRecorder interface {
-	// Open records the run BEFORE anything is written, carrying the coverage
-	// proof that authorised it and the row count the pass predicted.
-	Open(ctx context.Context, params OpenDestructiveRunParams) (uuid.UUID, error)
-	// CaptureSubscription stores the subscription row and its live entitlement
-	// windows exactly as they stand, stamped with the run. Returns the capture
-	// instant, which bounds intent attribution for that subject.
-	CaptureSubscription(ctx context.Context, runID, subscriptionID uuid.UUID) (time.Time, error)
-	// Seal runs right after the run's write to the subject: it records the
-	// revision the reverse requires to find, and attributes provider writes
-	// queued for the subject since `since` to the run, so the reverse can
-	// supersede the unfired ones.
-	Seal(ctx context.Context, runID, subscriptionID uuid.UUID, since time.Time) (int, error)
-	// Finish closes the run with its per-table actual counts.
-	Finish(ctx context.Context, runID uuid.UUID, status string, affected map[string]int) error
-}
-
 // OpenDestructiveRunParams is one approval run's header.
 type OpenDestructiveRunParams struct {
 	// PspID is set when the pass is account-bound; NULL means merchant-wide.
@@ -88,7 +67,7 @@ func (r *PGDestructiveRunRecorder) Open(ctx context.Context, params OpenDestruct
 	}
 	if _, err := r.DB.Gen(ctx).CreateDestructiveRun(ctx, gen.CreateDestructiveRunParams{
 		ID: runID, MerchantID: mid, PspID: params.PspID, Kind: params.Kind,
-		Actor: actor, DryRun: false, Coverage: coverage, ExpectedRows: &expected, Note: note,
+		Actor: actor, Coverage: coverage, ExpectedRows: &expected, Note: note,
 	}); err != nil {
 		return uuid.Nil, fmt.Errorf("open destructive run: %w", err)
 	}

@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"time"
 
-	solanago "github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
@@ -42,18 +40,11 @@ const (
 // signature.
 var ErrNoPendingChange = errors.New("solana: no pending plan change takes this transaction")
 
-// Chain reads a landed transaction and a reference's finalized history
-// (satisfied by *solana.MerchantChainReader).
+// Chain reads the chain for one merchant, with a reference's finalized
+// history (satisfied by *solana.MerchantChainReader).
 type Chain interface {
-	GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error)
+	solanaint.ChainReader
 	ReferenceHistory(ctx context.Context, reference string, terminal solanaint.ChainTerminal) ([]solanaint.SignatureInfo, bool, error)
-}
-
-// Lifecycle is the membership surface a settled change drives (satisfied by
-// *subscriptions.SubscriptionLifecycleService).
-type Lifecycle interface {
-	CancelMembershipTx(ctx context.Context, txDB *db.DB, params *subscriptions.CancelMembershipParams) (*subscriptions.CancelMembershipTxResult, error)
-	CreateMembershipTx(ctx context.Context, txDB *db.DB, params *subscriptions.CreateMembershipParams) (*models.Subscription, []*models.NotificationEvent, error)
 }
 
 // Handler is the solana_tier_change operation and the surface the change
@@ -62,7 +53,7 @@ type Handler struct {
 	DB        *db.DB
 	Clock     clockwork.Clock
 	Chain     Chain
-	Lifecycle Lifecycle
+	Lifecycle *subscriptions.SubscriptionLifecycleService
 	Tokens    recurring.Tokens
 	Store     *intents.Store
 }

@@ -56,13 +56,6 @@ type Plan struct {
 	ImplicitCurrency bool
 }
 
-// Validate resolves a query against the registry into a compilable plan, or
-// returns every validation error at once. Relative ranges resolve against the
-// wall clock; ValidateAt pins it.
-func Validate(q *Query) (*Plan, *ValidationError) {
-	return ValidateAt(q, time.Now().UTC())
-}
-
 // ValidateAt is Validate with an explicit "now" for relative-range resolution.
 func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 	var errs []FieldError

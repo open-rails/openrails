@@ -143,7 +143,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 		path = bootstrap.DefaultMerchantConfigManifestPath
 	}
 
-	manifest, err := bootstrap.LoadMerchantConfigManifest(path)
+	manifest, err := bootstrap.LoadMerchantConfigManifestFiles(path)
 	if err != nil {
 		return err
 	}

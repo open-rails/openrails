@@ -3,7 +3,6 @@
 package alerting
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -19,8 +18,6 @@ const (
 	SeverityWarning  Severity = "warning"
 	SeverityCritical Severity = "critical"
 )
-
-func (s Severity) valid() bool { return s == SeverityWarning || s == SeverityCritical }
 
 // ChannelType is a delivery sink kind.
 type ChannelType string
@@ -71,17 +68,6 @@ func (w Webhook) API() billing.AlertWebhook {
 	}
 }
 
-// Notification is a merchant inbox entry being written. A non-nil ID makes
-// the write idempotent.
-type Notification struct {
-	ID       uuid.UUID
-	Severity Severity
-	Title    string
-	Body     string
-	Link     string
-	Data     any
-}
-
 // Alert is an immediate operational notification, without a configurable rule.
 type Alert struct {
 	Title         string    `json:"title"`
@@ -127,9 +113,3 @@ func (e *ValidationError) orNil() *ValidationError {
 	}
 	return e
 }
-
-func singleFieldError(param, code, msg string, valid ...string) *ValidationError {
-	return &ValidationError{Errors: []FieldError{{Param: param, Code: code, Message: msg, Valid: valid}}}
-}
-
-func percentf(ratio float64) string { return fmt.Sprintf("%.2f%%", ratio*100) }

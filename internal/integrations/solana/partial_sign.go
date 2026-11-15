@@ -13,7 +13,8 @@ import (
 // sign the wallet's slot, handing back a transaction it alone authorized.
 var ErrCosignerPays = errors.New("solana: the wallet is the cranker that cosigns its transaction")
 
-// blockhashGetter is the minimal RPC surface BuildPartiallySignedTx needs.
+// blockhashGetter is where BuildPartiallySignedTx reads its blockhash: the
+// chain, or one already read.
 type blockhashGetter interface {
 	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
 }

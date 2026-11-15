@@ -50,16 +50,6 @@ func noLivePSP(r *httprequest.Request) bool {
 	return err == nil && presence == merchants.LiveRailAbsent
 }
 
-func optionalStrings(values ...*string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if value != nil {
-			out = append(out, *value)
-		}
-	}
-	return out
-}
-
 // writeCardEntryError renders the refusals of a card OpenRails received
 // itself; false means err is not one.
 func writeCardEntryError(r *httprequest.Request, err error) bool {

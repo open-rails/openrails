@@ -123,12 +123,3 @@ func isCustomRole(name string) bool {
 	rest, ok := strings.CutPrefix(name, "custom-")
 	return ok && rest != ""
 }
-
-// RoleNames is roles' bare names, as the wire shows them.
-func RoleNames(roles []iam.Role) []string {
-	out := make([]string, len(roles))
-	for i, role := range roles {
-		out[i] = role.Name()
-	}
-	return out
-}

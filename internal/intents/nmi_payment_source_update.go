@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 )
 
 // TypeNMIPaymentSourceUpdate is the durable NMI payment-source swap:
@@ -91,12 +92,12 @@ type NMIPaymentSourceUpdateHandler struct {
 	DB *db.DB
 	// Resolver arms the subscription merchant's NMI client from the armed
 	// rail state at drain time.
-	Resolver NMIClientResolver
+	Resolver railresolve.NMIClientResolver
 	Clock    clockwork.Clock
 	Policy   BackoffPolicy
 }
 
-func NewNMIPaymentSourceUpdateHandler(d *db.DB, resolver NMIClientResolver, clock clockwork.Clock) *NMIPaymentSourceUpdateHandler {
+func NewNMIPaymentSourceUpdateHandler(d *db.DB, resolver railresolve.NMIClientResolver, clock clockwork.Clock) *NMIPaymentSourceUpdateHandler {
 	return &NMIPaymentSourceUpdateHandler{DB: d, Resolver: resolver, Clock: clock, Policy: DefaultBackoff}
 }
 
@@ -519,7 +520,7 @@ func (t *PaymentSourceUpdateThrough) EnqueueSwap(ctx context.Context, tx pgx.Tx,
 		return uuid.Nil, err
 	}
 	store := NewStore(d)
-	if gated, ok := t.Runner.Store.(*Store); ok {
+	if gated := t.Runner.Store; gated != nil {
 		store = gated.withTxDB(d)
 	}
 	params.Inline = true

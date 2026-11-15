@@ -1,7 +1,6 @@
 # Stripe
 
-> Which flows are supported on this rail, and how well each one is verified:
-> [rail certification matrix](certification-matrix.md).
+> What each rail supports: [rails](README.md).
 
 Connect a Stripe account to OpenRails as a PSP on the `stripe` rail. Stripe is a
 reserved gateway: the PSP name is `stripe` (a sandbox account is conventionally
@@ -41,7 +40,8 @@ merchants:
 
 `account_id` is your Stripe account id (`acct_…`). Copy it from the Dashboard, or run
 `curl https://api.stripe.com/v1/account -u "sk_live_...:"`. OpenRails stores it as
-declared; it does not derive it at runtime.
+declared and checks the key against it (`GET /v1/account`): a key of another
+account is never armed.
 
 ### Webhooks
 

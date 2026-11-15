@@ -20,13 +20,13 @@ import (
 // attempt's reference and landing within its validity. The caller claims the
 // payment for its attempt and opens the membership in one transaction.
 type EnrollService struct {
-	chain  landedTxReader
+	chain  solanaint.ChainReader
 	tokens Tokens
 	now    func() time.Time
 }
 
 // NewEnrollService builds an EnrollService.
-func NewEnrollService(chain landedTxReader, tokens Tokens) *EnrollService {
+func NewEnrollService(chain solanaint.ChainReader, tokens Tokens) *EnrollService {
 	return &EnrollService{chain: chain, tokens: tokens, now: time.Now}
 }
 

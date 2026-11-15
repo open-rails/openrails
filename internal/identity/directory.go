@@ -257,57 +257,13 @@ type Claims struct {
 	UpdatedAt *time.Time
 }
 
-// RecordClaims keeps a verified token's contact claims in the merchant's
-// copy, newest first: a new customer's are recorded at once, a known one's
-// only when dated and newer than what is held. Nothing is written when
-// nothing changed.
-func RecordClaims(ctx context.Context, q *gen.Queries, merchantID billing.MerchantID, customerID uuid.UUID, c Claims) error {
-	email, name, username := bounded(c.Email, 320), bounded(c.Name, 256), bounded(c.Username, 256)
-	if email == nil && name == nil && username == nil {
-		return nil
-	}
-	var at *time.Time
-	if c.UpdatedAt != nil && !c.UpdatedAt.IsZero() {
-		t := c.UpdatedAt.UTC()
-		at = &t
-	}
-	return q.RecordContactClaims(ctx, gen.RecordContactClaimsParams{
-		MerchantID: merchantID.UUID(), CustomerID: customerID, Email: email, DisplayName: name, UserName: username, ClaimsUpdatedAt: at,
-	})
-}
-
-// bounded is a claim the copy can hold: trimmed, nil when blank or longer
-// than its column allows.
-func bounded(s string, max int) *string {
-	s = strings.TrimSpace(s)
-	if s == "" || len(s) > max {
-		return nil
-	}
-	return &s
-}
-
-// UserDirectory reads a customer's username and email for billing email.
-type UserDirectory interface {
-	EmailIdentity(ctx context.Context, userID string) (username, email string, ok bool, err error)
-}
-
-// UsernameResolver resolves a provider-supplied username to a customer. It
-// is used only by the CCBill username bridge.
-type UsernameResolver interface {
-	GetUserIDByUsername(ctx context.Context, username string) (string, error)
-}
-
 // ErrUsernameUnknown is a username no contact holds, or more than one does.
 var ErrUsernameUnknown = errors.New("identity: no customer holds that username")
 
-// Customers answers both from a Directory, within the merchant ctx is pinned
-// to.
+// Customers reads a customer's username and email for billing email, and
+// resolves a provider-supplied username (the CCBill username bridge), from a
+// Directory within the merchant ctx is pinned to.
 type Customers struct{ Directory Directory }
-
-var (
-	_ UserDirectory    = Customers{}
-	_ UsernameResolver = Customers{}
-)
 
 // EmailIdentity is the customer's username and email; ok is false without
 // an email.

@@ -852,27 +852,6 @@ func (q *Queries) GetLatestManualRebillForPeriod(ctx context.Context, arg GetLat
 	return i, err
 }
 
-const getLatestProviderIntentIDForSubscription = `-- name: GetLatestProviderIntentIDForSubscription :one
-SELECT id FROM billing.provider_intents
-WHERE merchant_id = $1::uuid AND intent_type = $2::text
-  AND subscription_id = $3::uuid
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-`
-
-type GetLatestProviderIntentIDForSubscriptionParams struct {
-	MerchantID     uuid.UUID
-	IntentType     string
-	SubscriptionID uuid.UUID
-}
-
-func (q *Queries) GetLatestProviderIntentIDForSubscription(ctx context.Context, arg GetLatestProviderIntentIDForSubscriptionParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, getLatestProviderIntentIDForSubscription, arg.MerchantID, arg.IntentType, arg.SubscriptionID)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
 const getLatestSubscriptionCollectionForPeriod = `-- name: GetLatestSubscriptionCollectionForPeriod :one
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
@@ -1070,7 +1049,7 @@ func (q *Queries) GetProviderIntentByIdempotencyKey(ctx context.Context, arg Get
 }
 
 const getReconciliationFindingByIdentity = `-- name: GetReconciliationFindingByIdentity :one
-SELECT id, merchant_id, finding_type, rail, psp_id, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id, pull_id, dismissed_at FROM billing.reconciliation_findings
+SELECT id, merchant_id, finding_type, rail, psp_id, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, change, source, evidence_digest, approval_run_id, pull_id, dismissed_at FROM billing.reconciliation_findings
 WHERE merchant_id = $1::uuid
   AND finding_type = $2
   AND subject_key = $3
@@ -1109,65 +1088,12 @@ func (q *Queries) GetReconciliationFindingByIdentity(ctx context.Context, arg Ge
 		&i.ResolvedBy,
 		&i.NotifiedAt,
 		&i.NotifiedSeverity,
-		&i.SeenRunClass,
 		&i.Change,
 		&i.Source,
 		&i.EvidenceDigest,
 		&i.ApprovalRunID,
 		&i.PullID,
 		&i.DismissedAt,
-	)
-	return i, err
-}
-
-const getUnresolvedInitialEnrollmentForCustomerProduct = `-- name: GetUnresolvedInitialEnrollmentForCustomerProduct :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
-WHERE merchant_id=$1::uuid AND intent_type='initial_membership'
-  AND payload->'terms'->>'customer_id'=$2::text
-  AND payload->'terms'->>'product_id'=$3::text
-  AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
-ORDER BY created_at LIMIT 1
-`
-
-type GetUnresolvedInitialEnrollmentForCustomerProductParams struct {
-	MerchantID uuid.UUID
-	CustomerID string
-	ProductID  string
-}
-
-func (q *Queries) GetUnresolvedInitialEnrollmentForCustomerProduct(ctx context.Context, arg GetUnresolvedInitialEnrollmentForCustomerProductParams) (BillingProviderIntent, error) {
-	row := q.db.QueryRow(ctx, getUnresolvedInitialEnrollmentForCustomerProduct, arg.MerchantID, arg.CustomerID, arg.ProductID)
-	var i BillingProviderIntent
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Rail,
-		&i.IntentType,
-		&i.SubscriptionID,
-		&i.PaymentID,
-		&i.PriceID,
-		&i.Payload,
-		&i.IdempotencyKey,
-		&i.Status,
-		&i.Attempts,
-		&i.NextAttemptAt,
-		&i.LeaseExpiresAt,
-		&i.Origin,
-		&i.OriginReason,
-		&i.Actor,
-		&i.LastFailureReason,
-		&i.ExpiresAt,
-		&i.ResultEvidence,
-		&i.CreatedAt,
-		&i.ExecutedAt,
-		&i.UpdatedAt,
-		&i.PspID,
-		&i.DestructiveRunID,
-		&i.DestructiveRunClass,
-		&i.CustodianID,
-		&i.Subject,
-		&i.Credential,
-		&i.DestructiveActionID,
 	)
 	return i, err
 }
@@ -3006,72 +2932,6 @@ func (q *Queries) SupersedePendingNMIDelete(ctx context.Context, arg SupersedePe
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const supersedePendingNMIDeleteActions = `-- name: SupersedePendingNMIDeleteActions :many
-UPDATE billing.provider_intents
-SET status='superseded', last_failure_reason=$1, updated_at=now()
-WHERE merchant_id=$2::uuid
-  AND (idempotency_key=$3::text
-       OR idempotency_key=$3::text || ':action:' || destructive_action_id::text)
-  AND intent_type='nmi_delete_subscription'
-  AND (status='failed_retryable' OR (status='pending' AND attempts=0)) RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id
-`
-
-type SupersedePendingNMIDeleteActionsParams struct {
-	Reason         *string
-	MerchantID     uuid.UUID
-	IdempotencyKey string
-}
-
-func (q *Queries) SupersedePendingNMIDeleteActions(ctx context.Context, arg SupersedePendingNMIDeleteActionsParams) ([]BillingProviderIntent, error) {
-	rows, err := q.db.Query(ctx, supersedePendingNMIDeleteActions, arg.Reason, arg.MerchantID, arg.IdempotencyKey)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingProviderIntent
-	for rows.Next() {
-		var i BillingProviderIntent
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Rail,
-			&i.IntentType,
-			&i.SubscriptionID,
-			&i.PaymentID,
-			&i.PriceID,
-			&i.Payload,
-			&i.IdempotencyKey,
-			&i.Status,
-			&i.Attempts,
-			&i.NextAttemptAt,
-			&i.LeaseExpiresAt,
-			&i.Origin,
-			&i.OriginReason,
-			&i.Actor,
-			&i.LastFailureReason,
-			&i.ExpiresAt,
-			&i.ResultEvidence,
-			&i.CreatedAt,
-			&i.ExecutedAt,
-			&i.UpdatedAt,
-			&i.PspID,
-			&i.DestructiveRunID,
-			&i.DestructiveRunClass,
-			&i.CustodianID,
-			&i.Subject,
-			&i.Credential,
-			&i.DestructiveActionID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const supersedeProviderIntentsBySubject = `-- name: SupersedeProviderIntentsBySubject :execrows

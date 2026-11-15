@@ -28,8 +28,9 @@ type RPCEndpoint struct {
 	target *url.URL
 }
 
-// RPCFallbackClient wraps multiple RPC clients and provides automatic failover.
-type RPCFallbackClient struct {
+// RPCClient is a Solana PSP's RPC chain: its endpoints in priority order,
+// with automatic failover between them.
+type RPCClient struct {
 	endpoints []RPCEndpoint
 	clients   []*rpc.Client
 	network   string
@@ -41,8 +42,8 @@ type RPCFallbackClient struct {
 	readOnly bool
 }
 
-// RPCFallbackConfig is a Solana PSP's RPC chain.
-type RPCFallbackConfig struct {
+// RPCClientConfig is a Solana PSP's RPC chain.
+type RPCClientConfig struct {
 	// Network is the PSP's environment: mainnet, devnet or testnet.
 	Network string
 	// URL is the PSP's own endpoint (secrets.rpc_url), tried first; the
@@ -67,8 +68,8 @@ func PublicEndpoint(network string) string {
 	}
 }
 
-// NewRPCFallbackClient creates a new RPC client with fallback support.
-func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
+// NewRPCClientWithConfig builds the RPC chain cfg declares.
+func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
 	network := strings.ToLower(strings.TrimSpace(cfg.Network))
 	if network == "" {
 		network = "mainnet"
@@ -91,7 +92,7 @@ func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
 	}
 	log.WithFields(log.Fields{"chain": strings.Join(names, " → "), "network": network}).Debug("Solana RPC chain")
 
-	return &RPCFallbackClient{
+	return &RPCClient{
 		readOnly:  cfg.ReadOnly,
 		endpoints: endpoints,
 		clients:   clients,
@@ -107,7 +108,7 @@ const failureCooldown = 30 * time.Second
 const rateLimitCooldown = 2 * time.Minute
 
 // getActiveEndpoints returns endpoints that aren't in cooldown, preserving priority order.
-func (c *RPCFallbackClient) getActiveEndpoints() []int {
+func (c *RPCClient) getActiveEndpoints() []int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -134,7 +135,7 @@ func (c *RPCFallbackClient) getActiveEndpoints() []int {
 }
 
 // markFailed records a failure for an endpoint.
-func (c *RPCFallbackClient) markFailed(idx int, cooldown time.Duration) {
+func (c *RPCClient) markFailed(idx int, cooldown time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if cooldown <= 0 {
@@ -149,7 +150,7 @@ func (c *RPCFallbackClient) markFailed(idx int, cooldown time.Duration) {
 }
 
 // markSuccess clears the failure status for an endpoint.
-func (c *RPCFallbackClient) markSuccess(idx int) {
+func (c *RPCClient) markSuccess(idx int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.failures, idx)
@@ -175,7 +176,7 @@ func isRateLimitError(err error) bool {
 
 // withFallback executes a function against RPC endpoints with automatic failover.
 // It tries endpoints in priority order, skipping those in cooldown.
-func (c *RPCFallbackClient) withFallback(ctx context.Context, operation string, fn func(*rpc.Client) error) error {
+func (c *RPCClient) withFallback(ctx context.Context, operation string, fn func(*rpc.Client) error) error {
 	activeEndpoints := c.getActiveEndpoints()
 
 	var lastErr error
@@ -229,7 +230,7 @@ func (e *allEndpointsFailedError) Error() string {
 func (e *allEndpointsFailedError) Unwrap() []error { return []error{ErrAllRPCEndpointsFailed, e.err} }
 
 // GetBalance returns the SOL balance for an address with automatic failover.
-func (c *RPCFallbackClient) GetBalance(ctx context.Context, address solanago.PublicKey) (uint64, error) {
+func (c *RPCClient) GetBalance(ctx context.Context, address solanago.PublicKey) (uint64, error) {
 	var balance uint64
 	err := c.withFallback(ctx, "GetBalance", func(client *rpc.Client) error {
 		resp, err := client.GetBalance(ctx, address, rpc.CommitmentFinalized)
@@ -242,13 +243,13 @@ func (c *RPCFallbackClient) GetBalance(ctx context.Context, address solanago.Pub
 	return balance, err
 }
 
-// SendTransactionSkipPreflight submits WITHOUT the RPC preflight simulation. For
+// sendTransactionSkipPreflight submits WITHOUT the RPC preflight simulation. For
 // a transaction that depends on very recently created/modified accounts (e.g. a
 // subscription pull right after subscribe), the node's preflight simulates
 // against a lagging bank and spuriously fails (InvalidAccountOwner / not-found)
 // even though the transaction executes fine. Callers MUST confirm the signature
 // afterward (WatchTransaction) since a skipped-preflight failure still lands.
-func (c *RPCFallbackClient) SendTransactionSkipPreflight(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error) {
+func (c *RPCClient) sendTransactionSkipPreflight(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error) {
 	if c.readOnly {
 		return solanago.Signature{}, ErrProviderReadOnly
 	}
@@ -273,7 +274,7 @@ func (c *RPCFallbackClient) SendTransactionSkipPreflight(ctx context.Context, tx
 // GetAccountData returns an account's raw data bytes, or (nil, nil) when the
 // account does not exist. Uses Confirmed commitment so freshly-written state
 // (e.g. a just-initialized PDA) is visible without waiting for finalization.
-func (c *RPCFallbackClient) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
+func (c *RPCClient) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
 	var data []byte
 	err := c.withFallback(ctx, "GetAccountData", func(client *rpc.Client) error {
 		ai, err := client.GetAccountInfoWithOpts(ctx, address, &rpc.GetAccountInfoOpts{Commitment: rpc.CommitmentConfirmed})
@@ -294,9 +295,9 @@ func (c *RPCFallbackClient) GetAccountData(ctx context.Context, address solanago
 	return data, err
 }
 
-// GetAccountOwnerAndData returns an account's owning program and data; nil
+// getAccountOwnerAndData returns an account's owning program and data; nil
 // data when the account does not exist.
-func (c *RPCFallbackClient) GetAccountOwnerAndData(ctx context.Context, address solanago.PublicKey) (solanago.PublicKey, []byte, error) {
+func (c *RPCClient) getAccountOwnerAndData(ctx context.Context, address solanago.PublicKey) (solanago.PublicKey, []byte, error) {
 	var owner solanago.PublicKey
 	var data []byte
 	err := c.withFallback(ctx, "GetAccountInfo", func(client *rpc.Client) error {
@@ -328,7 +329,7 @@ const (
 // evaluated only against a node that has reached `minSlot` (the slot our write
 // confirmed at), so a lagging node returns a retryable error instead of stale
 // data. minSlot == 0 behaves exactly like GetAccountData (no gating).
-func (c *RPCFallbackClient) GetAccountDataAtSlot(ctx context.Context, address solanago.PublicKey, minSlot uint64) ([]byte, error) {
+func (c *RPCClient) GetAccountDataAtSlot(ctx context.Context, address solanago.PublicKey, minSlot uint64) ([]byte, error) {
 	if minSlot == 0 {
 		return c.GetAccountData(ctx, address)
 	}
@@ -365,7 +366,7 @@ func (c *RPCFallbackClient) GetAccountDataAtSlot(ctx context.Context, address so
 // getBalance lacks a MinContextSlot opts variant, so we read the slot the node
 // served the response at (RPCContext.Context.Slot) and retry the fallback chain
 // until a node answers at or beyond minSlot. minSlot == 0 == GetBalance.
-func (c *RPCFallbackClient) GetBalanceAtSlot(ctx context.Context, address solanago.PublicKey, minSlot uint64) (uint64, error) {
+func (c *RPCClient) GetBalanceAtSlot(ctx context.Context, address solanago.PublicKey, minSlot uint64) (uint64, error) {
 	if minSlot == 0 {
 		return c.GetBalance(ctx, address)
 	}
@@ -389,13 +390,13 @@ func (c *RPCFallbackClient) GetBalanceAtSlot(ctx context.Context, address solana
 	return balance, nil
 }
 
-// GetTokenAccountBalanceAtSlot is GetTokenAccountBalance gated on minContextSlot.
+// getTokenAccountBalanceAtSlot is getTokenAccountBalance gated on minContextSlot.
 // As with GetBalanceAtSlot, the vendored method lacks a MinContextSlot opts
 // variant, so we gate on the served RPCContext slot. minSlot == 0 ==
-// GetTokenAccountBalance.
-func (c *RPCFallbackClient) GetTokenAccountBalanceAtSlot(ctx context.Context, account solanago.PublicKey, minSlot uint64) (*rpc.GetTokenAccountBalanceResult, error) {
+// getTokenAccountBalance.
+func (c *RPCClient) getTokenAccountBalanceAtSlot(ctx context.Context, account solanago.PublicKey, minSlot uint64) (*rpc.GetTokenAccountBalanceResult, error) {
 	if minSlot == 0 {
-		return c.GetTokenAccountBalance(ctx, account)
+		return c.getTokenAccountBalance(ctx, account)
 	}
 	var result *rpc.GetTokenAccountBalanceResult
 	read := func(ctx context.Context) error {
@@ -453,7 +454,7 @@ func retryMinContextSlotWithBackoff(
 }
 
 // GetLatestBlockhash gets the latest blockhash with automatic failover.
-func (c *RPCFallbackClient) GetLatestBlockhash(ctx context.Context) (solanago.Hash, error) {
+func (c *RPCClient) GetLatestBlockhash(ctx context.Context) (solanago.Hash, error) {
 	var blockhash solanago.Hash
 	err := c.withFallback(ctx, "GetLatestBlockhash", func(client *rpc.Client) error {
 		resp, err := client.GetLatestBlockhash(ctx, rpc.CommitmentFinalized)
@@ -468,7 +469,7 @@ func (c *RPCFallbackClient) GetLatestBlockhash(ctx context.Context) (solanago.Ha
 
 // LatestBlockhash gets the latest blockhash WITH the chain terminal it carries
 // (lastValidBlockHeight), with automatic failover.
-func (c *RPCFallbackClient) LatestBlockhash(ctx context.Context) (RecentBlockhash, error) {
+func (c *RPCClient) LatestBlockhash(ctx context.Context) (RecentBlockhash, error) {
 	var out RecentBlockhash
 	err := c.withFallback(ctx, "GetLatestBlockhash", func(client *rpc.Client) error {
 		resp, err := client.GetLatestBlockhash(ctx, rpc.CommitmentFinalized)
@@ -481,8 +482,8 @@ func (c *RPCFallbackClient) LatestBlockhash(ctx context.Context) (RecentBlockhas
 	return out, err
 }
 
-// GetEpoch returns the cluster's current epoch at confirmed commitment.
-func (c *RPCFallbackClient) GetEpoch(ctx context.Context) (uint64, error) {
+// getEpoch returns the cluster's current epoch at confirmed commitment.
+func (c *RPCClient) getEpoch(ctx context.Context) (uint64, error) {
 	var epoch uint64
 	err := c.withFallback(ctx, "GetEpochInfo", func(client *rpc.Client) error {
 		info, err := client.GetEpochInfo(ctx, rpc.CommitmentConfirmed)
@@ -495,9 +496,9 @@ func (c *RPCFallbackClient) GetEpoch(ctx context.Context) (uint64, error) {
 	return epoch, err
 }
 
-// GetEpochInfo returns one node's slot and block height at commitment, with
+// getEpochInfo returns one node's slot and block height at commitment, with
 // automatic failover.
-func (c *RPCFallbackClient) GetEpochInfo(ctx context.Context, commitment rpc.CommitmentType) (*rpc.GetEpochInfoResult, error) {
+func (c *RPCClient) getEpochInfo(ctx context.Context, commitment rpc.CommitmentType) (*rpc.GetEpochInfoResult, error) {
 	var info *rpc.GetEpochInfoResult
 	err := c.withFallback(ctx, "GetEpochInfo", func(client *rpc.Client) error {
 		out, err := client.GetEpochInfo(ctx, commitment)
@@ -515,7 +516,7 @@ func (c *RPCFallbackClient) GetEpochInfo(ctx context.Context, commitment rpc.Com
 
 // GetBlockHeight returns the cluster's current block height at the given
 // commitment, with automatic failover.
-func (c *RPCFallbackClient) GetBlockHeight(ctx context.Context, commitment rpc.CommitmentType) (uint64, error) {
+func (c *RPCClient) GetBlockHeight(ctx context.Context, commitment rpc.CommitmentType) (uint64, error) {
 	var height uint64
 	err := c.withFallback(ctx, "GetBlockHeight", func(client *rpc.Client) error {
 		h, err := client.GetBlockHeight(ctx, commitment)
@@ -529,7 +530,7 @@ func (c *RPCFallbackClient) GetBlockHeight(ctx context.Context, commitment rpc.C
 }
 
 // GetMinimumBalanceForRentExemption returns the minimum balance with automatic failover.
-func (c *RPCFallbackClient) GetMinimumBalanceForRentExemption(ctx context.Context, dataSize uint64) (uint64, error) {
+func (c *RPCClient) GetMinimumBalanceForRentExemption(ctx context.Context, dataSize uint64) (uint64, error) {
 	var balance uint64
 	err := c.withFallback(ctx, "GetMinimumBalanceForRentExemption", func(client *rpc.Client) error {
 		resp, err := client.GetMinimumBalanceForRentExemption(ctx, dataSize, rpc.CommitmentFinalized)
@@ -547,7 +548,7 @@ func (c *RPCFallbackClient) GetMinimumBalanceForRentExemption(ctx context.Contex
 var ErrProviderReadOnly = errors.New("solana: transaction submission is blocked (mode=readonly)")
 
 // SendTransaction submits a transaction with automatic failover.
-func (c *RPCFallbackClient) SendTransaction(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error) {
+func (c *RPCClient) SendTransaction(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error) {
 	if c.readOnly {
 		return solanago.Signature{}, ErrProviderReadOnly
 	}
@@ -573,13 +574,13 @@ func (c *RPCFallbackClient) SendTransaction(ctx context.Context, tx *solanago.Tr
 
 // GetTransaction retrieves transaction details at confirmed commitment with
 // automatic failover.
-func (c *RPCFallbackClient) GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error) {
-	return c.GetTransactionAt(ctx, signature, rpc.CommitmentConfirmed)
+func (c *RPCClient) GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error) {
+	return c.getTransactionAt(ctx, signature, rpc.CommitmentConfirmed)
 }
 
-// GetTransactionAt retrieves a transaction at commitment. Versioned (v0)
+// getTransactionAt retrieves a transaction at commitment. Versioned (v0)
 // transactions are requested explicitly; without it the node refuses them.
-func (c *RPCFallbackClient) GetTransactionAt(ctx context.Context, signature solanago.Signature, commitment rpc.CommitmentType) (*rpc.GetTransactionResult, error) {
+func (c *RPCClient) getTransactionAt(ctx context.Context, signature solanago.Signature, commitment rpc.CommitmentType) (*rpc.GetTransactionResult, error) {
 	var result *rpc.GetTransactionResult
 	version := uint64(0)
 	err := c.withFallback(ctx, "GetTransaction", func(client *rpc.Client) error {
@@ -598,7 +599,7 @@ func (c *RPCFallbackClient) GetTransactionAt(ctx context.Context, signature sola
 }
 
 // SimulateTransaction simulates a transaction with automatic failover.
-func (c *RPCFallbackClient) SimulateTransaction(ctx context.Context, tx *solanago.Transaction) (*rpc.SimulateTransactionResponse, error) {
+func (c *RPCClient) SimulateTransaction(ctx context.Context, tx *solanago.Transaction) (*rpc.SimulateTransactionResponse, error) {
 	var result *rpc.SimulateTransactionResponse
 	err := c.withFallback(ctx, "SimulateTransaction", func(client *rpc.Client) error {
 		resp, err := client.SimulateTransaction(ctx, tx)
@@ -611,8 +612,8 @@ func (c *RPCFallbackClient) SimulateTransaction(ctx context.Context, tx *solanag
 	return result, err
 }
 
-// GetSignatureStatuses gets signature statuses with automatic failover.
-func (c *RPCFallbackClient) GetSignatureStatuses(ctx context.Context, searchHistory bool, sigs ...solanago.Signature) (*rpc.GetSignatureStatusesResult, error) {
+// getSignatureStatuses gets signature statuses with automatic failover.
+func (c *RPCClient) getSignatureStatuses(ctx context.Context, searchHistory bool, sigs ...solanago.Signature) (*rpc.GetSignatureStatusesResult, error) {
 	var result *rpc.GetSignatureStatusesResult
 	err := c.withFallback(ctx, "GetSignatureStatuses", func(client *rpc.Client) error {
 		resp, err := client.GetSignatureStatuses(ctx, searchHistory, sigs...)
@@ -625,8 +626,8 @@ func (c *RPCFallbackClient) GetSignatureStatuses(ctx context.Context, searchHist
 	return result, err
 }
 
-// GetTokenAccountBalance gets token account balance with automatic failover.
-func (c *RPCFallbackClient) GetTokenAccountBalance(ctx context.Context, account solanago.PublicKey) (*rpc.GetTokenAccountBalanceResult, error) {
+// getTokenAccountBalance gets token account balance with automatic failover.
+func (c *RPCClient) getTokenAccountBalance(ctx context.Context, account solanago.PublicKey) (*rpc.GetTokenAccountBalanceResult, error) {
 	var result *rpc.GetTokenAccountBalanceResult
 	err := c.withFallback(ctx, "GetTokenAccountBalance", func(client *rpc.Client) error {
 		resp, err := client.GetTokenAccountBalance(ctx, account, rpc.CommitmentFinalized)
@@ -639,8 +640,8 @@ func (c *RPCFallbackClient) GetTokenAccountBalance(ctx context.Context, account 
 	return result, err
 }
 
-// GetSignaturesForAddressWithOpts gets signatures for an address with automatic failover.
-func (c *RPCFallbackClient) GetSignaturesForAddressWithOpts(ctx context.Context, address solanago.PublicKey, opts *rpc.GetSignaturesForAddressOpts) ([]*rpc.TransactionSignature, error) {
+// getSignaturesForAddressWithOpts gets signatures for an address with automatic failover.
+func (c *RPCClient) getSignaturesForAddressWithOpts(ctx context.Context, address solanago.PublicKey, opts *rpc.GetSignaturesForAddressOpts) ([]*rpc.TransactionSignature, error) {
 	var result []*rpc.TransactionSignature
 	err := c.withFallback(ctx, "GetSignaturesForAddress", func(client *rpc.Client) error {
 		resp, err := client.GetSignaturesForAddressWithOpts(ctx, address, opts)
@@ -653,8 +654,8 @@ func (c *RPCFallbackClient) GetSignaturesForAddressWithOpts(ctx context.Context,
 	return result, err
 }
 
-// GetProgramAccountsWithOpts lists program-owned accounts with automatic failover.
-func (c *RPCFallbackClient) GetProgramAccountsWithOpts(ctx context.Context, program solanago.PublicKey, opts *rpc.GetProgramAccountsOpts) (rpc.GetProgramAccountsResult, error) {
+// getProgramAccountsWithOpts lists program-owned accounts with automatic failover.
+func (c *RPCClient) getProgramAccountsWithOpts(ctx context.Context, program solanago.PublicKey, opts *rpc.GetProgramAccountsOpts) (rpc.GetProgramAccountsResult, error) {
 	var result rpc.GetProgramAccountsResult
 	err := c.withFallback(ctx, "GetProgramAccounts", func(client *rpc.Client) error {
 		resp, err := client.GetProgramAccountsWithOpts(ctx, program, opts)
@@ -668,7 +669,7 @@ func (c *RPCFallbackClient) GetProgramAccountsWithOpts(ctx context.Context, prog
 }
 
 // GetEndpoint returns the primary endpoint URL (first in chain).
-func (c *RPCFallbackClient) GetEndpoint() string {
+func (c *RPCClient) GetEndpoint() string {
 	if len(c.endpoints) == 0 {
 		return ""
 	}

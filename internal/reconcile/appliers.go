@@ -2,7 +2,6 @@ package reconcile
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,21 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// LocalWriter performs enforce mode's idempotent local mirror writes of
-// provider facts (payments, refunds, vault metadata, subscription
-// materialization); subscription transitions go through DecisionApplier. No
-// method calls a rail, so enforce can run under readonly. Each reports whether
-// it changed anything, so a second enforce run is observably a no-op.
-type LocalWriter interface {
-	BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error)
-	RecordRefund(ctx context.Context, a RecordRefundAction) (bool, error)
-	AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMethodAction) (bool, error)
-	GrantAccess(ctx context.Context, a GrantAccessAction) (bool, error)
-	MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error)
-	AcceptProviderSchedules(ctx context.Context, psp uuid.UUID, snap *RemoteSnapshot, exhaustive bool, reader TransactionReader) (ProviderScheduleResult, error)
-	RespellSubscriptions(ctx context.Context, psp uuid.UUID, refs []string) (int64, error)
-}
-
 // PGLocalWriter applies enforce writes via the sqlc layer on a merchant-pinned
 // connection.
 type PGLocalWriter struct {
@@ -45,24 +29,11 @@ type PGLocalWriter struct {
 	Now func() time.Time
 }
 
-var _ LocalWriter = (*PGLocalWriter)(nil)
-
 func (w *PGLocalWriter) now() time.Time {
 	if w.Now != nil {
 		return w.Now()
 	}
 	return time.Now().UTC()
-}
-
-func metadataJSON(m map[string]any) []byte {
-	if len(m) == 0 {
-		return nil
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return nil
-	}
-	return b
 }
 
 func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error) {
@@ -287,12 +258,4 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		res.PaymentBackfilled = backfilled
 	}
 	return res, nil
-}
-
-// uuidOrNil is an optional id: the zero id is none.
-func uuidOrNil(id uuid.UUID) *uuid.UUID {
-	if id == uuid.Nil {
-		return nil
-	}
-	return &id
 }

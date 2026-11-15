@@ -212,47 +212,6 @@ func (q *Queries) ListAllMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
 	return items, nil
 }
 
-const listLiveMerchantsByGroupID = `-- name: ListLiveMerchantsByGroupID :many
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation, tenant_id FROM billing.merchants
-WHERE permission_group_id = $1::text AND deleted_at IS NULL
-LIMIT 2
-`
-
-// LIMIT 2: a second match means the caller must name the merchant.
-func (q *Queries) ListLiveMerchantsByGroupID(ctx context.Context, groupID string) ([]BillingMerchant, error) {
-	rows, err := q.db.Query(ctx, listLiveMerchantsByGroupID, groupID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingMerchant
-	for rows.Next() {
-		var i BillingMerchant
-		if err := rows.Scan(
-			&i.ID,
-			&i.Slug,
-			&i.Status,
-			&i.PermissionGroupID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
-			&i.RetiredAt,
-			&i.GroupReleaseCompletedAt,
-			&i.CatalogRevision,
-			&i.SlugChangedAt,
-			&i.EntitlementGeneration,
-			&i.TenantID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listLiveMerchantsByGroupIDs = `-- name: ListLiveMerchantsByGroupIDs :many
 SELECT id, slug, permission_group_id::text AS group_id
 FROM billing.merchants

@@ -30,21 +30,10 @@ type Quote struct {
 	AsOf time.Time
 }
 
-// Provider defines the interface for FX rate providers.
-type Provider interface {
-	// Quote returns the conversion rate from one supported currency to another.
-	// For same-currency input, returns rate=1.0.
-	Quote(ctx context.Context, fromCurrency, toCurrency string) (*Quote, error)
-	// QuoteToUSD returns the conversion rate from the given currency to USD.
-	// For USD input, returns rate=1.0.
-	// Returns an error if the currency is not supported or the rate cannot be fetched.
-	QuoteToUSD(ctx context.Context, currency string) (*Quote, error)
-}
-
 // ConvertAmount rounds a source amount up into the target currency's internal
 // units. Enforcement paths use ceil so cross-currency spend cannot under-count
 // because of fractional internal-unit conversion.
-func ConvertAmount(ctx context.Context, provider Provider, fromCurrency, toCurrency string, amount int64) (int64, *Quote, error) {
+func ConvertAmount(ctx context.Context, provider *Rates, fromCurrency, toCurrency string, amount int64) (int64, *Quote, error) {
 	from := money.NormalizeCurrency(fromCurrency)
 	to := money.NormalizeCurrency(toCurrency)
 	if err := moneyutil.ValidateCurrency(from); err != nil {

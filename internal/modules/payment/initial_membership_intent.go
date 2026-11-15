@@ -26,6 +26,7 @@ import (
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -42,11 +43,11 @@ func decodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMember
 
 type InitialMembershipIntentHandler struct {
 	Purchases *PurchaseService
-	Resolver  intents.NMIClientResolver
+	Resolver  railresolve.NMIClientResolver
 	Policy    intents.BackoffPolicy
 }
 
-func NewInitialMembershipIntentHandler(s *PurchaseService, resolvers ...intents.NMIClientResolver) *InitialMembershipIntentHandler {
+func NewInitialMembershipIntentHandler(s *PurchaseService, resolvers ...railresolve.NMIClientResolver) *InitialMembershipIntentHandler {
 	h := &InitialMembershipIntentHandler{Purchases: s, Policy: intents.DefaultBackoff}
 	if len(resolvers) > 0 {
 		h.Resolver = resolvers[0]

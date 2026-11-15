@@ -17,11 +17,11 @@ import (
 // admission transaction. FX conversion expresses each limit in the request unit.
 type SpendgatePolicyLoader struct {
 	policies *BillingPolicyStore
-	fx       fx.Provider
+	fx       *fx.Rates
 }
 
 // NewSpendgatePolicyLoader wires the loader.
-func NewSpendgatePolicyLoader(policies *BillingPolicyStore, fxp fx.Provider) *SpendgatePolicyLoader {
+func NewSpendgatePolicyLoader(policies *BillingPolicyStore, fxp *fx.Rates) *SpendgatePolicyLoader {
 	return &SpendgatePolicyLoader{policies: policies, fx: fxp}
 }
 

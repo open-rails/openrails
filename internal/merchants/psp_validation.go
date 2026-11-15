@@ -46,9 +46,6 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 		if s.nmiWire != nil {
 			s.nmiWire(client)
 		}
-		if s.nmiCredentialProbeQueryURL != "" {
-			client.QueryURL = s.nmiCredentialProbeQueryURL
-		}
 		probeCtx, cancel := context.WithTimeout(ctx, providerCredentialProbeTimeout)
 		defer cancel()
 		if err := client.ProbeCredentials(probeCtx); err != nil {
@@ -74,9 +71,6 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 			DataLinkPassword: password,
 			Sandbox:          p.Environment == config.EnvironmentSandbox,
 		})
-		if s.ccbillCredentialProbeBaseURL != "" {
-			client.BaseURL = s.ccbillCredentialProbeBaseURL
-		}
 		probeCtx, cancel := context.WithTimeout(ctx, providerCredentialProbeTimeout)
 		defer cancel()
 		if err := client.ProbeCredentials(probeCtx); err != nil {

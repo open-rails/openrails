@@ -80,17 +80,6 @@ func (q *Queries) CountMerchantRowsNMIHistoryMonths(ctx context.Context, merchan
 	return count, err
 }
 
-const countMerchantRowsNotificationQueue = `-- name: CountMerchantRowsNotificationQueue :one
-SELECT count(*) FROM billing.notifications WHERE merchant_id = $1
-`
-
-func (q *Queries) CountMerchantRowsNotificationQueue(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsNotificationQueue, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countMerchantRowsOrderAttempts = `-- name: CountMerchantRowsOrderAttempts :one
 SELECT count(*) FROM billing.order_attempts WHERE merchant_id = $1
 `
@@ -274,15 +263,6 @@ DELETE FROM billing.nmi_history_months WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsNMIHistoryMonths(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsNMIHistoryMonths, merchantID)
-	return err
-}
-
-const purgeMerchantRowsNotificationQueue = `-- name: PurgeMerchantRowsNotificationQueue :exec
-DELETE FROM billing.notifications WHERE merchant_id = $1
-`
-
-func (q *Queries) PurgeMerchantRowsNotificationQueue(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsNotificationQueue, merchantID)
 	return err
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -45,7 +46,7 @@ type UserSubscriptionService struct {
 	NotificationService *NotificationService
 	EntitlementService  *entitlements.EntitlementService
 	// NMIResolver arms store-scoped NMI clients per merchant.
-	NMIResolver NMIClientSource
+	NMIResolver railresolve.NMIClientResolver
 	clock       clockwork.Clock
 	postures    writeposture.View
 
@@ -447,7 +448,7 @@ func NewUserSubscriptionService(
 	paymentService *payments.PaymentService,
 	notificationService *NotificationService,
 	entitlementService *entitlements.EntitlementService,
-	nmiResolver NMIClientSource,
+	nmiResolver railresolve.NMIClientResolver,
 	postures writeposture.View,
 	clocks ...clockwork.Clock,
 ) *UserSubscriptionService {

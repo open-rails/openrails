@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -106,14 +107,14 @@ type Service struct {
 	DB    *db.DB
 	Clock clockwork.Clock
 	// Memberships creates the subscription a paid recurring line produces.
-	Memberships Memberships
+	Memberships *subscriptions.SubscriptionLifecycleService
 	// Abandon closes, at the provider, the attempt of an order that closed
 	// while its payment awaited the customer.
 	Abandon func(ctx context.Context, attemptID uuid.UUID) error
 }
 
 // New is the orders service.
-func New(database *db.DB, memberships Memberships, clocks ...clockwork.Clock) *Service {
+func New(database *db.DB, memberships *subscriptions.SubscriptionLifecycleService, clocks ...clockwork.Clock) *Service {
 	return &Service{DB: database, Memberships: memberships, Clock: timeutil.FirstClock(clocks...)}
 }
 

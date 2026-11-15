@@ -56,15 +56,6 @@ type PSPCoverage struct {
 // precondition for treating its roster as an absence proof.
 func (c PSPCoverage) Complete() bool { return c.Declared > 0 && c.Pulled >= c.Declared }
 
-// ProviderEndpoints overrides provider base URLs on store-armed clients — a
-// test seam for fake provider HTTP servers. Zero value = real endpoints.
-type ProviderEndpoints struct {
-	NMIQueryURL           string
-	NMIV5BaseURL          string
-	CCBillDataLinkBaseURL string
-	StripeBaseURL         string
-}
-
 // MerchantFetcherBuilder builds one merchant's fetchers/probers at use time
 // from the armed rail state (nil Merchants = nothing arms; fail closed).
 type MerchantFetcherBuilder struct {
@@ -77,7 +68,6 @@ type MerchantFetcherBuilder struct {
 	// pulls; may target archived accounts for drain).
 	AccountIDs map[Provider]string
 
-	Endpoints ProviderEndpoints
 	// NMIClients is the runtime's shared NMI client factory; its transport
 	// (the fake-provider seam) carries over to pull clients.
 	NMIClients *railresolve.NMIFactory
@@ -269,7 +259,7 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 	if _, ok := b.requireSecret(ctx, mid, scope, "security_key", out); !ok {
 		return // fail closed (logged): a declared account never falls back across planes
 	}
-	factory := &railresolve.NMIFactory{Config: b.Config, Endpoints: railresolve.NMIEndpoints{QueryURL: b.Endpoints.NMIQueryURL, V5BaseURL: b.Endpoints.NMIV5BaseURL}}
+	factory := &railresolve.NMIFactory{Config: b.Config}
 	if b.NMIClients != nil {
 		factory.Transport = b.NMIClients.Transport
 	}
@@ -312,8 +302,8 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.Mer
 		Sandbox:          scope.Environment == config.EnvironmentSandbox,
 	})
 	dl.ReadOnly = b.readOnly()
-	if b.Endpoints.CCBillDataLinkBaseURL != "" {
-		dl.BaseURL = b.Endpoints.CCBillDataLinkBaseURL
+	if sandbox := config.SandboxCCBillDataLinkURL(b.Config); sandbox != "" {
+		dl.BaseURL = sandbox
 		dl.LoopbackFixture = true
 	}
 	out.Fetchers[ProviderCCBill] = keyedFetcher{RailFetcher: NewCCBillFetcher(dl), key: scope.AccountID}
@@ -327,12 +317,10 @@ func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid billing.Mer
 	}
 	fetcher := NewStripeFetcher(secretKey)
 	fetcher.HTTPClient = b.StripeClients.ReadOnlyClient(30 * time.Second)
-	fetcher.BaseURL = b.Endpoints.StripeBaseURL
 	out.Fetchers[ProviderStripe] = keyedFetcher{RailFetcher: fetcher, key: scope.AccountID}
 	out.Probers[ProviderStripe] = &StripeSubscriptionProber{Prober: &subscriptions.HTTPStripeLivenessProber{
 		SecretKey:  secretKey,
 		HTTPClient: b.StripeClients.ReadOnlyClient(30 * time.Second),
-		BaseURL:    b.Endpoints.StripeBaseURL,
 	}}
 }
 

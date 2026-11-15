@@ -28,12 +28,6 @@ FROM billing.merchants
 WHERE permission_group_id = ANY(sqlc.arg(group_ids)::text[]) AND deleted_at IS NULL
 ORDER BY slug;
 
--- LIMIT 2: a second match means the caller must name the merchant.
--- name: ListLiveMerchantsByGroupID :many
-SELECT * FROM billing.merchants
-WHERE permission_group_id = sqlc.arg(group_id)::text AND deleted_at IS NULL
-LIMIT 2;
-
 -- name: LockMerchantNameForRename :one
 SELECT slug, slug_changed_at, now()::timestamptz AS now
 FROM billing.merchants

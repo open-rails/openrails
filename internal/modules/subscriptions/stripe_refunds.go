@@ -42,18 +42,6 @@ type StripeRefundService struct {
 	StripeClients *stripeapi.Factory
 	Config        *config.Config
 	Rails         railresolve.Source
-
-	// BaseURL overrides the Stripe API root. Empty means the production
-	// Stripe API (https://api.stripe.com). Tests set this to an httptest
-	// server.
-	BaseURL string
-}
-
-func (s *StripeRefundService) baseURL() string {
-	if s != nil && strings.TrimSpace(s.BaseURL) != "" {
-		return strings.TrimRight(strings.TrimSpace(s.BaseURL), "/")
-	}
-	return "https://api.stripe.com"
 }
 
 type RefundParams struct {
@@ -117,7 +105,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	// dedupes the WRITE, the metadata makes the refund re-findable via reads.
 	values.Set("metadata["+stripeRefundMetadataKey+"]", idempotencyKey)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL()+"/v1/refunds", strings.NewReader(values.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stripeapi.APIBase+"/v1/refunds", strings.NewReader(values.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -192,53 +180,6 @@ func metadataStringValue(metadata map[string]any, key string) string {
 	return s
 }
 
-func (s *StripeRefundService) GetRefund(ctx context.Context, refundID string) (*RefundResult, error) {
-	if s == nil {
-		return nil, fmt.Errorf("stripe refund service is not initialized")
-	}
-	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
-	if err != nil {
-		return nil, err
-	}
-
-	refundID = strings.TrimSpace(refundID)
-	if refundID == "" {
-		return nil, errors.New("refund_id is required")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL()+"/v1/refunds/"+refundID, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+secretKey)
-
-	client := s.StripeClients.Client(s.Config, 0)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("stripe refund fetch failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read stripe refund fetch response: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		msg := ParseStripeAPIError(body)
-		if msg == "" {
-			msg = fmt.Sprintf("stripe refund fetch failed (%d)", resp.StatusCode)
-		}
-		return nil, &StripeAPICallError{StatusCode: resp.StatusCode, Message: msg}
-	}
-
-	var result RefundResult
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse stripe refund response: %w", err)
-	}
-
-	return &result, nil
-}
-
 // FindRefundByIdempotencyKey re-discovers a refund via READS: lists the
 // charge's (or payment intent's) refunds and matches the metadata mirror of
 // the idempotency key. found=false with a nil error means Stripe answered and
@@ -263,7 +204,7 @@ func (s *StripeRefundService) FindRefundByIdempotencyKey(ctx context.Context, ch
 	} else {
 		values.Set("charge", chargeID)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL()+"/v1/refunds?"+values.Encode(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stripeapi.APIBase+"/v1/refunds?"+values.Encode(), nil)
 	if err != nil {
 		return nil, false, err
 	}

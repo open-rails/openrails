@@ -106,11 +106,8 @@ func (s *PurchaseService) confirmStripeAuthentication(ctx context.Context, id uu
 	if err != nil {
 		return gen.BillingProviderIntent{}, err
 	}
-	verifier, ok := s.Intents.(interface {
-		VerifyByID(context.Context, uuid.UUID) (gen.BillingProviderIntent, error)
-	})
-	if !ok {
+	if s.Intents == nil {
 		return gen.BillingProviderIntent{}, errors.New("payment verifier unavailable")
 	}
-	return verifier.VerifyByID(ctx, in.ID)
+	return s.Intents.VerifyByID(ctx, in.ID)
 }
