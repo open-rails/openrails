@@ -49,45 +49,18 @@ const (
 	IdempotencyTTL   = 24 * time.Hour
 )
 
-// orderRailTargets is the multi-PSP resolution capability the session
-// service REQUIRES of its executor (or#893, #704, #848): resolve a wire
-// selector — a PSP key or a bare rail kind — to the concrete armed account, and
-// say when a key is declared-but-archived rather than unknown.
-//
-// It is REQUIRED, not optional, because every session must land on a real PSP:
-// order_attempts.psp_id is NOT NULL, and a session nobody can attribute
-// would be invisible to a PSP-scoped prune and would collide with a sibling
-// account's reference under the nil-uuid lane 0063 deleted. The methods are
-// unexported so only this package can satisfy it — test fakes implement it
-// (see stubRailTargets) instead of the session path branching on the
-// executor's concrete type.
-type orderRailTargets interface {
-	resolveRailTarget(ctx context.Context, selector string) (railTarget, error)
-	pspKeyArchived(ctx context.Context, key string) bool
-	railSource() railresolve.Source
-}
-
-type solanaPaymentService interface {
-	// RegisterReference gives a transaction-request attempt its one reference.
-	RegisterReference(ctx context.Context, kind solanamodule.ReferenceKind, sessionID uuid.UUID, reference string, quoteExpiresAt time.Time) (gen.BillingSolanaPayReference, error)
-}
-
-type solanaTransactionService interface {
-	BuildPaymentTransactionFromQuote(ctx context.Context, req *solanamodule.PaymentTransactionBuildRequest) (*solanamodule.TransactionBuildResponse, error)
-	ObserveTransfer(ctx context.Context, req solana.ObserveTransferRequest) (*solana.TransferObservation, error)
-	BlockHeight(ctx context.Context) (uint64, error)
-	ReferenceHasOurTransfer(ctx context.Context, reference, recipient, mint string, sessionID uuid.UUID) (bool, error)
-}
-
 type OrderAttemptService struct {
-	db                       *db.DB
-	repo                     *OrderAttemptRepo
-	priceService             *catalog.PriceService
-	productService           *catalog.ProductService
-	paymentMethodService     *paymentmethods.PaymentMethodService
-	purchaseService          orderRailTargets
-	solanaPayService         solanaPaymentService
-	solanaTransactionService solanaTransactionService
+	db                   *db.DB
+	repo                 *OrderAttemptRepo
+	priceService         *catalog.PriceService
+	productService       *catalog.ProductService
+	paymentMethodService *paymentmethods.PaymentMethodService
+	// purchaseService resolves a wire selector (a PSP key or a bare rail kind)
+	// to the armed account. Required: every session lands on a real PSP
+	// (order_attempts.psp_id is NOT NULL).
+	purchaseService          *PurchaseService
+	solanaPayService         *solanamodule.SolanaPayService
+	solanaTransactionService *solanamodule.SolanaTransactionService
 	fxProvider               fx.Provider
 	priceProvider            solanamodule.TokenPriceProvider
 	// solanaMints reads SPL mint decimals from the chain (#817). Late-bound —
@@ -140,9 +113,9 @@ func NewOrderAttemptService(
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
 	paymentMethodService *paymentmethods.PaymentMethodService,
-	purchaseService orderRailTargets,
-	solanaPayService solanaPaymentService,
-	solanaTransactionService solanaTransactionService,
+	purchaseService *PurchaseService,
+	solanaPayService *solanamodule.SolanaPayService,
+	solanaTransactionService *solanamodule.SolanaTransactionService,
 	fxProvider fx.Provider,
 	priceProvider solanamodule.TokenPriceProvider,
 	cfg *config.Config,

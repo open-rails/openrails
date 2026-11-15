@@ -277,7 +277,7 @@ func (s *PurchaseService) ResolvePSPID(ctx context.Context, name string) uuid.UU
 	return target.Scope.ID
 }
 
-// railSource exposes the merchant rail plane for routing (orderRailTargets).
+// railSource exposes the merchant rail plane for routing.
 func (s *PurchaseService) railSource() railresolve.Source {
 	if s == nil {
 		return nil

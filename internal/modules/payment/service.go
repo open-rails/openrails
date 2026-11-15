@@ -71,7 +71,7 @@ type PurchaseService struct {
 	StripeService *subscriptions.StripeService
 	// Intents executes durable write-ahead provider intents; a new
 	// membership's charge goes through it.
-	Intents   intentExecutor
+	Intents   *intents.Runner
 	Lifecycle *subscriptions.SubscriptionLifecycleService
 	clock     clockwork.Clock
 	Config    *config.Config
@@ -310,36 +310,13 @@ func initialMembershipResponseFromIntent(intent gen.BillingProviderIntent) (*Pur
 	return resp, nil
 }
 
-// railCustomerStore is the slice of RailCustomerService used for
-// Stripe customer resolution. Defined as an interface so the resolution logic
-// is unit-testable without a database.
-type railCustomerStore interface {
-	GetCustomerID(ctx context.Context, userID, rail string) (string, error)
-	Upsert(ctx context.Context, userID, rail, customerID string) error
-}
-
-// stripeCustomerClient is the slice of StripeService used for customer
-// resolution and the duplicate guard.
-type stripeCustomerClient interface {
-	CreateCustomer(ctx context.Context, email, appUserID string) (string, error)
-	FindCustomerIDByAppUserID(ctx context.Context, appUserID string) (string, error)
-	ListActiveSubscriptionsForCustomer(ctx context.Context, customerID string) ([]subscriptions.StripeSubscriptionSummary, error)
-}
-
-func (s *PurchaseService) customerStore() railCustomerStore {
-	if s.RailCustomerService == nil {
-		return nil
-	}
-	return s.RailCustomerService
-}
-
 // resolveStripeCustomerWith returns the durable Stripe customer id for a user,
 // in priority order: the local mapping, Stripe Customer Search on
 // metadata[app_user_id], then a fresh idempotent customer. A resolved customer
 // is upserted into the local mapping so the link survives a missed webhook.
 // "" (no error) only when the dependencies are unavailable; the caller then
 // falls back to customer_email.
-func resolveStripeCustomerWith(ctx context.Context, store railCustomerStore, client stripeCustomerClient, user *UserIdentity) (string, error) {
+func resolveStripeCustomerWith(ctx context.Context, store *payments.RailCustomerService, client *subscriptions.StripeService, user *UserIdentity) (string, error) {
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		return "", nil
 	}

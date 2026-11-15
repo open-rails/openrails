@@ -61,8 +61,8 @@ func (s *OrderAttemptService) SetOrders(o *orders.Service) {
 }
 
 func (s *OrderAttemptService) saleService() *NMISaleService {
-	cs, ok := s.purchaseService.(*PurchaseService)
-	if !ok || cs == nil {
+	cs := s.purchaseService
+	if cs == nil {
 		return nil
 	}
 	return cs.NMISaleService
@@ -306,8 +306,8 @@ func (s *OrderAttemptService) custodyOf(ctx context.Context, o OrderOption) (str
 		}
 	}
 
-	purchase, ok := s.purchaseService.(*PurchaseService)
-	if !ok {
+	purchase := s.purchaseService
+	if purchase == nil {
 		return "", nil, errors.New("order payment is unavailable")
 	}
 	target, err := purchase.resolveRailTargetForPSP(ctx, o.Rail, o.PSPID)
@@ -466,8 +466,8 @@ type newCard struct {
 
 func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (OrderCharge, error) {
 	sale := s.saleService()
-	purchase, ok := s.purchaseService.(*PurchaseService)
-	if sale == nil || sale.Intents == nil || s.orders == nil || !ok {
+	purchase := s.purchaseService
+	if sale == nil || sale.Intents == nil || s.orders == nil || purchase == nil {
 		return OrderCharge{}, errors.New("order payment is unavailable")
 	}
 	if err := s.requireProviderWrites(ctx); err != nil {
@@ -782,7 +782,7 @@ func (s *OrderAttemptService) prepareNewCard(ctx context.Context, purchase *Purc
 	if method == nil || method.Card == nil {
 		return nil, fmt.Errorf("%w: Stripe has no card %s", ErrPaymentMethodStale, token)
 	}
-	customerRef, err := resolveStripeCustomerWith(db.WithPSPID(ctx, psp), purchase.customerStore(), service, in.User)
+	customerRef, err := resolveStripeCustomerWith(db.WithPSPID(ctx, psp), purchase.RailCustomerService, service, in.User)
 	if err != nil {
 		return nil, err
 	}
@@ -943,8 +943,8 @@ func (s *OrderAttemptService) OrderNextAction(ctx context.Context, order *orders
 	case hostedAttempt(attempt), ccbillAttempt(attempt):
 		return orderHostedAction(attempt), nil
 	}
-	purchase, ok := s.purchaseService.(*PurchaseService)
-	if !ok || resolver == nil {
+	purchase := s.purchaseService
+	if purchase == nil || resolver == nil {
 		return nil, errors.New("order authentication is unavailable")
 	}
 	operation, err := s.OrderOperation(ctx, *order.AttemptID)
@@ -998,8 +998,8 @@ func (s *OrderAttemptService) ConfirmOrder(ctx context.Context, order *orders.Or
 	case ccbillAttempt(attempt):
 		return s.confirmOrderCCBill(ctx, attempt)
 	}
-	purchase, ok := s.purchaseService.(*PurchaseService)
-	if !ok {
+	purchase := s.purchaseService
+	if purchase == nil {
 		return OrderCharge{}, errors.New("order confirmation is unavailable")
 	}
 	operation, err := s.OrderOperation(ctx, *order.AttemptID)
@@ -1010,10 +1010,8 @@ func (s *OrderAttemptService) ConfirmOrder(ctx context.Context, order *orders.Or
 		if _, err := purchase.confirmStripeAuthentication(ctx, operation.ID, principal); err != nil {
 			return OrderCharge{}, err
 		}
-	} else if verifier, ok := purchase.Intents.(interface {
-		VerifyByID(context.Context, uuid.UUID) (gen.BillingProviderIntent, error)
-	}); ok {
-		if _, err := verifier.VerifyByID(ctx, operation.ID); err != nil {
+	} else if purchase.Intents != nil {
+		if _, err := purchase.Intents.VerifyByID(ctx, operation.ID); err != nil {
 			return OrderCharge{}, err
 		}
 	}
@@ -1051,14 +1049,12 @@ func (s *OrderAttemptService) AbandonOrderAttempt(ctx context.Context, attemptID
 	if err := intents.NewStore(s.db).RecordProgress(ctx, operation.ID, map[string]any{orderClosedKey: "true"}); err != nil {
 		return err
 	}
-	purchase, ok := s.purchaseService.(*PurchaseService)
-	if !ok {
+	purchase := s.purchaseService
+	if purchase == nil {
 		return nil
 	}
-	if verifier, ok := purchase.Intents.(interface {
-		VerifyByID(context.Context, uuid.UUID) (gen.BillingProviderIntent, error)
-	}); ok {
-		_, err = verifier.VerifyByID(ctx, operation.ID)
+	if purchase.Intents != nil {
+		_, err = purchase.Intents.VerifyByID(ctx, operation.ID)
 	}
 	return err
 }
