@@ -494,13 +494,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 			runtime.PurchaseService.NMISaleService.Intents = intentRunner
 			runtime.PurchaseService.NMISaleService.Config = runtime.Config
 			runtime.PurchaseService.NMISaleService.Posture = runtime.Posture()
-			if engines, ok := runtime.CollectionResolver.(intents.StripeEngineServiceResolver); ok {
-				runtime.PurchaseService.NMISaleService.StripeEngines = engines
-			}
+			runtime.PurchaseService.NMISaleService.StripeEngines = runtime.CollectionResolver
 		}
-		if engines, ok := runtime.CollectionResolver.(intents.StripeEngineServiceResolver); ok {
-			runtime.PurchaseService.StripeEngines = engines
-		}
+		runtime.PurchaseService.StripeEngines = runtime.CollectionResolver
 	}
 	if runtime.OrderAttemptService != nil {
 		runtime.OrderAttemptService.SetOrders(runtime.Orders)

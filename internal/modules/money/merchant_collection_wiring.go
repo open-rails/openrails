@@ -28,35 +28,10 @@ import (
 // unreadable secrets fails the charge closed; a rail with no account has no
 // adapter. Nothing is cached, so a rotated credential applies on the next charge.
 
-// CollectionAdapterResolver arms the store-scoped adapter for one saved-method
-// charge. ok=false with nil err = the merchant declares no account on the rail
-// (nothing to charge with — the charge fails closed, there is no fallback
-// plane); err = declared but not armable (fail closed).
-type CollectionAdapterResolver interface {
-	// ResolveCollectionAdapter arms the adapter charging method through psp.
-	ResolveCollectionAdapter(ctx context.Context, method gen.BillingPaymentMethod, psp uuid.UUID) (CollectionAdapter, bool, error)
-}
-
-// CollectionPlane is the runtime-facing per-merchant credential resolver
-// surface: store-armed collection adapters, raw NMI clients and the
-// reconciliation reads for in-doubt collection operations.
-// Satisfied by *MerchantCollectionAdapterBuilder; tests may inject fakes.
-type CollectionPlane interface {
-	CollectionAdapterResolver
-	railresolve.NMIClientResolver
-	CollectionVerifier
-}
-
-// CollectionVerifier reads qualified receipts for a canonical accepted row.
-// Nonexecution after possible submission requires provider-supported proof;
-// absence from a search alone never releases a potentially charged operation.
-type CollectionVerifier interface {
-	ReadCollectionReceipt(ctx context.Context, in gen.BillingProviderIntent, reference string) (intents.CollectedReceipt, bool, error)
-	ConfirmCollectionNotExecuted(ctx context.Context, in gen.BillingProviderIntent) error
-}
-
-// MerchantCollectionAdapterBuilder builds one merchant's collection adapter at
-// charge time. MerchantsFn is late-bound (Runtime.Merchants is wired after the
+// MerchantCollectionAdapterBuilder is the runtime's per-merchant credential
+// resolver: store-armed collection adapters, raw NMI clients and the
+// reconciliation reads for in-doubt collection operations. It builds one
+// merchant's collection adapter at charge time. MerchantsFn is late-bound (Runtime.Merchants is wired after the
 // charger is constructed); a nil fn/service = nothing armable.
 type MerchantCollectionAdapterBuilder struct {
 	BasisTheoryTransport http.RoundTripper
@@ -68,8 +43,6 @@ type MerchantCollectionAdapterBuilder struct {
 	// one from Config.
 	NMIClients *railresolve.NMIFactory
 }
-
-var _ CollectionPlane = (*MerchantCollectionAdapterBuilder)(nil)
 
 func (b *MerchantCollectionAdapterBuilder) merchants() *merchants.Service {
 	if b == nil || b.MerchantsFn == nil {
@@ -105,6 +78,10 @@ func (b *MerchantCollectionAdapterBuilder) nmiProxyPosture(ctx context.Context, 
 	return b.nmiFactory().ProxyPosture(mid, scope, settings)
 }
 
+// ResolveCollectionAdapter arms the adapter charging method through psp.
+// ok=false with nil err = the merchant declares no account on the rail
+// (nothing to charge with — the charge fails closed, there is no fallback
+// plane); err = declared but not armable (fail closed).
 func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.Context, method gen.BillingPaymentMethod, psp uuid.UUID) (CollectionAdapter, bool, error) {
 	svc := b.merchants()
 	if svc == nil || b.DB == nil {
@@ -168,7 +145,8 @@ func (b *MerchantCollectionAdapterBuilder) ResolveNMIClient(ctx context.Context,
 	return b.nmiArmer().ResolveNMIClient(ctx, merchantID, stampedAccountID)
 }
 
-// ConfirmCollectionNotExecuted closes only a provider-provable nonexecution.
+// ConfirmCollectionNotExecuted closes only a provider-provable nonexecution:
+// absence from a search alone never releases a potentially charged operation.
 // NMI search absence is not authoritative. Stripe objects can be cleaned up
 // under the same operation key, then read back in an unchargeable state.
 func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx context.Context, in gen.BillingProviderIntent) error {

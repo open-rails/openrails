@@ -152,7 +152,7 @@ type Runtime struct {
 	// ingest verify seam (#786). Nil-safe: recording never fails a webhook.
 	WebhookHealth *webhookhealth.Recorder
 
-	MoneyCharger        money.Charger
+	MoneyCharger        *money.ScopedCharger
 	RailCustomerService *payments.RailCustomerService
 	Merchants           *merchants.Service
 	// Vault is the runtime's Vault connection: the merchant configuration
@@ -168,7 +168,7 @@ type Runtime struct {
 	// CollectionResolver is the ONE #725/#788 store-armed per-merchant
 	// credential resolver (invoice collection adapters + NMI clients for rebills,
 	// cancels, refunds and admin actions).
-	CollectionResolver money.CollectionPlane
+	CollectionResolver *money.MerchantCollectionAdapterBuilder
 	// RailConfigs is the ONE Layer-C rail resolution seam (#788): every
 	// decision-time rail credential/armed-state read resolves the ctx
 	// merchant's psps row + scoped secrets through it.

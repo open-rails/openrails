@@ -13,11 +13,10 @@ import (
 )
 
 func (h *SubscriptionCollectionHandler) stripeEngineService(ctx context.Context, in gen.BillingProviderIntent) (*subscriptions.StripeService, error) {
-	resolver, ok := h.Resolver.(intents.StripeEngineServiceResolver)
-	if !ok {
+	if h.Resolver == nil {
 		return nil, errors.New("Stripe engine resolver unavailable")
 	}
-	service, armed, err := resolver.ResolveStripeEngineService(ctx, in.MerchantID, in.PspID)
+	service, armed, err := h.Resolver.ResolveStripeEngineService(ctx, in.MerchantID, in.PspID)
 	if err != nil {
 		return nil, err
 	}

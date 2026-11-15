@@ -289,8 +289,8 @@ func pspRail(r *httprequest.Request, merchantID, pspID uuid.UUID) string {
 
 // saveStripeCard saves a card the page's Stripe fields tokenized.
 func saveStripeCard(r *httprequest.Request, user *payment.UserIdentity, psp uuid.UUID, token string) {
-	resolver, ok := r.State.CollectionResolver.(intents.StripeEngineServiceResolver)
-	if !ok || r.State.PurchaseService == nil {
+	resolver := r.State.StripeEngines()
+	if resolver == nil || r.State.PurchaseService == nil {
 		r.ErrorCode(billing.CodeServiceUnavailable, "Stripe card save unavailable")
 		return
 	}
@@ -337,8 +337,8 @@ func ConfirmPaymentMethod(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeInvalidParam, "capture belongs to a custodian payment method")
 		return
 	}
-	resolver, ok := r.State.CollectionResolver.(intents.StripeEngineServiceResolver)
-	if !ok || r.State.PurchaseService == nil {
+	resolver := r.State.StripeEngines()
+	if resolver == nil || r.State.PurchaseService == nil {
 		r.ErrorCode(billing.CodeServiceUnavailable, "Stripe card save unavailable")
 		return
 	}

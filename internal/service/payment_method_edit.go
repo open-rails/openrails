@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/mandates"
@@ -320,11 +319,10 @@ func (s *Service) liveMethod(ctx context.Context, merchantID, customerID, method
 }
 
 func (s *Service) stripeAccount(ctx context.Context, method gen.BillingPaymentMethod) (*subscriptions.StripeService, error) {
-	resolver, ok := s.rt.CollectionResolver.(intents.StripeEngineServiceResolver)
-	if !ok {
+	if s.rt.CollectionResolver == nil {
 		return nil, paymentmethods.ErrPaymentMethodProviderUnavailable
 	}
-	service, ok, err := resolver.ResolveStripeEngineService(ctx, method.MerchantID, method.PspID)
+	service, ok, err := s.rt.CollectionResolver.ResolveStripeEngineService(ctx, method.MerchantID, method.PspID)
 	if err != nil || !ok {
 		return nil, fmt.Errorf("%w: %v", paymentmethods.ErrPaymentMethodProviderUnavailable, err)
 	}

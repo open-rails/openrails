@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
-	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -59,15 +58,12 @@ type recurringNMICharger interface {
 	ChargeRecurringMIT(context.Context, charge.Request) (charge.Result, *nmi.CustomerVaultError, error)
 }
 
-func prepareEngineNMICharge(ctx context.Context, resolver CollectionPlane, method gen.BillingPaymentMethod, psp uuid.UUID, binding charge.HyperSwitchBinding) (recurringNMICharger, error) {
+func prepareEngineNMICharge(ctx context.Context, resolver *MerchantCollectionAdapterBuilder, method gen.BillingPaymentMethod, psp uuid.UUID, binding charge.HyperSwitchBinding) (recurringNMICharger, error) {
 	if models.BasisTheoryCustody(method.Custodian) {
-		platform, ok := resolver.(interface {
-			ResolveBasisTheoryNMICharge(context.Context, gen.BillingPaymentMethod, uuid.UUID) (*nmiproxy.Charger, error)
-		})
-		if !ok {
+		if resolver == nil {
 			return nil, errors.New("platform NMI collection is unavailable")
 		}
-		return platform.ResolveBasisTheoryNMICharge(ctx, method, psp)
+		return resolver.ResolveBasisTheoryNMICharge(ctx, method, psp)
 	}
 	if method.Custodian == models.CustodianHyperSwitch {
 		return PrepareHyperSwitchCharge(ctx, resolver, method, psp, binding)
