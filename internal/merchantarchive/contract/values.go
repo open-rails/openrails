@@ -183,7 +183,7 @@ func ValidateValues(p Profile, values []*string) error {
 		case "jsonb":
 			field := p.Name + "." + c.Name
 			if p.Name == "provider_intents" && (c.Name == "payload" || c.Name == "result_evidence") {
-				if typ := value(p, values, "intent_type"); typ != nil && (*typ == intents.TypeNMIPaymentMethodDelete || *typ == intents.TypeHyperSwitchMethodDelete || *typ == intents.TypePlatformMethodDelete || *typ == "nmi_sale" || *typ == "initial_membership" || *typ == intents.TypeOrderCollection || *typ == "manual_rebill" || *typ == subscriptions.TypeSubscriptionCollection || *typ == intents.TypeNMIRecurringConfirmation) {
+				if typ := value(p, values, "intent_type"); typ != nil && (*typ == intents.TypeNMIPaymentMethodDelete || *typ == intents.TypeHyperSwitchMethodDelete || *typ == intents.TypePlatformMethodDelete || *typ == "nmi_sale" || *typ == "initial_membership" || *typ == intents.TypeOrderCollection || *typ == "manual_rebill" || *typ == subscriptions.TypeSubscriptionCollection || *typ == intents.TypeNMIRecurringConfirmation || *typ == solanaTierChange) {
 					field = p.Name + "." + *typ + "." + c.Name
 				} else if typ != nil && *typ == solanaPull && c.Name == "payload" {
 					field = p.Name + "." + solanaPull + ".payload"
@@ -257,7 +257,7 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "provider_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != intents.TypePlatformMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != intents.TypeOrderCollection && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection && *typ != intents.TypeNMIRecurringConfirmation && *typ != solanaPull)) {
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != intents.TypePlatformMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != intents.TypeOrderCollection && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection && *typ != intents.TypeNMIRecurringConfirmation && *typ != solanaPull && *typ != solanaTierChange)) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
 		if typ != nil && (*typ == "nmi_refund" || *typ == "stripe_refund") {
@@ -341,8 +341,11 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 	return terms.Initiator == charge.InitiatorCustomer || row.Origin == string(intents.OriginAdmin) && intents.OrderCollectionRetryKeyValid(terms.OrderID, row.IdempotencyKey), nil
 }
 
-// solanaPull is solanasubs.PullType.
-const solanaPull = "solana_pull"
+// solanaPull is solanasubs.PullType; solanaTierChange is solanasubs.ChangeType.
+const (
+	solanaPull       = "solana_pull"
+	solanaTierChange = "solana_tier_change"
+)
 
 // unattemptedSolanaPull reports a pull scheduled ahead and never attempted:
 // the one live operation an archive carries, with its subscription.

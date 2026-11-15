@@ -2,6 +2,7 @@ package recurring
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -33,10 +34,9 @@ type tierChangeTransactor interface {
 type ConfirmTierChangeInput struct {
 	Signature string // the wallet's atomic tier-change tx signature
 
-	// OrderAttemptID and Reference bind a purchase-driven change: the
-	// transaction must carry the purchase's reference and is claimed for it.
-	// Both empty for the subscription route, which binds by the subscription
-	// accounts alone.
+	// Reference is the address the pending change was prepared with: the
+	// transaction must carry it. Required. OrderAttemptID, when set, also
+	// claims the transaction for that purchase.
 	OrderAttemptID uuid.UUID
 	Reference      string
 
@@ -76,10 +76,11 @@ type ConfirmTierChangeInput struct {
 	// old period end.
 	IsUpgrade bool
 
-	// FirstChargeBaseUnits is the prorated first pull the upgrade must carry.
-	// Zero accepts the merchant-co-signed pull; its signed fiat quote is recorded
-	// on the payment. Ignored for downgrades.
+	// FirstChargeBaseUnits and FirstChargeMicros are the prorated first pull
+	// and its fiat quote, frozen when the change was prepared: an upgrade must
+	// carry exactly both. A downgrade pulls nothing and quotes zero.
 	FirstChargeBaseUnits uint64
+	FirstChargeMicros    int64
 
 	// OldPeriodEndsAt is the OLD lifecycle subscription's CurrentPeriodEndsAt — the
 	// downgrade's deferred first-pull time. Required for a downgrade.
@@ -91,6 +92,11 @@ type ConfirmTierChangeResult struct {
 	Receipt          *models.SolanaTierChangeReceipt
 	AlreadyConfirmed bool
 }
+
+// ErrTierChangeConflict: the landed transaction is this change, but the
+// subscription no longer takes it (it ended, or another change landed first).
+// The chain moved and nothing was recorded: an operator settles it.
+var ErrTierChangeConflict = errors.New("recurring: the landed plan change no longer applies to the subscription")
 
 // ReplayTierChange accepts only the exact operation previously committed.
 func ReplayTierChange(sub *models.Subscription, priceID uuid.UUID, signature string) (*ConfirmTierChangeResult, error) {
@@ -155,8 +161,12 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	if oldSub.Rail != models.RailSolana || oldSub.CustomerID.String() != in.UserID {
 		return nil, fmt.Errorf("%w: old subscription does not belong to this subscriber", ErrPaymentUnverified)
 	}
-	if result, err := ReplayTierChange(oldSub, in.NewPriceID, in.Signature); result != nil || err != nil {
+	// A receipt of another transaction is judged once this one is qualified.
+	if result, err := ReplayTierChange(oldSub, in.NewPriceID, in.Signature); result != nil || (err != nil && !errors.Is(err, ErrPaymentUnverified)) {
 		return result, err
+	}
+	if in.Reference == "" {
+		return nil, fmt.Errorf("recurring: a plan change is qualified against its reference")
 	}
 	if in.NewSubscriptionPDA == "" {
 		return nil, fmt.Errorf("recurring: new subscription pda is required")
@@ -164,8 +174,8 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	if in.NewAmountBaseUnits == 0 || in.NewPeriodHours == 0 {
 		return nil, fmt.Errorf("recurring: invalid new plan terms (amount/period)")
 	}
-	if in.IsUpgrade && in.NewProductID == uuid.Nil {
-		return nil, fmt.Errorf("recurring: upgrade requires the new plan's product")
+	if in.IsUpgrade && (in.NewProductID == uuid.Nil || in.FirstChargeBaseUnits == 0) {
+		return nil, fmt.Errorf("recurring: upgrade requires the new plan's product and its quoted first charge")
 	}
 	if !in.IsUpgrade && (in.OldPeriodEndsAt == nil || in.OldPeriodEndsAt.IsZero()) {
 		return nil, fmt.Errorf("recurring: downgrade requires the old period end (deferred first pull)")
@@ -194,12 +204,13 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	if err != nil {
 		return nil, err
 	}
-	var chargeAmount int64
-	if in.IsUpgrade {
-		chargeAmount, err = payment.tierChangeCharge(in.NewCurrency, in.NewFiatAmount)
-		if err != nil {
-			return nil, err
-		}
+	// The quote the cranker signed: the upgrade's charge, nothing for a downgrade.
+	chargeAmount, err := payment.tierChangeCharge(in.NewCurrency, in.NewFiatAmount)
+	if err != nil {
+		return nil, err
+	}
+	if chargeAmount != in.FirstChargeMicros || (!in.IsUpgrade && chargeAmount != 0) {
+		return nil, fmt.Errorf("%w: the signed quote is not the prepared one", ErrPaymentUnverified)
 	}
 
 	// Mirror in one DB transaction: a failure leaves no partial state for the
@@ -280,11 +291,15 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 			return fmt.Errorf("%w: old subscription does not belong to this subscriber", ErrPaymentUnverified)
 		}
 		result, err = ReplayTierChange(locked, in.NewPriceID, in.Signature)
-		if result != nil || err != nil {
+		switch {
+		case result != nil:
+			return nil
+		case errors.Is(err, ErrPaymentUnverified):
+			return fmt.Errorf("%w: %v", ErrTierChangeConflict, err)
+		case err != nil:
 			return err
-		}
-		if locked.Status != models.StatusActive {
-			return fmt.Errorf("%w: old subscription is not active for this subscriber", ErrPaymentUnverified)
+		case locked.Status != models.StatusActive:
+			return fmt.Errorf("%w: it is %s", ErrTierChangeConflict, locked.Status)
 		}
 		if in.OrderAttemptID != uuid.Nil {
 			if err := settlement.ClaimOrder(ctx, txDB, in.OrderAttemptID, in.Signature); err != nil {
@@ -356,10 +371,8 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 // returning the upgrade's pulled amount (0 for a downgrade).
 func (s *ConfirmTierChangeService) verifyLanded(ctx context.Context, payment *landedTx, oldRow *models.SolanaSubscription, in ConfirmTierChangeInput) (uint64, error) {
 	var err error
-	if in.OrderAttemptID != uuid.Nil {
-		if err := payment.references(in.Reference); err != nil {
-			return 0, err
-		}
+	if err := payment.references(in.Reference); err != nil {
+		return 0, err
 	}
 	var keys [6]solanago.PublicKey
 	for i, v := range []string{oldRow.SubscriberWallet, in.NewPlanOwner, s.newMint(ctx, oldRow, in.NewMintSymbol), oldRow.PlanPDA, oldRow.SubscriptionPDA, in.NewTreasury} {
@@ -386,6 +399,10 @@ func (s *ConfirmTierChangeService) verifyLanded(ctx context.Context, payment *la
 		return 0, err
 	}
 	if !in.IsUpgrade {
+		// The cranker co-signed the message, so the wallet could not alter it.
+		if !payment.signedBy(owner) {
+			return 0, fmt.Errorf("%w: not co-signed by the plan's cranker", ErrPaymentUnverified)
+		}
 		return 0, nil
 	}
 	return payment.pulls(terms, in.FirstChargeBaseUnits)

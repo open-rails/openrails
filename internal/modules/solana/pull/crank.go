@@ -51,6 +51,10 @@ type resolvedPlan struct {
 	periodEnd         *time.Time
 }
 
+// pendingChangeRecheck is how long a refused pull waits for the subscription's
+// pending plan change to settle or be released.
+const pendingChangeRecheck = 5 * time.Minute
+
 // crankKind classifies a completed (error-free) crankOne for the intent ledger.
 type crankKind int
 
@@ -60,7 +64,7 @@ const (
 	crankCanceled                         // delegate revoked → membership canceled (no dunning)
 	crankDunned                           // recoverable decline → FailMembership + rescheduled
 	crankGhostExpired                     // ghost plan → row expired
-	crankNotDue                           // the chain's clock had not reached the period end
+	crankNotDue                           // not yet: the chain's clock is short of the period end, or a plan change is pending
 )
 
 // crankOutcome is crankOne's classified result. signature is set on success
@@ -183,6 +187,17 @@ func (h *Handler) crankOne(ctx context.Context, repo *solanasubs.SolanaSubscript
 			// The subscriber canceled in their wallet (cancel_subscription, or
 			// the token delegate revoked): the paid period has ended, so cancel
 			// and stop, never dun.
+			// A plan change cancels the old subscription on chain too. While
+			// one awaits its chain outcome this refusal is no cancellation.
+			changing, err := solanasubs.PendingChanges(ctx, h.DB, row.SubscriptionID)
+			if err != nil {
+				return crankOutcome{}, fmt.Errorf("solana crank: read pending plan changes: %w", err)
+			}
+			if len(changing) > 0 {
+				llog.Warn("Solana cranker: pull refused while a plan change is pending; waiting for its chain outcome")
+				return crankOutcome{kind: crankNotDue, reason: "a plan change of this subscription awaits its chain outcome",
+					retryAt: h.now().Add(pendingChangeRecheck)}, nil
+			}
 			llog.Warn("Solana cranker: terminal pull failure (canceled on-chain); cancelling subscription (no dunning)")
 			if err := h.recordPullAttempt(ctx, row, plan, memoLocalID, string(cf.Code), crankErr.Error()); err != nil {
 				return crankOutcome{}, err

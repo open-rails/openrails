@@ -860,6 +860,21 @@
     "OR-J37-S63": [
       "TestSolanaContracts/OR-J37-S63/a-wallet-that-is-the-plans-cranker-is-refused-a-co-signed-subscribe"
     ],
+    "OR-J37-S64": [
+      "TestSolanaPlanChanges/OR-J37-S64/an-upgrade-the-wallet-lands-and-never-confirms-is-recorded-from-the-chain"
+    ],
+    "OR-J37-S65": [
+      "TestSolanaPlanChanges/OR-J37-S65/a-downgrade-the-wallet-lands-and-never-confirms-is-recorded-from-the-chain"
+    ],
+    "OR-J37-S66": [
+      "TestSolanaPlanChanges/OR-J37-S66/a-prepared-change-that-never-landed-is-released"
+    ],
+    "OR-J37-S67": [
+      "TestSolanaPlanChanges/OR-J37-S67/a-confirm-that-arrives-and-the-chain-read-record-one-change"
+    ],
+    "OR-J37-S68": [
+      "TestSolanaPlanChanges/OR-J37-S68/a-pull-the-old-subscription-refuses-while-its-change-is-pending-cancels-nothing"
+    ],
     "OR-J21-S60": [
       "TestBackgroundJobs/OR-J21-S60/an-import-queues-the-read-of-the-charges-it-attributed"
     ],

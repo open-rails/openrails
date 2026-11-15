@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 330,
+  "scenario_count": 335,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1412,6 +1412,31 @@
       "id": "OR-J37-S63",
       "journey": "J37",
       "name": "A wallet that is the plan's cranker is refused a co-signed subscribe; the cranker signs nothing for it"
+    },
+    {
+      "id": "OR-J37-S64",
+      "journey": "J37",
+      "name": "A Solana upgrade the wallet lands and never confirms is recorded from the chain: one charge, no revocation, the new plan pulled at renewal"
+    },
+    {
+      "id": "OR-J37-S65",
+      "journey": "J37",
+      "name": "A Solana downgrade the wallet lands and never confirms is recorded from the chain and renews on the lower plan"
+    },
+    {
+      "id": "OR-J37-S66",
+      "journey": "J37",
+      "name": "A prepared Solana plan change whose transaction provably never landed is released"
+    },
+    {
+      "id": "OR-J37-S67",
+      "journey": "J37",
+      "name": "A Solana plan change's confirm and the chain read record one change, in either order"
+    },
+    {
+      "id": "OR-J37-S68",
+      "journey": "J37",
+      "name": "A pull the old Solana subscription refuses while its plan change is pending cancels nothing"
     },
     {
       "id": "OR-J21-S60",

@@ -13,6 +13,12 @@ import (
 // sign the wallet's slot, handing back a transaction it alone authorized.
 var ErrCosignerPays = errors.New("solana: the wallet is the cranker that cosigns its transaction")
 
+// blockhashGetter is where BuildPartiallySignedTx reads its blockhash: the
+// chain, or one already read.
+type blockhashGetter interface {
+	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
+}
+
 // BuildPartiallySignedTx assembles a transaction needing two or more signers,
 // signs only the co-signer's slot with the cranker, and returns it base64
 // with the other slots empty for a wallet to complete and submit.
@@ -24,7 +30,7 @@ var ErrCosignerPays = errors.New("solana: the wallet is the cranker that cosigns
 //
 // feePayer is account index 0 and the wallet-side signer; cosigner must be a
 // required signer other than feePayer, else this errors.
-func BuildPartiallySignedTx(ctx context.Context, cosigner Signer, rpc ChainReader, feePayer solanago.PublicKey, instructions []solanago.Instruction) (string, error) {
+func BuildPartiallySignedTx(ctx context.Context, cosigner Signer, rpc blockhashGetter, feePayer solanago.PublicKey, instructions []solanago.Instruction) (string, error) {
 	if cosigner == nil {
 		return "", fmt.Errorf("solana: cosigner is required")
 	}

@@ -1775,6 +1775,7 @@
       "type Payload struct {\n\tAgreement *Agreement `json:\"agreement,omitempty\"`\n\tsolanasubs.PullEpisode\n}"
     ],
     "internal/modules/solana/solanasubs": [
+      "type Change struct {\n\tReference            string `json:\"reference\"`\n\tLastValidBlockHeight uint64 `json:\"last_valid_block_height\"`\n\n\tOldSubscriptionID uuid.UUID  `json:\"old_subscription_id\"`\n\tCustomerID        uuid.UUID  `json:\"customer_id\"`\n\tOldPeriodEndsAt   *time.Time `json:\"old_period_ends_at\"`\n\n\tPriceID            uuid.UUID `json:\"price_id\"`\n\tProductID          uuid.UUID `json:\"product_id\"`\n\tNewSubscriptionPDA string    `json:\"new_subscription_pda\"`\n\tPlanOwner          string    `json:\"plan_owner\"`\n\tTreasury           string    `json:\"treasury\"`\n\tPlanID             uint64    `json:\"plan_id\"`\n\tMintSymbol         string    `json:\"mint_symbol\"`\n\tAmountBaseUnits    uint64    `json:\"amount_base_units\"`\n\tPeriodHours        uint64    `json:\"period_hours\"`\n\tPlanCreatedAt      int64     `json:\"plan_created_at\"`\n\tAmount             int64     `json:\"amount\"`\n\tCurrency           string    `json:\"currency\"`\n\n\tUpgrade              bool   `json:\"upgrade\"`\n\tFirstChargeBaseUnits uint64 `json:\"first_charge_base_units\"`\n\tFirstChargeMicros    int64  `json:\"first_charge_micros\"`\n\n\tPreparedAt time.Time `json:\"prepared_at\"`\n}",
       "type PullEpisode struct {\n\tSubscriptionPDA string    `json:\"subscription_pda\"`\n\tRowID           uuid.UUID `json:\"row_id\"`\n\tNextPullAt      time.Time `json:\"next_pull_at\"`\n}"
     ],
     "internal/modules/subscriptions": [
@@ -4042,6 +4043,17 @@
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/modules/solana/solanasubs/change.go": {
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "internal/modules/solana/solanasubs/pull.go": {
       "context": "context",

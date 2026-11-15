@@ -17,6 +17,9 @@ type ChainReader interface {
 	// GetAccountData is an account's data; nil when it does not exist.
 	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
 	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
+	// LatestBlockhash is a recent blockhash with the height it stops being
+	// landable at.
+	LatestBlockhash(ctx context.Context) (RecentBlockhash, error)
 	// GetTokenBalanceForMint is the owner's ATA balance of mint in base units;
 	// 0 when the ATA does not exist.
 	GetTokenBalanceForMint(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey) (uint64, error)

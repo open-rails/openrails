@@ -188,6 +188,14 @@ func (r *MerchantChainReader) NeverLanded(ctx context.Context, signature solanag
 	return client.NeverLanded(ctx, signature, terminal)
 }
 
+func (r *MerchantChainReader) ReferenceHistory(ctx context.Context, reference string, terminal solanarpc.ChainTerminal) ([]solanarpc.SignatureInfo, bool, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	return client.ReferenceHistory(ctx, reference, terminal)
+}
+
 func (r *MerchantChainReader) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
 	client, err := r.client(ctx)
 	if err != nil {
@@ -202,6 +210,14 @@ func (r *MerchantChainReader) GetLatestBlockhash(ctx context.Context) (solanago.
 		return solanago.Hash{}, err
 	}
 	return client.GetLatestBlockhash(ctx)
+}
+
+func (r *MerchantChainReader) LatestBlockhash(ctx context.Context) (solanarpc.RecentBlockhash, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return solanarpc.RecentBlockhash{}, err
+	}
+	return client.LatestBlockhash(ctx)
 }
 
 func (r *MerchantChainReader) GetBalance(ctx context.Context, address solanago.PublicKey) (uint64, error) {
