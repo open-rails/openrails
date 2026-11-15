@@ -88,7 +88,7 @@ func Webhook(r *httprequest.Request) {
 // openrails.merchant_id GUC) for the rest of the dispatch and returns the
 // release the caller must defer. A webhook resolves its merchant inside the
 // handler, so MerchantDBConnMW cannot have pinned it. Nested calls are a
-// no-op, so re-entering processResolvedMerchantWebhook is safe.
+// no-op, so re-entering processStripeWebhook is safe.
 func pinWebhookMerchantConn(r *httprequest.Request, merchantID billing.MerchantID) (func(), bool) {
 	if r == nil || r.State == nil || r.State.DB == nil || merchantID.IsZero() {
 		return func() {}, true
@@ -104,7 +104,7 @@ func pinWebhookMerchantConn(r *httprequest.Request, merchantID billing.MerchantI
 	return release, true
 }
 
-func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID billing.MerchantID, accountID string) {
+func processStripeWebhook(r *httprequest.Request, merchantID billing.MerchantID, accountID string) {
 	if strings.TrimSpace(accountID) == "" {
 		r.ErrorCode(billing.CodeInvalidParam, "Webhook account_id is required")
 		return
@@ -115,42 +115,6 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	}
 	defer release()
 
-	if rails.IsNMI(models.Rail(provider)) {
-		if processMerchantNMIWebhook(r, provider, merchantID, accountID) {
-			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
-		}
-		return
-	}
-	if provider == string(models.EventSourceBasisTheory) {
-		if processMerchantBasisTheoryWebhook(r, merchantID, accountID) {
-			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
-		}
-		return
-	}
-	if provider == subscriptions.RailCCBill {
-		// Pin the routed PSP first, so a refused source counts against it.
-		if r.State.Merchants != nil {
-			pspID, found, err := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, provider, accountID)
-			if !bindResolvedWebhookPSP(r, pspID, found, err) {
-				return
-			}
-		}
-		clientIP := r.ClientIP()
-		if !ccbillWebhookIPAllowed(r, clientIP) {
-			r.State.WebhookHealth.Rejected(r.Request.Context())
-			r.ErrorCode(billing.CodeResourceAccessDenied, "Unauthorized webhook source")
-			return
-		}
-		if processMerchantCCBillWebhook(r, clientIP, accountID) {
-			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
-		}
-		return
-	}
-	if provider != subscriptions.RailStripe {
-		r.ErrorCode(billing.CodeInvalidParam, "Provider not supported on merchant webhook surface")
-		return
-	}
-
 	body, ok := readLimitedWebhookBody(r, maxStripeWebhookBytes)
 	if !ok {
 		return
@@ -160,7 +124,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	var found bool
 	creds, found, err = r.State.Merchants.LoadStripeCredentialsForAccount(r.Request.Context(), merchantID, accountID)
 	if err == nil && !found {
-		warnUndeclaredWebhook(provider, accountID)
+		warnUndeclaredWebhook(subscriptions.RailStripe, accountID)
 		rejectWebhook(r)
 		return
 	}
@@ -173,7 +137,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		r.ErrorCode(billing.CodeInternalError, "Credential load failed")
 		return
 	}
-	pspID, found, resolveErr := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, provider, accountID)
+	pspID, found, resolveErr := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, subscriptions.RailStripe, accountID)
 	if !bindResolvedWebhookPSP(r, pspID, found, resolveErr) {
 		return
 	}
@@ -335,10 +299,10 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 			return true, false
 		}
 		defer release()
-		// handled=true, accepted=false: processResolvedMerchantWebhook writes
-		// its own response (401 on a bad signature, 200 on success), so the
-		// caller must not write "accepted" on top of a refused forgery.
-		processResolvedMerchantWebhook(r, subscriptions.RailStripe, account.MerchantID, account.AccountID)
+		// handled=true, accepted=false: processStripeWebhook writes its own
+		// response (401 on a bad signature, 200 on success), so the caller
+		// must not write "accepted" on top of a refused forgery.
+		processStripeWebhook(r, account.MerchantID, account.AccountID)
 		return true, false
 	default:
 		return false, false
@@ -438,14 +402,6 @@ func pinWebhookAccount(r *httprequest.Request, rail, accountID string,
 		return merchants.PSPIdentity{}, noop, false
 	}
 	return account, release, true
-}
-
-func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchantID billing.MerchantID, accountID string) bool {
-	body, ok := readLimitedWebhookBody(r, maxNMIWebhookBytes)
-	if !ok {
-		return false
-	}
-	return processMerchantNMIWebhookBody(r, provider, merchantID, accountID, body)
 }
 
 func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merchantID billing.MerchantID, accountID string, body []byte) bool {
@@ -551,37 +507,6 @@ func bindResolvedWebhookPSP(r *httprequest.Request, id uuid.UUID, found bool, er
 	}
 	r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), id))
 	return true
-}
-
-func processMerchantCCBillWebhook(r *httprequest.Request, clientIP, routeAccountID string) bool {
-	body, ok := readLimitedWebhookBody(r, maxCCBillWebhookBytes)
-	if !ok {
-		return false
-	}
-	prepared, accountID, ok := prepareCCBillWebhookWithAccountID(r, body)
-	if !ok {
-		return false
-	}
-	if accountID != routeAccountID {
-		r.ErrorCode(billing.CodeInvalidParam, "Webhook account does not match payload")
-		return false
-	}
-	mid, err := merchant.Require(r.Request.Context())
-	if err != nil || r.State.Merchants == nil {
-		r.ErrorCode(billing.CodeServiceUnavailable, "Merchant webhook routing is not configured")
-		return false
-	}
-	pspID, found, err := r.State.Merchants.ResolvePSPID(r.Request.Context(), mid, subscriptions.RailCCBill, routeAccountID)
-	if err != nil {
-		r.ErrorCode(billing.CodeInternalError, "Webhook account resolution failed")
-		return false
-	}
-	if !found {
-		rejectWebhook(r)
-		return false
-	}
-	r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), pspID))
-	return processMerchantCCBillWebhookPrepared(r, clientIP, prepared, accountID)
 }
 
 func prepareCCBillWebhookWithAccountID(r *httprequest.Request, body []byte) (webhookutil.Prepared, string, bool) {
