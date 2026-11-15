@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
+	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -77,13 +78,21 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		return
 	}
 	body.SubscriptionID, body.IdempotencyKey = id, key
+	if refuseBlockedCardAttempt(r, payer.String()) {
+		return
+	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-	result, err := svc.RetrySubscriptionNow(r.Request.Context(), payer, body, verifiedPrincipal(r))
+	ctx := intents.WithOrderCaptchaSubjects(r.Request.Context(), middleware.SubjectKeysFromContext(r.Request.Context()))
+	result, err := svc.RetrySubscriptionNow(ctx, payer, body, verifiedPrincipal(r))
 	if err != nil {
+		var refusal *billingservice.CustomerPaymentRefusal
+		if errors.As(err, &refusal) {
+			noteCardDecline(r, payer.String())
+		}
 		customerPaymentError(r, err)
 		return
 	}
@@ -112,6 +121,8 @@ func customerPaymentError(r *httprequest.Request, err error) {
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "payment_in_progress", "a payment is already unresolved; read this resource before retrying"))
 	case errors.Is(err, money.ErrCustomerPaymentUnsupported), errors.Is(err, intents.ErrRebillUnsupported):
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "customer_payment_unsupported", "customer-present payment is unsupported for this rail or method"))
+	case errors.Is(err, intents.ErrRetryNeedsNewMethod):
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "payment_not_retryable", "this card is not charged again for this renewal; set another payment method on the subscription"))
 	case errors.Is(err, intents.ErrRebillNotRetryable):
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "payment_not_retryable", "resource is not payable now"))
 	case errors.Is(err, money.ErrDefaultPaymentMethodInvalid), errors.Is(err, money.ErrDefaultPaymentMethodRequired), errors.Is(err, charge.ErrAgreementRequired):

@@ -272,7 +272,8 @@ var jsonRules = map[string]jsonRule{
 		"transaction_id":            textValue, "response_code": integerValue, "not_executed": booleanValue,
 	}),
 	"provider_intents.manual_rebill.payload": object(map[string]jsonRule{
-		"initiator": textValue, "requested_payment_method_id": uuidValue,
+		"order_captcha_subjects": array(textValue),
+		"initiator":              textValue, "requested_payment_method_id": uuidValue,
 		"renewal":           acceptedRenewalJSON,
 		"payment_method_id": uuidValue, "rail": textValue, "rail_subscription_id": textValue, "order_reference": uuidValue,
 		"attempt": integerValue, "failure_count": integerValue, "amount_minor": moneyStringValue,

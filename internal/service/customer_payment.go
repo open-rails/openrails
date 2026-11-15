@@ -193,6 +193,12 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 		out.BlockedReason = "subscription_not_retryable"
 		return out, nil
 	}
+	if err := intents.AdmitCustomerRetry(ctx, s.rt.DB.Gen(ctx), sub, *charged); errors.Is(err, intents.ErrRetryNeedsNewMethod) {
+		out.BlockedReason = "payment_method_update_required"
+		return out, nil
+	} else if err != nil {
+		return nil, err
+	}
 	out.Retryable = true
 	s.holdRecoveryForWritePosture(ctx, sub.MerchantID, out)
 	return out, nil

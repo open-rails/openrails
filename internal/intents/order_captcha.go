@@ -26,7 +26,7 @@ func (r *Runner) recordOrderCardDecline(ctx context.Context, in gen.BillingProvi
 		return
 	}
 	switch in.IntentType {
-	case "nmi_sale", "subscription_collection", TypeOrderCollection:
+	case "nmi_sale", "subscription_collection", "manual_rebill", TypeOrderCollection:
 	default:
 		return
 	}

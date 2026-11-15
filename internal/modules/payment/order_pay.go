@@ -405,12 +405,12 @@ func (s *OrderAttemptService) PayOrder(ctx context.Context, in OrderPayInput) (O
 	case in.Hosted != nil:
 		return s.payOrderHosted(ctx, in)
 	}
-	if err := s.guardCardAttempt(ctx, in.User); err != nil {
+	if err := s.GuardCardAttempt(ctx, in.User); err != nil {
 		return OrderCharge{}, err
 	}
 	out, err := s.payOrder(ctx, in)
 	if out.Declined || err != nil && cardAttemptFailed(err) {
-		s.noteCardAttempt(ctx, in.User)
+		s.NoteCardAttempt(ctx, in.User)
 	}
 	return out, err
 }

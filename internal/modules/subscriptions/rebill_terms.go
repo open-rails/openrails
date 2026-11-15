@@ -21,6 +21,9 @@ const TypeManualRebill = "manual_rebill"
 // confirmed charge buys. OrderReference is the obligation's, shared by every
 // attempt for the period; the idempotency key stays per attempt.
 type ManualRebillPayload struct {
+	// OrderCaptchaSubjects preserves a customer retry's HTTP subjects for its
+	// decline's captcha count.
+	OrderCaptchaSubjects     []string                `json:"order_captcha_subjects,omitempty"`
 	Initiator                charge.Initiator        `json:"initiator"`
 	RequestedPaymentMethodID *uuid.UUID              `json:"requested_payment_method_id,omitempty"`
 	Renewal                  RenewalTerms            `json:"renewal"`
