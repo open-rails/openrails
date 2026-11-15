@@ -275,9 +275,24 @@ only, across every merchant and PSP.
   repeats the request with `signature`. Wallet cancellations and delegate
   revocations are also detected when a due pull is refused, without dunning.
   They cannot be undone locally.
-- **Tier changes are signed by the subscriber.** The change route answers a
-  `solana_sign_transactions` next action; repeat with the landed signature.
-  A merchant cannot sign this action for the customer.
+- **Tier changes are signed by the subscriber and recorded from the chain.**
+  The change route freezes the agreement (the new plan's terms and, for an
+  upgrade, the prorated charge) as a pending `solana_tier_change` operation
+  with a reference, then answers a `solana_sign_transactions` next action:
+  one transaction carrying that reference, co-signed by the new plan's
+  cranker (a downgrade too), so the wallet can sign it but not alter it or
+  its blockhash. OpenRails reads the chain for a finalized
+  transaction naming the reference, qualifies it against the frozen agreement
+  and records the switch, its bill, payment and access period together.
+  Repeating the request with the landed `signature` only makes it look at
+  once; a closed tab or a wallet that never returns changes nothing. A change
+  whose transaction can no longer land (the finalized block height is past its
+  blockhash's last valid height and no transaction names the reference) is
+  released. While a change is pending, a pull the old subscription refuses as
+  canceled cancels nothing. A change that landed but can no longer be recorded
+  raises a `consistency.ledger.unbooked` finding
+  (`solana_tier_change_unrecorded`). A merchant cannot sign this action for the
+  customer.
 
 ### Devnet testing
 

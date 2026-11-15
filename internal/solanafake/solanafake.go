@@ -436,6 +436,19 @@ func (n *Node) Land(tx *solanago.Transaction, blockTime time.Time) (solanago.Sig
 	return sig, nil
 }
 
+// LandConfirmed is Land for a transaction the cluster has confirmed and not
+// yet finalized: its effects apply, and finalized reads miss it until Finalize.
+func (n *Node) LandConfirmed(tx *solanago.Transaction, blockTime time.Time) (solanago.Signature, error) {
+	sig, err := n.Land(tx, blockTime)
+	if err != nil {
+		return sig, err
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.txs[sig.String()].finalized = false
+	return sig, nil
+}
+
 // apply executes one instruction's effect, returning the address of a program
 // account and of a token account it created; n.mu held.
 func (n *Node) apply(tx *solanago.Transaction, inst solanago.CompiledInstruction, blockTime time.Time) (string, string, error) {

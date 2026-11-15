@@ -321,6 +321,8 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		solanaPull.Chain = r.SolanaRPCResolver.ChainReader()
 	}
 	registry.Register(pull.NewHandler(solanaPull))
+	// A Solana plan change is found on chain by the reference it was prepared with.
+	registry.Register(r.SolanaPlanChanges(clock))
 	return registry
 }
 
