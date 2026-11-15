@@ -163,6 +163,8 @@ type solanaFixtureOptions struct {
 	freshWallet bool
 	manualFleet bool
 	network     string
+	// fx replaces the fixed FX wire.
+	fx http.RoundTripper
 }
 
 func newSolanaWorld(t *testing.T, recurring bool, options ...solanaFixtureOptions) *solanaWorld {
@@ -193,6 +195,9 @@ func newSolanaWorld(t *testing.T, recurring bool, options ...solanaFixtureOption
 		s.node.SetClock(w.clock.Now)
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: s.wire.server.URL}
+		if option.fx != nil {
+			w.deps.FXTransport = option.fx
+		}
 		m := w.cfg.Merchants["alpha"]
 		m.PSPs = openrails.PSPs{"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}
 		w.cfg.Merchants["alpha"] = m

@@ -184,7 +184,7 @@ is a file or Vault, cached per instance. Per-instance caches:
 |---|---|
 | Merchant configuration | an edit through OpenRails: at once (`NOTIFY`); one made in Vault directly: within 30 seconds of the merchant's next use; a file: the instance's next start |
 | A Solana Transit cranker's public key | 60 seconds |
-| FX rates | the instance's next refresh (every 2 hours); a rate published 48 hours ago is never quoted |
+| FX rates | the instance's next refresh (every 2 hours); a rate published 48 hours ago is never quoted, and one more than 1.25 times (either way) the rate it replaces is held back until a later day's publication repeats it |
 | `GET /v1/config` in browsers and CDNs | 5 minutes (`Cache-Control`) |
 | PSP posture verdicts | at once, when the PSP's configuration changes |
 
@@ -1343,7 +1343,7 @@ trusted issuers' JWKS URIs, `llm.base_url`), the server calls:
 
 | Destination | What for |
 |---|---|
-| `latest.currency-api.pages.dev`, then `cdn.jsdelivr.net` | FX rates for cross-currency quotes, held in each instance's memory: each instance reads 34 files, one per currency (the fallback mirror when the primary fails), every 2 hours from its first cross-currency quote, and a quote reads the one file it finds missing or stale. An instance that never quotes across currencies never calls them. Boot never waits for them: a failed read is retried at the next refresh or quote, and a rate it cannot fetch fails only the quote that needed it. |
+| `latest.currency-api.pages.dev`, then `cdn.jsdelivr.net` | FX rates for cross-currency quotes, held in each instance's memory: each instance reads 34 files, one per currency (the fallback mirror when the primary fails), every 2 hours from its first cross-currency quote, and a quote reads the one file it finds missing or stale. An instance that never quotes across currencies never calls them. Boot never waits for them: a failed read is retried at the next refresh or quote, and a rate it cannot fetch fails only the quote that needed it. Both hosts serve one publisher's files, so neither checks the other; a rate is checked only against the one the instance already holds. |
 | `hermes.pyth.network` | Solana token prices, when a Solana rail quotes a token. |
 | `api.stripe.com` | Stripe PSPs. |
 | `secure.nmi.com`, `sandbox.nmi.com` | NMI PSPs, by each PSP's `environment`. |
