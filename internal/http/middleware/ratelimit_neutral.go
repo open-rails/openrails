@@ -102,7 +102,7 @@ type RateLimitDeps struct {
 	Captcha        *config.CaptchaConfig
 	State          *abusestate.Store
 	ChallengeStore *captcha.ChallengeStore
-	Verifier       captcha.Verifier
+	Verifier       *captcha.Verifier
 }
 
 // EvaluateRateLimit decides rate limit and captcha for a request. It may wrap

@@ -188,7 +188,7 @@ type Runtime struct {
 	// here. Armed over SolanaRPCResolver's merchant-scoped chain reader.
 	SolanaMintDecimals  *solanamodule.MintDecimals
 	SolanaPriceProvider solanamodule.TokenPriceProvider
-	FXProvider          fx.Provider
+	FXProvider          *fx.Rates
 	// FXRates is FXProvider: rates held in memory, refreshed from the
 	// process's first cross-currency quote until Close.
 	FXRates *fx.Rates

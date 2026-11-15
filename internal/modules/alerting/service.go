@@ -24,7 +24,7 @@ type Deps struct {
 	DB *db.DB
 	// Email is the outbound alert-email sender seam (may be nil — email channel
 	// then fails soft with a note in the delivery record).
-	Email EmailSender
+	Email *MailSender
 	// Outbound is the SSRF policy for merchant-supplied webhook sinks (#SEC-21).
 	// The zero value is the strict production policy: publicly routable
 	// destinations only, enforced at the dialer and on every redirect hop.

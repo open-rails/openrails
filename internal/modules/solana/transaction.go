@@ -28,7 +28,7 @@ type SolanaTransactionService struct {
 	rpcBuilder   *MerchantRPCBuilder
 	cfg          *config.Config
 	priceService *catalog.PriceService
-	fxProvider   fx.Provider
+	fxProvider   *fx.Rates
 	clock        clockwork.Clock
 }
 
@@ -41,7 +41,7 @@ func (s *SolanaTransactionService) now() time.Time {
 }
 
 // NewSolanaTransactionService creates a new transaction service.
-func NewSolanaTransactionService(db *db.DB, rpc *solanarpc.RPCClient, cfg *config.Config, price *catalog.PriceService, fxProvider fx.Provider, clocks ...clockwork.Clock) *SolanaTransactionService {
+func NewSolanaTransactionService(db *db.DB, rpc *solanarpc.RPCClient, cfg *config.Config, price *catalog.PriceService, fxProvider *fx.Rates, clocks ...clockwork.Clock) *SolanaTransactionService {
 	return &SolanaTransactionService{
 		db:           db,
 		rpc:          rpc,

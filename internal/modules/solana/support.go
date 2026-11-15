@@ -208,7 +208,7 @@ type TokenPriceProvider interface {
 // units. Token-denominated prices pay exactly in that token; fiat prices use FX
 // and the token price. quotedAt comes from the owning purchase clock. decimals
 // is the mint's on-chain precision (MintDecimals.ForMint), never an assumed 6.
-func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals int, amountMicros moneyutil.Micros, currency string, fxProvider fx.Provider, priceProvider TokenPriceProvider, quotedAt time.Time) (*TokenQuote, error) {
+func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals int, amountMicros moneyutil.Micros, currency string, fxProvider *fx.Rates, priceProvider TokenPriceProvider, quotedAt time.Time) (*TokenQuote, error) {
 	if quotedAt.IsZero() {
 		return nil, fmt.Errorf("token quote requires its creation time")
 	}

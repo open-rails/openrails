@@ -49,7 +49,7 @@ type CCBillWebhookService struct {
 	NotificationService          *subscriptions.NotificationService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
-	ProfileRepo                  identitydir.UsernameResolver
+	ProfileRepo                  *identitydir.Customers
 	PaymentService               *payments.PaymentService
 	DeduplicationService         *DeduplicationService
 	OrderAttemptService          *payment.OrderAttemptService

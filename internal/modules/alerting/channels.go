@@ -19,27 +19,18 @@ import (
 	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
-// EmailSender is the config/host seam for outbound alert email.
-// subscriptions.EmailService satisfies it; a host can inject its own.
-// A nil sender or one that IsEnabled()==false fails soft (the delivery record
-// notes the skip and the dev path logs loudly).
-type EmailSender interface {
-	SendEmail(ctx context.Context, to, subject, htmlContent, plainContent string) error
-	IsEnabled() bool
-}
-
 // deliverer sends immediate notifications to the selected destinations.
 type deliverer struct {
 	store       *store
 	cfgStore    *merchantconfig.Store
-	email       EmailSender
+	email       *MailSender
 	outbound    httpx.Policy
 	http        *http.Client
 	backoff     time.Duration
 	maxAttempts int
 }
 
-func newDeliverer(database *db.DB, st *store, email EmailSender, outbound httpx.Policy, backoff time.Duration) *deliverer {
+func newDeliverer(database *db.DB, st *store, email *MailSender, outbound httpx.Policy, backoff time.Duration) *deliverer {
 	if backoff <= 0 {
 		backoff = 500 * time.Millisecond
 	}

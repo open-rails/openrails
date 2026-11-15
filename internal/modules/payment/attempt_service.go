@@ -61,7 +61,7 @@ type OrderAttemptService struct {
 	purchaseService          *PurchaseService
 	solanaPayService         *solanamodule.SolanaPayService
 	solanaTransactionService *solanamodule.SolanaTransactionService
-	fxProvider               fx.Provider
+	fxProvider               *fx.Rates
 	priceProvider            solanamodule.TokenPriceProvider
 	// solanaMints reads SPL mint decimals from the chain (#817). Late-bound —
 	// it needs the per-merchant RPC resolver. nil = solana quotes fail closed.
@@ -116,7 +116,7 @@ func NewOrderAttemptService(
 	purchaseService *PurchaseService,
 	solanaPayService *solanamodule.SolanaPayService,
 	solanaTransactionService *solanamodule.SolanaTransactionService,
-	fxProvider fx.Provider,
+	fxProvider *fx.Rates,
 	priceProvider solanamodule.TokenPriceProvider,
 	cfg *config.Config,
 	rails railresolve.Source,
