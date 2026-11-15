@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 322,
+  "scenario_count": 324,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -757,6 +757,11 @@
       "id": "OR-J31-S06",
       "journey": "J31",
       "name": "NMI receipts that name their card export and restore verbatim"
+    },
+    {
+      "id": "OR-J31-S10",
+      "journey": "J31",
+      "name": "A Solana pull scheduled ahead and restored with its merchant runs on the destination at its due time"
     },
     {
       "id": "OR-J31-S40",
@@ -1522,6 +1527,11 @@
       "id": "OR-J04-S48",
       "journey": "J04",
       "name": "Job progress fails once a billing pass records critical work a day overdue and clears after a clean pass"
+    },
+    {
+      "id": "OR-J04-S60",
+      "journey": "J04",
+      "name": "A live provider operation whose River wake was lost is queued again by the first billing pass an hour past its due time"
     },
     {
       "id": "OR-J25-S40",

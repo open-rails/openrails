@@ -90,7 +90,7 @@ func newBillingExportCmd() *cobra.Command {
 			cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			var bytes int64
 			err = writeBillingArchive(out, overwrite, func(w io.Writer) error {
-				client, close, err := openBillingArchiveClient(ctx, cfg, opts, mid)
+				client, close, err := openBillingArchiveClient(ctx, cfg, opts, mid, false)
 				if err != nil {
 					return err
 				}
@@ -148,7 +148,7 @@ func newBillingImportCmd() *cobra.Command {
 			ctx, stop := opts.context(cmd.Context())
 			defer stop()
 			cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-			client, close, err := openBillingArchiveClient(ctx, cfg, opts, mid)
+			client, close, err := openBillingArchiveClient(ctx, cfg, opts, mid, true)
 			if err != nil {
 				return err
 			}
@@ -204,7 +204,9 @@ func parseBillingArchiveMerchant(value string) (billing.MerchantID, error) {
 	return mid, nil
 }
 
-func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts billingArchiveOptions, mid billing.MerchantID) (*openrails.Client, func(), error) {
+// A local import queues the wakes of the operations it restores: queueJobs
+// binds a River producer.
+func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts billingArchiveOptions, mid billing.MerchantID, queueJobs bool) (*openrails.Client, func(), error) {
 	if strings.TrimSpace(opts.url) != "" {
 		if _, err := readTokenFile(opts.tokenFile); err != nil {
 			return nil, nil, err
@@ -217,6 +219,12 @@ func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts bill
 		return nil, nil, err
 	}
 	close := func() { _ = database.Close() }
+	if queueJobs {
+		if err := bindCLIRiverProducer(ctx, cfg, database); err != nil {
+			close()
+			return nil, nil, err
+		}
+	}
 	// A minimal runtime shares the real handlers and merchant gate without
 	// initializing credentials, providers, workers, FX refresh or control plane.
 	rt := &app.Runtime{DB: database, Config: cfg, Clock: clockwork.NewRealClock()}

@@ -346,4 +346,31 @@ func TestBillingPass(t *testing.T) {
 		require.EqualValues(t, 1000, lotExpired(t, w.alpha, lots[0].ID))
 		require.NoError(t, progress(t.Context()), "a clean pass clears it")
 	})
+	t.Run("OR-J04-S60/a-live-operation-whose-wake-was-lost-is-queued-again-an-hour-past-due", func(t *testing.T) {
+		s := newSolanaWorld(t, true)
+		_, sub := s.subscribe(t)
+		due := sub.CurrentPeriodEndsAt.Add(pullMargin)
+		fleet := quietFleet(t, s.world)
+		settleOperations(t, fleet)
+		// The period's pull loses its wake: its River job is deleted.
+		jobs := operationJobs(t, fleet)
+		require.NotEmpty(t, jobs)
+		for _, job := range jobs {
+			_, err := fleet.JobDelete(t.Context(), job.ID)
+			require.NoError(t, err)
+		}
+		sends := s.wire.sends()
+		advanceTo(s.world, due.Add(30*time.Minute))
+		require.False(t, runPass(t, fleet))
+		require.Empty(t, operationJobs(t, fleet), "a wake less than an hour late is not taken as lost")
+		require.Equal(t, sends, s.wire.sends())
+		advanceTo(s.world, due.Add(90*time.Minute))
+		landedAt := s.clock.Now()
+		require.False(t, runPass(t, fleet))
+		s.renewed(t, sub, landedAt.Add(168*time.Hour))
+		settleOperations(t, fleet)
+		require.False(t, runPass(t, fleet))
+		settleOperations(t, fleet)
+		require.Len(t, operationJobs(t, fleet, rivertype.JobStateScheduled), 1, "the next period's pull, not overdue, keeps its one wake")
+	})
 }

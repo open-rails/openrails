@@ -1038,6 +1038,12 @@
     ],
     "OR-J29-S37": [
       "TestDueWork/OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck"
+    ],
+    "OR-J31-S10": [
+      "TestBillingArchive/OR-J31-S10/a-restored-solana-pull-runs-at-its-due-time"
+    ],
+    "OR-J04-S60": [
+      "TestBillingPass/OR-J04-S60/a-live-operation-whose-wake-was-lost-is-queued-again-an-hour-past-due"
     ]
   },
   "suites": {

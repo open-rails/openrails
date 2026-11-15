@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	notifypg "github.com/open-rails/authkit/notify/postgres"
@@ -21,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/stretchr/testify/require"
 )
 
@@ -296,5 +298,50 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, billing.OrderComplete, restored.Status)
 		require.Equal(t, paid.Payment.PaymentID, restored.Payment.PaymentID)
+	})
+	t.Run("OR-J31-S10/a-restored-solana-pull-runs-at-its-due-time", func(t *testing.T) {
+		s := newSolanaWorld(t, true)
+		_, sub := s.subscribe(t)
+		due := *sub.CurrentPeriodEndsAt
+		archive := archiveBytes(t, s.alpha)
+		target, client := archiveTarget(t, s.world, func(w *world) {
+			w.clock.Advance(s.clock.Now().Sub(w.clock.Now()))
+			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: s.wire.server.URL}
+			w.cfg.Solana = &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: s.cranker.PrivateKey.String()}}}
+		})
+		s.node.SetClock(target.clock.Now)
+		_, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+		// The merchant's configuration names the same treasury.
+		require.NoError(t, target.engine.Close(t.Context()))
+		cfg := target.cfg
+		cfg.Merchants = maps.Clone(target.cfg.Merchants)
+		cfg.Merchants["restored-source"] = openrails.MerchantDeclaration{DisplayName: "Restored", PSPs: openrails.PSPs{"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}}
+		target.engine, err = openrails.New(t.Context(), cfg, target.deps)
+		require.NoError(t, err)
+		client, err = target.engine.Merchant(s.alpha.MerchantID())
+		require.NoError(t, err)
+		require.NoError(t, s.engine.Close(context.Background()))
+		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
+		fleet := quietFleet(t, target)
+		require.NotEmpty(t, operationJobs(t, fleet), "the restore queues the pull's wake")
+		settleOperations(t, fleet)
+		sends := s.wire.sends()
+		advanceTo(target, due)
+		wakeOperations(t, fleet)
+		settleOperations(t, fleet)
+		require.Equal(t, sends, s.wire.sends(), "the pull waits its margin")
+		advanceTo(target, due.Add(pullMargin))
+		landedAt := target.clock.Now()
+		wakeOperations(t, fleet)
+		require.Eventually(t, func() bool {
+			current, err := client.GetSubscription(t.Context(), sub.ID)
+			return err == nil && current.CurrentPeriodEndsAt != nil && current.CurrentPeriodEndsAt.Equal(landedAt.Add(168*time.Hour))
+		}, 20*time.Second, 20*time.Millisecond, "the restored pull renews the period at its due time")
+		require.Equal(t, sends+1, s.wire.sends())
+		payments, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
+		require.NoError(t, err)
+		require.Len(t, payments.Items, 2, "the restored subscribe payment and one renewal")
+		require.EqualValues(t, 20_000_000, s.node.Balance(s.treasury.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))
 	})
 }

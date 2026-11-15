@@ -1505,6 +1505,133 @@ func (q *Queries) ListCompletedManualRebillPaymentCoverage(ctx context.Context, 
 	return items, nil
 }
 
+const listLiveProviderOperations = `-- name: ListLiveProviderOperations :many
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
+WHERE merchant_id = $1::uuid
+  AND id > $2::uuid
+  AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+  AND intent_type <> ALL($3::text[])
+ORDER BY id
+LIMIT $4::int
+`
+
+type ListLiveProviderOperationsParams struct {
+	MerchantID       uuid.UUID
+	AfterID          uuid.UUID
+	RequestOnlyTypes []string
+	RowLimit         int32
+}
+
+// One merchant's live operations a wake runs, in id order after a cursor.
+func (q *Queries) ListLiveProviderOperations(ctx context.Context, arg ListLiveProviderOperationsParams) ([]BillingProviderIntent, error) {
+	rows, err := q.db.Query(ctx, listLiveProviderOperations,
+		arg.MerchantID,
+		arg.AfterID,
+		arg.RequestOnlyTypes,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingProviderIntent
+	for rows.Next() {
+		var i BillingProviderIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.LeaseExpiresAt,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+			&i.Subject,
+			&i.Credential,
+			&i.DestructiveActionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOverdueProviderOperations = `-- name: ListOverdueProviderOperations :many
+SELECT merchant_id, id, next_attempt_at FROM billing.provider_intents
+WHERE status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+  AND next_attempt_at < $1::timestamptz
+  AND (next_attempt_at, id) > ($2::timestamptz, $3::uuid)
+  AND (lease_expires_at IS NULL OR lease_expires_at < $1::timestamptz)
+  AND intent_type <> ALL($4::text[])
+ORDER BY next_attempt_at, id
+LIMIT $5::int
+`
+
+type ListOverdueProviderOperationsParams struct {
+	Before           time.Time
+	AfterAt          time.Time
+	AfterID          uuid.UUID
+	RequestOnlyTypes []string
+	RowLimit         int32
+}
+
+type ListOverdueProviderOperationsRow struct {
+	MerchantID    uuid.UUID
+	ID            uuid.UUID
+	NextAttemptAt time.Time
+}
+
+// CROSS-MERCHANT: live operations whose next attempt, and any lease, ended
+// before before, oldest first from the (after_at, after_id) cursor: each one's
+// wake should have run it by then. Request-only operations have no wake.
+func (q *Queries) ListOverdueProviderOperations(ctx context.Context, arg ListOverdueProviderOperationsParams) ([]ListOverdueProviderOperationsRow, error) {
+	rows, err := q.db.Query(ctx, listOverdueProviderOperations,
+		arg.Before,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RequestOnlyTypes,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOverdueProviderOperationsRow
+	for rows.Next() {
+		var i ListOverdueProviderOperationsRow
+		if err := rows.Scan(&i.MerchantID, &i.ID, &i.NextAttemptAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPaidEngineAgreementsAtBoundary = `-- name: ListPaidEngineAgreementsAtBoundary :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
 WHERE merchant_id=$1::uuid AND id IN (

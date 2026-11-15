@@ -77,6 +77,10 @@ with `openrails merchant arm --merchant NAME --by NAME`. A refused or failed
 export restores the posture it found. Stopping the source writers is still
 the procedure; the fence keeps a forgotten worker from billing.
 
+A Solana pull scheduled ahead and never attempted moves with its subscription.
+The import queues it on the destination for its due time; until the merchant
+is armed it waits there.
+
 ## One authoritative database
 
 Normal replicas share one writable PostgreSQL database. Database claims and
