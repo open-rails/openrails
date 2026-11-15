@@ -42,18 +42,6 @@ type StripeRefundService struct {
 	StripeClients *stripeapi.Factory
 	Config        *config.Config
 	Rails         railresolve.Source
-
-	// BaseURL overrides the Stripe API root. Empty means the production
-	// Stripe API (https://api.stripe.com). Tests set this to an httptest
-	// server.
-	BaseURL string
-}
-
-func (s *StripeRefundService) baseURL() string {
-	if s != nil && strings.TrimSpace(s.BaseURL) != "" {
-		return strings.TrimRight(strings.TrimSpace(s.BaseURL), "/")
-	}
-	return "https://api.stripe.com"
 }
 
 type RefundParams struct {
@@ -117,7 +105,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	// dedupes the WRITE, the metadata makes the refund re-findable via reads.
 	values.Set("metadata["+stripeRefundMetadataKey+"]", idempotencyKey)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL()+"/v1/refunds", strings.NewReader(values.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stripeapi.APIBase+"/v1/refunds", strings.NewReader(values.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +204,7 @@ func (s *StripeRefundService) FindRefundByIdempotencyKey(ctx context.Context, ch
 	} else {
 		values.Set("charge", chargeID)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL()+"/v1/refunds?"+values.Encode(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stripeapi.APIBase+"/v1/refunds?"+values.Encode(), nil)
 	if err != nil {
 		return nil, false, err
 	}

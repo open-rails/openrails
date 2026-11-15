@@ -69,29 +69,12 @@ func (r FindingRecord) Quiet() bool {
 	return quiet
 }
 
-// Store is the engine-facing persistence surface. The pg implementation runs
-// merchant-scoped; the unit-test fake is in-memory.
-type Store interface {
-	UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding) (FindingRecord, error)
-	// ListActionablePullFindings and AutoResolveVanished cover the pull
-	// findings of one PSP: a pass over one PSP proves nothing about another.
-	ListActionablePullFindings(ctx context.Context, pspID uuid.UUID) ([]FindingRecord, error)
-	AutoResolveVanished(ctx context.Context, pspID uuid.UUID, runID uuid.UUID, types []FindingType) (int64, error)
-	MarkFindingVanished(ctx context.Context, id uuid.UUID) error
-	MarkFindingAutoFixed(ctx context.Context, id uuid.UUID, resolutionEvidence map[string]any) error
-	// MarkFindingNotified stamps the dedupe linkage after a FindingNotifier
-	// pushes an operator notification for an open finding.
-	MarkFindingNotified(ctx context.Context, id uuid.UUID, at time.Time, severity Severity) error
-}
-
 // PGStore persists findings via the sqlc layer on a merchant-pinned
 // connection.
 type PGStore struct {
 	DB  *db.DB
 	Now func() time.Time
 }
-
-var _ Store = (*PGStore)(nil)
 
 func marshalEvidence(m map[string]any) []byte {
 	if len(m) == 0 {

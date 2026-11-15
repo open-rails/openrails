@@ -50,10 +50,10 @@ type ChainReader interface {
 type Handler struct {
 	DB        *db.DB
 	Clock     clockwork.Clock
-	Cranker   Cranker        // nil parks every pull
-	Lifecycle Lifecycle      // nil parks every pull
-	Store     *intents.Store // pre-submit signature write-ahead
-	Chain     ChainReader    // nil leaves recorded transactions unresolved
+	Cranker   *recurring.CrankService                     // nil parks every pull
+	Lifecycle *subscriptions.SubscriptionLifecycleService // nil parks every pull
+	Store     *intents.Store                              // pre-submit signature write-ahead
+	Chain     ChainReader                                 // nil leaves recorded transactions unresolved
 	Policy    intents.BackoffPolicy
 	// Gas checks the merchant's cranker wallets after a pull it signed paid
 	// its fee: a low one raises its finding, a funded one resolves it.
@@ -395,7 +395,7 @@ func (h *Handler) expiredUnseen(ctx context.Context, intent gen.BillingProviderI
 
 // repairFromSignature runs the renewal repair for a pull CONFIRMED on-chain:
 // RenewMembership (idempotent on the signature) + AdvanceAfterPull.
-func (h *Handler) repairFromSignature(ctx context.Context, repo solanaSubStore, agreement *Agreement, intent gen.BillingProviderIntent, sig string) intents.Outcome {
+func (h *Handler) repairFromSignature(ctx context.Context, repo *solanasubs.SolanaSubscriptionRepo, agreement *Agreement, intent gen.BillingProviderIntent, sig string) intents.Outcome {
 	receipt, err := recurring.VerifyPullReceipt(ctx, h.Chain, &agreement.Row, sig, agreement.TokenAmount, agreement.PeriodHours, agreement.TokenDecimals, intent.ID)
 	if err != nil {
 		return intents.Ambiguous("pull receipt does not qualify its accepted agreement: " + err.Error())

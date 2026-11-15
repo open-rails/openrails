@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/open-rails/openrails/internal/booktag"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"io"
 	"strings"
 	"time"
@@ -49,7 +50,7 @@ type StripeWebhookService struct {
 	MoneyService                 *money.MoneyService
 	DeduplicationService         *DeduplicationService
 	RailCustomerService          *payments.RailCustomerService
-	OrderAttemptService          webhookOrderAttemptStore
+	OrderAttemptService          *payment.OrderAttemptService
 	Clock                        clockwork.Clock
 	// ConvergeEnqueuer: subscription-state events are wake-up signals; the
 	// handler marks the subscription dirty and the coalesced River job fetches
@@ -57,7 +58,7 @@ type StripeWebhookService struct {
 	ConvergeEnqueuer SubscriptionConvergeEnqueuer
 	// StripePaymentState reads the exact routed Stripe account. Payment-method
 	// events are wake-up signals; fetched provider truth owns the local link.
-	StripePaymentState payments.StripePaymentStateReader
+	StripePaymentState *payments.HTTPStripePaymentStateReader
 	// ObserveEnqueuer queues the coalesced read of a catalog object a
 	// product.* or price.* event names.
 	ObserveEnqueuer ProviderObjectObserveEnqueuer

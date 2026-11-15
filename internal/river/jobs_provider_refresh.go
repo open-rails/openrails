@@ -80,11 +80,6 @@ var providerRefreshUniqueStates = []rivertype.JobState{
 	rivertype.JobStateScheduled,
 }
 
-// refreshJobInserter is the slice of river.Client the scheduler uses (test seam).
-type refreshJobInserter interface {
-	Insert(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error)
-}
-
 // ProviderRefreshSchedulerWorker is the periodic umbrella: it enqueues one
 // refresh job per active merchant that has a PSP, spread evenly over Stagger.
 // River supplies per-merchant error isolation; the next pass resumes a
@@ -100,11 +95,6 @@ type ProviderRefreshSchedulerWorker struct {
 	// Stagger is the fan-out spread window (0 = defaultRefreshStagger). Slot 0
 	// is immediate, so a single-merchant (embedded) boot refreshes right away.
 	Stagger time.Duration
-
-	// Test seams; nil = production defaults.
-	Inserter        refreshJobInserter
-	ListMerchants   func(ctx context.Context) ([]uuid.UUID, error)
-	HasRailAccounts func(ctx context.Context, mid uuid.UUID) (bool, error)
 }
 
 func (ProviderRefreshSchedulerWorker) Kind() string { return KindProviderRefresh }
@@ -130,20 +120,10 @@ func (w *ProviderRefreshSchedulerWorker) merchantQueue() string {
 	return QueueProviderRefresh
 }
 
-func (w *ProviderRefreshSchedulerWorker) listMerchants(ctx context.Context) ([]uuid.UUID, error) {
-	if w.ListMerchants != nil {
-		return w.ListMerchants(ctx)
-	}
-	return w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
-}
-
 // merchantHasRailAccounts reports whether the merchant declares any PSP.
 // Archived PSPs count (drain pulls still arm). Environment is not filtered: a
 // wrong-environment PSP enqueues a job that arms nothing (fail open, cheap).
 func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Context, mid uuid.UUID) (bool, error) {
-	if w.HasRailAccounts != nil {
-		return w.HasRailAccounts(ctx, mid)
-	}
 	var exists bool
 	mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 	err := w.DB.MerchantTx(mctx, func(tctx context.Context, tx pgx.Tx) error {
@@ -156,15 +136,11 @@ func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Con
 }
 
 func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[ProviderRefreshArgs]) error {
-	inserter := w.Inserter
-	if inserter == nil {
-		client, err := river.ClientFromContextSafely[pgx.Tx](ctx)
-		if err != nil {
-			return fmt.Errorf("provider refresh scheduler: river client: %w", err)
-		}
-		inserter = client
+	inserter, err := river.ClientFromContextSafely[pgx.Tx](ctx)
+	if err != nil {
+		return fmt.Errorf("provider refresh scheduler: river client: %w", err)
 	}
-	merchantIDs, err := w.listMerchants(ctx)
+	merchantIDs, err := w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("provider refresh scheduler: list merchants: %w", err)
 	}
@@ -245,10 +221,7 @@ type ProviderRefreshWorker struct {
 	// store. nil = no-op.
 	Alerts *alerting.Service
 
-	// PullEndpoints overrides provider base URLs on store-armed clients
-	// (fake-provider test seam).
-	PullEndpoints reconcile.ProviderEndpoints
-	NMIClients    *railresolve.NMIFactory
+	NMIClients *railresolve.NMIFactory
 	// Verifier reads the unverified NMI rows; nil leaves them to the
 	// unknown-cohort reconcile.
 	Verifier *reconcile.Verifier
@@ -301,7 +274,6 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		Config:        w.Config,
 		Merchants:     w.Merchants,
 		DB:            w.DB,
-		Endpoints:     w.PullEndpoints,
 		NMIClients:    w.NMIClients,
 	}
 

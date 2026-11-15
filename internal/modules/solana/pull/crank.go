@@ -29,34 +29,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// Cranker signs and sends a pull (satisfied by *recurring.CrankService):
-// presubmit(sig, terminal) persists the signed tx signature and when it stops
-// being landable before submission, and memoLocalID (the durable pull-intent
-// id) is stamped on the pull tx as its self-recognition memo.
-type Cranker interface {
-	CrankWithPresubmit(ctx context.Context, merchantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string, terminal solanaint.ChainTerminal) error) (string, error)
-}
-
-// Lifecycle is the membership surface a pull drives (satisfied by
-// *subscriptions.SubscriptionLifecycleService): renew on a confirmed pull, fail
-// (-> dunning) on a charge failure.
-type Lifecycle interface {
-	RenewMembership(ctx context.Context, params *subscriptions.RenewMembershipParams) error
-	FailMembership(ctx context.Context, params *subscriptions.FailMembershipParams) error
-	// CancelMembership terminates the subscription (an out-of-band cancel
-	// detected at rebill time: the subscriber revoked the delegation on-chain).
-	CancelMembership(ctx context.Context, params *subscriptions.CancelMembershipParams) error
-	ApplyLocalUnknown(ctx context.Context, d *db.DB, sub *models.Subscription, from ...models.SubscriptionStatus) error
-}
-
-// solanaSubStore is the persistence surface crankOne mutates (satisfied by
-// *solanasubs.SolanaSubscriptionRepo).
-type solanaSubStore interface {
-	SetStatus(ctx context.Context, id uuid.UUID, status string) error
-	SetNextPullAt(ctx context.Context, id uuid.UUID, nextPullAt time.Time) error
-	AdvanceAfterPull(ctx context.Context, id, subscriptionID uuid.UUID, episodeAt, periodStart time.Time, signature string, nextPullAt time.Time) error
-}
-
 // resolvedPlan is the per-subscription billing terms crankOne acts on: the
 // on-chain pull amount + period + ghost-plan fingerprint, plus the fiat
 // amount/currency recorded on renewal.
@@ -109,7 +81,7 @@ type crankOutcome struct {
 // record. An error means the pull is unresolved (operational failure, or a
 // landed pull whose local finalize failed; the recorded signature tells them
 // apart); nil means the period resolved (see crankKind).
-func (h *Handler) crankOne(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription, plan resolvedPlan, memoLocalID uuid.UUID, presubmit func(signature string, terminal solanaint.ChainTerminal) error) (crankOutcome, error) {
+func (h *Handler) crankOne(ctx context.Context, repo *solanasubs.SolanaSubscriptionRepo, row *models.SolanaSubscription, plan resolvedPlan, memoLocalID uuid.UUID, presubmit func(signature string, terminal solanaint.ChainTerminal) error) (crankOutcome, error) {
 	merchantID := billing.MerchantID(row.MerchantID)
 
 	amountBaseUnits := plan.amountBaseUnits
@@ -299,7 +271,7 @@ func (h *Handler) crankOne(ctx context.Context, repo solanaSubStore, row *models
 // membership window (payment row, period advance, notifications; idempotent
 // on the tx signature) and advance the row past the pulled period. Shared by
 // the inline success path and the recorded-signature verify leg.
-func (h *Handler) finalizePull(ctx context.Context, repo solanaSubStore, agreement *Agreement, receipt *recurring.PullReceipt, execution *observed.Execution) error {
+func (h *Handler) finalizePull(ctx context.Context, repo *solanasubs.SolanaSubscriptionRepo, agreement *Agreement, receipt *recurring.PullReceipt, execution *observed.Execution) error {
 	row := &agreement.Row
 	ctx = db.WithPSPID(ctx, row.PspID)
 	hours, err := safecast.Convert[int](agreement.PeriodHours)

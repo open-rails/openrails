@@ -19,29 +19,17 @@ import (
 // startup verified. There is no bare-key path.
 type NMIFactory struct {
 	Config *config.Config
-	// Endpoints points clients at a loopback fake gateway (test seam). Unset
-	// fields fall back to config.ProviderSandbox's NMI gateway.
-	Endpoints NMIEndpoints
 	// Transport replaces the wire at the real endpoints (test seam). Unlike
-	// Endpoints it exempts nothing: posture is verified through it.
+	// the sandbox gateway it exempts nothing: posture is verified through it.
 	Transport http.RoundTripper
 }
 
-func (f *NMIFactory) endpoints() NMIEndpoints {
+// gateway is config.ProviderSandbox's loopback NMI gateway, or empty for NMI.
+func (f *NMIFactory) gateway() string {
 	if f == nil {
-		return NMIEndpoints{}
+		return ""
 	}
-	endpoints := f.Endpoints
-	if f.Config != nil {
-		if gateway := config.SandboxNMIGatewayURL(f.Config); gateway != "" {
-			for _, url := range []*string{&endpoints.V5BaseURL, &endpoints.DirectPostURL, &endpoints.QueryURL} {
-				if *url == "" {
-					*url = gateway
-				}
-			}
-		}
-	}
-	return endpoints
+	return config.SandboxNMIGatewayURL(f.Config)
 }
 
 // Settings reads the PSP's credential set: its versioned security key, the
@@ -109,19 +97,11 @@ func (f *NMIFactory) Wire(client *nmi.NMIClient) {
 	if f == nil || client == nil {
 		return
 	}
-	if endpoints := f.endpoints(); endpoints != (NMIEndpoints{}) {
+	if gateway := f.gateway(); gateway != "" {
 		// Loopback fake gateways only: the client refuses any mutation whose
 		// destination is not a literal loopback IP.
 		client.LoopbackFixture = true
-		if endpoints.V5BaseURL != "" {
-			client.V5BaseURL = endpoints.V5BaseURL
-		}
-		if endpoints.DirectPostURL != "" {
-			client.DirectPostURL = endpoints.DirectPostURL
-		}
-		if endpoints.QueryURL != "" {
-			client.QueryURL = endpoints.QueryURL
-		}
+		client.V5BaseURL, client.DirectPostURL, client.QueryURL = gateway, gateway, gateway
 	}
 	if f.Transport != nil {
 		client.UseTransport(f.Transport)
@@ -131,5 +111,5 @@ func (f *NMIFactory) Wire(client *nmi.NMIClient) {
 // ProxyPosture is the posture identity of scope's credential forwarded by a
 // custodian proxy: the same identity, environment and destination rules.
 func (f *NMIFactory) ProxyPosture(mid billing.MerchantID, scope merchants.PSPScope, settings *config.NMIProviderSettings) (*nmi.NMIClient, error) {
-	return nmi.ProxyPostureClient(mid.UUID(), scope.ID, scope.AccountID, settings, f.endpoints().DirectPostURL)
+	return nmi.ProxyPostureClient(mid.UUID(), scope.ID, scope.AccountID, settings, f.gateway())
 }

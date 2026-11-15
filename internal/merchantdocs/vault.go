@@ -17,19 +17,11 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/vault"
 )
 
-// KV is the KV v2 surface the Vault source needs; paths are under the mount.
-type KV interface {
-	ReadDocument(ctx context.Context, rel string) (vault.Document, error)
-	WriteDocument(ctx context.Context, rel string, data json.RawMessage, cas int64) (vault.Document, error)
-	ListDocuments(ctx context.Context, rel string) ([]string, error)
-	DeleteDocument(ctx context.Context, rel string) error
-}
-
 // VaultSource keeps each merchant's configuration under
 // <prefix>/merchants/<merchant_id>/: the merchant document at merchant, a PSP
 // at psps/<key>, a custodian at custodians/<key>.
 type VaultSource struct {
-	kv     KV
+	kv     *vault.KVv2Adapter
 	prefix string
 }
 
@@ -38,7 +30,7 @@ const DefaultPrefix = "openrails"
 
 // NewVaultSource keeps configuration in kv under prefix ("" is
 // DefaultPrefix).
-func NewVaultSource(kv KV, prefix string) (*VaultSource, error) {
+func NewVaultSource(kv *vault.KVv2Adapter, prefix string) (*VaultSource, error) {
 	if kv == nil {
 		return nil, fmt.Errorf("merchantdocs: Vault source needs a KV client")
 	}

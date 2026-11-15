@@ -10,25 +10,10 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Charger arms an off-session (merchant-initiated) charge of a saved payment
-// method in two phases: Prepare does every local check and credential
-// resolution and read-only qualification; Submit is the one provider
-// submission. The invoice_collection intent fences between the two, so a
-// Prepare failure never consumes an attempt and every Submit error is a
-// possible submission. Implemented by ScopedCharger; faked in tests.
-type Charger interface {
-	Prepare(ctx context.Context, req ChargeRequest) (PreparedCharge, error)
-}
-
 // PreparedCharge is one armed provider submission.
-type PreparedCharge interface {
-	Submit(ctx context.Context) (ChargeResult, error)
-}
+type PreparedCharge func(ctx context.Context) (ChargeResult, error)
 
-// PreparedChargeFunc adapts a closure to PreparedCharge.
-type PreparedChargeFunc func(ctx context.Context) (ChargeResult, error)
-
-func (f PreparedChargeFunc) Submit(ctx context.Context) (ChargeResult, error) { return f(ctx) }
+func (f PreparedCharge) Submit(ctx context.Context) (ChargeResult, error) { return f(ctx) }
 
 type ChargeRequest struct {
 	MerchantID      uuid.UUID

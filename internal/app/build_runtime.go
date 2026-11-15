@@ -249,7 +249,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if hostUserInfo {
 		directory = identity.Live{Lookup: overrides.UserInfo, DB: database}
 	}
-	customers := identity.Customers{Directory: directory}
+	customers := &identity.Customers{Directory: directory}
 	// #1099: idempotency leases renew on their own connections, so a pool
 	// saturated by the requests holding them can never starve a renewal.
 	leaseDB, err := database.SeparatePool(ctx, idempotencyLeaseConns)
@@ -494,13 +494,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 			runtime.PurchaseService.NMISaleService.Intents = intentRunner
 			runtime.PurchaseService.NMISaleService.Config = runtime.Config
 			runtime.PurchaseService.NMISaleService.Posture = runtime.Posture()
-			if engines, ok := runtime.CollectionResolver.(intents.StripeEngineServiceResolver); ok {
-				runtime.PurchaseService.NMISaleService.StripeEngines = engines
-			}
+			runtime.PurchaseService.NMISaleService.StripeEngines = runtime.CollectionResolver
 		}
-		if engines, ok := runtime.CollectionResolver.(intents.StripeEngineServiceResolver); ok {
-			runtime.PurchaseService.StripeEngines = engines
-		}
+		runtime.PurchaseService.StripeEngines = runtime.CollectionResolver
 	}
 	if runtime.OrderAttemptService != nil {
 		runtime.OrderAttemptService.SetOrders(runtime.Orders)
@@ -574,7 +570,7 @@ type servicesInstances struct {
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
 	SolanaTransactionService *solanamodule.SolanaTransactionService
 	SolanaPriceProvider      solanamodule.TokenPriceProvider
-	FXProvider               fx.Provider
+	FXProvider               *fx.Rates
 	FXRates                  *fx.Rates
 
 	UserSubscriptionService  *subscriptions.UserSubscriptionService
@@ -606,7 +602,7 @@ func alertingDashboardBaseURL(cfg *config.Config) string {
 	return strings.TrimRight(cfg.DashboardBaseURL, "/")
 }
 
-func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, fxRates *fx.Rates, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver identity.UsernameResolver, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
+func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, fxRates *fx.Rates, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver *identity.Customers, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// Domain services publish immutable notification facts; applications consume them.

@@ -30,11 +30,6 @@ func CardAttackModeSubject(merchantID uuid.UUID) string {
 	return "__card_attack_mode__:" + merchantID.String()
 }
 
-// Verifier validates captcha response tokens against a provider siteverify endpoint.
-type Verifier interface {
-	Verify(ctx context.Context, req VerifyRequest) (*VerifyResult, error)
-}
-
 // VerifyRequest describes a captcha token verification attempt.
 type VerifyRequest struct {
 	Token    string
@@ -51,12 +46,10 @@ type VerifyResult struct {
 	ErrorCodes []string
 }
 
-type siteVerifyVerifier struct {
+// Verifier validates captcha response tokens against a provider siteverify endpoint.
+type Verifier struct {
 	cfg    *config.CaptchaConfig
 	client *http.Client
-	// verifyURLOverride points in-package tests at an httptest server; the URL
-	// is otherwise hardcoded per provider.
-	verifyURLOverride string
 }
 
 // ChallengeStore tracks challenged subjects in the process's abuse state. One
@@ -67,7 +60,7 @@ type ChallengeStore struct {
 }
 
 // NewVerifier returns a provider-neutral captcha verifier when captcha is enabled.
-func NewVerifier(cfg *config.CaptchaConfig, client *http.Client) Verifier {
+func NewVerifier(cfg *config.CaptchaConfig, client *http.Client) *Verifier {
 	if !config.CaptchaEnabled(cfg) {
 		return nil
 	}
@@ -76,17 +69,10 @@ func NewVerifier(cfg *config.CaptchaConfig, client *http.Client) Verifier {
 		client = &http.Client{Timeout: 5 * time.Second}
 	}
 
-	return &siteVerifyVerifier{cfg: cfg, client: client}
+	return &Verifier{cfg: cfg, client: client}
 }
 
-func (v *siteVerifyVerifier) verifyURL() string {
-	if v.verifyURLOverride != "" {
-		return v.verifyURLOverride
-	}
-	return config.CaptchaVerifyURL(v.cfg)
-}
-
-func (v *siteVerifyVerifier) Verify(ctx context.Context, req VerifyRequest) (*VerifyResult, error) {
+func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (*VerifyResult, error) {
 	if v == nil || v.cfg == nil {
 		return nil, fmt.Errorf("captcha verifier is not configured")
 	}
@@ -103,7 +89,7 @@ func (v *siteVerifyVerifier) Verify(ctx context.Context, req VerifyRequest) (*Ve
 		form.Set("remoteip", remoteIP)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, v.verifyURL(), strings.NewReader(form.Encode()))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, config.CaptchaVerifyURL(v.cfg), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("create captcha verify request: %w", err)
 	}

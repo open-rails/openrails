@@ -53,24 +53,18 @@ type NMIPaymentMethodDeletePayload struct {
 	RailMethodRef    string    `json:"rail_method_ref,omitempty"`
 }
 
-// RailClientResolver resolves the per-merchant NMI client for a payment
-// method (implemented by paymentmethods.RailPaymentMethodService).
-type RailClientResolver interface {
-	ResolveClientForPaymentMethod(ctx context.Context, pm *models.PaymentMethod) (*nmi.NMIClient, error)
-}
-
 // NMIPaymentMethodDeleteHandler verifies the accepted native-vault target,
 // retains its admission fence through uncertainty, and commits removal with
 // the terminal receipt. Live subscriptions and unresolved operations block
 // admission and execution; a missing local row cannot prove remote erasure.
 type NMIPaymentMethodDeleteHandler struct {
 	DB     *db.DB
-	Rails  RailClientResolver
+	Rails  *paymentmethods.RailPaymentMethodService
 	Policy BackoffPolicy
 	Clock  clockwork.Clock
 }
 
-func NewNMIPaymentMethodDeleteHandler(d *db.DB, rails RailClientResolver, clocks ...clockwork.Clock) *NMIPaymentMethodDeleteHandler {
+func NewNMIPaymentMethodDeleteHandler(d *db.DB, rails *paymentmethods.RailPaymentMethodService, clocks ...clockwork.Clock) *NMIPaymentMethodDeleteHandler {
 	return &NMIPaymentMethodDeleteHandler{DB: d, Rails: rails, Policy: DefaultBackoff, Clock: timeutil.FirstClock(clocks...)}
 }
 
@@ -403,8 +397,8 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 	}
 	if models.BasisTheoryCustody(pm.Custodian) {
 		h, ok := t.Runner.Registry.Lookup(TypePlatformMethodDelete).(*PlatformMethodDeleteHandler)
-		store, stored := t.Runner.Store.(*Store)
-		if !ok || !stored {
+		store := t.Runner.Store
+		if !ok || store == nil {
 			return paymentmethods.PaymentMethodDeleteOutcome{}, errors.New("platform delete admission is not wired")
 		}
 		row, err := h.admit(ctx, store, pm)
@@ -419,8 +413,8 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 	}
 	if pm != nil && pm.Custodian == models.CustodianHyperSwitch {
 		h, ok := t.Runner.Registry.Lookup(TypeHyperSwitchMethodDelete).(*HyperSwitchMethodDeleteHandler)
-		store, stored := t.Runner.Store.(*Store)
-		if !ok || !stored {
+		store := t.Runner.Store
+		if !ok || store == nil {
 			return paymentmethods.PaymentMethodDeleteOutcome{}, errors.New("custodian delete admission is not wired")
 		}
 		row, err := h.admit(ctx, store, pm)
@@ -491,8 +485,8 @@ func (t *PaymentMethodDeleteThrough) admitStaffDeletion(ctx context.Context, pm 
 	if t.Runner.Admissions == nil {
 		return ctx, errors.New("staff payment method admission is not wired")
 	}
-	store, ok := t.Runner.Store.(*Store)
-	if !ok {
+	store := t.Runner.Store
+	if store == nil {
 		return ctx, errors.New("payment method admission store is unavailable")
 	}
 	key := manualMethodDeleteKey(TypeNMIPaymentMethodDelete, pm.ID)

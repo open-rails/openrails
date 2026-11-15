@@ -20,16 +20,6 @@ type WebhookRoute struct {
 	MerchantSlug string
 }
 
-// WebhookResolver maps an explicit webhook path slug to a merchant. It is the
-// FIRST step of webhook handling; the resolver is NOT the trust boundary — after
-// resolution OpenRails loads that merchant's signing secret and verifies the
-// signature.
-type WebhookResolver interface {
-	// ResolveBySlug maps an explicit merchant slug
-	// to its merchant. Returns ErrMerchantRouteUnresolved for unknown/inactive merchants.
-	ResolveBySlug(ctx context.Context, slug string) (WebhookRoute, error)
-}
-
 // ResolveBySlug uses the same authoritative name resolution as other merchant
 // entrypoints. Provider signature verification still follows resolution.
 func (s *Service) ResolveBySlug(ctx context.Context, slug string) (WebhookRoute, error) {

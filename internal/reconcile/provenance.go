@@ -20,16 +20,6 @@ type ObjectRefs struct {
 	Reference                                 *uuid.UUID
 }
 
-// ProvenanceStore classifies unknown provider objects. A Store that lacks it
-// leaves every finding as raised.
-type ProvenanceStore interface {
-	// BookTag is this book's tag; false when it cannot be read now.
-	BookTag(ctx context.Context) (booktag.Tag, bool)
-	// ObjectNamed reports whether the PSP moves real money and whether a
-	// record of the merchant names the object.
-	ObjectNamed(ctx context.Context, pspID uuid.UUID, refs ObjectRefs) (live, named bool, err error)
-}
-
 // BookTag is this book's tag.
 func (s *PGStore) BookTag(ctx context.Context) (booktag.Tag, bool) {
 	mid, err := merchant.Require(ctx)
@@ -71,8 +61,8 @@ var provenanceTypes = map[FindingType]bool{
 // severity and neither alerts nor holds recovery. A record that names the
 // object always keeps today's handling.
 func (e *Engine) classifyProvenance(ctx context.Context, pspID uuid.UUID, snap *RemoteSnapshot, findings []Finding) []Finding {
-	store, ok := e.Store.(ProvenanceStore)
-	if !ok {
+	store := e.Store
+	if store == nil {
 		return findings
 	}
 	var tag booktag.Tag

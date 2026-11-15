@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -356,8 +355,7 @@ func (s *Service) replayOrderAnswer(ctx context.Context, rt *orderRuntime, actor
 		if err != nil {
 			return OrderAnswer{}, err
 		}
-		resolver, _ := s.rt.CollectionResolver.(intents.StripeEngineServiceResolver)
-		if result.Order.Payment.NextAction, err = rt.Attempts.OrderNextAction(ctx, order.AsOf(s.now()), actor.Principal, resolver); err != nil {
+		if result.Order.Payment.NextAction, err = rt.Attempts.OrderNextAction(ctx, order.AsOf(s.now()), actor.Principal, s.rt.StripeEngines()); err != nil {
 			return OrderAnswer{}, err
 		}
 	}
@@ -661,8 +659,7 @@ func (s *Service) orderView(ctx context.Context, rt *orderRuntime, actor OrderAc
 	order.AsOf(s.now())
 	var next *billing.NextAction
 	if order.CollectionOwner == string(billing.OrderCollectionEngine) && order.AwaitsCustomer() {
-		resolver, _ := s.rt.CollectionResolver.(intents.StripeEngineServiceResolver)
-		if next, err = rt.Attempts.OrderNextAction(ctx, order, actor.Principal, resolver); err != nil {
+		if next, err = rt.Attempts.OrderNextAction(ctx, order, actor.Principal, s.rt.StripeEngines()); err != nil {
 			return nil, err
 		}
 	}

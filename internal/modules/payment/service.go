@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -61,7 +60,7 @@ type PurchaseService struct {
 	PaymentMethodService     *paymentmethods.PaymentMethodService
 	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	MerchantSecrets          merchants.MerchantSecretReader
-	ProviderSecrets          merchants.PSPSecretResolver
+	ProviderSecrets          *merchants.Service
 	// RailCustomerService maps users to rail customer ids: one Stripe customer
 	// per user, recorded at purchase rather than only by webhooks.
 	RailCustomerService *payments.RailCustomerService
@@ -70,7 +69,7 @@ type PurchaseService struct {
 	StripeService *subscriptions.StripeService
 	// Intents executes durable write-ahead provider intents; a new
 	// membership's charge goes through it.
-	Intents   intentExecutor
+	Intents   *intents.Runner
 	Lifecycle *subscriptions.SubscriptionLifecycleService
 	clock     clockwork.Clock
 	Config    *config.Config
@@ -80,9 +79,6 @@ type PurchaseService struct {
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
 	// one from Config.
 	NMIClients *railresolve.NMIFactory
-	// ResolveNMIClientOverride replaces the store-armed NMI client resolution
-	// entirely (test seam; nil = the scoped resolution).
-	ResolveNMIClientOverride func(context.Context, string) (*nmi.NMIClient, error)
 	// StripeEngines reads a Stripe engine payment's issuer challenge for the
 	// customer's next action.
 	StripeEngines intents.StripeEngineServiceResolver
@@ -238,29 +234,6 @@ func (s *PurchaseService) processCCBillUpgrade(
 	}, nil
 }
 
-// railCustomerStore is the slice of RailCustomerService used for
-// Stripe customer resolution. Both calls act on the PSP pinned on ctx.
-type railCustomerStore interface {
-	GetAccountIDForPSP(ctx context.Context, customerID uuid.UUID, rail string) (string, error)
-	Upsert(ctx context.Context, userID, rail, customerID string) error
-}
-
-// stripeCustomerClient is the slice of an account-bound StripeService used for
-// customer resolution and the duplicate guard.
-type stripeCustomerClient interface {
-	AccountIdentity() (merchantID, pspID uuid.UUID)
-	CreateCustomer(ctx context.Context, email, appUserID string) (string, error)
-	FindCustomerIDByAppUserID(ctx context.Context, appUserID string) (string, error)
-	ListActiveSubscriptionsForCustomer(ctx context.Context, customerID string) ([]subscriptions.StripeSubscriptionSummary, error)
-}
-
-func (s *PurchaseService) customerStore() railCustomerStore {
-	if s.RailCustomerService == nil {
-		return nil
-	}
-	return s.RailCustomerService
-}
-
 // resolveStripeCustomerWith returns the user's Stripe customer id on the
 // account client is bound to, in priority order: that account's local
 // mapping, Stripe Customer Search on metadata[app_user_id], then a fresh
@@ -269,7 +242,7 @@ func (s *PurchaseService) customerStore() railCustomerStore {
 // on the account that minted it, so another account's mapping is never read.
 // "" (no error) only when the dependencies are unavailable; the caller then
 // falls back to customer_email.
-func resolveStripeCustomerWith(ctx context.Context, store railCustomerStore, client stripeCustomerClient, user *UserIdentity) (string, error) {
+func resolveStripeCustomerWith(ctx context.Context, store *payments.RailCustomerService, client *subscriptions.StripeService, user *UserIdentity) (string, error) {
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		return "", nil
 	}

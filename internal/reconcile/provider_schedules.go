@@ -31,11 +31,6 @@ import (
 // NMI's record states recurring terms today; a rail whose pull reads none
 // (CCBill) keeps its schedules unresolved.
 
-// TransactionReader reads provider transactions by id.
-type TransactionReader interface {
-	TransactionsByID(ctx context.Context, ids []string) (map[string]RemoteTransaction, error)
-}
-
 // ProviderScheduleResult counts one pull's schedule acceptances.
 type ProviderScheduleResult struct{ Accepted, Unresolved, Replayed int }
 
@@ -64,7 +59,7 @@ type acceptedSchedule struct {
 // unresolved imported schedule against this read of the provider's roster.
 // exhaustive says the roster proves absence. reader reads receipts by id; nil
 // leaves accepted subscriptions' receipts for a later pass.
-func (w *PGLocalWriter) AcceptProviderSchedules(ctx context.Context, psp uuid.UUID, snap *RemoteSnapshot, exhaustive bool, reader TransactionReader) (ProviderScheduleResult, error) {
+func (w *PGLocalWriter) AcceptProviderSchedules(ctx context.Context, psp uuid.UUID, snap *RemoteSnapshot, exhaustive bool, reader *NMIFetcher) (ProviderScheduleResult, error) {
 	var res ProviderScheduleResult
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -243,7 +238,7 @@ func providerRecordEvidence(rail models.Rail, entry *RemoteSubscription) *provid
 // receipts from the provider by id and records each as its schedule places
 // it, then resolves each subscription's finding. A receipt the provider does
 // not report as a sale or decline stays unresolved, with why.
-func (w *PGLocalWriter) replayUnresolvedReceipts(ctx context.Context, psp uuid.UUID, accepted []acceptedSchedule, reader TransactionReader, now time.Time) (ProviderScheduleResult, error) {
+func (w *PGLocalWriter) replayUnresolvedReceipts(ctx context.Context, psp uuid.UUID, accepted []acceptedSchedule, reader *NMIFetcher, now time.Time) (ProviderScheduleResult, error) {
 	var res ProviderScheduleResult
 	q := w.DB.Gen(ctx)
 	ids := make([]string, len(accepted))

@@ -257,28 +257,13 @@ type Claims struct {
 	UpdatedAt *time.Time
 }
 
-// UserDirectory reads a customer's username and email for billing email.
-type UserDirectory interface {
-	EmailIdentity(ctx context.Context, userID string) (username, email string, ok bool, err error)
-}
-
-// UsernameResolver resolves a provider-supplied username to a customer. It
-// is used only by the CCBill username bridge.
-type UsernameResolver interface {
-	GetUserIDByUsername(ctx context.Context, username string) (string, error)
-}
-
 // ErrUsernameUnknown is a username no contact holds, or more than one does.
 var ErrUsernameUnknown = errors.New("identity: no customer holds that username")
 
-// Customers answers both from a Directory, within the merchant ctx is pinned
-// to.
+// Customers reads a customer's username and email for billing email, and
+// resolves a provider-supplied username (the CCBill username bridge), from a
+// Directory within the merchant ctx is pinned to.
 type Customers struct{ Directory Directory }
-
-var (
-	_ UserDirectory    = Customers{}
-	_ UsernameResolver = Customers{}
-)
 
 // EmailIdentity is the customer's username and email; ok is false without
 // an email.

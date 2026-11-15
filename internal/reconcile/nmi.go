@@ -11,17 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// nmiQueryClient is the slice of *nmi.NMIClient the fetcher uses, read-only by
-// construction. Subscriptions and the vault read the v5 JSON API; transaction
-// search stays on query.php (v5 payments has no list/search).
-type nmiQueryClient interface {
-	ListSubscriptionsPage(ctx context.Context, cursor string, perPage int) (nmi.SubscriptionPage, error)
-	GetSubscription(ctx context.Context, subscriptionID string) (nmi.V5Subscription, bool, error)
-	ListCustomersPage(ctx context.Context, cursor string, perPage int, id string) (nmi.CustomerPage, error)
-	GetCustomer(ctx context.Context, id string) (nmi.V5Customer, bool, error)
-	SearchTransactions(ctx context.Context, filter nmi.QueryFilter) (string, error)
-}
-
 // NMIFetcher pulls NMI state: GET /v5/subscriptions (live recurring
 // schedules), query.php report_type=transaction (date-ranged, declines
 // included) and GET /v5/customers (stored payment methods).
@@ -37,7 +26,7 @@ type nmiQueryClient interface {
 //   - Declines are action_type=sale with success=0; response_text is the reason.
 //   - Neither API exposes chargebacks (Chargebacks=false).
 type NMIFetcher struct {
-	Client nmiQueryClient
+	Client *nmi.NMIClient
 }
 
 // NewNMIFetcher builds a fetcher over an existing NMI client (query API only).
@@ -156,7 +145,7 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 // legal; the read stops only on has_more=false. A page claiming more rows
 // without a cursor, or repeating one, is refused: an incomplete roster must
 // never pass for an exhaustive one.
-func readNMIRoster(ctx context.Context, client nmiQueryClient) ([]nmi.V5Subscription, error) {
+func readNMIRoster(ctx context.Context, client *nmi.NMIClient) ([]nmi.V5Subscription, error) {
 	var out []nmi.V5Subscription
 	cursor, seen := "", map[string]bool{}
 	for {

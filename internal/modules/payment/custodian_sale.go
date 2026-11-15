@@ -37,10 +37,6 @@ type CustodianSaleService struct {
 	Fulfillment          *FulfillmentService
 	Rails                railresolve.Source
 	Config               *config.Config
-	// BTBaseURLOverride points every BT byte at a fake server (test seam).
-	BTBaseURLOverride string
-	// GatewayDirectPostURLOverride overrides the proxy destination (test seam).
-	GatewayDirectPostURLOverride string
 }
 
 // custodialPSP is the resolved arrangement one custodian sale charges through:
@@ -83,13 +79,12 @@ func (s *CustodianSaleService) resolveConfig(ctx context.Context) (*custodialPSP
 	}, nil
 }
 
-// nmiFactory is the single PSP-scoped factory; the proxy destination seam is
-// a loopback fixture like any other endpoint override.
+// nmiFactory is the single PSP-scoped factory.
 func (s *CustodianSaleService) nmiFactory() *railresolve.NMIFactory {
 	if s.NMIClients != nil {
 		return s.NMIClients
 	}
-	return &railresolve.NMIFactory{Config: s.Config, Endpoints: railresolve.NMIEndpoints{DirectPostURL: s.GatewayDirectPostURLOverride}}
+	return &railresolve.NMIFactory{Config: s.Config}
 }
 
 func (s *CustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client, error) {
@@ -99,13 +94,9 @@ func (s *CustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client,
 	if s.BasisTheoryTransport != nil && cfg.Custody.Environment != config.ClassTest {
 		return nil, errors.New("live custody cannot use a test wire")
 	}
-	baseURL := s.BTBaseURLOverride
-	if baseURL == "" {
-		baseURL = cfg.Custody.APIBaseURL
-	}
 	return basistheory.New(basistheory.Config{
 		APIKey:        cfg.Custody.APIKey,
-		BaseURL:       baseURL,
+		BaseURL:       cfg.Custody.APIBaseURL,
 		WebhookKeyURL: cfg.Custody.WebhookKeyURL,
 		ReadOnly:      s.Config != nil && config.IsProviderReadOnly(s.Config),
 		Transport:     s.BasisTheoryTransport,

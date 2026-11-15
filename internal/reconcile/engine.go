@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
@@ -28,18 +29,18 @@ import (
 // Engine. A run executes under exactly one merchant-scoped context.
 type Engine struct {
 	Fetchers map[Provider]RailFetcher
-	Store    Store
-	Local    LocalStateLoader
+	Store    *PGStore
+	Local    *PGLocalStateLoader
 	// Writer applies enforce-mode local mirror writes. May be nil for
 	// advisory-only engines.
-	Writer LocalWriter
+	Writer *PGLocalWriter
 	// Decisions applies decider transitions (PS-2/PS-3). May be nil for
 	// advisory-only engines.
-	Decisions DecisionApplier
+	Decisions *LifecycleDecisionApplier
 	// History is the third dunning-forensics evidence source (failed payment
 	// attempts). May be nil or unconfigured: the forensics report then carries
 	// a note; an unavailable history source is never a run error.
-	History HistoryEventSource
+	History *PGHistorySource
 
 	// RecoverUsagePayment qualifies an observed NMI receipt of a usage order
 	// through its canonical financial writer before the generic subscription
@@ -54,14 +55,14 @@ type Engine struct {
 	// Policy reads the merchant's evidence-staleness floor. A nil Policy makes
 	// the decider trust only what this pass observed: stricter, never more
 	// permissive.
-	Policy EvidenceFloorReader
+	Policy *destructive.Gate
 
 	// Runs makes an enforce pass reversible: it opens a maintenance_runs
 	// record with the coverage proof that authorised the pass, captures a
 	// before-image of every subscription the pass overwrites, and attributes
 	// the provider intents it queues. Passes that would overwrite subscription
 	// state refuse when it is nil: an unrecorded destructive pass has no undo.
-	Runs DestructiveRunRecorder
+	Runs *PGDestructiveRunRecorder
 
 	// Now is the clock (defaults to time.Now UTC).
 	Now func() time.Time
@@ -274,7 +275,7 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 		return nil, fmt.Errorf("reconcile: invalid mode %q", params.Mode)
 	}
 	if params.Mode == ModeEnforce && e.Writer == nil {
-		return nil, fmt.Errorf("reconcile: enforce mode requires a LocalWriter")
+		return nil, fmt.Errorf("reconcile: enforce mode requires a local writer")
 	}
 	e.syncDBClocks()
 
@@ -374,18 +375,12 @@ func (e *Engine) respell(ctx context.Context, binding PSPBinding, snap *RemoteSn
 }
 
 func (e *Engine) syncDBClocks() {
-	if store, ok := e.Store.(*PGStore); ok {
-		store.Now = e.now
+	if e.Store != nil {
+		e.Store.Now = e.now
 	}
-	if writer, ok := e.Writer.(*PGLocalWriter); ok {
-		writer.Now = e.now
+	if e.Writer != nil {
+		e.Writer.Now = e.now
 	}
-}
-
-// EvidenceFloorReader yields a merchant's evidence-staleness floor.
-// internal/destructive.Gate implements it.
-type EvidenceFloorReader interface {
-	EvidenceFloor(ctx context.Context, merchantID uuid.UUID) time.Time
 }
 
 // evidenceFloor reads the running merchant's staleness floor off the run's own
@@ -505,7 +500,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		if k, ok := fetcher.(keyedFetcher); ok {
 			unwrapped = k.RailFetcher
 		}
-		reader, _ := unwrapped.(TransactionReader)
+		reader, _ := unwrapped.(*NMIFetcher)
 		exhaustive := snap.Coverage.SubscriptionsExhaustive && traits.absenceMeansCanceled
 		res, err := e.Writer.AcceptProviderSchedules(ctx, binding.ID, snap, exhaustive, reader)
 		if err != nil {
@@ -524,8 +519,8 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("load local payments: %w", err)
 	}
-	if loader, ok := e.Local.(chargeAttributionLoader); ok && len(txnIDs) > 0 {
-		if local.Attributions, err = loader.ChargeAttributions(ctx, binding.ID, txnIDs); err != nil {
+	if len(txnIDs) > 0 {
+		if local.Attributions, err = e.Local.ChargeAttributions(ctx, binding.ID, txnIDs); err != nil {
 			return rep, nil, nil, nil, fmt.Errorf("load charge attributions: %w", err)
 		}
 	}
@@ -848,7 +843,7 @@ func (e *Engine) openDestructiveRun(ctx context.Context, provider Provider, bind
 		return uuid.Nil, nil
 	}
 	if e.Runs == nil {
-		return uuid.Nil, fmt.Errorf("reconcile: enforce mode with %d subscription state transitions requires a DestructiveRunRecorder (a destructive pass with no run record has no undo)", plannedOverwrites)
+		return uuid.Nil, fmt.Errorf("reconcile: enforce mode with %d subscription state transitions requires a destructive-run recorder (a destructive pass with no run record has no undo)", plannedOverwrites)
 	}
 	var pspID *uuid.UUID
 	note := fmt.Sprintf("converge-enforce pull %s", provider)
@@ -945,9 +940,7 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 		if e.Decisions == nil {
 			return nil, false, fmt.Errorf("no decision applier wired (enforce with subscription transitions requires Engine.Decisions)")
 		}
-		if setter, ok := e.Decisions.(interface{ SetClock(clockwork.Clock) }); ok {
-			setter.SetClock(clockwork.NewFakeClockAt(now))
-		}
+		e.Decisions.SetClock(clockwork.NewFakeClockAt(now))
 		changed, err := e.Decisions.ApplyDecision(ctx, a.Decide.SubscriptionID, a.Decide.Decision)
 		if err != nil {
 			return nil, false, err

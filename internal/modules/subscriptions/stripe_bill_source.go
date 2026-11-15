@@ -45,13 +45,6 @@ type StripeBillPayment struct {
 	PaidAt                                                time.Time
 }
 
-// StripeBillReader reads provider invoice truth without initiating collection.
-// The visitor bounds memory and commits each bill independently during recovery.
-type StripeBillReader interface {
-	VisitSubscriptionBills(context.Context, string, func(StripeBill) error) error
-	ReadBill(context.Context, string) (StripeBill, error)
-}
-
 type stripeBillList struct {
 	Data    []json.RawMessage `json:"data"`
 	HasMore bool              `json:"has_more"`
@@ -353,14 +346,10 @@ func (p *HTTPStripeLivenessProber) billGet(ctx context.Context, path string, que
 	if strings.TrimSpace(p.SecretKey) == "" {
 		return nil, fmt.Errorf("Stripe secret key is required")
 	}
-	base := strings.TrimRight(p.BaseURL, "/")
-	if base == "" {
-		base = "https://api.stripe.com"
-	}
 	if len(query) != 0 {
 		path += "?" + query.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stripeapi.APIBase+path, nil)
 	if err != nil {
 		return nil, err
 	}

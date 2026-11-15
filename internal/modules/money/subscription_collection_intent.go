@@ -36,12 +36,12 @@ var errEngineObligationChanged = errors.New("accepted engine obligation changed 
 // and shared renewal writer for qualified engine card obligations.
 type SubscriptionCollectionHandler struct {
 	DB       *db.DB
-	Resolver CollectionPlane
+	Resolver *MerchantCollectionAdapterBuilder
 	Config   *config.Config
 	Clock    clockwork.Clock
 }
 
-func NewSubscriptionCollectionHandler(d *db.DB, resolver CollectionPlane, cfg *config.Config, clock clockwork.Clock) *SubscriptionCollectionHandler {
+func NewSubscriptionCollectionHandler(d *db.DB, resolver *MerchantCollectionAdapterBuilder, cfg *config.Config, clock clockwork.Clock) *SubscriptionCollectionHandler {
 	return &SubscriptionCollectionHandler{DB: d, Resolver: resolver, Config: cfg, Clock: timeutil.FirstClock(clock)}
 }
 func (*SubscriptionCollectionHandler) Type() string { return subscriptions.TypeSubscriptionCollection }

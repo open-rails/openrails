@@ -54,13 +54,9 @@ func (e *UnknownCycleError) Is(target error) bool { return target == ErrUnknownC
 // FindingUnknownCycle is a collection that refused to run for want of a cycle.
 const FindingUnknownCycle = "life.cadence.unknown"
 
-type findingWriter interface {
-	UpsertReconciliationFinding(context.Context, gen.UpsertReconciliationFindingParams) (gen.BillingReconciliationFinding, error)
-}
-
 // RecordUnknownCycle raises the operator finding for subject (a subscription
 // or usage order id) that collection refused because its cycle is unknown.
-func RecordUnknownCycle(ctx context.Context, q findingWriter, merchantID uuid.UUID, subject, consumer string, cause error) error {
+func RecordUnknownCycle(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, subject, consumer string, cause error) error {
 	evidence, _ := json.Marshal(map[string]any{"subject": subject, "consumer": consumer, "error": cause.Error()})
 	action := fmt.Sprintf("%s %s has no billing cycle, so collection refuses to charge, retry or end it (%v). Give its price a recurring cadence or resolve it by hand", consumer, subject, cause)
 	_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{

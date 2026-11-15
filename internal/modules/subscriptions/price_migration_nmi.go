@@ -18,36 +18,26 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// NMIPusher pushes a migration to an NMI gateway schedule (NewNMIPlanPusher;
-// faked in tests). CanPush doubles as the NMI-family rail detector, so
-// custom-named NMI PSPs classify without code changes.
-type NMIPusher interface {
-	// CanPush reports whether sub is an addressable gateway-native NMI
-	// recurring record: the merchant declares an armable NMI account for it
-	// and the subscription carries a rail reference.
-	CanPush(ctx context.Context, sub *models.Subscription) bool
-	// PushPlanAmount sets the remote record's plan_amount to amountNative
-	// (internal units at CURRENCY's registered scale, converted to NMI's
-	// decimal form through the registry), PRESERVING the record's current
-	// plan_payments, and read-back-verifies the flip took. It never touches
-	// the schedule (day/month frequency), so the rebill date is unchanged.
-	PushPlanAmount(ctx context.Context, sub *models.Subscription, currency string, amountNative int64) error
+// NMIPlanPusher pushes a migration to an NMI gateway schedule. CanPush doubles
+// as the NMI-family rail detector, so custom-named NMI PSPs classify without
+// code changes.
+type NMIPlanPusher struct {
+	resolver railresolve.NMIClientResolver
 }
 
-type nmiPlanPusher struct {
-	resolver NMIClientSource
+// NewNMIPlanPusher builds the pusher over the merchant's NMI client resolver.
+func NewNMIPlanPusher(resolver railresolve.NMIClientResolver) *NMIPlanPusher {
+	return &NMIPlanPusher{resolver: resolver}
 }
 
-// NewNMIPlanPusher builds the production NMIPusher over the merchant's NMI
-// client resolver (money.MerchantCollectionAdapterBuilder).
-func NewNMIPlanPusher(resolver NMIClientSource) NMIPusher {
-	return &nmiPlanPusher{resolver: resolver}
-}
-
-func (p *nmiPlanPusher) CanPush(ctx context.Context, sub *models.Subscription) bool {
+// CanPush reports whether sub is an addressable gateway-native NMI recurring
+// record: the merchant declares an armable NMI account for it and the
+// subscription carries a rail reference.
+func (p *NMIPlanPusher) CanPush(ctx context.Context, sub *models.Subscription) bool {
 	if p == nil || p.resolver == nil || sub == nil {
 		return false
 	}
@@ -58,7 +48,12 @@ func (p *nmiPlanPusher) CanPush(ctx context.Context, sub *models.Subscription) b
 	return err == nil && ok
 }
 
-func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscription, currency string, amountNative int64) error {
+// PushPlanAmount sets the remote record's plan_amount to amountNative
+// (internal units at currency's registered scale, converted to NMI's decimal
+// form through the registry), PRESERVING the record's current plan_payments,
+// and read-back-verifies the flip took. It never touches the schedule
+// (day/month frequency), so the rebill date is unchanged.
+func (p *NMIPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscription, currency string, amountNative int64) error {
 	client, _, ok, err := NMIClientForExistingSubscription(ctx, p.resolver, sub)
 	if err != nil {
 		return fmt.Errorf("nmi push: resolve client: %w", err)

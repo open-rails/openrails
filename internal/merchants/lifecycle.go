@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/integrations/vault"
@@ -58,23 +59,6 @@ var ErrMerchantNotFound = errors.New("merchants: merchant not found")
 var ErrPermissionGroupRequired = errors.New("merchants: permission group required")
 var ErrMerchantRetired = errors.New("merchants: billing identity retired")
 
-// DestructivePolicy is the destructive-action gate a merchant purge must clear
-// (#836 kill switch + #835 per-merchant policy). internal/destructive.Gate
-// implements it; the indirection keeps this package free of that import and
-// lets a nil gate mean "deny", not "skip".
-type DestructivePolicy interface {
-	// AllowDestructive reports whether destructive actions may execute for a
-	// merchant, and why not when they may not. Implementations fail closed.
-	AllowDestructive(ctx context.Context, merchantID uuid.UUID) (bool, string)
-}
-
-// deniedPolicy is the zero value: no gate wired means no purge.
-type deniedPolicy struct{}
-
-func (deniedPolicy) AllowDestructive(context.Context, uuid.UUID) (bool, string) {
-	return false, "destructive gate not wired on the merchants service; refusing to purge (fail closed)"
-}
-
 // Service is the merchant provisioning + lifecycle service (issue #225). It owns
 // the billing.merchants directory rows (billing buckets) and per-merchant
 // secrets. Control-plane callers create/resolve the AuthKit permission-group and
@@ -92,21 +76,11 @@ type Service struct {
 	// fakeProviders are the fake providers wired beside this deployment's
 	// PSPs: with any, a live PSP is refused.
 	fakeProviders []string
-	// nmiProbeV5BaseURL is a test-only seam: overrides the base URL the
-	// arm-time environment probe (verifyNMIEnvironment) hits, so tests can
-	// point it at a fake gateway instead of the real NMI API. Empty in
-	// production — the probe uses nmi.NewClient's documented default.
-	nmiProbeV5BaseURL string
-	// Credential-probe endpoint overrides are test-only seams for the
-	// read-only NMI Query API and CCBill DataLink checks.
-	nmiCredentialProbeQueryURL   string
-	ccbillCredentialProbeBaseURL string
 	// nmiWire points credential probes at the runtime's NMI gateway and
 	// transport, as every NMI client it builds.
 	nmiWire func(*nmi.NMIClient)
-	// destructive gates the merchant purge. Never nil: NewService seeds it
-	// with deniedPolicy so an unwired service cannot purge.
-	destructive DestructivePolicy
+	// destructive gates the merchant purge; nil denies (the gate fails closed).
+	destructive *destructive.Gate
 	// jobs queues a purge's secret cleanup with the purge.
 	jobs *db.DB
 	// clock and webhookSecretOverlap bound rotated webhook secrets (SEC-29).
@@ -124,7 +98,7 @@ type Service struct {
 
 // WithDestructivePolicy wires the destructive-action gate the merchant purge
 // must clear. Without it, Purge refuses.
-func (s *Service) WithDestructivePolicy(p DestructivePolicy) *Service {
+func (s *Service) WithDestructivePolicy(p *destructive.Gate) *Service {
 	if s != nil && p != nil {
 		s.destructive = p
 	}
@@ -168,7 +142,7 @@ func NewDirectoryService(pool *db.Pool) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{pool: pool, database: database, destructive: deniedPolicy{}}, nil
+	return &Service{pool: pool, database: database}, nil
 }
 
 // Config is the merchants' configuration; nil on a directory-only Service.

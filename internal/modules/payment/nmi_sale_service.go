@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
@@ -14,14 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 )
-
-// intentExecutor is the write-through provider-intents surface:
-// EnqueueAndExecute posts the durable intent and executes it inline; anything
-// not finished inline is drained by the scheduled executor/verifier.
-type intentExecutor interface {
-	EnqueueAndExecute(ctx context.Context, p intents.EnqueueParams) (gen.BillingProviderIntent, error)
-	EnqueueOwnedAndExecute(ctx context.Context, p intents.EnqueueParams, owns func(gen.BillingProviderIntent) error) (gen.BillingProviderIntent, error)
-}
 
 // ErrPurchaseProcessing is returned when the provider write's outcome is not
 // yet final (transport-ambiguous charge being verified, parked on an
@@ -44,7 +35,7 @@ type NMISaleService struct {
 	StripeEngines intents.StripeEngineServiceResolver
 	// Intents executes the durable write-ahead sale intent. Every card charge
 	// in this flow goes through it; there is no direct provider call here.
-	Intents intentExecutor
+	Intents *intents.Runner
 	// Orders settles an order sale in its completion transaction.
 	Orders *orders.Service
 	// Custody charges cards a Basis Theory custodian holds.

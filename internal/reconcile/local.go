@@ -154,26 +154,6 @@ type LocalState struct {
 	Attributions map[string]uuid.UUID
 }
 
-// chargeAttributionLoader is a LocalStateLoader that reads declared charge
-// attributions.
-type chargeAttributionLoader interface {
-	ChargeAttributions(ctx context.Context, pspID uuid.UUID, transactionIDs []string) (map[string]uuid.UUID, error)
-}
-
-// LocalStateLoader loads the local rows the diff engine compares against a
-// provider snapshot. PaymentsByTransactionIDs is bounded by the snapshot's
-// transaction set, not a date window, so clock skew with the rail cannot fake
-// a missing payment. pspID is required: one PSP's mirror rows are not its
-// sibling's, and one account's roster must never judge another's book.
-type LocalStateLoader interface {
-	Load(ctx context.Context, provider Provider, pspID uuid.UUID) (*LocalState, error)
-	PaymentsByTransactionIDs(ctx context.Context, provider Provider, pspID uuid.UUID, transactionIDs []string) ([]LocalPayment, error)
-	// ExecutingOperations is, of ids, the PSP's provider operations executing
-	// at now: claimed, their lease live. Empty ids asks whether the PSP has
-	// any: the answer then holds a zero id.
-	ExecutingOperations(ctx context.Context, pspID uuid.UUID, ids []uuid.UUID, now time.Time) (map[uuid.UUID]bool, error)
-}
-
 // PGLocalStateLoader loads local state through the sqlc layer on a
 // merchant-pinned connection.
 type PGLocalStateLoader struct {
@@ -182,8 +162,6 @@ type PGLocalStateLoader struct {
 	// matching; nil matches without it.
 	Contacts identity.Directory
 }
-
-var _ LocalStateLoader = (*PGLocalStateLoader)(nil)
 
 // fillCustomerEmails reads the subscriptions' customers' emails in one
 // directory lookup.

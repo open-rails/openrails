@@ -308,7 +308,7 @@ func routingRuleMatches(m models.PSPRoutingMatch, in RoutingInput) bool {
 
 // evaluateCandidate resolves one selector and reports whether it can serve this
 // price now. The empty skip class means eligible.
-func (s *OrderAttemptService) evaluateCandidate(ctx context.Context, targets orderRailTargets, in RoutingInput, selector string) (railTarget, string) {
+func (s *OrderAttemptService) evaluateCandidate(ctx context.Context, targets *PurchaseService, in RoutingInput, selector string) (railTarget, string) {
 	target, err := targets.resolveRailTarget(ctx, selector)
 	if err != nil {
 		var ambiguous *AmbiguousRailError

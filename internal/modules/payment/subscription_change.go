@@ -132,10 +132,8 @@ func (s *PurchaseService) ConfirmSubscriptionChange(ctx context.Context, subscri
 	var current gen.BillingProviderIntent
 	if live.IntentType == TypeInitialMembership && live.Rail == string(models.RailStripe) {
 		current, err = s.confirmStripeAuthentication(ctx, live.ID, payer)
-	} else if verifier, ok := s.Intents.(interface {
-		VerifyByID(context.Context, uuid.UUID) (gen.BillingProviderIntent, error)
-	}); ok {
-		current, err = verifier.VerifyByID(ctx, live.ID)
+	} else if s.Intents != nil {
+		current, err = s.Intents.VerifyByID(ctx, live.ID)
 	} else {
 		return nil, errors.New("payment verifier unavailable")
 	}

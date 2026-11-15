@@ -192,7 +192,7 @@ func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string) ([]Remot
 // StripeSubscriptionProber wraps the per-subscription Stripe read
 // (GET /v1/subscriptions/{id}?expand[]=latest_invoice) as a snapshot source.
 type StripeSubscriptionProber struct {
-	Prober subscriptions.StripeLivenessProber
+	Prober *subscriptions.HTTPStripeLivenessProber
 }
 
 func (p *StripeSubscriptionProber) ProbeSubscription(ctx context.Context, subj ProbeSubject) (*RemoteSnapshot, error) {
@@ -266,16 +266,10 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 	return snap
 }
 
-// CCBillStatusReader is the one SMS read the CCBill prober needs
-// (*ccbill.DataLinkClient satisfies it).
-type CCBillStatusReader interface {
-	ViewSubscriptionStatus(ctx context.Context, subscriptionID string) (ccbill.SubscriptionStatusResult, error)
-}
-
 // CCBillSubscriptionProber probes one CCBill subscription via DataLink's
 // per-record viewSubscriptionStatus. Read-only by construction.
 type CCBillSubscriptionProber struct {
-	Client CCBillStatusReader
+	Client *ccbill.DataLinkClient
 }
 
 func (p *CCBillSubscriptionProber) ProbeSubscription(ctx context.Context, subj ProbeSubject) (*RemoteSnapshot, error) {

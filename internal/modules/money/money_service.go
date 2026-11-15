@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 
 	"github.com/google/uuid"
@@ -86,7 +87,7 @@ type MoneyService struct {
 	EngineAdmissionHold   bool
 	UsageBillingEnabled   bool
 	hyperSwitchDeployment string
-	usageRecoveryResolver NMIClientResolver
+	usageRecoveryResolver railresolve.NMIClientResolver
 	db                    *db.DB
 	clock                 clockwork.Clock
 	// posting is set on the service a running charge's posting runs on.

@@ -30,10 +30,6 @@ func main() {
 	}
 }
 
-// bootNMIProbeV5BaseURL is a test-only override for the NMI environment arm
-// probe target during the boot-manifest reconcile; empty in production.
-var bootNMIProbeV5BaseURL string
-
 func newRootCmd() *cobra.Command {
 	build := buildinfo.Get()
 	rootCmd := &cobra.Command{
@@ -183,7 +179,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// configuration. The conventional file is optional; an explicit manifest
 	// path must exist.
 	listener := hostconfig.FromContext(cmd.Context())
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, listener.MerchantManifestOverlays, bootNMIProbeV5BaseURL); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, listener.MerchantManifestOverlays); err != nil {
 		return closeOnError(err)
 	}
 	// HTTP never serves webhook and async billing APIs when the workers
@@ -227,7 +223,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 			log.WithError(err).Error("Application shutdown encountered issues")
 		}
 	}()
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, hostconfig.FromContext(cmd.Context()).MerchantManifestOverlays, bootNMIProbeV5BaseURL); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, hostconfig.FromContext(cmd.Context()).MerchantManifestOverlays); err != nil {
 		return err
 	}
 	// Background workers only (no HTTP server); fail fast if River cannot start.
