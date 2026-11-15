@@ -1,11 +1,6 @@
-// Package embedhttp assembles the embedded billing HTTP surface as a gin-free
-// net/http handler (issue #282/#285). It is the keystone that lets pkg/embedded
-// expose NewHTTPHandler without importing gin: route groups are registered via
-// the neutral router.NewMux (request.NewHTTP backend), all wrapped with the
+// Package embedhttp assembles the embedded billing HTTP surface as a net/http
+// handler: route groups are registered via router.NewMux, all wrapped with the
 // net/http base middleware stack (security headers, CORS, body limit).
-//
-// The gin Server (internal/http) and standalone cmd/ keep gin; this package is
-// the gin-free analogue of the embedded assembly that used to live there.
 package embedhttp
 
 import (
@@ -67,11 +62,10 @@ func FromApp(a *app.App) *Assembler {
 	}
 }
 
-// NewHTTPHandler assembles the embedded billing surface as a gin-free
-// *http.ServeMux (issue #282). Route groups are registered via router.NewMux
-// (request.NewHTTP backend), and the captcha routes are plain net/http handlers.
-// The mux is wrapped with the net/http base middleware stack (security headers,
-// CORS, body limit) — the gin-free analogue of the global engine middleware. The returned handler imports zero gin on the request path.
+// NewHTTPHandler assembles the embedded billing surface on an *http.ServeMux.
+// Route groups are registered via router.NewMux, and the captcha routes are
+// plain net/http handlers. The mux is wrapped with the net/http base
+// middleware stack (security headers, CORS, body limit).
 //
 // Rate-limiting + the captcha challenge flow ARE enforced here BY DEFAULT
 // (#742): embedded.New seeds config.Config.RateLimits/Captcha with the same

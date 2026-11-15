@@ -179,7 +179,7 @@ func (e *Env) mounts(route Route) bool {
 }
 
 // mount registers the selected catalog routes on rr, which is rooted at base.
-func (e *Env) mount(rr router.Router, base string, selected func(Route) bool) {
+func (e *Env) mount(rr *router.Router, base string, selected func(Route) bool) {
 	for _, route := range Catalog() {
 		if !selected(route) || !e.mounts(route) {
 			continue
@@ -347,20 +347,20 @@ func in(group Group, also ...func(Route) bool) func(Route) bool {
 
 // RegisterMetaRoutes mounts the process surface the assembly supplies
 // handlers for, on a router rooted at the mount's root.
-func RegisterMetaRoutes(rr router.Router, opts Options) {
+func RegisterMetaRoutes(rr *router.Router, opts Options) {
 	newEnv(nil, opts).mount(rr, "", in(Meta))
 }
 
 // RegisterUserRoutes mounts the buyer-facing surface, on a router rooted at
 // /v1.
-func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+func RegisterUserRoutes(rr *router.Router, rt *app.Runtime, opts Options) {
 	newEnv(rt, opts).mount(rr, "/v1", in(Payment))
 }
 
 // RegisterStaffRoutes mounts the staff groups opts.Groups turns on, each
 // route behind its permission. Any staff or programmatic group also mounts
 // the access read, on a router rooted at /v1.
-func RegisterStaffRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+func RegisterStaffRoutes(rr *router.Router, rt *app.Runtime, opts Options) {
 	if opts.AdminLimiter == nil && rt != nil {
 		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.AbuseState)
 	}
@@ -371,7 +371,7 @@ func RegisterStaffRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 
 // RegisterStaffRoutesUnder mounts the staff routes under prefix, on a router
 // rooted at /v1: the CLI's database-only runtimes serve one resource.
-func RegisterStaffRoutesUnder(rr router.Router, rt *app.Runtime, opts Options, prefix string) {
+func RegisterStaffRoutesUnder(rr *router.Router, rt *app.Runtime, opts Options, prefix string) {
 	env := newEnv(rt, opts)
 	env.mount(rr, "/v1", func(r Route) bool { return r.Staff() && env.on(r) && under(prefix)(r) })
 }
@@ -404,7 +404,7 @@ func Serves(g config.RouteGroups, r Route) bool {
 // RegisterWebhookRoutes mounts the canonical callback surface under /webhooks.
 // The configured provider identity resolves its merchant in the runtime
 // environment; runtime bindings and signatures remain mandatory.
-func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
+func RegisterWebhookRoutes(rr *router.Router, rt *app.Runtime) {
 	newEnv(rt, Options{}).mount(rr, "/v1/webhooks", in(Webhooks))
 }
 
@@ -412,7 +412,7 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 // opts.Groups.Programmatic, each behind its permission, on a router rooted
 // at /v1: SCIM provisioning too, unless the runtime reads the host's user
 // directory instead of keeping a pushed copy.
-func RegisterAppRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+func RegisterAppRoutes(rr *router.Router, rt *app.Runtime, opts Options) {
 	env := newEnv(rt, opts)
 	env.mount(rr, "/v1", in(App, func(r Route) bool {
 		return env.on(r) && (r.Auth == AuthApplication || r.Auth == AuthProvisioning)
@@ -422,7 +422,7 @@ func RegisterAppRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 // RegisterSCIMRoutes mounts the SCIM routes for merchant, without a
 // credential, on a router rooted at the SCIM root: a directory in the same
 // process pushes to them.
-func RegisterSCIMRoutes(rr router.Router, rt *app.Runtime, merchant billing.MerchantID) {
+func RegisterSCIMRoutes(rr *router.Router, rt *app.Runtime, merchant billing.MerchantID) {
 	newEnv(rt, Options{SCIMMerchant: merchant}).mount(rr, SCIMRoot, in(App, func(r Route) bool { return r.Auth == AuthProvisioning }))
 }
 
@@ -438,7 +438,7 @@ const SelfRoutePrefix = "/me"
 // middleware (paymentpage.ResolveHTTP) admits the secret; customer routes
 // act as the order's customer at the order's merchant
 // (paymentpage.Authenticator), for that order alone.
-func RegisterPaymentPageRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+func RegisterPaymentPageRoutes(rr *router.Router, rt *app.Runtime, opts Options) {
 	opts.Auth = paymentpage.Authenticator{}
 	env := newEnv(rt, opts)
 	env.Customers, env.payURL = opts.Auth, true
@@ -497,7 +497,7 @@ func customerEnv(rt *app.Runtime, m CustomerMount) *Env {
 // RegisterCustomerRoutes mounts the customer surface. Every operation is
 // scoped to the verified customer and their merchant: no path names a
 // customer.
-func RegisterCustomerRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) {
+func RegisterCustomerRoutes(rr *router.Router, rt *app.Runtime, m CustomerMount) {
 	customerEnv(rt, m).mount(rr, "/v1/me", in(Customer))
 }
 

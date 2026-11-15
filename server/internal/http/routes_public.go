@@ -40,7 +40,7 @@ func (s *Server) registerWebhookRoutes(mux router.Registrar) {
 func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, "", s.runtime, s.recordRoute), httproutes.Options{External: httproutes.External{
 		Live: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			httprequest.NewHTTP(w, r, nil).SuccessJSON(httproutes.Health{Status: httproutes.HealthOK})
+			httprequest.New(w, r, nil).SuccessJSON(httproutes.Health{Status: httproutes.HealthOK})
 		}),
 		Ready: http.HandlerFunc(s.readyHandler),
 	}})
@@ -58,7 +58,7 @@ func (s *Server) capabilities() *billing.Capabilities {
 // why, goes to the log: the route is public.
 func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	if s != nil && s.draining.Load() {
-		httprequest.NewHTTP(w, r, nil).ErrorCode(billing.CodeServiceUnavailable, "draining")
+		httprequest.New(w, r, nil).ErrorCode(billing.CodeServiceUnavailable, "draining")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -72,7 +72,7 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	if err == nil && (s == nil || s.auth == nil) {
 		err = errors.New("readiness: authentication is not available")
 	}
-	req := httprequest.NewHTTP(w, r, nil)
+	req := httprequest.New(w, r, nil)
 	if err != nil {
 		log.WithError(err).Warn("not ready")
 		req.ErrorCode(billing.CodeServiceUnavailable, "not ready")
