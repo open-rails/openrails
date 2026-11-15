@@ -202,6 +202,9 @@
     "OR-J14-S05": [
       "TestProcessRecovery/OR-J14-S05/settled-renewal-survives-death-before-queue-ack"
     ],
+    "OR-J14-S06": [
+      "TestRenewalAgreements/OR-J14-S06/each-paid-agreement-renews-once-and-two-refuse"
+    ],
     "OR-J15-S01": [
       "TestNMIRecovery/OR-J15-S01/missing-callback-is-repaired-from-provider-query"
     ],

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 320,
+  "scenario_count": 321,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -332,6 +332,11 @@
       "id": "OR-J14-S05",
       "journey": "J14",
       "name": "Committed renewal payment/event and period survive process death before River acknowledgement"
+    },
+    {
+      "id": "OR-J14-S06",
+      "journey": "J14",
+      "name": "An order's sale, a renewal's collection and an upgrade's membership each authorize one renewal; two agreements at one boundary refuse"
     },
     {
       "id": "OR-J15-S01",
