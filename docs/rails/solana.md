@@ -1,7 +1,6 @@
 # Solana rail — merchant setup
 
-> Which flows are supported on this rail, and how well each one is verified:
-> [rail certification matrix](certification-matrix.md).
+> What each rail supports: [rails](README.md).
 
 Solana is the self-custody rail: there is no third-party PSP account. Payments
 land directly in a wallet the merchant controls, its **treasury**. One-time
@@ -317,3 +316,28 @@ when live pricing is unavailable, so they never require a price feed.
 - Every pull is confirmed on-chain before being treated as success, and the
   transaction signature is durably recorded before submission, so a crash
   mid-pull is resolved by reading the chain — never by blindly re-charging.
+
+### Solana Pay settlement
+
+An order's Solana attempt has one reference in `billing.solana_pay_references`
+(`pending` → `confirmed` | `expired`). Every replica's poller claims due references
+(`SKIP LOCKED`) and walks each one's finalized signature history from a stored
+cursor, so no number of transactions can hide a payment. Each signature settles
+once, under the reference's row lock, into `billing.solana_pay_receipts`.
+
+- The amount is the recipient's balance change in the quoted mint (Token-2022,
+  split transfers, inner instructions and any token account the recipient owns
+  included). Only finalized transactions credit; a page confirm waits up to 60 s,
+  then answers `processing` and the poller credits it.
+- A Token-2022 transfer fee is priced in at quote time; a fee raised later leaves
+  the merchant short (`underpaid`). Mints with a transfer hook are refused.
+- The first transfer of at least the quoted amount by quote expiry + 30 min is
+  credited; an excess is credited and flagged `overpaid`.
+- Anything else is recorded `disposition = 'review'` with a critical
+  `consistency.ledger.unbooked` finding whose operation is `solana_pay_` plus the
+  reason: `already_paid`, `late`, `underpaid`, `session_closed`, `wrong_asset`,
+  `unreadable` or `settle_failed`; a transfer that settled another purchase is `duplicate`.
+  Nothing is refunded automatically. After refunding, close a review with
+  `openrails solana-pay resolve --merchant … --signature … --resolution …`.
+  Open reviews and pending references refuse the billing archive.
+- A paid or expired reference is watched for 7 days, then deleted; receipts stay.

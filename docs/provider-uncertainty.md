@@ -210,7 +210,7 @@ delete for the unpaid successor. The route answers exactly as for a Stripe tier
 change: `202` with the operation id while unresolved, the stored result under
 the same key, `409 subscription_change_in_flight` under another key, and a coded
 `subscription_change_refused` (a card decline keeps its code) once terminal. See
-[upgrade recovery](architecture/upgrade-recovery.md).
+[upgrade recovery](#tier-changes).
 
 ### NMI refund currency and non-execution
 
@@ -228,3 +228,28 @@ reads additionally require the named identities, currency and exact refund
 amount. This is an engine/wire correction tested with loopback provider fixtures;
 it does not qualify a particular NMI account or establish missing provider
 operation-correlation guarantees.
+
+### Tier changes
+
+A tier change is one durable operation keyed by its `Idempotency-Key`, freezing
+the subscription, prices, period and instrument; the same key replays (`200`), an
+unresolved one answers `202` with its id, another key meanwhile is
+`409 subscription_change_in_flight`, and a definitive refusal is
+`subscription_change_refused` (a decline keeps its `402` code).
+
+- **NMI upgrades** have two steps with separate receipts, the successor enrollment
+  and the proration sale. Each records its submission fence before calling NMI; a
+  possibly submitted step is only read, and an empty search never permits a
+  resend (a roster match on vault and plan is not a receipt). Once both are
+  established, the predecessor's cancellation, the successor, the payment and the
+  access change commit together. A refused proration cancels the known successor
+  and keeps the predecessor. Close a stuck step with
+  `openrails intents resolve --step successor|proration`.
+- **Stripe** upgrades are one `update` (`proration_behavior=always_invoice`,
+  `billing_cycle_anchor=now`, `payment_behavior=error_if_incomplete`, so the
+  change is paid or refused, never left unpaid); downgrades are a `schedule` then
+  its `phases`. Each step sends `<operation id>:<step>` as its Stripe key and stamps
+  `metadata[openrails_tier_change]`. A lost response is read back by exact id, then
+  replayed while Stripe keeps the key (23 h), then left to
+  `openrails intents resolve --step update|schedule|phases`. Local state commits
+  only from a matched receipt and its own dates.

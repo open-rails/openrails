@@ -15,7 +15,7 @@ for live money state**. For provider-vaulted rails (NMI, CCBill, Stripe) the
 provider owns the card vault and the recurring billing schedule: it keeps
 charging on its own clock after your cutover. Importing brings OpenRails'
 mirror up to date as of a declared horizon; from then on webhooks, the
-scheduled [Provider Refresh](operations.md#provider-refresh-and-the-unknown-cohort)
+scheduled [Provider Refresh](operations.md#provider-refresh)
 converge the mirror against provider truth, and a PSP import re-reads a
 PSP on demand, its differences becoming proposals.
 
@@ -32,13 +32,13 @@ What import does **not** do:
   provider-affecting output: a declared cancel whose legacy schedule was not
   confirmed dead (`schedule_live`) enqueues a durable rail-delete intent,
   executed later by the intent executor under the
-  [mode gate](operations.md#operating-modes-the-safety-levers).
+  [mode gate](operations.md#safety-levers).
 - **No card-data movement.** OpenRails never holds card data. Declared
   payment methods are *references* into the provider's vault
   (`rail_customer_ref` / `rail_method_ref`), meaningful only within the PSP
   account that created them. You cannot import your way onto a different
   PSP — see
-  [PSP binding and credential rotation](operations.md#psp-binding-and-credential-rotation);
+  [PSP binding and credential rotation](operations.md#psps-and-credentials);
   between accounts, cards can only be re-captured when customers next pay.
 
 ### The import surface
@@ -242,15 +242,15 @@ billing data over this seam:
    would start charging them within hours.
 7. **Let the first dunning cycle materialize the backlog**, then review
    `openrails intents` — the
-   [drain forecast](operations.md#inspecting-the-ledger) is the dry-run view
+   [drain forecast](operations.md#provider-intents) is the dry-run view
    of your cutover ("N execute under limited, M require full").
 8. **Verify against the provider** with a PSP import
    (`POST /v1/merchant/psp-imports`) and its proposals, then raise to
    `PROVIDER_WRITE_MODE=full` — it drains exactly what the forecast showed.
 
 Steps 6–8 in depth:
-[Cutover: booting against production credentials](operations.md#cutover-booting-against-production-credentials)
-and [Materialized backlog under mode=limited](operations.md#materialized-backlog-under-modelimited).
+[Cutover: booting against production credentials](operations.md#booting-against-production-credentials)
+and [Materialized backlog under mode=limited](operations.md#booting-against-production-credentials).
 
 ### Provider facts outrank the book
 
@@ -266,7 +266,7 @@ import](psp-import.md#provider-facts-outrank-a-hosts-book)).
 ### Gotchas
 
 - **Stale `past_due` is canceled, never charged.** Anything past the
-  [dunning staleness window](operations.md#dunning) (derived from the
+  [dunning staleness window](dunning.md) (derived from the
   billing cycle; 14 days for monthly) gets the local no-charge cancel +
   downgrade. Missed billing periods are never back-billed.
 - **`unverified` is healthy.** Evidence-starved rows park as `unverified` and keep
@@ -329,7 +329,7 @@ OpenRails.
    vault or pause changed at NMI), `pull.payment_method.mismatch` (vault card removed)
    and blocked import rows. Fix the book and re-import rather than editing rows.
 3. **Arm the destructive switch** for the merchant
-   ([operations.md](operations.md#arming-a-merchant-the-first-enforce-gate)).
+   ([operations.md](operations.md#the-kill-switch)).
    Until then a member's cancel of an NMI-owned membership is refused with
    `provider_cancel_held` and raises `life.provider_cancel.held`: OpenRails
    will not cancel locally while NMI would keep charging. Account deletion

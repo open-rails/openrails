@@ -60,6 +60,19 @@ money-unit ratio (an average) is rounded to whole native units. Counts are JSON
 numbers and ratios floats. Money never sums across currencies — `currency`
 becomes an implicit group-by when ambiguous.
 
+## Payment measures
+
+Decline measures group by owner (`engine`, `nmi_schedule`, `provider`) and `psp`:
+`attempt_failure_rate` (the new-card decline rate is `kind` in `verify`, `initial`
+with `card_entry=new`; also by `reason`, `category`, `response_code`, `card_bin`,
+`card_brand`, AVS and CVV), `purchase_failure_rate` (per buyer),
+`rebill_first_failure_rate`, `rebill_missed_rate`, and `dunning_recovered` by
+`recovery_attempt` or `days_to_recover`. `nmi_history_authorizations`,
+`nmi_history_approved`, `nmi_history_refused` and `nmi_history_refusal_rate` come from NMI's own history, read daily
+and kept 25 months, by month, `nmi_kind` (`verification`, `one_off_sale`,
+`scheduled_rebill`), PSP, `category` and `reason`; `one_off_sale` cannot separate
+first sales from retried rebills.
+
 ## Limits
 
 - `limit`: 1..1000 (default 1000 rows).

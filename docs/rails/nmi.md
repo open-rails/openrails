@@ -1,7 +1,6 @@
 # NMI (high-risk gateway) setup
 
-> Which flows are supported on this rail, and how well each one is verified:
-> [rail certification matrix](certification-matrix.md).
+> What each rail supports: [rails](README.md).
 
 ### What NMI is, and where your ISO fits
 
@@ -424,7 +423,7 @@ nothing:
 
 A payment renews exactly the periods it paid, a decline enters dunning, and a
 schedule NMI ended is canceled, subject to the
-[cancel gate](../operations.md#cancellation-caps). A row with no evidence stays
+[cancel gate](../operations.md#the-kill-switch). A row with no evidence stays
 `unverified`. The
 `life.unverified.backlog` finding reports each account's count and oldest age;
 a row still unverified after three days raises `life.unverified.unresolved` for
