@@ -42,7 +42,7 @@ func (im *Importer) AdoptNMISubscription(ctx context.Context, pspID uuid.UUID, s
 	if !found {
 		return fmt.Errorf("adopt: PSP %s is not declared", pspID)
 	}
-	st, err := (&nmiSource{currency: "USD"}).subscription(sub, nmi.RecurringReportRow{}, im.now())
+	st, err := (&nmiSource{}).subscription(sub, nmi.RecurringReportRow{}, im.now())
 	if err != nil {
 		return err
 	}

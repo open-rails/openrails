@@ -655,6 +655,9 @@
     "OR-J38-S13": [
       "TestPSPImport/OR-J38-S13/unreadable-answer-fails-visibly"
     ],
+    "OR-J38-S42": [
+      "TestPSPImport/OR-J38-S42/nmi-amounts-land-in-the-mapped-price-currency"
+    ],
     "OR-J38-S30": [
       "TestMerchantConsole/OR-J38-S30/console-pull-link-map-apply-lands-once"
     ],

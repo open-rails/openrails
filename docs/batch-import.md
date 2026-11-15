@@ -376,8 +376,9 @@ a book that carries these verified facts.
 
 For live NMI and CCBill subscriptions, `accepted_schedule` states the accepted
 terms: a stable `source_reference`, recurring `amount` in native currency units,
-`currency`, `first_due_at`, and exactly one of `interval_hours` (whole days) or
-`interval_months` (calendar months). The anchor preserves its accepted time of
+`currency` (the price's; another blocks the subscription), `first_due_at`, and
+exactly one of `interval_hours` (whole days) or `interval_months` (calendar
+months). The anchor preserves its accepted time of
 day. A monthly January 31 anchor yields February's last day and then March 31.
 Approved transactions also carry the provider-confirmed `next_billing_at`
 boundary. An unchanged transaction receipt remains bound to its original cycle

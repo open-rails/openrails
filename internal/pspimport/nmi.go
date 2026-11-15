@@ -20,8 +20,6 @@ import (
 // report (order ids, emails) and the transaction report.
 type nmiSource struct {
 	client *nmi.NMIClient
-	// currency prices NMI amounts, which name none.
-	currency string
 	// now is when the roster is read: a schedule billing before it is past due.
 	now func() time.Time
 }
@@ -135,7 +133,11 @@ func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReport
 	f.add(FactOrderID, row.OrderID, row.PONumber)
 	f.add(FactEmail, row.Email)
 	f.add(FactName, fullName(row.FirstName, row.LastName))
-	data := subscriptionData{Currency: s.currency, StartedAt: nmiTime(sub.StartDate), Paused: nmiFlag(sub.PausedSubscription)}
+	// NMI names no currency: the subscription's price denominates its amount.
+	data := subscriptionData{Decimal: sub.DeclaredAmount(), StartedAt: nmiTime(sub.StartDate), Paused: nmiFlag(sub.PausedSubscription)}
+	if data.Decimal == "" {
+		return staged{}, fmt.Errorf("nmi subscription %s states no amount", ref)
+	}
 	var stated *providerobjects.Object
 	if sub.Plan != nil {
 		if plan := providerobjects.NMIPlan(*sub.Plan); plan.Ref != "" {
@@ -150,13 +152,6 @@ func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReport
 	f.add(FactPlan, data.Plan)
 	if next := nmiTime(sub.NextBillingDate); !next.IsZero() {
 		data.NextBillingAt = &next
-	}
-	minor, err := moneyutil.DecimalToRailMinor(s.currency, sub.DeclaredAmount())
-	if err != nil {
-		return staged{}, fmt.Errorf("nmi subscription %s amount: %w", ref, err)
-	}
-	if data.Amount, err = moneyutil.RailMinorToNative(s.currency, minor); err != nil {
-		return staged{}, err
 	}
 	data.Evidence, _ = json.Marshal(map[string]any{"source": "nmi_psp_import", "subscription": sub, "recurring": row})
 	remote, err := reconcile.NMIRemoteSubscription(sub, now)

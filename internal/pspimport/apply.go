@@ -597,7 +597,14 @@ func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImpor
 	case data.StartedAt.IsZero():
 		return billing.DeclaredSubscription{}, price, "the provider states no start date", nil
 	}
-	if data.Amount == 0 {
+	switch {
+	case data.Decimal != "":
+		amount, why := denominate(price, data.Decimal)
+		if why != "" {
+			return billing.DeclaredSubscription{}, price, why, nil
+		}
+		data.Amount, data.Currency = amount, price.currency
+	case data.Amount == 0:
 		// The provider's record states no terms: the declared price does.
 		data.Amount, data.Currency, data.IntervalHours, data.IntervalMonths = price.amount, price.currency, price.hours, price.months
 	}

@@ -52,9 +52,12 @@ type cardData struct {
 // subscriptionData is a live provider subscription's terms. Amount is in the
 // currency's native units.
 type subscriptionData struct {
-	Plan           string     `json:"plan,omitempty"`
-	Amount         int64      `json:"amount,string"`
-	Currency       string     `json:"currency"`
+	Plan     string `json:"plan,omitempty"`
+	Amount   int64  `json:"amount,string"`
+	Currency string `json:"currency"`
+	// Decimal is a major-unit amount a provider states without a currency
+	// (NMI); the subscription's price denominates it.
+	Decimal        string     `json:"decimal,omitempty"`
 	IntervalHours  int        `json:"interval_hours,omitempty"`
 	IntervalMonths int        `json:"interval_months,omitempty"`
 	StartedAt      time.Time  `json:"started_at"`

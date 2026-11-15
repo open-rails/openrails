@@ -13,7 +13,9 @@ Rails:
 
 - NMI: v5 plans, customers and subscriptions, the Query API's recurring and
   transaction reports. A live schedule lands with NMI's own terms as its
-  accepted schedule; a paused one as canceled at the pull.
+  accepted schedule, its amount read in the mapped price's currency (NMI
+  names none; one not exact in it stays `blocked`); a paused one as canceled
+  at the pull.
 - Stripe: products and prices (active and inactive), customers with their
   cards, subscriptions in every status, and
   the charges and refunds in the window with the invoices they paid. A
