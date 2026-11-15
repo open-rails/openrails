@@ -21,7 +21,6 @@ var ownedTables = []string{
 	"catalog_restore_receipts",
 	"order_attempts",
 	"custodians",
-	"custody_migrations",
 	"customer_contacts",
 	"customer_delinquency",
 	"customer_entitlement_cache",

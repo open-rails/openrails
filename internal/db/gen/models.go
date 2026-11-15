@@ -194,34 +194,6 @@ type BillingCustodian struct {
 	UpdatedAt time.Time
 }
 
-// One row per instrument whose CUSTODY changed — the durable memory of a vault-export remap. Records where the card used to live (the PSP vault handle the processor holds) and where it lives now (the custodian token), on an unchanged payment_method_id so subscriptions never move. Reversible in RECORD, never in custody: the fields to re-point an instrument back are all here, but a processor that deleted the vault entry or terminated the merchant cannot be undone by a row. Retention: permanent, never pruned.
-type BillingCustodyMigration struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	// The operator run that produced this row. A dry-run plan writes nothing; an applied run stamps every flip with one batch id so the report and the audit agree.
-	BatchID         uuid.UUID
-	PaymentMethodID uuid.UUID
-	Rail            string
-	FromCustodian   string
-	FromCustodianID *uuid.UUID
-	// The PSP-scope vault handle the instrument had BEFORE the flip (NMI customer_vault_id). Retained on the payment_methods row too — this is the copy that survives a later re-remap.
-	FromRailCustomerRef *string
-	// The instrument-scope handle before the flip (NMI billing_id; empty for the one-vault-per-card default).
-	FromRailMethodRef *string
-	FromPspID         *uuid.UUID
-	ToCustodian       string
-	ToCustodianID     uuid.UUID
-	// The custodian token id the instrument now charges through — payment_methods.rail_method_ref after the flip.
-	ToRailMethodRef string
-	ToPspID         *uuid.UUID
-	// The declared horizon of the custodian's ingest of the vault export — when the token set was true.
-	ExportedAt *time.Time
-	// remapped = an existing instrument changed custody (same payment_method_id, subscriptions untouched); created = the export carried a card with no local instrument and the operator declared its customer.
-	Outcome   string
-	Reason    *string
-	CreatedAt time.Time
-}
-
 // OpenRails payable identity: (merchant_id, issuer, id), id being the issuer's stable UUID subject. A credential of another issuer never acts on the row.
 type BillingCustomer struct {
 	ID         uuid.UUID
