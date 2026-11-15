@@ -218,8 +218,10 @@ the exception: no rollback past it, and hosts sharing the schema upgrade
 together. `openrails migrate up` can run first as a deploy step
 instead.
 
-The schema is one baseline migration. A database built by an earlier release's
-numbered migrations is not upgraded: recreate it. During the rollout a browser may load the admin console from a new
+The schema is one baseline migration. A database that ran every numbered
+migration of an earlier release has the same schema and is accepted (its old
+ledger rows stay, reported as informational); one that ran only part of them is
+refused with the schema difference: recreate it. During the rollout a browser may load the admin console from a new
 instance and its assets from an old one; a reload fixes it once the rollout
 ends.
 

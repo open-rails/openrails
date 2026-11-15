@@ -97,8 +97,8 @@ effect where the objects it touches are defined, delete the numbered file and pr
 the result with `go run ./scripts/schemaproof` (the previous revision's chain
 and the tree's must dump identically, in the default schema and another).
 
-A database built by the numbered migrations the baseline replaced is not
-upgraded: recreate it. Any other database the boot refuses (an
+A database that ran all the numbered migrations the baseline replaced has the
+same schema and is accepted; one that ran only part of them is refused. Any other database the boot refuses (an
 applied `0001` that differs and a schema that is not a fresh build of it) is
 wiped:
 
