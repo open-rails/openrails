@@ -70,7 +70,7 @@ ORDER BY created_at DESC, id DESC;
 -- natural key, for webhook routing and the uniqueness preflight, both of which
 -- run before any merchant context exists.
 -- name: ResolvePSPOwnerByRailIdentity :one
-SELECT id, merchant_id, rail, environment, account_id
+SELECT id, merchant_id, key, rail, environment, account_id, superseded_at
 FROM billing.psps
 WHERE rail = lower(sqlc.arg(rail)::text)
   AND live = sqlc.arg(live)::bool
@@ -109,12 +109,6 @@ RETURNING *;
 
 -- name: MerchantHasPSPs :one
 SELECT EXISTS (SELECT 1 FROM billing.psps WHERE merchant_id = sqlc.arg(merchant_id)::uuid);
-
--- name: GetPSPIDByRailAccount :one
-SELECT id FROM billing.psps
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = lower(sqlc.arg(rail)::text)
-  AND account_id = sqlc.arg(account_id)::text
-LIMIT 1;
 
 -- name: GetPSPEnvironmentForRail :one
 SELECT environment FROM billing.psps
