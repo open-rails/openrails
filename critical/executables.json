@@ -776,6 +776,9 @@
     "OR-J19-S05": [
       "TestPriceMigrationContracts/OR-J19-S05/move-that-no-longer-applies-is-skipped-and-settles-its-migration"
     ],
+    "OR-J19-S06": [
+      "TestPriceMigrationContracts/OR-J19-S06/notice-follows-cost-per-unit-of-time"
+    ],
     "OR-J12-S30": [
       "TestStoredCardRefresh/OR-J12-S30/marked-cards-never-starve-a-planned-check"
     ],

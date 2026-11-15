@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 298,
+  "scenario_count": 299,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1202,6 +1202,11 @@
       "id": "OR-J19-S05",
       "journey": "J19",
       "name": "A migration move that no longer applies is skipped, terminally, and its migration settles"
+    },
+    {
+      "id": "OR-J19-S06",
+      "journey": "J19",
+      "name": "A migration needs notice when what the customer pays per unit of time rises, at the seats its renewal bills; a one-time target is refused"
     },
     {
       "id": "OR-J34-S30",
