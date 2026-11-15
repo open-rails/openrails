@@ -1323,7 +1323,11 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 			return err
 		}
 
+		// Reactivation buys no period: the paid period keeps its start.
 		periodStartsAt := now
+		if start := subscription.CurrentPeriodStartsAt; start != nil && start.Before(now) {
+			periodStartsAt = start.UTC()
+		}
 		periodEndsAt := params.CurrentPeriodEndsAt.UTC()
 
 		// An explicit reactivation decision; it is not a payment fact.
@@ -1347,8 +1351,13 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		}); err != nil {
 			return fmt.Errorf("failed to clear grace access on reactivation: %w", err)
 		}
-		if _, err := entitlementService.PushAccess(ctx, subscriptionAccessForPeriod(subscription, periodStartsAt.UTC(), &periodEndsAt)); err != nil {
+		// Reactivation charges nothing: access is restored to the paid end,
+		// then the renewal grace the cancel took.
+		if _, err := entitlementService.PushAccess(ctx, paidPeriodAccess(subscription, now, periodEndsAt)); err != nil {
 			return fmt.Errorf("failed to restore access on reactivation: %w", err)
+		}
+		if err := s.EnsureRenewalGrace(ctx, txdb, subscription); err != nil {
+			return fmt.Errorf("restore renewal grace on reactivation: %w", err)
 		}
 
 		reactivated = subscription

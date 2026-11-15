@@ -263,6 +263,9 @@
     "OR-J17-S05": [
       "TestCancellationRecoveryContracts/OR-J17-S05/cancel-after-paid-boundary-has-no-resume-or-new-charge"
     ],
+    "OR-J17-S06": [
+      "TestCancellationRecoveryContracts/OR-J17-S06/resume-inside-the-paid-period-never-extends-access-past-it"
+    ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
     ],
@@ -274,6 +277,9 @@
     ],
     "OR-J18-S04": [
       "TestSubscriptionChangeContracts/OR-J18-S04/admitted-renewal-fences-concurrent-customer-upgrade"
+    ],
+    "OR-J18-S05": [
+      "TestSubscriptionChangeContracts/OR-J18-S05/late-in-place-upgrade-holds-the-new-tier-only-to-the-paid-boundary"
     ],
     "OR-J19-S01": [
       "TestPriceMigrationContracts/OR-J19-S01/only-eligible-subscription-moves-at-the-paid-boundary"

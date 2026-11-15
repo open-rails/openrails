@@ -62,6 +62,17 @@ func subscriptionAccessForPeriod(sub *models.Subscription, start time.Time, peri
 	}
 }
 
+// paidPeriodAccess is the access a change inside a paid period opens at start
+// without paying for a new period: an explicit duration never runs past the
+// period's end. Provider-default and indefinite access keep their meaning.
+func paidPeriodAccess(sub *models.Subscription, start, periodEnd time.Time) entitlements.PushAccessParams {
+	grant := subscriptionAccessForPeriod(sub, start, &periodEnd)
+	if grant.EndsAt != nil && grant.EndsAt.After(periodEnd) {
+		grant.EndsAt = &periodEnd
+	}
+	return grant
+}
+
 // Renewal grace applies to continuous membership access. A deliberately shorter
 // access window is not extended through an unpaid gap, and a longer or indefinite
 // purchase does not need a billing-boundary grace grant.

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 288,
+  "scenario_count": 290,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -409,6 +409,11 @@
       "name": "Cancellation after boundary follows irreversible rail policy"
     },
     {
+      "id": "OR-J17-S06",
+      "journey": "J17",
+      "name": "Cancel, resume and cancel again inside the paid period never extends access past it"
+    },
+    {
       "id": "OR-J18-S01",
       "journey": "J18",
       "name": "Known price or seat change preview and confirmation agree"
@@ -427,6 +432,11 @@
       "id": "OR-J18-S04",
       "journey": "J18",
       "name": "Concurrent renewal and change retain one financial agreement"
+    },
+    {
+      "id": "OR-J18-S05",
+      "journey": "J18",
+      "name": "An in-place upgrade late in the period holds the new tier only to the paid boundary"
     },
     {
       "id": "OR-J19-S01",
