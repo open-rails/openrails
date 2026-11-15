@@ -109,7 +109,7 @@ func TerminalWithEvidence(reason string, evidence map[string]any) Outcome {
 func Parked(reason string) Outcome { return Outcome{Class: OutcomeParked, Reason: reason} }
 
 // Deferred is an attempt not made yet because it is not due: the intent stays
-// pending until until, and the wait is not an attempt.
+// pending until until, and the wait is neither an attempt nor a failure.
 func Deferred(reason string, until time.Time) Outcome {
 	return Outcome{Class: OutcomeParked, Reason: reason, Until: until}
 }

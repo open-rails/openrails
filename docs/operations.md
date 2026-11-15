@@ -846,12 +846,13 @@ disappears. Two safety doctrines matter operationally:
   the local DB" is not absence — it usually means *not imported yet*. Held
   repairs stay `reconcile_required` with the unproven domain in evidence.
 - **Stuck intents** (`life.provider_intent.stuck`): the health pass flags provider
-  intents sitting non-terminal too long — `pending`/`failed_retryable` older
-  than 24h, `in_flight`/`unknown_needs_verify` older than 2h; thresholds are
-  hardcoded. Mode-parked intents are informational (that wait is by design);
-  everything else is `requires_review` — provider failures, bad credentials,
-  or a dead worker. The engine never touches intent rows (the
-  executor/verifier own them); findings auto-resolve on recovery.
+  intents sitting non-terminal too long — `pending` 24h past its next attempt
+  (one scheduled ahead or deferred waits for its instant), parked `pending` or
+  `failed_retryable` older than 24h, `in_flight`/`unknown_needs_verify` older
+  than 2h; thresholds are hardcoded. Mode-parked intents are informational
+  (that wait is by design); everything else is `requires_review` — provider
+  failures, bad credentials, or a dead worker. The engine never touches intent
+  rows (the executor/verifier own them); findings auto-resolve on recovery.
 - **Operational problems** outside the engine are findings too:
   `consistency.ledger.unbooked` (a provider event OpenRails could not book; the
   merchant repairs the ledger and resolves the finding) and

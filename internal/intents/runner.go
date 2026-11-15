@@ -529,11 +529,13 @@ func (r *Runner) park(ctx context.Context, logEntry *log.Entry, stats *Stats, id
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	ctx = r.transitionContext(ctx)
-	until := outcome.Until
+	until, reason := outcome.Until, outcome.Reason
 	if until.IsZero() {
 		until = now.Add(ParkRetryInterval)
+	} else {
+		reason = "" // a deferral waits for its instant: no failure
 	}
-	if err := r.Store.Park(ctx, id, until, outcome.Reason); err != nil {
+	if err := r.Store.Park(ctx, id, until, reason); err != nil {
 		logEntry.WithError(err).Error("intent ledger: park failed; lease expiry will re-surface the intent")
 		return
 	}

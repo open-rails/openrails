@@ -261,15 +261,16 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type
   AND NOT (intent_type='initial_membership' AND coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted')
   AND intent_type <> 'subscription_collection';
 
--- Non-terminal intents older than the converge engine's stuck thresholds:
--- pending/failed_retryable before action_cutoff, in_flight/unknown_needs_verify
--- before verify_cutoff (a healthy verifier resolves unknowns in minutes).
--- A price migration's push waits for its subscription's last period before
--- the move: pending and not yet due, it is scheduled, not stuck.
+-- Non-terminal intents past the converge engine's stuck thresholds: pending
+-- with no failure due before action_cutoff (scheduled ahead or deferred, it
+-- waits for its instant), pending parked or failed_retryable created before
+-- action_cutoff (each re-park or backoff keeps the next attempt near),
+-- in_flight/unknown_needs_verify created before verify_cutoff (a healthy
+-- verifier resolves unknowns in minutes).
 -- name: ListStuckProviderIntents :many
 SELECT * FROM billing.provider_intents
-WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(action_cutoff)::timestamptz
-       AND NOT (intent_type = 'price_migration_push' AND status = 'pending' AND next_attempt_at > sqlc.arg(now)::timestamptz))
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status = 'pending' AND last_failure_reason IS NULL AND next_attempt_at <= sqlc.arg(action_cutoff)::timestamptz)
+   OR ((status = 'failed_retryable' OR status = 'pending' AND last_failure_reason IS NOT NULL) AND created_at <= sqlc.arg(action_cutoff)::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= sqlc.arg(verify_cutoff)::timestamptz)
 ) ORDER BY created_at, id;
 

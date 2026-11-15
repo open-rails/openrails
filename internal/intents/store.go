@@ -781,6 +781,8 @@ func (s *Store) MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason str
 	}, outcome)
 }
 
+// Park returns the intent to pending until nextAttemptAt; an empty reason
+// records no failure.
 func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
 	return s.park(ctx, id, nextAttemptAt, reason, nil)
 }
@@ -793,10 +795,14 @@ func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 	if scopeErr != nil {
 		return scopeErr
 	}
+	var failure *string
+	if reason != "" {
+		failure = &reason
+	}
 	return one(s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
 		wake := nextAttemptAt
 		rows, err := txs.db.Gen(ctx).ParkProviderIntent(ctx, gen.ParkProviderIntentParams{
-			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
+			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: failure,
 			RecoveryEvidence: recovery,
 		})
 		if err == nil && rows > 0 {
@@ -821,7 +827,7 @@ func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 		if submitted {
 			// The live-state predicate still protects a concurrently sealed outcome.
 			rows, err := txs.db.Gen(ctx).MarkProviderIntentUnknown(ctx, gen.MarkProviderIntentUnknownParams{
-				MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
+				MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: failure,
 				ResultEvidence: recovery,
 			})
 			if err == nil && rows > 0 {

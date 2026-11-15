@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 288,
+  "scenario_count": 289,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1442,6 +1442,11 @@
       "id": "OR-J12-S70",
       "journey": "J12",
       "name": "A card save confirmed or saved again past its 24-hour cutoff, before any pass, is removed"
+    },
+    {
+      "id": "OR-J29-S37",
+      "journey": "J29",
+      "name": "A provider operation scheduled ahead is no stuck finding however long ago it was queued; one a day past its attempt, or parked or failing for a day, is"
     }
   ]
 }

@@ -295,16 +295,15 @@ WHERE f.merchant_id = $1::uuid
       SELECT 1 FROM billing.provider_intents pi
       WHERE pi.merchant_id = f.merchant_id
         AND pi.id::text = f.subject_key
-        AND ((pi.status IN ('pending', 'failed_retryable') AND pi.created_at <= $2::timestamptz
-              AND NOT (pi.intent_type = 'price_migration_push' AND pi.status = 'pending' AND pi.next_attempt_at > $3::timestamptz))
-          OR (pi.status IN ('in_flight', 'unknown_needs_verify') AND pi.created_at <= $4::timestamptz))
+        AND ((pi.status = 'pending' AND pi.last_failure_reason IS NULL AND pi.next_attempt_at <= $2::timestamptz)
+          OR ((pi.status = 'failed_retryable' OR pi.status = 'pending' AND pi.last_failure_reason IS NOT NULL) AND pi.created_at <= $2::timestamptz)
+          OR (pi.status IN ('in_flight', 'unknown_needs_verify') AND pi.created_at <= $3::timestamptz))
   )
 `
 
 type AutoResolveRecoveredStuckIntentFindingsParams struct {
 	MerchantID   uuid.UUID
 	ActionCutoff time.Time
-	Now          time.Time
 	VerifyCutoff time.Time
 }
 
@@ -313,12 +312,7 @@ type AutoResolveRecoveredStuckIntentFindingsParams struct {
 // re-scheduled) auto-resolves on the next LIFE pass. Cutoffs mirror the
 // detection (ListStuckProviderIntents) exactly — edit together.
 func (q *Queries) AutoResolveRecoveredStuckIntentFindings(ctx context.Context, arg AutoResolveRecoveredStuckIntentFindingsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, autoResolveRecoveredStuckIntentFindings,
-		arg.MerchantID,
-		arg.ActionCutoff,
-		arg.Now,
-		arg.VerifyCutoff,
-	)
+	result, err := q.db.Exec(ctx, autoResolveRecoveredStuckIntentFindings, arg.MerchantID, arg.ActionCutoff, arg.VerifyCutoff)
 	if err != nil {
 		return 0, err
 	}
@@ -1284,7 +1278,8 @@ WHERE m.status = 'active' AND m.deleted_at IS NULL AND m.id > $1::uuid
                AND s.status IN ('active', 'past_due') AND s.deleted_at IS NULL AND s.current_period_ends_at <= $4::timestamptz)
     OR EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id = m.id AND i.updated_at > $2::timestamptz)
     OR EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id = m.id
-               AND i.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify') AND i.created_at <= $5::timestamptz)
+               AND i.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+               AND CASE WHEN i.status = 'pending' AND i.last_failure_reason IS NULL THEN i.next_attempt_at ELSE i.created_at END <= $5::timestamptz)
     OR EXISTS (SELECT 1 FROM billing.product_access e WHERE e.merchant_id = m.id AND e.deleted_at IS NULL
                AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > $6::timestamptz
                AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= $7::timestamptz))

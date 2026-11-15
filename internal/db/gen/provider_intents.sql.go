@@ -1931,31 +1931,26 @@ func (q *Queries) ListRetainedSubscriptionCollectionsForArchive(ctx context.Cont
 
 const listStuckProviderIntents = `-- name: ListStuckProviderIntents :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
-WHERE provider_intents.merchant_id = $1::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= $2::timestamptz
-       AND NOT (intent_type = 'price_migration_push' AND status = 'pending' AND next_attempt_at > $3::timestamptz))
-   OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $4::timestamptz)
+WHERE provider_intents.merchant_id = $1::uuid AND ( (status = 'pending' AND last_failure_reason IS NULL AND next_attempt_at <= $2::timestamptz)
+   OR ((status = 'failed_retryable' OR status = 'pending' AND last_failure_reason IS NOT NULL) AND created_at <= $2::timestamptz)
+   OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $3::timestamptz)
 ) ORDER BY created_at, id
 `
 
 type ListStuckProviderIntentsParams struct {
 	MerchantID   uuid.UUID
 	ActionCutoff time.Time
-	Now          time.Time
 	VerifyCutoff time.Time
 }
 
-// Non-terminal intents older than the converge engine's stuck thresholds:
-// pending/failed_retryable before action_cutoff, in_flight/unknown_needs_verify
-// before verify_cutoff (a healthy verifier resolves unknowns in minutes).
-// A price migration's push waits for its subscription's last period before
-// the move: pending and not yet due, it is scheduled, not stuck.
+// Non-terminal intents past the converge engine's stuck thresholds: pending
+// with no failure due before action_cutoff (scheduled ahead or deferred, it
+// waits for its instant), pending parked or failed_retryable created before
+// action_cutoff (each re-park or backoff keeps the next attempt near),
+// in_flight/unknown_needs_verify created before verify_cutoff (a healthy
+// verifier resolves unknowns in minutes).
 func (q *Queries) ListStuckProviderIntents(ctx context.Context, arg ListStuckProviderIntentsParams) ([]BillingProviderIntent, error) {
-	rows, err := q.db.Query(ctx, listStuckProviderIntents,
-		arg.MerchantID,
-		arg.ActionCutoff,
-		arg.Now,
-		arg.VerifyCutoff,
-	)
+	rows, err := q.db.Query(ctx, listStuckProviderIntents, arg.MerchantID, arg.ActionCutoff, arg.VerifyCutoff)
 	if err != nil {
 		return nil, err
 	}
