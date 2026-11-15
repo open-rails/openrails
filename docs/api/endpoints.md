@@ -95,8 +95,9 @@ name held at the merchant, or the `root:` name held in the root scope
 ([auth](../auth.md#permissions)). On the standalone server an API key carries its role's, a trusted issuer's token
 the `permissions` it asserts within its ceiling, and a user session the user's
 role in the merchant's group. Admin operations do not require a recent
-sign-in. Customer-network routes marked `sensitive` retain their
-recent-sign-in policy. A `/v1/app` route refuses a person
+sign-in; the sensitive operations a host maps with `Engine.CustomerRoutes`
+ask for one ([host customer APIs](../auth.md#host-customer-apis)). A
+`/v1/app` route refuses a person
 (`403 application_required`). Programmatic writes use their documented durable
 identity, with the same replay behavior as embedded calls.
 
@@ -154,8 +155,6 @@ know about the deployment, and names no merchant:
   token_header}`: load `script_url`, solve with `site_key` and `action`, and
   resend the request with the token in `token_header`. Null when the
   deployment challenges nobody.
-- `network`: the payment page's sign-in to the customer network, null without
-  the network or a payment page.
 
 `GET /v1/me/config` is a merchant's part, answered only to a credential bound
 to that merchant: a customer's token, or a pay URL's secret on the

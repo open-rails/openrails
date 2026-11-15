@@ -974,7 +974,7 @@ You'd pass this into your OpenRails client construct like: `openrails.Deps{Postg
 
 Merchant config (your name, settings, PSPs and their credentials) lives in one of two places:
 
-- **Your file** (`merchant.yaml` above): read into memory at start and kept there. Changing merchant-config requires modifying your YAML file and reloading OpenRails with your new configuration. Theis configuration can be seein in the admin dashboard, but cannot be changed because it's immutable.
+- **Your file** (`merchant.yaml` above): read into memory at start and kept there. Changing merchant-config requires modifying your YAML file and reloading OpenRails with your new configuration. The admin dashboard shows it but cannot change it.
 
 - **HashiCorp Vault**: staff add and rotate PSPs and change settings over HTTP / in the admin dashboard (`RouteGroups.MerchantConfig`), and OpenRails writes them to Vault: one document for the merchant and one per PSP. Configuration looks like this:
 
@@ -1053,8 +1053,8 @@ and no session is sticky.
   that stops answering falls back to memory per instance until it returns.
 - **Identical on every instance**: the configuration (merchant declaration,
   catalog, rate limits, trusted proxies), the mounted `Routes`, and for the
-  standalone server its signing keys. `auth.keys.allow_ephemeral_dev_keys` is
-  for a single instance.
+  standalone server its signing and TOTP keys (`auth.keys.path`).
+  `auth.keys.allow_ephemeral_dev_keys` is for a single instance.
 - **Background work**: every instance that calls `Start` works River jobs, each
   job on one instance. River's leader schedules periodic work on its period's
   clock boundaries, once per period for the fleet; when the leader stops,
@@ -1514,7 +1514,7 @@ AuthorizationServer: authkit.AuthorizationServerConfig{
 		ID:           "courses-backend", // confidential: this server and the SCIM pushes
 		SecretSHA256: hex.EncodeToString(secret[:]),
 		Resources:    []string{s.OpenRailsURL},
-		Permissions:  []string{"merchant:customer:read", "merchant:entitlements:read", "merchant:catalog:read"}, // customer support's reads; the content gate and its offers
+		Permissions:  []string{"merchant:customer:read", "merchant:entitlements:read", "merchant:catalog:read"}, // customer support's reads; the content gate and catalog
 		GrantTypes:   []authkit.OAuthGrantType{authkit.GrantClientCredentials},
 	}},
 },
@@ -1602,7 +1602,7 @@ Point each PSP's webhooks at the server: `https://<your server>/v1/webhooks/{rai
 
 #### Route groups and permissions
 
-`route_groups` turns on what `RouteGroups` does embedded: `admin`, `catalog`, `merchant_config`, `metrics` and `programmatic` (`/v1/app`, SCIM included). The staff groups check the server's permissions, `merchant:customer:read|manage`, `merchant:catalog:read|manage`, `merchant:config:manage` and `merchant:metrics:read`; `/v1/app` routes check `merchant:orders:manage`, `merchant:entitlements:read`, `merchant:usage:read|manage` and `merchant:events:read`. A token carries them from your AuthKit roles within the issuer's ceiling. The backend client above may read customers, check entitlements and read offers, nothing more. Your staff sign in to the standalone console at `/admin`; configure `admin_console.issuers` for app sign-in or `local_sign_in` for local accounts. See the [standalone console](docs/billing-admin.md).
+`route_groups` turns on what `RouteGroups` does embedded: `admin`, `catalog`, `merchant_config`, `metrics` and `programmatic` (`/v1/app`, SCIM included). The staff groups check the server's permissions, `merchant:customer:read|manage`, `merchant:catalog:read|manage`, `merchant:config:manage` and `merchant:metrics:read`; `/v1/app` routes check `merchant:orders:manage`, `merchant:entitlements:read`, `merchant:usage:read|manage` and `merchant:events:read`. A token carries them from your AuthKit roles within the issuer's ceiling. The backend client above may read customers, check entitlements and read the catalog, nothing more. Your staff sign in to the standalone console at `/admin`; configure `admin_console.issuers` for app sign-in or `local_sign_in` for local accounts. See the [standalone console](docs/billing-admin.md).
 
 #### Operate it
 

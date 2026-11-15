@@ -120,7 +120,7 @@ field. Construction refuses to boot unless the write mode is explicit:
 | `Vault` | A borrowed Vault client. PSP secrets come from a declared merchant's PSPs or the secret store. |
 | `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SMTP` (set one). An empty `From` is the deployment's own mail. |
 | `UserInfo` | Your directory (AuthKit's `ak.UserInfo()`, or your own `openrails.UserInfo`): who each customer is, asked whenever OpenRails emails or shows one. See [customer contacts](customer-contacts.md). |
-| `StripeTransport`, `NMITransport`, `FXTransport`, `Clock` | Test seams, refused beside a live PSP. |
+| `StripeTransport`, `NMITransport`, `BasisTheoryTransport`, `FXTransport`, `Clock` | Test seams, refused beside a live PSP. |
 
 `Deps` holds no auth: the engine authenticates nobody. Your auth guards the
 routes you mount (section 6) and decides who may sign in; OpenRails keeps no
@@ -130,7 +130,7 @@ from `Deps.UserInfo`, or from your directory's SCIM pushes with
 
 Each PSP declares its `environment`; omitted is the rail's real-money one.
 OpenRails checks it with the provider before the PSP is used, and a test seam
-(`StripeTransport`, `NMITransport`, `FXTransport`, `Clock`) refuses to boot
+(a `Deps` transport or `Clock`, a `ProviderSandbox` URL) refuses to boot
 beside a live PSP ([PSP environments](psp-environments.md)).
 
 **Rate limiting is on by default**: a nil `RateLimits` gets the built-in limits
@@ -153,7 +153,8 @@ if err != nil { return err }
 
 `New` fails only on what the engine cannot serve without: Postgres and the
 migrations it applies first, an unset or unknown `ProviderWriteMode`, an
-invalid River schema, and money safety (a test seam beside a live PSP). It starts no workers and never changes the catalog.
+invalid River schema, and money safety (a test seam beside a live PSP). It
+starts no workers and never changes the catalog.
 Anything else that cannot be served is refused alone and the rest serves: an
 optional setting (Redis, captcha, LLM, SMTP, a trusted proxy, ...) is turned off;
 a merchant whose slug is invalid is not provisioned; one PSP, custodian or

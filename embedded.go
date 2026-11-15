@@ -70,9 +70,9 @@ type Engine struct {
 // recover in the background and fail only the features that need them (see
 // Probes). It fails only on what the engine cannot serve without: the
 // database and its migrations, an unknown ProviderWriteMode, an invalid
-// River schema, a test seam beside a live PSP. Any
-// other setting, merchant or document that cannot be served is refused alone
-// and reported by Ready and the openrails_configuration probe.
+// River schema, or a test seam beside a live PSP. Any other setting, merchant
+// or document that cannot be served is refused alone and reported by Ready
+// and the openrails_configuration probe.
 func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error) {
 	inner, err := engine.New(ctx, cfg, deps)
 	if err != nil {

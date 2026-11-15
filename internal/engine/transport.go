@@ -30,7 +30,7 @@ var NewClient func(transport http.RoundTripper, merchant billing.MerchantID) any
 func (e *Engine) Transport() http.RoundTripper {
 	rt := e.App.Runtime
 	// Mounted at the first call, so what a host adds to the runtime after
-	// New (a server's customer network) is served.
+	// New is served.
 	served := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		e.handlerOnce.Do(func() { e.handler = newServiceHandler(rt) })
 		e.handler.ServeHTTP(w, r)
