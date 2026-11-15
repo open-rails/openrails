@@ -511,6 +511,9 @@
     "OR-J31-S06": [
       "TestBillingArchive/OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book"
     ],
+    "OR-J31-S40": [
+      "TestNotificationAdoptionExport/OR-J31-S40/export-holds-back-no-other-merchant-and-orders-its-own-producers"
+    ],
     "OR-J32-S01": [
       "TestMerchantHost/OR-J32-S01/provision-find-list-rename-retains-identity"
     ],
