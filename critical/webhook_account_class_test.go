@@ -44,9 +44,10 @@ func newAccountClassWorld(t *testing.T, alpha, beta openrails.PSPs, configure ..
 }
 
 // restartWith boots the world's engine again with change applied to its
-// configuration.
+// configuration, behind a new server the remote clients follow.
 func (a *authorityWorld) restartWith(t *testing.T, change func(*openrails.Config)) {
 	t.Helper()
+	a.server.Close()
 	require.NoError(t, a.engine.Close(context.Background()))
 	change(&a.cfg)
 	var err error
@@ -57,6 +58,8 @@ func (a *authorityWorld) restartWith(t *testing.T, change func(*openrails.Config
 	a.beta, err = a.engine.MerchantBySlug("beta")
 	require.NoError(t, err)
 	a.serve(t)
+	a.alphaRemote = a.remote(t, a.alpha.MerchantID(), a.alphaKey.Secret)
+	a.betaRemote = a.remote(t, a.beta.MerchantID(), a.betaKey.Secret)
 }
 
 func pspIDs(t *testing.T, c *openrails.Client) map[string]uuid.UUID {

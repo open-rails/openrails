@@ -46,24 +46,30 @@ func TestPSPPostureExpiry(t *testing.T) {
 			}, http.StatusServiceUnavailable, 1_000_000)
 			product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "posture-download", DisplayName: "Download", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"download:owned"}})
 			require.NoError(t, err)
-			price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "posture-download", UnitAmount: 9_990_000, Currency: "USD"})
-			require.NoError(t, err)
-			buy := func(ctx context.Context, key string) (int, []byte, error) {
-				input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
+			// One open order per customer and lines: each concurrent sale buys its
+			// own price, so each is its own order and reaches the write gate.
+			prices := make([]billing.PriceID, 4)
+			for i := range prices {
+				price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "posture-download-" + string(rune('a'+i)), UnitAmount: 9_990_000, Currency: "USD"})
+				require.NoError(t, err)
+				prices[i] = price.ID
+			}
+			buy := func(ctx context.Context, price billing.PriceID, key string) (int, []byte, error) {
+				input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
 					Payment: &billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"})}}
 				return a.do(ctx, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
 			}
 			paid := func(key string) {
 				t.Helper()
-				status, raw, err := buy(t.Context(), key)
+				status, raw, err := buy(t.Context(), prices[0], key)
 				require.NoError(t, err)
 				require.Equal(t, http.StatusCreated, status, string(raw))
 			}
-			refused := func(key string) {
+			refused := func(key string, want int) {
 				t.Helper()
-				status, raw, err := buy(t.Context(), key)
+				status, raw, err := buy(t.Context(), prices[0], key)
 				require.NoError(t, err)
-				require.NotEqual(t, http.StatusCreated, status, string(raw))
+				require.Equal(t, want, status, string(raw))
 			}
 
 			// The start-up verification has armed the PSP before counting.
@@ -88,14 +94,15 @@ func TestPSPPostureExpiry(t *testing.T) {
 			down.Store(true)
 			var wg sync.WaitGroup
 			statuses := make([]int, 3)
+			raws := make([][]byte, 3)
 			errs := make([]error, 3)
 			for i := range statuses {
-				wg.Go(func() { statuses[i], _, errs[i] = buy(t.Context(), "stale-"+string(rune('a'+i))) })
+				wg.Go(func() { statuses[i], raws[i], errs[i] = buy(t.Context(), prices[i+1], "stale-"+string(rune('a'+i))) })
 			}
 			wg.Wait()
 			for i := range statuses {
 				require.NoError(t, errs[i])
-				require.NotEqual(t, http.StatusCreated, statuses[i], "a stale proof never arms a write")
+				require.Equal(t, http.StatusPaymentRequired, statuses[i], "a stale proof never arms a write: %s", raws[i])
 			}
 			require.Equal(t, proven+1, probes.Load(), "concurrent sales share one proof")
 			journal.money(t, 2, 1998)
@@ -112,9 +119,10 @@ func TestPSPPostureExpiry(t *testing.T) {
 			// nothing asks; the next sale after it is refused before any bytes.
 			journal.core.SetTestMode(false)
 			a.clock.Advance(time.Hour)
-			refused("left-test-mode")
+			refused("left-test-mode", http.StatusPaymentRequired)
 			require.Equal(t, proven+3, probes.Load())
-			refused("still-live")
+			// The disarmed PSP is no longer offered.
+			refused("still-live", http.StatusUnprocessableEntity)
 			require.Equal(t, proven+3, probes.Load(), "a disagreeing answer holds until the PSP's configuration changes")
 			journal.money(t, 3, 2997)
 			require.Len(t, journal.core.Sales(), 3)
