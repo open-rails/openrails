@@ -249,7 +249,6 @@ server or workers, and keep standard output parseable.
 | `ledger-audit --merchant=id:<uuid>` | check ledger conservation and counters; non-zero on a finding. There is no scheduled audit |
 | `nmi decline-report --merchant --since [--until] [--psp]` | read-only NMI decline baseline by month and reason |
 | `solana-pay resolve --merchant --signature --resolution` | close a reviewed Solana Pay receipt |
-| `access-cutover preflight [--approve NAME]` | list and approve the access changes the product-access cutover migration makes |
 | `workers [--json]` | job health from River's tables |
 
 A private standalone first run, as an init job:
