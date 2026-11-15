@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 305,
+  "scenario_count": 306,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1512,6 +1512,11 @@
       "id": "OR-J12-S70",
       "journey": "J12",
       "name": "A card save confirmed or saved again past its 24-hour cutoff, before any pass, is removed"
+    },
+    {
+      "id": "OR-J37-S10",
+      "journey": "J37",
+      "name": "A published FX rate far from the one held is refused: once the held rate is stale, a euro price gets no Solana quote"
     },
     {
       "id": "OR-J22-S07",
