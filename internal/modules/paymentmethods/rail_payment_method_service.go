@@ -42,8 +42,7 @@ type RailPaymentMethodService struct {
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
 	// one from Config.
 	NMIClients      *railresolve.NMIFactory
-	ProviderSecrets merchants.PSPSecretResolver
-	ProviderScopes  merchants.PSPScopeResolver
+	ProviderSecrets *merchants.Service
 	Config          *config.Config
 	DB              *db.DB
 	// DeleteIntents routes DeletePaymentMethod through the durable nmi_vault_delete
@@ -83,14 +82,11 @@ func (s *RailPaymentMethodService) SetMerchantSecretStore(store merchants.Mercha
 	s.MerchantSecrets = store
 }
 
-func (s *RailPaymentMethodService) SetPSPSecretResolver(resolver merchants.PSPSecretResolver) {
+func (s *RailPaymentMethodService) SetPSPSecretResolver(resolver *merchants.Service) {
 	if s == nil {
 		return
 	}
 	s.ProviderSecrets = resolver
-	if scopes, ok := resolver.(merchants.PSPScopeResolver); ok {
-		s.ProviderScopes = scopes
-	}
 }
 
 func (s *RailPaymentMethodService) SetClock(c clockwork.Clock) {
@@ -431,11 +427,10 @@ func (s *RailPaymentMethodService) CardEntryForPSP(ctx context.Context, pspID uu
 
 // pspScope resolves one PSP of the merchant's configuration by id.
 func (s *RailPaymentMethodService) pspScope(ctx context.Context, mid billing.MerchantID, pspID uuid.UUID) (merchants.PSPScope, bool, error) {
-	resolver, ok := s.ProviderSecrets.(merchants.PSPIdentityScopeResolver)
-	if !ok {
+	if s.ProviderSecrets == nil {
 		return merchants.PSPScope{}, false, errors.New("PSP lookup unavailable")
 	}
-	return resolver.PSPScopeByID(ctx, mid, pspID)
+	return s.ProviderSecrets.PSPScopeByID(ctx, mid, pspID)
 }
 
 // ResolveClientForPSP arms the NMI client of one declared PSP.
@@ -507,14 +502,9 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 		return client, &scope.ID, err
 	}
 
-	var scopeResolver merchants.PSPScopeResolver
+	var scopeResolver *merchants.Service
 	if s != nil {
-		scopeResolver = s.ProviderScopes
-		if scopeResolver == nil {
-			if resolver, ok := s.ProviderSecrets.(merchants.PSPScopeResolver); ok {
-				scopeResolver = resolver
-			}
-		}
+		scopeResolver = s.ProviderSecrets
 	}
 	if rails.IsNMI(models.Rail(provider)) && s != nil && s.MerchantSecrets != nil && scopeResolver != nil {
 		tid, err := merchant.Require(ctx)

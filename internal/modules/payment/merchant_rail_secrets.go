@@ -32,15 +32,11 @@ func (s *PurchaseService) SetMerchantSecretStore(store merchants.MerchantSecretR
 	}
 }
 
-func (s *PurchaseService) SetPSPSecretResolver(resolver merchants.PSPSecretResolver) {
+func (s *PurchaseService) SetPSPSecretResolver(resolver *merchants.Service) {
 	if s == nil {
 		return
 	}
 	s.ProviderSecrets = resolver
-}
-
-func (s *PurchaseService) merchantSecret(ctx context.Context, name string) (string, bool, error) {
-	return s.merchantSecretRef(ctx, merchants.SecretRef{Name: name})
 }
 
 // merchantSecretRef is the single credential read for purchase money paths. It
@@ -90,18 +86,11 @@ func (s *PurchaseService) merchantProviderSecret(ctx context.Context, rail, key 
 		}
 		return s.merchantSecretRef(ctx, ref)
 	}
-	if refResolver, ok := s.ProviderSecrets.(merchants.PSPSecretRefResolver); ok {
-		ref, found, err := refResolver.ActivePSPSecretRef(ctx, tid, rail, key)
-		if err != nil || !found {
-			return "", found, err
-		}
-		return s.merchantSecretRef(ctx, ref)
+	ref, found, err := s.ProviderSecrets.ActivePSPSecretRef(ctx, tid, rail, key)
+	if err != nil || !found {
+		return "", found, err
 	}
-	name, ok, err := s.ProviderSecrets.ActivePSPSecretName(ctx, tid, rail, key)
-	if err != nil || !ok {
-		return "", ok, err
-	}
-	return s.merchantSecret(ctx, name)
+	return s.merchantSecretRef(ctx, ref)
 }
 
 func (s *PurchaseService) scopedProviderSecretsEnabled() bool {
@@ -175,11 +164,7 @@ func (s *PurchaseService) resolveRailTarget(ctx context.Context, requested strin
 	}
 
 	// Declared PSP key wins (a rail-named account resolves identically).
-	keys, ok := s.ProviderSecrets.(merchants.PSPKeyResolver)
-	if !ok {
-		return railTarget{}, errors.New("payment provider key resolution is not configured")
-	}
-	scope, found, err := keys.PSPScopeByKey(ctx, tid, name)
+	scope, found, err := s.ProviderSecrets.PSPScopeByKey(ctx, tid, name)
 	if err != nil {
 		return railTarget{}, fmt.Errorf("resolve payment provider %q: %w", name, err)
 	}
@@ -193,11 +178,7 @@ func (s *PurchaseService) resolveRailTarget(ctx context.Context, requested strin
 
 	// Bare rail kind: arming picks the PSP, and only an unambiguous match may.
 	// The armed account's key becomes the PSP so plan links resolve.
-	lister, ok := s.ProviderSecrets.(merchants.PSPRailScopesResolver)
-	if !ok {
-		return railTarget{}, errors.New("payment provider rail resolution is not configured")
-	}
-	scopes, err := lister.ActivePSPScopesForRail(ctx, tid, name)
+	scopes, err := s.ProviderSecrets.ActivePSPScopesForRail(ctx, tid, name)
 	if err != nil {
 		return railTarget{}, fmt.Errorf("resolve payment rail %q: %w", name, err)
 	}
@@ -248,15 +229,11 @@ func (s *PurchaseService) resolveRailTargetForPSP(ctx context.Context, rail stri
 	if s == nil || s.ProviderSecrets == nil {
 		return railTarget{}, errors.New("payment provider resolution is not configured")
 	}
-	lister, ok := s.ProviderSecrets.(merchants.PSPRailScopesResolver)
-	if !ok {
-		return railTarget{}, errors.New("payment provider rail resolution is not configured")
-	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return railTarget{}, fmt.Errorf("resolve payment provider account: %w", err)
 	}
-	scopes, err := lister.ActivePSPScopesForRail(ctx, tid, rail)
+	scopes, err := s.ProviderSecrets.ActivePSPScopesForRail(ctx, tid, rail)
 	if err != nil {
 		return railTarget{}, fmt.Errorf("resolve payment rail %q: %w", rail, err)
 	}
@@ -363,8 +340,8 @@ func (s *PurchaseService) resolveCCBillConfig(ctx context.Context) (*config.CCBi
 }
 
 func (s *PurchaseService) resolveScopedCCBillConfig(ctx context.Context, base *config.CCBillConfig) (*config.CCBillConfig, error) {
-	scopeResolver, ok := s.ProviderSecrets.(merchants.PSPScopeResolver)
-	if !ok {
+	scopeResolver := s.ProviderSecrets
+	if scopeResolver == nil {
 		return nil, errors.New("missing scoped merchant CCBill PSP resolver")
 	}
 	tid, err := merchant.Require(ctx)
@@ -372,6 +349,7 @@ func (s *PurchaseService) resolveScopedCCBillConfig(ctx context.Context, base *c
 		return nil, err
 	}
 	var scope merchants.PSPScope
+	var ok bool
 	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
 		scope, err = s.capturedPSPScope(ctx, pspID)
 		ok = err == nil
@@ -430,8 +408,8 @@ func custodianHeld(target railTarget) bool {
 // Best-effort: it only refines a skip class in the routing trace, never a
 // routing outcome, so a resolver that cannot answer leaves the class as-is.
 func (s *PurchaseService) pspKeyArchived(ctx context.Context, selector string) bool {
-	resolver, ok := s.ProviderSecrets.(merchants.ArchivedPSPKeyResolver)
-	if !ok {
+	resolver := s.ProviderSecrets
+	if resolver == nil {
 		return false
 	}
 	tid, err := merchant.Require(ctx)
@@ -451,8 +429,8 @@ func (s *PurchaseService) capturedPSPScope(ctx context.Context, pspID uuid.UUID)
 	if err != nil {
 		return merchants.PSPScope{}, err
 	}
-	resolver, ok := s.ProviderSecrets.(merchants.PSPIdentityScopeResolver)
-	if !ok {
+	resolver := s.ProviderSecrets
+	if resolver == nil {
 		return merchants.PSPScope{}, errors.New("immutable PSP resolver is required")
 	}
 	scope, ok, err := resolver.PSPScopeByID(ctx, mid, pspID)

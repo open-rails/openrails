@@ -62,7 +62,7 @@ type PurchaseService struct {
 	PaymentMethodService     *paymentmethods.PaymentMethodService
 	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	MerchantSecrets          merchants.MerchantSecretReader
-	ProviderSecrets          merchants.PSPSecretResolver
+	ProviderSecrets          *merchants.Service
 	// RailCustomerService maps users to rail customer ids: one Stripe customer
 	// per user, recorded at purchase rather than only by webhooks.
 	RailCustomerService *payments.RailCustomerService
