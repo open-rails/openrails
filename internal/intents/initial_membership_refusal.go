@@ -199,7 +199,7 @@ func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.BillingPr
 		return errors.New("Stripe decline is still executable")
 	}
 	if result.DeclineCode == "" {
-		result.DeclineCode = s.retainedDeclineCode(ctx, in)
+		result.DeclineCode = s.retainedDecline(ctx, in, result).DeclineCode
 	}
 	binding, err := collectionBinding(in)
 	if err != nil {

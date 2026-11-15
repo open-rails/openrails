@@ -140,12 +140,12 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.BillingProv
 			if err != nil {
 				return err
 			}
-			stripeCode, stripePI, stripeFound, err := LoadStripeRecurringDecline(current)
+			stripeRefusal, stripeFound, err := LoadStripeRecurringDecline(current)
 			if err != nil {
 				return err
 			}
 			if stripeFound {
-				if outcome.Evidence["declined"] != true || outcome.Evidence["failure_code"] != stripeCode || outcome.Evidence["stripe_payment_intent_id"] != stripePI {
+				if outcome.Evidence["declined"] != true || outcome.Evidence["failure_code"] != stripeRefusal.Code || outcome.Evidence["stripe_payment_intent_id"] != stripeRefusal.PaymentIntentID {
 					return errors.New("Stripe terminal result contradicts canceled payment custody")
 				}
 			} else if found {
