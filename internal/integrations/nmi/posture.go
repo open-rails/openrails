@@ -85,15 +85,15 @@ func (c *NMIClient) CheckPosture(ctx context.Context) (providerposture.Verdict, 
 
 // requireArmed gates every mutation: the credential must hold a cached verdict
 // matching its declared environment (live, or simulated for test and
-// sandbox); an unseen credential is verified once, inline.
+// sandbox); an unseen credential, or one proven an hour ago, is verified
+// inline.
 func (c *NMIClient) requireArmed(ctx context.Context, target string) error {
 	if ctx.Value(probeContextKey{}) == c {
 		return nil
 	}
 	if c.Live() {
 		// A live credential proves it is not in test mode before its first
-		// mutation: verified on load, or inline (bounded, once) when this
-		// process has not seen it.
+		// mutation, and again hourly: test mode is a dashboard toggle.
 		if c.LoopbackFixture {
 			return nil
 		}

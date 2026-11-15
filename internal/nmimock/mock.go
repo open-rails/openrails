@@ -69,6 +69,7 @@ type Mock struct {
 	failUpdates               int
 	hide                      int
 	queryDown                 bool
+	liveMode                  bool
 	unsupportedDuplicateCheck bool
 	failures                  []*failure
 	intercepts                []*intercept
