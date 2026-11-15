@@ -170,7 +170,7 @@ for its merchant, and the page shows the root group alone.
 ## Your own auth
 
 A host without AuthKit implements the same contract over its own users and
-roles: [examples/own-auth](../examples/own-auth) is one, with its tests.
+roles: [examples/own-auth](../examples/own-auth) is one.
 `authkit/auth` defines the contract and uses only the standard library. It is
 versioned with AuthKit but imports no AuthKit runtime, so a host implements it
 without running AuthKit:

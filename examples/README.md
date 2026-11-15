@@ -3,10 +3,9 @@
 One app three ways: a course site where users sign in with AuthKit, buy a
 course, rent one for 3 days, buy the bundle, or join the channel membership,
 which unlocks every video. Each folder is complete on its own; copy the one
-you need. They share no code by import, and `shared_test.go` keeps the parts
-they have in common identical: the catalog, the content routes and media
-signing (`content.go`), and the React pages (`web/src/pages.tsx`, `main.tsx`)
-with their browser tests (`web/e2e`).
+you need. They share no code by import; what they have in common is the
+same in each: the catalog, the content routes and media signing
+(`content.go`), and the React pages (`web/src/pages.tsx`, `main.tsx`).
 
 | | [`embedded`](embedded) | [`standalone`](standalone) | [`hosted`](hosted) |
 |---|---|---|---|
@@ -26,9 +25,8 @@ with their browser tests (`web/e2e`).
 Only `main.go`, `web/src/clients.ts` and each folder's run files differ.
 OpenRails emails a customer only at an address they proved, so the
 standalone and hosted apps make AuthKit verify each sign-up's email. Each
-folder's README says how to run it and its tests.
+folder's README says how to run it.
 
 [`own-auth`](own-auth) stands apart: a backend with custom authentication and no web
 app, two merchants on one engine, whose own users, sessions and roles tables
-answer OpenRails through authkit/auth's `Authenticator`. Its tests run
-OpenRails' conformance check and its gates against them.
+answer OpenRails through authkit/auth's `Authenticator`.

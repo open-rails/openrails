@@ -32,7 +32,7 @@ curl http://localhost:3053/health/ready       # readiness: dependencies, local w
 ```
 
 Host ports (all bound to 127.0.0.1): OpenRails `:3053`, Postgres `:5434`,
-Redis `:6380`. The server applies its migrations at boot. Everything — public catalog,
+Redis `:6380`. The server applies its migrations at boot. Everything — public routes,
 `/v1/me/*` self-service, `/v1/admin/*`, and webhooks — shares the one port;
 there is no separate private/service listener.
 
@@ -74,7 +74,7 @@ signing or trusted-proxy requirements.
 
 ```bash
 openrails run-server --config /etc/openrails/config.yaml \
-  --provider-write-mode full --test-mode live
+  --provider-write-mode full
 ```
 
 **Required configuration** (config validation refuses boot otherwise):
@@ -126,11 +126,10 @@ Manifest walkthrough (file layout, YAML secret overlays via
 
 Three file-backed manifests drive provisioning (example shapes:
 `config/bootstrap.example.yaml`, `config/merchants_config.example.yaml`,
-`config/catalog.example.yaml`). Every push command shares one **mutation-flag
-contract**: with no flags it is **plan-only** (prints a terraform-style diff,
-mutates nothing); `--insert` creates missing state, `--overwrite` updates
-existing state, `--prune` removes target extras absent from the manifest. The
-flags compose; full reconciliation is `--insert --overwrite --prune`.
+`config/catalog.example.yaml`). `push-merchant-config` is create-only: bare,
+it only reports; `--insert` creates the missing merchants. `--overwrite` and
+`--prune` are refused as retired; configuration changes at its revision
+through the API.
 
 The merchant manifest (`version: 1`, then `merchants.<slug>`) can instead be
 read at every boot, `run-server --merchant-manifest merchants.yaml` (or a
@@ -401,10 +400,9 @@ with that merchant's own signing secret, and updates
 subscriptions/entitlements; your app just reads the results. For local rail
 sandboxes see [dev/local-webhooks.md](dev/local-webhooks.md).
 
-**Public routes.** The routes that take no credential name their merchant in
-the request, whatever host they are called at: the public catalog as
-`?merchant=<merchant id>`, a wallet's Solana Pay request by its order.
-`GET /v1/config` is the deployment's and names none.
+**Public routes.** A wallet's Solana Pay request names its merchant by its
+order; `GET /v1/config` is the deployment's and names none. No public route
+reads the catalog: your server reads it with the Go client.
 
 **One API host.** The server answers every merchant on one host: a request's
 Host names no merchant, and a merchant has no hostname of its own. Each

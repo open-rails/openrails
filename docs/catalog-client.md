@@ -69,8 +69,8 @@ OpenRails includes current prices by default. Like
 lookups filtered by product. Shopify's
 [product model](https://shopify.dev/docs/api/admin-graphql/latest/objects/ProductVariant)
 exposes priced variants; OpenRails keeps its existing price records rather
-than introducing variants. Public browser lookups remain bounded to named
-product keys and redact provider-private price fields.
+than introducing variants. No public route reads the catalog: a host's server
+reads it with the Client and shows products in its own pages.
 
 ## Reads served from memory
 

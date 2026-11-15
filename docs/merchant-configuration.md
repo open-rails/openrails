@@ -72,8 +72,7 @@ openrails apply-merchant-config --server-url https://billing.example --token-fil
 ```
 
 Remote mode does not read local infrastructure configuration and rejects
-explicit `--config`, `--provider-write-mode`, `--test-mode` and `--merchant`
-flags. In a local run `--merchant` names the merchant; a slug selects scope
+explicit `--config`, `--provider-write-mode` and `--merchant` flags. In a local run `--merchant` names the merchant; a slug selects scope
 and grants no authority.
 
 `push-merchant-config --seed` provisions the merchants a manifest names (create

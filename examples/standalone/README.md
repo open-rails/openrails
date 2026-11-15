@@ -15,7 +15,6 @@ OAuth issuer the server trusts. The walkthrough is the root README's
 | `openrails/config.yaml` | the server's configuration: database, Redis, its own AuthKit (a resource server), route groups, SMTP |
 | `openrails/merchant.example.yaml` | the merchant the server serves, the app's AuthKit as its trusted issuer, and its NMI PSP; copy it to `merchant.yaml` |
 | `compose.yaml` | the stack: PostgreSQL, Redis, Mailpit, the server, a one-shot `catalog apply`, and the app |
-| `compose.e2e.yaml`, `e2e-seed.mjs` | the same stack with NMI played by the server's fake gateway, running `web/e2e` in a browser |
 | `Dockerfile`, `postgres-init.sql` | the app's image; the app's database beside the server's |
 
 ## Run it
@@ -29,9 +28,9 @@ The store is http://localhost:8080, the server http://localhost:3053 and the
 inbox (verification codes, receipts) http://localhost:8025.
 `docker compose down -v` removes it all.
 
-The server image is `docker.io/openrails/openrails:v0.259.0`, including explicit
-account-directory tenancy. Until it is published, build that tag from this checkout:
-`docker build -t docker.io/openrails/openrails:v0.259.0 ../..`.
+The server image is the release `compose.yaml` pins; to run this checkout
+instead, build it: `docker build -t docker.io/openrails/openrails:dev ../..` and
+point `compose.yaml` at that tag.
 
 The example keeps fixed, separate directory IDs for the app and the billing
 platform. For your deployment generate each ID once, set the app's
@@ -49,34 +48,4 @@ openrails run-server --config openrails/config.yaml --merchant-manifest openrail
 openrails catalog apply catalog.yaml --config openrails/config.yaml --merchant-manifest openrails/merchant.yaml --merchant onlydemo
 (cd web && pnpm install && pnpm build)
 DATABASE_URL=postgres://… OPENRAILS_CLIENT_SECRET=… EMAIL_SMTP_HOST=… go run .
-```
-
-## Tests
-
-CI runs them (`bash scripts/check.sh examples-e2e` from the repository root).
-By hand: `go test -tags integration .` with `OPENRAILS_E2E_DSN` naming a PostgreSQL 18
-server, and `OPENRAILS_E2E_REDIS` a Redis if you want one. Each test runs
-the `openrails` binary (`OPENRAILS_BIN`, else built from `../../server`)
-with `openrails/config.yaml` and `merchant.example.yaml`, only their ports
-changed (and without Redis when none is named: one server counting its limits
-in memory), applies the catalog with
-`catalog apply`, and plays NMI with `openrailstest/nmimock` and SMTP with
-`smtptest`.
-
-- `TestGatedContent`, `TestCourseList`, `TestMediaURLs`: the embedded
-  example's, with each purchase made at the server with a DPoP-bound token,
-  as billing-ui does.
-- `TestServerSetup`: a user who signs up and proves their email buys and is
-  emailed a receipt; the backend's read-only token reads them, with the email
-  AuthKit pushed over SCIM, and is refused a write; a signed NMI webhook is
-  accepted and a forged one refused.
-- `TestBrowser`: `web/e2e` in Chromium against the app and the server.
-
-The whole stack from its images, with the browser tests:
-
-```sh
-cp openrails/merchant.example.yaml openrails/merchant.yaml   # its placeholder keys suit the fake gateway
-(cd web && pnpm install)
-OPENRAILS_CLIENT_SECRET=$(openssl rand -hex 32) docker compose -f compose.yaml -f compose.e2e.yaml run --rm e2e
-docker compose -f compose.yaml -f compose.e2e.yaml down -v
 ```

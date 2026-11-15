@@ -92,13 +92,13 @@ Ownership determines which system may initiate the renewal.
 | Worker | Cadence | Job |
 |---|---|---|
 | Provider operation | its own job, at each attempt | runs one outbound provider mutation from the intent ledger (Solana pulls included, scheduled at each due period); resolves an `unknown_needs_verify` outcome by *reading* the provider before any retry |
-| Due / dunning | 1 min | admits due engine renewals and retries `past_due` per the derived schedule; parks whole missed periods for verification instead of charging ([operations.md → Dunning](operations.md#dunning)) |
+| Due / dunning | hourly billing pass | admits due engine renewals and retries `past_due` per the derived schedule; parks whole missed periods for verification instead of charging ([operations.md → Dunning](operations.md#dunning)) |
 | Customer convergence | with each mutation | re-derives the changed customer's state in a job committed with the mutation ([operations.md](operations.md#the-convergence-engine)) |
 | Merchant health | hourly | health findings and timed access lapses, for merchants with activity ([operations.md](operations.md#the-convergence-engine)) |
 | Provider Refresh | 2 h (+ on start) | watermarked missed-event backfill, unknown-cohort reconcile — reads only, never mutates a provider |
 | Retention cleanup | 1 h | deletes rows past their retention ([operations.md → Data retention](operations.md#data-retention)) |
-| Usage orders (opt-in) | 5 min | bills due usage accounts and queues due collections as operations ([usage billing](usage-billing.md)) |
-| Arrears delinquency | 1 min | evaluates customers whose usage order fell due or whose grace ran out |
+| Usage orders (opt-in) | hourly billing pass | bills due usage accounts and queues due collections as operations ([usage billing](usage-billing.md)) |
+| Arrears delinquency | hourly billing pass | evaluates customers whose usage order fell due or whose grace ran out |
 
 The full list: [operations.md → Background worker schedule](operations.md#background-worker-schedule).
 

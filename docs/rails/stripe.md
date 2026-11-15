@@ -41,7 +41,8 @@ merchants:
 
 `account_id` is your Stripe account id (`acct_…`). Copy it from the Dashboard, or run
 `curl https://api.stripe.com/v1/account -u "sk_live_...:"`. OpenRails stores it as
-declared; it does not derive it at runtime.
+declared and checks the key against it (`GET /v1/account`): a key of another
+account is never armed.
 
 ### Webhooks
 

@@ -391,7 +391,7 @@ Every route needs `merchant:config:manage` (or `root:config:manage`). These oper
 | `GET /v1/merchant/findings` | problems OpenRails found that need an operator (`?type=`) |
 | `GET /v1/merchant/findings/{id}` | one finding |
 | `POST /v1/merchant/findings/{id}/resolve` | resolve one |
-| `GET /v1/merchant/configuration` | your name, settings, their revision and your API host |
+| `GET /v1/merchant/configuration` | your name, settings and their revision |
 | `PATCH /v1/merchant/configuration` | change your name or settings |
 | `GET /v1/merchant/alert-webhooks` | where operator alerts are sent |
 | `POST /v1/merchant/alert-webhooks` | add an alert webhook |
@@ -982,7 +982,7 @@ Merchant config (your name, settings, PSPs and their credentials) lives in one o
 cfg := openrails.Config{
 	Database:          openrails.DatabaseConfig{Schema: "billing"},
 	ProviderWriteMode: openrails.ProviderWritesFull,
-	Merchant:          openrails.MerchantDeclaration{Slug: "onlydemo"}, // no PSPs here: staff manage them in Vault
+	Merchants:         map[string]openrails.MerchantDeclaration{"onlydemo": {}}, // no PSPs here: staff manage them in Vault
 	Vault: &openrails.VaultConfig{
 		Address:    "https://vault.internal:8200",
 		AuthMethod: "kubernetes", // or "approle", "token"
@@ -1052,10 +1052,9 @@ and no session is sticky.
   Redis these are kept in memory, so run a single instance. A configured Redis
   that stops answering falls back to memory per instance until it returns.
 - **Identical on every instance**: the configuration (merchant declaration,
-  catalog, rate limits, trusted proxies), the mounted `Routes`,
-  `encryption.master_key`, and for the standalone server its signing and TOTP
-  keys and `resource_server.dpop_nonce_key`. `auth.allow_ephemeral_signing_key`
-  and `auth.allow_memory` are for a single instance.
+  catalog, rate limits, trusted proxies), the mounted `Routes`, and for the
+  standalone server its signing keys. `auth.keys.allow_ephemeral_dev_keys` is
+  for a single instance.
 - **Background work**: every instance that calls `Start` works River jobs, each
   job on one instance. River's leader schedules periodic work on its period's
   clock boundaries, once per period for the fleet; when the leader stops,
@@ -1394,23 +1393,23 @@ The server's service is the image with your two files mounted:
 
 ```yaml
 openrails:
-  image: docker.io/openrails/openrails:v0.235.0
+  image: docker.io/openrails/openrails:vX.Y.Z
   command: [run-server, --config, /etc/openrails/config.yaml, --merchant-manifest, /etc/openrails/merchant.yaml]
   volumes:
     - ./openrails:/etc/openrails:ro
-    - openrails-keys:/vault/auth # the server's signing key (auth.keys_path)
+    - openrails-keys:/vault/auth # the server's signing key (auth.keys.path)
 ```
 
 Without Docker, download the binary and run the same files:
 
 ```sh
-curl -fsSL https://github.com/open-rails/openrails/releases/download/v0.235.0/openrails_0.235.0_linux_amd64.tar.gz | tar xz openrails
+curl -fsSL https://github.com/open-rails/openrails/releases/download/vX.Y.Z/openrails_X.Y.Z_linux_amd64.tar.gz | tar xz openrails
 DB_URL=postgres://… EMAIL_SMTP_HOST=… AUTH_KEYS_PATH=… ./openrails run-server --config config.yaml --merchant-manifest merchant.yaml
 ```
 
 #### Configure it
 
-`config.yaml` holds the process: its database, its own AuthKit, the issuer it trusts, its route groups and SMTP. Generate a stable `auth.default_tenant_id` once for the server's platform/operator account directory; it is independent of its merchants' tenants. Keep it across replicas and restarts. `openrails migrate up` prepares both billing and this explicit AuthKit directory. See [account directory adoption](docs/auth.md#standalone-account-directory). This is the example's, whole:
+`config.yaml` holds the process: its database, its own AuthKit, its route groups and SMTP. The issuer it trusts is the merchant's, in `merchant.yaml`. Generate a stable `auth.default_tenant_id` once for the server's platform/operator account directory; it is independent of its merchants' tenants. Keep it across replicas and restarts. `openrails migrate up` prepares both billing and this explicit AuthKit directory. See [account directory adoption](docs/auth.md#standalone-account-directory). This is the example's, whole:
 
 ```yaml
 provider_write_mode: full # full | limited | readonly: how much it may do at the PSPs
@@ -1424,32 +1423,31 @@ db:
 redis: # rate limits and abuse state shared by replicas; without it, in memory (one instance)
   addr: redis:6379
 
-# The server's own AuthKit: its tables (schema profiles) and signing key. Its
-# sign-in stays off: people sign in at the app, the trusted issuer below.
+# The server's own AuthKit, by AuthKit's keys: its signing key, and the
+# resource server it is. Its sign-in stays off: people sign in at the app,
+# which merchant.yaml declares the merchant's trusted issuer.
 auth:
   default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11
-  issuer: http://localhost:3053
-  request_origin: http://localhost:3053 # the origin DPoP proofs name
-  keys_path: /vault/auth
-  direct_peer_ip: true                  # clients connect directly; behind a proxy, set trusted_proxies
-  allow_loopback_http: true             # local only: http://localhost as issuer and origin
-  allow_ephemeral_signing_key: true     # local only: generates its key under keys_path
-  allow_missing_senders: true           # it sends no sign-in mail of its own
-
-# OpenRails is an OAuth resource server: it accepts the app's AuthKit tokens.
-resource_server:
-  identifier: http://localhost:3053   # the tokens' aud
-  dpop_nonce_key: local-dpop-nonce-key-at-least-32-bytes # the same on every replica
-  trusted_issuers:
-    - name: courses
-      issuer: http://localhost:8080   # the app's AuthKit; keys from its /.well-known/jwks.json
-      merchants: [onlydemo]           # its tokens act for this merchant only
-      permissions: ["merchant:customer:read", "merchant:entitlements:read", "merchant:catalog:read"] # the most its tokens may grant
+  token:
+    issuer: http://localhost:3053
+    allow_private_network_jwks: true # local only: the app's keys at http://localhost:8080
+  keys:
+    path: /vault/auth
+    allow_ephemeral_dev_keys: true   # local only: generates its key under keys.path
+  http:
+    direct_peer_ip: true             # clients connect directly; behind a proxy, set trusted_proxies
+  registration:
+    allow_missing_senders: true      # it sends no sign-in mail of its own
+  # OpenRails is an OAuth resource server: it accepts the tokens its
+  # merchants' trusted issuers mint for it.
+  resource:
+    id: http://localhost:3053        # the tokens' aud, and where DPoP proofs point
 
 # Route groups beyond the public, customer (/v1/me) and webhook routes.
 route_groups:
   admin: true        # customer support; the app's backend reads customers with merchant:customer:read
-  programmatic: true # /v1/app: the backend's entitlement checks (merchant:entitlements:read) and offers (merchant:catalog:read)
+  catalog: true      # product and price reads (merchant:catalog:read)
+  programmatic: true # /v1/app: the backend's entitlement checks (merchant:entitlements:read)
 
 # Native account mail and operator alerts; customer billing delivery belongs to the application.
 email_smtp:
@@ -1458,7 +1456,7 @@ email_smtp:
   from: "OnlyDemo Billing <billing@onlydemo.example>"
 ```
 
-Every key also reads from the environment, its path upper-cased and joined by `_` (`db.url` is `DB_URL`), or from a file of that name under `/vault/secrets` (`VAULT_SECRETS_PATH`); flags beat the environment, which beats the file. In production drop the `allow_*` lines; use https for `auth.issuer`, `auth.request_origin`, `resource_server.identifier` and the trusted issuer; mount a real signing key at `keys_path`; take `dpop_nonce_key` (`RESOURCE_SERVER_DPOP_NONCE_KEY`) and database credentials from secrets; and behind a load balancer replace `direct_peer_ip` with `trusted_proxies` (`cloudflare_proxies` behind Cloudflare). Redis takes `redis.url` (`redis://` or `rediss://`), `redis.username`, `redis.tls` and `redis.ca_cert` for a managed instance. The server applies its migrations at boot (`openrails migrate up` runs them ahead of a rollout); see [config.example.yaml](config.example.yaml) for every key.
+Every key also reads from the environment, its path upper-cased and joined by `_` (`db.url` is `DB_URL`), or from a file of that name under `/vault/secrets` (`VAULT_SECRETS_PATH`); flags beat the environment, which beats the file. In production drop the `allow_*` lines; use https for `auth.token.issuer`, `auth.resource.id` and the trusted issuer; mount a real signing key at `auth.keys.path`; take database credentials from secrets; and behind a load balancer replace `auth.http.direct_peer_ip` with `trusted_proxies` (`cloudflare_proxies` behind Cloudflare). Redis takes `redis.url` (`redis://` or `rediss://`), `redis.username`, `redis.tls` and `redis.ca_cert` for a managed instance. The server applies its migrations at boot (`openrails migrate up` runs them ahead of a rollout); see [config.example.yaml](config.example.yaml) for every key.
 
 #### Declare the merchant
 
@@ -1469,12 +1467,15 @@ version: 1
 merchants:
   onlydemo: # your merchant's name: lowercase letters, digits and hyphens
     display_name: OnlyDemo
-    api_host: localhost # the Host its public routes (the catalog, purchase) answer on
+    remote_application: # the app's AuthKit: its tokens act for this merchant only
+      issuer: http://localhost:8080
+      jwks_uri: http://localhost:8080/.well-known/jwks.json
     profile:
       from_email: billing@onlydemo.example # merchant sender identity
     psps:
       mobius: # your name for this account; any key you like
         rail: nmi
+        environment: sandbox # live (real money; the default), test or sandbox
         gateway_id: "000000" # the NMI dashboard's Gateway ID
         tokenization_key: your-public-tokenization-key # the browser's card fields use it
         secrets:
@@ -1482,7 +1483,7 @@ merchants:
           webhook_signing_secret: your-webhook-signing-key
 ```
 
-The public routes find their merchant by the request's Host, so every merchant needs an `api_host`, a lone one included. In production keep `secrets` out of the file: render them (Vault Agent, a Kubernetes Secret) as a YAML file of the same shape and list it in `merchant_manifest_overlays`. To add and rotate PSPs at runtime instead, name a Vault KV mount (`vault.kv_mount`) and turn on `route_groups.merchant_config`: Vault then holds the configuration and the file names only the merchant, its slug and `api_host` ([Vault](docs/vault.md)).
+A request names its merchant by its credential, never by its host. In production keep `secrets` out of the file: render them (Vault Agent, a Kubernetes Secret) as a YAML file of the same shape and list it in `merchant_manifest_overlays`. To add and rotate PSPs at runtime instead, name a Vault KV mount (`vault.kv_mount`) and turn on `route_groups.merchant_config`: Vault then holds the configuration and the file names only the merchant and its `remote_application` ([Vault](docs/vault.md)).
 
 #### Apply the catalog
 
@@ -1519,7 +1520,7 @@ AuthorizationServer: authkit.AuthorizationServerConfig{
 },
 ```
 
-The server's `resource_server` block (above) names this issuer, the merchant its tokens act for, and their permission ceiling.
+The merchant's `remote_application` (above) names this issuer. Its tokens act for that merchant only, within the merchant owner role its application holds and the token's scopes ([trusted issuers](docs/auth.md#trusted-issuers)).
 
 #### Build the billing client
 
@@ -1601,7 +1602,7 @@ Point each PSP's webhooks at the server: `https://<your server>/v1/webhooks/{rai
 
 #### Route groups and permissions
 
-`route_groups` turns on what `RouteGroups` does embedded: `admin`, `catalog`, `merchant_config`, `metrics` and `programmatic` (`/v1/app`, SCIM included). The staff groups check the server's permissions, `merchant:customer:read|manage`, `merchant:catalog:manage`, `merchant:config:manage` and `merchant:metrics:read`; `/v1/app` routes check `merchant:orders:manage`, `merchant:entitlements:read`, `merchant:catalog:read`, `merchant:usage:manage` and `merchant:events:read`. A token carries them from your AuthKit roles within the issuer's ceiling. The backend client above may read customers, check entitlements and read offers, nothing more. Your staff sign in to the standalone console at `/admin`; configure `admin_console.issuers` for app sign-in or `local_sign_in` for local accounts. See the [standalone console](docs/billing-admin.md).
+`route_groups` turns on what `RouteGroups` does embedded: `admin`, `catalog`, `merchant_config`, `metrics` and `programmatic` (`/v1/app`, SCIM included). The staff groups check the server's permissions, `merchant:customer:read|manage`, `merchant:catalog:read|manage`, `merchant:config:manage` and `merchant:metrics:read`; `/v1/app` routes check `merchant:orders:manage`, `merchant:entitlements:read`, `merchant:usage:read|manage` and `merchant:events:read`. A token carries them from your AuthKit roles within the issuer's ceiling. The backend client above may read customers, check entitlements and read offers, nothing more. Your staff sign in to the standalone console at `/admin`; configure `admin_console.issuers` for app sign-in or `local_sign_in` for local accounts. See the [standalone console](docs/billing-admin.md).
 
 #### Operate it
 
@@ -1629,15 +1630,16 @@ The [standalone guide](docs/standalone-integration.md) and [operations manual](d
 [openrails.dev](https://openrails.dev) runs OpenRails for you, for many
 merchants:
 
-- **Sign up** and create a merchant account. It gets its own API host, shown in
-  the dashboard; your staff join it as owners, support or viewers.
+- **Sign up** and create a merchant account; your staff join it as owners,
+  support or viewers. Every merchant calls the platform's one API URL, shown in
+  the dashboard; your credential names your merchant.
 - **In the dashboard,** add your PSPs (credentials go to Vault), manage the
   catalog, and copy the webhook URL for each processor.
 - **Your backend** creates a service token in the dashboard and uses the same Go
   `Client`:
 
   ```go
-  bill, err := openrails.NewRemoteMerchant("https://<your API host>", openrails.RemoteCredential{
+  bill, err := openrails.NewRemoteMerchant("https://<the platform's API URL>", openrails.RemoteCredential{
       APIKey: os.Getenv("OPENRAILS_SERVICE_TOKEN"), // shown once in the dashboard
   })
   ```
@@ -1653,14 +1655,14 @@ merchants:
 - **Orders** — one purchase model across every rail: tokenized card entry
   (NMI Collect.js, Stripe Elements), a provider-hosted redirect, and Solana Pay.
 - **Catalog as source of truth** — declare your products, prices, rate cards, and tiers
-  once; OpenRails pushes them to providers (find-or-create).
+  once; existing provider plans and prices are mirrored read-only, never created.
 - **Entitlements & product ownership** — your webserver asks one question ("does user X
   have Y right now?") against your own database, never a provider API.
 - **Tiered plans with proration** — users upgrade/downgrade between tiers; preview the
   proration before committing.
 - **Dunning: capture lost revenue** — failed rebills are retried on a schedule derived
   from the billing cycle, with a staleness window that guarantees a months-old failure is
-  canceled, never surprise-charged.
+  parked for verification with access kept, never surprise-charged.
 - **Payment-lifecycle facts** — payment failures, card updates, renewals and
   cancellations produce durable events. Each application consumes them independently
   and owns its inbox, templates, email preferences and delivery.
@@ -1748,7 +1750,8 @@ OpenRails ships the whole recovery stack built in:
   rates on the charges that matter most: the renewals.
 - **Smart retries on the failures that remain** — hard declines (stolen card,
   do-not-honor) go terminal immediately instead of burning retries; soft declines get a
-  cycle-derived schedule, and a months-stale failure is canceled, never surprise-charged.
+  cycle-derived schedule, and a months-stale failure is parked for verification, never
+  surprise-charged.
 - **Events for the customer conversation** — payment-failure and card-expiry facts
   let your application deliver notices and recheck whether an action is still needed.
 - **Proof it's working** — approval rate by rail, token type, and decline reason on your
@@ -1763,8 +1766,8 @@ build yourself, badly, under deadline:
 
 - **The Convergence Engine.** Billing systems rot by drifting from provider truth: a lost
   webhook here, a manual refund there. OpenRails treats the provider as the source of
-  truth for money state and *continuously* re-converges against it — inline after every
-  mutation, on a background sweep, and via watermarked provider reads. Every divergence
+  truth for money state and re-converges against it — inline after every mutation, on
+  indexed due work, and via watermarked provider reads. Every divergence
   becomes a classified finding on one of four planes (provider-observed truth, derived
   effects, lifecycle clocks, internal consistency); safe repairs apply automatically,
   judgment calls queue for a human and never auto-fire.
@@ -1775,15 +1778,15 @@ build yourself, badly, under deadline:
   observed and converged. Same subscription model either way.
 - **Double-entry money, twice over.** Every money movement is a balanced double-entry
   ledger transaction — value is never created or destroyed, only moved. A separate grant
-  ledger tracks credit lots (who was granted what, from which source), and the
-  Convergence Engine cross-checks the two continuously: duplicates, broken source
-  references, and unbalanced effects surface as findings instead of festering.
+  ledger tracks credit lots (who was granted what, from which source). Ledger integrity
+  is checked on export and restore, and `openrails ledger-audit` checks conservation and
+  account counters against the transfer log on demand.
 - **Audited entitlements.** No entitlement exists without provenance: every access window
   records its source event, grant, and lifecycle (granted → revoked, with reason), so
   "why does this user have premium?" is a query, not an investigation. Excess grants
   (e.g. access surviving a refund) are detected and flagged automatically.
 - **Effectively-once provider writes.** Every outbound mutation is a durable intent
-  before it's an HTTP call: idempotency-keyed, origin-tagged, account-fingerprinted, and
+  before it's an HTTP call: idempotency-keyed, origin-tagged, stamped with the account it targets, and
   drained by an executor that resolves ambiguous outcomes by *reading* the provider
   before any retry. A charge is never blind-retried; a credential swap can never fire a
   stale queue against the wrong account.
@@ -1868,7 +1871,7 @@ We'd rather you find this out here than three weeks in. Skip OpenRails if:
   Billing / Lago / Kill Bill territory; our invoicing is functional, not an accounting
   suite.
 - **You can't run Postgres.** OpenRails is self-hosted infrastructure with a database as
-  its source of truth. If you want zero ops, wait for our hosted version.
+  its source of truth. If you want zero ops, use [our hosted platform](#using-our-hosted-openrails-platform).
 
 ---
 

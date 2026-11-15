@@ -14,7 +14,7 @@ const server: { base_url: string; resource: string } = await fetch("/api/billing
 
 // The browser calls the server directly. Signed in, each call carries an
 // openrails:self token for the server and a DPoP proof; signed out, the
-// public catalog needs neither.
+// public routes need neither.
 export const billing = createBillingClient({
   baseUrl: server.base_url,
   fetch: (input, init) =>
