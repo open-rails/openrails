@@ -1050,6 +1050,12 @@
     ],
     "OR-J04-S60": [
       "TestBillingPass/OR-J04-S60/a-live-operation-whose-wake-was-lost-is-queued-again-an-hour-past-due"
+    ],
+    "OR-J20-S70": [
+      "TestRefundRecovery/OR-J20-S70/a-dashboard-refund-lands-while-the-roster-cannot-be-read"
+    ],
+    "OR-J04-S71": [
+      "TestBillingPass/OR-J04-S71/a-failed-nmi-history-read-fails-the-pass-and-the-next-reads-it"
     ]
   },
   "suites": {

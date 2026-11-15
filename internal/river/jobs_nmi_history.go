@@ -33,6 +33,9 @@ const (
 
 	nmiHistoryMerchantBatch = 200
 	nmiHistoryPSPBatch      = 100
+	// nmiHistoryReadBudget bounds one PSP's read, so a slow account cannot
+	// spend the whole scan's budget and starve the rest.
+	nmiHistoryReadBudget = 30 * time.Minute
 )
 
 // NMIHistoryWorker keeps each NMI PSP's authorization history as monthly
@@ -40,7 +43,9 @@ const (
 // first read backfills NMIHistoryMonths; later ones, daily, re-read from the
 // month before the last read's. A read replaces the months it covers in one
 // transaction, so a rerun is idempotent and a failed read leaves the stored
-// months as they were. It only reads NMI.
+// months as they were. The checkpoint is the PSP, not the month: the Query
+// API selects by last change, so a month's count is exact only from one read
+// that runs through to now. It only reads NMI.
 type NMIHistoryWorker struct {
 	DB          *db.DB
 	Clock       clockwork.Clock
@@ -95,13 +100,18 @@ func (w *NMIHistoryWorker) readMerchant(ctx context.Context, mid uuid.UUID, now 
 	if err != nil {
 		return err
 	}
+	var errs error
 	for _, psp := range due {
-		if err := w.read(ctx, mid, psp.ID, psp.ReadAt, now); err != nil {
+		rctx, cancel := context.WithTimeout(ctx, nmiHistoryReadBudget)
+		err := w.read(rctx, mid, psp.ID, psp.ReadAt, now)
+		cancel()
+		if err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{"merchant_id": mid, "psp_id": psp.ID}).
 				Warn("nmi history: read failed; the stored months stand and the next pass tries again")
+			errs = errors.Join(errs, fmt.Errorf("psp %s: %w", psp.ID, err))
 		}
 	}
-	return nil
+	return errs
 }
 
 // read reads one PSP's history and replaces the months it covers.

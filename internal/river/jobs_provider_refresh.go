@@ -584,6 +584,9 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		Since:       since,
 		Until:       until,
 	}
+	if provider == reconcile.ProviderStripe {
+		w.runReversals(ctx, engine, params, provider, pspID, horizon, now, &out)
+	}
 	applied := func() bool {
 		res, err := engine.Run(ctx, params)
 		if err != nil {
@@ -657,6 +660,34 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		}
 	}
 	return out
+}
+
+// runReversals reads the PSP's refunds and disputes before its full read, which
+// a large book may never finish. It moves no watermark: while the full read
+// is stuck, every pass re-reads the last batch up to the horizon.
+func (w *ProviderRefreshWorker) runReversals(ctx context.Context, engine *reconcile.Engine, params reconcile.RunParams, provider reconcile.Provider, pspID uuid.UUID, horizon, now time.Time, out *providerRefreshProviderResult) {
+	params.Reversals = true
+	if floor := horizon.Add(-w.batch()); params.Since.Before(floor) {
+		params.Since = floor
+	}
+	params.Until = horizon
+	res, err := engine.Run(ctx, params)
+	if err != nil {
+		out.LaneErrors++
+		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: reversals read failed; the full read still runs")
+		return
+	}
+	if rep := res.Summary.Providers[string(provider)]; rep != nil {
+		out.NewFindings += rep.NewFindings
+		out.UpdatedFindings += rep.UpdatedFindings
+	}
+	if n := len(res.AppliedChanges); n > 0 {
+		out.AppliedChanges += n
+		out.Changed = true
+		if _, err := webhookhealth.Drift(ctx, w.DB, pspID, now, n); err != nil {
+			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: record webhook drift failed")
+		}
+	}
 }
 
 func (w *ProviderRefreshWorker) loadAppliedWatermark(ctx context.Context, mid, psp uuid.UUID) (time.Time, error) {
@@ -733,6 +764,7 @@ func (s *providerRefreshStats) add(r providerRefreshMerchantResult) {
 	s.UpdatedFindings += r.UpdatedFindings
 	s.WatermarkErrors += r.WatermarkErrors
 	s.ProviderErrors += r.ProviderErrors
+	s.LaneErrors += r.LaneErrors
 	s.Held += r.Held
 }
 
@@ -749,6 +781,7 @@ func (r *providerRefreshMerchantResult) add(p providerRefreshProviderResult) {
 	r.UpdatedFindings += p.UpdatedFindings
 	r.WatermarkErrors += p.WatermarkErrors
 	r.ProviderErrors += p.ProviderErrors
+	r.LaneErrors += p.LaneErrors
 	r.Held += p.Held
 	r.Changed = r.Changed || p.Changed
 	if len(p.Proofs) > 0 {
@@ -768,8 +801,10 @@ type providerRefreshProviderResult struct {
 	UpdatedFindings int
 	WatermarkErrors int
 	ProviderErrors  int
-	Held            int
-	Changed         bool
+	// LaneErrors counts a failed reversals read; the full read still ran.
+	LaneErrors int
+	Held       int
+	Changed    bool
 	// Proofs carries the completed pull's coverage for the confirmed-absence gate.
 	Proofs reconcile.PullProofs
 }

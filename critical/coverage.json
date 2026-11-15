@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 326,
+  "scenario_count": 328,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -487,6 +487,11 @@
       "id": "OR-J20-S04",
       "journey": "J20",
       "name": "Foreign merchant and unsupported refund are refused with original currency and account intact"
+    },
+    {
+      "id": "OR-J20-S70",
+      "journey": "J20",
+      "name": "A dashboard refund lands from the reversals read while the full provider read cannot finish, and once"
     },
     {
       "id": "OR-J20-S05",
@@ -1487,6 +1492,11 @@
       "id": "OR-J04-S70",
       "journey": "J04",
       "name": "The hourly health pass raises held engine renewals and closes them once attempted"
+    },
+    {
+      "id": "OR-J04-S71",
+      "journey": "J04",
+      "name": "An NMI history read that fails fails the billing pass; the next pass reads it"
     },
     {
       "id": "OR-J27-S10",

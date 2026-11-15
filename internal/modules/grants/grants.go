@@ -466,39 +466,40 @@ func (l *Ledger) RevokeBySourceAsOf(ctx context.Context, customer uuid.UUID, kin
 }
 
 // The DERIVE detections below are single set queries: customer nil reads the
-// whole merchant, non-nil one customer (its convergence job).
+// whole merchant, non-nil one customer (its convergence job). Each returns at
+// most limit rows, in the order a draining pass repairs them.
 
 // MissingEffects returns live grants whose derived effects are not fully
 // materialized (`derive.grant_effect.missing`). Repair = MaterializeGrant
 // (idempotent).
-func (l *Ledger) MissingEffects(ctx context.Context, customer *uuid.UUID) ([]gen.BillingGrant, error) {
+func (l *Ledger) MissingEffects(ctx context.Context, customer *uuid.UUID, limit int32) ([]gen.BillingGrant, error) {
 	return l.q.ListLiveGrantsMissingEffects(ctx, gen.ListLiveGrantsMissingEffectsParams{
-		MerchantID: l.merchant, CustomerID: customer,
+		MerchantID: l.merchant, CustomerID: customer, RowLimit: limit,
 	})
 }
 
 // UnretractedTerminations returns terminated grants whose derived effect is
 // still live (`derive.grant_effect.excess`). Repair = MaterializeGrant, which
 // retracts (access → revoke window; credit → clawback), idempotently.
-func (l *Ledger) UnretractedTerminations(ctx context.Context, customer *uuid.UUID) ([]gen.BillingGrant, error) {
+func (l *Ledger) UnretractedTerminations(ctx context.Context, customer *uuid.UUID, limit int32) ([]gen.BillingGrant, error) {
 	return l.q.ListUnretractedTerminations(ctx, gen.ListUnretractedTerminationsParams{
-		MerchantID: l.merchant, CustomerID: customer,
+		MerchantID: l.merchant, CustomerID: customer, RowLimit: limit,
 	})
 }
 
 // UngrantedGrantablePayments returns completed, positive, one-off payments
 // that produced no grant (`derive.grant.missing`). Surface-only.
-func (l *Ledger) UngrantedGrantablePayments(ctx context.Context, customer *uuid.UUID) ([]gen.ListUngrantedGrantablePaymentsRow, error) {
+func (l *Ledger) UngrantedGrantablePayments(ctx context.Context, customer *uuid.UUID, limit int32) ([]gen.ListUngrantedGrantablePaymentsRow, error) {
 	return l.q.ListUngrantedGrantablePayments(ctx, gen.ListUngrantedGrantablePaymentsParams{
-		MerchantID: l.merchant, CustomerID: customer,
+		MerchantID: l.merchant, CustomerID: customer, RowLimit: limit,
 	})
 }
 
 // RefundedSourceGrants returns live grants whose backing payment was refunded
 // (`derive.grant.excess`). Surface-only: a goodwill refund may keep access.
-func (l *Ledger) RefundedSourceGrants(ctx context.Context, customer *uuid.UUID) ([]gen.ListLiveGrantsWithRefundedPaymentRow, error) {
+func (l *Ledger) RefundedSourceGrants(ctx context.Context, customer *uuid.UUID, limit int32) ([]gen.ListLiveGrantsWithRefundedPaymentRow, error) {
 	return l.q.ListLiveGrantsWithRefundedPayment(ctx, gen.ListLiveGrantsWithRefundedPaymentParams{
-		MerchantID: l.merchant, CustomerID: customer,
+		MerchantID: l.merchant, CustomerID: customer, RowLimit: limit,
 	})
 }
 
@@ -511,18 +512,18 @@ func (l *Ledger) RefundedSourceGrants(ctx context.Context, customer *uuid.UUID) 
 // (`derive.subscription.missing`). Unknown fails open; chargeback cancels get
 // no runway. scanSince bounds the scan to windows ending on/after it.
 // customer nil = merchant-wide sweep.
-func (l *Ledger) UngrantedSubscriptions(ctx context.Context, customer *uuid.UUID, scanSince time.Time) ([]gen.ListUngrantedSubscriptionsRow, error) {
+func (l *Ledger) UngrantedSubscriptions(ctx context.Context, customer *uuid.UUID, scanSince time.Time, limit int32) ([]gen.ListUngrantedSubscriptionsRow, error) {
 	return l.q.ListUngrantedSubscriptions(ctx, gen.ListUngrantedSubscriptionsParams{
-		MerchantID: l.merchant, CustomerID: customer, ScanSince: scanSince,
+		MerchantID: l.merchant, CustomerID: customer, ScanSince: scanSince, RowLimit: limit,
 	})
 }
 
 // UngrantedWalletPayments returns completed solana wallet payments carrying a
 // stored access window with no grant yet (`derive.wallet.missing`). customer
 // nil = merchant-wide sweep.
-func (l *Ledger) UngrantedWalletPayments(ctx context.Context, customer *uuid.UUID, scanSince time.Time) ([]gen.ListUngrantedWalletPaymentsRow, error) {
+func (l *Ledger) UngrantedWalletPayments(ctx context.Context, customer *uuid.UUID, scanSince time.Time, limit int32) ([]gen.ListUngrantedWalletPaymentsRow, error) {
 	return l.q.ListUngrantedWalletPayments(ctx, gen.ListUngrantedWalletPaymentsParams{
-		MerchantID: l.merchant, CustomerID: customer, ScanSince: scanSince,
+		MerchantID: l.merchant, CustomerID: customer, ScanSince: scanSince, RowLimit: limit,
 	})
 }
 

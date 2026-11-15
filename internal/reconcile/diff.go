@@ -1254,7 +1254,7 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 			}
 			findings = append(findings, finding)
 		case TransactionTypeSale:
-			if !t.Success || t.TransactionID == "" {
+			if !t.Success || t.TransactionID == "" || snap.ReversalsOnly {
 				continue
 			}
 			if payment, ok := paymentsByTxnID[t.TransactionID]; ok {

@@ -1090,19 +1090,21 @@ WHERE g.merchant_id = $1::uuid
         SELECT 1 FROM billing.ledger_transfers lt
         WHERE lt.merchant_id = g.merchant_id AND lt.transfer_type = 'deposit' AND lt.grant_id = g.id))
   )
-ORDER BY g.created_at
+ORDER BY g.created_at, g.id
+LIMIT $3::int
 `
 
 type ListLiveGrantsMissingEffectsParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
+	RowLimit   int32
 }
 
 // derive.grant_effect.missing: live access/credit grants without their effect:
 // access has no window (revoked windows count), credit has no deposit transfer.
 // NULL customer_id = merchant-wide. Repair = MaterializeGrant.
 func (q *Queries) ListLiveGrantsMissingEffects(ctx context.Context, arg ListLiveGrantsMissingEffectsParams) ([]BillingGrant, error) {
-	rows, err := q.db.Query(ctx, listLiveGrantsMissingEffects, arg.MerchantID, arg.CustomerID)
+	rows, err := q.db.Query(ctx, listLiveGrantsMissingEffects, arg.MerchantID, arg.CustomerID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -1167,11 +1169,13 @@ WHERE g.merchant_id = $1::uuid
         AND (p.status = 'refunded' OR refund.settled)
   )
 ORDER BY g.id
+LIMIT $3::int
 `
 
 type ListLiveGrantsWithRefundedPaymentParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
+	RowLimit   int32
 }
 
 type ListLiveGrantsWithRefundedPaymentRow struct {
@@ -1185,7 +1189,7 @@ type ListLiveGrantsWithRefundedPaymentRow struct {
 // goodwill refund may keep access, so an operator decides. NULL customer_id =
 // merchant-wide.
 func (q *Queries) ListLiveGrantsWithRefundedPayment(ctx context.Context, arg ListLiveGrantsWithRefundedPaymentParams) ([]ListLiveGrantsWithRefundedPaymentRow, error) {
-	rows, err := q.db.Query(ctx, listLiveGrantsWithRefundedPayment, arg.MerchantID, arg.CustomerID)
+	rows, err := q.db.Query(ctx, listLiveGrantsWithRefundedPayment, arg.MerchantID, arg.CustomerID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -1426,11 +1430,13 @@ WHERE p.merchant_id = $1::uuid
         AND (g.payment_id = p.id OR g.source_id = p.id::text)
   )
 ORDER BY p.id
+LIMIT $3::int
 `
 
 type ListUngrantedGrantablePaymentsParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
+	RowLimit   int32
 }
 
 type ListUngrantedGrantablePaymentsRow struct {
@@ -1445,7 +1451,7 @@ type ListUngrantedGrantablePaymentsRow struct {
 // refunded purchase keeps its grant event, so it is not flagged. Surface-only:
 // re-granting re-runs derive-1. NULL customer_id = merchant-wide.
 func (q *Queries) ListUngrantedGrantablePayments(ctx context.Context, arg ListUngrantedGrantablePaymentsParams) ([]ListUngrantedGrantablePaymentsRow, error) {
-	rows, err := q.db.Query(ctx, listUngrantedGrantablePayments, arg.MerchantID, arg.CustomerID)
+	rows, err := q.db.Query(ctx, listUngrantedGrantablePayments, arg.MerchantID, arg.CustomerID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -1489,13 +1495,15 @@ WHERE s.merchant_id = $1::uuid
       WHERE g.merchant_id = s.merchant_id AND g.event = 'grant'
         AND g.source_type = 'subscription' AND g.source_id = s.id::text
   )
-ORDER BY COALESCE(s.current_period_starts_at, s.started_at)
+ORDER BY COALESCE(s.current_period_starts_at, s.started_at), s.id
+LIMIT $4::int
 `
 
 type ListUngrantedSubscriptionsParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	ScanSince  time.Time
+	RowLimit   int32
 }
 
 type ListUngrantedSubscriptionsRow struct {
@@ -1517,7 +1525,12 @@ type ListUngrantedSubscriptionsRow struct {
 // windows that ended long ago. A provider-default window ends at the paid
 // period end; dunning access is grace's. NULL customer_id = merchant-wide.
 func (q *Queries) ListUngrantedSubscriptions(ctx context.Context, arg ListUngrantedSubscriptionsParams) ([]ListUngrantedSubscriptionsRow, error) {
-	rows, err := q.db.Query(ctx, listUngrantedSubscriptions, arg.MerchantID, arg.CustomerID, arg.ScanSince)
+	rows, err := q.db.Query(ctx, listUngrantedSubscriptions,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.ScanSince,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1568,13 +1581,15 @@ WHERE p.merchant_id = $1::uuid
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
         AND ((g.source_type = 'purchase' AND g.source_id = p.id::text) OR g.payment_id = p.id)
   )
-ORDER BY p.purchased_at
+ORDER BY p.purchased_at, p.id
+LIMIT $4::int
 `
 
 type ListUngrantedWalletPaymentsParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 	ScanSince  time.Time
+	RowLimit   int32
 }
 
 type ListUngrantedWalletPaymentsRow struct {
@@ -1590,7 +1605,12 @@ type ListUngrantedWalletPaymentsRow struct {
 // window [purchased_at, expiration) unambiguous, so unlike derive.grant.missing
 // this auto-repairs.
 func (q *Queries) ListUngrantedWalletPayments(ctx context.Context, arg ListUngrantedWalletPaymentsParams) ([]ListUngrantedWalletPaymentsRow, error) {
-	rows, err := q.db.Query(ctx, listUngrantedWalletPayments, arg.MerchantID, arg.CustomerID, arg.ScanSince)
+	rows, err := q.db.Query(ctx, listUngrantedWalletPayments,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.ScanSince,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1644,19 +1664,21 @@ WHERE g.merchant_id = $1::uuid
               AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_revoke', 'credit_refund', 'credit_refund_restore')
         ), 0)) > 0)
   )
-ORDER BY g.created_at
+ORDER BY g.created_at, g.id
+LIMIT $3::int
 `
 
 type ListUnretractedTerminationsParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
+	RowLimit   int32
 }
 
 // derive.grant_effect.excess: terminated grants whose effect is still live (an
 // unrevoked window, or a credit remainder > 0). NULL customer_id =
 // merchant-wide. Repair = MaterializeGrant, idempotent.
 func (q *Queries) ListUnretractedTerminations(ctx context.Context, arg ListUnretractedTerminationsParams) ([]BillingGrant, error) {
-	rows, err := q.db.Query(ctx, listUnretractedTerminations, arg.MerchantID, arg.CustomerID)
+	rows, err := q.db.Query(ctx, listUnretractedTerminations, arg.MerchantID, arg.CustomerID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

@@ -2067,12 +2067,14 @@ WHERE provider_intents.merchant_id = $1::uuid AND ( (status = 'pending' AND last
    OR ((status = 'failed_retryable' OR status = 'pending' AND last_failure_reason IS NOT NULL) AND created_at <= $2::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $3::timestamptz)
 ) ORDER BY created_at, id
+LIMIT $4::int
 `
 
 type ListStuckProviderIntentsParams struct {
 	MerchantID   uuid.UUID
 	ActionCutoff time.Time
 	VerifyCutoff time.Time
+	RowLimit     int32
 }
 
 // Non-terminal intents past the converge engine's stuck thresholds: pending
@@ -2082,7 +2084,12 @@ type ListStuckProviderIntentsParams struct {
 // in_flight/unknown_needs_verify created before verify_cutoff (a healthy
 // verifier resolves unknowns in minutes).
 func (q *Queries) ListStuckProviderIntents(ctx context.Context, arg ListStuckProviderIntentsParams) ([]BillingProviderIntent, error) {
-	rows, err := q.db.Query(ctx, listStuckProviderIntents, arg.MerchantID, arg.ActionCutoff, arg.VerifyCutoff)
+	rows, err := q.db.Query(ctx, listStuckProviderIntents,
+		arg.MerchantID,
+		arg.ActionCutoff,
+		arg.VerifyCutoff,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

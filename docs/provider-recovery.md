@@ -10,7 +10,12 @@ Provider refresh runs every two hours. Each PSP is read in bounded time windows
 from its watermark to five minutes ago; NMI and Stripe start 24 hours before
 theirs, for late provider indexing. It records qualified payments, refunds and
 provider-owned records. A failed read leaves the watermark and is read again
-next pass. Unknown identities,
+next pass. Before each Stripe window, a reversals read takes the PSP's
+refunds and disputes alone, from the window start or eight days ago, whichever
+is later, to five minutes ago. It reads no subscriptions, cards or invoices,
+records only refunds that match a recorded payment, moves no watermark and
+proves nothing about absence, so a book too large for the full read still has
+its refunds recorded. Unknown identities,
 duplicate subscriptions and conflicting receipts remain visible findings;
 acknowledging an alert does not resolve its underlying evidence.
 
