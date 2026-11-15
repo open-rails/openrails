@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 288,
+  "scenario_count": 290,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -662,6 +662,16 @@
       "id": "OR-J28-S05",
       "journey": "J28",
       "name": "Callback during active fetch causes a durable follow-up observation"
+    },
+    {
+      "id": "OR-J28-S06",
+      "journey": "J28",
+      "name": "Another merchant's claim of a PSP or custodian account in the other money class is refused, by file or by declaration, and the owner's webhooks keep working"
+    },
+    {
+      "id": "OR-J28-S07",
+      "journey": "J28",
+      "name": "One merchant's live and test PSPs on one account each receive the events their own secret verifies; Stripe's livemode attributes one both verify; one neither verifies is refused"
     },
     {
       "id": "OR-J29-S01",
