@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -406,7 +407,7 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 // currency on a card without the customer's active unscheduled mandate for it
 // on the account that charges it: never given, or waiting for consent after
 // the card was reissued under another brand.
-func requireCollectionAgreement(ctx context.Context, q *gen.Queries, custody charge.Custody, method gen.BillingPaymentMethod, currency string) error {
+func requireCollectionAgreement(ctx context.Context, q *gen.Queries, custody *merchants.Service, method gen.BillingPaymentMethod, currency string) error {
 	psp, err := charge.RoutePSP(ctx, custody, method)
 	if err != nil {
 		return err

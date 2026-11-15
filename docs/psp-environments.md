@@ -40,7 +40,8 @@ they must share one.
 
 ## When it is verified
 
-Once per loaded credential set, never per payment:
+Once per loaded credential set, and again once its proof is an hour old;
+never per payment:
 
 - At startup, in the background: `openrails.New` and the standalone server
   never wait on a provider. An embedded engine verifies only its declared
@@ -51,6 +52,10 @@ Once per loaded credential set, never per payment:
   merchant. A PSP disarmed at startup is offered again once its credential is
   fixed, without a restart.
 - At the first mutation of a credential set this process has not verified yet.
+- At the first mutation after its arming verdict is an hour old: an account's
+  environment can change after it was proven (NMI's test mode is a dashboard
+  toggle). The mutation waits for the signal below; there is no periodic
+  sweep.
 
 A verdict is keyed by rail, merchant, PSP, account, environment, endpoint and
 credential fingerprint: any change is a fresh verification.
@@ -64,8 +69,10 @@ any bytes are sent; reads work. The engine still starts and stays ready, and the
 `openrails_psp_posture` probe fails while a loaded PSP is unverified or
 disarmed. `unknown`, which includes a page that is not the provider's own
 response (maintenance, WAF), is verified again on the next mutation, with backoff
-capped at 30 seconds, and in the background, capped at 5 minutes. A disagreeing or
-`unsupported` answer holds until the PSP's configuration changes.
+capped at 30 seconds, and in the background, capped at 5 minutes. A proof an
+hour old is never used: a check that does not answer then leaves the PSP
+`unknown`, verified again on a later mutation with the same backoff. A disagreeing or `unsupported` answer holds
+until the PSP's configuration changes.
 
 ## Signals
 

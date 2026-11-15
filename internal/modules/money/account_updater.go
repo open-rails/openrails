@@ -43,11 +43,7 @@ func (b *MerchantCollectionAdapterBuilder) AccountUpdater(ctx context.Context, m
 	if custody.Custodian != m.Custodian || b.BasisTheoryTransport != nil && custody.Environment != config.ClassTest {
 		return nil, false, errors.New("account updater: card custody identity changed")
 	}
-	base := custody.APIBaseURL
-	if b.Endpoints.BTBaseURL != "" {
-		base = b.Endpoints.BTBaseURL
-	}
-	client, err := basistheory.New(basistheory.Config{APIKey: custody.APIKey, BaseURL: base, ReadOnly: b.Config != nil && config.IsProviderReadOnly(b.Config), Transport: b.BasisTheoryTransport})
+	client, err := basistheory.New(basistheory.Config{APIKey: custody.APIKey, BaseURL: custody.APIBaseURL, ReadOnly: b.Config != nil && config.IsProviderReadOnly(b.Config), Transport: b.BasisTheoryTransport})
 	if err != nil {
 		return nil, false, err
 	}

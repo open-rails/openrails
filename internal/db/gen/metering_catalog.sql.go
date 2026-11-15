@@ -72,26 +72,6 @@ func (q *Queries) GetActiveMeteringProductForShare(ctx context.Context, arg GetA
 	return id, err
 }
 
-const getDefaultUsageRateCardPriceForUpdate = `-- name: GetDefaultUsageRateCardPriceForUpdate :one
-SELECT price
-FROM billing.catalog_rate_cards
-WHERE merchant_id = $1
-  AND meter_key = $2::text
-FOR UPDATE
-`
-
-type GetDefaultUsageRateCardPriceForUpdateParams struct {
-	MerchantID uuid.UUID
-	MeterKey   string
-}
-
-func (q *Queries) GetDefaultUsageRateCardPriceForUpdate(ctx context.Context, arg GetDefaultUsageRateCardPriceForUpdateParams) ([]byte, error) {
-	row := q.db.QueryRow(ctx, getDefaultUsageRateCardPriceForUpdate, arg.MerchantID, arg.MeterKey)
-	var price []byte
-	err := row.Scan(&price)
-	return price, err
-}
-
 const getDefaultUsageRateCardStateForUpdate = `-- name: GetDefaultUsageRateCardStateForUpdate :one
 SELECT filter, allowance, price
 FROM billing.catalog_rate_cards
@@ -544,27 +524,6 @@ type UsageEventsExistForTypesParams struct {
 
 func (q *Queries) UsageEventsExistForTypes(ctx context.Context, arg UsageEventsExistForTypesParams) (bool, error) {
 	row := q.db.QueryRow(ctx, usageEventsExistForTypes, arg.MerchantID, arg.EventTypes)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
-const usageMeterExists = `-- name: UsageMeterExists :one
-SELECT EXISTS (
-    SELECT 1
-    FROM billing.catalog_meters
-    WHERE merchant_id = $1
-      AND key = $2
-)
-`
-
-type UsageMeterExistsParams struct {
-	MerchantID uuid.UUID
-	MeterKey   string
-}
-
-func (q *Queries) UsageMeterExists(ctx context.Context, arg UsageMeterExistsParams) (bool, error) {
-	row := q.db.QueryRow(ctx, usageMeterExists, arg.MerchantID, arg.MeterKey)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
@@ -125,7 +126,7 @@ func (c *RPCClient) WatchTransaction(ctx context.Context, sig solanago.Signature
 // watchOnce is one observation: (outcome, nil) when the commitment is reached,
 // (nil, err) when the chain says it never will, (nil, nil) to keep watching.
 func (c *RPCClient) watchOnce(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, terminal ChainTerminal) (*TransactionOutcome, error) {
-	st, err := c.fallback.GetSignatureStatuses(ctx, true, sig)
+	st, err := c.getSignatureStatuses(ctx, true, sig)
 	if err != nil {
 		return nil, nil // transient RPC error — the chain has not spoken
 	}
@@ -147,7 +148,7 @@ func (c *RPCClient) watchOnce(ctx context.Context, sig solanago.Signature, commi
 	if terminal.LastValidBlockHeight == 0 {
 		return nil, nil
 	}
-	height, err := c.fallback.GetBlockHeight(ctx, commitment)
+	height, err := c.GetBlockHeight(ctx, commitment)
 	if err != nil {
 		return nil, nil
 	}
@@ -156,6 +157,69 @@ func (c *RPCClient) watchOnce(ctx context.Context, sig solanago.Signature, commi
 			sig, height, terminal.LastValidBlockHeight, ErrTransactionExpired)
 	}
 	return nil, nil
+}
+
+// NeverLanded reports whether sig provably never landed and never will. The
+// finalized block height must be past the last valid height of the blockhash
+// sig was signed over, so every block that could hold it is finalized. A
+// history-searching status read made after that, by a node that has processed
+// at least that far, must not know it. false is "not proven", never "landed".
+func (c *RPCClient) NeverLanded(ctx context.Context, sig solanago.Signature, terminal ChainTerminal) (bool, error) {
+	if terminal.LastValidBlockHeight == 0 {
+		return false, nil
+	}
+	finalized, err := c.getEpochInfo(ctx, rpc.CommitmentFinalized)
+	if err != nil {
+		return false, err
+	}
+	if finalized.BlockHeight <= terminal.LastValidBlockHeight {
+		return false, nil
+	}
+	st, err := c.getSignatureStatuses(ctx, true, sig)
+	if err != nil {
+		return false, err
+	}
+	if st == nil || st.Context.Slot < finalized.AbsoluteSlot || len(st.Value) != 1 {
+		return false, nil
+	}
+	return st.Value[0] == nil, nil
+}
+
+// referenceHistoryPage is the most signatures one history read returns.
+const referenceHistoryPage = 1000
+
+// ReferenceHistory lists the finalized transactions naming reference, newest
+// first. closed reports that the list is final for a transaction built on
+// terminal's blockhash: the finalized block height is past its last valid
+// height, so every block that could hold one is finalized, and the node that
+// listed them had finalized that far. Not closed is "not proven", never "none".
+func (c *RPCClient) ReferenceHistory(ctx context.Context, reference string, terminal ChainTerminal) ([]SignatureInfo, bool, error) {
+	key, err := solanago.PublicKeyFromBase58(strings.TrimSpace(reference))
+	if err != nil {
+		return nil, false, fmt.Errorf("invalid reference: %w", err)
+	}
+	finalized, err := c.getEpochInfo(ctx, rpc.CommitmentFinalized)
+	if err != nil {
+		return nil, false, err
+	}
+	limit, slot := referenceHistoryPage, finalized.AbsoluteSlot
+	page, err := c.getSignaturesForAddressWithOpts(ctx, key, &rpc.GetSignaturesForAddressOpts{
+		Commitment: rpc.CommitmentFinalized, Limit: &limit, MinContextSlot: &slot,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("read the history of reference %s: %w", key, err)
+	}
+	out := make([]SignatureInfo, 0, len(page))
+	for _, sig := range page {
+		info := SignatureInfo{Signature: sig.Signature.String(), HasError: sig.Err != nil}
+		if sig.BlockTime != nil {
+			t := sig.BlockTime.Time().UTC()
+			info.BlockTime = &t
+		}
+		out = append(out, info)
+	}
+	closed := terminal.LastValidBlockHeight != 0 && finalized.BlockHeight > terminal.LastValidBlockHeight && len(page) < referenceHistoryPage
+	return out, closed, nil
 }
 
 // SubmitAndConfirm submits a signed transaction and watches it to Confirmed.
@@ -167,7 +231,7 @@ func (c *RPCClient) SubmitAndConfirm(ctx context.Context, tx *solanago.Transacti
 	// writes, so a tx touching very recent accounts (a pull right after
 	// subscribe) spuriously fails with InvalidAccountOwner. WatchTransaction
 	// below reports real on-chain failures.
-	sig, err := c.fallback.SendTransactionSkipPreflight(ctx, tx)
+	sig, err := c.sendTransactionSkipPreflight(ctx, tx)
 	if err != nil {
 		return nil, err
 	}

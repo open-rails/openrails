@@ -13,11 +13,10 @@ import (
 )
 
 func (h *SubscriptionCollectionHandler) stripeEngineService(ctx context.Context, in gen.BillingProviderIntent) (*subscriptions.StripeService, error) {
-	resolver, ok := h.Resolver.(intents.StripeEngineServiceResolver)
-	if !ok {
+	if h.Resolver == nil {
 		return nil, errors.New("Stripe engine resolver unavailable")
 	}
-	service, armed, err := resolver.ResolveStripeEngineService(ctx, in.MerchantID, in.PspID)
+	service, armed, err := h.Resolver.ResolveStripeEngineService(ctx, in.MerchantID, in.PspID)
 	if err != nil {
 		return nil, err
 	}
@@ -199,8 +198,15 @@ func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.C
 		return h.resendLostStripeSubmission(ctx, current, service, params)
 	}
 	if result.State == subscriptions.StripeEngineDeclined && result.FailureCode != "canceled" {
-		// Cancellation erases the decline at Stripe; retain it first.
-		if err := intents.NewStore(h.DB).RecordProgress(ctx, current.ID, map[string]any{"decline_code": result.FailureCode}); err != nil {
+		// Cancellation erases the decline and its advice at Stripe; retain
+		// them first.
+		progress := map[string]any{"decline_code": result.FailureCode}
+		for key, value := range map[string]string{"advice_code": result.AdviceCode, "network_advice_code": result.NetworkAdviceCode, "network_decline_code": result.NetworkDeclineCode} {
+			if value != "" {
+				progress[key] = value
+			}
+		}
+		if err := intents.NewStore(h.DB).RecordProgress(ctx, current.ID, progress); err != nil {
 			return intents.Ambiguous(err.Error())
 		}
 		if _, err := service.FinalizeEngineDecline(ctx, params, result.PaymentIntentID); err != nil {

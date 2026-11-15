@@ -84,20 +84,6 @@ func FormatAmount(amount int64, currency string) string {
 	return whole + " " + cur.Code
 }
 
-// FormatAmounts renders per-currency totals in code order: "1.50 EUR, 12.00 USD".
-func FormatAmounts(totals map[string]int64) string {
-	codes := make([]string, 0, len(totals))
-	for code := range totals {
-		codes = append(codes, code)
-	}
-	sort.Strings(codes)
-	parts := make([]string, len(codes))
-	for i, code := range codes {
-		parts[i] = FormatAmount(totals[code], code)
-	}
-	return strings.Join(parts, ", ")
-}
-
 // FormatRailMinor renders a provider minor-unit amount (cents, whole yen,
 // lamports) as FormatAmount does.
 func FormatRailMinor(minor Cents, currency string) string {

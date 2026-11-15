@@ -15,13 +15,13 @@ import (
 const createDestructiveRun = `-- name: CreateDestructiveRun :one
 
 INSERT INTO billing.maintenance_runs (
-    id, merchant_id, psp_id, kind, actor, dry_run, coverage, expected_rows, note
+    id, merchant_id, psp_id, kind, actor, coverage, expected_rows, note
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
-    $4::text, $5::text, $6::boolean,
-    $7::jsonb, $8::bigint, $9::text
+    $4::text, $5::text,
+    $6::jsonb, $7::bigint, $8::text
 )
-RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
+RETURNING id, merchant_id, kind, actor, psp_id, started_at, finished_at, status, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, inventory_manifest, inventory_total_rows, run_class
 `
 
 type CreateDestructiveRunParams struct {
@@ -30,7 +30,6 @@ type CreateDestructiveRunParams struct {
 	PspID        *uuid.UUID
 	Kind         string
 	Actor        string
-	DryRun       bool
 	Coverage     []byte
 	ExpectedRows *int64
 	Note         *string
@@ -46,7 +45,6 @@ func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiv
 		arg.PspID,
 		arg.Kind,
 		arg.Actor,
-		arg.DryRun,
 		arg.Coverage,
 		arg.ExpectedRows,
 		arg.Note,
@@ -58,14 +56,9 @@ func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiv
 		&i.Kind,
 		&i.Actor,
 		&i.PspID,
-		&i.Mode,
-		&i.Rails,
-		&i.WindowStartsAt,
-		&i.WindowEndsAt,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
-		&i.DryRun,
 		&i.Coverage,
 		&i.ExpectedRows,
 		&i.Affected,
@@ -73,7 +66,6 @@ func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiv
 		&i.ReversedBy,
 		&i.Note,
 		&i.Summary,
-		&i.Error,
 		&i.InventoryManifest,
 		&i.InventoryTotalRows,
 		&i.RunClass,
@@ -87,7 +79,7 @@ SET status = $1::text,
     finished_at = $2::timestamptz,
     affected = $3::jsonb
 WHERE merchant_id = $4::uuid AND kind IN ('prune','approval','merchant_purge') AND id = $5::uuid
-RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
+RETURNING id, merchant_id, kind, actor, psp_id, started_at, finished_at, status, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, inventory_manifest, inventory_total_rows, run_class
 `
 
 type FinishDestructiveRunParams struct {
@@ -113,14 +105,9 @@ func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiv
 		&i.Kind,
 		&i.Actor,
 		&i.PspID,
-		&i.Mode,
-		&i.Rails,
-		&i.WindowStartsAt,
-		&i.WindowEndsAt,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
-		&i.DryRun,
 		&i.Coverage,
 		&i.ExpectedRows,
 		&i.Affected,
@@ -128,7 +115,6 @@ func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiv
 		&i.ReversedBy,
 		&i.Note,
 		&i.Summary,
-		&i.Error,
 		&i.InventoryManifest,
 		&i.InventoryTotalRows,
 		&i.RunClass,
@@ -137,7 +123,7 @@ func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiv
 }
 
 const getDestructiveRun = `-- name: GetDestructiveRun :one
-SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
+SELECT id, merchant_id, kind, actor, psp_id, started_at, finished_at, status, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
 WHERE merchant_id = $1::uuid AND kind IN ('prune','approval','merchant_purge') AND id = $2::uuid
 `
 
@@ -155,14 +141,9 @@ func (q *Queries) GetDestructiveRun(ctx context.Context, arg GetDestructiveRunPa
 		&i.Kind,
 		&i.Actor,
 		&i.PspID,
-		&i.Mode,
-		&i.Rails,
-		&i.WindowStartsAt,
-		&i.WindowEndsAt,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
-		&i.DryRun,
 		&i.Coverage,
 		&i.ExpectedRows,
 		&i.Affected,
@@ -170,7 +151,6 @@ func (q *Queries) GetDestructiveRun(ctx context.Context, arg GetDestructiveRunPa
 		&i.ReversedBy,
 		&i.Note,
 		&i.Summary,
-		&i.Error,
 		&i.InventoryManifest,
 		&i.InventoryTotalRows,
 		&i.RunClass,
@@ -179,7 +159,7 @@ func (q *Queries) GetDestructiveRun(ctx context.Context, arg GetDestructiveRunPa
 }
 
 const listDestructiveRuns = `-- name: ListDestructiveRuns :many
-SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
+SELECT id, merchant_id, kind, actor, psp_id, started_at, finished_at, status, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
 WHERE merchant_id = $1::uuid
   AND kind IN ('prune','approval','merchant_purge')
   AND ($2::text IS NULL OR kind = $2::text)
@@ -208,14 +188,9 @@ func (q *Queries) ListDestructiveRuns(ctx context.Context, arg ListDestructiveRu
 			&i.Kind,
 			&i.Actor,
 			&i.PspID,
-			&i.Mode,
-			&i.Rails,
-			&i.WindowStartsAt,
-			&i.WindowEndsAt,
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.Status,
-			&i.DryRun,
 			&i.Coverage,
 			&i.ExpectedRows,
 			&i.Affected,
@@ -223,7 +198,6 @@ func (q *Queries) ListDestructiveRuns(ctx context.Context, arg ListDestructiveRu
 			&i.ReversedBy,
 			&i.Note,
 			&i.Summary,
-			&i.Error,
 			&i.InventoryManifest,
 			&i.InventoryTotalRows,
 			&i.RunClass,
@@ -417,7 +391,7 @@ WHERE merchant_id = $3::uuid
   AND kind IN ('prune','approval','merchant_purge')
   AND id = $4::uuid
   AND status <> 'reversed'
-RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
+RETURNING id, merchant_id, kind, actor, psp_id, started_at, finished_at, status, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, inventory_manifest, inventory_total_rows, run_class
 `
 
 type MarkDestructiveRunReversedParams struct {
@@ -441,14 +415,9 @@ func (q *Queries) MarkDestructiveRunReversed(ctx context.Context, arg MarkDestru
 		&i.Kind,
 		&i.Actor,
 		&i.PspID,
-		&i.Mode,
-		&i.Rails,
-		&i.WindowStartsAt,
-		&i.WindowEndsAt,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
-		&i.DryRun,
 		&i.Coverage,
 		&i.ExpectedRows,
 		&i.Affected,
@@ -456,7 +425,6 @@ func (q *Queries) MarkDestructiveRunReversed(ctx context.Context, arg MarkDestru
 		&i.ReversedBy,
 		&i.Note,
 		&i.Summary,
-		&i.Error,
 		&i.InventoryManifest,
 		&i.InventoryTotalRows,
 		&i.RunClass,

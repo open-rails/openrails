@@ -145,14 +145,13 @@ func (b *MerchantRPCBuilder) Treasury(ctx context.Context, mid billing.MerchantI
 	return solanago.PublicKeyFromBase58(scope.AccountID)
 }
 
-// ChainReader adapts the builder to the intent verify leg's chain reads: the
-// merchant comes off the intent runner's merchant-scoped ctx. Satisfies
-// pull.ChainReader.
+// ChainReader is the solana.ChainReader that reads with the ctx merchant's
+// client (the intent runner's merchant-scoped ctx, or a merchant request's).
 func (b *MerchantRPCBuilder) ChainReader() *MerchantChainReader {
 	return &MerchantChainReader{builder: b}
 }
 
-// MerchantChainReader is a merchant-resolving GetTransaction surface.
+// MerchantChainReader resolves the ctx merchant's RPC client per call.
 type MerchantChainReader struct {
 	builder *MerchantRPCBuilder
 }
@@ -181,6 +180,22 @@ func (r *MerchantChainReader) GetTransaction(ctx context.Context, signature sola
 	return client.GetTransaction(ctx, signature)
 }
 
+func (r *MerchantChainReader) NeverLanded(ctx context.Context, signature solanago.Signature, terminal solanarpc.ChainTerminal) (bool, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return false, err
+	}
+	return client.NeverLanded(ctx, signature, terminal)
+}
+
+func (r *MerchantChainReader) ReferenceHistory(ctx context.Context, reference string, terminal solanarpc.ChainTerminal) ([]solanarpc.SignatureInfo, bool, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	return client.ReferenceHistory(ctx, reference, terminal)
+}
+
 func (r *MerchantChainReader) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
 	client, err := r.client(ctx)
 	if err != nil {
@@ -195,6 +210,14 @@ func (r *MerchantChainReader) GetLatestBlockhash(ctx context.Context) (solanago.
 		return solanago.Hash{}, err
 	}
 	return client.GetLatestBlockhash(ctx)
+}
+
+func (r *MerchantChainReader) LatestBlockhash(ctx context.Context) (solanarpc.RecentBlockhash, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return solanarpc.RecentBlockhash{}, err
+	}
+	return client.LatestBlockhash(ctx)
 }
 
 func (r *MerchantChainReader) GetBalance(ctx context.Context, address solanago.PublicKey) (uint64, error) {

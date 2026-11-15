@@ -53,9 +53,13 @@ func (m *Mock) Ledger(vault string) []LedgerEntry {
 	defer m.mu.Unlock()
 	var out []LedgerEntry
 	for _, s := range m.sales {
-		if s.Approved() && !s.Voided && (vault == "" || s.Vault == vault) {
+		if s.Approved() && !s.Voided && !s.HeldInFull && (vault == "" || s.Vault == vault) {
+			cents := centsOf(s.Amount)
+			if s.PartialBalance != "" {
+				cents -= centsOf(s.PartialBalance)
+			}
 			out = append(out, LedgerEntry{TransactionID: s.TransactionID, OrderID: s.OrderID, Vault: s.Vault, Last4: s.Card.Last4,
-				Cents: centsOf(s.Amount), RefundedCents: s.RefundedCents})
+				Cents: cents, RefundedCents: s.RefundedCents})
 		}
 	}
 	return out

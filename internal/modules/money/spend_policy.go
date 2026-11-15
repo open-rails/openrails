@@ -26,19 +26,8 @@ const (
 	DenyInsufficientCredit  = "insufficient_credit"
 )
 
-// DefaultAccountSettings returns the implicit policy for an payer that has no
-// explicit settings row: prepaid. Used by
-// GetAccountSettings and the enforcement path so an unconfigured account "just
-// works" (prepaid, balance-gated only).
-func DefaultAccountSettings(payer identity.CustomerID) *models.MoneyAccount {
-	return &models.MoneyAccount{
-		CustomerID:  payer.UUID(),
-		BillingMode: BillingModePrepaid,
-	}
-}
-
-// GetAccountSettings returns the stored settings for (payer, currency), or a
-// DefaultAccountSettings value when none exists (never nil, never an error for a
+// GetAccountSettings returns the stored settings for (payer, currency), or the
+// implicit prepaid policy when none exists (never nil, never an error for a
 // missing row).
 func (s *MoneyService) GetAccountSettings(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	return s.getAccountSettings(ctx, payer, currency)

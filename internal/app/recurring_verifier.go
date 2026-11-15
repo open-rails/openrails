@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
-	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/writeposture"
@@ -31,13 +30,10 @@ func (rt *Runtime) RecurringVerifier(merchantID uuid.UUID, origin intents.Origin
 		var ref string
 		var err error
 		if models.BasisTheoryCustody(method.Custodian) {
-			resolver, ok := rt.CollectionResolver.(interface {
-				ResolveBasisTheoryNMICharge(context.Context, gen.BillingPaymentMethod, uuid.UUID) (*nmiproxy.Charger, error)
-			})
-			if !ok {
+			if rt.CollectionResolver == nil {
 				return "", errors.New("platform card verification is unavailable")
 			}
-			proxy, resolveErr := resolver.ResolveBasisTheoryNMICharge(ctx, method, psp)
+			proxy, resolveErr := rt.CollectionResolver.ResolveBasisTheoryNMICharge(ctx, method, psp)
 			if resolveErr != nil {
 				return "", resolveErr
 			}

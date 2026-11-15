@@ -48,6 +48,12 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 				reject(merchantdocs.CustodianDoc(key), err.Error())
 				continue
 			}
+			if err := s.AssertCustodianUnowned(ctx, q, id.UUID(), c.Kind, c.Environment, c.AccountID); errors.Is(err, ErrCustodianOwnedByAnotherMerchant) {
+				reject(merchantdocs.CustodianDoc(key), "the custodian account belongs to another merchant")
+				continue
+			} else if err != nil {
+				return err
+			}
 			if why, err := registerCustodian(ctx, tx, id, key, c); err != nil {
 				return err
 			} else if why != "" {
@@ -78,7 +84,7 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 			}
 			// Refused before any label moves: an account another merchant
 			// owns never costs this merchant's PSP its label.
-			if err := AssertPSPUnowned(ctx, q, id.UUID(), p.Rail, p.Environment, p.AccountID); errors.Is(err, ErrPSPOwnedByAnotherMerchant) {
+			if err := s.AssertPSPUnowned(ctx, q, id.UUID(), p.Rail, p.Environment, p.AccountID); errors.Is(err, ErrPSPOwnedByAnotherMerchant) {
 				reject(merchantdocs.PSPDoc(key), "the account belongs to another merchant's PSP")
 				continue
 			} else if err != nil {

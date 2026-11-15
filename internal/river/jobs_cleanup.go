@@ -54,14 +54,6 @@ type CleanupConfig struct {
 	// EventRetention bounds retained facts independently of reader progress.
 	EventRetention time.Duration
 
-	// NotificationSeenRetention is how long to keep seen notifications
-	// Default: 90 days (matches model's IsExpiredForCleanup)
-	NotificationSeenRetention time.Duration
-
-	// NotificationUnseenRetention is how long to keep unseen notifications
-	// Default: 180 days (matches model's IsExpiredForCleanup)
-	NotificationUnseenRetention time.Duration
-
 	// WebhookEventRetention is how long completed webhook dedup marks
 	// (webhook_events) are kept. Default: 90 days.
 	WebhookEventRetention time.Duration
@@ -87,17 +79,15 @@ func clampInt32(v int) int32 {
 // zero retention fails loudly instead of mass-deleting.
 func DefaultCleanupConfig() CleanupConfig {
 	return CleanupConfig{
-		EventRetention:              retention.EventLog,
-		NotificationSeenRetention:   retention.NotificationsRead,
-		NotificationUnseenRetention: retention.NotificationsUnread,
-		WebhookEventRetention:       webhooks.WebhookEventRetention,
+		EventRetention:        retention.EventLog,
+		WebhookEventRetention: webhooks.WebhookEventRetention,
 
 		PaymentAttemptRetention: retention.PaymentAttempts,
 	}
 }
 
 func (c CleanupConfig) validate() error {
-	if c.EventRetention <= 0 || c.NotificationSeenRetention <= 0 || c.NotificationUnseenRetention <= 0 || c.WebhookEventRetention <= 0 ||
+	if c.EventRetention <= 0 || c.WebhookEventRetention <= 0 ||
 		c.PaymentAttemptRetention <= 0 {
 		return fmt.Errorf("cleanup worker config requires positive retentions (wire DefaultCleanupConfig()): %+v", c)
 	}
@@ -112,9 +102,10 @@ type CleanupExpiredDataArgs struct {
 
 func (CleanupExpiredDataArgs) Kind() string { return KindCleanupExpiredData }
 
-// InsertOpts runs each job of a pass once per period.
+// InsertOpts runs each job of a pass once per period, in one attempt: the
+// next period's pass retries what it left.
 func (CleanupExpiredDataArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: CleanupInterval}}
+	return river.InsertOpts{Queue: QueueBilling, MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: CleanupInterval}}
 }
 
 type CleanupExpiredDataWorker struct {
@@ -140,8 +131,6 @@ type CleanupResult struct {
 	IdempotencyKeys            int64
 	SolanaPayReferences        int64
 	PeriodicLeases             int64
-	NotificationsSeen          int64
-	NotificationsAll           int64
 	WebhookEvents              int64
 	HostOutbox                 int64
 	PaymentAttempts            int64
@@ -156,7 +145,6 @@ type CleanupResult struct {
 	AdmissionDenials           int64
 	WebhookHealthDays          int64
 	ReconciliationFindings     int64
-	ReconciliationRuns         int64
 	ProviderIntents            int64
 	ProviderMutationLogs       int64
 	ReleasedParks              int64
@@ -217,23 +205,20 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 
 	dueWork := func(after *uuid.UUID, limit int32) ([]uuid.UUID, error) {
 		return directory.ListRetentionWorkMerchants(ctx, gen.ListRetentionWorkMerchantsParams{
-			Now:                    now,
-			NotificationCutoff:     now.Add(-config.NotificationUnseenRetention),
-			NotificationSeenCutoff: now.Add(-config.NotificationSeenRetention),
-			WebhookCutoff:          now.Add(-config.WebhookEventRetention),
-			OutboxCutoff:           now.Add(-max(retention.EventLog, config.EventRetention)),
-			AttemptCutoff:          now.Add(-config.PaymentAttemptRetention),
-			TransitionCutoff:       now.Add(-retention.SubscriptionTransitions),
-			OrderAttemptCutoff:     now.Add(-retention.ExpiredOrderAttempts),
-			UnpaidOrderCutoff:      now.Add(-retention.UnpaidOrders),
-			MeterCutoff:            now.Add(-retention.MeterPeriodQuantities),
-			CounterCutoff:          now.Add(-retention.MetricCounters),
-			FindingCutoff:          now.Add(-retention.ResolvedFindings),
-			RunCutoff:              now.Add(-retention.ReconciliationRuns),
-			ProviderWriteCutoff:    now.Add(-retention.ProviderWrites),
-			ParkCutoff:             now.Add(-retention.ReleasedParks),
-			After:                  after,
-			MerchantLimit:          limit,
+			Now:                 now,
+			WebhookCutoff:       now.Add(-config.WebhookEventRetention),
+			OutboxCutoff:        now.Add(-max(retention.EventLog, config.EventRetention)),
+			AttemptCutoff:       now.Add(-config.PaymentAttemptRetention),
+			TransitionCutoff:    now.Add(-retention.SubscriptionTransitions),
+			OrderAttemptCutoff:  now.Add(-retention.ExpiredOrderAttempts),
+			UnpaidOrderCutoff:   now.Add(-retention.UnpaidOrders),
+			MeterCutoff:         now.Add(-retention.MeterPeriodQuantities),
+			CounterCutoff:       now.Add(-retention.MetricCounters),
+			FindingCutoff:       now.Add(-retention.ResolvedFindings),
+			ProviderWriteCutoff: now.Add(-retention.ProviderWrites),
+			ParkCutoff:          now.Add(-retention.ReleasedParks),
+			After:               after,
+			MerchantLimit:       limit,
 		})
 	}
 
@@ -271,8 +256,6 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 		"periodic_leases":              result.PeriodicLeases,
 		"notification_events":          result.NotificationEvents,
 		"event_log":                    result.EventLog,
-		"notifications_seen":           result.NotificationsSeen,
-		"notifications_unseen":         result.NotificationsAll,
 		"webhook_events":               result.WebhookEvents,
 		"host_outbox":                  result.HostOutbox,
 		"payment_attempts":             result.PaymentAttempts,
@@ -287,7 +270,6 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 		"admission_denials":            result.AdmissionDenials,
 		"webhook_health_days":          result.WebhookHealthDays,
 		"reconciliation_findings":      result.ReconciliationFindings,
-		"reconciliation_runs":          result.ReconciliationRuns,
 		"provider_intents":             result.ProviderIntents,
 		"provider_mutation_logs":       result.ProviderMutationLogs,
 		"released_parks":               result.ReleasedParks,
@@ -437,18 +419,6 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		capped = true
 	}
 
-	// Old notifications: seen ones first, with the shorter retention.
-	sweep("delete seen notifications", &result.NotificationsSeen, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.DeleteSeenNotificationsBefore(ctx, gen.DeleteSeenNotificationsBeforeParams{
-			MerchantID: mid, Cutoff: now.Add(-config.NotificationSeenRetention), RowLimit: limit,
-		})
-	})
-	sweep("delete old notifications", &result.NotificationsAll, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.DeleteNotificationsBefore(ctx, gen.DeleteNotificationsBeforeParams{
-			MerchantID: mid, Cutoff: now.Add(-config.NotificationUnseenRetention), RowLimit: limit,
-		})
-	})
-
 	// Webhook dedup marks.
 	sweep("delete webhook events", &result.WebhookEvents, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteCompletedWebhookEventsBefore(ctx, gen.DeleteCompletedWebhookEventsBeforeParams{
@@ -542,18 +512,12 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		})
 	})
 
-	// Resolved findings, then the reconciliation runs nothing names any more.
+	// Resolved findings.
 	sweep("delete resolved findings", &result.ReconciliationFindings, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteResolvedFindingsBefore(ctx, gen.DeleteResolvedFindingsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.ResolvedFindings), RowLimit: limit,
 		})
 	})
-	sweep("delete reconciliation runs", &result.ReconciliationRuns, guarded("maintenance_runs",
-		func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-			return q.DeleteReconciliationRunsPastRetention(ctx, gen.DeleteReconciliationRunsPastRetentionParams{
-				MerchantID: mid, RetentionDays: retention.Days(retention.ReconciliationRuns), RowLimit: limit,
-			})
-		}))
 
 	// Finished outbox intents and the mutation log. Intents that are the
 	// record of money, a membership or an erasure are not outbox types.

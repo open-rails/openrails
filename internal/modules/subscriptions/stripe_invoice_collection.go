@@ -220,7 +220,7 @@ func (s *StripeService) stripePostForm(ctx context.Context, path string, values 
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.stripeBaseURL()+path, strings.NewReader(values.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stripeapi.APIBase+path, strings.NewReader(values.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -617,7 +617,7 @@ func (s *StripeService) stripeDelete(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, s.stripeBaseURL()+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, stripeapi.APIBase+path, nil)
 	if err != nil {
 		return err
 	}
@@ -642,7 +642,7 @@ func (s *StripeService) stripeGet(ctx context.Context, path string, query url.Va
 	if err != nil {
 		return nil, 0, err
 	}
-	target := s.stripeBaseURL() + path
+	target := stripeapi.APIBase + path
 	if len(query) > 0 {
 		target += "?" + query.Encode()
 	}

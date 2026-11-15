@@ -1,7 +1,6 @@
 package intents
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -95,12 +94,6 @@ func DecodeOrderCollectionPayload(intent gen.BillingProviderIntent) (OrderCollec
 		return p, errors.New("Stripe operation has no frozen customer or payment method")
 	}
 	return p, nil
-}
-
-// OrderCollectionRetryKey scopes a merchant retry's opaque key to its order.
-func OrderCollectionRetryKey(orderID uuid.UUID, clientKey string) string {
-	digest := sha256.Sum256([]byte(orderID.String() + "\x00" + clientKey))
-	return fmt.Sprintf("%s:%s:retry:%x", TypeOrderCollection, orderID, digest[:16])
 }
 
 func OrderCollectionRetryKeyValid(orderID uuid.UUID, key string) bool {

@@ -1,7 +1,6 @@
 # Solana rail — merchant setup
 
-> Which flows are supported on this rail, and how well each one is verified:
-> [rail certification matrix](certification-matrix.md).
+> What each rail supports: [rails](README.md).
 
 Solana is the self-custody rail: there is no third-party PSP account. Payments
 land directly in a wallet the merchant controls, its **treasury**. One-time
@@ -165,7 +164,9 @@ order: `payment: {token_symbol}` (the plan's token) answers `solana_pay` with
 `payload.period_hours`, and the wallet's transaction request is answered with
 the subscribe transaction for its account: (`init_subscription_authority`
 for a first-timer,) `subscribe`, and a cranker-co-signed pull of the full
-first period, stamped with the order's reference.
+first period, stamped with the order's reference. An account that is the
+plan's cranker is refused (`invalid_param`): the cranker never signs a
+wallet's slot.
 
 A subscription activates only from that first payment: signed by the wallet
 that asked for it, carrying the reference, subscribing to the plan's terms and
@@ -225,11 +226,11 @@ only, across every merchant and PSP.
   and grant that one period. Later catalog edits and verifier clocks cannot
   reprice or extend it. Missing or mismatched evidence stays unresolved.
 - **Each attempt freezes its terms when it executes.** An attempt with nothing
-  signed, or whose signed transaction reverted, freezes its agreement from the
-  subscription as it stands, a due scheduled change applied, under the
-  subscription lock and its claim. A signed pull without retained terms keeps
-  its signature for evidence-based recovery; current catalog data cannot
-  supply its missing historical agreement.
+  signed, or whose signed transaction reverted or expired unseen, freezes its
+  agreement from the subscription as it stands, a due scheduled change
+  applied, under the subscription lock and its claim. A signed pull without
+  retained terms keeps its signature for evidence-based recovery; current
+  catalog data cannot supply its missing historical agreement.
 - **One pull per period, enforced twice.** The on-chain program independently
   caps pulls at one plan-amount per period (a second pull fails with
   `Custom:400` "period already paid"), so even a buggy biller cannot
@@ -253,6 +254,12 @@ only, across every merchant and PSP.
   backoff, never held against the subscriber. An episode whose operation ended
   without advancing the subscription (a period already paid on chain) waits
   for the operator its finding names.
+- **A dropped pull is signed again only once it provably never landed.**
+  Cranker transactions bid a priority fee. The signature and its blockhash's
+  last valid block height are recorded before sending. A signature the chain
+  does not know stays unresolved until the finalized block height passes that
+  height and a history-searching status read made afterwards still does not
+  know it; only then is the pull signed again. A dropped pull is never dunned.
 - **Cancellation is pending until the paid period ends and needs no wallet.**
   `POST /v1/me/subscriptions/{id}/cancel` records it immediately and stops the
   cranker from pulling another renewal. Paid access continues until the period
@@ -267,9 +274,24 @@ only, across every merchant and PSP.
   repeats the request with `signature`. Wallet cancellations and delegate
   revocations are also detected when a due pull is refused, without dunning.
   They cannot be undone locally.
-- **Tier changes are signed by the subscriber.** The change route answers a
-  `solana_sign_transactions` next action; repeat with the landed signature.
-  A merchant cannot sign this action for the customer.
+- **Tier changes are signed by the subscriber and recorded from the chain.**
+  The change route freezes the agreement (the new plan's terms and, for an
+  upgrade, the prorated charge) as a pending `solana_tier_change` operation
+  with a reference, then answers a `solana_sign_transactions` next action:
+  one transaction carrying that reference, co-signed by the new plan's
+  cranker (a downgrade too), so the wallet can sign it but not alter it or
+  its blockhash. OpenRails reads the chain for a finalized
+  transaction naming the reference, qualifies it against the frozen agreement
+  and records the switch, its bill, payment and access period together.
+  Repeating the request with the landed `signature` only makes it look at
+  once; a closed tab or a wallet that never returns changes nothing. A change
+  whose transaction can no longer land (the finalized block height is past its
+  blockhash's last valid height and no transaction names the reference) is
+  released. While a change is pending, a pull the old subscription refuses as
+  canceled cancels nothing. A change that landed but can no longer be recorded
+  raises a `consistency.ledger.unbooked` finding
+  (`solana_tier_change_unrecorded`). A merchant cannot sign this action for the
+  customer.
 
 ### Devnet testing
 
@@ -309,3 +331,28 @@ when live pricing is unavailable, so they never require a price feed.
 - Every pull is confirmed on-chain before being treated as success, and the
   transaction signature is durably recorded before submission, so a crash
   mid-pull is resolved by reading the chain — never by blindly re-charging.
+
+### Solana Pay settlement
+
+An order's Solana attempt has one reference in `billing.solana_pay_references`
+(`pending` → `confirmed` | `expired`). Every replica's poller claims due references
+(`SKIP LOCKED`) and walks each one's finalized signature history from a stored
+cursor, so no number of transactions can hide a payment. Each signature settles
+once, under the reference's row lock, into `billing.solana_pay_receipts`.
+
+- The amount is the recipient's balance change in the quoted mint (Token-2022,
+  split transfers, inner instructions and any token account the recipient owns
+  included). Only finalized transactions credit; a page confirm waits up to 60 s,
+  then answers `processing` and the poller credits it.
+- A Token-2022 transfer fee is priced in at quote time; a fee raised later leaves
+  the merchant short (`underpaid`). Mints with a transfer hook are refused.
+- The first transfer of at least the quoted amount by quote expiry + 30 min is
+  credited; an excess is credited and flagged `overpaid`.
+- Anything else is recorded `disposition = 'review'` with a critical
+  `consistency.ledger.unbooked` finding whose operation is `solana_pay_` plus the
+  reason: `already_paid`, `late`, `underpaid`, `session_closed`, `wrong_asset`,
+  `unreadable` or `settle_failed`; a transfer that settled another purchase is `duplicate`.
+  Nothing is refunded automatically. After refunding, close a review with
+  `openrails solana-pay resolve --merchant … --signature … --resolution …`.
+  Open reviews and pending references refuse the billing archive.
+- A paid or expired reference is watched for 7 days, then deleted; receipts stay.

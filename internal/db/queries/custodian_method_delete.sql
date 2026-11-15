@@ -28,11 +28,6 @@ SET park_reason = 'delete:' || sqlc.arg(operation_id)::uuid::text,
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%');
 
--- name: DeleteFencedPaymentMethod :execrows
-DELETE FROM billing.payment_methods
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND park_reason = 'delete:' || sqlc.arg(operation_id)::uuid::text;
-
 -- name: LockCustodianDeletionAccount :one
 SELECT * FROM billing.custodians
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
@@ -52,14 +47,6 @@ SET status = 'succeeded', result_evidence = sqlc.arg(evidence)::jsonb,
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND intent_type IN ('hyperswitch_method_delete','nmi_vault_delete','platform_method_delete')
   AND status IN ('in_flight', 'unknown_needs_verify');
-
--- name: ListMethodDeletesForArchive :many
-SELECT * FROM billing.provider_intents
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'succeeded'
-  AND idempotency_key IN ('hyperswitch_method_delete:' || sqlc.arg(payment_method_id)::uuid::text,
-                          'nmi_vault_delete:' || sqlc.arg(payment_method_id)::uuid::text)
-  AND NOT EXISTS (SELECT 1 FROM billing.payment_methods m
-                  WHERE m.merchant_id=sqlc.arg(merchant_id)::uuid AND m.id=sqlc.arg(payment_method_id)::uuid);
 
 -- name: LockNativeMethodDelete :one
 SELECT * FROM billing.provider_intents
@@ -106,4 +93,3 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND custodian = 'psp' AND rail = 'nmi'
   AND status IN ('active','closed','replaced','removed')
   AND park_reason = 'delete:' || sqlc.arg(operation_id)::uuid::text;
-

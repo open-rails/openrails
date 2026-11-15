@@ -13,14 +13,6 @@ import (
 
 const tierChangeQuotePrefix = "openrails:tier-change:1:"
 
-// tierChangeRPC reads the SubscriptionAuthority, the subscriber's balance and a
-// recent blockhash.
-type tierChangeRPC interface {
-	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
-	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
-	GetTokenBalanceForMint(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey) (uint64, error)
-}
-
 // PrepareTierChangeService builds the single atomic tier-change transaction.
 // Plan terms are immutable and a subscription binds one plan, so a tier change
 // is cancel-old + subscribe-new in one all-or-nothing tx:
@@ -28,19 +20,23 @@ type tierChangeRPC interface {
 //	UPGRADE   = [cancel(old) + subscribe(new) + transfer_subscription(new,
 //	            prorated)]; the cranker pre-signs the transfer, the wallet
 //	            completes and submits.
-//	DOWNGRADE = [cancel(old) + subscribe(new)], subscriber-only, no charge; the
-//	            first pull is deferred to the old period end.
+//	DOWNGRADE = [cancel(old) + subscribe(new)], no charge; the first pull is
+//	            deferred to the old period end.
+//
+// The new plan's cranker co-signs both, so the wallet cannot alter the
+// message: the transaction that lands is the one prepared, on the blockhash
+// whose last valid height is recorded with the pending change.
 //
 // The SubscriptionAuthority already exists (same-mint subscription), so there is
 // no init step.
 type PrepareTierChangeService struct {
 	submitter Submitter // the new plan owner's cranker co-signs upgrades
-	rpc       tierChangeRPC
+	rpc       solanaint.ChainReader
 	tokens    Tokens
 }
 
 // NewPrepareTierChangeService builds a PrepareTierChangeService.
-func NewPrepareTierChangeService(submitter Submitter, rpc tierChangeRPC, tokens Tokens) *PrepareTierChangeService {
+func NewPrepareTierChangeService(submitter Submitter, rpc solanaint.ChainReader, tokens Tokens) *PrepareTierChangeService {
 	return &PrepareTierChangeService{submitter: submitter, rpc: rpc, tokens: tokens}
 }
 
@@ -76,29 +72,34 @@ type PrepareTierChangeInput struct {
 	FirstChargeMicros int64
 	Currency          string
 
-	// Reference, when set, tags the tx with a Solana Pay reference
-	// (referenceTagInstruction) so a order attempt can drive the tier change.
+	// Reference tags the transaction (referenceTagInstruction): the address
+	// its pending change is found by on chain. Required.
 	Reference string
 }
 
 // PrepareTierChangeResult is the transaction the wallet must sign + send.
 type PrepareTierChangeResult struct {
-	// Transaction is base64-encoded: PARTIALLY signed (cranker pre-signed) for an
-	// upgrade, or fully UNSIGNED for a downgrade.
+	// Transaction is base64-encoded and partially signed: the cranker has
+	// signed, the wallet completes it.
 	Transaction string
 	// Kind is "upgrade" or "downgrade".
 	Kind string
 	// NewSubscriptionPDA is the new on-chain subscription account (for the confirm
 	// step + the persisted row).
 	NewSubscriptionPDA string
+	// LastValidBlockHeight: past it the transaction can never land.
+	LastValidBlockHeight uint64
 }
 
-// Prepare builds the atomic tier-change transaction. For an upgrade it returns a
-// partially-signed bundle (cranker co-signed the transfer); for a downgrade a
-// plain unsigned [cancel+subscribe] the wallet signs alone.
+// Prepare builds the atomic tier-change transaction, co-signed by the new
+// plan's cranker: with the prorated transfer for an upgrade, [cancel+subscribe]
+// for a downgrade.
 func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierChangeInput) (*PrepareTierChangeResult, error) {
 	if in.SubscriberWallet == "" {
 		return nil, fmt.Errorf("recurring: subscriber wallet is required")
+	}
+	if in.Reference == "" {
+		return nil, fmt.Errorf("recurring: a plan change needs the reference it is found by")
 	}
 	if in.NewAmountBaseUnits == 0 || in.NewPeriodHours == 0 {
 		return nil, fmt.Errorf("recurring: invalid new plan terms (amount/period)")
@@ -106,10 +107,8 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 	if in.IsUpgrade && in.FirstChargeBaseUnits == 0 {
 		return nil, fmt.Errorf("recurring: upgrade requires a non-zero prorated first charge")
 	}
-	if in.IsUpgrade {
-		if _, ok := moneyutil.LookupCurrency(in.Currency); !ok || in.FirstChargeMicros < 0 {
-			return nil, fmt.Errorf("recurring: invalid first-charge quote")
-		}
+	if _, ok := moneyutil.LookupCurrency(in.Currency); !ok || in.FirstChargeMicros < 0 || (!in.IsUpgrade && in.FirstChargeMicros != 0) {
+		return nil, fmt.Errorf("recurring: invalid first-charge quote")
 	}
 
 	mintStr, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens.of(ctx))
@@ -190,16 +189,31 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 		ExpectedSubscriptionAuthInitID: initID,
 	})
 
-	result := &PrepareTierChangeResult{NewSubscriptionPDA: newSubPDA.String()}
+	// One blockhash, read once: its last valid height bounds the transaction.
+	blockhash, err := s.rpc.LatestBlockhash(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("recurring: get recent blockhash: %w", err)
+	}
+	result := &PrepareTierChangeResult{NewSubscriptionPDA: newSubPDA.String(), LastValidBlockHeight: blockhash.LastValidBlockHeight}
+
+	// The cranker signs the fiat quote in the same message. Confirmation must
+	// not reconstruct the quote using a later clock or rate.
+	quoted := []byte(fmt.Sprintf("%s%s:%d", tierChangeQuotePrefix, moneyutil.NormalizeCurrency(in.Currency), in.FirstChargeMicros))
+	signer, err := s.submitter.Signer(ctx, merchant)
+	if err != nil {
+		return nil, err
+	}
 
 	if !in.IsUpgrade {
-		// Downgrade: cancel old + subscribe new, no immediate charge. Wallet signs
-		// alone. The cranker defers the first pull to the old period end.
-		ixs, err := withReference([]solanago.Instruction{cancelOld, subscribeNew}, subscriber, in.Reference)
+		// Downgrade: cancel old + subscribe new, no immediate charge; the
+		// cranker defers the first pull to the old period end. Nothing else in
+		// it needs the cranker, so the quote memo names it as a signer.
+		quote := solanago.NewInstruction(solanago.MemoProgramID, solanago.AccountMetaSlice{solanago.NewAccountMeta(merchant, false, true)}, quoted)
+		ixs, err := withReference([]solanago.Instruction{cancelOld, subscribeNew, quote}, subscriber, in.Reference)
 		if err != nil {
 			return nil, err
 		}
-		tx, err := buildTierChangeUnsignedTxBase64(ctx, s.rpc, subscriber, ixs)
+		tx, err := solanaint.BuildPartiallySignedTx(ctx, signer, fixedBlockhash(blockhash.Hash), subscriber, ixs)
 		if err != nil {
 			return nil, err
 		}
@@ -240,18 +254,11 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 		Delegator:             subscriber,
 	})
 
-	// The merchant signs the fiat quote and token pull in the same message.
-	// Confirmation must not reconstruct the quote using a later clock or rate.
-	quote := solanaint.NewMemoInstruction(fmt.Sprintf("%s%s:%d", tierChangeQuotePrefix, moneyutil.NormalizeCurrency(in.Currency), in.FirstChargeMicros))
-	ixs, err := withReference([]solanago.Instruction{cancelOld, subscribeNew, transferNew, quote}, subscriber, in.Reference)
+	ixs, err := withReference([]solanago.Instruction{cancelOld, subscribeNew, transferNew, solanaint.NewMemoInstruction(string(quoted))}, subscriber, in.Reference)
 	if err != nil {
 		return nil, err
 	}
-	signer, err := s.submitter.Signer(ctx, merchant)
-	if err != nil {
-		return nil, err
-	}
-	tx, err := solanaint.BuildPartiallySignedTx(ctx, signer, s.rpc, subscriber, ixs)
+	tx, err := solanaint.BuildPartiallySignedTx(ctx, signer, fixedBlockhash(blockhash.Hash), subscriber, ixs)
 	if err != nil {
 		return nil, err
 	}
@@ -260,16 +267,9 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 	return result, nil
 }
 
-// buildTierChangeUnsignedTxBase64 assembles an unsigned transaction (payer signs + sends)
-// with a recent blockhash, base64-encoded. Shared by the downgrade path.
-func buildTierChangeUnsignedTxBase64(ctx context.Context, rpc tierChangeRPC, payer solanago.PublicKey, ixs []solanago.Instruction) (string, error) {
-	blockhash, err := rpc.GetLatestBlockhash(ctx)
-	if err != nil {
-		return "", fmt.Errorf("recurring: get recent blockhash: %w", err)
-	}
-	tx, err := solanago.NewTransaction(ixs, blockhash, solanago.TransactionPayer(payer))
-	if err != nil {
-		return "", fmt.Errorf("recurring: build transaction: %w", err)
-	}
-	return marshalUnsignedTxBase64(tx)
+// fixedBlockhash hands the co-signer the blockhash already read.
+type fixedBlockhash solanago.Hash
+
+func (h fixedBlockhash) GetLatestBlockhash(context.Context) (solanago.Hash, error) {
+	return solanago.Hash(h), nil
 }

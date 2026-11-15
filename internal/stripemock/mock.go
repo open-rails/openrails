@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -57,12 +58,12 @@ type Mock struct {
 	server *httptest.Server
 
 	mu              sync.Mutex
-	seq             int
 	now             func() time.Time
 	customers       map[string]Object
 	setups          map[string]Object
 	methods         map[string]Object
 	declines        map[string]string
+	advice          map[string]Advice
 	intents         map[string]Object
 	order           []string
 	charges         map[string]Object
@@ -97,6 +98,8 @@ type Mock struct {
 	webhookEndpoints map[string][]Object
 	webhook          webhookTarget
 	events           []Event
+	// thinEvents are the v2 events a thin destination was sent, by id.
+	thinEvents map[string]Object
 }
 
 // New starts a Mock on a loopback listener; see URL and Close.
@@ -112,10 +115,10 @@ func NewUnstarted(opts Options) *Mock {
 	if opts.Clock == nil {
 		opts.Clock = time.Now
 	}
-	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{},
+	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{}, advice: map[string]Advice{},
 		intents: map[string]Object{}, charges: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
 		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{}, webhookEndpoints: map[string][]Object{},
-		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}}
+		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}, thinEvents: map[string]Object{}}
 }
 
 // URL is the loopback API root; OpenRails' provider_sandbox.stripe_api_url.
@@ -133,9 +136,12 @@ func (m *Mock) Close() {
 	}
 }
 
+// idSeq is process-wide: Stripe ids are unique across accounts, so mocks
+// standing in for two accounts never mint the same id.
+var idSeq atomic.Int64
+
 func (m *Mock) id(prefix string) string {
-	m.seq++
-	return fmt.Sprintf("%s_gf%06d", prefix, m.seq)
+	return fmt.Sprintf("%s_gf%09d", prefix, idSeq.Add(1))
 }
 
 // ServeHTTP serves the API on a listener. A lost request aborts the
@@ -294,6 +300,11 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 		return 200, Object{"object": "account", "id": accountOf(r), "charges_enabled": true}
 	case p == "/v1/balance":
 		return 200, Object{"object": "balance", "livemode": false, "available": []any{}, "pending": []any{}}
+	case r.Method == http.MethodGet && strings.HasPrefix(p, "/v2/core/events/"):
+		if event, ok := m.thinEvents[strings.TrimPrefix(p, "/v2/core/events/")]; ok {
+			return 200, event
+		}
+		return 404, stripeErr("resource_missing")
 	case seg[0] == "products" || seg[0] == "prices":
 		if status, out, ok := m.catalogLocked(r, seg, q); ok {
 			return status, out
@@ -586,8 +597,12 @@ func (m *Mock) createIntent(form url.Values) (int, any) {
 		// Stripe detaches the refused method from the intent; it survives
 		// only on last_payment_error.
 		pi["status"], pi["payment_method"] = "requires_payment_method", nil
-		pi["last_payment_error"] = Object{"type": "card_error", "code": "card_declined", "decline_code": decline, "payment_method": Object{"id": pm, "object": "payment_method"}}
-		return 402, Object{"error": Object{"type": "card_error", "code": "card_declined", "decline_code": decline, "payment_intent": pi}}
+		refusal := Object{"type": "card_error", "code": "card_declined", "decline_code": decline, "payment_method": Object{"id": pm, "object": "payment_method"}}
+		m.advice[pm].on(refusal)
+		pi["last_payment_error"] = refusal
+		answer := Object{"type": "card_error", "code": "card_declined", "decline_code": decline, "payment_intent": pi}
+		m.advice[pm].on(answer)
+		return 402, Object{"error": answer}
 	}
 }
 

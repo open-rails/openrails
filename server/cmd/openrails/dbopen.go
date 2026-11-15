@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/internal/config"
@@ -38,4 +40,19 @@ func withCLIDB(cmd *cobra.Command, run func(context.Context, *db.DB) error) erro
 	}
 	defer database.Close()
 	return run(ctx, database)
+}
+
+// bindCLIRiverProducer binds an insert-only River client in the configured
+// River schema: jobs a command commits wait there for the fleet.
+func bindCLIRiverProducer(ctx context.Context, cfg *config.Config, database *db.DB) error {
+	schema := config.RiverSchemaName(cfg)
+	producer, err := river.NewClient(riverpgxv5.New(database.Pool()), &river.Config{Schema: schema, SkipUnknownJobCheck: true})
+	if err != nil {
+		return fmt.Errorf("River producer: %w", err)
+	}
+	if err := database.ValidateRiverJobBinding(ctx, database.Pool(), schema); err != nil {
+		return fmt.Errorf("River producer: %w", err)
+	}
+	database.SetRiverJobInserter(producer)
+	return nil
 }

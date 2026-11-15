@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // ErrNotDispatched is emitted only before entering the proxy POST call.
@@ -20,7 +21,9 @@ var ErrNotDispatched = errors.New("hyperswitch proxy was not dispatched")
 // operator's exact qualified route. Form values are secret wrapped so neither
 // the PSP key nor a future confidential field enters debug output.
 func (c *Client) ProxyNMI(ctx context.Context, destination, methodID string, form map[string]Secret) (*nmi.SaleResponse, error) {
-	if c == nil || !safeIdentifier(methodID) || len(form) == 0 {
+	// The answer is checked against the amount the form sends.
+	amount, err := moneyutil.DecimalToRailMinor(string(form["currency"]), string(form["amount"]))
+	if c == nil || !safeIdentifier(methodID) || len(form) == 0 || err != nil {
 		return nil, errors.Join(ErrNotDispatched, ErrBinding)
 	}
 	if c.readOnly {
@@ -89,7 +92,7 @@ func (c *Client) ProxyNMI(ctx context.Context, destination, methodID string, for
 	for key, value := range response.Body {
 		values.Set(key, value)
 	}
-	return nmi.ParseSaleResponse(values.Encode())
+	return nmi.ParseSaleResponse(values.Encode(), amount, string(form["currency"]))
 }
 
 func safeNMIIdentifier(value, providerKey string) bool {

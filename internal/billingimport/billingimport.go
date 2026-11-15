@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -566,7 +567,7 @@ func deriveImportedAccess(ctx context.Context, q *gen.Queries, merchantID billin
 	scanSince := now.Add(-3 * 365 * 24 * time.Hour)
 	ledger := grants.New(q, merchantID.UUID())
 	for i := range ids {
-		subs, err := ledger.UngrantedSubscriptions(ctx, &ids[i], scanSince)
+		subs, err := ledger.UngrantedSubscriptions(ctx, &ids[i], scanSince, math.MaxInt32)
 		if err != nil {
 			return fmt.Errorf("customer %s: %w", ids[i], err)
 		}
@@ -577,13 +578,6 @@ func deriveImportedAccess(ctx context.Context, q *gen.Queries, merchantID billin
 		}
 	}
 	return nil
-}
-
-func nilIfEmpty(s string) *string {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	return &s
 }
 
 // importAdminGrants records each comp as a free grant of its product,

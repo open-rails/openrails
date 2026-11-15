@@ -60,6 +60,11 @@ type StripeEnginePaymentResult struct {
 	PaymentIntentID string                   `json:"payment_intent_id"`
 	FailureCode     string                   `json:"failure_code,omitempty"`
 	Receipt         *StripeEngineReceipt     `json:"receipt,omitempty"`
+	// The decline's advice: Stripe's advice_code, the network's advice and
+	// response codes.
+	AdviceCode         string `json:"advice_code,omitempty"`
+	NetworkAdviceCode  string `json:"network_advice_code,omitempty"`
+	NetworkDeclineCode string `json:"network_decline_code,omitempty"`
 }
 
 type StripeEngineReceipt struct {
@@ -220,7 +225,7 @@ func (s *StripeService) CreateEnginePayment(ctx context.Context, p StripeEngineP
 	for key, value := range p.metadata() {
 		v.Set("metadata["+key+"]", value)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, scoped.stripeBaseURL()+"/v1/payment_intents", strings.NewReader(v.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stripeapi.APIBase+"/v1/payment_intents", strings.NewReader(v.Encode()))
 	if err != nil {
 		return StripeEnginePaymentResult{}, fmt.Errorf("%w: %v", charge.ErrNotDispatched, err)
 	}
@@ -277,9 +282,12 @@ type stripeEngineIntent struct {
 	ClientSecret       string            `json:"client_secret"`
 	CancellationReason string            `json:"cancellation_reason"`
 	LastPaymentError   *struct {
-		Code          string          `json:"code"`
-		DeclineCode   string          `json:"decline_code"`
-		PaymentMethod json.RawMessage `json:"payment_method"`
+		Code               string          `json:"code"`
+		DeclineCode        string          `json:"decline_code"`
+		AdviceCode         string          `json:"advice_code"`
+		NetworkAdviceCode  string          `json:"network_advice_code"`
+		NetworkDeclineCode string          `json:"network_decline_code"`
+		PaymentMethod      json.RawMessage `json:"payment_method"`
 	} `json:"last_payment_error"`
 }
 
@@ -438,6 +446,10 @@ func (s *StripeService) engineResult(ctx context.Context, p StripeEnginePaymentP
 		}
 		r.State = StripeEngineSucceeded
 		r.Receipt = &receipt
+	}
+	if r.State == StripeEngineDeclined && pi.LastPaymentError != nil {
+		e := pi.LastPaymentError
+		r.AdviceCode, r.NetworkAdviceCode, r.NetworkDeclineCode = strings.TrimSpace(e.AdviceCode), strings.TrimSpace(e.NetworkAdviceCode), strings.TrimSpace(e.NetworkDeclineCode)
 	}
 	return r, nil
 }

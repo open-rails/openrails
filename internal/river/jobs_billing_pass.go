@@ -11,6 +11,7 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -52,9 +53,12 @@ type PassReport struct {
 
 // BillingPassWorker runs each scan in turn under its own budget. One scan's
 // failure never stops the next; the pass fails with all of them. It then
-// records which critical scans hold rows a day overdue.
+// records which critical scans hold rows a day overdue. A pass that starts
+// while another still runs, on any fleet, exits: the running one takes what is
+// due.
 type BillingPassWorker struct {
 	WorkerDefaults[BillingPassArgs]
+	DB    *db.DB
 	Scans []Scan
 	Clock clockwork.Clock
 }
@@ -62,6 +66,17 @@ type BillingPassWorker struct {
 func (*BillingPassWorker) Kind() string { return KindBillingPass }
 
 func (w *BillingPassWorker) Work(ctx context.Context, _ *river.Job[BillingPassArgs]) error {
+	release, locked, err := w.DB.TryLockPass(ctx, KindBillingPass)
+	switch {
+	case err != nil:
+		// A duplicate pass is safe; a missed one is not.
+		log.WithContext(ctx).WithError(err).Warn("billing pass: lock unavailable; running the pass")
+	case !locked:
+		log.WithContext(ctx).Warn("billing pass: the previous pass is still running; this one exits")
+		return nil
+	default:
+		defer release()
+	}
 	var errs error
 	for _, s := range w.Scans {
 		if ctx.Err() != nil {
@@ -136,6 +151,7 @@ var billingScanBudgets = map[string]time.Duration{
 	KindNMIHistory:           time.Hour,
 	KindConfigRealerts:       DefaultTimeout,
 	KindStoredCardRefreshDue: time.Hour,
+	KindOperationWakes:       DefaultTimeout,
 }
 
 // ScanBudget is a scan's budget inside the pass.

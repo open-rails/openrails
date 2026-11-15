@@ -69,21 +69,16 @@ func withCardVaultBilling(ctx context.Context, billing nmi.CreateCustomerVaultDa
 	return context.WithValue(ctx, cardVaultBillingKey{}, billing)
 }
 
-// CardVaultClients arms the NMI client of the PSP a card is vaulted in.
-type CardVaultClients interface {
-	ResolveClientForPSP(ctx context.Context, rail string, pspID uuid.UUID) (*nmi.NMIClient, error)
-}
-
 type NMICardVaultHandler struct {
 	DB      *db.DB
 	Posture ModeView
-	Clients CardVaultClients
+	Clients *paymentmethods.RailPaymentMethodService
 	Store   *Store
 	Clock   clockwork.Clock
 	Policy  BackoffPolicy
 }
 
-func NewNMICardVaultHandler(d *db.DB, clients CardVaultClients, store *Store, posture ModeView, clock clockwork.Clock) *NMICardVaultHandler {
+func NewNMICardVaultHandler(d *db.DB, clients *paymentmethods.RailPaymentMethodService, store *Store, posture ModeView, clock clockwork.Clock) *NMICardVaultHandler {
 	return &NMICardVaultHandler{DB: d, Clients: clients, Store: store, Posture: posture, Clock: clock, Policy: DefaultBackoff}
 }
 

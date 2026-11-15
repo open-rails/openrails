@@ -196,7 +196,7 @@ func (q *Queries) GetCardCaptureAccountsForShare(ctx context.Context, arg GetCar
 
 const getOrderAttemptByID = `-- name: GetOrderAttemptByID :one
 
-SELECT id, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason, order_id FROM billing.order_attempts WHERE order_attempts.merchant_id = $2::uuid AND id = $1
+SELECT id, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, order_id FROM billing.order_attempts WHERE order_attempts.merchant_id = $2::uuid AND id = $1
   AND deleted_at IS NULL
 `
 
@@ -231,50 +231,6 @@ func (q *Queries) GetOrderAttemptByID(ctx context.Context, arg GetOrderAttemptBy
 		&i.DeletedAt,
 		&i.DestructiveRunID,
 		&i.DestructiveRunClass,
-		&i.RoutingReason,
-		&i.OrderID,
-	)
-	return i, err
-}
-
-const getOrderAttemptByReference = `-- name: GetOrderAttemptByReference :one
-SELECT id, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason, order_id FROM billing.order_attempts cs
-WHERE cs.merchant_id = $2::uuid AND cs.reference = $1
-  AND cs.deleted_at IS NULL
-LIMIT 1
-`
-
-type GetOrderAttemptByReferenceParams struct {
-	Reference  *string
-	MerchantID uuid.UUID
-}
-
-func (q *Queries) GetOrderAttemptByReference(ctx context.Context, arg GetOrderAttemptByReferenceParams) (BillingOrderAttempt, error) {
-	row := q.db.QueryRow(ctx, getOrderAttemptByReference, arg.Reference, arg.MerchantID)
-	var i BillingOrderAttempt
-	err := row.Scan(
-		&i.ID,
-		&i.Rail,
-		&i.Status,
-		&i.Amount,
-		&i.Currency,
-		&i.ExpiresAt,
-		&i.Reference,
-		&i.TransactionID,
-		&i.PaymentID,
-		&i.SubscriptionID,
-		&i.RailFields,
-		&i.RailState,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.PspID,
-		&i.DeletedAt,
-		&i.DestructiveRunID,
-		&i.DestructiveRunClass,
-		&i.RoutingReason,
 		&i.OrderID,
 	)
 	return i, err

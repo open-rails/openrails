@@ -25,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/providerrecovery"
@@ -33,7 +32,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/cadence"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const (
@@ -82,11 +80,6 @@ var providerRefreshUniqueStates = []rivertype.JobState{
 	rivertype.JobStateScheduled,
 }
 
-// refreshJobInserter is the slice of river.Client the scheduler uses (test seam).
-type refreshJobInserter interface {
-	Insert(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error)
-}
-
 // ProviderRefreshSchedulerWorker is the periodic umbrella: it enqueues one
 // refresh job per active merchant that has a PSP, spread evenly over Stagger.
 // River supplies per-merchant error isolation; the next pass resumes a
@@ -102,11 +95,6 @@ type ProviderRefreshSchedulerWorker struct {
 	// Stagger is the fan-out spread window (0 = defaultRefreshStagger). Slot 0
 	// is immediate, so a single-merchant (embedded) boot refreshes right away.
 	Stagger time.Duration
-
-	// Test seams; nil = production defaults.
-	Inserter        refreshJobInserter
-	ListMerchants   func(ctx context.Context) ([]uuid.UUID, error)
-	HasRailAccounts func(ctx context.Context, mid uuid.UUID) (bool, error)
 }
 
 func (ProviderRefreshSchedulerWorker) Kind() string { return KindProviderRefresh }
@@ -132,20 +120,10 @@ func (w *ProviderRefreshSchedulerWorker) merchantQueue() string {
 	return QueueProviderRefresh
 }
 
-func (w *ProviderRefreshSchedulerWorker) listMerchants(ctx context.Context) ([]uuid.UUID, error) {
-	if w.ListMerchants != nil {
-		return w.ListMerchants(ctx)
-	}
-	return w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
-}
-
 // merchantHasRailAccounts reports whether the merchant declares any PSP.
 // Archived PSPs count (drain pulls still arm). Environment is not filtered: a
 // wrong-environment PSP enqueues a job that arms nothing (fail open, cheap).
 func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Context, mid uuid.UUID) (bool, error) {
-	if w.HasRailAccounts != nil {
-		return w.HasRailAccounts(ctx, mid)
-	}
 	var exists bool
 	mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 	err := w.DB.MerchantTx(mctx, func(tctx context.Context, tx pgx.Tx) error {
@@ -158,15 +136,11 @@ func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Con
 }
 
 func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[ProviderRefreshArgs]) error {
-	inserter := w.Inserter
-	if inserter == nil {
-		client, err := river.ClientFromContextSafely[pgx.Tx](ctx)
-		if err != nil {
-			return fmt.Errorf("provider refresh scheduler: river client: %w", err)
-		}
-		inserter = client
+	inserter, err := river.ClientFromContextSafely[pgx.Tx](ctx)
+	if err != nil {
+		return fmt.Errorf("provider refresh scheduler: river client: %w", err)
 	}
-	merchantIDs, err := w.listMerchants(ctx)
+	merchantIDs, err := w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("provider refresh scheduler: list merchants: %w", err)
 	}
@@ -247,10 +221,7 @@ type ProviderRefreshWorker struct {
 	// store. nil = no-op.
 	Alerts *alerting.Service
 
-	// PullEndpoints overrides provider base URLs on store-armed clients
-	// (fake-provider test seam).
-	PullEndpoints reconcile.ProviderEndpoints
-	NMIClients    *railresolve.NMIFactory
+	NMIClients *railresolve.NMIFactory
 	// Verifier reads the unverified NMI rows; nil leaves them to the
 	// unknown-cohort reconcile.
 	Verifier *reconcile.Verifier
@@ -303,7 +274,6 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		Config:        w.Config,
 		Merchants:     w.Merchants,
 		DB:            w.DB,
-		Endpoints:     w.PullEndpoints,
 		NMIClients:    w.NMIClients,
 	}
 
@@ -586,6 +556,9 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		Since:       since,
 		Until:       until,
 	}
+	if provider == reconcile.ProviderStripe {
+		w.runReversals(ctx, engine, params, provider, pspID, horizon, now, &out)
+	}
 	applied := func() bool {
 		res, err := engine.Run(ctx, params)
 		if err != nil {
@@ -649,14 +622,6 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			log.WithContext(ctx).WithError(err).WithField("psp_id", pspID).Warn("Provider Refresh: read open financial findings failed")
 		} else if conflicts {
 			out.Held++
-		} else {
-			more, err := w.completeObservation(ctx, mid, pspID, horizon)
-			if err != nil {
-				out.WatermarkErrors++
-				log.WithContext(ctx).WithError(err).WithField("psp_id", pspID).Warn("Provider Refresh: completion and recovery wakeups failed")
-			} else {
-				out.More = more
-			}
 		}
 	}
 	// Advance the pull watermark after the pass so the next pass's drift gate
@@ -669,38 +634,32 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	return out
 }
 
-// Complete coverage records reporting progress; it never grants write permission. Scans use the
-// existing collection policy/cadence; refresh never invokes a provider writer.
-func (w *ProviderRefreshWorker) completeObservation(ctx context.Context, mid, psp uuid.UUID, horizon time.Time) (bool, error) {
-	const batch = 100
-	more := false
-	err := w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := w.DB.NewWithPgxTx(tx)
-		changed, err := d.Gen(ctx).UpsertPSPCompletedRefreshWatermark(ctx, gen.UpsertPSPCompletedRefreshWatermarkParams{MerchantID: mid, PspID: psp, WatermarkAt: horizon})
-		if err != nil {
-			return err
+// runReversals reads the PSP's refunds and disputes before its full read, which
+// a large book may never finish. It moves no watermark: while the full read
+// is stuck, every pass re-reads the last batch up to the horizon.
+func (w *ProviderRefreshWorker) runReversals(ctx context.Context, engine *reconcile.Engine, params reconcile.RunParams, provider reconcile.Provider, pspID uuid.UUID, horizon, now time.Time, out *providerRefreshProviderResult) {
+	params.Reversals = true
+	if floor := horizon.Add(-w.batch()); params.Since.Before(floor) {
+		params.Since = floor
+	}
+	params.Until = horizon
+	res, err := engine.Run(ctx, params)
+	if err != nil {
+		out.LaneErrors++
+		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: reversals read failed; the full read still runs")
+		return
+	}
+	if rep := res.Summary.Providers[string(provider)]; rep != nil {
+		out.NewFindings += rep.NewFindings
+		out.UpdatedFindings += rep.UpdatedFindings
+	}
+	if n := len(res.AppliedChanges); n > 0 {
+		out.AppliedChanges += n
+		out.Changed = true
+		if _, err := webhookhealth.Drift(ctx, w.DB, pspID, now, n); err != nil {
+			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: record webhook drift failed")
 		}
-		if (writeposture.View{Config: w.Config, DB: d}).Posture(ctx, mid).Limited() {
-			return nil
-		}
-		if changed == 0 {
-			return nil
-		}
-		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}}
-		if w.Config != nil && w.Config.UsageBillingEnabled {
-			jobs = append(jobs, money.UsageOrderArgs{})
-		}
-		for _, args := range jobs {
-			// A merchant's wake is never absorbed by a scan sleeping on an
-			// earlier outage. Canonical usage/renewal admission and durable
-			// cadence own money.
-			if _, err := w.DB.InsertRiverJobTx(ctx, tx, args, nil); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	return more, err
+	}
 }
 
 func (w *ProviderRefreshWorker) loadAppliedWatermark(ctx context.Context, mid, psp uuid.UUID) (time.Time, error) {
@@ -777,6 +736,7 @@ func (s *providerRefreshStats) add(r providerRefreshMerchantResult) {
 	s.UpdatedFindings += r.UpdatedFindings
 	s.WatermarkErrors += r.WatermarkErrors
 	s.ProviderErrors += r.ProviderErrors
+	s.LaneErrors += r.LaneErrors
 	s.Held += r.Held
 }
 
@@ -793,6 +753,7 @@ func (r *providerRefreshMerchantResult) add(p providerRefreshProviderResult) {
 	r.UpdatedFindings += p.UpdatedFindings
 	r.WatermarkErrors += p.WatermarkErrors
 	r.ProviderErrors += p.ProviderErrors
+	r.LaneErrors += p.LaneErrors
 	r.Held += p.Held
 	r.Changed = r.Changed || p.Changed
 	if len(p.Proofs) > 0 {
@@ -812,8 +773,10 @@ type providerRefreshProviderResult struct {
 	UpdatedFindings int
 	WatermarkErrors int
 	ProviderErrors  int
-	Held            int
-	Changed         bool
+	// LaneErrors counts a failed reversals read; the full read still ran.
+	LaneErrors int
+	Held       int
+	Changed    bool
 	// Proofs carries the completed pull's coverage for the confirmed-absence gate.
 	Proofs reconcile.PullProofs
 }

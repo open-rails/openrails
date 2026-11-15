@@ -10,16 +10,21 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	notifypg "github.com/open-rails/authkit/notify/postgres"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,6 +48,94 @@ func archiveBytes(t *testing.T, client *openrails.Client) []byte {
 	require.NotEmpty(t, out.Bytes())
 	return out.Bytes()
 }
+
+// withCustodyMigrationRecord rewrites an archive into the shape exports had
+// before migration 207: the custody migration record, here with one row,
+// ahead of the meter period quantities.
+func withCustodyMigrationRecord(t *testing.T, archive []byte) []byte {
+	t.Helper()
+	var out bytes.Buffer
+	var w *archivewire.Writer
+	var merchant string
+	inserted := false
+	_, err := archivewire.Read(bytes.NewReader(archive), func(h archivewire.Header) error {
+		var err error
+		merchant = h.MerchantID
+		w, err = archivewire.NewWriterWithTenant(&out, h.MerchantID, h.TenantID, h.CatalogRevision)
+		return err
+	}, func(r archivewire.Record) error {
+		if r.Kind != "table" {
+			return w.Row(r.Values)
+		}
+		if r.Table == "meter_period_quantities" {
+			if err := w.Table("custody_migrations"); err != nil {
+				return err
+			}
+			id, batch, method, custodian := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+			// merchant_id, id, batch_id, payment_method_id, rail, from_custodian, from_custodian_id,
+			// from_rail_customer_ref, from_rail_method_ref, from_psp_id, to_custodian, to_custodian_id,
+			// to_rail_method_ref, to_psp_id, exported_at, outcome, reason, created_at
+			if err := w.Row([]*string{&merchant, &id, &batch, &method, ptr("nmi"), ptr("psp"), nil,
+				ptr("1001"), nil, nil, ptr("basis_theory"), &custodian,
+				ptr("tok_critical"), nil, nil, ptr("remapped"), nil, ptr("2026-01-01 00:00:00+00")}); err != nil {
+				return err
+			}
+			inserted = true
+		}
+		return w.Table(r.Table)
+	})
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, w.Close())
+	return out.Bytes()
+}
+
+// beforeSchemaDrops rewrites an archive into the shape exports had before
+// migration 208: a usage collection cadence after the ledger accounts, and the
+// dropped columns' empty values in place. It reports the tables it widened.
+func beforeSchemaDrops(t *testing.T, archive []byte) ([]byte, map[string]bool) {
+	t.Helper()
+	var out bytes.Buffer
+	var w *archivewire.Writer
+	var merchant, table string
+	widened := map[string]bool{}
+	_, err := archivewire.Read(bytes.NewReader(archive), func(h archivewire.Header) error {
+		var err error
+		merchant = h.MerchantID
+		w, err = archivewire.NewWriterWithTenant(&out, h.MerchantID, h.TenantID, h.CatalogRevision)
+		return err
+	}, func(r archivewire.Record) error {
+		if r.Kind == "table" {
+			if table == "ledger_accounts" {
+				if err := w.Table("usage_collection_cadence"); err != nil {
+					return err
+				}
+				if err := w.Row([]*string{&merchant, ptr("2026-01-01 00:00:00+00"), ptr("2026-02-01 00:00:00+00")}); err != nil {
+					return err
+				}
+			}
+			table = r.Table
+			return w.Table(table)
+		}
+		v := r.Values
+		switch table {
+		case "maintenance_runs": // mode, rails, window_starts_at, window_ends_at; dry_run
+			v = slices.Concat(v[:5], []*string{nil, ptr("{}"), nil, nil}, v[5:8], []*string{ptr("false")}, v[8:])
+		case "order_attempts": // routing_reason, before order_id
+			v = slices.Concat(v[:len(v)-1], []*string{nil}, v[len(v)-1:])
+		case "payment_methods": // wallet_card_id
+			v = slices.Concat(v, []*string{nil})
+		default:
+			return w.Row(v)
+		}
+		widened[table] = true
+		return w.Row(v)
+	})
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	return out.Bytes(), widened
+}
+
 func TestBillingArchive(t *testing.T) {
 	t.Run("OR-J31-S01/empty-target-restore-preserves-ledger-and-resets-destination-stream", func(t *testing.T) {
 		actor, provider := newPaymentWorld(t)
@@ -266,5 +359,123 @@ func TestBillingArchive(t *testing.T) {
 		payment, err := client.GetPayment(t.Context(), *paid.Payment.PaymentID)
 		require.NoError(t, err)
 		require.Equal(t, "5454", *payment.Card.Last4)
+	})
+	t.Run("OR-J31-S08/an-archive-carrying-the-dropped-custody-migration-record-restores", func(t *testing.T) {
+		source := newWorld(t)
+		customer := billing.CustomerID(uuid.New())
+		_, err := source.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 2500, Source: "critical", SourceID: "custody-record"}})
+		require.NoError(t, err)
+		archive := withCustodyMigrationRecord(t, archiveBytes(t, source.alpha))
+		_, client := archiveTarget(t, source)
+		receipt, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err, "the record and its row are skipped")
+		require.False(t, receipt.AlreadyImported)
+		balance(t, client, customer, 2500, 0, 2500)
+	})
+	t.Run("OR-J31-S09/a-paid-stripe-hosted-page-order-moves-with-the-book", func(t *testing.T) {
+		source, provider := newPaymentWorld(t)
+		provider.core.SendWebhooksTo(source.server.URL+"/v1/webhooks/stripe/acct_e2e", "whsec_critical_fixture")
+		sale := saleInput(t, source, provider)
+		hosted := billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}}
+		status, raw := source.request(t, http.MethodPost, "/v1/me/orders", source.aliceToken, hosted, map[string]string{"Idempotency-Key": "archived-hosted"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var order billing.Order
+		require.NoError(t, json.Unmarshal(raw, &order))
+		require.NotNil(t, order.Payment.NextAction)
+		require.Equal(t, "redirect_to_url", order.Payment.NextAction.Type)
+		// The attempt keeps Stripe's page in its rail state: the session and its URL.
+		_, err := provider.core.CompleteCheckoutSession(t.Context(), strings.TrimPrefix(*order.Payment.NextAction.URL, stripemock.CheckoutURL))
+		require.NoError(t, err)
+		var paid *billing.Order
+		require.Eventually(t, func() bool {
+			paid, err = source.alpha.GetOrder(t.Context(), order.ID)
+			return err == nil && paid.Status == billing.OrderComplete
+		}, 20*time.Second, 20*time.Millisecond)
+		require.NotNil(t, paid.Payment.PaymentID)
+		archive := archiveBytes(t, source.alpha)
+		_, client := archiveTarget(t, source.world)
+		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+		restored, err := client.GetOrder(t.Context(), order.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.OrderComplete, restored.Status)
+		require.Equal(t, paid.Payment.PaymentID, restored.Payment.PaymentID)
+	})
+	t.Run("OR-J31-S10/a-restored-solana-pull-runs-at-its-due-time", func(t *testing.T) {
+		s := newSolanaWorld(t, true)
+		_, sub := s.subscribe(t)
+		due := *sub.CurrentPeriodEndsAt
+		// The source's poller settles the subscribe's reference: a pending one
+		// stays with the deployment that watches the chain.
+		quietFleet(t, s.world)
+		require.Eventually(t, func() bool {
+			s.clock.Advance(time.Second)
+			var pending int
+			err := s.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{s.schema, "solana_pay_references"}.Sanitize()+" WHERE status = 'pending'").Scan(&pending)
+			return err == nil && pending == 0
+		}, 20*time.Second, 100*time.Millisecond, "the poller confirms the landed subscribe")
+		archive := archiveBytes(t, s.alpha)
+		target, client := archiveTarget(t, s.world, func(w *world) {
+			w.clock.Advance(s.clock.Now().Sub(w.clock.Now()))
+			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: s.wire.server.URL}
+			w.cfg.Solana = &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: s.cranker.PrivateKey.String()}}}
+		})
+		s.node.SetClock(target.clock.Now)
+		_, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+		// The merchant's configuration names the same treasury.
+		require.NoError(t, target.engine.Close(t.Context()))
+		cfg := target.cfg
+		cfg.Merchants = maps.Clone(target.cfg.Merchants)
+		cfg.Merchants["restored-source"] = openrails.MerchantDeclaration{DisplayName: "Restored", PSPs: openrails.PSPs{"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}}
+		target.engine, err = openrails.New(t.Context(), cfg, target.deps)
+		require.NoError(t, err)
+		client, err = target.engine.Merchant(s.alpha.MerchantID())
+		require.NoError(t, err)
+		require.NoError(t, s.engine.Close(context.Background()))
+		fleet := quietFleet(t, target)
+		require.NotEmpty(t, operationJobs(t, fleet), "the restore queues the pull's wake")
+		settleOperations(t, fleet)
+		sends := s.wire.sends()
+		advanceTo(target, due.Add(pullMargin))
+		wakeOperations(t, fleet)
+		settleOperations(t, fleet)
+		require.Equal(t, sends, s.wire.sends(), "a restored pull sends nothing before the operator arms")
+		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
+		// The held pull is looked at again after its park interval.
+		target.clock.Advance(5 * time.Minute)
+		landedAt := target.clock.Now()
+		wakeOperations(t, fleet)
+		require.Eventually(t, func() bool {
+			current, err := client.GetSubscription(t.Context(), sub.ID)
+			return err == nil && current.CurrentPeriodEndsAt != nil && current.CurrentPeriodEndsAt.Equal(landedAt.Add(168*time.Hour))
+		}, 20*time.Second, 20*time.Millisecond, "the restored pull renews the period at its due time")
+		require.Equal(t, sends+1, s.wire.sends())
+		payments, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
+		require.NoError(t, err)
+		require.Len(t, payments.Items, 2, "the restored subscribe payment and one renewal")
+		require.EqualValues(t, 20_000_000, s.node.Balance(s.treasury.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))
+	})
+	t.Run("OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores", func(t *testing.T) {
+		actor, provider := newPaymentWorld(t)
+		source := actor.world
+		status, raw := actor.request(t, "POST", "/v1/me/orders", actor.aliceToken, saleInput(t, actor, provider), map[string]string{"Idempotency-Key": "archive-before-drops"})
+		require.Equal(t, 201, status, string(raw))
+		var paid billing.Order
+		require.NoError(t, json.Unmarshal(raw, &paid))
+		_, err := source.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{source.schema, "maintenance_runs"}.Sanitize()+" (merchant_id, kind, actor, status, finished_at) VALUES ($1, 'prune', 'critical', 'completed', now())", source.alpha.MerchantID().UUID())
+		require.NoError(t, err)
+		archive, widened := beforeSchemaDrops(t, archiveBytes(t, source.alpha))
+		require.Equal(t, map[string]bool{"maintenance_runs": true, "order_attempts": true, "payment_methods": true}, widened)
+		_, client := archiveTarget(t, source)
+		receipt, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+		require.False(t, receipt.AlreadyImported)
+		order, err := client.GetOrder(t.Context(), paid.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.OrderComplete, order.Status)
+		methods, err := client.ListPaymentMethods(t.Context(), paid.CustomerID, billing.PaymentMethodListParams{})
+		require.NoError(t, err)
+		require.Len(t, methods.Items, 1, "the saved card moves with the book")
 	})
 }

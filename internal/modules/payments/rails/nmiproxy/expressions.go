@@ -167,5 +167,8 @@ func paymentForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *b
 	}
 
 	sc.ApplyToForm(values)
+	if kind == "sale" {
+		nmi.SettleOnlyInFull(values)
+	}
 	return values, nil
 }

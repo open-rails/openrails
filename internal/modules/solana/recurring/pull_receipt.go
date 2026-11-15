@@ -24,7 +24,7 @@ type PullReceipt struct {
 // VerifyPullReceipt proves the recorded signature is the cranker-signed pull
 // of the accepted amount into the accepted mint/treasury for this episode.
 // Missing metadata and a successful unrelated transaction prove nothing.
-func VerifyPullReceipt(ctx context.Context, chain landedTxReader, row *models.SolanaSubscription, signature string, amount, periodHours uint64, decimals int, intentID uuid.UUID) (*PullReceipt, error) {
+func VerifyPullReceipt(ctx context.Context, chain solanaint.ChainReader, row *models.SolanaSubscription, signature string, amount, periodHours uint64, decimals int, intentID uuid.UUID) (*PullReceipt, error) {
 	if chain == nil || row == nil || amount == 0 || periodHours == 0 || periodHours > 24*366 || intentID == uuid.Nil {
 		return nil, fmt.Errorf("%w: incomplete accepted pull", ErrPaymentUnverified)
 	}

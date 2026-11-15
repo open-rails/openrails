@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
@@ -421,6 +422,99 @@ func TestCCBillIdentity(t *testing.T) {
 				require.Equal(t, ccbillStored, *sub.RailSubscriptionID, "only a mirror write respells the row")
 			})
 		}
+	})
+
+	t.Run("OR-J38-S43/a-late-sale-on-an-order-paid-by-card-is-kept-for-refund", func(t *testing.T) {
+		// A payment is never recorded in the database's future.
+		a, provider := newPaymentWorld(t, func(w *world) {
+			w.clock.Advance(-30 * 24 * time.Hour)
+			w.cfg.CCBillWebhookIPAllowlist = []string{"127.0.0.1/32"}
+			m := w.cfg.Merchants["alpha"]
+			m.PSPs["ccbill"] = openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
+			w.cfg.Merchants["alpha"] = m
+		})
+		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "member", DisplayName: "Member", Entitlements: []string{"member:paid"}})
+		require.NoError(t, err)
+		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "member-monthly", UnitAmount: 10_000_000, Currency: "USD",
+			BillingIntervalHours: ptr(720), AccessDurationHours: ptr(720)})
+		require.NoError(t, err)
+		_, err = a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "member-ccbill", PSP: "ccbill", FlexID: "critical-flex",
+			Currency: "USD", UnitAmount: ptr(int64(10_000_000)), BillingIntervalHours: ptr(720)})
+		require.NoError(t, err)
+		lines := []billing.OrderLineParams{{PriceID: price.ID}}
+		status, raw := a.request(t, http.MethodPost, "/v1/me/orders/preview", a.aliceToken, billing.PreviewMyOrderParams{Lines: lines})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var preview billing.OrderPreview
+		require.NoError(t, json.Unmarshal(raw, &preview))
+		var page billing.PSPID
+		for _, option := range preview.PaymentOptions {
+			if option.Rail == "ccbill" {
+				page = option.PSPID
+			}
+		}
+		require.False(t, page.IsZero(), "the card sale's FlexForm stands in for it: %s", raw)
+
+		// Alice opens the CCBill page and leaves; once it lapses she pays by card.
+		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, billing.CreateMyOrderParams{Lines: lines, ExpectedTotal: ptr(int64(10_000_000)),
+			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: "https://critical.invalid/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var order billing.Order
+		require.NoError(t, json.Unmarshal(raw, &order))
+		require.NotNil(t, order.Payment.NextAction, string(raw))
+		link, err := url.Parse(*order.Payment.NextAction.URL)
+		require.NoError(t, err)
+		a.clock.Advance(61 * time.Minute)
+		status, raw = a.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", a.aliceToken, billing.PayOrderParams{ExpectedTotal: 10_000_000, Reusable: ptr(true),
+			Payment: billing.OrderPaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}, map[string]string{"Idempotency-Key": "card-after-page"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.NoError(t, json.Unmarshal(raw, &order))
+		require.Equal(t, billing.OrderComplete, order.Status, string(raw))
+		card := *order.Payment.PaymentID
+
+		// The page is completed after all: CCBill charged her twice and bills a
+		// subscription OpenRails never took. Its sale is kept for refund, once.
+		alice := customerOf(a.alice)
+		sale := map[string]any{"subscriptionId": "0778899001122334455", "transactionId": "0812233445566778820", "reservationId": link.Query().Get("reservationId"),
+			"flexId": "critical-flex", "username": a.alice.Username, "billedInitialPrice": "10.00", "billedRecurringPrice": "10.00", "billedCurrencyCode": "840",
+			"nextRenewalDate": a.clock.Now().UTC().Add(720 * time.Hour).Format(time.DateOnly), "cardType": "VISA", "last4": "1111"}
+		for range 2 {
+			status, body := ccbillNotice(t, a, "NewSaleSuccess", sale)
+			require.Equal(t, http.StatusOK, status, body)
+			a.clock.Advance(time.Second)
+		}
+		paid, err := a.alpha.GetOrder(t.Context(), order.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.OrderComplete, paid.Status)
+		require.Equal(t, card, *paid.Payment.PaymentID, "the card still pays the order")
+		listed, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: alice})
+		require.NoError(t, err)
+		var held []billing.Payment
+		for _, p := range listed.Items {
+			if p.TransactionID == "0812233445566778820" {
+				held = append(held, p)
+			}
+		}
+		require.Len(t, held, 1, "the second charge is recorded once: %+v", listed.Items)
+		require.Equal(t, billing.PaymentSucceeded, held[0].Status)
+		require.EqualValues(t, 10_000_000, held[0].Amount)
+		require.Equal(t, "ccbill", *held[0].Rail)
+		require.Equal(t, order.ID, *held[0].OrderID)
+		require.Nil(t, held[0].SubscriptionID, "the sale grants nothing")
+		require.Equal(t, "stripe", onlySubscription(t, a.alpha, alice).Rail, "the card's membership is the only one")
+		late, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.order.late_payment"})
+		require.NoError(t, err)
+		require.Len(t, late.Items, 1)
+		require.Equal(t, held[0].ID.UUID().String(), late.Items[0].SubjectKey)
+		require.Equal(t, billing.FindingStatus("requires_review"), late.Items[0].Status)
+		require.Contains(t, *late.Items[0].RecommendedAction, "Refund it at the provider")
+		unbooked, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.ledger.unbooked"})
+		require.NoError(t, err)
+		require.Len(t, unbooked.Items, 1, "one repair: cancel the subscription at CCBill")
+		require.Equal(t, "ccbill_sale_order_paid", unbooked.Items[0].Evidence["operation"])
+		require.Equal(t, "0778899001122334455", unbooked.Items[0].Evidence["metadata"].(map[string]any)["rail_subscription_id"])
+		effects := provider.effects(t)
+		require.Len(t, effects, 1, "the card is never refunded for CCBill's charge")
+		require.Equal(t, "charge", effects[0].Kind)
 	})
 }
 

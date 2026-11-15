@@ -153,7 +153,7 @@ func TestBackgroundJobs(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		host, err := fleet.Insert(t.Context(), hostChore{}, &river.InsertOpts{Queue: "host"})
 		require.NoError(t, err)
-		short, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.order_expiry"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		short, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.usage_orders"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		long, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.cleanup_expired_data"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
@@ -207,11 +207,10 @@ func TestBackgroundJobs(t *testing.T) {
 			_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET attempt=1, "+set+" WHERE id=$1", job.Job.ID)
 			require.NoError(t, err)
 		}
-		insert("openrails.order_expiry", "state='running', attempted_at=now()-interval '11 minutes', attempted_by=ARRAY['stuck']")
-		insert("openrails.balance_watch", "state='discarded', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute', "+
-			"errors=ARRAY[jsonb_build_object('at', now(), 'attempt', 1, 'error', 'critical: the pass failed', 'trace', '')]")
+		insert("openrails.usage_orders", "state='running', attempted_at=now()-interval '11 minutes', attempted_by=ARRAY['stuck']")
+		insert("openrails.balance_look", "state='discarded', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute', "+
+			"errors=ARRAY[jsonb_build_object('at', now(), 'attempt', 1, 'error', 'critical: the look failed', 'trace', '')]")
 		insert("openrails.billing_pass", "state='completed', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute'")
-		insert("openrails.rebill_watch", "state='completed', attempted_at=now()-interval '2 minutes', finalized_at=now()-interval '1 minute'")
 
 		var kinds []billing.WorkerHealth
 		require.NoError(t, json.Unmarshal([]byte(hostCLI(t, w, "workers", "--json")), &kinds))
@@ -219,16 +218,18 @@ func TestBackgroundJobs(t *testing.T) {
 		for _, k := range kinds {
 			health[k.Kind] = k
 		}
-		require.EqualValues(t, 1, health["openrails.order_expiry"].Overrunning)
-		require.EqualValues(t, 600, health["openrails.order_expiry"].TimeoutSeconds)
-		require.EqualValues(t, 1, health["openrails.balance_watch"].Discarded)
-		require.NotNil(t, health["openrails.balance_watch"].LastError)
-		require.Equal(t, "critical: the pass failed", *health["openrails.balance_watch"].LastError)
+		require.EqualValues(t, 1, health["openrails.usage_orders"].Overrunning)
+		require.EqualValues(t, 600, health["openrails.usage_orders"].TimeoutSeconds)
+		require.EqualValues(t, 1, health["openrails.balance_look"].Discarded)
+		require.NotNil(t, health["openrails.balance_look"].LastError)
+		require.Equal(t, "critical: the look failed", *health["openrails.balance_look"].LastError)
 		require.NotNil(t, health["openrails.billing_pass"].LastCompletedAt)
 		require.NotNil(t, health["openrails.billing_pass"].PeriodSeconds)
 		require.EqualValues(t, 3600, *health["openrails.billing_pass"].PeriodSeconds)
-		require.Nil(t, health["openrails.rebill_watch"].PeriodSeconds, "a scan runs in the billing pass")
-		require.Nil(t, health["openrails.rebill_watch"].LastCompletedAt)
+		for _, scan := range []string{"openrails.dunning", "openrails.balance_watch", "openrails.delinquency", "openrails.order_expiry",
+			"openrails.rebill_watch", "openrails.nmi_history", "openrails.config_realerts", "openrails.stored_card_refresh_due"} {
+			require.NotContains(t, health, scan, "a scan runs in the billing pass; it is no job kind")
+		}
 		require.NotContains(t, health, "openrails.operation_wakes")
 		require.Contains(t, health, "openrails.provider_operation")
 		require.Nil(t, health["openrails.provider_operation"].PeriodSeconds, "an operation runs when queued")
@@ -238,9 +239,9 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, fleet.Start(t.Context()))
 		require.Eventually(t, func() bool {
 			err := progress(t.Context())
-			return err != nil && strings.Contains(err.Error(), "openrails.order_expiry: 1 running past its 10m0s timeout")
+			return err != nil && strings.Contains(err.Error(), "openrails.usage_orders: 1 running past its 10m0s timeout")
 		}, 20*time.Second, 50*time.Millisecond, "the probe names the job running past its timeout")
-		_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET state='completed', finalized_at=now() WHERE kind='openrails.order_expiry'")
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET state='completed', finalized_at=now() WHERE kind='openrails.usage_orders'")
 		require.NoError(t, err)
 		require.NoError(t, progress(t.Context()), "a fresh leader and no overrunning job")
 	})
@@ -278,7 +279,7 @@ func TestBackgroundJobs(t *testing.T) {
 		restore := storageFault(t, w, w.schema, "ledger_transfers", fmt.Sprintf("NEW.merchant_id = '%s'::uuid", w.alpha.MerchantID().UUID()))
 		w.clock.Advance(time.Hour)
 		fleet := startFleet(t, w)
-		runRegisteredFails(t, fleet, "openrails.balance_watch")
+		runRegisteredFails(t, fleet, "openrails.billing_pass")
 		beta, err := w.beta.GetCreditGrant(t.Context(), lots[w.beta])
 		require.NoError(t, err)
 		require.EqualValues(t, 1000, beta.ExpiredAmount, "the other merchant's pass finishes")
@@ -286,7 +287,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, alpha.ExpiredAmount)
 		restore()
-		runRegistered(t, fleet, "openrails.balance_watch", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		alpha, err = w.alpha.GetCreditGrant(t.Context(), lots[w.alpha])
 		require.NoError(t, err)
 		require.EqualValues(t, 1000, alpha.ExpiredAmount)
@@ -337,11 +338,11 @@ func TestBackgroundJobs(t *testing.T) {
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		require.Contains(t, []string{"created", "requires_action"}, attempt(), "only the order expiry expires an attempt")
 		require.Zero(t, orphans())
-		runRegistered(t, fleet, "openrails.order_expiry", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Equal(t, "expired", attempt())
 
 		w.clock.Advance(91 * 24 * time.Hour)
-		runRegistered(t, fleet, "openrails.order_expiry", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
 		require.NoError(t, err, "the order expiry deletes nothing")
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
@@ -358,23 +359,28 @@ func TestBackgroundJobs(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
-		notifications := pgx.Identifier{w.schema, "notifications"}.Sanitize()
-		// More merchants than one job's batch each hold a notification past
-		// its retention.
+		findings := pgx.Identifier{w.schema, "reconciliation_findings"}.Sanitize()
+		// More merchants than one job's batch each hold a resolved finding
+		// past its retention.
 		_, err := w.pool.Exec(t.Context(), `WITH m AS (INSERT INTO `+pgx.Identifier{w.schema, "merchants"}.Sanitize()+` (slug, status)
 			SELECT 'retention-' || g, 'active' FROM generate_series(1, 201) g RETURNING id)
-			INSERT INTO `+notifications+` (merchant_id, event_type, data, recipient_kind, severity, title, body, created_at)
-			SELECT id, 'operator.alert', '{}', 'merchant', 'info', 'Old', 'Past its retention', now() - interval '200 days' FROM m`)
+			INSERT INTO `+findings+` (merchant_id, finding_type, subject_key, severity, status, resolution, resolved_at, last_seen_at)
+			SELECT id, 'consistency.retention_fixture', 'old', 'low', 'ignored', 'ignored', now() - interval '400 days', now() - interval '400 days' FROM m`)
 		require.NoError(t, err)
 		expired := func() int {
 			var n int
-			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+notifications+" WHERE created_at < now() - interval '199 days'").Scan(&n))
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+findings+" WHERE resolved_at < now() - interval '399 days'").Scan(&n))
 			return n
 		}
 		require.Equal(t, 201, expired())
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		require.Eventually(t, func() bool { return expired() == 0 }, 30*time.Second, 50*time.Millisecond,
 			"the pass continues in a new job after its first 200 merchants")
+		rows, err := w.pool.Query(t.Context(), "SELECT max_attempts FROM "+pgx.Identifier{w.schema, "river_job"}.Sanitize()+" WHERE kind = 'openrails.cleanup_expired_data' AND args ? 'after'")
+		require.NoError(t, err)
+		attempts, err := pgx.CollectRows(rows, pgx.RowTo[int])
+		require.NoError(t, err)
+		require.Equal(t, []int{1}, attempts, "the continuation makes one attempt; the next period's pass retries what it left")
 	})
 	t.Run("OR-J37-S06/a-solana-renewal-whose-pull-is-still-owed-is-not-a-missed-rebill", func(t *testing.T) {
 		s := newSolanaWorld(t, true)
@@ -449,11 +455,16 @@ func TestBackgroundJobs(t *testing.T) {
 		var down atomic.Bool
 		var probes atomic.Int32
 		p.core.FailRequests(func(r *http.Request) bool {
-			if down.Load() && strings.HasSuffix(r.URL.Path, "/query.php") {
-				probes.Add(1)
-				return true
+			if !down.Load() || !strings.HasSuffix(r.URL.Path, "/query.php") {
+				return false
 			}
-			return false
+			// The pass's NMI history read names no sale or schedule; the probe does.
+			_ = r.ParseForm()
+			if r.Form.Get("order_id") == "" && r.Form.Get("subscription_id") == "" {
+				return false
+			}
+			probes.Add(1)
+			return true
 		}, http.StatusServiceUnavailable, 1_000_000)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) + 25*time.Hour)
 		fleet := hostFleet(t, a.world)
@@ -461,14 +472,14 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
 		down.Store(true)
-		runRegistered(t, fleet, "openrails.rebill_watch", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		failed := probes.Load()
 		require.NotZero(t, failed)
-		runRegistered(t, fleet, "openrails.rebill_watch", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Equal(t, failed, probes.Load(), "a failed probe waits out its backoff")
 		down.Store(false)
 		a.clock.Advance(time.Hour)
-		runRegistered(t, fleet, "openrails.rebill_watch", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.rebill.missed"})
 		require.NoError(t, err)
 		require.Len(t, findings.Items, 1, "the probe runs again once its backoff has passed")

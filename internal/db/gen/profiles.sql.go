@@ -11,24 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const bindUnboundMerchantGroup = `-- name: BindUnboundMerchantGroup :execrows
-UPDATE billing.merchants SET permission_group_id=$1::text,updated_at=now()
-WHERE id=$2::uuid AND permission_group_id IS NULL AND deleted_at IS NULL
-`
-
-type BindUnboundMerchantGroupParams struct {
-	GroupID string
-	ID      uuid.UUID
-}
-
-func (q *Queries) BindUnboundMerchantGroup(ctx context.Context, arg BindUnboundMerchantGroupParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bindUnboundMerchantGroup, arg.GroupID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const getMerchantDirectoryByID = `-- name: GetMerchantDirectoryByID :one
 SELECT id,slug,status,permission_group_id
 FROM billing.merchants WHERE id=$1::uuid AND deleted_at IS NULL

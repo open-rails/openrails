@@ -81,8 +81,8 @@ type RecordUsageParams struct {
 // payer, event_type, source, source_id): a replay returns the existing event
 // with Replayed set and never charges again, even after a price change; a
 // changed stated amount gets ErrIdempotencyKeyReused. The event's key is
-// honoured for the ingest window after it occurred; a failed event's
-// ledger posting is idempotent for good. The balance row is locked before the
+// honoured for the ingest window after it occurred; a charged failed event's
+// ledger legs hold its key for good. The balance row is locked before the
 // idempotency check, so concurrent identical records serialize.
 func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams) (*models.UsageEvent, error) {
 	if s == nil || s.db == nil {
@@ -183,6 +183,34 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		if !errors.Is(gerr, pgx.ErrNoRows) {
 			return gerr
 		}
+		// Past the window a charged failure's ledger legs still hold its key.
+		// Answer their event before any grace is counted or lot drawn: a
+		// fresh spend would draw other lots under new once-keys.
+		charged, legs, lerr := params.Key.committedAt(ctx, q, tenantID, payerID, cur)
+		if lerr != nil {
+			return lerr
+		}
+		if legs > 0 {
+			tr, terr := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
+				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+				Operation: string(params.Key.Operation()),
+				Source:    params.Key.Source(), SourceID: params.Key.SourceID(),
+			})
+			if terr != nil {
+				return terr
+			}
+			// The event lies within the key window around its posting.
+			coords.OccurredFrom, coords.OccurredTo = usageKeyWindow(tr.CreatedAt)
+			row, rerr := q.GetUsageEventByCoords(ctx, coords)
+			if rerr == nil {
+				return replay(row)
+			}
+			if !errors.Is(rerr, pgx.ErrNoRows) {
+				return rerr
+			}
+			return fmt.Errorf("%w: %s key (%s, %s) already charged %d and its event is past retention",
+				ErrIdempotencyKeyReused, params.Key.Operation(), params.Key.Source(), params.Key.SourceID(), charged)
+		}
 
 		// What the event's meters take from it, before anything is written:
 		// a meter that cannot price it refuses it whole.
@@ -258,8 +286,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			}
 		} else if charge > 0 {
 			// The host's price: prepaid balance first, the rest owed.
-			_, _, applied, derr := bound.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, charge, true)
-			if derr != nil {
+			if _, _, _, derr := bound.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, charge, true); derr != nil {
 				return derr
 			}
 			// Link the usage event to the durable spend transfer (the balance
@@ -269,25 +296,10 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 				Operation: string(params.Key.Operation()),
 				Source:    params.Key.Source(), SourceID: params.Key.SourceID(),
 			})
-			if terr != nil && !errors.Is(terr, pgx.ErrNoRows) {
+			if terr != nil {
 				return terr
 			}
-			if terr == nil {
-				id := tr.ID
-				debitID = &id
-				if !applied {
-					// The ledger debit is permanent and older than the key
-					// window: its event lies within the window around it.
-					coords.OccurredFrom, coords.OccurredTo = usageKeyWindow(tr.CreatedAt)
-					row, rerr := q.GetUsageEventByCoords(ctx, coords)
-					if rerr == nil {
-						return replay(row)
-					}
-					if !errors.Is(rerr, pgx.ErrNoRows) {
-						return rerr
-					}
-				}
-			}
+			debitID = &tr.ID
 		}
 
 		ev = &models.UsageEvent{

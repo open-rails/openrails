@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 
 	"github.com/google/uuid"
@@ -86,7 +87,7 @@ type MoneyService struct {
 	EngineAdmissionHold   bool
 	UsageBillingEnabled   bool
 	hyperSwitchDeployment string
-	usageRecoveryResolver NMIClientResolver
+	usageRecoveryResolver railresolve.NMIClientResolver
 	db                    *db.DB
 	clock                 clockwork.Clock
 	// posting is set on the service a running charge's posting runs on.
@@ -169,35 +170,6 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 	// Derived read without a lock: a stale read never overdrafts, since writers
 	// re-derive under the customers-row lock.
 	return s.deriveBalance(ctx, s.db.Gen(ctx), tenantID, payerID, cur)
-}
-
-func (s *MoneyService) ListBalancesForCustomer(ctx context.Context, payer identity.CustomerID) ([]models.MoneyBalance, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	tenantID := tid.UUID()
-	payerID := payer.UUID()
-	q := s.db.Gen(ctx)
-	currencies, err := q.ListCustomerBalanceCurrencies(ctx, gen.ListCustomerBalanceCurrenciesParams{MerchantID: tenantID, CustomerID: payerID})
-	if err != nil {
-		return nil, err
-	}
-	out := []models.MoneyBalance{}
-	for _, cur := range currencies {
-		bal, err := s.deriveBalance(ctx, q, tenantID, payerID, normalizeCurrency(cur))
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *bal)
-	}
-	return out, nil
 }
 
 // AdmissionCapacity is the affordability snapshot consumed by the SQL
@@ -389,43 +361,6 @@ func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, payer 
 			return e
 		}
 		out = st
-		return nil
-	})
-	return out, err
-}
-
-// GetDepositBySourceID returns the credit grant committed at the caller's
-// deposit key, or (nil, nil) when it never committed. It reads the exact
-// coordinate depositTx dedupes on: (merchant, payer, source_id), operation
-// deposit.
-func (s *MoneyService) GetDepositBySourceID(ctx context.Context, payer identity.CustomerID, sourceID string) (*models.MoneyTransaction, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return nil, fmt.Errorf("source_id required")
-	}
-	var out *models.MoneyTransaction
-	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		tid, err := merchant.Require(ctx)
-		if err != nil {
-			return err
-		}
-		g, err := s.db.Gen(ctx).GetCreditGrantBySourceID(ctx, gen.GetCreditGrantBySourceIDParams{
-			MerchantID: tid.UUID(), CustomerID: payer.UUID(), SourceID: sourceID,
-		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		out, err = creditGrantTxn(g)
-		if err != nil {
-			return err
-		}
-		out.Replayed = true
 		return nil
 	})
 	return out, err

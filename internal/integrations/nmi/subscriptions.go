@@ -219,6 +219,7 @@ func (c *NMIClient) AttemptManualRebill(ctx context.Context, params ManualRebill
 		values.Set("ponumber", trimmed)
 	}
 	params.StoredCredential.ApplyToForm(values)
+	SettleOnlyInFull(values)
 
 	response, err := c.sendDirectRequest(ctx, values)
 	if err != nil {
@@ -233,6 +234,12 @@ func (c *NMIClient) AttemptManualRebill(ctx context.Context, params ManualRebill
 		transactionID := strings.TrimSpace(output.Get("transactionid"))
 		if transactionID == "" {
 			err := ambiguous(errors.New("approved manual rebill missing transaction id"))
+			return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
+		}
+		// The schedule names the amount, so only a remaining balance shows a
+		// partial here; the receipt's exact amount decides the rest.
+		if balance := strings.TrimSpace(output.Get("partial_payment_balance")); partialBalance(balance) {
+			err := partialApproval(strings.TrimSpace(output.Get("amount_authorized")), balance)
 			return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
 		}
 		return &ManualRebillResponse{Success: true, TransactionID: transactionID, AVSResponse: strings.TrimSpace(output.Get("avsresponse")), CVVResponse: strings.TrimSpace(output.Get("cvvresponse"))}, nil

@@ -3,12 +3,18 @@ package solana
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 
 	solanago "github.com/gagliardetto/solana-go"
 )
 
-// blockhashGetter is the minimal RPC surface BuildPartiallySignedTx needs.
+// ErrCosignerPays refuses a fee payer that is the cosigner: the cranker would
+// sign the wallet's slot, handing back a transaction it alone authorized.
+var ErrCosignerPays = errors.New("solana: the wallet is the cranker that cosigns its transaction")
+
+// blockhashGetter is where BuildPartiallySignedTx reads its blockhash: the
+// chain, or one already read.
 type blockhashGetter interface {
 	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
 }
@@ -23,13 +29,20 @@ type blockhashGetter interface {
 // cancel/subscribe.
 //
 // feePayer is account index 0 and the wallet-side signer; cosigner must be a
-// required signer, else this errors.
+// required signer other than feePayer, else this errors.
 func BuildPartiallySignedTx(ctx context.Context, cosigner Signer, rpc blockhashGetter, feePayer solanago.PublicKey, instructions []solanago.Instruction) (string, error) {
 	if cosigner == nil {
 		return "", fmt.Errorf("solana: cosigner is required")
 	}
 	if len(instructions) == 0 {
 		return "", fmt.Errorf("solana: at least one instruction is required")
+	}
+	cosignerPub, err := cosigner.PublicKey(ctx)
+	if err != nil {
+		return "", fmt.Errorf("solana: resolve cosigner public key: %w", err)
+	}
+	if feePayer.Equals(cosignerPub) {
+		return "", fmt.Errorf("%w: %s", ErrCosignerPays, feePayer)
 	}
 	blockhash, err := rpc.GetLatestBlockhash(ctx)
 	if err != nil {
@@ -40,10 +53,6 @@ func BuildPartiallySignedTx(ctx context.Context, cosigner Signer, rpc blockhashG
 		return "", fmt.Errorf("solana: build transaction: %w", err)
 	}
 
-	cosignerPub, err := cosigner.PublicKey(ctx)
-	if err != nil {
-		return "", fmt.Errorf("solana: resolve cosigner public key: %w", err)
-	}
 	numSigners := int(tx.Message.Header.NumRequiredSignatures)
 	idx := -1
 	for i := 0; i < numSigners && i < len(tx.Message.AccountKeys); i++ {

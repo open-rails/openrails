@@ -132,17 +132,3 @@ func (r *OrderAttemptRepo) BindSolanaTransactionRequest(ctx context.Context, ses
 	}
 	return nil
 }
-
-func (r *OrderAttemptRepo) GetByReference(ctx context.Context, reference string) (*models.OrderAttempt, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return nil, queryScopeErr
-	}
-
-	ref := strings.TrimSpace(reference)
-	row, err := r.db.Gen(ctx).GetOrderAttemptByReference(ctx, gen.GetOrderAttemptByReferenceParams{MerchantID: queryMerchant.UUID(), Reference: &ref})
-	if err != nil {
-		return nil, err
-	}
-	return models.OrderAttemptFromGen(row)
-}

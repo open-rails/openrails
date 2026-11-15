@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -113,7 +114,7 @@ func (r NMIEnrollmentReceipt) Validate(in gen.BillingProviderIntent) error {
 	return nil
 }
 
-func ReadNMIEnrollmentReceipt(ctx context.Context, in gen.BillingProviderIntent, resolver NMIClientResolver, reference string) (NMIEnrollmentReceipt, bool, error) {
+func ReadNMIEnrollmentReceipt(ctx context.Context, in gen.BillingProviderIntent, resolver railresolve.NMIClientResolver, reference string) (NMIEnrollmentReceipt, bool, error) {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return NMIEnrollmentReceipt{}, false, err

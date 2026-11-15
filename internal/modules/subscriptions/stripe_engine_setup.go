@@ -39,23 +39,6 @@ func (s *StripeService) checkEngineSetup(p StripeEngineSetupParams) error {
 	}
 	return nil
 }
-func (s *StripeService) CreateEngineSetup(ctx context.Context, p StripeEngineSetupParams) (StripeEngineSetup, error) {
-	if err := s.checkEngineSetup(p); err != nil {
-		return StripeEngineSetup{}, err
-	}
-	scoped := *s
-	scoped.Rails = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
-	s = &scoped
-	v := url.Values{"customer": {p.CustomerRef}, "usage": {"off_session"}, "payment_method_types[]": {"card"}}
-	for k, value := range p.metadata() {
-		v.Set("metadata["+k+"]", value)
-	}
-	body, err := s.stripePostForm(ctx, "/v1/setup_intents", v, "engine-setup:"+p.SessionID.String())
-	if err != nil {
-		return StripeEngineSetup{}, errors.New("Stripe setup outcome requires recovery")
-	}
-	return s.decodeEngineSetup(ctx, p, "", body)
-}
 func (s *StripeService) ReadEngineSetup(ctx context.Context, p StripeEngineSetupParams, reference string) (StripeEngineSetup, bool, error) {
 	if err := s.checkEngineSetup(p); err != nil {
 		return StripeEngineSetup{}, false, err

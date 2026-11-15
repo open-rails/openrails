@@ -14,7 +14,6 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
@@ -197,24 +196,6 @@ func startCapacity(accountCapacity, activeHeld int64) int64 {
 	return accountCapacity - activeHeld
 }
 
-func budgetScopeWindowModels(ws []billing.BudgetWindow) []models.BudgetWindowPolicy {
-	out := make([]models.BudgetWindowPolicy, 0, len(ws))
-	for _, w := range ws {
-		out = append(out, models.BudgetWindowPolicy{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency})
-	}
-	return out
-}
-
-func spendLimitWindowInputs(ws []models.BudgetWindowPolicy) []billing.BudgetWindow {
-	out := make([]billing.BudgetWindow, 0, len(ws))
-	for _, w := range ws {
-		out = append(out, billing.BudgetWindow{
-			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
-		})
-	}
-	return out
-}
-
 // BillingPolicy declares one named billing policy (or#897). Window entries
 // carry the same {key, window_seconds, limit, currency} shape everywhere in this
 // package — billing.BudgetWindow.
@@ -346,11 +327,4 @@ func (s *Service) GetTrustLevel(ctx context.Context, payer identity.CustomerID, 
 		return "", err
 	}
 	return money.NewMoneyService(s.rt.DB).GetTrustLevel(ctx, payer, cur)
-}
-
-func nonEmptyString(v string) *string {
-	if v == "" {
-		return nil
-	}
-	return &v
 }

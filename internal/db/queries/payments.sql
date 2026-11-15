@@ -179,17 +179,6 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND status = 'pending'
   AND deleted_at IS NULL;
 
--- name: HasCompletedPaymentAtOrAfterPeriodEnd :one
-SELECT EXISTS (
-    SELECT 1
-    FROM billing.payments purch
-    WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND purch.subscription_id = sqlc.arg(subscription_id)::uuid
-      AND purch.status = 'succeeded'
-      AND purch.purchased_at >= sqlc.arg(period_end)::timestamptz
-      AND purch.deleted_at IS NULL
-)::bool;
-
 -- name: GetLatestChargeBySubscriptionID :one
 SELECT * FROM billing.payments purch
 WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.subscription_id = $1

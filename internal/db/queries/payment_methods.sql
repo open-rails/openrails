@@ -138,11 +138,6 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
  AND rail='stripe' AND rail_method_ref=sqlc.arg(rail_method_ref)::text
  AND rail_customer_ref IS NULL AND custodian='psp' AND custodian_id IS NULL AND park_reason IS NULL;
 
--- name: ListPaymentMethodsByRails :many
-SELECT * FROM billing.payment_methods pm
-WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.rail = ANY(sqlc.arg(rails)::text[])
-ORDER BY pm.created_at DESC;
-
 -- name: ListCustomerPaymentMethodsByIDs :many
 SELECT * FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
@@ -165,11 +160,6 @@ ORDER BY pm.created_at DESC;
 -- name: CountPaymentMethodForUser :one
 SELECT count(*) FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = $1 AND pm.customer_id = $2;
-
--- name: ListPaymentMethodsByRail :many
-SELECT * FROM billing.payment_methods pm
-WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.rail = $1
-ORDER BY pm.created_at DESC;
 
 -- name: ListLatestChargeByPaymentMethodIDs :many
 -- #589 derived health: each payment method's most recent charge attempt
@@ -310,7 +300,10 @@ UPDATE billing.payment_methods SET status = 'removed', setup_ref = NULL, capture
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'requires_action' AND (created_at < sqlc.arg(before)::timestamptz OR (capture->>'expires_at')::timestamptz <= sqlc.arg(now)::timestamptz);
 
 -- name: ListStaleSetupMerchants :many
--- The sweep's work queue: merchants with a card save waiting past the cutoff.
+-- The sweep's work queue: merchants with a card save waiting past the cutoff,
+-- in id order after a cursor.
 SELECT DISTINCT merchant_id FROM billing.payment_methods
 WHERE status = 'requires_action' AND (created_at < sqlc.arg(before)::timestamptz OR (capture->>'expires_at')::timestamptz <= sqlc.arg(now)::timestamptz)
+  AND merchant_id > sqlc.arg(after_merchant_id)::uuid
+ORDER BY merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;

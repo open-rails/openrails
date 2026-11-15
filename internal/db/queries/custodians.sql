@@ -21,14 +21,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND lower(key) = lower(sqlc.arg(key)::text)
 LIMIT 1;
 
--- name: GetCustodianByIdentity :one
-SELECT * FROM billing.custodians
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND kind = lower(sqlc.arg(kind)::text)
-  AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
-  AND account_id = sqlc.arg(account_id)::text
-LIMIT 1;
-
 -- name: ListCustodiansForMerchant :many
 SELECT * FROM billing.custodians
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid

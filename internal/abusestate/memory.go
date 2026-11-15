@@ -136,12 +136,6 @@ func (t *table) remove(keys []string) {
 	}
 }
 
-func (t *table) len() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return len(t.entries)
-}
-
 func (t *table) insert(key, set string, value int64, expires time.Time) {
 	for len(t.entries) >= t.limit {
 		t.drop(heap.Pop(&t.expiry).(*entry))

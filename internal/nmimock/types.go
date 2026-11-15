@@ -99,7 +99,15 @@ type Sale struct {
 	InitiatedBy, Indicator, Initial string
 	ScheduleID                      string
 	// Declined is the response_code of a declined sale; "" when approved.
-	Declined      string
+	Declined string
+	// PartialBalance is what a partial approval left unpaid; Amount stays
+	// the amount requested. HeldInFull: the request sent
+	// partial_payments=payment_in_full, so the sale never settles.
+	PartialBalance string
+	HeldInFull     bool
+	// IssuerCode replaces the processor_response_code the Query API reports
+	// behind a decline (05, or 51 behind 202).
+	IssuerCode    string
 	RefundedCents int64
 	RefundIDs     []string
 	// Voided sales never settle: no money moved.

@@ -15,7 +15,7 @@ sources:
 With `Deps.UserInfo`, the SCIM routes are not mounted: one source of truth.
 Customer billing facts identify their merchant and customer; the consuming
 application resolves its own recipients, preferences and delivery addresses.
-OpenRails produces [notification events](customer-notifications.md), not
+OpenRails produces [notification events](events.md), not
 customer email or a browser inbox. `Config.SMTP` and `Deps.Email` remain available
 for operator alerts and the standalone server's AuthKit messages.
 

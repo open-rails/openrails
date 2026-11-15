@@ -14,9 +14,6 @@ FROM (SELECT 1) AS one
 LEFT JOIN billing.destructive_action_switch s ON true
 LEFT JOIN billing.merchant_destructive_policy m ON m.merchant_id = sqlc.arg(merchant_id)::uuid;
 
--- name: IsDestructiveActionSwitchEnabled :one
-SELECT COALESCE((SELECT enabled FROM billing.destructive_action_switch LIMIT 1), false)::boolean AS enabled;
-
 -- name: SetDestructiveActionSwitch :exec
 -- One UPDATE halts every destructive plane on every node at its next gate check.
 UPDATE billing.destructive_action_switch

@@ -336,71 +336,6 @@ func (q *Queries) EnqueueOrderHostEvent(ctx context.Context, arg EnqueueOrderHos
 	return result.RowsAffected(), nil
 }
 
-const getCustomerOrder = `-- name: GetCustomerOrder :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded FROM billing.orders
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND id = $3::uuid
-`
-
-type GetCustomerOrderParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	ID         uuid.UUID
-}
-
-func (q *Queries) GetCustomerOrder(ctx context.Context, arg GetCustomerOrderParams) (BillingOrder, error) {
-	row := q.db.QueryRow(ctx, getCustomerOrder, arg.MerchantID, arg.CustomerID, arg.ID)
-	var i BillingOrder
-	err := row.Scan(
-		&i.MerchantID,
-		&i.ID,
-		&i.CustomerID,
-		&i.Origin,
-		&i.Status,
-		&i.Currency,
-		&i.Total,
-		&i.Number,
-		&i.IdempotencyKey,
-		&i.RequestDigest,
-		&i.PaymentMethodID,
-		&i.PspID,
-		&i.AttemptID,
-		&i.PaymentID,
-		&i.LastPaymentError,
-		&i.ExpiresAt,
-		&i.CompletedAt,
-		&i.CanceledAt,
-		&i.ExpiredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PaymentStatus,
-		&i.PayUrlSecretHash,
-		&i.PayUrlExpiresAt,
-		&i.SuccessUrl,
-		&i.CancelUrl,
-		&i.SavedPaymentMethods,
-		&i.SubscriptionID,
-		&i.PeriodStartsAt,
-		&i.PeriodEndsAt,
-		&i.DueAt,
-		&i.VoidedAt,
-		&i.AmountPaid,
-		&i.UncollectibleAt,
-		&i.CollectionMethod,
-		&i.PoNumber,
-		&i.Memo,
-		&i.Tax,
-		&i.BillingContacts,
-		&i.CollectionFailureCount,
-		&i.CollectionFailedAt,
-		&i.NextCollectionAttemptAt,
-		&i.CollectionOwner,
-		&i.SubscriptionBillKind,
-		&i.LinesDigest,
-		&i.Embedded,
-	)
-	return i, err
-}
-
 const getOpenOrderByLines = `-- name: GetOpenOrderByLines :one
 SELECT id, expires_at FROM billing.orders
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
@@ -559,7 +494,7 @@ func (q *Queries) GetOrder(ctx context.Context, arg GetOrderParams) (BillingOrde
 }
 
 const getOrderAttempt = `-- name: GetOrderAttempt :one
-SELECT id, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason, order_id FROM billing.order_attempts
+SELECT id, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, order_id FROM billing.order_attempts
 WHERE merchant_id = $1::uuid AND id = $2::uuid AND order_id IS NOT NULL AND deleted_at IS NULL
 `
 
@@ -593,7 +528,6 @@ func (q *Queries) GetOrderAttempt(ctx context.Context, arg GetOrderAttemptParams
 		&i.DeletedAt,
 		&i.DestructiveRunID,
 		&i.DestructiveRunClass,
-		&i.RoutingReason,
 		&i.OrderID,
 	)
 	return i, err
@@ -877,32 +811,48 @@ func (q *Queries) HandOverOwnershipClaim(ctx context.Context, arg HandOverOwners
 }
 
 const listExpiredOrders = `-- name: ListExpiredOrders :many
-SELECT id FROM billing.orders
+SELECT id, expires_at::timestamptz AS expires_at FROM billing.orders
 WHERE merchant_id = $1::uuid AND collection_owner = 'engine' AND status = 'open'
   AND expires_at <= $2::timestamptz
-ORDER BY expires_at
-LIMIT $3::int
+  AND ($3::timestamptz IS NULL
+       OR (expires_at, id) > ($3::timestamptz, $4::uuid))
+ORDER BY expires_at, id
+LIMIT $5::int
 `
 
 type ListExpiredOrdersParams struct {
-	MerchantID uuid.UUID
-	Now        time.Time
-	RowLimit   int32
+	MerchantID     uuid.UUID
+	Now            time.Time
+	AfterExpiresAt *time.Time
+	AfterID        *uuid.UUID
+	RowLimit       int32
 }
 
-func (q *Queries) ListExpiredOrders(ctx context.Context, arg ListExpiredOrdersParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listExpiredOrders, arg.MerchantID, arg.Now, arg.RowLimit)
+type ListExpiredOrdersRow struct {
+	ID        uuid.UUID
+	ExpiresAt time.Time
+}
+
+// A merchant's live orders past their expiry, in expiry order after a cursor.
+func (q *Queries) ListExpiredOrders(ctx context.Context, arg ListExpiredOrdersParams) ([]ListExpiredOrdersRow, error) {
+	rows, err := q.db.Query(ctx, listExpiredOrders,
+		arg.MerchantID,
+		arg.Now,
+		arg.AfterExpiresAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []ListExpiredOrdersRow
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i ListExpiredOrdersRow
+		if err := rows.Scan(&i.ID, &i.ExpiresAt); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -984,24 +934,27 @@ const listOrderExpiryMerchants = `-- name: ListOrderExpiryMerchants :many
 SELECT merchant_id FROM (
     SELECT merchant_id FROM billing.orders
     WHERE collection_owner = 'engine' AND status = 'open' AND expires_at <= $1::timestamptz
+      AND merchant_id > $2::uuid
     UNION
     SELECT merchant_id FROM billing.order_attempts
     WHERE expires_at IS NOT NULL AND expires_at < $1::timestamptz
       AND deleted_at IS NULL AND status IN ('created', 'requires_action')
+      AND merchant_id > $2::uuid
 ) due
 ORDER BY merchant_id
-LIMIT $2::int
+LIMIT $3::int
 `
 
 type ListOrderExpiryMerchantsParams struct {
-	Now           time.Time
-	MerchantLimit int32
+	Now             time.Time
+	AfterMerchantID uuid.UUID
+	MerchantLimit   int32
 }
 
 // The expiry's work queue: merchants with a live order or an order attempt
-// waiting on its customer past its expiry.
+// waiting on its customer past its expiry, in id order after a cursor.
 func (q *Queries) ListOrderExpiryMerchants(ctx context.Context, arg ListOrderExpiryMerchantsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listOrderExpiryMerchants, arg.Now, arg.MerchantLimit)
+	rows, err := q.db.Query(ctx, listOrderExpiryMerchants, arg.Now, arg.AfterMerchantID, arg.MerchantLimit)
 	if err != nil {
 		return nil, err
 	}

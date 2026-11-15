@@ -60,12 +60,6 @@ type Descriptor struct {
 	// on this rail.
 	SupportsChargeSavedMethod bool
 
-	// SupportsCatalogTrial: the rail can honour a price's catalog first phase
-	// (`trial:`, free or paid intro): Stripe via subscription_data[trial_end],
-	// CCBill via FlexForm terms OpenRails validates the billed amount against.
-	// Elsewhere a declared trial is refused at catalog push, never dropped.
-	SupportsCatalogTrial bool
-
 	// SupportsPaymentMethodCRUD: OpenRails owns first-party payment-instrument
 	// CRUD on this rail. NMI only: its customer vault is the one instrument
 	// store OpenRails writes.
@@ -186,7 +180,6 @@ var descriptors = []Descriptor{
 		true,          // HasPSPs
 		false,         // HasRemoteCustomer (vault ids are per-card)
 		true,          // SupportsChargeSavedMethod
-		false,         // SupportsCatalogTrial (add_subscription has no first phase)
 		true,          // SupportsPaymentMethodCRUD (the customer vault)
 		true,          // OpenRailsDrivenDunning
 		true,          // RemoteDeleteOnTerminalCancel (or NMI keeps retrying the schedule forever)
@@ -212,7 +205,6 @@ var descriptors = []Descriptor{
 		true,          // HasPSPs
 		false,         // HasRemoteCustomer (keys on subscription_id)
 		false,         // SupportsChargeSavedMethod
-		true,          // SupportsCatalogTrial (FlexForm terms; OpenRails validates the billed amount)
 		false,         // SupportsPaymentMethodCRUD (CCBill owns the vault)
 		false,         // OpenRailsDrivenDunning (CCBill retries itself)
 		false,         // RemoteDeleteOnTerminalCancel (CCBill drives its own lifecycle)
@@ -234,7 +226,6 @@ var descriptors = []Descriptor{
 		true,     // HasPSPs
 		true,     // HasRemoteCustomer (cus_*)
 		true,     // SupportsChargeSavedMethod
-		true,     // SupportsCatalogTrial (subscription_data[trial_end]; a PAID intro is refused separately)
 		false,    // SupportsPaymentMethodCRUD (Purchase / Billing Portal own instrument mutation)
 		false,    // OpenRailsDrivenDunning (Stripe dunning + webhooks)
 		false,    // RemoteDeleteOnTerminalCancel (Stripe cancels its own schedule)
@@ -258,7 +249,6 @@ var descriptors = []Descriptor{
 		true,     // HasPSPs
 		false,    // HasRemoteCustomer (keys on wallet address)
 		false,    // SupportsChargeSavedMethod
-		false,    // SupportsCatalogTrial (the on-chain plan has one period price)
 		false,    // SupportsPaymentMethodCRUD (a wallet is not an instrument we hold)
 		true,     // OpenRailsDrivenDunning (recurring pulled by our worker)
 		false,    // RemoteDeleteOnTerminalCancel (local cancel cascade stops the cranker)
@@ -377,14 +367,6 @@ func HasRemoteCustomer(rail models.Rail) bool {
 func SupportsPSPs(rail models.Rail) bool {
 	d, ok := Lookup(rail)
 	return ok && d.HasPSPs
-}
-
-// SupportsCatalogTrial reports whether a catalog `trial:` first phase can run
-// on this rail. Unknown rails: false, so an unclassified trial is refused,
-// never dropped.
-func SupportsCatalogTrial(rail models.Rail) bool {
-	d, ok := Lookup(rail)
-	return ok && d.SupportsCatalogTrial
 }
 
 // CanSellNew reports whether purchase can make a NEW sale of this kind on the

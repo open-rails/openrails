@@ -5,18 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 
-	"github.com/goccy/go-yaml"
 	"github.com/jackc/pgx/v5"
-	koanfyaml "github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/rawbytes"
-	"github.com/knadh/koanf/v2"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
 	log "github.com/sirupsen/logrus"
@@ -29,14 +24,12 @@ import (
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
 
-type BillingConfig struct {
-	Version   int                       `yaml:"version" koanf:"version"`
-	Merchants map[string]MerchantConfig `yaml:"merchants" koanf:"merchants"`
-}
+// BillingConfig is the manifest as the server reads it.
+type BillingConfig = merchantbootstrap.Manifest[MerchantConfig]
 
 // Declarations is the manifest as the engine reads it: each merchant's
 // declaration, without the keys only the server reads (remote_application).
-func (m *BillingConfig) Declarations() *merchantbootstrap.BillingConfig {
+func Declarations(m *BillingConfig) *merchantbootstrap.BillingConfig {
 	if m == nil {
 		return nil
 	}
@@ -47,131 +40,16 @@ func (m *BillingConfig) Declarations() *merchantbootstrap.BillingConfig {
 	return out
 }
 
-// LoadMerchantConfigManifest reads and validates a merchant config manifest.
-func LoadMerchantConfigManifest(path string) (*BillingConfig, error) {
-	return LoadMerchantConfigManifestFiles(path)
-}
-
-// LoadMerchantConfigManifestFiles loads a merchant config YAML file plus optional
-// structured YAML overlays through koanf, then validates the merged tree.
+// LoadMerchantConfigManifestFiles loads a merchant config YAML file plus
+// optional structured YAML overlays.
 func LoadMerchantConfigManifestFiles(path string, overlays ...string) (*BillingConfig, error) {
-	docs := make([][]byte, 0, 1+len(overlays))
-	for _, p := range append([]string{path}, overlays...) {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		raw, err := os.ReadFile(p) // #nosec G304 -- operator-supplied manifest path
-		if err != nil {
-			return nil, fmt.Errorf("read merchant config manifest %s: %w", p, err)
-		}
-		docs = append(docs, raw)
-	}
-	if len(docs) == 0 {
-		return nil, fmt.Errorf("read merchant config manifest: no path given")
-	}
-	return LoadMerchantConfigManifestWithOverlays(docs[0], docs[1:]...)
+	return merchantbootstrap.LoadManifestFiles(path, overlays, checkManifestEntry)
 }
 
-// ReadMerchantManifestOverlays reads operator-mounted overlay files for
-// LoadMerchantConfigManifestWithOverlays. Every listed path must exist.
-func ReadMerchantManifestOverlays(paths []string) ([][]byte, error) {
-	out := make([][]byte, 0, len(paths))
-	for _, p := range paths {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		raw, err := os.ReadFile(p) // #nosec G304 -- operator-configured overlay path
-		if err != nil {
-			return nil, fmt.Errorf("read merchant manifest overlay %s: %w", p, err)
-		}
-		out = append(out, raw)
-	}
-	return out, nil
-}
-
-// LoadMerchantConfigManifestWithOverlays merges the manifest with structured YAML
-// overlays (later wins) and validates the result. Overlays are the caller's
-// concern (a host's mounted secret files); the engine reads no env or files.
+// LoadMerchantConfigManifestWithOverlays merges the manifest with structured
+// YAML overlays (later wins) and validates the result.
 func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*BillingConfig, error) {
-	k := koanf.New(".")
-	for i, doc := range append([][]byte{raw}, overlays...) {
-		if len(strings.TrimSpace(string(doc))) == 0 {
-			continue
-		}
-		if i > 0 {
-			if err := validateMerchantSecretOverlay(doc); err != nil {
-				return nil, fmt.Errorf("load merchant config overlay %d: %w", i, err)
-			}
-		}
-		if err := k.Load(rawbytes.Provider(doc), koanfyaml.Parser()); err != nil {
-			if i == 0 {
-				return nil, fmt.Errorf("load merchant config manifest: %w", err)
-			}
-			return nil, fmt.Errorf("load merchant config overlay %d: %w", i, err)
-		}
-	}
-	for _, key := range []string{"auth", "users", "groups", "roles", "permissions", "catalogs", "products"} {
-		if k.Exists(key) {
-			return nil, fmt.Errorf("merchant config manifest does not accept %q; use the matching push command", key)
-		}
-	}
-	// Strict-parse the merged tree: koanf's Unmarshal silently ignores unknown
-	// fields, so route the file/overlay path through the same DisallowUnknownField
-	// parser as the embedded bytes path — a typo'd field is rejected, not dropped.
-	merged, err := k.Marshal(koanfyaml.Parser())
-	if err != nil {
-		return nil, fmt.Errorf("merge merchant config manifest: %w", err)
-	}
-	return ParseMerchantConfigManifest(merged)
-}
-
-// ParseMerchantConfigManifest parses the merchant config manifest consumed by
-// push-merchant-config. Bootstrap authority and catalog state are intentionally
-// rejected by the strict YAML decoder.
-func ParseMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
-	if err := rejectMisplacedMerchantConfigKeys(raw); err != nil {
-		return nil, fmt.Errorf("parse merchant config manifest: %w", err)
-	}
-	var manifest BillingConfig
-	if err := yaml.UnmarshalWithOptions(raw, &manifest, yaml.DisallowUnknownField()); err != nil {
-		return nil, fmt.Errorf("parse merchant config manifest: %w", err)
-	}
-	if len(manifest.Merchants) == 0 {
-		return nil, fmt.Errorf("merchant config manifest must declare at least one merchant")
-	}
-	if err := validateMerchantManifestShape(&manifest); err != nil {
-		return nil, err
-	}
-	return &manifest, nil
-}
-
-func mergeMerchantConfigManifest(dst, src *BillingConfig) {
-	if dst == nil || src == nil {
-		return
-	}
-	if src.Version != 0 {
-		dst.Version = src.Version
-	}
-	if len(src.Merchants) == 0 {
-		return
-	}
-	if dst.Merchants == nil {
-		dst.Merchants = map[string]MerchantConfig{}
-	}
-	for slug, srcMerchant := range src.Merchants {
-		dstMerchant := dst.Merchants[slug]
-		mergeMerchantConfig(&dstMerchant, srcMerchant)
-		dst.Merchants[slug] = dstMerchant
-	}
-}
-
-func mergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
-	merchantbootstrap.MergeMerchantConfig(&dst.MerchantDeclaration, src.MerchantDeclaration)
-	if src.RemoteApplication != nil {
-		dst.RemoteApplication = src.RemoteApplication
-	}
+	return merchantbootstrap.LoadManifest(raw, overlays, checkManifestEntry)
 }
 
 type MerchantConfig struct {
@@ -264,11 +142,11 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 	if manifest == nil {
 		return fmt.Errorf("merchant bootstrap manifest is required")
 	}
-	if manifest.Version != BootstrapManifestVersion {
-		return fmt.Errorf("merchant bootstrap: manifest version must be %d", BootstrapManifestVersion)
+	if manifest.Version != merchantbootstrap.BootstrapManifestVersion {
+		return fmt.Errorf("merchant bootstrap: manifest version must be %d", merchantbootstrap.BootstrapManifestVersion)
 	}
 	merchantsDeclared := maps.Clone(manifest.Merchants)
-	for _, slug := range sortedMerchantKeys(merchantsDeclared) {
+	for _, slug := range slices.Sorted(maps.Keys(merchantsDeclared)) {
 		mt := merchantsDeclared[slug]
 		if err := config.RefuseDeclarationBesideVault(cfg, slug, mt.MerchantDeclaration); err != nil {
 			if opts.Refuse == nil {
@@ -304,7 +182,7 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 			log.Info("merchant bootstrap: without Vault the manifest is read by the server that boots with it; only merchant identities persist here")
 		}
 	}
-	for _, slug := range sortedMerchantKeys(manifest.Merchants) {
+	for _, slug := range slices.Sorted(maps.Keys(manifest.Merchants)) {
 		tn, err := ProvisionMerchant(ctx, ProvisionMerchantParams{
 			Config: cfg, ControlPlane: cp, Database: database, Merchants: directory,
 			Slug: slug, Merchant: merchantsDeclared[slug], Insert: opts.Insert,
@@ -393,15 +271,6 @@ func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *control
 	return tn, nil
 }
 
-func sortedMerchantKeys(in map[string]MerchantConfig) []string {
-	keys := make([]string, 0, len(in))
-	for key := range in {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
 // remoteApplicationStaticPublicKeys passes the manifest's static JWKs to
 // AuthKit, which validates them at registration.
 func remoteApplicationStaticPublicKeys(app *RemoteApplicationConfig) []iam.RemoteApplicationKey {
@@ -484,9 +353,6 @@ func lockMerchantManifestBootstrap(ctx context.Context, cp *controlplane.Control
 
 const merchantManifestAdvisoryLock = int64(734252042137424)
 const DefaultMerchantConfigManifestPath = merchantbootstrap.DefaultMerchantConfigManifestPath
-
-var validateMerchantSecretOverlay = merchantbootstrap.ValidateMerchantSecretOverlay
-var rejectMisplacedMerchantConfigKeys = merchantbootstrap.RejectMisplacedMerchantConfigKeys
 
 type PSPConfig = config.PSPConfig
 type CustodianConfig = config.CustodianConfig

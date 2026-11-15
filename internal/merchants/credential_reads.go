@@ -36,18 +36,6 @@ type MerchantSecretReader interface {
 	Get(ctx context.Context, merchantID billing.MerchantID, name string) (Secret, error)
 }
 
-// SecretMap reads fixed credentials by name, the same for every merchant:
-// for tools and tests that have no merchant configuration.
-type SecretMap map[string]string
-
-func (m SecretMap) Get(_ context.Context, _ billing.MerchantID, name string) (Secret, error) {
-	name = cleanSecretName(name)
-	if v := strings.TrimSpace(m[name]); v != "" {
-		return Secret{Name: name, Value: v, Version: 1}, nil
-	}
-	return Secret{}, ErrSecretNotFound
-}
-
 // SecretRef names a credential slot. Retired reads as absent: nothing arms a
 // duplicate declaration.
 type SecretRef struct {
@@ -138,47 +126,6 @@ func (s PSPScope) HasSecret(key string) bool {
 // lowercase, trimmed.
 func NormalizeCredentialVersionKey(key string) string {
 	return strings.ToLower(strings.TrimSpace(key))
-}
-
-// PSPSecretResolver resolves the canonical secret name for the active PSP a
-// merchant should use.
-type PSPSecretResolver interface {
-	ActivePSPSecretName(ctx context.Context, merchantID billing.MerchantID, rail, key string) (string, bool, error)
-}
-
-// PSPSecretRefResolver is PSPSecretResolver as a SecretRef.
-type PSPSecretRefResolver interface {
-	ActivePSPSecretRef(ctx context.Context, merchantID billing.MerchantID, rail, key string) (SecretRef, bool, error)
-}
-
-// PSPScopeResolver resolves the selected PSP without requiring a particular
-// secret key.
-type PSPScopeResolver interface {
-	ActivePSPScope(ctx context.Context, merchantID billing.MerchantID, rail string) (PSPScope, bool, error)
-}
-
-// PSPKeyResolver resolves a live PSP by its key: the payment-provider name
-// purchase requests and catalog provider_links use.
-type PSPKeyResolver interface {
-	PSPScopeByKey(ctx context.Context, merchantID billing.MerchantID, key string) (PSPScope, bool, error)
-}
-
-// PSPRailScopesResolver lists every live PSP on a rail: purchase's
-// unambiguous rail-kind fallback (#848).
-type PSPRailScopesResolver interface {
-	ActivePSPScopesForRail(ctx context.Context, merchantID billing.MerchantID, rail string) ([]PSPScope, error)
-}
-
-// ArchivedPSPKeyResolver reports whether a key names an ARCHIVED PSP (or#288),
-// so routing can tell "you retired this PSP" from "no such PSP".
-type ArchivedPSPKeyResolver interface {
-	PSPKeyArchived(ctx context.Context, merchantID billing.MerchantID, key string) (bool, error)
-}
-
-// PSPIdentityScopeResolver resolves a PSP by identity for existing
-// obligations; archived PSPs remain available.
-type PSPIdentityScopeResolver interface {
-	PSPScopeByID(ctx context.Context, merchantID billing.MerchantID, pspID uuid.UUID) (PSPScope, bool, error)
 }
 
 // cleanSecretName normalises a secret name, refusing ("") one with a

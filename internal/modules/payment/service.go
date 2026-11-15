@@ -20,10 +20,8 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -57,13 +55,12 @@ type PurchaseService struct {
 	PaymentService           *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
 	Fulfillment              *FulfillmentService
-	PaymentMethodResolver    *PaymentMethodResolver
 	NMISaleService           *NMISaleService
 	CustodianSaleService     *CustodianSaleService
 	PaymentMethodService     *paymentmethods.PaymentMethodService
 	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	MerchantSecrets          merchants.MerchantSecretReader
-	ProviderSecrets          merchants.PSPSecretResolver
+	ProviderSecrets          *merchants.Service
 	// RailCustomerService maps users to rail customer ids: one Stripe customer
 	// per user, recorded at purchase rather than only by webhooks.
 	RailCustomerService *payments.RailCustomerService
@@ -72,7 +69,7 @@ type PurchaseService struct {
 	StripeService *subscriptions.StripeService
 	// Intents executes durable write-ahead provider intents; a new
 	// membership's charge goes through it.
-	Intents   intentExecutor
+	Intents   *intents.Runner
 	Lifecycle *subscriptions.SubscriptionLifecycleService
 	clock     clockwork.Clock
 	Config    *config.Config
@@ -82,9 +79,6 @@ type PurchaseService struct {
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
 	// one from Config.
 	NMIClients *railresolve.NMIFactory
-	// ResolveNMIClientOverride replaces the store-armed NMI client resolution
-	// entirely (test seam; nil = the scoped resolution).
-	ResolveNMIClientOverride func(context.Context, string) (*nmi.NMIClient, error)
 	// StripeEngines reads a Stripe engine payment's issuer challenge for the
 	// customer's next action.
 	StripeEngines intents.StripeEngineServiceResolver
@@ -135,7 +129,6 @@ func NewPurchaseService(
 		PaymentService:           paymentService,
 		EntitlementService:       entitlementService,
 		Fulfillment:              NewFulfillmentService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
-		PaymentMethodResolver:    NewPaymentMethodResolver(paymentMethodService, railPMService),
 		PaymentMethodService:     paymentMethodService,
 		RailPaymentMethodService: railPMService,
 		RailCustomerService:      railCustomerService,
@@ -144,7 +137,7 @@ func NewPurchaseService(
 		Config:                   cfg,
 		Rails:                    railSet,
 	}
-	service.NMISaleService = NewNMISaleService(service.Fulfillment, service.PaymentMethodResolver, railPMService)
+	service.NMISaleService = NewNMISaleService(service.Fulfillment, railPMService)
 	// The scoped resolver is the only NMI client source; armed once
 	// SetMerchantSecretStore wires the merchant secret store.
 	service.NMISaleService.ResolveNMIClient = service.resolveNMIClient
@@ -174,19 +167,6 @@ func (s *PurchaseService) GetUserProductCoverage(ctx context.Context, userID str
 		return nil, errors.New("purchase service unavailable")
 	}
 	return s.Fulfillment.GetUserProductCoverage(ctx, userID, product)
-}
-
-// processSubscription handles subscription purchases
-func (s *PurchaseService) processSubscription(
-	ctx context.Context,
-	req *PurchaseRequest,
-	user *UserIdentity,
-	price *models.Price,
-	product *models.Product,
-	coverage *CoverageInfo,
-	rail string,
-) (*PurchaseResponse, error) {
-	return nil, errors.New("new engine subscriptions require a saved-method order attempt and explicit agreement confirmation")
 }
 
 // processCCBillUpgrade handles CCBill subscription upgrades
@@ -254,96 +234,15 @@ func (s *PurchaseService) processCCBillUpgrade(
 	}, nil
 }
 
-// initialMembershipResponseFromIntent rebuilds the purchase response from a
-// succeeded create intent's evidence.
-func initialMembershipResponseFromIntent(intent gen.BillingProviderIntent) (*PurchaseResponse, error) {
-	if intent.Status == intents.StatusSucceeded {
-		if err := intents.ValidateInitialMembershipTerminal(intent); err != nil {
-			return nil, err
-		}
-	}
-	if intent.Status == intents.StatusFailedTerminal {
-		return nil, terminalPurchaseError(intent, "initial enrollment refused")
-	}
-	if intent.Status != intents.StatusSucceeded {
-		return nil, ErrPurchaseProcessing
-	}
-
-	var evidence struct {
-		SubscriptionID string `json:"subscription_id"`
-		TransactionID  string `json:"transaction_id"`
-		DelayedStart   string `json:"delayed_start"`
-		Status         string `json:"status"`
-		Message        string `json:"message"`
-	}
-	if len(intent.ResultEvidence) == 0 {
-		return nil, errors.New("subscription created but evidence unreadable")
-	}
-	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
-		return nil, fmt.Errorf("subscription created but evidence unreadable: %w", err)
-	}
-	accepted, err := subscriptions.DecodeInitialMembershipPayload(intent)
-	if err != nil {
-		return nil, err
-	}
-	resp := &PurchaseResponse{
-		Status:        evidence.Status,
-		Action:        "new",
-		Message:       evidence.Message,
-		TransactionID: evidence.TransactionID,
-	}
-	if accepted.Terms.PaymentID != uuid.Nil {
-		resp.PaymentID = &accepted.Terms.PaymentID
-	}
-	if resp.Status == "" {
-		resp.Status = "success"
-	}
-	if resp.Message == "" {
-		resp.Message = "Subscription created successfully"
-	}
-	if evidence.SubscriptionID != "" {
-		if id, err := uuid.Parse(evidence.SubscriptionID); err == nil {
-			resp.SubscriptionID = &id
-		}
-	}
-	if evidence.DelayedStart != "" {
-		if t, err := time.Parse(time.RFC3339, evidence.DelayedStart); err == nil {
-			resp.DelayedStart = &t
-		}
-	}
-	return resp, nil
-}
-
-// railCustomerStore is the slice of RailCustomerService used for
-// Stripe customer resolution. Defined as an interface so the resolution logic
-// is unit-testable without a database.
-type railCustomerStore interface {
-	GetCustomerID(ctx context.Context, userID, rail string) (string, error)
-	Upsert(ctx context.Context, userID, rail, customerID string) error
-}
-
-// stripeCustomerClient is the slice of StripeService used for customer
-// resolution and the duplicate guard.
-type stripeCustomerClient interface {
-	CreateCustomer(ctx context.Context, email, appUserID string) (string, error)
-	FindCustomerIDByAppUserID(ctx context.Context, appUserID string) (string, error)
-	ListActiveSubscriptionsForCustomer(ctx context.Context, customerID string) ([]subscriptions.StripeSubscriptionSummary, error)
-}
-
-func (s *PurchaseService) customerStore() railCustomerStore {
-	if s.RailCustomerService == nil {
-		return nil
-	}
-	return s.RailCustomerService
-}
-
-// resolveStripeCustomerWith returns the durable Stripe customer id for a user,
-// in priority order: the local mapping, Stripe Customer Search on
-// metadata[app_user_id], then a fresh idempotent customer. A resolved customer
-// is upserted into the local mapping so the link survives a missed webhook.
+// resolveStripeCustomerWith returns the user's Stripe customer id on the
+// account client is bound to, in priority order: that account's local
+// mapping, Stripe Customer Search on metadata[app_user_id], then a fresh
+// idempotent customer. A resolved customer is upserted into that account's
+// mapping so the link survives a missed webhook. A customer id is valid only
+// on the account that minted it, so another account's mapping is never read.
 // "" (no error) only when the dependencies are unavailable; the caller then
 // falls back to customer_email.
-func resolveStripeCustomerWith(ctx context.Context, store railCustomerStore, client stripeCustomerClient, user *UserIdentity) (string, error) {
+func resolveStripeCustomerWith(ctx context.Context, store *payments.RailCustomerService, client *subscriptions.StripeService, user *UserIdentity) (string, error) {
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		return "", nil
 	}
@@ -352,9 +251,18 @@ func resolveStripeCustomerWith(ctx context.Context, store railCustomerStore, cli
 		// the email-only path rather than failing the purchase.
 		return "", nil
 	}
+	_, psp := client.AccountIdentity()
+	if psp == uuid.Nil {
+		return "", errors.New("Stripe customer resolution needs an account-bound client")
+	}
+	ctx = db.WithPSPID(ctx, psp)
+	customer, err := db.ResolveCustomerID(user.ID)
+	if err != nil {
+		return "", err
+	}
 
 	// 1. Local mapping.
-	customerID, err := store.GetCustomerID(ctx, user.ID, "stripe")
+	customerID, err := store.GetAccountIDForPSP(ctx, customer, "stripe")
 	if err != nil && !db.IsNotFound(err) {
 		return "", fmt.Errorf("lookup stripe customer mapping: %w", err)
 	}
@@ -516,10 +424,6 @@ func parseStripeError(body []byte) string {
 		return ""
 	}
 	return strings.TrimSpace(out.Error.Message)
-}
-
-func timePtr(t time.Time) *time.Time {
-	return &t
 }
 
 // RegisterPurchase records a confirmed one-time purchase and grants its

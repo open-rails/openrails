@@ -3,7 +3,6 @@ package service
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -21,10 +20,6 @@ import (
 // readonly) blocks publishing a Solana plan.
 var errRemoteWritesDisabled = errors.New("provider writes are disabled (mode=limited/readonly)")
 
-// ErrTrialUnsupportedOnRail refuses a trial first phase on a rail that cannot
-// run one. Exported so the HTTP layer answers 400.
-var ErrTrialUnsupportedOnRail = apperr.New(http.StatusBadRequest, "trial_unsupported_on_rail", "trial first phase is not supported on this rail")
-
 // ErrPriceNotSellable refuses a price none of its methods can sell.
 var ErrPriceNotSellable = apperr.New(http.StatusBadRequest, "price_not_sellable", "no PSP can sell this price")
 
@@ -37,22 +32,6 @@ type solanaPlanContext struct {
 	BillingCycleDays     *int
 	BillingIntervalHours *int
 	RemoteWritesDisabled bool
-}
-
-// normalizeLinkMap trims each key/value and drops empty pairs; nil when none
-// survive.
-func normalizeLinkMap(in map[string]string) map[string]string {
-	out := map[string]string{}
-	for k, v := range in {
-		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
-		if k != "" && v != "" {
-			out[k] = v
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 // catalogRemoteWritesDisabled reports whether the operating mode blocks

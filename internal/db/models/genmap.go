@@ -340,13 +340,6 @@ func OrderAttemptFromGen(c gen.BillingOrderAttempt) (*OrderAttempt, error) {
 	if err := m.ValidateTerms(); err != nil {
 		return nil, err
 	}
-	if len(c.RoutingReason) > 0 {
-		var reason PSPRoutingReason
-		if err := FromJSONB(c.RoutingReason, &reason, "order_attempts.routing_reason"); err != nil {
-			return nil, err
-		}
-		m.RoutingReason = &reason
-	}
 	return m, nil
 }
 

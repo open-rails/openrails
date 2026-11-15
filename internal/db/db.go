@@ -115,22 +115,6 @@ func newTunedPGXPool(ctx context.Context, url string, sqlTrace, retry bool) (*pg
 	return pool, nil
 }
 
-// NewPGXPoolWithRetry creates a pgx pool and eagerly verifies connectivity.
-func NewPGXPoolWithRetry(ctx context.Context, connString string) (*pgxpool.Pool, error) {
-	if connString == "" {
-		return nil, fmt.Errorf("missing postgres connection string")
-	}
-	pool, err := pgxpool.New(ctx, connString)
-	if err != nil {
-		return nil, fmt.Errorf("create pgx pool: %w", err)
-	}
-	if err := pingWithRetry(ctx, pool.Ping, "pgx pool"); err != nil {
-		pool.Close()
-		return nil, err
-	}
-	return pool, nil
-}
-
 func pingWithRetry(ctx context.Context, ping func(context.Context) error, label string) error {
 	started := time.Now()
 	delay := dbConnectBaseDelay

@@ -2,7 +2,7 @@ name: Validate
 
 on:
   pull_request:
-    branches: [master, "release/**"]
+    branches: [master, "rc/**"]
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed]
   workflow_dispatch:
 
@@ -20,14 +20,31 @@ env:
   GOMAXPROCS: "2"
   GOFLAGS: -p=4
 
+# A PR into rc/** is the light tier: selected suites without the critical
+# journeys. A PR into master is the full tier: every suite, nothing skipped.
 # Suite selection is deliberately coarse. Shared or unknown inputs fan out.
 jobs:
+  source:
+    name: Source branch
+    if: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' && !github.event.pull_request.draft && github.event.pull_request.base.ref == 'master' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: bash scripts/ci-source-branch.sh "$GITHUB_REPOSITORY" "$HEAD_REPOSITORY" "$HEAD_REF"
+
   scope:
     name: Scope
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      tier: ${{ steps.scope.outputs.tier }}
       core: ${{ steps.scope.outputs.core }}
       runtime: ${{ steps.scope.outputs.runtime }}
       browser: ${{ steps.scope.outputs.browser }}
@@ -49,6 +66,8 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
@@ -62,8 +81,14 @@ jobs:
             current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$encoded" --jq .object.sha)"
             test "$current" = "$BASE_SHA" || { echo 'Base moved; update the PR and rerun.' >&2; exit 1; }
             printf 'base_ref=%s\nbase_sha=%s\n' "$BASE_REF" "$BASE_SHA" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ "$EVENT" == pull_request && "$BASE_REF" == rc/* ]]; then
+            echo tier=light >> "$GITHUB_OUTPUT"
             python3 scripts/ci-scope.py --base "$BASE_SHA" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT" | tee "$RUNNER_TEMP/suites.json"
           else
+            # Nothing heavy starts for a pull request master will refuse.
+            [[ "$EVENT" != pull_request ]] || bash scripts/ci-source-branch.sh "$GITHUB_REPOSITORY" "$HEAD_REPOSITORY" "$HEAD_REF"
+            echo tier=full >> "$GITHUB_OUTPUT"
             python3 scripts/ci-scope.py --full --github-output "$GITHUB_OUTPUT" | tee "$RUNNER_TEMP/suites.json"
           fi
           cat "$RUNNER_TEMP/suites.json" >> "$GITHUB_STEP_SUMMARY"
@@ -81,7 +106,10 @@ jobs:
         with:
           go-version-file: go.mod
       - run: python3 scripts/check-ci-policy.py
+      # Migration numbers are claimed on the branch this PR merges into.
       - run: bash scripts/check.sh guards
+        env:
+          MIGRATION_PREFIX_BRANCH: ${{ github.event.pull_request.base.ref || 'master' }}
       - run: bash scripts/scan-injected-code.sh --self-test
       - name: Workflow lint
         run: |
@@ -191,11 +219,50 @@ jobs:
       # the schema list is read from a database migrated on this server.
       - name: Reviewed contracts are current
         run: go run ./scripts/contracts -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable'
+      # Snapshots are written against a database; a drifted run offers them as a patch to review and commit.
+      - name: Regenerate the drifted contracts as a patch
+        if: ${{ failure() }}
+        run: |
+          go run ./scripts/contracts -write -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable'
+          git add -A && git diff --cached --binary > "$RUNNER_TEMP/regenerated-contracts.patch"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() }}
+        with:
+          name: regenerated-contracts
+          path: ${{ runner.temp }}/regenerated-contracts.patch
+
+  # The light tier's browser check; the full tier builds these inside critical.
+  browser:
+    name: Browser build
+    needs: scope
+    if: ${{ needs.scope.outputs.tier == 'light' && needs.scope.outputs.browser == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: sdk/billing-ui/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            sdk/billing-ui/pnpm-lock.yaml
+            server/web/console/pnpm-lock.yaml
+            web/pay/pnpm-lock.yaml
+      - run: bash scripts/check.sh browser
 
   critical:
     name: Critical public-interface journeys
     needs: scope
-    if: ${{ needs.scope.outputs.runtime == 'true' || needs.scope.outputs.browser == 'true' }}
+    if: ${{ needs.scope.outputs.tier == 'full' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 70
     env:
@@ -239,20 +306,12 @@ jobs:
         working-directory: critical/server-fixture
         run: GOWORK=off go test -race -c -p 2 -o "$OPENRAILS_CRITICAL_SERVER_BINARY" .
       - name: Build the public operator CLI once
-        if: ${{ needs.scope.outputs.runtime == 'true' }}
         working-directory: server
         run: GOWORK=off go build -p 2 -o "$OPENRAILS_CRITICAL_CLI_BINARY" ./cmd/openrails
       - name: Services are ready
         run: bash scripts/ci-services.sh ready
-      - name: Require every selected critical scenario
-        env:
-          FULL_RUNTIME: ${{ needs.scope.outputs.runtime }}
-        run: |
-          if [[ "$FULL_RUNTIME" == true ]]; then
-            bash scripts/critical-tests.sh
-          else
-            bash scripts/critical-tests.sh --suite browser
-          fi
+      - name: Require every critical scenario
+        run: bash scripts/critical-tests.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
@@ -293,7 +352,7 @@ jobs:
         run: |
           gosec_bin="$(scripts/ci-install-tool.sh gosec)"
           for module in . server adapters/authkit examples; do
-            (cd "$module" && "$gosec_bin" -severity high -confidence medium -exclude-dir=.agents ./...)
+            (cd "$module" && "$gosec_bin" -severity high -confidence medium ./...)
           done
       - name: Go vulnerability analysis
         run: |
@@ -348,7 +407,7 @@ jobs:
 
   gate:
     name: ${{ (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}
-    needs: [scope, guards, lint, chart, sql, critical, security, artifact-release, artifact-image]
+    needs: [source, scope, guards, lint, chart, sql, browser, critical, security, artifact-release, artifact-image]
     if: ${{ always() && (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -369,6 +428,8 @@ jobs:
           import json, os, re, subprocess
           from urllib.parse import quote
           result = json.loads(os.environ['RESULTS'])
+          if result['source']['result'] == 'failure':
+              raise SystemExit('master takes pull requests only from rc/<name> and chore/release-vX.Y.Z; see the Source branch job')
           if result['scope']['result'] != 'success':
               raise SystemExit('Scope verification failed or did not run')
           plan = result['scope']['outputs']
@@ -377,9 +438,21 @@ jobs:
                       'artifact-release': 'artifacts', 'artifact-image': 'artifacts'}
           if plan.get('browser') not in ('true', 'false'):
               raise SystemExit('Missing browser selection')
-          critical_expected = 'success' if plan['browser'] == 'true' or plan.get('runtime') == 'true' else 'skipped'
-          if result['critical']['result'] != critical_expected:
-              raise SystemExit(f"critical: {result['critical']['result']}; expected {critical_expected}")
+          pull, target = os.environ['EVENT_NAME'] == 'pull_request', os.environ['EVENT_BASE_REF']
+          to_master = pull and target == 'master'
+          tier = 'light' if pull and target.startswith('rc/') else 'full'
+          if pull and not to_master and tier != 'light':
+              raise SystemExit(f'Unexpected target branch: {target}')
+          if plan.get('tier') != tier:
+              raise SystemExit(f"tier: {plan.get('tier')}; expected {tier}")
+          if tier == 'full' and any(plan.get(suite) != 'true' for suite in ('core', 'runtime', 'browser', 'chart', 'security', 'artifacts')):
+              raise SystemExit('A full run skips no suite')
+          tiered = {'source': to_master, 'critical': tier == 'full',
+                    'browser': tier == 'light' and plan['browser'] == 'true'}
+          for job, selected in tiered.items():
+              expected = 'success' if selected else 'skipped'
+              if result[job]['result'] != expected:
+                  raise SystemExit(f"{job}: {result[job]['result']}; expected {expected}")
           for job, suite in required.items():
               if suite is not None and plan.get(suite) not in ('true', 'false'):
                   raise SystemExit(f'Missing suite selection: {suite}')

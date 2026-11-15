@@ -170,14 +170,6 @@ LEFT JOIN billing.products product
 WHERE meter.merchant_id = sqlc.arg(merchant_id)
   AND meter.key = sqlc.arg(meter_key);
 
--- name: UsageMeterExists :one
-SELECT EXISTS (
-    SELECT 1
-    FROM billing.catalog_meters
-    WHERE merchant_id = sqlc.arg(merchant_id)
-      AND key = sqlc.arg(meter_key)
-);
-
 -- name: LockUsageEventsForMeterCorrection :exec
 LOCK TABLE billing.usage_events IN SHARE ROW EXCLUSIVE MODE;
 
@@ -199,13 +191,6 @@ SELECT key,
 FROM billing.catalog_meters
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND key = sqlc.arg(meter_key)
-FOR UPDATE;
-
--- name: GetDefaultUsageRateCardPriceForUpdate :one
-SELECT price
-FROM billing.catalog_rate_cards
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND meter_key = sqlc.arg(meter_key)::text
 FOR UPDATE;
 
 -- name: GetActiveMeteringProductForShare :one

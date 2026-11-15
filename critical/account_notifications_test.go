@@ -5,11 +5,15 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authtest"
@@ -17,6 +21,7 @@ import (
 	notifypg "github.com/open-rails/authkit/notify/postgres"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -95,7 +100,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 		p.core.SetDecline("4242", "insufficient_funds")
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		subscriptionState(t, a, sub.ID, "past_due")
 		var item notify.Item
 		require.Eventually(t, func() bool {
@@ -111,7 +116,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 		require.Equal(t, "payment_method_failed", item.Kind)
 		require.Nil(t, item.ReadAt)
 		require.Empty(t, accountNotices(t, inbox, a.bob.ID))
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		items := accountNotices(t, inbox, a.alice.ID)
 		require.Len(t, items, 1)
 		require.Equal(t, item.ID, items[0].ID, "retry before the due time must not duplicate the receipt")
@@ -127,7 +132,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 		require.Equal(t, adoption, repeated, "stopped source export must not manufacture new revisions")
 		p.core.SetDecline("4242", "")
 		a.clock.Advance(24 * time.Hour)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		renewalSettled(t, a, p, sub, due)
 		require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 0 }, 20*time.Second, 20*time.Millisecond)
 		_, err = inbox.Get(t.Context(), notify.Recipient{Audience: notify.AudienceUser, ID: a.alice.ID}, item.ID)
@@ -155,7 +160,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 		p.core.SetDecline("4242", "lost_card")
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		subscriptionState(t, a, sub.ID, "awaiting_method")
 		require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 1 }, 20*time.Second, 20*time.Millisecond)
 		require.Equal(t, "payment_method_update_required", accountNotices(t, inbox, a.alice.ID)[0].Kind)
@@ -179,7 +184,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 			p.core.SetDecline("4242", tc.decline)
 			a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 			fleet := startFleet(t, a.world)
-			runRegistered(t, fleet, "openrails.dunning", 2)
+			runRegistered(t, fleet, "openrails.billing_pass", 2)
 			waiting := subscriptionState(t, a, sub.ID, tc.state)
 			items := accountNotices(t, inbox, a.alice.ID)
 			require.Len(t, items, 1)
@@ -190,7 +195,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 				require.NotNil(t, waiting.Dunning)
 				require.NotNil(t, waiting.Dunning.FinalRetryAt)
 				a.clock.Advance(waiting.Dunning.FinalRetryAt.Sub(a.clock.Now()) + time.Microsecond)
-				runRegistered(t, fleet, "openrails.dunning", 2)
+				runRegistered(t, fleet, "openrails.billing_pass", 2)
 			} else {
 				status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Stop renewal after the failed charge"})
 				require.Equal(t, http.StatusOK, status, string(raw))
@@ -220,13 +225,13 @@ func TestAccountNotificationChannel(t *testing.T) {
 		p.core.SetDecline("4242", "insufficient_funds")
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		subscriptionState(t, a, sub.ID, "past_due")
 		// The operator has not armed terminal lifecycle actions. The next
 		// nonrecoverable decline is held for verification, not paid or canceled.
 		p.core.SetDecline("4242", "stolen_card")
 		a.clock.Advance(24 * time.Hour)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		require.Eventually(t, func() bool {
 			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.terminal_outcome.held"})
 			return err == nil && len(findings.Items) == 1
@@ -237,6 +242,167 @@ func TestAccountNotificationChannel(t *testing.T) {
 		require.Len(t, adoption.Adoptions, 1)
 		require.False(t, adoption.Adoptions[0].Current.Withdrawn, "uncertain provider state is not recovery evidence")
 		require.Len(t, accountNotices(t, inbox, a.alice.ID), 1)
+	})
+}
+
+// recipientGate parks the next host recipient lookup until opened.
+type recipientGate struct {
+	armed   atomic.Bool
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *recipientGate) wrap(w *world) {
+	next := w.deps.Notifications.Recipient
+	w.deps.Notifications.Recipient = func(ctx context.Context, source openrails.NotificationRecipient) (string, bool, error) {
+		if g.armed.CompareAndSwap(true, false) {
+			close(g.entered)
+			<-g.release
+		}
+		return next(ctx, source)
+	}
+}
+
+func (g *recipientGate) open() { g.once.Do(func() { close(g.release) }) }
+
+func TestNotificationAdoptionExport(t *testing.T) {
+	t.Run("OR-J31-S40/export-holds-back-no-other-merchant-and-orders-its-own-producers", func(t *testing.T) {
+		var inbox *notifypg.Store
+		lookup := &recipientGate{entered: make(chan struct{}), release: make(chan struct{})}
+		defer lookup.open()
+		a, p, sub := purchasedMembershipWith(t, 7*24, accountInbox(t, &inbox), lookup.wrap)
+		p.core.SetDecline("4242", "insufficient_funds")
+		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+		fleet := startFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
+		subscriptionState(t, a, sub.ID, "past_due")
+		require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 1 }, 20*time.Second, 20*time.Millisecond)
+		request := accountNotices(t, inbox, a.alice.ID)[0]
+		require.Equal(t, "payment_method_failed", request.Kind)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+		defer cancel()
+		sale := func(client *openrails.Client) billing.PriceID {
+			product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "sale", DisplayName: "Sale", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"sale:owned"}})
+			require.NoError(t, err)
+			price, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "sale", UnitAmount: 30_000_000, Currency: "USD"})
+			require.NoError(t, err)
+			return price.ID
+		}
+		alphaSale, betaSale := sale(a.alpha), sale(a.beta)
+		paid := func(client *openrails.Client, customer string, price billing.PriceID, key string) func() error {
+			return func() error {
+				order, err := client.CreateOrder(ctx, billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(customer)), Lines: []billing.OrderLineParams{{PriceID: price}}, IdempotencyKey: key})
+				if err != nil {
+					return err
+				}
+				_, err = client.RecordExternalPayment(ctx, billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 30_000_000, TransactionID: key})
+				return err
+			}
+		}
+		// committed reports whether a write lands while the export is held; a
+		// write still waiting at the deadline lands after release.
+		committed := func(write func() error, release func()) bool {
+			done := make(chan error, 1)
+			go func() { done <- write() }()
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+				return true
+			case <-time.After(30 * time.Second):
+				release()
+				require.NoError(t, <-done)
+				return false
+			}
+		}
+		type exportResult struct {
+			adoption billing.NotificationAdoption
+			err      error
+		}
+		exported := make(chan exportResult, 1)
+		export := func() {
+			adoption, err := a.local.ExportNotificationAdoption(ctx)
+			exported <- exportResult{adoption, err}
+		}
+
+		// Host recipient lookups hold nothing: the merchant's own order lands.
+		lookup.armed.Store(true)
+		go export()
+		select {
+		case <-lookup.entered:
+		case <-time.After(30 * time.Second):
+			t.Fatal("the export never looked up its recipient")
+		}
+		if !committed(paid(a.alpha, a.alice.ID, alphaSale, "alpha-during-lookups"), lookup.open) {
+			t.Error("the merchant's own order waited behind the export's host recipient lookups")
+		}
+		lookup.open()
+		first := <-exported
+		require.NoError(t, first.err)
+		require.Len(t, first.adoption.Adoptions, 1)
+		require.False(t, first.adoption.Adoptions[0].Current.Withdrawn)
+		revision := first.adoption.Adoptions[0].Current.Revision
+
+		// Hold the export inside its snapshot, at its revision write.
+		hold, err := a.pool.Begin(ctx)
+		require.NoError(t, err)
+		release := func() { _ = hold.Rollback(context.Background()) }
+		defer release()
+		var holder, exporter int
+		require.NoError(t, hold.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&holder))
+		_, err = hold.Exec(ctx, "SELECT 1 FROM "+pgx.Identifier{a.schema, "notification_issue_revisions"}.Sanitize()+" WHERE merchant_id=$1 FOR UPDATE", a.alpha.MerchantID().UUID())
+		require.NoError(t, err)
+		go export()
+		require.Eventually(t, func() bool {
+			return a.pool.QueryRow(ctx, "SELECT pid FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))", holder).Scan(&exporter) == nil
+		}, 30*time.Second, 20*time.Millisecond, "the export must reach its revision write")
+		if !committed(paid(a.beta, a.bob.ID, betaSale, "beta-during-export"), release) {
+			t.Error("another merchant's order waited behind this merchant's export")
+			require.NoError(t, (<-exported).err)
+			return
+		}
+
+		// The merchant's own producer waits and lands after the snapshot.
+		canceled := make(chan error, 1)
+		go func() {
+			status, raw, err := a.do(ctx, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Stop renewal after the failed charge"})
+			if err == nil && status != http.StatusOK {
+				err = fmt.Errorf("cancel: %d %s", status, raw)
+			}
+			canceled <- err
+		}()
+		require.Eventually(t, func() bool {
+			var waiting bool
+			return a.pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)))", exporter).Scan(&waiting) == nil && waiting
+		}, 30*time.Second, 20*time.Millisecond, "the merchant's own cancellation must wait for its export")
+		select {
+		case err := <-canceled:
+			t.Fatalf("the merchant's own cancellation committed inside its export: %v", err)
+		default:
+		}
+		require.NoError(t, hold.Rollback(ctx))
+		held := <-exported
+		require.NoError(t, held.err)
+		require.Len(t, held.adoption.Adoptions, 1)
+		require.False(t, held.adoption.Adoptions[0].Current.Withdrawn, "the snapshot predates the waiting cancellation")
+		require.Equal(t, revision, held.adoption.Adoptions[0].Current.Revision)
+		require.NoError(t, <-canceled)
+		subscriptionState(t, a, sub.ID, "canceled")
+		// The cancellation ends access, so the inbox now holds the ended notice instead.
+		_, err = inbox.Get(ctx, notify.Recipient{Audience: notify.AudienceUser, ID: a.alice.ID}, request.ID)
+		require.ErrorIs(t, err, notify.ErrNotFound, "the cancellation withdraws the request after the export")
+		after, err := a.local.ExportNotificationAdoption(ctx)
+		require.NoError(t, err)
+		var withdrawn *notify.Adoption
+		for i := range after.Adoptions {
+			if after.Adoptions[i].Current.Kind == "payment_method_failed" {
+				require.Nil(t, withdrawn, "one adoption per issue")
+				withdrawn = &after.Adoptions[i]
+			}
+		}
+		require.NotNil(t, withdrawn)
+		require.True(t, withdrawn.Current.Withdrawn)
+		require.Greater(t, withdrawn.Current.Revision, revision, "the later withdrawal orders after the exported revision")
 	})
 }
 
@@ -297,7 +463,7 @@ func TestOrderNotificationRecovery(t *testing.T) {
 		p.core.SetDecline("4242", "auth")
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 1 }, 20*time.Second, 20*time.Millisecond)
 		item := accountNotices(t, inbox, a.alice.ID)[0]
 		require.Equal(t, "payment_authentication_required", item.Kind)

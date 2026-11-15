@@ -36,12 +36,12 @@ var errEngineObligationChanged = errors.New("accepted engine obligation changed 
 // and shared renewal writer for qualified engine card obligations.
 type SubscriptionCollectionHandler struct {
 	DB       *db.DB
-	Resolver CollectionPlane
+	Resolver *MerchantCollectionAdapterBuilder
 	Config   *config.Config
 	Clock    clockwork.Clock
 }
 
-func NewSubscriptionCollectionHandler(d *db.DB, resolver CollectionPlane, cfg *config.Config, clock clockwork.Clock) *SubscriptionCollectionHandler {
+func NewSubscriptionCollectionHandler(d *db.DB, resolver *MerchantCollectionAdapterBuilder, cfg *config.Config, clock clockwork.Clock) *SubscriptionCollectionHandler {
 	return &SubscriptionCollectionHandler{DB: d, Resolver: resolver, Config: cfg, Clock: timeutil.FirstClock(clock)}
 }
 func (*SubscriptionCollectionHandler) Type() string { return subscriptions.TypeSubscriptionCollection }
@@ -399,11 +399,11 @@ func (h *SubscriptionCollectionHandler) completeEvidence(ctx context.Context, in
 	} else if found {
 		return h.completePaid(ctx, in, p, receipt), true
 	}
-	if code, reference, found, err := intents.LoadStripeRecurringDecline(in); err != nil {
+	if refusal, found, err := intents.LoadStripeRecurringDecline(in); err != nil {
 		return intents.Ambiguous(err.Error()), true
 	} else if found {
-		outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "failure_code": code, "stripe_payment_intent_id": reference})
-		return h.completeDecline(ctx, in, p, code, reference, outcome), true
+		outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "failure_code": refusal.Code, "stripe_payment_intent_id": refusal.PaymentIntentID})
+		return h.completeDecline(ctx, in, p, refusal.Evidence(), refusal.PaymentIntentID, outcome), true
 	}
 	if code, reference, found, err := intents.LoadRecurringDecline(in); err != nil {
 		return intents.Ambiguous(err.Error()), true
@@ -523,15 +523,21 @@ func (h *SubscriptionCollectionHandler) renewMembership(ctx context.Context, d *
 }
 func (h *SubscriptionCollectionHandler) completeDeclined(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, response int, reference string) intents.Outcome {
 	outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "response_code": response})
-	return h.completeDecline(ctx, in, p, strconv.Itoa(response), reference, outcome)
+	return h.completeDecline(ctx, in, p, decline.Evidence{Code: strconv.Itoa(response)}, reference, outcome)
 }
-func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, code, reference string, outcome intents.Outcome) intents.Outcome {
+
+// completeDecline settles a refusal: answer is the rail's code with the
+// advice that came with it.
+func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, answer decline.Evidence, reference string, outcome intents.Outcome) intents.Outcome {
+	answer.Rail = in.Rail
+	code := answer.Code
+	verdict := decline.ClassifyEvidence(answer)
 	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
-		if err := recordEngineAttempt(ctx, d, in, p, attempts.Attempt{Answer: decline.Evidence{Code: code}, TransactionID: reference}, h.now()); err != nil {
+		if err := recordEngineAttempt(ctx, d, in, p, attempts.Attempt{Answer: answer, TransactionID: reference}, h.now()); err != nil {
 			return err
 		}
-		reason := decline.ReasonFor(in.Rail, code)
-		failure := billing.DeclineReason(reason).Failure()
+		reason := string(verdict.Reason)
+		failure := verdict.Reason.Failure()
 		if in.Rail == "stripe" && code == "canceled" {
 			failure = billing.DeclineReason("authentication_required").Failure()
 		}
@@ -545,7 +551,7 @@ func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in 
 			failures = *sub.RetryAttempts
 		}
 		if (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod) && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) && failures == p.FailureCount {
-			action := decline.Classify(in.Rail, code).Action
+			action := verdict.Action
 			if in.Rail == "stripe" && code == "canceled" {
 				action = decline.FixPaymentMethod
 			}

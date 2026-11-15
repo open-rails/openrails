@@ -31,8 +31,6 @@ import (
 // default_payment_method, not an N+1 /v1/payment_methods sweep.
 type StripeFetcher struct {
 	SecretKey string
-	// BaseURL defaults to https://api.stripe.com; overridable for tests.
-	BaseURL string
 	// HTTPClient defaults to stripeapi.ReadOnlyClient.
 	HTTPClient *http.Client
 	// PageLimit is the per-page list size (default and Stripe max: 100).
@@ -65,6 +63,9 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		Provider:     ProviderStripe,
 		FetchedAt:    fetchObservedAt(params),
 		Capabilities: f.Capabilities(),
+	}
+	if params.Reversals {
+		return f.fetchReversals(ctx, params, snap)
 	}
 	snap.Coverage.TransactionsExhaustive = true
 	snap.Coverage.TransactionsPaginatedComplete = true
@@ -99,7 +100,7 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		snap.Transactions = append(snap.Transactions, normalizeStripeCharge(obj))
 	}
 
-	reader := &subscriptions.HTTPStripeLivenessProber{SecretKey: f.SecretKey, BaseURL: f.BaseURL, HTTPClient: f.client()}
+	reader := &subscriptions.HTTPStripeLivenessProber{SecretKey: f.SecretKey, HTTPClient: f.client()}
 	for _, subscription := range snap.Subscriptions {
 		if err := reader.VisitSubscriptionBills(ctx, subscription.RailSubscriptionID, func(bill subscriptions.StripeBill) error {
 			if bill.CustomerID != subscription.CustomerID {
@@ -140,11 +141,39 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 	return snap, nil
 }
 
-func (f *StripeFetcher) baseURL() string {
-	if f.BaseURL != "" {
-		return strings.TrimRight(f.BaseURL, "/")
+// fetchReversals reads the window's refunds and disputes, and the charge each
+// names so the diff checks it against its PaymentIntent as a full read does.
+// It reads no roster, vault or bills and claims no coverage.
+func (f *StripeFetcher) fetchReversals(ctx context.Context, params FetchParams, snap *RemoteSnapshot) (*RemoteSnapshot, error) {
+	snap.Capabilities.Subscriptions, snap.Capabilities.Vault = false, false
+	refunds, err := f.listRaw(ctx, "/v1/refunds", FetchParams{Since: params.Since, Until: params.Until}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("stripe refunds: %w", err)
 	}
-	return "https://api.stripe.com"
+	for _, obj := range refunds {
+		snap.Transactions = append(snap.Transactions, normalizeStripeRefund(obj))
+	}
+	disputes, err := f.listRaw(ctx, "/v1/disputes", FetchParams{Since: params.Since, Until: params.Until}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("stripe disputes: %w", err)
+	}
+	for _, obj := range disputes {
+		snap.Transactions = append(snap.Transactions, normalizeStripeDispute(obj))
+	}
+	read := map[string]bool{}
+	for _, t := range snap.Transactions {
+		charge := decodeBreadcrumbs(t.Raw).Charge
+		if charge == "" || read[charge] {
+			continue
+		}
+		read[charge] = true
+		body, err := f.get(ctx, "/v1/charges/"+url.PathEscape(charge))
+		if err != nil {
+			return nil, fmt.Errorf("stripe charge %s: %w", charge, err)
+		}
+		snap.Transactions = append(snap.Transactions, normalizeStripeCharge(body))
+	}
+	return snap, nil
 }
 
 func (f *StripeFetcher) client() *http.Client {
@@ -268,7 +297,7 @@ func (f *StripeFetcher) StripeGet(ctx context.Context, path string) (json.RawMes
 }
 
 func (f *StripeFetcher) getStatus(ctx context.Context, pathAndQuery string) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.baseURL()+pathAndQuery, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stripeapi.APIBase+pathAndQuery, nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -594,5 +623,5 @@ func StripeCharges(charges, refunds []json.RawMessage) []RemoteTransaction {
 
 // Bills is the fetcher's invoice reader.
 func (f *StripeFetcher) Bills() *subscriptions.HTTPStripeLivenessProber {
-	return &subscriptions.HTTPStripeLivenessProber{SecretKey: f.SecretKey, BaseURL: f.BaseURL, HTTPClient: f.client()}
+	return &subscriptions.HTTPStripeLivenessProber{SecretKey: f.SecretKey, HTTPClient: f.client()}
 }

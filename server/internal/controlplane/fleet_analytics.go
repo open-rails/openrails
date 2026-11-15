@@ -26,7 +26,7 @@ type FleetMerchantFunnel struct {
 }
 
 // FleetCurrencyRevenue is the window's settled volume in one currency, in the
-// currency's native units (the ledger convention, docs/money-wire.md).
+// currency's native units (the ledger convention, docs/api/conventions.md).
 type FleetCurrencyRevenue struct {
 	Currency      string
 	Payments      int64

@@ -137,7 +137,9 @@ var ErrCustodianOwnedByAnotherMerchant = errors.New("merchants: custodian tenant
 
 // AssertCustodianUnowned is the custody sibling of AssertPSPUnowned: it reads
 // the cross-merchant directory function before an upsert claims an identity.
-func AssertCustodianUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, kind, environment, accountID string) error {
+// A new claim is also refused while another merchant's current custodian
+// holds the tenant in the other money class: its webhooks name no class.
+func (s *Service) AssertCustodianUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, kind, environment, accountID string) error {
 	accountID = strings.TrimSpace(accountID)
 	if q == nil || accountID == "" {
 		return nil
@@ -147,56 +149,85 @@ func AssertCustodianUnowned(ctx context.Context, q *gen.Queries, merchantID uuid
 	if environment == "" {
 		return errors.New("merchants: custodian environment must be live or test")
 	}
+	owner, found, err := resolveCustodianOwner(ctx, q, kind, environment, accountID)
+	if err != nil {
+		return err
+	}
+	if found {
+		if uuid.UUID(owner.MerchantID) == merchantID {
+			return nil
+		}
+		return fmt.Errorf("custodian %s tenant %s (%s): %w", kind, accountID, environment, ErrCustodianOwnedByAnotherMerchant)
+	}
+	otherClass := config.ClassTest
+	if environment == config.ClassTest {
+		otherClass = config.ClassLive
+	}
+	other, found, err := resolveCustodianOwner(ctx, q, kind, otherClass, accountID)
+	if err != nil || !found || uuid.UUID(other.MerchantID) == merchantID {
+		return err
+	}
+	current, err := s.custodianCurrent(ctx, other)
+	if err != nil {
+		return err
+	}
+	if current {
+		return fmt.Errorf("custodian %s tenant %s (%s): %w", kind, accountID, otherClass, ErrCustodianOwnedByAnotherMerchant)
+	}
+	return nil
+}
+
+// custodianCurrent reports whether another merchant's custodian is named by an
+// unarchived document under its key.
+func (s *Service) custodianCurrent(ctx context.Context, c CustodianIdentity) (bool, error) {
+	set, known, err := s.foreignDocuments(ctx, c.MerchantID)
+	if err != nil || !known {
+		return !known, err
+	}
+	doc, ok := set.Custodians[strings.ToLower(c.Key)]
+	if !ok || doc.Value.Archived {
+		return false, nil
+	}
+	return custodians.Normalize(doc.Value.Kind) == c.Kind && doc.Value.Environment == c.Environment && strings.TrimSpace(doc.Value.AccountID) == c.AccountID, nil
+}
+
+// ResolveCustodiansByIdentity lists the custodians a tenant identity names, in
+// either money class, live first. Custody is not a rail, so a Basis
+// Theory webhook cannot route through the rail directory — but the problem is
+// identical (an inbound event with a global provider-side id and no merchant
+// context) and so is the answer: a lookup by the global identity key. It
+// resolves the CUSTODIAN, never "the" PSP: one custodian may back several.
+// Two are told apart by which class's key verifies the event.
+func (s *Service) ResolveCustodiansByIdentity(ctx context.Context, kind, accountID string) ([]CustodianIdentity, error) {
+	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
+		return nil, nil
+	}
+	kind = custodians.Normalize(kind)
+	var out []CustodianIdentity
+	for _, environment := range []string{config.ClassLive, config.ClassTest} {
+		owner, found, err := resolveCustodianOwner(ctx, gen.New(s.pool), kind, environment, strings.TrimSpace(accountID))
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			out = append(out, owner)
+		}
+	}
+	return out, nil
+}
+
+func resolveCustodianOwner(ctx context.Context, q *gen.Queries, kind, environment, accountID string) (CustodianIdentity, bool, error) {
 	row, err := q.ResolveCustodianOwnerByIdentity(ctx, gen.ResolveCustodianOwnerByIdentityParams{
 		Kind:        kind,
 		Environment: &environment,
 		AccountID:   accountID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+		return CustodianIdentity{}, false, nil
 	}
 	if err != nil {
-		return err
+		return CustodianIdentity{}, false, err
 	}
-	if row.MerchantID == merchantID {
-		return nil
-	}
-	return fmt.Errorf("custodian %s tenant %s (%s): %w", kind, accountID, environment, ErrCustodianOwnedByAnotherMerchant)
-}
-
-// ResolveCustodianByIdentity resolves the merchant a CUSTODIAN's tenant
-// identity belongs to (or#880). Custody is not a rail, so a Basis Theory
-// webhook cannot route through the rail directory — but the problem is
-// identical (an inbound event with a global provider-side id and no merchant
-// context) and so is the answer: a lookup by the global identity key. It
-// resolves the CUSTODIAN, never "the" PSP: one custodian may back several.
-func (s *Service) ResolveCustodianByIdentity(ctx context.Context, kind, accountID string) (CustodianIdentity, bool, error) {
-	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
-		return CustodianIdentity{}, false, nil
-	}
-	kind = custodians.Normalize(kind)
-	var rows []gen.ResolveCustodianOwnerByIdentityRow
-	for _, environment := range []string{config.ClassLive, config.ClassTest} {
-		row, err := gen.New(s.pool).ResolveCustodianOwnerByIdentity(ctx, gen.ResolveCustodianOwnerByIdentityParams{
-			Kind:        kind,
-			Environment: &environment,
-			AccountID:   strings.TrimSpace(accountID),
-		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return CustodianIdentity{}, false, err
-		}
-		rows = append(rows, row)
-	}
-	if len(rows) == 0 {
-		return CustodianIdentity{}, false, nil
-	}
-	if len(rows) > 1 {
-		return CustodianIdentity{}, false, fmt.Errorf("merchants: %s tenant %s is a custodian in both money classes; its webhooks cannot tell them apart", kind, accountID)
-	}
-	row := rows[0]
 	return CustodianIdentity{
 		ID:          row.ID,
 		MerchantID:  billing.MerchantID(row.MerchantID),

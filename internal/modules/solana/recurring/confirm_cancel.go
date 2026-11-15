@@ -12,18 +12,14 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
 )
-
-// accountReader reads a program account; empty once it is closed.
-type accountReader interface {
-	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
-}
 
 // CanceledOnChain reports whether the subscriber canceled the subscription in
 // their wallet (cancel_subscription, or the account closed): the program then
 // refuses the next period's pull, so OpenRails cannot renew it.
-func CanceledOnChain(ctx context.Context, chain accountReader, row *models.SolanaSubscription) (bool, error) {
+func CanceledOnChain(ctx context.Context, chain solanaint.ChainReader, row *models.SolanaSubscription) (bool, error) {
 	pda, err := parseKey("subscription_pda", row.SubscriptionPDA)
 	if err != nil {
 		return false, err
@@ -44,7 +40,7 @@ func CanceledOnChain(ctx context.Context, chain accountReader, row *models.Solan
 
 // RenewableOnChain also checks that the token account still delegates pulls
 // to this subscription authority. A wallet revoke cannot be undone locally.
-func RenewableOnChain(ctx context.Context, chain accountReader, row *models.SolanaSubscription) (bool, error) {
+func RenewableOnChain(ctx context.Context, chain solanaint.ChainReader, row *models.SolanaSubscription) (bool, error) {
 	canceled, err := CanceledOnChain(ctx, chain, row)
 	if err != nil || canceled {
 		return false, err
@@ -79,34 +75,22 @@ func RenewableOnChain(ctx context.Context, chain accountReader, row *models.Sola
 	return account.Mint.Equals(mint) && account.Owner.Equals(wallet) && account.Delegate != nil && account.Delegate.Equals(authority) && account.DelegatedAmount > 0, nil
 }
 
-// cancelConfirmRPC watches a wallet-sent signature land. It does not assert
-// success: the outcome reports the on-chain result.
-type cancelConfirmRPC interface {
-	WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, terminal solanaint.ChainTerminal) (*solanaint.TransactionOutcome, error)
-}
-
-// membershipCanceller applies the customer's period-end cancel; its cascade
-// flips the linked solana_subscriptions row to canceled, stopping the cranker.
-type membershipCanceller interface {
-	CancelMembership(ctx context.Context, params *submod.CancelMembershipParams) error
-}
-
 // ConfirmCancelService confirms the optional on-chain cancel a customer's
 // wallet signed landed. A Solana cancel needs none: OpenRails stops pulling.
 // The customer's period-end cancel is applied with it (a no-op when already
 // canceled); cancel_subscription also ends the subscription at period end.
 type ConfirmCancelService struct {
-	rpc        cancelConfirmRPC
-	repo       solanaSubscriptionReader
-	chain      accountReader
-	canceller  membershipCanceller
+	rpc        solanaint.ChainReader
+	repo       *solanasubs.SolanaSubscriptionRepo
+	chain      solanaint.ChainReader
+	canceller  *submod.SubscriptionLifecycleService
 	commitment rpc.CommitmentType
 }
 
 // NewConfirmCancelService confirms at Confirmed commitment. The wallet built
 // the transaction, so its blockhash is unknown here: the watch runs until the
 // caller's context ends.
-func NewConfirmCancelService(rpcClient cancelConfirmRPC, canceller membershipCanceller, repo solanaSubscriptionReader, chain accountReader) *ConfirmCancelService {
+func NewConfirmCancelService(rpcClient solanaint.ChainReader, canceller *submod.SubscriptionLifecycleService, repo *solanasubs.SolanaSubscriptionRepo, chain solanaint.ChainReader) *ConfirmCancelService {
 	return &ConfirmCancelService{
 		rpc:        rpcClient,
 		repo:       repo,

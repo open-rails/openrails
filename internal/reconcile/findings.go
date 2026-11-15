@@ -170,7 +170,7 @@ type ApplyAction struct {
 }
 
 // DecideAction carries a decider transition computed at diff time from the
-// snapshot evidence, applied through the engine's DecisionApplier under the
+// snapshot evidence, applied through the engine's Decisions applier under the
 // mutation-policy gate.
 type DecideAction struct {
 	SubscriptionID uuid.UUID

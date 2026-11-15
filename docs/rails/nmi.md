@@ -1,7 +1,6 @@
 # NMI (high-risk gateway) setup
 
-> Which flows are supported on this rail, and how well each one is verified:
-> [rail certification matrix](certification-matrix.md).
+> What each rail supports: [rails](README.md).
 
 ### What NMI is, and where your ISO fits
 
@@ -271,13 +270,15 @@ whether they move money; NMI's own answer must agree before the PSP arms:
 ```
 
 Verification runs once per loaded credential set (startup, credential
-create/rotate), bound to merchant + PSP + environment + endpoint + credential
-fingerprint. Every NMI client (purchase, card save, rebills, refunds, pulls,
-custodian proxies) is built from that same PSP scope, so all of them share the
-one verdict; see [PSP environments](../psp-environments.md). A disagreeing,
-unknown or unavailable verdict disarms the PSP: every NMI mutation is refused
-before anything is sent, reads still work, and the `openrails_psp_posture`
-probe fails until a background retry succeeds.
+create/rotate), and again before the first mutation after the verdict is an
+hour old (test mode is a dashboard toggle). It is bound to merchant + PSP +
+environment + endpoint + credential fingerprint. Every NMI client (purchase,
+card save, rebills, refunds, pulls, custodian proxies) is built from that same
+PSP scope, so all of them share the one verdict; see
+[PSP environments](../psp-environments.md). A disagreeing, unknown or
+unavailable verdict disarms the PSP: every NMI mutation is refused before
+anything is sent, reads still work, and the `openrails_psp_posture` probe
+fails until a retry succeeds.
 
 Sandbox test card: `4111 1111 1111 1111`, expiry `10/29`. Enter it
 only into Collect.js fields. Sandboxes generally cannot advance time, so
@@ -323,10 +324,7 @@ doesn't surprise you:
   and a usage order's collection stops with failure code
   `stored_credential_required`. Saving a card verifies it for reuse without
   `billing_method`; moving a subscription onto a card without a recurring
-  agreement verifies one first. A custody migration leaves a card's mandates
-  with the account that made them. If the card is then charged through a
-  different account, collection there stops the same way until the customer
-  pays with a card on that account and names it as their default.
+  agreement verifies one first.
 - **Confirm recurring classification per processor.** OpenRails sends
   `billing_method=recurring` on the initial recurring CIT and later recurring
   charges, matching NMI's Credential on File guide. The Classic API reference
@@ -362,6 +360,18 @@ unknown and is never re-sent. An engine renewal completes if its own order shows
 otherwise it raises `life.submission.unresolved`, naming the vault's matching
 charges under other orders. A recovery waits for the operator
 (`openrails intents resolve`).
+
+### Partial approvals
+
+On an account with partial approvals enabled, an issuer may approve less than a
+sale's amount. Every sale OpenRails sends carries
+`partial_payments=payment_in_full`, so NMI settles a partial approval only once
+it is collected in full, which OpenRails never does. An answer whose
+`amount_authorized` differs from the sale's amount, or with a nonzero
+`partial_payment_balance`, is not a payment: the operation stays unknown for
+the operator (a one-off sale raises `life.sale.unresolved`) and nothing is
+re-sent. A receipt whose order search shows a `partial_payment_balance` never
+qualifies.
 
 ### Exactly-once renewals
 
@@ -410,7 +420,7 @@ nothing:
 
 A payment renews exactly the periods it paid, a decline enters dunning, and a
 schedule NMI ended is canceled, subject to the
-[cancel gate](../operations.md#cancellation-caps). A row with no evidence stays
+[cancel gate](../operations.md#the-kill-switch). A row with no evidence stays
 `unverified`. The
 `life.unverified.backlog` finding reports each account's count and oldest age;
 a row still unverified after three days raises `life.unverified.unresolved` for

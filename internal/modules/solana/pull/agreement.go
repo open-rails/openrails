@@ -60,15 +60,14 @@ func (a *Agreement) validate(in gen.BillingProviderIntent, p Payload) error {
 }
 
 func (h *Handler) acceptPull(ctx context.Context, row *models.SolanaSubscription, plan resolvedPlan) (*Agreement, error) {
-	reader, ok := h.Chain.(solanaint.MintAccountReader)
-	if !ok {
+	if h.Chain == nil {
 		return nil, errors.New("Solana pull requires authoritative mint metadata")
 	}
 	mint, err := solanago.PublicKeyFromBase58(row.Mint)
 	if err != nil {
 		return nil, err
 	}
-	decimals, err := solanaint.ReadMintDecimals(ctx, reader, mint)
+	decimals, err := solanaint.ReadMintDecimals(ctx, h.Chain, mint)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +115,7 @@ func pullEpisodeState(sub *models.Subscription, current *models.SolanaSubscripti
 // freezeAgreement freezes what this attempt pulls from the subscription as it
 // stands now, a due scheduled change applied, and records it on the claimed
 // operation before anything is signed. Only an attempt with nothing signed, or
-// whose signed transaction reverted, freezes.
+// whose signed transaction reverted or expired unseen, freezes.
 func (h *Handler) freezeAgreement(ctx context.Context, in gen.BillingProviderIntent, p Payload, row *models.SolanaSubscription) (*Agreement, error) {
 	plan, err := h.resolvePlan(ctx, row)
 	if err != nil {

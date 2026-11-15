@@ -50,39 +50,16 @@ type SubscriptionLifecycleService struct {
 	NotificationService *NotificationService
 	PaymentService      *payments.PaymentService // For creating Payment records on renewal
 
-	// These seams keep terminal state changes and their access side effects
-	// testable as one transaction without changing the public service API.
-	entitlementServiceFactory func(*db.DB, clockwork.Clock) lifecycleEntitlementService
-	cancelSolanaSubscription  func(context.Context, *db.DB, uuid.UUID) error
-
 	// providerCancel queues the durable provider cancel of a membership the
 	// lifecycle ends (QueueProviderCancel). Injected in the composition root;
 	// when nil a terminal outcome cannot stop the provider schedule.
 	providerCancel ProviderCancelScheduler
 }
 
-type lifecycleEntitlementService interface {
-	ListLiveProductsBySource(context.Context, models.AccessSourceType, string) ([]uuid.UUID, error)
-	PushAccess(context.Context, entitlements.PushAccessParams) (*models.ProductAccess, error)
-	RevokeAccess(context.Context, entitlements.RevokeAccessParams) error
-	RevokeSourcesForSubscriptionAsOf(context.Context, string, uuid.UUID, time.Time, models.AccessRevokeReason, ...models.AccessSourceType) error
-	BoundSubscriptionAccess(context.Context, uuid.UUID, time.Time) error
-}
-
-func (s *SubscriptionLifecycleService) newLifecycleEntitlementService(dbb *db.DB) lifecycleEntitlementService {
-	if s.entitlementServiceFactory != nil {
-		return s.entitlementServiceFactory(dbb, s.Clock())
-	}
+func (s *SubscriptionLifecycleService) newLifecycleEntitlementService(dbb *db.DB) *entitlements.EntitlementService {
 	entSvc := entitlements.NewEntitlementService(dbb, s.Clock())
 	entSvc.SetClock(s.Clock())
 	return entSvc
-}
-
-func (s *SubscriptionLifecycleService) cancelSolanaSubscriptionForLifecycle(ctx context.Context, dbb *db.DB, subscriptionID uuid.UUID) error {
-	if s.cancelSolanaSubscription != nil {
-		return s.cancelSolanaSubscription(ctx, dbb, subscriptionID)
-	}
-	return cancelSolanaSubscriptionCascade(ctx, dbb, subscriptionID)
 }
 
 func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context.Context, subscription *models.Subscription, trigger string, allowOverride bool) error {
@@ -269,7 +246,7 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 			}
 			if sub.Status != models.StatusPending {
 				if terms.Amount > 0 {
-					payment, err := payments.NewPaymentRepo(txDB).GetByID(ctx, terms.PaymentID)
+					payment, err := payments.NewPaymentService(txDB).GetByID(ctx, terms.PaymentID)
 					if err != nil {
 						return nil, nil, err
 					}
@@ -1323,7 +1300,11 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 			return err
 		}
 
+		// Reactivation buys no period: the paid period keeps its start.
 		periodStartsAt := now
+		if start := subscription.CurrentPeriodStartsAt; start != nil && start.Before(now) {
+			periodStartsAt = start.UTC()
+		}
 		periodEndsAt := params.CurrentPeriodEndsAt.UTC()
 
 		// An explicit reactivation decision; it is not a payment fact.
@@ -1347,8 +1328,13 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		}); err != nil {
 			return fmt.Errorf("failed to clear grace access on reactivation: %w", err)
 		}
-		if _, err := entitlementService.PushAccess(ctx, subscriptionAccessForPeriod(subscription, periodStartsAt.UTC(), &periodEndsAt)); err != nil {
+		// Reactivation charges nothing: access is restored to the paid end,
+		// then the renewal grace the cancel took.
+		if _, err := entitlementService.PushAccess(ctx, paidPeriodAccess(subscription, now, periodEndsAt)); err != nil {
 			return fmt.Errorf("failed to restore access on reactivation: %w", err)
+		}
+		if err := s.EnsureRenewalGrace(ctx, txdb, subscription); err != nil {
+			return fmt.Errorf("restore renewal grace on reactivation: %w", err)
 		}
 
 		reactivated = subscription
@@ -1624,7 +1610,7 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 	// no-op; any other error rolls the cancellation back so a retry cannot
 	// leave the cranker active.
 	if sub.Rail == models.RailSolana {
-		if err := s.cancelSolanaSubscriptionForLifecycle(ctx, dbb, sub.ID); err != nil {
+		if err := cancelSolanaSubscriptionCascade(ctx, dbb, sub.ID); err != nil {
 			return fmt.Errorf("apply local cancellation: cancel Solana subscription %s: %w", sub.ID, err)
 		}
 	}
@@ -2403,7 +2389,7 @@ func awaitMethodDeadline(ctx context.Context, d *db.DB, prices *catalog.PriceSer
 
 // dunningAccess applies the merchant's policy through an explicit grace grant.
 // It never changes the expiry of purchased access.
-func (s *SubscriptionLifecycleService) dunningAccess(ctx context.Context, d *db.DB, ent lifecycleEntitlementService, sub *models.Subscription, now time.Time) error {
+func (s *SubscriptionLifecycleService) dunningAccess(ctx context.Context, d *db.DB, ent *entitlements.EntitlementService, sub *models.Subscription, now time.Time) error {
 	if sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil || !accessMatchesBillingPeriod(sub, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt) {
 		return nil
 	}

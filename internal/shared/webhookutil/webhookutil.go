@@ -2,8 +2,6 @@ package webhookutil
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -175,16 +173,6 @@ func ParseStripeEventMeta(body []byte) (string, string, error) {
 		return "", "", fmt.Errorf("missing event id or type")
 	}
 	return payload.ID, payload.Type, nil
-}
-
-func ComputeUniqueKey(rail, eventID, eventType string, body []byte) string {
-	rail = strings.ToLower(strings.TrimSpace(rail))
-	eventID = strings.TrimSpace(eventID)
-	if eventID != "" {
-		return fmt.Sprintf("webhook:%s:%s", rail, eventID)
-	}
-	hash := sha256.Sum256(append([]byte(rail+"|"+eventType+"|"), body...))
-	return fmt.Sprintf("webhook:%s:%s", rail, hex.EncodeToString(hash[:8]))
 }
 
 func NormalizeCCBillPayload(body []byte) ([]byte, error) {

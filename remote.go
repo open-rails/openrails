@@ -15,7 +15,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -390,14 +389,6 @@ func pathID(field, value string) (string, error) {
 		return "", err
 	}
 	return url.PathEscape(value), nil
-}
-
-// requireUUID is requireID for a plain UUID identifier: the zero UUID names nothing.
-func requireUUID(field string, id uuid.UUID) (string, error) {
-	if id == uuid.Nil {
-		return "", invalidErr(field + " is required")
-	}
-	return id.String(), nil
 }
 
 // wireID is any typed identifier of the id family (ids.go).

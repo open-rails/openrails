@@ -73,6 +73,14 @@ func integerValue(v any) bool {
 	_, err := strconv.ParseInt(n.String(), 10, 64)
 	return err == nil
 }
+func unsignedValue(v any) bool {
+	n, ok := v.(json.Number)
+	if !ok {
+		return false
+	}
+	_, err := strconv.ParseUint(n.String(), 10, 64)
+	return err == nil
+}
 func moneyStringValue(v any) bool {
 	s, ok := v.(string)
 	if !ok {
@@ -146,7 +154,7 @@ var priceBindingConfigurationJSON = object(map[string]jsonRule{
 	"provider_billing_interval_months": textValue,
 	"token":                            textValue, "mint": textValue, "mint_symbol": textValue,
 	"amount_base_units": textValue, "period_hours": textValue,
-	"created_at": textValue, "merchant_address": textValue,
+	"created_at": textValue, "merchant_address": textValue, "treasury": textValue,
 })
 
 var providerPriceSnapshotJSON = nullable(object(map[string]jsonRule{
@@ -250,7 +258,7 @@ var jsonRules = map[string]jsonRule{
 		"attempt":     integerValue, "failure_count": integerValue, "amount_minor": moneyStringValue, "order_reference": uuidValue, "order_id": uuidValue,
 	}),
 	"provider_intents.subscription_collection.result_evidence": nullable(object(map[string]jsonRule{
-		"stripe_recurring_decline": object(map[string]jsonRule{"decline_code": textValue, "binding": receiptBindingJSON, "failure_code": textValue, "payment_intent_id": textValue}),
+		"stripe_recurring_decline": object(map[string]jsonRule{"decline_code": textValue, "advice_code": textValue, "network_advice_code": textValue, "network_decline_code": textValue, "binding": receiptBindingJSON, "failure_code": textValue, "payment_intent_id": textValue}),
 		"failure_code":             textValue, "stripe_payment_intent_id": textValue, "authentication_required": booleanValue,
 		"qualified_receipt": collectedReceiptJSON, "transaction_id": textValue, "rail": textValue, "verified_existing": booleanValue,
 		"submitted_at": textValue, "declined": booleanValue, "response_code": integerValue, "not_executed": booleanValue, "not_executed_code": textValue,
@@ -272,7 +280,8 @@ var jsonRules = map[string]jsonRule{
 		"transaction_id":            textValue, "response_code": integerValue, "not_executed": booleanValue,
 	}),
 	"provider_intents.manual_rebill.payload": object(map[string]jsonRule{
-		"initiator": textValue, "requested_payment_method_id": uuidValue,
+		"order_captcha_subjects": array(textValue),
+		"initiator":              textValue, "requested_payment_method_id": uuidValue,
 		"renewal":           acceptedRenewalJSON,
 		"payment_method_id": uuidValue, "rail": textValue, "rail_subscription_id": textValue, "order_reference": uuidValue,
 		"attempt": integerValue, "failure_count": integerValue, "amount_minor": moneyStringValue,
@@ -356,25 +365,35 @@ var jsonRules = map[string]jsonRule{
 	"order_attempts.metadata":    metadataJSON,
 	"order_attempts.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
 	"order_attempts.rail_state": nullable(object(map[string]jsonRule{
-		"operation_id": uuidValue, "flow": textValue, "return_url": textValue, "checkout_session_id": textValue, "purchase_url": textValue,
+		"operation_id": uuidValue, "flow": textValue, "return_url": textValue, "checkout_session_id": textValue, "checkout_url": textValue,
 		"token_symbol": textValue, "token_mint": textValue, "token_decimals": textValue, "recipient": textValue, "token_amount": moneyStringValue,
 		"token_price_usd": numberValue, "fx_rate": numberValue, "fx_currency": textValue, "quoted_at": textValue, "quote_expires_at": textValue,
 		"plan_id": textValue, "mint_symbol": textValue, "amount_base_units": moneyStringValue, "period_hours": textValue, "plan_created_at": textValue,
-		"payer": textValue, "subscriber_wallet": textValue, "subscription_pda": textValue,
+		"payer": textValue, "subscriber_wallet": textValue, "subscription_pda": textValue, "plan_owner": textValue, "treasury": textValue,
 	})),
-	"order_attempts.routing_reason": nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
 	"host_outbox.data": object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_orders": integerValue, "entered_at": textValue, "evaluated_at": textValue,
 		// An order's transition: its statuses, number, payment and decline reason.
 		"status": textValue, "payment_status": textValue, "number": integerValue, "payment_id": uuidValue, "reason": textValue, "settlement_source": textValue,
 		// A balance event: the balance as its crossing was seen.
 		"available_amount": moneyStringValue, "owed_amount": moneyStringValue, "accrual_rate_per_hour": moneyStringValue, "as_of": textValue, "depletes_at": nullable(textValue),
 		"usage_rate_per_hour": moneyStringValue, "low_balance_amount": moneyStringValue, "runway_ends_at": nullable(textValue)}),
-	"provider_intents.payload":            nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
-	"provider_intents.result_evidence":    nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),
-	"admission_operations.terms":          object(map[string]jsonRule{"invoker": textValue, "invoker_type": textValue, "trust_level": textValue, "roles": array(textValue), "resource": textValue, "source": textValue, "accrual_rate_delta_per_hour": integerValue}),
-	"admission_operations.capture_terms":  nullable(object(map[string]jsonRule{"event_type": textValue, "resource": textValue, "metadata": metadataJSON, "source": textValue, "source_id": textValue, "dimensions": dictionary(integerValue), "amount": moneyStringValue})),
-	"admission_operations.estimate_usage": nullable(object(map[string]jsonRule{"amount": moneyStringValue, "event_type": textValue, "dimensions": dictionary(integerValue), "metadata": metadataJSON})),
-	"admission_operations.rate_cards":     nullable(array(pinnedRateCardJSON)),
+	"provider_intents.solana_pull.payload": object(map[string]jsonRule{"subscription_pda": textValue, "row_id": uuidValue, "next_pull_at": textValue}),
+	"provider_intents.payload":             nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
+	"provider_intents.result_evidence":     nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),
+	"admission_operations.terms":           object(map[string]jsonRule{"invoker": textValue, "invoker_type": textValue, "trust_level": textValue, "roles": array(textValue), "resource": textValue, "source": textValue, "accrual_rate_delta_per_hour": integerValue}),
+	"admission_operations.capture_terms":   nullable(object(map[string]jsonRule{"event_type": textValue, "resource": textValue, "metadata": metadataJSON, "source": textValue, "source_id": textValue, "dimensions": dictionary(integerValue), "amount": moneyStringValue})),
+	"admission_operations.estimate_usage":  nullable(object(map[string]jsonRule{"amount": moneyStringValue, "event_type": textValue, "dimensions": dictionary(integerValue), "metadata": metadataJSON})),
+	"admission_operations.rate_cards":      nullable(array(pinnedRateCardJSON)),
+	// A Solana plan change's frozen agreement, and how its chain outcome ended.
+	"provider_intents.solana_tier_change.payload": object(map[string]jsonRule{
+		"reference": textValue, "last_valid_block_height": unsignedValue, "old_subscription_id": uuidValue, "customer_id": uuidValue, "old_period_ends_at": nullable(textValue),
+		"price_id": uuidValue, "product_id": uuidValue, "new_subscription_pda": textValue, "plan_owner": textValue, "treasury": textValue,
+		"plan_id": unsignedValue, "mint_symbol": textValue, "amount_base_units": unsignedValue, "period_hours": unsignedValue, "plan_created_at": integerValue,
+		"amount": integerValue, "currency": textValue, "upgrade": booleanValue, "first_charge_base_units": unsignedValue, "first_charge_micros": integerValue, "prepared_at": textValue,
+	}),
+	"provider_intents.solana_tier_change.result_evidence": nullable(object(map[string]jsonRule{
+		"transaction_id": textValue, "never_landed": textValue,
+	})),
 }
 
 func validateJSON(field, raw string) error {

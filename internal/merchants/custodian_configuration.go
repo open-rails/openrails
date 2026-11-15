@@ -152,7 +152,7 @@ func (s *Service) PutCustodianConfiguration(ctx context.Context, mid billing.Mer
 		return zero, apperr.Invalidf("the custodian credential belongs to another account").WithParam("account_id")
 	}
 	err = s.database.RunInMerchantConn(merchant.WithID(ctx, mid), func(ctx context.Context) error {
-		return AssertCustodianUnowned(ctx, s.database.Gen(ctx), mid.UUID(), next.Kind, next.Environment, next.AccountID)
+		return s.AssertCustodianUnowned(ctx, s.database.Gen(ctx), mid.UUID(), next.Kind, next.Environment, next.AccountID)
 	})
 	if errors.Is(err, ErrCustodianOwnedByAnotherMerchant) {
 		return zero, apperr.New(http.StatusConflict, billing.CodeResourceConflict, "custodian account is already owned by another merchant")

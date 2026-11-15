@@ -17,10 +17,6 @@ ON CONFLICT (merchant_id, grant_id) WHERE deleted_at IS NULL DO NOTHING;
 SELECT * FROM billing.product_access
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND grant_id = sqlc.arg(grant_id)::uuid AND deleted_at IS NULL;
 
--- name: ProductAccessExistsForGrant :one
-SELECT EXISTS (SELECT 1 FROM billing.product_access
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND grant_id = sqlc.arg(grant_id)::uuid AND deleted_at IS NULL);
-
 -- name: RevokeProductAccessByGrant :execrows
 -- A terminated grant retracts its window: started windows are revoked, a
 -- window that has not started is removed.
@@ -294,17 +290,6 @@ FROM billing.product_access pa
 JOIN billing.products p ON p.merchant_id = pa.merchant_id AND p.id = pa.product_id
 JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
 WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.id = ANY(sqlc.arg(ids)::uuid[]) AND pa.deleted_at IS NULL;
-
--- name: GetLatestLiveProductEnd :one
--- The latest end of the customer's live windows of a product (NULL:
--- indefinite), for a grant that extends after them.
-SELECT pa.ends_at FROM billing.product_access pa
-WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
-  AND pa.product_id = sqlc.arg(product_id)::uuid
-  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-  AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at)::timestamptz)
-ORDER BY pa.ends_at DESC NULLS FIRST
-LIMIT 1;
 
 -- name: CountLiveProductHolders :many
 -- How many customers hold each product at at.

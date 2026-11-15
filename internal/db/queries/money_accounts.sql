@@ -27,8 +27,10 @@ SELECT
      -- Retired credit funds its refund from the retired account. Only value
      -- still in customer_balance remains reserved here; an unswept expired
      -- source is entirely unavailable, including its unrefunded remainder.
+     -- A refund returns the credit line's money first, so a pending refund
+     -- holds its share of the line's paid amount, not of the whole payment.
      + COALESCE((SELECT sum(CASE WHEN g.ends_at <= sqlc.arg(as_of)::timestamptz
-         THEN lot.remaining ELSE LEAST(ceil(g.amount::numeric * r.pending / p.amount),lot.remaining) END)
+         THEN lot.remaining ELSE LEAST(ceil(g.amount::numeric * LEAST(r.pending,(g.spec_snapshot->'deposit'->>'paid_amount')::numeric) / (g.spec_snapshot->'deposit'->>'paid_amount')::numeric),lot.remaining) END)
        FROM (SELECT refunded_payment_id, sum(-refund.amount)::numeric AS pending
          FROM billing.payments refund WHERE refund.merchant_id=a.merchant_id
            AND refund.customer_id=a.customer_id AND refund.currency=a.currency
@@ -126,30 +128,10 @@ SET tier = NULLIF(sqlc.arg(tier)::text, ''), updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 
--- Every currency a customer holds a balance, settings, pending charges or an unpaid usage order in.
--- name: ListCustomerBalanceCurrencies :many
-SELECT currency::text AS currency
-FROM (
-    SELECT currency FROM billing.ledger_accounts
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-      AND account_type = 'customer_balance'
-    UNION
-    SELECT currency FROM billing.money_settings
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-    UNION
-    SELECT currency FROM billing.owed_items
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-      AND order_id IS NULL AND status = 'pending'
-    UNION
-    SELECT currency FROM billing.orders
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-      AND origin = 'usage' AND status IN ('open', 'processing') AND amount_paid < total
-) currencies
-ORDER BY currency;
-
 -- name: ListCustomersBalanceCurrencies :many
--- ListCustomerBalanceCurrencies for many customers: at most one row per
--- customer and registered currency, which bounds row_limit.
+-- Every currency each customer holds a balance, settings, pending charges or
+-- an unpaid usage order in: at most one row per customer and registered
+-- currency, which bounds row_limit.
 SELECT DISTINCT customer_id::uuid AS customer_id, currency::text AS currency
 FROM (
     SELECT customer_id, currency FROM billing.ledger_accounts

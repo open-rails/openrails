@@ -162,6 +162,11 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if customer && (!rails.IsNMI(sub.Rail) || sub.CollectionPolicy != models.CollectionPolicyNMISchedule || method.Custodian != models.CustodianPSP) {
 			return ErrRebillUnsupported
 		}
+		if customer {
+			if err := AdmitCustomerRetry(ctx, d.Gen(ctx), sub, method.ID); err != nil {
+				return err
+			}
+		}
 		minor, err := moneyutil.NativeToRailMinorExact(terms.Currency, terms.Amount)
 		if err != nil {
 			return err
@@ -170,7 +175,11 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if instrument.Mandate, err = mandates.ForSubscription(ctx, d.Gen(ctx), mid.UUID(), sub.CustomerID, sub.ID, method.ID, sub.PspID); err != nil {
 			return fmt.Errorf("rebill: %w", err)
 		}
-		p := subscriptions.ManualRebillPayload{Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Renewal: terms, PaymentMethodID: method.ID, Instrument: instrument, Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, OrderReference: subscriptions.ObligationOrderReference(sub.ID, terms.PeriodStart), Attempt: ordinal, FailureCount: failures, AmountMinor: minor}
+		var subjects []string
+		if customer {
+			subjects = OrderCaptchaSubjects(ctx)
+		}
+		p := subscriptions.ManualRebillPayload{OrderCaptchaSubjects: subjects, Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Renewal: terms, PaymentMethodID: method.ID, Instrument: instrument, Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, OrderReference: subscriptions.ObligationOrderReference(sub.ID, terms.PeriodStart), Attempt: ordinal, FailureCount: failures, AmountMinor: minor}
 		policy, err := subscriptions.CasePolicy(ctx, d, sub)
 		if err != nil {
 			return err

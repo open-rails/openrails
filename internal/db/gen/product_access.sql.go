@@ -145,37 +145,6 @@ func (q *Queries) GetAccessTimelineTailEnd(ctx context.Context, arg GetAccessTim
 	return ends_at, err
 }
 
-const getLatestLiveProductEnd = `-- name: GetLatestLiveProductEnd :one
-SELECT pa.ends_at FROM billing.product_access pa
-WHERE pa.merchant_id = $1::uuid AND pa.customer_id = $2::uuid
-  AND pa.product_id = $3::uuid
-  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-  AND (pa.ends_at IS NULL OR pa.ends_at > $4::timestamptz)
-ORDER BY pa.ends_at DESC NULLS FIRST
-LIMIT 1
-`
-
-type GetLatestLiveProductEndParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	ProductID  uuid.UUID
-	At         time.Time
-}
-
-// The latest end of the customer's live windows of a product (NULL:
-// indefinite), for a grant that extends after them.
-func (q *Queries) GetLatestLiveProductEnd(ctx context.Context, arg GetLatestLiveProductEndParams) (*time.Time, error) {
-	row := q.db.QueryRow(ctx, getLatestLiveProductEnd,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.ProductID,
-		arg.At,
-	)
-	var ends_at *time.Time
-	err := row.Scan(&ends_at)
-	return ends_at, err
-}
-
 const getLatestProductAccessBySource = `-- name: GetLatestProductAccessBySource :one
 SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at, quantity FROM billing.product_access
 WHERE merchant_id = $1::uuid
@@ -717,23 +686,6 @@ func (q *Queries) ProductAccessExistsBySource(ctx context.Context, arg ProductAc
 		arg.SourceID,
 		arg.ProductID,
 	)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
-const productAccessExistsForGrant = `-- name: ProductAccessExistsForGrant :one
-SELECT EXISTS (SELECT 1 FROM billing.product_access
-WHERE merchant_id = $1::uuid AND grant_id = $2::uuid AND deleted_at IS NULL)
-`
-
-type ProductAccessExistsForGrantParams struct {
-	MerchantID uuid.UUID
-	GrantID    uuid.UUID
-}
-
-func (q *Queries) ProductAccessExistsForGrant(ctx context.Context, arg ProductAccessExistsForGrantParams) (bool, error) {
-	row := q.db.QueryRow(ctx, productAccessExistsForGrant, arg.MerchantID, arg.GrantID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err

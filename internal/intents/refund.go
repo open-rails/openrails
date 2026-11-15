@@ -232,13 +232,6 @@ func endRefundedMembership(ctx context.Context, d *db.DB, clock clockwork.Clock,
 	return err
 }
 
-func (r refundReservations) now() time.Time {
-	if r.Clock != nil {
-		return r.Clock.Now().UTC()
-	}
-	return time.Now().UTC()
-}
-
 func (r refundReservations) recordReceipt(ctx context.Context, p RefundPayload, providerRefundID string) error {
 	if strings.TrimSpace(providerRefundID) == "" {
 		return errors.New("successful refund response has no transaction reference")
@@ -317,11 +310,11 @@ type NMIRefundHandler struct {
 	refundReservations
 	// Resolver arms the intent merchant's NMI client from the armed rail
 	// state at drain time.
-	Resolver NMIClientResolver
+	Resolver railresolve.NMIClientResolver
 	Policy   BackoffPolicy
 }
 
-func NewNMIRefundHandler(d *db.DB, resolver NMIClientResolver, clock clockwork.Clock) *NMIRefundHandler {
+func NewNMIRefundHandler(d *db.DB, resolver railresolve.NMIClientResolver, clock clockwork.Clock) *NMIRefundHandler {
 	return &NMIRefundHandler{
 		refundReservations: refundReservations{DB: d, Clock: clock},
 		Resolver:           resolver,
@@ -440,13 +433,6 @@ func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.BillingProvid
 	return Succeeded(map[string]any{"provider_refund_id": resolution.ProviderReference}), nil
 }
 
-// stripeRefundAPI is the StripeRefundService slice the handler drives
-// (interface for unit tests).
-type stripeRefundAPI interface {
-	CreateRefund(ctx context.Context, params subscriptions.RefundParams) (*subscriptions.RefundResult, error)
-	FindRefundByIdempotencyKey(ctx context.Context, chargeID, idempotencyKey string) (*subscriptions.RefundResult, bool, error)
-}
-
 // StripeRefundHandler executes refunds against Stripe. Effectively-once is
 // double-walled: the ledger dedupes intents AND every create carries the
 // intent's idempotency_key as the Stripe Idempotency-Key header, so even a
@@ -457,7 +443,7 @@ type StripeRefundHandler struct {
 	refundReservations
 	Config *config.Config
 	Rails  railresolve.Source
-	Stripe stripeRefundAPI
+	Stripe *subscriptions.StripeRefundService
 	Policy BackoffPolicy
 }
 

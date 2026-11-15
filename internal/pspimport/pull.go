@@ -33,7 +33,7 @@ var sources = map[string]func(ctx context.Context, im *Importer, mid billing.Mer
 			return nil, err
 		}
 		client.ReadOnly = true
-		return &nmiSource{client: client, currency: "USD", now: im.now}, nil
+		return &nmiSource{client: client, now: im.now}, nil
 	},
 	"stripe": func(ctx context.Context, im *Importer, mid billing.MerchantID, scope merchants.PSPScope) (source, error) {
 		key, err := im.secret(ctx, mid, scope, "secret_key")

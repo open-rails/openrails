@@ -35,7 +35,8 @@ type Submitter interface {
 type RPCResolver func(ctx context.Context, merchantID billing.MerchantID) (*solanaint.RPCClient, error)
 
 // signerSubmitter is the production Submitter: the crankers over
-// solana.BuildSignSubmit, on the RPC of the merchant whose work they sign.
+// solana.BuildSignSubmitPresubmit, on the RPC of the merchant whose work they
+// sign.
 type signerSubmitter struct {
 	crankers *Crankers
 	resolve  RPCResolver
@@ -88,9 +89,9 @@ func (s *signerSubmitter) Submit(ctx context.Context, tenantID billing.MerchantI
 	return s.SubmitWithPresubmit(ctx, tenantID, owner, instructions, nil)
 }
 
-// SubmitWithPresubmit persists the signed tx signature via presubmit before
-// submission.
-func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, owner solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
+// SubmitWithPresubmit persists the signed tx signature and its blockhash's
+// chain terminal via presubmit before submission.
+func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, owner solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature, solanaint.ChainTerminal) error) (solanago.Signature, error) {
 	signer, err := s.crankers.Owner(ctx, owner)
 	if err != nil {
 		return solanago.Signature{}, err
@@ -106,18 +107,11 @@ func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID bill
 	return signature, nil
 }
 
-// planReader reads the Plan PDA back before create_plan for PublishPlan's
-// idempotent re-publish guard. Optional: without it create_plan is submitted
-// directly and the program rejects a duplicate PDA.
-type planReader interface {
-	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
-}
-
 // PlanService publishes recurring Solana plans on-chain: owned by the
 // deployment's first cranker, paying into the merchant's treasury.
 type PlanService struct {
 	submitter Submitter
-	reader    planReader // optional; enables the idempotent re-publish guard
+	reader    solanaint.ChainReader // optional; enables the idempotent re-publish guard
 	tokens    Tokens
 	treasury  Treasury
 	now       func() time.Time
@@ -127,7 +121,7 @@ type PlanService struct {
 // before submitting create_plan, so a re-publish with MATCHING terms is an
 // idempotent no-op and a re-publish with DIFFERING terms is rejected (plans are
 // immutable on-chain — see PublishPlan).
-func NewPlanServiceWithReader(submitter Submitter, reader planReader, tokens Tokens, treasury Treasury) *PlanService {
+func NewPlanServiceWithReader(submitter Submitter, reader solanaint.ChainReader, tokens Tokens, treasury Treasury) *PlanService {
 	return &PlanService{submitter: submitter, reader: reader, tokens: tokens, treasury: treasury, now: time.Now}
 }
 

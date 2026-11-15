@@ -28,7 +28,7 @@ func MirrorAttachedStripePaymentMethod(
 	database *db.DB,
 	customers *RailCustomerService,
 	clock clockwork.Clock,
-	reader StripePaymentStateReader,
+	reader *HTTPStripePaymentStateReader,
 	paymentMethodID string,
 	source paymentmethods.CardSource,
 	eventRef string,
@@ -86,7 +86,7 @@ func ConvergeStripeCustomerPaymentState(
 	database *db.DB,
 	customers *RailCustomerService,
 	clock clockwork.Clock,
-	reader StripePaymentStateReader,
+	reader *HTTPStripePaymentStateReader,
 	customerID string,
 ) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)

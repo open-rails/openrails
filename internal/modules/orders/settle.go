@@ -28,13 +28,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// Memberships creates a paid recurring line's subscription in the caller's
-// transaction.
-type Memberships interface {
-	CreateMembershipTx(ctx context.Context, txDB *db.DB, params *subscriptions.CreateMembershipParams) (*models.Subscription, []*models.NotificationEvent, error)
-	EnsureRenewalGrace(ctx context.Context, d *db.DB, sub *models.Subscription) error
-}
-
 // Charge is money a provider took for an order, as its qualified receipt
 // reports it, or (Manual) money the merchant received outside OpenRails.
 type Charge struct {
@@ -114,6 +107,44 @@ func (s *Service) Paid(ctx context.Context, d *db.DB, orderID uuid.UUID, charge 
 		return "", fmt.Errorf("order %s charge contradicts its total", orderID)
 	}
 	return s.settle(ctx, d, order, &charge)
+}
+
+// PaidAgain records, in d's transaction, a charge on an order another payment
+// completed: the payment is recorded against the order, grants nothing, and
+// its refund is queued with a finding. It reports whether it recorded the
+// charge; a replay records nothing.
+func (s *Service) PaidAgain(ctx context.Context, d *db.DB, orderID uuid.UUID, charge Charge) (bool, error) {
+	if d == nil || d.Pool() != nil {
+		return false, errors.New("an order is settled in its charge's transaction")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	q := d.Gen(ctx)
+	order, err := s.load(ctx, q, mid.UUID(), orderID, true)
+	if err != nil {
+		return false, err
+	}
+	if order.Status != string(billing.OrderComplete) || order.PaymentID == nil || *order.PaymentID == charge.PaymentID {
+		return false, fmt.Errorf("order %s is not paid by another payment", orderID)
+	}
+	if charge.Amount != order.Total || !strings.EqualFold(charge.Currency, order.Currency) || charge.PaymentID == uuid.Nil {
+		return false, fmt.Errorf("order %s charge contradicts its total", orderID)
+	}
+	if _, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid.UUID(), ID: charge.PaymentID}); err == nil {
+		return false, nil
+	} else if !db.IsNotFound(err) {
+		return false, err
+	}
+	payment, err := s.recordPayment(ctx, d, order, &charge)
+	if err != nil {
+		return false, err
+	}
+	if err := s.attemptDone(ctx, q, order, "succeeded", &charge, s.now()); err != nil {
+		return false, err
+	}
+	return true, intents.RefundLateOrderPayment(ctx, d, payment, s.Clock)
 }
 
 // settle is Paid for a locked order; charge is nil for a free order.

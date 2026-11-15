@@ -6,10 +6,16 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
+	computebudget "github.com/gagliardetto/solana-go/programs/compute-budget"
 )
 
 // DefaultSignerCacheTTL is how long a cranker's public key is cached.
 const DefaultSignerCacheTTL = 60 * time.Second
+
+// crankerComputeUnitPrice is the priority fee a cranker transaction bids, in
+// micro-lamports per compute unit, so a leader under load does not drop it.
+// No compute-unit limit is set: a short one would revert the pull.
+const crankerComputeUnitPrice = 20_000
 
 // Signer is the deployment's cranker: the one key that publishes every
 // merchant's recurring plans, pulls their renewals and pays the fees. It
@@ -26,7 +32,7 @@ type Signer interface {
 }
 
 // blockhashProvider is the subset of *RPCClient the tx builder needs. Declared
-// as an interface so BuildSignSubmit is unit-testable without a live RPC.
+// as an interface so BuildSignSubmitPresubmit is unit-testable without a live RPC.
 type blockhashProvider interface {
 	// LatestBlockhash returns the blockhash with its chain terminal, so the
 	// confirmation watch ends on the chain's word.
@@ -35,31 +41,18 @@ type blockhashProvider interface {
 	SubmitAndConfirm(ctx context.Context, tx *solanago.Transaction, terminal ChainTerminal) (*TransactionOutcome, error)
 }
 
-// BuildSignSubmit assembles a single-signer transaction (the cranker is fee
-// payer and sole required signer), signs it and submits it: the shared path
-// for create_plan, update_plan and transfer_subscription.
-//
-// With one required signer, Signatures[0] is the fee payer's; a co-signer flow
-// must order signatures to match the message's required-signer list.
-func BuildSignSubmit(
-	ctx context.Context,
-	signer Signer,
-	rpc blockhashProvider,
-	instructions []solanago.Instruction,
-) (solanago.Signature, error) {
-	return BuildSignSubmitPresubmit(ctx, signer, rpc, instructions, nil)
-}
-
-// BuildSignSubmitPresubmit is BuildSignSubmit with a hook run after signing and
-// before submission: the caller durably records the signature so a crash
-// mid-submit resolves by a chain read, not a blind re-send. A presubmit error
-// aborts the submit (nothing was sent).
+// BuildSignSubmitPresubmit assembles a single-signer transaction (the cranker
+// is fee payer and sole required signer; Signatures[0] is its), signs it, runs
+// presubmit when set and submits it. In presubmit the caller durably records the
+// signature and the chain terminal of its blockhash, so a crash mid-submit
+// resolves by a chain read, not a blind re-send. A presubmit error aborts the
+// submit (nothing was sent).
 func BuildSignSubmitPresubmit(
 	ctx context.Context,
 	signer Signer,
 	rpc blockhashProvider,
 	instructions []solanago.Instruction,
-	presubmit func(solanago.Signature) error,
+	presubmit func(solanago.Signature, ChainTerminal) error,
 ) (solanago.Signature, error) {
 	if signer == nil {
 		return solanago.Signature{}, fmt.Errorf("solana: signer is required")
@@ -87,7 +80,7 @@ func BuildSignSubmitWithPayerPresubmit(
 	payer solanago.PublicKey,
 	instructions []solanago.Instruction,
 	signMessage func([]byte) (solanago.Signature, error),
-	presubmit func(solanago.Signature) error,
+	presubmit func(solanago.Signature, ChainTerminal) error,
 ) (solanago.Signature, error) {
 	if signMessage == nil {
 		return solanago.Signature{}, fmt.Errorf("solana: signer is required")
@@ -103,7 +96,8 @@ func BuildSignSubmitWithPayerPresubmit(
 		return solanago.Signature{}, fmt.Errorf("solana: get recent blockhash: %w", err)
 	}
 
-	tx, err := solanago.NewTransaction(instructions, blockhash.Hash, solanago.TransactionPayer(payer))
+	priced := append([]solanago.Instruction{computebudget.NewSetComputeUnitPriceInstruction(crankerComputeUnitPrice).Build()}, instructions...)
+	tx, err := solanago.NewTransaction(priced, blockhash.Hash, solanago.TransactionPayer(payer))
 	if err != nil {
 		return solanago.Signature{}, fmt.Errorf("solana: build transaction: %w", err)
 	}
@@ -122,7 +116,7 @@ func BuildSignSubmitWithPayerPresubmit(
 	// Durable write-ahead of the signature: once persisted, a crash at any
 	// later point resolves by reading the chain for it.
 	if presubmit != nil {
-		if err := presubmit(sig); err != nil {
+		if err := presubmit(sig, blockhash.Terminal()); err != nil {
 			return solanago.Signature{}, fmt.Errorf("solana: presubmit persistence failed (transaction NOT sent): %w", err)
 		}
 	}

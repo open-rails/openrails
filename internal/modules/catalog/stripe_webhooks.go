@@ -47,8 +47,8 @@ const maxManagedWebhookEndpoints = 4
 // Retire the superseded ones first.
 var ErrWebhookEndpointBudgetExhausted = errors.New("managed stripe webhook endpoint budget exhausted: retire superseded endpoints before rolling over again")
 
-// webhookPost POSTs a form and returns the full response body + status (unlike
-// stripePostForm, which parses only {id} — webhook create needs the `secret`).
+// webhookPost POSTs a form and returns the full response body + status:
+// webhook create needs the `secret`.
 // StripeMetadataOpenRailsManaged marks a Stripe object OpenRails owns.
 const StripeMetadataOpenRailsManaged = "openrails_managed"
 
@@ -135,7 +135,7 @@ func (s *StripeCatalogService) CreateWebhookEndpoint(ctx context.Context, webhoo
 			form.Add("enabled_events[]", e)
 		}
 	}
-	body, status, err := s.webhookPost(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/webhook_endpoints", form)
+	body, status, err := s.webhookPost(ctx, stripeProc.SecretKey, stripeapi.APIBase+"/v1/webhook_endpoints", form)
 	if err != nil {
 		return StripeWebhookEndpoint{}, "", err
 	}
@@ -165,7 +165,7 @@ func (s *StripeCatalogService) ListWebhookEndpoints(ctx context.Context) ([]Stri
 	var endpoints []StripeWebhookEndpoint
 	cursor := ""
 	for {
-		endpoint := fmt.Sprintf("%s/v1/webhook_endpoints?limit=%d", s.baseURL(), stripeListPageLimit)
+		endpoint := fmt.Sprintf("%s/v1/webhook_endpoints?limit=%d", stripeapi.APIBase, stripeListPageLimit)
 		if cursor != "" {
 			endpoint += "&starting_after=" + url.QueryEscape(cursor)
 		}
@@ -234,7 +234,7 @@ func (s *StripeCatalogService) UpdateWebhookEndpoint(ctx context.Context, id str
 	if len(form) == 0 {
 		return nil
 	}
-	body, status, err := s.webhookPost(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/webhook_endpoints/"+url.PathEscape(id), form)
+	body, status, err := s.webhookPost(ctx, stripeProc.SecretKey, stripeapi.APIBase+"/v1/webhook_endpoints/"+url.PathEscape(id), form)
 	if err != nil {
 		return err
 	}
@@ -254,7 +254,7 @@ func (s *StripeCatalogService) DeleteWebhookEndpoint(ctx context.Context, id str
 	if id == "" {
 		return fmt.Errorf("webhook endpoint id required")
 	}
-	body, status, err := s.stripeDelete(ctx, stripeProc.SecretKey, s.baseURL()+"/v1/webhook_endpoints/"+url.PathEscape(id))
+	body, status, err := s.stripeDelete(ctx, stripeProc.SecretKey, stripeapi.APIBase+"/v1/webhook_endpoints/"+url.PathEscape(id))
 	if err != nil {
 		return err
 	}

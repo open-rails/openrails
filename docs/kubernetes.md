@@ -283,7 +283,7 @@ rollback past it, and hosts sharing the schema upgrade together.
   ```
 
 - **Keys outside Postgres**: `keys.json`, `totp.key` and what
-  [backup and recovery](backup-and-recovery.md) lists. Keep them in your secret
+  [backup and recovery](operations.md#backup-and-recovery) lists. Keep them in your secret
   manager, not only in the cluster's Secrets.
 
 ## Operator commands

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/open-rails/openrails/internal/booktag"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"io"
 	"strings"
 	"time"
@@ -49,7 +50,7 @@ type StripeWebhookService struct {
 	MoneyService                 *money.MoneyService
 	DeduplicationService         *DeduplicationService
 	RailCustomerService          *payments.RailCustomerService
-	OrderAttemptService          webhookOrderAttemptStore
+	OrderAttemptService          *payment.OrderAttemptService
 	Clock                        clockwork.Clock
 	// ConvergeEnqueuer: subscription-state events are wake-up signals; the
 	// handler marks the subscription dirty and the coalesced River job fetches
@@ -57,7 +58,7 @@ type StripeWebhookService struct {
 	ConvergeEnqueuer SubscriptionConvergeEnqueuer
 	// StripePaymentState reads the exact routed Stripe account. Payment-method
 	// events are wake-up signals; fetched provider truth owns the local link.
-	StripePaymentState payments.StripePaymentStateReader
+	StripePaymentState *payments.HTTPStripePaymentStateReader
 	// ObserveEnqueuer queues the coalesced read of a catalog object a
 	// product.* or price.* event names.
 	ObserveEnqueuer ProviderObjectObserveEnqueuer
@@ -98,15 +99,6 @@ type stripeInvoiceLineItem struct {
 			Price string `json:"price"`
 		} `json:"price_details"`
 	} `json:"pricing"`
-}
-
-// priceID returns the Stripe price id for the line item, tolerating both the
-// legacy `price.id` shape and the preview `pricing.price_details.price` shape.
-func (li stripeInvoiceLineItem) priceID() string {
-	if id := strings.TrimSpace(li.Price.ID); id != "" {
-		return id
-	}
-	return strings.TrimSpace(li.Pricing.PriceDetails.Price)
 }
 
 type stripeInvoice struct {
@@ -843,17 +835,6 @@ func parseOrderAttemptID(metadata map[string]string) uuid.UUID {
 	return id.UUID()
 }
 
-// Stripe invoice amounts are cents on the wire; payment rows store micros.
-// Success rows record amount_paid (what settled); failed rows record
-// amount_due (what was attempted). Wire-pinned in TestStripeInvoiceWireShapes.
-func stripeInvoicePaidAmountMicros(inv stripeInvoice) int64 {
-	return int64(moneyutil.CentsToMicros(moneyutil.Cents(inv.AmountPaid)))
-}
-
-func stripeInvoiceFailedAmountMicros(inv stripeInvoice) int64 {
-	return int64(moneyutil.CentsToMicros(moneyutil.Cents(inv.AmountDue)))
-}
-
 func (s *StripeWebhookService) handleRefund(ctx context.Context, obj json.RawMessage) error {
 	var refund stripeRefund
 	if err := json.Unmarshal(obj, &refund); err != nil {
@@ -1269,23 +1250,4 @@ func (s *StripeWebhookService) lookupStripeOriginalPayment(ctx context.Context, 
 		}
 	}
 	return nil, errStripeOriginalUnknown
-}
-
-func (s *StripeWebhookService) resolvePriceFromMetadata(ctx context.Context, metadata map[string]string, lines []stripeInvoiceLineItem) (uuid.UUID, *models.Price, error) {
-	if idStr := normalize.FirstNonEmpty(metadata["internal_price_id"], metadata["price_id"]); idStr != "" {
-		priceID, err := uuid.Parse(idStr)
-		if err == nil {
-			return priceID, nil, nil
-		}
-	}
-	if len(lines) > 0 {
-		if stripePriceID := lines[0].priceID(); stripePriceID != "" {
-			price, err := s.PriceService.GetByStripePriceID(ctx, stripePriceID)
-			if err != nil {
-				return uuid.Nil, nil, fmt.Errorf("stripe price not mapped")
-			}
-			return price.ID, price, nil
-		}
-	}
-	return uuid.Nil, nil, fmt.Errorf("unable to resolve price")
 }

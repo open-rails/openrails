@@ -70,7 +70,7 @@ func usageRecoveryClient(ctx context.Context, resolver railresolve.NMIClientReso
 }
 
 // SetUsageRecoveryResolver wires account-bound readback before serving work.
-func (s *MoneyService) SetUsageRecoveryResolver(resolver NMIClientResolver) {
+func (s *MoneyService) SetUsageRecoveryResolver(resolver railresolve.NMIClientResolver) {
 	s.usageRecoveryResolver = resolver
 }
 
@@ -116,12 +116,11 @@ func (h *OrderCollectionHandler) recoverBeforeDispatch(ctx context.Context, inte
 	if p.Rail != string(models.RailNMI) {
 		return intents.Outcome{}, false
 	}
-	resolver, ok := h.Verifier.(NMIClientResolver)
-	if !ok {
+	if h.Verifier == nil {
 		return intents.Parked("order history reader unavailable"), true
 	}
 	service := NewMoneyService(h.DB, h.Clock)
-	service.SetUsageRecoveryResolver(resolver)
+	service.SetUsageRecoveryResolver(h.Verifier)
 	receipt, found, err := service.findObservedUsagePayment(ctx, h.DB.Gen(ctx), intent.MerchantID, p.OrderID, *intent.PspID)
 	if err != nil {
 		return intents.Parked("read current order history: " + err.Error()), true

@@ -5,6 +5,7 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -287,7 +288,7 @@ func TestPSPControls(t *testing.T) {
 				require.EqualValues(t, 1000, p.provider.effects(t)[0].Amount)
 				a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 				fleet := startFleet(t, a.world)
-				runRegistered(t, fleet, "openrails.dunning", 2)
+				runRegistered(t, fleet, "openrails.billing_pass", 2)
 				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 				require.NoError(t, err)
 				require.Equal(t, sub.CurrentPeriodEndsAt, current.CurrentPeriodEndsAt)
@@ -613,48 +614,91 @@ func TestStripeWebhookDueWork(t *testing.T) {
 	})
 	t.Run("OR-J06-S62/an-unresolved-undeclared-account-alerts-again-once-a-day", func(t *testing.T) {
 		mail := &alertMailbox{}
-		w := newWorld(t, func(w *world) {
-			declareCCBill(w, nil)
-			m := w.cfg.Merchants["alpha"]
-			m.AlertEmail = ptr("ops@alpha.example")
-			w.cfg.Merchants["alpha"] = m
-			w.deps.Email = mail
-		})
-		importCCBillAttribution(t, w)
-		// The operator removes the account from the declaration while the
-		// provider still bills a membership on it.
-		require.NoError(t, w.engine.Close(t.Context()))
-		m := w.cfg.Merchants["alpha"]
-		m.PSPs = nil
-		w.cfg.Merchants["alpha"] = m
-		var err error
-		w.engine, err = openrails.New(t.Context(), w.cfg, w.deps)
-		require.NoError(t, err)
-		w.alpha, err = w.engine.MerchantBySlug("alpha")
-		require.NoError(t, err)
-		require.Eventually(t, func() bool { return mail.count("undeclared_account") == 1 }, 20*time.Second, 20*time.Millisecond,
-			"the configuration load that finds the account alerts its operator")
+		w := undeclaredAccountWorld(t, mail)
 		fleet := hostFleet(t, w)
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
-		runRegistered(t, fleet, "openrails.config_realerts", 1)
+		require.Eventually(t, func() bool { return mail.count("undeclared_account") == 1 }, 20*time.Second, 20*time.Millisecond,
+			"the configuration load that finds the account alerts its operator")
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		alertsSettled(t, fleet)
 		require.Equal(t, 1, mail.count("undeclared_account"), "not again within a day")
 		w.clock.Advance(24*time.Hour + time.Minute)
-		runRegistered(t, fleet, "openrails.config_realerts", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
+		alertsSettled(t, fleet)
 		require.Equal(t, 2, mail.count("undeclared_account"), "a day later it alerts again, once however many passes run")
+	})
+	t.Run("OR-J06-S64/a-finding-alert-whose-delivery-fails-is-delivered-on-retry-once", func(t *testing.T) {
+		mail := &alertMailbox{refuse: 1}
+		w := undeclaredAccountWorld(t, mail)
+		fleet := hostFleet(t, w)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		require.Eventually(t, func() bool { return mail.refusals() == 1 }, 20*time.Second, 20*time.Millisecond,
+			"the alert's first delivery fails")
+		require.Eventually(t, func() bool { return mail.count("undeclared_account") == 1 }, 20*time.Second, 20*time.Millisecond,
+			"its job retries the delivery")
+		// Neither the delivered job nor a later pass sends it again.
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		alertsSettled(t, fleet)
+		require.Equal(t, 1, mail.count("undeclared_account"), "delivered once")
+		require.Equal(t, 1, mail.refusals())
 	})
 }
 
-// alertMailbox records the email OpenRails sends.
+// undeclaredAccountWorld boots alpha, which has an alert email, with a CCBill
+// membership on an account its declaration no longer names.
+func undeclaredAccountWorld(t *testing.T, mail *alertMailbox) *world {
+	t.Helper()
+	w := newWorld(t, func(w *world) {
+		declareCCBill(w, nil)
+		m := w.cfg.Merchants["alpha"]
+		m.AlertEmail = ptr("ops@alpha.example")
+		w.cfg.Merchants["alpha"] = m
+		w.deps.Email = mail
+	})
+	importCCBillAttribution(t, w)
+	// The operator removes the account from the declaration while the
+	// provider still bills a membership on it.
+	require.NoError(t, w.engine.Close(t.Context()))
+	m := w.cfg.Merchants["alpha"]
+	m.PSPs = nil
+	w.cfg.Merchants["alpha"] = m
+	var err error
+	w.engine, err = openrails.New(t.Context(), w.cfg, w.deps)
+	require.NoError(t, err)
+	w.alpha, err = w.engine.MerchantBySlug("alpha")
+	require.NoError(t, err)
+	return w
+}
+
+// alertsSettled waits until no operator alert job is outstanding.
+func alertsSettled(t *testing.T, fleet *river.Client[pgx.Tx]) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.operator_alert").States(rivertype.JobStateAvailable,
+			rivertype.JobStatePending, rivertype.JobStateRetryable, rivertype.JobStateRunning, rivertype.JobStateScheduled))
+		return err == nil && len(jobs.Jobs) == 0
+	}, 20*time.Second, 20*time.Millisecond, "every operator alert job settles")
+}
+
+// alertMailbox records the email OpenRails sends, refusing the first refuse.
 type alertMailbox struct {
-	mu   sync.Mutex
-	sent []openrails.Email
+	mu      sync.Mutex
+	sent    []openrails.Email
+	refuse  int
+	refused int
 }
 
 func (m *alertMailbox) Send(_ context.Context, email openrails.Email) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.refused < m.refuse {
+		m.refused++
+		return errors.New("critical mailbox refused the message")
+	}
 	m.sent = append(m.sent, email)
 	return nil
 }
@@ -672,6 +716,13 @@ func (m *alertMailbox) count(text string) int {
 		}
 	}
 	return n
+}
+
+// refusals is how many sends it refused.
+func (m *alertMailbox) refusals() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.refused
 }
 
 // stripeWebhookBase is a public https billing mount Stripe could reach.

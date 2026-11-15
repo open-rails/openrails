@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
@@ -28,18 +29,18 @@ import (
 // Engine. A run executes under exactly one merchant-scoped context.
 type Engine struct {
 	Fetchers map[Provider]RailFetcher
-	Store    Store
-	Local    LocalStateLoader
+	Store    *PGStore
+	Local    *PGLocalStateLoader
 	// Writer applies enforce-mode local mirror writes. May be nil for
 	// advisory-only engines.
-	Writer LocalWriter
+	Writer *PGLocalWriter
 	// Decisions applies decider transitions (PS-2/PS-3). May be nil for
 	// advisory-only engines.
-	Decisions DecisionApplier
+	Decisions *LifecycleDecisionApplier
 	// History is the third dunning-forensics evidence source (failed payment
 	// attempts). May be nil or unconfigured: the forensics report then carries
 	// a note; an unavailable history source is never a run error.
-	History HistoryEventSource
+	History *PGHistorySource
 
 	// RecoverUsagePayment qualifies an observed NMI receipt of a usage order
 	// through its canonical financial writer before the generic subscription
@@ -54,14 +55,14 @@ type Engine struct {
 	// Policy reads the merchant's evidence-staleness floor. A nil Policy makes
 	// the decider trust only what this pass observed: stricter, never more
 	// permissive.
-	Policy EvidenceFloorReader
+	Policy *destructive.Gate
 
 	// Runs makes an enforce pass reversible: it opens a maintenance_runs
 	// record with the coverage proof that authorised the pass, captures a
 	// before-image of every subscription the pass overwrites, and attributes
 	// the provider intents it queues. Passes that would overwrite subscription
 	// state refuse when it is nil: an unrecorded destructive pass has no undo.
-	Runs DestructiveRunRecorder
+	Runs *PGDestructiveRunRecorder
 
 	// Now is the clock (defaults to time.Now UTC).
 	Now func() time.Time
@@ -107,6 +108,10 @@ type RunParams struct {
 	// Since/Until bound the transaction window passed to the fetchers.
 	Since time.Time
 	Until time.Time
+	// Reversals runs the reversals lane: only the window's refunds, voids and
+	// disputes are diffed. It proves no coverage and resolves only reversal
+	// findings it read again.
+	Reversals bool
 }
 
 // LocalMutationPolicy limits a pull's local mirror writes by mutation class.
@@ -264,13 +269,13 @@ func traitsFor(p Provider) providerTraits {
 }
 
 // Run executes one reconcile run: fetch + diff (+ apply in enforce mode) for
-// every requested provider, persisting findings and the run summary.
+// every requested provider, persisting findings.
 func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) {
 	if params.Mode != ModeAdvisory && params.Mode != ModeEnforce {
 		return nil, fmt.Errorf("reconcile: invalid mode %q", params.Mode)
 	}
 	if params.Mode == ModeEnforce && e.Writer == nil {
-		return nil, fmt.Errorf("reconcile: enforce mode requires a LocalWriter")
+		return nil, fmt.Errorf("reconcile: enforce mode requires a local writer")
 	}
 	e.syncDBClocks()
 
@@ -287,21 +292,12 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 		}
 	}
 
-	var sincePtr, untilPtr *time.Time
-	if !params.Since.IsZero() {
-		t := params.Since.UTC()
-		sincePtr = &t
+	if _, err := merchant.Require(ctx); err != nil {
+		return nil, fmt.Errorf("reconcile: %w", err)
 	}
-	if !params.Until.IsZero() {
-		t := params.Until.UTC()
-		untilPtr = &t
-	}
-
-	runID, err := e.Store.CreateRun(ctx, params.Mode, providers, sincePtr, untilPtr)
-	if err != nil {
-		return nil, fmt.Errorf("reconcile: create run: %w", err)
-	}
-
+	// The run id correlates the pass's findings: a finding it did not see
+	// again is resolved as vanished.
+	runID := uuid.Must(uuid.NewV7())
 	summary := &RunSummary{Mode: params.Mode, Providers: map[string]*ProviderReport{}}
 	result := &RunResult{RunID: runID, Mode: params.Mode, Summary: summary}
 	var providerErrs []string
@@ -331,14 +327,6 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 		runErr = strings.Join(providerErrs, "; ")
 	}
 	result.Status = status
-
-	summaryJSON, err := json.Marshal(summary)
-	if err != nil {
-		summaryJSON = nil
-	}
-	if err := e.Store.FinishRun(ctx, runID, status, summaryJSON, runErr); err != nil {
-		return result, fmt.Errorf("reconcile: finish run: %w", err)
-	}
 	if runErr != "" {
 		return result, fmt.Errorf("reconcile run %s finished with provider errors: %s", runID, runErr)
 	}
@@ -387,18 +375,12 @@ func (e *Engine) respell(ctx context.Context, binding PSPBinding, snap *RemoteSn
 }
 
 func (e *Engine) syncDBClocks() {
-	if store, ok := e.Store.(*PGStore); ok {
-		store.Now = e.now
+	if e.Store != nil {
+		e.Store.Now = e.now
 	}
-	if writer, ok := e.Writer.(*PGLocalWriter); ok {
-		writer.Now = e.now
+	if e.Writer != nil {
+		e.Writer.Now = e.now
 	}
-}
-
-// EvidenceFloorReader yields a merchant's evidence-staleness floor.
-// internal/destructive.Gate implements it.
-type EvidenceFloorReader interface {
-	EvidenceFloor(ctx context.Context, merchantID uuid.UUID) time.Time
 }
 
 // evidenceFloor reads the running merchant's staleness floor off the run's own
@@ -448,11 +430,15 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		PspID:      binding.ID.String(),
 		Rail:       binding.Rail,
 		AccountID:  binding.AccountID,
+		Reversals:  params.Reversals,
 	})
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("fetch: %w", err)
 	}
 	snap.PspID = binding.ID.String()
+	if params.Reversals {
+		narrowToReversals(snap)
+	}
 	// Strip the absence proof when the pass did not read every active PSP on
 	// the rail, or a merchant with two NMI PSPs would have the unread one's
 	// whole book canceled as "absent from an exhaustive roster".
@@ -514,7 +500,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		if k, ok := fetcher.(keyedFetcher); ok {
 			unwrapped = k.RailFetcher
 		}
-		reader, _ := unwrapped.(TransactionReader)
+		reader, _ := unwrapped.(*NMIFetcher)
 		exhaustive := snap.Coverage.SubscriptionsExhaustive && traits.absenceMeansCanceled
 		res, err := e.Writer.AcceptProviderSchedules(ctx, binding.ID, snap, exhaustive, reader)
 		if err != nil {
@@ -533,13 +519,13 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("load local payments: %w", err)
 	}
-	if loader, ok := e.Local.(chargeAttributionLoader); ok && len(txnIDs) > 0 {
-		if local.Attributions, err = loader.ChargeAttributions(ctx, binding.ID, txnIDs); err != nil {
+	if len(txnIDs) > 0 {
+		if local.Attributions, err = e.Local.ChargeAttributions(ctx, binding.ID, txnIDs); err != nil {
 			return rep, nil, nil, nil, fmt.Errorf("load charge attributions: %w", err)
 		}
 	}
 	recoveryErrors := map[string]error{}
-	if provider == ProviderNMI && params.Mode == ModeEnforce && params.Mutations.allowsInsert() && e.RecoverUsagePayment != nil {
+	if provider == ProviderNMI && params.Mode == ModeEnforce && params.Mutations.allowsInsert() && e.RecoverUsagePayment != nil && !params.Reversals {
 		known := make(map[string]bool, len(localPayments))
 		for _, payment := range localPayments {
 			known[payment.TransactionID] = true
@@ -585,7 +571,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	bindApplyActions(findings, binding.ID, runID)
 	findings = e.classifyProvenance(ctx, binding.ID, snap, findings)
 
-	if snap.Capabilities.Transactions {
+	if snap.Capabilities.Transactions && !params.Reversals {
 		history, historyNote := e.fetchHistory(ctx, provider, params)
 		rep.Dunning = computeDunningForensics(provider, snap, local, history, historyNote, now)
 	}
@@ -750,16 +736,21 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	// Auto-resolve: state-roster findings absent from this completed run
-	// vanished on their own.
-	resolvable := []FindingType{FindingPaymentMethodMismatch}
+	// vanished on their own. Card findings only when the vault was read.
+	var resolvable []FindingType
+	if snap.Capabilities.Vault {
+		resolvable = []FindingType{FindingPaymentMethodMismatch}
+	}
 	if snap.Coverage.SubscriptionsExhaustive {
 		resolvable = stateRosterFindingTypes
 	}
-	resolved, err := e.Store.AutoResolveVanished(ctx, binding.ID, runID, resolvable)
-	if err != nil {
-		return rep, records, planned, appliedChanges, fmt.Errorf("auto-resolve vanished findings: %w", err)
+	if len(resolvable) > 0 {
+		resolved, err := e.Store.AutoResolveVanished(ctx, binding.ID, runID, resolvable)
+		if err != nil {
+			return rep, records, planned, appliedChanges, fmt.Errorf("auto-resolve vanished findings: %w", err)
+		}
+		rep.AutoResolved = resolved
 	}
-	rep.AutoResolved = resolved
 
 	// Transaction windows may be keyed by provider modification time (NMI),
 	// not occurrence time. Only an actually returned transaction can qualify
@@ -777,7 +768,12 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			continue
 		}
 		switch rec.Type {
-		case FindingChargeMissingLocal, FindingRefundUnrecorded, FindingChargebackActiveSub, FindingReversalUnlinked:
+		case FindingRefundUnrecorded, FindingChargebackActiveSub, FindingReversalUnlinked:
+		case FindingChargeMissingLocal:
+			// A reversals read saw no sale: an NMI refund carries its sale's id.
+			if params.Reversals {
+				continue
+			}
 		default:
 			continue
 		}
@@ -796,6 +792,31 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	return rep, records, planned, appliedChanges, nil
+}
+
+// narrowToReversals makes a snapshot a reversals-lane read whatever its
+// fetcher returned: refunds, voids and disputes, with the sales they name kept
+// only as context for the alias check, no roster or vault, and no coverage
+// claim.
+func narrowToReversals(snap *RemoteSnapshot) {
+	named := map[string]bool{}
+	for _, t := range snap.Transactions {
+		if t.isReversal() {
+			named[decodeBreadcrumbs(t.Raw).Charge] = true
+			named[t.OriginalTransactionID] = true
+		}
+	}
+	delete(named, "")
+	var kept []RemoteTransaction
+	for _, t := range snap.Transactions {
+		if t.isReversal() || (t.Type == TransactionTypeSale && named[t.TransactionID]) {
+			kept = append(kept, t)
+		}
+	}
+	snap.Transactions, snap.ReversalsOnly = kept, true
+	snap.Subscriptions, snap.PaymentMethods = nil, nil
+	snap.Capabilities.Subscriptions, snap.Capabilities.Vault = false, false
+	snap.Coverage = SnapshotCoverage{}
 }
 
 // countStateOverwrites is how many of this pass's applies would OVERWRITE
@@ -822,7 +843,7 @@ func (e *Engine) openDestructiveRun(ctx context.Context, provider Provider, bind
 		return uuid.Nil, nil
 	}
 	if e.Runs == nil {
-		return uuid.Nil, fmt.Errorf("reconcile: enforce mode with %d subscription state transitions requires a DestructiveRunRecorder (a destructive pass with no run record has no undo)", plannedOverwrites)
+		return uuid.Nil, fmt.Errorf("reconcile: enforce mode with %d subscription state transitions requires a destructive-run recorder (a destructive pass with no run record has no undo)", plannedOverwrites)
 	}
 	var pspID *uuid.UUID
 	note := fmt.Sprintf("converge-enforce pull %s", provider)
@@ -919,9 +940,7 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 		if e.Decisions == nil {
 			return nil, false, fmt.Errorf("no decision applier wired (enforce with subscription transitions requires Engine.Decisions)")
 		}
-		if setter, ok := e.Decisions.(interface{ SetClock(clockwork.Clock) }); ok {
-			setter.SetClock(clockwork.NewFakeClockAt(now))
-		}
+		e.Decisions.SetClock(clockwork.NewFakeClockAt(now))
 		changed, err := e.Decisions.ApplyDecision(ctx, a.Decide.SubscriptionID, a.Decide.Decision)
 		if err != nil {
 			return nil, false, err

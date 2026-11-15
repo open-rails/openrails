@@ -28,50 +28,10 @@ import (
 // unreadable secrets fails the charge closed; a rail with no account has no
 // adapter. Nothing is cached, so a rotated credential applies on the next charge.
 
-// CollectionAdapterResolver arms the store-scoped adapter for one saved-method
-// charge. ok=false with nil err = the merchant declares no account on the rail
-// (nothing to charge with — the charge fails closed, there is no fallback
-// plane); err = declared but not armable (fail closed).
-type CollectionAdapterResolver interface {
-	// ResolveCollectionAdapter arms the adapter charging method through psp.
-	ResolveCollectionAdapter(ctx context.Context, method gen.BillingPaymentMethod, psp uuid.UUID) (CollectionAdapter, bool, error)
-}
-
-// CollectionEndpoints overrides provider base URLs on store-armed collection
-// clients — a test seam for fake provider HTTP servers. Zero value = real.
-type CollectionEndpoints struct {
-	StripeBaseURL string
-	NMIV5BaseURL  string
-	// Classic NMI endpoints (manual-rebill leg: Direct Post + Query API).
-	NMIDirectPostURL string
-	NMIQueryURL      string
-	// BTBaseURL points store-armed Basis Theory clients at a fake server.
-	BTBaseURL string
-}
-
-// CollectionPlane is the runtime-facing per-merchant credential resolver
-// surface: store-armed collection adapters, raw NMI clients and the
-// reconciliation reads for in-doubt collection operations.
-// Satisfied by *MerchantCollectionAdapterBuilder; tests may inject fakes.
-type CollectionPlane interface {
-	CollectionAdapterResolver
-	NMIClientResolver
-	CollectionVerifier
-}
-
-// CollectionVerifier reads qualified receipts for a canonical accepted row.
-// Nonexecution after possible submission requires provider-supported proof;
-// absence from a search alone never releases a potentially charged operation.
-type CollectionVerifier interface {
-	ReadCollectionReceipt(ctx context.Context, in gen.BillingProviderIntent, reference string) (intents.CollectedReceipt, bool, error)
-	ConfirmCollectionNotExecuted(ctx context.Context, in gen.BillingProviderIntent) error
-}
-
-// NMIClientResolver is the raw-client NMI leg of the store resolver.
-type NMIClientResolver = railresolve.NMIClientResolver
-
-// MerchantCollectionAdapterBuilder builds one merchant's collection adapter at
-// charge time. MerchantsFn is late-bound (Runtime.Merchants is wired after the
+// MerchantCollectionAdapterBuilder is the runtime's per-merchant credential
+// resolver: store-armed collection adapters, raw NMI clients and the
+// reconciliation reads for in-doubt collection operations. It builds one
+// merchant's collection adapter at charge time. MerchantsFn is late-bound (Runtime.Merchants is wired after the
 // charger is constructed); a nil fn/service = nothing armable.
 type MerchantCollectionAdapterBuilder struct {
 	BasisTheoryTransport http.RoundTripper
@@ -79,13 +39,10 @@ type MerchantCollectionAdapterBuilder struct {
 	Config               *config.Config
 	DB                   *db.DB
 	MerchantsFn          func() *merchants.Service
-	Endpoints            CollectionEndpoints
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
-	// one from Config and Endpoints.
+	// one from Config.
 	NMIClients *railresolve.NMIFactory
 }
-
-var _ CollectionPlane = (*MerchantCollectionAdapterBuilder)(nil)
 
 func (b *MerchantCollectionAdapterBuilder) merchants() *merchants.Service {
 	if b == nil || b.MerchantsFn == nil {
@@ -103,18 +60,12 @@ func (b *MerchantCollectionAdapterBuilder) nmiArmer() *railresolve.NMIArmer {
 	return &railresolve.NMIArmer{Config: b.Config, DB: b.DB, MerchantsFn: b.MerchantsFn, Factory: b.nmiFactory()}
 }
 
-// nmiFactory is the runtime's shared factory; this builder's own endpoint
-// overrides (test seams) bind a copy with the same wire.
+// nmiFactory is the runtime's shared factory.
 func (b *MerchantCollectionAdapterBuilder) nmiFactory() *railresolve.NMIFactory {
-	endpoints := railresolve.NMIEndpoints{V5BaseURL: b.Endpoints.NMIV5BaseURL, DirectPostURL: b.Endpoints.NMIDirectPostURL, QueryURL: b.Endpoints.NMIQueryURL}
-	if b.NMIClients != nil && endpoints == (railresolve.NMIEndpoints{}) {
+	if b.NMIClients != nil {
 		return b.NMIClients
 	}
-	factory := &railresolve.NMIFactory{Config: b.Config, Endpoints: endpoints}
-	if b.NMIClients != nil {
-		factory.Transport = b.NMIClients.Transport
-	}
-	return factory
+	return &railresolve.NMIFactory{Config: b.Config}
 }
 
 // nmiProxyPosture is the posture identity of scope's gateway credential
@@ -127,6 +78,10 @@ func (b *MerchantCollectionAdapterBuilder) nmiProxyPosture(ctx context.Context, 
 	return b.nmiFactory().ProxyPosture(mid, scope, settings)
 }
 
+// ResolveCollectionAdapter arms the adapter charging method through psp.
+// ok=false with nil err = the merchant declares no account on the rail
+// (nothing to charge with — the charge fails closed, there is no fallback
+// plane); err = declared but not armable (fail closed).
 func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.Context, method gen.BillingPaymentMethod, psp uuid.UUID) (CollectionAdapter, bool, error) {
 	svc := b.merchants()
 	if svc == nil || b.DB == nil {
@@ -190,7 +145,8 @@ func (b *MerchantCollectionAdapterBuilder) ResolveNMIClient(ctx context.Context,
 	return b.nmiArmer().ResolveNMIClient(ctx, merchantID, stampedAccountID)
 }
 
-// ConfirmCollectionNotExecuted closes only a provider-provable nonexecution.
+// ConfirmCollectionNotExecuted closes only a provider-provable nonexecution:
+// absence from a search alone never releases a potentially charged operation.
 // NMI search absence is not authoritative. Stripe objects can be cleaned up
 // under the same operation key, then read back in an unchargeable state.
 func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx context.Context, in gen.BillingProviderIntent) error {
@@ -252,9 +208,6 @@ func (b *MerchantCollectionAdapterBuilder) stripeService(ctx context.Context, sv
 	}
 	service := subscriptions.NewAccountStripeService(b.Config, mid.UUID(), scope.ID, scope.AccountID, secretKey)
 	service.StripeClients = b.StripeClients
-	if b.Endpoints.StripeBaseURL != "" {
-		service.SetBaseURLForTest(b.Endpoints.StripeBaseURL)
-	}
 	return service, nil
 }
 

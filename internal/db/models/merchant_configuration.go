@@ -34,8 +34,9 @@ type MerchantConfiguration struct {
 	// channel is inactive.
 	AlertEmail string `json:"alert_email,omitempty"`
 
-	// RepriceNoticeWindowDays is the minimum advance notice a subscription
-	// price increase must give existing subscribers; decreases are exempt.
+	// RepriceNoticeWindowDays is the minimum advance notice a price migration
+	// must give a subscriber whose cost per unit of time rises; equal or lower
+	// cost is exempt.
 	// Nil ⇒ DefaultPriceIncreaseNoticeDays; zero enforces none.
 	RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
 

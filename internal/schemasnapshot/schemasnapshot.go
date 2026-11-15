@@ -144,44 +144,6 @@ func Capture(ctx context.Context, dsn string) ([]byte, error) {
 	return list, nil
 }
 
-// Diff is what differs between two lists, each line under the object it
-// belongs to: removed or changed lines of old, then added lines of new.
-func Diff(old, new []byte) (gone, added []string) {
-	a, b := flatten(old), flatten(new)
-	return missing(a, b), missing(b, a)
-}
-
-func flatten(list []byte) []string {
-	var out []string
-	object := ""
-	for line := range strings.Lines(string(list)) {
-		line = strings.TrimSuffix(line, "\n")
-		switch {
-		case line == "" || strings.HasPrefix(line, "#"):
-		case strings.HasPrefix(line, " "):
-			out = append(out, object+": "+strings.TrimSpace(line))
-		default:
-			object = line
-			out = append(out, line)
-		}
-	}
-	return out
-}
-
-func missing(from, in []string) []string {
-	have := make(map[string]bool, len(in))
-	for _, line := range in {
-		have[line] = true
-	}
-	var out []string
-	for _, line := range from {
-		if !have[line] {
-			out = append(out, line)
-		}
-	}
-	return out
-}
-
 var lineBreak = regexp.MustCompile(`\s*\n\s*`)
 
 type relation struct {

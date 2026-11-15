@@ -2,45 +2,29 @@ package merchantbootstrap
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
-const (
-	// DefaultBootstrapManifestPath is the conventional mounted AuthKit authority
-	// bootstrap file location for standalone containers and Linux deployments.
-	DefaultBootstrapManifestPath = "/etc/openrails/bootstrap.yaml"
-	BootstrapManifestVersion     = 1
-)
+// BootstrapManifestVersion is the merchant config manifest's version.
+const BootstrapManifestVersion = 1
 
-func validateMerchantManifestShape(m *BillingConfig) error {
-	if m == nil {
-		return fmt.Errorf("merchant manifest is required")
+// CheckManifestDeclaration vets one manifest declaration as the
+// configuration API would and normalizes its PSPs in place.
+func CheckManifestDeclaration(slug string, t config.MerchantDeclaration) error {
+	// The configuration API's own validator: a manifest cannot declare
+	// settings the API would refuse.
+	if _, err := merchantconfig.Normalize(t.DisplayName, t.MerchantSettings); err != nil {
+		return fmt.Errorf("merchant %q settings: %w", slug, err)
 	}
-	if m.Version != BootstrapManifestVersion {
-		return fmt.Errorf("merchant bootstrap: manifest version must be %d", BootstrapManifestVersion)
-	}
-	for _, rawSlug := range sortedMerchantKeys(m.Merchants) {
-		t := m.Merchants[rawSlug]
-		slug := strings.ToLower(strings.TrimSpace(rawSlug))
-		if slug == "" {
-			return fmt.Errorf("merchant key is required")
+	for key, account := range t.PSPs {
+		normalized, err := NormalizeManifestPSP(slug, key, account)
+		if err != nil {
+			return err
 		}
-		// The configuration API's own validator: a manifest cannot declare
-		// settings the API would refuse.
-		if _, err := merchantconfig.Normalize(t.DisplayName, t.MerchantSettings); err != nil {
-			return fmt.Errorf("merchant %q settings: %w", slug, err)
-		}
-		for key, account := range t.PSPs {
-			normalized, err := NormalizeManifestPSP(slug, key, account)
-			if err != nil {
-				return err
-			}
-			t.PSPs[key] = normalized
-		}
+		t.PSPs[key] = normalized
 	}
 	return nil
 }
@@ -62,13 +46,4 @@ func NormalizeManifestPSP(slug string, key string, cfg config.PSPConfig) (config
 		return cfg, fmt.Errorf("merchant %q %w", slug, err)
 	}
 	return cfg, nil
-}
-
-func sortedMerchantKeys(in map[string]config.MerchantDeclaration) []string {
-	keys := make([]string, 0, len(in))
-	for key := range in {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

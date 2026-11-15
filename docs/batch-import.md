@@ -15,7 +15,7 @@ for live money state**. For provider-vaulted rails (NMI, CCBill, Stripe) the
 provider owns the card vault and the recurring billing schedule: it keeps
 charging on its own clock after your cutover. Importing brings OpenRails'
 mirror up to date as of a declared horizon; from then on webhooks, the
-scheduled [Provider Refresh](operations.md#provider-refresh-and-the-unknown-cohort)
+scheduled [Provider Refresh](operations.md#provider-refresh)
 converge the mirror against provider truth, and a PSP import re-reads a
 PSP on demand, its differences becoming proposals.
 
@@ -32,13 +32,13 @@ What import does **not** do:
   provider-affecting output: a declared cancel whose legacy schedule was not
   confirmed dead (`schedule_live`) enqueues a durable rail-delete intent,
   executed later by the intent executor under the
-  [mode gate](operations.md#operating-modes-the-safety-levers).
+  [mode gate](operations.md#safety-levers).
 - **No card-data movement.** OpenRails never holds card data. Declared
   payment methods are *references* into the provider's vault
   (`rail_customer_ref` / `rail_method_ref`), meaningful only within the PSP
   account that created them. You cannot import your way onto a different
   PSP — see
-  [PSP binding and credential rotation](operations.md#psp-binding-and-credential-rotation);
+  [PSP binding and credential rotation](operations.md#psps-and-credentials);
   between accounts, cards can only be re-captured when customers next pay.
 
 ### The import surface
@@ -88,7 +88,7 @@ classification evaluates against it, never wall-clock.
 covers the merchant's entire book — it MUST be false for batched imports.
 
 Every live NMI schedule is dunned by OpenRails (NMI never retries a declined
-renewal), whatever `collection_policy` the book declares. Its recurring
+renewal). Its recurring
 stored-card anchor is the method's `recurring_transaction_id` when declared,
 otherwise the schedule's first approved sale in the book's transactions: the
 customer's recurring signup. A schedule with neither stays provider-collected
@@ -236,21 +236,21 @@ billing data over this seam:
    `source_id` so re-runs are exact and results are auditable per row. Declare
    admin/manual comps as `admin_grants` in the same book.
 5. **Access is derived by the import itself** for the book's customers; no
-   merchant-wide `ConvergeMerchant` is required.
+   merchant-wide convergence pass is required.
 6. **Boot with `PROVIDER_WRITE_MODE=limited` — set before first start.**
    Imported stale `past_due` rows are immediately "due"; a full-behavior boot
    would start charging them within hours.
 7. **Let the first dunning cycle materialize the backlog**, then review
    `openrails intents` — the
-   [drain forecast](operations.md#inspecting-the-ledger) is the dry-run view
+   [drain forecast](operations.md#provider-intents) is the dry-run view
    of your cutover ("N execute under limited, M require full").
 8. **Verify against the provider** with a PSP import
    (`POST /v1/merchant/psp-imports`) and its proposals, then raise to
    `PROVIDER_WRITE_MODE=full` — it drains exactly what the forecast showed.
 
 Steps 6–8 in depth:
-[Cutover: booting against production credentials](operations.md#cutover-booting-against-production-credentials)
-and [Materialized backlog under mode=limited](operations.md#materialized-backlog-under-modelimited).
+[Cutover: booting against production credentials](operations.md#booting-against-production-credentials)
+and [Materialized backlog under mode=limited](operations.md#booting-against-production-credentials).
 
 ### Provider facts outrank the book
 
@@ -266,7 +266,7 @@ import](psp-import.md#provider-facts-outrank-a-hosts-book)).
 ### Gotchas
 
 - **Stale `past_due` is canceled, never charged.** Anything past the
-  [dunning staleness window](operations.md#dunning) (derived from the
+  [dunning staleness window](dunning.md) (derived from the
   billing cycle; 14 days for monthly) gets the local no-charge cancel +
   downgrade. Missed billing periods are never back-billed.
 - **`unverified` is healthy.** Evidence-starved rows park as `unverified` and keep
@@ -284,8 +284,9 @@ import](psp-import.md#provider-facts-outrank-a-hosts-book)).
 - **Dates stay faithful.** `canceled_at`/`ended_at` come from the declared
   evidence, not import wall-clock; grace = missed period end + the grace
   window; a re-import never regresses them.
-- **Money is micros locally, cents on the wire.** `amount_cents: 2300` lands
-  as `23,000,000` micros. Don't pre-convert.
+- **Amounts are native units.** Every `amount` is a decimal string in the
+  currency's native units, micros for USD (`"23000000"` is $23). There is no
+  cents field.
 
 ### Verifying success
 
@@ -310,8 +311,8 @@ never takes them over: NMI keeps billing them. New purchases are billed by
 OpenRails.
 
 1. **Import.** Declare the book (customers, vault cards, subscriptions with
-   `collection_policy` empty = NMI-owned, and the charge history including
-   declines) at a fixed `as_of`. Declare `recurring_transaction_id` on a card
+   their NMI schedules, and the charge history including declines) at a fixed
+   `as_of`. Declare `recurring_transaction_id` on a card
    only when legacy evidence proves the recurring stored-card agreement. A paused NMI schedule is declared as
    `cancel: {kind: user_canceled, at: <pause time>}`: access runs to the paid
    date and OpenRails never deletes the paused schedule. A card reference the
@@ -328,7 +329,7 @@ OpenRails.
    vault or pause changed at NMI), `pull.payment_method.mismatch` (vault card removed)
    and blocked import rows. Fix the book and re-import rather than editing rows.
 3. **Arm the destructive switch** for the merchant
-   ([operations.md](operations.md#arming-a-merchant-the-first-enforce-gate)).
+   ([operations.md](operations.md#the-kill-switch)).
    Until then a member's cancel of an NMI-owned membership is refused with
    `provider_cancel_held` and raises `life.provider_cancel.held`: OpenRails
    will not cancel locally while NMI would keep charging. Account deletion
@@ -376,8 +377,9 @@ a book that carries these verified facts.
 
 For live NMI and CCBill subscriptions, `accepted_schedule` states the accepted
 terms: a stable `source_reference`, recurring `amount` in native currency units,
-`currency`, `first_due_at`, and exactly one of `interval_hours` (whole days) or
-`interval_months` (calendar months). The anchor preserves its accepted time of
+`currency` (the price's; another blocks the subscription), `first_due_at`, and
+exactly one of `interval_hours` (whole days) or `interval_months` (calendar
+months). The anchor preserves its accepted time of
 day. A monthly January 31 anchor yields February's last day and then March 31.
 Approved transactions also carry the provider-confirmed `next_billing_at`
 boundary. An unchanged transaction receipt remains bound to its original cycle

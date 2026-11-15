@@ -3,7 +3,6 @@ package catalog
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -195,48 +194,6 @@ func (s *PriceService) GetActiveByProductID(ctx context.Context, productID uuid.
 	return s.pricesFromGen(ctx, rows)
 }
 
-func (s *PriceService) GetAllActive(ctx context.Context) ([]*models.Price, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return nil, queryScopeErr
-	}
-
-	rows, err := s.db.Gen(ctx).ListAllActivePricesWithProduct(ctx, queryMerchant.UUID())
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*models.Price, 0, len(rows))
-	for _, row := range rows {
-		price, err := s.priceWithProduct(ctx, row.BillingPrice, row.BillingProduct)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, price)
-	}
-	return out, s.db.LoadPricePSPBindings(ctx, out, nil)
-}
-
-func (s *PriceService) GetAll(ctx context.Context) ([]*models.Price, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return nil, queryScopeErr
-	}
-
-	rows, err := s.db.Gen(ctx).ListAllPricesWithProduct(ctx, queryMerchant.UUID())
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*models.Price, 0, len(rows))
-	for _, row := range rows {
-		price, err := s.priceWithProduct(ctx, row.BillingPrice, row.BillingProduct)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, price)
-	}
-	return out, s.db.LoadPricePSPBindings(ctx, out, nil)
-}
-
 func (s *PriceService) priceWithProduct(ctx context.Context, p gen.BillingPrice, prod gen.BillingProduct) (*models.Price, error) {
 	price, err := models.PriceFromGen(p)
 	if err != nil {
@@ -408,17 +365,6 @@ func (s *PriceService) GetByStripePriceID(ctx context.Context, stripePriceID str
 		return nil, err
 	}
 	return price, nil
-}
-
-// Update is not supported: prices are immutable. A reprice is a new price;
-// UpdatePSPLinks changes provider bindings.
-func (s *PriceService) Update(ctx context.Context, price *models.Price) error {
-	return errors.New("prices are immutable; use UpdatePSPLinks() or Deactivate() for allowed changes")
-}
-
-// Delete is not supported: prices are immutable; Deactivate archives one.
-func (s *PriceService) Delete(ctx context.Context, id uuid.UUID) error {
-	return errors.New("prices cannot be deleted; use Deactivate() instead to preserve historical data")
 }
 
 // Prices have no full-row update: money and identity columns are immutable.

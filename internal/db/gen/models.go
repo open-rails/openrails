@@ -194,34 +194,6 @@ type BillingCustodian struct {
 	UpdatedAt time.Time
 }
 
-// One row per instrument whose CUSTODY changed — the durable memory of a vault-export remap. Records where the card used to live (the PSP vault handle the processor holds) and where it lives now (the custodian token), on an unchanged payment_method_id so subscriptions never move. Reversible in RECORD, never in custody: the fields to re-point an instrument back are all here, but a processor that deleted the vault entry or terminated the merchant cannot be undone by a row. Retention: permanent, never pruned.
-type BillingCustodyMigration struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	// The operator run that produced this row. A dry-run plan writes nothing; an applied run stamps every flip with one batch id so the report and the audit agree.
-	BatchID         uuid.UUID
-	PaymentMethodID uuid.UUID
-	Rail            string
-	FromCustodian   string
-	FromCustodianID *uuid.UUID
-	// The PSP-scope vault handle the instrument had BEFORE the flip (NMI customer_vault_id). Retained on the payment_methods row too — this is the copy that survives a later re-remap.
-	FromRailCustomerRef *string
-	// The instrument-scope handle before the flip (NMI billing_id; empty for the one-vault-per-card default).
-	FromRailMethodRef *string
-	FromPspID         *uuid.UUID
-	ToCustodian       string
-	ToCustodianID     uuid.UUID
-	// The custodian token id the instrument now charges through — payment_methods.rail_method_ref after the flip.
-	ToRailMethodRef string
-	ToPspID         *uuid.UUID
-	// The declared horizon of the custodian's ingest of the vault export — when the token set was true.
-	ExportedAt *time.Time
-	// remapped = an existing instrument changed custody (same payment_method_id, subscriptions untouched); created = the export carried a card with no local instrument and the operator declared its customer.
-	Outcome   string
-	Reason    *string
-	CreatedAt time.Time
-}
-
 // OpenRails payable identity: (merchant_id, issuer, id), id being the issuer's stable UUID subject. A credential of another issuer never acts on the row.
 type BillingCustomer struct {
 	ID         uuid.UUID
@@ -606,21 +578,16 @@ type BillingLedgerTransfer struct {
 	Operation string
 }
 
-// Typed maintenance run headers: reconciliation observations, reversible destructive work, and immutable purge inventories. Each kind has explicit columns and constraints; before-images remain in destructive_run_before_images. Retention: reconciliation runs no finding refers to are deleted 12 months (366 days) after they started, by the cleanup job only; every other kind is permanent.
+// Typed maintenance run headers: reversible destructive work, billing restore receipts and immutable purge inventories. Each kind has explicit columns and constraints; before-images remain in destructive_run_before_images. Retention: permanent, never pruned.
 type BillingMaintenanceRun struct {
-	ID             uuid.UUID
-	MerchantID     uuid.UUID
-	Kind           string
-	Actor          *string
-	PspID          *uuid.UUID
-	Mode           *string
-	Rails          []string
-	WindowStartsAt *time.Time
-	WindowEndsAt   *time.Time
-	StartedAt      time.Time
-	FinishedAt     *time.Time
-	Status         string
-	DryRun         bool
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Kind       string
+	Actor      *string
+	PspID      *uuid.UUID
+	StartedAt  time.Time
+	FinishedAt *time.Time
+	Status     string
 	// The coverage proof authorizing a destructive run, retained unchanged for audit and undo.
 	Coverage []byte
 	// The operator-confirmed or planned affected row count.
@@ -630,11 +597,10 @@ type BillingMaintenanceRun struct {
 	ReversedBy   *string
 	Note         *string
 	Summary      []byte
-	Error        *string
 	// Purge row counts, secret names, and omitted resources. Not a backup and never an undo image.
 	InventoryManifest  []byte
 	InventoryTotalRows *int64
-	// Derived from the immutable kind. Child foreign keys include it, so findings can reference only observation runs and stamped rows, intents and before-images only destructive runs.
+	// Derived from the immutable kind. Child foreign keys include it, so stamped rows, intents and before-images reference only destructive runs.
 	RunClass string
 }
 
@@ -797,22 +763,6 @@ type BillingNmiHistoryRead struct {
 	ReadAt     time.Time
 }
 
-// Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox. Retention: rows are deleted 90 days after created_at once read, 180 days if never read.
-type BillingNotification struct {
-	ID            uuid.UUID
-	EventType     string
-	Data          []byte
-	RecipientKind string
-	ReadAt        *time.Time
-	Severity      *string
-	Title         *string
-	Body          *string
-	Link          *string
-	CreatedAt     time.Time
-	MerchantID    uuid.UUID
-	CustomerID    *uuid.UUID
-}
-
 // Internal notification emission and deduplication journal; the public feed is event_log. Retention: rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers.
 type BillingNotificationEvent struct {
 	MerchantID uuid.UUID
@@ -918,8 +868,6 @@ type BillingOrderAttempt struct {
 	DeletedAt           *time.Time
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
-	// Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.
-	RoutingReason []byte
 	// The order this payment attempt pays.
 	OrderID *uuid.UUID
 }
@@ -1158,8 +1106,6 @@ type BillingPaymentMethod struct {
 	SetupRef *string
 	// Private accepted custodian card-save binding, encrypted SDK authorization until completion, then token hash and canonical method identity. Never payment authority.
 	Capture []byte
-	// The wallet card this merchant copy was made from (lineage); NULL for a card given to the merchant.
-	WalletCardID *uuid.UUID
 }
 
 // Append-only history of the card behind a payment method: one row per save, customer edit, updater or network change, closure or contact advice, with the card as its holder reported it at that version. Replays of one source event are one row. Retention: permanent, never pruned.
@@ -1694,12 +1640,13 @@ type BillingReconciliationFinding struct {
 	Severity          string
 	Status            string
 	RecommendedAction *string
-	// Reconciliation run that first observed this finding; NULL when raised outside a run (e.g. the intents volume breaker).
+	// The reconciliation pass that first saw this finding, an id naming no row; NULL when raised outside a pass (e.g. the intents volume breaker).
 	FirstSeenRun *uuid.UUID
-	LastSeenRun  *uuid.UUID
-	LastSeenAt   time.Time
-	ResolvedAt   *time.Time
-	Resolution   *string
+	// The reconciliation pass that last saw this finding; a pass resolves the findings it did not see again.
+	LastSeenRun *uuid.UUID
+	LastSeenAt  time.Time
+	ResolvedAt  *time.Time
+	Resolution  *string
 	// Operator-entered notes attached when a finding is fixed or ignored manually.
 	OperatorNotes *string
 	CreatedAt     time.Time
@@ -1712,7 +1659,6 @@ type BillingReconciliationFinding struct {
 	NotifiedAt *time.Time
 	// Severity at last notification; a further increase while still open re-fires, re-observation at the same/lower severity does not.
 	NotifiedSeverity *string
-	SeenRunClass     *string
 	// A pull.* proposal's change: its kind, subject, from and to, effects, the basis it was computed against, when its evidence was observed, the provider evidence and what approving it executes. NULL on findings only dismissing resolves.
 	Change []byte
 	// What raised a pull.* finding: a PSP read (pull) or a by-id read of an uncertain record (verification). Set exactly on pull.* findings.
@@ -1970,13 +1916,6 @@ type BillingSubscriptionVerification struct {
 	Reads          int32
 	LastReadAt     *time.Time
 	LastError      *string
-}
-
-// Last fully scanned thirty-day usage collection period per merchant. Advancing this marker requires successful admission of the whole eligible scan; accepted operations recover independently. Included in merchant archives. Retention: permanent, never pruned.
-type BillingUsageCollectionCadence struct {
-	MerchantID             uuid.UUID
-	MonthlyPeriodStartedAt time.Time
-	CompletedAt            time.Time
 }
 
 // Append-only multi-dimensional metered usage. Source of truth for usage reporting and usage order lines. Priced when recorded, by the host (amount) or the rate cards (charges); event and ledger postings commit in one tx. The hot admission path never reads this table. Retention: monthly partitions on occurred_at, dropped 24 months after the month's usage was billed.

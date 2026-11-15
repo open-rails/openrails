@@ -139,21 +139,6 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 	return out, err
 }
 
-// catalogAfterCommit keeps best-effort legacy propagation outside the local
-// transaction. Failed transactions discard all callbacks; none are retried.
-func (s *Service) catalogAfterCommit(ctx context.Context, work func(context.Context, *Service)) {
-	if s.localCatalogOnly {
-		return
-	}
-	if s.catalogWriteLocked {
-		if s.catalogCommittedWork != nil {
-			*s.catalogCommittedWork = append(*s.catalogCommittedWork, work)
-		}
-		return
-	}
-	work(ctx, s)
-}
-
 // ErrCatalogBenefitOverlap refuses a catalog change that lets two recurring
 // products grant one entitlement outside a shared tier group.
 func errCatalogBenefitOverlap(o gen.ListRecurringBenefitOverlapsRow) error {

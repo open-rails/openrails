@@ -25,8 +25,8 @@ merchants:
       jwks_uri: https://local-stack.example/.well-known/jwks.json
 
     # The merchant's settings sit flat on the merchant: the same fields GET
-    # /v1/admin/configuration reads and PATCH changes
-    # (docs/api/merchant-settings.md), with the same names and units.
+    # /v1/merchant/configuration reads and PATCH changes
+    # (docs/merchant-configuration.md), with the same names and units.
     profile:
       logo_url: https://local-stack.example/assets/logo.png
       from_email: billing@local-stack.example
@@ -40,7 +40,7 @@ merchants:
     # or#878 arrears delinquency: days past due_at before new spend is refused
     # and the host is signalled to shut off. Default 14; the amount floor
     # (arrears_delinquency_floor) defaults to monthly_floor. See
-    # docs/arrears-delinquency.md.
+    # docs/spend-limits.md.
     arrears_grace_days: 7
 
     delegated_invoker_wasted_spend_limits:
@@ -52,9 +52,8 @@ merchants:
     # does not name cannot be routed to, which is how you pin a product to one
     # rail. Candidates that cannot serve the price right now (unarmed,
     # archived, credentials missing, no price link, mode unsupported) are
-    # skipped; the skipped set and its reasons land on the session's
-    # routing_reason. Entries are PSP keys, or a rail kind where exactly one
-    # PSP is armed on it.
+    # skipped (the routing preview lists them with their reasons). Entries are
+    # PSP keys, or a rail kind where exactly one PSP is armed on it.
     #
     # Omit it for the built-in order (stripe, nmi, ccbill, solana), the right
     # answer for a merchant with one PSP per rail. A declared list REPLACES

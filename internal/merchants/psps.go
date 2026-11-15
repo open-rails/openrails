@@ -261,6 +261,10 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 		if owner.MerchantID != id || !ok || !strings.EqualFold(row.Key, key) {
 			return billing.PSP{}, fmt.Errorf("PSP %s:%s: %w", rail, accountID, ErrPSPExists)
 		}
+	} else if err := s.AssertPSPUnowned(ctx, gen.New(s.pool), id.UUID(), rail, environment, accountID); errors.Is(err, ErrPSPOwnedByAnotherMerchant) {
+		return billing.PSP{}, fmt.Errorf("PSP %s:%s: %w", rail, accountID, ErrPSPExists)
+	} else if err != nil {
+		return billing.PSP{}, err
 	}
 	if err := s.verifyNMIEnvironment(ctx, id, doc); err != nil {
 		return billing.PSP{}, err
@@ -818,9 +822,6 @@ func (s *Service) verifyNMIEnvironment(ctx context.Context, id billing.MerchantI
 	if s.nmiWire != nil {
 		s.nmiWire(client)
 	}
-	if s.nmiProbeV5BaseURL != "" {
-		client.V5BaseURL = s.nmiProbeV5BaseURL
-	}
 	if err := nmi.CheckEnvironmentArm(ctx, client); err != nil {
 		return providerCredentialError(fmt.Errorf("merchants: rail %q account %q: %w", p.Rail, p.AccountID, err))
 	}
@@ -855,7 +856,7 @@ func (s *Service) DeclarePSP(ctx context.Context, id billing.MerchantID, declara
 	if why := s.environmentRefusal(rail, environment); why != "" {
 		return billing.PSP{}, fmt.Errorf("%w: %s", ErrPSPEnvironmentRefused, why)
 	}
-	if err := AssertPSPUnowned(ctx, gen.New(s.pool), id.UUID(), rail, environment, accountID); err != nil {
+	if err := s.AssertPSPUnowned(ctx, gen.New(s.pool), id.UUID(), rail, environment, accountID); err != nil {
 		return billing.PSP{}, err
 	}
 	pspID, nRail, nEnv, nAccount := PSPNaturalKey(rail, environment, accountID)

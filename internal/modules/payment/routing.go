@@ -88,28 +88,6 @@ func (d *RoutingDecision) Eligible() []string {
 	return out
 }
 
-// Reason projects the decision onto the persisted trace.
-func (d *RoutingDecision) Reason() *models.PSPRoutingReason {
-	if d == nil || d.Target.PSP == "" {
-		return nil
-	}
-	reason := &models.PSPRoutingReason{
-		Policy:   d.Policy,
-		Rule:     d.Rule,
-		Selected: d.Target.PSP,
-		Rail:     d.Target.Rail,
-	}
-	for _, c := range d.Candidates {
-		switch {
-		case c.Skip != "":
-			reason.Skipped = append(reason.Skipped, models.PSPRoutingSkip{Selector: c.Selector, Reason: c.Skip})
-		case c.Selector != reason.Selected:
-			reason.Fallbacks = append(reason.Fallbacks, c.Selector)
-		}
-	}
-	return reason
-}
-
 // ErrNoRoutableProcessor is returned when no declared candidate can serve the
 // price. Fail closed: routing never invents a processor.
 var ErrNoRoutableProcessor = errors.New("no payment provider is available for this price")
@@ -330,7 +308,7 @@ func routingRuleMatches(m models.PSPRoutingMatch, in RoutingInput) bool {
 
 // evaluateCandidate resolves one selector and reports whether it can serve this
 // price now. The empty skip class means eligible.
-func (s *OrderAttemptService) evaluateCandidate(ctx context.Context, targets orderRailTargets, in RoutingInput, selector string) (railTarget, string) {
+func (s *OrderAttemptService) evaluateCandidate(ctx context.Context, targets *PurchaseService, in RoutingInput, selector string) (railTarget, string) {
 	target, err := targets.resolveRailTarget(ctx, selector)
 	if err != nil {
 		var ambiguous *AmbiguousRailError

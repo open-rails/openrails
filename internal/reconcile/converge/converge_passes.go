@@ -28,10 +28,12 @@ import (
 // harmless (not live); the bound keeps a merchant-wide pass cheap.
 const deriveBackfillWindow = 3 * 365 * 24 * time.Hour
 
-// convergeScanCap bounds one pass's per-merchant detector scans, so its work
-// does not scale with the whole book. Each capped scan is ordered by urgency
-// and a pass removes what it repairs, so a merchant over the cap drains from
-// the front across passes. Far above any healthy merchant's drift.
+// convergeScanCap bounds every per-merchant detector scan, so a pass's work
+// does not scale with the whole book. Each capped scan is ordered and a pass
+// removes what it repairs, so a merchant over the cap drains from the front
+// across passes; a scan that hits it marks its types truncated, so nothing
+// past the cap resolves. Far above any healthy merchant's drift. The NOTIFY
+// scan is bounded by its lookback instead.
 const convergeScanCap = 5000
 
 // DERIVE runs before CON: sources must be truthful before grant effects are
@@ -53,10 +55,11 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	// (idempotent).
 	gl := grants.New(p.e.DB.Gen(ctx), scope.Merchant.UUID())
 	gl.SetClock(p.e.Now)
-	missing, err := gl.MissingEffects(ctx, customer)
+	missing, err := gl.MissingEffects(ctx, customer, convergeScanCap)
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan missing grant effects: %w", err)
 	}
+	markTruncated(ctx, len(missing), "derive.grant_effect.missing")
 	out := make([]ConvergeFinding, 0, len(missing))
 	for i := range missing {
 		g := missing[i]
@@ -77,10 +80,11 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	// MaterializeGrant (entitlement revoke / credit clawback). Grant and
 	// termination are both present, so this is AUTO propagation of a recorded
 	// decision, not the confirmed-absence case.
-	unretracted, err := gl.UnretractedTerminations(ctx, customer)
+	unretracted, err := gl.UnretractedTerminations(ctx, customer, convergeScanCap)
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan unretracted terminations: %w", err)
 	}
+	markTruncated(ctx, len(unretracted), "derive.grant_effect.excess")
 	for i := range unretracted {
 		g := unretracted[i]
 		out = append(out, ConvergeFinding{
@@ -106,10 +110,11 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	// products and fees never flag. ADMIN surface-only: re-granting re-runs
 	// derive-1, so an operator investigates. Critical: taking money without
 	// delivering access outranks giving content away.
-	ungranted, err := gl.UngrantedGrantablePayments(ctx, customer)
+	ungranted, err := gl.UngrantedGrantablePayments(ctx, customer, convergeScanCap)
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan ungranted grantable payments: %w", err)
 	}
+	markTruncated(ctx, len(ungranted), "derive.grant.missing")
 	for i := range ungranted {
 		p := ungranted[i]
 		out = append(out, ConvergeFinding{
@@ -130,10 +135,11 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	// the unambiguous window. A no-op for live subs (they carry their grant);
 	// it fires on imported ones.
 	scanSince := p.e.Now().Add(-deriveBackfillWindow)
-	ungrantedSubs, err := gl.UngrantedSubscriptions(ctx, customer, scanSince)
+	ungrantedSubs, err := gl.UngrantedSubscriptions(ctx, customer, scanSince, convergeScanCap)
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan ungranted subscriptions: %w", err)
 	}
+	markTruncated(ctx, len(ungrantedSubs), "derive.subscription.missing")
 	for i := range ungrantedSubs {
 		s := ungrantedSubs[i]
 		out = append(out, ConvergeFinding{
@@ -151,10 +157,11 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	// derive.wallet.missing — a completed solana wallet payment with a stored
 	// access window and no grant. AUTO-repaired (the stored expiration is the
 	// window). A no-op for live payments; it fires on imported ones.
-	ungrantedWallet, err := gl.UngrantedWalletPayments(ctx, customer, scanSince)
+	ungrantedWallet, err := gl.UngrantedWalletPayments(ctx, customer, scanSince, convergeScanCap)
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan ungranted wallet payments: %w", err)
 	}
+	markTruncated(ctx, len(ungrantedWallet), "derive.wallet.missing")
 	for i := range ungrantedWallet {
 		w := ungrantedWallet[i]
 		out = append(out, ConvergeFinding{
@@ -169,10 +176,11 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 		})
 	}
 
-	refunded, err := gl.RefundedSourceGrants(ctx, customer)
+	refunded, err := gl.RefundedSourceGrants(ctx, customer, convergeScanCap)
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan grants with refunded source: %w", err)
 	}
+	markTruncated(ctx, len(refunded), "derive.grant.excess")
 	for i := range refunded {
 		g := refunded[i]
 		pid := ""
@@ -200,11 +208,12 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	q := p.e.DB.Gen(ctx)
 	now := p.e.Now()
 	unprojected, err := q.ListActiveSubsMissingAccessProjection(ctx, gen.ListActiveSubsMissingAccessProjectionParams{
-		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now,
+		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now, RowLimit: convergeScanCap,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan unprojected subscriptions: %w", err)
 	}
+	markTruncated(ctx, len(unprojected), "derive.grant_effect.mismatch")
 	unprojectedSubscriptions := make(map[uuid.UUID]struct{}, len(unprojected))
 	for i := range unprojected {
 		s := unprojected[i]
@@ -416,7 +425,7 @@ func (p *healthPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	// the decline spike findings watch the rate.
 	// Surface-only; it closes once its operation is no longer abandoned.
 	abandoned, err := q.ListAbandonedProviderIntents(ctx, gen.ListAbandonedProviderIntentsParams{
-		MerchantID: mid, Since: now.Add(-abandonedLookback), Now: now,
+		MerchantID: mid, Since: now.Add(-abandonedLookback), Now: now, RowLimit: convergeScanCap,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("health: scan abandoned provider intents: %w", err)
@@ -438,13 +447,15 @@ func (p *healthPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	}
 
 	// life.provider_intent.stuck — a rail intent sitting non-terminal beyond
-	// the stuck thresholds. Mode/kill-switch parks are informational (the
+	// the stuck thresholds; a pending one counts from its next attempt until it
+	// is parked, so one scheduled ahead or deferred is not stuck, and from its
+	// creation once parked. Mode/kill-switch parks are informational (the
 	// intent's job runs it once the blocker lifts); anything else means
 	// provider failures, bad credentials or a lost job. Never repaired here:
 	// the intent's job owns it.
 	actionCutoff, verifyCutoff := now.Add(-stuckActionableAge), now.Add(-stuckVerifyAge)
 	stuck, err := q.ListStuckProviderIntents(ctx, gen.ListStuckProviderIntentsParams{
-		MerchantID: mid, ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff, Now: now,
+		MerchantID: mid, ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff, RowLimit: convergeScanCap,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("health: scan stuck rail intents: %w", err)
@@ -455,7 +466,7 @@ func (p *healthPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	// Stuck findings close subject-first once their intent no longer meets
 	// the stuck criteria.
 	if _, err := q.AutoResolveRecoveredStuckIntentFindings(ctx, gen.AutoResolveRecoveredStuckIntentFindingsParams{
-		MerchantID: mid, ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff, Now: now,
+		MerchantID: mid, ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff,
 	}); err != nil {
 		return nil, fmt.Errorf("health: resolve recovered stuck-intent findings: %w", err)
 	}
@@ -463,10 +474,10 @@ func (p *healthPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 }
 
 // Stuck-intent thresholds — HARDCODED (no-knobs policy): each intent's job
-// wakes at its next attempt, so a day-old actionable intent means provider
-// failures, bad credentials, a lost job — or a deliberate park; a healthy job
-// resolves an unknown in minutes, and an in_flight lease outliving hours
-// means its job died.
+// wakes at its next attempt, so a pending intent a day past it means a lost
+// job, and one parked or failing for a day a blocker, provider failures or bad
+// credentials; a healthy job resolves an unknown in minutes, and an in_flight
+// lease outliving hours means its job died.
 const (
 	stuckActionableAge = 24 * time.Hour // pending / failed_retryable
 	stuckVerifyAge     = 2 * time.Hour  // in_flight / unknown_needs_verify
@@ -639,15 +650,16 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	}
 	orphanSubs, err := q.ConOrphanAccessSubscriptionSource(ctx, gen.ConOrphanAccessSubscriptionSourceParams{
 		MerchantID: scopeMerchantID.UUID(),
-		Now:        now, CustomerID: cust,
+		Now:        now, CustomerID: cust, RowLimit: convergeScanCap,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan orphan subscription sources: %w", err)
 	}
-	orphanPays, err := q.ConOrphanAccessPaymentSource(ctx, gen.ConOrphanAccessPaymentSourceParams{MerchantID: scopeMerchantID.UUID(), CustomerID: cust})
+	orphanPays, err := q.ConOrphanAccessPaymentSource(ctx, gen.ConOrphanAccessPaymentSourceParams{MerchantID: scopeMerchantID.UUID(), CustomerID: cust, RowLimit: convergeScanCap})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan orphan payment sources: %w", err)
 	}
+	markTruncated(ctx, max(len(orphanSubs), len(orphanPays)), "consistency.reference.source_reference")
 	// Free grants have no source row to dangle: the grant ledger is their
 	// provenance.
 
@@ -683,10 +695,11 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	// twice is never auto-undone (a refund is an operator decision); the
 	// finding carries the payment ids and a refund recommendation. Critical:
 	// money harm. Findings the scan no longer reports close themselves.
-	dupCharges, err := q.ConDuplicateChargesSamePeriod(ctx, gen.ConDuplicateChargesSamePeriodParams{MerchantID: scopeMerchantID.UUID(), CustomerID: cust})
+	dupCharges, err := q.ConDuplicateChargesSamePeriod(ctx, gen.ConDuplicateChargesSamePeriodParams{MerchantID: scopeMerchantID.UUID(), CustomerID: cust, RowLimit: convergeScanCap})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan duplicate charges: %w", err)
 	}
+	markTruncated(ctx, len(dupCharges), findingDuplicateCharge)
 	for i := range dupCharges {
 		d := dupCharges[i]
 		ids := make([]string, len(d.PaymentIds))
@@ -726,10 +739,11 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	// purchase duplicate.provider_charge misses. Critical, ADMIN surface-only,
 	// with a cancel_and_refund recommendation targeting the later purchase
 	// (override_params can flip it before approving).
-	dupOwn, err := q.ConDuplicateOwnershipGrants(ctx, gen.ConDuplicateOwnershipGrantsParams{MerchantID: scopeMerchantID.UUID(), Now: now, CustomerID: cust})
+	dupOwn, err := q.ConDuplicateOwnershipGrants(ctx, gen.ConDuplicateOwnershipGrantsParams{MerchantID: scopeMerchantID.UUID(), Now: now, CustomerID: cust, RowLimit: convergeScanCap})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan duplicate ownership grants: %w", err)
 	}
+	markTruncated(ctx, len(dupOwn), "consistency.duplicate.ownership")
 	for i := range dupOwn {
 		f, err := duplicateOwnershipFinding(&dupOwn[i])
 		if err != nil {
@@ -1019,12 +1033,4 @@ type funnelStates struct {
 	PastDue        int64 `json:"in_dunning"` // past_due; the key avoids the money-name guard
 	AwaitingMethod int64 `json:"awaiting_method"`
 	Unverified     int64 `json:"unverified"`
-}
-
-// samePeriod reports whether the locked row is still on the scanned period.
-func samePeriod(current, scanned *time.Time) bool {
-	if current == nil || scanned == nil {
-		return current == scanned
-	}
-	return current.Equal(*scanned)
 }

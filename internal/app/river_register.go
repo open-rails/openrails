@@ -46,14 +46,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// One registry feeds every worker that runs intents; IntentRunner builds
 	// the same set, so per-type semantics never diverge.
-	if err := addWorker(workers, &riverjobs.DestructiveAlertWorker{DB: r.DB, Alerts: r.AlertService}); err != nil {
-		return fmt.Errorf("add destructive alert worker: %w", err)
+	if err := addWorker(workers, &riverjobs.OperatorAlertWorker{DB: r.DB, Alerts: r.AlertService}); err != nil {
+		return fmt.Errorf("add operator alert worker: %w", err)
 	}
 	intentRegistry := r.buildIntentRegistry(clock)
-	dunning := &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService}
-	if err := addWorker(workers, dunning); err != nil {
-		return fmt.Errorf("add dunning worker: %w", err)
-	}
 	// Provider refresh: the periodic kind is a scheduler that fans out one
 	// staggered, per-merchant-unique refresh job, skipping merchants with no PSPs.
 	if err := addWorker(workers, &riverjobs.ProviderRefreshSchedulerWorker{
@@ -67,8 +63,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if r.Verifier == nil {
 		r.Verifier = &reconcile.Verifier{
 			DB: r.DB, Clock: clock, DeferDelete: r.DeferredDeletes, Notifications: r.NotificationService,
-			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients,
-				Endpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)}},
+			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients},
 		}
 		r.Verifier.Start()
 	}
@@ -85,7 +80,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Contacts:      r.Contacts,
 		Alerts:        r.AlertService, // requires_review findings -> operator notifications
 		NMIClients:    r.NMIClients,
-		PullEndpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)},
 		Verifier:      r.Verifier,
 		RecoverUsagePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
 			mid, err := merchant.Require(ctx)
@@ -123,26 +117,17 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// Stored cards a vault must be asked about: one refresh per card, queued on
 	// an expired or reissued decline and ahead of each renewal.
-	updaters, _ := r.CollectionResolver.(paymentmethods.AccountUpdaters)
+	var updaters paymentmethods.AccountUpdaters
+	if r.CollectionResolver != nil {
+		updaters = r.CollectionResolver
+	}
 	if err := addWorker(workers, &riverjobs.StoredCardRefreshWorker{DB: r.DB, Clock: clock, Updaters: updaters, Intents: r.intentRunner(intentRegistry, clock), Lifecycle: r.SubscriptionLifecycleService}); err != nil {
 		return fmt.Errorf("add stored card refresh worker: %w", err)
-	}
-	storedCards := &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture()}
-	if err := addWorker(workers, storedCards); err != nil {
-		return fmt.Errorf("add stored card refresh pass worker: %w", err)
-	}
-	balances := &riverjobs.BalanceWatchWorker{DB: r.DB, Money: r.MoneyService}
-	if err := addWorker(workers, balances); err != nil {
-		return fmt.Errorf("add balance watch worker: %w", err)
 	}
 	// A balance's look, queued by the change that crossed one of its lines
 	// and for the instant its last look named.
 	if err := addWorker(workers, &riverjobs.BalanceLookWorker{DB: r.DB, Money: r.MoneyService}); err != nil {
 		return fmt.Errorf("add balance look worker: %w", err)
-	}
-	expiry := &riverjobs.OrderExpiryWorker{DB: r.DB, Orders: r.Orders, Clock: clock}
-	if err := addWorker(workers, expiry); err != nil {
-		return fmt.Errorf("add order expiry worker: %w", err)
 	}
 	// Flushes closed hours of the Redis admission-denial counters to PG.
 	// Redis may be nil (no-admission deployments); the worker no-ops then.
@@ -194,8 +179,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add subscription converge worker: %w", err)
 	}
-	// Each NMI PSP's own history, as monthly aggregates.
-	nmiHistory := &riverjobs.NMIHistoryWorker{DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver}
 	// Catalog objects a Stripe event announced, read by id.
 	if err := addWorker(workers, &riverjobs.ProviderObjectObserveWorker{Objects: r.ProviderObjects}); err != nil {
 		return fmt.Errorf("add provider object observe worker: %w", err)
@@ -211,14 +194,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add charge attribution worker: %w", err)
 	}
-	// Overdue NMI rebills are probed; provider-billed renewals unconfirmed past
-	// their grace are read by id.
-	rebills := &riverjobs.RebillWatchWorker{
-		DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService,
-	}
-	if err := addWorker(workers, rebills); err != nil {
-		return fmt.Errorf("add rebill watch worker: %w", err)
-	}
 	// Each Stripe PSP's webhook endpoint, queued when the PSP or the boot's
 	// configuration changes, at a superseded endpoint's retirement, and daily.
 	if err := addWorker(workers, &riverjobs.StripeWebhookReconcileWorker{
@@ -231,58 +206,52 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}
-	// Undeclared accounts alert their operator again while unresolved.
-	realerts := &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}
-	if err := addWorker(workers, realerts); err != nil {
-		return fmt.Errorf("add config re-alert worker: %w", err)
-	}
 	// A merchant purge's Vault cleanup, queued with the purge.
 	if err := addWorker(workers, &riverjobs.MerchantSecretCleanupWorker{Merchants: r.Merchants}); err != nil {
 		return fmt.Errorf("add merchant secret cleanup worker: %w", err)
 	}
 	// Usage orders: due accounts billed, due collections queued as
-	// operations.
+	// operations; a full page continues in its own job.
 	usage := &riverjobs.UsageOrderWorker{DB: r.DB, Money: r.MoneyService, Config: r.Config, Clock: clock}
 	if err := addWorker(workers, usage); err != nil {
 		return fmt.Errorf("add usage order worker: %w", err)
 	}
-	delinquency := &riverjobs.DelinquencyWorker{DB: r.DB, Clock: clock}
-	if err := addWorker(workers, delinquency); err != nil {
-		return fmt.Errorf("add delinquency worker: %w", err)
-	}
 	// Every due scan, in turn, at the top of each hour. Renewals, retries,
 	// delinquency and lapses are critical: a day overdue fails job progress.
+	dunning := &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, Lifecycle: r.SubscriptionLifecycleService}
+	balances := &riverjobs.BalanceWatchWorker{DB: r.DB, Money: r.MoneyService}
+	delinquency := &riverjobs.DelinquencyWorker{DB: r.DB, Clock: clock}
+	expiry := &riverjobs.OrderExpiryWorker{DB: r.DB, Orders: r.Orders, Clock: clock}
+	// Overdue NMI rebills are probed.
+	rebills := &riverjobs.RebillWatchWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService}
+	// Each NMI PSP's own history, as monthly aggregates.
+	nmiHistory := &riverjobs.NMIHistoryWorker{DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver}
+	// Undeclared accounts alert their operator again while unresolved.
+	realerts := &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}
+	storedCards := &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture()}
 	scans := []riverjobs.Scan{
-		{Kind: riverjobs.KindDunning, Run: scanOf[riverjobs.DunningArgs](dunning), DueBy: dunning.DueBy},
-		{Kind: riverjobs.KindBalanceWatch, Run: scanOf[riverjobs.BalanceWatchArgs](balances), DueBy: balances.DueBy},
-		{Kind: riverjobs.KindDelinquency, Run: scanOf[riverjobs.DelinquencyArgs](delinquency), DueBy: delinquency.DueBy},
-		{Kind: riverjobs.KindOrderExpiry, Run: scanOf[riverjobs.OrderExpiryArgs](expiry)},
+		{Kind: riverjobs.KindDunning, Run: dunning.Pass, DueBy: dunning.DueBy},
+		{Kind: riverjobs.KindBalanceWatch, Run: balances.Pass, DueBy: balances.DueBy},
+		{Kind: riverjobs.KindDelinquency, Run: delinquency.Pass, DueBy: delinquency.DueBy},
+		{Kind: riverjobs.KindOrderExpiry, Run: expiry.Pass, DueBy: expiry.DueBy},
 	}
 	if r.declares(riverjobs.WithUsageBilling) {
-		scans = append(scans, riverjobs.Scan{Kind: money.KindUsageOrders, Run: scanOf[money.UsageOrderArgs](usage), DueBy: usage.DueBy})
+		scans = append(scans, riverjobs.Scan{Kind: money.KindUsageOrders, Run: usage.Pass, DueBy: usage.DueBy})
 	}
 	scans = append(scans,
-		riverjobs.Scan{Kind: riverjobs.KindRebillWatch, Run: scanOf[riverjobs.RebillWatchArgs](rebills)},
+		riverjobs.Scan{Kind: riverjobs.KindRebillWatch, Run: rebills.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindNMIHistory, Run: nmiHistory.Pass},
-		riverjobs.Scan{Kind: riverjobs.KindConfigRealerts, Run: scanOf[riverjobs.ConfigRealertArgs](realerts)},
-		riverjobs.Scan{Kind: riverjobs.KindStoredCardRefreshDue, Run: scanOf[riverjobs.StoredCardRefreshDueArgs](storedCards)},
+		riverjobs.Scan{Kind: riverjobs.KindConfigRealerts, Run: realerts.Pass},
+		riverjobs.Scan{Kind: riverjobs.KindStoredCardRefreshDue, Run: storedCards.Pass},
+		riverjobs.Scan{Kind: riverjobs.KindOperationWakes, Run: (&riverjobs.OperationWakes{DB: r.DB, Clock: clock}).Pass},
 	)
 	for i := range scans {
 		scans[i].Timeout = riverjobs.ScanBudget(scans[i].Kind)
 	}
-	if err := addWorker(workers, &riverjobs.BillingPassWorker{Scans: scans, Clock: clock}); err != nil {
+	if err := addWorker(workers, &riverjobs.BillingPassWorker{DB: r.DB, Scans: scans, Clock: clock}); err != nil {
 		return fmt.Errorf("add billing pass worker: %w", err)
 	}
 	return nil
-}
-
-// scanOf runs w as a scan of the billing pass: the pass's own job, with T's
-// zero args.
-func scanOf[T river.JobArgs](w river.Worker[T]) func(context.Context) error {
-	return func(ctx context.Context) error {
-		var args T
-		return w.Work(ctx, &river.Job[T]{JobRow: &rivertype.JobRow{Kind: args.Kind()}, Args: args})
-	}
 }
 
 // addWorker registers an OpenRails worker. Its timeout is its kind's budget,
@@ -338,8 +307,8 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewNMICardVaultHandler(r.DB, r.RailPaymentMethodService, intents.NewStore(r.DB), r.Posture(), clock),
 	)
 	// An account-updater request is billed and may mint a vault token.
-	if updaters, ok := r.CollectionResolver.(paymentmethods.AccountUpdaters); ok {
-		registry.Register(&riverjobs.AccountUpdaterHandler{DB: r.DB, Clock: clock, Updaters: updaters, Lifecycle: r.SubscriptionLifecycleService, Policy: intents.DefaultBackoff})
+	if r.CollectionResolver != nil {
+		registry.Register(&riverjobs.AccountUpdaterHandler{DB: r.DB, Clock: clock, Updaters: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService, Policy: intents.DefaultBackoff})
 	}
 	// Solana recurring pull: signature write-ahead before the send, chain-read
 	// verification after it. The verify leg reads the chain with the intent's
@@ -353,6 +322,8 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		solanaPull.Chain = r.SolanaRPCResolver.ChainReader()
 	}
 	registry.Register(pull.NewHandler(solanaPull))
+	// A Solana plan change is found on chain by the reference it was prepared with.
+	registry.Register(r.SolanaPlanChanges(clock))
 	return registry
 }
 
@@ -375,6 +346,15 @@ func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock
 		Config:      r.Posture(),
 	}
 	return runner
+}
+
+// StripeEngines is the collection resolver as the Stripe engine reads it; nil
+// when the runtime has none.
+func (r *Runtime) StripeEngines() intents.StripeEngineServiceResolver {
+	if r.CollectionResolver == nil {
+		return nil
+	}
+	return r.CollectionResolver
 }
 
 // Posture reads merchants' provider write postures.

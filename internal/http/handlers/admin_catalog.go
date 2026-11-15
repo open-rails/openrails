@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
@@ -324,34 +323,4 @@ func priceIDParam(r *httprequest.Request) (billing.PriceID, bool) {
 // invalidParam refuses one malformed request parameter.
 func invalidParam(param, message string) *api.APIError {
 	return api.Coded(billing.CodeInvalidParam, message).WithParam(param)
-}
-
-// PaginatedResponse is the offset page some routes outside the catalog still
-// answer.
-type PaginatedResponse[T any] struct {
-	Items  []T   `json:"items"`
-	Total  int64 `json:"total"`
-	Limit  int   `json:"limit"`
-	Offset int   `json:"offset"`
-}
-
-func parseIntDefault(s string, def int) int {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return def
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 0 {
-		return def
-	}
-	return n
-}
-
-func parseBool(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "true", "1", "yes", "y", "on":
-		return true
-	default:
-		return false
-	}
 }

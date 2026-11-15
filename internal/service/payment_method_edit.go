@@ -14,8 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -320,11 +320,10 @@ func (s *Service) liveMethod(ctx context.Context, merchantID, customerID, method
 }
 
 func (s *Service) stripeAccount(ctx context.Context, method gen.BillingPaymentMethod) (*subscriptions.StripeService, error) {
-	resolver, ok := s.rt.CollectionResolver.(intents.StripeEngineServiceResolver)
-	if !ok {
+	if s.rt.CollectionResolver == nil {
 		return nil, paymentmethods.ErrPaymentMethodProviderUnavailable
 	}
-	service, ok, err := resolver.ResolveStripeEngineService(ctx, method.MerchantID, method.PspID)
+	service, ok, err := s.rt.CollectionResolver.ResolveStripeEngineService(ctx, method.MerchantID, method.PspID)
 	if err != nil || !ok {
 		return nil, fmt.Errorf("%w: %v", paymentmethods.ErrPaymentMethodProviderUnavailable, err)
 	}
@@ -333,7 +332,7 @@ func (s *Service) stripeAccount(ctx context.Context, method gen.BillingPaymentMe
 
 // reusePSP is the account a card's reuse consent belongs to: the PSP holding
 // it, or the one PSP routing reaches a custodian's card through.
-func reusePSP(ctx context.Context, custody charge.Custody, method gen.BillingPaymentMethod) (uuid.UUID, error) {
+func reusePSP(ctx context.Context, custody *merchants.Service, method gen.BillingPaymentMethod) (uuid.UUID, error) {
 	if method.PspID != nil {
 		return *method.PspID, nil
 	}

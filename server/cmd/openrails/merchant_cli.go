@@ -33,7 +33,7 @@ func cliMerchantManifest(ctx context.Context, path string) (*merchantbootstrap.B
 	if err != nil {
 		return nil, fmt.Errorf("merchant manifest %s: %w", path, err)
 	}
-	return manifest.Declarations(), nil
+	return bootstrap.Declarations(manifest), nil
 }
 
 func resolveCLIMerchant(ctx context.Context, database *db.DB, slug string) (billing.MerchantID, error) {

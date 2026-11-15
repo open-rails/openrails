@@ -73,14 +73,14 @@ const stripeReplayWindow = 23 * time.Hour
 // OrderCollectionHandler executes and reconciles order_collection intents.
 type OrderCollectionHandler struct {
 	DB       *db.DB
-	Charger  Charger
-	Verifier CollectionVerifier
+	Charger  *ScopedCharger
+	Verifier *MerchantCollectionAdapterBuilder
 	Config   intents.ModeView
 	Clock    clockwork.Clock
 	Policy   intents.BackoffPolicy
 }
 
-func NewOrderCollectionHandler(database *db.DB, charger Charger, verifier CollectionVerifier, cfg intents.ModeView, clock clockwork.Clock) *OrderCollectionHandler {
+func NewOrderCollectionHandler(database *db.DB, charger *ScopedCharger, verifier *MerchantCollectionAdapterBuilder, cfg intents.ModeView, clock clockwork.Clock) *OrderCollectionHandler {
 	return &OrderCollectionHandler{DB: database, Charger: charger, Verifier: verifier, Config: cfg, Clock: timeutil.FirstClock(clock), Policy: intents.DefaultBackoff}
 }
 

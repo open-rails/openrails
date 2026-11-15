@@ -35,8 +35,9 @@ import (
 // has one live CCBill page: paying it again answers that page until it
 // lapses. CCBill's NewSaleSuccess for the attempt completes the order and
 // opens the provider-billed subscription in one transaction; NewSaleFailure
-// declines it. A sale the order no longer takes is never granted: it is left
-// for the merchant to refund and cancel at CCBill.
+// declines it. A sale the order no longer takes is never granted: it is
+// recorded and held for refund when it paid an order, else refused, and the
+// merchant refunds and cancels it at CCBill.
 
 // ccbillFlow marks an order attempt paid on a CCBill FlexForm.
 const ccbillFlow = "ccbill_flexform"
@@ -116,8 +117,8 @@ func (s *OrderAttemptService) payOrderCCBill(ctx context.Context, in OrderPayInp
 	if in.User == nil || len(CCBillIdentityMissing(in.User)) > 0 {
 		return ErrCCBillIdentityRequired
 	}
-	purchase, ok := s.purchaseService.(*PurchaseService)
-	if !ok {
+	purchase := s.purchaseService
+	if purchase == nil {
 		return errors.New("CCBill order payment is unavailable")
 	}
 	client, err := purchase.resolveCCBillClient(db.WithPSPID(ctx, option.PSPID))
@@ -243,11 +244,13 @@ func (s *OrderAttemptService) confirmOrderCCBill(ctx context.Context, attempt ge
 
 // SettleOrderCCBill settles the CCBill sale of an order attempt: in one
 // transaction the order completes and the subscription CCBill bills opens
-// with its access. A redelivered sale changes nothing. A sale the order no
-// longer takes (paid otherwise, the membership held, or contradicting the
-// attempt) answers CCBillSaleUnhonored and writes nothing; one for an order
-// that closed while what it buys is held is recorded and held for refund.
-// An unresolved other payment on the order answers a retryable error.
+// with its access. A redelivered sale changes nothing. A sale for an order
+// another payment completed, or that closed while what it buys is held, is
+// recorded against the order and held for refund, with a repair to cancel
+// its subscription at CCBill. One the order otherwise no longer takes (the
+// membership held, or contradicting the attempt) answers
+// CCBillSaleUnhonored and writes nothing. An unresolved other payment on the
+// order answers a retryable error.
 func (s *OrderAttemptService) SettleOrderCCBill(ctx context.Context, attemptID uuid.UUID, sale payments.CCBillSale) error {
 	if s.orders == nil {
 		return errors.New("order settlement is unavailable")
@@ -308,12 +311,21 @@ func (s *OrderAttemptService) SettleOrderCCBill(ctx context.Context, attemptID u
 			return err
 		}
 		ours := order.AttemptID != nil && *order.AttemptID == attemptID
+		charge := orders.Charge{PaymentID: paymentID, AttemptID: attemptID, PSPID: attempt.PspID,
+			Rail: string(models.RailCCBill), TransactionID: sale.TransactionID, Amount: order.Total, Currency: order.Currency, PurchasedAt: start, Card: sale.Card,
+			Metadata: map[string]any{"ccbill_subscription_id": sale.SubscriptionID, "ccbill_flex_id": sale.FlexID, "order_attempt_id": billing.OrderAttemptID(attemptID).String()}}
 		switch {
 		case order.Status == string(billing.OrderComplete):
 			if ours && current.TransactionID != nil && *current.TransactionID == sale.TransactionID {
 				return nil
 			}
-			return unhonored("order_already_paid", "order %s is already paid", order.ID)
+			// Another payment completed the order (a card or another page
+			// after this one lapsed, or an earlier sale on this page).
+			recorded, err := s.orders.PaidAgain(ctx, d, order.ID, charge)
+			if err != nil || !recorded {
+				return err
+			}
+			return ccbillCancelRepair(ctx, d, now, "ccbill_sale_order_paid", attempt, order.ID, paymentID, sale)
 		case !ours && (order.Status == string(billing.OrderProcessing) || order.PaymentStatus == string(billing.OrderPaymentRequiresAction)):
 			return errCCBillSaleWaits
 		case !ours && order.Status == string(billing.OrderOpen) && !orders.Expired(order, now):
@@ -323,29 +335,33 @@ func (s *OrderAttemptService) SettleOrderCCBill(ctx context.Context, attemptID u
 				return errors.Join(err, orders.ErrNotPayable)
 			}
 		}
-		outcome, err := s.orders.Paid(ctx, d, order.ID, orders.Charge{PaymentID: paymentID, AttemptID: attemptID, PSPID: attempt.PspID,
-			Rail: string(models.RailCCBill), TransactionID: sale.TransactionID, Amount: order.Total, Currency: order.Currency, PurchasedAt: start, Card: sale.Card,
-			Metadata: map[string]any{"ccbill_subscription_id": sale.SubscriptionID, "ccbill_flex_id": sale.FlexID, "order_attempt_id": billing.OrderAttemptID(attemptID).String()},
-			Enrolled: &orders.Enrolled{RailSubscriptionID: sale.SubscriptionID, PeriodStart: start, PeriodEnd: end, PriceID: billedPrice}})
+		charge.Enrolled = &orders.Enrolled{RailSubscriptionID: sale.SubscriptionID, PeriodStart: start, PeriodEnd: end, PriceID: billedPrice}
+		outcome, err := s.orders.Paid(ctx, d, order.ID, charge)
 		if subscriptions.IsMembershipSlotTaken(err) {
 			return unhonored("membership_held", "the customer already holds the membership order %s buys", order.ID)
 		}
 		if err != nil || outcome != orders.OutcomeRefunded {
 			return err
 		}
-		// The order closed and what it buys is held meanwhile: the payment
-		// is kept for refund, and CCBill's subscription must be canceled.
-		return alerting.RecordLedgerRepair(ctx, d, now, alerting.LedgerRepair{
-			Provider: string(models.RailCCBill), Operation: "ccbill_sale_after_close", TransactionID: sale.TransactionID,
-			CustomerID: attempt.CustomerID.String(), IdempotencyKey: "ccbill_sale_after_close:" + sale.TransactionID,
-			OriginalPaymentID: &paymentID, Err: errors.New("cancel the CCBill subscription and refund its sale"),
-			Metadata: map[string]any{"rail_subscription_id": sale.SubscriptionID, "order_id": billing.OrderID(order.ID).String(), "order_attempt_id": billing.OrderAttemptID(attemptID).String()},
-		})
+		// The order closed and what it buys is held meanwhile.
+		return ccbillCancelRepair(ctx, d, now, "ccbill_sale_after_close", attempt, order.ID, paymentID, sale)
 	})
 	if db.IsUniqueViolation(err) {
 		return unhonored("duplicate_sale", "CCBill transaction %s already settles another attempt", sale.TransactionID)
 	}
 	return err
+}
+
+// ccbillCancelRepair raises the repair a sale held for refund needs: CCBill
+// bills its subscription until the merchant cancels it there. OpenRails
+// neither refunds nor cancels at CCBill.
+func ccbillCancelRepair(ctx context.Context, d *db.DB, now time.Time, operation string, attempt gen.BillingOrderAttempt, orderID, paymentID uuid.UUID, sale payments.CCBillSale) error {
+	return alerting.RecordLedgerRepair(ctx, d, now, alerting.LedgerRepair{
+		Provider: string(models.RailCCBill), Operation: operation, TransactionID: sale.TransactionID,
+		CustomerID: attempt.CustomerID.String(), IdempotencyKey: operation + ":" + sale.TransactionID,
+		OriginalPaymentID: &paymentID, Err: errors.New("cancel the CCBill subscription and refund its sale"),
+		Metadata: map[string]any{"rail_subscription_id": sale.SubscriptionID, "order_id": billing.OrderID(orderID).String(), "order_attempt_id": billing.OrderAttemptID(attempt.ID).String()},
+	})
 }
 
 // ccbillSaleContradicts is why a sale is not the one its attempt offered:

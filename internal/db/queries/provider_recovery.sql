@@ -31,18 +31,6 @@ SELECT COALESCE(min(at), sqlc.arg(fallback)::timestamptz)::timestamptz AS oldest
       AND EXISTS (SELECT 1 FROM billing.psps p WHERE p.merchant_id=i.merchant_id AND p.id=sqlc.arg(psp_id)::uuid AND p.rail IN ('nmi','stripe'))
 ) facts;
 
--- name: GetPSPCompletedRefreshWatermark :one
-SELECT watermark_at FROM billing.psp_refresh_watermarks
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
-  AND event_domain='completed_events';
-
--- name: UpsertPSPCompletedRefreshWatermark :execrows
-INSERT INTO billing.psp_refresh_watermarks(merchant_id,psp_id,event_domain,watermark_at)
-VALUES(sqlc.arg(merchant_id)::uuid,sqlc.arg(psp_id)::uuid,'completed_events',sqlc.arg(watermark_at)::timestamptz)
-ON CONFLICT(merchant_id,psp_id,event_domain) DO UPDATE
-SET watermark_at=EXCLUDED.watermark_at,updated_at=now()
-WHERE billing.psp_refresh_watermarks.watermark_at<EXCLUDED.watermark_at;
-
 -- name: PSPHasUnresolvedFinancialFindings :one
 -- Ignore silences an operator notification; it does not settle a receipt. A
 -- provider record resolved as foreign is settled: Foreign proved at resolution
@@ -56,4 +44,3 @@ SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings f
      'pull.subscription.facts')
    AND f.resolution IS DISTINCT FROM 'foreign'
    AND NOT COALESCE(f.evidence @> '{"quiet_foreign":true}', false))::boolean;
-

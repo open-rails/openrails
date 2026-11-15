@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -139,14 +140,8 @@ func settingText(settings map[string]any, key string) string {
 	}
 }
 
-// ActivePSPSecretName resolves the active PSP for a merchant rail and returns
-// that account's credential name for key.
-func (s *Service) ActivePSPSecretName(ctx context.Context, id billing.MerchantID, rail, key string) (string, bool, error) {
-	ref, ok, err := s.ActivePSPSecretRef(ctx, id, rail, key)
-	return ref.Name, ok, err
-}
-
-// ActivePSPSecretRef is ActivePSPSecretName as a SecretRef.
+// ActivePSPSecretRef resolves the active PSP for a merchant rail and returns
+// that account's credential reference for key.
 func (s *Service) ActivePSPSecretRef(ctx context.Context, id billing.MerchantID, rail, key string) (SecretRef, bool, error) {
 	scope, ok, err := s.ActivePSPScope(ctx, id, rail)
 	if err != nil || !ok {
@@ -363,52 +358,28 @@ type NMIWebhookSecrets struct {
 	Current, Previous string
 }
 
-// LoadNMIWebhookSigningSecretForAccount loads the webhook secrets of an NMI
-// account (#641). ok=false when the merchant has no such account: reject.
-func (s *Service) LoadNMIWebhookSigningSecretForAccount(ctx context.Context, id billing.MerchantID, accountID string) (NMIWebhookSecrets, bool, error) {
-	scope, ok, err := s.PSPScopeByAccountID(ctx, id, string(models.RailNMI), accountID)
-	if err != nil || !ok {
-		return NMIWebhookSecrets{}, ok, err
+// LoadNMIWebhookSecrets loads an NMI PSP's webhook secrets; none when no
+// document declares it.
+func (s *Service) LoadNMIWebhookSecrets(ctx context.Context, id billing.MerchantID, pspID uuid.UUID) (NMIWebhookSecrets, error) {
+	scope, ok, err := s.PSPScopeByID(ctx, id, pspID)
+	if err != nil || !ok || scope.Rail != string(models.RailNMI) {
+		return NMIWebhookSecrets{}, err
 	}
 	out := NMIWebhookSecrets{Current: scope.Secret("webhook_signing_secret")}
 	if s.overlapOpen(scope) {
 		out.Previous = scope.Secret("webhook_signing_secret_previous")
 	}
-	return out, true, nil
+	return out, nil
 }
 
-// LoadStripeCredentialsForAccount loads the credentials of a Stripe account
-// (#641). ok=false when the merchant has no such account.
-func (s *Service) LoadStripeCredentialsForAccount(ctx context.Context, id billing.MerchantID, accountID string) (StripeCredentials, bool, error) {
-	scope, ok, err := s.PSPScopeByAccountID(ctx, id, "stripe", accountID)
-	if err != nil || !ok {
-		return StripeCredentials{}, ok, err
+// LoadStripeCredentialsForPSP loads a Stripe PSP's credentials; none when no
+// document declares it.
+func (s *Service) LoadStripeCredentialsForPSP(ctx context.Context, id billing.MerchantID, pspID uuid.UUID) (StripeCredentials, error) {
+	scope, ok, err := s.PSPScopeByID(ctx, id, pspID)
+	if err != nil || !ok || scope.Rail != string(models.RailStripe) {
+		return StripeCredentials{}, err
 	}
-	return s.stripeCredentials(scope), true, nil
-}
-
-// ResolvePSPID returns the id of an account by account_id (#641), to stamp
-// records from a per-account webhook. ok=false when none matches.
-func (s *Service) ResolvePSPID(ctx context.Context, id billing.MerchantID, rail, accountID string) (uuid.UUID, bool, error) {
-	if s == nil || s.pool == nil || id.IsZero() || strings.TrimSpace(accountID) == "" {
-		return uuid.Nil, false, nil
-	}
-	rail = normalizeProviderSecretType(rail)
-	var pid uuid.UUID
-	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		var err error
-		pid, err = s.database.Gen(ctx).GetPSPIDByRailAccount(ctx, gen.GetPSPIDByRailAccountParams{
-			MerchantID: id.UUID(), Rail: rail, AccountID: strings.TrimSpace(accountID),
-		})
-		return err
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, false, nil
-	}
-	if err != nil {
-		return uuid.Nil, false, err
-	}
-	return pid, true, nil
+	return s.stripeCredentials(scope), nil
 }
 
 // ResolveActivePSPIDForRail returns the PSP whose credentials the account-less
@@ -428,9 +399,11 @@ func (s *Service) ResolveActivePSPIDForRail(ctx context.Context, id billing.Merc
 type PSPIdentity struct {
 	ID          uuid.UUID
 	MerchantID  billing.MerchantID
+	Key         string
 	Rail        string
 	Environment string
 	AccountID   string
+	Superseded  bool
 }
 
 // ErrPSPOwnedByAnotherMerchant signals that a (rail, environment,
@@ -469,13 +442,19 @@ func PspID(rail, environment, accountID string) uuid.UUID {
 // already belongs to a merchant other than merchantID, and nil when the account
 // is unclaimed or already this merchant's.
 //
+// A webhook names an account in neither money class, so a new claim is also
+// refused while another merchant's current PSP holds the account in the other
+// class. A superseded or archived one does not hold it: rows are never
+// deleted, and a squatted or retired account must not block its owner for
+// good. A merchant's own live and non-live PSPs may share an account.
+//
 // #824: the ownership question is global by definition, so it goes through the
 // cross-merchant directory lookup (resolvePSPOwner). Reading psps directly on
 // q could only ever see the caller's OWN merchant, which made this assertion
 // pass unconditionally — the only thing still catching a hijack was UpsertPSP's
 // `ON CONFLICT … WHERE psps.merchant_id = EXCLUDED.merchant_id`, and it reports
 // the conflict as an opaque no-rows.
-func AssertPSPUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, rail, environment, accountID string) error {
+func (s *Service) AssertPSPUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, rail, environment, accountID string) error {
 	accountID = strings.TrimSpace(accountID)
 	if q == nil || accountID == "" {
 		return nil
@@ -485,14 +464,64 @@ func AssertPSPUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID,
 	if environment == "" {
 		return fmt.Errorf("merchants: PSP environment must be one of %s's (%s)", rail, strings.Join(rails.Environments(models.Rail(rail)), ", "))
 	}
-	owner, found, err := resolvePSPOwner(ctx, q, rail, config.LiveEnvironment(rail, environment), accountID)
-	if err != nil || !found {
+	live := config.LiveEnvironment(rail, environment)
+	owner, found, err := resolvePSPOwner(ctx, q, rail, live, accountID)
+	if err != nil {
 		return err
 	}
-	if uuid.UUID(owner.MerchantID) != merchantID {
-		return fmt.Errorf("PSP %s:%s (%s): %w", owner.Rail, owner.AccountID, owner.Environment, ErrPSPOwnedByAnotherMerchant)
+	if found {
+		if uuid.UUID(owner.MerchantID) != merchantID {
+			return fmt.Errorf("PSP %s:%s (%s): %w", owner.Rail, owner.AccountID, owner.Environment, ErrPSPOwnedByAnotherMerchant)
+		}
+		return nil
+	}
+	other, found, err := resolvePSPOwner(ctx, q, rail, !live, accountID)
+	if err != nil || !found || uuid.UUID(other.MerchantID) == merchantID {
+		return err
+	}
+	current, err := s.pspCurrent(ctx, other)
+	if err != nil {
+		return err
+	}
+	if current {
+		return fmt.Errorf("PSP %s:%s (%s): %w", other.Rail, other.AccountID, other.Environment, ErrPSPOwnedByAnotherMerchant)
 	}
 	return nil
+}
+
+// pspCurrent reports whether another merchant's PSP takes work: not
+// superseded, and named by an unarchived document under its key.
+func (s *Service) pspCurrent(ctx context.Context, p PSPIdentity) (bool, error) {
+	if p.Superseded {
+		return false, nil
+	}
+	set, known, err := s.foreignDocuments(ctx, p.MerchantID)
+	if err != nil || !known {
+		return !known, err
+	}
+	doc, ok := set.PSPs[strings.ToLower(p.Key)]
+	if !ok || doc.Value.Archived {
+		return false, nil
+	}
+	return strings.EqualFold(doc.Value.Rail, p.Rail) && strings.TrimSpace(doc.Value.AccountID) == p.AccountID &&
+		config.LiveEnvironment(p.Rail, doc.Value.Environment) == config.LiveEnvironment(p.Rail, p.Environment), nil
+}
+
+// foreignDocuments reads another merchant's documents from the
+// configuration's source, not its cache: the caller may be reloading a
+// merchant itself. known is false while a file has not declared the merchant
+// (boot puts merchants one at a time), and its identities then count as
+// current.
+func (s *Service) foreignDocuments(ctx context.Context, id billing.MerchantID) (merchantdocs.Set, bool, error) {
+	if s == nil || s.config == nil {
+		return merchantdocs.Set{}, false, nil
+	}
+	source := s.config.Source()
+	if files, ok := source.(*merchantdocs.FileSource); ok && !files.Declared(id) {
+		return merchantdocs.Set{}, false, nil
+	}
+	set, err := source.Load(ctx, id)
+	return set, err == nil, err
 }
 
 // ResolvePSPByIdentity resolves an account globally by
@@ -514,36 +543,27 @@ func (s *Service) ResolvePSPByIdentity(ctx context.Context, rail, environment, a
 	return resolvePSPOwner(ctx, gen.New(s.pool), rail, config.LiveEnvironment(rail, environment), strings.TrimSpace(accountID))
 }
 
-// ResolvePSPByAccount resolves an account globally by rail and account_id in
-// either money class: an inbound webhook names no environment. The same
-// account_id live and non-live is ambiguous and refused.
-func (s *Service) ResolvePSPByAccount(ctx context.Context, rail, accountID string) (PSPIdentity, bool, error) {
+// ResolvePSPsByAccount lists the PSPs an account_id names on rail, live
+// first: an inbound webhook names no environment, so a live and a non-live
+// PSP may share it. The caller tells them apart by whose secret verifies the
+// delivery.
+func (s *Service) ResolvePSPsByAccount(ctx context.Context, rail, accountID string) ([]PSPIdentity, error) {
 	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
-		return PSPIdentity{}, false, nil
+		return nil, nil
 	}
 	rail = normalizeProviderSecretType(rail)
 	var found []PSPIdentity
 	for _, live := range []bool{true, false} {
 		owner, ok, err := resolvePSPOwner(ctx, gen.New(s.pool), rail, live, strings.TrimSpace(accountID))
 		if err != nil {
-			return PSPIdentity{}, false, err
+			return nil, err
 		}
 		if ok {
 			found = append(found, owner)
 		}
 	}
-	switch len(found) {
-	case 0:
-		return PSPIdentity{}, false, nil
-	case 1:
-		return found[0], true, nil
-	}
-	return PSPIdentity{}, false, fmt.Errorf("merchants: %s account %s is both a live and a non-live PSP; its webhooks cannot tell them apart", rail, accountID)
+	return found, nil
 }
-
-// or#880: the custody sibling of ResolvePSPByIdentity moved to
-// custodians.go (ResolveCustodianByIdentity). It resolves the CUSTODIAN, not a
-// PSP — one custodian may back several, so "the" PSP was never well defined.
 
 // resolvePSPOwner is the one place the cross-merchant PSP directory lookup is
 // made. q may be bound to anything (pool, merchant-pinned conn, tx): the
@@ -563,9 +583,11 @@ func resolvePSPOwner(ctx context.Context, q *gen.Queries, rail string, live bool
 	return PSPIdentity{
 		ID:          row.ID,
 		MerchantID:  billing.MerchantID(row.MerchantID),
+		Key:         row.Key,
 		Rail:        row.Rail,
 		Environment: row.Environment,
 		AccountID:   row.AccountID,
+		Superseded:  row.SupersededAt != nil,
 	}, true, nil
 }
 

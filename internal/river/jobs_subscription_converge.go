@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
@@ -96,9 +97,7 @@ type SubscriptionConvergeWorker struct {
 	Clock  clockwork.Clock
 
 	// NMIResolver arms the args merchant's NMI client from the armed rail state.
-	NMIResolver money.NMIClientResolver
-	// StripeProber overrides the config-built prober (tests). Nil = build from Rails.
-	StripeProber subscriptions.StripeLivenessProber
+	NMIResolver railresolve.NMIClientResolver
 
 	PriceService                 *catalog.PriceService
 	ProductService               *catalog.ProductService
@@ -107,7 +106,7 @@ type SubscriptionConvergeWorker struct {
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
 	RailCustomerService          *payments.RailCustomerService
-	OrderAttemptService          webhooks.OrderAttemptStore
+	OrderAttemptService          *payment.OrderAttemptService
 	// Objects records the provider prices parked subscriptions bill.
 	Objects func() *providerobjects.Observer
 	// Importer adopts live NMI subscriptions OpenRails does not hold.
@@ -165,15 +164,11 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 	}
 	switch {
 	case args.Rail == string(models.RailStripe):
-		prober := w.StripeProber
-		if prober == nil {
-			p, err := subscriptions.NewStripeLivenessProber(ctx, w.Rails)
-			if err != nil {
-				return uuid.Nil, fmt.Errorf("%s (stripe): %w", subscriptionConvergeMissingClient, err)
-			}
-			p.HTTPClient = w.StripeClients.ReadOnlyClient(0)
-			prober = p
+		prober, err := subscriptions.NewStripeLivenessProber(ctx, w.Rails)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("%s (stripe): %w", subscriptionConvergeMissingClient, err)
 		}
+		prober.HTTPClient = w.StripeClients.ReadOnlyClient(0)
 		svc := &webhooks.StripeConvergeService{
 			DB:                           w.DB,
 			Clock:                        w.Clock,

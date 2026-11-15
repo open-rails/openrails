@@ -152,14 +152,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 	if cycle == nil || *cycle <= 0 || int64(*cycle) > math.MaxInt64/int64(time.Hour) {
 		return terms, errors.New("renewal price has no valid recurring cadence")
 	}
-	// The renewal's price decides whether it has seats: a price newly per seat
-	// starts at its minimum, one without seats drops them.
-	switch {
-	case price.Quantity == nil || !SeatsChangeable(sub):
-		terms.Quantity = nil
-	case terms.Quantity == nil:
-		terms.Quantity = CloneQuantity(&price.Quantity.Min)
-	}
+	terms.Quantity = renewalQuantity(sub, price, terms.Quantity)
 	amount, err := SeatAmount(price.Amount, terms.Quantity)
 	if err != nil {
 		return terms, err
@@ -185,6 +178,20 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		terms.CreditGrant = &models.CreditGrantSnapshot{Amount: amount, Currency: policy.Currency, ExpiresAfterDays: days}
 	}
 	return terms, terms.Validate()
+}
+
+// renewalQuantity is the seats a renewal at price bills sub, which holds
+// held: the price decides whether it has seats. A price newly per seat starts
+// at its minimum; one without seats, or a subscription whose seats cannot
+// change, drops them.
+func renewalQuantity(sub *models.Subscription, price *models.Price, held *int) *int {
+	switch {
+	case price.Quantity == nil || !SeatsChangeable(sub):
+		return nil
+	case held == nil:
+		return CloneQuantity(&price.Quantity.Min)
+	}
+	return held
 }
 
 // applyRenewalTerms moves sub to the accepted terms and answers the scheduled

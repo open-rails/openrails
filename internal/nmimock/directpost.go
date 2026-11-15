@@ -122,6 +122,7 @@ func (m *Mock) sale(form url.Values) string {
 	m.remember(*charged, form.Get("amount"))
 	fields := []string{"response", "1", "responsetext", "SUCCESS", "authcode", "123456", "transactionid", s.TransactionID, "avsresponse", charged.AVS, "cvvresponse", charged.CVV,
 		"orderid", order, "type", "sale", "response_code", "100", "customer_vault_id", v.ID}
+	fields = append(fields, m.partial(s, *charged, form)...)
 	if form.Get("recurring") == "add_subscription" {
 		id, bad := m.addSubscription(form)
 		if bad != "" {
@@ -174,6 +175,7 @@ func (m *Mock) tokenSale(form url.Values) string {
 		s.Vault, s.BillingID = v.ID, v.BillingID
 		fields = append(fields, "customer_vault_id", v.ID)
 	}
+	fields = append(fields, m.partial(s, c, form)...)
 	if m.hide > 0 {
 		m.hide--
 		s.Hidden = true
@@ -181,6 +183,20 @@ func (m *Mock) tokenSale(form url.Values) string {
 	m.sales = append(m.sales, s)
 	m.remember(c, amount)
 	return answer(fields...)
+}
+
+// partial applies the issuer's partial approval of c to an approved sale:
+// the answer names the amount approved and the rest unpaid
+// (amount_authorized, partial_payment_balance); the reports keep the
+// requested Amount.
+func (m *Mock) partial(s *Sale, c Card, form url.Values) []string {
+	limit := m.partials[c.Last4]
+	if limit == "" || centsOf(limit) >= centsOf(s.Amount) {
+		return nil
+	}
+	s.PartialBalance = decimalCents(centsOf(s.Amount) - centsOf(limit))
+	s.HeldInFull = form.Get("partial_payments") == "payment_in_full"
+	return []string{"amount_authorized", limit, "partial_payment_id", m.txnID(), "partial_payment_balance", s.PartialBalance}
 }
 
 // addSubscription enrolls a vault on a stored plan; start_date (YYYYMMDD)

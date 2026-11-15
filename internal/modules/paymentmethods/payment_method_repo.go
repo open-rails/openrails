@@ -428,40 +428,6 @@ func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMe
 	return nil
 }
 
-// GetAllNMIBacked returns the merchant's NMI payment methods.
-func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.PaymentMethod, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByRails(ctx, gen.ListPaymentMethodsByRailsParams{MerchantID: mid.UUID(), Rails: []string{string(models.RailNMI)}})
-	if err != nil {
-		return nil, err
-	}
-	return models.PaymentMethodsFromGen(rows)
-}
-
-// GetNMIBackedByUserID returns a customer's NMI payment methods.
-func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return nil, queryScopeErr
-	}
-
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByCustomerRails(ctx, gen.ListPaymentMethodsByCustomerRailsParams{MerchantID: queryMerchant.UUID(),
-		CustomerID: tsid,
-		Rails:      []string{string(models.RailNMI)},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return models.PaymentMethodsFromGen(rows)
-}
-
 func (r *PaymentMethodRepo) ExistsForUser(ctx context.Context, id uuid.UUID, userID string) (bool, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
@@ -484,27 +450,6 @@ func (r *PaymentMethodRepo) ExistsForUser(ctx context.Context, id uuid.UUID, use
 
 func (r *PaymentMethodRepo) WithTx(txdb *db.DB) *PaymentMethodRepo {
 	return NewPaymentMethodRepo(txdb)
-}
-
-func (r *PaymentMethodRepo) GetByRail(ctx context.Context, rail models.Rail) ([]*models.PaymentMethod, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return nil, queryScopeErr
-	}
-
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByRail(ctx, gen.ListPaymentMethodsByRailParams{MerchantID: queryMerchant.UUID(), Rail: string(rail)})
-	if err != nil {
-		return nil, err
-	}
-	return models.PaymentMethodsFromGen(rows)
-}
-
-func (r *PaymentMethodRepo) RequireByID(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
-	pm, err := r.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return pm, nil
 }
 
 // LatestChargeByMethodIDs returns the most recent charge (time and raw status)

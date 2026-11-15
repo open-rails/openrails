@@ -38,6 +38,56 @@ func (q *Queries) DeletePaymentAttemptsBefore(ctx context.Context, arg DeletePay
 	return result.RowsAffected(), nil
 }
 
+const getCycleCardStanding = `-- name: GetCycleCardStanding :one
+SELECT count(*)::int AS declines,
+       count(*) FILTER (WHERE pa.kind = 'customer_retry')::int AS customer_declines,
+       coalesce((array_agg(pa.reason ORDER BY pa.attempted_at DESC, pa.id DESC))[1], '')::text AS reason,
+       coalesce((array_agg(pa.action ORDER BY pa.attempted_at DESC, pa.id DESC))[1], '')::text AS action,
+       coalesce((array_agg(pa.issuer_code ORDER BY pa.attempted_at DESC, pa.id DESC))[1], '')::text AS issuer_code
+FROM billing.rebill_cycles c
+JOIN billing.payment_attempts pa ON pa.merchant_id = c.merchant_id AND pa.cycle_id = c.id
+WHERE c.merchant_id = $1::uuid
+  AND c.subscription_id = $2::uuid
+  AND c.due_at = $3::timestamptz
+  AND pa.category <> 'approved'
+  AND pa.payment_method_id = $4::uuid
+`
+
+type GetCycleCardStandingParams struct {
+	MerchantID      uuid.UUID
+	SubscriptionID  uuid.UUID
+	DueAt           time.Time
+	PaymentMethodID uuid.UUID
+}
+
+type GetCycleCardStandingRow struct {
+	Declines         int32
+	CustomerDeclines int32
+	Reason           string
+	Action           string
+	IssuerCode       string
+}
+
+// The declines of the renewal due at due_at on one card: how many, how many
+// the customer made, and the latest one's reason, action and issuer code.
+func (q *Queries) GetCycleCardStanding(ctx context.Context, arg GetCycleCardStandingParams) (GetCycleCardStandingRow, error) {
+	row := q.db.QueryRow(ctx, getCycleCardStanding,
+		arg.MerchantID,
+		arg.SubscriptionID,
+		arg.DueAt,
+		arg.PaymentMethodID,
+	)
+	var i GetCycleCardStandingRow
+	err := row.Scan(
+		&i.Declines,
+		&i.CustomerDeclines,
+		&i.Reason,
+		&i.Action,
+		&i.IssuerCode,
+	)
+	return i, err
+}
+
 const getPaymentAttempt = `-- name: GetPaymentAttempt :one
 SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid AND id = $2::uuid
@@ -207,66 +257,6 @@ func (q *Queries) InsertPaymentAttempt(ctx context.Context, arg InsertPaymentAtt
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const latestOrderAttempt = `-- name: LatestOrderAttempt :one
-SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id FROM billing.payment_attempts
-WHERE merchant_id = $1::uuid AND order_id = $2::uuid
-ORDER BY attempted_at DESC, id DESC
-LIMIT 1
-`
-
-type LatestOrderAttemptParams struct {
-	MerchantID uuid.UUID
-	OrderID    uuid.UUID
-}
-
-// The newest answer to an order's payment: its standing.
-func (q *Queries) LatestOrderAttempt(ctx context.Context, arg LatestOrderAttemptParams) (BillingPaymentAttempt, error) {
-	row := q.db.QueryRow(ctx, latestOrderAttempt, arg.MerchantID, arg.OrderID)
-	var i BillingPaymentAttempt
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.PspID,
-		&i.Rail,
-		&i.Kind,
-		&i.Owner,
-		&i.CardEntry,
-		&i.Source,
-		&i.ObservedVia,
-		&i.Category,
-		&i.Reason,
-		&i.Action,
-		&i.ResponseCode,
-		&i.ResponseText,
-		&i.TransactionID,
-		&i.AvsResult,
-		&i.CvvResult,
-		&i.CardBrand,
-		&i.CardLast4,
-		&i.TokenType,
-		&i.Amount,
-		&i.Currency,
-		&i.AttemptedAt,
-		&i.PurchaseID,
-		&i.PurchaseTarget,
-		&i.SubscriptionID,
-		&i.PaymentMethodID,
-		&i.PaymentID,
-		&i.ProviderIntentID,
-		&i.Step,
-		&i.CreatedAt,
-		&i.CycleID,
-		&i.CardBin,
-		&i.IssuerCode,
-		&i.IssuerText,
-		&i.MandateID,
-		&i.SentInitialTransactionID,
-		&i.OrderID,
-	)
-	return i, err
 }
 
 const latestPaymentOrderAttempt = `-- name: LatestPaymentOrderAttempt :one

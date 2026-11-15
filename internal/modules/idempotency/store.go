@@ -161,11 +161,6 @@ func read(ctx context.Context, q *gen.Queries, mid uuid.UUID, operation, key str
 	return r, nil
 }
 
-// GetInTx reads a key's record inside tx, nil when absent.
-func GetInTx(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, operation, key string) (*Record, error) {
-	return read(ctx, gen.New(tx), merchantID, operation, key)
-}
-
 // DeleteExpired deletes up to limit idempotency rows past their expiry,
 // across every merchant and store.
 func DeleteExpired(ctx context.Context, database *db.DB, limit int32) (int64, error) {
@@ -200,12 +195,6 @@ type Claim struct {
 	// confirmed is when the last confirmed lease was requested: the lease
 	// runs from at least then, on the database's clock.
 	confirmed time.Time
-}
-
-// Renew extends the lease; ErrClaimLost when it already lapsed or passed on.
-func (c *Claim) Renew(ctx context.Context) error {
-	_, err := c.renew(ctx)
-	return err
 }
 
 // renew returns when the confirmed lease was requested.

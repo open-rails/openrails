@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -50,4 +51,23 @@ func At(row gen.BillingProviderIntent) time.Time {
 func Queue(ctx context.Context, d *db.DB, tx pgx.Tx, row gen.BillingProviderIntent) error {
 	_, err := d.InsertRiverJobTx(ctx, tx, Args{MerchantID: row.MerchantID, IntentID: row.ID}, Opts(At(row)))
 	return err
+}
+
+// waiting are a wake's states before it finishes.
+var waiting = []rivertype.JobState{
+	rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning,
+	rivertype.JobStateRetryable, rivertype.JobStateScheduled,
+}
+
+// Requeue inserts an overdue operation's wake to run now, in tx, unless one
+// Requeue inserted is still waiting: an operation held past due gains one
+// extra wake, not one per call. It reports whether it inserted one.
+func Requeue(ctx context.Context, d *db.DB, tx pgx.Tx, merchantID, id uuid.UUID) (bool, error) {
+	opts := Opts(time.Time{})
+	opts.UniqueOpts = river.UniqueOpts{ByArgs: true, ByState: waiting}
+	result, err := d.InsertRiverJobTx(ctx, tx, Args{MerchantID: merchantID, IntentID: id}, opts)
+	if err != nil {
+		return false, err
+	}
+	return !result.UniqueSkippedAsDuplicate, nil
 }

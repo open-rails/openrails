@@ -102,17 +102,6 @@ func (q *Queries) GetDestructivePolicy(ctx context.Context, merchantID uuid.UUID
 	return i, err
 }
 
-const isDestructiveActionSwitchEnabled = `-- name: IsDestructiveActionSwitchEnabled :one
-SELECT COALESCE((SELECT enabled FROM billing.destructive_action_switch LIMIT 1), false)::boolean AS enabled
-`
-
-func (q *Queries) IsDestructiveActionSwitchEnabled(ctx context.Context) (bool, error) {
-	row := q.db.QueryRow(ctx, isDestructiveActionSwitchEnabled)
-	var enabled bool
-	err := row.Scan(&enabled)
-	return enabled, err
-}
-
 const recordFirstPullCompleted = `-- name: RecordFirstPullCompleted :exec
 INSERT INTO billing.merchant_destructive_policy (merchant_id, first_pull_completed_at, updated_at)
 VALUES ($1::uuid, $2::timestamptz, now())

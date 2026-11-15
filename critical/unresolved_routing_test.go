@@ -29,23 +29,30 @@ func (w accountWire) RoundTrip(r *http.Request) (*http.Response, error) {
 	return w.primary.RoundTrip(r)
 }
 
+// armAlternateStripe declares alpha's second Stripe account, "alternate",
+// served by its own provider and chosen on the wire by its key. New cards may
+// go to either account.
+func armAlternateStripe(t *testing.T, w *world) *providerLedger {
+	t.Helper()
+	alternate := newProviderLedger(t, w)
+	alternate.secret = "sk_test_alternate"
+	target, err := url.Parse(alternate.server.URL)
+	require.NoError(t, err)
+	wire := http.DefaultTransport.(*http.Transport).Clone()
+	t.Cleanup(wire.CloseIdleConnections)
+	w.deps.StripeTransport = accountWire{primary: w.deps.StripeTransport, alternate: loopbackWire{target: target, wire: wire}}
+	declaration := w.cfg.Merchants["alpha"]
+	declaration.CardVault = ""
+	declaration.PSPRouting = &[]billing.PSPRoutingRule{{Prefer: []string{"stripe", "alternate"}}}
+	declaration.PSPs["alternate"] = openrails.StripePSP{AccountID: "acct_other", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_alternate", WebhookSigningSecret: "whsec_alternate", PublishableKey: "pk_test_alternate"}.PSPConfig()
+	w.cfg.Merchants["alpha"] = declaration
+	return alternate
+}
+
 func TestUnresolvedRouting(t *testing.T) {
 	t.Run("OR-J11-S04/unknown-debit-forbids-replacement-and-alternate-account", func(t *testing.T) {
 		var alternate *providerLedger
-		a, p := newPaymentWorld(t, func(w *world) {
-			alternate = newProviderLedger(t, w)
-			alternate.secret = "sk_test_alternate"
-			target, err := url.Parse(alternate.server.URL)
-			require.NoError(t, err)
-			wire := http.DefaultTransport.(*http.Transport).Clone()
-			t.Cleanup(wire.CloseIdleConnections)
-			w.deps.StripeTransport = accountWire{primary: w.deps.StripeTransport, alternate: loopbackWire{target: target, wire: wire}}
-			declaration := w.cfg.Merchants["alpha"]
-			declaration.CardVault = ""
-			declaration.PSPRouting = &[]billing.PSPRoutingRule{{Prefer: []string{"stripe", "alternate"}}}
-			declaration.PSPs["alternate"] = openrails.StripePSP{AccountID: "acct_other", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_alternate", WebhookSigningSecret: "whsec_alternate", PublishableKey: "pk_test_alternate"}.PSPConfig()
-			w.cfg.Merchants["alpha"] = declaration
-		})
+		a, p := newPaymentWorld(t, func(w *world) { alternate = armAlternateStripe(t, w) })
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
 		require.Len(t, psps.Items, 2)

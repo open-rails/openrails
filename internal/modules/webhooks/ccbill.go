@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/modules/alerting"
+	"github.com/open-rails/openrails/internal/modules/payment"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -48,10 +49,10 @@ type CCBillWebhookService struct {
 	NotificationService          *subscriptions.NotificationService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
-	ProfileRepo                  identitydir.UsernameResolver
+	ProfileRepo                  *identitydir.Customers
 	PaymentService               *payments.PaymentService
 	DeduplicationService         *DeduplicationService
-	OrderAttemptService          webhookOrderAttemptStore
+	OrderAttemptService          *payment.OrderAttemptService
 	MoneyService                 *money.MoneyService
 }
 
@@ -100,34 +101,6 @@ func capCCBillRetryAt(nextRetryAt, paidTermEnd *time.Time) *time.Time {
 	return &candidate
 }
 
-// boundCCBillPeriodEnd caps a CCBill-announced period end at one billing
-// cycle plus ccbillGraceCap past the later of the current paid end and now:
-// CCBill signs nothing, so one posted date must never buy years. An unknown
-// cycle fails closed.
-func boundCCBillPeriodEnd(candidate *time.Time, sub *models.Subscription, now time.Time) (*time.Time, error) {
-	if candidate == nil {
-		return nil, nil
-	}
-	if sub == nil || sub.Price == nil {
-		return nil, MarkWebhookErrorNonRetryable(fmt.Errorf("ccbill period end requires the subscription price cycle"))
-	}
-	hours := sub.Price.RecurringCycleHours()
-	if hours == nil || *hours <= 0 {
-		return nil, MarkWebhookErrorNonRetryable(fmt.Errorf("ccbill period end refused: price %s has no billing cycle", sub.Price.ID))
-	}
-	anchor := now.UTC()
-	if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(anchor) {
-		anchor = sub.CurrentPeriodEndsAt.UTC()
-	}
-	limit := anchor.Add(time.Duration(*hours)*time.Hour + ccbillGraceCap)
-	if candidate.After(limit) {
-		log.WithFields(log.Fields{"subscription_id": sub.ID, "announced": candidate, "bounded": limit}).
-			Warn("CCBill announced a period end beyond one billing cycle; bounded")
-		return &limit, nil
-	}
-	return candidate, nil
-}
-
 func parseCCBillPositiveAmountCents(currency, rawAmount, parseFieldName, invalidFieldName string) (moneyutil.Cents, error) {
 	return parseCCBillAmountCents(currency, rawAmount, parseFieldName, invalidFieldName, false)
 }
@@ -157,47 +130,6 @@ func ccbillInitialChargeAmount(price *models.Price) moneyutil.Micros {
 	return moneyutil.Micros(price.Amount)
 }
 
-func validateCCBillBilledAmount(ctx context.Context, svc *CCBillWebhookService, currency string, billedAmountCents moneyutil.Cents, expectedAmountMicros moneyutil.Micros, contextFields map[string]interface{}, logFields log.Fields) error {
-	expectedAmountCents, err := moneyutil.NativeToRailMinorExact(currency, int64(expectedAmountMicros))
-	if err != nil {
-		return err
-	}
-	tolerance := expectedAmountCents * 2 / 100 // 2% tolerance, integer-only
-	if billedAmountCents >= expectedAmountCents-tolerance && billedAmountCents <= expectedAmountCents+tolerance {
-		return nil
-	}
-
-	billingErr := newBillingError(ErrorTypeAmount,
-		"Billed amount does not match expected price",
-		map[string]interface{}{
-			"expected_amount": moneyutil.FormatRailMinor(expectedAmountCents, currency),
-			"billed_amount":   moneyutil.FormatRailMinor(billedAmountCents, currency),
-			"tolerance":       moneyutil.FormatRailMinor(tolerance, currency),
-		}, nil)
-	for key, value := range contextFields {
-		billingErr.Context[key] = value
-	}
-	if svc != nil {
-		svc.logBillingError(ctx, billingErr, logFields)
-		// Amount mismatches ACK as non-retryable, so a >2% drifted real charge
-		// needs a durable operator trace, not just a log line.
-		txnID, _ := billingErr.Context["transaction_id"].(string)
-		if txnID == "" {
-			txnID, _ = logFields["transaction_id"].(string)
-		}
-		if alertErr := alerting.RecordLedgerRepair(ctx, svc.DB, svc.now(), alerting.LedgerRepair{
-			Provider:      string(models.RailCCBill),
-			Operation:     "amount_mismatch",
-			TransactionID: txnID,
-			Err:           billingErr,
-			Metadata:      billingErr.Context,
-		}); alertErr != nil {
-			return fmt.Errorf("record CCBill amount mismatch repair alert: %w", alertErr)
-		}
-	}
-	return billingErr
-}
-
 // requireCCBillCurrency is the CCBill currency ingestion boundary: its result
 // is written to a payments row, so it returns the canonical upper-case code.
 // CCBill sends the ISO-4217 numeric code; an alpha code is upper-cased.
@@ -218,22 +150,6 @@ func requireCCBillCurrency(currencyCode Stringish, fieldName string) (string, er
 		return currency, nil
 	}
 	return normalized, nil
-}
-
-func validateCCBillCurrencyMatches(actualCurrency, expectedCurrency string, contextFields map[string]interface{}) error {
-	actual := money.NormalizeCurrency(actualCurrency)
-	expected := money.NormalizeCurrency(expectedCurrency)
-	if expected == "" || actual == expected {
-		return nil
-	}
-	billingErr := newBillingError(ErrorTypeValidation, "Billed currency does not match expected price", map[string]interface{}{
-		"billed_currency":   actual,
-		"expected_currency": expected,
-	}, nil)
-	for key, value := range contextFields {
-		billingErr.Context[key] = value
-	}
-	return billingErr
 }
 
 func ccbillPriceLookupID(rboID, flexID string) string {
@@ -309,7 +225,14 @@ func (s *CCBillWebhookService) stableDedupeEventKey() string {
 		return "ccbill:raw:" + hex.EncodeToString(sum[:8])
 	}
 
-	if txID := ccbillPayloadStringField(payload, "transactionId"); txID != "" {
+	if s.Data.EventType == EventTypeRefund {
+		var refund CCBillRefundEvent
+		if json.Unmarshal(body, &refund) == nil {
+			if id, ok := ccbillRefundID(&refund); ok {
+				return id
+			}
+		}
+	} else if txID := ccbillPayloadStringField(payload, "transactionId"); txID != "" {
 		return "tx:" + txID
 	}
 
@@ -323,9 +246,30 @@ func (s *CCBillWebhookService) stableDedupeEventKey() string {
 	return "ccbill:event:" + hex.EncodeToString(sum[:8])
 }
 
-type CCBillWebhookEventType = string
+// ccbillRefundID names one Refund notice; it is the notice's dedupe key and
+// its reversal's transaction id. CCBill does not say whether transactionId is
+// the refund's or the refunded charge's: if the charge's, every partial
+// refund of it shares one, so the event time and amount tell them apart, and
+// a redelivery repeats all three. false when the notice has no time.
+func ccbillRefundID(data *CCBillRefundEvent) (string, bool) {
+	at := strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, data.Timestamp)
+	currency, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode")
+	if err != nil || at == "" {
+		return "", false
+	}
+	cents, err := parseCCBillPositiveAmountCents(currency, data.Amount, "refund amount", "amount")
+	if err != nil {
+		return "", false
+	}
+	return "refund:" + strings.TrimSpace(data.TransactionID) + ":" + at + ":" + strconv.FormatInt(int64(cents), 10), true
+}
 
-const CCBillRail models.Rail = "ccbill"
+type CCBillWebhookEventType = string
 
 const (
 	EventTypeNewSaleSuccess     CCBillWebhookEventType = "NewSaleSuccess"
@@ -507,7 +451,8 @@ const CCBillSaleUnhonored = "ccbill_sale_unhonored"
 // handleNewSaleSuccess settles the sale of the order attempt its
 // reservationId names: the order completes with the subscription CCBill
 // bills. A sale for a membership OpenRails holds is a replay and changes
-// nothing. A sale no attempt issued, or one its order no longer takes, is
+// nothing. One for an order another payment completed is held for refund. A
+// sale no attempt issued, or one its order otherwise no longer takes, is
 // refused with an operator repair alert: CCBill has taken money OpenRails
 // will not honour.
 func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
@@ -1241,6 +1186,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	reversalID, identified := ccbillRefundID(&data)
 
 	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := s.DB.NewWithPgxTx(tx)
@@ -1249,7 +1195,20 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("load refunded CCBill subscription: %w", err)
 		}
-		reversalID := "refund:" + strings.TrimSpace(refundTransactionID)
+		unbooked := func(original *uuid.UUID, reason error) error {
+			repair := alerting.LedgerRepair{
+				Provider: "ccbill", Operation: "refund_reversal", TransactionID: refundTransactionID,
+				CustomerID: sub.CustomerID.String(), OriginalPaymentID: original, SubscriptionID: &sub.ID, Err: reason,
+				Metadata: map[string]any{"rail_subscription_id": pSubscriptionID, "refund_amount_cents": refundAmountCents, "refund_reason": refundReason, "refund_timestamp": data.Timestamp},
+			}
+			if identified {
+				repair.IdempotencyKey = "ccbill:" + reversalID
+			}
+			return alerting.RecordLedgerRepair(ctx, txdb, s.now(), repair)
+		}
+		if !identified {
+			return unbooked(nil, fmt.Errorf("CCBill refund has no timestamp to tell it from another refund of the transaction"))
+		}
 		existing, err := svc.GetByPSPTransactionID(ctx, models.RailCCBill, reversalID)
 		var original *models.Payment
 		if err == nil && existing.RefundedPaymentID != nil {
@@ -1260,12 +1219,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		if db.IsNotFound(err) || err == nil && original == nil {
 			// The notice does not prove which paid period was refunded. Never
 			// substitute the latest charge: it may fund unrelated newer access.
-			return alerting.RecordLedgerRepair(ctx, txdb, s.now(), alerting.LedgerRepair{
-				Provider: "ccbill", Operation: "refund_reversal", TransactionID: refundTransactionID,
-				CustomerID: sub.CustomerID.String(), SubscriptionID: &sub.ID,
-				Err:      fmt.Errorf("CCBill refund does not identify a recorded original payment"),
-				Metadata: map[string]any{"rail_subscription_id": pSubscriptionID, "refund_amount_cents": refundAmountCents, "refund_reason": refundReason},
-			})
+			return unbooked(nil, fmt.Errorf("CCBill refund does not identify a recorded original payment"))
 		}
 		if err != nil {
 			return err
@@ -1274,6 +1228,11 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 			return fmt.Errorf("CCBill refund original does not match subscription and currency")
 		}
 		_, err = svc.Refund(ctx, original.ID, reversalID, int64(moneyutil.CentsToMicros(moneyutil.Cents(refundAmountCents))), payments.ReversalRefund)
+		if errors.Is(err, payments.ErrRefundExceedsPayment) {
+			// More refunded than the named charge took: booking it would
+			// overstate the refund, so a person places it.
+			return unbooked(&original.ID, err)
+		}
 		return err
 	})
 }

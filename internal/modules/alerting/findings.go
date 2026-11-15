@@ -1,16 +1,16 @@
-// Reconciliation findings produce immediate, deduplicated alert deliveries.
+// Reconciliation findings produce durable, deduplicated alert deliveries.
 package alerting
 
 import (
-	"github.com/open-rails/openrails/internal/merchant"
-
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db/gen"
-	log "github.com/sirupsen/logrus"
+	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
@@ -24,88 +24,43 @@ var _ reconcile.FindingNotifier = (*Service)(nil)
 // A set NotifiedAt blocks re-firing unless severity strictly escalates; every
 // resolution clears it, so a reopened finding notifies again.
 func (s *Service) NotifyFinding(ctx context.Context, rec reconcile.FindingRecord) error {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return queryScopeErr
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
 	}
-
 	if rec.Status != reconcile.FindingStatusRequiresReview || rec.Quiet() {
 		return nil
 	}
 	if rec.NotifiedAt != nil && reconcile.SeverityRank(rec.Severity) >= reconcile.SeverityRank(reconcile.Severity(rec.NotifiedSeverity)) {
 		return nil // already notified at this severity or worse; not a genuine escalation
 	}
-	alert, channels, err := s.findingAlert(ctx, rec)
-	if err != nil {
-		return err
-	}
-	// The episode claim keeps concurrent or stale callers from sending
-	// duplicate hooks; the finding itself is the console's record. External
-	// deliveries are best-effort after the claim commits.
-	var n int64
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		var err error
-		n, err = s.db.Gen(ctx).ClaimReconciliationFindingNotification(ctx, gen.ClaimReconciliationFindingNotificationParams{MerchantID: queryMerchant.UUID(),
-			ID: rec.ID, NotifiedAt: alert.FiredAt, Severity: string(rec.Severity),
+	// The episode claim and its alert's job commit together: concurrent or
+	// stale callers claim nothing, and a claimed episode is delivered with
+	// retries. The episode is the stored instant, so it is microseconds.
+	notifiedAt := s.now().Truncate(time.Microsecond)
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		n, err := s.db.NewWithPgxTx(tx).Gen(ctx).ClaimReconciliationFindingNotification(ctx, gen.ClaimReconciliationFindingNotificationParams{
+			MerchantID: mid.UUID(), ID: rec.ID, NotifiedAt: notifiedAt, Severity: string(rec.Severity),
 		})
-		return err
+		if err != nil || n == 0 {
+			return err
+		}
+		return s.queueFindingAlert(ctx, tx, mid.UUID(), rec.ID, rec.Severity, notifiedAt)
 	})
 	if err != nil {
 		return fmt.Errorf("claim finding notification: %w", err)
 	}
-	if n == 0 {
-		return nil
-	}
-	s.deliverFinding(ctx, rec, channels, alert)
 	return nil
 }
 
-// RealertFinding alerts rec again. The caller claimed its notification
-// episode, in the transaction that re-armed it.
-func (s *Service) RealertFinding(ctx context.Context, rec reconcile.FindingRecord) error {
-	if _, err := merchant.Require(ctx); err != nil {
-		return err
-	}
-	alert, channels, err := s.findingAlert(ctx, rec)
-	if err != nil {
-		return err
-	}
-	s.deliverFinding(ctx, rec, channels, alert)
-	return nil
-}
-
-// findingAlert is rec's alert and the channels it goes to: the severity's
-// defaults, and the merchant's enabled webhooks unless it is low.
-func (s *Service) findingAlert(ctx context.Context, rec reconcile.FindingRecord) (Alert, []ChannelRef, error) {
-	sev := findingAlertSeverity(rec.Severity)
-	alert := Alert{
-		Severity:      sev,
+// findingAlert is rec's alert, fired when its episode was claimed.
+func (s *Service) findingAlert(rec reconcile.FindingRecord, firedAt time.Time) Alert {
+	return Alert{
+		Severity:      findingAlertSeverity(rec.Severity),
 		Title:         findingTitle(rec),
 		Summary:       findingSummary(rec),
 		DashboardLink: s.findingLink(rec.ID),
-		FiredAt:       s.now(),
-	}
-	channels := defaultChannels(sev)
-	if rec.Severity != reconcile.SeverityLow {
-		hooks, err := s.store.listWebhooks(ctx, nil)
-		if err != nil {
-			return Alert{}, nil, fmt.Errorf("list finding webhook destinations: %w", err)
-		}
-		for _, hook := range hooks {
-			if hook.Enabled {
-				id := hook.ID
-				channels = append(channels, ChannelRef{Type: ChannelWebhook, WebhookID: &id})
-			}
-		}
-	}
-	return alert, channels, nil
-}
-
-func (s *Service) deliverFinding(ctx context.Context, rec reconcile.FindingRecord, channels []ChannelRef, alert Alert) {
-	for _, result := range s.deliverer.dispatchFinding(ctx, channels, alert) {
-		if !result.OK {
-			log.WithContext(ctx).WithFields(log.Fields{"finding_id": rec.ID, "channel": result.Channel}).Warn("finding notification retained in console; external delivery failed")
-		}
+		FiredAt:       firedAt,
 	}
 }
 

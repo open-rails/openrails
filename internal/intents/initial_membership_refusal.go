@@ -135,7 +135,11 @@ func (s *Store) RetainInitialMembershipDecline(ctx context.Context, in gen.Billi
 	if rejection == nil {
 		return errors.New("initial decline requires a provider rejection")
 	}
-	_, err := nmi.ParseSaleResponse(rejection.RawResponse)
+	terms, err := decodeCollectedTerms(in)
+	if err != nil {
+		return err
+	}
+	_, err = nmi.ParseSaleResponse(rejection.RawResponse, terms.AmountMinor, terms.Currency)
 	var parsed *nmi.CustomerVaultError
 	if !errors.As(err, &parsed) || nmi.RequiresVerification(err) || parsed.ResponseCode != rejection.ResponseCode {
 		return errors.New("initial rejection is not a qualified provider decline")
@@ -199,7 +203,7 @@ func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.BillingPr
 		return errors.New("Stripe decline is still executable")
 	}
 	if result.DeclineCode == "" {
-		result.DeclineCode = s.retainedDeclineCode(ctx, in)
+		result.DeclineCode = s.retainedDecline(ctx, in, result).DeclineCode
 	}
 	binding, err := collectionBinding(in)
 	if err != nil {

@@ -1,9 +1,7 @@
 # CCBill
 
-> Which flows are supported on this rail, and how well each one is verified:
-> [rail certification matrix](certification-matrix.md). Read it before relying on
-> CCBill operations. Automatic refunds are unavailable; see the
-> [CCBill refunds](ccbill-refund-qualification.md).
+> What each rail supports: [rails](README.md). Automatic CCBill refunds are
+> unavailable; see [refunds](#refunds).
 
 CCBill is a payment-page payment processor commonly used by high-risk and
 adult/subscription businesses. In OpenRails it is a **reserved gateway**: the
@@ -118,14 +116,18 @@ be paid on CCBill:
   A redelivery changes nothing.
 - `NewSaleFailure` naming the attempt fails it: the order takes another
   payment with `last_payment_error`.
-- A sale the order no longer takes is never granted: the order was paid
-  otherwise, a second sale on the same page, the customer already holds the
-  membership, or the sale contradicts the attempt. It is refused
-  (`ccbill_sale_unhonored`) with a `consistency.ledger.unbooked` finding:
-  refund and cancel it at CCBill. A sale on a lapsed page still pays an order
-  nothing else paid. One for an order that closed meanwhile revives it, or,
-  when what it buys is held, is recorded for refund with a finding to cancel
-  it at CCBill.
+- A sale the order no longer takes is never granted. One for an order
+  another payment completed (a card or another page after this one lapsed,
+  or a second sale on the same page) is recorded against the order as a
+  payment held for refund: a `life.order.late_payment` finding to refund it
+  at CCBill and a `consistency.ledger.unbooked` finding to cancel its
+  subscription there; OpenRails does neither itself, and a redelivery
+  changes nothing. One whose customer already holds the membership, or
+  that contradicts the attempt, is refused (`ccbill_sale_unhonored`) with a
+  `consistency.ledger.unbooked` finding: refund and cancel it at CCBill. A
+  sale on a lapsed page still pays an order nothing else paid. One for an
+  order that closed meanwhile revives it, or, when what it buys is held, is
+  recorded for refund the same way.
 - A `NewSaleSuccess` no OpenRails attempt issued is refused
   (`ccbill_new_subscription_unsupported`) with the same finding.
 
@@ -176,7 +178,8 @@ Consumed events: `NewSaleSuccess`, `NewSaleFailure`, `RenewalSuccess`,
 `RenewalFailure`, `UpgradeSuccess`, `UpgradeFailure`, `Cancellation`,
 `Expiration`, `BillingDateChange`, `CustomerDataUpdate`, `UserReactivation`,
 `Refund`, `Void`, `Chargeback`. Unknown event types are rejected as
-non-retryable. Events are deduplicated by transaction id / payload hash.
+non-retryable. Events are deduplicated by transaction id / payload hash; a
+`Refund` by its transaction id, timestamp and amount.
 
 ### Sandbox testing
 
@@ -221,10 +224,13 @@ PSP alone accepts nothing extra.
   for operator verification. Confirmed inbound refunds and manual accounting
   remain supported. A refund notification must identify its original payment;
   an unknown original raises a ledger-review finding without guessing the latest
-  charge. A matched refund follows the merchant's cumulative access policy and
-  does not cancel renewal. Separate provider cancellation events are still
-  mirrored. Distinct identities for repeated partial-refund notifications remain
-  unqualified. See [CCBill refunds](ccbill-refund-qualification.md).
+  charge. CCBill does not document whether a `Refund`'s `transactionId` is the
+  refund's or the refunded charge's, so each notice is identified by that id
+  with its timestamp and amount: every partial refund of a charge is booked
+  once, and one beyond what remains of the charge books nothing and raises a
+  ledger-review finding. A matched refund follows the merchant's cumulative
+  access policy and does not cancel renewal. Separate provider cancellation
+  events are still mirrored. See [refunds](#refunds).
 - An imported CCBill charge names CCBill's transaction id, which is digits.
   One declared without an amount is kept as an attribution to its
   subscription. With DataLink credentials, the provider pull records it when it
@@ -234,3 +240,18 @@ PSP alone accepts nothing extra.
   closes the finding.
 - CCBill subscriptions cannot be reassigned to another payment method;
   payment-method changes go through a new purchase.
+
+### Refunds
+
+Full, partial and cancel-and-refund requests are refused
+(`400 refund_unsupported`) before any reservation or intent, with no override; the
+admin UI does not offer them. Refund in CCBill's admin: OpenRails ingests the
+`Refund` webhook and applies `provider_refund_access`. Cancel-only requests work.
+
+CCBill's documented calls cannot refund one charge for an exact amount and prove
+the outcome: [`refundTransaction`](https://ccbill.com/doc/ccbill-api-guide) takes
+a decimal amount (omitted: the initial transaction's full amount) and also cancels
+the subscription, `voidOrRefundTransaction` may void the whole transaction, neither
+takes a transaction id, success code `1` does not confirm the amount, and
+[`-7`](https://ccbill.com/doc/ccbill-api-7-error-explained) does not prove nothing
+happened. There is no documented DataLink refund sandbox.

@@ -2,9 +2,7 @@ package alerting
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/url"
 	"slices"
 	"strings"
@@ -119,25 +117,4 @@ func webhookOf(mid billing.MerchantID, hook merchantdocs.AlertWebhook) Webhook {
 		w.DestinationHost = strings.ToLower(parsed.Host)
 	}
 	return w
-}
-
-// marshalJSON encodes v, substituting empty for a nil/zero value.
-func marshalJSON(v any, empty string) ([]byte, error) {
-	if v == nil {
-		if empty == "" {
-			return nil, nil
-		}
-		return []byte(empty), nil
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil, fmt.Errorf("alerting: encode jsonb: %w", err)
-	}
-	if string(b) == "null" {
-		if empty == "" {
-			return nil, nil
-		}
-		return []byte(empty), nil
-	}
-	return b, nil
 }

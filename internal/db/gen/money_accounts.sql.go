@@ -24,8 +24,10 @@ SELECT
      -- Retired credit funds its refund from the retired account. Only value
      -- still in customer_balance remains reserved here; an unswept expired
      -- source is entirely unavailable, including its unrefunded remainder.
+     -- A refund returns the credit line's money first, so a pending refund
+     -- holds its share of the line's paid amount, not of the whole payment.
      + COALESCE((SELECT sum(CASE WHEN g.ends_at <= $2::timestamptz
-         THEN lot.remaining ELSE LEAST(ceil(g.amount::numeric * r.pending / p.amount),lot.remaining) END)
+         THEN lot.remaining ELSE LEAST(ceil(g.amount::numeric * LEAST(r.pending,(g.spec_snapshot->'deposit'->>'paid_amount')::numeric) / (g.spec_snapshot->'deposit'->>'paid_amount')::numeric),lot.remaining) END)
        FROM (SELECT refunded_payment_id, sum(-refund.amount)::numeric AS pending
          FROM billing.payments refund WHERE refund.merchant_id=a.merchant_id
            AND refund.customer_id=a.customer_id AND refund.currency=a.currency
@@ -176,53 +178,6 @@ func (q *Queries) InsertMoneyAccountSettingsIfAbsent(ctx context.Context, arg In
 	return result.RowsAffected(), nil
 }
 
-const listCustomerBalanceCurrencies = `-- name: ListCustomerBalanceCurrencies :many
-SELECT currency::text AS currency
-FROM (
-    SELECT currency FROM billing.ledger_accounts
-    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-      AND account_type = 'customer_balance'
-    UNION
-    SELECT currency FROM billing.money_settings
-    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-    UNION
-    SELECT currency FROM billing.owed_items
-    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-      AND order_id IS NULL AND status = 'pending'
-    UNION
-    SELECT currency FROM billing.orders
-    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-      AND origin = 'usage' AND status IN ('open', 'processing') AND amount_paid < total
-) currencies
-ORDER BY currency
-`
-
-type ListCustomerBalanceCurrenciesParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-}
-
-// Every currency a customer holds a balance, settings, pending charges or an unpaid usage order in.
-func (q *Queries) ListCustomerBalanceCurrencies(ctx context.Context, arg ListCustomerBalanceCurrenciesParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listCustomerBalanceCurrencies, arg.MerchantID, arg.CustomerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []string
-	for rows.Next() {
-		var currency string
-		if err := rows.Scan(&currency); err != nil {
-			return nil, err
-		}
-		items = append(items, currency)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listCustomerSettingsAccounts = `-- name: ListCustomerSettingsAccounts :many
 SELECT customer_id, currency, credit_limit_amount, credit_limit_override, tier FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = ANY($2::uuid[])
@@ -306,8 +261,9 @@ type ListCustomersBalanceCurrenciesRow struct {
 	Currency   string
 }
 
-// ListCustomerBalanceCurrencies for many customers: at most one row per
-// customer and registered currency, which bounds row_limit.
+// Every currency each customer holds a balance, settings, pending charges or
+// an unpaid usage order in: at most one row per customer and registered
+// currency, which bounds row_limit.
 func (q *Queries) ListCustomersBalanceCurrencies(ctx context.Context, arg ListCustomersBalanceCurrenciesParams) ([]ListCustomersBalanceCurrenciesRow, error) {
 	rows, err := q.db.Query(ctx, listCustomersBalanceCurrencies, arg.MerchantID, arg.CustomerIds, arg.RowLimit)
 	if err != nil {

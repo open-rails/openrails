@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 )
 
 // TypeNMIDeleteSubscription is the deferred NMI delete_subscription intent.
@@ -70,12 +71,12 @@ type NMIDeleteHandler struct {
 	Config *config.Config
 	// Resolver arms the intent merchant's NMI client from the armed rail
 	// state at drain time.
-	Resolver NMIClientResolver
+	Resolver railresolve.NMIClientResolver
 	Clock    clockwork.Clock
 	Policy   BackoffPolicy
 }
 
-func NewNMIDeleteHandler(d *db.DB, cfg *config.Config, resolver NMIClientResolver, clock clockwork.Clock) *NMIDeleteHandler {
+func NewNMIDeleteHandler(d *db.DB, cfg *config.Config, resolver railresolve.NMIClientResolver, clock clockwork.Clock) *NMIDeleteHandler {
 	return &NMIDeleteHandler{DB: d, Config: cfg, Resolver: resolver, Clock: clock, Policy: DefaultBackoff}
 }
 

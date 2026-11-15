@@ -82,7 +82,7 @@ nested under `secrets`. Unknown fields are refused.
 }
 ```
 
-Its settings are the fields [`GET /v1/merchant/configuration`](api/merchant-settings.md)
+Its settings are the fields [`GET /v1/merchant/configuration`](merchant-configuration.md#settings)
 returns. An alert webhook's `id` is a UUID you choose; `format` is `generic`,
 `discord` or `slack`.
 
@@ -102,7 +102,7 @@ returns. An alert webhook's `id` is a UUID you choose; `format` is `generic`,
 
 The rail decides the fields. `environment` is one of the rail's, its
 real-money one when omitted ([PSP environments](psp-environments.md)).
-`account_id` is the rail's own id ([merchant provisioning](merchant-provisioning.md)
+`account_id` is the rail's own id ([merchant configuration](merchant-configuration.md#psps)
 lists each rail's). A Solana PSP has `treasury` in its place and an optional
 `rpc_url` secret:
 

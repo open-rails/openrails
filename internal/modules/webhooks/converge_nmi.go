@@ -54,13 +54,7 @@ type NMIConvergeService struct {
 	// Findings notifies an operator of the finding a park raises.
 	Findings reconcile.FindingNotifier
 	// Adopter lands a live subscription OpenRails does not hold.
-	Adopter NMIAdopter
-}
-
-// NMIAdopter lands one live NMI subscription OpenRails does not hold, on its
-// plan's provider price, for the vault's one owner.
-type NMIAdopter interface {
-	AdoptNMISubscription(ctx context.Context, pspID uuid.UUID, sub nmi.V5Subscription, customer uuid.UUID, price *models.Price) error
+	Adopter *pspimport.Importer
 }
 
 func (s *NMIConvergeService) now() time.Time {

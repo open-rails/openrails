@@ -13,7 +13,9 @@ WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_type = 'subscri
   AND NOT (pa.revoked_at IS NULL
            AND pa.starts_at <= sqlc.arg(now)::timestamptz
            AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(now)::timestamptz))
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR pa.customer_id = sqlc.narg(customer_id)::uuid);
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR pa.customer_id = sqlc.narg(customer_id)::uuid)
+ORDER BY pa.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ConOrphanAccessPaymentSource :many
 SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id
@@ -22,7 +24,9 @@ LEFT JOIN billing.payments purch ON purch.merchant_id = sqlc.arg(merchant_id)::u
 WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_type = 'purchase'
   AND pa.deleted_at IS NULL
   AND purch.id IS NULL
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR pa.customer_id = sqlc.narg(customer_id)::uuid);
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR pa.customer_id = sqlc.narg(customer_id)::uuid)
+ORDER BY pa.id
+LIMIT sqlc.arg(row_limit)::int;
 
 
 -- consistency.duplicate.ownership: more than one live purchased access grant for
@@ -68,7 +72,9 @@ JOIN billing.products prod ON prod.id = lo.product_id
 
 WHERE prod.merchant_id = sqlc.arg(merchant_id)::uuid
 GROUP BY lo.customer_id, lo.product_id, prod.key
-HAVING COUNT(*) > 1;
+HAVING COUNT(*) > 1
+ORDER BY lo.customer_id, lo.product_id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ConDuplicateChargesSamePeriod :many
 -- A subscription order may have multiple genuine partial payments. Report
@@ -99,15 +105,6 @@ FROM excess e
 JOIN LATERAL (SELECT line.product_id, prod.key::text AS product_key
     FROM billing.order_lines line JOIN billing.products prod ON prod.merchant_id=line.merchant_id AND prod.id=line.product_id
     WHERE line.merchant_id=sqlc.arg(merchant_id)::uuid AND line.order_id=e.order_id
-    ORDER BY line.position LIMIT 1) l ON true;
-
--- name: ResolveVanishedFindings :execrows
--- Open findings of one type under a subject prefix that the latest full scan
--- no longer reports close themselves.
-UPDATE billing.reconciliation_findings
-   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
- WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-   AND finding_type = sqlc.arg(finding_type)::text
-   AND subject_key LIKE sqlc.arg(subject_prefix)::text || '%'
-   AND NOT (subject_key = ANY(sqlc.arg(keep_subjects)::text[]))
-   AND status IN ('reconcile_required', 'requires_review');
+    ORDER BY line.position LIMIT 1) l ON true
+ORDER BY e.first_date, e.order_id
+LIMIT sqlc.arg(row_limit)::int;

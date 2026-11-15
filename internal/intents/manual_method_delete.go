@@ -3,6 +3,7 @@ package intents
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -26,8 +27,14 @@ func ManualPaymentMethodDelete(in gen.BillingProviderIntent) bool {
 	return manualMethodDeleteType(in.IntentType)
 }
 
+// ManualPaymentMethodDeleteTypes are the request-only operation types: no
+// wake runs them.
+func ManualPaymentMethodDeleteTypes() []string {
+	return []string{TypeNMIPaymentMethodDelete, TypePlatformMethodDelete, TypeHyperSwitchMethodDelete}
+}
+
 func manualMethodDeleteType(kind string) bool {
-	return kind == TypeNMIPaymentMethodDelete || kind == TypePlatformMethodDelete || kind == TypeHyperSwitchMethodDelete
+	return slices.Contains(ManualPaymentMethodDeleteTypes(), kind)
 }
 
 func manualMethodDeleteKey(kind string, id uuid.UUID) string {
@@ -46,8 +53,8 @@ func methodDeleteKeyMatches(kind, key string, id uuid.UUID) bool {
 // A previous ambiguous attempt is read back first; it is never blindly sent
 // again. A fresh ambiguous response gets one readback before returning an error.
 func (t *PaymentMethodDeleteThrough) executeManual(ctx context.Context, in gen.BillingProviderIntent) (gen.BillingProviderIntent, error) {
-	store, ok := t.Runner.Store.(*Store)
-	if !ok || !ManualPaymentMethodDelete(in) {
+	store := t.Runner.Store
+	if store == nil || !ManualPaymentMethodDelete(in) {
 		return in, errors.New("manual payment-method deletion store unavailable")
 	}
 	ctx = context.WithValue(ctx, manualDeleteContextKey{}, in.ID)

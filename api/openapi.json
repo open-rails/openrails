@@ -4298,6 +4298,7 @@
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
           "authentication_required",
+          "card_attempts_blocked",
           "card_declined",
           "customer_action_required",
           "customer_payment_unsupported",

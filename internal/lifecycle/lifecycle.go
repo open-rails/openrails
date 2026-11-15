@@ -456,12 +456,6 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 	return s, nil, fmt.Errorf("%w: unknown event %T", ErrInvalid, e)
 }
 
-// RenewalDue reports whether the engine's due pass should open the renewal
-// obligation for this subscription at now.
-func RenewalDue(s Snapshot, now time.Time) bool {
-	return s.Owner == Engine && s.Status == Active && !now.Before(s.PaidThrough)
-}
-
 func illegal(s Snapshot, e Event) error {
 	return fmt.Errorf("%w: %s from %s", ErrIllegal, e.event(), s.Status)
 }

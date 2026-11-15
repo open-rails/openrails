@@ -437,10 +437,6 @@ func (c *NMIClient) sendQueryRequest(ctx context.Context, data url.Values) (_ st
 // Live reports whether the client's PSP moves real money.
 func (c *NMIClient) Live() bool { return config.LiveEnvironment("nmi", c.Environment) }
 
-func (c *NMIClient) GetWebhookSecret() string {
-	return c.WebhookSecret
-}
-
 // NewAccountClient is the only exported NMI client constructor. It binds the
 // credential to its merchant, PSP, account and environment, which is also the
 // identity its posture verdict is keyed by.

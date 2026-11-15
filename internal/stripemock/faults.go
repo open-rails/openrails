@@ -25,6 +25,33 @@ func (m *Mock) SetDecline(last4, decline string) {
 	}
 }
 
+// Advice is what a decline tells the merchant to do next: Stripe's
+// advice_code, the network's advice code (Mastercard's Merchant Advice Code)
+// and the network's response code.
+type Advice struct {
+	Code, NetworkAdviceCode, NetworkDeclineCode string
+}
+
+func (a Advice) on(refusal Object) {
+	for key, value := range map[string]string{"advice_code": a.Code, "network_advice_code": a.NetworkAdviceCode, "network_decline_code": a.NetworkDeclineCode} {
+		if value != "" {
+			refusal[key] = value
+		}
+	}
+}
+
+// SetAdvice attaches advice to future declines on every card ending in
+// last4.
+func (m *Mock) SetAdvice(last4 string, a Advice) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, pm := range m.methods {
+		if pm["card"].(Object)["last4"] == last4 {
+			m.advice[id] = a
+		}
+	}
+}
+
 // SetMethodDecline sets the issuer's answer for future charges on one
 // payment method.
 func (m *Mock) SetMethodDecline(pm, decline string) {

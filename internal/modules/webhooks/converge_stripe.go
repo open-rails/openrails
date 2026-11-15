@@ -23,10 +23,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/parking"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
@@ -43,7 +43,7 @@ import (
 type StripeConvergeService struct {
 	DB                           *db.DB
 	Clock                        clockwork.Clock
-	Prober                       subscriptions.StripeLivenessProber
+	Prober                       *subscriptions.HTTPStripeLivenessProber
 	PriceService                 *catalog.PriceService
 	ProductService               *catalog.ProductService
 	SubscriptionService          *subscriptions.SubscriptionService
@@ -51,7 +51,7 @@ type StripeConvergeService struct {
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
 	RailCustomerService          *payments.RailCustomerService
-	OrderAttemptService          webhookOrderAttemptStore
+	OrderAttemptService          *payment.OrderAttemptService
 	// Objects records the Stripe price a parked subscription bills.
 	Objects *providerobjects.Observer
 	// Findings notifies an operator of the finding a park raises.
@@ -78,10 +78,7 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 		return uuid.Nil, fmt.Errorf("stripe converge: prober not configured")
 	}
 	now := s.now().UTC()
-	reader, ok := s.Prober.(subscriptions.StripeBillReader)
-	if !ok {
-		return uuid.Nil, fmt.Errorf("stripe converge: verified invoice reader is required")
-	}
+	reader := s.Prober
 
 	// Only Stripe's resource_missing is Found=false; any other refusal (a
 	// misrouted 404, a 401, the API down) retries, ending nothing.
@@ -142,7 +139,7 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 // from the FETCHED record (metadata stamped by purchase, latest invoice). A
 // live subscription it cannot land parks: price first (one mapping wakes many
 // parks), then the customer, never guessed and never by email.
-func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, reader subscriptions.StripeBillReader, now time.Time) (uuid.UUID, error) {
+func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, reader *subscriptions.HTTPStripeLivenessProber, now time.Time) (uuid.UUID, error) {
 	status := strings.ToLower(strings.TrimSpace(rec.Status))
 	if !rec.LatestInvoicePaid || (status != "active" && status != "trialing") {
 		// Nothing settled yet (incomplete signup, unpaid first invoice) — the
@@ -282,39 +279,12 @@ func (s *StripeConvergeService) resolveFetchedPrice(ctx context.Context, rec sub
 	return uuid.Nil, nil, false, fmt.Errorf("unable to resolve price from fetched subscription")
 }
 
-// validateStripeFetchedInvoicePrice checks the fetched invoice against the
-// price: same currency and exact list price, except proration invoices
-// (billing_reason=subscription_update, any positive amount) and settled
-// zero-amount invoices (trials).
-func validateStripeFetchedInvoicePrice(rec subscriptions.StripeLivenessRecord, price *models.Price) error {
-	if price == nil {
-		return fmt.Errorf("fetched invoice price is required for validation")
-	}
-	if !strings.EqualFold(strings.TrimSpace(rec.LatestInvoiceCurrency), strings.TrimSpace(price.Currency)) {
-		return fmt.Errorf("fetched invoice currency mismatch: got %s, want %s", rec.LatestInvoiceCurrency, price.Currency)
-	}
-	if strings.EqualFold(rec.LatestInvoiceBillingReason, "subscription_update") {
-		if rec.LatestInvoiceAmountPaid <= 0 {
-			return fmt.Errorf("fetched proration invoice has non-positive amount_paid: %d", rec.LatestInvoiceAmountPaid)
-		}
-		return nil
-	}
-	amountPaidMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(rec.LatestInvoiceAmountPaid)))
-	if amountPaidMicros != price.Amount {
-		if rec.LatestInvoiceAmountPaid == 0 {
-			return nil // settled zero-amount invoice (trial / no_payment_required)
-		}
-		return fmt.Errorf("fetched invoice amount mismatch: got %s, want %s", moneyutil.FormatAmount(amountPaidMicros, price.Currency), moneyutil.FormatAmount(price.Amount, price.Currency))
-	}
-	return nil
-}
-
 // recordFetchedBills walks the complete subscription history and fetches each
 // specific invoice. Replayed or unordered webhooks cannot replace an earlier
 // bill with latest_invoice. Each callback owns one local transaction. A bill
 // with a line on a price no price of ours binds is deferred, and returned by
 // that price: the subscription parks on it until it is mapped.
-func (s *StripeConvergeService) recordFetchedBills(ctx context.Context, sub *models.Subscription, rec subscriptions.StripeLivenessRecord, reader subscriptions.StripeBillReader, now time.Time) (map[string][]string, error) {
+func (s *StripeConvergeService) recordFetchedBills(ctx context.Context, sub *models.Subscription, rec subscriptions.StripeLivenessRecord, reader *subscriptions.HTTPStripeLivenessProber, now time.Time) (map[string][]string, error) {
 	deferred := map[string][]string{}
 	err := reader.VisitSubscriptionBills(ctx, sub.RailSubscriptionID, func(invoice subscriptions.StripeBill) error {
 		if invoice.CustomerID != rec.CustomerID {

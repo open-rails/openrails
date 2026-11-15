@@ -29,21 +29,3 @@ cp merchant.example.yaml merchant.yaml    # your NMI sandbox gateway's IDs and k
 DATABASE_URL=postgres://… go run . catalog apply catalog.yaml   # once, and whenever it changes
 DATABASE_URL=postgres://… go run .        # http://localhost:8080 (MEDIA_KEY signs video URLs)
 ```
-
-## Tests
-
-`go test -tags integration .` with `OPENRAILS_E2E_DSN` naming a PostgreSQL 18
-server. Each run creates and drops its own database, and NMI is
-`openrailstest/nmimock`.
-
-- `TestCourseList` pages the courses and counts queries: one product read and
-  one entitlement read per page, none of the latter signed out.
-- `TestGatedContent` buys through the routes billing-ui calls: a course, a
-  rental and the bundle unlock their courses, the membership every video, and
-  the signed URL serves the video, ranges included.
-- `TestMediaURLs` refuses a tampered, expired or unsigned media URL.
-- `TestBrowser` serves the same app and runs `web/e2e` in Chromium: buy from the
-  store or a course's buy page (the course, the bundle or the membership), sign
-  in with auth-ui, pay, and the video plays.
-  It skips until `web/` is installed and built, and Playwright needs its
-  browser (`pnpm exec playwright install chromium`).

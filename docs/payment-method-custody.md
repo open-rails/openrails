@@ -272,9 +272,6 @@ Local provider fakes verify the request/receipt contract, not live vendor
 qualification. Sandbox qualification of application permissions, iframe
 collection, proxy approval/decline, and conversion recovery remains required.
 
-`payment_methods.wallet_card_id` names the customer wallet card a merchant's
-copy was made from; it is NULL for a card given to the merchant.
-
 ## Declaring a custodian
 
 A custodian is an account the merchant holds with a third party, exactly like a
@@ -323,8 +320,8 @@ Consequences, all enforced rather than documented:
 * Only rails the custodian's registry entry names may reference it — today
   `nmi`, the one rail with a detokenizing-proxy charge path. Any other rail
   refuses the push.
-* A PSP referencing an undeclared custodian key fails the push, and the DB
-  carries a composite foreign key so it cannot reference another merchant's.
+* A PSP referencing an undeclared custodian key is refused, as is one whose
+  money class (live or test) differs from the custodian's.
 * A custodial PSP must not also declare `tokenization_key` / `tokenization_url`:
   the browser tokenizes against the **custodian**, so the rail's own tokenizer
   key would be dead config on a purchase path.
@@ -332,9 +329,7 @@ Consequences, all enforced rather than documented:
   custodian's public key — a frontend drives whoever holds the card.
 * Secrets are scoped by custodian IDENTITY, not by the merchant's nickname for
   it: `custodians/<kind>/<environment>/<account_id>/<key>`, the exact shape
-  `psps/<rail>/<environment>/<account_id>/<key>` already has — and they are read
-  through the same rotation version floor (`custodians.credential_versions`), so a
-  rotated custodial key cuts over on every node at once.
+  `psps/<rail>/<environment>/<account_id>/<key>` already has.
 * `account_updater` arms Basis Theory's **real-time Account Updater** for the
   Visa and Mastercard cards this vault holds. NMI charges the vault's own card
   number, so the vault must be asked whether a card was reissued; a PSP or

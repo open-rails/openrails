@@ -23,7 +23,7 @@
 #   scan-injected-code.sh --files <path>...    scan the named paths verbatim
 #   scan-injected-code.sh --self-test          run the detector against its fixtures
 #
-# Exits non-zero if anything is found. See docs/injection-scan.md.
+# Exits non-zero if anything is found. See docs/dev/injection-scan.md.
 
 set -euo pipefail
 export LC_ALL=C # byte-wise matching; grep -P must not choke on invalid UTF-8
@@ -85,7 +85,7 @@ CONFIG_RE='(^|/)([^/]+\.config\.[A-Za-z]+|(vite|webpack|tailwind|postcss|next|ro
 SKIP_ALL_RE='(^|/)scripts/testdata/injection-scan/'
 # Excluded from the content rules (2-5) only: these two quote the signatures they
 # describe. Both are still subject to the structural whitespace rule.
-SKIP_CONTENT_RE='(^|/)(scripts/scan-injected-code\.sh|docs/injection-scan\.md)$'
+SKIP_CONTENT_RE='(^|/)(scripts/scan-injected-code\.sh|docs/dev/injection-scan\.md)$'
 
 self="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 findings=0

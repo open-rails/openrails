@@ -1,38 +1,6 @@
--- Reconciliation runs and findings, the engine's local-state reads, and the
+-- Reconciliation findings, the engine's local-state reads, and the
 -- enforce appliers' idempotent local writes. Statements that read
 -- billing.current_merchant_id() need a merchant-pinned connection.
-
--- name: CreateReconciliationRun :one
-INSERT INTO billing.maintenance_runs (
-    merchant_id, kind, mode, rails, window_starts_at, window_ends_at, started_at, status
-) VALUES (
-    sqlc.arg(merchant_id), 'reconciliation', sqlc.arg(mode)::text, sqlc.arg(rails),
-    sqlc.narg(window_starts_at), sqlc.narg(window_ends_at), now(), 'running'
-)
-RETURNING *;
-
--- name: FinishReconciliationRun :execrows
-UPDATE billing.maintenance_runs
-SET status = sqlc.arg(status),
-    summary = sqlc.narg(summary),
-    error = sqlc.narg(error),
-    finished_at = now()
-WHERE id = sqlc.arg(id) AND kind='reconciliation' AND merchant_id=billing.current_merchant_id() AND status = 'running';
-
--- name: GetReconciliationRun :one
-SELECT * FROM billing.maintenance_runs WHERE id = $1 AND kind='reconciliation' AND merchant_id=billing.current_merchant_id();
-
--- name: GetLatestReconciliationRun :one
-SELECT * FROM billing.maintenance_runs
-WHERE kind='reconciliation' AND merchant_id=billing.current_merchant_id()
-ORDER BY started_at DESC
-LIMIT 1;
-
--- name: ListReconciliationRuns :many
-SELECT * FROM billing.maintenance_runs
-WHERE kind='reconciliation' AND merchant_id=billing.current_merchant_id()
-ORDER BY started_at DESC
-LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- Re-runs UPDATE the standing finding for (merchant, finding_type, subject_key).
 -- A previously resolved finding that reappears is REOPENED with the freshly
@@ -212,8 +180,8 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
       SELECT 1 FROM billing.provider_intents pi
       WHERE pi.merchant_id = f.merchant_id
         AND pi.id::text = f.subject_key
-        AND ((pi.status IN ('pending', 'failed_retryable') AND pi.created_at <= sqlc.arg(action_cutoff)::timestamptz
-              AND NOT (pi.intent_type = 'price_migration_push' AND pi.status = 'pending' AND pi.next_attempt_at > sqlc.arg(now)::timestamptz))
+        AND ((pi.status = 'pending' AND pi.last_failure_reason IS NULL AND pi.next_attempt_at <= sqlc.arg(action_cutoff)::timestamptz)
+          OR ((pi.status = 'failed_retryable' OR pi.status = 'pending' AND pi.last_failure_reason IS NOT NULL) AND pi.created_at <= sqlc.arg(action_cutoff)::timestamptz)
           OR (pi.status IN ('in_flight', 'unknown_needs_verify') AND pi.created_at <= sqlc.arg(verify_cutoff)::timestamptz))
   );
 
@@ -235,26 +203,6 @@ SET status = 'auto_fixed',
     notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
-
--- name: AckReconciliationFinding :execrows
-UPDATE billing.reconciliation_findings
-SET status = 'fixed',
-    resolution = 'admin_fixed',
-    operator_notes = sqlc.narg(operator_notes),
-    resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
-    updated_at = now()
-WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed');
-
--- name: DismissReconciliationFinding :execrows
-UPDATE billing.reconciliation_findings
-SET status = 'ignored',
-    resolution = 'ignored',
-    operator_notes = sqlc.narg(operator_notes),
-    resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
-    updated_at = now()
-WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed');
 
 -- The operator work list: open findings unless a status filter is given,
 -- critical first, then oldest first; keyset-paged.
@@ -454,11 +402,6 @@ SELECT id FROM billing.payments
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
   AND transaction_id = sqlc.arg(transaction_id)::text AND deleted_at IS NULL;
 
--- name: ListApprovalRunFindings :many
-SELECT * FROM billing.reconciliation_findings
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND approval_run_id = sqlc.arg(run_id)::uuid
-ORDER BY resolved_at, id;
-
 -- name: ReconcileListSubscriptionsByRails :many
 SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subscriptions.product_id,
        subscriptions.row_version, subscriptions.status, subscriptions.rail, subscriptions.collection_policy, subscriptions.rail_subscription_id,
@@ -540,13 +483,6 @@ WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM
 -- Enforce appliers: idempotent local writes only, never a provider call.
 -- Subscription state transitions go through reconcile.Decide and
 -- reconcile.ApplyDecision instead.
-
--- Backfills a rail charge that has no local payment record, deduped on
--- payments_psp_id_transaction_id_key.
--- name: ReconcileMarkPaymentRefunded :execrows
-UPDATE billing.payments
-SET status = 'refunded'
-WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status <> 'refunded' AND deleted_at IS NULL;
 
 -- Materialization (--materialize): creates the local subscription for a rail
 -- subscription resolved unambiguously to an identity and a price; access
@@ -634,7 +570,7 @@ ORDER BY s.merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;
 
 -- An active provider-billed subscription whose paid period ended before
--- overdue_before with no renewal payment. A clock reading only: rebill watch
+-- overdue_before with no renewal payment. A clock reading only: the due pass
 -- asks the provider (RenewalOverdue -> unverified). Oldest lapse first, a page
 -- after the (period end, id) cursor.
 -- name: ListOverdueRenewals :many
@@ -668,7 +604,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         OR (status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
             AND expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz)
       )
-ORDER BY created_at, id;
+ORDER BY created_at, id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- life.provider_intent.abandoned findings close subject-first once their
 -- operation is no longer abandoned (it ran after all, or is gone).
@@ -736,7 +673,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
              pa.starts_at < COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour'))
         AND (pa.ends_at IS NULL OR pa.ends_at > COALESCE(s.current_period_starts_at, s.started_at))
   )
-ORDER BY s.current_period_ends_at;
+ORDER BY s.current_period_ends_at, s.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- A chargeback revokes access. Ordinary cancellation only stops billing and
 -- leaves all previously purchased access windows intact, including indefinite
@@ -935,7 +873,8 @@ WHERE m.status = 'active' AND m.deleted_at IS NULL AND m.id > sqlc.arg(after_mer
                AND s.status IN ('active', 'past_due') AND s.deleted_at IS NULL AND s.current_period_ends_at <= sqlc.arg(held_before)::timestamptz)
     OR EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id = m.id AND i.updated_at > sqlc.arg(active_since)::timestamptz)
     OR EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id = m.id
-               AND i.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify') AND i.created_at <= sqlc.arg(stuck_before)::timestamptz)
+               AND i.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+               AND CASE WHEN i.status = 'pending' AND i.last_failure_reason IS NULL THEN i.next_attempt_at ELSE i.created_at END <= sqlc.arg(stuck_before)::timestamptz)
     OR EXISTS (SELECT 1 FROM billing.product_access e WHERE e.merchant_id = m.id AND e.deleted_at IS NULL
                AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > sqlc.arg(lapsed_since)::timestamptz
                AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= sqlc.arg(now)::timestamptz))
@@ -1075,14 +1014,6 @@ SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text
   AND subject_key = sqlc.arg(subject_key)::text
   AND status IN ('reconcile_required', 'requires_review');
-
--- name: AutoResolveReviewFindingsByType :exec
-UPDATE billing.reconciliation_findings
-SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, updated_at = now()
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = ANY(sqlc.arg(finding_types)::text[])
-  AND status = 'requires_review';
-
 
 -- The PSP's subscriptions whose imported provider schedule is unresolved,
 -- each named by its open life.import.schedule_unresolved finding; keyset
