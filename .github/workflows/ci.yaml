@@ -233,9 +233,11 @@ jobs:
       # A pull request that rewrites the migrations (a fold into the baseline)
       # must build the database its base's chain builds: identical pg_dump
       # output in billing and in a relocated schema. pg_dump 18 is the server
-      # container's.
+      # container's. It is proven where the rewrite enters its release candidate:
+      # the candidate's own pull request into master also carries the schema
+      # changes merged beside it, so its chain is not its base's.
       - name: Rewritten migrations build the base's schema
-        if: ${{ !cancelled() && needs.scope.outputs.base_sha != '' }}
+        if: ${{ !cancelled() && needs.scope.outputs.base_sha != '' && needs.scope.outputs.tier == 'light' }}
         env:
           BASE_SHA: ${{ needs.scope.outputs.base_sha }}
         run: |

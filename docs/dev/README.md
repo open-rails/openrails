@@ -64,7 +64,7 @@ change: a schema change is a new numbered migration (`0002_…`) with its
 Before v1 a merged migration is folded into the baseline: apply its effect where
 the objects it touches are defined, delete the numbered file and take it out of
 `sqlc.yaml`. CI's "SQL bindings and query audit" job proves the fold: when a
-pull request changes or removes a migration of its base, `go run
+pull request into a release candidate changes or removes a migration of its base, `go run
 ./scripts/schemaproof` applies the base's chain and the tree's to empty
 databases and fails unless they dump identically (`pg_dump` 18), in `billing`
 and in another schema.
