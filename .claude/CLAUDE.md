@@ -25,6 +25,13 @@ through `host-four`; these are placeholders, not customer or repository names.
   opens a PR pinning their requires of the root; once it is green, `publish vX.Y.Z` fast-forwards
   master to it and pushes the `vX.Y.Z`, `server/vX.Y.Z` and `adapters/authkit/vX.Y.Z` tags with it.
 
+## Branches
+- Feature branch → open RC → master → tag. `OPEN.md` names the one open `rc/<name>` (cut from master,
+  deleted once merged); branch from it and target it, never master.
+- A ready PR into `rc/**` runs the light CI tier (no `critical/`); the RC → master PR runs everything once.
+- Master takes PRs only from `rc/*` and `scripts/release`'s `chore/release-vX.Y.Z` (`Source branch` check).
+  A release is a tag on master; not every master commit is one. Details: `docs/ci.md`.
+
 ## v1 is frozen
 - From v1.0.0 three contracts change only by adding to them (`docs/compatibility.md`):
   the Go API (`openrails`, `billing`, `catalog`, `adapters/*`, `server/web/console`, `server`), the

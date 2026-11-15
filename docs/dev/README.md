@@ -133,16 +133,22 @@ The root, `billing`, `catalog`, the adapters, `openrailstest` (and its
 `nmimock` and `stripemock`), `server/web/console` and `server` are the only importable non-`main` packages;
 another one changes `compatibility/contract.json`, which the contract check holds to its snapshot.
 
+## Branches
+
+Cut a feature branch from the open release candidate named in [OPEN.md](../../OPEN.md) and open its
+pull request against that `rc/<name>` branch, as a draft until its last commit. Master takes only the
+release candidate and the release PR below. [docs/ci.md](../ci.md) has the rules and what each runs.
+
 ## Releases
 
 ```sh
-scripts/release prepare vX.Y.Z            # opens the release PR from origin/master
-scripts/release publish vX.Y.Z ["note"]   # once that PR's checks pass
+scripts/release prepare vX.Y.Z [rc/<name>]  # opens the release PR from origin/master, or from the open RC
+scripts/release publish vX.Y.Z ["note"]     # once that PR's checks pass
 ```
 
 The root, server and optional AuthKit adapter modules release together. Master accepts only commits
 whose checks passed, so `prepare` pins their requirements of the root
-to `vX.Y.Z` on a `release/vX.Y.Z` branch and opens its PR; `publish`
+to `vX.Y.Z` on a `chore/release-vX.Y.Z` branch and opens its PR into master; `publish`
 fast-forwards master to the green PR head and pushes it with the signed,
 annotated `vX.Y.Z`, `server/vX.Y.Z` and `adapters/authkit/vX.Y.Z` tags in one atomic push. `vX.Y.Z` runs `release.yaml` (GoReleaser builds the binary from the
 server module: binaries, checksums, SBOMs, generated notes, build
