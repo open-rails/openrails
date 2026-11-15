@@ -165,7 +165,9 @@ order: `payment: {token_symbol}` (the plan's token) answers `solana_pay` with
 `payload.period_hours`, and the wallet's transaction request is answered with
 the subscribe transaction for its account: (`init_subscription_authority`
 for a first-timer,) `subscribe`, and a cranker-co-signed pull of the full
-first period, stamped with the order's reference.
+first period, stamped with the order's reference. An account that is the
+plan's cranker is refused (`invalid_param`): the cranker never signs a
+wallet's slot.
 
 A subscription activates only from that first payment: signed by the wallet
 that asked for it, carrying the reference, subscribing to the plan's terms and

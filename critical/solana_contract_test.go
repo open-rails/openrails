@@ -438,6 +438,26 @@ func TestSolanaContracts(t *testing.T) {
 		settleOperations(t, fleet)
 		s.renewed(t, sub, due.Add(pullMargin).Add(168*time.Hour))
 	})
+	t.Run("OR-J37-S63/a-wallet-that-is-the-plans-cranker-is-refused-a-co-signed-subscribe", func(t *testing.T) {
+		s := newSolanaWorld(t, true)
+		usdc := solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)
+		// Funded and delegated, so only the cranker identity can refuse it.
+		s.node.Fund(s.cranker.PublicKey(), usdc, 100_000_000)
+		require.NoError(t, s.node.Authority(s.cranker.PublicKey(), usdc, 123))
+		order := s.order(t, true)
+		sends := s.wire.sends()
+		status, raw := s.request(t, http.MethodPost, "/v1/orders/"+order.ID.String()+"/solana-pay", s.aliceToken, map[string]string{"account": s.cranker.PublicKey().String()})
+		require.Equal(t, http.StatusBadRequest, status, string(raw))
+		require.Contains(t, string(raw), `"code":"invalid_param"`)
+		var prepared struct {
+			Transaction string `json:"transaction"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &prepared))
+		require.Empty(t, prepared.Transaction, "the cranker signs no transaction for its own wallet")
+		require.Equal(t, sends, s.wire.sends())
+		require.EqualValues(t, 100_000_000, s.node.Balance(s.cranker.PublicKey(), usdc))
+		s.noAccess(t, order)
+	})
 	t.Run("OR-J37-S05", func(t *testing.T) {
 		t.Run("wrong-chain-identity", func(t *testing.T) {
 			s := newSolanaWorld(t, false, solanaFixtureOptions{network: "mainnet"})
