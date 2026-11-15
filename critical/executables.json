@@ -844,6 +844,9 @@
     "OR-J04-S70": [
       "TestDueWork/OR-J04-S70/the-hourly-health-pass-raises-held-renewals"
     ],
+    "OR-J04-S71": [
+      "TestBillingPass/OR-J04-S71/a-failed-nmi-history-read-fails-the-pass-and-the-next-reads-it"
+    ],
     "OR-J12-S12": [
       "TestCardGuard/OR-J12-S12/mastercard-length-rule-keeps-real-cards-blocked"
     ],

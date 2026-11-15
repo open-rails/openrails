@@ -241,6 +241,16 @@ func TestBillingPass(t *testing.T) {
 		require.EqualValues(t, 1000, lotExpired(t, a.alpha, lots[0].ID))
 		renewalSettled(t, a, p, sub, due)
 	})
+	t.Run("OR-J04-S71/a-failed-nmi-history-read-fails-the-pass-and-the-next-reads-it", func(t *testing.T) {
+		a, p := newNMIWorld(t)
+		fleet := quietFleet(t, a.world)
+		p.core.QueryUnavailable(true)
+		advanceTo(a.world, nextHour(a.clock.Now()))
+		require.True(t, runPass(t, fleet), "a history read NMI refused fails the pass, not only a log line")
+		p.core.QueryUnavailable(false)
+		advanceTo(a.world, nextHour(a.clock.Now()))
+		require.False(t, runPass(t, fleet), "the next pass reads the account's history")
+	})
 	t.Run("OR-J04-S48/job-progress-fails-a-day-overdue-and-clears-on-a-clean-pass", func(t *testing.T) {
 		w := newWorld(t)
 		customer := billing.CustomerID(uuid.New())
