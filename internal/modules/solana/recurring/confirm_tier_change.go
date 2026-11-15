@@ -16,32 +16,13 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/solana/settlement"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// tierChangeLifecycle is the membership surface the mirror drives (satisfied by
-// *subscriptions.SubscriptionLifecycleService): cancel the OLD membership and
-// create the NEW one.
-type tierChangeLifecycle interface {
-	CancelMembershipTx(ctx context.Context, txDB *db.DB, params *submod.CancelMembershipParams) (*submod.CancelMembershipTxResult, error)
-	CreateMembershipTx(ctx context.Context, txDB *db.DB, params *submod.CreateMembershipParams) (*models.Subscription, []*models.NotificationEvent, error)
-}
-
 type tierChangeTransactor interface {
 	MerchantTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error
-}
-
-type tierChangeStore interface {
-	GetBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.SolanaSubscription, error)
-	UpsertTx(ctx context.Context, txDB *db.DB, s *models.SolanaSubscription) error
-	SetStatusTx(ctx context.Context, txDB *db.DB, id uuid.UUID, status string) error
-}
-
-type tierChangeMembershipStore interface {
-	GetByID(ctx context.Context, id uuid.UUID) (*models.Subscription, error)
-	LockTierChangeTx(ctx context.Context, txDB *db.DB, id uuid.UUID) (*models.Subscription, error)
-	SaveSolanaTierChangeTx(ctx context.Context, txDB *db.DB, id uuid.UUID, receipt *models.SolanaTierChangeReceipt) error
 }
 
 // ConfirmTierChangeInput describes a confirmed on-chain tier change to mirror.
@@ -134,9 +115,9 @@ func ReplayTierChange(sub *models.Subscription, priceID uuid.UUID, signature str
 // active row. Retries return the receipt saved with the old membership.
 type ConfirmTierChangeService struct {
 	chain       landedTxReader
-	lifecycle   tierChangeLifecycle
-	store       tierChangeStore
-	memberships tierChangeMembershipStore
+	lifecycle   *submod.SubscriptionLifecycleService
+	store       *solanasubs.SolanaSubscriptionRepo
+	memberships *submod.SubscriptionRepo
 	transactor  tierChangeTransactor
 	tokens      Tokens
 	now         func() time.Time
@@ -144,7 +125,7 @@ type ConfirmTierChangeService struct {
 
 // NewConfirmTierChangeService builds a ConfirmTierChangeService. network
 // ("mainnet"/"devnet") resolves the recurring mint for the new row.
-func NewConfirmTierChangeService(chain landedTxReader, lifecycle tierChangeLifecycle, store tierChangeStore, memberships tierChangeMembershipStore, transactor tierChangeTransactor, tokens Tokens) *ConfirmTierChangeService {
+func NewConfirmTierChangeService(chain landedTxReader, lifecycle *submod.SubscriptionLifecycleService, store *solanasubs.SolanaSubscriptionRepo, memberships *submod.SubscriptionRepo, transactor tierChangeTransactor, tokens Tokens) *ConfirmTierChangeService {
 	return &ConfirmTierChangeService{
 		chain:       chain,
 		lifecycle:   lifecycle,

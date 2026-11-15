@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -85,28 +86,22 @@ type cancelConfirmRPC interface {
 	WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, terminal solanaint.ChainTerminal) (*solanaint.TransactionOutcome, error)
 }
 
-// membershipCanceller applies the customer's period-end cancel; its cascade
-// flips the linked solana_subscriptions row to canceled, stopping the cranker.
-type membershipCanceller interface {
-	CancelMembership(ctx context.Context, params *submod.CancelMembershipParams) error
-}
-
 // ConfirmCancelService confirms the optional on-chain cancel a customer's
 // wallet signed landed. A Solana cancel needs none: OpenRails stops pulling.
 // The customer's period-end cancel is applied with it (a no-op when already
 // canceled); cancel_subscription also ends the subscription at period end.
 type ConfirmCancelService struct {
 	rpc        cancelConfirmRPC
-	repo       solanaSubscriptionReader
+	repo       *solanasubs.SolanaSubscriptionRepo
 	chain      accountReader
-	canceller  membershipCanceller
+	canceller  *submod.SubscriptionLifecycleService
 	commitment rpc.CommitmentType
 }
 
 // NewConfirmCancelService confirms at Confirmed commitment. The wallet built
 // the transaction, so its blockhash is unknown here: the watch runs until the
 // caller's context ends.
-func NewConfirmCancelService(rpcClient cancelConfirmRPC, canceller membershipCanceller, repo solanaSubscriptionReader, chain accountReader) *ConfirmCancelService {
+func NewConfirmCancelService(rpcClient cancelConfirmRPC, canceller *submod.SubscriptionLifecycleService, repo *solanasubs.SolanaSubscriptionRepo, chain accountReader) *ConfirmCancelService {
 	return &ConfirmCancelService{
 		rpc:        rpcClient,
 		repo:       repo,
