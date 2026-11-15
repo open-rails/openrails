@@ -232,7 +232,8 @@ func (s StripeScheduleState) MatchesCreation(subscriptionID, currentPriceID stri
 
 // MatchesPhases is the exact-receipt check for a scheduled downgrade: the
 // schedule carries the operation key, governs the frozen subscription, keeps
-// the current price until the frozen period end and then bills the new price.
+// the current price until the frozen period end and then bills the new price
+// for the same seats.
 func (s StripeScheduleState) MatchesPhases(subscriptionID, key, currentPriceID, newPriceID string, periodEnd int64) error {
 	if err := s.MatchesCreation(subscriptionID, currentPriceID); err != nil {
 		return err
@@ -242,6 +243,8 @@ func (s StripeScheduleState) MatchesPhases(subscriptionID, key, currentPriceID, 
 		return fmt.Errorf("%w: schedule %s does not carry this operation's key", ErrStripeTierChangeMismatch, s.ID)
 	case len(s.Phases) < 2 || newPriceID == "" || s.Phases[1].PriceID != newPriceID:
 		return fmt.Errorf("%w: schedule %s does not continue on price %q", ErrStripeTierChangeMismatch, s.ID, newPriceID)
+	case s.Phases[1].Quantity != s.Phases[0].Quantity:
+		return fmt.Errorf("%w: schedule %s continues with %d seats, not %d", ErrStripeTierChangeMismatch, s.ID, s.Phases[1].Quantity, s.Phases[0].Quantity)
 	case periodEnd <= 0 || s.Phases[0].EndDate != periodEnd:
 		return fmt.Errorf("%w: schedule %s switches at %d, not %d", ErrStripeTierChangeMismatch, s.ID, s.Phases[0].EndDate, periodEnd)
 	}
@@ -274,24 +277,29 @@ type StripeSchedulePhasesParams struct {
 }
 
 func (p StripeSchedulePhasesParams) values() url.Values {
+	values := schedulePhasesForm(p.Current, p.NewPriceID, p.BillingCycleDays)
+	values.Set("metadata["+StripeTierChangeKeyMetadata+"]", p.Key)
+	return values
+}
+
+// schedulePhasesForm is the two-phase schedule every price change at period
+// end writes: the current phase as Stripe copied it from the subscription,
+// then the new price for the same seats, released when it ends.
+func schedulePhasesForm(current StripeSchedulePhase, newPriceID string, billingCycleDays *int) url.Values {
 	interval, intervalCount := "month", 1
-	if p.BillingCycleDays != nil && *p.BillingCycleDays > 0 {
-		interval, intervalCount = sharedformat.BillingCycleDaysToStripeRecurring(*p.BillingCycleDays)
+	if billingCycleDays != nil && *billingCycleDays > 0 {
+		interval, intervalCount = sharedformat.BillingCycleDaysToStripeRecurring(*billingCycleDays)
 	}
-	quantity := p.Current.Quantity
-	if quantity <= 0 {
-		quantity = 1
-	}
+	seats := strconv.FormatInt(max(current.Quantity, 1), 10)
 	values := url.Values{}
 	values.Set("end_behavior", "release")
 	values.Set("proration_behavior", "none")
-	values.Set("metadata["+StripeTierChangeKeyMetadata+"]", p.Key)
-	values.Set("phases[0][items][0][price]", p.Current.PriceID)
-	values.Set("phases[0][items][0][quantity]", strconv.FormatInt(quantity, 10))
-	values.Set("phases[0][start_date]", strconv.FormatInt(p.Current.StartDate, 10))
-	values.Set("phases[0][end_date]", strconv.FormatInt(p.Current.EndDate, 10))
-	values.Set("phases[1][items][0][price]", p.NewPriceID)
-	values.Set("phases[1][items][0][quantity]", "1")
+	values.Set("phases[0][items][0][price]", current.PriceID)
+	values.Set("phases[0][items][0][quantity]", seats)
+	values.Set("phases[0][start_date]", strconv.FormatInt(current.StartDate, 10))
+	values.Set("phases[0][end_date]", strconv.FormatInt(current.EndDate, 10))
+	values.Set("phases[1][items][0][price]", newPriceID)
+	values.Set("phases[1][items][0][quantity]", seats)
 	values.Set("phases[1][duration][interval]", interval)
 	values.Set("phases[1][duration][interval_count]", strconv.Itoa(intervalCount))
 	return values

@@ -926,6 +926,12 @@
     ],
     "OR-J12-S70": [
       "TestOrderExpiryClock/OR-J12-S70/card-save-past-its-cutoff-is-removed-before-the-pass"
+    ],
+    "OR-J18-S06": [
+      "TestSubscriptionChangeContracts/OR-J18-S06/stripe-downgrade-keeps-the-subscriptions-seats"
+    ],
+    "OR-J19-S07": [
+      "TestPriceMigrationContracts/OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create"
     ]
   },
   "suites": {

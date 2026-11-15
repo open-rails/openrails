@@ -4,7 +4,11 @@ package critical_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -246,6 +250,56 @@ func TestPriceMigrationContracts(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, sub.PriceID, current.PriceID)
 		require.Nil(t, current.ScheduledChange)
+	})
+	t.Run("OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create", func(t *testing.T) {
+		s := stripeSeatMembership(t)
+		s.stripe.AddPrice(stripemock.Price{ID: "price_gold_v2", Product: "prod_gold", Amount: 2500, Interval: "month"})
+		target, err := s.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: s.gold.ProductID, Key: "stripe-gold-v2", PSP: "seats", PriceID: "price_gold_v2"})
+		require.NoError(t, err)
+		// Stripe attaches the first schedule, then its answer is lost.
+		var lost atomic.Bool
+		s.stripe.Intercept(func(r *http.Request) bool {
+			return r.Method == http.MethodPost && r.URL.Path == "/v1/subscription_schedules" && !lost.Load()
+		}, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
+			serve()
+			lost.Store(true)
+			return nil, errors.New("stripe attached the schedule; its answer was lost")
+		})
+		migration, err := s.alpha.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: s.gold.ID, ToPriceID: target.ID, AcknowledgeShortNotice: true})
+		require.NoError(t, err)
+		require.Equal(t, 1, migration.Scheduled)
+		remote := *s.sub.RailSubscriptionID
+		fleet := manualFleet(t, s.world)
+		require.Eventually(t, func() bool {
+			wakeOperations(t, fleet)
+			return lost.Load()
+		}, 20*time.Second, 50*time.Millisecond)
+		// The clock moves only once the push has recorded its retry, if any.
+		require.Eventually(t, func() bool { return operationsIdle(t, fleet) }, 20*time.Second, 50*time.Millisecond)
+		s.clock.Advance(time.Hour)
+		var schedule string
+		require.Eventually(t, func() bool {
+			wakeOperations(t, fleet)
+			schedule, _ = s.stripe.Subscription(remote)["schedule"].(string)
+			return schedule != "" && len(s.stripe.Mutations("/v1/subscription_schedules/"+schedule)) > 0
+		}, 20*time.Second, 50*time.Millisecond, "the retried push replays the attached schedule and writes its phases")
+		creates := s.stripe.Submitted("/v1/subscription_schedules")
+		require.Len(t, creates, 2, "the lost create and its replay")
+		key, ok := strings.CutSuffix(creates[0].IdempotencyKey, ":schedule")
+		require.True(t, ok, creates[0].IdempotencyKey)
+		for _, create := range creates {
+			require.Equal(t, key+":schedule", create.IdempotencyKey)
+			require.Equal(t, url.Values{"from_subscription": {remote}}, create.Form)
+		}
+		writes := s.stripe.Submitted("/v1/subscription_schedules/" + schedule)
+		require.Len(t, writes, 1)
+		require.Equal(t, key+":phases", writes[0].IdempotencyKey)
+		require.Equal(t, s.phasesForm("price_gold_v2", nil), writes[0].Form, "the new price bills the same three seats from the switch")
+		require.Len(t, s.stripe.Mutations("/v1/subscription_schedules"), 2, "Stripe attached one schedule and wrote its phases once")
+		result, err := s.alpha.GetPriceMigration(t.Context(), migration.ID)
+		require.NoError(t, err)
+		require.Zero(t, result.Blocked)
+		require.Equal(t, 1, result.Scheduled, "the move waits for Stripe's switch")
 	})
 }
 
