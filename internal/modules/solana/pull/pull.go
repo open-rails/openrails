@@ -40,11 +40,13 @@ type Payload struct {
 // *solana.RPCClient).
 type ChainReader interface {
 	GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error)
+	NeverLanded(ctx context.Context, signature solanago.Signature, terminal solanaint.ChainTerminal) (bool, error)
 }
 
 // Handler executes the recurring pull intent: it freezes the accepted
 // agreement, records the signature before sending, repairs landed pulls, and
-// only retries a recorded transaction after confirming that it reverted.
+// only retries a recorded transaction after proving that it reverted or
+// expired without landing.
 type Handler struct {
 	DB        *db.DB
 	Clock     clockwork.Clock
@@ -163,7 +165,12 @@ func (h *Handler) Execute(ctx context.Context, intent gen.BillingProviderIntent)
 		result, verdict := h.checkSignature(ctx, sig)
 		switch verdict {
 		case sigVerdictUnknown:
-			return intents.Ambiguous("recorded pull signature unresolved; refusing to re-pull blind")
+			if !h.expiredUnseen(ctx, intent, sig) {
+				return intents.Ambiguous("recorded pull signature unresolved; refusing to re-pull blind")
+			}
+			if err := h.recordExpiredSignature(ctx, intent.ID, sig); err != nil {
+				return intents.Parked("could not retain pull nonexecution evidence: " + err.Error())
+			}
 		case sigVerdictLanded:
 			if err := verifyPullMemoMatchesIntent(result, intent.ID); err != nil {
 				return intents.Parked("recorded pull signature landed but " + err.Error())
@@ -193,7 +200,7 @@ func (h *Handler) Execute(ctx context.Context, intent gen.BillingProviderIntent)
 
 	var recorded string
 	var execution *observed.Execution
-	presubmit := func(sig string) error {
+	presubmit := func(sig string, terminal solanaint.ChainTerminal) error {
 		if h.Store == nil {
 			return errors.New("intent store unavailable for signature write-ahead")
 		}
@@ -217,7 +224,8 @@ func (h *Handler) Execute(ctx context.Context, intent gen.BillingProviderIntent)
 			if err := pullEpisodeState(sub, current, p.NextPullAt, p.Agreement); err != nil {
 				return err
 			}
-			execution = &observed.Execution{IntentID: intent.ID, AttemptID: uuidutil.NewV7(), ClaimAttempt: intent.Attempts, Signature: sig, SubmittedAt: h.now().Truncate(time.Microsecond)}
+			execution = &observed.Execution{IntentID: intent.ID, AttemptID: uuidutil.NewV7(), ClaimAttempt: intent.Attempts, Signature: sig, SubmittedAt: h.now().Truncate(time.Microsecond),
+				LastValidBlockHeight: terminal.LastValidBlockHeight}
 			encoded, err := json.Marshal(execution)
 			if err != nil {
 				return err
@@ -305,9 +313,8 @@ func (h *Handler) Execute(ctx context.Context, intent gen.BillingProviderIntent)
 	}
 }
 
-// Verify repairs successful pulls and retries reverted transactions. Missing
-// transactions stay unresolved: even after expiry, a missing historical read
-// does not prove that the payment never landed.
+// Verify repairs successful pulls and retries reverted transactions. A missing
+// transaction stays unresolved until its expiry is proven (expiredUnseen).
 func (h *Handler) Verify(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
 	p, err := decodePayload(intent)
 	if err != nil {
@@ -323,7 +330,13 @@ func (h *Handler) Verify(ctx context.Context, intent gen.BillingProviderIntent) 
 	result, verdict := h.checkSignature(ctx, sig)
 	switch verdict {
 	case sigVerdictUnknown:
-		return intents.Ambiguous("recorded pull signature still unresolved")
+		if !h.expiredUnseen(ctx, intent, sig) {
+			return intents.Ambiguous("recorded pull signature still unresolved")
+		}
+		if err := h.recordExpiredSignature(ctx, intent.ID, sig); err != nil {
+			return intents.Parked("could not retain pull nonexecution evidence: " + err.Error())
+		}
+		return intents.Retryable("recorded transaction expired without landing; safe to re-pull")
 	case sigVerdictNotLanded:
 		if err := h.recordRevertedSignature(ctx, intent.ID, sig); err != nil {
 			return intents.Parked("could not retain pull nonexecution evidence: " + err.Error())
@@ -341,11 +354,43 @@ func (h *Handler) Verify(ctx context.Context, intent gen.BillingProviderIntent) 
 
 // The proof names its exact signature. A subsequent signed pull has a new
 // transaction_id and is unresolved again, regardless of the old proof.
+// reverted_transaction_id names a signature proven to have moved no money.
 func (h *Handler) recordRevertedSignature(ctx context.Context, id uuid.UUID, sig string) error {
 	if h.Store == nil {
 		return errors.New("intent store unavailable")
 	}
 	return h.Store.RecordProgress(ctx, id, map[string]any{"reverted_transaction_id": sig})
+}
+
+// recordExpiredSignature releases a signature that expired without landing.
+func (h *Handler) recordExpiredSignature(ctx context.Context, id uuid.UUID, sig string) error {
+	if h.Store == nil {
+		return errors.New("intent store unavailable")
+	}
+	return h.Store.RecordProgress(ctx, id, map[string]any{"reverted_transaction_id": sig, "expired_transaction_id": sig})
+}
+
+// expiredUnseen reports whether the recorded signature provably never landed:
+// its submitted execution names the last block height that could include it,
+// and the chain proves that height finalized with the signature unknown.
+// Anything less, a missing execution or terminal included, proves nothing.
+func (h *Handler) expiredUnseen(ctx context.Context, intent gen.BillingProviderIntent, sig string) bool {
+	if h.Chain == nil {
+		return false
+	}
+	var evidence struct {
+		Execution *observed.Execution `json:"execution"`
+	}
+	if json.Unmarshal(intent.ResultEvidence, &evidence) != nil || evidence.Execution == nil ||
+		evidence.Execution.IntentID != intent.ID || evidence.Execution.Signature != sig || evidence.Execution.LastValidBlockHeight == 0 {
+		return false
+	}
+	signature, err := solanago.SignatureFromBase58(sig)
+	if err != nil {
+		return false
+	}
+	never, err := h.Chain.NeverLanded(ctx, signature, solanaint.ChainTerminal{LastValidBlockHeight: evidence.Execution.LastValidBlockHeight})
+	return err == nil && never
 }
 
 // repairFromSignature runs the renewal repair for a pull CONFIRMED on-chain:

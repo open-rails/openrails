@@ -799,6 +799,9 @@
     "OR-J37-S61": [
       "TestSolanaPulls/OR-J37-S61/a-pull-the-chain-refuses-before-its-period-end-is-retried-not-taken-as-paid"
     ],
+    "OR-J37-S62": [
+      "TestSolanaPulls/OR-J37-S62/a-dropped-pull-is-signed-again-only-once-it-provably-never-landed"
+    ],
     "OR-J21-S60": [
       "TestBackgroundJobs/OR-J21-S60/an-import-queues-the-read-of-the-charges-it-attributed"
     ],

@@ -225,11 +225,11 @@ only, across every merchant and PSP.
   and grant that one period. Later catalog edits and verifier clocks cannot
   reprice or extend it. Missing or mismatched evidence stays unresolved.
 - **Each attempt freezes its terms when it executes.** An attempt with nothing
-  signed, or whose signed transaction reverted, freezes its agreement from the
-  subscription as it stands, a due scheduled change applied, under the
-  subscription lock and its claim. A signed pull without retained terms keeps
-  its signature for evidence-based recovery; current catalog data cannot
-  supply its missing historical agreement.
+  signed, or whose signed transaction reverted or expired unseen, freezes its
+  agreement from the subscription as it stands, a due scheduled change
+  applied, under the subscription lock and its claim. A signed pull without
+  retained terms keeps its signature for evidence-based recovery; current
+  catalog data cannot supply its missing historical agreement.
 - **One pull per period, enforced twice.** The on-chain program independently
   caps pulls at one plan-amount per period (a second pull fails with
   `Custom:400` "period already paid"), so even a buggy biller cannot
@@ -253,6 +253,12 @@ only, across every merchant and PSP.
   backoff, never held against the subscriber. An episode whose operation ended
   without advancing the subscription (a period already paid on chain) waits
   for the operator its finding names.
+- **A dropped pull is signed again only once it provably never landed.**
+  Cranker transactions bid a priority fee. The signature and its blockhash's
+  last valid block height are recorded before sending. A signature the chain
+  does not know stays unresolved until the finalized block height passes that
+  height and a history-searching status read made afterwards still does not
+  know it; only then is the pull signed again. A dropped pull is never dunned.
 - **Cancellation is pending until the paid period ends and needs no wallet.**
   `POST /v1/me/subscriptions/{id}/cancel` records it immediately and stops the
   cranker from pulling another renewal. Paid access continues until the period
