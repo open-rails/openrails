@@ -869,6 +869,9 @@
     "OR-J12-S12": [
       "TestCardGuard/OR-J12-S12/mastercard-length-rule-keeps-real-cards-blocked"
     ],
+    "OR-J12-S13": [
+      "TestStripeCustomerPerAccount/OR-J12-S13/each-stripe-account-resolves-its-own-customer"
+    ],
     "OR-J38-S36": [
       "TestCardGuard/OR-J38-S36/ccbill-references-import-and-export-unchanged"
     ],

@@ -315,16 +315,16 @@ func initialMembershipResponseFromIntent(intent gen.BillingProviderIntent) (*Pur
 }
 
 // railCustomerStore is the slice of RailCustomerService used for
-// Stripe customer resolution. Defined as an interface so the resolution logic
-// is unit-testable without a database.
+// Stripe customer resolution. Both calls act on the PSP pinned on ctx.
 type railCustomerStore interface {
-	GetCustomerID(ctx context.Context, userID, rail string) (string, error)
+	GetAccountIDForPSP(ctx context.Context, customerID uuid.UUID, rail string) (string, error)
 	Upsert(ctx context.Context, userID, rail, customerID string) error
 }
 
-// stripeCustomerClient is the slice of StripeService used for customer
-// resolution and the duplicate guard.
+// stripeCustomerClient is the slice of an account-bound StripeService used for
+// customer resolution and the duplicate guard.
 type stripeCustomerClient interface {
+	AccountIdentity() (merchantID, pspID uuid.UUID)
 	CreateCustomer(ctx context.Context, email, appUserID string) (string, error)
 	FindCustomerIDByAppUserID(ctx context.Context, appUserID string) (string, error)
 	ListActiveSubscriptionsForCustomer(ctx context.Context, customerID string) ([]subscriptions.StripeSubscriptionSummary, error)
@@ -337,10 +337,12 @@ func (s *PurchaseService) customerStore() railCustomerStore {
 	return s.RailCustomerService
 }
 
-// resolveStripeCustomerWith returns the durable Stripe customer id for a user,
-// in priority order: the local mapping, Stripe Customer Search on
-// metadata[app_user_id], then a fresh idempotent customer. A resolved customer
-// is upserted into the local mapping so the link survives a missed webhook.
+// resolveStripeCustomerWith returns the user's Stripe customer id on the
+// account client is bound to, in priority order: that account's local
+// mapping, Stripe Customer Search on metadata[app_user_id], then a fresh
+// idempotent customer. A resolved customer is upserted into that account's
+// mapping so the link survives a missed webhook. A customer id is valid only
+// on the account that minted it, so another account's mapping is never read.
 // "" (no error) only when the dependencies are unavailable; the caller then
 // falls back to customer_email.
 func resolveStripeCustomerWith(ctx context.Context, store railCustomerStore, client stripeCustomerClient, user *UserIdentity) (string, error) {
@@ -352,9 +354,18 @@ func resolveStripeCustomerWith(ctx context.Context, store railCustomerStore, cli
 		// the email-only path rather than failing the purchase.
 		return "", nil
 	}
+	_, psp := client.AccountIdentity()
+	if psp == uuid.Nil {
+		return "", errors.New("Stripe customer resolution needs an account-bound client")
+	}
+	ctx = db.WithPSPID(ctx, psp)
+	customer, err := db.ResolveCustomerID(user.ID)
+	if err != nil {
+		return "", err
+	}
 
 	// 1. Local mapping.
-	customerID, err := store.GetCustomerID(ctx, user.ID, "stripe")
+	customerID, err := store.GetAccountIDForPSP(ctx, customer, "stripe")
 	if err != nil && !db.IsNotFound(err) {
 		return "", fmt.Errorf("lookup stripe customer mapping: %w", err)
 	}
