@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 324,
+  "scenario_count": 326,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1444,9 +1444,19 @@
       "name": "A provider-billed grace that ends unanswered is read by id from the due pass"
     },
     {
+      "id": "OR-J16-S71",
+      "journey": "J16",
+      "name": "An overdue provider-billed renewal is asked by id from the due pass before the rebill watch reads NMI"
+    },
+    {
       "id": "OR-J15-S70",
       "journey": "J15",
       "name": "An NMI renewal the probe cannot settle is read by id once its grace passes"
+    },
+    {
+      "id": "OR-J15-S72",
+      "journey": "J15",
+      "name": "A complete provider refresh queues no due work: the hourly billing pass takes it"
     },
     {
       "id": "OR-J15-S71",

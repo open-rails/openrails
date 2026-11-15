@@ -53,7 +53,7 @@ func runRegistered(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copie
 	// River uses wall time while business time is advanced independently. Make
 	// newly accepted work available through River's host API; worker admission
 	// still checks its own persisted eligibility at the controlled clock.
-	if kind == "openrails.dunning" || kind == "openrails.billing_pass" {
+	if kind == "openrails.billing_pass" {
 		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
 		require.NoError(t, err)
 		for _, job := range jobs.Jobs {
@@ -107,7 +107,7 @@ func TestRenewal(t *testing.T) {
 		a, p, sub := purchasedMembership(t)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) - time.Microsecond)
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 		require.NoError(t, err)
 		require.Equal(t, *sub.CurrentPeriodEndsAt, *current.CurrentPeriodEndsAt)
@@ -121,9 +121,9 @@ func TestRenewal(t *testing.T) {
 		due := *sub.CurrentPeriodEndsAt
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		renewalSettled(t, a, p, sub, due)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		renewalSettled(t, a, p, sub, due)
 		paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
 		require.NoError(t, err)
@@ -145,7 +145,7 @@ func TestRenewal(t *testing.T) {
 		a.alpha, err = a.engine.MerchantBySlug("alpha")
 		require.NoError(t, err)
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		renewalSettled(t, a, p, sub, due)
 	})
 	t.Run("OR-J14-S04/admitted-renewal-keeps-terms-after-price-replacement", func(t *testing.T) {
@@ -155,7 +155,7 @@ func TestRenewal(t *testing.T) {
 		defer hold.Release()
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		select {
 		case <-hold.Arrived():
 		case <-time.After(10 * time.Second):

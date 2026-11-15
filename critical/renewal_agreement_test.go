@@ -20,7 +20,7 @@ import (
 func renewedAt(t *testing.T, a *authorityWorld, fleet *river.Client[pgx.Tx], sub billing.SubscriptionID, at, due time.Time) *billing.Subscription {
 	t.Helper()
 	a.clock.Advance(at.Sub(a.clock.Now()))
-	runRegistered(t, fleet, "openrails.dunning", 1)
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
 	require.Eventually(t, func() bool {
 		current, err := a.alpha.GetSubscription(t.Context(), sub)
 		return err == nil && current.CurrentPeriodStartsAt != nil && current.CurrentPeriodStartsAt.Equal(due)
@@ -53,7 +53,7 @@ func TestRenewalAgreements(t *testing.T) {
 		require.EqualValues(t, 1, tag.RowsAffected())
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		refused := func() []billing.Finding {
 			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.due_pass.refused"})
 			require.NoError(t, err)

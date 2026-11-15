@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -26,20 +25,12 @@ const (
 	configRealertMerchants = 500
 )
 
-// ConfigRealertArgs is one pass over due configuration re-alerts.
-type ConfigRealertArgs struct{}
-
-func (ConfigRealertArgs) Kind() string { return KindConfigRealerts }
-
-func (ConfigRealertArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
-
 // ConfigRealertWorker alerts each merchant's operator again of every
 // undeclared account still unresolved ConfigRealert after its last alert. The
 // merchant's configuration is re-evaluated first, which resolves what a
 // declaration or an ended subscription settled; then the due findings are
 // re-armed and claimed in one statement, committed with their alerts.
 type ConfigRealertWorker struct {
-	WorkerDefaults[ConfigRealertArgs]
 	DB    *db.DB
 	Clock clockwork.Clock
 	// Reload re-evaluates a merchant's configuration.
@@ -48,9 +39,7 @@ type ConfigRealertWorker struct {
 	Alerts *alerting.Service
 }
 
-func (ConfigRealertWorker) Kind() string { return KindConfigRealerts }
-
-func (w ConfigRealertWorker) Work(ctx context.Context, _ *river.Job[ConfigRealertArgs]) error {
+func (w ConfigRealertWorker) Pass(ctx context.Context) error {
 	if w.Alerts == nil {
 		return nil
 	}

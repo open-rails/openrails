@@ -288,7 +288,7 @@ func TestPSPControls(t *testing.T) {
 				require.EqualValues(t, 1000, p.provider.effects(t)[0].Amount)
 				a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 				fleet := startFleet(t, a.world)
-				runRegistered(t, fleet, "openrails.dunning", 2)
+				runRegistered(t, fleet, "openrails.billing_pass", 2)
 				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 				require.NoError(t, err)
 				require.Equal(t, sub.CurrentPeriodEndsAt, current.CurrentPeriodEndsAt)
@@ -621,11 +621,11 @@ func TestStripeWebhookDueWork(t *testing.T) {
 		require.NoError(t, fleet.Start(t.Context()))
 		require.Eventually(t, func() bool { return mail.count("undeclared_account") == 1 }, 20*time.Second, 20*time.Millisecond,
 			"the configuration load that finds the account alerts its operator")
-		runRegistered(t, fleet, "openrails.config_realerts", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		alertsSettled(t, fleet)
 		require.Equal(t, 1, mail.count("undeclared_account"), "not again within a day")
 		w.clock.Advance(24*time.Hour + time.Minute)
-		runRegistered(t, fleet, "openrails.config_realerts", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		alertsSettled(t, fleet)
 		require.Equal(t, 2, mail.count("undeclared_account"), "a day later it alerts again, once however many passes run")
 	})
@@ -641,7 +641,7 @@ func TestStripeWebhookDueWork(t *testing.T) {
 		require.Eventually(t, func() bool { return mail.count("undeclared_account") == 1 }, 20*time.Second, 20*time.Millisecond,
 			"its job retries the delivery")
 		// Neither the delivered job nor a later pass sends it again.
-		runRegistered(t, fleet, "openrails.config_realerts", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		alertsSettled(t, fleet)
 		require.Equal(t, 1, mail.count("undeclared_account"), "delivered once")
 		require.Equal(t, 1, mail.refusals())

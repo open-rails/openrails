@@ -797,7 +797,7 @@ Deadlines with no event:
 | Deadline | Picked up by | What happens |
 |---|---|---|
 | a provider-billed `past_due` row's grace ends with no retry scheduled | the due pass (hourly billing pass) | `unverified`: the provider is read by id, access kept |
-| a provider-billed renewal has no payment 48h after its period | the rebill watch (hourly billing pass) | `unverified`, as above |
+| a provider-billed renewal has no payment 48h after its period | the due pass (hourly billing pass) | `unverified`, as above |
 | a timed access window lapses | the health pass (hourly) | the customer's access-ended notice |
 | an engine renewal past its allowance, an unverified row past 72h, a stuck or abandoned provider operation | the health pass | `life.renewal.held`, `life.unverified.unresolved`, `life.provider_intent.stuck` / `.abandoned` |
 
@@ -1058,7 +1058,7 @@ the same idempotent reconciliation writers the pull uses, then runs scoped
 convergence. It never mutates a provider and **never charges** — charging
 stays inside dunning. Dunning owns `past_due` (we SAW the failure); the
 **silence cohort** — lapsed subscriptions with NO webhook either way — is
-parked as `unverified` by the rebill watch and the due pass, and resolved by the Unknown-cohort lane
+parked as `unverified` by the due pass, and resolved by the Unknown-cohort lane
 against ONE verdict set:
 
 | Provider evidence | Resolution |
@@ -1330,11 +1330,11 @@ each job stays short and the pass still reaches all of its work.
 
 Each OpenRails job runs under its kind's timeout: 10 minutes, an hour for
 the passes that read every merchant's providers (`cleanup_expired_data`,
-`provider_refresh_merchant`, `merchant_health`, `rebill_watch`) and an
-import's `charge_attributions` read, and for `stored_card_refresh_due` (which
-stops opening pages after 10 minutes), two for `psp_import`. The billing pass
-runs each scan under its own budget and takes their sum. River cancels a job
-past it. River's
+`provider_refresh_merchant`, `merchant_health`) and an import's
+`charge_attributions` read, two for `psp_import`. The billing pass runs each
+scan under its own budget, 10 minutes or an hour for the rebill watch, the NMI
+history read and stored card refresh (which stops opening pages after 10
+minutes), and takes their sum. River cancels a job past it. River's
 rescuer returns a job whose process died to work once it has run past both
 its timeout and `RescueStuckJobsAfter` (10 minutes unless the host sets it).
 

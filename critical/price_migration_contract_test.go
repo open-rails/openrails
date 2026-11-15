@@ -98,7 +98,7 @@ func TestPriceMigrationContracts(t *testing.T) {
 				fleet := startFleet(t, a.world)
 				if profile == "already-applied" {
 					a.clock.Advance(alice.CurrentPeriodEndsAt.Sub(a.clock.Now()))
-					runRegistered(t, fleet, "openrails.dunning", 2)
+					runRegistered(t, fleet, "openrails.billing_pass", 2)
 					require.Eventually(t, func() bool {
 						current, err := a.alpha.GetPriceMigration(t.Context(), migration.ID)
 						return err == nil && current.Applied == 1
@@ -113,7 +113,7 @@ func TestPriceMigrationContracts(t *testing.T) {
 					require.Zero(t, canceled.Canceled)
 					require.Equal(t, 1, canceled.PriceMigration.Applied)
 				}
-				runRegistered(t, fleet, "openrails.dunning", 2)
+				runRegistered(t, fleet, "openrails.billing_pass", 2)
 				alicePrice := alice.PriceID
 				aliceAmount := int64(1000)
 				if profile == "already-applied" {
@@ -151,7 +151,7 @@ func TestPriceMigrationContracts(t *testing.T) {
 		defer gate.unblock()
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		select {
 		case <-gate.arrived:
 		case <-time.After(15 * time.Second):
@@ -197,10 +197,10 @@ func TestPriceMigrationContracts(t *testing.T) {
 		require.Equal(t, migration.ID, *before.ScheduledChange.PriceMigrationID)
 		fleet := startFleet(t, a.world)
 		a.clock.Advance(alice.CurrentPeriodEndsAt.Sub(a.clock.Now()) - time.Microsecond)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		require.Len(t, p.effects(t), 2, "migration cannot collect early")
 		a.clock.Advance(time.Microsecond)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		for _, expected := range []struct {
 			sub   *billing.Subscription
 			price billing.PriceID
@@ -220,7 +220,7 @@ func TestPriceMigrationContracts(t *testing.T) {
 			amounts = append(amounts, effect.Amount)
 		}
 		require.ElementsMatch(t, []int64{1000, 1000, 2000, 3000}, amounts)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		require.Len(t, p.effects(t), 4)
 	})
 	t.Run("OR-J19-S05/move-that-no-longer-applies-is-skipped-and-settles-its-migration", func(t *testing.T) {

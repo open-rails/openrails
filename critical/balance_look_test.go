@@ -211,7 +211,7 @@ func TestBalanceLooks(t *testing.T) {
 		require.NoError(t, tx.QueryRow(t.Context(), "SELECT pg_backend_pid()").Scan(&holder))
 		events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
 		defer unsubscribe()
-		pass, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.balance_watch"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		pass, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.billing_pass"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		require.Eventually(t, func() bool { return blockedBy(t, w, holder) > 0 }, 30*time.Second, 20*time.Millisecond)
 		// That look commits the next instant it names.
@@ -229,7 +229,7 @@ func TestBalanceLooks(t *testing.T) {
 					done = true
 				}
 			case <-deadline.C:
-				t.Fatal("the balance watch pass did not finish")
+				t.Fatal("the billing pass did not finish")
 			}
 		}
 		var stored time.Time

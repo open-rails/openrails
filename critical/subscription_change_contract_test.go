@@ -131,7 +131,7 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		due := *sub.CurrentPeriodEndsAt
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		require.Eventually(t, func() bool {
 			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 			return err == nil && current.PriceID == price.ID && current.CurrentPeriodStartsAt.Equal(due)
@@ -271,7 +271,7 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		due := *sub.CurrentPeriodEndsAt
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		select {
 		case <-gate.Arrived():
 		case <-time.After(15 * time.Second):

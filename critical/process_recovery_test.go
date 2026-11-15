@@ -323,7 +323,7 @@ func TestProcessRecovery(t *testing.T) {
 		child := startWorkerProcess(t, a.world, p, func(c *workerProcessConfig) {
 			c.AfterWork, c.IgnoreIntents = atCommit, ignored
 		})
-		_, err = queue.Insert(t.Context(), registeredJob{KindName: "openrails.dunning"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		_, err = queue.Insert(t.Context(), registeredJob{KindName: "openrails.billing_pass"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		var operation rivertype.JobRow
 		require.Eventually(t, func() bool {
@@ -379,7 +379,7 @@ func TestProcessRecovery(t *testing.T) {
 				priorIntents[args["intent_id"]] = true
 			}
 			child := startWorkerProcess(t, a.world, p)
-			_, err = queue.Insert(t.Context(), registeredJob{KindName: "openrails.dunning"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+			_, err = queue.Insert(t.Context(), registeredJob{KindName: "openrails.billing_pass"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 			require.NoError(t, err)
 			select {
 			case <-arrived:

@@ -18,9 +18,6 @@ Observation and application use separate `psp_refresh_watermarks` domains:
 
 - `events` records observed provider windows, including advisory runs.
 - `applied_events` records successfully applied account-bound windows.
-- `completed_events` records the target of a complete financial observation.
-  Failed reads, incomplete pagination and unresolved financial identities can
-  leave it unchanged. It is reporting progress, never write authorization.
 
 A newly configured or restored instance follows its explicit provider write
 mode. `readonly` permits observation but no provider mutation; `limited`

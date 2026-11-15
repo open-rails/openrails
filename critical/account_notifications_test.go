@@ -100,7 +100,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 		p.core.SetDecline("4242", "insufficient_funds")
 		a.clock.Advance(due.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		subscriptionState(t, a, sub.ID, "past_due")
 		var item notify.Item
 		require.Eventually(t, func() bool {
@@ -116,7 +116,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 		require.Equal(t, "payment_method_failed", item.Kind)
 		require.Nil(t, item.ReadAt)
 		require.Empty(t, accountNotices(t, inbox, a.bob.ID))
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		items := accountNotices(t, inbox, a.alice.ID)
 		require.Len(t, items, 1)
 		require.Equal(t, item.ID, items[0].ID, "retry before the due time must not duplicate the receipt")
@@ -132,7 +132,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 		require.Equal(t, adoption, repeated, "stopped source export must not manufacture new revisions")
 		p.core.SetDecline("4242", "")
 		a.clock.Advance(24 * time.Hour)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		renewalSettled(t, a, p, sub, due)
 		require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 0 }, 20*time.Second, 20*time.Millisecond)
 		_, err = inbox.Get(t.Context(), notify.Recipient{Audience: notify.AudienceUser, ID: a.alice.ID}, item.ID)
@@ -160,7 +160,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 		p.core.SetDecline("4242", "lost_card")
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		subscriptionState(t, a, sub.ID, "awaiting_method")
 		require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 1 }, 20*time.Second, 20*time.Millisecond)
 		require.Equal(t, "payment_method_update_required", accountNotices(t, inbox, a.alice.ID)[0].Kind)
@@ -184,7 +184,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 			p.core.SetDecline("4242", tc.decline)
 			a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 			fleet := startFleet(t, a.world)
-			runRegistered(t, fleet, "openrails.dunning", 2)
+			runRegistered(t, fleet, "openrails.billing_pass", 2)
 			waiting := subscriptionState(t, a, sub.ID, tc.state)
 			items := accountNotices(t, inbox, a.alice.ID)
 			require.Len(t, items, 1)
@@ -195,7 +195,7 @@ func TestAccountNotificationChannel(t *testing.T) {
 				require.NotNil(t, waiting.Dunning)
 				require.NotNil(t, waiting.Dunning.FinalRetryAt)
 				a.clock.Advance(waiting.Dunning.FinalRetryAt.Sub(a.clock.Now()) + time.Microsecond)
-				runRegistered(t, fleet, "openrails.dunning", 2)
+				runRegistered(t, fleet, "openrails.billing_pass", 2)
 			} else {
 				status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Stop renewal after the failed charge"})
 				require.Equal(t, http.StatusOK, status, string(raw))
@@ -225,13 +225,13 @@ func TestAccountNotificationChannel(t *testing.T) {
 		p.core.SetDecline("4242", "insufficient_funds")
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		subscriptionState(t, a, sub.ID, "past_due")
 		// The operator has not armed terminal lifecycle actions. The next
 		// nonrecoverable decline is held for verification, not paid or canceled.
 		p.core.SetDecline("4242", "stolen_card")
 		a.clock.Advance(24 * time.Hour)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		require.Eventually(t, func() bool {
 			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.terminal_outcome.held"})
 			return err == nil && len(findings.Items) == 1
@@ -275,7 +275,7 @@ func TestNotificationAdoptionExport(t *testing.T) {
 		p.core.SetDecline("4242", "insufficient_funds")
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		subscriptionState(t, a, sub.ID, "past_due")
 		require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 1 }, 20*time.Second, 20*time.Millisecond)
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
@@ -452,7 +452,7 @@ func TestOrderNotificationRecovery(t *testing.T) {
 		p.core.SetDecline("4242", "auth")
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 1 }, 20*time.Second, 20*time.Millisecond)
 		item := accountNotices(t, inbox, a.alice.ID)[0]
 		require.Equal(t, "payment_authentication_required", item.Kind)

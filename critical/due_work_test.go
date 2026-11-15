@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
@@ -124,7 +125,7 @@ func TestDueWork(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
-		runRegistered(t, fleet, "openrails.dunning", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		remote := *sub.RailSubscriptionID
 		require.Eventually(t, func() bool { return accounts.read("sk_test_old", "/v1/subscriptions/"+remote) }, 20*time.Second, 20*time.Millisecond,
 			"a grace that ended with no word from the provider is a question to it, by id")
@@ -145,14 +146,49 @@ func TestDueWork(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
-		runRegistered(t, fleet, "openrails.rebill_watch", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		subscriptionState(t, a, sub.ID, "active")
 		a.clock.Advance(24 * time.Hour)
-		runRegistered(t, fleet, "openrails.rebill_watch", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		subscriptionState(t, a, sub.ID, "unverified")
 		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:member"}})
 		require.NoError(t, err)
 		require.True(t, access.Entitlements["nmi:member"], "unverified keeps access")
+	})
+	t.Run("OR-J16-S71/an-overdue-renewal-is-asked-before-the-rebill-watch-reads-nmi", func(t *testing.T) {
+		a, p, sub := nmiMembership(t)
+		// NMI's Query API stops answering a probe of this subscription's sales.
+		hold := p.core.Hold(func(r *http.Request) bool {
+			if !strings.HasSuffix(r.URL.Path, "/query.php") {
+				return false
+			}
+			_ = r.ParseForm()
+			return r.Form.Get("order_id") == sub.ID.UUID().String()
+		}, nmimock.HoldRequest)
+		defer hold.Release()
+		a.clock.Advance(sub.CurrentPeriodEndsAt.Add(49 * time.Hour).Sub(a.clock.Now()))
+		fleet := quietFleet(t, a.world)
+		_, err := fleet.Insert(t.Context(), billingPass{}, nil)
+		require.NoError(t, err)
+		select {
+		case <-hold.Arrived():
+		case <-time.After(20 * time.Second):
+			t.Fatal("the rebill watch never probed NMI")
+		}
+		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionStatus("unverified"), current.Status, "the due pass asked about the overdue renewal before NMI was read")
+		hold.Release()
+		require.True(t, entitled(t, a.alpha, sub.CustomerID, "nmi:member"), "unverified keeps access")
+	})
+	t.Run("OR-J15-S72/a-complete-provider-refresh-queues-no-due-work", func(t *testing.T) {
+		a, _ := newNMIWorld(t)
+		fleet := quietFleet(t, a.world)
+		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
+		var queued int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "river_job"}.Sanitize()+
+			" WHERE kind IN ('openrails.dunning', 'openrails.usage_orders', 'openrails.billing_pass')").Scan(&queued))
+		require.Zero(t, queued, "what falls due waits for the hourly billing pass; a refresh queues none of it")
 	})
 	t.Run("OR-J29-S70/a-grant-commits-with-its-customers-convergence", func(t *testing.T) {
 		w := newWorld(t)
@@ -342,7 +378,7 @@ func TestDueWork(t *testing.T) {
 		require.Empty(t, held())
 		runRegistered(t, fleet, "openrails.merchant_health", 1)
 		require.Len(t, held(), 1, "an engine renewal past its allowance with no outcome is held")
-		runRegistered(t, fleet, "openrails.dunning", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Eventually(t, func() bool {
 			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 			return err == nil && current.CurrentPeriodStartsAt.Equal(*sub.CurrentPeriodEndsAt)

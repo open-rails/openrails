@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -19,25 +18,16 @@ import (
 
 const KindOrderExpiry = "openrails.order_expiry"
 
-type OrderExpiryArgs struct{}
-
-func (OrderExpiryArgs) Kind() string { return KindOrderExpiry }
-
-func (OrderExpiryArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
-
 // OrderExpiryWorker expires orders past their expiry, releasing their claims,
 // and the order attempts still waiting on their customer past theirs: it is
 // their one expiry writer. It never touches an order whose payment is
 // processing: only the provider's answer ends that. It also removes card
 // saves left waiting for the bank's authentication.
 type OrderExpiryWorker struct {
-	WorkerDefaults[OrderExpiryArgs]
 	DB     *db.DB
 	Orders *orders.Service
 	Clock  clockwork.Clock
 }
-
-func (OrderExpiryWorker) Kind() string { return KindOrderExpiry }
 
 // orderExpiryBatch is how many merchants, orders or attempts one read takes.
 // Each read is indexed on the expiry, so a pass costs what is due.
@@ -49,9 +39,9 @@ func (w OrderExpiryWorker) DueBy(ctx context.Context, at time.Time) (bool, error
 	return len(due) > 0, err
 }
 
-// Work pages through the merchants with something due and drains each, within
+// Pass pages through the merchants with something due and drains each, within
 // the pass's budget; what the budget leaves stays due for the next pass.
-func (w OrderExpiryWorker) Work(ctx context.Context, _ *river.Job[OrderExpiryArgs]) error {
+func (w OrderExpiryWorker) Pass(ctx context.Context) error {
 	if w.Orders == nil {
 		return nil
 	}

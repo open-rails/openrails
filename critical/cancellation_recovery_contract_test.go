@@ -73,7 +73,7 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		enableLifecycleMaintenance(t, a)
 		a.clock.Advance(20 * time.Minute)
 		third := startWorkerProcess(t, a.world, nil)
-		_, err = queue.Insert(t.Context(), registeredJob{KindName: "openrails.dunning"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		_, err = queue.Insert(t.Context(), registeredJob{KindName: "openrails.billing_pass"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		for _, original := range jobs.Jobs {
 			for range 2 {
@@ -118,7 +118,7 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		}
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) + time.Hour)
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 		require.NoError(t, err)
 		require.Equal(t, billing.SubscriptionCanceled, current.Status)
@@ -143,7 +143,7 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		status, raw = a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/resume", a.aliceToken, nil)
 		require.Equal(t, http.StatusBadRequest, status, string(raw))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 		require.NoError(t, err)
 		require.Equal(t, billing.SubscriptionCanceled, current.Status)
