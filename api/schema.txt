@@ -145,6 +145,7 @@ migration 0202_imported_admin_grants.up.sql sha256:97caea3589f118cbcf284a2a4c662
 migration 0203_solana_pay_wake.up.sql sha256:a499ec3a2454bd5c967a3d9b123dc8afb8868511df5693c6cbda485fa0ab4fd5
 migration 0204_eventlog_notify.up.sql sha256:91a6970712b5bbe33cfd17780178d384b2a62cd41e67f12e8d4757c2094ee311
 migration 0205_balance_looks.up.sql sha256:5f841bea6334f020e8f6a6d5e56fcf6ebc831afc9bc449923f907ee583e6145e
+migration 0206_order_sale_index.up.sql sha256:aa5ea99e956bf8731d05bc640faf50e719dbde3a9beffe8df928ce73d10d2e5b
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2248,6 +2249,7 @@ table billing.provider_intents
   index CREATE UNIQUE INDEX provider_intents_obligation_unreleased_key ON billing.provider_intents USING btree (merchant_id, subscription_id, ((payload ->> 'order_reference'::text))) WHERE ((intent_type = ANY (ARRAY['subscription_collection'::text, 'manual_rebill'::text])) AND (status <> ALL (ARRAY['failed_terminal'::text, 'superseded'::text, 'expired'::text])))
   index CREATE UNIQUE INDEX provider_intents_open_subscription_collection_key ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE ((intent_type = 'subscription_collection'::text) AND (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text])))
   index CREATE INDEX provider_intents_order_attempt_idx ON billing.provider_intents USING btree (merchant_id, ((payload ->> 'order_attempt_id'::text))) WHERE (payload ? 'order_attempt_id'::text)
+  index CREATE INDEX provider_intents_order_sale_idx ON billing.provider_intents USING btree (merchant_id, ((payload ->> 'order_id'::text))) WHERE ((intent_type = 'nmi_sale'::text) AND (status = 'succeeded'::text) AND (payload ? 'order_id'::text))
   index CREATE INDEX provider_intents_origin_created_at_intent_type_idx ON billing.provider_intents USING btree (merchant_id, origin, created_at, intent_type)
   index CREATE UNIQUE INDEX provider_intents_pkey ON billing.provider_intents USING btree (merchant_id, id)
   index CREATE INDEX provider_intents_psp_id_idx ON billing.provider_intents USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL)
