@@ -714,7 +714,7 @@
       "name": "NMI receipts that name their card export and restore verbatim"
     },
     {
-      "id": "OR-J31-S07",
+      "id": "OR-J31-S10",
       "journey": "J31",
       "name": "A Solana pull scheduled ahead and restored with its merchant runs on the destination at its due time"
     },

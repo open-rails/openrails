@@ -269,7 +269,7 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "5454", *payment.Card.Last4)
 	})
-	t.Run("OR-J31-S07/a-restored-solana-pull-runs-at-its-due-time", func(t *testing.T) {
+	t.Run("OR-J31-S10/a-restored-solana-pull-runs-at-its-due-time", func(t *testing.T) {
 		s := newSolanaWorld(t, true)
 		_, sub := s.subscribe(t)
 		due := *sub.CurrentPeriodEndsAt
