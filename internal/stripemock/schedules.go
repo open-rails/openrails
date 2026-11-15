@@ -50,7 +50,7 @@ func (m *Mock) changeItemLocked(s Object, form url.Values) (int, any) {
 }
 
 // createScheduleLocked attaches a schedule to a subscription, its one phase
-// copied from the subscription's current period.
+// copied from the subscription's current period and seats.
 func (m *Mock) createScheduleLocked(form url.Values) (int, any) {
 	sub := form.Get("from_subscription")
 	s, ok := m.subs[sub]
@@ -61,9 +61,13 @@ func (m *Mock) createScheduleLocked(form url.Values) (int, any) {
 		return 400, stripeErr("resource_already_exists")
 	}
 	item := s["items"].(Object)["data"].([]Object)[0]
+	quantity, ok := item["quantity"].(int64)
+	if !ok {
+		quantity = 1
+	}
 	id := m.id("sub_sched")
 	schedule := Object{"object": "subscription_schedule", "id": id, "subscription": sub, "status": "active", "end_behavior": "release", "metadata": map[string]string{}, "livemode": false,
-		"phases": []Object{{"start_date": item["current_period_start"], "end_date": item["current_period_end"], "items": []Object{{"price": item["price"].(Object)["id"], "quantity": int64(1)}}}}}
+		"phases": []Object{{"start_date": item["current_period_start"], "end_date": item["current_period_end"], "items": []Object{{"price": item["price"].(Object)["id"], "quantity": quantity}}}}}
 	m.schedules[id] = schedule
 	s["schedule"] = id
 	return 200, schedule

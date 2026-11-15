@@ -987,6 +987,12 @@
     ],
     "OR-J37-S10": [
       "TestFXRates/OR-J37-S10/a-published-rate-far-from-the-held-one-prices-nothing"
+    ],
+    "OR-J18-S06": [
+      "TestSubscriptionChangeContracts/OR-J18-S06/stripe-downgrade-keeps-the-subscriptions-seats"
+    ],
+    "OR-J19-S07": [
+      "TestPriceMigrationContracts/OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create"
     ]
   },
   "suites": {

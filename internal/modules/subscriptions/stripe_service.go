@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,7 +17,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
-	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 )
 
 // RequireStripeSecretKey resolves the ctx merchant's armed Stripe account (the
@@ -381,134 +379,48 @@ func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptio
 	return nil
 }
 
-type stripeSubscriptionScheduleResponse struct {
-	ID     string `json:"id"`
-	Phases []struct {
-		StartDate int64 `json:"start_date"`
-		EndDate   int64 `json:"end_date"`
-		Items     []struct {
-			Price    string `json:"price"`
-			Quantity int64  `json:"quantity"`
-		} `json:"items"`
-	} `json:"phases"`
-}
-
-func (s *StripeService) ScheduleSubscriptionPriceChange(ctx context.Context, subscriptionID, currentPriceID, newPriceID string, currentPeriodStart, currentPeriodEnd time.Time, billingCycleDays *int) (string, error) {
-	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
-	if err != nil {
-		return "", err
-	}
+// ScheduleSubscriptionPriceChange plants a schedule that keeps the current
+// price and seats until the current period ends, then bills newPriceID for
+// the same seats and releases. key (the move's id) makes both writes
+// idempotent: a retry after a lost answer replays them instead of finding the
+// schedule its first attempt attached.
+func (s *StripeService) ScheduleSubscriptionPriceChange(ctx context.Context, key, subscriptionID, currentPriceID, newPriceID string, currentPeriodStart, currentPeriodEnd time.Time, billingCycleDays *int) error {
 	subscriptionID = strings.TrimSpace(subscriptionID)
 	currentPriceID = strings.TrimSpace(currentPriceID)
 	newPriceID = strings.TrimSpace(newPriceID)
 	if subscriptionID == "" || currentPriceID == "" || newPriceID == "" {
-		return "", errors.New("subscription_id, current_price_id, and new_price_id are required")
+		return errors.New("subscription_id, current_price_id, and new_price_id are required")
 	}
 	if currentPeriodEnd.IsZero() {
-		return "", errors.New("current_period_end is required to schedule a Stripe price change")
+		return errors.New("current_period_end is required to schedule a Stripe price change")
 	}
-
-	createValues := url.Values{}
-	createValues.Set("from_subscription", subscriptionID)
-	createReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/subscription_schedules", strings.NewReader(createValues.Encode()))
+	created, err := s.CreateScheduleFromSubscription(ctx, subscriptionID, key)
 	if err != nil {
-		return "", err
+		return fmt.Errorf("stripe subscription schedule create failed: %w", err)
 	}
-	createReq.Header.Set("Authorization", "Bearer "+secretKey)
-	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	client := s.StripeClients.Client(s.Config, 0)
-	createResp, err := client.Do(createReq)
-	if err != nil {
-		return "", fmt.Errorf("stripe subscription schedule create failed: %w", err)
-	}
-	defer createResp.Body.Close()
-	createBody, err := io.ReadAll(createResp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read stripe subscription schedule create response: %w", err)
-	}
-	if createResp.StatusCode >= 400 {
-		msg := ParseStripeAPIError(createBody)
-		if msg == "" {
-			msg = fmt.Sprintf("stripe subscription schedule create failed (%d)", createResp.StatusCode)
+	current := StripeSchedulePhase{PriceID: currentPriceID, StartDate: currentPeriodStart.Unix(), EndDate: currentPeriodEnd.Unix(), Quantity: 1}
+	if len(created.Phases) > 0 {
+		first := created.Phases[0]
+		if first.StartDate > 0 {
+			current.StartDate = first.StartDate
 		}
-		return "", errors.New(msg)
-	}
-
-	var schedule stripeSubscriptionScheduleResponse
-	if err := json.Unmarshal(createBody, &schedule); err != nil {
-		return "", fmt.Errorf("stripe subscription schedule parse failed: %w", err)
-	}
-	if strings.TrimSpace(schedule.ID) == "" {
-		return "", errors.New("stripe subscription schedule id missing")
-	}
-
-	startDate := currentPeriodStart.Unix()
-	endDate := currentPeriodEnd.Unix()
-	quantity := int64(1)
-	if len(schedule.Phases) > 0 {
-		if schedule.Phases[0].StartDate > 0 {
-			startDate = schedule.Phases[0].StartDate
+		if first.EndDate > 0 {
+			current.EndDate = first.EndDate
 		}
-		if schedule.Phases[0].EndDate > 0 {
-			endDate = schedule.Phases[0].EndDate
+		if first.PriceID != "" {
+			current.PriceID = first.PriceID
 		}
-		if len(schedule.Phases[0].Items) > 0 {
-			if strings.TrimSpace(schedule.Phases[0].Items[0].Price) != "" {
-				currentPriceID = schedule.Phases[0].Items[0].Price
-			}
-			if schedule.Phases[0].Items[0].Quantity > 0 {
-				quantity = schedule.Phases[0].Items[0].Quantity
-			}
+		if first.Quantity > 0 {
+			current.Quantity = first.Quantity
 		}
 	}
-	if startDate <= 0 {
-		startDate = time.Now().UTC().Unix()
+	if current.StartDate <= 0 || current.EndDate <= current.StartDate {
+		return fmt.Errorf("stripe subscription schedule %s has no open current phase", created.ID)
 	}
-
-	interval := "month"
-	intervalCount := 1
-	if billingCycleDays != nil && *billingCycleDays > 0 {
-		interval, intervalCount = sharedformat.BillingCycleDaysToStripeRecurring(*billingCycleDays)
+	if _, err := s.stripePostForm(ctx, "/v1/subscription_schedules/"+url.PathEscape(created.ID), schedulePhasesForm(current, newPriceID, billingCycleDays), key+":phases"); err != nil {
+		return fmt.Errorf("stripe subscription schedule update failed: %w", err)
 	}
-
-	updateValues := url.Values{}
-	updateValues.Set("end_behavior", "release")
-	updateValues.Set("proration_behavior", "none")
-	updateValues.Set("phases[0][items][0][price]", currentPriceID)
-	updateValues.Set("phases[0][items][0][quantity]", strconv.FormatInt(quantity, 10))
-	updateValues.Set("phases[0][start_date]", strconv.FormatInt(startDate, 10))
-	updateValues.Set("phases[0][end_date]", strconv.FormatInt(endDate, 10))
-	updateValues.Set("phases[1][items][0][price]", newPriceID)
-	updateValues.Set("phases[1][items][0][quantity]", "1")
-	updateValues.Set("phases[1][duration][interval]", interval)
-	updateValues.Set("phases[1][duration][interval_count]", strconv.Itoa(intervalCount))
-
-	updateReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/subscription_schedules/"+schedule.ID, strings.NewReader(updateValues.Encode()))
-	if err != nil {
-		return "", err
-	}
-	updateReq.Header.Set("Authorization", "Bearer "+secretKey)
-	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	updateResp, err := client.Do(updateReq)
-	if err != nil {
-		return "", fmt.Errorf("stripe subscription schedule update failed: %w", err)
-	}
-	defer updateResp.Body.Close()
-	updateBody, err := io.ReadAll(updateResp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read stripe subscription schedule update response: %w", err)
-	}
-	if updateResp.StatusCode >= 400 {
-		msg := ParseStripeAPIError(updateBody)
-		if msg == "" {
-			msg = fmt.Sprintf("stripe subscription schedule update failed (%d)", updateResp.StatusCode)
-		}
-		return "", errors.New(msg)
-	}
-
-	return schedule.ID, nil
+	return nil
 }
 
 func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID string) error {

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 306,
+  "scenario_count": 308,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1512,6 +1512,16 @@
       "id": "OR-J12-S70",
       "journey": "J12",
       "name": "A card save confirmed or saved again past its 24-hour cutoff, before any pass, is removed"
+    },
+    {
+      "id": "OR-J18-S06",
+      "journey": "J18",
+      "name": "A Stripe downgrade schedules the new price for the subscription's seats"
+    },
+    {
+      "id": "OR-J19-S07",
+      "journey": "J19",
+      "name": "A Stripe migration push keeps the subscription's seats, and a retry after a lost schedule create replays it"
     },
     {
       "id": "OR-J37-S10",

@@ -4,11 +4,16 @@ package critical_test
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
@@ -26,6 +31,72 @@ func upgradePrice(t *testing.T, a *authorityWorld, sub *billing.Subscription) *b
 	require.NoError(t, err)
 	return price
 }
+
+// stripeSeats is a provider-owned Stripe subscription billing three seats of
+// Gold, ranked above Silver. Stripe's item quantity is the only record of
+// its seats.
+type stripeSeats struct {
+	*authorityWorld
+	stripe       *stripemock.Mock
+	sub          *billing.Subscription
+	gold, silver *billing.Price
+	start, end   time.Time
+}
+
+func stripeSeatMembership(t *testing.T) *stripeSeats {
+	t.Helper()
+	var accounts *stripeAccounts
+	a := newAuthorityWorld(t, func(w *world) {
+		accounts = newStripeAccounts(t, w, "sk_test_seats")
+		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		m := w.cfg.Merchants["alpha"]
+		m.PSPs = openrails.PSPs{"seats": stripePSP("acct_seats", "sk_test_seats", false)}
+		w.cfg.Merchants["alpha"] = m
+	})
+	s := &stripeSeats{authorityWorld: a, stripe: accounts.accounts["sk_test_seats"].core}
+	prices := map[string]*billing.Price{}
+	for rank, tier := range []string{"silver", "gold"} {
+		s.stripe.AddProduct("prod_"+tier, tier)
+		s.stripe.AddPrice(stripemock.Price{ID: "price_" + tier, Product: "prod_" + tier, Amount: int64(1000 * (rank + 1)), Interval: "month"})
+		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: tier, DisplayName: tier, TierGroup: ptr("seat-membership"), TierRank: rank + 1, Entitlements: []string{"member:" + tier}})
+		require.NoError(t, err)
+		prices[tier], err = a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "stripe-" + tier, PSP: "seats", PriceID: "price_" + tier})
+		require.NoError(t, err)
+	}
+	s.gold, s.silver = prices["gold"], prices["silver"]
+	s.start = a.clock.Now().Truncate(time.Second)
+	s.end = s.start.Add(30 * 24 * time.Hour)
+	customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+	remote := s.stripe.AddSubscription(s.stripe.AddCustomer(a.alice.Email, "Seat member", nil), "pm_seats", "price_gold", 6000, s.start, s.end)
+	s.stripe.SetQuantity(remote, 3)
+	book := billing.DeclaredBilling{AsOf: s.start, DefaultPSP: billing.PSPRef{Key: "seats"}, Customers: []billing.DeclaredCustomer{{Customer: customer}},
+		Subscriptions: []billing.DeclaredSubscription{{SourceID: "three-seat-stripe-membership", Customer: customer, Price: s.gold.ID, Rail: "stripe", RailSubscriptionID: remote, StartedAt: s.start, PaidThrough: &s.end}}}
+	imported, err := a.alpha.ImportBilling(t.Context(), book)
+	require.NoError(t, err)
+	require.Empty(t, imported.Blocked, "%+v", imported.Reasons)
+	subs, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: customer})
+	require.NoError(t, err)
+	require.Len(t, subs.Items, 1)
+	s.sub, err = a.alpha.GetSubscription(t.Context(), subs.Items[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, billing.SubscriptionActive, s.sub.Status)
+	return s
+}
+
+// phasesForm is the exact schedule a change at period end writes: Gold's
+// three seats until the period ends, then next's three seats, released.
+func (s *stripeSeats) phasesForm(next string, extra url.Values) url.Values {
+	form := url.Values{
+		"end_behavior": {"release"}, "proration_behavior": {"none"},
+		"phases[0][items][0][price]": {"price_gold"}, "phases[0][items][0][quantity]": {"3"},
+		"phases[0][start_date]": {strconv.FormatInt(s.start.Unix(), 10)}, "phases[0][end_date]": {strconv.FormatInt(s.end.Unix(), 10)},
+		"phases[1][items][0][price]": {next}, "phases[1][items][0][quantity]": {"3"},
+		"phases[1][duration][interval]": {"month"}, "phases[1][duration][interval_count]": {"1"},
+	}
+	maps.Copy(form, extra)
+	return form
+}
+
 func TestSubscriptionChangeContracts(t *testing.T) {
 	t.Run("OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t)
@@ -265,5 +336,28 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, sample.allowed, access.Entitlements[sample.key], "%s at %s", sample.key, sample.at)
 		}
+	t.Run("OR-J18-S06/stripe-downgrade-keeps-the-subscriptions-seats", func(t *testing.T) {
+		s := stripeSeatMembership(t)
+		changed, err := s.alpha.ChangeSubscription(t.Context(), s.sub.ID, billing.ChangeSubscriptionParams{PriceID: &s.silver.ID, Reason: "Customer asked for the smaller plan", IdempotencyKey: "three-seat-downgrade"})
+		require.NoError(t, err)
+		require.Equal(t, "succeeded", changed.Status, changed.Message)
+		require.Equal(t, "period_end", changed.Effective)
+		remote := *s.sub.RailSubscriptionID
+		creates := s.stripe.Submitted("/v1/subscription_schedules")
+		require.Len(t, creates, 1)
+		key, ok := strings.CutSuffix(creates[0].IdempotencyKey, ":schedule")
+		require.True(t, ok, creates[0].IdempotencyKey)
+		require.Equal(t, url.Values{"from_subscription": {remote}}, creates[0].Form)
+		schedule, _ := s.stripe.Subscription(remote)["schedule"].(string)
+		require.NotEmpty(t, schedule)
+		writes := s.stripe.Submitted("/v1/subscription_schedules/" + schedule)
+		require.Len(t, writes, 1)
+		require.Equal(t, key+":phases", writes[0].IdempotencyKey)
+		require.Equal(t, s.phasesForm("price_silver", url.Values{"metadata[openrails_tier_change]": {key}}), writes[0].Form, "Silver bills the same three seats from the switch")
+		current, err := s.alpha.GetSubscription(t.Context(), s.sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, s.gold.ID, current.PriceID)
+		require.NotNil(t, current.ScheduledChange)
+		require.Equal(t, s.silver.ID, current.ScheduledChange.PriceID)
 	})
 }

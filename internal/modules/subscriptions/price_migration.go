@@ -90,7 +90,7 @@ const (
 type StripePusher interface {
 	GetSubscriptionItemID(ctx context.Context, subscriptionID string) (string, error)
 	UpdateSubscriptionPrice(ctx context.Context, subscriptionID, itemID, newPriceID, internalPriceID, prorationBehavior, billingAnchor string) error
-	ScheduleSubscriptionPriceChange(ctx context.Context, subscriptionID, currentPriceID, newPriceID string, currentPeriodStart, currentPeriodEnd time.Time, billingCycleDays *int) (string, error)
+	ScheduleSubscriptionPriceChange(ctx context.Context, key, subscriptionID, currentPriceID, newPriceID string, currentPeriodStart, currentPeriodEnd time.Time, billingCycleDays *int) error
 }
 
 // MigrationPushes records a move's provider push as a durable operation in
@@ -621,7 +621,7 @@ func (s *PriceMigrationService) push(ctx context.Context, capability migrationCa
 	case capabilityEngine:
 		return nil
 	case capabilityAutoStripe:
-		return s.pushStripe(ctx, sub, source, target, change.EffectiveAt)
+		return s.pushStripe(ctx, sub, source, target, change)
 	case capabilityAutoNMI:
 		return s.pushNMI(ctx, sub, target, targetProduct, change)
 	default:
@@ -658,9 +658,9 @@ func (s *PriceMigrationService) pushNMI(ctx context.Context, sub *models.Subscri
 }
 
 // pushStripe plants a Stripe subscription schedule flipping at the current
-// period end (no proration, no anchor move); converge applies the change
-// from Stripe's truth.
-func (s *PriceMigrationService) pushStripe(ctx context.Context, sub *models.Subscription, source, target *models.Price, effectiveAt time.Time) error {
+// period end (no proration, no anchor move, same seats), idempotent on the
+// move; converge applies the change from Stripe's truth.
+func (s *PriceMigrationService) pushStripe(ctx context.Context, sub *models.Subscription, source, target *models.Price, change *models.ScheduledChange) error {
 	if s.stripe == nil {
 		return fmt.Errorf("stripe pusher not configured")
 	}
@@ -679,15 +679,14 @@ func (s *PriceMigrationService) pushStripe(ctx context.Context, sub *models.Subs
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
 		return fmt.Errorf("%w: subscription missing current period end", errPushRefused)
 	}
-	if deferredPushRequired(effectiveAt, sub) {
-		return fmt.Errorf("stripe_deferred_push_required: effective_at %s is beyond the current period end %s", effectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
+	if deferredPushRequired(change.EffectiveAt, sub) {
+		return fmt.Errorf("stripe_deferred_push_required: effective_at %s is beyond the current period end %s", change.EffectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
 	}
 	periodStart := sub.StartedAt
 	if sub.CurrentPeriodStartsAt != nil && !sub.CurrentPeriodStartsAt.IsZero() {
 		periodStart = *sub.CurrentPeriodStartsAt
 	}
-	_, err := s.stripe.ScheduleSubscriptionPriceChange(ctx, railSubID, sourceStripeID, targetStripeID, periodStart, *sub.CurrentPeriodEndsAt, target.RecurringCycleDays())
-	return err
+	return s.stripe.ScheduleSubscriptionPriceChange(ctx, change.ID.String(), railSubID, sourceStripeID, targetStripeID, periodStart, *sub.CurrentPeriodEndsAt, target.RecurringCycleDays())
 }
 
 // applyNow moves the subscription to the target now and marks the change
