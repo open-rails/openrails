@@ -817,6 +817,9 @@
     "OR-J06-S64": [
       "TestStripeWebhookDueWork/OR-J06-S64/a-finding-alert-whose-delivery-fails-is-delivered-on-retry-once"
     ],
+    "OR-J06-S65": [
+      "TestDueWork/OR-J06-S65/a-psp-whose-webhooks-went-silent-while-pulls-find-its-charges-raises-a-finding"
+    ],
     "OR-J14-S70": [
       "TestDueWork/OR-J14-S70/an-engine-renewal-nothing-attempted-reads-as-missed"
     ],

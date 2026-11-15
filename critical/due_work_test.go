@@ -304,4 +304,76 @@ func TestDueWork(t *testing.T) {
 		runRegistered(t, fleet, "openrails.merchant_health", 1)
 		require.Empty(t, held(), "the finding closes once the renewal is attempted")
 	})
+	t.Run("OR-J06-S65/a-psp-whose-webhooks-went-silent-while-pulls-find-its-charges-raises-a-finding", func(t *testing.T) {
+		w := newWorld(t, func(w *world) {
+			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+			m := w.cfg.Merchants["alpha"]
+			m.PSPs = openrails.PSPs{}
+			for key, subacc := range map[string]string{"silent": "0001", "quiet": "0002", "pulled": "0003"} {
+				m.PSPs[key] = openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: subacc, Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
+			}
+			w.cfg.Merchants["alpha"] = m
+		})
+		listed, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		psps := map[string]billing.PSP{}
+		for _, psp := range listed.Items {
+			psps[psp.Key] = psp
+		}
+		require.Len(t, psps, 3)
+		merchantID, customer := w.alpha.MerchantID().UUID(), uuid.New()
+		_, err = w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "customers"}.Sanitize()+" (id, merchant_id) VALUES ($1, $2)", customer, merchantID)
+		require.NoError(t, err)
+		// A provider-scheduled charge of key's PSP that OpenRails learned of via.
+		charge := func(key, via string, at time.Time) {
+			t.Helper()
+			_, err := w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "payment_attempts"}.Sanitize()+
+				` (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, amount, currency, attempted_at, step)
+				VALUES ($1, $2, $3, $4, 'initial', 'provider', 'saved', 'provider_schedule', $5, 'approved', 10000000, 'USD', $6, '')`,
+				merchantID, customer, psps[key].ID.UUID(), string(psps[key].Rail), via, at)
+			require.NoError(t, err)
+		}
+		now := w.clock.Now()
+		for day := range 10 {
+			at := now.Add(-time.Duration(day+2) * 24 * time.Hour)
+			charge("silent", "webhook", at)
+			charge("quiet", "webhook", at)
+			charge("pulled", "pull", at)
+		}
+		// In the last day neither webhook-fed PSP sent one; pulls found the
+		// silent PSP's charges and the pull-only PSP's, the quiet PSP had none.
+		for hour := range 3 {
+			at := now.Add(-time.Duration(hour+1) * time.Hour)
+			charge("silent", "pull", at)
+			charge("pulled", "pull", at)
+		}
+		fleet := hostFleet(t, w)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		silence := func(status billing.FindingStatus) map[string]billing.Finding {
+			page, err := w.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.webhooks.silent", Status: status})
+			require.NoError(t, err)
+			out := map[string]billing.Finding{}
+			for _, finding := range page.Items {
+				out[finding.SubjectKey] = finding
+			}
+			return out
+		}
+		subject := "psp:" + psps["silent"].ID.String()
+
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		open := silence("")
+		require.Len(t, open, 1, "a PSP with no charges, or one that never sent webhooks, is not silent")
+		require.Contains(t, open, subject, "the PSP whose webhooks stopped while pulls find its charges is silent")
+		require.Equal(t, billing.FindingStatus("requires_review"), open[subject].Status)
+		require.Equal(t, "high", open[subject].Severity)
+
+		charge("silent", "webhook", now.Add(-30*time.Minute))
+		runRegistered(t, fleet, "openrails.merchant_health", 1)
+		require.Empty(t, silence(""), "the finding clears once its webhooks resume")
+		closed := silence("fixed")
+		require.Contains(t, closed, subject)
+		require.Equal(t, "auto_vanished", *closed[subject].Resolution)
+	})
 }
