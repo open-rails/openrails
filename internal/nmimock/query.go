@@ -168,6 +168,9 @@ func (m *Mock) search(form url.Values) string {
 			Success: success, Source: source, ResponseText: text, ResponseCode: code})
 		txn.OrderDescription = s.OrderDescription
 		txn.MDF = bookField(s.Book)
+		if s.Declined != "" && s.IssuerCode != "" {
+			txn.Action.ProcessorResponseCode, txn.Action.ProcessorResponseText = s.IssuerCode, "DECLINE"
+		}
 		if v := m.vaults[s.Vault]; v != nil {
 			txn.Email = v.Email
 		}
