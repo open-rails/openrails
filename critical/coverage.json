@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 288,
+  "scenario_count": 289,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -712,6 +712,11 @@
       "id": "OR-J31-S06",
       "journey": "J31",
       "name": "NMI receipts that name their card export and restore verbatim"
+    },
+    {
+      "id": "OR-J31-S40",
+      "journey": "J31",
+      "name": "A merchant's notification adoption export holds back no other merchant and its own producers commit after its snapshot"
     },
     {
       "id": "OR-J32-S01",

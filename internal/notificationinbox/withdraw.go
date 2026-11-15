@@ -53,7 +53,13 @@ func Recipient(ctx context.Context, d *db.DB, customer uuid.UUID) (*config.Notif
 	return channel, r, nil
 }
 
+// RequireOrdering admits one producer change to the merchant's notification
+// ordering: it shares the merchant's ordering lock until the transaction ends
+// and refuses while a billing archive restore awaits the ordering snapshot.
 func RequireOrdering(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID) error {
+	if err := gen.New(tx).ShareNotificationOrdering(ctx, merchantID); err != nil {
+		return err
+	}
 	var pending bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing.notification_channel_state WHERE merchant_id=$1 AND restore_required)`, merchantID).Scan(&pending); err != nil {
 		return err
@@ -62,6 +68,13 @@ func RequireOrdering(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID) error
 		return fmt.Errorf("account notifications require explicit ordering-state restoration after the billing archive restore")
 	}
 	return nil
+}
+
+// LockOrdering holds the merchant's notification ordering alone until the
+// transaction ends: none of its producers commits meanwhile, and no other
+// merchant waits.
+func LockOrdering(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID) error {
+	return gen.New(tx).LockNotificationOrdering(ctx, merchantID)
 }
 
 func Withdraw(ctx context.Context, d *db.DB, customerID uuid.UUID, keys []string) error {

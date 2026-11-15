@@ -83,9 +83,12 @@ only after the producer channel and host wiring have been qualified.
    understand hidden withdrawal tombstones.
 
 The export reads only retained producer facts and authoritative billing state;
-it never enumerates the destination inbox. Facts already removed by retention
-cannot reconstruct a legacy mapping and must be accounted for explicitly in the
-operator's cutover inventory rather than guessed from current customer names.
+it never enumerates the destination inbox. It asks the host for recipients
+first, then holds only this merchant's notification ordering for its snapshot:
+the merchant's own producers wait for it, other merchants never do. Facts
+already removed by retention cannot reconstruct a legacy mapping and must be
+accounted for explicitly in the operator's cutover inventory rather than
+guessed from current customer names.
 
 The `Ordering` portion is separate from the financial archive. Preserve it in
 ordinary database backups and transfer it when moving a merchant to a new

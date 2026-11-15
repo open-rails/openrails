@@ -21,58 +21,40 @@ import (
 )
 
 // ExportNotificationAdoption selects exact legacy origins from the producer's
-// journal. Stop the old importer and business writers for the whole cutover;
-// the table locks below protect this snapshot, not later destination calls.
+// journal. Stop the old importer and business writers for the whole cutover.
+// Host recipient lookups run first, outside the transaction. The transaction
+// then holds this merchant's notification ordering alone: every revision
+// writer of the merchant shares or holds that lock until it commits, so no
+// publication or withdrawal interleaves with the snapshot, and no other
+// merchant waits. Every read follows the lock; a repeatable-read snapshot
+// would be taken before it.
 func ExportNotificationAdoption(ctx context.Context, d *db.DB, id billing.MerchantID, now time.Time) (billing.NotificationAdoption, error) {
 	out := billing.NotificationAdoption{MerchantID: id}
 	if d.Notifications() == nil {
 		return out, errors.New("notification adoption requires the destination recipient mapping")
 	}
 	ctx = merchant.WithID(ctx, id)
-	err := d.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	groups, err := adoptionGroups(ctx, d.Qx(ctx), id)
+	if err != nil {
+		return out, err
+	}
+	recipients := map[uuid.UUID]*notify.Recipient{}
+	for _, g := range groups {
+		if err := adoptionRecipient(ctx, d, recipients, g.latest.CustomerID); err != nil {
+			return out, err
+		}
+	}
+	err = d.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := notificationinbox.LockOrdering(ctx, tx, id.UUID()); err != nil {
+			return err
+		}
 		if err := notificationinbox.RequireOrdering(ctx, tx, id.UUID()); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `LOCK TABLE billing.notification_events,billing.notification_issue_revisions,
-billing.subscriptions,billing.orders,billing.product_access IN SHARE ROW EXCLUSIVE MODE`); err != nil {
-			return err
-		}
 		txdb := d.NewWithPgxTx(tx)
-		rows, err := tx.Query(ctx, `SELECT id,customer_id,event_type,data,created_at FROM billing.notification_events
-WHERE merchant_id=$1 AND event_type=ANY($2) ORDER BY created_at DESC,id DESC`, id.UUID(),
-			[]string{"payment_method_failed", "payment_method_update_required", "payment_authentication_required", "order_collection_stopped", "premium_ended", "premium_renewed"})
+		groups, err := adoptionGroups(ctx, tx, id)
 		if err != nil {
 			return err
-		}
-		facts, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (*models.NotificationEvent, error) {
-			n := &models.NotificationEvent{}
-			var data []byte
-			if err := row.Scan(&n.ID, &n.CustomerID, &n.EventType, &data, &n.CreatedAt); err != nil {
-				return nil, err
-			}
-			return n, json.Unmarshal(data, &n.Data)
-		})
-		if err != nil {
-			return err
-		}
-		type group struct {
-			latest   *models.NotificationEvent
-			previous []notify.Origin
-			key      string
-		}
-		groups := map[string]*group{}
-		for _, n := range facts {
-			key, selected := inboxKey(n)
-			if !selected || strings.HasPrefix(key, "event:") {
-				continue // Historical receipts retain their existing identity and state.
-			}
-			identity := n.CustomerID.String() + "/" + key
-			g := groups[identity]
-			if g == nil {
-				g = &group{latest: n, key: key}
-				groups[identity] = g
-			}
-			g.previous = append(g.previous, notify.Origin{System: "openrails", Scope: id.String(), ID: "ntf_" + n.ID.String()})
 		}
 		identities := make([]string, 0, len(groups))
 		for identity := range groups {
@@ -81,11 +63,12 @@ WHERE merchant_id=$1 AND event_type=ANY($2) ORDER BY created_at DESC,id DESC`, i
 		slices.Sort(identities)
 		for _, identity := range identities {
 			g := groups[identity]
-			channel, recipient, err := notificationinbox.Recipient(ctx, txdb, g.latest.CustomerID)
-			if err != nil {
+			// Only a fact that arrived after the lookups is looked up here.
+			if err := adoptionRecipient(ctx, txdb, recipients, g.latest.CustomerID); err != nil {
 				return err
 			}
-			if channel == nil {
+			recipient := recipients[g.latest.CustomerID]
+			if recipient == nil {
 				continue
 			}
 			withdrawn, err := notificationResolved(ctx, txdb, g.latest, now)
@@ -104,7 +87,7 @@ WHERE merchant_id=$1 AND event_type=ANY($2) ORDER BY created_at DESC,id DESC`, i
 			if err != nil {
 				return err
 			}
-			current := notify.Mutation{Input: notify.Input{Recipient: recipient,
+			current := notify.Mutation{Input: notify.Input{Recipient: *recipient,
 				Origin: notify.Origin{System: "openrails", Scope: id.String(), ID: g.key},
 				Kind:   string(g.latest.EventType), Data: data, CreatedAt: g.latest.CreatedAt,
 				Visibility: notify.VisibilityTenant, ActionRequested: billing.CustomerNotificationActionRequested(string(g.latest.EventType))},
@@ -115,6 +98,65 @@ WHERE merchant_id=$1 AND event_type=ANY($2) ORDER BY created_at DESC,id DESC`, i
 		return err
 	})
 	return out, err
+}
+
+type adoptionGroup struct {
+	latest   *models.NotificationEvent
+	previous []notify.Origin
+	key      string
+}
+
+// adoptionGroups groups the merchant's retained selected facts by exact issue,
+// latest first.
+func adoptionGroups(ctx context.Context, q gen.DBTX, id billing.MerchantID) (map[string]*adoptionGroup, error) {
+	rows, err := q.Query(ctx, `SELECT id,customer_id,event_type,data,created_at FROM billing.notification_events
+WHERE merchant_id=$1 AND event_type=ANY($2) ORDER BY created_at DESC,id DESC`, id.UUID(),
+		[]string{"payment_method_failed", "payment_method_update_required", "payment_authentication_required", "order_collection_stopped", "premium_ended", "premium_renewed"})
+	if err != nil {
+		return nil, err
+	}
+	facts, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (*models.NotificationEvent, error) {
+		n := &models.NotificationEvent{}
+		var data []byte
+		if err := row.Scan(&n.ID, &n.CustomerID, &n.EventType, &data, &n.CreatedAt); err != nil {
+			return nil, err
+		}
+		return n, json.Unmarshal(data, &n.Data)
+	})
+	if err != nil {
+		return nil, err
+	}
+	groups := map[string]*adoptionGroup{}
+	for _, n := range facts {
+		key, selected := inboxKey(n)
+		if !selected || strings.HasPrefix(key, "event:") {
+			continue // Historical receipts retain their existing identity and state.
+		}
+		identity := n.CustomerID.String() + "/" + key
+		g := groups[identity]
+		if g == nil {
+			g = &adoptionGroup{latest: n, key: key}
+			groups[identity] = g
+		}
+		g.previous = append(g.previous, notify.Origin{System: "openrails", Scope: id.String(), ID: "ntf_" + n.ID.String()})
+	}
+	return groups, nil
+}
+
+// adoptionRecipient asks the host once per customer; nil means no delivery.
+func adoptionRecipient(ctx context.Context, d *db.DB, recipients map[uuid.UUID]*notify.Recipient, customer uuid.UUID) error {
+	if _, ok := recipients[customer]; ok {
+		return nil
+	}
+	channel, recipient, err := notificationinbox.Recipient(ctx, d, customer)
+	if err != nil {
+		return err
+	}
+	recipients[customer] = nil
+	if channel != nil {
+		recipients[customer] = &recipient
+	}
+	return nil
 }
 
 func notificationResolved(ctx context.Context, d *db.DB, n *models.NotificationEvent, now time.Time) (bool, error) {
@@ -176,6 +218,9 @@ func RestoreNotificationOrdering(ctx context.Context, d *db.DB, id billing.Merch
 	}
 	ctx = merchant.WithID(ctx, id)
 	return d.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := notificationinbox.LockOrdering(ctx, tx, id.UUID()); err != nil {
+			return err
+		}
 		for _, item := range snapshot.Ordering {
 			if item.CustomerID.IsZero() || item.Key == "" || item.Revision < 1 {
 				return errors.New("invalid notification ordering record")
