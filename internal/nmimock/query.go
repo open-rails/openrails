@@ -25,8 +25,7 @@ func (m *Mock) query(rec *httptest.ResponseRecorder, form url.Values) {
 		}
 		_, _ = rec.WriteString(m.search(form))
 	case "test_mode_status":
-		// A gateway account in test mode, as test_mode_status reports it.
-		_, _ = rec.WriteString("<nm_response><test_mode_enabled>true</test_mode_enabled></nm_response>")
+		_, _ = rec.WriteString("<nm_response><test_mode_enabled>" + strconv.FormatBool(!m.liveMode) + "</test_mode_enabled></nm_response>")
 	default:
 		m.odd = append(m.odd, "POST query.php report_type="+form.Get("report_type"))
 		_, _ = rec.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n<nm_response><error_response>Invalid report_type</error_response></nm_response>")

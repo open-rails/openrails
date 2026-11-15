@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 288,
+  "scenario_count": 289,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -892,6 +892,11 @@
       "id": "OR-J06-S07",
       "journey": "J06",
       "name": "PSP import and its queued job commit together"
+    },
+    {
+      "id": "OR-J06-S08",
+      "journey": "J06",
+      "name": "A PSP's environment proof expires after an hour and is proven again before the next write; an account that changed environment is refused"
     },
     {
       "id": "OR-J12-S08",

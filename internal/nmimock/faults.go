@@ -96,6 +96,14 @@ func (m *Mock) QueryUnavailable(down bool) {
 	m.queryDown = down
 }
 
+// SetTestMode flips the account's test mode, as the dashboard toggle does; a
+// new mock's account is in test mode.
+func (m *Mock) SetTestMode(enabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.liveMode = !enabled
+}
+
 // FailScheduleUpdates makes the next n update_subscription requests fail.
 func (m *Mock) FailScheduleUpdates(n int) {
 	m.mu.Lock()

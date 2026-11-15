@@ -186,7 +186,7 @@ is a file or Vault, cached per instance. Per-instance caches:
 | A Solana Transit cranker's public key | 60 seconds |
 | FX rates | the instance's next refresh (every 2 hours); a rate published 48 hours ago is never quoted |
 | `GET /v1/config` in browsers and CDNs | 5 minutes (`Cache-Control`) |
-| PSP posture verdicts | at once, when the PSP's configuration changes |
+| PSP posture verdicts | at once, when the PSP's configuration changes; an arming verdict an hour old is checked again before the next provider write |
 
 ### What scales
 
