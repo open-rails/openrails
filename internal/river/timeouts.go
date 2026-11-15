@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/convergejob"
 	"github.com/open-rails/openrails/internal/intents/wake"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -41,7 +42,7 @@ var kinds = map[string]time.Duration{
 	KindSubscriptionConverge:             DefaultTimeout,
 	KindProviderObjectObserve:            DefaultTimeout,
 	convergejob.Kind:                     DefaultTimeout,
-	DestructiveAlertArgs{}.Kind():        DefaultTimeout,
+	alerting.DeliveryKind:                DefaultTimeout,
 	wake.Kind:                            DefaultTimeout,
 	paymentmethods.KindStoredCardRefresh: DefaultTimeout,
 	merchants.SecretCleanupArgs{}.Kind(): DefaultTimeout,
