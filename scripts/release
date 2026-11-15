@@ -2,26 +2,28 @@
 # Releases the root, server and optional AuthKit adapter in lockstep. Master only
 # accepts commits whose checks passed, so a release is two steps:
 #
-#   scripts/release prepare vX.Y.Z           # opens the release PR
-#   scripts/release publish vX.Y.Z ["note"]  # once that PR is green
+#   scripts/release prepare vX.Y.Z [rc/<name>]  # opens the release PR
+#   scripts/release publish vX.Y.Z ["note"]     # once that PR is green
 #
 # prepare pins the server, AuthKit adapter and standalone test fixture to vX.Y.Z
-# (replaces keep in-repository builds on local source) on origin/master, commits
-# that to chore/release-vX.Y.Z and opens its PR. publish fast-forwards master to the
-# green PR head and pushes it with the signed, annotated vX.Y.Z and
-# server/vX.Y.Z and adapters/authkit/vX.Y.Z tags at once. The vX.Y.Z tag runs release.yaml and
+# (replaces keep in-repository builds on local source) on origin/master, or on the
+# open release candidate so one full run qualifies the candidate and its release,
+# commits that to chore/release-vX.Y.Z and opens its PR into master. publish
+# fast-forwards master to the green PR head and pushes it with the signed,
+# annotated vX.Y.Z, server/vX.Y.Z and adapters/authkit/vX.Y.Z tags at once, so a
+# tag is always a master commit. The vX.Y.Z tag runs release.yaml and
 # docker-publish.yaml.
 set -euo pipefail
 die() {
   echo "release: $*" >&2
   exit 1
 }
-usage="usage: scripts/release prepare vX.Y.Z | publish vX.Y.Z [note]"
+usage="usage: scripts/release prepare vX.Y.Z [rc/<name>] | publish vX.Y.Z [note]"
 step="${1:-}"
 version="${2:-}"
 note="${3:-}"
 [[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] || die "$usage"
-# release/** branches are protected merge targets, not mutable PR heads.
+# master takes this head and rc/* only (scripts/ci-source-branch.sh).
 branch="chore/release-$version"
 cd "$(git rev-parse --show-toplevel)"
 export GOWORK=off
@@ -34,12 +36,16 @@ done
 
 case "$step" in
 prepare)
+  base="${3:-master}"
+  [[ "$base" =~ ^(master|rc/[^/]+)$ ]] || die "$usage"
+  git fetch --quiet origin "$base"
+  git merge-base --is-ancestor origin/master "origin/$base" || die "$base is behind origin/master; update it first"
   work="$HOME/cozy/.worktrees/openrails/release-$version"
   [[ ! -e "$work" ]] || die "$work already exists; resume its owned release work"
   mkdir -p "${work%/*}"
-  git worktree add --quiet -b "$branch" "$work" origin/master
+  git worktree add --quiet -b "$branch" "$work" "origin/$base"
   admin="$(git -C "$work" rev-parse --absolute-git-dir)"
-  python3 - "$admin/OWNER.json" "$branch" "$(git rev-parse origin/master)" "$work" <<'PY'
+  python3 - "$admin/OWNER.json" "$branch" "$(git rev-parse "origin/$base")" "$work" <<'PY'
 import json, sys
 from pathlib import Path
 Path(sys.argv[1]).write_text(json.dumps({

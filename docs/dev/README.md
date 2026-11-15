@@ -75,11 +75,17 @@ That rewrites `api/go.txt`, `api/openapi.json`, `api/schema.txt`,
 `compatibility/contract.json`, the TypeScript wire types and `docs/api/routes.md`
 and `error-codes.md`. Without `-write` it checks them. Never hand-merge them.
 
+## Branches
+
+Cut a feature branch from the open release candidate named in [OPEN.md](../../OPEN.md) and open its
+pull request against that `rc/<name>` branch, as a draft until its last commit. Master takes only the
+release candidate and the release PR below. [docs/ci.md](../ci.md) has the rules and what each runs.
+
 ## Releases
 
 ```sh
-scripts/release prepare vX.Y.Z            # opens release/vX.Y.Z pinning server and adapter to the root
-scripts/release publish vX.Y.Z ["note"]   # once its checks pass
+scripts/release prepare vX.Y.Z [rc/<name>]  # opens chore/release-vX.Y.Z from master, or from the open RC, pinning server and adapter to the root
+scripts/release publish vX.Y.Z ["note"]     # once that PR's checks pass
 ```
 
 `publish` fast-forwards master to the green PR and pushes the signed `vX.Y.Z`,

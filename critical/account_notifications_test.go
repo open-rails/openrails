@@ -278,6 +278,8 @@ func TestNotificationAdoptionExport(t *testing.T) {
 		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		subscriptionState(t, a, sub.ID, "past_due")
 		require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 1 }, 20*time.Second, 20*time.Millisecond)
+		request := accountNotices(t, inbox, a.alice.ID)[0]
+		require.Equal(t, "payment_method_failed", request.Kind)
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 		defer cancel()
 		sale := func(client *openrails.Client) billing.PriceID {
@@ -386,12 +388,21 @@ func TestNotificationAdoptionExport(t *testing.T) {
 		require.Equal(t, revision, held.adoption.Adoptions[0].Current.Revision)
 		require.NoError(t, <-canceled)
 		subscriptionState(t, a, sub.ID, "canceled")
-		require.Empty(t, accountNotices(t, inbox, a.alice.ID), "the cancellation withdraws the request after the export")
+		// The cancellation ends access, so the inbox now holds the ended notice instead.
+		_, err = inbox.Get(ctx, notify.Recipient{Audience: notify.AudienceUser, ID: a.alice.ID}, request.ID)
+		require.ErrorIs(t, err, notify.ErrNotFound, "the cancellation withdraws the request after the export")
 		after, err := a.local.ExportNotificationAdoption(ctx)
 		require.NoError(t, err)
-		require.Len(t, after.Adoptions, 1)
-		require.True(t, after.Adoptions[0].Current.Withdrawn)
-		require.Greater(t, after.Adoptions[0].Current.Revision, revision, "the later withdrawal orders after the exported revision")
+		var withdrawn *notify.Adoption
+		for i := range after.Adoptions {
+			if after.Adoptions[i].Current.Kind == "payment_method_failed" {
+				require.Nil(t, withdrawn, "one adoption per issue")
+				withdrawn = &after.Adoptions[i]
+			}
+		}
+		require.NotNil(t, withdrawn)
+		require.True(t, withdrawn.Current.Withdrawn)
+		require.Greater(t, withdrawn.Current.Revision, revision, "the later withdrawal orders after the exported revision")
 	})
 }
 

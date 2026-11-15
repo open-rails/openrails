@@ -146,7 +146,7 @@ var priceBindingConfigurationJSON = object(map[string]jsonRule{
 	"provider_billing_interval_months": textValue,
 	"token":                            textValue, "mint": textValue, "mint_symbol": textValue,
 	"amount_base_units": textValue, "period_hours": textValue,
-	"created_at": textValue, "merchant_address": textValue,
+	"created_at": textValue, "merchant_address": textValue, "treasury": textValue,
 })
 
 var providerPriceSnapshotJSON = nullable(object(map[string]jsonRule{
@@ -361,7 +361,7 @@ var jsonRules = map[string]jsonRule{
 		"token_symbol": textValue, "token_mint": textValue, "token_decimals": textValue, "recipient": textValue, "token_amount": moneyStringValue,
 		"token_price_usd": numberValue, "fx_rate": numberValue, "fx_currency": textValue, "quoted_at": textValue, "quote_expires_at": textValue,
 		"plan_id": textValue, "mint_symbol": textValue, "amount_base_units": moneyStringValue, "period_hours": textValue, "plan_created_at": textValue,
-		"payer": textValue, "subscriber_wallet": textValue, "subscription_pda": textValue,
+		"payer": textValue, "subscriber_wallet": textValue, "subscription_pda": textValue, "plan_owner": textValue, "treasury": textValue,
 	})),
 	"host_outbox.data": object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_orders": integerValue, "entered_at": textValue, "evaluated_at": textValue,
 		// An order's transition: its statuses, number, payment and decline reason.
@@ -369,12 +369,13 @@ var jsonRules = map[string]jsonRule{
 		// A balance event: the balance as its crossing was seen.
 		"available_amount": moneyStringValue, "owed_amount": moneyStringValue, "accrual_rate_per_hour": moneyStringValue, "as_of": textValue, "depletes_at": nullable(textValue),
 		"usage_rate_per_hour": moneyStringValue, "low_balance_amount": moneyStringValue, "runway_ends_at": nullable(textValue)}),
-	"provider_intents.payload":            nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
-	"provider_intents.result_evidence":    nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),
-	"admission_operations.terms":          object(map[string]jsonRule{"invoker": textValue, "invoker_type": textValue, "trust_level": textValue, "roles": array(textValue), "resource": textValue, "source": textValue, "accrual_rate_delta_per_hour": integerValue}),
-	"admission_operations.capture_terms":  nullable(object(map[string]jsonRule{"event_type": textValue, "resource": textValue, "metadata": metadataJSON, "source": textValue, "source_id": textValue, "dimensions": dictionary(integerValue), "amount": moneyStringValue})),
-	"admission_operations.estimate_usage": nullable(object(map[string]jsonRule{"amount": moneyStringValue, "event_type": textValue, "dimensions": dictionary(integerValue), "metadata": metadataJSON})),
-	"admission_operations.rate_cards":     nullable(array(pinnedRateCardJSON)),
+	"provider_intents.solana_pull.payload": object(map[string]jsonRule{"subscription_pda": textValue, "row_id": uuidValue, "next_pull_at": textValue}),
+	"provider_intents.payload":             nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
+	"provider_intents.result_evidence":     nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),
+	"admission_operations.terms":           object(map[string]jsonRule{"invoker": textValue, "invoker_type": textValue, "trust_level": textValue, "roles": array(textValue), "resource": textValue, "source": textValue, "accrual_rate_delta_per_hour": integerValue}),
+	"admission_operations.capture_terms":   nullable(object(map[string]jsonRule{"event_type": textValue, "resource": textValue, "metadata": metadataJSON, "source": textValue, "source_id": textValue, "dimensions": dictionary(integerValue), "amount": moneyStringValue})),
+	"admission_operations.estimate_usage":  nullable(object(map[string]jsonRule{"amount": moneyStringValue, "event_type": textValue, "dimensions": dictionary(integerValue), "metadata": metadataJSON})),
+	"admission_operations.rate_cards":      nullable(array(pinnedRateCardJSON)),
 }
 
 func validateJSON(field, raw string) error {

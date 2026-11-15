@@ -405,6 +405,15 @@ func TestBillingArchive(t *testing.T) {
 		s := newSolanaWorld(t, true)
 		_, sub := s.subscribe(t)
 		due := *sub.CurrentPeriodEndsAt
+		// The source's poller settles the subscribe's reference: a pending one
+		// stays with the deployment that watches the chain.
+		quietFleet(t, s.world)
+		require.Eventually(t, func() bool {
+			s.clock.Advance(time.Second)
+			var pending int
+			err := s.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{s.schema, "solana_pay_references"}.Sanitize()+" WHERE status = 'pending'").Scan(&pending)
+			return err == nil && pending == 0
+		}, 20*time.Second, 100*time.Millisecond, "the poller confirms the landed subscribe")
 		archive := archiveBytes(t, s.alpha)
 		target, client := archiveTarget(t, s.world, func(w *world) {
 			w.clock.Advance(s.clock.Now().Sub(w.clock.Now()))
@@ -424,16 +433,17 @@ func TestBillingArchive(t *testing.T) {
 		client, err = target.engine.Merchant(s.alpha.MerchantID())
 		require.NoError(t, err)
 		require.NoError(t, s.engine.Close(context.Background()))
-		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
 		fleet := quietFleet(t, target)
 		require.NotEmpty(t, operationJobs(t, fleet), "the restore queues the pull's wake")
 		settleOperations(t, fleet)
 		sends := s.wire.sends()
-		advanceTo(target, due)
+		advanceTo(target, due.Add(pullMargin))
 		wakeOperations(t, fleet)
 		settleOperations(t, fleet)
-		require.Equal(t, sends, s.wire.sends(), "the pull waits its margin")
-		advanceTo(target, due.Add(pullMargin))
+		require.Equal(t, sends, s.wire.sends(), "a restored pull sends nothing before the operator arms")
+		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
+		// The held pull is looked at again after its park interval.
+		target.clock.Advance(5 * time.Minute)
 		landedAt := target.clock.Now()
 		wakeOperations(t, fleet)
 		require.Eventually(t, func() bool {

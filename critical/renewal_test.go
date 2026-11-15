@@ -5,6 +5,7 @@ package critical_test
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,19 @@ func startFleet(t *testing.T, w *world) *river.Client[pgx.Tx] {
 // completion. This drives a due pass; it makes no claim about scheduler cadence.
 func runRegistered(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copies int) {
 	t.Helper()
+	runRegisteredFailing(t, fleet, kind, copies, "")
+}
+
+// runPassFailing drives billing passes while one scan cannot finish: a pass
+// that ran its scans fails with that scan's error alone, and at least one did.
+func runPassFailing(t *testing.T, fleet *river.Client[pgx.Tx], copies int, scan string) {
+	t.Helper()
+	runRegisteredFailing(t, fleet, "openrails.billing_pass", copies, scan)
+}
+
+func runRegisteredFailing(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copies int, scan string) {
+	t.Helper()
+	failed := 0
 	events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
 	defer unsubscribe()
 	waiting := map[int64]bool{}
@@ -43,12 +57,23 @@ func runRegistered(t *testing.T, fleet *river.Client[pgx.Tx], kind string, copie
 		select {
 		case event := <-events:
 			if event != nil && waiting[event.Job.ID] {
-				require.Equal(t, river.EventKindJobCompleted, event.Kind, "%s: %+v", kind, event.Job.Errors)
+				if scan == "" || event.Kind != river.EventKindJobFailed {
+					require.Equal(t, river.EventKindJobCompleted, event.Kind, "%s: %+v", kind, event.Job.Errors)
+				} else {
+					failed++
+					require.NotEmpty(t, event.Job.Errors)
+					for _, line := range strings.Split(event.Job.Errors[len(event.Job.Errors)-1].Error, "\n") {
+						require.True(t, strings.HasPrefix(line, scan+": "), "only %s may fail the pass: %s", scan, line)
+					}
+				}
 				delete(waiting, event.Job.ID)
 			}
 		case <-deadline.C:
 			t.Fatalf("registered %s jobs did not complete: %v", kind, waiting)
 		}
+	}
+	if scan != "" {
+		require.Positive(t, failed, "a pass whose %s cannot finish fails", scan)
 	}
 	// River uses wall time while business time is advanced independently. Make
 	// newly accepted work available through River's host API; worker admission
