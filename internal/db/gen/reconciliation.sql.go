@@ -1419,7 +1419,7 @@ type ListOverdueRenewalsRow struct {
 }
 
 // An active provider-billed subscription whose paid period ended before
-// overdue_before with no renewal payment. A clock reading only: rebill watch
+// overdue_before with no renewal payment. A clock reading only: the due pass
 // asks the provider (RenewalOverdue -> unverified). Oldest lapse first, a page
 // after the (period end, id) cursor.
 func (q *Queries) ListOverdueRenewals(ctx context.Context, arg ListOverdueRenewalsParams) ([]ListOverdueRenewalsRow, error) {

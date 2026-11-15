@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jonboulle/clockwork"
-	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -24,13 +23,6 @@ const (
 	delinquencyBatch = 200
 )
 
-// DelinquencyArgs triggers one pass over the payers whose delinquency is due.
-type DelinquencyArgs struct{}
-
-func (DelinquencyArgs) Kind() string { return KindDelinquency }
-
-func (DelinquencyArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
-
 // DelinquencyWorker evaluates the payers whose delinquency time alone changed
 // (customer_delinquency.next_evaluation_at): a usage order fell due or a grace
 // window ran out. A change to a usage order evaluates its payer inline. It
@@ -38,12 +30,9 @@ func (DelinquencyArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
 // in limited or readonly mode. A failed evaluation stays due and fails the
 // pass once the others are done.
 type DelinquencyWorker struct {
-	WorkerDefaults[DelinquencyArgs]
 	DB    *db.DB
 	Clock clockwork.Clock
 }
-
-func (DelinquencyWorker) Kind() string { return KindDelinquency }
 
 func (w DelinquencyWorker) now() time.Time {
 	if w.Clock != nil {
@@ -58,7 +47,7 @@ func (w DelinquencyWorker) DueBy(ctx context.Context, at time.Time) (bool, error
 	return len(due) > 0, err
 }
 
-func (w DelinquencyWorker) Work(ctx context.Context, _ *river.Job[DelinquencyArgs]) error {
+func (w DelinquencyWorker) Pass(ctx context.Context) error {
 	if w.DB == nil {
 		return nil
 	}

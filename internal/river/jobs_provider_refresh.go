@@ -25,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/providerrecovery"
@@ -33,7 +32,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/cadence"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const (
@@ -649,14 +647,6 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			log.WithContext(ctx).WithError(err).WithField("psp_id", pspID).Warn("Provider Refresh: read open financial findings failed")
 		} else if conflicts {
 			out.Held++
-		} else {
-			more, err := w.completeObservation(ctx, mid, pspID, horizon)
-			if err != nil {
-				out.WatermarkErrors++
-				log.WithContext(ctx).WithError(err).WithField("psp_id", pspID).Warn("Provider Refresh: completion and recovery wakeups failed")
-			} else {
-				out.More = more
-			}
 		}
 	}
 	// Advance the pull watermark after the pass so the next pass's drift gate
@@ -667,40 +657,6 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		}
 	}
 	return out
-}
-
-// Complete coverage records reporting progress; it never grants write permission. Scans use the
-// existing collection policy/cadence; refresh never invokes a provider writer.
-func (w *ProviderRefreshWorker) completeObservation(ctx context.Context, mid, psp uuid.UUID, horizon time.Time) (bool, error) {
-	const batch = 100
-	more := false
-	err := w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := w.DB.NewWithPgxTx(tx)
-		changed, err := d.Gen(ctx).UpsertPSPCompletedRefreshWatermark(ctx, gen.UpsertPSPCompletedRefreshWatermarkParams{MerchantID: mid, PspID: psp, WatermarkAt: horizon})
-		if err != nil {
-			return err
-		}
-		if (writeposture.View{Config: w.Config, DB: d}).Posture(ctx, mid).Limited() {
-			return nil
-		}
-		if changed == 0 {
-			return nil
-		}
-		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}}
-		if w.Config != nil && w.Config.UsageBillingEnabled {
-			jobs = append(jobs, money.UsageOrderArgs{})
-		}
-		for _, args := range jobs {
-			// A merchant's wake is never absorbed by a scan sleeping on an
-			// earlier outage. Canonical usage/renewal admission and durable
-			// cadence own money.
-			if _, err := w.DB.InsertRiverJobTx(ctx, tx, args, nil); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	return more, err
 }
 
 func (w *ProviderRefreshWorker) loadAppliedWatermark(ctx context.Context, mid, psp uuid.UUID) (time.Time, error) {

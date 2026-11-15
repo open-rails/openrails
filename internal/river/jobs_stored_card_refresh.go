@@ -388,12 +388,6 @@ const (
 	storedCardVaultRetry = time.Hour
 )
 
-type StoredCardRefreshDueArgs struct{}
-
-func (StoredCardRefreshDueArgs) Kind() string { return KindStoredCardRefreshDue }
-
-func (StoredCardRefreshDueArgs) InsertOpts() river.InsertOpts { return coalescedPass() }
-
 // StoredCardRefreshDueWorker queues a refresh for each card an armed vault
 // holds whose next renewal is inside the vault's lookahead and that was not
 // checked for it. It reads only billing.stored_card_checks: a subscription's
@@ -401,7 +395,6 @@ func (StoredCardRefreshDueArgs) InsertOpts() river.InsertOpts { return coalesced
 // card's next check, queues it, or drops it until its renewals change again.
 // A vault armed later is first asked about a card ahead of its next renewal.
 type StoredCardRefreshDueWorker struct {
-	WorkerDefaults[StoredCardRefreshDueArgs]
 	DB        *db.DB
 	Clock     clockwork.Clock
 	Merchants func() *merchants.Service
@@ -409,19 +402,12 @@ type StoredCardRefreshDueWorker struct {
 	Posture intents.ModeView
 }
 
-func (StoredCardRefreshDueWorker) Kind() string { return KindStoredCardRefreshDue }
-
-func (w StoredCardRefreshDueWorker) Work(ctx context.Context, _ *river.Job[StoredCardRefreshDueArgs]) error {
-	_, err := w.RunPass(ctx)
-	return err
-}
-
-// RunPass looks at the due checks and returns how many refreshes it queued.
-// Each round reads a page of marked cards and a page of planned checks, so
-// neither starves the other, until both run short or the budget is spent.
-func (w StoredCardRefreshDueWorker) RunPass(ctx context.Context) (int, error) {
+// Pass looks at the due checks. Each round reads a page of marked cards and a
+// page of planned checks, so neither starves the other, until both run short
+// or the budget is spent.
+func (w StoredCardRefreshDueWorker) Pass(ctx context.Context) error {
 	if w.DB == nil || w.Merchants == nil || w.Merchants() == nil {
-		return 0, errors.New("stored card refresh pass: DB and merchant configuration are required")
+		return errors.New("stored card refresh pass: DB and merchant configuration are required")
 	}
 	logger := log.WithContext(ctx).WithField("worker", KindStoredCardRefreshDue)
 	now := workerNow(w.Clock)
@@ -440,7 +426,7 @@ func (w StoredCardRefreshDueWorker) RunPass(ctx context.Context) (int, error) {
 			}
 			rows, err := q.ListMarkedStoredCardChecks(ctx, gen.ListMarkedStoredCardChecksParams{SkipMerchantIds: skip, RowLimit: storedCardBatch})
 			if err != nil {
-				return queued, errors.Join(passErr, fmt.Errorf("stored card refresh pass: list marked cards: %w", err))
+				return errors.Join(passErr, fmt.Errorf("stored card refresh pass: list marked cards: %w", err))
 			}
 			markedDone = len(rows) < storedCardBatch
 			for _, row := range rows {
@@ -452,7 +438,7 @@ func (w StoredCardRefreshDueWorker) RunPass(ctx context.Context) (int, error) {
 			params.Now, params.RowLimit = now, storedCardBatch
 			rows, err := q.ListPlannedStoredCardChecks(ctx, params)
 			if err != nil {
-				return queued, errors.Join(passErr, fmt.Errorf("stored card refresh pass: list planned checks: %w", err))
+				return errors.Join(passErr, fmt.Errorf("stored card refresh pass: list planned checks: %w", err))
 			}
 			plannedDone = len(rows) < storedCardBatch
 			for _, row := range rows {
@@ -468,7 +454,7 @@ func (w StoredCardRefreshDueWorker) RunPass(ctx context.Context) (int, error) {
 	if queued > 0 {
 		logger.WithFields(log.Fields{"checks": looked, "queued": queued}).Info("stored card refresh pass: refreshes queued")
 	}
-	return queued, passErr
+	return passErr
 }
 
 // dueCheck is one card due for a look.

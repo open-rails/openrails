@@ -820,8 +820,14 @@
     "OR-J16-S70": [
       "TestDueWork/OR-J16-S70/a-provider-billed-grace-that-ends-unanswered-is-read-by-the-due-pass"
     ],
+    "OR-J16-S71": [
+      "TestDueWork/OR-J16-S71/an-overdue-renewal-is-asked-before-the-rebill-watch-reads-nmi"
+    ],
     "OR-J15-S70": [
       "TestDueWork/OR-J15-S70/an-nmi-renewal-the-probe-cannot-settle-is-read-by-id-after-its-grace"
+    ],
+    "OR-J15-S72": [
+      "TestDueWork/OR-J15-S72/a-complete-provider-refresh-queues-no-due-work"
     ],
     "OR-J15-S71": [
       "TestNMIRoster/OR-J15-S71/a-truncated-roster-page-resolves-nothing"

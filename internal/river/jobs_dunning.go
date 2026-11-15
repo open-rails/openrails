@@ -25,10 +25,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/writeposture"
-	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -71,31 +71,13 @@ const (
 	dunningOutcomeRefused
 )
 
-// DunningArgs triggers one due pass; a set MerchantID scopes it to that merchant.
-type DunningArgs struct {
-	MerchantID uuid.UUID `json:"merchant_id,omitempty"`
-}
-
-func (DunningArgs) Kind() string { return KindDunning }
-
-// InsertOpts: a deployment-wide pass makes one attempt, so one merchant's
-// failure never holds back the next pass; a merchant's wake is never absorbed
-// by a pass.
-func (a DunningArgs) InsertOpts() river.InsertOpts {
-	if a.MerchantID != uuid.Nil {
-		return river.InsertOpts{Queue: QueueBilling}
-	}
-	return coalescedPass()
-}
-
 // DunningWorker is the due pass: per merchant with due work it queues past_due
 // NMI retries as manual_rebill operations, admits due engine renewals to
 // collection, ends memberships whose wait for a card outlived the dunning
-// window, and asks the provider about a provider-billed past_due row whose
-// grace ended unanswered. It never waits on a provider: each operation's own
-// job charges.
+// window, and asks the provider about a provider-billed row whose grace
+// ended unanswered or whose renewal is overdue. It never waits on a provider:
+// each operation's own job charges.
 type DunningWorker struct {
-	WorkerDefaults[DunningArgs]
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock
@@ -105,6 +87,7 @@ type DunningWorker struct {
 	// EngineCollections admits stored engine obligations; the existing
 	// provider-intent fleet performs the accepted charge and receipt recovery.
 	EngineCollections *money.MoneyService
+	Lifecycle         *subscriptions.SubscriptionLifecycleService
 }
 
 // storeArmsNMI reports whether the merchant-secrets store can arm an NMI
@@ -119,8 +102,6 @@ func (w *DunningWorker) storeArmsNMI(ctx context.Context, sub *models.Subscripti
 	return ok || err != nil
 }
 
-func (DunningWorker) Kind() string { return KindDunning }
-
 // now returns the current time from the worker's clock
 func (w *DunningWorker) now() time.Time {
 	if w.Clock != nil {
@@ -129,7 +110,12 @@ func (w *DunningWorker) now() time.Time {
 	return time.Now()
 }
 
-func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) error {
+// Pass runs the due work, then asks the provider about overdue renewals.
+func (w *DunningWorker) Pass(ctx context.Context) error {
+	return errors.Join(w.due(ctx), w.overdueRenewals(ctx, w.now().UTC()))
+}
+
+func (w *DunningWorker) due(ctx context.Context) error {
 	// Charges fire only in mode=full. Under limited the scan still materializes
 	// its decisions: stale subscriptions park as unknown and in-window charges
 	// enqueue as parked system-origin intents, visible in `openrails intents`.
@@ -149,23 +135,19 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	nmiRails, includeEngine, admitEngine := w.dueScope()
 	now := w.now()
 	var merchantIDs []uuid.UUID
-	if job.Args.MerchantID != uuid.Nil {
-		merchantIDs = []uuid.UUID{job.Args.MerchantID}
-	} else {
-		after := uuid.Nil
-		for {
-			page, err := w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
-				Rails: nmiRails, Now: now, MerchantLimit: dunningMerchantBatch, IncludeEngine: includeEngine, AdmitEngine: admitEngine, AfterMerchantID: after,
-			})
-			if err != nil {
-				return fmt.Errorf("query merchants with due subscriptions: %w", err)
-			}
-			merchantIDs = append(merchantIDs, page...)
-			if len(page) < dunningMerchantBatch {
-				break
-			}
-			after = page[len(page)-1]
+	after := uuid.Nil
+	for {
+		page, err := w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
+			Rails: nmiRails, Now: now, MerchantLimit: dunningMerchantBatch, IncludeEngine: includeEngine, AdmitEngine: admitEngine, AfterMerchantID: after,
+		})
+		if err != nil {
+			return fmt.Errorf("query merchants with due subscriptions: %w", err)
 		}
+		merchantIDs = append(merchantIDs, page...)
+		if len(page) < dunningMerchantBatch {
+			break
+		}
+		after = page[len(page)-1]
 	}
 	if len(merchantIDs) == 0 {
 		log.WithContext(ctx).Debug("Dunning: no subscriptions due for retry")
@@ -299,6 +281,65 @@ func (w *DunningWorker) DueBy(ctx context.Context, at time.Time) (bool, error) {
 		Rails: rails, Now: at, MerchantLimit: 1, IncludeEngine: includeEngine, AdmitEngine: admitEngine, AfterMerchantID: uuid.Nil,
 	})
 	return len(ids) > 0, err
+}
+
+// overdueRenewals moves each provider-billed renewal still unconfirmed
+// reconcile.PeriodGrace after its period to unverified: a clock reading is
+// not evidence, so it only asks the provider. The row leaves the due set.
+func (w *DunningWorker) overdueRenewals(ctx context.Context, now time.Time) error {
+	if w.Lifecycle == nil {
+		return errors.New("overdue renewals: lifecycle not wired")
+	}
+	before := now.Add(-reconcile.PeriodGrace)
+	postures := writeposture.View{Config: w.Config, DB: w.DB}
+	var workErr error
+	after := uuid.Nil
+	for {
+		merchantIDs, err := w.DB.GenDirectory().ListOverdueRenewalMerchants(ctx, gen.ListOverdueRenewalMerchantsParams{
+			OverdueBefore: before, AfterMerchantID: after, MerchantLimit: dunningMerchantBatch,
+		})
+		if err != nil {
+			return errors.Join(workErr, fmt.Errorf("overdue renewals: list merchants: %w", err))
+		}
+		for _, mid := range merchantIDs {
+			if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "overdue renewals", func(ctx context.Context) error {
+				if p := postures.Posture(ctx, mid); p.ReadOnly() {
+					return nil
+				}
+				return w.overdueMerchantRenewals(ctx, mid, before)
+			}); err != nil {
+				workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
+			}
+		}
+		if len(merchantIDs) < dunningMerchantBatch {
+			return workErr
+		}
+		after = merchantIDs[len(merchantIDs)-1]
+	}
+}
+
+func (w *DunningWorker) overdueMerchantRenewals(ctx context.Context, mid uuid.UUID, before time.Time) error {
+	var merchantErr error
+	var afterAt time.Time
+	afterID := uuid.Nil
+	for {
+		rows, err := w.DB.Gen(ctx).ListOverdueRenewals(ctx, gen.ListOverdueRenewalsParams{
+			MerchantID: mid, OverdueBefore: before, AfterDueAt: afterAt, AfterID: afterID, RowLimit: subscriptions.DueDunningBatch,
+		})
+		if err != nil {
+			return errors.Join(merchantErr, err)
+		}
+		for _, row := range rows {
+			if _, err := w.Lifecycle.AskProviderOverdueRenewal(ctx, w.DB, row.ID, *row.CurrentPeriodEndsAt); err != nil {
+				merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", row.ID, err))
+			}
+		}
+		if len(rows) < subscriptions.DueDunningBatch {
+			return merchantErr
+		}
+		last := rows[len(rows)-1]
+		afterAt, afterID = *last.CurrentPeriodEndsAt, last.ID
+	}
 }
 
 // FindingDuePassRefused is a subscription the due pass could not process.

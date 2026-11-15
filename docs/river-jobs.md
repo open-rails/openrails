@@ -1,11 +1,10 @@
 # OpenRails background jobs and events audit
 
-Source snapshot: `origin/master` at `88a70db5ac000a8d27802bbe806ab7ca0eec9cda`
-(v0.279.0), inspected 2026-11-15. This is a source inventory, not a report of
-jobs currently present in any deployed database.
+This is a source inventory, not a report of jobs currently present in any
+deployed database.
 
-The inventory contains **25 registered core River job kinds**, **6 core periodic
-declarations**, **9 scans inside the hourly billing pass** (one is not a River
+The inventory contains **18 registered core River job kinds**, **6 core periodic
+declarations**, **9 scans inside the hourly billing pass** (one is also a River
 job), **22 provider-operation types**, **16 host event types**, and **21 customer
 notification types**. It also covers incoming provider events, the standalone
 server's AuthKit jobs, and background activity outside River.
@@ -13,7 +12,7 @@ server's AuthKit jobs, and background activity outside River.
 These are capabilities present in the code. Whether they do work depends on the
 host, enabled features, merchant configuration, credentials, and due database
 rows. No production database, queued-job counts, or deployment configuration was
-inspected. `git pull --ff-only` confirmed this source snapshot was current.
+inspected.
 
 ## How to read the inventory
 
@@ -38,7 +37,7 @@ the authoritative kind/timeout list is [timeouts.go](../internal/river/timeouts.
 | `billing` | 20 | All core work below, except PSP imports and standalone per-merchant provider refreshes. |
 | `psp_import` | 2 | PSP import pulls, relinking, and application of approved imports. Contributed to host fleets too. |
 | `provider_refresh` | 4 | Per-merchant provider refresh jobs when OpenRails owns River. In a host fleet those jobs use `billing`. |
-| `default` | 10 | Configured when OpenRails owns River; none of the 25 core kinds defaults to this queue. |
+| `default` | 10 | Configured when OpenRails owns River; none of the 18 core kinds defaults to this queue. |
 
 These are defaults applied when a host has not already configured the queue;
 they are per River client, not deployment-wide concurrency guarantees. Optional
@@ -98,20 +97,19 @@ See [retention constants and instruction-only intent list](../internal/retention
 
 ## 2. Hourly billing-pass scans: all nine, in execution order
 
-Eight scans below also have registered River workers, but **none has its own
-periodic declaration**. Their ordinary timer is the enclosing
-`openrails.billing_pass`; some also have immediate wake-ups. NMI history is the
-one function-only scan, explicitly identified below.
+A scan is a function the pass runs, not a River job: its only timer is the
+enclosing `openrails.billing_pass`. Usage orders is the one scan that is also a
+job kind, for its page continuations and threshold wake-ups.
 
-| Scan / job kind | What selects work or wakes it | What it does / consequence | Source |
+| Scan | What selects work | What it does / consequence | Source |
 | --- | --- | --- | --- |
-| `openrails.dunning` | Due subscription retry/renewal rows; also a merchant-scoped job after provider-refresh coverage advances. | Admits NMI recovery charges as `manual_rebill` operations and engine renewals as collection operations; handles exhausted waits for cards and asks for provider verification when confirmation is overdue. The scan queues operations; their own jobs contact the charging provider. Full mode permits system charging; limited mode can materialize held operations; readonly observes. | [dunning](../internal/river/jobs_dunning.go) |
+| `openrails.dunning` | Due subscription retry/renewal rows; active provider-billed renewals still unpaid 48 hours after their period. | Admits NMI recovery charges as `manual_rebill` operations and engine renewals as collection operations; handles exhausted waits for cards and asks for provider verification when a grace or renewal confirmation is overdue (the row becomes unverified; access is kept, and elapsed time alone is no cancellation evidence). The scan queues operations; their own jobs contact the charging provider. Full mode permits system charging; limited mode can materialize held operations; readonly observes. | [dunning](../internal/river/jobs_dunning.go) |
 | `openrails.balance_watch` | `balance_watches.next_check_at` is due. | Expires lapsed credit lots, posts running-charge daily checkpoints, evaluates low/depleted balance crossings, records host/customer notices and plans the next look. The per-balance job in section 3 uses the same money-service behavior. | [balance watch](../internal/river/jobs_balance_watch.go), [balance behavior](../internal/modules/money/balance_watch.go) |
 | `openrails.delinquency` | `customer_delinquency.next_evaluation_at` is due. | Re-evaluates usage debt as a due date/grace deadline passes. Changes delinquency state and records events/notices; refuses new spend under policy. Makes no provider call and moves no money. Runs in limited/readonly mode too. Order mutations also evaluate the payer inline. | [delinquency](../internal/river/jobs_delinquency.go) |
 | `openrails.order_expiry` | Order/attempt expiry deadlines and abandoned bank-authentication card saves. | Expires eligible orders and customer-waiting attempts, releases claims, and abandons stale payment-method setups. Leaves processing payments for a provider answer. | [expiry](../internal/river/jobs_order_expiry.go) |
-| `openrails.usage_orders` | Included only with `UsageBillingEnabled`; due usage-account bill dates and order collection dates. Threshold crossings and completed provider observations can also enqueue it immediately. | Rates/bills due usage accounts into orders, then admits due order collections as `order_collection` operations. Collections wait for limited mode to end. Pages of 200 accounts/orders continue in another job. | [usage scan](../internal/river/jobs_usage_orders.go), [arguments/threshold wake](../internal/modules/money/account_usage_billing.go) |
-| `openrails.rebill_watch` | Overdue provider-billed renewals; NMI schedule at least 24 hours past its expected cycle without a recorded attempt. | Reads provider evidence to recover a lost charge/webhook; only proven absence establishes a missed rebill. A cycle NMI skipped can be queued for collection. Other unconfirmed provider renewals become unverified while access is kept; elapsed time alone is not cancellation evidence. | [rebill watch](../internal/river/jobs_rebill_watch.go) |
-| `openrails.nmi_history` **(scan only; no registered River kind/args)** | Active NMI PSPs whose history read is due. Checked hourly; eligible again 23 hours after the last read, giving roughly daily reads. | Reads NMI authorization/decline history into monthly aggregates for reporting. First read reaches back 25 months; subsequent reads overlap the month before the last read. Replaces covered aggregates atomically; reads providers without charging them. | [history scan](../internal/river/jobs_nmi_history.go) |
+| `openrails.usage_orders` (also a job kind) | Included only with `UsageBillingEnabled`; due usage-account bill dates and order collection dates. A threshold crossing also enqueues it immediately. | Rates/bills due usage accounts into orders, then admits due order collections as `order_collection` operations. Collections wait for limited mode to end. Pages of 200 accounts/orders continue in another job. | [usage scan](../internal/river/jobs_usage_orders.go), [arguments/threshold wake](../internal/modules/money/account_usage_billing.go) |
+| `openrails.rebill_watch` | NMI schedule at least 24 hours past its expected cycle without a recorded attempt. | Reads provider evidence to recover a lost charge/webhook; only proven absence establishes a missed rebill. A cycle NMI skipped can be queued for collection. | [rebill watch](../internal/river/jobs_rebill_watch.go) |
+| `openrails.nmi_history` | Active NMI PSPs whose history read is due. Checked hourly; eligible again 23 hours after the last read, giving roughly daily reads. | Reads NMI authorization/decline history into monthly aggregates for reporting. First read reaches back 25 months; subsequent reads overlap the month before the last read. Replaces covered aggregates atomically; reads providers without charging them. | [history scan](../internal/river/jobs_nmi_history.go) |
 | `openrails.config_realerts` | An unresolved undeclared-account finding was last notified at least 24 hours ago. | Reloads merchant configuration first, resolves corrected findings, claims still-due findings and alerts the operator again. No alert service means no claimed/delivered re-alerts. | [configuration alerts](../internal/river/jobs_config_realerts.go) |
 | `openrails.stored_card_refresh_due` | `stored_card_checks` marks a card due or its next renewal enters its vault's lookahead window. | Plans or queues one-card refresh jobs for armed account-updater vaults. Spreads requests over the following hour; rechecks an unanswered queued card after 24 hours. The scan itself stops opening new pages after ten minutes. | [card refresh planner](../internal/river/jobs_stored_card_refresh.go) |
 
@@ -121,13 +119,13 @@ See [scan wiring](../internal/app/river_register.go).
 
 ## 3. Jobs driven by mutations, imports, webhooks or scheduled deadlines
 
-These eleven kinds complete the set of 25 core workers. They have no separate
+These eleven kinds complete the set of 18 core kinds. They have no separate
 periodic declaration; two-hour refreshes, the hourly scans or domain mutations
 create their work.
 
 | Job kind | Trigger / scope | What it does / external effects | Source |
 | --- | --- | --- | --- |
-| `openrails.provider_refresh_merchant` | `provider_refresh` schedules one per merchant; standalone queue is `provider_refresh`, host fleet queue is `billing`. | Pulls bounded provider event/history windows, recovers missing observations/charges, reconciles unknown subscriptions, reads CCBill DataLink where armed, runs local convergence and advances PSP-specific watermarks. Default overlap 24 hours, safety lag 5 minutes, windows bounded to 8 days. Can queue later dunning/usage work and deferred provider operations; refresh itself does not invoke a provider writer. | [merchant refresh](../internal/river/jobs_provider_refresh.go) |
+| `openrails.provider_refresh_merchant` | `provider_refresh` schedules one per merchant; standalone queue is `provider_refresh`, host fleet queue is `billing`. | Pulls bounded provider event/history windows, recovers missing observations/charges, reconciles unknown subscriptions, reads CCBill DataLink where armed, runs local convergence and advances PSP-specific watermarks. Default overlap 24 hours, safety lag 5 minutes, windows bounded to 8 days. Can queue deferred provider operations; refresh itself does not invoke a provider writer. | [merchant refresh](../internal/river/jobs_provider_refresh.go) |
 | `openrails.provider_operation` | Accepted `provider_intents` row, its next attempt/verification time, explicit wake or lease expiry. One operation identity per job. | Executes or verifies one authorized provider action from section 5 until terminal. Owns durable wake-up/retry, while the intent ledger owns authorization, evidence and accounting. Can charge, refund, cancel, change provider state or delete vault methods depending on type. | [worker](../internal/river/jobs_provider_intents.go), [wake contract](../internal/intents/wake/wake.go), [dispatch](../internal/intents/river_dispatch.go) |
 | `openrails.subscription_converge` | Stripe/NMI subscription/payment webhooks, or fixing/releasing a parked subscription. Identity: merchant, PSP, rail, remote subscription ref. | Debounces a burst for 5 seconds, fetches current provider truth by ID, imports/mirrors/converges the subscription and its effects. Provider failure retries and preserves access. A wake arriving during an in-flight read creates a follow-up. | [subscription worker](../internal/river/jobs_subscription_converge.go), [enqueue/coalescing](../internal/wakejobs/wakejobs.go), [park release](../internal/modules/parking/parking.go) |
 | `openrails.provider_object_observe` | Stripe product/price create/update/delete webhooks. Identity: merchant, PSP, object kind and ref. | Debounces for 5 seconds, reads the current catalog object, records observations/retirement and synchronizes unmapped-price findings. Read-only toward the provider; does not create a local sellable price automatically. | [object observer](../internal/river/jobs_provider_object_observe.go), [Stripe trigger](../internal/modules/webhooks/stripe_catalog.go) |
@@ -163,11 +161,10 @@ the normal failure-attempt budget.
 | --- | --- |
 | `billing_pass`, `merchant_health`, `admission_denial_flush` | One attempt, unique per period; a later periodic pass takes remaining due work. |
 | `provider_refresh` | One attempt, unique by two-hour period and outstanding state. Per-merchant child jobs deduplicate by merchant while outstanding and use client-default attempts. |
-| Deployment-wide `dunning`, `balance_watch`, `delinquency`, `order_expiry`, `rebill_watch`, `config_realerts`, `stored_card_refresh_due` | One attempt, coalesced while outstanding. Merchant-scoped dunning wakes use client-default attempts instead. |
 | `usage_orders` | One attempt, coalesced by arguments/outstanding state, including page continuations. |
 | `provider_operation` | Explicit maximum 32,767 infrastructure attempts; business waiting uses snooze/successors. A River failure budget is not the business decision to abandon accepted money. |
 | `stored_card_refresh` | Four attempts; final declined-card handling asks the customer unless a replacement settled it. |
-| `balance_look` | Five attempts; hourly `balance_watch` is its backstop. |
+| `balance_look` | Five attempts; the hourly balance-watch scan is its backstop. |
 | `stripe_webhook_reconcile` | Five attempts, coalesced by PSP arguments/outstanding state; daily pass is the backstop. |
 | `destructive_alert` | 100 attempts, deduplicated by incident/channel arguments, including completed jobs. |
 | `psp_import` | Pull/relink: 10,000 attempts for transient outages; apply: 10. Non-transient failure budget: five. Retry delay is attempt⁴ seconds, capped at one hour. Permanent errors or exhausted budget mark the import failed. |
@@ -176,8 +173,8 @@ the normal failure-attempt budget.
 
 All core jobs have a **10-minute timeout**, with these overrides:
 
-- **1 hour:** `stored_card_refresh_due`, `cleanup_expired_data`,
-  `provider_refresh_merchant`, `merchant_health`, `rebill_watch`, `charge_attributions`.
+- **1 hour:** `cleanup_expired_data`, `provider_refresh_merchant`,
+  `merchant_health`, `charge_attributions`.
 - **2 hours:** `psp_import`.
 - **4 hours:** `billing_pass`, the sum of all nine scan budgets (including usage
   even when disabled). Inside it, six scans have 10 minutes each; rebill watch,
@@ -376,7 +373,7 @@ Pinned versions: AuthKit **v1.43.0**, Helpers **v1.18.0**, River **v0.49.0**.
 See [attachment](../server/internal/operator/controlplane.go),
 [contribution](../server/internal/controlplane/routes.go), and [module pins](../go.mod).
 
-The following five dependency kinds are separate from the 25 core kinds. Their
+The following five dependency kinds are separate from the 18 core kinds. Their
 registration is in pinned
 [AuthKit river.go](https://github.com/open-rails/authkit/blob/v1.43.0/internal/engine/river.go).
 
@@ -426,8 +423,9 @@ business job kinds. Their effective configuration belongs to the fleet owner.
 - **Actual schedule beats an unused constant:** `money.UsageOrdersInterval` still
   says five minutes, but it is not in `Periodics`; current registration runs usage
   inside the hourly billing pass. Threshold-triggered wakes remain immediate.
-- **Kind-looking names are not always jobs:** `openrails.nmi_history` labels a
-  billing scan and has no `JobArgs.Kind()`, registered worker or kind timeout.
+- **Scan names are not job kinds:** every billing-pass scan but
+  `openrails.usage_orders` labels a function, with no `JobArgs.Kind()`,
+  registered worker or kind timeout.
 - **Separate observation from execution:** provider refresh reads and records
   provider truth; any admitted charge/cancel is executed through its own
   authorized provider-operation path. Stripe endpoint reconciliation itself does
@@ -438,7 +436,7 @@ business job kinds. Their effective configuration belongs to the fleet owner.
   Solana wiring, SCIM targets and control-plane attachment determine which
   capabilities actually run. Live queue state would be a separate audit.
 
-Coverage was checked against every core `Kind()` declaration, all 25
+Coverage was checked against every core `Kind()` declaration, all 18
 `addWorker` registrations, the timeout map, all six `Periodics` entries, all nine
 scan registrations, the complete intent-handler registry, both billing event
 catalogs and provider dispatch switches. Dependency jobs were read from the exact

@@ -192,7 +192,7 @@ func refreshJobs(t *testing.T, fleet *river.Client[pgx.Tx], states ...rivertype.
 // queued: the vault has then answered calls times in all.
 func checkAhead(t *testing.T, v *vaultCards, fleet *river.Client[pgx.Tx], calls int) {
 	t.Helper()
-	runRegistered(t, fleet, "openrails.stored_card_refresh_due", 1)
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
 	require.Eventually(t, func() bool {
 		return len(v.vendor.updaterAsked()) == calls && refreshJobs(t, fleet, rivertype.JobStateCompleted) == refreshJobs(t, fleet)
 	}, 20*time.Second, 20*time.Millisecond)
@@ -248,14 +248,14 @@ func expiredRenewal(t *testing.T, v *vaultCards, reissue btReissue) (billing.Pay
 	}
 	v.journal.core.SetDecline("1111", "223")
 	v.clock.Advance(sub.CurrentPeriodEndsAt.Sub(v.clock.Now()))
-	runRegistered(t, fleet, "openrails.dunning", 2)
+	runRegistered(t, fleet, "openrails.billing_pass", 2)
 	return method, sub, fleet, old
 }
 
 // renewedOn waits for the renewal waiting on the card to be collected.
 func renewedOn(t *testing.T, v *vaultCards, fleet *river.Client[pgx.Tx], sub billing.Subscription, last4 string) {
 	t.Helper()
-	runRegistered(t, fleet, "openrails.dunning", 2)
+	runRegistered(t, fleet, "openrails.billing_pass", 2)
 	require.Eventually(t, func() bool {
 		current, err := v.alpha.GetSubscription(t.Context(), sub.ID)
 		return err == nil && current.CurrentPeriodEndsAt != nil && current.CurrentPeriodEndsAt.After(*sub.CurrentPeriodEndsAt)
@@ -318,7 +318,7 @@ func TestStoredCardRefresh(t *testing.T) {
 		require.Equal(t, 1, noticeCount(t, v.authorityWorld, "payment_method_failed"))
 		require.Len(t, v.vendor.updaterAsked(), 2, "asked again at the decline")
 		require.Equal(t, "1111", *v.card(t, method).Card.Last4)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		subscriptionState(t, v.authorityWorld, sub.ID, "awaiting_method")
 		v.journal.money(t, 1, 2300)
 		require.Len(t, v.vendor.updaterAsked(), 2)
@@ -337,13 +337,13 @@ func TestStoredCardRefresh(t *testing.T) {
 		declined := v.subscribe(t, v.bobToken, "bob-daily", 24, 17_000_000, waiting)
 		v.journal.money(t, 2, 4000)
 		fleet := startVaultFleet(t, v)
-		runRegistered(t, fleet, "openrails.stored_card_refresh_due", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Zero(t, refreshJobs(t, fleet), "an unarmed vault's cards are never refreshed")
 
 		// An unarmed vault's declined card asks its customer.
 		v.journal.core.SetDecline("1881", "223")
 		v.clock.Advance(declined.CurrentPeriodEndsAt.Sub(v.clock.Now()))
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		subscriptionState(t, v.authorityWorld, declined.ID, "awaiting_method")
 		require.Eventually(t, func() bool { return noticeCount(t, v.authorityWorld, "payment_method_update_required") == 1 }, 20*time.Second, 20*time.Millisecond)
 		require.Equal(t, 1, noticeCount(t, v.authorityWorld, "payment_method_failed"))
@@ -365,7 +365,7 @@ func TestStoredCardRefresh(t *testing.T) {
 		slices.Sort(last4s)
 		require.Equal(t, []string{"1111", "1881"}, last4s, "the renewed and the awaiting-method cards; not the unused card or the renewal beyond the lookahead")
 
-		runRegistered(t, fleet, "openrails.stored_card_refresh_due", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Equal(t, 2, refreshJobs(t, fleet), "a card checked for its renewal is not checked again")
 		require.Len(t, v.vendor.updaterAsked(), 2)
 		require.Equal(t, 1, noticeCount(t, v.authorityWorld, "payment_method_update_required"), "a refresh ahead of renewal asks nobody")
@@ -377,7 +377,7 @@ func TestStoredCardRefresh(t *testing.T) {
 		sub := v.subscribe(t, v.aliceToken, "daily", 24, 23_000_000, card)
 		v.vendor.setThrottle(true)
 		fleet := startVaultFleet(t, v)
-		runRegistered(t, fleet, "openrails.stored_card_refresh_due", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Eventually(t, func() bool {
 			return v.vendor.throttledCalls() == 1 && refreshJobs(t, fleet, rivertype.JobStateCompleted) == refreshJobs(t, fleet)
 		}, 20*time.Second, 20*time.Millisecond)
@@ -393,7 +393,7 @@ func TestStoredCardRefresh(t *testing.T) {
 		// day's look asks again before its renewal.
 		v.vendor.setThrottle(false)
 		v.clock.Advance(sub.CurrentPeriodEndsAt.Sub(v.clock.Now()) + time.Minute)
-		runRegistered(t, fleet, "openrails.stored_card_refresh_due", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Eventually(t, func() bool { return len(v.vendor.updaterAsked()) == 1 }, 20*time.Second, 20*time.Millisecond)
 		require.Equal(t, 5, v.vendor.throttledCalls())
 		require.Zero(t, noticeCount(t, v.authorityWorld, "payment_method_update_required"))
@@ -423,7 +423,7 @@ func TestStoredCardRefresh(t *testing.T) {
 		p.core.SetDecline("4242", "expired_card")
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
 		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.dunning", 2)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		subscriptionState(t, a, sub.ID, "awaiting_method")
 		require.Eventually(t, func() bool { return noticeCount(t, a, "payment_method_update_required") == 1 }, 20*time.Second, 20*time.Millisecond)
 		require.Zero(t, noticeCount(t, a, "payment_method_failed"), "the PSP charged its current card: nothing to re-read")

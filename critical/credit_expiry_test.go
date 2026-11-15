@@ -46,7 +46,7 @@ func TestCreditExpiry(t *testing.T) {
 		done, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
 		defer unsubscribe()
 		w.clock.Advance(time.Hour)
-		job, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.balance_watch"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		job, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.billing_pass"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
@@ -62,7 +62,7 @@ func TestCreditExpiry(t *testing.T) {
 				require.Equal(t, river.EventKindJobCompleted, event.Kind)
 				finished = true
 			case <-timer.C:
-				t.Fatal("registered balance watch worker did not finish")
+				t.Fatal("the billing pass did not finish")
 			}
 		}
 		grant, err := w.alpha.GetCreditGrant(t.Context(), expiring[0].ID)
@@ -124,13 +124,13 @@ func TestCreditExpiry(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
-		runRegistered(t, fleet, "openrails.balance_watch", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		w.clock.Advance(endsAt.Add(-time.Second).Sub(w.clock.Now()))
-		runRegistered(t, fleet, "openrails.balance_watch", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		balance(t, w.alpha, customer, 1500, 0, 1500)
 		w.clock.Advance(time.Second)
 		balance(t, w.alpha, customer, 500, 0, 1500)
-		runRegistered(t, fleet, "openrails.balance_watch", 1)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		grant, err := w.alpha.GetCreditGrant(t.Context(), lapsing[0].ID)
 		require.NoError(t, err)
 		require.EqualValues(t, 1000, grant.ExpiredAmount)

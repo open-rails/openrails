@@ -390,7 +390,7 @@ func TestMerchantOwnedBasisTheoryCardLifecycle(t *testing.T) {
 			// worker verifies the lost gateway reply from its independent receipt.
 			a.clock.Advance(2 * time.Minute)
 			fleet := startFleet(t, a.world)
-			runRegistered(t, fleet, "openrails.dunning", 1)
+			runRegistered(t, fleet, "openrails.billing_pass", 1)
 			require.Eventually(t, func() bool {
 				current, err := a.alpha.GetOrder(t.Context(), order.ID)
 				return err == nil && current.Status == billing.OrderComplete
@@ -410,13 +410,13 @@ func TestMerchantOwnedBasisTheoryCardLifecycle(t *testing.T) {
 			}
 			require.NoError(t, err, "changing new-card custody must preserve existing mandates")
 			a.clock.Advance(due.Sub(a.clock.Now()))
-			runRegistered(t, fleet, "openrails.dunning", 2)
+			runRegistered(t, fleet, "openrails.billing_pass", 2)
 			require.Eventually(t, func() bool {
 				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 				return err == nil && current.CurrentPeriodEndsAt != nil && current.CurrentPeriodEndsAt.After(due)
 			}, 15*time.Second, 20*time.Millisecond, "the engine renews with this merchant's own vault and original mandate")
 			journal.money(t, 2, 4600)
-			runRegistered(t, fleet, "openrails.dunning", 2)
+			runRegistered(t, fleet, "openrails.billing_pass", 2)
 			journal.money(t, 2, 4600)
 			status, raw = a.request(t, http.MethodDelete, "/v1/me/payment-methods/"+method.ID.String(), a.aliceToken, nil)
 			require.Equal(t, http.StatusConflict, status, string(raw))

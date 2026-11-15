@@ -30,24 +30,6 @@ func (q *Queries) GetPSPAppliedRefreshWatermark(ctx context.Context, arg GetPSPA
 	return watermark_at, err
 }
 
-const getPSPCompletedRefreshWatermark = `-- name: GetPSPCompletedRefreshWatermark :one
-SELECT watermark_at FROM billing.psp_refresh_watermarks
-WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
-  AND event_domain='completed_events'
-`
-
-type GetPSPCompletedRefreshWatermarkParams struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-}
-
-func (q *Queries) GetPSPCompletedRefreshWatermark(ctx context.Context, arg GetPSPCompletedRefreshWatermarkParams) (time.Time, error) {
-	row := q.db.QueryRow(ctx, getPSPCompletedRefreshWatermark, arg.MerchantID, arg.PspID)
-	var watermark_at time.Time
-	err := row.Scan(&watermark_at)
-	return watermark_at, err
-}
-
 const pSPHasUnresolvedFinancialFindings = `-- name: PSPHasUnresolvedFinancialFindings :one
 SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings f
  WHERE f.merchant_id=$1::uuid AND f.psp_id=$2::uuid
@@ -127,26 +109,4 @@ type UpsertPSPAppliedRefreshWatermarkParams struct {
 func (q *Queries) UpsertPSPAppliedRefreshWatermark(ctx context.Context, arg UpsertPSPAppliedRefreshWatermarkParams) error {
 	_, err := q.db.Exec(ctx, upsertPSPAppliedRefreshWatermark, arg.MerchantID, arg.PspID, arg.WatermarkAt)
 	return err
-}
-
-const upsertPSPCompletedRefreshWatermark = `-- name: UpsertPSPCompletedRefreshWatermark :execrows
-INSERT INTO billing.psp_refresh_watermarks(merchant_id,psp_id,event_domain,watermark_at)
-VALUES($1::uuid,$2::uuid,'completed_events',$3::timestamptz)
-ON CONFLICT(merchant_id,psp_id,event_domain) DO UPDATE
-SET watermark_at=EXCLUDED.watermark_at,updated_at=now()
-WHERE billing.psp_refresh_watermarks.watermark_at<EXCLUDED.watermark_at
-`
-
-type UpsertPSPCompletedRefreshWatermarkParams struct {
-	MerchantID  uuid.UUID
-	PspID       uuid.UUID
-	WatermarkAt time.Time
-}
-
-func (q *Queries) UpsertPSPCompletedRefreshWatermark(ctx context.Context, arg UpsertPSPCompletedRefreshWatermarkParams) (int64, error) {
-	result, err := q.db.Exec(ctx, upsertPSPCompletedRefreshWatermark, arg.MerchantID, arg.PspID, arg.WatermarkAt)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
