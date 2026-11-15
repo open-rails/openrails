@@ -63,4 +63,15 @@ full = json.loads(subprocess.check_output(["python3", str(selector), "--full"], 
 assert all(full["suites"].values())
 invalid = subprocess.run(["python3", str(selector), "--base", "missing", "--head", "missing"], capture_output=True)
 assert invalid.returncode != 0
+source = Path(__file__).with_name("ci-source-branch.sh")
+repo = "open-rails/openrails"
+for head_repo, ref, admitted in [
+    (repo, "rc/v1.2.0", True), (repo, "rc/audit-2026-11", True), (repo, "chore/release-v1.2.3", True),
+    (repo, "chore/release-v1.2.3-rc.1", True), ("fork/openrails", "rc/v1.2.0", False),
+    (repo, "feat/thing", False), (repo, "release/v1.2.3", False), (repo, "chore/release-notes", False),
+    (repo, "rc/", False), (repo, "rc/a/b", False), (repo, "xrc/v1", False),
+]:
+    ran = subprocess.run(["bash", str(source), repo, head_repo, ref], capture_output=True, text=True)
+    assert (ran.returncode == 0) == admitted, (head_repo, ref, ran.stderr)
+    assert admitted or "::error::master refuses" in ran.stderr, (ref, ran.stderr)
 print(f"Conservative selection passed {len(cases)} real-Git cases, manual full selection and invalid-reference refusal.")
