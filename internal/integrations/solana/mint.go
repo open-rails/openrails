@@ -46,16 +46,10 @@ func DecodeMintDecimals(data []byte) (int, error) {
 	return int(data[mintDecimalsOffset]), nil
 }
 
-// MintAccountReader is the read surface ReadMintDecimals needs. Satisfied by
-// *RPCClient and by the merchant-scoped chain readers.
-type MintAccountReader interface {
-	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
-}
-
 // ReadMintDecimals returns the mint's on-chain base-unit precision. The chain is
 // the source of truth for decimals: an unreadable, absent, or undecodable mint
 // is an error, never a default.
-func ReadMintDecimals(ctx context.Context, reader MintAccountReader, mint solanago.PublicKey) (int, error) {
+func ReadMintDecimals(ctx context.Context, reader ChainReader, mint solanago.PublicKey) (int, error) {
 	if reader == nil {
 		return 0, fmt.Errorf("solana: no chain reader armed to read mint %s decimals", mint)
 	}

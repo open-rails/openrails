@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/solana/settlement"
@@ -133,7 +134,7 @@ func ReplayTierChange(sub *models.Subscription, priceID uuid.UUID, signature str
 // (releasing the tier-group slot), create the new membership and upsert the new
 // active row. Retries return the receipt saved with the old membership.
 type ConfirmTierChangeService struct {
-	chain       landedTxReader
+	chain       solanaint.ChainReader
 	lifecycle   tierChangeLifecycle
 	store       tierChangeStore
 	memberships tierChangeMembershipStore
@@ -144,7 +145,7 @@ type ConfirmTierChangeService struct {
 
 // NewConfirmTierChangeService builds a ConfirmTierChangeService. network
 // ("mainnet"/"devnet") resolves the recurring mint for the new row.
-func NewConfirmTierChangeService(chain landedTxReader, lifecycle tierChangeLifecycle, store tierChangeStore, memberships tierChangeMembershipStore, transactor tierChangeTransactor, tokens Tokens) *ConfirmTierChangeService {
+func NewConfirmTierChangeService(chain solanaint.ChainReader, lifecycle tierChangeLifecycle, store tierChangeStore, memberships tierChangeMembershipStore, transactor tierChangeTransactor, tokens Tokens) *ConfirmTierChangeService {
 	return &ConfirmTierChangeService{
 		chain:       chain,
 		lifecycle:   lifecycle,

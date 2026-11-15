@@ -125,7 +125,7 @@ func (c *RPCClient) WatchTransaction(ctx context.Context, sig solanago.Signature
 // watchOnce is one observation: (outcome, nil) when the commitment is reached,
 // (nil, err) when the chain says it never will, (nil, nil) to keep watching.
 func (c *RPCClient) watchOnce(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, terminal ChainTerminal) (*TransactionOutcome, error) {
-	st, err := c.fallback.GetSignatureStatuses(ctx, true, sig)
+	st, err := c.getSignatureStatuses(ctx, true, sig)
 	if err != nil {
 		return nil, nil // transient RPC error — the chain has not spoken
 	}
@@ -147,7 +147,7 @@ func (c *RPCClient) watchOnce(ctx context.Context, sig solanago.Signature, commi
 	if terminal.LastValidBlockHeight == 0 {
 		return nil, nil
 	}
-	height, err := c.fallback.GetBlockHeight(ctx, commitment)
+	height, err := c.GetBlockHeight(ctx, commitment)
 	if err != nil {
 		return nil, nil
 	}
@@ -167,7 +167,7 @@ func (c *RPCClient) SubmitAndConfirm(ctx context.Context, tx *solanago.Transacti
 	// writes, so a tx touching very recent accounts (a pull right after
 	// subscribe) spuriously fails with InvalidAccountOwner. WatchTransaction
 	// below reports real on-chain failures.
-	sig, err := c.fallback.SendTransactionSkipPreflight(ctx, tx)
+	sig, err := c.sendTransactionSkipPreflight(ctx, tx)
 	if err != nil {
 		return nil, err
 	}

@@ -95,7 +95,7 @@ func CredentialFingerprint(v string) string {
 
 // PrimaryCredentialFingerprint fingerprints the primary endpoint's full URL;
 // empty when it carries no credential.
-func (c *RPCFallbackClient) PrimaryCredentialFingerprint() string {
+func (c *RPCClient) PrimaryCredentialFingerprint() string {
 	if len(c.endpoints) == 0 || c.endpoints[0].target == nil {
 		return ""
 	}

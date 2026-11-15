@@ -29,8 +29,8 @@ func GenesisHash(network string) string {
 	return ""
 }
 
-// PostureKey binds a verdict to the exact RPC chain and its credentials.
-func (c *RPCFallbackClient) PostureKey() providerposture.Key {
+// postureKey binds a verdict to the exact RPC chain and its credentials.
+func (c *RPCClient) postureKey() providerposture.Key {
 	urls := make([]string, 0, len(c.endpoints))
 	secrets := make([]string, 0, len(c.endpoints))
 	for _, ep := range c.endpoints {
@@ -50,7 +50,7 @@ func (c *RPCFallbackClient) PostureKey() providerposture.Key {
 
 // CheckPosture requires every endpoint in the chain to report the genesis hash
 // of the PSP's network: mainnet's is live, devnet's and testnet's simulated.
-func (c *RPCFallbackClient) CheckPosture(ctx context.Context) (providerposture.Verdict, error) {
+func (c *RPCClient) CheckPosture(ctx context.Context) (providerposture.Verdict, error) {
 	if len(c.clients) == 0 {
 		return providerposture.Unknown, fmt.Errorf("solana: no RPC endpoints")
 	}
@@ -79,12 +79,12 @@ func (c *RPCFallbackClient) CheckPosture(ctx context.Context) (providerposture.V
 }
 
 // VerifyPosture verifies the chain now and records the verdict.
-func (c *RPCFallbackClient) VerifyPosture(ctx context.Context) providerposture.Status {
-	return providerposture.Process().Verify(ctx, c.PostureKey(), c.CheckPosture)
+func (c *RPCClient) VerifyPosture(ctx context.Context) providerposture.Status {
+	return providerposture.Process().Verify(ctx, c.postureKey(), c.CheckPosture)
 }
 
 // requireArmed refuses a submission until every endpoint is proven on the
 // PSP's network.
-func (c *RPCFallbackClient) requireArmed(ctx context.Context) error {
-	return providerposture.Process().Require(ctx, c.PostureKey(), c.CheckPosture)
+func (c *RPCClient) requireArmed(ctx context.Context) error {
+	return providerposture.Process().Require(ctx, c.postureKey(), c.CheckPosture)
 }
