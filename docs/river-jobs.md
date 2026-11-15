@@ -171,7 +171,7 @@ the normal failure-attempt budget.
 | `stripe_webhook_reconcile` | Five attempts, coalesced by PSP arguments/outstanding state; daily pass is the backstop. |
 | `destructive_alert` | 100 attempts, deduplicated by incident/channel arguments, including completed jobs. |
 | `psp_import` | Pull/relink: 10,000 attempts for transient outages; apply: 10. Non-transient failure budget: five. Retry delay is attempt⁴ seconds, capped at one hour. Permanent errors or exhausted budget mark the import failed. |
-| `cleanup_expired_data` | Unique by page arguments/hour; uses client-default attempts. |
+| `cleanup_expired_data` | One attempt, unique by page arguments/hour; the next hour's pass takes what it left. |
 | Other core kinds | See the argument/producer links in section 3; use client-default attempts unless the producer supplies options. Customer/object wake-ups coalesce outstanding work; completed jobs do not absorb later changes. |
 
 All core jobs have a **10-minute timeout**, with these overrides:
