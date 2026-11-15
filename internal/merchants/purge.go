@@ -389,11 +389,7 @@ func (s *Service) Purge(ctx context.Context, id billing.MerchantID, params billi
 
 	// The gate is the last read-only wall: every refusal an operator can still
 	// act on states the true blast radius.
-	gate := s.destructive
-	if gate == nil {
-		gate = deniedPolicy{}
-	}
-	if allowed, reason := gate.AllowDestructive(ctx, id.UUID()); !allowed {
+	if allowed, reason := s.destructive.AllowDestructive(ctx, id.UUID()); !allowed {
 		return billing.MerchantPurge{}, fmt.Errorf("merchants: refusing to purge merchant %s: %s", m.Slug, reason)
 	}
 

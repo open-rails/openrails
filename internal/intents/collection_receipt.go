@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -122,7 +123,7 @@ func collectionBinding(in gen.BillingProviderIntent) (receiptBinding, error) {
 
 // ReadNMICollectionReceipt resolves the accepted PSP and reads the actual order
 // match and exact transaction from that account. Terms are never caller inputs.
-func ReadNMICollectionReceipt(ctx context.Context, in gen.BillingProviderIntent, resolver NMIClientResolver, reference string) (CollectedReceipt, bool, error) {
+func ReadNMICollectionReceipt(ctx context.Context, in gen.BillingProviderIntent, resolver railresolve.NMIClientResolver, reference string) (CollectedReceipt, bool, error) {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return CollectedReceipt{}, false, err

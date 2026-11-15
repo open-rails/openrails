@@ -317,11 +317,11 @@ type NMIRefundHandler struct {
 	refundReservations
 	// Resolver arms the intent merchant's NMI client from the armed rail
 	// state at drain time.
-	Resolver NMIClientResolver
+	Resolver railresolve.NMIClientResolver
 	Policy   BackoffPolicy
 }
 
-func NewNMIRefundHandler(d *db.DB, resolver NMIClientResolver, clock clockwork.Clock) *NMIRefundHandler {
+func NewNMIRefundHandler(d *db.DB, resolver railresolve.NMIClientResolver, clock clockwork.Clock) *NMIRefundHandler {
 	return &NMIRefundHandler{
 		refundReservations: refundReservations{DB: d, Clock: clock},
 		Resolver:           resolver,

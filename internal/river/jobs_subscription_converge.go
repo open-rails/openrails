@@ -96,7 +96,7 @@ type SubscriptionConvergeWorker struct {
 	Clock  clockwork.Clock
 
 	// NMIResolver arms the args merchant's NMI client from the armed rail state.
-	NMIResolver money.NMIClientResolver
+	NMIResolver railresolve.NMIClientResolver
 	// StripeProber overrides the config-built prober (tests). Nil = build from Rails.
 	StripeProber subscriptions.StripeLivenessProber
 

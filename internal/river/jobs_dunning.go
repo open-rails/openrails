@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/writeposture"
@@ -101,7 +102,7 @@ type DunningWorker struct {
 	Clock  clockwork.Clock
 	// NMIResolver arms store-scoped NMI clients per merchant. Consulted at the
 	// charge gate; the rebill handler re-resolves at charge time.
-	NMIResolver money.NMIClientResolver
+	NMIResolver railresolve.NMIClientResolver
 	// EngineCollections admits stored engine obligations; the existing
 	// provider-intent fleet performs the accepted charge and receipt recovery.
 	EngineCollections *money.MoneyService

@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
@@ -31,13 +32,13 @@ var errRebillSuperseded = errors.New("accepted rebill is no longer applicable")
 type ManualRebillHandler struct {
 	DB          *db.DB
 	Config      *config.Config
-	Resolver    NMIClientResolver
+	Resolver    railresolve.NMIClientResolver
 	Clock       clockwork.Clock
 	Policy      BackoffPolicy
 	DeferDelete subscriptions.ProviderCancelScheduler
 }
 
-func NewManualRebillHandler(d *db.DB, cfg *config.Config, resolver NMIClientResolver, clock clockwork.Clock) *ManualRebillHandler {
+func NewManualRebillHandler(d *db.DB, cfg *config.Config, resolver railresolve.NMIClientResolver, clock clockwork.Clock) *ManualRebillHandler {
 	return &ManualRebillHandler{DB: d, Config: cfg, Resolver: resolver, Clock: timeutil.FirstClock(clock), Policy: DefaultBackoff}
 }
 func (h *ManualRebillHandler) Type() string                         { return subscriptions.TypeManualRebill }

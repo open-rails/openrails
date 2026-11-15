@@ -18,6 +18,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -38,12 +39,12 @@ type NMIPusher interface {
 }
 
 type nmiPlanPusher struct {
-	resolver NMIClientSource
+	resolver railresolve.NMIClientResolver
 }
 
 // NewNMIPlanPusher builds the production NMIPusher over the merchant's NMI
 // client resolver (money.MerchantCollectionAdapterBuilder).
-func NewNMIPlanPusher(resolver NMIClientSource) NMIPusher {
+func NewNMIPlanPusher(resolver railresolve.NMIClientResolver) NMIPusher {
 	return &nmiPlanPusher{resolver: resolver}
 }
 

@@ -1,27 +1,22 @@
 package paymentpage
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
-
-// MerchantSettings reads a merchant's settings document.
-type MerchantSettings interface {
-	MerchantSettings(ctx context.Context, id billing.MerchantID) (string, billing.MerchantSettings, error)
-}
 
 // Framing frames an embedded payment page's page, /pay/{order_id}, by the origins
 // its merchant registered. The order id is not a credential: it only picks
 // which registered origins may frame the page. A lookup that fails frames
 // nothing.
-func (s *Store) Framing(settings MerchantSettings) Framing {
+func (s *Store) Framing(settings db.MerchantConfig) Framing {
 	return func(r *http.Request) []string {
 		if r.Method != http.MethodGet || s == nil || s.db == nil || settings == nil {
 			return nil

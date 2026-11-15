@@ -7,10 +7,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -31,17 +30,10 @@ func ValidatePaymentMethodSourceCustody(pm *models.PaymentMethod) error {
 	return nil
 }
 
-// NMIClientSource arms the merchant's NMI client for a subscription's stamped
-// PSP (money.MerchantCollectionAdapterBuilder). ok=false with nil err = no NMI
-// account declared; err = declared but not armable (fail closed).
-type NMIClientSource interface {
-	ResolveNMIClient(ctx context.Context, merchantID uuid.UUID, stampedAccountID *uuid.UUID) (*nmi.NMIClient, bool, error)
-}
-
 // NMIClientForExistingSubscription resolves the NMI client that owns sub: its
 // stamped PSP when present, else the merchant's pull scope. New-work selectors
 // must not be used for rows pinned to an archived PSP.
-func NMIClientForExistingSubscription(ctx context.Context, resolver NMIClientSource, sub *models.Subscription) (*nmi.NMIClient, string, bool, error) {
+func NMIClientForExistingSubscription(ctx context.Context, resolver railresolve.NMIClientResolver, sub *models.Subscription) (*nmi.NMIClient, string, bool, error) {
 	if sub == nil {
 		return nil, "", false, errors.New("subscription is nil")
 	}

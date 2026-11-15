@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -35,7 +36,7 @@ func New(rt *app.Runtime, origin string, assets fs.FS, issuers []string, limiter
 		captcha = config.CaptchaProvider(rt.Config.Captcha)
 	}
 	store := paymentpage.NewStore(rt.DB)
-	var settings paymentpage.MerchantSettings
+	var settings db.MerchantConfig
 	if rt.Merchants != nil {
 		settings = rt.Merchants
 	}

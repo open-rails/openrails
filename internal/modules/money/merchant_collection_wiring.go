@@ -43,7 +43,7 @@ type CollectionAdapterResolver interface {
 // Satisfied by *MerchantCollectionAdapterBuilder; tests may inject fakes.
 type CollectionPlane interface {
 	CollectionAdapterResolver
-	NMIClientResolver
+	railresolve.NMIClientResolver
 	CollectionVerifier
 }
 
@@ -54,9 +54,6 @@ type CollectionVerifier interface {
 	ReadCollectionReceipt(ctx context.Context, in gen.BillingProviderIntent, reference string) (intents.CollectedReceipt, bool, error)
 	ConfirmCollectionNotExecuted(ctx context.Context, in gen.BillingProviderIntent) error
 }
-
-// NMIClientResolver is the raw-client NMI leg of the store resolver.
-type NMIClientResolver = railresolve.NMIClientResolver
 
 // MerchantCollectionAdapterBuilder builds one merchant's collection adapter at
 // charge time. MerchantsFn is late-bound (Runtime.Merchants is wired after the
